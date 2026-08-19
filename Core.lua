@@ -108,7 +108,7 @@ function ns.Execute(code)
         AddOutput(output, L.COMPLETED_NO_OUTPUT)
     end
 
-    return true, table.concat(output.parts), code, ns.CreateValueTree(values)
+    return true, table.concat(output.parts), code, ns.CreateValueTree(values), ns.CreateStoredValueTree(values)
 end
 
 SLASH_LYCHEEDEV1 = "/dev"

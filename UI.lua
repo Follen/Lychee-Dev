@@ -62,10 +62,13 @@ local function Clamp(value, minimum, maximum)
 end
 
 local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomInset)
-    local scroll = CreateFrame("ScrollFrame", nil, parent)
+    local scroll = CreateFrame("Frame", nil, parent)
     scroll:SetPoint("TOPLEFT", leftInset, -topInset)
     scroll:SetPoint("BOTTOMRIGHT", -(rightInset + 11), bottomInset)
+    scroll:SetClipsChildren(true)
     scroll:EnableMouseWheel(true)
+    scroll.verticalOffset = 0
+    scroll.verticalRange = 0
 
     local scrollbar = CreateFrame("Slider", nil, parent)
     scrollbar:SetOrientation("VERTICAL")
@@ -102,17 +105,61 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         end
     end)
 
-    scroll:SetScript("OnVerticalScroll", function(_, offset)
+    function scroll:GetVerticalScroll()
+        return self.verticalOffset or 0
+    end
+
+    function scroll:SetVerticalScroll(offset)
         if issecretvalue and issecretvalue(offset) then
             return
+        end
+        offset = Clamp(tonumber(offset) or 0, 0, self.verticalRange or 0)
+        local changed = offset ~= self.verticalOffset
+        self.verticalOffset = offset
+        if self.scrollChild then
+            self.scrollChild:ClearAllPoints()
+            self.scrollChild:SetPoint("TOPLEFT", self, "TOPLEFT", 0, offset)
         end
         scrollbar.syncing = true
         scrollbar:SetValue(offset)
         scrollbar.syncing = nil
-        if scroll.onVerticalScrollChanged then
-            scroll.onVerticalScrollChanged(offset)
+        if changed and self.onVerticalScrollChanged then
+            self.onVerticalScrollChanged(offset)
         end
-    end)
+    end
+
+    function scroll:UpdateScrollChildRect()
+        local childHeight = self.scrollChild and self.scrollChild:GetHeight() or 0
+        local viewHeight = self:GetHeight() or 0
+        if issecretvalue and (issecretvalue(childHeight) or issecretvalue(viewHeight)) then
+            scrollbar:Hide()
+            return
+        end
+
+        local range = math.max(0, (childHeight or 0) - (viewHeight or 0))
+        self.verticalRange = range
+        scrollbar:SetMinMaxValues(0, range)
+        self:SetVerticalScroll(Clamp(self.verticalOffset or 0, 0, range))
+        if range <= 0 then
+            scrollbar:Hide()
+            return
+        end
+
+        local trackHeight = scrollbar:GetHeight()
+        if not (issecretvalue and issecretvalue(trackHeight))
+            and trackHeight and trackHeight > 0 and viewHeight > 0 then
+            scrollbar.thumb:SetHeight(math.max(28, math.floor(trackHeight * viewHeight / childHeight + 0.5)))
+        end
+        scrollbar:Show()
+    end
+
+    function scroll:SetScrollChild(child)
+        self.scrollChild = child
+        child:ClearAllPoints()
+        child:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
+        self:UpdateScrollChildRect()
+    end
+
     local function HandleMouseWheel(_, delta)
         local minimum, maximum = scrollbar:GetMinMaxValues()
         local value = scrollbar:GetValue()
@@ -120,37 +167,14 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
             return
         end
         local target = Clamp(value - delta * 36, minimum, maximum)
-        scrollbar.syncing = true
-        scrollbar:SetValue(target)
-        scrollbar.syncing = nil
         scroll:SetVerticalScroll(target)
     end
     scroll:SetScript("OnMouseWheel", HandleMouseWheel)
     scroll.onMouseWheel = HandleMouseWheel
     scrollbar:EnableMouseWheel(true)
     scrollbar:SetScript("OnMouseWheel", HandleMouseWheel)
-    scroll:SetScript("OnScrollRangeChanged", function(self, _, verticalRange)
-        if issecretvalue and issecretvalue(verticalRange) then
-            scrollbar:Hide()
-            return
-        end
-
-        local range = math.max(0, verticalRange or 0)
-        scrollbar:SetMinMaxValues(0, range)
-        scrollbar:SetValue(Clamp(scrollbar:GetValue(), 0, range))
-        if range <= 0 then
-            scrollbar:Hide()
-            return
-        end
-
-        local trackHeight = scrollbar:GetHeight()
-        local viewHeight = self:GetHeight()
-        if not (issecretvalue and (issecretvalue(trackHeight) or issecretvalue(viewHeight)))
-            and trackHeight and trackHeight > 0 and viewHeight and viewHeight > 0 then
-            local contentHeight = viewHeight + range
-            scrollbar.thumb:SetHeight(math.max(28, math.floor(trackHeight * viewHeight / contentHeight + 0.5)))
-        end
-        scrollbar:Show()
+    scroll:SetScript("OnSizeChanged", function(self)
+        self:UpdateScrollChildRect()
     end)
 
     scrollbar:Hide()
@@ -569,7 +593,7 @@ local function CreateHistoryButton(index)
         if entry then
             window.inputPanel.editBox:SetText(entry.code or "")
             SetResult(entry.result or "")
-            local valueTree = historyTrees[entry]
+            local valueTree = historyTrees[entry] or entry.tree
             window.treeView:SetTree(valueTree)
             SetResultMode(valueTree and "tree" or "text")
             SetStatus(entry.succeeded and L.COMPLETED or L.FAILED,
@@ -609,11 +633,11 @@ local function RefreshHistory()
 end
 
 local function RunInput()
-    local succeeded, result, normalizedCode, valueTree = ns.Execute(window.inputPanel.editBox:GetText())
+    local succeeded, result, normalizedCode, valueTree, storedTree = ns.Execute(window.inputPanel.editBox:GetText())
     SetResult(result)
     window.treeView:SetTree(valueTree)
     SetResultMode(valueTree and "tree" or "text")
-    local historyEntry = ns.AddHistory(normalizedCode, result, succeeded)
+    local historyEntry = ns.AddHistory(normalizedCode, result, succeeded, storedTree)
     if historyEntry and valueTree then
         historyTrees[historyEntry] = valueTree
     end
@@ -653,12 +677,6 @@ local function CreateWindow()
     header:SetPoint("TOPLEFT", 1, -1)
     header:SetPoint("TOPRIGHT", -1, -1)
     header:SetHeight(66)
-
-    local headerLine = frame:CreateTexture(nil, "ARTWORK")
-    headerLine:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.9)
-    headerLine:SetPoint("TOPLEFT", 1, -66)
-    headerLine:SetPoint("TOPRIGHT", -1, -66)
-    headerLine:SetHeight(2)
 
     local logo = frame:CreateTexture(nil, "ARTWORK")
     logo:SetTexture(LOGO_TEXTURE)
@@ -732,12 +750,17 @@ local function CreateWindow()
     inputPanel.editBox:SetWidth(WINDOW_WIDTH - MAIN_LEFT - 58)
     frame.inputPanel = inputPanel
 
-    local runButton = CreateButton(runnerPage, 96, L.RUN, true)
-    runButton:SetPoint("TOPRIGHT", inputPanel, "BOTTOMRIGHT", 0, -10)
+    local actionRow = CreateFrame("Frame", nil, runnerPage)
+    actionRow:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 0, -8)
+    actionRow:SetPoint("TOPRIGHT", inputPanel, "BOTTOMRIGHT", 0, -8)
+    actionRow:SetHeight(30)
+
+    local runButton = CreateButton(actionRow, 96, L.RUN, true)
+    runButton:SetPoint("RIGHT", actionRow, "RIGHT", 0, 0)
     runButton:SetScript("OnClick", RunInput)
     frame.runButton = runButton
 
-    local clearInputButton = CreateButton(runnerPage, 108, L.CLEAR_INPUT, false)
+    local clearInputButton = CreateButton(actionRow, 108, L.CLEAR_INPUT, false)
     clearInputButton:SetPoint("RIGHT", runButton, "LEFT", -8, 0)
     clearInputButton:SetScript("OnClick", function()
         frame.inputPanel.editBox:SetText("")
@@ -745,21 +768,21 @@ local function CreateWindow()
         SetStatus(L.READY, 0.55, 0.60, 0.65)
     end)
 
-    local statusDot = runnerPage:CreateTexture(nil, "ARTWORK")
+    local statusDot = actionRow:CreateTexture(nil, "ARTWORK")
     statusDot:SetSize(5, 5)
-    statusDot:SetPoint("LEFT", inputPanel, "BOTTOMLEFT", 2, -24)
+    statusDot:SetPoint("LEFT", actionRow, "LEFT", 2, 0)
     frame.statusDot = statusDot
 
-    local status = runnerPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local status = actionRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("LEFT", statusDot, "RIGHT", 7, 0)
     frame.status = status
 
     local resultLabel = CreateSectionLabel(runnerPage, L.RESULT)
-    resultLabel:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 0, -52)
+    resultLabel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -13)
 
     local resultTextTab = CreateNavTab(runnerPage, L.TEXT)
     resultTextTab:SetSize(58, 28)
-    resultTextTab:SetPoint("TOPRIGHT", inputPanel, "BOTTOMRIGHT", 0, -42)
+    resultTextTab:SetPoint("TOPRIGHT", actionRow, "BOTTOMRIGHT", 0, -4)
     frame.resultTextTab = resultTextTab
 
     local resultTreeTab = CreateNavTab(runnerPage, L.TREE)
@@ -768,7 +791,7 @@ local function CreateWindow()
     frame.resultTreeTab = resultTreeTab
 
     local resultPanel = CreateTextArea(runnerPage, true)
-    resultPanel:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 0, -73)
+    resultPanel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -35)
     resultPanel:SetPoint("BOTTOMRIGHT", -14, 54)
     resultPanel.editBox:SetWidth(WINDOW_WIDTH - MAIN_LEFT - 58)
     resultPanel.editBox:SetScript("OnMouseUp", function(self) self:SetFocus() end)
@@ -788,7 +811,7 @@ local function CreateWindow()
         accentB = ACCENT_B,
         contentWidth = WINDOW_WIDTH - MAIN_LEFT - 28,
     })
-    treeView.panel:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 0, -73)
+    treeView.panel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -35)
     treeView.panel:SetPoint("BOTTOMRIGHT", -14, 54)
     frame.treeView = treeView
 

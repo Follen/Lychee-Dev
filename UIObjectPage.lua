@@ -370,16 +370,26 @@ function ns.CreateObjectPage(parent, ui)
     inspectButton:SetScript("OnClick", function() InspectPath(pathPanel.editBox:GetText()) end)
     mouseButton:SetScript("OnClick", StartPicker)
     local function Search()
-        if currentValue == nil then
-            SetStatus(L.INSPECT_OR_CAPTURE_FIRST, ui.accentR, ui.accentG, ui.accentB)
-            return
+        local query = pathPanel.editBox:GetText()
+        local succeeded, searchResult, errorMessage
+        local searchedGlobal = currentValue == nil
+        if searchedGlobal then
+            succeeded, searchResult, errorMessage = ns.ObjectInspector.SearchGlobal(query)
+        else
+            succeeded, searchResult, errorMessage = ns.ObjectInspector.SearchValue(currentValue, query)
+            if succeeded and searchResult.totalMatches == 0 then
+                succeeded, searchResult, errorMessage = ns.ObjectInspector.SearchGlobal(query)
+                searchedGlobal = succeeded
+            end
         end
-        local succeeded, searchResult, errorMessage = ns.ObjectInspector.SearchValue(currentValue, pathPanel.editBox:GetText())
         if succeeded then
             results = searchResult.results
-            searchRootLabel = currentLabel
+            searchRootLabel = searchedGlobal and "_G" or currentLabel
             RefreshResults()
-            SetStatus(string.format(L.MATCH_COUNT, searchResult.totalMatches), 0.55, 0.60, 0.65)
+            local message = searchedGlobal
+                and string.format(L.GLOBAL_MATCH_COUNT, searchResult.totalMatches)
+                or string.format(L.MATCH_COUNT, searchResult.totalMatches)
+            SetStatus(message, 0.55, 0.60, 0.65)
         else
             SetStatus(errorMessage, ui.accentR, ui.accentG, ui.accentB)
         end

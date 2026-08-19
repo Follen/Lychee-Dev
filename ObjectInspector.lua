@@ -208,7 +208,7 @@ function inspector.GetMouseFocusLabel()
         SafeMethod(focus, "GetObjectType") or type(focus)
 end
 
-function inspector.SearchValue(value, query, limit)
+function inspector.SearchValue(value, query, limit, maxDepth)
     if ns.IsCombatBlocked() then return false, nil, ns.L.COMBAT_BLOCKED end
     query = Trim(query):lower()
     if query == "" then return false, nil, ns.L.SEARCH_TERM_REQUIRED end
@@ -217,6 +217,7 @@ function inspector.SearchValue(value, query, limit)
     end
 
     limit = math.max(1, math.floor(tonumber(limit) or MAX_SEARCH_RESULTS))
+    maxDepth = math.max(0, math.floor(tonumber(maxDepth) or MAX_SEARCH_DEPTH))
     local exact, prefixes, contains = {}, {}, {}
     local matchCount = 0
     local scanned = 0
@@ -235,7 +236,7 @@ function inspector.SearchValue(value, query, limit)
     end
 
     local function Push(childValue, path, depth)
-        if depth <= MAX_SEARCH_DEPTH and (type(childValue) == "table" or IsScriptRegion(childValue))
+        if depth <= maxDepth and (type(childValue) == "table" or IsScriptRegion(childValue))
             and not IsSecret(childValue) and not seen[childValue] then
             stack[#stack + 1] = { value = childValue, path = path, depth = depth }
         end
@@ -282,7 +283,7 @@ function inspector.SearchValue(value, query, limit)
                 end
             end
 
-            if item.depth < MAX_SEARCH_DEPTH and IsScriptRegion(current) then
+            if item.depth < maxDepth and IsScriptRegion(current) then
                 local childFrames = SafeMethodResults(current, "GetChildren") or {}
                 for index = 1, #childFrames do
                     Push(childFrames[index], ChildPath(item.path, ns.L.FRAME_CHILDREN) .. "[" .. index .. "]", item.depth + 1)
@@ -319,6 +320,9 @@ function inspector.SearchValue(value, query, limit)
     }
 end
 
+function inspector.SearchGlobal(query, limit)
+    return inspector.SearchValue(_G, query, limit, 0)
+end
 
 function inspector.SearchPath(path, query, limit)
     if ns.IsCombatBlocked() then return false, nil, ns.L.COMBAT_BLOCKED end

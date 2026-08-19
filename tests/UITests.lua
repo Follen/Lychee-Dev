@@ -42,6 +42,14 @@ local function NewRegion(name)
         return self.height
     end
 
+    function region:SetPoint(...)
+        self.point = { ... }
+    end
+
+    function region:ClearAllPoints()
+        self.point = nil
+    end
+
     function region:SetText(text)
         self.text = text or ""
     end
@@ -228,6 +236,33 @@ LoadAddonFile("UIDiagnosticsPage.lua", ns)
 LoadAddonFile("UIAboutPage.lua", ns)
 LoadAddonFile("UI.lua", ns)
 
+LycheeDevDB = {
+    schemaVersion = 4,
+    history = {
+        {
+            code = "return { persisted = true }",
+            result = "{ persisted = true }",
+            succeeded = true,
+            timestamp = 1234567889,
+            tree = {
+                roots = {
+                    {
+                        label = "[1]",
+                        kind = "table",
+                        value = "表（1 项）",
+                        expanded = true,
+                        loaded = true,
+                        hasMore = false,
+                        children = {
+                            { label = "persisted", kind = "boolean", value = "true" },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
 assert(frameCount == 0, "UI created frames before /dev was used")
 SlashCmdList.LYCHEEDEV()
 assert(frameCount > 0, "UI did not create frames on first /dev")
@@ -241,14 +276,20 @@ assert(pageCount == 6, "window did not create all six workbench pages")
 assert(LycheeDevWindow.pages.runner:IsShown(), "runner page was not active by default")
 assert(LycheeDevWindow.resultTextTab and LycheeDevWindow.resultTreeTab, "result mode buttons were not created")
 local resultScrollbar = LycheeDevWindow.resultPanel.scroll.scrollbar
-resultScrollbar:SetMinMaxValues(0, 100)
-resultScrollbar:SetValue(50)
+LycheeDevWindow.resultPanel.scroll:SetHeight(100)
+LycheeDevWindow.resultPanel.editBox:SetHeight(300)
+LycheeDevWindow.resultPanel.scroll:UpdateScrollChildRect()
+LycheeDevWindow.resultPanel.scroll:SetVerticalScroll(50)
+local minimumScroll, maximumScroll = resultScrollbar:GetMinMaxValues()
+assert(minimumScroll == 0 and maximumScroll == 200, "custom scroll range did not follow content height")
 local resultEditScripts = rawget(LycheeDevWindow.resultPanel.editBox, "scripts")
 assert(resultEditScripts and resultEditScripts.OnMouseWheel, "result edit box did not capture mouse wheel input")
 resultEditScripts.OnMouseWheel(LycheeDevWindow.resultPanel.editBox, -1)
 assert(resultScrollbar:GetValue() == 86, "mouse wheel input did not move the custom scrollbar")
 assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 86,
-    "mouse wheel input did not move the text scroll frame")
+    "mouse wheel input did not move the text viewport")
+assert(LycheeDevWindow.resultPanel.editBox.point[5] == 86,
+    "mouse wheel input did not offset the clipped content")
 LycheeDevWindow.inputPanel.editBox:SetText("return { nested = { value = 7 } }")
 LycheeDevWindow.runButton:Click()
 assert(LycheeDevWindow.treeView:HasTree(), "table result did not create a tree")
@@ -258,6 +299,8 @@ assert(not LycheeDevWindow.treeView:HasTree(), "run without return values unexpe
 LycheeDevWindow.historyButtons[2]:Click()
 assert(LycheeDevWindow.treeView:HasTree(), "current-session history did not restore its tree")
 assert(LycheeDevWindow.resultTreeTab:IsEnabled(), "restored history tree mode was not enabled")
+LycheeDevWindow.historyButtons[3]:Click()
+assert(LycheeDevWindow.treeView:HasTree(), "persisted history did not restore its stored tree")
 LycheeDevWindow.resultTextTab:Click()
 assert(LycheeDevWindow.resultPanel:IsShown() and not LycheeDevWindow.treeView.panel:IsShown(),
     "result text mode did not activate")

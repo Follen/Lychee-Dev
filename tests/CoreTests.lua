@@ -72,7 +72,7 @@ inCombat = false
 
 local originalPrint = print
 local originalDump = dump
-local succeeded, result, normalized, valueTree = ns.Execute('/run print("hello", 7); return { b = 2, a = 1 }, nil, "ok"')
+local succeeded, result, normalized, valueTree, storedTree = ns.Execute('/run print("hello", 7); return { b = 2, a = 1 }, nil, "ok"')
 assert(succeeded, result)
 assert(print == originalPrint, "captured print leaked into the global environment")
 assert(dump == originalDump, "captured dump leaked into the global environment")
@@ -84,6 +84,9 @@ assert(result:find('[3] = "ok"', 1, true), "multiple return values were lost")
 assert(valueTree and #valueTree.roots == 3, "structured return values were not captured")
 assert(valueTree.roots[1].kind == "table", "table return was not represented as a tree")
 assert(valueTree.roots[2].kind == "nil", "nil return was not represented in the tree")
+assert(storedTree and #storedTree.roots == 3, "stored return tree was not created")
+assert(storedTree.roots[1].source == nil and storedTree.roots[1].parent == nil,
+    "stored tree retained runtime object references")
 
 local largeTable = {}
 for index = 1, 450 do
@@ -154,10 +157,14 @@ issecretvalue = function()
     return false
 end
 
+local storedEntry = ns.AddHistory("stored tree", "result", true, storedTree)
+assert(storedEntry.tree == storedTree and storedEntry.tree.roots[1].loaded,
+    "history did not retain the stored return tree")
+
 for index = 1, 35 do
     ns.AddHistory("code " .. index, "result " .. index, true)
 end
-assert(#ns.GetHistory() == 36, "history still has the old 30-entry limit")
+assert(#ns.GetHistory() == 37, "history still has the old 30-entry limit")
 assert(ns.GetHistory()[1].code == "code 35", "history is not newest-first")
 
 for index = 36, 1200 do

@@ -123,6 +123,10 @@ local nestedSearched, nestedResult = ns.ObjectInspector.SearchValue(TestRoot, "a
 assert(nestedSearched and nestedResult.totalMatches == 1
     and nestedResult.results[1].path == "Nested.Controls.UpdateAddButton",
     "nested object search did not return the matched field path")
+local globalSearched, globalResult = ns.ObjectInspector.SearchGlobal("testroot")
+assert(globalSearched and globalResult.totalMatches == 1
+    and globalResult.results[1].path == "TestRoot",
+    "global object search did not stay on the top level")
 local captured, inspection = ns.ObjectInspector.CaptureMouseFocus()
 assert(captured and inspection.isFrame and inspection.label == "TargetFrame", "mouse frame snapshot failed")
 assert(inspection.value == mouseFocus, "mouse capture did not retain the selected object")

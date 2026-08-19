@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-local SCHEMA_VERSION = 3
+local SCHEMA_VERSION = 4
 local MAX_HISTORY_BYTES = 16 * 1024 * 1024
 local MIN_HISTORY_ENTRY_BYTES = 16 * 1024
 local MAX_CODE_BYTES = 12000
@@ -17,8 +17,29 @@ local function TrimText(value, limit)
     return value:sub(1, limit) .. "\n... <truncated>"
 end
 
+local function GetStoredTreeBytes(value, seen)
+    if type(value) == "string" then
+        return #value
+    elseif type(value) ~= "table" then
+        return 8
+    elseif seen[value] then
+        return 0
+    end
+
+    seen[value] = true
+    local bytes = 48
+    for key, child in pairs(value) do
+        bytes = bytes + GetStoredTreeBytes(key, seen) + GetStoredTreeBytes(child, seen)
+        if bytes >= MAX_HISTORY_BYTES then
+            break
+        end
+    end
+    return bytes
+end
+
 local function GetHistoryEntryBytes(entry)
-    local contentBytes = #(entry.code or "") + #(entry.result or "") + 128
+    local treeBytes = entry.tree and GetStoredTreeBytes(entry.tree, {}) or 0
+    local contentBytes = #(entry.code or "") + #(entry.result or "") + treeBytes + 128
     return math.max(MIN_HISTORY_ENTRY_BYTES, contentBytes)
 end
 
@@ -78,7 +99,7 @@ function ns.GetHistory()
     return db and db.history or nil
 end
 
-function ns.AddHistory(code, result, succeeded)
+function ns.AddHistory(code, result, succeeded, tree)
     if not db then
         return nil
     end
@@ -88,6 +109,7 @@ function ns.AddHistory(code, result, succeeded)
         result = TrimText(result, MAX_RESULT_BYTES),
         succeeded = succeeded and true or false,
         timestamp = time(),
+        tree = type(tree) == "table" and tree or nil,
     }
     table.insert(db.history, 1, entry)
 

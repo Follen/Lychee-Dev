@@ -2,6 +2,10 @@ local ADDON_NAME, ns = ...
 
 local PAGE_SIZE = 200
 local MAX_SCANS_PER_PAGE = PAGE_SIZE * 4
+local STORED_MAX_DEPTH = 8
+local STORED_MAX_NODES = 4000
+local STORED_MAX_ENTRIES = 200
+local STORED_MAX_VALUE_BYTES = 512
 
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
@@ -284,5 +288,125 @@ function ns.CreateValueTree(values)
     return {
         roots = roots,
         truncated = false,
+    }
+end
+
+local function TrimStoredText(value)
+    value = tostring(value or "")
+    if #value <= STORED_MAX_VALUE_BYTES then
+        return value
+    end
+    return value:sub(1, STORED_MAX_VALUE_BYTES) .. "..."
+end
+
+local function BuildStoredNode(label, value, context, depth)
+    if context.count >= STORED_MAX_NODES then
+        context.truncated = true
+        return nil
+    end
+    context.count = context.count + 1
+
+    if IsSecret(value) then
+        return MarkerNode(label, ns.L.TREE_SECRET)
+    end
+
+    local isUIObject = IsUIObject(value)
+    if type(value) ~= "table" and not isUIObject then
+        return {
+            label = label,
+            kind = type(value),
+            value = TrimStoredText(SafeToString(value)),
+        }
+    elseif context.ancestors[value] then
+        return MarkerNode(label, ns.L.TREE_CYCLE)
+    end
+
+    local node = {
+        label = label,
+        kind = "table",
+        value = ns.L.TREE_TABLE,
+        children = {},
+        expanded = depth == 0,
+        loaded = true,
+        hasMore = false,
+    }
+    if depth >= STORED_MAX_DEPTH then
+        context.truncated = true
+        node.children[1] = MarkerNode("...", ns.L.TREE_STORED_TRUNCATED)
+        node.value = string.format(ns.L.TREE_TABLE_COUNT, 0)
+        return node
+    end
+
+    context.ancestors[value] = true
+    local entries = {}
+    if isUIObject then
+        entries[1] = { key = ns.L.FRAME_OVERVIEW, value = BuildUIObjectOverview(value) }
+    end
+    if type(value) == "table" then
+        local cursor
+        while #entries < STORED_MAX_ENTRIES and context.count + #entries < STORED_MAX_NODES do
+            local succeeded, key, childValue = pcall(next, value, cursor)
+            if not succeeded or key == nil then
+                break
+            end
+            cursor = key
+            if not IsSecret(key) then
+                entries[#entries + 1] = { key = key, value = childValue }
+            end
+        end
+        if cursor ~= nil then
+            local succeeded, nextKey = pcall(next, value, cursor)
+            if succeeded and nextKey ~= nil then
+                context.truncated = true
+            end
+        end
+    end
+
+    table.sort(entries, function(left, right)
+        return SortKey(left.key) < SortKey(right.key)
+    end)
+    for index = 1, #entries do
+        local entry = entries[index]
+        local child = BuildStoredNode(FormatKey(entry.key), entry.value, context, depth + 1)
+        if not child then
+            context.truncated = true
+            break
+        end
+        node.children[#node.children + 1] = child
+    end
+    context.ancestors[value] = nil
+
+    if context.truncated and #node.children < STORED_MAX_ENTRIES
+        and context.count < STORED_MAX_NODES then
+        node.children[#node.children + 1] = MarkerNode("...", ns.L.TREE_STORED_TRUNCATED)
+    end
+    node.value = string.format(ns.L.TREE_TABLE_COUNT, #node.children)
+    return node
+end
+
+function ns.CreateStoredValueTree(values)
+    if type(values) ~= "table" or type(values.n) ~= "number" or values.n <= 0 then
+        return nil
+    end
+
+    local context = {
+        count = 0,
+        truncated = false,
+        ancestors = {},
+    }
+    local roots = {}
+    for index = 1, values.n do
+        local node = BuildStoredNode("[" .. index .. "]", values[index], context, 0)
+        if not node then
+            break
+        end
+        roots[#roots + 1] = node
+    end
+    if context.truncated and #roots == 0 then
+        roots[1] = MarkerNode("...", ns.L.TREE_STORED_TRUNCATED)
+    end
+    return {
+        roots = roots,
+        truncated = context.truncated,
     }
 end
