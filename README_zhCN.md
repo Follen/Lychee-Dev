@@ -11,7 +11,7 @@
   </p>
 
   <p>
-    <img alt="版本 0.7.1" src="https://img.shields.io/badge/release-v0.7.1-d83b4e?style=for-the-badge">
+    <img alt="版本 0.7.2" src="https://img.shields.io/badge/release-v0.7.2-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
     <img alt="19 项测试通过" src="https://img.shields.io/badge/tests-19%20passing-2f855a?style=for-the-badge">
   </p>
@@ -98,7 +98,7 @@ flowchart LR
 使用完整记录定位根因，引用对应热路径或失败调用点，并给出最小安全修复。
 ```
 
-记录中包含数据类型、标题、完整序列化内容、字节数、创建时间、客户端构建、语言、来源路径和受限的可搜索元数据。清理缓存后 Ticket 编号也不会复用。
+记录使用带版本的 `lychee.evidence.v1` 结构，包含来源标识、唯一一份完整数据、客户端环境、创建时间和受限的功能元数据。清理缓存后 Ticket 编号也不会复用。Agent 的稳定读取路径为 `LycheeDevDB.exports.records[TICKET].payload.content`，完整协议见 [EvidenceProtocol.md](docs/EvidenceProtocol.md)。
 
 ## 深度性能证据
 
@@ -158,7 +158,7 @@ flowchart LR
 ## 数据结构与限制
 
 - 最近运行历史位于 `LycheeDevDB.history`，共享 16 MB 预算。
-- 完整落盘数据位于 `LycheeDevDB.exports.records[ticket]`。
+- 完整落盘数据位于 `LycheeDevDB.exports.records[ticket].payload.content`。
 - 落盘缓存限制为 16 MB 和 200 条记录，优先移除最旧数据。
 - 超大序列化内容采用增量文本加载。
 - 魔兽世界只会在 `/reload`、退出角色或关闭游戏时写入 SavedVariables。
@@ -184,7 +184,13 @@ tests/                 独立 Lua 测试和三客户端矩阵
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/TestAll.ps1
 ```
 
-测试矩阵在正式服、经典版和经典泰坦上运行 19 项检查，覆盖语言契约、生成事件目录、运行时行为、UI 交互和 TOC/构建选择。
+运行三端精确构建静态兼容审计：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/AuditCompatibility.ps1
+```
+
+测试矩阵在正式服、经典版和经典泰坦上运行 20 项检查，覆盖语言契约、生成事件目录、运行时行为、UI 交互、TOC/构建选择和静态审计契约。
 
 ## 设计边界
 

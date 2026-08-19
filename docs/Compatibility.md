@@ -39,6 +39,8 @@ Each TOC loads a catalog generated from its exact official source snapshot. Reta
 
 ## Verification
 
-Run `powershell -ExecutionPolicy Bypass -File tests/TestAll.ps1`. It executes five functional suites under each client profile and then verifies Interface metadata, client-profile and event-catalog selection, shared TOC ordering, and referenced files.
+Run `powershell -ExecutionPolicy Bypass -File tests/TestAll.ps1`. It executes six functional suites under each client profile and then verifies Interface metadata, client-profile and event-catalog selection, shared TOC ordering, and referenced files.
 
-For an API upgrade, also run `wowdoc validate` against all three exact product refs and record the replacement commits in this file.
+Run `powershell -ExecutionPolicy Bypass -File tools/AuditCompatibility.ps1` for the full static audit. It isolates each TOC load closure, validates it against the exact official product Tag, checks literal events against the matching generated catalog, and reports compatibility logic that escaped the shared boundary. The method and limitations are documented in [StaticCompatibilityAudit.md](StaticCompatibilityAudit.md).
+
+For an API upgrade, update the three exact refs and commits in the audit tool, this file, the client profiles, generated event catalogs, README support matrix, and build tests together.

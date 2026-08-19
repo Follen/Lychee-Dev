@@ -25,3 +25,8 @@ Remove-Item Env:LYCHEE_TEST_CLIENT -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) {
     throw 'build matrix tests failed'
 }
+
+& powershell -ExecutionPolicy Bypass -File 'tests/StaticCompatibilityAuditTests.ps1'
+if ($LASTEXITCODE -ne 0) {
+    throw 'static compatibility audit tests failed'
+}

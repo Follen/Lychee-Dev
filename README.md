@@ -11,7 +11,7 @@
   </p>
 
   <p>
-    <img alt="Release 0.7.1" src="https://img.shields.io/badge/release-v0.7.1-d83b4e?style=for-the-badge">
+    <img alt="Release 0.7.2" src="https://img.shields.io/badge/release-v0.7.2-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
     <img alt="19 tests passing" src="https://img.shields.io/badge/tests-19%20passing-2f855a?style=for-the-badge">
   </p>
@@ -99,7 +99,7 @@ Use the complete record to identify the root cause, cite the hot path or failing
 call site, and propose the smallest safe patch.
 ```
 
-The record includes its kind, title, complete serialized content, byte count, creation time, client build, locale, source path, and bounded searchable metadata. Ticket identifiers are never reused after cache cleanup.
+The record uses the versioned `lychee.evidence.v1` envelope. It includes source identity, one complete payload, client environment, creation time, and bounded feature metadata. Ticket identifiers are never reused after cache cleanup. The stable Agent lookup path is `LycheeDevDB.exports.records[TICKET].payload.content`; see [EvidenceProtocol.md](docs/EvidenceProtocol.md).
 
 ## Deep performance evidence
 
@@ -159,7 +159,7 @@ The addon cannot be opened or used during combat. Active monitors, traces, and c
 ## Data model and limits
 
 - Recent runs live in `LycheeDevDB.history` under a shared 16 MB budget.
-- Complete exports live in `LycheeDevDB.exports.records[ticket]`.
+- Complete exports live in `LycheeDevDB.exports.records[ticket].payload.content`.
 - Export storage is bounded to 16 MB and 200 records; oldest records are pruned first.
 - Text views use incremental loading for large serialized values.
 - World of Warcraft writes SavedVariables only on `/reload`, logout, or exit.
@@ -185,7 +185,13 @@ Run the complete matrix:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/TestAll.ps1
 ```
 
-The suite runs 19 checks across Retail, Classic, and Classic Titan, including locale contracts, generated event catalogs, runtime behavior, UI interaction, and TOC/build selection.
+Run the exact-build static compatibility audit:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/AuditCompatibility.ps1
+```
+
+The suite runs 20 checks across Retail, Classic, and Classic Titan, including locale contracts, generated event catalogs, runtime behavior, UI interaction, TOC/build selection, and the static-audit contract.
 
 ## Design constraints
 

@@ -56,7 +56,7 @@ function ns.CreateAboutPage(parent, ui)
     description:SetText(L.ABOUT_DESCRIPTION)
     description:SetTextColor(0.92, 0.94, 0.96, 0.92)
 
-    local version = "0.7.1"
+    local version = "0.7.2"
     version = ns.Client.GetAddOnMetadata(ADDON_NAME, "Version") or version
 
     local accent = page:CreateTexture(nil, "ARTWORK")

@@ -6,7 +6,7 @@
 ## Notes-zhCN: 运行 Lua，检查对象与事件，追踪函数并分析插件性能。
 ## Notes-zhTW: 執行 Lua，檢查物件與事件，追蹤函式並分析插件效能。
 ## Author: Follen
-## Version: 0.7.1
+## Version: 0.7.2
 ## Dependencies: !BugGrabber
 ## SavedVariables: LycheeDevDB, DumperDB
 ## IconTexture: Interface\AddOns\Lychee Dev\Media\Logo.png

@@ -68,6 +68,24 @@ DumperDB = {
             succeeded = true,
         },
     },
+    exports = {
+        version = 1,
+        nextId = 4,
+        records = {
+            ["LYCHEE-LEGACY-0004"] = {
+                ticket = "LYCHEE-LEGACY-0004",
+                kind = "legacy_test",
+                title = "Legacy evidence",
+                content = "legacy export",
+                byteCount = 13,
+                createdAt = 1234567888,
+                metadata = { path = "Legacy.Path" },
+                client = { version = "0.6.0", interface = 120100, locale = "enUS" },
+                preservedField = "keep-me",
+            },
+        },
+        order = { "LYCHEE-LEGACY-0004" },
+    },
 }
 local toggled = false
 ns.ToggleWindow = function()
@@ -78,18 +96,39 @@ assert(type(ns.db) == "table", "database did not initialize on first use")
 assert(LycheeDevDB == ns.db, "database was not moved to the Lychee Dev root")
 assert(DumperDB == nil, "legacy database root was not cleared after migration")
 assert(ns.db.history[1].code == "legacy code", "legacy history was not preserved")
-assert(ns.db.schemaVersion == 6, "database schema was not upgraded")
-assert(ns.db.exports and ns.db.exports.version == 1,
+assert(ns.db.schemaVersion == 7, "database schema was not upgraded")
+assert(ns.db.exports and ns.db.exports.version == 2,
     "export database was not initialized")
+local migratedEvidence = ns.GetExport("LYCHEE-LEGACY-0004")
+assert(migratedEvidence and migratedEvidence.schema == "lychee.evidence.v1"
+        and migratedEvidence.source.kind == "legacy_test"
+        and migratedEvidence.source.title == "Legacy evidence"
+        and migratedEvidence.source.path == "Legacy.Path"
+        and migratedEvidence.payload.content == "legacy export"
+        and migratedEvidence.payload.byteCount == #"legacy export"
+        and migratedEvidence.environment.version == "0.6.0"
+        and migratedEvidence.content == nil and migratedEvidence.kind == nil
+        and migratedEvidence.preservedField == "keep-me",
+    "legacy export was not migrated into the evidence envelope")
 assert(ns.db.history[2].tree and ns.db.history[2].tree.roots[1].children[1].label == "player",
     "legacy serialized history was not restored as a tree")
 assert(toggled, "slash command did not toggle the window")
+ns.ClearExports()
 
 local firstTicket = ns.AddExport("test", "First", "first export", { path = "Test.First" })
 local secondTicket = ns.AddExport("test", "Second", "second export", { path = "Test.Second" })
 assert(firstTicket and secondTicket and firstTicket ~= secondTicket,
     "export tickets were not unique")
-assert(ns.GetExport(firstTicket).content == "first export"
+local firstEvidence = ns.GetExport(firstTicket)
+assert(firstEvidence.schema == "lychee.evidence.v1"
+        and firstEvidence.payload.content == "first export"
+        and firstEvidence.payload.mediaType == "text/plain"
+        and firstEvidence.payload.encoding == "utf-8"
+        and firstEvidence.source.kind == "test"
+        and firstEvidence.source.title == "First"
+        and firstEvidence.source.path == "Test.First"
+        and firstEvidence.environment.clientId == testClient
+        and firstEvidence.content == nil
         and ns.GetExports().order[1] == secondTicket
         and ns.IsExportPending(firstTicket) and ns.IsExportPending(secondTicket)
         and ns.GetPendingExportCount() == 2,

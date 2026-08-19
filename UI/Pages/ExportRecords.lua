@@ -133,12 +133,9 @@ function ns.CreateExportRecordsPage(parent, ui)
     ticketPanel:SetPoint("TOPRIGHT", -4, -247)
     ticketPanel:SetHeight(40)
 
-    local selectTicket = ui.CreateButton(ticketPanel, 118, L.SELECT_TICKET, false)
-    selectTicket:SetPoint("RIGHT", -5, 0)
-
     local ticketBox = CreateFrame("EditBox", nil, ticketPanel)
     ticketBox:SetPoint("TOPLEFT", 10, -1)
-    ticketBox:SetPoint("BOTTOMRIGHT", selectTicket, "BOTTOMLEFT", -10, 1)
+    ticketBox:SetPoint("BOTTOMRIGHT", -10, 1)
     ticketBox:SetAutoFocus(false)
     ticketBox:SetFontObject(ChatFontNormal)
     ticketBox:SetTextColor(0.94, 0.95, 0.96)
@@ -172,7 +169,12 @@ function ns.CreateExportRecordsPage(parent, ui)
     local function RefreshDetail()
         local entry = selectedTicket and ns.GetExport(selectedTicket) or nil
         local hasEntry = entry ~= nil
-        detailHeading:SetText(hasEntry and (entry.title ~= "" and entry.title or L.EXPORT_RECORD_DETAIL)
+        local source = hasEntry and entry.source or nil
+        local payload = hasEntry and entry.payload or nil
+        local environment = hasEntry and entry.environment or nil
+        local title = source and source.title or ""
+        local kind = source and source.kind or "unknown"
+        detailHeading:SetText(hasEntry and (title ~= "" and title or L.EXPORT_RECORD_DETAIL)
             or L.EXPORT_RECORD_DETAIL)
         local pending = hasEntry and ns.IsExportPending(selectedTicket)
         detailStatus:SetText(hasEntry and (pending and L.EXPORT_STATUS_PENDING or L.EXPORT_STATUS_SAVED) or "")
@@ -181,26 +183,29 @@ function ns.CreateExportRecordsPage(parent, ui)
         else
             detailStatus:SetTextColor(1, 1, 1, 0.36)
         end
-        nameValue:SetText(hasEntry and (entry.title ~= "" and entry.title or L.UNKNOWN) or "")
-        kindValue:SetText(hasEntry and GetKindLabel(entry.kind) or "")
+        nameValue:SetText(hasEntry and (title ~= "" and title or L.UNKNOWN) or "")
+        kindValue:SetText(hasEntry and GetKindLabel(kind) or "")
         timeValue:SetText(hasEntry and FormatTime(entry.createdAt) or "")
-        sizeValue:SetText(hasEntry and FormatBytes(entry.byteCount) or "")
-        if hasEntry and entry.client then
-            local version = entry.client.version or L.UNKNOWN
-            local build = entry.client.build and (" (" .. tostring(entry.client.build) .. ")") or ""
+        sizeValue:SetText(hasEntry and FormatBytes(payload and payload.byteCount) or "")
+        if hasEntry and environment then
+            local version = environment.version or L.UNKNOWN
+            local build = environment.build and (" (" .. tostring(environment.build) .. ")") or ""
             clientValue:SetText(version .. build)
         else
             clientValue:SetText("")
         end
-        local path = hasEntry and entry.metadata and entry.metadata.path
+        local path = hasEntry and source and source.path
         pathValue:SetText(path and tostring(path) or L.NOT_AVAILABLE)
         ticketBox.savedText = hasEntry and selectedTicket or ""
         ticketBox.updatingText = true
         ticketBox:SetText(ticketBox.savedText)
         ticketBox.updatingText = nil
-        ticketBox:SetCursorPosition(0)
         ticketHint:SetText(L.EXPORT_TICKET_HELP)
-        ui.SetButtonEnabled(selectTicket, hasEntry)
+        if hasEntry then
+            ui.SelectAllText(ticketBox)
+        else
+            ticketBox:ClearFocus()
+        end
         ui.SetButtonEnabled(deleteButton, hasEntry)
         deleteConfirmed = false
         ui.SetButtonText(deleteButton, L.EXPORT_RECORD_DELETE)
@@ -284,9 +289,11 @@ function ns.CreateExportRecordsPage(parent, ui)
         for index = 1, #order do
             local ticket = order[index]
             local entry = ns.GetExport(ticket)
+            local source = entry.source
+            local payload = entry.payload
             local row = AcquireRow(index)
             row.ticket = ticket
-            row.title:SetText(entry.title ~= "" and entry.title or ticket)
+            row.title:SetText(source.title ~= "" and source.title or ticket)
             local pending = ns.IsExportPending(ticket)
             row.status:SetText(pending and L.EXPORT_STATUS_PENDING or L.EXPORT_STATUS_SAVED)
             if pending then
@@ -294,8 +301,8 @@ function ns.CreateExportRecordsPage(parent, ui)
             else
                 row.status:SetTextColor(1, 1, 1, 0.30)
             end
-            row.meta:SetText(FormatTime(entry.createdAt) .. " | " .. GetKindLabel(entry.kind)
-                .. " | " .. FormatBytes(entry.byteCount))
+            row.meta:SetText(FormatTime(entry.createdAt) .. " | " .. GetKindLabel(source.kind)
+                .. " | " .. FormatBytes(payload.byteCount))
             row:Show()
         end
         for index = #order + 1, #rows do
@@ -325,12 +332,7 @@ function ns.CreateExportRecordsPage(parent, ui)
     ticketBox:SetScript("OnMouseUp", function()
         if selectedTicket then
             ui.SelectAllText(ticketBox)
-            ticketHint:SetText(L.EXPORT_TICKET_SELECTED)
         end
-    end)
-    selectTicket:SetScript("OnClick", function()
-        ui.SelectAllText(ticketBox)
-        ticketHint:SetText(L.EXPORT_TICKET_SELECTED)
     end)
     reloadButton:SetScript("OnClick", function()
         if ns.IsCombatBlocked() then
@@ -371,7 +373,6 @@ function ns.CreateExportRecordsPage(parent, ui)
     page.ticketHint = ticketHint
     page.pendingText = pendingText
     page.detailStatus = detailStatus
-    page.selectTicket = selectTicket
     page.deleteButton = deleteButton
     page.clearButton = clearButton
     page.reloadButton = reloadButton

@@ -64,6 +64,23 @@ local function NewRegion(name)
         return self.text
     end
 
+    function region:SetFocus()
+        self.focused = true
+    end
+
+    function region:ClearFocus()
+        self.focused = false
+    end
+
+    function region:HighlightText()
+        self.highlighted = true
+    end
+
+    function region:SelectAll()
+        self.focused = true
+        self.highlighted = true
+    end
+
     function region:GetStringHeight()
         return 14
     end
@@ -517,14 +534,16 @@ local loadedObjectTextLength = #objectPage.textView.editBox:GetText()
 objectPage.exportSnapshot:Click()
 local exportedObjects = ns.GetExports()
 local objectExport = ns.GetExport(exportedObjects.order[1])
-assert(objectExport and objectExport.kind == "object_snapshot"
-        and #objectExport.content > loadedObjectTextLength,
+assert(objectExport and objectExport.source.kind == "object_snapshot"
+        and #objectExport.payload.content > loadedObjectTextLength,
     "object export did not serialize the full source independently of the edit box")
 assert(LycheeDevWindow.exportController.popup.overlay:IsShown(),
     "export ticket popup did not open")
-LycheeDevWindow.exportController.popup.copyButton:Click()
-assert(LycheeDevWindow.exportController.popup.hint:GetText() == ns.L.EXPORT_TICKET_SELECTED,
-    "export ticket copy action did not explain Ctrl+C")
+assert(LycheeDevWindow.exportController.popup.copyButton == nil
+        and LycheeDevWindow.exportController.popup.ticketBox.focused
+        and LycheeDevWindow.exportController.popup.ticketBox.highlighted
+        and LycheeDevWindow.exportController.popup.hint:GetText() == ns.L.EXPORT_TICKET_HELP,
+    "export popup did not select the Ticket by default")
 LycheeDevWindow.exportController.popup.reloadButton:Click()
 assert(reloadCalled, "export popup reload action did not call ReloadUI")
 LycheeDevWindow.exportController.popup.laterButton:Click()
@@ -538,8 +557,8 @@ assert(objectPage.nodePopup.textPanel.editBox:GetText():find("nested", 1, true),
     "node text popup did not contain the selected object")
 objectPage.nodePopup.exportButton:Click()
 local nodeExport = ns.GetExport(ns.GetExports().order[1])
-assert(nodeExport and nodeExport.kind == "object_node"
-        and #nodeExport.content > #objectPage.nodePopup.textPanel.editBox:GetText(),
+assert(nodeExport and nodeExport.source.kind == "object_node"
+        and #nodeExport.payload.content > #objectPage.nodePopup.textPanel.editBox:GetText(),
     "node export did not serialize the full subtree")
 LycheeDevWindow.exportController.popup.laterButton:Click()
 objectPage.nodePopup.closeButton:Click()
@@ -734,9 +753,10 @@ assert(exportPage.listScroll:GetVerticalScroll() > 0,
 exportPage.rows[2]:Click()
 assert(exportPage.ticketBox:GetText() == exportPage.rows[2].ticket,
     "export record rows could not be selected")
-exportPage.selectTicket:Click()
-assert(exportPage.ticketHint:GetText() == ns.L.EXPORT_TICKET_SELECTED,
-    "export record Ticket selection did not explain Ctrl+C")
+assert(rawget(exportPage, "selectTicket") == nil and exportPage.ticketBox.focused
+        and exportPage.ticketBox.highlighted
+        and exportPage.ticketHint:GetText() == ns.L.EXPORT_TICKET_HELP,
+    "export record did not select its Ticket by default")
 exportPage.deleteButton:Click()
 assert(exportPage.deleteButton.label:GetText() == ns.L.EXPORT_RECORD_DELETE_CONFIRM,
     "export record deletion did not require confirmation")

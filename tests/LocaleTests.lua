@@ -36,8 +36,8 @@ local english = LoadLocale("enUS")
 local britishEnglish = LoadLocale("enGB")
 local internationalFallback = LoadLocale("deDE")
 
-assert(CountKeys(chinese) == 398, "unexpected Chinese locale key count")
-assert(CountKeys(english) == 398, "unexpected English locale key count")
+assert(CountKeys(chinese) == 394, "unexpected Chinese locale key count")
+assert(CountKeys(english) == 394, "unexpected English locale key count")
 
 for key, chineseValue in pairs(chinese) do
     local englishValue = english[key]

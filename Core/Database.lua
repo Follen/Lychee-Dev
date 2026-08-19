@@ -1,13 +1,14 @@
 local ADDON_NAME, ns = ...
 
-local SCHEMA_VERSION = 6
+local SCHEMA_VERSION = 7
 local MAX_HISTORY_BYTES = 16 * 1024 * 1024
 local MAX_EXPORT_BYTES = 16 * 1024 * 1024
 local MAX_EXPORT_RECORDS = 200
 local MIN_HISTORY_ENTRY_BYTES = 16 * 1024
 local MAX_CODE_BYTES = 12000
 local MAX_RESULT_BYTES = 48000
-local EXPORT_SCHEMA_VERSION = 1
+local EXPORT_SCHEMA_VERSION = 2
+local EVIDENCE_SCHEMA = "lychee.evidence.v1"
 
 local db
 local historyBytes = 0
@@ -58,7 +59,8 @@ local function PruneHistoryToBudget()
 end
 
 local function GetExportEntryBytes(entry)
-    return #(entry.content or "")
+    local payload = type(entry) == "table" and entry.payload or nil
+    return type(payload) == "table" and #(payload.content or "") or 0
 end
 
 local function RemoveExport(ticket)
@@ -112,12 +114,84 @@ local function CopyExportMetadata(value, depth)
     return copied
 end
 
+local function CreateEvidenceRecord(ticket, kind, title, content, createdAt, metadata, client)
+    metadata = CopyExportMetadata(metadata, 0) or {}
+    client = type(client) == "table" and client or {}
+    return {
+        schema = EVIDENCE_SCHEMA,
+        ticket = ticket,
+        createdAt = tonumber(createdAt) or 0,
+        source = {
+            kind = type(kind) == "string" and kind or "unknown",
+            title = type(title) == "string" and title or "",
+            path = type(metadata.path) == "string" and metadata.path or nil,
+        },
+        payload = {
+            mediaType = "text/plain",
+            encoding = "utf-8",
+            content = content,
+            byteCount = #content,
+        },
+        environment = {
+            addonName = ADDON_NAME,
+            clientId = client.clientId,
+            version = client.version,
+            build = client.build,
+            buildDate = client.buildDate,
+            interface = client.interface,
+            locale = client.locale,
+        },
+        metadata = metadata,
+    }
+end
+
+local function NormalizeEvidenceRecord(ticket, entry)
+    if type(entry) ~= "table" then
+        return nil
+    end
+
+    local payload = entry.payload
+    if type(payload) == "table" and type(payload.content) == "string" then
+        entry.ticket = ticket
+        entry.schema = type(entry.schema) == "string" and entry.schema or EVIDENCE_SCHEMA
+        entry.createdAt = tonumber(entry.createdAt) or 0
+        entry.source = type(entry.source) == "table" and entry.source or {}
+        entry.source.kind = type(entry.source.kind) == "string" and entry.source.kind or "unknown"
+        entry.source.title = type(entry.source.title) == "string" and entry.source.title or ""
+        entry.metadata = CopyExportMetadata(entry.metadata, 0) or {}
+        if type(entry.source.path) ~= "string" then
+            entry.source.path = type(entry.metadata.path) == "string" and entry.metadata.path or nil
+        end
+        payload.mediaType = type(payload.mediaType) == "string" and payload.mediaType or "text/plain"
+        payload.encoding = type(payload.encoding) == "string" and payload.encoding or "utf-8"
+        payload.byteCount = #payload.content
+        entry.environment = type(entry.environment) == "table" and entry.environment or {}
+        entry.environment.addonName = type(entry.environment.addonName) == "string"
+            and entry.environment.addonName or ADDON_NAME
+        return entry
+    end
+
+    if type(entry.content) ~= "string" then
+        return nil
+    end
+    local client = type(entry.client) == "table" and entry.client or {}
+    local migrated = CreateEvidenceRecord(ticket, entry.kind, entry.title, entry.content,
+        entry.createdAt, entry.metadata, client)
+    for key, value in pairs(entry) do
+        if migrated[key] == nil and key ~= "content" and key ~= "kind"
+            and key ~= "title" and key ~= "client" and key ~= "byteCount" then
+            migrated[key] = value
+        end
+    end
+    return migrated
+end
+
 local function InitializeExports()
     if type(db.exports) ~= "table" then
         db.exports = {}
     end
     local exports = db.exports
-    exports.version = type(exports.version) == "number" and exports.version or EXPORT_SCHEMA_VERSION
+    exports.version = math.max(tonumber(exports.version) or 0, EXPORT_SCHEMA_VERSION)
     exports.nextId = math.max(0, math.floor(tonumber(exports.nextId) or 0))
     exports.records = type(exports.records) == "table" and exports.records or {}
     exports.order = type(exports.order) == "table" and exports.order or {}
@@ -125,15 +199,10 @@ local function InitializeExports()
     local validRecords = {}
     exportBytes = 0
     for ticket, entry in pairs(exports.records) do
-        if type(ticket) == "string" and type(entry) == "table" and type(entry.content) == "string" then
-            entry.ticket = ticket
-            entry.kind = type(entry.kind) == "string" and entry.kind or "unknown"
-            entry.title = type(entry.title) == "string" and entry.title or ""
-            entry.createdAt = tonumber(entry.createdAt) or 0
-            entry.byteCount = #entry.content
-            entry.metadata = CopyExportMetadata(entry.metadata, 0) or {}
-            validRecords[ticket] = entry
-            exportBytes = exportBytes + GetExportEntryBytes(entry)
+        local normalized = type(ticket) == "string" and NormalizeEvidenceRecord(ticket, entry) or nil
+        if normalized then
+            validRecords[ticket] = normalized
+            exportBytes = exportBytes + GetExportEntryBytes(normalized)
         end
     end
     exports.records = validRecords
@@ -262,22 +331,14 @@ function ns.AddExport(kind, title, content, metadata)
     if GetBuildInfo then
         version, build, buildDate, interfaceVersion = GetBuildInfo()
     end
-    local entry = {
-        ticket = ticket,
-        kind = type(kind) == "string" and kind or "unknown",
-        title = type(title) == "string" and title or "",
-        content = content,
-        byteCount = #content,
-        createdAt = timestamp,
-        metadata = CopyExportMetadata(metadata, 0) or {},
-        client = {
-            version = version,
-            build = build,
-            buildDate = buildDate,
-            interface = interfaceVersion,
-            locale = GetLocale and GetLocale() or nil,
-        },
-    }
+    local entry = CreateEvidenceRecord(ticket, kind, title, content, timestamp, metadata, {
+        clientId = ns.Client and ns.Client.id or nil,
+        version = version,
+        build = build,
+        buildDate = buildDate,
+        interface = interfaceVersion,
+        locale = GetLocale and GetLocale() or nil,
+    })
     local entryBytes = GetExportEntryBytes(entry)
     if entryBytes > MAX_EXPORT_BYTES then
         return nil, ns.L.EXPORT_TOO_LARGE
