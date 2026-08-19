@@ -12,6 +12,8 @@ local EXPORT_SCHEMA_VERSION = 1
 local db
 local historyBytes = 0
 local exportBytes = 0
+local pendingExports = {}
+local pendingExportCount = 0
 
 local function TrimText(value, limit)
     value = type(value) == "string" and value or tostring(value or "")
@@ -64,6 +66,10 @@ local function RemoveExport(ticket)
     if entry then
         exportBytes = math.max(0, exportBytes - GetExportEntryBytes(entry))
         db.exports.records[ticket] = nil
+    end
+    if pendingExports[ticket] then
+        pendingExports[ticket] = nil
+        pendingExportCount = math.max(0, pendingExportCount - 1)
     end
 end
 
@@ -280,6 +286,8 @@ function ns.AddExport(kind, title, content, metadata)
     db.exports.records[ticket] = entry
     table.insert(db.exports.order, 1, ticket)
     exportBytes = exportBytes + entryBytes
+    pendingExports[ticket] = true
+    pendingExportCount = pendingExportCount + 1
     PruneExportsToBudget()
     return ticket, entry
 end
@@ -299,6 +307,31 @@ function ns.GetExportStats()
     return #db.exports.order, exportBytes, MAX_EXPORT_BYTES
 end
 
+function ns.IsExportPending(ticket)
+    return type(ticket) == "string" and pendingExports[ticket] == true
+end
+
+function ns.GetPendingExportCount()
+    return pendingExportCount
+end
+
+function ns.DeleteExport(ticket)
+    if not db or not db.exports or type(ticket) ~= "string"
+        or not db.exports.records[ticket] then
+        return false
+    end
+
+    RemoveExport(ticket)
+    for index = 1, #db.exports.order do
+        if db.exports.order[index] == ticket then
+            table.remove(db.exports.order, index)
+            break
+        end
+    end
+    db.exports.totalBytes = exportBytes
+    return true
+end
+
 function ns.ClearExports()
     if not db or not db.exports then
         return 0
@@ -306,7 +339,9 @@ function ns.ClearExports()
     local removed = #db.exports.order
     wipe(db.exports.order)
     wipe(db.exports.records)
+    wipe(pendingExports)
     exportBytes = 0
+    pendingExportCount = 0
     db.exports.totalBytes = 0
     return removed
 end

@@ -335,7 +335,7 @@ function ns.CreateEventsPage(parent, ui)
 
     local inputPanel = CreateLineInput(page, ui)
     inputPanel:SetPoint("TOPLEFT", 14, -104)
-    inputPanel:SetPoint("TOPRIGHT", -250, -104)
+    inputPanel:SetPoint("TOPRIGHT", -278, -104)
     inputPanel:SetHeight(30)
     page.inputPanel = inputPanel
 
@@ -345,7 +345,7 @@ function ns.CreateEventsPage(parent, ui)
     inputHint:SetTextColor(1, 1, 1, 0.30)
     page.inputHint = inputHint
 
-    local monitorButton = ui.CreateButton(page, 112, L.START_MONITORING, true)
+    local monitorButton = ui.CreateButton(page, 140, L.START_MONITORING, true)
     monitorButton:SetPoint("TOPRIGHT", -14, -104)
 
     local clearButton = ui.CreateButton(page, 100, L.CLEAR_LOG, false)
@@ -384,7 +384,7 @@ function ns.CreateEventsPage(parent, ui)
     selectedCount:SetPoint("LEFT", selectedLabel, "RIGHT", 9, 0)
     selectedCount:SetTextColor(1, 1, 1, 0.34)
 
-    local selectedPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
+    local selectedPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.78)
     selectedPanel:SetPoint("TOPLEFT", 14, -189)
     selectedPanel:SetPoint("TOPRIGHT", -14, -189)
     selectedPanel:SetHeight(42)
@@ -407,14 +407,14 @@ function ns.CreateEventsPage(parent, ui)
     local detailLabel = ui.CreateSectionLabel(page, L.PAYLOAD)
     detailLabel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", EVENT_LIST_WIDTH + 15, -22)
 
-    local logPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
+    local logPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.78)
     logPanel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", 0, -42)
     logPanel:SetPoint("BOTTOMLEFT", 14, 54)
     logPanel:SetWidth(EVENT_LIST_WIDTH)
 
     local logScroll = ui.CreateScrollArea(logPanel, 8, 8, 7, 8)
     local logContent = CreateFrame("Frame", nil, logScroll)
-    logContent:SetWidth(EVENT_LIST_WIDTH - 34)
+    logContent:SetWidth(EVENT_LIST_WIDTH - 26)
     logContent:SetHeight(1)
     logScroll:SetScrollChild(logContent)
 
@@ -488,17 +488,12 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     local function ApplySearchRowStyle(row)
+        ui.SetListRowState(row, row.resultIndex == highlightedSearchIndex, row.isHovered)
         if row.resultIndex == highlightedSearchIndex then
-            row:SetBackdropColor(ui.accentR, ui.accentG, ui.accentB, 0.14)
-            row:SetBackdropBorderColor(ui.accentR, ui.accentG, ui.accentB, 0.32)
             row.name:SetTextColor(1, 1, 1, 0.96)
         elseif row.isHovered then
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.94)
-            ui.SetBorderColor(row, false, 0.42)
             row.name:SetTextColor(1, 1, 1, 0.9)
         else
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.48)
-            ui.SetBorderColor(row, false, 0.18)
             row.name:SetTextColor(1, 1, 1, 0.72)
         end
     end
@@ -526,23 +521,21 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     local function CreateSearchRow(index)
-        local row = CreateFrame("Button", nil, searchPanel, "BackdropTemplate")
+        local row = ui.CreateListRow(searchPanel, SEARCH_ROW_HEIGHT)
         row:SetPoint("TOPLEFT", 3, -3 - ((index - 1) * SEARCH_ROW_HEIGHT))
         row:SetPoint("TOPRIGHT", -3, -3 - ((index - 1) * SEARCH_ROW_HEIGHT))
-        row:SetHeight(SEARCH_ROW_HEIGHT - 2)
-        row:SetBackdrop(ui.backdrop)
         row.resultIndex = index
 
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         name:SetPoint("TOPLEFT", 9, -5)
-        name:SetPoint("RIGHT", -9, 0)
+        name:SetPoint("TOPRIGHT", -9, -5)
         name:SetJustifyH("LEFT")
         name:SetWordWrap(false)
         row.name = name
 
         local payload = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         payload:SetPoint("BOTTOMLEFT", 9, 5)
-        payload:SetPoint("RIGHT", -9, 0)
+        payload:SetPoint("BOTTOMRIGHT", -9, 5)
         payload:SetJustifyH("LEFT")
         payload:SetWordWrap(false)
         payload:SetTextColor(1, 1, 1, 0.38)
@@ -594,19 +587,12 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     local function ApplySelectedRowStyle(row)
-        if row.isHovered then
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.88)
-            ui.SetBorderColor(row, false, 0.36)
-        else
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.42)
-            ui.SetBorderColor(row, false, 0.16)
-        end
+        ui.SetListRowState(row, false, row.isHovered)
     end
 
     local function CreateSelectedRow(index)
-        local row = CreateFrame("Frame", nil, selectedContent, "BackdropTemplate")
-        row:SetSize(ui.windowWidth - 56, SELECTED_ROW_HEIGHT - 2)
-        row:SetBackdrop(ui.backdrop)
+        local row = ui.CreateListRow(selectedContent, SELECTED_ROW_HEIGHT)
+        row:SetWidth(ui.windowWidth - 56)
         row:EnableMouse(true)
 
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -745,22 +731,12 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     local function ApplyEventRowStyle(row)
-        if row.record == selectedRecord then
-            row:SetBackdropColor(ui.accentR, ui.accentG, ui.accentB, 0.13)
-            row:SetBackdropBorderColor(ui.accentR, ui.accentG, ui.accentB, 0.35)
-        elseif row.isHovered then
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.9)
-            ui.SetBorderColor(row, false, 0.45)
-        else
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.44)
-            ui.SetBorderColor(row, false, 0.18)
-        end
+        ui.SetListRowState(row, row.record == selectedRecord, row.isHovered)
     end
 
     local function CreateEventRow(index)
-        local row = CreateFrame("Button", nil, logContent, "BackdropTemplate")
-        row:SetSize(EVENT_LIST_WIDTH - 34, EVENT_ROW_HEIGHT - 2)
-        row:SetBackdrop(ui.backdrop)
+        local row = ui.CreateListRow(logContent, EVENT_ROW_HEIGHT)
+        row:SetWidth(EVENT_LIST_WIDTH - 26)
 
         local timeLabel = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         timeLabel:SetPoint("LEFT", 8, 0)
@@ -773,6 +749,7 @@ function ns.CreateEventsPage(parent, ui)
         eventLabel:SetPoint("LEFT", 72, 7)
         eventLabel:SetPoint("RIGHT", -8, 7)
         eventLabel:SetJustifyH("LEFT")
+        eventLabel:SetWordWrap(false)
         eventLabel:SetTextColor(0.93, 0.94, 0.96, 0.9)
         row.eventLabel = eventLabel
 

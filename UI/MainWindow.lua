@@ -31,7 +31,9 @@ local PAGE_DEFINITIONS = {
     { key = "objects", label = L.TAB_OBJECTS },
     { key = "events", label = L.TAB_EVENTS },
     { key = "trace", label = L.TAB_TRACE },
+    { key = "performance", label = L.TAB_PERFORMANCE },
     { key = "diagnostics", label = L.TAB_DIAGNOSTICS },
+    { key = "exports", label = L.TAB_EXPORTS },
     { key = "about", label = L.TAB_ABOUT },
 }
 
@@ -47,10 +49,10 @@ local function CreatePanel(parent, r, g, b, a)
     local panel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     panel:SetBackdrop(BACKDROP)
     panel:SetBackdropColor(r, g, b, a)
-    SetBorderColor(panel, false)
+    SetBorderColor(panel, false, 0.26)
 
     local innerHighlight = panel:CreateTexture(nil, "ARTWORK")
-    innerHighlight:SetColorTexture(1, 1, 1, 0.035)
+    innerHighlight:SetColorTexture(1, 1, 1, 0.026)
     innerHighlight:SetPoint("TOPLEFT", 1, -1)
     innerHighlight:SetPoint("TOPRIGHT", -1, -1)
     innerHighlight:SetHeight(1)
@@ -291,8 +293,13 @@ local function ApplyButtonState(button, state)
     local variant = button.variant or (button.primary and "primary" or "secondary")
 
     if not enabled then
-        button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.34)
-        SetBorderColor(button, false, 0.18)
+        if variant == "ghost" then
+            button:SetBackdropColor(0, 0, 0, 0)
+            SetBorderColor(button, false, 0)
+        else
+            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.34)
+            SetBorderColor(button, false, 0.18)
+        end
         button.label:SetTextColor(1, 1, 1, 0.28)
         SetButtonLabelOffset(button, 0)
         return
@@ -304,36 +311,53 @@ local function ApplyButtonState(button, state)
             button:SetBackdropColor(ACCENT_R * 0.78, ACCENT_G * 0.78, ACCENT_B * 0.78, 1)
         elseif variant == "selected" then
             button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.22)
+        elseif variant == "ghost" then
+            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.72)
         else
-            button:SetBackdropColor(SURFACE_R * 0.72, SURFACE_G * 0.72, SURFACE_B * 0.72, 1)
+            button:SetBackdropColor(SURFACE_R * 0.82, SURFACE_G * 0.82, SURFACE_B * 0.82, 0.86)
         end
-        SetBorderColor(button, emphasized or variant == "selected", emphasized and 1 or 0.64)
+        SetBorderColor(button, emphasized or variant == "selected",
+            variant == "ghost" and 0.28 or (emphasized and 1 or 0.64))
     elseif state == "hover" then
         if emphasized then
             button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 1)
         elseif variant == "selected" then
             button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.18)
+        elseif variant == "ghost" then
+            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.48)
         else
-            button:SetBackdropColor(SURFACE_R * 1.28, SURFACE_G * 1.28, SURFACE_B * 1.28, 1)
+            button:SetBackdropColor(SURFACE_R * 1.22, SURFACE_G * 1.22, SURFACE_B * 1.22, 0.82)
         end
-        SetBorderColor(button, emphasized or variant == "selected", emphasized and 1 or 0.7)
+        SetBorderColor(button, emphasized or variant == "selected",
+            variant == "ghost" and 0.20 or (emphasized and 1 or 0.7))
     else
         if emphasized then
             button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.88)
         elseif variant == "selected" then
             button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.12)
+        elseif variant == "ghost" then
+            button:SetBackdropColor(0, 0, 0, 0)
         else
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.92)
+            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.42)
         end
-        SetBorderColor(button, emphasized or variant == "selected", emphasized and 0.85 or (variant == "selected" and 0.52 or 0.42))
+        SetBorderColor(button, emphasized or variant == "selected",
+            variant == "ghost" and 0
+                or (emphasized and 0.85 or (variant == "selected" and 0.52 or 0.30)))
     end
 
-    button.label:SetTextColor(1, 1, 1, emphasized and 1 or (variant == "selected" and 0.94 or 0.76))
+    local labelAlpha = 0.76
+    if emphasized then
+        labelAlpha = 1
+    elseif variant == "selected" then
+        labelAlpha = 0.94
+    elseif variant == "ghost" then
+        labelAlpha = state == "normal" and 0.68 or 0.92
+    end
+    button.label:SetTextColor(1, 1, 1, labelAlpha)
 end
 
 local function CreateButton(parent, width, text, primary)
     local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    button:SetSize(width, 28)
     button:SetBackdrop(BACKDROP)
     button.variant = type(primary) == "string" and primary or (primary and "primary" or "secondary")
     button.primary = button.variant == "primary"
@@ -342,6 +366,7 @@ local function CreateButton(parent, width, text, primary)
     label:SetPoint("CENTER")
     label:SetText(text)
     button.label = label
+    button:SetSize(math.max(width, math.ceil(label:GetStringWidth()) + 24), 30)
 
     button:SetScript("OnEnter", function(self)
         self.isHovered = true
@@ -380,7 +405,11 @@ local function SetButtonEnabled(button, enabled)
     if not enabled then
         button.isHovered = nil
     end
-    ApplyButtonState(button, "normal")
+    if button.RefreshEnabledState then
+        button:RefreshEnabledState()
+    else
+        ApplyButtonState(button, "normal")
+    end
 end
 
 local function SetButtonText(button, text)
@@ -388,10 +417,52 @@ local function SetButtonText(button, text)
 end
 
 local function CreateSectionLabel(parent, text)
-    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetText(text)
-    label:SetTextColor(0.78, 0.82, 0.86, 1)
+    label:SetTextColor(0.70, 0.75, 0.79, 0.92)
     return label
+end
+
+local function CreateListRow(parent, height)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(height)
+
+    local background = row:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0, 0, 0, 0)
+    row.background = background
+
+    local accent = row:CreateTexture(nil, "ARTWORK")
+    accent:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
+    accent:SetPoint("TOPLEFT", 0, 0)
+    accent:SetPoint("BOTTOMLEFT", 0, 0)
+    accent:SetWidth(2)
+    accent:Hide()
+    row.accent = accent
+
+    local divider = row:CreateTexture(nil, "ARTWORK")
+    divider:SetColorTexture(1, 1, 1, 0.055)
+    divider:SetPoint("BOTTOMLEFT", 0, 0)
+    divider:SetPoint("BOTTOMRIGHT", 0, 0)
+    divider:SetHeight(1)
+    row.divider = divider
+    return row
+end
+
+local function SetListRowState(row, selected, hovered)
+    if selected then
+        row.background:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.095)
+        row.accent:Show()
+        row.divider:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.28)
+    elseif hovered then
+        row.background:SetColorTexture(SURFACE_R, SURFACE_G, SURFACE_B, 0.68)
+        row.accent:Hide()
+        row.divider:SetColorTexture(1, 1, 1, 0.08)
+    else
+        row.background:SetColorTexture(0, 0, 0, 0)
+        row.accent:Hide()
+        row.divider:SetColorTexture(1, 1, 1, 0.055)
+    end
 end
 
 local function CreateNavTab(parent, text)
@@ -410,7 +481,10 @@ local function CreateNavTab(parent, text)
     button.underline = underline
 
     local function ApplyState(self)
-        if self.active then
+        if not self:IsEnabled() then
+            self.label:SetTextColor(1, 1, 1, 0.24)
+            self.underline:SetColorTexture(0, 0, 0, 0)
+        elseif self.active then
             self.label:SetTextColor(1, 1, 1, 1)
             self.underline:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
         elseif self.isHovered then
@@ -422,6 +496,7 @@ local function CreateNavTab(parent, text)
         end
     end
 
+    button.RefreshEnabledState = ApplyState
     button.SetActive = function(self, active)
         self.active = active and true or false
         ApplyState(self)
@@ -436,6 +511,11 @@ local function CreateNavTab(parent, text)
     end)
     button:SetActive(false)
     return button
+end
+
+local function FitNavTab(button, minimumWidth, height)
+    button:SetSize(math.max(minimumWidth or 48,
+        math.ceil(button.label:GetStringWidth()) + 22), height or 30)
 end
 
 local function CreateTextArea(parent, readOnly)
@@ -594,7 +674,10 @@ local function SetResultMode(mode)
 end
 
 local function SetActivePage(pageName)
-    if not window or not window.pages[pageName] then
+    if not window or not window.pages then
+        return
+    end
+    if not window.pages[pageName] then
         pageName = "runner"
     end
     activePage = pageName
@@ -632,57 +715,56 @@ local function StopRuntimeTools()
         ns.FunctionTrace.Stop()
     end
 
+    if window and window.performancePage then
+        window.performancePage:Stop()
+    elseif ns.Performance then
+        ns.Performance.StopCapture("window_closed")
+    end
+
 end
 
-local function FormatHistoryLabel(entry)
+local function FormatHistoryEntry(entry)
     local stamp = entry.timestamp and date("%m-%d %H:%M", entry.timestamp) or L.UNKNOWN_TIME
     local firstLine = (entry.code or ""):match("([^\r\n]+)") or L.EMPTY_INPUT
     if #firstLine > 22 then
         firstLine = firstLine:sub(1, 22) .. "..."
     end
-    return stamp .. "\n" .. firstLine
+    return stamp, firstLine
 end
 
 local function ApplyHistoryButtonStyle(button)
     local selected = button.entryIndex == selectedHistoryIndex
+    SetListRowState(button, selected, button.isHovered)
     if selected then
-        button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.13)
-        button:SetBackdropBorderColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.35)
-        button.accent:Show()
-        button.text:SetTextColor(1, 1, 1, 0.96)
+        button.time:SetTextColor(1, 1, 1, 0.96)
+        button.preview:SetTextColor(1, 1, 1, 0.68)
     elseif button.isHovered then
-        button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.92)
-        SetBorderColor(button, false, 0.48)
-        button.accent:Hide()
-        button.text:SetTextColor(1, 1, 1, 0.9)
+        button.time:SetTextColor(1, 1, 1, 0.90)
+        button.preview:SetTextColor(1, 1, 1, 0.58)
     else
-        button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.48)
-        SetBorderColor(button, false, 0.2)
-        button.accent:Hide()
-        button.text:SetTextColor(1, 1, 1, 0.62)
+        button.time:SetTextColor(1, 1, 1, 0.68)
+        button.preview:SetTextColor(1, 1, 1, 0.42)
     end
 end
 
 local function CreateHistoryButton(index)
-    local button = CreateFrame("Button", nil, window.historyContent, "BackdropTemplate")
-    button:SetSize(HISTORY_WIDTH - 34, 48)
-    button:SetBackdrop(BACKDROP)
+    local button = CreateListRow(window.historyContent, 52)
+    button:SetWidth(HISTORY_WIDTH - 26)
     button.entryIndex = index
 
-    local accent = button:CreateTexture(nil, "ARTWORK")
-    accent:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
-    accent:SetPoint("TOPLEFT", 0, -1)
-    accent:SetPoint("BOTTOMLEFT", 0, 1)
-    accent:SetWidth(2)
-    accent:Hide()
-    button.accent = accent
+    local timeLabel = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    timeLabel:SetPoint("TOPLEFT", 12, -9)
+    timeLabel:SetPoint("TOPRIGHT", -9, -9)
+    timeLabel:SetJustifyH("LEFT")
+    timeLabel:SetWordWrap(false)
+    button.time = timeLabel
 
-    local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    label:SetPoint("LEFT", 10, 0)
-    label:SetPoint("RIGHT", -7, 0)
-    label:SetJustifyH("LEFT")
-    label:SetJustifyV("MIDDLE")
-    button.text = label
+    local preview = button:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    preview:SetPoint("BOTTOMLEFT", 12, 8)
+    preview:SetPoint("BOTTOMRIGHT", -9, 8)
+    preview:SetJustifyH("LEFT")
+    preview:SetWordWrap(false)
+    button.preview = preview
 
     button:SetScript("OnEnter", function(self)
         self.isHovered = true
@@ -727,7 +809,9 @@ local function RefreshHistory()
         button.entryIndex = index
         button:ClearAllPoints()
         button:SetPoint("TOPLEFT", 0, -((index - 1) * 52))
-        button.text:SetText(FormatHistoryLabel(history[index]))
+        local stamp, preview = FormatHistoryEntry(history[index])
+        button.time:SetText(stamp)
+        button.preview:SetText(preview)
         ApplyHistoryButtonStyle(button)
         button:Show()
     end
@@ -805,11 +889,11 @@ local function CreateWindow()
     for index = 1, #PAGE_DEFINITIONS do
         local definition = PAGE_DEFINITIONS[index]
         local tab = CreateNavTab(frame, definition.label)
-        tab:SetSize(70, 32)
+        FitNavTab(tab, 48, 32)
         if previousTab then
-            tab:SetPoint("LEFT", previousTab, "RIGHT", 2, 0)
+            tab:SetPoint("LEFT", previousTab, "RIGHT", 8, 0)
         else
-            tab:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 348, 8)
+            tab:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 300, 8)
         end
         tab:SetScript("OnClick", function()
             SetActivePage(definition.key)
@@ -825,7 +909,7 @@ local function CreateWindow()
     local historyLabel = CreateSectionLabel(runnerPage, L.HISTORY)
     historyLabel:SetPoint("TOPLEFT", 17, -84)
 
-    local historyPanel = CreatePanel(runnerPage, EDITOR_R, EDITOR_G, EDITOR_B, 0.72)
+    local historyPanel = CreatePanel(runnerPage, EDITOR_R, EDITOR_G, EDITOR_B, 0.78)
     historyPanel:SetPoint("TOPLEFT", 14, -104)
     historyPanel:SetPoint("BOTTOMLEFT", 14, 54)
     historyPanel:SetWidth(HISTORY_WIDTH)
@@ -833,7 +917,7 @@ local function CreateWindow()
     local historyScroll = CreateScrollArea(historyPanel, 8, 8, 7, 8)
 
     local historyContent = CreateFrame("Frame", nil, historyScroll)
-    historyContent:SetWidth(HISTORY_WIDTH - 34)
+    historyContent:SetWidth(HISTORY_WIDTH - 26)
     historyContent:SetHeight(1)
     historyScroll:SetScrollChild(historyContent)
     frame.historyContent = historyContent
@@ -886,12 +970,12 @@ local function CreateWindow()
     resultLabel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -13)
 
     local resultTextTab = CreateNavTab(runnerPage, L.TEXT)
-    resultTextTab:SetSize(58, 28)
+    FitNavTab(resultTextTab, 58, 28)
     resultTextTab:SetPoint("TOPRIGHT", actionRow, "BOTTOMRIGHT", 0, -4)
     frame.resultTextTab = resultTextTab
 
     local resultTreeTab = CreateNavTab(runnerPage, L.TREE)
-    resultTreeTab:SetSize(58, 28)
+    FitNavTab(resultTreeTab, 58, 28)
     resultTreeTab:SetPoint("RIGHT", resultTextTab, "LEFT", -2, 0)
     frame.resultTreeTab = resultTreeTab
 
@@ -934,8 +1018,13 @@ local function CreateWindow()
         ns.ClearHistory()
         wipe(historyTrees)
         selectedHistoryIndex = nil
+        SetResult("")
+        frame.treeView:SetTree(nil)
+        SetResultMode("text")
+        SetStatus(L.READY, 0.55, 0.60, 0.65)
         RefreshHistory()
     end)
+    frame.clearHistoryButton = clearHistoryButton
 
     inputPanel.editBox:SetScript("OnTabPressed", function(self)
         self:Insert("    ")
@@ -947,13 +1036,16 @@ local function CreateWindow()
         CreateScrollArea = CreateScrollArea,
         CreateTextArea = CreateTextArea,
         CreateButton = CreateButton,
+        CreateListRow = CreateListRow,
         CreateViewTab = CreateNavTab,
+        FitViewTab = FitNavTab,
         CreateSectionLabel = CreateSectionLabel,
         SetBorderColor = SetBorderColor,
         SetButtonEnabled = SetButtonEnabled,
         SetButtonPrimary = SetButtonPrimary,
         SetButtonText = SetButtonText,
         SetButtonVariant = SetButtonVariant,
+        SetListRowState = SetListRowState,
         AppendReadOnlyText = AppendReadOnlyText,
         SetReadOnlyText = SetReadOnlyText,
         SelectAllText = SelectAllText,
@@ -975,6 +1067,56 @@ local function CreateWindow()
     end
     frame.exportController = exportController
 
+    local captureDock
+    local function EnsureCaptureDock()
+        if captureDock then return captureDock end
+        captureDock = CreateFrame("Button", "LycheeDevCaptureDock", UIParent, "BackdropTemplate")
+        captureDock:SetSize(52, 52)
+        captureDock:SetPoint("TOP", UIParent, "TOP", 0, -36)
+        captureDock:SetFrameStrata("TOOLTIP")
+        captureDock:SetClampedToScreen(true)
+        captureDock:SetBackdrop(BACKDROP)
+        captureDock:SetBackdropColor(EDITOR_R, EDITOR_G, EDITOR_B, 0.96)
+        captureDock:SetBackdropBorderColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.92)
+        local texture = captureDock:CreateTexture(nil, "ARTWORK")
+        texture:SetTexture(LOGO_TEXTURE)
+        texture:SetTexCoord(0.18, 0.79, 0.17, 0.80)
+        texture:SetPoint("TOPLEFT", 5, -5)
+        texture:SetPoint("BOTTOMRIGHT", -5, 5)
+        local pulse = captureDock:CreateTexture(nil, "OVERLAY")
+        pulse:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.95)
+        pulse:SetSize(6, 6)
+        pulse:SetPoint("BOTTOMRIGHT", -4, 4)
+        captureDock:Hide()
+        return captureDock
+    end
+
+    featureUI.BeginCaptureMode = function(cancelCallback)
+        local dock = EnsureCaptureDock()
+        frame.captureModeActive = true
+        frame.captureCancelCallback = cancelCallback
+        dock:SetScript("OnClick", function()
+            local callback = frame.captureCancelCallback
+            if callback then callback() end
+        end)
+        dock:Show()
+        frame:Hide()
+    end
+    featureUI.EndCaptureMode = function(restoreWindow)
+        local wasActive = frame.captureModeActive
+        frame.captureModeActive = nil
+        frame.captureCancelCallback = nil
+        if captureDock then
+            captureDock:SetScript("OnClick", nil)
+            captureDock:Hide()
+        end
+        if restoreWindow and wasActive and not ns.IsCombatBlocked() then
+            frame:Show()
+            SetActivePage("performance")
+        end
+    end
+    featureUI.OpenPage = SetActivePage
+
     local exportResultButton = CreateButton(runnerPage, 92, L.SAVE_TO_DISK, false)
     exportResultButton:SetPoint("RIGHT", selectButton, "LEFT", -8, 0)
     exportResultButton:SetScript("OnClick", function()
@@ -986,9 +1128,14 @@ local function CreateWindow()
     frame.exportResultButton = exportResultButton
 
     frame.objectPage = ns.CreateObjectPage(frame, featureUI)
+    featureUI.GetObjectSelection = function()
+        return frame.objectPage:GetSelection()
+    end
     frame.eventsPage = ns.CreateEventsPage(frame, featureUI)
     frame.tracePage = ns.CreateTracePage(frame, featureUI)
+    frame.performancePage = ns.CreatePerformancePage(frame, featureUI)
     frame.diagnosticsPage = ns.CreateDiagnosticsPage(frame, featureUI)
+    frame.exportRecordsPage = ns.CreateExportRecordsPage(frame, featureUI)
     frame.aboutPage = ns.CreateAboutPage(frame, featureUI)
     frame.historyButtons = historyButtons
     frame.pages = {
@@ -996,7 +1143,9 @@ local function CreateWindow()
         objects = frame.objectPage,
         events = frame.eventsPage,
         trace = frame.tracePage,
+        performance = frame.performancePage,
         diagnostics = frame.diagnosticsPage,
+        exports = frame.exportRecordsPage,
         about = frame.aboutPage,
     }
     for key, page in pairs(frame.pages) do
@@ -1005,7 +1154,11 @@ local function CreateWindow()
         end
     end
 
-    frame:SetScript("OnHide", StopRuntimeTools)
+    frame:SetScript("OnHide", function()
+        if not frame.captureModeActive then
+            StopRuntimeTools()
+        end
+    end)
     frame:HookScript("OnHide", function() exportController:Hide() end)
     resultTextTab:SetScript("OnClick", function()
         SetResultMode("text")
@@ -1029,6 +1182,9 @@ function ns.ToggleWindow()
         return
     end
     local frame = window or CreateWindow()
+    if not frame or not frame.pages then
+        return
+    end
     if frame:IsShown() then
         frame:Hide()
     else

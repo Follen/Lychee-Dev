@@ -56,13 +56,13 @@ function ns.CreateTracePage(parent, ui)
     listLabel:SetPoint("TOPLEFT", 17, -152)
     local detailLabel = ui.CreateSectionLabel(page, L.CALL_ARGUMENTS)
     detailLabel:SetPoint("TOPLEFT", LIST_WIDTH + 29, -152)
-    local listPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
+    local listPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.78)
     listPanel:SetPoint("TOPLEFT", 14, -172)
     listPanel:SetPoint("BOTTOMLEFT", 14, 54)
     listPanel:SetWidth(LIST_WIDTH)
     local scroll = ui.CreateScrollArea(listPanel, 8, 8, 7, 8)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetWidth(LIST_WIDTH - 34) content:SetHeight(1) scroll:SetScrollChild(content)
+    content:SetWidth(LIST_WIDTH - 26) content:SetHeight(1) scroll:SetScrollChild(content)
     local empty = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     empty:SetPoint("TOP", 0, -24) empty:SetText(L.NO_CALLS_CAPTURED) empty:SetTextColor(1, 1, 1, 0.32)
     local selected
@@ -103,14 +103,16 @@ function ns.CreateTracePage(parent, ui)
         return table.concat(lines, "\n")
     end
     local function CreateRow(index)
-        local row = CreateFrame("Button", nil, content, "BackdropTemplate")
-        row:SetSize(LIST_WIDTH - 34, ROW_HEIGHT - 2) row:SetBackdrop(ui.backdrop)
+        local row = ui.CreateListRow(content, ROW_HEIGHT)
+        row:SetWidth(LIST_WIDTH - 26)
         local elapsed = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         elapsed:SetPoint("LEFT", 8, 0) elapsed:SetWidth(62) elapsed:SetJustifyH("LEFT") elapsed:SetTextColor(1, 1, 1, 0.38) row.elapsed = elapsed
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        name:SetPoint("TOPLEFT", 72, -5) name:SetPoint("RIGHT", -8, 0) name:SetJustifyH("LEFT") row.name = name
+        name:SetPoint("TOPLEFT", 72, -5) name:SetPoint("TOPRIGHT", -8, -5) name:SetJustifyH("LEFT") name:SetWordWrap(false) row.name = name
         local summary = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        summary:SetPoint("BOTTOMLEFT", 72, 5) summary:SetPoint("RIGHT", -8, 0) summary:SetJustifyH("LEFT") summary:SetWordWrap(false) summary:SetTextColor(1, 1, 1, 0.38) row.summary = summary
+        summary:SetPoint("BOTTOMLEFT", 72, 5) summary:SetPoint("BOTTOMRIGHT", -8, 5) summary:SetJustifyH("LEFT") summary:SetWordWrap(false) summary:SetTextColor(1, 1, 1, 0.38) row.summary = summary
+        row:SetScript("OnEnter", function(self) self.isHovered = true ui.SetListRowState(self, self.record == selected, true) end)
+        row:SetScript("OnLeave", function(self) self.isHovered = nil ui.SetListRowState(self, self.record == selected, false) end)
         row:SetScript("OnClick", function(self) selected = self.record SetReadOnlyText(detail, Format(selected)) page:Refresh() end)
         rows[index] = row return row
     end
@@ -128,7 +130,7 @@ function ns.CreateTracePage(parent, ui)
             local row = rows[pool] or CreateRow(pool)
             row.record = record row:ClearAllPoints() row:SetPoint("TOPLEFT", 0, -((recordIndex - 1) * ROW_HEIGHT))
             row.elapsed:SetText(string.format("+%.2fs", record.elapsed)) row.name:SetText(record.path) row.summary:SetText(record.summary ~= "" and record.summary or L.NO_ARGUMENTS)
-            row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, record == selected and 0.8 or 0.44) ui.SetBorderColor(row, record == selected, record == selected and 0.35 or 0.18) row:Show()
+            ui.SetListRowState(row, record == selected, row.isHovered) row:Show()
         end
         content:SetHeight(math.max(1, recordCount * ROW_HEIGHT)) scroll:UpdateScrollChildRect() empty:SetShown(recordCount == 0)
     end

@@ -152,14 +152,6 @@ local function BuildInspection(value, label)
     }
 end
 
-local function GetMouseFocus()
-    local foci = GetMouseFoci()
-    if IsSecret(foci) or type(foci) ~= "table" or not foci[1] or IsSecret(foci[1]) then
-        return nil
-    end
-    return foci[1]
-end
-
 function inspector.ResolvePath(path)
     local tokens, errorMessage = ParsePath(path)
     if not tokens then return false, nil, errorMessage end
@@ -194,7 +186,7 @@ end
 
 function inspector.CaptureMouseFocus()
     if ns.IsCombatBlocked() then return false, nil, ns.L.COMBAT_BLOCKED end
-    local focus = GetMouseFocus()
+    local focus = ns.Client.GetMouseFocus()
     if not focus then
         return false, nil, ns.L.NO_MOUSE_FOCUS
     end
@@ -204,7 +196,7 @@ end
 
 function inspector.GetMouseFocusLabel()
     if ns.IsCombatBlocked() then return false, nil, nil, ns.L.COMBAT_BLOCKED end
-    local focus = GetMouseFocus()
+    local focus = ns.Client.GetMouseFocus()
     if not focus then return false, nil, nil, ns.L.NO_MOUSE_FOCUS end
     return true,
         SafeMethod(focus, "GetName") or SafePreview(focus),

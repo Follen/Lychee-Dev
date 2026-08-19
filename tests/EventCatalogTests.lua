@@ -11,12 +11,32 @@ local function LoadAddonFile(path, namespace)
 end
 
 local ns = {}
-LoadAddonFile("Locale.lua", ns)
-LoadAddonFile("EventCatalogData.lua", ns)
-LoadAddonFile("EventCatalog.lua", ns)
+local clientFiles = {
+    retail = "Core/Clients/Mainline.lua",
+    classic = "Core/Clients/Mists.lua",
+    titan = "Core/Clients/Titan.lua",
+}
+local catalogFiles = {
+    retail = "Modules/Events/CatalogData_Mainline.lua",
+    classic = "Modules/Events/CatalogData_Mists.lua",
+    titan = "Modules/Events/CatalogData_Titan.lua",
+}
+local expectedCounts = {
+    retail = 1782,
+    classic = 1483,
+    titan = 1486,
+}
+local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
+LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
+LoadAddonFile("Core/Compatibility.lua", ns)
+LoadAddonFile("Core/Locale.lua", ns)
+LoadAddonFile("Core/Locale_enUS.lua", ns)
+LoadAddonFile(assert(catalogFiles[testClient]), ns)
+LoadAddonFile("Modules/Events/Catalog.lua", ns)
 
 local catalog = ns.EventCatalog
-assert(catalog.GetCount() == 1782, "official Retail 12.1 event catalog count changed")
+assert(catalog.GetCount() == expectedCounts[testClient],
+    testClient .. " official event catalog count changed")
 assert(createdFrames == 0, "event catalog created a frame while loading")
 
 local previousName
@@ -38,6 +58,26 @@ assert(healthSignature == "unitTarget", "UNIT_HEALTH payload is incorrect")
 local equipmentIndex = assert(catalog.Find("PLAYER_EQUIPMENT_CHANGED"), "PLAYER_EQUIPMENT_CHANGED is missing")
 local _, equipmentSignature = catalog.Get(equipmentIndex)
 assert(equipmentSignature == "equipmentSlot, hasCurrent", "PLAYER_EQUIPMENT_CHANGED payload is incorrect")
+
+local bnConnectedIndex = assert(catalog.Find("BN_CONNECTED"), "BN_CONNECTED is missing")
+local _, bnConnectedSignature = catalog.Get(bnConnectedIndex)
+if testClient == "retail" then
+    assert(catalog.Find("ACTIVE_DELVE_DATA_UPDATE"), "Retail-specific delve event is missing")
+    assert(not catalog.Find("ARENA_TEAM_UPDATE"), "Retail catalog contains a Classic arena event")
+    assert(catalog.Find("EXTERNAL_EVENT_LAUNCH_URL_FAILED"), "Retail external URL event is missing")
+    assert(bnConnectedSignature == "suppressNotification", "Retail BN_CONNECTED payload is incorrect")
+elseif testClient == "classic" then
+    assert(not catalog.Find("ACTIVE_DELVE_DATA_UPDATE"), "Classic catalog contains a Retail delve event")
+    assert(catalog.Find("ARENA_TEAM_UPDATE"), "Classic arena event is missing")
+    assert(not catalog.Find("EXTERNAL_EVENT_LAUNCH_URL_FAILED"),
+        "Classic catalog contains a Titan external URL event")
+    assert(bnConnectedSignature == "", "Classic BN_CONNECTED payload is incorrect")
+else
+    assert(not catalog.Find("ACTIVE_DELVE_DATA_UPDATE"), "Titan catalog contains a Retail delve event")
+    assert(catalog.Find("ARENA_TEAM_UPDATE"), "Titan arena event is missing")
+    assert(catalog.Find("EXTERNAL_EVENT_LAUNCH_URL_FAILED"), "Titan external URL event is missing")
+    assert(bnConnectedSignature == "", "Titan BN_CONNECTED payload is incorrect")
+end
 
 local exactResults = catalog.Search("unit_health", 8)
 assert(exactResults[1] == healthIndex, "exact event match was not ranked first")

@@ -2,7 +2,6 @@ local ADDON_NAME, ns = ...
 local L = ns.L
 
 local ERROR_ROW_HEIGHT = 44
-local PERF_ROW_HEIGHT = 28
 local ERROR_LIST_WIDTH = 430
 local VISIBLE_ROWS = 16
 
@@ -39,19 +38,13 @@ function ns.CreateDiagnosticsPage(parent, ui)
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
 
-    local errorsTab = ui.CreateViewTab(page, L.ERRORS)
-    errorsTab:SetSize(72, 30)
-    errorsTab:SetPoint("TOPLEFT", 14, -84)
-    local performanceTab = ui.CreateViewTab(page, L.PERFORMANCE)
-    performanceTab:SetSize(72, 30)
-    performanceTab:SetPoint("LEFT", errorsTab, "RIGHT", 2, 0)
     local refreshButton = ui.CreateButton(page, 92, L.REFRESH, false)
     refreshButton:SetPoint("TOPRIGHT", -14, -84)
-    local clearButton = ui.CreateButton(page, 112, L.CLEAR_ERRORS, false)
+    local clearButton = ui.CreateButton(page, 178, L.CLEAR_ERRORS, false)
     clearButton:SetPoint("RIGHT", refreshButton, "LEFT", -8, 0)
 
     local status = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    status:SetPoint("LEFT", performanceTab, "RIGHT", 14, 0)
+    status:SetPoint("TOPLEFT", 17, -94)
     status:SetPoint("RIGHT", clearButton, "LEFT", -10, 0)
     status:SetJustifyH("LEFT")
     local function SetStatus(text, errorState)
@@ -80,8 +73,6 @@ function ns.CreateDiagnosticsPage(parent, ui)
     selectReport:SetPoint("TOPRIGHT", -14, 0)
     local exportReport = ui.CreateButton(errorsView, 92, L.SAVE_TO_DISK, false)
     exportReport:SetPoint("RIGHT", selectReport, "LEFT", -8, 0)
-    page.errorsTab = errorsTab
-    page.performanceTab = performanceTab
     page.currentScope = currentScope
     page.allScope = allScope
     page.refreshButton = refreshButton
@@ -94,13 +85,13 @@ function ns.CreateDiagnosticsPage(parent, ui)
     local reportLabel = ui.CreateSectionLabel(errorsView, L.AGENT_REPORT)
     reportLabel:SetPoint("TOPLEFT", ERROR_LIST_WIDTH + 29, -48)
 
-    local listPanel = ui.CreatePanel(errorsView, ui.editorR, ui.editorG, ui.editorB, 0.9)
+    local listPanel = ui.CreatePanel(errorsView, ui.editorR, ui.editorG, ui.editorB, 0.78)
     listPanel:SetPoint("TOPLEFT", 14, -68)
     listPanel:SetPoint("BOTTOMLEFT", 14, 54)
     listPanel:SetWidth(ERROR_LIST_WIDTH)
     local errorScroll = ui.CreateScrollArea(listPanel, 8, 8, 7, 8)
     local errorContent = CreateFrame("Frame", nil, errorScroll)
-    errorContent:SetWidth(ERROR_LIST_WIDTH - 34)
+    errorContent:SetWidth(ERROR_LIST_WIDTH - 26)
     errorContent:SetHeight(1)
     errorScroll:SetScrollChild(errorContent)
     local errorEmpty = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -117,66 +108,26 @@ function ns.CreateDiagnosticsPage(parent, ui)
     end)
     SetReadOnlyText(reportPanel, L.SELECT_ERROR_DETAIL)
 
-    local performanceView = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
-    performanceView:SetPoint("TOPLEFT", 14, -126)
-    performanceView:SetPoint("BOTTOMRIGHT", -14, 54)
-    local overview = performanceView:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    overview:SetPoint("TOPLEFT", 17, -12)
-    overview:SetPoint("TOPRIGHT", -17, -12)
-    overview:SetJustifyH("LEFT")
-    overview:SetTextColor(1, 1, 1, 0.58)
-    local perfScroll = ui.CreateScrollArea(performanceView, 8, 52, 7, 8)
-    local perfContent = CreateFrame("Frame", nil, perfScroll)
-    perfContent:SetWidth(ui.windowWidth - 56)
-    perfContent:SetHeight(1)
-    perfScroll:SetScrollChild(perfContent)
-    local addonHeader = performanceView:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    addonHeader:SetPoint("TOPLEFT", 17, -35)
-    addonHeader:SetText(L.ADDON_COLUMN)
-    addonHeader:SetTextColor(1, 1, 1, 0.42)
-    local memoryHeader = performanceView:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    memoryHeader:SetPoint("TOPRIGHT", -130, -35)
-    memoryHeader:SetText(L.MEMORY_COLUMN)
-    memoryHeader:SetTextColor(1, 1, 1, 0.42)
-    local cpuHeader = performanceView:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    cpuHeader:SetPoint("TOPRIGHT", -28, -35)
-    cpuHeader:SetText(L.CPU_COLUMN)
-    cpuHeader:SetTextColor(1, 1, 1, 0.42)
-
-    local exportPerformance = ui.CreateButton(page, 92, L.SAVE_TO_DISK, false)
-    exportPerformance:SetPoint("BOTTOMRIGHT", -14, 14)
-    page.exportPerformance = exportPerformance
-
     local errors = {}
-    local addons = {}
-    local performanceSnapshot
     local selectedError
-    local errorRows, perfRows = {}, {}
-    local mode = "errors"
+    local errorRows = {}
     local scope = "current"
     local confirmClear = false
     local callbackOwner = {}
     local callbackRegistered = false
     local refreshQueued = false
 
-    local function FormatMemory(kb)
-        return kb >= 1024 and string.format("%.1f MB", kb / 1024) or string.format("%.0f KB", kb)
-    end
-
     local function ApplyErrorRowStyle(row)
         local selected = row.errorEntry == selectedError
-        local alpha = selected and 0.82 or (row.isHovered and 0.72 or 0.44)
-        row:SetBackdropColor(ui.surfaceR, ui.surfaceG, ui.surfaceB, alpha)
-        ui.SetBorderColor(row, selected, selected and 0.42 or (row.isHovered and 0.30 or 0.18))
+        ui.SetListRowState(row, selected, row.isHovered)
     end
 
     local function CreateErrorRow(index)
-        local row = CreateFrame("Button", nil, errorContent, "BackdropTemplate")
-        row:SetSize(ERROR_LIST_WIDTH - 34, ERROR_ROW_HEIGHT - 2)
-        row:SetBackdrop(ui.backdrop)
+        local row = ui.CreateListRow(errorContent, ERROR_ROW_HEIGHT)
+        row:SetWidth(ERROR_LIST_WIDTH - 26)
         local message = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         message:SetPoint("TOPLEFT", 9, -6)
-        message:SetPoint("RIGHT", -54, 0)
+        message:SetPoint("TOPRIGHT", -54, -6)
         message:SetJustifyH("LEFT")
         message:SetWordWrap(false)
         row.message = message
@@ -186,7 +137,7 @@ function ns.CreateDiagnosticsPage(parent, ui)
         row.count = count
         local metadata = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         metadata:SetPoint("BOTTOMLEFT", 9, 5)
-        metadata:SetPoint("RIGHT", -9, 0)
+        metadata:SetPoint("BOTTOMRIGHT", -9, 5)
         metadata:SetJustifyH("LEFT")
         metadata:SetWordWrap(false)
         metadata:SetTextColor(1, 1, 1, 0.34)
@@ -205,32 +156,6 @@ function ns.CreateDiagnosticsPage(parent, ui)
             page:RefreshErrors()
         end)
         errorRows[index] = row
-        return row
-    end
-
-    local function CreatePerfRow(index)
-        local row = CreateFrame("Frame", nil, perfContent)
-        row:SetSize(ui.windowWidth - 56, PERF_ROW_HEIGHT)
-        local background = row:CreateTexture(nil, "BACKGROUND")
-        background:SetAllPoints()
-        background:SetColorTexture(ui.surfaceR, ui.surfaceG, ui.surfaceB, index % 2 == 0 and 0.38 or 0.18)
-        local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        name:SetPoint("LEFT", 9, 0)
-        name:SetPoint("RIGHT", -230, 0)
-        name:SetJustifyH("LEFT")
-        name:SetWordWrap(false)
-        row.name = name
-        local memory = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        memory:SetPoint("RIGHT", -116, 0)
-        memory:SetWidth(100)
-        memory:SetJustifyH("RIGHT")
-        row.memory = memory
-        local cpu = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cpu:SetPoint("RIGHT", -12, 0)
-        cpu:SetWidth(92)
-        cpu:SetJustifyH("RIGHT")
-        row.cpu = cpu
-        perfRows[index] = row
         return row
     end
 
@@ -264,28 +189,6 @@ function ns.CreateDiagnosticsPage(parent, ui)
         ui.SetButtonEnabled(exportReport, #errors > 0)
     end
 
-    local function RefreshPerformanceRows()
-        for index = 1, #perfRows do perfRows[index]:Hide() end
-        local offset = perfScroll:GetVerticalScroll()
-        if issecretvalue and issecretvalue(offset) then offset = 0 end
-        local first = math.floor((offset or 0) / PERF_ROW_HEIGHT) + 1
-        local last = math.min(#addons, first + VISIBLE_ROWS - 1)
-        local pool = 0
-        for itemIndex = first, last do
-            pool = pool + 1
-            local entry = addons[itemIndex]
-            local row = perfRows[pool] or CreatePerfRow(pool)
-            row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 0, -((itemIndex - 1) * PERF_ROW_HEIGHT))
-            row.name:SetText(entry.title or entry.name)
-            row.memory:SetText(FormatMemory(entry.memory or 0))
-            row.cpu:SetText(entry.cpu and string.format("%.2f ms", entry.cpu) or "--")
-            row:Show()
-        end
-        perfContent:SetHeight(math.max(1, #addons * PERF_ROW_HEIGHT))
-        perfScroll:UpdateScrollChildRect()
-    end
-
     local function RefreshErrorsFromSource()
         confirmClear = false
         ui.SetButtonText(clearButton, L.CLEAR_ERRORS)
@@ -302,28 +205,6 @@ function ns.CreateDiagnosticsPage(parent, ui)
         page:RefreshErrors()
     end
 
-    local function RefreshPerformance()
-        performanceSnapshot = nil
-        addons = {}
-        ui.SetButtonEnabled(exportPerformance, false)
-        local succeeded, snapshot, errorMessage = ns.Diagnostics.CollectSystem()
-        if not succeeded then
-            SetStatus(errorMessage, true)
-            return
-        end
-        addons = snapshot.addons
-        performanceSnapshot = snapshot
-        overview:SetText(string.format(L.DIAGNOSTIC_SUMMARY,
-            snapshot.version,
-            snapshot.locale,
-            snapshot.scriptErrors and L.ON or L.OFF,
-            snapshot.scriptProfile and L.ON or L.OFF,
-            snapshot.bugGrabberPaused and L.YES or L.NO))
-        SetStatus(L.PERFORMANCE_UPDATED, false)
-        RefreshPerformanceRows()
-        ui.SetButtonEnabled(exportPerformance, #addons > 0)
-    end
-
     local function SetScope(newScope)
         scope = newScope
         ui.SetButtonVariant(currentScope, scope == "current" and "selected" or "secondary")
@@ -331,23 +212,12 @@ function ns.CreateDiagnosticsPage(parent, ui)
         RefreshErrorsFromSource()
     end
 
-    local function SetMode(newMode)
-        mode = newMode
-        errorsView:SetShown(mode == "errors")
-        performanceView:SetShown(mode == "performance")
-        clearButton:SetShown(mode == "errors")
-        exportPerformance:SetShown(mode == "performance")
-        errorsTab:SetActive(mode == "errors")
-        performanceTab:SetActive(mode == "performance")
-        if mode == "errors" then RefreshErrorsFromSource() else RefreshPerformance() end
-    end
-
     local function QueueErrorRefresh()
-        if refreshQueued or mode ~= "errors" then return end
+        if refreshQueued then return end
         refreshQueued = true
         C_Timer.After(0, function()
             refreshQueued = false
-            if page:IsShown() and mode == "errors" then
+            if page:IsShown() then
                 RefreshErrorsFromSource()
             end
         end)
@@ -366,7 +236,6 @@ function ns.CreateDiagnosticsPage(parent, ui)
     end
 
     errorScroll.onVerticalScrollChanged = function() page:RefreshErrors() end
-    perfScroll.onVerticalScrollChanged = RefreshPerformanceRows
     currentScope:SetScript("OnClick", function() SetScope("current") end)
     allScope:SetScript("OnClick", function() SetScope("all") end)
     searchButton:SetScript("OnClick", RefreshErrorsFromSource)
@@ -388,18 +257,7 @@ function ns.CreateDiagnosticsPage(parent, ui)
             SetStatus(L.NO_ERRORS, true)
         end
     end)
-    exportPerformance:SetScript("OnClick", function()
-        if performanceSnapshot then
-            ui.ExportText("performance_snapshot", L.PERFORMANCE, function()
-                return ns.SerializeForExport(performanceSnapshot)
-            end, { addonCount = #addons })
-        end
-    end)
-    errorsTab:SetScript("OnClick", function() SetMode("errors") end)
-    performanceTab:SetScript("OnClick", function() SetMode("performance") end)
-    refreshButton:SetScript("OnClick", function()
-        if mode == "errors" then RefreshErrorsFromSource() else RefreshPerformance() end
-    end)
+    refreshButton:SetScript("OnClick", RefreshErrorsFromSource)
     clearButton:SetScript("OnClick", function()
         if not confirmClear then
             confirmClear = true
@@ -417,20 +275,15 @@ function ns.CreateDiagnosticsPage(parent, ui)
     page:SetScript("OnHide", UnregisterErrorCallback)
 
     function page:Activate()
-        SetMode(mode)
+        RefreshErrorsFromSource()
     end
     function page:Stop()
         UnregisterErrorCallback()
     end
 
-    performanceView:Hide()
-    errorsTab:SetActive(true)
-    performanceTab:SetActive(false)
     ui.SetButtonEnabled(clearButton, false)
     ui.SetButtonEnabled(selectReport, false)
     ui.SetButtonEnabled(exportReport, false)
-    ui.SetButtonEnabled(exportPerformance, false)
-    exportPerformance:Hide()
     SetStatus(L.READY, false)
     return page
 end

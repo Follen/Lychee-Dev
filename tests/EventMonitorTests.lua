@@ -56,13 +56,25 @@ function wipe(target)
     end
 end
 
-local chunk, loadError = loadfile("EventMonitor.lua")
+local chunk, loadError = loadfile("Modules/Events/Monitor.lua")
 assert(chunk, loadError)
 local ns = {}
-local localeChunk, localeError = loadfile("Locale.lua")
+local clientFiles = {
+    retail = "Core/Clients/Mainline.lua",
+    classic = "Core/Clients/Mists.lua",
+    titan = "Core/Clients/Titan.lua",
+}
+local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
+local clientChunk, clientError = loadfile(assert(clientFiles[testClient], "unknown test client: " .. testClient))
+assert(clientChunk, clientError)
+clientChunk("Lychee Dev", ns)
+local localeChunk, localeError = loadfile("Core/Locale.lua")
 assert(localeChunk, localeError)
 localeChunk("Lychee Dev", ns)
-local safetyChunk, safetyError = loadfile("Safety.lua")
+local englishLocaleChunk, englishLocaleError = loadfile("Core/Locale_enUS.lua")
+assert(englishLocaleChunk, englishLocaleError)
+englishLocaleChunk("Lychee Dev", ns)
+local safetyChunk, safetyError = loadfile("Core/Safety.lua")
 assert(safetyChunk, safetyError)
 safetyChunk("Lychee Dev", ns)
 chunk("Lychee Dev", ns)

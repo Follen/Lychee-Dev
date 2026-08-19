@@ -16,34 +16,49 @@ function ns.CreateExportController(parent, ui)
         overlay:EnableMouse(true)
 
         local panel = ui.CreatePanel(overlay, ui.surfaceR, ui.surfaceG, ui.surfaceB, 1)
-        panel:SetSize(620, 286)
+        panel:SetSize(570, 300)
         panel:SetPoint("CENTER")
         panel:SetFrameLevel(overlay:GetFrameLevel() + 1)
 
+        local logo = panel:CreateTexture(nil, "ARTWORK")
+        logo:SetTexture("Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\Logo.png")
+        logo:SetTexCoord(0.18, 0.79, 0.17, 0.80)
+        logo:SetSize(40, 40)
+        logo:SetPoint("TOPLEFT", 20, -18)
+
         local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        title:SetPoint("TOPLEFT", 20, -18)
+        title:SetPoint("TOPLEFT", logo, "TOPRIGHT", 13, -1)
         title:SetText(L.EXPORT_SAVED_TITLE)
 
         local description = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        description:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-        description:SetPoint("RIGHT", -20, 0)
+        description:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+        description:SetPoint("RIGHT", panel, "RIGHT", -20, 0)
         description:SetJustifyH("LEFT")
         description:SetText(L.EXPORT_SAVED_DESCRIPTION)
         description:SetTextColor(1, 1, 1, 0.62)
 
+        local divider = panel:CreateTexture(nil, "ARTWORK")
+        divider:SetColorTexture(1, 1, 1, 0.07)
+        divider:SetPoint("TOPLEFT", 20, -82)
+        divider:SetPoint("TOPRIGHT", -20, -82)
+        divider:SetHeight(1)
+
         local ticketLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        ticketLabel:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -18)
+        ticketLabel:SetPoint("TOPLEFT", 20, -104)
         ticketLabel:SetText(L.EXPORT_TICKET)
         ticketLabel:SetTextColor(1, 1, 1, 0.38)
 
         local ticketPanel = ui.CreatePanel(panel, ui.editorR, ui.editorG, ui.editorB, 1)
         ticketPanel:SetPoint("TOPLEFT", ticketLabel, "BOTTOMLEFT", 0, -7)
-        ticketPanel:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -119)
-        ticketPanel:SetHeight(34)
+        ticketPanel:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -126)
+        ticketPanel:SetHeight(38)
+
+        local selectButton = ui.CreateButton(ticketPanel, 118, L.SELECT_TICKET, false)
+        selectButton:SetPoint("RIGHT", -5, 0)
 
         local ticketBox = CreateFrame("EditBox", nil, ticketPanel)
-        ticketBox:SetPoint("TOPLEFT", 9, -1)
-        ticketBox:SetPoint("BOTTOMRIGHT", -9, 1)
+        ticketBox:SetPoint("TOPLEFT", 10, -1)
+        ticketBox:SetPoint("BOTTOMRIGHT", selectButton, "BOTTOMLEFT", -10, 1)
         ticketBox:SetAutoFocus(false)
         ticketBox:SetFontObject(ChatFontNormal)
         ticketBox:SetTextColor(0.94, 0.95, 0.96)
@@ -61,8 +76,15 @@ function ns.CreateExportController(parent, ui)
         hint:SetPoint("TOPLEFT", ticketPanel, "BOTTOMLEFT", 1, -10)
         hint:SetPoint("RIGHT", -20, 0)
         hint:SetJustifyH("LEFT")
-        hint:SetText(L.EXPORT_RELOAD_HINT)
+        hint:SetText(L.EXPORT_TICKET_HELP)
         hint:SetTextColor(1, 1, 1, 0.40)
+
+        local reloadHint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        reloadHint:SetPoint("BOTTOMLEFT", 20, 61)
+        reloadHint:SetPoint("RIGHT", -20, 0)
+        reloadHint:SetJustifyH("LEFT")
+        reloadHint:SetText(L.EXPORT_RELOAD_HINT)
+        reloadHint:SetTextColor(1, 1, 1, 0.52)
 
         local reloadButton = ui.CreateButton(panel, 110, L.RELOAD_NOW, true)
         reloadButton:SetPoint("BOTTOMRIGHT", -20, 18)
@@ -78,11 +100,12 @@ function ns.CreateExportController(parent, ui)
         laterButton:SetPoint("RIGHT", reloadButton, "LEFT", -8, 0)
         laterButton:SetScript("OnClick", function() overlay:Hide() end)
 
-        local copyButton = ui.CreateButton(panel, 112, L.COPY_TICKET, false)
-        copyButton:SetPoint("RIGHT", laterButton, "LEFT", -8, 0)
-        copyButton:SetScript("OnClick", function()
-            ticketBox:SetFocus()
-            ticketBox:HighlightText()
+        selectButton:SetScript("OnClick", function()
+            ui.SelectAllText(ticketBox)
+            hint:SetText(L.EXPORT_TICKET_SELECTED)
+        end)
+        ticketBox:SetScript("OnMouseUp", function()
+            ui.SelectAllText(ticketBox)
             hint:SetText(L.EXPORT_TICKET_SELECTED)
         end)
 
@@ -90,7 +113,8 @@ function ns.CreateExportController(parent, ui)
             overlay = overlay,
             ticketBox = ticketBox,
             hint = hint,
-            copyButton = copyButton,
+            copyButton = selectButton,
+            selectButton = selectButton,
             laterButton = laterButton,
             reloadButton = reloadButton,
         }
@@ -120,7 +144,7 @@ function ns.CreateExportController(parent, ui)
         activePopup.ticketBox:SetText(ticket)
         activePopup.ticketBox.updatingText = nil
         activePopup.ticketBox:SetCursorPosition(0)
-        activePopup.hint:SetText(L.EXPORT_RELOAD_HINT)
+        activePopup.hint:SetText(L.EXPORT_TICKET_HELP)
         activePopup.overlay:Show()
         return ticket
     end

@@ -37,12 +37,21 @@ local function LoadAddonFile(path, namespace)
 end
 
 local ns = {}
-LoadAddonFile("Locale.lua", ns)
-LoadAddonFile("Database.lua", ns)
-LoadAddonFile("Serializer.lua", ns)
-LoadAddonFile("Inspector.lua", ns)
-LoadAddonFile("Safety.lua", ns)
-LoadAddonFile("Core.lua", ns)
+local clientFiles = {
+    retail = "Core/Clients/Mainline.lua",
+    classic = "Core/Clients/Mists.lua",
+    titan = "Core/Clients/Titan.lua",
+}
+local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
+LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
+LoadAddonFile("Core/Compatibility.lua", ns)
+LoadAddonFile("Core/Locale.lua", ns)
+LoadAddonFile("Core/Locale_enUS.lua", ns)
+LoadAddonFile("Core/Database.lua", ns)
+LoadAddonFile("Core/Serializer.lua", ns)
+LoadAddonFile("Core/Inspector.lua", ns)
+LoadAddonFile("Core/Safety.lua", ns)
+LoadAddonFile("Core/Bootstrap.lua", ns)
 
 assert(SLASH_LYCHEEDEV1 == "/dev", "slash command was not renamed")
 assert(type(SlashCmdList.LYCHEEDEV) == "function", "slash command was not registered")
@@ -81,10 +90,17 @@ local secondTicket = ns.AddExport("test", "Second", "second export", { path = "T
 assert(firstTicket and secondTicket and firstTicket ~= secondTicket,
     "export tickets were not unique")
 assert(ns.GetExport(firstTicket).content == "first export"
-        and ns.GetExports().order[1] == secondTicket,
+        and ns.GetExports().order[1] == secondTicket
+        and ns.IsExportPending(firstTicket) and ns.IsExportPending(secondTicket)
+        and ns.GetPendingExportCount() == 2,
     "export records were not indexed by ticket and recency")
+assert(ns.DeleteExport(firstTicket) and ns.GetExport(firstTicket) == nil
+        and ns.GetExportStats() == 1 and ns.GetPendingExportCount() == 1
+        and not ns.DeleteExport(firstTicket),
+    "a single export record could not be deleted safely")
 local nextIdBeforeClear = ns.GetExports().nextId
-assert(ns.ClearExports() == 2 and ns.GetExportStats() == 0,
+assert(ns.ClearExports() == 1 and ns.GetExportStats() == 0
+        and ns.GetPendingExportCount() == 0,
     "export cache was not cleared")
 local ticketAfterClear = ns.AddExport("test", "After clear", "new export")
 assert(ticketAfterClear and ns.GetExports().nextId > nextIdBeforeClear
@@ -170,10 +186,10 @@ assert(_G.LycheeDevTestGlobal == 42, "execution environment did not match /run g
 _G.LycheeDevTestGlobal = nil
 
 succeeded, result = ns.Execute("this is not valid lua")
-assert(not succeeded and result:find("编译错误：", 1, true), "compile errors were not captured")
+assert(not succeeded and result:find(ns.L.COMPILE_ERROR, 1, true), "compile errors were not captured")
 
 succeeded, result = ns.Execute('error("expected failure")')
-assert(not succeeded and result:find("运行错误：", 1, true), "runtime errors were not captured")
+assert(not succeeded and result:find(ns.L.RUNTIME_ERROR, 1, true), "runtime errors were not captured")
 
 succeeded, result = ns.Execute('print(string.rep("x", 50000))')
 assert(succeeded, result)

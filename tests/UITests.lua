@@ -1,5 +1,11 @@
 SlashCmdList = {}
 UISpecialFrames = {}
+local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
+local testBuilds = {
+    retail = { "12.1.0", "70000", "Aug 19 2026", 120100 },
+    classic = { "5.5.4", "64000", "Aug 04 2026", 50504 },
+    titan = { "3.80.2", "63000", "Aug 05 2026", 38002 },
+}
 
 local frameCount = 0
 local textures = {}
@@ -60,6 +66,10 @@ local function NewRegion(name)
 
     function region:GetStringHeight()
         return 14
+    end
+
+    function region:GetStringWidth()
+        return #self.text * 7
     end
 
     function region:SetTexture(path)
@@ -196,10 +206,16 @@ local function NewRegion(name)
     return region
 end
 
-function CreateFrame(frameType, name)
+function CreateFrame(frameType, name, _, template)
     frameCount = frameCount + 1
     local frame = NewRegion(name)
     frame.frameType = frameType
+    frame.hasBackdrop = template == "BackdropTemplate"
+    if not frame.hasBackdrop then
+        frame.SetBackdrop = false
+        frame.SetBackdropColor = false
+        frame.SetBackdropBorderColor = false
+    end
     if name then
         _G[name] = frame
     end
@@ -231,11 +247,70 @@ GameFontNormal = {}
 GameFontNormalLarge = {}
 GameFontHighlightSmall = {}
 GameFontDisableSmall = {}
-C_Timer = { After = function(_, callback) callback() end }
+local now = 10
+local activeTicker
+C_Timer = {
+    After = function(_, callback) callback() end,
+    NewTicker = function(interval, callback)
+        activeTicker = { interval = interval, callback = callback, cancelled = false }
+        function activeTicker:Cancel() self.cancelled = true end
+        return activeTicker
+    end,
+}
 local inCombat = false
 local reloadCalled = false
 function InCombatLockdown() return inCombat end
 function ReloadUI() reloadCalled = true end
+function GetTime() return now end
+function GetCVarBool() return false end
+local functionCpuUsage = 0
+function GetFunctionCPUUsage()
+    functionCpuUsage = functionCpuUsage + 1
+    return functionCpuUsage, functionCpuUsage
+end
+function UpdateAddOnMemoryUsage() end
+function GetAddOnMemoryUsage(name) return name == "OtherAddOn" and 2048 or 512 end
+function IsCpuBound() return true end
+function GetBuildInfo()
+    local build = assert(testBuilds[testClient])
+    return build[1], build[2], build[3], build[4]
+end
+function GetLocale() return "zhCN" end
+Enum = { AddOnProfilerMetric = {} }
+local metricNames = {
+    "SessionAverageTime", "RecentAverageTime", "EncounterAverageTime", "LastTime",
+    "PeakTime", "CountTimeOver1Ms", "CountTimeOver5Ms", "CountTimeOver10Ms",
+    "CountTimeOver50Ms", "CountTimeOver100Ms", "CountTimeOver500Ms", "CountTimeOver1000Ms",
+}
+for index = 1, #metricNames do Enum.AddOnProfilerMetric[metricNames[index]] = index end
+C_AddOnProfiler = {
+    IsEnabled = function() return true end,
+    GetAddOnMetric = function(name, metric) return (name == "OtherAddOn" and 1 or 0.1) * metric end,
+    GetOverallMetric = function(metric) return metric * 10 end,
+    GetApplicationMetric = function(metric) return metric * 20 end,
+    MeasureCall = function(func, ...)
+        func(...)
+        return {
+            elapsedMilliseconds = 1,
+            elapsedTicks = 100,
+            allocatedBytes = 1024,
+            deallocatedBytes = 256,
+            events = {},
+        }
+    end,
+}
+C_AddOns = {
+    GetNumAddOns = function() return 2 end,
+    GetAddOnInfo = function(index)
+        if index == 1 then return "Lychee Dev", "[Lychee] Dev Tools" end
+        return "OtherAddOn", "Other AddOn"
+    end,
+    IsAddOnLoaded = function() return true, true end,
+    GetAddOnMetadata = function(name, key)
+        if name == "OtherAddOn" and key == "SavedVariables" then return "OtherDB" end
+        return ""
+    end,
+}
 
 local function LoadAddonFile(path, namespace)
     local chunk, loadError = loadfile(path)
@@ -244,25 +319,43 @@ local function LoadAddonFile(path, namespace)
 end
 
 local ns = {}
-LoadAddonFile("Locale.lua", ns)
-LoadAddonFile("Database.lua", ns)
-LoadAddonFile("Serializer.lua", ns)
-LoadAddonFile("Inspector.lua", ns)
-LoadAddonFile("Safety.lua", ns)
-LoadAddonFile("Core.lua", ns)
-LoadAddonFile("ObjectInspector.lua", ns)
-LoadAddonFile("Diagnostics.lua", ns)
-LoadAddonFile("FunctionTrace.lua", ns)
-LoadAddonFile("EventCatalogData.lua", ns)
-LoadAddonFile("EventCatalog.lua", ns)
-LoadAddonFile("EventMonitor.lua", ns)
-LoadAddonFile("UIExport.lua", ns)
-LoadAddonFile("UIFeatures.lua", ns)
-LoadAddonFile("UIObjectPage.lua", ns)
-LoadAddonFile("UITracePage.lua", ns)
-LoadAddonFile("UIDiagnosticsPage.lua", ns)
-LoadAddonFile("UIAboutPage.lua", ns)
-LoadAddonFile("UI.lua", ns)
+local clientFiles = {
+    retail = "Core/Clients/Mainline.lua",
+    classic = "Core/Clients/Mists.lua",
+    titan = "Core/Clients/Titan.lua",
+}
+local catalogFiles = {
+    retail = "Modules/Events/CatalogData_Mainline.lua",
+    classic = "Modules/Events/CatalogData_Mists.lua",
+    titan = "Modules/Events/CatalogData_Titan.lua",
+}
+LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
+assert(ns.Client.id == testClient and select(4, GetBuildInfo()) == ns.Client.interface,
+    "UI test client profile mismatch")
+LoadAddonFile("Core/Compatibility.lua", ns)
+LoadAddonFile("Core/Locale.lua", ns)
+LoadAddonFile("Core/Locale_enUS.lua", ns)
+LoadAddonFile("Core/Database.lua", ns)
+LoadAddonFile("Core/Serializer.lua", ns)
+LoadAddonFile("Core/Inspector.lua", ns)
+LoadAddonFile("Core/Safety.lua", ns)
+LoadAddonFile("Core/Bootstrap.lua", ns)
+LoadAddonFile("Modules/ObjectInspector.lua", ns)
+LoadAddonFile("Modules/Diagnostics.lua", ns)
+LoadAddonFile("Modules/FunctionTrace.lua", ns)
+LoadAddonFile("Modules/Performance.lua", ns)
+LoadAddonFile(assert(catalogFiles[testClient]), ns)
+LoadAddonFile("Modules/Events/Catalog.lua", ns)
+LoadAddonFile("Modules/Events/Monitor.lua", ns)
+LoadAddonFile("UI/Export.lua", ns)
+LoadAddonFile("UI/Pages/ExportRecords.lua", ns)
+LoadAddonFile("UI/Features.lua", ns)
+LoadAddonFile("UI/Pages/Object.lua", ns)
+LoadAddonFile("UI/Pages/Trace.lua", ns)
+LoadAddonFile("UI/Pages/Performance.lua", ns)
+LoadAddonFile("UI/Pages/Diagnostics.lua", ns)
+LoadAddonFile("UI/Pages/About.lua", ns)
+LoadAddonFile("UI/MainWindow.lua", ns)
 
 LycheeDevDB = {
     schemaVersion = 4,
@@ -300,8 +393,19 @@ assert(LycheeDevWindow.width == 1040 and LycheeDevWindow.height == 720, "window 
 
 local pageCount = 0
 for _ in pairs(LycheeDevWindow.pages) do pageCount = pageCount + 1 end
-assert(pageCount == 6, "window did not create all six workbench pages")
+assert(pageCount == 8, "window did not create all eight workbench pages")
 assert(LycheeDevWindow.pages.runner:IsShown(), "runner page was not active by default")
+assert(LycheeDevWindow.pageTabs.runner:GetWidth()
+        >= math.max(48, LycheeDevWindow.pageTabs.runner.label:GetStringWidth() + 22),
+    "main navigation did not preserve text padding")
+assert(LycheeDevWindow.pageTabs.exports:GetWidth() > LycheeDevWindow.pageTabs.runner:GetWidth(),
+    "main navigation did not size tabs from their rendered labels")
+assert(LycheeDevWindow.pageTabs.objects.point[4] == 8,
+    "main navigation did not use a consistent visual gap")
+assert(LycheeDevWindow.historyButtons[1].background
+        and LycheeDevWindow.historyButtons[1].divider
+        and LycheeDevWindow.historyButtons[1]:GetWidth() == 206,
+    "history list did not use the aligned flat-row component")
 assert(LycheeDevWindow.resultTextTab and LycheeDevWindow.resultTreeTab, "result mode buttons were not created")
 local resultScrollbar = LycheeDevWindow.resultPanel.scroll.scrollbar
 LycheeDevWindow.resultPanel.scroll:SetHeight(100)
@@ -361,6 +465,21 @@ assert(LycheeDevWindow.resultPanel:IsShown() and not LycheeDevWindow.treeView.pa
 LycheeDevWindow.resultTreeTab:Click()
 assert(LycheeDevWindow.treeView.panel:IsShown() and not LycheeDevWindow.resultPanel:IsShown(),
     "result tree mode did not activate")
+local inputBeforeClearHistory = LycheeDevWindow.inputPanel.editBox:GetText()
+LycheeDevWindow.clearHistoryButton:Click()
+assert(#ns.GetHistory() == 0 and LycheeDevWindow.historyEmpty:IsShown(),
+    "clear history did not empty the history list")
+assert(LycheeDevWindow.currentResultText == ""
+        and LycheeDevWindow.resultPanel.editBox:GetText() == ""
+        and not LycheeDevWindow.treeView:HasTree(),
+    "clear history did not clear the current result")
+assert(LycheeDevWindow.resultPanel:IsShown() and not LycheeDevWindow.treeView.panel:IsShown(),
+    "clear history did not restore the empty text result view")
+assert(not LycheeDevWindow.exportResultButton:IsEnabled()
+        and LycheeDevWindow.status:GetText() == ns.L.READY,
+    "clear history did not reset result actions and status")
+assert(LycheeDevWindow.inputPanel.editBox:GetText() == inputBeforeClearHistory,
+    "clear history unexpectedly cleared the current Lua input")
 LycheeDevWindow.pageTabs.objects:Click()
 assert(LycheeDevWindow.pages.objects:IsShown(), "object page did not activate")
 assert(not LycheeDevWindow.pages.runner:IsShown(), "runner page stayed visible after navigation")
@@ -487,35 +606,186 @@ ns.FunctionTrace.Stop = originalTraceStop
 ns.FunctionTrace.IsRunning = originalTraceIsRunning
 ns.FunctionTrace.GetActivePath = originalTraceGetActivePath
 
+LycheeDevWindow.pageTabs.performance:Click()
+local performancePage = LycheeDevWindow.pages.performance
+for _, tab in pairs(performancePage.modeTabs) do
+    assert(tab:GetWidth() >= tab.label:GetStringWidth() + 22,
+        "performance mode tab did not preserve text padding")
+end
+for _, tab in pairs(performancePage.resultTabs) do
+    assert(tab:GetWidth() >= tab.label:GetStringWidth() + 22,
+        "performance result tab did not preserve text padding")
+end
+assert(performancePage.modeTabs.capture.point[4] == 8
+        and performancePage.resultTabs.cpu.point[4] == 8,
+    "performance tabs did not use consistent visual gaps")
+assert(performancePage.captureButton:GetWidth() >= 140,
+    "capture button did not reserve its longest state label")
+assert(performancePage:IsShown() and performancePage.modeTabs.health.active,
+    "performance lab was not split into its own main page")
+assert(performancePage.healthRows[1] and performancePage.healthRows[1]:IsShown()
+        and performancePage.healthReport.editBox:GetText() ~= "",
+    "performance health view did not render native profiler evidence")
+assert(not performancePage.modeTabs.capture:IsEnabled()
+        and not performancePage.changeAddon:IsShown(),
+    "performance detail views were available before selecting an addon")
+local otherAddonRow
+for index = 1, #performancePage.healthRows do
+    if performancePage.healthRows[index].entry.name == "OtherAddOn" then
+        otherAddonRow = performancePage.healthRows[index]
+        break
+    end
+end
+assert(otherAddonRow, "performance list did not expose the target addon")
+otherAddonRow:Click()
+assert(performancePage.modeTabs.capture:IsEnabled()
+        and performancePage.changeAddon:IsShown()
+        and performancePage.views.capture:IsShown(),
+    "selecting an addon did not establish the shared performance context")
+OtherAddOn = { Refresh = function() return true end }
+OtherDB = { records = {} }
+performancePage.captureButton:Click()
+OtherDB.records[1] = { value = "test" }
+assert(ns.Performance.IsCapturing() and activeTicker and not activeTicker.cancelled
+        and LycheeDevCaptureDock:IsShown() and not LycheeDevWindow:IsShown(),
+    "performance capture did not minimize the window into the Lychee logo")
+LycheeDevCaptureDock:Click()
+assert(not ns.Performance.IsCapturing() and activeTicker.cancelled
+        and LycheeDevWindow:IsShown() and performancePage.sessionRows[1]:IsShown(),
+    "performance capture did not stop, restore, and retain its session")
+performancePage.resultTabs.cpu:Click()
+assert(performancePage.captureReport.editBox:GetText():find(ns.L.PERFORMANCE_FUNCTION_HOTSPOTS, 1, true),
+    "performance CPU view did not expose function hotspots")
+performancePage.resultTabs.objects:Click()
+assert(performancePage.captureReport.editBox:GetText():find(ns.L.PERFORMANCE_CLOSURE_ANALYSIS, 1, true),
+    "performance object view did not expose object and closure analysis")
+performancePage.resultTabs.storage:Click()
+assert(performancePage.captureReport.editBox:GetText():find(ns.L.PERFORMANCE_STORAGE_DELTA, 1, true)
+        and performancePage.captureReport.editBox:GetText():find(ns.L.PERFORMANCE_STORAGE_ESTIMATE_NOTE, 1, true),
+    "performance storage view did not expose capture-correlated data")
+performancePage.resultTabs.full:Click()
+assert(performancePage.captureReport.editBox:GetText():find(ns.L.PERFORMANCE_RESULT_CPU, 1, true)
+        and performancePage.captureReport.editBox:GetText():find(ns.L.PERFORMANCE_RESULT_OBJECTS, 1, true),
+    "performance full report omitted deep evidence sections")
+TestPerformanceFunction = function() return true end
+performancePage.modeTabs.functionLab:Click()
+performancePage.functionPath.editBox:SetText("TestPerformanceFunction")
+performancePage.runBenchmark:Click()
+assert(performancePage.benchmarkReport.editBox:GetText():find("1.0 KB", 1, true),
+    "function experiment did not report exact allocation data")
+assert(performancePage.benchmarkReport.editBox:GetText():find("OtherAddOn", 1, true),
+    "advanced experiment did not retain the selected addon context")
+assert(rawget(performancePage, "captureAddon") == nil
+        and rawget(performancePage, "storageAddon") == nil
+        and rawget(performancePage.modeTabs, "objects") == nil
+        and rawget(performancePage.modeTabs, "storage") == nil,
+    "performance workflow retained conflicting or cross-page tools")
+performancePage.changeAddon:Click()
+assert(performancePage.views.health:IsShown()
+        and not performancePage.changeAddon:IsShown(),
+    "change addon action did not return to addon selection")
+local lycheeAddonRow
+for index = 1, #performancePage.healthRows do
+    if performancePage.healthRows[index].entry.name == "Lychee Dev" then
+        lycheeAddonRow = performancePage.healthRows[index]
+        break
+    end
+end
+assert(lycheeAddonRow, "performance list did not expose Lychee Dev")
+lycheeAddonRow:Click()
+performancePage.modeTabs.capture:Click()
+assert(not performancePage.sessionRows[1]:IsShown(),
+    "capture history leaked sessions from another addon context")
+performancePage.captureButton:Click()
+LycheeDevCaptureDock:Click()
+performancePage.resultTabs.storage:Click()
+local noStorageReport = performancePage.captureReport.editBox:GetText()
+assert(noStorageReport:find(ns.L.PERFORMANCE_STORAGE_NOT_DECLARED, 1, true)
+        and not noStorageReport:find(ns.L.PERFORMANCE_STORAGE_DELTA_TOTAL, 1, true),
+    "undeclared SavedVariables were rendered as a misleading zero-byte disk change")
+
 LycheeDevWindow.pageTabs.diagnostics:Click()
 local diagnosticsPage = LycheeDevWindow.pages.diagnostics
-assert(diagnosticsPage.errorsTab.active and not diagnosticsPage.performanceTab.active,
-    "diagnostics did not expose the active view as a tab")
+assert(rawget(diagnosticsPage, "performanceTab") == nil and rawget(diagnosticsPage, "errorsTab") == nil,
+    "diagnostics still contained the old nested performance tabs")
 assert(diagnosticsPage.currentScope.variant == "selected" and diagnosticsPage.allScope.variant == "secondary",
     "diagnostic scope did not expose its selected state")
 assert(not diagnosticsPage.selectReport:IsEnabled(), "empty diagnostic report could be selected")
 assert(not diagnosticsPage.exportReport:IsEnabled(), "empty diagnostic report could be exported")
 assert(not diagnosticsPage.clearButton:IsEnabled(), "empty diagnostic error list could be cleared")
 
-LycheeDevWindow.pageTabs.about:Click()
-local aboutPage = LycheeDevWindow.pages.about
+for index = 1, 12 do
+    ns.AddExport("test", "测试记录 " .. index, "record " .. index)
+end
+LycheeDevWindow.pageTabs.exports:Click()
+local exportPage = LycheeDevWindow.pages.exports
+local exportCountBeforeDelete = ns.GetExportStats()
+assert(exportPage.ticketBox:GetText() == ns.GetExports().order[1]
+        and exportPage.rows[1]:IsShown()
+        and exportPage.rows[1].background and exportPage.rows[1].divider
+        and exportPage.rows[1].status:GetText() == ns.L.EXPORT_STATUS_PENDING
+        and exportPage.detailStatus:GetText() == ns.L.EXPORT_STATUS_PENDING
+        and exportPage.pendingText:GetText() ~= "",
+    "export records page did not select the newest record")
+local exportWheel = rawget(exportPage.listScroll, "scripts").OnMouseWheel
+exportWheel(exportPage.listScroll, -1)
+assert(exportPage.listScroll:GetVerticalScroll() > 0,
+    "export record list did not respond to the mouse wheel")
+exportPage.rows[2]:Click()
+assert(exportPage.ticketBox:GetText() == exportPage.rows[2].ticket,
+    "export record rows could not be selected")
+exportPage.selectTicket:Click()
+assert(exportPage.ticketHint:GetText() == ns.L.EXPORT_TICKET_SELECTED,
+    "export record Ticket selection did not explain Ctrl+C")
+exportPage.deleteButton:Click()
+assert(exportPage.deleteButton.label:GetText() == ns.L.EXPORT_RECORD_DELETE_CONFIRM,
+    "export record deletion did not require confirmation")
+exportPage.deleteButton:Click()
+assert(ns.GetExportStats() == exportCountBeforeDelete - 1,
+    "selected export record was not deleted")
+reloadCalled = false
+exportPage.reloadButton:Click()
+assert(reloadCalled, "export records page reload action did not call ReloadUI")
 local exportNextId = ns.GetExports().nextId
-assert(aboutPage.clearExportCache:IsEnabled(), "nonempty export cache could not be cleared")
-aboutPage.clearExportCache:Click()
-assert(aboutPage.clearExportCache.label:GetText() == ns.L.CONFIRM_CLEAR_CACHE,
+assert(exportPage.clearButton:IsEnabled(), "nonempty export cache could not be cleared")
+exportPage.clearButton:Click()
+assert(exportPage.clearButton.label:GetText() == ns.L.CONFIRM_CLEAR_CACHE,
     "export cache clear did not require confirmation")
-aboutPage.clearExportCache:Click()
+exportPage.clearButton:Click()
 local remainingExports = ns.GetExportStats()
 assert(remainingExports == 0 and ns.GetExports().nextId == exportNextId,
     "export cache clear did not remove records or changed the ticket sequence")
-aboutPage.selectAddressButton:Click()
-assert(aboutPage.selectAddressButton.label:GetText() == ns.L.ADDRESS_SELECTED,
-    "about page did not confirm repository selection")
-assert(aboutPage.copyHint:GetText() == ns.L.ABOUT_SELECTED_HINT,
-    "about page did not explain the copy action")
-rawget(aboutPage.urlBox, "scripts").OnEditFocusLost(aboutPage.urlBox)
-assert(aboutPage.selectAddressButton.label:GetText() == ns.L.SELECT_ADDRESS,
-    "about page did not reset repository selection feedback")
+assert(ns.GetPendingExportCount() == 0 and not exportPage.reloadButton:IsEnabled()
+        and exportPage.pendingText:GetText() == "",
+    "clearing exports did not clear the pending disk-write state")
+
+LycheeDevWindow.pageTabs.about:Click()
+local aboutPage = LycheeDevWindow.pages.about
+assert(aboutPage.metaItems.clients.value.point[3]
+        ~= aboutPage.metaItems.command.value.point[3],
+    "supported clients did not receive a dedicated metadata row")
+assert(aboutPage.metaItems.clients.value:GetWidth() == 920,
+    "supported clients did not receive the full metadata width")
+assert(rawget(aboutPage, "linkPopup") == nil,
+    "about page created the repository popup before it was needed")
+aboutPage.githubButton:Click()
+assert(aboutPage.linkPopup and aboutPage.linkPopup:IsShown()
+        and aboutPage.linkBackdrop:IsShown(),
+    "GitHub button did not open the repository popup")
+assert(aboutPage.urlBox:GetText() == "https://github.com/Follen/Lychee-Dev",
+    "repository popup did not show the correct address")
+rawget(aboutPage.urlBox, "scripts").OnEscapePressed(aboutPage.urlBox)
+assert(not aboutPage.linkPopup:IsShown() and not aboutPage.linkBackdrop:IsShown(),
+    "Escape did not close the repository popup")
+aboutPage.githubButton:Click()
+aboutPage.linkBackdrop:Click()
+assert(not aboutPage.linkPopup:IsShown() and not aboutPage.linkBackdrop:IsShown(),
+    "clicking outside did not close the repository popup")
+aboutPage.githubButton:Click()
+LycheeDevWindow.pageTabs.runner:Click()
+assert(not aboutPage.linkPopup:IsShown() and not aboutPage.linkBackdrop:IsShown(),
+    "leaving the About page did not close the repository popup")
+LycheeDevWindow.pageTabs.about:Click()
 
 local foundLogo, foundGitHub
 for index = 1, #textures do
@@ -526,7 +796,7 @@ for index = 1, #textures do
     end
 end
 assert(foundLogo, "logo texture was not loaded from the addon")
-assert(foundGitHub, "GitHub texture was not loaded from the addon")
+assert(foundGitHub, "about page did not load the GitHub icon")
 
 SlashCmdList.LYCHEEDEV()
 assert(not LycheeDevWindow:IsShown(), "second /dev did not close the window")

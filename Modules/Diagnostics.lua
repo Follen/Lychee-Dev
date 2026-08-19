@@ -62,37 +62,6 @@ local function CollectErrors(scope, query)
     return errors, session, true
 end
 
-local function CollectAddOnPerformance()
-    UpdateAddOnMemoryUsage()
-    local profiling = GetCVarBool("scriptProfile") and true or false
-    if profiling then UpdateAddOnCPUUsage() end
-
-    local addons = {}
-    for index = 1, C_AddOns.GetNumAddOns() do
-        local name, title = C_AddOns.GetAddOnInfo(index)
-        if not IsSecret(name) and type(name) == "string" then
-            local _, loaded = C_AddOns.IsAddOnLoaded(name)
-            if loaded and not IsSecret(loaded) then
-                local memory = GetAddOnMemoryUsage(name)
-                local cpu = profiling and GetAddOnCPUUsage(name) or nil
-                if not IsSecret(memory) and not IsSecret(cpu) then
-                    addons[#addons + 1] = {
-                        name = name,
-                        title = not IsSecret(title) and title or name,
-                        memory = tonumber(memory) or 0,
-                        cpu = tonumber(cpu),
-                    }
-                end
-            end
-        end
-    end
-    table.sort(addons, function(left, right)
-        if left.memory == right.memory then return left.name < right.name end
-        return left.memory > right.memory
-    end)
-    return addons, profiling
-end
-
 local function DetectSource(entry)
     local source = SafeText(entry.source)
     if source ~= "" then return source end
@@ -105,28 +74,6 @@ function diagnostics.GetErrors(scope, query)
     local errors, session, available = CollectErrors(scope, query)
     if not available then return false, nil, ns.L.BUGGRABBER_UNAVAILABLE end
     return true, { errors = errors, session = session }
-end
-
-function diagnostics.CollectSystem()
-    if ns.IsCombatBlocked() then return false, nil, ns.L.COMBAT_BLOCKED end
-    local version, build, buildDate = GetBuildInfo()
-    local addons, profiling = CollectAddOnPerformance()
-    local grabber = GetGrabber()
-    local paused = false
-    if grabber and type(grabber.IsPaused) == "function" then
-        local succeeded, value = pcall(grabber.IsPaused, grabber)
-        paused = succeeded and value and true or false
-    end
-    return true, {
-        version = SafeText(version),
-        build = SafeText(build),
-        buildDate = SafeText(buildDate),
-        locale = SafeText(GetLocale()),
-        scriptErrors = GetCVarBool("scriptErrors") and true or false,
-        scriptProfile = profiling,
-        bugGrabberPaused = paused,
-        addons = addons,
-    }
 end
 
 function diagnostics.FormatAgentReport(entry)
