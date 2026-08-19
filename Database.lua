@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-local SCHEMA_VERSION = 4
+local SCHEMA_VERSION = 5
 local MAX_HISTORY_BYTES = 16 * 1024 * 1024
 local MIN_HISTORY_ENTRY_BYTES = 16 * 1024
 local MAX_CODE_BYTES = 12000
@@ -69,7 +69,9 @@ function ns.InitializeDatabase()
         LycheeDevDB.history = {}
     end
 
-    if type(LycheeDevDB.schemaVersion) ~= "number" or LycheeDevDB.schemaVersion < SCHEMA_VERSION then
+    local storedTreeMigrationRequired = type(LycheeDevDB.schemaVersion) ~= "number"
+        or LycheeDevDB.schemaVersion < SCHEMA_VERSION
+    if storedTreeMigrationRequired then
         LycheeDevDB.schemaVersion = SCHEMA_VERSION
     end
     db = LycheeDevDB
@@ -85,6 +87,12 @@ function ns.InitializeDatabase()
             entry.succeeded = entry.succeeded and true or false
             if type(entry.timestamp) ~= "number" then
                 entry.timestamp = nil
+            end
+            if type(entry.tree) ~= "table" then
+                entry.tree = nil
+                if storedTreeMigrationRequired and entry.succeeded and ns.CreateStoredTreeFromSerialized then
+                    entry.tree = ns.CreateStoredTreeFromSerialized(entry.result)
+                end
             end
             historyBytes = historyBytes + GetHistoryEntryBytes(entry)
         end

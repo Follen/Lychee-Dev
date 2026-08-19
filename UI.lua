@@ -161,12 +161,10 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
     end
 
     local function HandleMouseWheel(_, delta)
-        local minimum, maximum = scrollbar:GetMinMaxValues()
-        local value = scrollbar:GetValue()
-        if issecretvalue and (issecretvalue(minimum) or issecretvalue(maximum) or issecretvalue(value) or issecretvalue(delta)) then
+        if issecretvalue and issecretvalue(delta) then
             return
         end
-        local target = Clamp(value - delta * 36, minimum, maximum)
+        local target = Clamp((scroll.verticalOffset or 0) - delta * 36, 0, scroll.verticalRange or 0)
         scroll:SetVerticalScroll(target)
     end
     scroll:SetScript("OnMouseWheel", HandleMouseWheel)
@@ -428,6 +426,17 @@ local function CreateTextArea(parent, readOnly)
     end)
     scroll:SetScrollChild(editBox)
 
+    local wheelCatcher
+    if readOnly then
+        wheelCatcher = CreateFrame("Frame", nil, panel)
+        wheelCatcher:SetAllPoints(scroll)
+        wheelCatcher:SetFrameLevel(panel:GetFrameLevel() + 10)
+        wheelCatcher:EnableMouseWheel(true)
+        wheelCatcher:SetScript("OnMouseWheel", function(_, delta)
+            scroll.onMouseWheel(scroll, delta)
+        end)
+    end
+
     if readOnly then
         editBox:SetTextColor(0.79, 0.83, 0.87)
     else
@@ -436,6 +445,7 @@ local function CreateTextArea(parent, readOnly)
 
     panel.scroll = scroll
     panel.editBox = editBox
+    panel.wheelCatcher = wheelCatcher
     panel.SelectAll = function(self)
         self.editBox:SetFocus()
         self.editBox:HighlightText()

@@ -290,6 +290,13 @@ assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 86,
     "mouse wheel input did not move the text viewport")
 assert(LycheeDevWindow.resultPanel.editBox.point[5] == 86,
     "mouse wheel input did not offset the clipped content")
+LycheeDevWindow.resultPanel.scroll:SetVerticalScroll(50)
+local wheelCatcherScripts = rawget(LycheeDevWindow.resultPanel.wheelCatcher, "scripts")
+assert(wheelCatcherScripts and wheelCatcherScripts.OnMouseWheel,
+    "text area did not create a dedicated wheel catcher")
+wheelCatcherScripts.OnMouseWheel(LycheeDevWindow.resultPanel.wheelCatcher, -1)
+assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 86,
+    "dedicated wheel catcher did not move the text viewport")
 LycheeDevWindow.inputPanel.editBox:SetText("return { nested = { value = 7 } }")
 LycheeDevWindow.runButton:Click()
 assert(LycheeDevWindow.treeView:HasTree(), "table result did not create a tree")

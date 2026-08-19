@@ -60,7 +60,7 @@ function ns.CreateAboutPage(parent, ui)
     divider:SetPoint("TOPRIGHT", -14, -195)
     divider:SetHeight(1)
 
-    local version = "0.4.5"
+    local version = "0.4.6"
     if C_AddOns and C_AddOns.GetAddOnMetadata then
         version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or version
     end

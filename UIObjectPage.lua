@@ -121,10 +121,8 @@ function ns.CreateObjectPage(parent, ui)
     end)
 
     local pickerDock
-    local pickerTooltip
     local pickerPrompt
     local pickerActive = false
-    local pickerElapsed = 0
     local StopPicker
     local ShowInspection
     local currentValue
@@ -156,34 +154,12 @@ function ns.CreateObjectPage(parent, ui)
         pickerDock:SetPoint("TOP", UIParent, "TOP", 0, -36)
         pickerDock:SetFrameStrata("TOOLTIP")
         pickerDock:SetClampedToScreen(true)
-        pickerDock:SetBackdrop(ui.backdrop)
-        pickerDock:SetBackdropColor(ui.editorR, ui.editorG, ui.editorB, 0.96)
-        pickerDock:SetBackdropBorderColor(ui.accentR, ui.accentG, ui.accentB, 0.9)
 
         local logo = pickerDock:CreateTexture(nil, "ARTWORK")
         logo:SetTexture("Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\Logo.png")
         logo:SetTexCoord(0.18, 0.79, 0.17, 0.80)
         logo:SetPoint("TOPLEFT", 5, -5)
         logo:SetPoint("BOTTOMRIGHT", -5, 5)
-
-        pickerTooltip = ui.CreatePanel(pickerDock, ui.editorR, ui.editorG, ui.editorB, 0.98)
-        pickerTooltip:SetPoint("TOP", pickerDock, "BOTTOM", 0, -8)
-        pickerTooltip:SetSize(310, 58)
-        pickerTooltip:SetFrameLevel(pickerDock:GetFrameLevel() + 2)
-        local target = pickerTooltip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        target:SetPoint("TOPLEFT", 10, -9)
-        target:SetPoint("TOPRIGHT", -10, -9)
-        target:SetJustifyH("CENTER")
-        target:SetWordWrap(false)
-        target:SetTextColor(1, 1, 1, 0.9)
-        pickerTooltip.target = target
-        local help = pickerTooltip:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        help:SetPoint("BOTTOMLEFT", 10, 9)
-        help:SetPoint("BOTTOMRIGHT", -10, 9)
-        help:SetJustifyH("CENTER")
-        help:SetText(L.PICKER_HELP)
-        help:SetTextColor(1, 1, 1, 0.46)
-        pickerTooltip:Hide()
 
         pickerPrompt = ui.CreatePanel(pickerDock, ui.editorR, ui.editorG, ui.editorB, 0.98)
         pickerPrompt:SetPoint("TOP", pickerDock, "BOTTOM", 0, -7)
@@ -195,15 +171,6 @@ function ns.CreateObjectPage(parent, ui)
         promptText:SetTextColor(1, 1, 1, 0.86)
         pickerPrompt:Hide()
 
-        pickerTooltip:ClearAllPoints()
-        pickerTooltip:SetPoint("TOP", pickerPrompt, "BOTTOM", 0, -5)
-
-        pickerDock:SetScript("OnEnter", function()
-            pickerTooltip:Show()
-        end)
-        pickerDock:SetScript("OnLeave", function()
-            pickerTooltip:Hide()
-        end)
         pickerDock:SetScript("OnClick", function()
             StopPicker(true, L.PICKER_CANCELLED)
         end)
@@ -212,15 +179,12 @@ function ns.CreateObjectPage(parent, ui)
 
     StopPicker = function(restoreWindow, statusText)
         pickerActive = false
-        pickerElapsed = 0
         if pickerDock then
-            pickerDock:SetScript("OnUpdate", nil)
             pickerDock:SetScript("OnKeyDown", nil)
             if not ns.IsCombatBlocked() then
                 pickerDock:EnableKeyboard(false)
             end
             pickerDock:Hide()
-            pickerTooltip:Hide()
             pickerPrompt:Hide()
         end
         if restoreWindow and not ns.IsCombatBlocked() then
@@ -248,21 +212,6 @@ function ns.CreateObjectPage(parent, ui)
                 StopPicker(true, L.PICKER_CANCELLED)
             else
                 self:SetPropagateKeyboardInput(true)
-            end
-        end)
-        pickerDock:SetScript("OnUpdate", function(_, elapsed)
-            pickerElapsed = pickerElapsed + elapsed
-            if pickerElapsed < 0.05 then
-                return
-            end
-            pickerElapsed = 0
-            local succeeded, label, objectType = ns.ObjectInspector.GetMouseFocusLabel()
-            if succeeded then
-                pickerTooltip.target:SetText(string.format(L.PICKER_TARGET, label, objectType))
-                pickerDock:SetBackdropBorderColor(ui.accentR, ui.accentG, ui.accentB, 0.95)
-            else
-                pickerTooltip.target:SetText(L.NO_MOUSE_FOCUS)
-                pickerDock:SetBackdropBorderColor(0.46, 0.51, 0.56, 0.42)
             end
         end)
         pickerDock:Show()

@@ -49,6 +49,11 @@ DumperDB = {
     schemaVersion = 1,
     history = {
         { code = "legacy code", result = "legacy result", succeeded = true },
+        {
+            code = "return { player = { name = 'Follen', level = 80 } }",
+            result = '[1] = {\n  ["player"] = {\n    ["level"] = 80,\n    ["name"] = "Follen",\n  },\n}',
+            succeeded = true,
+        },
     },
 }
 local toggled = false
@@ -60,6 +65,9 @@ assert(type(ns.db) == "table", "database did not initialize on first use")
 assert(LycheeDevDB == ns.db, "database was not moved to the Lychee Dev root")
 assert(DumperDB == nil, "legacy database root was not cleared after migration")
 assert(ns.db.history[1].code == "legacy code", "legacy history was not preserved")
+assert(ns.db.schemaVersion == 5, "database schema was not upgraded")
+assert(ns.db.history[2].tree and ns.db.history[2].tree.roots[1].children[1].label == "player",
+    "legacy serialized history was not restored as a tree")
 assert(toggled, "slash command did not toggle the window")
 
 inCombat = true
@@ -164,7 +172,7 @@ assert(storedEntry.tree == storedTree and storedEntry.tree.roots[1].loaded,
 for index = 1, 35 do
     ns.AddHistory("code " .. index, "result " .. index, true)
 end
-assert(#ns.GetHistory() == 37, "history still has the old 30-entry limit")
+assert(#ns.GetHistory() == 38, "history still has the old 30-entry limit")
 assert(ns.GetHistory()[1].code == "code 35", "history is not newest-first")
 
 for index = 36, 1200 do

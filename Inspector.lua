@@ -410,3 +410,234 @@ function ns.CreateStoredValueTree(values)
         truncated = context.truncated,
     }
 end
+
+local function SkipSerializedWhitespace(text, position)
+    while position <= #text do
+        local character = text:sub(position, position)
+        if character ~= " " and character ~= "\t" and character ~= "\r" and character ~= "\n" then
+            break
+        end
+        position = position + 1
+    end
+    return position
+end
+
+local function TrimSerializedToken(text)
+    return text:match("^%s*(.-)%s*$") or ""
+end
+
+local function ScanSerializedQuoted(text, position)
+    local quote = text:sub(position, position)
+    local cursor = position + 1
+    while cursor <= #text do
+        local character = text:sub(cursor, cursor)
+        if character == "\\" then
+            cursor = cursor + 2
+        elseif character == quote then
+            return text:sub(position, cursor), cursor + 1
+        else
+            cursor = cursor + 1
+        end
+    end
+    return nil
+end
+
+local function ScanSerializedKey(text, position)
+    local startPosition = position
+    local braceDepth = 0
+    local bracketDepth = 0
+    while position <= #text do
+        local character = text:sub(position, position)
+        if character == "\"" or character == "'" then
+            local _, nextPosition = ScanSerializedQuoted(text, position)
+            if not nextPosition then
+                return nil
+            end
+            position = nextPosition
+        elseif character == "{" then
+            braceDepth = braceDepth + 1
+            position = position + 1
+        elseif character == "}" then
+            braceDepth = math.max(0, braceDepth - 1)
+            position = position + 1
+        elseif character == "[" then
+            bracketDepth = bracketDepth + 1
+            position = position + 1
+        elseif character == "]" then
+            if braceDepth == 0 and bracketDepth == 0 then
+                return TrimSerializedToken(text:sub(startPosition, position - 1)), position + 1
+            end
+            bracketDepth = math.max(0, bracketDepth - 1)
+            position = position + 1
+        else
+            position = position + 1
+        end
+    end
+    return nil
+end
+
+local function FormatSerializedKey(token)
+    local identifier = token:match('^"([_%a][_%w]*)"$') or token:match("^'([_%a][_%w]*)'$")
+    if identifier then
+        return identifier
+    end
+    return "[" .. token .. "]"
+end
+
+local function CreateSerializedScalarNode(label, token)
+    local kind
+    if token == "nil" then
+        kind = "nil"
+    elseif token == "true" or token == "false" then
+        kind = "boolean"
+    elseif tonumber(token) ~= nil then
+        kind = "number"
+    elseif token:sub(1, 1) == "<" then
+        kind = "marker"
+    else
+        kind = "string"
+    end
+    return {
+        label = label,
+        kind = kind,
+        value = TrimStoredText(token),
+    }
+end
+
+local ParseSerializedNode
+ParseSerializedNode = function(text, position, label, context, depth)
+    if context.count >= STORED_MAX_NODES then
+        return nil
+    end
+    context.count = context.count + 1
+    position = SkipSerializedWhitespace(text, position)
+    local character = text:sub(position, position)
+
+    if character == "\"" or character == "'" then
+        local token, nextPosition = ScanSerializedQuoted(text, position)
+        if not token then
+            return nil
+        end
+        return CreateSerializedScalarNode(label, token), nextPosition
+    elseif character ~= "{" then
+        local startPosition = position
+        while position <= #text do
+            character = text:sub(position, position)
+            if character == "," or character == "\r" or character == "\n" or character == "}" then
+                break
+            end
+            position = position + 1
+        end
+        local token = TrimSerializedToken(text:sub(startPosition, position - 1))
+        if token == "" then
+            return nil
+        end
+        return CreateSerializedScalarNode(label, token), position
+    end
+
+    local node = {
+        label = label,
+        kind = "table",
+        value = ns.L.TREE_TABLE,
+        children = {},
+        expanded = depth == 0,
+        loaded = true,
+        hasMore = false,
+    }
+    position = position + 1
+    while position <= #text do
+        position = SkipSerializedWhitespace(text, position)
+        character = text:sub(position, position)
+        if character == "}" then
+            node.value = string.format(ns.L.TREE_TABLE_COUNT, #node.children)
+            return node, position + 1
+        elseif text:sub(position, position + 2) == "..." then
+            local lineEnd = text:find("[\r\n]", position)
+            local marker = TrimSerializedToken(text:sub(position, (lineEnd or (#text + 1)) - 1))
+            node.children[#node.children + 1] = MarkerNode("...", marker)
+            position = lineEnd or (#text + 1)
+        elseif character ~= "[" then
+            return nil
+        else
+            local keyToken, nextPosition = ScanSerializedKey(text, position + 1)
+            if not keyToken then
+                return nil
+            end
+            position = SkipSerializedWhitespace(text, nextPosition)
+            if text:sub(position, position) ~= "=" then
+                return nil
+            end
+            local child
+            child, position = ParseSerializedNode(text, position + 1,
+                FormatSerializedKey(keyToken), context, depth + 1)
+            if not child then
+                return nil
+            end
+            node.children[#node.children + 1] = child
+            position = SkipSerializedWhitespace(text, position)
+            if text:sub(position, position) == "," then
+                position = position + 1
+            end
+        end
+    end
+    return nil
+end
+
+local function ParseSerializedRootHeader(text, position, expectedIndex)
+    if text:sub(position, position) ~= "[" then
+        return nil
+    end
+    local closing = text:find("]", position + 1, true)
+    if not closing or tonumber(text:sub(position + 1, closing - 1)) ~= expectedIndex then
+        return nil
+    end
+    position = SkipSerializedWhitespace(text, closing + 1)
+    if text:sub(position, position) ~= "=" then
+        return nil
+    end
+    return position + 1
+end
+
+function ns.CreateStoredTreeFromSerialized(text)
+    if type(text) ~= "string" or text == "" then
+        return nil
+    end
+
+    local position = text:find("^%[1%]%s*=")
+    if not position then
+        local lineStart = text:find("\n%[1%]%s*=")
+        position = lineStart and lineStart + 1 or nil
+    end
+    if not position then
+        return nil
+    end
+
+    local context = { count = 0 }
+    local roots = {}
+    local rootIndex = 1
+    while position and position <= #text do
+        position = ParseSerializedRootHeader(text, position, rootIndex)
+        if not position then
+            break
+        end
+        local node
+        node, position = ParseSerializedNode(text, position, "[" .. rootIndex .. "]", context, 0)
+        if not node then
+            return nil
+        end
+        roots[#roots + 1] = node
+        rootIndex = rootIndex + 1
+        position = SkipSerializedWhitespace(text, position)
+        if text:sub(position, position) ~= "[" then
+            break
+        end
+    end
+
+    if #roots == 0 then
+        return nil
+    end
+    return {
+        roots = roots,
+        truncated = false,
+    }
+end
