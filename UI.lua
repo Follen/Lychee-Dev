@@ -365,7 +365,12 @@ local function CreateTextArea(parent, readOnly)
         scroll.onMouseWheel(scroll, delta)
     end)
 
-    local editBox = CreateFrame("EditBox", nil, scroll)
+    local scrollContent = CreateFrame("Frame", nil, scroll)
+    scrollContent:SetWidth(500)
+    scrollContent:SetHeight(1)
+
+    local editBox = CreateFrame("EditBox", nil, scrollContent)
+    editBox:SetPoint("TOPLEFT", scrollContent, "TOPLEFT", 0, 0)
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
     editBox:EnableMouseWheel(true)
@@ -411,8 +416,17 @@ local function CreateTextArea(parent, readOnly)
         if issecretvalue and issecretvalue(textHeight) then
             return
         end
-        self:SetHeight(math.max(viewHeight or 1, (textHeight or 0) + 18))
+        local contentHeight = math.max(viewHeight or 1, (textHeight or 0) + 18)
+        self:SetHeight(contentHeight)
+        scrollContent:SetWidth(math.max(1, textWidth or 1))
+        scrollContent:SetHeight(contentHeight)
         scroll:UpdateScrollChildRect()
+    end)
+    editBox:SetScript("OnSizeChanged", function(self, width)
+        if issecretvalue and issecretvalue(width) then
+            return
+        end
+        scrollContent:SetWidth(math.max(1, width or 1))
     end)
     editBox:SetScript("OnCursorChanged", function(self, x, y, width, height)
         scroll:UpdateScrollChildRect()
@@ -424,7 +438,7 @@ local function CreateTextArea(parent, readOnly)
             scroll:SetVerticalScroll(-y + height - scrollHeight)
         end
     end)
-    scroll:SetScrollChild(editBox)
+    scroll:SetScrollChild(scrollContent)
 
     local wheelCatcher
     if readOnly then
@@ -444,6 +458,7 @@ local function CreateTextArea(parent, readOnly)
     end
 
     panel.scroll = scroll
+    panel.scrollContent = scrollContent
     panel.editBox = editBox
     panel.wheelCatcher = wheelCatcher
     panel.SelectAll = function(self)

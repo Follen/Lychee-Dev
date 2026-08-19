@@ -2,7 +2,7 @@
 ## Title: |cffd83b4e[荔枝]|r开发工具
 ## Notes: 运行 Agent 生成的 Lua，检查结构化结果与游戏事件。
 ## Author: Follen
-## Version: 0.4.6
+## Version: 0.4.7
 ## Dependencies: !BugGrabber
 ## SavedVariables: LycheeDevDB, DumperDB
 ## IconTexture: Interface\AddOns\Lychee Dev\Media\Logo.png

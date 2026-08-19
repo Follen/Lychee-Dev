@@ -278,6 +278,7 @@ assert(LycheeDevWindow.resultTextTab and LycheeDevWindow.resultTreeTab, "result 
 local resultScrollbar = LycheeDevWindow.resultPanel.scroll.scrollbar
 LycheeDevWindow.resultPanel.scroll:SetHeight(100)
 LycheeDevWindow.resultPanel.editBox:SetHeight(300)
+LycheeDevWindow.resultPanel.scrollContent:SetHeight(300)
 LycheeDevWindow.resultPanel.scroll:UpdateScrollChildRect()
 LycheeDevWindow.resultPanel.scroll:SetVerticalScroll(50)
 local minimumScroll, maximumScroll = resultScrollbar:GetMinMaxValues()
@@ -288,8 +289,10 @@ resultEditScripts.OnMouseWheel(LycheeDevWindow.resultPanel.editBox, -1)
 assert(resultScrollbar:GetValue() == 86, "mouse wheel input did not move the custom scrollbar")
 assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 86,
     "mouse wheel input did not move the text viewport")
-assert(LycheeDevWindow.resultPanel.editBox.point[5] == 86,
-    "mouse wheel input did not offset the clipped content")
+assert(LycheeDevWindow.resultPanel.scrollContent.point[5] == 86,
+    "mouse wheel input did not offset the text container")
+assert(LycheeDevWindow.resultPanel.editBox.point[5] == 0,
+    "scrolling moved the edit box instead of its stable container")
 LycheeDevWindow.resultPanel.scroll:SetVerticalScroll(50)
 local wheelCatcherScripts = rawget(LycheeDevWindow.resultPanel.wheelCatcher, "scripts")
 assert(wheelCatcherScripts and wheelCatcherScripts.OnMouseWheel,
