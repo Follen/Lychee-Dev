@@ -128,6 +128,9 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         scroll:SetScript("OnVerticalScroll", function(self, offset)
             self:SyncVerticalOffset(offset)
         end)
+        scroll:SetScript("OnScrollRangeChanged", function(self, _, verticalRange)
+            self:UpdateScrollChildRect(verticalRange)
+        end)
     else
         function scroll:GetVerticalScroll()
             return self.verticalOffset or 0
@@ -142,16 +145,32 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         end
     end
 
-    function scroll:UpdateScrollChildRect()
+    function scroll:UpdateScrollChildRect(nativeVerticalRange)
         local child = useNativeScrollFrame and self:GetScrollChild() or self.scrollChild
         local childHeight = child and child:GetHeight() or 0
         local viewHeight = self:GetHeight() or 0
-        if issecretvalue and (issecretvalue(childHeight) or issecretvalue(viewHeight)) then
+        local nativeRangeIsSecret = nativeVerticalRange ~= nil
+            and issecretvalue and issecretvalue(nativeVerticalRange)
+        if issecretvalue and (issecretvalue(childHeight) or issecretvalue(viewHeight)
+            or nativeRangeIsSecret) then
             scrollbar:Hide()
             return
         end
 
-        local range = math.max(0, (childHeight or 0) - (viewHeight or 0))
+        local range
+        if useNativeScrollFrame then
+            range = nativeVerticalRange
+            if range == nil then
+                range = self:GetVerticalScrollRange()
+            end
+        else
+            range = (childHeight or 0) - (viewHeight or 0)
+        end
+        if issecretvalue and issecretvalue(range) then
+            scrollbar:Hide()
+            return
+        end
+        range = math.max(0, tonumber(range) or 0)
         self.verticalRange = range
         scrollbar:SetMinMaxValues(0, range)
         local offset = useNativeScrollFrame and self:GetVerticalScroll() or self.verticalOffset
@@ -172,7 +191,8 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         local trackHeight = scrollbar:GetHeight()
         if not (issecretvalue and issecretvalue(trackHeight))
             and trackHeight and trackHeight > 0 and viewHeight > 0 then
-            scrollbar.thumb:SetHeight(math.max(28, math.floor(trackHeight * viewHeight / childHeight + 0.5)))
+            local contentHeight = math.max(viewHeight, viewHeight + range)
+            scrollbar.thumb:SetHeight(math.max(28, math.floor(trackHeight * viewHeight / contentHeight + 0.5)))
         end
         scrollbar:Show()
     end
@@ -398,6 +418,7 @@ local function CreateTextArea(parent, readOnly)
     editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
+    editBox:SetCountInvisibleLetters(true)
     editBox:EnableMouseWheel(true)
     editBox:SetScript("OnMouseWheel", function(_, delta)
         scroll.onMouseWheel(scroll, delta)
@@ -408,11 +429,6 @@ local function CreateTextArea(parent, readOnly)
     editBox:SetHeight(1)
     editBox.savedText = readOnly and "" or nil
 
-    local textMeasurement = panel:CreateFontString(nil, "BACKGROUND", "ChatFontNormal")
-    textMeasurement:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 0, -1)
-    textMeasurement:SetWidth(500)
-    textMeasurement:SetWordWrap(true)
-    textMeasurement:SetAlpha(0)
     editBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
     end)
@@ -430,36 +446,41 @@ local function CreateTextArea(parent, readOnly)
             self:HighlightText()
             return
         end
-        local viewHeight = scroll:GetHeight()
-        local textWidth = self:GetWidth()
-        if issecretvalue and (issecretvalue(viewHeight) or issecretvalue(textWidth)) then
-            return
-        end
-        textMeasurement:SetWidth(math.max(1, (textWidth or 1) - 8))
-        textMeasurement:SetText(self:GetText() or "")
-        local textHeight = textMeasurement:GetStringHeight()
-        if issecretvalue and issecretvalue(textHeight) then
-            return
-        end
-        local contentHeight = math.max(viewHeight or 1, (textHeight or 0) + 18)
-        self:SetHeight(contentHeight)
         scroll:UpdateScrollChildRect()
     end)
-    editBox:SetScript("OnSizeChanged", function()
-        scroll:UpdateScrollChildRect()
-    end)
-    editBox:SetScript("OnCursorChanged", function(self, x, y, width, height)
+
+    local function ScrollCursorIntoView()
+        editBox.cursorScrollQueued = false
         scroll:UpdateScrollChildRect()
         local offset = scroll:GetVerticalScroll()
         local scrollHeight = scroll:GetHeight()
+        local y = editBox.cursorOffset or 0
+        local height = editBox.cursorHeight or 0
+        if issecretvalue and (issecretvalue(offset) or issecretvalue(scrollHeight)
+            or issecretvalue(y) or issecretvalue(height)) then
+            return
+        end
         if -y < offset then
             scroll:SetVerticalScroll(-y)
         elseif -y + height > offset + scrollHeight then
             scroll:SetVerticalScroll(-y + height - scrollHeight)
         end
+    end
+    editBox:SetScript("OnCursorChanged", function(self, _, y, _, height)
+        self.cursorOffset = y
+        self.cursorHeight = height
+        if self.cursorScrollQueued then
+            return
+        end
+        self.cursorScrollQueued = true
+        C_Timer.After(0, ScrollCursorIntoView)
     end)
     scroll:SetScrollChild(editBox)
     scroll:UpdateScrollChildRect()
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", function()
+        editBox:SetFocus()
+    end)
 
     if readOnly then
         editBox:SetTextColor(0.79, 0.83, 0.87)

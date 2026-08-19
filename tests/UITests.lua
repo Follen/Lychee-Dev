@@ -122,6 +122,15 @@ local function NewRegion(name)
         return self.scrollChild
     end
 
+    function region:GetVerticalScrollRange()
+        local verticalScrollRange = rawget(self, "verticalScrollRange")
+        if verticalScrollRange ~= nil then
+            return verticalScrollRange
+        end
+        local childHeight = self.scrollChild and self.scrollChild:GetHeight() or 0
+        return math.max(0, childHeight - (self:GetHeight() or 0))
+    end
+
     function region:SetMinMaxValues(minimum, maximum)
         self.minimumValue = minimum
         self.maximumValue = maximum
@@ -299,6 +308,14 @@ assert(LycheeDevWindow.resultPanel.scroll.frameType == "ScrollFrame",
 assert(LycheeDevWindow.resultPanel.scroll:GetScrollChild() == LycheeDevWindow.resultPanel.editBox,
     "edit box was not the native scroll child")
 assert(minimumScroll == 0 and maximumScroll == 200, "custom scroll range did not follow content height")
+local resultScrollScripts = rawget(LycheeDevWindow.resultPanel.scroll, "scripts")
+LycheeDevWindow.resultPanel.scroll.verticalScrollRange = 240
+resultScrollScripts.OnScrollRangeChanged(LycheeDevWindow.resultPanel.scroll, 0, 240)
+minimumScroll, maximumScroll = resultScrollbar:GetMinMaxValues()
+assert(minimumScroll == 0 and maximumScroll == 240,
+    "custom scrollbar did not follow the native scroll range")
+LycheeDevWindow.resultPanel.scroll.verticalScrollRange = 200
+resultScrollScripts.OnScrollRangeChanged(LycheeDevWindow.resultPanel.scroll, 0, 200)
 local resultEditScripts = rawget(LycheeDevWindow.resultPanel.editBox, "scripts")
 assert(resultEditScripts and resultEditScripts.OnMouseWheel, "result edit box did not capture mouse wheel input")
 resultEditScripts.OnMouseWheel(LycheeDevWindow.resultPanel.editBox, -1)
