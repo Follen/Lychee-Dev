@@ -281,58 +281,75 @@ local function CreateCloseButton(parent)
     return button
 end
 
-local function ApplyButtonState(button, state)
-    local primary = button.primary
-    if state == "pressed" then
-        if primary then
-            button:SetBackdropColor(ACCENT_R * 0.78, ACCENT_G * 0.78, ACCENT_B * 0.78, 1)
-        else
-            button:SetBackdropColor(SURFACE_R * 0.72, SURFACE_G * 0.72, SURFACE_B * 0.72, 1)
-        end
-        SetBorderColor(button, primary, primary and 1 or 0.55)
-    elseif state == "hover" then
-        if primary then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 1)
-        else
-            button:SetBackdropColor(SURFACE_R * 1.28, SURFACE_G * 1.28, SURFACE_B * 1.28, 1)
-        end
-        SetBorderColor(button, primary, primary and 1 or 0.7)
-    else
-        if primary then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.88)
-        else
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.92)
-        end
-        SetBorderColor(button, primary, primary and 0.85 or 0.42)
-    end
-end
-
 local function SetButtonLabelOffset(button, y)
     button.label:ClearAllPoints()
     button.label:SetPoint("CENTER", 0, y)
+end
+
+local function ApplyButtonState(button, state)
+    local enabled = button:IsEnabled()
+    local variant = button.variant or (button.primary and "primary" or "secondary")
+
+    if not enabled then
+        button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.34)
+        SetBorderColor(button, false, 0.18)
+        button.label:SetTextColor(1, 1, 1, 0.28)
+        SetButtonLabelOffset(button, 0)
+        return
+    end
+
+    local emphasized = variant == "primary" or variant == "danger"
+    if state == "pressed" then
+        if emphasized then
+            button:SetBackdropColor(ACCENT_R * 0.78, ACCENT_G * 0.78, ACCENT_B * 0.78, 1)
+        elseif variant == "selected" then
+            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.22)
+        else
+            button:SetBackdropColor(SURFACE_R * 0.72, SURFACE_G * 0.72, SURFACE_B * 0.72, 1)
+        end
+        SetBorderColor(button, emphasized or variant == "selected", emphasized and 1 or 0.64)
+    elseif state == "hover" then
+        if emphasized then
+            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 1)
+        elseif variant == "selected" then
+            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.18)
+        else
+            button:SetBackdropColor(SURFACE_R * 1.28, SURFACE_G * 1.28, SURFACE_B * 1.28, 1)
+        end
+        SetBorderColor(button, emphasized or variant == "selected", emphasized and 1 or 0.7)
+    else
+        if emphasized then
+            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.88)
+        elseif variant == "selected" then
+            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.12)
+        else
+            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.92)
+        end
+        SetBorderColor(button, emphasized or variant == "selected", emphasized and 0.85 or (variant == "selected" and 0.52 or 0.42))
+    end
+
+    button.label:SetTextColor(1, 1, 1, emphasized and 1 or (variant == "selected" and 0.94 or 0.76))
 end
 
 local function CreateButton(parent, width, text, primary)
     local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
     button:SetSize(width, 28)
     button:SetBackdrop(BACKDROP)
-    button.primary = primary and true or false
+    button.variant = type(primary) == "string" and primary or (primary and "primary" or "secondary")
+    button.primary = button.variant == "primary"
 
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("CENTER")
     label:SetText(text)
-    label:SetTextColor(1, 1, 1, primary and 1 or 0.76)
     button.label = label
 
     button:SetScript("OnEnter", function(self)
         self.isHovered = true
         ApplyButtonState(self, "hover")
-        self.label:SetTextColor(1, 1, 1, 1)
     end)
     button:SetScript("OnLeave", function(self)
         self.isHovered = nil
         ApplyButtonState(self, "normal")
-        self.label:SetTextColor(1, 1, 1, self.primary and 1 or 0.76)
         SetButtonLabelOffset(self, 0)
     end)
     button:SetScript("OnMouseDown", function(self)
@@ -348,10 +365,26 @@ local function CreateButton(parent, width, text, primary)
     return button
 end
 
-local function SetButtonPrimary(button, primary)
-    button.primary = primary and true or false
+local function SetButtonVariant(button, variant)
+    button.variant = variant or "secondary"
+    button.primary = button.variant == "primary"
     ApplyButtonState(button, "normal")
-    button.label:SetTextColor(1, 1, 1, button.primary and 1 or 0.76)
+end
+
+local function SetButtonPrimary(button, primary)
+    SetButtonVariant(button, primary and "primary" or "secondary")
+end
+
+local function SetButtonEnabled(button, enabled)
+    button:SetEnabled(enabled and true or false)
+    if not enabled then
+        button.isHovered = nil
+    end
+    ApplyButtonState(button, "normal")
+end
+
+local function SetButtonText(button, text)
+    button.label:SetText(text or "")
 end
 
 local function CreateSectionLabel(parent, text)
@@ -899,7 +932,10 @@ local function CreateWindow()
         CreateViewTab = CreateNavTab,
         CreateSectionLabel = CreateSectionLabel,
         SetBorderColor = SetBorderColor,
+        SetButtonEnabled = SetButtonEnabled,
         SetButtonPrimary = SetButtonPrimary,
+        SetButtonText = SetButtonText,
+        SetButtonVariant = SetButtonVariant,
         SetReadOnlyText = SetReadOnlyText,
         SelectAllText = SelectAllText,
         backdrop = BACKDROP,

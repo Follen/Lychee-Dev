@@ -161,6 +161,9 @@ local function NewRegion(name)
     end
 
     function region:Click()
+        if not self:IsEnabled() then
+            return
+        end
         local scripts = rawget(self, "scripts")
         if scripts and scripts.OnClick then
             scripts.OnClick(self, "LeftButton")
@@ -356,15 +359,101 @@ assert(LycheeDevWindow.treeView.panel:IsShown() and not LycheeDevWindow.resultPa
 LycheeDevWindow.pageTabs.objects:Click()
 assert(LycheeDevWindow.pages.objects:IsShown(), "object page did not activate")
 assert(not LycheeDevWindow.pages.runner:IsShown(), "runner page stayed visible after navigation")
+local objectPage = LycheeDevWindow.pages.objects
+assert(objectPage.inspectButton.variant == "primary", "object inspect action was not primary")
+assert(not objectPage.selectSnapshot:IsEnabled(), "empty object snapshot could be selected")
+local originalInspectPath = ns.ObjectInspector.InspectPath
+ns.ObjectInspector.InspectPath = function(path)
+    return true, {
+        value = {},
+        label = path,
+        valueType = "table",
+        text = "{}",
+        tree = { roots = {} },
+    }
+end
+objectPage.inspectButton:Click()
+ns.ObjectInspector.InspectPath = originalInspectPath
+assert(objectPage.selectSnapshot:IsEnabled(), "object snapshot action did not enable after inspection")
 
-local foundLogo
+LycheeDevWindow.pageTabs.events:Click()
+local eventsPage = LycheeDevWindow.pages.events
+assert(eventsPage.monitorButton.label:GetText() == ns.L.START_MONITORING,
+    "event monitor did not show its start action")
+assert(not eventsPage.clearButton:IsEnabled(), "empty event log could be cleared")
+local monitorRunning = false
+local originalMonitorStart = ns.EventMonitor.Start
+local originalMonitorStop = ns.EventMonitor.Stop
+local originalMonitorIsRunning = ns.EventMonitor.IsRunning
+ns.EventMonitor.Start = function() monitorRunning = true return true end
+ns.EventMonitor.Stop = function() monitorRunning = false end
+ns.EventMonitor.IsRunning = function() return monitorRunning end
+eventsPage.monitorButton:Click()
+assert(eventsPage.monitorButton.label:GetText() == ns.L.STOP_MONITORING,
+    "event monitor did not switch to its stop action")
+assert(eventsPage.monitorButton.variant == "danger", "active event monitor did not show its stop state")
+eventsPage.monitorButton:Click()
+assert(eventsPage.monitorButton.label:GetText() == ns.L.START_MONITORING,
+    "event monitor did not return to its start action")
+ns.EventMonitor.Start = originalMonitorStart
+ns.EventMonitor.Stop = originalMonitorStop
+ns.EventMonitor.IsRunning = originalMonitorIsRunning
+
+LycheeDevWindow.pageTabs.trace:Click()
+local tracePage = LycheeDevWindow.pages.trace
+assert(tracePage.traceButton.label:GetText() == ns.L.START_TRACE,
+    "function trace did not show its start action")
+assert(not tracePage.clearButton:IsEnabled(), "empty trace log could be cleared")
+local traceRunning = false
+local originalTraceStart = ns.FunctionTrace.Start
+local originalTraceStop = ns.FunctionTrace.Stop
+local originalTraceIsRunning = ns.FunctionTrace.IsRunning
+local originalTraceGetActivePath = ns.FunctionTrace.GetActivePath
+ns.FunctionTrace.Start = function() traceRunning = true return true end
+ns.FunctionTrace.Stop = function() traceRunning = false end
+ns.FunctionTrace.IsRunning = function() return traceRunning end
+ns.FunctionTrace.GetActivePath = function() return "Test.Trace" end
+tracePage.traceButton:Click()
+assert(tracePage.traceButton.label:GetText() == ns.L.STOP_TRACE,
+    "function trace did not switch to its stop action")
+tracePage.traceButton:Click()
+assert(tracePage.traceButton.label:GetText() == ns.L.START_TRACE,
+    "function trace did not return to its start action")
+ns.FunctionTrace.Start = originalTraceStart
+ns.FunctionTrace.Stop = originalTraceStop
+ns.FunctionTrace.IsRunning = originalTraceIsRunning
+ns.FunctionTrace.GetActivePath = originalTraceGetActivePath
+
+LycheeDevWindow.pageTabs.diagnostics:Click()
+local diagnosticsPage = LycheeDevWindow.pages.diagnostics
+assert(diagnosticsPage.errorsTab.active and not diagnosticsPage.performanceTab.active,
+    "diagnostics did not expose the active view as a tab")
+assert(diagnosticsPage.currentScope.variant == "selected" and diagnosticsPage.allScope.variant == "secondary",
+    "diagnostic scope did not expose its selected state")
+assert(not diagnosticsPage.selectReport:IsEnabled(), "empty diagnostic report could be selected")
+assert(not diagnosticsPage.clearButton:IsEnabled(), "empty diagnostic error list could be cleared")
+
+LycheeDevWindow.pageTabs.about:Click()
+local aboutPage = LycheeDevWindow.pages.about
+aboutPage.selectAddressButton:Click()
+assert(aboutPage.selectAddressButton.label:GetText() == ns.L.ADDRESS_SELECTED,
+    "about page did not confirm repository selection")
+assert(aboutPage.copyHint:GetText() == ns.L.ABOUT_SELECTED_HINT,
+    "about page did not explain the copy action")
+rawget(aboutPage.urlBox, "scripts").OnEditFocusLost(aboutPage.urlBox)
+assert(aboutPage.selectAddressButton.label:GetText() == ns.L.SELECT_ADDRESS,
+    "about page did not reset repository selection feedback")
+
+local foundLogo, foundGitHub
 for index = 1, #textures do
     if textures[index] == "Interface\\AddOns\\Lychee Dev\\Media\\Logo.png" then
         foundLogo = true
-        break
+    elseif textures[index] == "Interface\\AddOns\\Lychee Dev\\Media\\GitHub.png" then
+        foundGitHub = true
     end
 end
 assert(foundLogo, "logo texture was not loaded from the addon")
+assert(foundGitHub, "GitHub texture was not loaded from the addon")
 
 SlashCmdList.LYCHEEDEV()
 assert(not LycheeDevWindow:IsShown(), "second /dev did not close the window")

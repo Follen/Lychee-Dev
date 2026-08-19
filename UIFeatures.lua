@@ -295,18 +295,17 @@ function ns.CreateEventsPage(parent, ui)
 
     local inputPanel = CreateLineInput(page, ui)
     inputPanel:SetPoint("TOPLEFT", 14, -104)
-    inputPanel:SetPoint("TOPRIGHT", -330, -104)
+    inputPanel:SetPoint("TOPRIGHT", -250, -104)
     inputPanel:SetHeight(30)
     page.inputPanel = inputPanel
 
-    local startButton = ui.CreateButton(page, 92, L.START, true)
-    startButton:SetPoint("TOPRIGHT", -14, -104)
-
-    local stopButton = ui.CreateButton(page, 92, L.STOP, false)
-    stopButton:SetPoint("RIGHT", startButton, "LEFT", -8, 0)
+    local monitorButton = ui.CreateButton(page, 112, L.START_MONITORING, true)
+    monitorButton:SetPoint("TOPRIGHT", -14, -104)
 
     local clearButton = ui.CreateButton(page, 100, L.CLEAR_LOG, false)
-    clearButton:SetPoint("RIGHT", stopButton, "LEFT", -8, 0)
+    clearButton:SetPoint("RIGHT", monitorButton, "LEFT", -8, 0)
+    page.monitorButton = monitorButton
+    page.clearButton = clearButton
 
     local statusDot = page:CreateTexture(nil, "ARTWORK")
     statusDot:SetSize(5, 5)
@@ -322,6 +321,12 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     local selection = ns.EventCatalog.CreateSelection({ "PLAYER_TARGET_CHANGED" })
+    local function SyncMonitorButton()
+        local running = ns.EventMonitor.IsRunning()
+        ui.SetButtonText(monitorButton, running and L.STOP_MONITORING or L.START_MONITORING)
+        ui.SetButtonVariant(monitorButton, running and "danger" or "primary")
+    end
+
     local selectedLabel = ui.CreateSectionLabel(page, L.SELECTED_EVENTS)
     selectedLabel:SetPoint("TOPLEFT", 17, -169)
 
@@ -701,6 +706,7 @@ function ns.CreateEventsPage(parent, ui)
     function page:Refresh()
         dirty = nil
         local recordCount = ns.EventMonitor.GetCount()
+        ui.SetButtonEnabled(clearButton, recordCount > 0)
         for index = 1, #rows do
             rows[index]:Hide()
         end
@@ -755,7 +761,14 @@ function ns.CreateEventsPage(parent, ui)
         C_Timer.After(0, FlushRefresh)
     end
 
-    startButton:SetScript("OnClick", function()
+    monitorButton:SetScript("OnClick", function()
+        if ns.EventMonitor.IsRunning() then
+            ns.EventMonitor.Stop()
+            SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+            SyncMonitorButton()
+            return
+        end
+
         local succeeded, errorMessage = ns.EventMonitor.Start(selection:GetNames(), QueueRefresh)
         if succeeded then
             local listeningText = ns.EventMonitor.IsMonitoringAllEvents()
@@ -767,11 +780,7 @@ function ns.CreateEventsPage(parent, ui)
         else
             SetStatus(errorMessage or L.COULD_NOT_START, ui.accentR, ui.accentG, ui.accentB)
         end
-    end)
-
-    stopButton:SetScript("OnClick", function()
-        ns.EventMonitor.Stop()
-        SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+        SyncMonitorButton()
     end)
 
     clearButton:SetScript("OnClick", function()
@@ -788,6 +797,7 @@ function ns.CreateEventsPage(parent, ui)
     function page:StopMonitor()
         ns.EventMonitor.Stop()
         SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+        SyncMonitorButton()
     end
 
     function page:RefreshIfDirty()
@@ -797,6 +807,7 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+    SyncMonitorButton()
     RefreshSelected()
     page:Refresh()
     return page

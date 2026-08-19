@@ -32,7 +32,7 @@ function ns.CreateObjectPage(parent, ui)
     mouseButton:SetPoint("TOPRIGHT", -14, -104)
     local searchButton = ui.CreateButton(page, 82, L.SEARCH)
     searchButton:SetPoint("RIGHT", mouseButton, "LEFT", -8, 0)
-    local inspectButton = ui.CreateButton(page, 82, L.INSPECT)
+    local inspectButton = ui.CreateButton(page, 82, L.INSPECT, true)
     inspectButton:SetPoint("RIGHT", searchButton, "LEFT", -8, 0)
 
     local pathPanel = CreateLineInput(page, ui)
@@ -119,6 +119,10 @@ function ns.CreateObjectPage(parent, ui)
         SetSnapshotMode("text")
         textView:SelectAll()
     end)
+    page.inspectButton = inspectButton
+    page.searchButton = searchButton
+    page.mouseButton = mouseButton
+    page.selectSnapshot = selectSnapshot
 
     local pickerDock
     local pickerPrompt
@@ -227,6 +231,7 @@ function ns.CreateObjectPage(parent, ui)
         treeView:SetTree(inspection.tree)
         ui.SetReadOnlyText(textView, inspection.text)
         SetSnapshotMode("tree")
+        ui.SetButtonEnabled(selectSnapshot, true)
         SetStatus(string.format(L.OBJECT_READY, inspection.label, inspection.valueType), 0.42, 0.76, 0.43)
     end
 
@@ -375,6 +380,7 @@ function ns.CreateObjectPage(parent, ui)
     SetStatus(L.READY, 0.55, 0.60, 0.65)
     treeView:SetTree(nil)
     ui.SetReadOnlyText(textView, "")
+    ui.SetButtonEnabled(selectSnapshot, false)
     SetSnapshotMode("tree")
     RefreshResults()
     return page

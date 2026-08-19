@@ -41,11 +41,13 @@ function ns.CreateDiagnosticsPage(parent, ui)
 
     local title = ui.CreateSectionLabel(page, L.DIAGNOSTICS)
     title:SetPoint("TOPLEFT", 17, -84)
-    local errorsTab = ui.CreateButton(page, 92, L.ERRORS, true)
+    local errorsTab = ui.CreateViewTab(page, L.ERRORS)
+    errorsTab:SetSize(72, 30)
     errorsTab:SetPoint("TOPLEFT", 14, -104)
-    local performanceTab = ui.CreateButton(page, 92, L.PERFORMANCE, false)
-    performanceTab:SetPoint("LEFT", errorsTab, "RIGHT", 8, 0)
-    local refreshButton = ui.CreateButton(page, 92, L.REFRESH, true)
+    local performanceTab = ui.CreateViewTab(page, L.PERFORMANCE)
+    performanceTab:SetSize(72, 30)
+    performanceTab:SetPoint("LEFT", errorsTab, "RIGHT", 2, 0)
+    local refreshButton = ui.CreateButton(page, 92, L.REFRESH, false)
     refreshButton:SetPoint("TOPRIGHT", -14, -104)
     local clearButton = ui.CreateButton(page, 112, L.CLEAR_ERRORS, false)
     clearButton:SetPoint("RIGHT", refreshButton, "LEFT", -8, 0)
@@ -66,9 +68,9 @@ function ns.CreateDiagnosticsPage(parent, ui)
     errorsView:SetPoint("TOPLEFT", 0, -146)
     errorsView:SetPoint("BOTTOMRIGHT")
 
-    local currentScope = ui.CreateButton(errorsView, 100, L.CURRENT_SESSION, true)
+    local currentScope = ui.CreateButton(errorsView, 104, L.CURRENT_SESSION, "selected")
     currentScope:SetPoint("TOPLEFT", 14, 0)
-    local allScope = ui.CreateButton(errorsView, 100, L.ALL_SESSIONS, false)
+    local allScope = ui.CreateButton(errorsView, 104, L.ALL_SESSIONS, false)
     allScope:SetPoint("LEFT", currentScope, "RIGHT", 8, 0)
     local searchPanel = CreateLineInput(errorsView, ui)
     searchPanel:SetPoint("TOPLEFT", allScope, "TOPRIGHT", 14, 0)
@@ -78,6 +80,13 @@ function ns.CreateDiagnosticsPage(parent, ui)
     searchButton:SetPoint("LEFT", searchPanel, "RIGHT", 8, 0)
     local selectReport = ui.CreateButton(errorsView, 110, L.SELECT_REPORT, false)
     selectReport:SetPoint("TOPRIGHT", -14, 0)
+    page.errorsTab = errorsTab
+    page.performanceTab = performanceTab
+    page.currentScope = currentScope
+    page.allScope = allScope
+    page.refreshButton = refreshButton
+    page.clearButton = clearButton
+    page.selectReport = selectReport
 
     local listLabel = ui.CreateSectionLabel(errorsView, L.ERROR_LIST)
     listLabel:SetPoint("TOPLEFT", 17, -48)
@@ -244,6 +253,8 @@ function ns.CreateDiagnosticsPage(parent, ui)
         errorContent:SetHeight(math.max(1, #errors * ERROR_ROW_HEIGHT))
         errorScroll:UpdateScrollChildRect()
         errorEmpty:SetShown(#errors == 0)
+        ui.SetButtonEnabled(clearButton, #errors > 0)
+        ui.SetButtonEnabled(selectReport, selectedError ~= nil)
     end
 
     local function RefreshPerformanceRows()
@@ -270,7 +281,8 @@ function ns.CreateDiagnosticsPage(parent, ui)
 
     local function RefreshErrorsFromSource()
         confirmClear = false
-        clearButton.label:SetText(L.CLEAR_ERRORS)
+        ui.SetButtonText(clearButton, L.CLEAR_ERRORS)
+        ui.SetButtonVariant(clearButton, "secondary")
         local succeeded, snapshot, errorMessage = ns.Diagnostics.GetErrors(scope, searchPanel.editBox:GetText())
         if not succeeded then
             SetStatus(errorMessage, true)
@@ -302,8 +314,8 @@ function ns.CreateDiagnosticsPage(parent, ui)
 
     local function SetScope(newScope)
         scope = newScope
-        ui.SetButtonPrimary(currentScope, scope == "current")
-        ui.SetButtonPrimary(allScope, scope == "all")
+        ui.SetButtonVariant(currentScope, scope == "current" and "selected" or "secondary")
+        ui.SetButtonVariant(allScope, scope == "all" and "selected" or "secondary")
         RefreshErrorsFromSource()
     end
 
@@ -312,8 +324,8 @@ function ns.CreateDiagnosticsPage(parent, ui)
         errorsView:SetShown(mode == "errors")
         performanceView:SetShown(mode == "performance")
         clearButton:SetShown(mode == "errors")
-        ui.SetButtonPrimary(errorsTab, mode == "errors")
-        ui.SetButtonPrimary(performanceTab, mode == "performance")
+        errorsTab:SetActive(mode == "errors")
+        performanceTab:SetActive(mode == "performance")
         if mode == "errors" then RefreshErrorsFromSource() else RefreshPerformance() end
     end
 
@@ -362,7 +374,8 @@ function ns.CreateDiagnosticsPage(parent, ui)
     clearButton:SetScript("OnClick", function()
         if not confirmClear then
             confirmClear = true
-            clearButton.label:SetText(L.CONFIRM_CLEAR_ERRORS)
+            ui.SetButtonText(clearButton, L.CONFIRM_CLEAR_ERRORS)
+            ui.SetButtonVariant(clearButton, "danger")
             SetStatus(L.CONFIRM_CLEAR_ERRORS, true)
             return
         end
@@ -382,6 +395,10 @@ function ns.CreateDiagnosticsPage(parent, ui)
     end
 
     performanceView:Hide()
+    errorsTab:SetActive(true)
+    performanceTab:SetActive(false)
+    ui.SetButtonEnabled(clearButton, false)
+    ui.SetButtonEnabled(selectReport, false)
     SetStatus(L.READY, false)
     return page
 end

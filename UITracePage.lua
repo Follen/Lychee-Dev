@@ -35,15 +35,15 @@ function ns.CreateTracePage(parent, ui)
     title:SetPoint("TOPLEFT", 17, -84)
     local input = CreateLineInput(page, ui)
     input:SetPoint("TOPLEFT", 14, -104)
-    input:SetPoint("TOPRIGHT", -330, -104)
+    input:SetPoint("TOPRIGHT", -250, -104)
     input:SetHeight(30)
     input.editBox:SetText("C_AddOns.GetAddOnInfo")
-    local start = ui.CreateButton(page, 92, L.START, true)
-    start:SetPoint("TOPRIGHT", -14, -104)
-    local stop = ui.CreateButton(page, 92, L.STOP, false)
-    stop:SetPoint("RIGHT", start, "LEFT", -8, 0)
+    local traceButton = ui.CreateButton(page, 112, L.START_TRACE, true)
+    traceButton:SetPoint("TOPRIGHT", -14, -104)
     local clear = ui.CreateButton(page, 100, L.CLEAR_LOG, false)
-    clear:SetPoint("RIGHT", stop, "LEFT", -8, 0)
+    clear:SetPoint("RIGHT", traceButton, "LEFT", -8, 0)
+    page.traceButton = traceButton
+    page.clearButton = clear
 
     local dot = page:CreateTexture(nil, "ARTWORK")
     dot:SetSize(5, 5)
@@ -74,6 +74,11 @@ function ns.CreateTracePage(parent, ui)
     SetReadOnlyText(detail, L.SELECT_CALL_DETAIL)
 
     local rows, selected, refreshQueued = {}, nil, false
+    local function SyncTraceButton()
+        local running = ns.FunctionTrace.IsRunning()
+        ui.SetButtonText(traceButton, running and L.STOP_TRACE or L.START_TRACE)
+        ui.SetButtonVariant(traceButton, running and "danger" or "primary")
+    end
     local function Format(record)
         if not record then return L.SELECT_CALL_DETAIL end
         local lines = { string.format(L.TRACE_PATH, record.path), string.format(L.ELAPSED_DETAIL, record.elapsed), "" }
@@ -96,6 +101,7 @@ function ns.CreateTracePage(parent, ui)
     function page:Refresh()
         for index = 1, #rows do rows[index]:Hide() end
         local recordCount = ns.FunctionTrace.GetCount()
+        ui.SetButtonEnabled(clear, recordCount > 0)
         local offset = scroll:GetVerticalScroll() if issecretvalue and issecretvalue(offset) then offset = 0 end
         local first = math.floor((offset or 0) / ROW_HEIGHT) + 1
         local last, pool = math.min(recordCount, first + VISIBLE_ROWS - 1), 0
@@ -115,18 +121,26 @@ function ns.CreateTracePage(parent, ui)
         refreshQueued = true
         C_Timer.After(0, function() refreshQueued = false if page:IsShown() then page:Refresh() end end)
     end
-    start:SetScript("OnClick", function()
+    traceButton:SetScript("OnClick", function()
+        if ns.FunctionTrace.IsRunning() then
+            ns.FunctionTrace.Stop()
+            SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+            SyncTraceButton()
+            return
+        end
+
         local succeeded, errorMessage = ns.FunctionTrace.Start(input.editBox:GetText(), QueueRefresh)
         SetStatus(succeeded and string.format(L.TRACING_FUNCTION, ns.FunctionTrace.GetActivePath()) or errorMessage, succeeded and 0.42 or ui.accentR, succeeded and 0.76 or ui.accentG, succeeded and 0.43 or ui.accentB)
+        SyncTraceButton()
     end)
-    stop:SetScript("OnClick", function() ns.FunctionTrace.Stop() SetStatus(L.STOPPED, 0.55, 0.60, 0.65) end)
     clear:SetScript("OnClick", function() ns.FunctionTrace.Clear() selected = nil SetReadOnlyText(detail, L.SELECT_CALL_DETAIL) page:Refresh() end)
-    input.editBox:SetScript("OnEnterPressed", function() start:Click() end)
+    input.editBox:SetScript("OnEnterPressed", function() traceButton:Click() end)
     function page:Activate() input.editBox:SetFocus() page:Refresh() end
     function page:Stop()
         ns.FunctionTrace.Stop()
         SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+        SyncTraceButton()
     end
-    SetStatus(L.STOPPED, 0.55, 0.60, 0.65) page:Refresh()
+    SetStatus(L.STOPPED, 0.55, 0.60, 0.65) SyncTraceButton() page:Refresh()
     return page
 end
