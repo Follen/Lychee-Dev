@@ -61,8 +61,8 @@ local function Clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
 
-local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomInset)
-    local scroll = CreateFrame("Frame", nil, parent)
+local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomInset, useNativeScrollFrame)
+    local scroll = CreateFrame(useNativeScrollFrame and "ScrollFrame" or "Frame", nil, parent)
     scroll:SetPoint("TOPLEFT", leftInset, -topInset)
     scroll:SetPoint("BOTTOMRIGHT", -(rightInset + 11), bottomInset)
     scroll:SetClipsChildren(true)
@@ -80,6 +80,7 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
     scrollbar:SetValueStep(1)
     scrollbar:SetObeyStepOnDrag(false)
     scrollbar:SetHitRectInsets(-4, -4, 0, 0)
+    scrollbar.syncing = false
 
     local track = scrollbar:CreateTexture(nil, "BACKGROUND")
     track:SetColorTexture(1, 1, 1, 0.07)
@@ -102,34 +103,48 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
     scrollbar:SetScript("OnValueChanged", function(self, value)
         if not self.syncing then
             scroll:SetVerticalScroll(value)
+            if useNativeScrollFrame then
+                scroll:SyncVerticalOffset(value)
+            end
         end
     end)
 
-    function scroll:GetVerticalScroll()
-        return self.verticalOffset or 0
-    end
-
-    function scroll:SetVerticalScroll(offset)
+    function scroll:SyncVerticalOffset(offset)
         if issecretvalue and issecretvalue(offset) then
             return
         end
         offset = Clamp(tonumber(offset) or 0, 0, self.verticalRange or 0)
         local changed = offset ~= self.verticalOffset
         self.verticalOffset = offset
-        if self.scrollChild then
-            self.scrollChild:ClearAllPoints()
-            self.scrollChild:SetPoint("TOPLEFT", self, "TOPLEFT", 0, offset)
-        end
         scrollbar.syncing = true
         scrollbar:SetValue(offset)
-        scrollbar.syncing = nil
+        scrollbar.syncing = false
         if changed and self.onVerticalScrollChanged then
             self.onVerticalScrollChanged(offset)
         end
     end
 
+    if useNativeScrollFrame then
+        scroll:SetScript("OnVerticalScroll", function(self, offset)
+            self:SyncVerticalOffset(offset)
+        end)
+    else
+        function scroll:GetVerticalScroll()
+            return self.verticalOffset or 0
+        end
+
+        function scroll:SetVerticalScroll(offset)
+            self:SyncVerticalOffset(offset)
+            if self.scrollChild then
+                self.scrollChild:ClearAllPoints()
+                self.scrollChild:SetPoint("TOPLEFT", self, "TOPLEFT", 0, self.verticalOffset or 0)
+            end
+        end
+    end
+
     function scroll:UpdateScrollChildRect()
-        local childHeight = self.scrollChild and self.scrollChild:GetHeight() or 0
+        local child = useNativeScrollFrame and self:GetScrollChild() or self.scrollChild
+        local childHeight = child and child:GetHeight() or 0
         local viewHeight = self:GetHeight() or 0
         if issecretvalue and (issecretvalue(childHeight) or issecretvalue(viewHeight)) then
             scrollbar:Hide()
@@ -139,7 +154,16 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         local range = math.max(0, (childHeight or 0) - (viewHeight or 0))
         self.verticalRange = range
         scrollbar:SetMinMaxValues(0, range)
-        self:SetVerticalScroll(Clamp(self.verticalOffset or 0, 0, range))
+        local offset = useNativeScrollFrame and self:GetVerticalScroll() or self.verticalOffset
+        if issecretvalue and issecretvalue(offset) then
+            scrollbar:Hide()
+            return
+        end
+        offset = Clamp(offset or 0, 0, range)
+        self:SetVerticalScroll(offset)
+        if useNativeScrollFrame then
+            self:SyncVerticalOffset(offset)
+        end
         if range <= 0 then
             scrollbar:Hide()
             return
@@ -153,11 +177,13 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         scrollbar:Show()
     end
 
-    function scroll:SetScrollChild(child)
-        self.scrollChild = child
-        child:ClearAllPoints()
-        child:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
-        self:UpdateScrollChildRect()
+    if not useNativeScrollFrame then
+        function scroll:SetScrollChild(child)
+            self.scrollChild = child
+            child:ClearAllPoints()
+            child:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
+            self:UpdateScrollChildRect()
+        end
     end
 
     local function HandleMouseWheel(_, delta)
@@ -166,6 +192,9 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         end
         local target = Clamp((scroll.verticalOffset or 0) - delta * 36, 0, scroll.verticalRange or 0)
         scroll:SetVerticalScroll(target)
+        if useNativeScrollFrame then
+            scroll:SyncVerticalOffset(target)
+        end
     end
     scroll:SetScript("OnMouseWheel", HandleMouseWheel)
     scroll.onMouseWheel = HandleMouseWheel
@@ -359,18 +388,14 @@ end
 local function CreateTextArea(parent, readOnly)
     local panel = CreatePanel(parent, EDITOR_R, EDITOR_G, EDITOR_B, 1)
 
-    local scroll = CreateScrollArea(panel, 10, 10, 8, 10)
+    local scroll = CreateScrollArea(panel, 10, 10, 8, 10, true)
     panel:EnableMouseWheel(true)
     panel:SetScript("OnMouseWheel", function(_, delta)
         scroll.onMouseWheel(scroll, delta)
     end)
 
-    local scrollContent = CreateFrame("Frame", nil, scroll)
-    scrollContent:SetWidth(500)
-    scrollContent:SetHeight(1)
-
-    local editBox = CreateFrame("EditBox", nil, scrollContent)
-    editBox:SetPoint("TOPLEFT", scrollContent, "TOPLEFT", 0, 0)
+    local editBox = CreateFrame("EditBox", nil, scroll)
+    editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
     editBox:EnableMouseWheel(true)
@@ -418,15 +443,10 @@ local function CreateTextArea(parent, readOnly)
         end
         local contentHeight = math.max(viewHeight or 1, (textHeight or 0) + 18)
         self:SetHeight(contentHeight)
-        scrollContent:SetWidth(math.max(1, textWidth or 1))
-        scrollContent:SetHeight(contentHeight)
         scroll:UpdateScrollChildRect()
     end)
-    editBox:SetScript("OnSizeChanged", function(self, width)
-        if issecretvalue and issecretvalue(width) then
-            return
-        end
-        scrollContent:SetWidth(math.max(1, width or 1))
+    editBox:SetScript("OnSizeChanged", function()
+        scroll:UpdateScrollChildRect()
     end)
     editBox:SetScript("OnCursorChanged", function(self, x, y, width, height)
         scroll:UpdateScrollChildRect()
@@ -438,18 +458,8 @@ local function CreateTextArea(parent, readOnly)
             scroll:SetVerticalScroll(-y + height - scrollHeight)
         end
     end)
-    scroll:SetScrollChild(scrollContent)
-
-    local wheelCatcher
-    if readOnly then
-        wheelCatcher = CreateFrame("Frame", nil, panel)
-        wheelCatcher:SetAllPoints(scroll)
-        wheelCatcher:SetFrameLevel(panel:GetFrameLevel() + 10)
-        wheelCatcher:EnableMouseWheel(true)
-        wheelCatcher:SetScript("OnMouseWheel", function(_, delta)
-            scroll.onMouseWheel(scroll, delta)
-        end)
-    end
+    scroll:SetScrollChild(editBox)
+    scroll:UpdateScrollChildRect()
 
     if readOnly then
         editBox:SetTextColor(0.79, 0.83, 0.87)
@@ -458,9 +468,7 @@ local function CreateTextArea(parent, readOnly)
     end
 
     panel.scroll = scroll
-    panel.scrollContent = scrollContent
     panel.editBox = editBox
-    panel.wheelCatcher = wheelCatcher
     panel.SelectAll = function(self)
         self.editBox:SetFocus()
         self.editBox:HighlightText()

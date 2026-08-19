@@ -108,6 +108,18 @@ local function NewRegion(name)
 
     function region:SetVerticalScroll(offset)
         self.verticalScroll = offset
+        local scripts = rawget(self, "scripts")
+        if scripts and scripts.OnVerticalScroll then
+            scripts.OnVerticalScroll(self, offset)
+        end
+    end
+
+    function region:SetScrollChild(child)
+        self.scrollChild = child
+    end
+
+    function region:GetScrollChild()
+        return self.scrollChild
     end
 
     function region:SetMinMaxValues(minimum, maximum)
@@ -172,9 +184,10 @@ local function NewRegion(name)
     return region
 end
 
-function CreateFrame(_, name)
+function CreateFrame(frameType, name)
     frameCount = frameCount + 1
     local frame = NewRegion(name)
+    frame.frameType = frameType
     if name then
         _G[name] = frame
     end
@@ -278,10 +291,13 @@ assert(LycheeDevWindow.resultTextTab and LycheeDevWindow.resultTreeTab, "result 
 local resultScrollbar = LycheeDevWindow.resultPanel.scroll.scrollbar
 LycheeDevWindow.resultPanel.scroll:SetHeight(100)
 LycheeDevWindow.resultPanel.editBox:SetHeight(300)
-LycheeDevWindow.resultPanel.scrollContent:SetHeight(300)
 LycheeDevWindow.resultPanel.scroll:UpdateScrollChildRect()
 LycheeDevWindow.resultPanel.scroll:SetVerticalScroll(50)
 local minimumScroll, maximumScroll = resultScrollbar:GetMinMaxValues()
+assert(LycheeDevWindow.resultPanel.scroll.frameType == "ScrollFrame",
+    "text areas did not use a native scroll frame")
+assert(LycheeDevWindow.resultPanel.scroll:GetScrollChild() == LycheeDevWindow.resultPanel.editBox,
+    "edit box was not the native scroll child")
 assert(minimumScroll == 0 and maximumScroll == 200, "custom scroll range did not follow content height")
 local resultEditScripts = rawget(LycheeDevWindow.resultPanel.editBox, "scripts")
 assert(resultEditScripts and resultEditScripts.OnMouseWheel, "result edit box did not capture mouse wheel input")
@@ -289,17 +305,20 @@ resultEditScripts.OnMouseWheel(LycheeDevWindow.resultPanel.editBox, -1)
 assert(resultScrollbar:GetValue() == 86, "mouse wheel input did not move the custom scrollbar")
 assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 86,
     "mouse wheel input did not move the text viewport")
-assert(LycheeDevWindow.resultPanel.scrollContent.point[5] == 86,
-    "mouse wheel input did not offset the text container")
 assert(LycheeDevWindow.resultPanel.editBox.point[5] == 0,
-    "scrolling moved the edit box instead of its stable container")
-LycheeDevWindow.resultPanel.scroll:SetVerticalScroll(50)
-local wheelCatcherScripts = rawget(LycheeDevWindow.resultPanel.wheelCatcher, "scripts")
-assert(wheelCatcherScripts and wheelCatcherScripts.OnMouseWheel,
-    "text area did not create a dedicated wheel catcher")
-wheelCatcherScripts.OnMouseWheel(LycheeDevWindow.resultPanel.wheelCatcher, -1)
-assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 86,
-    "dedicated wheel catcher did not move the text viewport")
+    "native scrolling changed the edit box anchor")
+assert(not rawget(LycheeDevWindow.resultPanel, "wheelCatcher"),
+    "read-only text area still covered the edit box with a wheel catcher")
+resultScrollbar:SetValue(120)
+assert(LycheeDevWindow.resultPanel.scroll:GetVerticalScroll() == 120,
+    "custom scrollbar drag did not move the native text viewport")
+LycheeDevWindow.inputPanel.scroll:SetHeight(100)
+LycheeDevWindow.inputPanel.editBox:SetHeight(300)
+LycheeDevWindow.inputPanel.scroll:UpdateScrollChildRect()
+local inputEditScripts = rawget(LycheeDevWindow.inputPanel.editBox, "scripts")
+inputEditScripts.OnMouseWheel(LycheeDevWindow.inputPanel.editBox, -1)
+assert(LycheeDevWindow.inputPanel.scroll:GetVerticalScroll() == 36,
+    "editable input mouse wheel did not move the native text viewport")
 LycheeDevWindow.inputPanel.editBox:SetText("return { nested = { value = 7 } }")
 LycheeDevWindow.runButton:Click()
 assert(LycheeDevWindow.treeView:HasTree(), "table result did not create a tree")
