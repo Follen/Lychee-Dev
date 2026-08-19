@@ -1,0 +1,5 @@
+Analyze/
+*.zip
+*.log
+.idea/
+.vscode/
