@@ -55,6 +55,9 @@ function ns.CreateTreeView(parent, ui)
     local rows = {}
     local visibleNodes = {}
     local tree
+    local selectedNode
+    local selectionChanged
+    local nodeContext
     local view = { panel = panel }
 
     local function FlattenNodes(nodes, depth, visible)
@@ -68,7 +71,9 @@ function ns.CreateTreeView(parent, ui)
     end
 
     local function ApplyRowStyle(row)
-        if row.isHovered then
+        if row.node == selectedNode then
+            row.hover:SetColorTexture(ui.accentR, ui.accentG, ui.accentB, 0.16)
+        elseif row.isHovered then
             row.hover:SetColorTexture(ui.surfaceR, ui.surfaceG, ui.surfaceB, 0.72)
         else
             row.hover:SetColorTexture(0, 0, 0, 0)
@@ -78,6 +83,7 @@ function ns.CreateTreeView(parent, ui)
     local function CreateRow(index)
         local row = CreateFrame("Button", nil, content)
         row:SetSize(ui.contentWidth, TREE_ROW_HEIGHT)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
         local hover = row:CreateTexture(nil, "BACKGROUND")
         hover:SetAllPoints()
@@ -109,14 +115,30 @@ function ns.CreateTreeView(parent, ui)
             self.isHovered = nil
             ApplyRowStyle(self)
         end)
-        row:SetScript("OnClick", function(self)
+        row:SetScript("OnClick", function(self, mouseButton)
             local node = self.node
             if not node then
                 return
-            elseif node.kind == "load_more" and node.owner then
+            elseif mouseButton ~= "RightButton" and node.kind == "load_more" and node.owner then
                 ns.LoadMoreValueTreeNode(node.owner)
                 view:Refresh()
-            elseif node.kind == "table" then
+                return
+            end
+
+            if node.exportable then
+                selectedNode = node
+                if selectionChanged then
+                    selectionChanged(node)
+                end
+            end
+            if mouseButton == "RightButton" then
+                if node.exportable and nodeContext then
+                    nodeContext(node)
+                end
+                view:Refresh()
+                return
+            end
+            if node.kind == "table" then
                 if node.expanded then
                     node.expanded = false
                 else
@@ -125,8 +147,8 @@ function ns.CreateTreeView(parent, ui)
                     end
                     node.expanded = true
                 end
-                view:Refresh()
             end
+            view:Refresh()
         end)
 
         rows[index] = row
@@ -137,10 +159,27 @@ function ns.CreateTreeView(parent, ui)
         return tree and tree.roots and #tree.roots > 0
     end
 
+    function view:GetSelectedNode()
+        return selectedNode
+    end
+
+    function view:SetOnSelectionChanged(callback)
+        selectionChanged = type(callback) == "function" and callback or nil
+    end
+
+    function view:SetOnNodeContext(callback)
+        nodeContext = type(callback) == "function" and callback or nil
+    end
+
     function view:SetTree(newTree)
         tree = newTree
+        selectedNode = tree and tree.roots and tree.roots[1] and tree.roots[1].exportable
+            and tree.roots[1] or nil
         scroll:SetVerticalScroll(0)
         self:Refresh()
+        if selectionChanged then
+            selectionChanged(selectedNode)
+        end
     end
 
     function view:RenderRows()
@@ -206,6 +245,7 @@ function ns.CreateTreeView(parent, ui)
     end
 
     view.content = content
+    view.rows = rows
     view.scroll = scroll
     return view
 end

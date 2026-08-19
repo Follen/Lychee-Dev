@@ -138,13 +138,16 @@ end
 local function BuildInspection(value, label)
     if IsSecret(value) then return nil, ns.L.SECRET_VALUE_BLOCKED end
     local isFrame = IsScriptRegion(value)
+    local textStream = ns.CreateSerializationStream(value)
+    local serialized = textStream:ReadChunk()
     return {
         label = label,
         valueType = type(value),
         value = value,
         preview = SafePreview(value),
         isFrame = isFrame,
-        text = (label or "") .. "  ·  " .. type(value) .. "\n" .. ns.Serialize(value),
+        text = string.format(ns.L.OBJECT_TEXT_HEADER, label or "", type(value)) .. "\n" .. serialized,
+        textStream = textStream,
         tree = ns.CreateValueTree({ n = 1, value }),
     }
 end

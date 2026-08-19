@@ -60,7 +60,7 @@ function ns.CreateAboutPage(parent, ui)
     description:SetText(L.ABOUT_DESCRIPTION)
     description:SetTextColor(1, 1, 1, 0.50)
 
-    local version = "0.5.1"
+    local version = "0.5.2"
     if C_AddOns and C_AddOns.GetAddOnMetadata then
         version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or version
     end

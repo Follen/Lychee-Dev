@@ -541,6 +541,20 @@ local function SetReadOnlyText(panel, text)
     panel.scroll:SetVerticalScroll(0)
 end
 
+local function AppendReadOnlyText(panel, text)
+    if not text or text == "" then
+        return
+    end
+    local editBox = panel.editBox
+    local offset = panel.scroll:GetVerticalScroll()
+    editBox.savedText = (editBox.savedText or "") .. text
+    editBox.updatingText = true
+    editBox:SetText(editBox.savedText)
+    editBox.updatingText = nil
+    panel.scroll:UpdateScrollChildRect()
+    panel.scroll:SetVerticalScroll(offset)
+end
+
 local function SelectAllText(target)
     if target.SelectAll then
         target:SelectAll()
@@ -936,6 +950,7 @@ local function CreateWindow()
         SetButtonPrimary = SetButtonPrimary,
         SetButtonText = SetButtonText,
         SetButtonVariant = SetButtonVariant,
+        AppendReadOnlyText = AppendReadOnlyText,
         SetReadOnlyText = SetReadOnlyText,
         SelectAllText = SelectAllText,
         backdrop = BACKDROP,

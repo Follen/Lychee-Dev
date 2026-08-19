@@ -363,18 +363,43 @@ local objectPage = LycheeDevWindow.pages.objects
 assert(objectPage.inspectButton.variant == "primary", "object inspect action was not primary")
 assert(not objectPage.selectSnapshot:IsEnabled(), "empty object snapshot could be selected")
 local originalInspectPath = ns.ObjectInspector.InspectPath
+local inspectedObject = { nested = { value = 7 } }
+for index = 1, 2500 do
+    inspectedObject["streamField" .. index] = string.rep("v", 16)
+end
 ns.ObjectInspector.InspectPath = function(path)
+    local stream = ns.CreateSerializationStream(inspectedObject)
+    local serialized = stream:ReadChunk()
     return true, {
-        value = {},
+        value = inspectedObject,
         label = path,
         valueType = "table",
-        text = "{}",
-        tree = { roots = {} },
+        text = string.format(ns.L.OBJECT_TEXT_HEADER, path, "table") .. "\n" .. serialized,
+        textStream = stream,
+        tree = ns.CreateValueTree({ n = 1, inspectedObject }),
     }
 end
 objectPage.inspectButton:Click()
 ns.ObjectInspector.InspectPath = originalInspectPath
 assert(objectPage.selectSnapshot:IsEnabled(), "object snapshot action did not enable after inspection")
+local initialObjectTextLength = #objectPage.textView.editBox:GetText()
+objectPage.textView.scroll.verticalRange = 100
+local objectTextScripts = rawget(objectPage.textView.editBox, "scripts")
+objectTextScripts.OnMouseWheel(objectPage.textView.editBox, -1)
+assert(#objectPage.textView.editBox:GetText() > initialObjectTextLength,
+    "object text wheel scrolling did not append another chunk near the bottom")
+local objectRootRow = objectPage.treeView.rows[1]
+rawget(objectRootRow, "scripts").OnClick(objectRootRow, "RightButton")
+assert(objectPage.treeView:GetSelectedNode() == objectRootRow.node,
+    "object tree context action did not select its node")
+assert(objectPage.nodePopup and objectPage.nodePopup.overlay:IsShown(),
+    "object tree context action did not open the node text popup")
+assert(objectPage.nodePopup.textPanel.editBox:GetText():find("nested", 1, true),
+    "node text popup did not contain the selected object")
+objectPage.nodePopup.closeButton:Click()
+assert(not objectPage.nodePopup.overlay:IsShown()
+        and rawget(objectPage.nodePopup.textPanel, "serializationStream") == nil,
+    "closing the node text popup did not release its serialization stream")
 
 LycheeDevWindow.pageTabs.events:Click()
 local eventsPage = LycheeDevWindow.pages.events

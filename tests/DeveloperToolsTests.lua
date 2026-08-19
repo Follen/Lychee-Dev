@@ -112,6 +112,9 @@ TestRoot = {
 }
 local succeeded, value = ns.ObjectInspector.ResolvePath("_G.TestRoot.Nested.Value")
 assert(succeeded and value == "ok", "object path did not resolve")
+local inspected, objectInspection = ns.ObjectInspector.InspectPath("TestRoot")
+assert(inspected and objectInspection.textStream,
+    "object inspection did not retain an incremental text stream")
 local searched, searchResult = ns.ObjectInspector.SearchPath("TestRoot", "alpha")
 assert(searched and searchResult.totalMatches == 3, "object keyword search did not rank all matches")
 assert(searchResult.results[1].key == "Alpha", "exact object search match was not ranked first")

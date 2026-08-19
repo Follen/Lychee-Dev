@@ -156,6 +156,24 @@ local cyclic = {}
 cyclic.self = cyclic
 assert(ns.Serialize(cyclic):find("<cycle>", 1, true), "cycles were not bounded")
 
+local streamedValue = {}
+for index = 1, 3000 do
+    streamedValue["streamField" .. index] = string.rep("v", 16)
+end
+local stream = ns.CreateSerializationStream(streamedValue)
+local firstChunk, firstFinished = stream:ReadChunk()
+assert(#firstChunk <= 44000 and not firstFinished,
+    "serialization stream did not stop after its first chunk")
+local streamedParts = { firstChunk }
+while not stream:IsFinished() do
+    local chunk = stream:ReadChunk()
+    streamedParts[#streamedParts + 1] = chunk
+end
+local streamedText = table.concat(streamedParts)
+assert(streamedText:find('["streamField3000"]', 1, true),
+    "serialization stream did not continue from its saved position")
+assert(not stream:WasLimited(), "bounded stream unexpectedly hit its safety limit")
+
 local secret = {}
 issecretvalue = function(value)
     return value == secret

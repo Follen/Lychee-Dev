@@ -4,6 +4,8 @@ local L = ns.L
 local ROW_HEIGHT = 38
 local VISIBLE_ROWS = 16
 local LIST_WIDTH = 420
+local TEXT_CHUNK_BYTES = 44000
+local TEXT_LOAD_THRESHOLD = 80
 
 local function CreateLineInput(parent, ui)
     local panel = ui.CreatePanel(parent, ui.editorR, ui.editorG, ui.editorB, 1)
@@ -57,10 +59,44 @@ function ns.CreateObjectPage(parent, ui)
         statusDot:SetColorTexture(r, g, b, 0.92)
     end
 
+    local function BindIncrementalText(panel, textStream, onProgress)
+        panel.serializationStream = textStream
+        panel.loadingSerialization = false
+
+        local function LoadNextChunk()
+            local stream = panel.serializationStream
+            if panel.loadingSerialization or not stream or stream:IsFinished() then
+                return
+            end
+            panel.loadingSerialization = true
+            local chunk, finished = stream:ReadChunk(TEXT_CHUNK_BYTES)
+            if chunk ~= "" then
+                ui.AppendReadOnlyText(panel, chunk)
+            end
+            panel.loadingSerialization = false
+            if onProgress then
+                onProgress(#panel.editBox.savedText, finished, stream:WasLimited())
+            end
+        end
+
+        panel.scroll.onVerticalScrollChanged = function(offset)
+            local range = panel.scroll.verticalRange or 0
+            if range - (tonumber(offset) or 0) <= TEXT_LOAD_THRESHOLD then
+                LoadNextChunk()
+            end
+        end
+        panel.LoadNextChunk = LoadNextChunk
+    end
+
     local listLabel = ui.CreateSectionLabel(page, L.SEARCH_RESULTS)
     listLabel:SetPoint("TOPLEFT", 17, -161)
     local detailLabel = ui.CreateSectionLabel(page, L.OBJECT_SNAPSHOT)
     detailLabel:SetPoint("TOPLEFT", LIST_WIDTH + 29, -161)
+
+    local treeHint = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    treeHint:SetPoint("LEFT", detailLabel, "RIGHT", 10, 0)
+    treeHint:SetText(L.TREE_CONTEXT_HINT)
+    treeHint:SetTextColor(1, 1, 1, 0.32)
 
     local listPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
     listPanel:SetPoint("TOPLEFT", 14, -181)
@@ -106,11 +142,12 @@ function ns.CreateObjectPage(parent, ui)
         textView:SetShown(snapshotMode == "text")
         treeModeButton:SetActive(snapshotMode == "tree")
         textModeButton:SetActive(snapshotMode == "text")
+        treeHint:SetShown(snapshotMode == "tree")
     end
     treeModeButton:SetScript("OnClick", function() SetSnapshotMode("tree") end)
     textModeButton:SetScript("OnClick", function() SetSnapshotMode("text") end)
 
-    local selectSnapshot = ui.CreateButton(page, 118, L.SELECT_SNAPSHOT, false)
+    local selectSnapshot = ui.CreateButton(page, 132, L.SELECT_LOADED_TEXT, false)
     selectSnapshot:SetPoint("BOTTOMRIGHT", -14, 14)
     selectSnapshot:SetScript("OnClick", function()
         SetSnapshotMode("text")
@@ -120,6 +157,8 @@ function ns.CreateObjectPage(parent, ui)
     page.searchButton = searchButton
     page.mouseButton = mouseButton
     page.selectSnapshot = selectSnapshot
+    page.treeView = treeView
+    page.textView = textView
 
     local pickerDock
     local pickerPrompt
@@ -129,6 +168,103 @@ function ns.CreateObjectPage(parent, ui)
     local currentValue
     local currentLabel
     local searchRootLabel
+    local nodePopup
+
+    local function GetNodePath(node)
+        local labels = {}
+        while node and node.parent do
+            labels[#labels + 1] = node.label or "?"
+            node = node.parent
+        end
+        local path = currentLabel or "?"
+        for index = #labels, 1, -1 do
+            path = path .. " / " .. labels[index]
+        end
+        return path
+    end
+
+    local function EnsureNodePopup()
+        if nodePopup then
+            return nodePopup
+        end
+
+        local overlay = ui.CreatePanel(page, 0, 0, 0, 0.76)
+        overlay:SetAllPoints(page)
+        overlay:SetFrameLevel(page:GetFrameLevel() + 40)
+        overlay:EnableMouse(true)
+
+        local panel = ui.CreatePanel(overlay, ui.surfaceR, ui.surfaceG, ui.surfaceB, 1)
+        panel:SetSize(760, 520)
+        panel:SetPoint("CENTER")
+        panel:SetFrameLevel(overlay:GetFrameLevel() + 1)
+
+        local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("TOPLEFT", 18, -17)
+        title:SetText(L.NODE_TEXT_TITLE)
+
+        local path = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        path:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+        path:SetPoint("RIGHT", -18, 0)
+        path:SetJustifyH("LEFT")
+        path:SetWordWrap(false)
+        path:SetTextColor(1, 1, 1, 0.42)
+
+        local textPanel = ui.CreateTextArea(panel, true)
+        textPanel:SetPoint("TOPLEFT", 14, -66)
+        textPanel:SetPoint("BOTTOMRIGHT", -14, 56)
+        textPanel.editBox:SetWidth(712)
+
+        local progress = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        progress:SetPoint("BOTTOMLEFT", 18, 21)
+        progress:SetTextColor(1, 1, 1, 0.36)
+
+        local closeButton = ui.CreateButton(panel, 82, L.CLOSE, false)
+        closeButton:SetPoint("BOTTOMRIGHT", -14, 14)
+        closeButton:SetScript("OnClick", function()
+            overlay:Hide()
+            BindIncrementalText(textPanel, nil)
+        end)
+
+        local selectButton = ui.CreateButton(panel, 118, L.SELECT_LOADED_TEXT, false)
+        selectButton:SetPoint("RIGHT", closeButton, "LEFT", -8, 0)
+        selectButton:SetScript("OnClick", function() textPanel:SelectAll() end)
+
+        nodePopup = {
+            overlay = overlay,
+            path = path,
+            progress = progress,
+            textPanel = textPanel,
+            closeButton = closeButton,
+        }
+        page.nodePopup = nodePopup
+        overlay:Hide()
+        return nodePopup
+    end
+
+    local function OpenNodePopup(node)
+        if not node or not node.exportable then
+            return
+        end
+        local popup = EnsureNodePopup()
+        local nodePath = GetNodePath(node)
+        local stream = ns.CreateSerializationStream(node.source)
+        local serialized, finished = stream:ReadChunk(TEXT_CHUNK_BYTES)
+        popup.path:SetText(nodePath)
+        ui.SetReadOnlyText(popup.textPanel,
+            string.format(L.OBJECT_TEXT_HEADER, nodePath, type(node.source)) .. "\n" .. serialized)
+        local function UpdateProgress(bytes, isFinished, limited)
+            popup.progress:SetText(string.format(isFinished and L.TEXT_LOADED_COMPLETE or L.TEXT_LOADED_MORE,
+                math.floor(bytes / 1024 + 0.5)))
+            if isFinished and limited then
+                popup.progress:SetText(L.TEXT_LIMIT_REACHED)
+            end
+        end
+        BindIncrementalText(popup.textPanel, stream, UpdateProgress)
+        UpdateProgress(#popup.textPanel.editBox.savedText, finished, stream:WasLimited())
+        popup.overlay:Show()
+    end
+
+    treeView:SetOnNodeContext(OpenNodePopup)
 
     local function CompletePicker()
         local succeeded, inspection, errorMessage = ns.ObjectInspector.CaptureMouseFocus()
@@ -227,9 +363,28 @@ function ns.CreateObjectPage(parent, ui)
         currentLabel = inspection.label
         treeView:SetTree(inspection.tree)
         ui.SetReadOnlyText(textView, inspection.text)
+        if inspection.textStream then
+            BindIncrementalText(textView, inspection.textStream, function(bytes, finished, limited)
+                if finished and limited then
+                    SetStatus(L.TEXT_LIMIT_REACHED, ui.accentR, ui.accentG, ui.accentB)
+                elseif finished then
+                    SetStatus(string.format(L.OBJECT_READY, inspection.label, inspection.valueType),
+                        0.42, 0.76, 0.43)
+                else
+                    SetStatus(string.format(L.OBJECT_LOADING_PROGRESS, inspection.label,
+                        inspection.valueType, math.floor(bytes / 1024 + 0.5)), 0.42, 0.76, 0.43)
+                end
+            end)
+        else
+            BindIncrementalText(textView, nil)
+        end
         SetSnapshotMode("tree")
         ui.SetButtonEnabled(selectSnapshot, true)
-        SetStatus(string.format(L.OBJECT_READY, inspection.label, inspection.valueType), 0.42, 0.76, 0.43)
+        local readyText = L.OBJECT_READY
+        if inspection.textStream and not inspection.textStream:IsFinished() then
+            readyText = L.OBJECT_READY_MORE
+        end
+        SetStatus(string.format(readyText, inspection.label, inspection.valueType), 0.42, 0.76, 0.43)
     end
 
     local function InspectPath(path)
@@ -373,6 +528,11 @@ function ns.CreateObjectPage(parent, ui)
     end
     function page:Stop()
         StopPicker(false)
+        BindIncrementalText(textView, nil)
+        if nodePopup then
+            nodePopup.overlay:Hide()
+            BindIncrementalText(nodePopup.textPanel, nil)
+        end
     end
     SetStatus(L.READY, 0.55, 0.60, 0.65)
     treeView:SetTree(nil)

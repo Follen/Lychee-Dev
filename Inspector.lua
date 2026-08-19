@@ -147,6 +147,9 @@ local function BuildNode(label, value, parent)
             label = label,
             kind = type(value),
             value = SafeToString(value),
+            source = value,
+            exportable = true,
+            parent = parent,
         }
     elseif HasAncestorTable(parent, value) then
         return MarkerNode(label, ns.L.TREE_CYCLE)
@@ -159,6 +162,7 @@ local function BuildNode(label, value, parent)
         children = {},
         expanded = parent == nil,
         source = value,
+        exportable = true,
         isUIObject = isUIObject,
         parent = parent,
         cursor = nil,
