@@ -65,19 +65,37 @@ function ns.CreateTracePage(parent, ui)
     content:SetWidth(LIST_WIDTH - 34) content:SetHeight(1) scroll:SetScrollChild(content)
     local empty = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     empty:SetPoint("TOP", 0, -24) empty:SetText(L.NO_CALLS_CAPTURED) empty:SetTextColor(1, 1, 1, 0.32)
+    local selected
+    local Format
     local detail = ui.CreateTextArea(page, true)
     detail:SetPoint("TOPLEFT", LIST_WIDTH + 26, -172)
     detail:SetPoint("BOTTOMRIGHT", -14, 54)
     detail.editBox:SetWidth(ui.windowWidth - LIST_WIDTH - 78)
     SetReadOnlyText(detail, L.SELECT_CALL_DETAIL)
 
-    local rows, selected, refreshQueued = {}, nil, false
+    local exportDetail = ui.CreateButton(page, 92, L.SAVE_TO_DISK, false)
+    exportDetail:SetPoint("BOTTOMRIGHT", -14, 14)
+    exportDetail:SetScript("OnClick", function()
+        local recordCount = ns.FunctionTrace.GetCount()
+        if recordCount > 0 then
+            ui.ExportText("function_trace", L.CALL_RECORDS, function()
+                local records = {}
+                for index = 1, recordCount do
+                    records[index] = ns.FunctionTrace.GetRecord(index)
+                end
+                return ns.SerializeForExport(records)
+            end, { recordCount = recordCount })
+        end
+    end)
+    page.exportDetail = exportDetail
+
+    local rows, refreshQueued = {}, false
     local function SyncTraceButton()
         local running = ns.FunctionTrace.IsRunning()
         ui.SetButtonText(traceButton, running and L.STOP_TRACE or L.START_TRACE)
         ui.SetButtonVariant(traceButton, running and "danger" or "primary")
     end
-    local function Format(record)
+    Format = function(record)
         if not record then return L.SELECT_CALL_DETAIL end
         local lines = { string.format(L.TRACE_PATH, record.path), string.format(L.ELAPSED_DETAIL, record.elapsed), "" }
         if #record.arguments == 0 then lines[#lines + 1] = L.NO_ARGUMENTS end
@@ -100,6 +118,7 @@ function ns.CreateTracePage(parent, ui)
         for index = 1, #rows do rows[index]:Hide() end
         local recordCount = ns.FunctionTrace.GetCount()
         ui.SetButtonEnabled(clear, recordCount > 0)
+        ui.SetButtonEnabled(exportDetail, recordCount > 0)
         local offset = scroll:GetVerticalScroll() if issecretvalue and issecretvalue(offset) then offset = 0 end
         local first = math.floor((offset or 0) / ROW_HEIGHT) + 1
         local last, pool = math.min(recordCount, first + VISIBLE_ROWS - 1), 0

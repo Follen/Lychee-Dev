@@ -423,18 +423,35 @@ function ns.CreateEventsPage(parent, ui)
     empty:SetText(L.NO_EVENTS_CAPTURED)
     empty:SetTextColor(1, 1, 1, 0.32)
 
+    local selectedRecord
+    local FormatDetails
     local detailPanel = ui.CreateTextArea(page, true)
     detailPanel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", EVENT_LIST_WIDTH + 12, -42)
     detailPanel:SetPoint("BOTTOMRIGHT", -14, 54)
     detailPanel.editBox:SetWidth(ui.windowWidth - EVENT_LIST_WIDTH - 78)
     SetReadOnlyText(detailPanel, L.SELECT_EVENT_DETAIL)
 
+    local exportDetail = ui.CreateButton(page, 92, L.SAVE_TO_DISK, false)
+    exportDetail:SetPoint("BOTTOMRIGHT", -14, 14)
+    exportDetail:SetScript("OnClick", function()
+        local recordCount = ns.EventMonitor.GetCount()
+        if recordCount > 0 then
+            ui.ExportText("event_log", L.CAPTURED_EVENTS, function()
+                local records = {}
+                for index = 1, recordCount do
+                    records[index] = ns.EventMonitor.GetRecord(index)
+                end
+                return ns.SerializeForExport(records)
+            end, { recordCount = recordCount })
+        end
+    end)
+    page.exportDetail = exportDetail
+
     local rows = {}
     local selectedRows = {}
     local searchRows = {}
     local searchResults = {}
     local highlightedSearchIndex = 1
-    local selectedRecord
     local refreshQueued
     local dirty
 
@@ -707,7 +724,7 @@ function ns.CreateEventsPage(parent, ui)
         end
     end)
 
-    local function FormatDetails(record)
+    FormatDetails = function(record)
         if not record then
             return L.SELECT_EVENT_DETAIL
         end
@@ -789,6 +806,7 @@ function ns.CreateEventsPage(parent, ui)
         dirty = nil
         local recordCount = ns.EventMonitor.GetCount()
         ui.SetButtonEnabled(clearButton, recordCount > 0)
+        ui.SetButtonEnabled(exportDetail, recordCount > 0)
         for index = 1, #rows do
             rows[index]:Hide()
         end

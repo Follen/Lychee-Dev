@@ -565,7 +565,11 @@ local function SelectAllText(target)
 end
 
 local function SetResult(text)
+    window.currentResultText = text or ""
     SetReadOnlyText(window.resultPanel, text)
+    if window.exportResultButton then
+        SetButtonEnabled(window.exportResultButton, text ~= nil and text ~= "")
+    end
 end
 
 local function SetStatus(text, r, g, b)
@@ -965,6 +969,22 @@ local function CreateWindow()
         accentB = ACCENT_B,
         windowWidth = WINDOW_WIDTH,
     }
+    local exportController = ns.CreateExportController(frame, featureUI)
+    featureUI.ExportText = function(kind, title, content, metadata)
+        return exportController:Save(kind, title, content, metadata)
+    end
+    frame.exportController = exportController
+
+    local exportResultButton = CreateButton(runnerPage, 92, L.SAVE_TO_DISK, false)
+    exportResultButton:SetPoint("RIGHT", selectButton, "LEFT", -8, 0)
+    exportResultButton:SetScript("OnClick", function()
+        featureUI.ExportText("run_result", L.RESULT, frame.currentResultText, {
+            code = frame.inputPanel.editBox:GetText(),
+        })
+    end)
+    SetButtonEnabled(exportResultButton, false)
+    frame.exportResultButton = exportResultButton
+
     frame.objectPage = ns.CreateObjectPage(frame, featureUI)
     frame.eventsPage = ns.CreateEventsPage(frame, featureUI)
     frame.tracePage = ns.CreateTracePage(frame, featureUI)
@@ -986,6 +1006,7 @@ local function CreateWindow()
     end
 
     frame:SetScript("OnHide", StopRuntimeTools)
+    frame:HookScript("OnHide", function() exportController:Hide() end)
     resultTextTab:SetScript("OnClick", function()
         SetResultMode("text")
     end)

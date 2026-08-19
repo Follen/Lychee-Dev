@@ -78,6 +78,8 @@ function ns.CreateDiagnosticsPage(parent, ui)
     searchButton:SetPoint("LEFT", searchPanel, "RIGHT", 8, 0)
     local selectReport = ui.CreateButton(errorsView, 110, L.SELECT_REPORT, false)
     selectReport:SetPoint("TOPRIGHT", -14, 0)
+    local exportReport = ui.CreateButton(errorsView, 92, L.SAVE_TO_DISK, false)
+    exportReport:SetPoint("RIGHT", selectReport, "LEFT", -8, 0)
     page.errorsTab = errorsTab
     page.performanceTab = performanceTab
     page.currentScope = currentScope
@@ -85,6 +87,7 @@ function ns.CreateDiagnosticsPage(parent, ui)
     page.refreshButton = refreshButton
     page.clearButton = clearButton
     page.selectReport = selectReport
+    page.exportReport = exportReport
 
     local listLabel = ui.CreateSectionLabel(errorsView, L.ERROR_LIST)
     listLabel:SetPoint("TOPLEFT", 17, -48)
@@ -140,8 +143,13 @@ function ns.CreateDiagnosticsPage(parent, ui)
     cpuHeader:SetText(L.CPU_COLUMN)
     cpuHeader:SetTextColor(1, 1, 1, 0.42)
 
+    local exportPerformance = ui.CreateButton(page, 92, L.SAVE_TO_DISK, false)
+    exportPerformance:SetPoint("BOTTOMRIGHT", -14, 14)
+    page.exportPerformance = exportPerformance
+
     local errors = {}
     local addons = {}
+    local performanceSnapshot
     local selectedError
     local errorRows, perfRows = {}, {}
     local mode = "errors"
@@ -253,6 +261,7 @@ function ns.CreateDiagnosticsPage(parent, ui)
         errorEmpty:SetShown(#errors == 0)
         ui.SetButtonEnabled(clearButton, #errors > 0)
         ui.SetButtonEnabled(selectReport, selectedError ~= nil)
+        ui.SetButtonEnabled(exportReport, #errors > 0)
     end
 
     local function RefreshPerformanceRows()
@@ -294,12 +303,16 @@ function ns.CreateDiagnosticsPage(parent, ui)
     end
 
     local function RefreshPerformance()
+        performanceSnapshot = nil
+        addons = {}
+        ui.SetButtonEnabled(exportPerformance, false)
         local succeeded, snapshot, errorMessage = ns.Diagnostics.CollectSystem()
         if not succeeded then
             SetStatus(errorMessage, true)
             return
         end
         addons = snapshot.addons
+        performanceSnapshot = snapshot
         overview:SetText(string.format(L.DIAGNOSTIC_SUMMARY,
             snapshot.version,
             snapshot.locale,
@@ -308,6 +321,7 @@ function ns.CreateDiagnosticsPage(parent, ui)
             snapshot.bugGrabberPaused and L.YES or L.NO))
         SetStatus(L.PERFORMANCE_UPDATED, false)
         RefreshPerformanceRows()
+        ui.SetButtonEnabled(exportPerformance, #addons > 0)
     end
 
     local function SetScope(newScope)
@@ -322,6 +336,7 @@ function ns.CreateDiagnosticsPage(parent, ui)
         errorsView:SetShown(mode == "errors")
         performanceView:SetShown(mode == "performance")
         clearButton:SetShown(mode == "errors")
+        exportPerformance:SetShown(mode == "performance")
         errorsTab:SetActive(mode == "errors")
         performanceTab:SetActive(mode == "performance")
         if mode == "errors" then RefreshErrorsFromSource() else RefreshPerformance() end
@@ -364,6 +379,22 @@ function ns.CreateDiagnosticsPage(parent, ui)
             SetStatus(L.SELECT_ERROR_FIRST, true)
         end
     end)
+    exportReport:SetScript("OnClick", function()
+        if #errors > 0 then
+            ui.ExportText("error_log", L.ERROR_LIST, function()
+                return ns.SerializeForExport(errors)
+            end, { scope = scope, query = searchPanel.editBox:GetText(), recordCount = #errors })
+        else
+            SetStatus(L.NO_ERRORS, true)
+        end
+    end)
+    exportPerformance:SetScript("OnClick", function()
+        if performanceSnapshot then
+            ui.ExportText("performance_snapshot", L.PERFORMANCE, function()
+                return ns.SerializeForExport(performanceSnapshot)
+            end, { addonCount = #addons })
+        end
+    end)
     errorsTab:SetScript("OnClick", function() SetMode("errors") end)
     performanceTab:SetScript("OnClick", function() SetMode("performance") end)
     refreshButton:SetScript("OnClick", function()
@@ -397,6 +428,9 @@ function ns.CreateDiagnosticsPage(parent, ui)
     performanceTab:SetActive(false)
     ui.SetButtonEnabled(clearButton, false)
     ui.SetButtonEnabled(selectReport, false)
+    ui.SetButtonEnabled(exportReport, false)
+    ui.SetButtonEnabled(exportPerformance, false)
+    exportPerformance:Hide()
     SetStatus(L.READY, false)
     return page
 end

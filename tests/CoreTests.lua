@@ -22,6 +22,10 @@ function time()
     return 1234567890
 end
 
+function date(_, value)
+    return tostring(value)
+end
+
 function issecretvalue()
     return false
 end
@@ -65,10 +69,37 @@ assert(type(ns.db) == "table", "database did not initialize on first use")
 assert(LycheeDevDB == ns.db, "database was not moved to the Lychee Dev root")
 assert(DumperDB == nil, "legacy database root was not cleared after migration")
 assert(ns.db.history[1].code == "legacy code", "legacy history was not preserved")
-assert(ns.db.schemaVersion == 5, "database schema was not upgraded")
+assert(ns.db.schemaVersion == 6, "database schema was not upgraded")
+assert(ns.db.exports and ns.db.exports.version == 1,
+    "export database was not initialized")
 assert(ns.db.history[2].tree and ns.db.history[2].tree.roots[1].children[1].label == "player",
     "legacy serialized history was not restored as a tree")
 assert(toggled, "slash command did not toggle the window")
+
+local firstTicket = ns.AddExport("test", "First", "first export", { path = "Test.First" })
+local secondTicket = ns.AddExport("test", "Second", "second export", { path = "Test.Second" })
+assert(firstTicket and secondTicket and firstTicket ~= secondTicket,
+    "export tickets were not unique")
+assert(ns.GetExport(firstTicket).content == "first export"
+        and ns.GetExports().order[1] == secondTicket,
+    "export records were not indexed by ticket and recency")
+local nextIdBeforeClear = ns.GetExports().nextId
+assert(ns.ClearExports() == 2 and ns.GetExportStats() == 0,
+    "export cache was not cleared")
+local ticketAfterClear = ns.AddExport("test", "After clear", "new export")
+assert(ticketAfterClear and ns.GetExports().nextId > nextIdBeforeClear
+        and ticketAfterClear ~= firstTicket and ticketAfterClear ~= secondTicket,
+    "clearing exports reused an old ticket")
+ns.ClearExports()
+
+local largeExport = string.rep("x", 9 * 1024 * 1024)
+local oldLargeTicket = ns.AddExport("test", "Old large", largeExport)
+local newLargeTicket = ns.AddExport("test", "New large", largeExport)
+local exportCount, exportBytes = ns.GetExportStats()
+assert(oldLargeTicket and newLargeTicket and ns.GetExport(oldLargeTicket) == nil
+        and ns.GetExport(newLargeTicket) and exportCount == 1 and exportBytes == #largeExport,
+    "export cache did not prune oldest records to its 16 MB budget")
+ns.ClearExports()
 
 inCombat = true
 toggled = false

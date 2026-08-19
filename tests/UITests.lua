@@ -233,7 +233,9 @@ GameFontHighlightSmall = {}
 GameFontDisableSmall = {}
 C_Timer = { After = function(_, callback) callback() end }
 local inCombat = false
+local reloadCalled = false
 function InCombatLockdown() return inCombat end
+function ReloadUI() reloadCalled = true end
 
 local function LoadAddonFile(path, namespace)
     local chunk, loadError = loadfile(path)
@@ -254,6 +256,7 @@ LoadAddonFile("FunctionTrace.lua", ns)
 LoadAddonFile("EventCatalogData.lua", ns)
 LoadAddonFile("EventCatalog.lua", ns)
 LoadAddonFile("EventMonitor.lua", ns)
+LoadAddonFile("UIExport.lua", ns)
 LoadAddonFile("UIFeatures.lua", ns)
 LoadAddonFile("UIObjectPage.lua", ns)
 LoadAddonFile("UITracePage.lua", ns)
@@ -342,6 +345,8 @@ assert(LycheeDevWindow.inputPanel.scroll:GetVerticalScroll() == 36,
 LycheeDevWindow.inputPanel.editBox:SetText("return { nested = { value = 7 } }")
 LycheeDevWindow.runButton:Click()
 assert(LycheeDevWindow.treeView:HasTree(), "table result did not create a tree")
+assert(LycheeDevWindow.exportResultButton:IsEnabled(),
+    "run result export did not enable after execution")
 LycheeDevWindow.inputPanel.editBox:SetText("print('no return value')")
 LycheeDevWindow.runButton:Click()
 assert(not LycheeDevWindow.treeView:HasTree(), "run without return values unexpectedly created a tree")
@@ -362,6 +367,7 @@ assert(not LycheeDevWindow.pages.runner:IsShown(), "runner page stayed visible a
 local objectPage = LycheeDevWindow.pages.objects
 assert(objectPage.inspectButton.variant == "primary", "object inspect action was not primary")
 assert(not objectPage.selectSnapshot:IsEnabled(), "empty object snapshot could be selected")
+assert(not objectPage.exportSnapshot:IsEnabled(), "empty object snapshot could be exported")
 local originalInspectPath = ns.ObjectInspector.InspectPath
 local inspectedObject = { nested = { value = 7 } }
 for index = 1, 2500 do
@@ -388,6 +394,21 @@ local objectTextScripts = rawget(objectPage.textView.editBox, "scripts")
 objectTextScripts.OnMouseWheel(objectPage.textView.editBox, -1)
 assert(#objectPage.textView.editBox:GetText() > initialObjectTextLength,
     "object text wheel scrolling did not append another chunk near the bottom")
+local loadedObjectTextLength = #objectPage.textView.editBox:GetText()
+objectPage.exportSnapshot:Click()
+local exportedObjects = ns.GetExports()
+local objectExport = ns.GetExport(exportedObjects.order[1])
+assert(objectExport and objectExport.kind == "object_snapshot"
+        and #objectExport.content > loadedObjectTextLength,
+    "object export did not serialize the full source independently of the edit box")
+assert(LycheeDevWindow.exportController.popup.overlay:IsShown(),
+    "export ticket popup did not open")
+LycheeDevWindow.exportController.popup.copyButton:Click()
+assert(LycheeDevWindow.exportController.popup.hint:GetText() == ns.L.EXPORT_TICKET_SELECTED,
+    "export ticket copy action did not explain Ctrl+C")
+LycheeDevWindow.exportController.popup.reloadButton:Click()
+assert(reloadCalled, "export popup reload action did not call ReloadUI")
+LycheeDevWindow.exportController.popup.laterButton:Click()
 local objectRootRow = objectPage.treeView.rows[1]
 rawget(objectRootRow, "scripts").OnClick(objectRootRow, "RightButton")
 assert(objectPage.treeView:GetSelectedNode() == objectRootRow.node,
@@ -396,6 +417,12 @@ assert(objectPage.nodePopup and objectPage.nodePopup.overlay:IsShown(),
     "object tree context action did not open the node text popup")
 assert(objectPage.nodePopup.textPanel.editBox:GetText():find("nested", 1, true),
     "node text popup did not contain the selected object")
+objectPage.nodePopup.exportButton:Click()
+local nodeExport = ns.GetExport(ns.GetExports().order[1])
+assert(nodeExport and nodeExport.kind == "object_node"
+        and #nodeExport.content > #objectPage.nodePopup.textPanel.editBox:GetText(),
+    "node export did not serialize the full subtree")
+LycheeDevWindow.exportController.popup.laterButton:Click()
 objectPage.nodePopup.closeButton:Click()
 assert(not objectPage.nodePopup.overlay:IsShown()
         and rawget(objectPage.nodePopup.textPanel, "serializationStream") == nil,
@@ -407,6 +434,7 @@ assert(eventsPage.monitorButton.label:GetText() == ns.L.START_MONITORING,
     "event monitor did not show its start action")
 assert(not eventsPage.monitorButton:IsEnabled(), "event monitor started without a selected event")
 assert(not eventsPage.clearButton:IsEnabled(), "empty event log could be cleared")
+assert(not eventsPage.exportDetail:IsEnabled(), "empty event detail could be exported")
 local eventInputScripts = rawget(eventsPage.inputPanel.editBox, "scripts")
 eventsPage.inputPanel.editBox:SetText("PLAYER_TARGET_CHANGED")
 eventInputScripts.OnTextChanged(eventsPage.inputPanel.editBox)
@@ -438,6 +466,7 @@ local tracePage = LycheeDevWindow.pages.trace
 assert(tracePage.traceButton.label:GetText() == ns.L.START_TRACE,
     "function trace did not show its start action")
 assert(not tracePage.clearButton:IsEnabled(), "empty trace log could be cleared")
+assert(not tracePage.exportDetail:IsEnabled(), "empty trace detail could be exported")
 local traceRunning = false
 local originalTraceStart = ns.FunctionTrace.Start
 local originalTraceStop = ns.FunctionTrace.Stop
@@ -465,10 +494,20 @@ assert(diagnosticsPage.errorsTab.active and not diagnosticsPage.performanceTab.a
 assert(diagnosticsPage.currentScope.variant == "selected" and diagnosticsPage.allScope.variant == "secondary",
     "diagnostic scope did not expose its selected state")
 assert(not diagnosticsPage.selectReport:IsEnabled(), "empty diagnostic report could be selected")
+assert(not diagnosticsPage.exportReport:IsEnabled(), "empty diagnostic report could be exported")
 assert(not diagnosticsPage.clearButton:IsEnabled(), "empty diagnostic error list could be cleared")
 
 LycheeDevWindow.pageTabs.about:Click()
 local aboutPage = LycheeDevWindow.pages.about
+local exportNextId = ns.GetExports().nextId
+assert(aboutPage.clearExportCache:IsEnabled(), "nonempty export cache could not be cleared")
+aboutPage.clearExportCache:Click()
+assert(aboutPage.clearExportCache.label:GetText() == ns.L.CONFIRM_CLEAR_CACHE,
+    "export cache clear did not require confirmation")
+aboutPage.clearExportCache:Click()
+local remainingExports = ns.GetExportStats()
+assert(remainingExports == 0 and ns.GetExports().nextId == exportNextId,
+    "export cache clear did not remove records or changed the ticket sequence")
 aboutPage.selectAddressButton:Click()
 assert(aboutPage.selectAddressButton.label:GetText() == ns.L.ADDRESS_SELECTED,
     "about page did not confirm repository selection")

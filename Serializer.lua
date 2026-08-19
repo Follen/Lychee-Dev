@@ -307,3 +307,18 @@ function ns.CreateSerializationStream(value)
 
     return stream
 end
+
+function ns.SerializeForExport(value)
+    local stream = ns.CreateSerializationStream(value)
+    local parts = {}
+    repeat
+        local chunk = stream:ReadChunk()
+        if chunk ~= "" then
+            parts[#parts + 1] = chunk
+        end
+    until stream:IsFinished()
+    if stream.errorMessage then
+        error(stream.errorMessage, 0)
+    end
+    return table.concat(parts), stream:WasLimited(), stream.errorMessage
+end

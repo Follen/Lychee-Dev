@@ -11,3 +11,5 @@ The tree inspector loads large tables in pages of 200 entries and creates nested
 Click **Select result**, then press `Ctrl+C` to copy the result. World of Warcraft addons cannot write directly to the operating system clipboard.
 
 Recent runs are stored in `LycheeDevDB` under a 16 MB total storage budget rather than a fixed entry count. Existing `DumperDB` history is migrated automatically. Each stored input and result also has an individual size limit so SavedVariables cannot grow without bound.
+
+Full exports are stored under `LycheeDevDB.exports.records[ticket]`. Each record contains the ticket, data kind, title, complete serialized content, byte count, creation time, client information, and small searchable metadata. `exports.order` keeps newest-first ticket order and `exports.nextId` prevents ticket reuse after cache cleanup. Export content is bounded to 16 MB and 200 records; the oldest records are removed first. World of Warcraft writes SavedVariables to disk only during `/reload`, logout, or exit, so the export dialog offers both ticket selection and an immediate reload action.

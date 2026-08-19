@@ -153,10 +153,14 @@ function ns.CreateObjectPage(parent, ui)
         SetSnapshotMode("text")
         textView:SelectAll()
     end)
+
+    local exportSnapshot = ui.CreateButton(page, 92, L.SAVE_TO_DISK, false)
+    exportSnapshot:SetPoint("RIGHT", selectSnapshot, "LEFT", -8, 0)
     page.inspectButton = inspectButton
     page.searchButton = searchButton
     page.mouseButton = mouseButton
     page.selectSnapshot = selectSnapshot
+    page.exportSnapshot = exportSnapshot
     page.treeView = treeView
     page.textView = textView
 
@@ -229,12 +233,25 @@ function ns.CreateObjectPage(parent, ui)
         selectButton:SetPoint("RIGHT", closeButton, "LEFT", -8, 0)
         selectButton:SetScript("OnClick", function() textPanel:SelectAll() end)
 
+        local exportButton = ui.CreateButton(panel, 92, L.SAVE_TO_DISK, false)
+        exportButton:SetPoint("RIGHT", selectButton, "LEFT", -8, 0)
+        exportButton:SetScript("OnClick", function()
+            local nodePath = path:GetText()
+            ui.ExportText("object_node", nodePath, function()
+                return ns.SerializeForExport(nodePopup.source)
+            end, {
+                path = path:GetText(),
+                valueType = type(nodePopup.source),
+            })
+        end)
+
         nodePopup = {
             overlay = overlay,
             path = path,
             progress = progress,
             textPanel = textPanel,
             closeButton = closeButton,
+            exportButton = exportButton,
         }
         page.nodePopup = nodePopup
         overlay:Hide()
@@ -247,6 +264,7 @@ function ns.CreateObjectPage(parent, ui)
         end
         local popup = EnsureNodePopup()
         local nodePath = GetNodePath(node)
+        popup.source = node.source
         local stream = ns.CreateSerializationStream(node.source)
         local serialized, finished = stream:ReadChunk(TEXT_CHUNK_BYTES)
         popup.path:SetText(nodePath)
@@ -265,6 +283,13 @@ function ns.CreateObjectPage(parent, ui)
     end
 
     treeView:SetOnNodeContext(OpenNodePopup)
+
+    exportSnapshot:SetScript("OnClick", function()
+        local label = currentLabel or L.OBJECT_SNAPSHOT
+        ui.ExportText("object_snapshot", label, function()
+            return ns.SerializeForExport(currentValue)
+        end, { path = currentLabel or "", valueType = type(currentValue) })
+    end)
 
     local function CompletePicker()
         local succeeded, inspection, errorMessage = ns.ObjectInspector.CaptureMouseFocus()
@@ -380,6 +405,7 @@ function ns.CreateObjectPage(parent, ui)
         end
         SetSnapshotMode("tree")
         ui.SetButtonEnabled(selectSnapshot, true)
+        ui.SetButtonEnabled(exportSnapshot, true)
         local readyText = L.OBJECT_READY
         if inspection.textStream and not inspection.textStream:IsFinished() then
             readyText = L.OBJECT_READY_MORE
@@ -538,6 +564,7 @@ function ns.CreateObjectPage(parent, ui)
     treeView:SetTree(nil)
     ui.SetReadOnlyText(textView, "")
     ui.SetButtonEnabled(selectSnapshot, false)
+    ui.SetButtonEnabled(exportSnapshot, false)
     SetSnapshotMode("tree")
     RefreshResults()
     return page

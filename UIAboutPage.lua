@@ -55,12 +55,12 @@ function ns.CreateAboutPage(parent, ui)
 
     local description = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     description:SetPoint("TOPLEFT", productName, "BOTTOMLEFT", 0, -10)
-    description:SetPoint("RIGHT", -18, 0)
+    description:SetWidth(500)
     description:SetJustifyH("LEFT")
     description:SetText(L.ABOUT_DESCRIPTION)
     description:SetTextColor(1, 1, 1, 0.50)
 
-    local version = "0.5.2"
+    local version = "0.5.3"
     if C_AddOns and C_AddOns.GetAddOnMetadata then
         version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or version
     end
@@ -69,6 +69,45 @@ function ns.CreateAboutPage(parent, ui)
     versionText:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -10)
     versionText:SetText(string.format(L.ABOUT_VERSION_TEXT, version))
     versionText:SetTextColor(1, 1, 1, 0.32)
+
+    local cachePanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.86)
+    cachePanel:SetPoint("TOPRIGHT", -14, -88)
+    cachePanel:SetSize(340, 78)
+
+    local cacheLabel = cachePanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    cacheLabel:SetPoint("TOPLEFT", 14, -12)
+    cacheLabel:SetText(L.EXPORT_CACHE)
+
+    local cacheStats = cachePanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    cacheStats:SetPoint("BOTTOMLEFT", 14, 13)
+    cacheStats:SetTextColor(1, 1, 1, 0.40)
+
+    local clearCache = ui.CreateButton(cachePanel, 108, L.CLEAR_EXPORT_CACHE, false)
+    clearCache:SetPoint("RIGHT", -12, 0)
+
+    local clearCacheConfirmed = false
+    local function RefreshCache()
+        local count, bytes, maximum = ns.GetExportStats()
+        cacheStats:SetText(string.format(L.EXPORT_CACHE_STATUS, count, bytes / 1024, maximum / 1024 / 1024))
+        ui.SetButtonEnabled(clearCache, count > 0)
+        if count == 0 then
+            clearCacheConfirmed = false
+            ui.SetButtonText(clearCache, L.CLEAR_EXPORT_CACHE)
+            ui.SetButtonVariant(clearCache, "secondary")
+        end
+    end
+
+    clearCache:SetScript("OnClick", function()
+        if not clearCacheConfirmed then
+            clearCacheConfirmed = true
+            ui.SetButtonText(clearCache, L.CONFIRM_CLEAR_CACHE)
+            ui.SetButtonVariant(clearCache, "danger")
+            return
+        end
+        ns.ClearExports()
+        clearCacheConfirmed = false
+        RefreshCache()
+    end)
 
     local divider = page:CreateTexture(nil, "ARTWORK")
     divider:SetColorTexture(1, 1, 1, 0.08)
@@ -185,5 +224,11 @@ function ns.CreateAboutPage(parent, ui)
     page.urlBox = urlBox
     page.selectAddressButton = selectButton
     page.copyHint = copyHint
+    page.clearExportCache = clearCache
+    page.exportCacheStats = cacheStats
+    function page:Activate()
+        RefreshCache()
+    end
+    RefreshCache()
     return page
 end
