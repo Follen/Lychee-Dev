@@ -299,6 +299,12 @@ function ns.CreateEventsPage(parent, ui)
     inputPanel:SetHeight(30)
     page.inputPanel = inputPanel
 
+    local inputHint = inputPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    inputHint:SetPoint("LEFT", 10, 0)
+    inputHint:SetText(L.EVENT_SEARCH_HINT)
+    inputHint:SetTextColor(1, 1, 1, 0.30)
+    page.inputHint = inputHint
+
     local monitorButton = ui.CreateButton(page, 112, L.START_MONITORING, true)
     monitorButton:SetPoint("TOPRIGHT", -14, -104)
 
@@ -320,11 +326,15 @@ function ns.CreateEventsPage(parent, ui)
         statusDot:SetColorTexture(r, g, b, 0.92)
     end
 
-    local selection = ns.EventCatalog.CreateSelection({ "PLAYER_TARGET_CHANGED" })
-    local function SyncMonitorButton()
-        local running = ns.EventMonitor.IsRunning()
-        ui.SetButtonText(monitorButton, running and L.STOP_MONITORING or L.START_MONITORING)
-        ui.SetButtonVariant(monitorButton, running and "danger" or "primary")
+    local selection = ns.EventCatalog.CreateSelection()
+    local SyncMonitorControls
+    local function SetSelectionStatus()
+        local count = selection:GetCount()
+        if count > 0 then
+            SetStatus(string.format(L.EVENTS_SELECTED_STATUS, count), 0.55, 0.60, 0.65)
+        else
+            SetStatus(L.EVENT_READY, 0.55, 0.60, 0.65)
+        end
     end
 
     local selectedLabel = ui.CreateSectionLabel(page, L.SELECTED_EVENTS)
@@ -337,7 +347,8 @@ function ns.CreateEventsPage(parent, ui)
     local selectedPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
     selectedPanel:SetPoint("TOPLEFT", 14, -189)
     selectedPanel:SetPoint("TOPRIGHT", -14, -189)
-    selectedPanel:SetHeight(72)
+    selectedPanel:SetHeight(42)
+    page.selectedPanel = selectedPanel
 
     local selectedScroll = ui.CreateScrollArea(selectedPanel, 7, 7, 7, 7)
     local selectedContent = CreateFrame("Frame", nil, selectedScroll)
@@ -351,13 +362,13 @@ function ns.CreateEventsPage(parent, ui)
     selectedEmpty:SetTextColor(1, 1, 1, 0.32)
 
     local logLabel = ui.CreateSectionLabel(page, L.CAPTURED_EVENTS)
-    logLabel:SetPoint("TOPLEFT", 17, -280)
+    logLabel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", 3, -22)
 
     local detailLabel = ui.CreateSectionLabel(page, L.PAYLOAD)
-    detailLabel:SetPoint("TOPLEFT", EVENT_LIST_WIDTH + 29, -280)
+    detailLabel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", EVENT_LIST_WIDTH + 15, -22)
 
     local logPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 0.9)
-    logPanel:SetPoint("TOPLEFT", 14, -300)
+    logPanel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", 0, -42)
     logPanel:SetPoint("BOTTOMLEFT", 14, 54)
     logPanel:SetWidth(EVENT_LIST_WIDTH)
 
@@ -373,7 +384,7 @@ function ns.CreateEventsPage(parent, ui)
     empty:SetTextColor(1, 1, 1, 0.32)
 
     local detailPanel = ui.CreateTextArea(page, true)
-    detailPanel:SetPoint("TOPLEFT", EVENT_LIST_WIDTH + 26, -300)
+    detailPanel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", EVENT_LIST_WIDTH + 12, -42)
     detailPanel:SetPoint("BOTTOMRIGHT", -14, 54)
     detailPanel.editBox:SetWidth(ui.windowWidth - EVENT_LIST_WIDTH - 78)
     SetReadOnlyText(detailPanel, L.SELECT_EVENT_DETAIL)
@@ -392,6 +403,25 @@ function ns.CreateEventsPage(parent, ui)
     searchPanel:SetPoint("TOPRIGHT", inputPanel, "BOTTOMRIGHT", 0, -4)
     searchPanel:SetFrameLevel(page:GetFrameLevel() + 30)
     searchPanel:Hide()
+
+    SyncMonitorControls = function()
+        local running = ns.EventMonitor.IsRunning()
+        ui.SetButtonText(monitorButton, running and L.STOP_MONITORING or L.START_MONITORING)
+        ui.SetButtonVariant(monitorButton, running and "danger" or "primary")
+        ui.SetButtonEnabled(monitorButton, running or selection:GetCount() > 0)
+        inputPanel.editBox:SetEnabled(not running)
+        inputPanel.editBox:SetTextColor(0.94, 0.95, 0.96, running and 0.38 or 1)
+        inputHint:SetAlpha(running and 0.22 or 1)
+        if running then
+            inputPanel.editBox:ClearFocus()
+            searchPanel:Hide()
+        end
+        for index = 1, #selectedRows do
+            local removeButton = selectedRows[index].removeButton
+            removeButton:SetEnabled(not running)
+            removeButton:SetAlpha(running and 0.24 or 1)
+        end
+    end
 
     local function FormatCatalogPayload(eventName, signature)
         if eventName == "ALL" then
@@ -418,6 +448,9 @@ function ns.CreateEventsPage(parent, ui)
 
     local RefreshSelected
     local function AddSearchResult(resultIndex)
+        if ns.EventMonitor.IsRunning() then
+            return
+        end
         local catalogIndex = searchResults[resultIndex]
         if not catalogIndex then
             return
@@ -426,9 +459,10 @@ function ns.CreateEventsPage(parent, ui)
         local succeeded, errorMessage = selection:Add(catalogIndex)
         if succeeded then
             inputPanel.editBox:SetText("")
+            inputHint:Show()
             searchPanel:Hide()
             RefreshSelected()
-            SetStatus(string.format(L.EVENTS_SELECTED_STATUS, selection:GetCount()), 0.55, 0.60, 0.65)
+            SetSelectionStatus()
         else
             SetStatus(errorMessage or L.COULD_NOT_SELECT_EVENT, ui.accentR, ui.accentG, ui.accentB)
         end
@@ -479,7 +513,11 @@ function ns.CreateEventsPage(parent, ui)
     end
 
     local function RefreshSearch()
-        ns.EventCatalog.Search(inputPanel.editBox:GetText(), SEARCH_RESULT_LIMIT, searchResults)
+        local query = inputPanel.editBox:GetText()
+        wipe(searchResults)
+        if not ns.EventMonitor.IsRunning() and query ~= "" then
+            ns.EventCatalog.Search(query, SEARCH_RESULT_LIMIT, searchResults)
+        end
         highlightedSearchIndex = math.min(math.max(highlightedSearchIndex, 1), math.max(#searchResults, 1))
 
         for index = 1, #searchRows do
@@ -533,9 +571,9 @@ function ns.CreateEventsPage(parent, ui)
         local removeButton = CreateRemoveButton(row, ui)
         removeButton:SetPoint("RIGHT", -3, 0)
         removeButton:SetScript("OnClick", function()
-            if row.eventName and selection:Remove(row.eventName) then
+            if not ns.EventMonitor.IsRunning() and row.eventName and selection:Remove(row.eventName) then
                 RefreshSelected()
-                SetStatus(string.format(L.EVENTS_SELECTED_STATUS, selection:GetCount()), 0.55, 0.60, 0.65)
+                SetSelectionStatus()
             end
         end)
         row.removeButton = removeButton
@@ -580,14 +618,18 @@ function ns.CreateEventsPage(parent, ui)
         end
 
         selectedCount:SetText(string.format(L.SELECTED_COUNT, selectionCount))
+        selectedPanel:SetHeight(math.max(42,
+            math.min(selectionCount, SELECTED_VISIBLE_ROWS) * SELECTED_ROW_HEIGHT + 14))
         selectedContent:SetHeight(math.max(1, selectionCount * SELECTED_ROW_HEIGHT))
         selectedScroll:UpdateScrollChildRect()
         selectedEmpty:SetShown(selectionCount == 0)
+        SyncMonitorControls()
     end
 
     selectedScroll.onVerticalScrollChanged = RefreshSelected
 
-    inputPanel.editBox:SetScript("OnTextChanged", function()
+    inputPanel.editBox:SetScript("OnTextChanged", function(self)
+        inputHint:SetShown(self:GetText() == "")
         highlightedSearchIndex = 1
         RefreshSearch()
     end)
@@ -765,7 +807,7 @@ function ns.CreateEventsPage(parent, ui)
         if ns.EventMonitor.IsRunning() then
             ns.EventMonitor.Stop()
             SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
-            SyncMonitorButton()
+            SyncMonitorControls()
             return
         end
 
@@ -780,7 +822,7 @@ function ns.CreateEventsPage(parent, ui)
         else
             SetStatus(errorMessage or L.COULD_NOT_START, ui.accentR, ui.accentG, ui.accentB)
         end
-        SyncMonitorButton()
+        SyncMonitorControls()
     end)
 
     clearButton:SetScript("OnClick", function()
@@ -796,8 +838,8 @@ function ns.CreateEventsPage(parent, ui)
 
     function page:StopMonitor()
         ns.EventMonitor.Stop()
-        SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
-        SyncMonitorButton()
+        SetSelectionStatus()
+        SyncMonitorControls()
     end
 
     function page:RefreshIfDirty()
@@ -806,8 +848,7 @@ function ns.CreateEventsPage(parent, ui)
         end
     end
 
-    SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
-    SyncMonitorButton()
+    SetSelectionStatus()
     RefreshSelected()
     page:Refresh()
     return page

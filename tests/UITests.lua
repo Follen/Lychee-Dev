@@ -380,7 +380,14 @@ LycheeDevWindow.pageTabs.events:Click()
 local eventsPage = LycheeDevWindow.pages.events
 assert(eventsPage.monitorButton.label:GetText() == ns.L.START_MONITORING,
     "event monitor did not show its start action")
+assert(not eventsPage.monitorButton:IsEnabled(), "event monitor started without a selected event")
 assert(not eventsPage.clearButton:IsEnabled(), "empty event log could be cleared")
+local eventInputScripts = rawget(eventsPage.inputPanel.editBox, "scripts")
+eventsPage.inputPanel.editBox:SetText("PLAYER_TARGET_CHANGED")
+eventInputScripts.OnTextChanged(eventsPage.inputPanel.editBox)
+eventInputScripts.OnEnterPressed(eventsPage.inputPanel.editBox)
+assert(eventsPage.monitorButton:IsEnabled(), "event monitor did not enable after selecting an event")
+assert(eventsPage.selectedPanel:GetHeight() == 42, "single selected event left excess empty space")
 local monitorRunning = false
 local originalMonitorStart = ns.EventMonitor.Start
 local originalMonitorStop = ns.EventMonitor.Stop
@@ -392,9 +399,11 @@ eventsPage.monitorButton:Click()
 assert(eventsPage.monitorButton.label:GetText() == ns.L.STOP_MONITORING,
     "event monitor did not switch to its stop action")
 assert(eventsPage.monitorButton.variant == "danger", "active event monitor did not show its stop state")
+assert(not eventsPage.inputPanel.editBox:IsEnabled(), "event search stayed editable while monitoring")
 eventsPage.monitorButton:Click()
 assert(eventsPage.monitorButton.label:GetText() == ns.L.START_MONITORING,
     "event monitor did not return to its start action")
+assert(eventsPage.inputPanel.editBox:IsEnabled(), "event search did not unlock after monitoring stopped")
 ns.EventMonitor.Start = originalMonitorStart
 ns.EventMonitor.Stop = originalMonitorStop
 ns.EventMonitor.IsRunning = originalMonitorIsRunning

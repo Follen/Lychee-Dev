@@ -42,14 +42,11 @@ function ns.CreateAboutPage(parent, ui)
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
 
-    local sectionTitle = ui.CreateSectionLabel(page, L.ABOUT_TITLE)
-    sectionTitle:SetPoint("TOPLEFT", 17, -84)
-
     local logo = page:CreateTexture(nil, "ARTWORK")
     logo:SetTexture("Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\Logo.png")
     logo:SetTexCoord(0.18, 0.79, 0.17, 0.80)
     logo:SetSize(72, 72)
-    logo:SetPoint("TOPLEFT", 16, -116)
+    logo:SetPoint("TOPLEFT", 16, -88)
 
     local productName = page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     productName:SetPoint("TOPLEFT", logo, "TOPRIGHT", 18, -5)
@@ -63,7 +60,7 @@ function ns.CreateAboutPage(parent, ui)
     description:SetText(L.ABOUT_DESCRIPTION)
     description:SetTextColor(1, 1, 1, 0.50)
 
-    local version = "0.5.0"
+    local version = "0.5.1"
     if C_AddOns and C_AddOns.GetAddOnMetadata then
         version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or version
     end
@@ -75,16 +72,16 @@ function ns.CreateAboutPage(parent, ui)
 
     local divider = page:CreateTexture(nil, "ARTWORK")
     divider:SetColorTexture(1, 1, 1, 0.08)
-    divider:SetPoint("TOPLEFT", 14, -211)
-    divider:SetPoint("TOPRIGHT", -14, -211)
+    divider:SetPoint("TOPLEFT", 14, -183)
+    divider:SetPoint("TOPRIGHT", -14, -183)
     divider:SetHeight(1)
 
     local projectLabel = ui.CreateSectionLabel(page, L.ABOUT_PROJECT)
-    projectLabel:SetPoint("TOPLEFT", 17, -231)
+    projectLabel:SetPoint("TOPLEFT", 17, -203)
 
     local metadata = CreateFrame("Frame", nil, page)
-    metadata:SetPoint("TOPLEFT", 14, -253)
-    metadata:SetPoint("TOPRIGHT", -14, -253)
+    metadata:SetPoint("TOPLEFT", 14, -225)
+    metadata:SetPoint("TOPRIGHT", -14, -225)
     metadata:SetHeight(67)
     local metadataBackground = metadata:CreateTexture(nil, "BACKGROUND")
     metadataBackground:SetAllPoints()
@@ -104,11 +101,11 @@ function ns.CreateAboutPage(parent, ui)
     end
 
     local githubLabel = ui.CreateSectionLabel(page, L.ABOUT_GITHUB)
-    githubLabel:SetPoint("TOPLEFT", 17, -346)
+    githubLabel:SetPoint("TOPLEFT", 17, -318)
 
     local githubPanel = ui.CreatePanel(page, ui.editorR, ui.editorG, ui.editorB, 1)
-    githubPanel:SetPoint("TOPLEFT", 14, -370)
-    githubPanel:SetPoint("TOPRIGHT", -14, -370)
+    githubPanel:SetPoint("TOPLEFT", 14, -342)
+    githubPanel:SetPoint("TOPRIGHT", -14, -342)
     githubPanel:SetHeight(62)
 
     local githubIcon = githubPanel:CreateTexture(nil, "ARTWORK")
@@ -136,7 +133,7 @@ function ns.CreateAboutPage(parent, ui)
     selectButton:SetPoint("RIGHT", -14, 0)
 
     local copyHint = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    copyHint:SetPoint("TOPLEFT", 17, -442)
+    copyHint:SetPoint("TOPLEFT", 17, -414)
     copyHint:SetText(L.ABOUT_COPY_HINT)
     copyHint:SetTextColor(1, 1, 1, 0.32)
 
@@ -171,19 +168,19 @@ function ns.CreateAboutPage(parent, ui)
     selectButton:SetScript("OnClick", SelectAddress)
 
     local environmentLabel = ui.CreateSectionLabel(page, L.ABOUT_ENVIRONMENT)
-    environmentLabel:SetPoint("TOPLEFT", 17, -484)
+    environmentLabel:SetPoint("TOPLEFT", 17, -456)
 
     CreateEnvironmentRow(page, L.ABOUT_DEPENDENCY, L.ABOUT_DEPENDENCY_STATUS,
-        L.ABOUT_DEPENDENCY_DETAIL, -513, true)
+        L.ABOUT_DEPENDENCY_DETAIL, -485, true)
 
     local rowDivider = page:CreateTexture(nil, "ARTWORK")
     rowDivider:SetColorTexture(1, 1, 1, 0.06)
-    rowDivider:SetPoint("TOPLEFT", 190, -558)
-    rowDivider:SetPoint("TOPRIGHT", -18, -558)
+    rowDivider:SetPoint("TOPLEFT", 190, -530)
+    rowDivider:SetPoint("TOPRIGHT", -18, -530)
     rowDivider:SetHeight(1)
 
     CreateEnvironmentRow(page, L.ABOUT_SAFETY, L.ABOUT_SAFETY_STATUS,
-        L.ABOUT_SAFETY_TEXT, -578, false)
+        L.ABOUT_SAFETY_TEXT, -550, false)
 
     page.urlBox = urlBox
     page.selectAddressButton = selectButton
