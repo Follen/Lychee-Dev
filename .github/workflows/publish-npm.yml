@@ -1,0 +1,96 @@
+name: publish npm
+
+# Publishing is triggered by a version tag such as v0.8.0. Nothing is published
+# from a branch push, so `npm version` + `git push --follow-tags` is the only
+# way a release reaches the registry.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Build and test only, do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Vendor the shipped payload
+        working-directory: packages/cli
+        run: node scripts/vendor.mjs
+
+      - name: Fail if the vendored registry ships local task data
+        shell: bash
+        run: |
+          if grep -q '^-- BEGIN LYCHEE DEV TASK ' packages/cli/vendor/addon/Modules/Automation/auto/auto.lua; then
+            echo "::error::the task registry contains local task blocks; clear it before releasing"
+            exit 1
+          fi
+
+      - name: Package contents
+        working-directory: packages/cli
+        run: npm pack --dry-run
+
+  addon-tests:
+    name: addon test matrix
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the repository test matrix
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1
+
+  publish:
+    name: publish to npm
+    needs: [verify, addon-tests]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.dry-run == false
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Vendor the shipped payload
+        working-directory: packages/cli
+        run: node scripts/vendor.mjs
+
+      - name: Check the tag matches package.json
+        working-directory: packages/cli
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - name: Publish
+        working-directory: packages/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance

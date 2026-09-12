@@ -6,3 +6,8 @@ publish/
 __pycache__/
 .idea/
 .vscode/
+
+# npm package build output
+node_modules/
+packages/cli/vendor/
+packages/cli/*.tgz
