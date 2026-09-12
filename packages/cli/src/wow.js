@@ -233,6 +233,21 @@ export function resolveInstance(instances, { clientId = null, index = null } = {
   };
 }
 
+/**
+ * Find the instance a saved pin refers to.
+ *
+ * A pin stores the build plus which instance of that build, because window
+ * handles and pids change every launch. The number shown to the user counts
+ * among supported instances, so the same index works here.
+ */
+export function matchPinned(instances, pin) {
+  if (!pin || !pin.flavor) return null;
+  const supported = instances.filter((item) => item.supported);
+  const ofFlavor = supported.filter((item) => item.flavorId === pin.flavor);
+  if (ofFlavor.length === 0) return null;
+  return ofFlavor[pin.ordinal || 0] || ofFlavor[0];
+}
+
 export function formatInstance(instance, index) {
   const flavor = instance.flavorLabel || instance.flavorFolder || 'unknown';
   const suffix = instance.supported ? '' : '  (the addon does not serve this build)';

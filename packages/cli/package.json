@@ -1,6 +1,6 @@
 {
   "name": "lycheedev",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "lycheedev: install the World of Warcraft inspection addon, its in-game automation tooling, and drive it from the command line.",
   "keywords": [
     "wow",

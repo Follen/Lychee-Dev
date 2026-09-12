@@ -6,12 +6,13 @@ import path from 'node:path';
 
 import { runDoctor } from '../src/doctor.js';
 import { runInstall } from '../src/install.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, updateConfig } from '../src/config.js';
 import { runAutomation } from '../src/python.js';
 import {
   findInstances,
   findSavedVariablesCandidates,
   formatInstance,
+  matchPinned,
   resolveInstance,
   scanClients,
 } from '../src/wow.js';
@@ -27,6 +28,8 @@ commands
   doctor               report what is installed and what is missing
   clients              list every detected build and its addon state
   instances            list running game clients (build, pid, window)
+  use [index]          pin one running client as the default target
+  use --clear          drop the pin
   send <text>          type one slash command into the running game
   capture              poll the game window and decode the completion notice
   run --task <id>      deliver, decode, reload once and read the result ticket
@@ -52,8 +55,10 @@ options
   -v, --version        show the version
 
 Every non-retail client runs as WowClassic.exe, so a running client is matched
-by its install path, not its process name. When several clients are open, run
-"lycheedev instances" first and pass --instance <index> to choose one.
+by its install path, not its process name. With several clients open, run
+"lycheedev instances" then "lycheedev use <index>" to pin one as the target;
+the pin stores the build, so it survives a restart even though the pid and
+window handle change. Pass --instance <index> to override it for one command.
 
 The automation subcommands are thin wrappers over the bundled python helper, so
 the same arguments it accepts are forwarded unchanged.`;
@@ -146,21 +151,31 @@ function runClients(flags) {
 
 /** `lycheedev instances`: which game clients are running right now. */
 function runInstances(flags) {
+  const config = loadConfig();
   const instances = findInstances({ pythonBin: flags.python || null });
   if (instances.length === 0) {
     console.log('no World of Warcraft instance is running');
     return 0;
   }
+  const pinned = matchPinned(instances, config.pinnedInstance);
   console.log('running instances:');
-  instances.forEach((instance, index) => console.log(formatInstance(instance, index)));
+  instances.forEach((instance, index) => {
+    console.log(formatInstance(instance, index));
+  });
   const supported = instances.filter((item) => item.supported);
-  const sameBuild = supported.length > 1;
   console.log('');
+  if (pinned) {
+    const label = pinned.flavorLabel || pinned.flavorFolder;
+    console.log(`pinned: ${label} (pid ${pinned.pid}), pid ${pinned.pid} - commands target it`);
+  } else if (config.pinnedInstance) {
+    console.log('pinned client is not running; run `lycheedev use` to repin');
+  }
   if (supported.length === 0) {
     console.log('none of these builds are served by the addon');
-  } else if (sameBuild) {
-    console.log('several instances are running: target one with `--instance <index>`');
-  } else {
+  } else if (!pinned && supported.length > 1) {
+    console.log('several clients are running: `lycheedev use <index>` pins one, '
+      + 'or pass --instance <index> per command');
+  } else if (!pinned) {
     console.log('commands target this instance automatically');
   }
   return 0;
@@ -169,33 +184,114 @@ function runInstances(flags) {
 /**
  * Resolve the live game window a command should type into.
  *
- * The executable name cannot identify a build, so the running instance list is
- * the source of truth: `--instance <index>` picks explicitly, `--client`
- * filters by build, and a single match needs no flag at all. `--hwnd`/`--pid`
- * still override for scripted use.
+ * Precedence: an explicit `--hwnd`/`--pid`, then `--instance <index>`, then the
+ * saved pin, then `--client`, and finally the only running instance when there
+ * is exactly one. `WowClassic.exe` looks identical for every classic build, so
+ * an ambiguous choice fails loudly instead of typing into the wrong game.
  */
 function resolveRuntime(flags) {
   if (flags.hwnd || flags.pid) {
     return { hwnd: flags.hwnd, pid: flags.pid };
   }
   const instances = findInstances({ pythonBin: flags.python || null });
-  const resolved = resolveInstance(instances, {
-    clientId: flags.client || null,
-    index: flags.instance !== undefined ? flags.instance : null,
-  });
+  const supported = instances.filter((item) => item.supported);
+
+  if (flags.instance !== undefined) {
+    const chosen = supported[Number(flags.instance)];
+    if (!chosen) {
+      console.error(`error: --instance ${flags.instance} is out of range (0..${supported.length - 1})`);
+      supported.forEach((item, index) => console.log(formatInstance(item, index)));
+      return { error: true };
+    }
+    return toTarget(chosen);
+  }
+
+  if (!flags.client) {
+    const config = loadConfig();
+    const pinned = matchPinned(instances, config.pinnedInstance);
+    if (pinned) {
+      return toTarget(pinned);
+    }
+    if (config.pinnedInstance) {
+      console.error('error: the pinned client is not running; run `lycheedev use` again '
+        + 'or pass --instance <index>');
+    }
+  }
+
+  const resolved = resolveInstance(instances, { clientId: flags.client || null, index: null });
   if (resolved.error) {
     console.error(`error: ${resolved.error}`);
     if (resolved.candidates) {
       resolved.candidates.forEach((item, index) => console.log(formatInstance(item, index)));
     }
+    if (supported.length === 0 && instances.length > 0) {
+      instances.forEach((item, index) => console.log(formatInstance(item, index)));
+    }
     return { error: true };
   }
-  const instance = resolved.instance;
+  return toTarget(resolved.instance);
+}
+
+function toTarget(instance) {
   return {
     hwnd: instance.hwnd ? `0x${instance.hwnd.toString(16)}` : null,
     pid: instance.pid ? String(instance.pid) : null,
     instance,
   };
+}
+
+/**
+ * `lycheedev use [index]`: keep one running client as the default target.
+ *
+ * Stores only the build and the instance ordinal, so the pin survives a
+ * restart even though the pid and window handle do not.
+ */
+function runUse(flags, rest) {
+  const instances = findInstances({ pythonBin: flags.python || null });
+  const supported = instances.filter((item) => item.supported);
+
+  if (flags.clear) {
+    updateConfig({ pinnedInstance: null });
+    console.log('cleared the pinned client');
+    return 0;
+  }
+  if (supported.length === 0) {
+    console.error('error: no supported World of Warcraft instance is running');
+    if (instances.length > 0) {
+      instances.forEach((item, index) => console.log(formatInstance(item, index)));
+    }
+    return 1;
+  }
+
+  const requested = rest.length > 0 ? Number(rest[0]) : (flags.instance !== undefined ? Number(flags.instance) : null);
+  let chosen;
+  let ordinal;
+  if (requested !== null) {
+    chosen = supported[requested];
+    if (!chosen) {
+      console.error(`error: instance ${requested} is out of range (0..${supported.length - 1})`);
+      supported.forEach((item, index) => console.log(formatInstance(item, index)));
+      return 1;
+    }
+    ordinal = supported
+      .slice(0, requested)
+      .filter((item) => item.flavorId === chosen.flavorId)
+      .length;
+  } else {
+    if (supported.length > 1) {
+      console.error('error: several clients are running; pass an index, e.g. `lycheedev use 0`');
+      supported.forEach((item, index) => console.log(formatInstance(item, index)));
+      return 1;
+    }
+    [chosen] = supported;
+    ordinal = 0;
+  }
+
+  updateConfig({ pinnedInstance: { flavor: chosen.flavorId, ordinal } });
+  const label = chosen.flavorLabel || chosen.flavorFolder;
+  console.log(`pinned ${label}${ordinal > 0 ? ` instance ${ordinal}` : ''} (pid ${chosen.pid})`);
+  console.log('commands now target it; pass --instance <index> to override');
+  return 0;
 }
 
 function main(argv) {
@@ -231,6 +327,8 @@ function main(argv) {
       return runClients(flags);
     case 'instances':
       return runInstances(flags);
+    case 'use':
+      return runUse(flags, rest);
     case 'help':
       console.log(HELP);
       return 0;

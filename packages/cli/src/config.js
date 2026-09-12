@@ -8,6 +8,10 @@ const EMPTY = {
   pythonBin: null,
   installedAt: null,
   packageVersion: null,
+  // Which running client commands should target. `flavor` pins a build,
+  // `ordinal` picks among several instances of that same build. Window
+  // handles and pids change every launch, so only these stable fields persist.
+  pinnedInstance: null,
 };
 
 export function loadConfig() {
