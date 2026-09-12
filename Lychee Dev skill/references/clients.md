@@ -73,7 +73,7 @@ Pin one running client as the default target, so later commands need no flag:
 
 ```text
 lycheedev use        # the only running client
-lycheedev use 1      # the instance at index 1
+lycheedev use 1      # the instance at index 1, when the builds differ
 lycheedev use --clear
 ```
 
@@ -83,6 +83,10 @@ re-resolves against whatever is running now. If the pinned build is not
 running, commands fail with a clear message instead of typing into the wrong
 game.
 
+Pinning is for choosing **between builds**. If two windows of the same build are
+open, `use` refuses and asks for one window to be closed — see the ambiguity rule
+below.
+
 ## Choosing a target: precedence
 
 1. `--hwnd` / `--pid` — explicit, for scripted use
@@ -91,10 +95,22 @@ game.
 4. `--client retail|classic|titan` — filter by build
 5. the single running instance, when there is exactly one
 
-Several instances of **different** builds are separated by `--client`. Several
-instances of the **same** build are genuinely ambiguous: the CLI prints the
-table and fails instead of guessing, because a wrong guess types a slash command
-into the wrong game.
+Several instances of **different** builds are safe to keep open: the install path
+separates them, so `--client` picks one.
+
+Several instances of the **same** build cannot be told apart. Nothing observable
+from outside the game says which character is behind which window — only a
+build-specific memory reader could, and none ships here. Pinning an ordinal would
+only look precise while risking a slash command in the wrong game. The CLI
+therefore refuses and tells the user to close the extras:
+
+```text
+error: 2 Retail clients are running and cannot be told apart
+       close all but one, or close these pids: 62460, 71824
+```
+
+**Ask the user to close all but one window of that build.** Do not invent a way
+to pick between them, and do not offer to pin one.
 
 ## Multiple installations
 

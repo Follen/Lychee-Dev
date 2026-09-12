@@ -38,7 +38,7 @@ lycheedev instances    # what is running now, with pid and window handle
 lycheedev use [index]  # pin one as the default target
 ```
 
-With several clients open, `--instance <index>` overrides the pin for one command and `--client` filters by build. Same-build instances are ambiguous and the CLI refuses to guess. Full rules and the precedence order are in [references/clients.md](references/clients.md).
+With several clients open, `--instance <index>` overrides the pin for one command and `--client` filters by build. Different builds can stay open together because the install path separates them. Two windows of the **same** build cannot be told apart from outside the game, so the CLI refuses and names the pids to close — ask the user to close all but one instead of picking for them. Full rules and the precedence order are in [references/clients.md](references/clients.md).
 
 ## Read SavedVariables
 

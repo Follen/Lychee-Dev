@@ -256,3 +256,32 @@ export function formatInstance(instance, index) {
   return `  [${index}] ${flavor.padEnd(14)} pid=${String(instance.pid).padEnd(8)} `
     + `hwnd=${hwnd.padEnd(12)}${title}${suffix}`;
 }
+
+/**
+ * Decide whether several running instances can be told apart.
+ *
+ * Different builds are safe: the install path identifies them, so `--client`
+ * picks one. Several instances of the *same* build are not, because nothing
+ * observable from outside the game says which character is behind which pid —
+ * only a build-specific memory reader could, and none ships here. Rather than
+ * let the user pin an ordinal that may point at the wrong window, the caller is
+ * told to close the extras.
+ */
+export function describeAmbiguity(instances) {
+  const supported = instances.filter((item) => item.supported);
+  const byBuild = new Map();
+  for (const instance of supported) {
+    if (!byBuild.has(instance.flavorId)) byBuild.set(instance.flavorId, []);
+    byBuild.get(instance.flavorId).push(instance);
+  }
+  const duplicates = [...byBuild.entries()].filter(([, list]) => list.length > 1);
+  const distinct = byBuild.size;
+  return {
+    supported,
+    duplicates,
+    // Several builds open: picking one is unambiguous.
+    multipleBuilds: distinct > 1,
+    // Several windows of one build: nothing can tell them apart.
+    sameBuildCollision: duplicates.length > 0,
+  };
+}

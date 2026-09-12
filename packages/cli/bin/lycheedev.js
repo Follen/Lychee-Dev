@@ -9,6 +9,7 @@ import { runInstall } from '../src/install.js';
 import { loadConfig, updateConfig } from '../src/config.js';
 import { runAutomation } from '../src/python.js';
 import {
+  describeAmbiguity,
   findInstances,
   findSavedVariablesCandidates,
   formatInstance,
@@ -220,7 +221,18 @@ function resolveRuntime(flags) {
 
   const resolved = resolveInstance(instances, { clientId: flags.client || null, index: null });
   if (resolved.error) {
-    console.error(`error: ${resolved.error}`);
+    const shape = describeAmbiguity(instances);
+    // Several windows of one build: no flag can pick the right one reliably, so
+    // ask for a single window rather than inviting a wrong guess.
+    if (shape.sameBuildCollision) {
+      for (const [flavorId, list] of shape.duplicates) {
+        const label = list[0].flavorLabel || flavorId;
+        console.error(`error: ${list.length} ${label} clients are running and cannot be told apart`);
+        console.error(`       close all but one, or close these pids: ${list.map((i) => i.pid).join(', ')}`);
+      }
+    } else {
+      console.error(`error: ${resolved.error}`);
+    }
     if (resolved.candidates) {
       resolved.candidates.forEach((item, index) => console.log(formatInstance(item, index)));
     }
@@ -248,7 +260,8 @@ function toTarget(instance) {
  */
 function runUse(flags, rest) {
   const instances = findInstances({ pythonBin: flags.python || null });
-  const supported = instances.filter((item) => item.supported);
+  const shape = describeAmbiguity(instances);
+  const supported = shape.supported;
 
   if (flags.clear) {
     updateConfig({ pinnedInstance: null });
@@ -263,7 +276,23 @@ function runUse(flags, rest) {
     return 1;
   }
 
-  const requested = rest.length > 0 ? Number(rest[0]) : (flags.instance !== undefined ? Number(flags.instance) : null);
+  // Several windows of one build cannot be told apart from outside the game, so
+  // pinning one of them would only look precise. Ask for a single window instead.
+  if (shape.sameBuildCollision) {
+    for (const [flavorId, list] of shape.duplicates) {
+      const label = list[0].flavorLabel || flavorId;
+      console.error(`error: ${list.length} ${label} clients are running and cannot be told apart`);
+      console.error(`       close all but one, or close these pids: ${list.map((i) => i.pid).join(', ')}`);
+    }
+    console.error('       nothing observable from outside the game identifies which character');
+    console.error('       is behind which window, so pinning one would risk typing into the wrong game');
+    supported.forEach((item, index) => console.log(formatInstance(item, index)));
+    return 1;
+  }
+
+  const requested = rest.length > 0
+    ? Number(rest[0])
+    : (flags.instance !== undefined ? Number(flags.instance) : null);
   let chosen;
   let ordinal;
   if (requested !== null) {
@@ -289,7 +318,7 @@ function runUse(flags, rest) {
 
   updateConfig({ pinnedInstance: { flavor: chosen.flavorId, ordinal } });
   const label = chosen.flavorLabel || chosen.flavorFolder;
-  console.log(`pinned ${label}${ordinal > 0 ? ` instance ${ordinal}` : ''} (pid ${chosen.pid})`);
+  console.log(`pinned ${label} (pid ${chosen.pid})`);
   console.log('commands now target it; pass --instance <index> to override');
   return 0;
 }
