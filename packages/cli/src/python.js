@@ -61,6 +61,10 @@ export function pythonEnv() {
     ...process.env,
     PYTHONPATH: existing ? `${deps}${path.delimiter}${existing}` : deps,
     PYTHONDONTWRITEBYTECODE: '1',
+    // Player names, window titles and zone names are not ASCII; without this
+    // the helper's stdout is encoded with the console code page and comes back
+    // as mojibake.
+    PYTHONIOENCODING: 'utf-8',
   };
 }
 

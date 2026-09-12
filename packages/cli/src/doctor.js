@@ -5,9 +5,9 @@ import path from 'node:path';
 
 import { installedVersion, payloadVersion } from './addon.js';
 import { loadConfig } from './config.js';
-import { addonFolderName, configPath, dataDir, exists, pythonDepsDir, skillTargetDir } from './paths.js';
+import { configPath, dataDir, exists, pythonDepsDir, skillTargetDir } from './paths.js';
 import { automationScript, findPython, pythonEnv } from './python.js';
-import { findSavedVariablesCandidates, scanClients } from './wow.js';
+import { findInstances, findSavedVariablesCandidates, scanClients } from './wow.js';
 
 const OK = 'ok  ';
 const WARN = 'warn';
@@ -66,16 +66,22 @@ export function runDoctor({ flags }) {
     results.push(line(WARN, 'wow root', 'not configured; run `lycheedev install --wow-root <path>`'));
   } else {
     results.push(line(OK, 'wow root', roots[0]));
-    for (const client of scanClients(roots[0])) {
-      if (!['retail', 'classic', 'titan'].includes(client.id)) continue;
-      const target = path.join(client.addonsDir, addonFolderName);
-      if (!exists(target)) {
+    const clients = scanClients(roots[0]);
+    for (const client of clients) {
+      const version = client.version ? `v${client.version}` : 'unknown version';
+      if (!client.toc) {
+        // Present but intentionally not served: say so instead of hiding it.
+        results.push(line(OK, `build (${client.id})`, `${client.folder} ${version} - not served by the addon`));
+        continue;
+      }
+      const target = client.installedDir;
+      if (!client.installed) {
         results.push(line(WARN, `addon (${client.id})`, `not installed in ${client.addonsDir}`));
         continue;
       }
       const current = installedVersion(client.addonsDir);
       const shipped = payloadVersion();
-      const detail = `${target} (installed ${current || '?'}, package ${shipped || '?'})`;
+      const detail = `${client.folder} ${version} (installed ${current || '?'}, package ${shipped || '?'})`;
       results.push(current && shipped && current !== shipped
         ? line(WARN, `addon (${client.id})`, `${detail} - run \`lycheedev update\``)
         : line(OK, `addon (${client.id})`, detail));
@@ -84,6 +90,25 @@ export function runDoctor({ flags }) {
       results.push(candidates.length
         ? line(OK, `savedvariables (${client.id})`, `${candidates.length} account(s), newest: ${candidates[0].account}`)
         : line(WARN, `savedvariables (${client.id})`, 'none yet; log into the game once'));
+    }
+  }
+
+  // Which clients are running decides what `send`/`run` can target.
+  const instances = findInstances({ pythonBin: python ? python.bin : null });
+  const supportedRunning = instances.filter((item) => item.supported);
+  if (instances.length === 0) {
+    results.push(line(OK, 'running clients', 'none'));
+  } else {
+    for (const [index, instance] of instances.entries()) {
+      const label = instance.flavorLabel || instance.flavorFolder || 'unknown';
+      const detail = `${label} pid=${instance.pid}`
+        + `${instance.hwnd ? ` hwnd=0x${instance.hwnd.toString(16)}` : ''}`
+        + `${instance.supported ? '' : ' (not served by the addon)'}`;
+      results.push(line(instance.supported ? OK : WARN, `running [${index}]`, detail));
+    }
+    if (supportedRunning.length > 1) {
+      results.push(line(WARN, 'instance choice',
+        'several clients are running; pass `--instance <index>` to target one'));
     }
   }
 

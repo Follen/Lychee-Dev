@@ -57,7 +57,7 @@ data are excluded from both the ZIP and the npm payload.
 | --- | --- | --- | --- |
 | Retail Midnight `12.1.0` | `120100` | `Lychee Dev_Mainline.toc` | `_retail_` |
 | Classic `5.5.4` | `50504` | `Lychee Dev_Mists.toc` | `_classic_` |
-| Classic Titan `3.80.2` | `38002` | `Lychee Dev_Wrath.toc` | `_classic_arena_` |
+| Classic Titan `3.80.2` | `38002` | `Lychee Dev_Wrath.toc` | `_classic_titan_` |
 
 - Do not add Classic Era, Anniversary, PTR, Beta or older expansion branches unless
   the project owner changes the product scope. `_classic_era_` may be present on a

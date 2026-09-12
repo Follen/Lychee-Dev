@@ -25,12 +25,15 @@ export function payloadVersion() {
   }
 }
 
-/** Version of whatever is currently installed, if any. */
-export function installedVersion(addonsDir) {
+/** Version of whatever is currently installed for one build's catalog. */
+export function installedVersion(addonsDir, toc = null) {
   const target = addonTargetDir(addonsDir);
-  for (const toc of [`${addonFolderName}_Mainline.toc`, `${addonFolderName}_Mists.toc`,
-    `${addonFolderName}_Wrath.toc`]) {
-    const file = path.join(target, toc);
+  const catalogs = toc
+    ? [toc]
+    : [`${addonFolderName}_Mainline.toc`, `${addonFolderName}_Mists.toc`,
+      `${addonFolderName}_Wrath.toc`];
+  for (const name of catalogs) {
+    const file = path.join(target, name);
     if (!exists(file)) continue;
     const match = fs.readFileSync(file, 'utf8').match(/^##\s*Version:\s*(.+)$/m);
     if (match) return match[1].trim();
@@ -55,10 +58,15 @@ export function countFiles(dir) {
  * cannot linger. `auto.lua` is local task data, so it is preserved when the
  * caller asks for it: the empty shipped registry must not wipe pending work.
  */
-export function installAddon(addonsDir, { preserveRegistry = true } = {}) {
+export function installAddon(addonsDir, { preserveRegistry = true, toc = null } = {}) {
   const source = vendoredAddonRoot();
   if (!exists(source)) {
     return { ok: false, error: 'vendored addon payload is missing; reinstall the package' };
+  }
+  // Refuse to write a build the addon has no catalog for: the game would load
+  // nothing and report only a silent "out of date" addon.
+  if (toc && !exists(path.join(source, toc))) {
+    return { ok: false, error: `the payload has no ${toc}` };
   }
   const target = addonTargetDir(addonsDir);
 

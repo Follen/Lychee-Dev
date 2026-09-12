@@ -8,7 +8,13 @@ import { runDoctor } from '../src/doctor.js';
 import { runInstall } from '../src/install.js';
 import { loadConfig } from '../src/config.js';
 import { runAutomation } from '../src/python.js';
-import { findSavedVariablesCandidates, scanClients } from '../src/wow.js';
+import {
+  findInstances,
+  findSavedVariablesCandidates,
+  formatInstance,
+  resolveInstance,
+  scanClients,
+} from '../src/wow.js';
 import { addonFolderName, exists } from '../src/paths.js';
 
 const HELP = `lycheedev - Lychee Dev installer and World of Warcraft automation driver
@@ -19,7 +25,8 @@ commands
   install              install python dependencies, the skill and the addon
   update               refresh dependencies, skill and addon to this version
   doctor               report what is installed and what is missing
-  clients              list detected clients and their addon directories
+  clients              list every detected build and its addon state
+  instances            list running game clients (build, pid, window)
   send <text>          type one slash command into the running game
   capture              poll the game window and decode the completion notice
   run --task <id>      deliver, decode, reload once and read the result ticket
@@ -32,14 +39,21 @@ commands
   recover              show reload intents that were never confirmed
 
 options
-  --wow-root <path>    folder that contains _retail_/_classic_/_classic_arena_
+  --wow-root <path>    folder that contains _retail_/_classic_/_classic_titan_
   --client <id>        retail | classic | titan (default: the only configured one)
+  --instance <index>   which running client to target when several are open
+  --hwnd <handle>      target one window directly, skipping instance lookup
+  --pid <pid>          expected process id for the target window
   --python <bin>       python interpreter to use
   --force              redo work that is already present
   --reset-registry     install the addon with an empty task registry
   --json               machine-readable output where supported
   -h, --help           show this help
   -v, --version        show the version
+
+Every non-retail client runs as WowClassic.exe, so a running client is matched
+by its install path, not its process name. When several clients are open, run
+"lycheedev instances" first and pass --instance <index> to choose one.
 
 The automation subcommands are thin wrappers over the bundled python helper, so
 the same arguments it accepts are forwarded unchanged.`;
@@ -121,13 +135,67 @@ function runClients(flags) {
   }
   console.log(root);
   for (const client of scanClients(root)) {
-    const supported = ['retail', 'classic', 'titan'].includes(client.id);
-    const installed = exists(path.join(client.addonsDir, addonFolderName));
-    console.log(`  ${client.id.padEnd(11)} ${client.folder.padEnd(16)} `
-      + `${installed ? 'addon installed' : 'addon missing'}`.padEnd(18)
-      + `${supported ? '' : '(not supported by the addon)'}`);
+    const version = client.version ? `v${client.version}` : 'unknown version';
+    const state = !client.toc
+      ? 'not served by the addon'
+      : (client.installed ? 'addon installed' : 'addon missing');
+    console.log(`  ${client.id.padEnd(12)} ${client.folder.padEnd(18)} ${version.padEnd(18)} ${state}`);
   }
   return 0;
+}
+
+/** `lycheedev instances`: which game clients are running right now. */
+function runInstances(flags) {
+  const instances = findInstances({ pythonBin: flags.python || null });
+  if (instances.length === 0) {
+    console.log('no World of Warcraft instance is running');
+    return 0;
+  }
+  console.log('running instances:');
+  instances.forEach((instance, index) => console.log(formatInstance(instance, index)));
+  const supported = instances.filter((item) => item.supported);
+  const sameBuild = supported.length > 1;
+  console.log('');
+  if (supported.length === 0) {
+    console.log('none of these builds are served by the addon');
+  } else if (sameBuild) {
+    console.log('several instances are running: target one with `--instance <index>`');
+  } else {
+    console.log('commands target this instance automatically');
+  }
+  return 0;
+}
+
+/**
+ * Resolve the live game window a command should type into.
+ *
+ * The executable name cannot identify a build, so the running instance list is
+ * the source of truth: `--instance <index>` picks explicitly, `--client`
+ * filters by build, and a single match needs no flag at all. `--hwnd`/`--pid`
+ * still override for scripted use.
+ */
+function resolveRuntime(flags) {
+  if (flags.hwnd || flags.pid) {
+    return { hwnd: flags.hwnd, pid: flags.pid };
+  }
+  const instances = findInstances({ pythonBin: flags.python || null });
+  const resolved = resolveInstance(instances, {
+    clientId: flags.client || null,
+    index: flags.instance !== undefined ? flags.instance : null,
+  });
+  if (resolved.error) {
+    console.error(`error: ${resolved.error}`);
+    if (resolved.candidates) {
+      resolved.candidates.forEach((item, index) => console.log(formatInstance(item, index)));
+    }
+    return { error: true };
+  }
+  const instance = resolved.instance;
+  return {
+    hwnd: instance.hwnd ? `0x${instance.hwnd.toString(16)}` : null,
+    pid: instance.pid ? String(instance.pid) : null,
+    instance,
+  };
 }
 
 function main(argv) {
@@ -161,6 +229,8 @@ function main(argv) {
       return runDoctor({ flags });
     case 'clients':
       return runClients(flags);
+    case 'instances':
+      return runInstances(flags);
     case 'help':
       console.log(HELP);
       return 0;
@@ -178,6 +248,17 @@ function main(argv) {
   // AddOns folder that contains it.
   if (client.addonsDir) forwarded.push('--install-dir', path.join(client.addonsDir, addonFolderName));
 
+  // Commands that type into the game must target a live window, and the
+  // executable name cannot tell two instances apart, so resolve which running
+  // instance to use before forwarding.
+  const runtime = ['send', 'capture', 'run', 'bugs'].includes(command)
+    ? resolveRuntime(flags)
+    : null;
+  if (runtime && runtime.error) return 1;
+  const live = runtime && runtime.hwnd
+    ? { hwnd: runtime.hwnd, pid: runtime.pid }
+    : null;
+
   switch (command) {
     case 'send': {
       const text = rest.join(' ');
@@ -185,39 +266,47 @@ function main(argv) {
         console.error('error: send needs the command text, e.g. `lycheedev send "/dev auto status x"`');
         return 1;
       }
-      return forward(['send', ...targetArgs(client), '--text', text, ...passthrough(flags)]);
+      if (!live) return 1;
+      return forward(['send', ...targetArgs(live), '--text', text, ...passthrough(flags)]);
     }
     case 'capture':
-      return forward(['capture', ...targetArgs(client), ...passthrough(flags)]);
+      if (!live) return 1;
+      return forward(['capture', ...targetArgs(live), ...passthrough(flags)]);
     case 'run':
       if (!flags.task) {
         console.error('error: run needs --task <id>');
         return 1;
       }
+      if (!live) return 1;
       if (!client.svPath) {
         console.error('error: no SavedVariables path recorded for this client; re-run `lycheedev install`');
         return 1;
       }
-      return forward(['run', ...targetArgs(client), '--task', flags.task, '--sv', client.svPath,
+      return forward(['run', ...targetArgs(live), '--task', flags.task, '--sv', client.svPath,
         ...passthrough(flags)]);
     case 'bugs':
       if (!flags.count) {
         console.error('error: bugs needs --count <1-100>');
         return 1;
       }
+      if (!live) return 1;
       if (!client.svPath) {
         console.error('error: no SavedVariables path recorded for this client; re-run `lycheedev install`');
         return 1;
       }
-      return forward(['bugs', ...targetArgs(client), '--count', String(flags.count), '--sv', client.svPath,
+      return forward(['bugs', ...targetArgs(live), '--count', String(flags.count), '--sv', client.svPath,
         ...passthrough(flags)]);
-    case 'ack':
+    case 'ack': {
       if (!flags.ticket || !flags.status) {
         console.error('error: ack needs --ticket <t> --status received|failed');
         return 1;
       }
-      return forward(['ack', ...targetArgs(client), '--ticket', flags.ticket,
+      // An acknowledgement also has to reach a live window.
+      const ackTarget = resolveRuntime(flags);
+      if (ackTarget.error) return 1;
+      return forward(['ack', ...targetArgs(ackTarget), '--ticket', flags.ticket,
         '--status', flags.status, ...passthrough(flags)]);
+    }
     case 'task': {
       const sub = rest.shift();
       if (!sub) {
@@ -277,7 +366,7 @@ function main(argv) {
     // These are either handled by the wrapper itself or are global python
     // options that `forward()` places before the subcommand.
     const handled = ['wow-root', 'client', 'python', 'force', 'reset-registry', 'task', 'count',
-      'ticket', 'status', 'json', 'help', 'version', 'data-dir', 'installation'];
+      'ticket', 'status', 'json', 'help', 'version', 'data-dir', 'installation', 'instance'];
     for (const [name, value] of Object.entries(all)) {
       if (handled.includes(name)) continue;
       if (value === true) out.push(`--${name}`);

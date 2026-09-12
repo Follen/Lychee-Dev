@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { installAddon, installedVersion, payloadVersion } from './addon.js';
 import { loadConfig, setClient, updateConfig } from './config.js';
-import { addonFolderName, exists } from './paths.js';
+import { exists } from './paths.js';
 import { depsInstalled, findPython, installDeps } from './python.js';
 import { installSkill } from './skill.js';
 import { detectWowRoots, findSavedVariablesCandidates, scanClients } from './wow.js';
@@ -82,8 +82,10 @@ export function runInstall({ flags }) {
   let defaultClient = config.defaultClient || null;
 
   for (const client of resolved.clients) {
-    if (!['retail', 'classic', 'titan'].includes(client.id)) {
-      console.log(`\n${client.label}: skipped (unsupported by the addon)`);
+    // A build without a catalog is reported, not silently dropped: the folder
+    // still exists and the user should know why nothing was installed there.
+    if (!client.toc) {
+      console.log(`\n${client.label} (${client.folder}): not served by the addon, skipped`);
       continue;
     }
     step(`${client.label}: installing addon into ${client.folder}`, () => {
@@ -92,12 +94,15 @@ export function runInstall({ flags }) {
         return { ok: false, skipped: true };
       }
       const before = installedVersion(client.addonsDir);
-      const installed = installAddon(client.addonsDir, { preserveRegistry: !flags['reset-registry'] });
+      const installed = installAddon(client.addonsDir, {
+        preserveRegistry: !flags['reset-registry'],
+        toc: client.toc,
+      });
       if (!installed.ok) {
         console.log(`  error: ${installed.error}`);
         return installed;
       }
-      console.log(`  ${addonFolderName} -> ${installed.target}`);
+      console.log(`  ${client.toc} -> ${installed.target}`);
       console.log(`  files: ${installed.files}, version: ${before ? `${before} -> ` : ''}${installed.version}`);
       if (installed.keptRegistry) console.log('  kept the existing task registry (local task data)');
       addonResults.push({ client: client.id, ...installed });
@@ -107,6 +112,7 @@ export function runInstall({ flags }) {
     const candidates = findSavedVariablesCandidates(resolved.root, client.folder);
     setClient(nextConfig, client.id, {
       flavorFolder: client.folder,
+      toc: client.toc,
       addonsDir: client.addonsDir,
       svPath: candidates[0] ? candidates[0].path : null,
       installedAt: new Date().toISOString(),

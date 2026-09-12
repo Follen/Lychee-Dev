@@ -47,7 +47,7 @@ from automation.saved_variables import SavedVariablesError  # noqa: E402
 
 NOTICE_MAX_BYTES = 512
 BUG_TASK_ID = "bug"
-CLIENT_FOLDERS = {"retail": "_retail_", "classic": "_classic_", "titan": "_classic_arena"}
+CLIENT_FOLDERS = {"retail": "_retail_", "classic": "_classic_", "titan": "_classic_titan_"}
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_INTERVAL = 0.1
 SV_READ_RETRIES = 3
