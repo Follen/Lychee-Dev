@@ -4,7 +4,7 @@
 
 - `add-on/` contains the installable addon, its tests, tools and technical documentation. Unless stated otherwise, runtime paths below are relative to `add-on/`.
 - Root README files describe installation and the combined addon/skill workflow.
-- `Lychee Dev skill/` is the versioned source for the `wowdev` skill. Installed `wowdev` directories are copies of this source; keep the skill name unchanged.
+- `Lychee Dev skill/` is the versioned source for the `lychee-dev` skill (visible name: Lychee Dev skill). Installed `skills/lychee-dev/` directories are copies of this source; use `$lychee-dev` to invoke it.
 - Run the full matrix from the repository root with `powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1`.
 - Package with `powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tools/Package.ps1`. The ZIP must contain `Lychee Dev/`, not `add-on/`; tests, tools, docs, skills and investigation data are excluded.
 

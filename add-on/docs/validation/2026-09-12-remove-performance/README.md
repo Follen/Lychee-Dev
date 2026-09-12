@@ -2,6 +2,8 @@
 
 Date: 2026-09-12. Baseline: `0107369`. Implementation branch: `codex/remove-performance`, isolated at `D:/Code/wow/worktrees/lychee-dev-performance`.
 
+This is the historical removal/restructure record for commit `49ffe54`. The skill was subsequently renamed from `wowdev` to `lychee-dev`; see the [rename record](../2026-09-12-skill-rename.md). Names, installation paths and hashes below describe the earlier verification.
+
 ## Repository layout
 
 Root README files, AGENTS.md, .gitignore and Git metadata remain at repository level. `add-on/` owns runtime files plus tests/tools/docs; `Lychee Dev skill/` owns the `wowdev` skill. The original checkout and its ignored data were not moved. There was no Analyze/publish directory in this worktree before restructuring.

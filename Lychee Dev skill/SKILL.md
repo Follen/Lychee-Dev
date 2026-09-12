@@ -1,9 +1,9 @@
 ---
-name: wowdev
+name: lychee-dev
 description: Use when working with the Lychee Dev WoW addon to read persisted runtime evidence by Ticket or prepare bounded /run memory/CPU investigations, object inspection, and event monitoring. Do not use for generic WoW API research or unrelated addon implementation.
 ---
 
-# WoW Dev
+# Lychee Dev skill
 
 Use this skill as the operational guide for Lychee Dev, an in-game evidence workbench. The desired output is either (a) an evidence-backed diagnosis from SavedVariables or (b) a command/workflow the user can paste into WoW and report back.
 

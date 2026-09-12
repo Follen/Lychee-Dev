@@ -131,11 +131,11 @@ flowchart LR
 
 战斗中无法打开或使用荔枝开发工具。进入战斗时，正在运行的监听和追踪都会停止。
 
-## 安装 wowdev 技能
+## 安装 Lychee Dev skill
 
-[Lychee Dev skill/SKILL.md](<Lychee Dev skill/SKILL.md>) 是仓库内可追踪的 `wowdev` 技能源。将该目录内容复制到 Agent 的 `skills/wowdev/`，例如 `~/.codex/skills/wowdev/`。技能名称仍为 `wowdev`，不要用仓库目录名替换调用名称。
+[Lychee Dev skill/SKILL.md](<Lychee Dev skill/SKILL.md>) 是仓库内可追踪的 `lychee-dev` 技能源。将该目录内容复制到 Agent 的 `skills/lychee-dev/`，例如 `~/.codex/skills/lychee-dev/`。显示名称为 **Lychee Dev skill**，实际调用名为 `$lychee-dev`。
 
-使用 `$wowdev` 描述具体问题：Agent 准备一份有界脚本，你在 `/dev` 的运行页执行，再由 Agent 读取完整 Ticket 报告分析。插件负责运行和留证，技能负责设计调查与解释结果；安装技能不会自动安装或启动游戏插件。简单探针用运行页；需要大量源码的统一测试使用单独验证的诊断载体与短启动命令，避免巨型粘贴。输入路径是否流畅和脚本执行是否正确需要分别验证。
+使用 `$lychee-dev` 描述具体问题：Agent 准备一份有界脚本，你在 `/dev` 的运行页执行，再由 Agent 读取完整 Ticket 报告分析。插件负责运行和留证，技能负责设计调查与解释结果；安装技能不会自动安装或启动游戏插件。简单探针用运行页；需要大量源码的统一测试使用单独验证的诊断载体与短启动命令，避免巨型粘贴。输入路径是否流畅和脚本执行是否正确需要分别验证。
 
 ## 构建安装包
 

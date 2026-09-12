@@ -1,6 +1,6 @@
 # Run-based runtime investigations
 
-Lychee Dev provides the Run page and a common evidence workflow. The `wowdev` skill helps an Agent turn a specific question into a bounded Lua investigation; the addon does not supply a general performance monitor.
+Lychee Dev provides the Run page and a common evidence workflow. The `lychee-dev` skill helps an Agent turn a specific question into a bounded Lua investigation; the addon does not supply a general performance monitor.
 
 ## One investigation, one report
 

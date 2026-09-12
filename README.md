@@ -132,11 +132,11 @@ The archive ships all three TOCs. World of Warcraft selects the matching TOC, cl
 
 The addon cannot be opened or used during combat. Active monitors and traces are stopped when combat begins.
 
-## Install the wowdev skill
+## Install Lychee Dev skill
 
-[Lychee Dev skill/SKILL.md](<Lychee Dev skill/SKILL.md>) is the versioned source for the `wowdev` skill. Copy that folder's contents into your agent's `skills/wowdev/` directory, such as `~/.codex/skills/wowdev/`. Keep the skill name `wowdev`; the repository folder name is not its invocation name.
+[Lychee Dev skill/SKILL.md](<Lychee Dev skill/SKILL.md>) is the versioned source for the `lychee-dev` skill. Copy that folder's contents into your agent's `skills/lychee-dev/` directory, such as `~/.codex/skills/lychee-dev/`. The visible name is **Lychee Dev skill** and the invocation is `$lychee-dev`.
 
-Use `$wowdev` to describe a specific issue. The Agent prepares one bounded Run script, you execute it in `/dev`, and the Agent reads the complete saved Ticket to diagnose it. The addon runs Lua and preserves evidence; the skill plans and interprets the investigation. Installing the skill does not install or activate the addon. Small probes belong in Run; studies requiring large source bundles should use a separately verified diagnostic carrier and a short start command, not a giant paste. Input-path responsiveness and execution correctness require separate validation.
+Use `$lychee-dev` to describe a specific issue. The Agent prepares one bounded Run script, you execute it in `/dev`, and the Agent reads the complete saved Ticket to diagnose it. The addon runs Lua and preserves evidence; the skill plans and interprets the investigation. Installing the skill does not install or activate the addon. Small probes belong in Run; studies requiring large source bundles should use a separately verified diagnostic carrier and a short start command, not a giant paste. Input-path responsiveness and execution correctness require separate validation.
 
 ## Build an installable ZIP
 
