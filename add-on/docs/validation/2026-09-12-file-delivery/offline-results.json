@@ -1,0 +1,26 @@
+{
+  "scope": "Offline Lua only; no WoW, input, SV, or runtime protocol test",
+  "cases": [
+    {
+      "case": "large-source",
+      "sourceBytes": 468817,
+      "envelopeBytes": 468921,
+      "sha256": "d564ab0430dc3bf0d712d4daa24747108c19c0975b279efac8f2dd3c6a349648",
+      "output": "PASS large source staged and compiled without execution; explicit call returned 49"
+    },
+    {
+      "case": "all-byte-values",
+      "sourceBytes": 270,
+      "envelopeBytes": 869,
+      "sha256": "7e58aa8cd29196e670c8aa398b10f51e8df0670268649b8e6eabed255bb8d102",
+      "output": "PASS exact bytes, no execution, corruption detectable"
+    },
+    {
+      "case": "invalid-syntax",
+      "sourceBytes": 14,
+      "envelopeBytes": 111,
+      "sha256": "63530e7f2f6949e405962f1feba0a63bff7376234c786d49b95854864bbe6001",
+      "output": "PASS invalid source staged without execution; explicit compile rejected"
+    }
+  ]
+}
