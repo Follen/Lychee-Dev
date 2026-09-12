@@ -96,7 +96,7 @@ assert(type(ns.db) == "table", "database did not initialize on first use")
 assert(LycheeDevDB == ns.db, "database was not moved to the Lychee Dev root")
 assert(DumperDB == nil, "legacy database root was not cleared after migration")
 assert(ns.db.history[1].code == "legacy code", "legacy history was not preserved")
-assert(ns.db.schemaVersion == 7, "database schema was not upgraded")
+assert(ns.db.schemaVersion == 8, "database schema was not upgraded")
 assert(ns.db.exports and ns.db.exports.version == 2,
     "export database was not initialized")
 local migratedEvidence = ns.GetExport("LYCHEE-LEGACY-0004")

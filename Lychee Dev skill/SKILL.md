@@ -11,6 +11,7 @@ Use this skill as the operational guide for Lychee Dev, an in-game evidence work
 
 - **Persisted evidence:** locate the WoW `WTF` SavedVariables file, find the exact Ticket, and read the complete payload.
 - **Run:** open `/dev`, use the Run page, and paste `/run` or `/script` Lua.
+- **Automated task delivery:** when the user authorized scripted task delivery and reload, use the Python tooling in `scripts/` to upsert a task block, run it, decode the completion notice, reload once, and read the Ticket. Read [references/automation.md](references/automation.md) first; live-window steps still need per-host verification.
 - **Memory/CPU investigation:** use Run with a question-specific script; read [references/runtime-investigations.md](references/runtime-investigations.md) before designing a probe.
 - **Objects:** open `/dev` > Objects and inspect a global/object path or use the mouse picker.
 - **Events:** open `/dev` > Events, search the current client's catalog, select events, start monitoring, reproduce the behavior, then stop and save.
@@ -29,7 +30,7 @@ The Performance page, automatic capture, health scan and function benchmark have
    ```
 
    Validate `schema == "lychee.evidence.v1"`, and use `source.kind`, `source.title`, `source.path`, `environment`, and `createdAt` to identify the record. Validate the report schema inside the payload separately; record-level schema/source do not belong to `metadata`. Prefer the exact Ticket already supplied to the owning task, including directly delivered messages; do not ask the user to resend it to several tasks. The payload is the authoritative complete report; `metadata` is bounded context, not a replacement for it.
-   Current kinds include `run_result`, `object_snapshot`, `object_node`, `event_log`, `function_trace`, and `error_log`. Legacy `performance_*` records remain valid historical evidence; read their complete payload without requiring the deleted module or discarding them.
+   Current kinds include `run_result`, `object_snapshot`, `object_node`, `event_log`, `function_trace`, `error_log`, and `automation_result` (whose payload is one `lychee.automation.result.v1` JSON report and whose `metadata.contentChecksum` is an Adler-32 over the exact payload bytes). Legacy `performance_*` records remain valid historical evidence; read their complete payload without requiring the deleted module or discarding them.
 4. `LycheeDevDB.exports.order` is newest-first. Recent ad-hoc runs are in `LycheeDevDB.history` and may contain `code`, `result`, and a bounded `tree`; they are not the same as a saved export. Old installations may contain `DumperDB`, which the addon migrates into `LycheeDevDB`.
 5. A record created in-game is only in memory until `/reload`, logout, or exit. If the user has not completed one of those writes, explain that the Ticket cannot yet be found on disk. Exports and history are bounded and older entries can be pruned.
 

@@ -2,6 +2,14 @@ local ADDON_NAME, ns = ...
 
 local diagnostics = {}
 local MAX_REPORT_BYTES = 48000
+local SNAPSHOT_MAX_ERRORS = 100
+local SNAPSHOT_TEXT_FIELDS = { "message", "stack", "locals", "source" }
+
+-- Stable machine codes for snapshot failures; the caller reports them as data.
+local SNAPSHOT_ERROR_COMBAT = "combat_blocked"
+local SNAPSHOT_ERROR_COUNT = "invalid_count"
+local SNAPSHOT_ERROR_PROVIDER = "provider_unavailable"
+local SNAPSHOT_ERROR_PROVIDER_CALL = "provider_error"
 
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
@@ -121,6 +129,110 @@ function diagnostics.ResetErrors()
     end
     local succeeded = pcall(grabber.Reset, grabber)
     return succeeded, succeeded and ns.L.ERRORS_CLEARED or ns.L.ERRORS_CLEAR_FAILED
+end
+
+local function GetProviderVersion(grabber)
+    if type(grabber.version) == "string" and grabber.version ~= "" then
+        return grabber.version
+    end
+    local metadata = ns.Client and ns.Client.GetAddOnMetadata
+    if type(metadata) == "function" then
+        local succeeded, version = pcall(metadata, "!BugGrabber", "Version")
+        if succeeded and type(version) == "string" and not IsSecret(version) then
+            return version
+        end
+    end
+    return nil
+end
+
+-- Copy one error entry immediately so later BugGrabber updates cannot change it.
+local function CopyErrorEntry(entry)
+    local missing = {}
+    local copy = {}
+    for index = 1, #SNAPSHOT_TEXT_FIELDS do
+        local field = SNAPSHOT_TEXT_FIELDS[index]
+        local value = entry[field]
+        if value == nil then
+            -- source is optional; message/stack/locals are reported missing when absent.
+            if field ~= "source" then
+                missing[#missing + 1] = field
+            end
+        elseif IsSecret(value) then
+            missing[#missing + 1] = field
+        elseif type(value) ~= "string" then
+            -- Never substitute tostring(table) for real content.
+            missing[#missing + 1] = field
+        else
+            copy[field] = value
+        end
+    end
+    local timeValue = tonumber(entry.time)
+    local sessionValue = tonumber(entry.session)
+    local counterValue = tonumber(entry.counter)
+    if not timeValue or IsSecret(entry.time) then missing[#missing + 1] = "time" end
+    if not sessionValue or IsSecret(entry.session) then missing[#missing + 1] = "session" end
+    if not counterValue or IsSecret(entry.counter) then missing[#missing + 1] = "counter" end
+    copy.time = timeValue
+    copy.session = sessionValue
+    copy.counter = counterValue
+    copy.missingFields = missing
+    return copy
+end
+
+-- Machine snapshot for automation exports; never calls FormatAgentReport and
+-- never truncates fields silently. Returns nil plus a stable error code on failure.
+function diagnostics.SnapshotRecentErrors(count, scope)
+    if ns.IsCombatBlocked() then
+        return nil, SNAPSHOT_ERROR_COMBAT
+    end
+    if type(count) ~= "number" or count ~= math.floor(count)
+        or count < 1 or count > SNAPSHOT_MAX_ERRORS then
+        return nil, SNAPSHOT_ERROR_COUNT
+    end
+    local grabber = GetGrabber()
+    if not grabber then
+        return nil, SNAPSHOT_ERROR_PROVIDER
+    end
+    local succeeded, database = pcall(grabber.GetDB, grabber)
+    if not succeeded or type(database) ~= "table" then
+        return nil, SNAPSHOT_ERROR_PROVIDER_CALL
+    end
+
+    local session = GetSessionId(grabber)
+    local allSessions = scope ~= "current_session"
+    local availableCount = 0
+    local errors = {}
+    local incompleteReasons = {}
+    for index = #database, 1, -1 do
+        local entry = database[index]
+        if type(entry) == "table" then
+            if allSessions or tonumber(entry.session) == session then
+                availableCount = availableCount + 1
+                if #errors < count then
+                    local copy = CopyErrorEntry(entry)
+                    errors[#errors + 1] = copy
+                    for fieldIndex = 1, #copy.missingFields do
+                        incompleteReasons[#incompleteReasons + 1]
+                            = "error[" .. #errors .. "]." .. copy.missingFields[fieldIndex]
+                    end
+                end
+            end
+        end
+    end
+
+    return {
+        scope = allSessions and "provider_storage" or "current_session",
+        requestedCount = count,
+        returnedCount = #errors,
+        availableCount = availableCount,
+        ordering = "provider_storage_reverse",
+        session = session,
+        providerVersion = GetProviderVersion(grabber),
+        capturedAt = time(),
+        complete = #incompleteReasons == 0,
+        incompleteReasons = incompleteReasons,
+        errors = errors,
+    }, nil
 end
 
 ns.Diagnostics = diagnostics

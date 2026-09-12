@@ -36,8 +36,13 @@ local english = LoadLocale("enUS")
 local britishEnglish = LoadLocale("enGB")
 local internationalFallback = LoadLocale("deDE")
 
-assert(CountKeys(chinese) == 244, "unexpected Chinese locale key count")
-assert(CountKeys(english) == 244, "unexpected English locale key count")
+-- The two source locales must stay in lockstep. A frozen total is not checked:
+-- it changes with every new string and would fail for the wrong reason.
+local chineseKeyCount = CountKeys(chinese)
+local englishKeyCount = CountKeys(english)
+assert(chineseKeyCount > 0, "the Chinese locale table is empty")
+assert(chineseKeyCount == englishKeyCount,
+    "locale key counts differ: zhCN=" .. chineseKeyCount .. " enUS=" .. englishKeyCount)
 
 for key, chineseValue in pairs(chinese) do
     local englishValue = english[key]

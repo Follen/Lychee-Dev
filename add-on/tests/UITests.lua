@@ -324,15 +324,21 @@ LoadAddonFile("Core/Bootstrap.lua", ns)
 LoadAddonFile("Modules/ObjectInspector.lua", ns)
 LoadAddonFile("Modules/Diagnostics.lua", ns)
 LoadAddonFile("Modules/FunctionTrace.lua", ns)
+LoadAddonFile("Modules/Automation/auto/auto.lua", ns)
+LoadAddonFile("Modules/Automation/Report.lua", ns)
+LoadAddonFile("Modules/Automation/Controller.lua", ns)
 LoadAddonFile(assert(catalogFiles[testClient]), ns)
 LoadAddonFile("Modules/Events/Catalog.lua", ns)
 LoadAddonFile("Modules/Events/Monitor.lua", ns)
+LoadAddonFile("Libs/AutomationQR.lua", ns)
 LoadAddonFile("UI/Export.lua", ns)
+LoadAddonFile("UI/AutomationOverlay.lua", ns)
 LoadAddonFile("UI/Pages/ExportRecords.lua", ns)
 LoadAddonFile("UI/Features.lua", ns)
 LoadAddonFile("UI/Pages/Object.lua", ns)
 LoadAddonFile("UI/Pages/Trace.lua", ns)
 LoadAddonFile("UI/Pages/Diagnostics.lua", ns)
+LoadAddonFile("UI/Pages/Automation.lua", ns)
 LoadAddonFile("UI/Pages/About.lua", ns)
 LoadAddonFile("UI/MainWindow.lua", ns)
 
@@ -372,7 +378,7 @@ assert(LycheeDevWindow.width == 1040 and LycheeDevWindow.height == 720, "window 
 
 local pageCount = 0
 for _ in pairs(LycheeDevWindow.pages) do pageCount = pageCount + 1 end
-assert(pageCount == 7, "window did not create all seven remaining workbench pages")
+assert(pageCount == 8, "window did not create all eight workbench pages")
 assert(LycheeDevWindow.pages.runner:IsShown(), "runner page was not active by default")
 assert(LycheeDevWindow.pageTabs.runner:GetWidth()
         >= math.max(48, LycheeDevWindow.pageTabs.runner.label:GetStringWidth() + 22),
@@ -707,5 +713,61 @@ ns.ShutdownForCombat()
 assert(not LycheeDevWindow:IsShown(), "combat shutdown did not close the window")
 SlashCmdList.LYCHEEDEV()
 assert(not LycheeDevWindow:IsShown(), "/dev opened the window during combat")
+inCombat = false
+
+-- Automation page: build and drive it against a populated index. The page is
+-- created with the window, so it must survive records appearing later.
+local automationPage = assert(LycheeDevWindow.pages.automation, "automation page was not created")
+local automationIndex = assert(ns.GetAutomationIndex(), "automation index missing after initialization")
+assert(type(automationIndex.records) == "table" and type(automationIndex.order) == "table",
+    "automation index did not expose records/order")
+assert(automationPage.runButton and automationPage.cancelButton and automationPage.clearButton,
+    "automation page did not expose its action buttons")
+
+local olderTicket = ns.AddExport("automation_result", "older automation result", "older payload")
+local newerTicket = ns.AddExport("automation_result", "newer automation result", "newer payload")
+local longTicket = ns.AddExport("automation_result", "long automation result", string.rep("x", 60 * 1024))
+
+automationIndex.records["req-older"] = {
+    executionId = "req-older", taskId = "older-task", kind = "bug_snapshot",
+    status = "succeeded", startedAt = 1000, finishedAt = 1001, ticket = olderTicket,
+}
+automationIndex.records["req-newer"] = {
+    executionId = "req-newer", taskId = "newer-task", kind = "lua",
+    status = "failed", startedAt = 2000, finishedAt = 2001, ticket = newerTicket,
+    errorCode = "boom",
+}
+automationIndex.records["req-long"] = {
+    executionId = "req-long", taskId = "long-task", kind = "lua",
+    status = "succeeded", startedAt = 3000, finishedAt = 3001, ticket = longTicket,
+}
+-- Newest first, matching the committed index ordering.
+automationIndex.order = { "req-long", "req-newer", "req-older" }
+
+automationPage:Activate()
+assert(#automationPage.rows == 3, "automation page did not build one row per execution")
+assert(automationPage.ticketBox:GetText() == longTicket,
+    "automation page did not select the newest record on refresh")
+
+-- Selecting an older record must switch the whole detail pane.
+automationPage.SelectRecord("req-older")
+assert(automationPage.ticketBox:GetText() == olderTicket,
+    "selecting a record did not refresh the ticket box")
+
+-- The report view must bound what it displays without touching the stored payload.
+automationPage.SelectRecord("req-long")
+automationPage.viewReportButton:Click()
+assert(#automationPage.reportArea.editBox:GetText() < 60 * 1024,
+    "automation report view did not bound its displayed text")
+assert(ns.GetExport(longTicket).payload.content == string.rep("x", 60 * 1024),
+    "automation report view truncated the stored payload")
+
+-- Clearing history is confirmed on the second click.
+automationPage.clearButton:Click()
+assert(automationPage.clearButton.variant == "danger",
+    "first clear click did not switch to the confirmation state")
+automationPage.clearButton:Click()
+assert(#ns.GetAutomationIndex().order == 0,
+    "confirmed clear did not empty the automation history")
 
 print("Lychee Dev UI tests passed")

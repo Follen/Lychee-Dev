@@ -33,6 +33,7 @@ local PAGE_DEFINITIONS = {
     { key = "trace", label = L.TAB_TRACE },
     { key = "diagnostics", label = L.TAB_DIAGNOSTICS },
     { key = "exports", label = L.TAB_EXPORTS },
+    { key = "automation", label = L.TAB_AUTOMATION },
     { key = "about", label = L.TAB_ABOUT },
 }
 
@@ -1079,6 +1080,7 @@ local function CreateWindow()
     frame.tracePage = ns.CreateTracePage(frame, featureUI)
     frame.diagnosticsPage = ns.CreateDiagnosticsPage(frame, featureUI)
     frame.exportRecordsPage = ns.CreateExportRecordsPage(frame, featureUI)
+    frame.automationPage = ns.CreateAutomationPage(frame, featureUI)
     frame.aboutPage = ns.CreateAboutPage(frame, featureUI)
     frame.historyButtons = historyButtons
     frame.pages = {
@@ -1088,6 +1090,7 @@ local function CreateWindow()
         trace = frame.tracePage,
         diagnostics = frame.diagnosticsPage,
         exports = frame.exportRecordsPage,
+        automation = frame.automationPage,
         about = frame.aboutPage,
     }
     for key, page in pairs(frame.pages) do

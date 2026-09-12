@@ -112,7 +112,15 @@ function ns.Execute(code)
 end
 
 SLASH_LYCHEEDEV1 = "/dev"
-SlashCmdList.LYCHEEDEV = function()
+SlashCmdList.LYCHEEDEV = function(message)
+    local text = tostring(message or "")
+    local action = text:match("^(%S+)")
+    if action and action:lower() == "auto" then
+        if ns.Automation and ns.Automation.HandleCommand then
+            ns.Automation.HandleCommand(text:match("^%S+%s*(.-)%s*$") or "")
+        end
+        return
+    end
     if ns.IsCombatBlocked() then
         ns.PrintCombatBlocked()
         return

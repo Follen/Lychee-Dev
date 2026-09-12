@@ -48,6 +48,8 @@ LycheeDevDB.exports.records[TICKET].payload.content
 
 `source.kind` is a stable machine identifier. `source.title` and the payload may be localized display content. `metadata` contains bounded feature-specific context and must not be treated as a complete copy of the payload.
 
+Automation results commit through the same envelope: `source.kind` is `automation_result` (or `error_log` for the built-in bug snapshot), `payload.mediaType` is `application/json`, and the payload holds one complete `lychee.automation.result.v1` report. `metadata` then carries `taskId`, `executionId`, `revision`, `resultSchema`, `status`, `complete`, `checksumAlgorithm`, and `contentChecksum` (Adler-32 over the exact UTF-8 payload bytes). Automation records created in the current session are additionally protected from pruning, deletion and cache clears until the output-side reload writes them to disk.
+
 ## Persistence
 
 Creating a record updates the in-memory SavedVariables table. World of Warcraft writes it to disk only on `/reload`, logout, or normal client exit. The UI marks records created in the current session as pending until one of those lifecycle events occurs.

@@ -22,6 +22,16 @@ try {
         }
     }
     if ($names -notcontains 'Lychee Dev/Media/Logo.png') { throw 'Package is missing runtime media' }
+    $autoEntry = $archive.GetEntry('Lychee Dev/Modules/Automation/auto/auto.lua')
+    if ($null -eq $autoEntry) { throw 'Package is missing the automation task registry' }
+    $reader = [IO.StreamReader]::new($autoEntry.Open())
+    try {
+        $autoText = $reader.ReadToEnd()
+    } finally {
+        $reader.Dispose()
+    }
+    if ($autoText -match '(?m)^-- BEGIN LYCHEE DEV TASK \S') { throw 'Package ships local task source in the automation registry' }
+    if ($autoText -notmatch 'ns\.AutomationTaskDefinitions\s*=\s*ns\.AutomationTaskDefinitions\s*or\s*\{\}') { throw 'Package automation registry does not declare an empty registration table' }
     Write-Output "Lychee Dev packaging tests passed ($($names.Count) runtime files)"
 } finally {
     if ($archive) { $archive.Dispose() }
