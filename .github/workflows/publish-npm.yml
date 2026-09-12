@@ -54,6 +54,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner has no Lua interpreter, and the suite is written for the
+      # 5.1 subset the game uses. The archive ships lua5.1.exe, so it is copied
+      # to the bare `lua` name the test runner invokes.
+      - name: Install Lua 5.1
+        shell: pwsh
+        run: |
+          $toolDir = Join-Path $env:RUNNER_TEMP 'lua51'
+          New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'lua51.zip'
+          curl.exe -sL --fail --max-time 300 -o $zip `
+            "https://sourceforge.net/projects/luabinaries/files/5.1.5/Tools%20Executables/lua-5.1.5_Win64_bin.zip/download"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $toolDir)
+          Copy-Item -LiteralPath (Join-Path $toolDir 'lua5.1.exe') `
+            -Destination (Join-Path $toolDir 'lua.exe') -Force
+          Copy-Item -LiteralPath (Join-Path $toolDir 'luac5.1.exe') `
+            -Destination (Join-Path $toolDir 'luac.exe') -Force
+          $toolDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $toolDir 'lua.exe') -v
+
       - name: Run the repository test matrix
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1
