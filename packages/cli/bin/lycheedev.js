@@ -8,7 +8,7 @@ import { runDoctor } from '../src/doctor.js';
 import { runInstall } from '../src/install.js';
 import { loadConfig } from '../src/config.js';
 import { runAutomation } from '../src/python.js';
-import { scanClients } from '../src/wow.js';
+import { findSavedVariablesCandidates, scanClients } from '../src/wow.js';
 import { addonFolderName, exists } from '../src/paths.js';
 
 const HELP = `lycheedev - Lychee Dev installer and World of Warcraft automation driver
@@ -226,7 +226,42 @@ function main(argv) {
       }
       return forward(['task', sub, ...forwarded, ...passthrough(flags)]);
     }
-    case 'sv':
+    case 'sv': {
+      const sub = rest.shift();
+      if (sub === 'find') {
+        // The wrapper already knows the plaintext install and can enumerate the
+        // account folders itself, so `sv find` needs no profile binding.
+        const config = loadConfig();
+        const root = flags['wow-root'] || config.wowRoot;
+        if (!root || !exists(root)) {
+          console.error('error: no World of Warcraft root; run `lycheedev install --wow-root <path>`');
+          return 1;
+        }
+        const candidates = findSavedVariablesCandidates(root, client.flavorFolder);
+        if (candidates.length === 0) {
+          console.error(`no account-level '${addonFolderName}.lua' found under ${root}`);
+          return 1;
+        }
+        for (const candidate of candidates) console.log(candidate.path);
+        return 0;
+      }
+      if (sub === 'read') {
+        if (!flags.ticket) {
+          console.error('error: sv read needs --ticket <t>');
+          return 1;
+        }
+        const svPath = flags.sv || client.svPath;
+        if (!svPath) {
+          console.error('error: no SavedVariables path known for this client; '
+            + 'run `lycheedev install`, or pass --sv <path>');
+          return 1;
+        }
+        return forward(['sv', 'read', '--sv', svPath, '--ticket', flags.ticket,
+          ...passthrough(flags)]);
+      }
+      console.error('error: sv needs a subcommand: find or read');
+      return 1;
+    }
     case 'profile':
     case 'status':
     case 'recover':
