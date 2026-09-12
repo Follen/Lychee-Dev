@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="Media/Logo.png" width="112" alt="荔枝开发工具 Logo">
+  <img src="add-on/Media/Logo.png" width="112" alt="荔枝开发工具 Logo">
   <h1>荔枝开发工具</h1>
   <p><strong>面向魔兽世界插件程序员与编程 Agent 的游戏内证据工作台。</strong></p>
-  <p>运行 Lua、检查实时对象、抓取事件与错误、分析插件性能，并用可搜索的 Ticket 导出完整证据。</p>
+  <p>运行 Lua、检查实时对象、抓取事件与错误，并用可搜索的 Ticket 导出完整证据。</p>
 
   <p>
     <strong>简体中文</strong>
@@ -13,7 +13,7 @@
   <p>
     <img alt="版本 0.7.2" src="https://img.shields.io/badge/release-v0.7.2-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
-    <img alt="19 项测试通过" src="https://img.shields.io/badge/tests-19%20passing-2f855a?style=for-the-badge">
+    <img alt="21 项测试通过" src="https://img.shields.io/badge/tests-21%20passing-2f855a?style=for-the-badge">
   </p>
   <p>
     <img alt="正式服 12.1" src="https://img.shields.io/badge/Retail-12.1-1488cc?style=flat-square">
@@ -26,7 +26,6 @@
   <p>
     <a href="#为什么需要荔枝开发工具">项目定位</a> &middot;
     <a href="#agent-工作流">Agent 工作流</a> &middot;
-    <a href="#深度性能证据">性能分析</a> &middot;
     <a href="#支持客户端">兼容性</a> &middot;
     <a href="#参与开发">参与开发</a>
   </p>
@@ -42,7 +41,6 @@
 - 抓取嵌套界面对象，而不是只给一个 Frame 名称；
 - 按客户端构建提供准确事件与参数签名；
 - 记录插件完整生命周期内的 Lua 错误、调用栈与局部变量；
-- 在同一段录制中关联热路径、对象、对象池、闭包变化、SavedVariables 增长和分析器开销；
 - 将完整数据保存到 SavedVariables，并用稳定的 `LYCHEE-...` Ticket 定位。
 
 游戏内输入 `/dev` 打开。插件不会上传任何数据。
@@ -55,20 +53,8 @@
 | **对象** | 鼠标下是什么 Frame、由谁持有、内部还嵌套了什么？ |
 | **事件** | 当前客户端有哪些官方事件，实际触发时携带了什么参数？ |
 | **追踪** | 谁调用了这个函数，参数、返回值、来源和耗时是什么？ |
-| **性能** | 哪个插件、函数、Frame 脚本、对象模式或持久化结构正在制造开销？ |
 | **诊断** | 插件生命周期中发生了什么错误，应该把哪些证据交给 Agent？ |
 | **落盘记录** | 这个 Ticket 对应哪份完整报告，WoW 是否已经把它写入磁盘？ |
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/images/zh-CN/performance-capture.png" alt="插件深度性能录制"></td>
-    <td width="50%"><img src="docs/images/zh-CN/saved-records.png" alt="带 Ticket 的落盘记录"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>以插件为维度关联多层性能证据</sub></td>
-    <td align="center"><sub>完整数据、磁盘状态与稳定 Ticket</sub></td>
-  </tr>
-</table>
 
 ## Agent 工作流
 
@@ -85,7 +71,7 @@ flowchart LR
 ```
 
 1. 输入 `/dev` 打开荔枝开发工具。
-2. 复现错误、事件序列、对象状态或性能问题。
+2. 复现错误、事件序列或对象状态。
 3. 在对应报告中点击 **落盘**。
 4. 把生成的 `LYCHEE-YYYYMMDD-HHMMSS-NNNN` Ticket 交给 Agent。
 5. 点击 **重载界面**，让魔兽世界把 SavedVariables 写入磁盘。
@@ -95,26 +81,16 @@ flowchart LR
 
 ```text
 在荔枝开发工具 SavedVariables 中找到 Ticket LYCHEE-20260820-012825-0006。
-使用完整记录定位根因，引用对应热路径或失败调用点，并给出最小安全修复。
+使用完整记录定位根因，引用对应状态或失败调用点，并给出最小安全修复。
 ```
 
-记录使用带版本的 `lychee.evidence.v1` 结构，包含来源标识、唯一一份完整数据、客户端环境、创建时间和受限的功能元数据。清理缓存后 Ticket 编号也不会复用。Agent 的稳定读取路径为 `LycheeDevDB.exports.records[TICKET].payload.content`，完整协议见 [EvidenceProtocol.md](docs/EvidenceProtocol.md)。
+记录使用带版本的 `lychee.evidence.v1` 结构，包含来源标识、唯一一份完整数据、客户端环境、创建时间和受限的功能元数据。清理缓存后 Ticket 编号也不会复用。Agent 的稳定读取路径为 `LycheeDevDB.exports.records[TICKET].payload.content`，完整协议见 [EvidenceProtocol.md](add-on/docs/EvidenceProtocol.md)。
 
-## 深度性能证据
+## 有边界的运行时调查
 
-荔枝开发工具不会把插件性能简化成一个累计 CPU 数字。每次录制始终锁定一个目标插件，并在同一个受限时间段内关联多层证据：
+使用 **运行** 执行明确、有界的 Lua 调查，将结果落盘后交出 Ticket。对象检查、事件监听、函数追踪和错误诊断仍是独立工具。测量口径、观察器成本与一次脚本交接说明见 [运行时调查](add-on/docs/RuntimeInvestigations.md)。
 
-- `C_AddOnProfiler` 提供的近期、首领战、峰值和会话 CPU；
-- P50、P95、P99、最大值、尖峰阈值和相对客户端负载；
-- 函数自身耗时、包含耗时、调用次数和平均耗时；
-- 可归属的 Frame 脚本与 `OnUpdate` 活动；
-- 可达对象数量、类型、显隐变化和新观察对象；
-- 可识别对象池的容量、获取/释放变化和复用信号；
-- 稳定路径上的函数身份替换，用于提示闭包重复创建；
-- 录制期间声明的 SavedVariables 结构增长；
-- 分析器自身开销和明确的覆盖限制。
-
-深度录制默认关闭。只有开始录制时才会创建采样器；停止录制、关闭窗口或进入战斗后会立即取消。独立的高级实验使用 `C_AddOnProfiler.MeasureCall` 主动执行一个明确选择、可重复调用的函数，并报告耗时与内存分配证据。
+性能页面、自动录制、函数性能实验和 profiling 开关已移除。既有性能 Ticket 仍能在 **落盘记录** 中查看，完整 payload 路径保持不变。删除功能不会清空历史，也不会改写客户端全局设置。
 
 ## 对象与事件
 
@@ -144,16 +120,30 @@ flowchart LR
 | 经典版 | 5.5.4 | `50504` | `Lychee Dev_Mists.toc` |
 | 经典泰坦 | 3.80.2 | `38002` | `Lychee Dev_Wrath.toc` |
 
-发布包同时包含三个 TOC。魔兽世界会选择匹配的 TOC、客户端配置和生成事件目录，其他实现保持共享。准确的 API 证据与兼容边界见 [Compatibility.md](docs/Compatibility.md)。
+发布包同时包含三个 TOC。魔兽世界会选择匹配的 TOC、客户端配置和生成事件目录，其他实现保持共享。准确的 API 证据与兼容边界见 [Compatibility.md](add-on/docs/Compatibility.md)。
 
 ## 安装
 
 1. 安装 `!BugGrabber`。
-2. 将 `Lychee Dev` 文件夹放入对应魔兽世界客户端的 `Interface/AddOns` 目录。
+2. 将 `add-on/` 内的三个 TOC 和 `Core`、`Modules`、`UI`、`Media` 目录放入对应客户端的 `Interface/AddOns/Lychee Dev/`，或将构建出的 ZIP 解压到 `Interface/AddOns/`。TOC 必须直接位于 `Lychee Dev` 下，不能额外嵌套 `add-on` 目录。
 3. 在插件列表启用荔枝开发工具。
 4. 进入游戏后输入 `/dev`。
 
-战斗中无法打开或使用荔枝开发工具。进入战斗时，正在运行的监听、追踪和录制都会停止。
+战斗中无法打开或使用荔枝开发工具。进入战斗时，正在运行的监听和追踪都会停止。
+
+## 安装 wowdev 技能
+
+[Lychee Dev skill/SKILL.md](<Lychee Dev skill/SKILL.md>) 是仓库内可追踪的 `wowdev` 技能源。将该目录内容复制到 Agent 的 `skills/wowdev/`，例如 `~/.codex/skills/wowdev/`。技能名称仍为 `wowdev`，不要用仓库目录名替换调用名称。
+
+使用 `$wowdev` 描述具体问题：Agent 准备一份有界脚本，你在 `/dev` 的运行页执行，再由 Agent 读取完整 Ticket 报告分析。插件负责运行和留证，技能负责设计调查与解释结果；安装技能不会自动安装或启动游戏插件。简单探针用运行页；需要大量源码的统一测试使用单独验证的诊断载体与短启动命令，避免巨型粘贴。输入路径是否流畅和脚本执行是否正确需要分别验证。
+
+## 构建安装包
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tools/Package.ps1
+```
+
+安装包输出到 `add-on/publish/`，ZIP 顶层只有 `Lychee Dev/`。只包含 TOC、运行文件和媒体，不包含 tests、tools、docs、技能或调查数据。打包不会安装或发布插件。
 
 ## 数据结构与限制
 
@@ -170,27 +160,29 @@ flowchart LR
 项目使用 WoW Lua 5.1 子集，并通过明确的客户端配置隔离构建差异。
 
 ```text
-Core/                  兼容边界、持久化、序列化与安全
-Core/Clients/          各构建 API 配置
-Modules/               诊断、追踪、性能与对象检查
-Modules/Events/        生成事件目录与受限监听运行时
-UI/                    共享控件、落盘流程、页面与主窗口
-tests/                 独立 Lua 测试和三客户端矩阵
+README.md / README_zhCN.md
+add-on/
+  Core/ Modules/ UI/ Media/
+  Lychee Dev_*.toc
+  tests/ tools/ docs/
+Lychee Dev skill/
+  SKILL.md
+  agents/ references/
 ```
 
 运行完整测试：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/TestAll.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1
 ```
 
 运行三端精确构建静态兼容审计：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/AuditCompatibility.ps1
+powershell -ExecutionPolicy Bypass -File add-on/tools/AuditCompatibility.ps1
 ```
 
-测试矩阵在正式服、经典版和经典泰坦上运行 20 项检查，覆盖语言契约、生成事件目录、运行时行为、UI 交互、TOC/构建选择和静态审计契约。
+测试矩阵在正式服、经典版和经典泰坦上运行 21 项检查，覆盖语言契约、生成事件目录、运行时行为、UI 交互、TOC/构建选择、静态审计契约和安装包结构。
 
 ## 设计边界
 

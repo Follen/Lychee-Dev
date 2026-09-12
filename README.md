@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="Media/Logo.png" width="112" alt="Lychee Dev logo">
+  <img src="add-on/Media/Logo.png" width="112" alt="Lychee Dev logo">
   <h1>Lychee Dev</h1>
   <p><strong>An in-game evidence workbench for World of Warcraft addon engineers and coding agents.</strong></p>
-  <p>Run Lua, inspect live objects, capture events and errors, profile real addon behavior, and export complete evidence with a searchable Ticket.</p>
+  <p>Run Lua, inspect live objects, capture events and errors, and export complete evidence with a searchable Ticket.</p>
 
   <p>
     <a href="README_zhCN.md"><strong>简体中文</strong></a>
@@ -13,7 +13,7 @@
   <p>
     <img alt="Release 0.7.2" src="https://img.shields.io/badge/release-v0.7.2-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
-    <img alt="19 tests passing" src="https://img.shields.io/badge/tests-19%20passing-2f855a?style=for-the-badge">
+    <img alt="21 tests passing" src="https://img.shields.io/badge/tests-21%20passing-2f855a?style=for-the-badge">
   </p>
   <p>
     <img alt="Retail 12.1" src="https://img.shields.io/badge/Retail-12.1-1488cc?style=flat-square">
@@ -26,7 +26,6 @@
   <p>
     <a href="#why-lychee-dev">Why Lychee Dev</a> &middot;
     <a href="#agent-workflow">Agent workflow</a> &middot;
-    <a href="#deep-performance-evidence">Performance</a> &middot;
     <a href="#supported-clients">Compatibility</a> &middot;
     <a href="#development">Development</a>
   </p>
@@ -42,7 +41,6 @@ Most addon bugs are difficult because the useful state exists only inside a runn
 - nested UI objects instead of a single frame name;
 - build-correct events and argument signatures instead of a generic list;
 - lifecycle-wide Lua errors with stack and local context;
-- bounded performance captures with hot paths, object signals, pool reuse, closure churn, SavedVariables growth, and collector overhead;
 - complete SavedVariables exports addressed by stable `LYCHEE-...` Tickets.
 
 Open the workbench with `/dev`. Nothing is sent over the network.
@@ -55,20 +53,8 @@ Open the workbench with `/dev`. Nothing is sent over the network.
 | **Objects** | Which frame is under the cursor, what owns it, and what is nested below it? |
 | **Events** | Which documented client events fired, with which payloads? |
 | **Trace** | Who called this function, with what arguments, returns, source, and duration? |
-| **Performance** | Which addon, function, frame script, object pattern, or persistent structure is producing the cost? |
 | **Errors** | What failed across the addon lifecycle, and what evidence should be handed to an Agent? |
 | **Saved Records** | Which complete report belongs to this Ticket, and has WoW written it to disk yet? |
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/images/en/object-inspector.png" alt="Nested object inspector"></td>
-    <td width="50%"><img src="docs/images/en/saved-records.png" alt="Ticketed saved records"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Incremental object inspection with expandable structure</sub></td>
-    <td align="center"><sub>Complete evidence addressed by a stable Agent Ticket</sub></td>
-  </tr>
-</table>
 
 ## Agent workflow
 
@@ -85,7 +71,7 @@ flowchart LR
 ```
 
 1. Open Lychee Dev with `/dev`.
-2. Reproduce the error, event sequence, object state, or performance issue.
+2. Reproduce the error, event sequence, or object state.
 3. Click **Save** on the relevant report.
 4. Give the generated `LYCHEE-YYYYMMDD-HHMMSS-NNNN` Ticket to the Agent.
 5. Click **Reload UI** so World of Warcraft writes SavedVariables to disk.
@@ -95,27 +81,17 @@ A useful Agent request is intentionally short:
 
 ```text
 Find Ticket LYCHEE-20260820-012825-0006 in the Lychee Dev SavedVariables.
-Use the complete record to identify the root cause, cite the hot path or failing
+Use the complete record to identify the root cause, cite the captured state or failing
 call site, and propose the smallest safe patch.
 ```
 
-The record uses the versioned `lychee.evidence.v1` envelope. It includes source identity, one complete payload, client environment, creation time, and bounded feature metadata. Ticket identifiers are never reused after cache cleanup. The stable Agent lookup path is `LycheeDevDB.exports.records[TICKET].payload.content`; see [EvidenceProtocol.md](docs/EvidenceProtocol.md).
+The record uses the versioned `lychee.evidence.v1` envelope. It includes source identity, one complete payload, client environment, creation time, and bounded feature metadata. Ticket identifiers are never reused after cache cleanup. The stable Agent lookup path is `LycheeDevDB.exports.records[TICKET].payload.content`; see [EvidenceProtocol.md](add-on/docs/EvidenceProtocol.md).
 
-## Deep performance evidence
+## Focused runtime investigations
 
-Lychee Dev does not reduce addon performance to one cumulative CPU number. A recording stays scoped to one selected addon and correlates several evidence layers over the same bounded interval:
+Use **Run** for an explicit, bounded Lua investigation, then save its result and share the Ticket. Object inspection, event monitoring, function tracing, and error evidence remain separate tools. See [Runtime investigations](add-on/docs/RuntimeInvestigations.md) for scope, observer cost, and a single-script handoff.
 
-- current, encounter, peak, and session CPU from `C_AddOnProfiler`;
-- P50, P95, P99, maximum, spike thresholds, and relative client load;
-- function self time, inclusive time, call count, and average cost;
-- attributed Frame scripts and `OnUpdate` activity;
-- reachable object counts, types, visibility transitions, and newly observed objects;
-- recognizable object-pool capacity, acquire/release movement, and reuse signals;
-- function identity replacement at stable paths as a closure-churn signal;
-- declared SavedVariables structure growth during the capture;
-- analyzer overhead and explicit coverage limits.
-
-Deep capture is opt-in. Its sampler is created only when recording begins and is cancelled immediately when recording stops, the window closes, or combat starts. The separate Function Lab uses `C_AddOnProfiler.MeasureCall` to execute an explicitly selected repeatable function and report timing plus allocation evidence.
+The Performance page, automatic capture, function benchmarks, and profiling switch have been removed. Existing performance Tickets remain readable in **Saved Records** and through the unchanged evidence payload path. Removal does not clear history or rewrite global client settings.
 
 ## Object and event inspection
 
@@ -145,16 +121,30 @@ Errors are grouped by signature and rendered with occurrence count, client conte
 | Classic | 5.5.4 | `50504` | `Lychee Dev_Mists.toc` |
 | Classic Titan | 3.80.2 | `38002` | `Lychee Dev_Wrath.toc` |
 
-The archive ships all three TOCs. World of Warcraft selects the matching TOC, client profile, and generated event catalog while loading the shared implementation. Exact API evidence and compatibility boundaries are documented in [Compatibility.md](docs/Compatibility.md).
+The archive ships all three TOCs. World of Warcraft selects the matching TOC, client profile, and generated event catalog while loading the shared implementation. Exact API evidence and compatibility boundaries are documented in [Compatibility.md](add-on/docs/Compatibility.md).
 
 ## Installation
 
 1. Install `!BugGrabber`.
-2. Place the `Lychee Dev` folder in the matching World of Warcraft `Interface/AddOns` directory.
+2. Copy the three TOCs and the `Core`, `Modules`, `UI`, and `Media` directories from `add-on/` into `Interface/AddOns/Lychee Dev/` in the matching client, or extract the generated ZIP into `Interface/AddOns/`. The TOC files must be directly inside `Lychee Dev`, with no nested `add-on` folder.
 3. Enable Lychee Dev in the addon list.
 4. Enter the world and run `/dev`.
 
-The addon cannot be opened or used during combat. Active monitors, traces, and captures are stopped when combat begins.
+The addon cannot be opened or used during combat. Active monitors and traces are stopped when combat begins.
+
+## Install the wowdev skill
+
+[Lychee Dev skill/SKILL.md](<Lychee Dev skill/SKILL.md>) is the versioned source for the `wowdev` skill. Copy that folder's contents into your agent's `skills/wowdev/` directory, such as `~/.codex/skills/wowdev/`. Keep the skill name `wowdev`; the repository folder name is not its invocation name.
+
+Use `$wowdev` to describe a specific issue. The Agent prepares one bounded Run script, you execute it in `/dev`, and the Agent reads the complete saved Ticket to diagnose it. The addon runs Lua and preserves evidence; the skill plans and interprets the investigation. Installing the skill does not install or activate the addon. Small probes belong in Run; studies requiring large source bundles should use a separately verified diagnostic carrier and a short start command, not a giant paste. Input-path responsiveness and execution correctness require separate validation.
+
+## Build an installable ZIP
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tools/Package.ps1
+```
+
+The package is written under `add-on/publish/` with a single `Lychee Dev/` root. Only TOCs, their runtime files and media are included; tests, tools, docs, the skill and investigation data are excluded. Packaging does not install or publish it.
 
 ## Data model and limits
 
@@ -171,27 +161,29 @@ The addon cannot be opened or used during combat. Active monitors, traces, and c
 The project targets the WoW Lua 5.1 subset and keeps client differences behind explicit profiles.
 
 ```text
-Core/                  compatibility, persistence, serialization, safety
-Core/Clients/          build-specific API profiles
-Modules/               diagnostics, tracing, performance, object inspection
-Modules/Events/        generated catalogs plus bounded monitoring runtime
-UI/                    shared widgets, export flow, pages, main window
-tests/                 standalone Lua tests and the three-client matrix
+README.md / README_zhCN.md
+add-on/
+  Core/ Modules/ UI/ Media/
+  Lychee Dev_*.toc
+  tests/ tools/ docs/
+Lychee Dev skill/
+  SKILL.md
+  agents/ references/
 ```
 
 Run the complete matrix:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/TestAll.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1
 ```
 
 Run the exact-build static compatibility audit:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/AuditCompatibility.ps1
+powershell -ExecutionPolicy Bypass -File add-on/tools/AuditCompatibility.ps1
 ```
 
-The suite runs 20 checks across Retail, Classic, and Classic Titan, including locale contracts, generated event catalogs, runtime behavior, UI interaction, TOC/build selection, and the static-audit contract.
+The suite runs 21 checks across Retail, Classic, and Classic Titan, including locale contracts, generated event catalogs, runtime behavior, UI interaction, TOC/build selection, the static-audit contract, and installable ZIP contents.
 
 ## Design constraints
 

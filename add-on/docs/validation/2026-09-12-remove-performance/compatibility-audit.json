@@ -1,0 +1,98 @@
+{
+    "schema":  "lychee.compatibility-audit.v1",
+    "target":  "D:\\Code\\wow\\worktrees\\lychee-dev-performance\\add-on",
+    "policy":  "lychee-dev",
+    "generatedAt":  "2026-09-12T06:50:50.1314784Z",
+    "method":  [
+                   "Resolve the actual per-client TOC and recursive XML/Lua load closure.",
+                   "Validate each isolated closure against one locked official wow-ui-source commit.",
+                   "Compare manifests, shared load order, client profiles, and generated event catalogs.",
+                   "Check literal event registrations against the matching exact-build catalog.",
+                   "Flag dynamic event registrations and compatibility branches that require manual review."
+               ],
+    "clients":  [
+                    {
+                        "id":  "retail",
+                        "toc":  "Lychee Dev_Mainline.toc",
+                        "interface":  "120100",
+                        "officialSource":  {
+                                               "sourceId":  "wow-ui-source",
+                                               "product":  "retail",
+                                               "tag":  "12.1.0",
+                                               "commit":  "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"
+                                           },
+                        "loadClosureFiles":  23,
+                        "luaFiles":  23,
+                        "literalEvents":  1,
+                        "dynamicEventRegistrations":  0,
+                        "wowdoc":  {
+                                       "valid":  true,
+                                       "checkedLua":  23,
+                                       "diagnosticCount":  0,
+                                       "diagnostics":  [
+
+                                                       ]
+                                   }
+                    },
+                    {
+                        "id":  "classic",
+                        "toc":  "Lychee Dev_Mists.toc",
+                        "interface":  "50504",
+                        "officialSource":  {
+                                               "sourceId":  "wow-ui-source",
+                                               "product":  "classic",
+                                               "tag":  "5.5.4",
+                                               "commit":  "1028c1e687f721ba9d3af14d1b12a5745e4227c7"
+                                           },
+                        "loadClosureFiles":  23,
+                        "luaFiles":  23,
+                        "literalEvents":  1,
+                        "dynamicEventRegistrations":  0,
+                        "wowdoc":  {
+                                       "valid":  true,
+                                       "checkedLua":  23,
+                                       "diagnosticCount":  0,
+                                       "diagnostics":  [
+
+                                                       ]
+                                   }
+                    },
+                    {
+                        "id":  "titan",
+                        "toc":  "Lychee Dev_Wrath.toc",
+                        "interface":  "38002",
+                        "officialSource":  {
+                                               "sourceId":  "wow-ui-source",
+                                               "product":  "titan",
+                                               "tag":  "3.80.2",
+                                               "commit":  "825d29d3662b372f0bead725ee6abd339e4a77b5"
+                                           },
+                        "loadClosureFiles":  23,
+                        "luaFiles":  23,
+                        "literalEvents":  1,
+                        "dynamicEventRegistrations":  0,
+                        "wowdoc":  {
+                                       "valid":  true,
+                                       "checkedLua":  23,
+                                       "diagnosticCount":  0,
+                                       "diagnostics":  [
+
+                                                       ]
+                                   }
+                    }
+                ],
+    "findings":  [
+
+                 ],
+    "limitations":  [
+                        "Dynamic API names, dynamically constructed event names, and runtime-only code paths cannot be proven statically.",
+                        "A clean result does not replace in-game combat, taint, persistence, or interaction testing.",
+                        "The audit reports compatibility evidence; it does not rewrite target addon source."
+                    ],
+    "summary":  {
+                    "passed":  true,
+                    "errors":  0,
+                    "warnings":  0,
+                    "info":  0
+                }
+}
