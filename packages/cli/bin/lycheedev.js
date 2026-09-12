@@ -174,7 +174,9 @@ function main(argv) {
 
   const forwarded = [];
   const client = target.client || {};
-  if (client.addonsDir) forwarded.push('--install-dir', client.addonsDir);
+  // The python helper wants the installed addon directory itself, not the
+  // AddOns folder that contains it.
+  if (client.addonsDir) forwarded.push('--install-dir', path.join(client.addonsDir, addonFolderName));
 
   switch (command) {
     case 'send': {
@@ -237,11 +239,12 @@ function main(argv) {
 
   function passthrough(all) {
     const out = [];
+    // These are either handled by the wrapper itself or are global python
+    // options that `forward()` places before the subcommand.
+    const handled = ['wow-root', 'client', 'python', 'force', 'reset-registry', 'task', 'count',
+      'ticket', 'status', 'json', 'help', 'version', 'data-dir', 'installation'];
     for (const [name, value] of Object.entries(all)) {
-      if (['wow-root', 'client', 'python', 'force', 'reset-registry', 'task', 'count',
-        'ticket', 'status', 'json', 'help', 'version'].includes(name)) {
-        continue;
-      }
+      if (handled.includes(name)) continue;
       if (value === true) out.push(`--${name}`);
       else out.push(`--${name}`, String(value));
     }
@@ -249,7 +252,19 @@ function main(argv) {
   }
 
   function forward(args) {
-    const result = runAutomation(args, { pythonBin: flags.python || (target.config || {}).pythonBin });
+    // `--data-dir` and `--installation` are global options of the python helper,
+    // so they must precede the subcommand or argparse rejects them. Everything
+    // else stays where the caller put it.
+    const globals = [];
+    if (flags['data-dir']) globals.push('--data-dir', String(flags['data-dir']));
+    if (flags.installation) globals.push('--installation', String(flags.installation));
+    const finalArgs = [...globals, ...args];
+    if (process.env.LYCHEEDEV_DEBUG) {
+      console.error(`[debug] python automation.py ${finalArgs.join(' ')}`);
+    }
+    const result = runAutomation(finalArgs, {
+      pythonBin: flags.python || (target.config || {}).pythonBin,
+    });
     return typeof result.status === 'number' ? result.status : 1;
   }
 }

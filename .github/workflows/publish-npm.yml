@@ -66,14 +66,22 @@ jobs:
     environment: npm
     permissions:
       contents: read
+      # Required for npm trusted publishing (OIDC). No npm token is used, so a
+      # long-lived secret with 2FA bypass never has to exist.
       id-token: write
     steps:
       - uses: actions/checkout@v4
 
+      # Trusted publishing needs npm >= 11.5.1, which needs Node >= 22.14.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
+
+      - name: Ensure an npm that supports trusted publishing
+        run: |
+          npm install --global npm@latest
+          npm --version
 
       - name: Vendor the shipped payload
         working-directory: packages/cli
@@ -89,8 +97,8 @@ jobs:
             exit 1
           fi
 
+      # No NODE_AUTH_TOKEN and no NPM_TOKEN: npm exchanges the GitHub OIDC token
+      # for short-lived registry credentials. Provenance is attached automatically.
       - name: Publish
         working-directory: packages/cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public
