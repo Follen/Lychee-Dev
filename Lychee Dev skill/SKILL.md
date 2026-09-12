@@ -7,6 +7,14 @@ description: Use when working with the Lychee Dev WoW addon to read persisted ru
 
 Use this skill as the operational guide for Lychee Dev, an in-game evidence workbench. The desired output is either (a) an evidence-backed diagnosis from SavedVariables or (b) a command/workflow the user can paste into WoW and report back.
 
+Detail lives in `references/`. Read the one that matches the task instead of guessing:
+
+| Reference | Read it when |
+| --- | --- |
+| [references/clients.md](references/clients.md) | Any command that types into the game, or the user has several builds or instances open |
+| [references/automation.md](references/automation.md) | Authorized scripted task delivery: task blocks, run, notice, reload, receipt |
+| [references/runtime-investigations.md](references/runtime-investigations.md) | Designing a memory/CPU probe |
+
 ## Choose the workflow
 
 - **Persisted evidence:** locate the WoW `WTF` SavedVariables file, find the exact Ticket, and read the complete payload.
@@ -17,6 +25,20 @@ Use this skill as the operational guide for Lychee Dev, an in-game evidence work
 - **Events:** open `/dev` > Events, search the current client's catalog, select events, start monitoring, reproduce the behavior, then stop and save.
 
 The Performance page, automatic capture, health scan and function benchmark have been removed. Run, Objects, Events, Trace, Errors and Saved Records remain available. Do not route a new investigation to the removed UI. There are no separate `/object` or `/event` slash commands. Do not invent them; give the `/dev` UI steps instead.
+
+## Know which client you are driving
+
+Three builds are supported: Retail `12.1.0` (`_retail_`), Classic `5.5.4` (`_classic_`) and Classic Titan `3.80.2` (`_classic_titan_`). Other folders may exist on disk but the addon does not serve them. Never infer the build from the window title, and never assume `WowClassic.exe` means Classic — every non-retail build uses that name.
+
+Before a command that types into the game, confirm the target:
+
+```text
+lycheedev clients      # every build on disk, its version, and install state
+lycheedev instances    # what is running now, with pid and window handle
+lycheedev use [index]  # pin one as the default target
+```
+
+With several clients open, `--instance <index>` overrides the pin for one command and `--client` filters by build. Same-build instances are ambiguous and the CLI refuses to guess. Full rules and the precedence order are in [references/clients.md](references/clients.md).
 
 ## Read SavedVariables
 
