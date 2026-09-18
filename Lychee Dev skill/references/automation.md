@@ -14,7 +14,7 @@ data; it never runs at load. After an input-side `/reload`, the command
 `/dev auto run <task-id>` executes the block. While it runs, three RGB status
 blocks show at the top-left of the screen. When the result is committed to the
 in-memory SavedVariables database, they are replaced by one static QR code at
-the top-right that carries only the identity:
+the top-left that carries only the identity:
 `{"v":1,"ticket":"...","task":"...","run":"...","ts":...}`. `capture`, `run`
 and `bugs` keep one WGC capture session open and poll it until that notice is
 decoded or `--timeout` expires. The tooling then cross-checks the notice `task`
@@ -116,7 +116,26 @@ effects. Generate bounded, cancellable probes only.
 | `/dev auto show <ticket>` | Re-shows the notice for a kept historical result. |
 | `/dev auto cancel <task-id>` | Cooperative cancel; saves a cancelled report and its Ticket. |
 | `/dev auto ack <ticket> received\|failed` | Records that the host read this ticket (or failed to). Clears the pending-flush block so the next run can start **without a reload**. |
+| `/dev auto identify` | Shows the identity marker: a small QR code at the top-left carrying this character, realm, client and build, so a host with several windows open can learn which window is which. Not shown by default; it shares the corner with the completion notice. |
+| `/dev auto unidentify` | Hides the identity marker. |
 | `/dev auto stop` | Hides the notice UI only; the pending record and the busy state stay. |
+
+### Identity marker vs completion notice
+
+Both are small JSON QR codes at the top-left, and they are told apart by shape, not
+by position:
+
+| | identity marker | completion notice |
+| --- | --- | --- |
+| has `id` + `client` | yes | no |
+| has `ticket` + `task` + `run` | no | yes |
+| shown when | the user runs `/dev auto identify` | a result is committed |
+| purpose | identify the window before input | deliver the ticket after a run |
+
+`lycheedev instances --identify` reads the markers through window capture, so no
+window is focused and nothing is typed. This is what lets a caller name the window
+it is about to drive instead of guessing from a pid. Two windows showing the same
+character and realm remain indistinguishable.
 
 ### Reporting the read outcome back
 
@@ -151,6 +170,37 @@ Global options, valid for every subcommand:
   orchestration session, and use `--all-installations` when inspecting more
   than one.
 
+### identify
+
+Reads the in-game identity marker from one or more game windows, so a window can
+be named before anything is typed into it. Nothing observable from outside the
+game says which character is behind which window; the marker is how the game
+tells you.
+
+```text
+python scripts/automation.py identify --hwnd 0x1234 [--hwnd 0x5678] [--timeout 1.5]
+python scripts/automation.py identify --windows-json <instances.json>
+```
+
+- `--windows-json <file>` takes the instance list printed by
+  `lycheedev instances`; each entry needs an `hwnd`. Prefer this when probing
+  several windows, because the list survives the trip intact.
+- Prints one entry per window, in the input order, as JSON:
+  `{"hwnd":...,"pid":...,"flavorId":...,"identity":{...}|null,"error":null|"..."}`.
+- **`identity: null` is not an error.** It is the ordinary state until the user
+  runs `/dev auto identify` in that window. Only `error` marks a window that
+  could not be probed.
+- Exit code 5 means no window yielded a marker (including when every window was
+  unreadable); a partly readable set exits 0. A missing capture package exits 4.
+- Capture reads the window surface directly, so **no window needs the
+  foreground** and nothing is typed. Windows are probed concurrently.
+- A window showing the completion notice instead of a marker is not
+  mis-identified: the two payloads are told apart by shape, not position.
+
+Ask the user to run `/dev auto identify` in each window they care about, then
+probe, then confirm the character back to them before sending any command.
+`/dev auto unidentify` hides the marker again.
+
 ### task
 
 `task upsert|remove|list` with `--install-dir <dir>` or `--profile <name>`.
@@ -168,8 +218,21 @@ python scripts/automation.py profile show --name retail-main
 ```
 
 `profile set` requires `--client`, `--wow-root` and `--addon-dir`; both
-directories must exist. The stored profile also records the client folder
-(`retail` -> `_retail_`, `classic` -> `_classic_`, `titan` -> `_classic_arena`).
+directories must exist. `--client` accepts `retail`, `classic`, `titan` and
+`forever`. The stored profile records the client folder, and every accepted
+location for that client is kept so a build that moved folders still resolves:
+
+| `--client` | Client folder |
+| --- | --- |
+| `retail` | `_retail_` |
+| `classic` | `_classic_` |
+| `titan` | `_classic_titan_` |
+| `forever` | `_classic_beta_`, or `_forever_` |
+
+A folder name is a location rather than an identity: WoW: Forever currently ships
+in `_classic_beta_` on the test track, which a MoP-era classic test client also
+uses. `sv find` therefore tries every accepted folder under `--wow-root` and
+falls back to the root itself, rather than trusting the recorded name.
 Profiles are written atomically to `<data-dir>/profiles.json`.
 
 ### sv find / sv read
@@ -220,7 +283,7 @@ python scripts/automation.py send --hwnd 0x1234 --text "/reload" \
 
 - `capture` opens one `windows-capture` session for the window, decodes the
   QR with `zxingcpp.read_barcodes` (QR only) and prints the notice JSON. It
-  compares the top-right ROI on every `--interval` (default 0.1 s) until
+  compares the top-left ROI on every `--interval` (default 0.1 s) until
   `--timeout` (default 120 s) expires, then exits 5. Only the newest ROI is
   kept, so frames never pile up.
 - `send` always logs `command_sent` before input. When the text is `/reload`
@@ -281,7 +344,7 @@ uncertainty in your findings.
 | 2 | Task registry failure (schema, kind, marker, revision conflict, lock/limit refusal). |
 | 3 | SavedVariables read or verification failure after all attempts. |
 | 4 | Window identity, command input, or missing optional capture dependency (`windows-capture`/`numpy`/`zxing-cpp`) failure. |
-| 5 | No notice decoded before the timeout, or the game did not rewrite its SavedVariables file in time. |
+| 5 | No notice decoded before the timeout, no window yielded an identity marker, or the game did not rewrite its SavedVariables file in time. |
 
 Expected failures print one `error: ...` line on stderr; they never dump a
 traceback for a missing dependency, a missing argument or a bad source file.
@@ -298,6 +361,12 @@ uses only the interfaces those versions actually expose: `read_barcodes`
 (zxing-cpp 3.x, `read_bars` does not exist), `WindowsCapture(window_hwnd=...)`
 with `on_frame_arrived`/`on_closed` handlers, `start_free_threaded()` /
 `CaptureControl.stop()` and `Frame.convert_to_bgr()`.
+
+`capture`, `run`, `bugs` and `identify` read the screen and need these packages;
+without them they fail with an explicit dependency message and exit 4 rather than
+a traceback. `send` and `ack` import the same module but only use ctypes, so
+keyboard delivery works without them. Everything else — `task`, `profile`, `sv`,
+`status`, `recover` — runs on the standard library alone.
 
 ## Recovery
 
@@ -316,12 +385,29 @@ record that uncertainty in your findings.
 
 ## Known verification gaps
 
-Live-window steps (WGC capture, SendInput delivery, real SavedVariables
-writes, DPI/scaling) are implemented against the verified installed package
-interfaces but have not been exercised in a running game. Before relying on
-them: run `capture`/`send` against a real client, measure the notice QR size
-and DPI scaling per client, confirm command input reliability, and record real
-reload timing. The offline-verified parts are the task registry writer, the
-restricted SavedVariables reader and verifier, the session log/dedup/artifacts,
-the notice validation and identity checks, the polling shape and the CLI exit
-behaviour; they are covered by `scripts/selftest_offline.py`.
+Do not describe these as proven, and do not repeat them as if they were:
+
+- **On-screen rendering of the notice and identity QR codes.** The encoding
+  round-trips (the addon's own Lua encoder produces a matrix that the host's
+  `zxing-cpp` decoder reads back, at every module size from 2 to 8 px), but the
+  actual pixels drawn by the game have not been measured. Marker size and
+  scannability under DPI/UI scaling, occlusion, minimization, exclusive
+  fullscreen and HDR are all unmeasured.
+- **Identity probe against a window that really shows a marker.** The capture
+  pipeline itself has been exercised on a live client (frames arrive in 78-94 ms,
+  ~3 ms to decode an empty ROI, no frame errors), but no probe has yet read a
+  marker the game actually rendered. `/dev auto identify` has not been run in a
+  game.
+- **SendInput delivery reliability.** Keyboard input reaches the foreground
+  window through the focus-verify-paste-confirm sequence; whether the game
+  processes a given slash command still depends on client state, and `SendInput`
+  returning success does not prove it did.
+- **Real SavedVariables write timing** and the reload cost of a large report.
+- **WoW: Forever in a running client.** Its TOC, client profile and event catalog
+  are statically verified and pass the four-client matrix, but the addon has not
+  been loaded in a Forever client.
+
+The offline-verified parts are the task registry writer, the restricted
+SavedVariables reader and verifier, the session log/dedup/artifacts, the notice
+validation, the identity marker shape and probe concurrency, the polling shape
+and the CLI exit behaviour; they are covered by `scripts/selftest_offline.py`.

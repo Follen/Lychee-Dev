@@ -47,7 +47,17 @@ from automation.saved_variables import SavedVariablesError  # noqa: E402
 
 NOTICE_MAX_BYTES = 512
 BUG_TASK_ID = "bug"
-CLIENT_FOLDERS = {"retail": "_retail_", "classic": "_classic_", "titan": "_classic_titan_"}
+# Client -> candidate install folders, in the order to try. A folder name is a
+# location rather than an identity: the launcher reuses a test folder for
+# whatever is on the test track, so WoW: Forever currently lives in
+# `_classic_beta_` while a dedicated `_forever_` folder is also accepted. The
+# right folder is decided by what exists under the WoW root, not by the name.
+CLIENT_FOLDERS = {
+    "retail": ("_retail_",),
+    "classic": ("_classic_",),
+    "titan": ("_classic_titan_",),
+    "forever": ("_classic_beta_", "_forever_"),
+}
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_INTERVAL = 0.1
 SV_READ_RETRIES = 3
@@ -173,9 +183,13 @@ def cmd_profile(args) -> int:
         raise CliError(f"addon directory not found: {args.addon_dir}")
     if not os.path.isdir(args.wow_root):
         raise CliError(f"WoW root directory not found: {args.wow_root}")
+    folders = CLIENT_FOLDERS[args.client]
     profile = {
         "client": args.client,
-        "clientFolder": CLIENT_FOLDERS[args.client],
+        # The first entry is the default; clientFolders keeps every accepted
+        # location so a client that moved folders still resolves.
+        "clientFolder": folders[0],
+        "clientFolders": list(folders),
         "wow_root": os.path.abspath(args.wow_root),
         "addon_dir": os.path.abspath(args.addon_dir),
         "sv_path": os.path.abspath(args.sv_path) if args.sv_path else None,
@@ -192,15 +206,25 @@ def resolve_client_root(profile: dict) -> str:
     """Resolve the client folder (`_retail_`, ...) under the configured WoW root.
 
     A profile may point either at the WoW root that contains ``_retail_`` or at
-    the client folder itself; the account tree decides which one is right.
+    the client folder itself; the account tree decides which one is right. Every
+    accepted folder for the client is tried, so a build that moved folders still
+    resolves without rewriting the profile.
     """
 
     root = os.path.abspath(profile.get("wow_root") or "")
-    folder = profile.get("clientFolder") or CLIENT_FOLDERS.get(profile.get("client"))
+    recorded = profile.get("clientFolders")
+    if not recorded:
+        recorded = [profile.get("clientFolder")] if profile.get("clientFolder") else []
+    folders = list(recorded) + list(CLIENT_FOLDERS.get(profile.get("client"), ()))
     candidates = []
-    if folder:
-        candidates.append(os.path.join(root, folder))
-    candidates.append(root)
+    for folder in folders:
+        if not folder:
+            continue
+        path = os.path.join(root, folder)
+        if path not in candidates:
+            candidates.append(path)
+    if root not in candidates:
+        candidates.append(root)
     for candidate in candidates:
         if os.path.isdir(os.path.join(candidate, "WTF", "Account")):
             return candidate
@@ -520,6 +544,73 @@ def cmd_capture(args) -> int:
     return 0
 
 
+def cmd_identify(args) -> int:
+    """Read the in-game identity marker from one or more game windows.
+
+    Nothing observable from outside the game says which character sits behind
+    which window, so with several windows open a slash command cannot be aimed
+    without guessing. The addon can display a marker on request
+    (``/dev auto identify``); this reads it out of each window so the caller can
+    offer the user a character-based choice instead of an arbitrary index.
+
+    Capture does not need the foreground, so this is safe before any input is
+    sent. A window with no visible marker is reported with ``identity: null``
+    rather than treated as an error: that is the normal state until the user
+    asks the game to show one.
+    """
+
+    windows = _window_module()
+    targets = _identify_targets(args)
+    if not targets:
+        raise CliError("identify needs at least one window: pass --hwnd, or "
+                       "--windows-json with the instances list")
+
+    # Only forward an explicit timeout: passing None would override the helper's
+    # own measured default rather than selecting it.
+    options = {"interval": args.interval}
+    if args.timeout is not None:
+        options["timeout"] = args.timeout
+    results = windows.read_identities(targets, **options)
+    print(json.dumps(results, ensure_ascii=False, sort_keys=True))
+    # Every window unreadable is a real failure; a partly readable set is not.
+    if results and all(entry["identity"] is None and entry["error"] for entry in results):
+        return EXIT_NOTICE_TIMEOUT
+    return 0
+
+
+def _identify_targets(args) -> list[dict]:
+    """Build the probe list from repeated --hwnd flags or a windows JSON file."""
+
+    targets: list[dict] = []
+    if args.windows_json:
+        try:
+            with open(args.windows_json, encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except OSError as error:
+            raise CliError(f"could not read --windows-json: {error}") from error
+        except ValueError as error:
+            raise CliError(f"--windows-json is not valid JSON: {error}") from error
+        if not isinstance(loaded, list):
+            raise CliError("--windows-json must contain a JSON array of windows")
+        for entry in loaded:
+            if not isinstance(entry, dict) or entry.get("hwnd") is None:
+                raise CliError("every --windows-json entry needs an 'hwnd'")
+            targets.append({
+                "hwnd": entry.get("hwnd"),
+                "pid": entry.get("pid"),
+                "exePath": entry.get("exePath"),
+                "flavorFolder": entry.get("flavorFolder"),
+                "flavorId": entry.get("flavorId"),
+                "flavorLabel": entry.get("flavorLabel"),
+            })
+        return targets
+
+    for hwnd in args.hwnd or ():
+        targets.append({"hwnd": hwnd, "pid": args.pid, "exePath": args.exe_path,
+                        "flavorFolder": None, "flavorId": None, "flavorLabel": None})
+    return targets
+
+
 # --- orchestrated flows ---------------------------------------------------------
 
 def _notice_to_sv(session: session_mod.Session, windows, notice: dict, args,
@@ -696,7 +787,8 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("profile_command", choices=["set", "show"])
     profile.add_argument("--name", required=True, help="profile name")
     profile.add_argument("--client", choices=sorted(CLIENT_FOLDERS),
-                         help="client type: retail, classic or titan")
+                         help="client type: retail, classic, titan or forever; the "
+                              "client folder is resolved from the WoW root")
     profile.add_argument("--wow-root", help="WoW root that contains the client folder")
     profile.add_argument("--addon-dir", help="installed addon directory")
     profile.add_argument("--sv-path", help="exact 'Lychee Dev.lua' path to read")
@@ -759,6 +851,24 @@ def build_parser() -> argparse.ArgumentParser:
     capture = sub.add_parser("capture", parents=[window, polling],
                              help="poll the window and decode the notice QR")
     capture.set_defaults(func=cmd_capture)
+
+    identify = sub.add_parser(
+        "identify",
+        help="read the character/build identity marker from game windows")
+    identify.add_argument("--hwnd", type=lambda value: int(value, 0), action="append",
+                          help="a window to probe; repeat for several windows")
+    identify.add_argument("--windows-json",
+                          help="JSON file with the instance list to probe instead "
+                               "of --hwnd (the shape 'lycheedev instances' prints)")
+    identify.add_argument("--pid", type=int, help="expected process id")
+    identify.add_argument("--exe-path", help="expected executable path")
+    identify.add_argument("--timeout", type=float, default=None,
+                          help="seconds to wait per window for its marker "
+                               "(default: the helper's measured budget)")
+    identify.add_argument("--interval", type=float, default=DEFAULT_INTERVAL,
+                          help=f"seconds between polls per window "
+                               f"(default: {DEFAULT_INTERVAL})")
+    identify.set_defaults(func=cmd_identify)
 
     run = sub.add_parser("run", parents=[window, polling],
                          help="deliver and resolve one task run")

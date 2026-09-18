@@ -62,6 +62,7 @@ local clientFiles = {
     retail = "Core/Clients/Mainline.lua",
     classic = "Core/Clients/Mists.lua",
     titan = "Core/Clients/Titan.lua",
+    forever = "Core/Clients/Forever.lua",
 }
 local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
 LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
@@ -89,6 +90,8 @@ local overlayState = {
     errors = 0,
     hides = 0,
     notices = {},
+    identities = {},
+    identityHides = 0,
 }
 ns.AutomationOverlay = {
     ShowRunning = function() overlayState.running = overlayState.running + 1 end,
@@ -99,6 +102,11 @@ ns.AutomationOverlay = {
         return true
     end,
     HideNotice = function() overlayState.hides = overlayState.hides + 1 end,
+    ShowIdentity = function(json)
+        overlayState.identities[#overlayState.identities + 1] = json
+        return true
+    end,
+    HideIdentity = function() overlayState.identityHides = overlayState.identityHides + 1 end,
 }
 
 local Controller = ns.Automation
@@ -144,6 +152,8 @@ local function ResetOverlayState()
     overlayState.running = 0
     overlayState.errors = 0
     overlayState.notices = {}
+    overlayState.identities = {}
+    overlayState.identityHides = 0
 end
 
 -- --- registry file is data only ----------------------------------------------
@@ -774,6 +784,58 @@ assert(filledTickets > 0 and capacityFailureId,
 assert(ns.GetProtectedExportCount() == protectedBeforeFill + filledTickets,
     "a protected record was pruned to admit an over-budget commit")
 assert(ns.FailAutomationExecution(capacityFailureId, "failed", "capacity_exhausted"))
+
+-- --- identity marker for host-side window discovery ---------------------------
+
+-- The marker carries the character identity and build so a host can tell which
+-- window holds which character before it types anything into the game.
+ResetOverlayState()
+Controller.Identify()
+assert(#overlayState.identities == 1, "identify did not show an identity marker")
+local identityJson = overlayState.identities[1]
+local identityId = identityJson:match('"id":"([^"]*)"')
+local identityRealm = identityJson:match('"realm":"([^"]*)"')
+local identityClient = identityJson:match('"client":"([^"]*)"')
+local identityBuild = identityJson:match('"build":"([^"]*)"')
+assert(identityId == "TestChar", "identity marker lost the character name")
+assert(identityRealm == "TestRealm", "identity marker lost the realm name")
+assert(identityClient == ns.Client.id, "identity marker lost the client id")
+assert(identityBuild == "12.1.0", "identity marker lost the build")
+assert(identityJson:match('^%{"v":1,') ~= nil, "identity marker has no protocol version")
+assert(not identityJson:find('"ticket"', 1, true),
+    "identity marker must not look like a completion notice")
+-- The notice payload is validated ASCII with a ticket; the identity marker must
+-- stay distinguishable by shape, which the host relies on to tell them apart.
+assert(#identityJson < 512, "identity marker exceeded the notice payload budget")
+
+Controller.StopIdentify()
+assert(overlayState.identityHides == 1, "identify could not be hidden again")
+
+-- A completion notice occupies the same corner and is the only on-screen
+-- reference to its Ticket, so the marker must refuse to replace it rather than
+-- silently hiding evidence the user may still need.
+ResetOverlayState()
+local pendingTask = {
+    schema = 1,
+    requestId = "req-identity-notice",
+    revision = "rev-identity-notice",
+    kind = "lua",
+    createdAt = 0,
+    expiresAt = 0,
+    sourceBytes = #"return true",
+    sourceChecksum = ns.AutomationReport.Adler32("return true"),
+    source = "return true",
+}
+ns.AutomationTaskDefinitions["identity-notice"] = pendingTask
+Controller.Run("identity-notice")
+assert(Controller.GetAwaitingNotice() ~= nil, "a committed result did not leave a notice pending")
+local identitiesBefore = #overlayState.identities
+Controller.Identify()
+assert(#overlayState.identities == identitiesBefore,
+    "identify replaced a pending completion notice and hid its ticket")
+assert(Controller.GetAwaitingNotice() ~= nil,
+    "identify cleared the pending notice instead of refusing")
+ns.AutomationTaskDefinitions["identity-notice"] = nil
 
 print = originalPrint
 print("Lychee Dev automation tests passed")

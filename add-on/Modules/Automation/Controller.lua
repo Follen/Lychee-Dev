@@ -637,7 +637,82 @@ end
 function Controller.Stop()
     ns.AutomationOverlay.HideNotice()
     ns.AutomationOverlay.HideStatus()
+    ns.AutomationOverlay.HideIdentity()
     Print(L.AUTO_STOPPED)
+end
+
+function Controller.StopIdentify()
+    ns.AutomationOverlay.HideIdentity()
+    Print(L.AUTO_IDENTITY_HIDDEN)
+end
+
+-- Identity marker for host-side window discovery.
+--
+-- The host can capture several game windows but cannot tell which character is
+-- behind each one; nothing observable from outside the game says so. This shows
+-- a tiny QR code carrying the character identity and build, so a host can map
+-- every running window to a name and let the user choose. It appears only on
+-- explicit request because it shares the top-left corner with the completion
+-- notice and would otherwise sit on screen permanently.
+function Controller.Identify()
+    if not EnsureReady() then
+        return
+    end
+
+    local character, realm
+    local succeeded, name = pcall(UnitName, "player")
+    if succeeded and type(name) == "string" and name ~= ""
+        and not (issecretvalue and issecretvalue(name)) then
+        character = name
+    end
+    succeeded, name = pcall(GetRealmName)
+    if succeeded and type(name) == "string" and name ~= ""
+        and not (issecretvalue and issecretvalue(name)) then
+        realm = name
+    end
+
+    if not character then
+        Print(L.AUTO_IDENTITY_UNAVAILABLE)
+        return
+    end
+
+    -- The marker and the completion notice share one corner. Replacing a notice
+    -- would take away the only on-screen reference to its Ticket, so refuse
+    -- instead of hiding evidence the user may still need.
+    if awaitingNotice then
+        Print(L.AUTO_IDENTITY_NOTICE_SHOWN)
+        return
+    end
+
+    local version = GetBuildInfo and select(1, GetBuildInfo()) or nil
+    if issecretvalue and issecretvalue(version) then
+        version = nil
+    end
+
+    -- Character names and realm names are plain text, so escape them before
+    -- embedding rather than assuming they are JSON-safe.
+    local function EscapeJson(value)
+        value = tostring(value or "")
+        value = value:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("[%c]", " ")
+        return value
+    end
+
+    local json = string.format('{"v":1,"id":"%s","realm":"%s","client":"%s","build":"%s"}',
+        EscapeJson(character),
+        EscapeJson(realm or ""),
+        EscapeJson(ns.Client and ns.Client.id or ""),
+        EscapeJson(version or ""))
+
+    if #json > MAX_NOTICE_BYTES then
+        Print(L.AUTO_IDENTITY_UNAVAILABLE)
+        return
+    end
+
+    if ns.AutomationOverlay.ShowIdentity(json) then
+        Print(L.AUTO_IDENTITY_SHOWN:format(character, realm or "-"))
+    else
+        Print(L.AUTO_IDENTITY_UNAVAILABLE)
+    end
 end
 
 -- The plugin cannot observe whether the host read a result, so the host reports
@@ -725,6 +800,18 @@ function Controller.HandleCommand(text)
             return
         end
         Controller.Stop()
+    elseif action == "identify" then
+        if rest ~= "" then
+            Print(L.AUTO_USAGE)
+            return
+        end
+        Controller.Identify()
+    elseif action == "unidentify" then
+        if rest ~= "" then
+            Print(L.AUTO_USAGE)
+            return
+        end
+        Controller.StopIdentify()
     elseif action == "ack" then
         local ticket, outcome = rest:match("^(%S+)%s+(%S+)$")
         if not ticket or not outcome then
@@ -755,3 +842,13 @@ end
 function Controller.GetAwaitingNotice()
     return awaitingNotice
 end
+
+-- The identity marker is own UI and must not survive a combat lockout, matching
+-- the notice and status blocks. The callback is constant time while the overlay
+-- has never been built, so registering it costs nothing for users who never use
+-- the automation page.
+ns.RegisterCombatShutdown(function()
+    if ns.AutomationOverlay then
+        ns.AutomationOverlay.HideIdentity()
+    end
+end)

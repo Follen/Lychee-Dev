@@ -93,7 +93,8 @@ export function runDoctor({ flags }) {
     }
   }
 
-  // Which clients are running decides what `send`/`run` can target.
+  // Which clients are running decides what `send`/`run` can target. Reuse the
+  // interpreter already resolved above rather than probing for one again.
   const instances = findInstances({ pythonBin: python ? python.bin : null });
   const supportedRunning = instances.filter((item) => item.supported);
   if (instances.length === 0) {

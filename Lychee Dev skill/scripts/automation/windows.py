@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes as wt
+import json
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -569,5 +571,153 @@ def decode_qr(image, zxingcpp_module=None) -> list[str]:
         if isinstance(text, str) and text:
             payloads.append(text)
     return payloads
+
+
+def _identity_payload(payloads) -> dict | None:
+    """Pick the identity marker out of decoded payloads.
+
+    A window may show the completion notice instead of an identity marker, and
+    both are JSON with a ``v`` field, so the shape is checked rather than
+    assumed: an identity marker carries a character id, a notice carries a
+    ticket.
+    """
+
+    for text in payloads:
+        try:
+            value = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(value, dict) or "id" not in value:
+            continue
+        if "ticket" in value:
+            continue
+        return value
+    return None
+
+
+# The identity probe's waiting budget, sized from measurement rather than guess:
+# on a live window Windows.Graphics.Capture delivers the first frame in 78-94 ms
+# (234 ms cold) and decoding an empty ROI costs about 3 ms. The grace therefore
+# only has to cover a slow first frame, and the timeout only a window that never
+# delivers one at all.
+IDENTITY_FIRST_FRAME_GRACE = 0.35
+IDENTITY_TIMEOUT = 1.5
+
+
+def read_identity(hwnd: int, *, pid: int | None = None, exe_path: str | None = None,
+                  timeout: float = IDENTITY_TIMEOUT, interval: float = 0.03,
+                  first_frame_grace: float = IDENTITY_FIRST_FRAME_GRACE,
+                  minimum_update_interval_ms: int | None = None) -> dict | None:
+    """Read the in-game identity marker from one window, or None.
+
+    This exists because nothing observable from outside the game says which
+    character is behind which window. With one window that does not matter; with
+    several it decides where a slash command may be typed. The window does not
+    need to be in the foreground, because Windows.Graphics.Capture reads the
+    window surface directly, which is what makes this usable before any input is
+    sent.
+
+    "No marker" is the ordinary state, not a failure: the user shows one on
+    request. The wait therefore ends as soon as one frame has been decoded
+    without finding a marker and no newer frame follows, so an unmarked window
+    costs ``first_frame_grace`` rather than the whole ``timeout``. The timeout
+    remains the ceiling for a window that never delivers a frame at all.
+
+    Returns the decoded marker, or None. Raises WindowIdentityError for a stale
+    hwnd and CaptureDependencyError when the optional packages are missing.
+    """
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    grace = max(0.0, first_frame_grace)
+    last_attempted = None
+    first_frame_at = None
+    with open_notice_capture(hwnd, pid=pid, exe_path=exe_path, interval=interval,
+                             minimum_update_interval_ms=minimum_update_interval_ms) as session:
+        while time.monotonic() < deadline:
+            roi = session.latest_roi()
+            # The session keeps the newest frame until a newer one arrives, so
+            # decode each distinct frame once: re-decoding an unchanged image
+            # every interval would burn the whole timeout on one picture.
+            if roi is not None and roi is not last_attempted:
+                if first_frame_at is None:
+                    first_frame_at = time.monotonic()
+                last_attempted = roi
+                marker = _identity_payload(decode_qr(roi))
+                if marker is not None:
+                    return marker
+            if session.window_closed:
+                return None
+            if first_frame_at is not None and time.monotonic() - first_frame_at >= grace:
+                # Frames are arriving and none carried a marker, so waiting
+                # longer cannot change the answer.
+                return None
+            time.sleep(interval)
+    return None
+
+
+def _probe_one(window, timeout: float, interval: float,
+               first_frame_grace: float, reader=None) -> dict:
+    """Probe one window and return its result entry, never raising."""
+
+    entry = {
+        "hwnd": window.get("hwnd"),
+        "pid": window.get("pid"),
+        "flavorFolder": window.get("flavorFolder"),
+        "flavorId": window.get("flavorId"),
+        "flavorLabel": window.get("flavorLabel"),
+        "identity": None,
+        "error": None,
+    }
+    probe = reader if reader is not None else read_identity
+    try:
+        entry["identity"] = probe(
+            int(window["hwnd"]),
+            pid=window.get("pid"),
+            exe_path=window.get("exePath"),
+            timeout=timeout,
+            interval=interval,
+            first_frame_grace=first_frame_grace,
+        )
+    except (WindowIdentityError, CaptureDependencyError) as error:
+        # These say something about the request or the environment rather than
+        # about one window, so report them and keep going; the caller decides
+        # whether an unreadable set is fatal.
+        entry["error"] = str(error)
+    except (OSError, RuntimeError, ValueError) as error:
+        # One window being uncooperative (closed, minimized, denied) must not
+        # abort the probe of the remaining windows.
+        entry["error"] = str(error)
+    return entry
+
+
+def read_identities(windows, *, timeout: float = IDENTITY_TIMEOUT, interval: float = 0.03,
+                    first_frame_grace: float = IDENTITY_FIRST_FRAME_GRACE,
+                    reader=None) -> list[dict]:
+    """Probe several windows for their identity marker, in the given order.
+
+    The windows are probed concurrently. Each call owns its own capture session,
+    the frame callback only touches that session's queue, and the waiting is
+    sleep-bound, so the probe costs one window's latency instead of the sum of
+    all of them. With one window this is exactly the old behavior.
+
+    A window without a visible marker yields an entry with ``identity`` set to
+    None rather than an error, because "no marker" is the expected state until
+    the user asks the game to show one. ``reader`` exists so the concurrency and
+    error isolation can be tested without a game window.
+    """
+
+    items = list(windows)
+    if not items:
+        return []
+
+    def probe(window: dict) -> dict:
+        return _probe_one(window, timeout, interval, first_frame_grace, reader)
+
+    # Threads rather than processes: the work is blocking waits and small
+    # decodes, so the GIL is not the constraint, and every entry stays picklable
+    # for callers that serialize the result.
+    workers = min(len(items), 8)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(probe, items))
 
 

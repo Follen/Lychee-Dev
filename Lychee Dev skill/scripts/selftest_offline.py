@@ -574,6 +574,47 @@ else:
             "the Lua notice still anchors to TOPRIGHT while the ROI scans TOPLEFT"
         print("Lua notice anchor and Python ROI agree on the top-left corner OK")
 
+    # The identity probe reads a marker from every running window so the caller
+    # can name the window before typing into it. Probing must keep the input
+    # order, isolate one bad window, and treat "no marker" as ordinary rather
+    # than as an error.
+    probe_delay = 0.3
+
+    def fake_identity_reader(hwnd, **_kwargs):
+        time.sleep(probe_delay)
+        if hwnd == 3:
+            raise winmod.WindowIdentityError("stale window")
+        if hwnd == 4:
+            return None
+        return {"v": 1, "id": f"char{hwnd}", "realm": "realm", "client": "retail"}
+
+    probe_windows = [{"hwnd": 1, "pid": 11}, {"hwnd": 2, "pid": 22},
+                     {"hwnd": 3, "pid": 33}, {"hwnd": 4, "pid": 44}]
+    probe_start = time.monotonic()
+    probe_results = winmod.read_identities(probe_windows, reader=fake_identity_reader)
+    probe_elapsed = time.monotonic() - probe_start
+
+    assert [entry["hwnd"] for entry in probe_results] == [1, 2, 3, 4], probe_results
+    assert probe_results[0]["identity"]["id"] == "char1", probe_results[0]
+    assert probe_results[1]["identity"]["id"] == "char2", probe_results[1]
+    assert probe_results[2]["error"] == "stale window", probe_results[2]
+    assert probe_results[2]["identity"] is None, probe_results[2]
+    assert probe_results[3]["identity"] is None and probe_results[3]["error"] is None, \
+        probe_results[3]
+    # Windows are probed concurrently, so four delayed probes must cost far less
+    # than four sequential waits.
+    assert probe_elapsed < probe_delay * 2, probe_elapsed
+    assert winmod.read_identities([]) == []
+    # A found marker must return at once instead of waiting out the grace period.
+    instant_start = time.monotonic()
+    winmod.read_identities(probe_windows[:1],
+                           reader=lambda _hwnd, **_kw: {"v": 1, "id": "fast"})
+    assert time.monotonic() - instant_start < probe_delay, "a found marker waited"
+    # The waiting budget must stay small: it is paid per window on every probe.
+    assert 0 < winmod.IDENTITY_FIRST_FRAME_GRACE <= 1.0, winmod.IDENTITY_FIRST_FRAME_GRACE
+    assert 0 < winmod.IDENTITY_TIMEOUT <= 5.0, winmod.IDENTITY_TIMEOUT
+    print("identity probe order, isolation and concurrency OK")
+
 # --- host read acknowledgement ------------------------------------------------
 #
 # The plugin cannot see whether the host read a result, so the host says so with
@@ -838,10 +879,58 @@ with contextlib.redirect_stdout(out):
                      "--client", "retail",
                      "--wow-root", os.path.join(wow_root, "_retail_"),
                      "--addon-dir", addon_install]) == 0
+out = io.StringIO()
 with contextlib.redirect_stdout(out):
     assert cli.main(["--data-dir", profile_data, "sv", "find", "--profile", "direct"]) == 0
-assert expected_sv in out.getvalue()
+assert out.getvalue().strip() == expected_sv, out.getvalue()
 assert cli.main(["--data-dir", profile_data, "sv", "find", "--profile", "missing"]) == 1
+
+# WoW: Forever lives in a reused test folder on the test track, so a profile for
+# it must resolve whichever accepted folder actually holds the account tree.
+assert cli.CLIENT_FOLDERS["forever"] == ("_classic_beta_", "_forever_"), \
+    cli.CLIENT_FOLDERS["forever"]
+forever_account = os.path.join(wow_root, "_classic_beta_", "WTF", "Account",
+                               "TESTACCOUNT", "SavedVariables")
+os.makedirs(forever_account, exist_ok=True)
+forever_sv = os.path.join(forever_account, "Lychee Dev.lua")
+with open(forever_sv, "wb") as handle:
+    handle.write(b"LycheeDevDB = {}\n")
+assert cli.main(["--data-dir", profile_data, "profile", "set", "--name", "forever-main",
+                 "--client", "forever", "--wow-root", wow_root,
+                 "--addon-dir", addon_install]) == 0
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    assert cli.main(["--data-dir", profile_data, "sv", "find",
+                     "--profile", "forever-main"]) == 0
+assert out.getvalue().strip() == forever_sv, out.getvalue()
+
+# The same profile must still resolve after the client moves to its own folder,
+# without rewriting the profile: the recorded folder is a hint, not the answer.
+os.rename(os.path.join(wow_root, "_classic_beta_"), os.path.join(wow_root, "_forever_"))
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    assert cli.main(["--data-dir", profile_data, "sv", "find",
+                     "--profile", "forever-main"]) == 0
+assert out.getvalue().strip() == os.path.join(
+    wow_root, "_forever_", "WTF", "Account", "TESTACCOUNT", "SavedVariables",
+    "Lychee Dev.lua"), out.getvalue()
+
+# The old bug: a profile that recorded `_classic_arena_` (which does not exist)
+# must still fall back to the client's real folders.
+stale = os.path.join(profile_data, "profiles.json")
+with open(stale, encoding="utf-8") as handle:
+    stored = json.load(handle)
+stored["forever-main"]["clientFolder"] = "_classic_arena_"
+stored["forever-main"]["clientFolders"] = ["_classic_arena_"]
+with open(stale, "w", encoding="utf-8") as handle:
+    json.dump(stored, handle)
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    assert cli.main(["--data-dir", profile_data, "sv", "find",
+                     "--profile", "forever-main"]) == 0, out.getvalue()
+assert out.getvalue().strip() == os.path.join(
+    wow_root, "_forever_", "WTF", "Account", "TESTACCOUNT", "SavedVariables",
+    "Lychee Dev.lua"), out.getvalue()
 print("profile set + sv find resolve the client folder OK")
 
 # --- send: host log first, reload dedup, explicit input failure ---------------

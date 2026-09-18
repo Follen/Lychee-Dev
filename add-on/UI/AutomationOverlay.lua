@@ -7,7 +7,7 @@ local L = ns.L
 --
 -- Status blocks: three 4-physical-pixel squares in RGB order at the top-left
 -- corner while an automation request runs. Error state lights only red.
--- Completion notice: one static QR code at the top-right, encoded once per
+-- Completion notice: one static QR code at the top-left, encoded once per
 -- result and kept visible until the output-side reload, an explicit hide or a
 -- safe cleanup. Dark modules come from a bounded reuse pool.
 
@@ -16,10 +16,12 @@ local MAX_NOTICE_UI_SIZE = 480
 
 local statusFrame
 local noticeFrame
+local identityFrame
 local statusBlocks
 local noticeTextures = {}
-local noticeTextureCount = 0
+local identityTextures = {}
 local lastNoticeJson
+local lastIdentityJson
 
 local function PhysicalUnit()
     if ns.Client and ns.Client.GetPhysicalPixelSize then
@@ -58,6 +60,19 @@ local function EnsureOverlay()
     background:SetAllPoints()
     background:SetColorTexture(1, 1, 1, 1)
     noticeFrame:Hide()
+
+    -- Identity marker: the same corner and the same white-card convention as the
+    -- completion notice, but a separate frame. It answers "which character is in
+    -- this window" for a host that can capture several windows, and it is shown
+    -- only on explicit request so it never competes with the ticket notice.
+    identityFrame = CreateFrame("Frame", "LycheeDevAutomationIdentity", UIParent)
+    identityFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    identityFrame:SetFrameLevel(10000)
+    identityFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -16)
+    local identityBackground = identityFrame:CreateTexture(nil, "BACKGROUND")
+    identityBackground:SetAllPoints()
+    identityBackground:SetColorTexture(1, 1, 1, 1)
+    identityFrame:Hide()
 end
 
 local function LayoutStatusBlocks(mode)
@@ -89,7 +104,10 @@ local function CountDarkModules(matrix)
     return dark, size
 end
 
-local function RenderMatrix(matrix)
+-- Render a QR matrix into one corner frame, reusing a bounded pool of textures.
+-- Both the ticket notice and the identity marker go through here, so they share
+-- the quiet zone, sizing and pool behaviour.
+local function RenderMatrixInto(frame, textures, matrix)
     local dark, size = CountDarkModules(matrix)
     if dark > POOL_LIMIT then
         return false
@@ -103,7 +121,7 @@ local function RenderMatrix(matrix)
         quiet = moduleSize * 4
     end
     local total = size * moduleSize + quiet * 2
-    noticeFrame:SetSize(total, total)
+    frame:SetSize(total, total)
 
     local used = 0
     for y = 1, size do
@@ -111,36 +129,45 @@ local function RenderMatrix(matrix)
         for x = 1, size do
             if column[x] and column[x] > 0 then
                 used = used + 1
-                local texture = noticeTextures[used]
+                local texture = textures[used]
                 if not texture then
-                    texture = noticeFrame:CreateTexture(nil, "OVERLAY")
+                    texture = frame:CreateTexture(nil, "OVERLAY")
                     texture:SetColorTexture(0, 0, 0, 1)
-                    noticeTextures[used] = texture
-                    noticeTextureCount = used
+                    textures[used] = texture
                 end
                 texture:SetSize(moduleSize, moduleSize)
                 texture:ClearAllPoints()
-                texture:SetPoint("TOPLEFT", noticeFrame, "TOPLEFT",
+                texture:SetPoint("TOPLEFT", frame, "TOPLEFT",
                     quiet + (x - 1) * moduleSize, -(quiet + (y - 1) * moduleSize))
                 texture:Show()
             end
         end
     end
-    for index = used + 1, noticeTextureCount do
-        noticeTextures[index]:Hide()
+    -- Hide leftovers from a previous, larger matrix; a stale dark module would
+    -- corrupt the code the host is trying to read.
+    for index = used + 1, #textures do
+        textures[index]:Hide()
     end
-    return true
+    return true, used
 end
 
 local Overlay = {}
 
 function Overlay.ShowRunning()
     EnsureOverlay()
+    -- A run in progress outranks the static identity marker: they share the
+    -- corner, so the marker steps aside rather than overlapping the blocks.
+    if identityFrame then
+        identityFrame:Hide()
+    end
     LayoutStatusBlocks("running")
 end
 
 function Overlay.ShowError()
     EnsureOverlay()
+    if identityFrame then
+        identityFrame:Hide()
+    end
     LayoutStatusBlocks("error")
 end
 
@@ -157,7 +184,7 @@ function Overlay.ShowNotice(json)
         return true
     end
     local matrix, encodeError = ns.AutomationQR.Encode(json, 2)
-    if not matrix or not RenderMatrix(matrix) then
+    if not matrix or not RenderMatrixInto(noticeFrame, noticeTextures, matrix) then
         noticeFrame:Hide()
         lastNoticeJson = nil
         Overlay.ShowError()
@@ -169,6 +196,11 @@ function Overlay.ShowNotice(json)
     if statusFrame then
         statusFrame:Hide()
     end
+    -- The identity marker occupies the same corner; the completion notice is the
+    -- more urgent of the two, so it takes the corner.
+    if identityFrame then
+        identityFrame:Hide()
+    end
     noticeFrame:Show()
     return true
 end
@@ -178,6 +210,44 @@ function Overlay.HideNotice()
         noticeFrame:Hide()
     end
     lastNoticeJson = nil
+end
+
+-- Identity marker: a host able to capture several game windows reads this to
+-- learn which character and build each window holds, so it can offer a
+-- character-based choice instead of an arbitrary instance index.
+function Overlay.ShowIdentity(json)
+    EnsureOverlay()
+    if json == lastIdentityJson and identityFrame:IsShown() then
+        return true
+    end
+    local matrix, encodeError = ns.AutomationQR.Encode(json, 2)
+    if not matrix or not RenderMatrixInto(identityFrame, identityTextures, matrix) then
+        identityFrame:Hide()
+        lastIdentityJson = nil
+        return false, encodeError or "render_failed"
+    end
+    lastIdentityJson = json
+    -- The marker shares the top-left corner with the status blocks and the
+    -- completion notice; only one of the three may occupy it at a time.
+    if statusFrame then
+        statusFrame:Hide()
+    end
+    if noticeFrame then
+        noticeFrame:Hide()
+    end
+    identityFrame:Show()
+    return true
+end
+
+function Overlay.HideIdentity()
+    if identityFrame then
+        identityFrame:Hide()
+    end
+    lastIdentityJson = nil
+end
+
+function Overlay.IsIdentityShown()
+    return identityFrame ~= nil and identityFrame:IsShown()
 end
 
 ns.AutomationOverlay = Overlay

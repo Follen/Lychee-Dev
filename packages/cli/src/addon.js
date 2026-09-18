@@ -31,7 +31,7 @@ export function installedVersion(addonsDir, toc = null) {
   const catalogs = toc
     ? [toc]
     : [`${addonFolderName}_Mainline.toc`, `${addonFolderName}_Mists.toc`,
-      `${addonFolderName}_Wrath.toc`];
+      `${addonFolderName}_Wrath.toc`, `${addonFolderName}_Forever.toc`];
   for (const name of catalogs) {
     const file = path.join(target, name);
     if (!exists(file)) continue;

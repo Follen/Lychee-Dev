@@ -28,17 +28,30 @@ The Performance page, automatic capture, health scan and function benchmark have
 
 ## Know which client you are driving
 
-Three builds are supported: Retail `12.1.0` (`_retail_`), Classic `5.5.4` (`_classic_`) and Classic Titan `3.80.2` (`_classic_titan_`). Other folders may exist on disk but the addon does not serve them. Never infer the build from the window title, and never assume `WowClassic.exe` means Classic — every non-retail build uses that name.
+Four builds are supported: Retail `12.1.0` (`_retail_`), Classic `5.5.4` (`_classic_`), Classic Titan `3.80.2` (`_classic_titan_`) and WoW: Forever (无限服) `1.60.1` (`_classic_beta_`, or `_forever_`). Other folders may exist on disk — `_classic_era_`, `_anniversary_`, `_beta_` — and the addon does not serve those; `_classic_beta_` is served when it holds Forever, so never decide from the folder name. Never infer the build from the window title, and never assume `WowClassic.exe` means Classic — every non-retail build uses that name.
+
+A folder name is a location, not an identity: the launcher reuses a test folder for whatever is on the test track, so Forever currently lives under `_classic_beta_`, which a MoP-era classic test client also uses. The CLI resolves each client from its own `.flavor.info` product code and build instead of the folder; do the same when reasoning about a machine, and never promise a build because a folder is named a certain way.
 
 Before a command that types into the game, confirm the target:
 
 ```text
-lycheedev clients      # every build on disk, its version, and install state
-lycheedev instances    # what is running now, with pid and window handle
-lycheedev use [index]  # pin one as the default target
+lycheedev clients                     # every build on disk, its version, and install state
+lycheedev instances                   # what is running now, with pid and window handle
+lycheedev instances --identify        # also read each window's character and build
+lycheedev use [index]                 # pin one as the default target
+lycheedev use --character <name>      # pin the window reporting that character
 ```
 
-With several clients open, `--instance <index>` overrides the pin for one command and `--client` filters by build. Different builds can stay open together because the install path separates them. Two windows of the **same** build cannot be told apart from outside the game, so the CLI refuses and names the pids to close — ask the user to close all but one instead of picking for them. Full rules and the precedence order are in [references/clients.md](references/clients.md).
+When more than one window is running and you cannot tell them apart, ask the user to run `/dev auto identify` in the windows they care about, then run `lycheedev instances --identify`. That reads a small identity QR code from the top-left corner of each window — through window capture, so no window is focused and nothing is typed — and prints the character and build behind every window:
+
+```text
+  [0] Retail         pid=62460    hwnd=0x12410c7a    v12.1.0.69587
+        character: 荔枝-白银之手  client: retail  build: 12.1.0
+```
+
+Then pin the intended window by name — `lycheedev use --character 荔枝-白银之手` — and confirm that character back to the user, instead of guessing from a pid. `/dev auto unidentify` hides the marker again. The marker is not shown by default because it shares the corner with the completion notice.
+
+With several clients open, `--instance <index>` or `--character <name>` overrides the pin for one command, and `--client` filters by build. Different builds can stay open together because each install holds its own addon copy. Two windows of the **same** build that show the **same character and realm** — or that show no marker at all — still cannot be told apart, so ask the user to close all but one instead of picking for them. Full rules and the precedence order are in [references/clients.md](references/clients.md).
 
 ## Read SavedVariables
 
@@ -95,7 +108,7 @@ Use the Events page, not a guessed slash command:
 2. Select one or more events and click **Start Monitoring**.
 3. Reproduce the behavior, click **Stop Monitoring**, inspect payload arguments, and use **Save** if the evidence must be handed to an Agent.
 
-Event names and payload signatures are build-specific. The supported profiles are Retail `12.1.0`/Interface `120100`, Classic Mists `5.5.4`/`50504`, and Classic Titan `3.80.2`/`38002`; do not transfer a signature between profiles without checking the catalog. `ALL`/“monitor all events” is an explicit diagnostic mode, not a default recommendation. Monitoring is bounded (newest 500 records; at most 16 arguments per record, each shortened), and it stops on combat entry.
+Event names and payload signatures are build-specific. The supported profiles are Retail `12.1.0`/Interface `120100`, Classic Mists `5.5.4`/`50504`, Classic Titan `3.80.2`/`38002`, and WoW: Forever `1.60.1`/`16001`; do not transfer a signature between profiles without checking the catalog. `ALL`/“monitor all events” is an explicit diagnostic mode, not a default recommendation. Monitoring is bounded (newest 500 records; at most 16 arguments per record, each shortened), and it stops on combat entry.
 
 ## Delivery and ownership
 

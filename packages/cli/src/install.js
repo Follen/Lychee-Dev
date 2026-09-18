@@ -7,7 +7,7 @@ import { loadConfig, setClient, updateConfig } from './config.js';
 import { exists } from './paths.js';
 import { depsInstalled, findPython, installDeps } from './python.js';
 import { installSkill } from './skill.js';
-import { detectWowRoots, findSavedVariablesCandidates, scanClients } from './wow.js';
+import { detectWowRoots, findSavedVariablesCandidates, knownFolders, scanClients } from './wow.js';
 
 function step(label, fn) {
   process.stdout.write(`\n` + `${label}\n`);
@@ -30,8 +30,11 @@ export function resolveWowRoot({ wowRoot, config }) {
     const clients = scanClients(resolved);
     if (clients.length === 0) {
       return {
-        error: `${resolved} has no _retail_/_classic_/_classic_arena_ folder; `
-          + 'point --wow-root at the folder that contains them',
+        // List what detection actually accepts, generated from the same table,
+        // so the message cannot drift from the behavior it describes.
+        error: `${resolved} has no known client folder:\n  `
+          + knownFolders().join('\n  ')
+          + '\npoint --wow-root at the folder that contains them',
       };
     }
     return { root: resolved, clients };
@@ -79,7 +82,12 @@ export function runInstall({ flags }) {
 
   const nextConfig = { ...config, wowRoot: resolved.root, pythonBin: flags.python || config.pythonBin };
   const addonResults = [];
-  let defaultClient = config.defaultClient || null;
+  // Prefer retail as the default target so a routine command stays predictable;
+  // otherwise take the first supported client that was actually updated.
+  const preferredDefault = resolved.clients.some((client) => client.toc && client.id === 'retail')
+    ? 'retail'
+    : null;
+  let defaultClient = config.defaultClient || preferredDefault || null;
 
   for (const client of resolved.clients) {
     // A build without a catalog is reported, not silently dropped: the folder
