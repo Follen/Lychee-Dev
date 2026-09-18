@@ -65,5 +65,7 @@ assert(english.ADDON_TITLE:find("Lychee", 1, true), "English addon title is inco
 assert(english.ABOUT_CLIENT_VALUE:find("Retail 12.1", 1, true), "English client summary lacks Retail")
 assert(english.ABOUT_CLIENT_VALUE:find("Classic 5.5.4", 1, true), "English client summary lacks Classic")
 assert(english.ABOUT_CLIENT_VALUE:find("Titan 3.80.2", 1, true), "English client summary lacks Titan")
+assert(english.ABOUT_CLIENT_VALUE:find("Forever 1.60.1", 1, true), "English client summary lacks Forever")
+assert(chinese.ABOUT_CLIENT_VALUE:find("无限服 1.60.1", 1, true), "Chinese client summary lacks Forever")
 
 print("Locale tests passed")

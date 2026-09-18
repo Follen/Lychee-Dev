@@ -5,6 +5,7 @@ local testBuilds = {
     retail = { "12.1.0", "70000", "Aug 19 2026", 120100 },
     classic = { "5.5.4", "64000", "Aug 04 2026", 50504 },
     titan = { "3.80.2", "63000", "Aug 05 2026", 38002 },
+    forever = { "1.60.1", "69893", "Sep 17 2026", 16001 },
 }
 
 function InCombatLockdown() return inCombat end
@@ -119,6 +120,7 @@ local clientFiles = {
     retail = "Core/Clients/Mainline.lua",
     classic = "Core/Clients/Mists.lua",
     titan = "Core/Clients/Titan.lua",
+    forever = "Core/Clients/Forever.lua",
 }
 LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
 assert(ns.Client.id == testClient and select(4, GetBuildInfo()) == ns.Client.interface,

@@ -23,6 +23,14 @@ local builds = {
         catalog = "Modules/Events/CatalogData_Titan.lua",
         id = "titan",
     },
+    forever = {
+        toc = "Lychee Dev_Forever.toc",
+        interface = "16001",
+        flavor = "Forever",
+        client = "Core/Clients/Forever.lua",
+        catalog = "Modules/Events/CatalogData_Forever.lua",
+        id = "forever",
+    },
 }
 
 local function ReadToc(path)

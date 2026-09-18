@@ -12,7 +12,7 @@ try {
             throw "Unexpected package entry: $name"
         }
     }
-    foreach ($toc in @('Lychee Dev_Mainline.toc', 'Lychee Dev_Mists.toc', 'Lychee Dev_Wrath.toc')) {
+    foreach ($toc in @('Lychee Dev_Mainline.toc', 'Lychee Dev_Mists.toc', 'Lychee Dev_Wrath.toc', 'Lychee Dev_Forever.toc')) {
         if ($names -notcontains "Lychee Dev/$toc") { throw "Missing packaged TOC: $toc" }
         foreach ($line in Get-Content -LiteralPath (Join-Path $addonRoot $toc)) {
             $relative = $line.Trim().Replace('\', '/')

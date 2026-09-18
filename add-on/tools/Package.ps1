@@ -7,7 +7,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $addonRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $files = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-$tocs = @('Lychee Dev_Mainline.toc', 'Lychee Dev_Mists.toc', 'Lychee Dev_Wrath.toc')
+# Discover every client selector so adding a client cannot silently ship without
+# its TOC; PackagingTests asserts the expected set is present.
+$tocs = @(Get-ChildItem -LiteralPath $addonRoot -File -Filter 'Lychee Dev_*.toc' |
+    Sort-Object -Property Name | Select-Object -ExpandProperty Name)
+if ($tocs.Count -eq 0) { throw 'No client TOC found; refusing to build an empty package' }
 $version = $null
 
 foreach ($toc in $tocs) {

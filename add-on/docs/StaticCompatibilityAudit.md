@@ -1,6 +1,6 @@
 # Static compatibility audit
 
-Lychee Dev uses a reproducible, evidence-first static audit for its three supported clients. The audit does not scan the repository as an undifferentiated folder and does not assume that a clean Retail result implies Classic compatibility.
+Lychee Dev uses a reproducible, evidence-first static audit for its four supported clients. The audit does not scan the repository as an undifferentiated folder and does not assume that a clean Retail result implies Classic compatibility.
 
 ## Method
 
@@ -17,6 +17,7 @@ Lychee Dev uses a reproducible, evidence-first static audit for its three suppor
 | Retail | `retail` | `12.1.0` | `31c7f7b9cc79e56c986b365c06a6afbcf3c9177b` |
 | Classic | `classic` | `5.5.4` | `1028c1e687f721ba9d3af14d1b12a5745e4227c7` |
 | Titan | `titan` | `3.80.2` | `825d29d3662b372f0bead725ee6abd339e4a77b5` |
+| Forever | `forever` | `1.60.1` | `4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069` |
 
 ## Run
 
@@ -33,14 +34,14 @@ powershell -ExecutionPolicy Bypass -File add-on/tools/AuditCompatibility.ps1 `
 
 The report schema is `lychee.compatibility-audit.v1`. Errors fail the command. Warnings identify compatibility boundaries that require review but are not automatically treated as proof of failure.
 
-Audit another addon that provides the same three client TOC suffixes:
+Audit another addon that provides the same four client TOC suffixes:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File add-on/tools/AuditCompatibility.ps1 `
   -AddonPath "D:\Games\World of Warcraft\_retail_\Interface\AddOns\TargetAddon"
 ```
 
-Generic addon mode applies official API and event validation to `*_Mainline.toc`, `*_Mists.toc`, and `*_Wrath.toc`. Lychee Dev mode additionally enforces this repository's client-profile, compatibility-layer, generated-catalog, and shared-order invariants.
+Generic addon mode applies official API and event validation to `*_Mainline.toc`, `*_Mists.toc`, `*_Wrath.toc`, and `*_Forever.toc`. Lychee Dev mode additionally enforces this repository's client-profile, compatibility-layer, generated-catalog, and shared-order invariants.
 
 ## Limits
 

@@ -1,6 +1,6 @@
 param(
     [string] $WowdocRepository = "$env:USERPROFILE\.wowdoc\repositories\wow-ui-source.git",
-    [ValidateSet("all", "retail", "classic", "titan")]
+    [ValidateSet("all", "retail", "classic", "titan", "forever")]
     [string] $Product = "all",
     [string] $Commit,
     [string] $Version,
@@ -30,6 +30,13 @@ $builds = @(
         Version = "3.80.2"
         Commit = "825d29d3662b372f0bead725ee6abd339e4a77b5"
         OutputPath = (Join-Path $PSScriptRoot "..\Modules\Events\CatalogData_Titan.lua")
+    },
+    [pscustomobject]@{
+        Product = "forever"
+        Label = "Forever"
+        Version = "1.60.1"
+        Commit = "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069"
+        OutputPath = (Join-Path $PSScriptRoot "..\Modules\Events\CatalogData_Forever.lua")
     }
 )
 

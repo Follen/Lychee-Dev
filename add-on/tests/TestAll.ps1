@@ -4,7 +4,7 @@ $testRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $previousTestClient = $env:LYCHEE_TEST_CLIENT
 Push-Location -LiteralPath $testRoot
 try {
-    $clients = @('retail', 'classic', 'titan')
+    $clients = @('retail', 'classic', 'titan', 'forever')
     $tests = @(
         'tests/CoreTests.lua',
         'tests/LocaleTests.lua',

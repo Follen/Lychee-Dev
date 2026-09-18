@@ -41,6 +41,7 @@ local clientFiles = {
     retail = "Core/Clients/Mainline.lua",
     classic = "Core/Clients/Mists.lua",
     titan = "Core/Clients/Titan.lua",
+    forever = "Core/Clients/Forever.lua",
 }
 local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
 LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)

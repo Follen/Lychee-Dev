@@ -9,8 +9,8 @@ $report = ($raw | Out-String) | ConvertFrom-Json
 if ($report.schema -ne 'lychee.compatibility-audit.v1' -or -not $report.summary.passed) {
     throw 'static compatibility audit report is invalid'
 }
-if (@($report.clients).Count -ne 3) {
-    throw 'static compatibility audit did not cover all three clients'
+if (@($report.clients).Count -ne 4) {
+    throw 'static compatibility audit did not cover all four clients'
 }
 foreach ($client in @($report.clients)) {
     if ($client.loadClosureFiles -lt 20 -or $client.luaFiles -lt 20) {

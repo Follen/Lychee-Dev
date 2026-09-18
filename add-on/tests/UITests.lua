@@ -5,6 +5,7 @@ local testBuilds = {
     retail = { "12.1.0", "70000", "Aug 19 2026", 120100 },
     classic = { "5.5.4", "64000", "Aug 04 2026", 50504 },
     titan = { "3.80.2", "63000", "Aug 05 2026", 38002 },
+    forever = { "1.60.1", "69893", "Sep 17 2026", 16001 },
 }
 
 local frameCount = 0
@@ -304,11 +305,13 @@ local clientFiles = {
     retail = "Core/Clients/Mainline.lua",
     classic = "Core/Clients/Mists.lua",
     titan = "Core/Clients/Titan.lua",
+    forever = "Core/Clients/Forever.lua",
 }
 local catalogFiles = {
     retail = "Modules/Events/CatalogData_Mainline.lua",
     classic = "Modules/Events/CatalogData_Mists.lua",
     titan = "Modules/Events/CatalogData_Titan.lua",
+    forever = "Modules/Events/CatalogData_Forever.lua",
 }
 LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
 assert(ns.Client.id == testClient and select(4, GetBuildInfo()) == ns.Client.interface,

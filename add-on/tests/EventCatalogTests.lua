@@ -15,16 +15,19 @@ local clientFiles = {
     retail = "Core/Clients/Mainline.lua",
     classic = "Core/Clients/Mists.lua",
     titan = "Core/Clients/Titan.lua",
+    forever = "Core/Clients/Forever.lua",
 }
 local catalogFiles = {
     retail = "Modules/Events/CatalogData_Mainline.lua",
     classic = "Modules/Events/CatalogData_Mists.lua",
     titan = "Modules/Events/CatalogData_Titan.lua",
+    forever = "Modules/Events/CatalogData_Forever.lua",
 }
 local expectedCounts = {
     retail = 1782,
     classic = 1483,
     titan = 1486,
+    forever = 1802,
 }
 local testClient = os.getenv("LYCHEE_TEST_CLIENT") or "retail"
 LoadAddonFile(assert(clientFiles[testClient], "unknown test client: " .. testClient), ns)
@@ -72,6 +75,14 @@ elseif testClient == "classic" then
     assert(not catalog.Find("EXTERNAL_EVENT_LAUNCH_URL_FAILED"),
         "Classic catalog contains a Titan external URL event")
     assert(bnConnectedSignature == "", "Classic BN_CONNECTED payload is incorrect")
+elseif testClient == "forever" then
+    -- Forever's catalog tracks the modern client shape rather than the older
+    -- Classic ones: it carries the delve event and the notification-suppressing
+    -- BN_CONNECTED payload, and it has dropped the removed arena-team event.
+    assert(catalog.Find("ACTIVE_DELVE_DATA_UPDATE"), "Forever delve event is missing")
+    assert(not catalog.Find("ARENA_TEAM_UPDATE"), "Forever catalog contains a removed arena event")
+    assert(catalog.Find("EXTERNAL_EVENT_LAUNCH_URL_FAILED"), "Forever external URL event is missing")
+    assert(bnConnectedSignature == "suppressNotification", "Forever BN_CONNECTED payload is incorrect")
 else
     assert(not catalog.Find("ACTIVE_DELVE_DATA_UPDATE"), "Titan catalog contains a Retail delve event")
     assert(catalog.Find("ARENA_TEAM_UPDATE"), "Titan arena event is missing")

@@ -49,6 +49,17 @@ $clients = @(
         tocSuffix = '_Wrath.toc'
         profile = 'Core/Clients/Titan.lua'
         catalog = 'Modules/Events/CatalogData_Titan.lua'
+    },
+    [pscustomobject]@{
+        id = 'forever'
+        product = 'forever'
+        ref = '1.60.1'
+        commit = '4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069'
+        interface = '16001'
+        toc = 'Lychee Dev_Forever.toc'
+        tocSuffix = '_Forever.toc'
+        profile = 'Core/Clients/Forever.lua'
+        catalog = 'Modules/Events/CatalogData_Forever.lua'
     }
 )
 
