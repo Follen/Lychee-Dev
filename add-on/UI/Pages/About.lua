@@ -56,7 +56,10 @@ function ns.CreateAboutPage(parent, ui)
     description:SetText(L.ABOUT_DESCRIPTION)
     description:SetTextColor(0.92, 0.94, 0.96, 0.92)
 
-    local version = "0.7.2"
+    -- Fallback only: the TOC is the source of truth and overrides this on the
+    -- next line. Keep it aligned with the release version so a metadata failure
+    -- cannot display an unrelated old number.
+    local version = "1.0.6"
     version = ns.Client.GetAddOnMetadata(ADDON_NAME, "Version") or version
 
     local accent = page:CreateTexture(nil, "ARTWORK")

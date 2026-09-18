@@ -11,9 +11,9 @@
   </p>
 
   <p>
-    <img alt="版本 0.7.2" src="https://img.shields.io/badge/release-v0.7.2-d83b4e?style=for-the-badge">
+    <img alt="版本 1.0.6" src="https://img.shields.io/badge/release-v1.0.6-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
-    <img alt="21 项测试通过" src="https://img.shields.io/badge/tests-21%20passing-2f855a?style=for-the-badge">
+    <img alt="32 项测试通过" src="https://img.shields.io/badge/tests-32%20passing-2f855a?style=for-the-badge">
   </p>
   <p>
     <img alt="正式服 12.1" src="https://img.shields.io/badge/Retail-12.1-1488cc?style=flat-square">
@@ -55,6 +55,7 @@
 | **追踪** | 谁调用了这个函数，参数、返回值、来源和耗时是什么？ |
 | **诊断** | 插件生命周期中发生了什么错误，应该把哪些证据交给 Agent？ |
 | **落盘记录** | 这个 Ticket 对应哪份完整报告，WoW 是否已经把它写入磁盘？ |
+| **自动化** | Agent 投递了哪个有界任务，是否已执行，结果 Ticket 在哪里？ |
 
 ## Agent 工作流
 
@@ -103,6 +104,7 @@ flowchart LR
 | 正式服 12.1.0 | 1,782 |
 | 经典版 5.5.4 | 1,483 |
 | 经典泰坦 3.80.2 | 1,486 |
+| 无限服 1.60.1 | 1,802 |
 
 只有用户明确选择的事件才会注册。搜索 `ALL` 或 `全部` 可以进入当前客户端的 `RegisterAllEvents` 模式，但它永远不会默认开启。停止监听后会完整注销，抓取列表也有明确上限。
 
@@ -119,13 +121,16 @@ flowchart LR
 | 正式服 | 12.1.0 | `120100` | `Lychee Dev_Mainline.toc` |
 | 经典版 | 5.5.4 | `50504` | `Lychee Dev_Mists.toc` |
 | 经典泰坦 | 3.80.2 | `38002` | `Lychee Dev_Wrath.toc` |
+| 无限服 | 1.60.1 | `16001` | `Lychee Dev_Forever.toc` |
 
-发布包同时包含三个 TOC。魔兽世界会选择匹配的 TOC、客户端配置和生成事件目录，其他实现保持共享。准确的 API 证据与兼容边界见 [Compatibility.md](add-on/docs/Compatibility.md)。
+发布包同时包含四个 TOC。魔兽世界会选择匹配的 TOC、客户端配置和生成事件目录，其他实现保持共享。准确的 API 证据与兼容边界见 [Compatibility.md](add-on/docs/Compatibility.md)。
+
+客户端目录只是位置，不代表身份：启动器会把测试轨道的客户端放进复用的目录，因此无限服目前安装在 `_classic_beta_` 下，同时也接受独立的 `_forever_` 目录。CLI 通过客户端自身的 `.flavor.info` 产品码和构建号识别，而不是靠目录名，所以同一目录里换了别的构建也能被正确识别。
 
 ## 安装
 
 1. 安装 `!BugGrabber`。
-2. 将 `add-on/` 内的三个 TOC 和 `Core`、`Modules`、`UI`、`Media` 目录放入对应客户端的 `Interface/AddOns/Lychee Dev/`，或将构建出的 ZIP 解压到 `Interface/AddOns/`。TOC 必须直接位于 `Lychee Dev` 下，不能额外嵌套 `add-on` 目录。
+2. 将 `add-on/` 内的四个 TOC 和 `Core`、`Modules`、`UI`、`Media` 目录放入对应客户端的 `Interface/AddOns/Lychee Dev/`，或将构建出的 ZIP 解压到 `Interface/AddOns/`。TOC 必须直接位于 `Lychee Dev` 下，不能额外嵌套 `add-on` 目录。
 3. 在插件列表启用荔枝开发工具。
 4. 进入游戏后输入 `/dev`。
 
@@ -176,13 +181,13 @@ Lychee Dev skill/
 powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1
 ```
 
-运行三端精确构建静态兼容审计：
+运行四端精确构建静态兼容审计：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File add-on/tools/AuditCompatibility.ps1
 ```
 
-测试矩阵在正式服、经典版和经典泰坦上运行 21 项检查，覆盖语言契约、生成事件目录、运行时行为、UI 交互、TOC/构建选择、静态审计契约和安装包结构。
+测试矩阵在正式服、经典版、经典泰坦和无限服上运行 32 项检查，覆盖语言契约、生成事件目录、运行时行为、UI 交互、TOC/构建选择、静态审计契约和安装包结构。
 
 ## 设计边界
 

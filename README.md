@@ -11,9 +11,9 @@
   </p>
 
   <p>
-    <img alt="Release 0.7.2" src="https://img.shields.io/badge/release-v0.7.2-d83b4e?style=for-the-badge">
+    <img alt="Release 1.0.6" src="https://img.shields.io/badge/release-v1.0.6-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
-    <img alt="21 tests passing" src="https://img.shields.io/badge/tests-21%20passing-2f855a?style=for-the-badge">
+    <img alt="32 tests passing" src="https://img.shields.io/badge/tests-32%20passing-2f855a?style=for-the-badge">
   </p>
   <p>
     <img alt="Retail 12.1" src="https://img.shields.io/badge/Retail-12.1-1488cc?style=flat-square">
@@ -55,6 +55,7 @@ Open the workbench with `/dev`. Nothing is sent over the network.
 | **Trace** | Who called this function, with what arguments, returns, source, and duration? |
 | **Errors** | What failed across the addon lifecycle, and what evidence should be handed to an Agent? |
 | **Saved Records** | Which complete report belongs to this Ticket, and has WoW written it to disk yet? |
+| **Automation** | Which bounded task did an Agent deliver, did it run, and where is its result Ticket? |
 
 ## Agent workflow
 
@@ -104,6 +105,7 @@ Event search is generated from versioned Blizzard UI sources for each supported 
 | Retail 12.1.0 | 1,782 |
 | Classic 5.5.4 | 1,483 |
 | Classic Titan 3.80.2 | 1,486 |
+| WoW: Forever 1.60.1 | 1,802 |
 
 Only explicitly selected events are registered. Searching for `ALL` or `全部` exposes the client's `RegisterAllEvents` mode, but it is never enabled by default. Monitoring stops cleanly and keeps a bounded newest-first capture list.
 
@@ -120,13 +122,16 @@ Errors are grouped by signature and rendered with occurrence count, client conte
 | Retail | 12.1.0 | `120100` | `Lychee Dev_Mainline.toc` |
 | Classic | 5.5.4 | `50504` | `Lychee Dev_Mists.toc` |
 | Classic Titan | 3.80.2 | `38002` | `Lychee Dev_Wrath.toc` |
+| WoW: Forever (无限服) | 1.60.1 | `16001` | `Lychee Dev_Forever.toc` |
 
-The archive ships all three TOCs. World of Warcraft selects the matching TOC, client profile, and generated event catalog while loading the shared implementation. Exact API evidence and compatibility boundaries are documented in [Compatibility.md](add-on/docs/Compatibility.md).
+The archive ships all four TOCs. World of Warcraft selects the matching TOC, client profile, and generated event catalog while loading the shared implementation. Exact API evidence and compatibility boundaries are documented in [Compatibility.md](add-on/docs/Compatibility.md).
+
+A client folder is a location, not an identity: the launcher reuses a test folder for whatever is on the test track, so Forever currently installs under `_classic_beta_` on that track and a dedicated `_forever_` folder is also accepted. The CLI identifies each client from its own `.flavor.info` product code and build rather than from the folder name, so a folder holding a different build is still reported correctly.
 
 ## Installation
 
 1. Install `!BugGrabber`.
-2. Copy the three TOCs and the `Core`, `Modules`, `UI`, and `Media` directories from `add-on/` into `Interface/AddOns/Lychee Dev/` in the matching client, or extract the generated ZIP into `Interface/AddOns/`. The TOC files must be directly inside `Lychee Dev`, with no nested `add-on` folder.
+2. Copy the four TOCs and the `Core`, `Modules`, `UI`, and `Media` directories from `add-on/` into `Interface/AddOns/Lychee Dev/` in the matching client, or extract the generated ZIP into `Interface/AddOns/`. The TOC files must be directly inside `Lychee Dev`, with no nested `add-on` folder.
 3. Enable Lychee Dev in the addon list.
 4. Enter the world and run `/dev`.
 
@@ -183,7 +188,7 @@ Run the exact-build static compatibility audit:
 powershell -ExecutionPolicy Bypass -File add-on/tools/AuditCompatibility.ps1
 ```
 
-The suite runs 21 checks across Retail, Classic, and Classic Titan, including locale contracts, generated event catalogs, runtime behavior, UI interaction, TOC/build selection, the static-audit contract, and installable ZIP contents.
+The suite runs 32 checks across Retail, Classic, Classic Titan, and WoW: Forever, including locale contracts, generated event catalogs, runtime behavior, UI interaction, TOC/build selection, the static-audit contract, and installable ZIP contents.
 
 ## Design constraints
 

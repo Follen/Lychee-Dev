@@ -4,7 +4,7 @@
 
 本方案根据用户最新决定全面修订：所有结果统一通过 `/reload` 写入 SavedVariables；执行中显示色块，完成后显示一张简短通知二维码，Python 识别通知后重载并读取对应 Ticket。本文替代此前的二维码结果分片及按结果大小分流方案。
 
-文档位于现有 `lychee-dev-performance` worktree，属于 `codex/remove-performance` 分支。保留已完成的 Performance 移除与 **Lychee Dev skill** 命名。实现已落地：插件 Lua、Skill 脚本与 `references/automation.md` 均已写入，依赖按第 6.1 节锁定版本安装并用于离线核验；本文仍不声称任何真机结论。
+文档位于现有 `lychee-dev-performance` worktree，属于 `codex/remove-performance` 分支。保留已完成的 Performance 移除与 **Lychee Dev skill** 命名。实现已落地：插件 Lua、Skill 脚本与 `references/automation.md` 均已写入，依赖按第 6.1 节锁定版本安装并用于离线核验；真机结论见第 13 节。
 
 ## 1. 整体流程
 
