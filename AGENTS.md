@@ -35,7 +35,7 @@ addon's architecture and naming.
 Commands, from the repository root:
 
 ```powershell
-# full three-client test matrix
+# full four-client test matrix
 powershell -NoProfile -ExecutionPolicy Bypass -File add-on/tests/TestAll.ps1
 
 # release ZIP (must contain "Lychee Dev/", not "add-on/")
@@ -58,20 +58,36 @@ data are excluded from both the ZIP and the npm payload.
 | Retail Midnight `12.1.0` | `120100` | `Lychee Dev_Mainline.toc` | `_retail_` |
 | Classic `5.5.4` | `50504` | `Lychee Dev_Mists.toc` | `_classic_` |
 | Classic Titan `3.80.2` | `38002` | `Lychee Dev_Wrath.toc` | `_classic_titan_` |
+| WoW: Forever `1.60.1` | `16001` | `Lychee Dev_Forever.toc` | `_classic_beta_` (see below) |
 
 - Do not add Classic Era, Anniversary, PTR, Beta or older expansion branches unless
-  the project owner changes the product scope. `_classic_era_` may be present on a
-  machine but the addon does not install into it.
+  the project owner changes the product scope. `_classic_era_`, `_anniversary_` and
+  `_beta_` may be present on a machine but the addon does not install into them.
 - Each TOC loads exactly one file from `Core/Clients/`, then `Core/Compatibility.lua`,
   its matching generated event catalog, and the same shared module list in the same
   order.
-- Treat all three TOCs as release sources of truth. When a supported client changes,
+- Treat all four TOCs as release sources of truth. When a supported client changes,
   update its TOC, client profile, this table, both READMEs and the build tests together.
+- **A client folder is a location, not an identity.** The launcher reuses a test
+  folder for whatever is on the test track, so WoW: Forever currently ships in
+  `_classic_beta_` on that track while a dedicated `_forever_` folder is also
+  accepted. Never decide a build from the folder name alone: read the client's own
+  `.flavor.info` product code (`wow_forever`, `wow_classic_titan`, ...) and
+  `version.txt` build, and only fall back to the folder. `_classic_beta_` carrying
+  `5.5.x` is the MoP classic test track, not Forever. Both the CLI (`wow.js`
+  `resolveProduct`/`flavorForClient`, `src/py/instances.py`) and any new tooling must
+  follow this order.
 
 API baselines last checked 2026-08-20 with wowdoc: Retail `12.1.0` commit
 `31c7f7b9cc79e56c986b365c06a6afbcf3c9177b`; Classic `5.5.4` commit
 `1028c1e687f721ba9d3af14d1b12a5745e4227c7`; Titan `3.80.2` commit
 `825d29d3662b372f0bead725ee6abd339e4a77b5`.
+
+WoW: Forever baseline added 2026-09-17 with wowdoc `0.0.13`: product `forever`,
+branch `forever`, Tag `1.60.1`, commit `4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069`,
+build `1.60.1.69893` from the snapshot `version.txt`. Interface `16001` was confirmed
+empirically with `wowdoc validate --toc`, not inferred from the version string: a TOC
+declaring `16001` validates and `16000`/`16002` fail with `toc_interface_mismatch`.
 
 ## Non-negotiable acceptance criteria
 
@@ -222,7 +238,7 @@ Never publish a registry that contains task blocks, and never commit
   unrelated cleanup or formatting churn.
 - Before editing, inspect the relevant `.toc`, initialization path, database
   defaults and migrations, the module entry point, and the nearest equivalent feature.
-- For API or compatibility work, verify names and behavior against the three exact
+- For API or compatibility work, verify names and behavior against the exact
   baselines above. Do not rely on memory or a latest-branch assumption.
 - At minimum review the diff, confirm every referenced file is listed in the correct
   TOC order, and run the relevant lint, syntax, test and packaging commands.
@@ -244,7 +260,8 @@ Never publish a registry that contains task blocks, and never commit
 - Combat lockdown and secret values are handled before unsafe operations.
 - SavedVariables initialization and migrations preserve user data.
 - Lua stays 5.1-compatible and TOC order is correct.
-- Retail `120100`, Classic `50504` and Titan `38002` select the matching profile and
-  event catalog, share the same ordered implementation, and pass the whole matrix.
+- Retail `120100`, Classic `50504`, Titan `38002` and Forever `16001` each select the
+  matching profile and event catalog, share the same ordered implementation, and pass
+  the whole matrix.
 - The npm payload vendors cleanly, ships an empty task registry, and its selftest passes.
 - Reported verification matches what was actually run.
