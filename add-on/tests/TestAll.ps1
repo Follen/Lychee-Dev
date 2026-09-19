@@ -9,6 +9,7 @@ try {
         'tests/CoreTests.lua',
         'tests/LocaleTests.lua',
         'tests/AutomationTests.lua',
+        'tests/ReloadTests.lua',
         'tests/EventCatalogTests.lua',
         'tests/EventMonitorTests.lua',
         'tests/DeveloperToolsTests.lua',

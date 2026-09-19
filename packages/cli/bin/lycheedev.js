@@ -40,6 +40,7 @@ commands
   use --character <n>  pin the window that reports character <n>
   use --clear          drop the pin
   send <text>          type one slash command into the running game
+  reload               reload and locally confirm readiness; --resume <nonce> resumes without reloading
   capture              poll the game window and decode the completion notice
   run --task <id>      deliver, decode, reload once and read the result ticket
   bugs --count <n>     snapshot recent errors and read the result ticket
@@ -597,7 +598,7 @@ function main(argv) {
   // Commands that type into the game must target a live window, and the
   // executable name cannot tell two instances apart, so resolve which running
   // instance to use before forwarding.
-  const runtime = ['send', 'capture', 'run', 'bugs'].includes(command)
+  const runtime = ['send', 'capture', 'run', 'bugs', 'reload'].includes(command)
     ? resolveRuntime(flags)
     : null;
   if (runtime && runtime.error) return 1;
@@ -615,6 +616,9 @@ function main(argv) {
       if (!live) return 1;
       return forward(['send', ...targetArgs(live), '--text', text, ...passthrough(flags)]);
     }
+    case 'reload':
+      if (!live) return 1;
+      return forward(['reload', ...targetArgs(live), ...passthrough(flags)]);
     case 'capture':
       if (!live) return 1;
       return forward(['capture', ...targetArgs(live), ...passthrough(flags)]);

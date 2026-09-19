@@ -33,6 +33,7 @@ Modules\Events\Monitor.lua
 Libs\AutomationQR.lua
 UI\Export.lua
 UI\AutomationOverlay.lua
+Modules\Automation\Reload.lua
 UI\Pages\ExportRecords.lua
 UI\Features.lua
 UI\Pages\Object.lua

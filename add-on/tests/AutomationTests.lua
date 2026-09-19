@@ -860,5 +860,16 @@ assert(Controller.GetAwaitingNotice() ~= nil,
     "identify cleared the pending notice instead of refusing")
 ns.AutomationTaskDefinitions["identity-notice"] = nil
 
+-- Reload cannot interrupt an active request or replace a different result notice.
+local reloadNonce
+ns.AutomationReload = {Request=function(nonce) reloadNonce=nonce;return true end,Clear=function() end}
+Controller.HandleCommand("reload reload-proof")
+assert(reloadNonce==nil,"reload discarded an unclaimed result notice")
+Controller.HandleCommand("reload reload-proof LYCHEE-WRONG")
+assert(reloadNonce==nil,"reload accepted another ticket")
+Controller.HandleCommand("reload reload-proof "..Controller.GetAwaitingNotice().ticket)
+assert(reloadNonce=="reload-proof","matching output reload refused")
+ns.AutomationReload=nil
+
 print = originalPrint
 print("Lychee Dev automation tests passed")

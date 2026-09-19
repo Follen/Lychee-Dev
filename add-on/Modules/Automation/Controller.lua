@@ -643,6 +643,7 @@ function Controller.Stop()
 end
 
 function Controller.StopIdentify(nonce)
+    if ns.AutomationReload then ns.AutomationReload.Clear(nonce) end
     if nonce and nonce ~= identityReceiptNonce then
         return
     end
@@ -782,7 +783,18 @@ end
 function Controller.HandleCommand(text)
     local action, rest = tostring(text or ""):match("^(%S+)%s*(.-)%s*$")
     action = action and action:lower() or ""
-    if action == "run" then
+    if action ~= "reload" and action ~= "unidentify" and ns.AutomationReload then
+        ns.AutomationReload.Clear()
+    end
+    if action == "reload" then
+        local nonce, ticket = rest:match("^(%S+)%s+(%S+)$")
+        if not nonce then nonce = rest:match("^(%S+)$") end
+        if activeContext or not IsValidRequestId(nonce) or (ticket and not IsValidTicket(ticket))
+            or (awaitingNotice and awaitingNotice.ticket ~= ticket)
+            or not ns.AutomationReload or not ns.AutomationReload.Request(nonce) then
+            Print(L.AUTO_USAGE)
+        end
+    elseif action == "run" then
         local taskId = rest:match("^(%S+)$")
         if not taskId then
             Print(L.AUTO_USAGE)

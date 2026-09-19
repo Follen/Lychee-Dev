@@ -271,6 +271,7 @@ check('cli --version works', version.status === 0 && version.stdout.trim() === p
 
 const help = run(['--help']);
 check('cli --help lists install', help.status === 0 && help.stdout.includes('install'));
+check('cli --help lists reload readiness', help.stdout.includes('reload') && help.stdout.includes('--resume'));
 
 const doctor = run(['doctor']);
 check('cli doctor runs without a config', doctor.status === 0 || doctor.status === 1,

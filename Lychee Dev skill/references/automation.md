@@ -46,18 +46,20 @@ task-id 是 `[A-Za-z0-9_-]{1,64}`；requestId 建议只用字母、数字、点�
 
 同步调查返回紧凑结构。异步调查调用 `SetAsync()`，通过 `Finish(...)` 或 `Fail(message, code)` 完成，用 `OnCleanup(fn)` 释放自己创建的资源，检查 `IsCancelled()`；`Log` 与 `print` 输出有界。不得返回尚未完成的表并指望后来修改自动保存。
 
-输入侧 reload：发送 `/reload` 后等待客户端恢复可交互状态再发执行命令。SV mtime 变化只证明开始写盘，不证明加载已结束。用 WGC 观察世界画面恢复或验证过的就绪信号；固定等待数秒不能单独作为就绪证明。不得因暂时加载中而连续发命令试探。
+输入侧 reload 使用下面的专用命令。Python 生成 nonce，插件保存一次性请求后重载；新 Lua 会话收到重载的 `PLAYER_ENTERING_WORLD` 和 `LOADING_SCREEN_DISABLED`、核对角色及命令模块后才显示 ready QR。Python 在本地解码并按 nonce 清理，正常只返回 `reload_ready` JSON，不向 Agent 传图。SV mtime 变化和固定等待都不能替代就绪握手。该协议需要插件和脚本配套更新，旧插件不能识别时应停止，不自动降级或循环重载。
 
 ## 执行已绑定账户的任务
 
 下面示例的全局 `--data-dir`（如有）放在子命令前。全部窗口操作沿用本次绑定：
 
 ```text
-python <skill>/scripts/automation.py --installation <binding> send --mode messages --hwnd <hwnd> --pid <pid> --exe-path <exe> --text "/reload"
+python <skill>/scripts/automation.py --installation <binding> reload --mode messages --hwnd <hwnd> --pid <pid> --exe-path <exe> --timeout 60
 python <skill>/scripts/automation.py --installation <binding> run --mode messages --hwnd <hwnd> --pid <pid> --exe-path <exe> --task <task> --install-dir <addon> --sv <verified-sv> --timeout 120
 ```
 
-不要把两条命令无条件贴在同一个连续执行脚本里：输入 reload 后需先确认就绪。`run` 读取安装区块的 requestId/revision，提交 `/dev auto run <task>`，过滤旧完成码，记录输出 reload 去重键，再校验 SV 并保存完整报告。
+只有 `reload` 返回 0、状态为 `reload_ready` 后才运行下一条命令。`run` 读取安装区块的 requestId/revision，提交 `/dev auto run <task>`，过滤旧完成码，记录输出 reload 去重键，通过同一个握手等待就绪，再校验 SV 并保存完整报告。输出重载将已核对的 Ticket 传给插件，不覆盖其他待处理回执。
+
+日志分别记录 `reload_handshake_requested`、`reload_ready_confirmed`、`reload_ready_cleared`。超时返回原 nonce、失败阶段和本地 `reload/<nonce>/timeout.png`（没有图像时为 null），不上传图片正文。仅失败时 Agent 才有必要打开图片。恢复命令为 `reload --resume <nonce>`，沿用相同 installation/HWND/PID/exe；它绝不再次发送重载，确认过 ready 则只补清理。marker 最长存活 120 秒，超出后保持未解决，不自动制造新重载。
 
 账户未绑定时按 [clients.md](clients.md) 分段执行：`send` 运行、`capture` 取码、Agent 验证 task/run、带 requestId/Ticket 发送一次 `/reload`、定位精确记录，再 `sv read`。`capture` 本身只验证 QR 格式，不知道本次预期 task/run，不能拿任何码直接触发 reload。
 
@@ -86,7 +88,7 @@ SV 内容已完整验证后发送 received；读失败但已明确决定结束�
 python <skill>/scripts/automation.py --installation <binding> ack --mode messages --hwnd <hwnd> --pid <pid> --exe-path <exe> --ticket <ticket> --status received --timeout 30
 ```
 
-输出 reload 后先确认世界已恢复。ACK 分配新 nonce，等待含该 nonce、Ticket 和 outcome 的 QR；随后发送 `/dev auto unidentify <nonce>`，只隐藏对应 ACK 标记，再观察该码消失。`ticket_ack_confirmed` 和 `ticket_ack_cleared` 分开记录；确认成功但清理超时不等于任务失败。
+`run`/`bugs` 已通过握手确认输出 reload 后进入世界；ACK 前不需要再次给 Agent 看截图。若是旧版或手动 `/reload`，仍须有明确就绪证据。ACK 分配新 nonce，等待含该 nonce、Ticket 和 outcome 的 QR；随后发送 `/dev auto unidentify <nonce>`，只隐藏对应 ACK 标记，再观察该码消失。`ticket_ack_confirmed` 和 `ticket_ack_cleared` 分开记录；确认成功但清理超时不等于任务失败。
 
 旧版插件只支持两参数 ACK，不支持 nonce 清理。使用前核对工具与插件协议版本；授权的测试/更新应备份后同步相应源码并 reload。不能在旧插件上持续重试不支持的命令。`/dev auto unidentify` 无参数会隐藏身份标记，仅在明确属于自己的标记且没有新回执时用；不能用通用 stop 掩盖未处理证据。
 

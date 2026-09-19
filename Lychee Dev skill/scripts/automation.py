@@ -7,7 +7,8 @@ Subcommand groups (design section 9):
 - ``profile``   bind one WoW client installation, addon dir and SV path
 - ``sv``        find account-level SavedVariables candidates; read a Ticket
 - ``capture``   poll the game window and decode the completion notice QR
-- ``send``      deliver one slash command through focus/clipboard/Enter
+- ``send``      deliver one slash command through the selected input transport
+- ``reload``    reload, recognize the nonce-bound ready QR locally, then clear it
 - ``run``       task flow: run command, notice, output reload, SavedVariables
                 read and artifact save (the input-side reload that loads the
                 new task block is a separate, operator-visible step)
@@ -42,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from automation import registry, saved_variables as svlib  # noqa: E402
 from automation import session as session_mod  # noqa: E402
+from automation import reload as reload_mod  # noqa: E402
 from automation.registry import RegistryError  # noqa: E402
 from automation.saved_variables import SavedVariablesError  # noqa: E402
 
@@ -415,6 +417,22 @@ def cmd_send(args) -> int:
     return 0
 
 
+def reload_ready(session, windows, args, *, ticket=None, nonce=None, resume=False):
+    try:
+        return reload_mod.execute(windows, session, args, _deliver, nonce or new_request_id(),
+                                  ticket=ticket, resume=resume)
+    except reload_mod.ReloadError as error:
+        raise CliError(str(error), code=EXIT_NOTICE_TIMEOUT) from error
+
+
+def cmd_reload(args) -> int:
+    session = session_mod.Session(data_dir=args.data_dir, installation=args.installation)
+    result = reload_ready(session, _window_module(), args, nonce=args.resume or args.nonce,
+                          resume=bool(args.resume))
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def ack_command(ticket: str, outcome: str, nonce: str | None = None) -> str:
     """Build the in-game command that reports a ticket's read outcome.
 
@@ -678,7 +696,7 @@ def _notice_to_sv(session: session_mod.Session, windows, notice: dict, args,
             f"reload for {ticket} was already requested; check the saved "
             "variables file before repeating the reload")
     baseline = session.file_snapshot(args.sv)
-    _deliver(session, windows, args, "/reload")
+    reload_ready(session, windows, args, ticket=ticket)
     if not session.wait_for_saved_variables(args.sv, timeout=args.timeout,
                                             baseline=baseline):
         session.log_event("sv_write_timeout", ticket=ticket)
@@ -805,7 +823,15 @@ def cmd_recover(args) -> int:
     for ticket in pending:
         print(f"UNRESOLVED: reload requested for {ticket} but not received yet; "
               "inspect the saved variables file manually before any retry")
-    if not pending:
+    requests = {(e.get("installation"), e.get("nonce")) for e in
+                session.read_events("reload_handshake_requested", installation=scope)}
+    cleared = {(e.get("installation"), e.get("nonce")) for e in
+               session.read_events("reload_ready_cleared", installation=scope)}
+    unresolved = requests - cleared
+    for installation, nonce in sorted(unresolved):
+        print(f"UNRESOLVED: installation {installation!r}, reload handshake {nonce}; "
+              f"use reload --resume {nonce} with its original window binding; do not reload again")
+    if not pending and not unresolved:
         print(f"no unresolved reload requests in installation "
               f"{session.installation!r}")
     return 0
@@ -899,6 +925,13 @@ def build_parser() -> argparse.ArgumentParser:
                       help="request id used to dedup a '/reload' command")
     send.add_argument("--ticket", help="ticket used to dedup a '/reload' command")
     send.set_defaults(func=cmd_send)
+
+    reload_parser = sub.add_parser("reload", parents=[window, polling],
+                                   help="reload and locally confirm the nonce-bound ready marker")
+    identity = reload_parser.add_mutually_exclusive_group()
+    identity.add_argument("--nonce", help="unique reload identity (default: generated)")
+    identity.add_argument("--resume", help="wait/clean up this existing nonce without another reload")
+    reload_parser.set_defaults(func=cmd_reload)
 
     ack = sub.add_parser("ack", parents=[window, polling],
                          help="report a ticket's read outcome to the running game")
