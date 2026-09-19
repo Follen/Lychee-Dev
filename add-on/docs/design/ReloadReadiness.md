@@ -78,11 +78,24 @@ No performance improvement or numeric memory claim is made.
   static compatibility and packaging tests pass. Recursive wowdoc validation checks
   45 Lua files with no diagnostics; this is static evidence, not live correctness.
 - CLI vendor/selftest and package dry-run verify the distributed command and module.
-- No in-game test, installed-skill replacement, game-directory sync, GitHub push or
-  npm publication was performed: the parent task is actively using that shared
-  game instance and installed automation helper. This side task only changes the
-  independent Lychee Dev source repository. Live event ordering, background QR
-  detection across a real reload, minimize/reopen and combat remain unverified.
+- Installed addon and skill were updated together to 1.2.0, with file backups and
+  SHA-256 verification; unrelated task-registry entries were preserved.
+- Retail 12.1.0.69875 / Interface 120100 / zhCN passed three real background
+  reload handshakes: two explicit input reloads (9.05 and 8.62 seconds), then a
+  task's output reload. WGC decoded and cleared each nonce locally; no screenshots
+  were sent to the agent for these three readiness checks.
+- Task `reload-readiness-release`, request `reload-release-smoke-1.2.0`, revision
+  `1.2.0` executed after readiness and returned 42 with both command-path assertions
+  true. Ticket `LYCHEE-20260920-030631-0026` has a complete succeeded payload of
+  725 bytes, SHA-256 `6577d44b22b63a52746bbc32707d78bb21b2c37c16029afba32e296ba9558e42`.
+  The log confirms readiness cleanup preceded SV reading. The full payload was
+  checked against the selected character, realm and build, then ACKed and cleared.
+- Evidence is in the host's `automation/received/LYCHEE-20260920-030631-0026/`
+  directory. Local installation hashes and backups are in
+  `Analyze/reload-release/`. The initial upgrade used a legacy reload with visual
+  verification before the new protocol was available.
+- Other clients, minimize/reopen, live combat cancellation and live timeout
+  recovery remain unverified. Their applicable logic has offline coverage only.
 
 ## Versioned API evidence
 
