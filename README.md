@@ -11,7 +11,7 @@
   </p>
 
   <p>
-    <img alt="Release 1.1.1" src="https://img.shields.io/badge/release-v1.1.1-d83b4e?style=for-the-badge">
+    <img alt="Release 1.2.0" src="https://img.shields.io/badge/release-v1.2.0-d83b4e?style=for-the-badge">
     <img alt="Lua 5.1" src="https://img.shields.io/badge/Lua-5.1-2c2d72?style=for-the-badge&logo=lua&logoColor=white">
     <img alt="32 tests passing" src="https://img.shields.io/badge/tests-32%20passing-2f855a?style=for-the-badge">
   </p>
