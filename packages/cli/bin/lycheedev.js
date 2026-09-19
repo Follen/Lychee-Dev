@@ -121,6 +121,8 @@ function targetArgs(client) {
   const args = [];
   if (client && client.hwnd) args.push('--hwnd', String(client.hwnd));
   if (client && client.pid) args.push('--pid', String(client.pid));
+  const exePath = client?.exePath || client?.instance?.exePath;
+  if (exePath) args.push('--exe-path', exePath);
   return args;
 }
 
@@ -600,7 +602,7 @@ function main(argv) {
     : null;
   if (runtime && runtime.error) return 1;
   const live = runtime && runtime.hwnd
-    ? { hwnd: runtime.hwnd, pid: runtime.pid }
+    ? runtime
     : null;
 
   switch (command) {
@@ -626,7 +628,7 @@ function main(argv) {
         console.error('error: no SavedVariables path recorded for this client; re-run `lycheedev install`');
         return 1;
       }
-      return forward(['run', ...targetArgs(live), '--task', flags.task, '--sv', client.svPath,
+      return forward(['run', ...forwarded, ...targetArgs(live), '--task', flags.task, '--sv', client.svPath,
         ...passthrough(flags)]);
     case 'bugs':
       if (!flags.count) {

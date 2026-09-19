@@ -1,9 +1,8 @@
 """Window identity, capture and controlled command input for Windows.
 
 Window identity is never guessed from the title alone: every use confirms the
-HWND against pid, process executable path and (best effort) the process
-creation time. Command input uses the controlled focus-verify-paste-confirm
-sequence; WGC capture and QR decoding are optional heavy imports that fail
+HWND against pid and process executable path. Command input uses a controlled
+focus-verify-paste-confirm sequence; WGC capture and QR decoding are optional heavy imports that fail
 with explicit messages when their packages are missing.
 
 The capture session is long lived: a task can run far longer than one frame, so
@@ -24,6 +23,8 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes as wt
 import json
+import ntpath
+import uuid
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,10 @@ KEYEVENTF_KEYUP = 0x0002
 VK_CONTROL = 0x11
 VK_RETURN = 0x0D
 VK_V = 0x56
+VK_A = 0x41
+VK_C = 0x43
+VK_ESCAPE = 0x1B
+VK_OEM_2 = 0xBF
 VK_MENU = 0x12
 WM_CHAR = 0x0102
 WM_KEYDOWN = 0x0100
@@ -74,7 +79,9 @@ class WindowIdentity:
     def matches(self, *, pid: int | None = None, exe_path: str | None = None) -> bool:
         if pid is not None and self.pid != pid:
             return False
-        if exe_path is not None and (self.exe_path or "").lower() != exe_path.lower():
+        if exe_path is not None and (
+                ntpath.normcase(ntpath.normpath(self.exe_path or ""))
+                != ntpath.normcase(ntpath.normpath(exe_path))):
             return False
         return True
 
@@ -235,53 +242,84 @@ def _send_key(vk: int, *, ctrl: bool = False) -> None:
 
 def send_command(hwnd: int, command: str, *, pid: int | None = None,
                  exe_path: str | None = None, clipboard=None,
-                 mode: str = "foreground") -> None:
-    """Deliver one slash command through the game chat box.
+                 mode: str = "messages") -> None:
+    """Replace a chat draft and verify the copied edit text before submitting.
 
-    ``mode`` selects the injection strategy:
-
-    - ``"foreground"`` (default): focus the window, open chat with Return,
-      paste from the clipboard, submit with Return. Uses ``SendInput``, which
-      only reaches the foreground window, so the window is focused first.
-    - ``"messages"``: post the keystrokes straight into the target window's
-      message queue. This needs no foreground at all, but the client only
-      reacts when its chat edit box is already open and focused, and a client
-      that reads raw input may ignore posted messages entirely.
-
-    Both modes run the game's own command parser, so a slash command that the
-    client cannot run (locked UI, unknown command) still fails inside the game.
-
-    ``clipboard`` may be injected for tests; it needs ``copy_text``,
-    ``read_text`` and ``clear``. The previous clipboard content is restored
-    when it still belongs to this operation.
+    A successful return means keyboard submission, not game execution. Callers
+    must correlate the game's receipt. Messages mode is a separate HWND-bound
+    background transport and does not use focus or the clipboard.
     """
-
     if mode not in ("foreground", "messages"):
         raise InputError(f"unknown delivery mode: {mode}")
-
+    if (not isinstance(command, str) or not command.startswith("/")
+            or len(command.encode("utf-8")) > 255
+            or any(ord(char) < 32 or ord(char) == 127 for char in command)):
+        raise InputError("expected one slash command of at most 255 UTF-8 bytes")
     if mode == "messages":
-        confirm_window(hwnd, pid=pid, exe_path=exe_path)
-        send_command_messages(hwnd, command)
+        send_command_messages(hwnd, command, pid=pid, exe_path=exe_path)
         return
-
     if clipboard is None:
         clipboard = Clipboard()
-    confirm_window(hwnd, pid=pid, exe_path=exe_path)
+    identity = confirm_window(hwnd, pid=pid, exe_path=exe_path)
+    # Freeze inferred identity too: callers need not supply both fields.
+    pid, exe_path = identity.pid, identity.exe_path
     focus_window(hwnd, pid=pid, exe_path=exe_path)
+    deadline = time.monotonic() + 5.0
+
+    def guard():
+        confirm_window(hwnd, pid=pid, exe_path=exe_path)
+        if not is_foreground(hwnd):
+            raise InputError("game lost foreground; input cancelled without retry")
+        if time.monotonic() >= deadline:
+            raise InputError("command input timed out; input cancelled without retry")
+
+    def key(vk, *, ctrl=False):
+        guard()
+        _send_key(vk, ctrl=ctrl)
+        time.sleep(0.10)
+        guard()
 
     previous = clipboard.read_text()
-    clipboard.copy_text(command)
-    if clipboard.read_text() != command:
-        raise InputError("the clipboard did not accept the command text")
+    sentinel = "lycheedev-readback-" + uuid.uuid4().hex
+    owned = {command, sentinel}
     try:
+        # Open chat through the slash binding, never an initial Return: even
+        # an ignored Escape must not submit an existing public-chat draft.
+        key(VK_ESCAPE)
+        key(VK_OEM_2)
+        key(VK_A, ctrl=True)
+        clipboard.copy_text(command)
+        if clipboard.read_text() != command:
+            raise InputError("the clipboard did not accept the command text")
+        key(VK_V, ctrl=True)
+        key(VK_A, ctrl=True)
+        # Reading back the original clipboard would prove nothing. A unique
+        # sentinel makes missing/ignored Ctrl+C distinguishable from success.
+        clipboard.copy_text(sentinel)
+        key(VK_C, ctrl=True)
+        for _ in range(20):
+            guard()
+            copied = clipboard.read_text()
+            if copied == command:
+                break
+            if copied != sentinel:
+                raise InputError("chat edit text differs from the prepared command")
+            time.sleep(0.025)
+        else:
+            raise InputError("could not verify chat edit text before submission")
+        guard()
         _send_key(VK_RETURN)
-        time.sleep(0.15)
-        _send_key(VK_V, ctrl=True)
-        time.sleep(0.15)
-        _send_key(VK_RETURN)
-        time.sleep(0.05)
+    except BaseException:
+        # Never send cleanup keys into another app or resume a deferred submit.
+        try:
+            confirm_window(hwnd, pid=pid, exe_path=exe_path)
+            if is_foreground(hwnd):
+                _send_key(VK_ESCAPE)
+        except (WindowIdentityError, InputError):
+            pass
+        raise
     finally:
-        if clipboard.read_text() == command:
+        if clipboard.read_text() in owned:
             if previous is None:
                 clipboard.clear()
             else:
@@ -304,6 +342,7 @@ def focus_window(hwnd: int, *, pid: int | None = None,
         if user32.SetForegroundWindow(hwnd):
             time.sleep(0.10)
             if is_foreground(hwnd):
+                confirm_window(hwnd, pid=pid, exe_path=exe_path)
                 return
         if attempt == attempts - 1:
             break
@@ -318,7 +357,7 @@ def focus_window(hwnd: int, *, pid: int | None = None,
     if not is_foreground(hwnd):
         raise InputError(
             "could not bring the game window to the foreground; click the game "
-            "window once, or use `send --mode messages`")
+            "window once and retry the command")
 
 
 def _key_lparam(vk: int, *, up: bool = False) -> int:
@@ -331,21 +370,51 @@ def _key_lparam(vk: int, *, up: bool = False) -> int:
     return lparam
 
 
-def send_command_messages(hwnd: int, command: str, *, delay: float = 0.03) -> None:
-    """Type ``command`` into ``hwnd`` by posting messages; no focus needed.
+def send_command_messages(hwnd: int, command: str, *, delay: float = 0.05,
+                          pid: int | None = None, exe_path: str | None = None) -> None:
+    """Submit through the target HWND's queue without changing foreground.
 
-    The chat edit box must already be open and focused in the game, because the
-    client routes posted keys to whatever widget has focus. Characters go out
-    as WM_CHAR (the client re-encodes them for IME), and Return submits.
+    PostMessage acceptance only means queued input. It cannot prove chat focus
+    or text consumption; callers must wait for a matching game receipt.
     """
+    if (not isinstance(command, str) or not command.startswith("/")
+            or len(command.encode("utf-8")) > 255
+            or any(ord(char) < 32 or ord(char) == 127 for char in command)):
+        raise InputError("expected one slash command of at most 255 UTF-8 bytes")
+    identity = confirm_window(hwnd, pid=pid, exe_path=exe_path)
+    pid, exe_path = identity.pid, identity.exe_path
+    deadline = time.monotonic() + 20.0
 
-    for char in command:
-        if not user32.PostMessageW(hwnd, WM_CHAR, ord(char), 0):
-            raise InputError("the client window rejected a character message")
-        time.sleep(delay)
-    if not user32.PostMessageW(hwnd, WM_KEYDOWN, VK_RETURN, _key_lparam(VK_RETURN)):
-        raise InputError("the client window rejected the submit key")
-    user32.PostMessageW(hwnd, WM_KEYUP, VK_RETURN, _key_lparam(VK_RETURN, up=True))
+    def post(message, value, lparam):
+        confirm_window(hwnd, pid=pid, exe_path=exe_path)
+        if time.monotonic() >= deadline:
+            raise InputError("background input timed out; submission is unresolved")
+        if not user32.PostMessageW(hwnd, message, value, lparam):
+            raise InputError("target rejected background input; submission is unresolved")
+
+    def key(vk):
+        post(WM_KEYDOWN, vk, _key_lparam(vk))
+        post(WM_KEYUP, vk, _key_lparam(vk, up=True))
+        time.sleep(0.15)
+
+    try:
+        key(VK_ESCAPE)
+        key(VK_RETURN)
+        # WM_CHAR carries UTF-16 code units, not Python's Unicode code points.
+        encoded = command.encode("utf-16-le")
+        for offset in range(0, len(encoded), 2):
+            post(WM_CHAR, int.from_bytes(encoded[offset:offset + 2], "little"), 1)
+            time.sleep(delay)
+        key(VK_RETURN)
+    except BaseException:
+        # Queue cleanup only to the still-bound HWND, never to the foreground.
+        try:
+            confirm_window(hwnd, pid=pid, exe_path=exe_path)
+            user32.PostMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, _key_lparam(VK_ESCAPE))
+            user32.PostMessageW(hwnd, WM_KEYUP, VK_ESCAPE, _key_lparam(VK_ESCAPE, up=True))
+        except WindowIdentityError:
+            pass
+        raise
 
 
 class Clipboard:

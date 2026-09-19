@@ -719,7 +719,7 @@ end
 -- it back as a chat command: `/dev auto ack <ticket> <received|failed>`. That
 -- clears the pending-flush block immediately (no reload needed) and records the
 -- outcome so the page can show it and a later session keeps it.
-function Controller.Ack(ticket, outcome)
+function Controller.Ack(ticket, outcome, nonce)
     if not EnsureReady() then
         return
     end
@@ -736,6 +736,16 @@ function Controller.Ack(ticket, outcome)
         Print(L.AUTO_ACK_TICKET_UNKNOWN:format(ticket))
         return
     end
+    if nonce then
+        if not IsValidRequestId(nonce) or #ticket > 64 then
+            Print(L.AUTO_USAGE)
+            return
+        end
+        if awaitingNotice and awaitingNotice.ticket ~= ticket then
+            Print(L.AUTO_IDENTITY_NOTICE_SHOWN)
+            return
+        end
+    end
     record.receivedAt = time()
     record.receivedStatus = outcome
     -- Only the first acknowledgement of a result frees a backlog slot; a repeat
@@ -749,6 +759,14 @@ function Controller.Ack(ticket, outcome)
     if awaitingNotice and awaitingNotice.ticket == ticket then
         awaitingNotice = nil
         ns.AutomationOverlay.HideNotice()
+    end
+    if nonce then
+        -- Echo only validated identifiers. A fresh nonce separates this receipt
+        -- from an older acknowledgement still visible on screen.
+        local receipt = string.format(
+            '{"v":1,"ticket":"%s","task":"ack","run":"%s","ts":%d,"status":"%s"}',
+            ticket, nonce, record.receivedAt, outcome)
+        ns.AutomationOverlay.ShowIdentity(receipt)
     end
     Print(L.AUTO_ACK_DONE:format(ticket, outcome))
 end
@@ -813,12 +831,15 @@ function Controller.HandleCommand(text)
         end
         Controller.StopIdentify()
     elseif action == "ack" then
-        local ticket, outcome = rest:match("^(%S+)%s+(%S+)$")
+        local ticket, outcome, nonce = rest:match("^(%S+)%s+(%S+)%s+(%S+)$")
+        if not ticket then
+            ticket, outcome = rest:match("^(%S+)%s+(%S+)$")
+        end
         if not ticket or not outcome then
             Print(L.AUTO_USAGE)
             return
         end
-        Controller.Ack(ticket, outcome:lower())
+        Controller.Ack(ticket, outcome:lower(), nonce)
     else
         Print(L.AUTO_USAGE)
     end

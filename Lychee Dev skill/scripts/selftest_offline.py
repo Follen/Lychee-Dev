@@ -478,11 +478,7 @@ else:
         cli._window_module = real_window_module
     print("CLI window/input exit codes (4 for window/dependency, 1 otherwise) OK")
 
-# --- command delivery order: open chat, paste, submit ------------------------
-#
-# Regression: the sequence used to paste BEFORE opening the chat box, so the
-# client opened an empty chat and no command ran. Reference behaviour is
-# Return -> Ctrl+V -> Return.
+# --- input transaction regressions (no live game access) ----------------------
 
 try:
     from automation import windows as winmod
@@ -492,69 +488,10 @@ except Exception:  # pragma: no cover - non-Windows hosts
 if winmod is None:  # pragma: no cover - non-Windows hosts
     print("command delivery order (skipped: no windows module)")
 else:
-    class _RecordingClipboard:
-        def __init__(self):
-            self.value = None
-            self.writes = []
-
-        def read_text(self):
-            return self.value
-
-        def copy_text(self, text):
-            self.value = text
-            self.writes.append(text)
-
-        def clear(self):
-            self.value = None
-
-    pressed = []
-    real_send_key = winmod._send_key
-    real_set_fg = winmod.user32.SetForegroundWindow
-    real_is_foreground = winmod.is_foreground
-    real_confirm = winmod.confirm_window
-    real_sleep = winmod.time.sleep
-    try:
-        def fake_send_key(vk, *, ctrl=False):
-            pressed.append(("ctrl+v" if ctrl else "key") + ":%#x" % vk)
-
-        winmod._send_key = fake_send_key
-        winmod.user32.SetForegroundWindow = lambda _hwnd: 1
-        winmod.is_foreground = lambda _hwnd: True
-        winmod.confirm_window = lambda *a, **k: None
-        winmod.time.sleep = lambda _seconds: None
-
-        delivery_clipboard = _RecordingClipboard()
-        winmod.send_command(1, "/reload", clipboard=delivery_clipboard)
-        expected = ["key:0xd", "ctrl+v:0x56", "key:0xd"]
-        assert pressed == expected, f"delivery order was {pressed}, expected {expected}"
-        assert delivery_clipboard.writes[0] == "/reload", delivery_clipboard.writes
-    finally:
-        winmod._send_key = real_send_key
-        winmod.user32.SetForegroundWindow = real_set_fg
-        winmod.is_foreground = real_is_foreground
-        winmod.confirm_window = real_confirm
-        winmod.time.sleep = real_sleep
-    print("command delivery order (Return, Ctrl+V, Return) OK")
-
-    posted = []
-    real_post = winmod.user32.PostMessageW
-    real_sleep_messages = winmod.time.sleep
-    try:
-        winmod.user32.PostMessageW = (
-            lambda hwnd, msg, wparam, lparam: posted.append((msg, wparam)) or 1)
-        winmod.time.sleep = lambda _seconds: None
-        winmod.send_command_messages(1, "/reload")
-    finally:
-        winmod.user32.PostMessageW = real_post
-        winmod.time.sleep = real_sleep_messages
-
-    chars = "".join(chr(w) for m, w in posted if m == winmod.WM_CHAR)
-    assert chars == "/reload", chars
-    down = [w for m, w in posted if m == winmod.WM_KEYDOWN]
-    assert down == [winmod.VK_RETURN], down
-    assert all(m in (winmod.WM_CHAR, winmod.WM_KEYDOWN, winmod.WM_KEYUP)
-               for m, _w in posted), posted
-    print("command delivery via posted messages (no foreground) OK")
+    import unittest
+    from test_input_safety import InputSafetyTests
+    result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(InputSafetyTests))
+    assert result.wasSuccessful(), "input transaction regressions failed"
 
     # The notice is drawn at the top-left corner of the game window, so the scan
     # area must cover that corner. A ROI that drifts back to another corner makes
@@ -723,6 +660,20 @@ assert 0.15 < time.monotonic() - started < 5.0
 timeout_events = [r["event"] for r in timeout_session.read_events()]
 assert "notice_seen" not in timeout_events
 print("poll_notice: stale notice rejected, fresh accepted, timeout bounded OK")
+
+# Acknowledgement receipts must match Ticket, nonce, task and outcome together.
+ack_good = notice_json(task="ack", run="ack-nonce", status="received")
+ack_stale = notice_json(task="ack", run="old-nonce", status="received")
+ack_wrong_ticket = notice_json(task="ack", run="ack-nonce", ticket="LYCHEE-other", status="received")
+ack_wrong_status = notice_json(task="ack", run="ack-nonce", status="failed")
+ack_resolved = cli.poll_notice(
+    _FakeWindows([[ack_stale, ack_wrong_ticket, ack_wrong_status], [ack_good]]),
+    fake_session, poll_args, expected_task="ack", expected_run="ack-nonce",
+    expected_ticket=ticket, expected_status="received")
+assert ack_resolved and ack_resolved["status"] == "received"
+for bad_ticket in ("LYCHEE-1\n/reload", "LYCHEE-1 received", "bad"):
+    expect_failure("ack ticket validation", lambda t=bad_ticket: cli.ack_command(t, "received"), cli.CliError)
+print("ack receipt exact identity and command validation OK")
 
 # --- registry: schema/kind rejection, hash, region preservation ---------------
 
@@ -979,14 +930,14 @@ try:
     scoped = [r["event"] for r in
               ses.Session(data_dir=send_data, installation="send-scope").read_events()]
     assert scoped.count("reload_requested") == 1, scoped
-    assert scoped.count("command_sent") == 1, scoped
+    assert scoped.count("command_submitted") == 1, scoped
     every = ses.Session(data_dir=send_data).read_events(
         installation=ses.ALL_INSTALLATIONS)
-    assert [r["event"] for r in every].count("command_sent") == 2
+    assert [r["event"] for r in every].count("command_submitted") == 2
     assert _FakeSendWindows.sent == [(1, "/reload"), (1, "/dev auto status x")]
-    assert _FakeSendWindows.modes == ["foreground", "foreground"], _FakeSendWindows.modes
+    assert _FakeSendWindows.modes == ["messages", "messages"], _FakeSendWindows.modes
     assert cli.main(["--data-dir", send_data, "send", "--hwnd", "0x1",
-                     "--mode", "messages", "--text", "hi"]) == 0
+                     "--mode", "messages", "--text", "/dev"]) == 0
     assert _FakeSendWindows.modes[-1] == "messages", _FakeSendWindows.modes
 
     cli._window_module = lambda: _FailingSendWindows
@@ -998,6 +949,33 @@ try:
 finally:
     cli._window_module = original_window_module
 print("send host log + reload dedup + input failure exit OK")
+
+# Drive the actual CLI acknowledgement flow: submission alone is unresolved.
+from unittest.mock import patch
+ack_data = os.path.join(tmp, "ack-flow")
+ack_args = ["--data-dir", ack_data, "ack", "--hwnd", "1", "--ticket", "LYCHEE-1",
+            "--status", "received", "--timeout", "0.1"]
+with patch.object(cli, "_window_module", return_value=_FakeSendWindows), \
+     patch.object(cli, "poll_notice", return_value=None):
+    assert cli.main(ack_args) == 5
+ack_events = [r["event"] for r in ses.Session(data_dir=ack_data).read_events()]
+assert "ticket_ack_unresolved" in ack_events and "ticket_ack_confirmed" not in ack_events
+with patch.object(cli, "_window_module", return_value=_FakeSendWindows), \
+     patch.object(cli, "poll_notice", return_value={"status": "received"}) as poll:
+    assert cli.main(ack_args) == 0
+    sent_nonce = _FakeSendWindows.sent[-1][1].split()[-1]
+    assert poll.call_args.kwargs["expected_run"] == sent_nonce
+    assert poll.call_args.kwargs["expected_ticket"] == "LYCHEE-1"
+    assert poll.call_args.kwargs["expected_status"] == "received"
+with patch.object(cli, "_window_module", return_value=_FakeSendWindows), \
+     patch.object(cli, "poll_notice", return_value={}) as poll, \
+     patch.object(cli, "_notice_to_sv", return_value=0):
+    assert cli.main(["--data-dir", ack_data, "bugs", "--hwnd", "1", "--count", "2",
+                     "--sv", "unused", "--request-id", "bug-proof-1"]) == 0
+    assert _FakeSendWindows.sent[-1][1] == "/dev auto bug 2 bug-proof-1"
+    assert poll.call_args.kwargs["expected_run"] == "bug-proof-1"
+print("ack CLI unresolved/confirmed lifecycle and bug request delivery OK")
+
 
 # --- packaging metadata -------------------------------------------------------
 

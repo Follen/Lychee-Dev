@@ -208,8 +208,10 @@ inspect a second root without changing the saved one.
 - The **account** behind a running client is not exposed. SavedVariables files are
   per account, and the newest file is not necessarily the live session's account
   when several accounts are configured.
-- WoW ignores posted window messages, so keyboard delivery needs the window in the
-  foreground. That is why targeting the right window matters.
+- Background PostMessage delivery has been observed working in one Retail
+  instance. That does not establish support for every build, minimized window
+  or edit state. Target the exact HWND/PID/executable and require a correlated
+  game receipt; queue acceptance alone is not command execution.
 
 If the user must be certain which client is which, and the marker is unavailable,
 ask them to run a trivial in-game command (`/dev auto status <task>`) in the window

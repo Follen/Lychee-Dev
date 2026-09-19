@@ -19,7 +19,7 @@ Detail lives in `references/`. Read the one that matches the task instead of gue
 
 - **Persisted evidence:** locate the WoW `WTF` SavedVariables file, find the exact Ticket, and read the complete payload.
 - **Run:** open `/dev`, use the Run page, and paste `/run` or `/script` Lua.
-- **Automated task delivery:** when the user authorized scripted task delivery and reload, use the Python tooling in `scripts/` to upsert a task block, run it, decode the completion notice, reload once, and read the Ticket. Read [references/automation.md](references/automation.md) first; live-window steps still need per-host verification.
+- **Automated task delivery:** when the user authorized scripted task delivery and reload, use the Python tooling in `scripts/` to upsert a task block, run it, decode the completion notice, reload once, and read the Ticket. Read [references/automation.md](references/automation.md) first; live-window steps still need per-host verification. Foreground input verifies the edit text before submitting; `--mode messages` uses real background HWND delivery without foreground or clipboard access; a keyboard submission is not a game receipt. Use `ack` to confirm the exact Ticket/outcome with a fresh nonce QR, and treat timeout as unresolved.
 - **Memory/CPU investigation:** use Run with a question-specific script; read [references/runtime-investigations.md](references/runtime-investigations.md) before designing a probe.
 - **Objects:** open `/dev` > Objects and inspect a global/object path or use the mouse picker.
 - **Events:** open `/dev` > Events, search the current client's catalog, select events, start monitoring, reproduce the behavior, then stop and save.

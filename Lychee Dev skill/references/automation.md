@@ -286,11 +286,13 @@ python scripts/automation.py send --hwnd 0x1234 --text "/reload" \
   compares the top-left ROI on every `--interval` (default 0.1 s) until
   `--timeout` (default 120 s) expires, then exits 5. Only the newest ROI is
   kept, so frames never pile up.
-- `send` always logs `command_sent` before input. When the text is `/reload`
+- `send` logs `command_prepared` before input and `command_submitted` only after
+  verified keyboard submission. Neither event proves game execution. When the text is `/reload`
   and both `--request-id` and `--ticket` are given it also applies the reload
   dedup key, so the same notice can never trigger a second reload.
 - Both confirm the window identity (HWND, and `--pid`/`--exe-path` when given)
-  immediately before use and re-check the foreground before typing.
+  immediately before use. Foreground input also checks focus between steps;
+  background messages stay bound to the HWND without changing focus.
 
 ### run / bugs
 
@@ -411,3 +413,42 @@ The offline-verified parts are the task registry writer, the restricted
 SavedVariables reader and verifier, the session log/dedup/artifacts, the notice
 validation, the identity marker shape and probe concurrency, the polling shape
 and the CLI exit behaviour; they are covered by `scripts/selftest_offline.py`.
+
+### Automatic input and correlated acknowledgements
+
+Automatic input remains the default, using background `--mode messages`.
+Explicit `--mode foreground` cancels the current edit with
+Escape, opens chat through the default slash key, replaces its contents, and copies the selected edit text back
+for an exact comparison before submitting. A unique clipboard sentinel detects
+an ignored copy operation. HWND/PID/executable and foreground are checked between
+steps. Input is bounded and is never automatically retried after a timeout or
+focus loss. `--mode messages` is a separate background transport: it confirms the bound
+HWND/PID/executable before every PostMessage, cancels the old edit with Escape,
+opens chat, posts UTF-16 WM_CHAR units and submits. It never focuses the target,
+uses SendInput or touches the clipboard. Queue acceptance is not edit-state
+verification: ignored Escape/Return or another focused game widget remain
+unverified until real-game testing. Always require the correlated game receipt,
+and never blindly retry an unresolved background submission.
+Both modes accept only one slash command up to 255 UTF-8 bytes.
+For foreground mode, the slash key must
+open chat on the active keyboard layout and game keybindings; otherwise text
+readback fails without submitting. There is no initial Enter that could send a
+pre-existing draft if Escape is ignored.
+
+In foreground mode, if focus is lost, no cleanup keys are sent into the newly focused application.
+The game may retain an unsubmitted draft; the next transaction cancels it before
+opening fresh input. Do not manually press Enter to resume an interrupted send.
+Clipboard text is restored only while its value still belongs to the operation.
+Readback verifies edit text, not the identity of the focused game widget: a
+matching game receipt is still necessary to establish execution.
+
+`ack --ticket <ticket> --status received|failed [--timeout 120]` supplies a fresh
+nonce and waits for a QR containing that nonce, Ticket and outcome. A timeout is
+`ticket_ack_unresolved` (exit 5), never confirmed success. The addon retains the
+existing two-argument command for manual use. A nonce receipt never replaces a
+different Ticket's pending completion notice. Update addon and tooling together;
+older addons cannot emit the new receipt.
+
+`run` requires the installed block or an explicit request ID; `bugs` sends its
+request ID to the addon and filters the completion notice by that same ID.
+Output reload still resolves the exact Ticket through verified SavedVariables.

@@ -386,8 +386,8 @@ def _window_module():
 def _deliver(session: session_mod.Session, windows, args, text: str) -> None:
     """Log the intent, then send exactly one command (design section 6.2)."""
 
-    mode = getattr(args, "mode", "foreground")
-    session.log_event("command_sent", hwnd=args.hwnd, text=text, mode=mode)
+    mode = getattr(args, "mode", "messages")
+    session.log_event("command_prepared", hwnd=args.hwnd, text=text, mode=mode)
     try:
         windows.send_command(args.hwnd, text, pid=getattr(args, "pid", None),
                              exe_path=getattr(args, "exe_path", None),
@@ -396,6 +396,7 @@ def _deliver(session: session_mod.Session, windows, args, text: str) -> None:
         session.log_event("command_failed", hwnd=args.hwnd, text=text,
                           mode=mode, reason=str(error))
         raise CliError(f"command delivery failed: {error}", code=EXIT_INPUT)
+    session.log_event("command_submitted", hwnd=args.hwnd, text=text, mode=mode)
 
 
 def cmd_send(args) -> int:
@@ -410,11 +411,11 @@ def cmd_send(args) -> int:
                 f"reload for {args.ticket} was already requested; check the saved "
                 "variables file before repeating it")
     _deliver(session, windows, args, args.text)
-    print("sent")
+    print("submitted; game execution is not yet confirmed")
     return 0
 
 
-def ack_command(ticket: str, outcome: str) -> str:
+def ack_command(ticket: str, outcome: str, nonce: str | None = None) -> str:
     """Build the in-game command that reports a ticket's read outcome.
 
     The plugin cannot see whether the host read a result, so the host says so
@@ -423,7 +424,11 @@ def ack_command(ticket: str, outcome: str) -> str:
 
     if outcome not in ("received", "failed"):
         raise CliError("ack status must be 'received' or 'failed'")
-    return f"/dev auto ack {ticket} {outcome}"
+    if not svlib.TICKET_PATTERN.fullmatch(ticket) or len(ticket) > 64:
+        raise CliError("invalid acknowledgement ticket")
+    if nonce is not None and not registry.REQUEST_ID_PATTERN.fullmatch(nonce):
+        raise CliError("invalid acknowledgement nonce")
+    return f"/dev auto ack {ticket} {outcome}" + (f" {nonce}" if nonce else "")
 
 
 def cmd_ack(args) -> int:
@@ -432,10 +437,18 @@ def cmd_ack(args) -> int:
     windows = _window_module()
     session = session_mod.Session(data_dir=args.data_dir,
                                   installation=args.installation)
-    text = ack_command(args.ticket, args.status)
+    nonce = new_request_id()
+    text = ack_command(args.ticket, args.status, nonce)
     _deliver(session, windows, args, text)
-    session.log_event("ticket_ack_sent", ticket=args.ticket, status=args.status)
-    print(f"ack sent: {args.ticket} {args.status}")
+    session.log_event("ticket_ack_submitted", ticket=args.ticket, status=args.status)
+    notice = poll_notice(windows, session, args, expected_task="ack", expected_run=nonce,
+                         expected_ticket=args.ticket, expected_status=args.status)
+    if notice is None:
+        session.log_event("ticket_ack_unresolved", ticket=args.ticket, nonce=nonce)
+        raise CliError("ack was submitted but no matching game receipt arrived",
+                       code=EXIT_NOTICE_TIMEOUT)
+    session.log_event("ticket_ack_confirmed", ticket=args.ticket, status=args.status, nonce=nonce)
+    print(f"ack confirmed: {args.ticket} {args.status}")
     return 0
 
 
@@ -488,7 +501,9 @@ def notice_identity_problems(notice: dict, *, expected_task: str | None,
 
 def poll_notice(windows, session: session_mod.Session, args, *,
                 expected_task: str | None = None,
-                expected_run: str | None = None) -> dict | None:
+                expected_run: str | None = None,
+                expected_ticket: str | None = None,
+                expected_status: str | None = None) -> dict | None:
     """Keep one WGC session open and poll until a matching notice or the deadline.
 
     The session outlives a single frame because a task can run far longer than
@@ -516,6 +531,10 @@ def poll_notice(windows, session: session_mod.Session, args, *,
                     problems = notice_identity_problems(
                         notice, expected_task=expected_task,
                         expected_run=expected_run)
+                    if expected_ticket is not None and notice["ticket"] != expected_ticket:
+                        problems.append("receipt ticket mismatch")
+                    if expected_status is not None and notice.get("status") != expected_status:
+                        problems.append("receipt status mismatch")
                     if problems:
                         session.log_event("notice_identity_mismatch",
                                           ticket=notice["ticket"],
@@ -668,6 +687,11 @@ def cmd_run(args) -> int:
         expected_request_id = args.request_id or definition["requestId"]
         revision = args.revision or definition["revision"]
 
+    if not registry.TASK_ID_PATTERN.fullmatch(args.task):
+        raise CliError("invalid task id")
+    if not expected_request_id or not registry.REQUEST_ID_PATTERN.fullmatch(expected_request_id):
+        raise CliError("run requires an installed task block or an explicit --request-id")
+
     session.log_event("run_started", task=args.task,
                       requestId=expected_request_id, revision=revision)
     _deliver(session, windows, args, f"/dev auto run {args.task}")
@@ -689,8 +713,11 @@ def cmd_bugs(args) -> int:
         raise CliError("--count must be an integer between 1 and 100")
     session = session_mod.Session(data_dir=args.data_dir,
                                   installation=args.installation)
-    session.log_event("bugs_started", count=args.count)
-    _deliver(session, windows, args, f"/dev auto bug {args.count}")
+    args.request_id = args.request_id or new_request_id()
+    if not registry.REQUEST_ID_PATTERN.fullmatch(args.request_id):
+        raise CliError("invalid bug request id")
+    session.log_event("bugs_started", count=args.count, requestId=args.request_id)
+    _deliver(session, windows, args, f"/dev auto bug {args.count} {args.request_id}")
     notice = poll_notice(windows, session, args, expected_task=BUG_TASK_ID,
                          expected_run=args.request_id)
     if notice is None:
@@ -819,11 +846,9 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument("--pid", type=int, help="expected process id")
     window.add_argument("--exe-path", help="expected executable path")
     window.add_argument(
-        "--mode", choices=("foreground", "messages"), default="foreground",
-        help="input strategy: 'foreground' focuses the window and uses "
-             "SendInput; 'messages' posts keys straight to the window and needs "
-             "no foreground but requires the chat box to be open already "
-             "(default: foreground)")
+        "--mode", choices=("foreground", "messages"), default="messages",
+        help="foreground uses clipboard readback; messages posts input to the "
+             "target HWND without changing foreground (execution needs a receipt)")
 
     polling = argparse.ArgumentParser(add_help=False)
     polling.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
@@ -841,7 +866,7 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--ticket", help="ticket used to dedup a '/reload' command")
     send.set_defaults(func=cmd_send)
 
-    ack = sub.add_parser("ack", parents=[window],
+    ack = sub.add_parser("ack", parents=[window, polling],
                          help="report a ticket's read outcome to the running game")
     ack.add_argument("--ticket", required=True, help="exact ticket that was read")
     ack.add_argument("--status", required=True, choices=("received", "failed"),

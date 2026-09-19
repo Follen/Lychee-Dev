@@ -611,6 +611,24 @@ Controller.HandleCommand("ack " .. ackTicket)
 assert(LastMessage():find("run", 1, true),
     "ack without a status did not print usage: " .. LastMessage())
 
+-- A nonce receipt proves this acknowledgement, including outcome and Ticket.
+Controller.HandleCommand("ack " .. ackTicket2 .. " failed ack-proof-1")
+local ackReceipt = overlayState.identities[#overlayState.identities]
+assert(ackReceipt:find('"run":"ack-proof-1"', 1, true)
+    and ackReceipt:find('"ticket":"' .. ackTicket2 .. '"', 1, true)
+    and ackReceipt:find('"status":"failed"', 1, true),
+    "ack receipt did not correlate nonce, Ticket and outcome")
+local receiptsBeforeInvalid = #overlayState.identities
+Controller.HandleCommand("ack " .. ackTicket2 .. " received invalid/nonce")
+assert(#overlayState.identities == receiptsBeforeInvalid
+    and ns.GetAutomationRecord("req-run-ack-2").receivedStatus == "failed",
+    "invalid nonce changed acknowledgement state")
+DefineTask("ack-other", "req-ack-other", "return true")
+Controller.Run("ack-other")
+Controller.HandleCommand("ack " .. ackTicket .. " received ack-proof-2")
+assert(#overlayState.identities == receiptsBeforeInvalid,
+    "ack receipt replaced another Ticket's pending notice")
+
 -- --- controller: bug snapshots -------------------------------------------------
 
 local bugDatabase = {
