@@ -28,6 +28,7 @@ local MAX_UNACKNOWLEDGED_RESULTS = 3
 
 local activeContext
 local awaitingNotice
+local identityReceiptNonce
 local unacknowledgedResults = 0
 local executedRequests = {}
 
@@ -641,7 +642,11 @@ function Controller.Stop()
     Print(L.AUTO_STOPPED)
 end
 
-function Controller.StopIdentify()
+function Controller.StopIdentify(nonce)
+    if nonce and nonce ~= identityReceiptNonce then
+        return
+    end
+    identityReceiptNonce = nil
     ns.AutomationOverlay.HideIdentity()
     Print(L.AUTO_IDENTITY_HIDDEN)
 end
@@ -708,6 +713,7 @@ function Controller.Identify()
         return
     end
 
+    identityReceiptNonce = nil
     if ns.AutomationOverlay.ShowIdentity(json) then
         Print(L.AUTO_IDENTITY_SHOWN:format(character, realm or "-"))
     else
@@ -766,7 +772,9 @@ function Controller.Ack(ticket, outcome, nonce)
         local receipt = string.format(
             '{"v":1,"ticket":"%s","task":"ack","run":"%s","ts":%d,"status":"%s"}',
             ticket, nonce, record.receivedAt, outcome)
-        ns.AutomationOverlay.ShowIdentity(receipt)
+        if ns.AutomationOverlay.ShowIdentity(receipt) then
+            identityReceiptNonce = nonce
+        end
     end
     Print(L.AUTO_ACK_DONE:format(ticket, outcome))
 end
@@ -825,11 +833,12 @@ function Controller.HandleCommand(text)
         end
         Controller.Identify()
     elseif action == "unidentify" then
-        if rest ~= "" then
+        local nonce = rest ~= "" and rest:match("^(%S+)$") or nil
+        if rest ~= "" and not IsValidRequestId(nonce) then
             Print(L.AUTO_USAGE)
             return
         end
-        Controller.StopIdentify()
+        Controller.StopIdentify(nonce)
     elseif action == "ack" then
         local ticket, outcome, nonce = rest:match("^(%S+)%s+(%S+)%s+(%S+)$")
         if not ticket then

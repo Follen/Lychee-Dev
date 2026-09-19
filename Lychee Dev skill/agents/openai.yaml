@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lychee Dev skill"
-  short_description: "Read WoW evidence and prepare bounded Run investigations"
-  default_prompt: "Use $lychee-dev to investigate a specific WoW issue through Lychee Dev Run, one bounded script, and complete Ticket evidence."
+  display_name: "Lychee Dev"
+  short_description: "Orchestrate background WoW tasks and verified Ticket evidence"
+  default_prompt: "Use $lychee-dev to complete a background WoW investigation through verified Ticket evidence, acknowledgement, cleanup, and recovery if interrupted."

@@ -448,8 +448,42 @@ def cmd_ack(args) -> int:
         raise CliError("ack was submitted but no matching game receipt arrived",
                        code=EXIT_NOTICE_TIMEOUT)
     session.log_event("ticket_ack_confirmed", ticket=args.ticket, status=args.status, nonce=nonce)
+    _deliver(session, windows, args, f"/dev auto unidentify {nonce}")
+    if not wait_ack_cleared(windows, args, nonce):
+        session.log_event("ticket_ack_cleanup_unresolved", ticket=args.ticket, nonce=nonce)
+        raise CliError("ack confirmed, but its marker cleanup was not observed",
+                       code=EXIT_NOTICE_TIMEOUT)
+    session.log_event("ticket_ack_cleared", ticket=args.ticket, nonce=nonce)
     print(f"ack confirmed: {args.ticket} {args.status}")
     return 0
+
+
+def wait_ack_cleared(windows, args, nonce: str) -> bool:
+    """Observe removal of this receipt; never dismiss a newer marker by nonce."""
+    interval = getattr(args, "interval", None) or DEFAULT_INTERVAL
+    deadline = time.monotonic() + min(args.timeout, 5.0)
+    absent = 0
+    with windows.open_notice_capture(args.hwnd, pid=getattr(args, "pid", None),
+                                     exe_path=getattr(args, "exe_path", None),
+                                     interval=interval) as capture:
+        while time.monotonic() < deadline:
+            if capture.window_closed:
+                return False
+            roi = capture.latest_roi()
+            if roi is not None:
+                visible = False
+                for payload in windows.decode_qr(roi):
+                    try:
+                        marker = json.loads(payload)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(marker, dict) and marker.get("task") == "ack" and marker.get("run") == nonce:
+                        visible = True
+                absent = 0 if visible else absent + 1
+                if absent >= 2:
+                    return True
+            time.sleep(interval)
+    return False
 
 
 def validate_notice(json_text: str) -> dict:

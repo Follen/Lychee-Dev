@@ -1,129 +1,42 @@
 ---
 name: lychee-dev
-description: Use when working with the Lychee Dev WoW addon to read persisted runtime evidence by Ticket or prepare bounded /run memory/CPU investigations, object inspection, and event monitoring. Do not use for generic WoW API research or unrelated addon implementation.
+description: 编排 Lychee Dev 的 WoW 后台自动化任务、错误快照、二维码回执和 SavedVariables Ticket 读取；也用于有界 Run 性能调查、对象检查与事件监控。不用于无关插件实现或通用 WoW API 查询。
 ---
 
-# Lychee Dev skill
+# Lychee Dev
 
-Use this skill as the operational guide for Lychee Dev, an in-game evidence workbench. The desired output is either (a) an evidence-backed diagnosis from SavedVariables or (b) a command/workflow the user can paste into WoW and report back.
+把用户的调查问题变成完整、可追溯的游戏运行证据。已获授权的自动化应连续完成发送、读取、确认和收尾，不能停在“已发送”、二维码出现或脚本生成。
 
-Detail lives in `references/`. Read the one that matches the task instead of guessing:
+## 按任务读取资料
 
-| Reference | Read it when |
-| --- | --- |
-| [references/clients.md](references/clients.md) | Any command that types into the game, or the user has several builds or instances open |
-| [references/automation.md](references/automation.md) | Authorized scripted task delivery: task blocks, run, notice, reload, receipt |
-| [references/runtime-investigations.md](references/runtime-investigations.md) | Designing a memory/CPU probe |
+- 要操作正在运行的游戏：先读 [clients.md](references/clients.md)，确定版本、实例和安装位置。
+- 要执行自动任务、获取最近 n 条错误、ACK 或恢复中断：读 [automation.md](references/automation.md)，按其闭环继续到完成。
+- 设计内存/CPU 调查：另读 [runtime-investigations.md](references/runtime-investigations.md)。只读已有 Ticket 不需要准备新探针。
 
-## Choose the workflow
+## 默认后台通路
 
-- **Persisted evidence:** locate the WoW `WTF` SavedVariables file, find the exact Ticket, and read the complete payload.
-- **Run:** open `/dev`, use the Run page, and paste `/run` or `/script` Lua.
-- **Automated task delivery:** when the user authorized scripted task delivery and reload, use the Python tooling in `scripts/` to upsert a task block, run it, decode the completion notice, reload once, and read the Ticket. Read [references/automation.md](references/automation.md) first; live-window steps still need per-host verification. Foreground input verifies the edit text before submitting; `--mode messages` uses real background HWND delivery without foreground or clipboard access; a keyboard submission is not a game receipt. Use `ack` to confirm the exact Ticket/outcome with a fresh nonce QR, and treat timeout as unresolved.
-- **Memory/CPU investigation:** use Run with a question-specific script; read [references/runtime-investigations.md](references/runtime-investigations.md) before designing a probe.
-- **Objects:** open `/dev` > Objects and inspect a global/object path or use the mouse picker.
-- **Events:** open `/dev` > Events, search the current client's catalog, select events, start monitoring, reproduce the behavior, then stop and save.
+使用随 Skill 附带的 `scripts/automation.py`。发送显式传 `--mode messages`，通过 PostMessage 投递到绑定的 HWND；WGC 直接捕获窗口，zxing-cpp 解码。两者都不要求窗口获得前台焦点，不使用 GDI 截屏，也不需要剪贴板。不要自行换成 SetForegroundWindow、SendInput、点击聊天框或要求用户粘贴。
 
-The Performance page, automatic capture, health scan and function benchmark have been removed. Run, Objects, Events, Trace, Errors and Saved Records remain available. Do not route a new investigation to the removed UI. There are no separate `/object` or `/event` slash commands. Do not invent them; give the `/dev` UI steps instead.
+工具仍保留显式 `foreground` 模式；它不是后台通路的自动降级方案。后台异常时检查状态和证据，不把失败直接转成人工提交。用户明确选择人工 Run 时，才按该方式组织。
 
-## Know which client you are driving
+无焦点要求不等于所有窗口状态都可用：最小化、客户端切换、战斗、尚未载入世界、其他游戏编辑框和自定义聊天键位可能影响操作。只报告本次实际验证的客户端/版本/状态。消息成功入队不证明游戏执行；二维码出现不证明 SV 已落盘。
 
-Four builds are supported: Retail `12.1.0` (`_retail_`), Classic `5.5.4` (`_classic_`), Classic Titan `3.80.2` (`_classic_titan_`) and WoW: Forever (无限服) `1.60.1` (`_classic_beta_`, or `_forever_`). Other folders may exist on disk — `_classic_era_`, `_anniversary_`, `_beta_` — and the addon does not serve those; `_classic_beta_` is served when it holds Forever, so never decide from the folder name. Never infer the build from the window title, and never assume `WowClassic.exe` means Classic — every non-retail build uses that name.
+## 完成标准
 
-A folder name is a location, not an identity: the launcher reuses a test folder for whatever is on the test track, so Forever currently lives under `_classic_beta_`, which a MoP-era classic test client also uses. The CLI resolves each client from its own `.flavor.info` product code and build instead of the folder; do the same when reasoning about a machine, and never promise a build because a folder is named a certain way.
+一次自动调查需要取得匹配 task/requestId/Ticket 的完整报告，核对身份与校验信息、保存证据、确认 ACK，并完成该回执的界面清理。未完成的阶段必须明确说明。不要为了清理画面重跑任务。
 
-Before a command that types into the game, confirm the target:
+- 接收已有 Ticket：先找精确记录，禁止重新执行原任务来“获取同样结果”。
+- 新任务：只在目标安装目录 `Modules/Automation/auto/auto.lua` 更新自己拥有的 task-id 区块；同一次逻辑执行保持 requestId 不变。
+- 错误调查：`bugs --count n` 获取最多 n 条已有错误，不制造新错误填满数量。
+- 完整内容始终走 SV；超过 10 KB 不切换传输方式，不把正文塞进二维码。
+- 测试也是完整工作：每个用例结束或中断时处理自己留下的草稿、回执与任务块，再报告状态；不要在没有解释的情况下留在下一用例的中间步骤。
 
-```text
-lycheedev clients                     # every build on disk, its version, and install state
-lycheedev instances                   # what is running now, with pid and window handle
-lycheedev instances --identify        # also read each window's character and build
-lycheedev use [index]                 # pin one as the default target
-lycheedev use --character <name>      # pin the window reporting that character
-```
+保留当前会话已给出的授权，不重复请求常规步骤确认。调查授权不意味着可覆盖其他任务、重置数据库或发布插件；共享游戏实例存在实际占用时先协调。
 
-When more than one window is running and you cannot tell them apart, ask the user to run `/dev auto identify` in the windows they care about, then run `lycheedev instances --identify`. That reads a small identity QR code from the top-left corner of each window — through window capture, so no window is focused and nothing is typed — and prints the character and build behind every window:
+## 已有证据与人工工具
 
-```text
-  [0] Retail         pid=62460    hwnd=0x12410c7a    v12.1.0.69587
-        character: 荔枝-白银之手  client: retail  build: 12.1.0
-```
+SV 是数据：用受限解析器读取，不能在宿主执行 Lua。主记录位于 `LycheeDevDB.exports.records[TICKET]`，完整内容是 `payload.content`；`history` 与 metadata 都不能代替完整报告。未知/较新字段应保留，已有旧性能记录仍可作为历史证据。
 
-Then pin the intended window by name — `lycheedev use --character 荔枝-白银之手` — and confirm that character back to the user, instead of guessing from a pid. `/dev auto unidentify` hides the marker again. The marker is not shown by default because it shares the corner with the completion notice.
+用户选择手动操作时：Run 支持 `/run` 或 `/script` 和 Lua 5.1；异步调查使用验证过的完成写入机制。对象检查走 `/dev > Objects`，事件监控走 `/dev > Events`。没有独立 `/object`、`/event` 命令；Performance、自动性能采集、health scan 和 benchmark 页面已移除。脚本必须有界，异步资源用清理回调释放，不对可能为 secret 的值直接比较或格式化。
 
-With several clients open, `--instance <index>` or `--character <name>` overrides the pin for one command, and `--client` filters by build. Different builds can stay open together because each install holds its own addon copy. Two windows of the **same** build that show the **same character and realm** — or that show no marker at all — still cannot be told apart, so ask the user to close all but one instead of picking for them. Full rules and the precedence order are in [references/clients.md](references/clients.md).
-
-## Read SavedVariables
-
-1. Search the user's WoW installation for the global SavedVariables file, normally `WTF/Account/<account>/SavedVariables/Lychee Dev.lua`. The exact account/realm path is installation-specific. Use a filename search or `rg` for `LycheeDevDB`/the Ticket rather than assuming a path.
-2. Treat the file as data, not trusted code. Do not `dofile` or execute an unknown SavedVariables file in the host environment. Use a restricted Lua parser/sandbox or inspect the relevant assignment safely.
-3. For a Ticket `LYCHEE-...`, read:
-
-   ```text
-   LycheeDevDB.exports.records[TICKET]
-   LycheeDevDB.exports.records[TICKET].payload.content
-   ```
-
-   Validate `schema == "lychee.evidence.v1"`, and use `source.kind`, `source.title`, `source.path`, `environment`, and `createdAt` to identify the record. Validate the report schema inside the payload separately; record-level schema/source do not belong to `metadata`. Prefer the exact Ticket already supplied to the owning task, including directly delivered messages; do not ask the user to resend it to several tasks. The payload is the authoritative complete report; `metadata` is bounded context, not a replacement for it.
-   Current kinds include `run_result`, `object_snapshot`, `object_node`, `event_log`, `function_trace`, `error_log`, and `automation_result` (whose payload is one `lychee.automation.result.v1` JSON report and whose `metadata.contentChecksum` is an Adler-32 over the exact payload bytes). Legacy `performance_*` records remain valid historical evidence; read their complete payload without requiring the deleted module or discarding them.
-4. `LycheeDevDB.exports.order` is newest-first. Recent ad-hoc runs are in `LycheeDevDB.history` and may contain `code`, `result`, and a bounded `tree`; they are not the same as a saved export. Old installations may contain `DumperDB`, which the addon migrates into `LycheeDevDB`.
-5. A record created in-game is only in memory until `/reload`, logout, or exit. If the user has not completed one of those writes, explain that the Ticket cannot yet be found on disk. Exports and history are bounded and older entries can be pruned.
-
-When reporting persisted evidence, quote the Ticket, source kind, client environment, and the exact payload path. Do not claim that a record is absent until the likely SavedVariables locations and the exact Ticket have been searched.
-
-## Run commands
-
-The runner accepts either `/run` or `/script` prefixes and evaluates Lua 5.1 code. Prefer returning a compact structured report; use `print` for short scalar messages. Check the installed runner and serializer limits before delivery. A returned value is captured immediately, so an asynchronous script needs a verified completion/export writer; do not return an unfinished table and assume later mutations will be saved.
-
-```text
-/run print(GetBuildInfo())
-/run return { addon = MyAddon, profile = MyAddonDB and MyAddonDB.profile }
-/script return UIParent and { name = UIParent:GetName(), shown = UIParent:IsShown() }
-```
-
-Give commands that are explicit and bounded. Avoid unbounded table walks, per-frame polling, network calls, protected UI mutations, and writes to SavedVariables unless the user explicitly requests them. Lychee Dev truncates large run output, and combat blocks the workbench and active inspection/monitoring tools.
-
-One complete investigation does not mean pasting a bundle of implementation source. Use Run for a small probe; for large source-dependent studies, use a verified independent diagnostic carrier and a short entry command, with its installation/loading and cleanup explained. Never assume WoW can read arbitrary host files or hot-load Lua. When the user asks for one paste, cover the automatic matrix from one practical entry point and one final report; list external actions and missing coverage honestly. For a requested check, include the exact pasteable command, what result to expect, and what field or error the user should report back. If a value may be secret in combat, tell the user to leave combat before running it and do not suggest comparing or formatting that value.
-
-## Object inspection
-
-Use the Objects page for live object state. Valid paths are `_G`, dot-separated identifiers, numeric indexes, and quoted string indexes, for example:
-
-```text
-_G.MyAddon
-MyAddon.db.profile
-_G["MyAddon"]["db"]
-UIParent
-```
-
-The page can search globals or fields, expand tables, show frame overview/children/regions, and save an object snapshot or node. The mouse picker temporarily hides the window; press `F` or `Enter` to capture the object under the cursor, `Esc` to cancel. If a path is not known, use a short run command to return the candidate global, then inspect that path in Objects.
-
-Never promise a complete object graph: inspection is bounded, cyclic tables are marked, and secret combat values stop the read. Protected Blizzard frames must not be mutated as part of a diagnostic command.
-
-## Event monitoring
-
-Use the Events page, not a guessed slash command:
-
-1. Search for the uppercase event name in the catalog shown for the running client (for example `PLAYER_TARGET_CHANGED`).
-2. Select one or more events and click **Start Monitoring**.
-3. Reproduce the behavior, click **Stop Monitoring**, inspect payload arguments, and use **Save** if the evidence must be handed to an Agent.
-
-Event names and payload signatures are build-specific. The supported profiles are Retail `12.1.0`/Interface `120100`, Classic Mists `5.5.4`/`50504`, Classic Titan `3.80.2`/`38002`, and WoW: Forever `1.60.1`/`16001`; do not transfer a signature between profiles without checking the catalog. `ALL`/“monitor all events” is an explicit diagnostic mode, not a default recommendation. Monitoring is bounded (newest 500 records; at most 16 arguments per record, each shortened), and it stops on combat entry.
-
-## Delivery and ownership
-
-Use available computer controls only within the authorized workflow. Inspect their actual capabilities before attempting game input; a browser-only tool cannot type into WoW. After a failed input attempt, verify focus/state once and use one manual paste when reliable native input is unavailable. Do not loop speculative key presses.
-
-If the user authorized clipboard delivery, announce the exact script/version, write it, and read back the clipboard to verify equality. Keep that version stable while awaiting execution. A revision needs an explicit replacement notice and a new verification; another task's clipboard, game session, or pending probe is not yours to replace.
-
-Do not deploy addon changes or run destructive Provider/storage experiments merely to diagnose a problem. Preserve the current task's decision scope: a request for a proposal remains a proposal; an authorized implementation can proceed. A past project's memory target or plan-only decision is not a universal skill restriction.
-
-## Handoff format
-
-For a command request, answer with:
-
-1. **Paste:** the exact `/run` or `/script` text, or the `/dev` page and fields to use.
-2. **Reproduce:** the short action sequence and when to start/stop monitoring.
-3. **Report back:** the expected output fields or the Ticket to copy after saving and reloading.
-
-For a Ticket request, return the record's `source.kind`, client/build, creation time, payload path, and a concise evidence-based finding. Keep observations separate from hypotheses, and state when the evidence is truncated, pending disk write, client-specific, or blocked by combat/secret values.
+结果说明以用户问题的结论开头，附 Ticket、客户端实际版本、完整 payload 路径和验证边界。区分“提交”“游戏完成”“报告读取”“收尾完成”，不要用一个“成功”掩盖中间阶段。

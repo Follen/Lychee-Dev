@@ -961,9 +961,11 @@ with patch.object(cli, "_window_module", return_value=_FakeSendWindows), \
 ack_events = [r["event"] for r in ses.Session(data_dir=ack_data).read_events()]
 assert "ticket_ack_unresolved" in ack_events and "ticket_ack_confirmed" not in ack_events
 with patch.object(cli, "_window_module", return_value=_FakeSendWindows), \
-     patch.object(cli, "poll_notice", return_value={"status": "received"}) as poll:
+     patch.object(cli, "poll_notice", return_value={"status": "received"}) as poll, \
+     patch.object(cli, "wait_ack_cleared", return_value=True):
     assert cli.main(ack_args) == 0
-    sent_nonce = _FakeSendWindows.sent[-1][1].split()[-1]
+    sent_nonce = _FakeSendWindows.sent[-2][1].split()[-1]
+    assert _FakeSendWindows.sent[-1][1] == f"/dev auto unidentify {sent_nonce}"
     assert poll.call_args.kwargs["expected_run"] == sent_nonce
     assert poll.call_args.kwargs["expected_ticket"] == "LYCHEE-1"
     assert poll.call_args.kwargs["expected_status"] == "received"
@@ -974,6 +976,17 @@ with patch.object(cli, "_window_module", return_value=_FakeSendWindows), \
                      "--sv", "unused", "--request-id", "bug-proof-1"]) == 0
     assert _FakeSendWindows.sent[-1][1] == "/dev auto bug 2 bug-proof-1"
     assert poll.call_args.kwargs["expected_run"] == "bug-proof-1"
+# Cleanup requires observed frames, and a still-visible receipt must time out.
+cleanup_args = argparse.Namespace(hwnd=1, pid=None, exe_path=None, timeout=0.03, interval=0.001)
+assert cli.wait_ack_cleared(_FakeWindows([[], []]), cleanup_args, "cleanup-nonce")
+visible_receipt = notice_json(task="ack", run="cleanup-nonce", status="received")
+assert not cli.wait_ack_cleared(_FakeWindows([[visible_receipt], [visible_receipt]]),
+                                cleanup_args, "cleanup-nonce")
+class _NoFrameCapture(_FakeCapture):
+    def latest_roi(self): return None
+no_frames = _FakeWindows([])
+no_frames.open_notice_capture = lambda *a, **k: _NoFrameCapture()
+assert not cli.wait_ack_cleared(no_frames, cleanup_args, "cleanup-nonce")
 print("ack CLI unresolved/confirmed lifecycle and bug request delivery OK")
 
 

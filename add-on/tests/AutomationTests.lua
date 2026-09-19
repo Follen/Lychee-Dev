@@ -618,6 +618,11 @@ assert(ackReceipt:find('"run":"ack-proof-1"', 1, true)
     and ackReceipt:find('"ticket":"' .. ackTicket2 .. '"', 1, true)
     and ackReceipt:find('"status":"failed"', 1, true),
     "ack receipt did not correlate nonce, Ticket and outcome")
+local hidesBeforeClear = overlayState.identityHides
+Controller.HandleCommand("unidentify stale-nonce")
+assert(overlayState.identityHides == hidesBeforeClear, "stale cleanup hid a newer receipt")
+Controller.HandleCommand("unidentify ack-proof-1")
+assert(overlayState.identityHides == hidesBeforeClear + 1, "matching cleanup did not hide receipt")
 local receiptsBeforeInvalid = #overlayState.identities
 Controller.HandleCommand("ack " .. ackTicket2 .. " received invalid/nonce")
 assert(#overlayState.identities == receiptsBeforeInvalid

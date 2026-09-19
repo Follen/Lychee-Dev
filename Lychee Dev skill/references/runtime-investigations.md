@@ -1,5 +1,12 @@
 # Bounded memory and CPU investigations through Run
 
+For authorized background investigations, deliver the probe through the task registry
+and follow [automation.md](automation.md) through receipt and cleanup. The pasted
+Run input guidance below applies when the user chooses that UI workflow; it is not
+the default delivery path and does not require switching a background task to the
+foreground.
+
+
 Use this reference when a Lychee Dev investigation concerns memory, CPU, stutter, startup or repeated operations. The output is a question-specific script and evidence interpretation, not a replacement background profiler.
 
 ## Define the question before the probe
