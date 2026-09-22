@@ -9,6 +9,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/records/texture"
 	"github.com/follenfang/lycheedev/internal/selection"
+	"github.com/follenfang/lycheedev/internal/vault"
 	"io"
 	"os"
 	"unicode/utf8"
@@ -20,12 +21,35 @@ type QueryLocation struct {
 	Column int `json:"column"`
 }
 
+// errDoctorUnhealthy reports that doctor found at least one check with error
+// status. The checks themselves stay in the result; the sentinel only pins the
+// documented capability/environment exit code.
+var errDoctorUnhealthy = errors.New("doctor.check_failed")
+
 func queryFault(err error) (int, string, bool) {
 	for _, entry := range []struct {
 		cause error
 		exit  int
 		code  string
 	}{
+		{errDoctorUnhealthy, 3, "doctor.check_failed"},
+		{selection.ErrTargetMissing, 3, "selection.target_missing"},
+		{selection.ErrTargetExists, 3, "selection.target_exists"},
+		{selection.ErrTargetAmbiguous, 2, "selection.target_ambiguous"},
+		{selection.ErrTargetInUse, 3, "selection.target_in_use"},
+		{selection.ErrTargetFormat, 2, "selection.target_format"},
+		{selection.ErrListingOffline, 3, "selection.listing_requires_network"},
+		{selection.ErrManifestFormat, 4, "selection.manifest_format"},
+		{selection.ErrManifestLimit, 3, "selection.manifest_limit"},
+		{vault.ErrCacheIntegrity, 4, "vault.cache_integrity"},
+		{vault.ErrCacheLimit, 3, "vault.cache_limit"},
+		{vault.ErrCacheBudget, 3, "vault.cache_budget_exceeded"},
+		{vault.ErrCacheMissing, 3, "vault.cache_object_missing"},
+		{vault.ErrCacheProtection, 4, "vault.cache_protection"},
+		{vault.ErrConfigFormat, 4, "vault.config_format"},
+		{vault.ErrConfigSchemaNewer, 3, "vault.config_schema_newer"},
+		{vault.ErrWorkspaceExists, 3, "vault.workspace_exists"},
+		{vault.ErrArchiveState, 3, "vault.archive_state"},
 		{texture.ErrFormat, 4, "texture.invalid_format"},
 		{texture.ErrUnsupported, 3, "texture.unsupported_format"},
 		{texture.ErrMipmap, 3, "texture.mipmap_unavailable"},

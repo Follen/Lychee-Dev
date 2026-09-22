@@ -160,11 +160,11 @@ Preserve source, table/record, locale, filters, row counts and capture hashes.
 
 ## Local Hotfix records
 
-Use `data hotfix` for independent records from an explicitly selected
-`DBCache.bin`, not for an effective static table:
+Use `data hotfix` with an explicit `--source` for independent records, not for
+an effective static table. Local caches use `--source dbcache`:
 
 ```text
-lycheedev data hotfix --snapshot <data-pin> --file <DBCache.bin> --limit 50 --format json
+lycheedev data hotfix --source dbcache --snapshot <data-pin> --dbcache <DBCache.bin> --limit 50 --format json
 ```
 
 The command archives the original bytes, checks the cache build number against
@@ -178,7 +178,7 @@ present in its format, is preserved separately.
 For named fields, add `--table <name>` and optionally `--id <record-id>`:
 
 ```text
-lycheedev data hotfix --snapshot <data-pin> --file <DBCache.bin> --table ItemSparse --id <id> --format json
+lycheedev data hotfix --source dbcache --snapshot <data-pin> --dbcache <DBCache.bin> --table ItemSparse --record <id> --format json
 ```
 
 The command uses the data pin's exact WoWDBDefs commit and build. It returns
@@ -206,7 +206,7 @@ If `page.truncated` is true, continue the immutable source with the returned
 `page.nextIndex` and the same filters:
 
 ```text
-lycheedev data hotfix --snapshot <derived-pin> --from <source.id> --after-index <page.nextIndex> --limit 50 --format json
+lycheedev data hotfix --source dbcache --snapshot <derived-pin> --from <source.id> --after-index <page.nextIndex> --limit 50 --format json
 ```
 
 `--after-index` cannot read a live file: it requires the archived source so a

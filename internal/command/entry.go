@@ -97,6 +97,15 @@ type Options struct {
 	regionID                             uint32
 	regionIDSet                          bool
 	page, maxPages, maxRequests          int
+	remote, replace                      bool
+	uncommitted, dryRun                  bool
+	plan, fresh                          bool
+	targetBytes                          int64
+	maxObjects                           int
+	cacheMaxBytes                        int64
+	cacheMaxBytesSet                     bool
+	downloadWorkers                      int
+	downloadWorkersSet                   bool
 	words                                []string
 	help                                 bool
 }
@@ -362,8 +371,23 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				var root string
 				root, err = workspaceRoot(opts.home)
 				if err == nil {
-					response.Result, err = vault.InitializeWorkspace(ctx, root)
+					switch {
+					case opts.plan:
+						response.Result, err = vault.PlanFreshInitialize(ctx, root)
+					case opts.fresh:
+						response.Result, err = vault.FreshInitialize(ctx, root)
+					case opts.resume:
+						response.Result, err = vault.CompleteArchive(ctx, root)
+					default:
+						response.Result, err = vault.InitializeWorkspace(ctx, root)
+					}
 				}
+			case "doctor":
+				code, err = runDoctor(ctx, opts, &response)
+			case "config show", "config set":
+				code, err = runConfigVerb(ctx, route, opts, &response)
+			case "cache status", "cache verify", "cache prune":
+				code, err = runCacheVerb(ctx, route, opts, &response)
 			case "live instances":
 				var root string
 				root, err = workspaceRoot(opts.home)
@@ -498,6 +522,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Captures = append(response.Captures, target.Capture)
 					}
 				}
+			case "target list", "target add", "target remove", "target available":
+				code, err = runTargetVerb(ctx, route, argument, opts, &response)
 			case "target show", "live status", "live resume", "live session", "evidence show", "evidence verify":
 				if argument == "" {
 					err, code = errors.New("missing selection file or record ID; use describe"), 2
@@ -536,6 +562,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil && (route == "live status" || route == "target show" || route == "evidence show" || route == "evidence verify") {
 					response.Result = nil
 				}
+			case "evidence list":
+				code, err = runEvidenceList(ctx, opts, &response)
 			default:
 				err, code = fmt.Errorf("unknown command %q; use --help", strings.Join(opts.words, " ")), 2
 			}
@@ -689,7 +717,8 @@ func parseOptions(args []string) (Options, error) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" {
+		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" ||
+			arg == "--remote" || arg == "--replace" || arg == "--uncommitted" || arg == "--dry-run" || arg == "--plan" || arg == "--fresh" {
 			if _, ok := commandFlag(contract, arg); !ok {
 				return opts, unsupportedRouteFlag(route, arg)
 			}
@@ -697,16 +726,29 @@ func parseOptions(args []string) (Options, error) {
 				return opts, fmt.Errorf("repeated flag %s", arg)
 			}
 			seen[arg] = true
-			if arg == "--overwrite" {
+			switch arg {
+			case "--overwrite":
 				opts.overwrite = true
-			} else if arg == "--cdn" {
+			case "--cdn":
 				opts.cdn = true
-			} else if arg == "--offline" {
+			case "--offline":
 				opts.offline = true
-			} else if arg == "--latest" {
+			case "--latest":
 				opts.latest = true
-			} else {
+			case "--resume":
 				opts.resume = true
+			case "--remote":
+				opts.remote = true
+			case "--replace":
+				opts.replace = true
+			case "--uncommitted":
+				opts.uncommitted = true
+			case "--dry-run":
+				opts.dryRun = true
+			case "--plan":
+				opts.plan = true
+			case "--fresh":
+				opts.fresh = true
 			}
 			continue
 		}
@@ -1003,6 +1045,30 @@ func parseOptions(args []string) (Options, error) {
 				return opts, errors.New("--max-requests must be at least 1")
 			}
 			opts.maxRequests = n
+		case "--target-bytes":
+			n, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || n < 0 || n > vault.MaxCacheMaxBytes {
+				return opts, fmt.Errorf("--target-bytes must be between 0 and %d", vault.MaxCacheMaxBytes)
+			}
+			opts.targetBytes = n
+		case "--max-objects":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 {
+				return opts, errors.New("--max-objects must be a non-negative count")
+			}
+			opts.maxObjects = n
+		case "--cache-max-bytes":
+			n, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || n < 0 || n > vault.MaxCacheMaxBytes {
+				return opts, fmt.Errorf("--cache-max-bytes must be between 0 and %d", vault.MaxCacheMaxBytes)
+			}
+			opts.cacheMaxBytes, opts.cacheMaxBytesSet = n, true
+		case "--download-workers":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > vault.MaxDownloadWorkers {
+				return opts, fmt.Errorf("--download-workers must be between 0 and %d", vault.MaxDownloadWorkers)
+			}
+			opts.downloadWorkers, opts.downloadWorkersSet = n, true
 		}
 	}
 	if len(opts.words) == 0 {
@@ -1020,6 +1086,23 @@ func parseOptions(args []string) (Options, error) {
 	}
 	if route == "target resolve" && (seen["--product"] && seen["--installation"] || seen["--build"] && !seen["--product"]) {
 		return opts, errors.New("target resolve accepts either --installation or --product; --build requires --product")
+	}
+	if route == "target add" && !opts.help && opts.remote == (opts.installation != "") {
+		return opts, errors.New("target add requires exactly one of --installation or --remote")
+	}
+	if route == "config set" && !opts.help && !seen["--cache-max-bytes"] && !seen["--download-workers"] {
+		return opts, errors.New("config set requires --cache-max-bytes or --download-workers")
+	}
+	if route == "init" && !opts.help {
+		selected := 0
+		for _, flag := range []string{"--plan", "--fresh", "--resume"} {
+			if seen[flag] {
+				selected++
+			}
+		}
+		if selected > 1 {
+			return opts, errors.New("init accepts at most one of --plan, --fresh, --resume")
+		}
 	}
 	if route == "data db2" && seen["--id"] && (seen["--after-id"] || seen["--limit"]) {
 		return opts, errors.New("--id cannot be combined with --after-id or --limit")

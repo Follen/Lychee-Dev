@@ -145,8 +145,113 @@ func TestLiveConnectArgumentAdmission(t *testing.T) {
 	}
 }
 
+func TestWorkspaceVerbContractsAreAdvertised(t *testing.T) {
+	described, code := invoke(t, "describe", "--format=json")
+	if code != 0 || !described.OK {
+		t.Fatalf("describe: code=%d response=%+v", code, described)
+	}
+	advertised := map[string]bool{}
+	for _, definition := range commandList(t, resultMap(t, described)) {
+		advertised[definition["path"].(string)] = true
+	}
+	for _, path := range []string{
+		"target list", "target add", "target remove", "target available",
+		"doctor", "config show", "config set",
+		"cache status", "cache verify", "cache prune",
+		"evidence list",
+	} {
+		if !advertised[path] {
+			t.Fatalf("describe does not advertise %q", path)
+		}
+	}
+	for _, path := range []string{"live bugs", "live reload", "live cancel", "evidence bundle", "evidence keep", "evidence remove"} {
+		if advertised[path] {
+			t.Fatalf("describe advertises unimplemented %q", path)
+		}
+	}
+
+	addHelp, code := invoke(t, "target", "add", "--help", "--format=json")
+	if code != 0 || !addHelp.OK {
+		t.Fatalf("target add help: code=%d response=%+v", code, addHelp)
+	}
+	commands := commandList(t, resultMap(t, addHelp))
+	if len(commands) != 1 || commands[0]["path"] != "target add" || commands[0]["mutates"] != true {
+		t.Fatalf("target add definition: %#v", commands)
+	}
+	got := stringList(t, commands[0]["flags"])
+	want := map[string]bool{"--home <root>": false, "--format text|json|jsonl": false, "--product <retail|classic|titan|forever>": false,
+		"--region <us|eu|cn|kr|tw>": false, "--locale <locale>": false, "--build <full-build>": false,
+		"--installation <client-directory>": false, "--remote": false, "--replace": false}
+	for _, flag := range got {
+		if _, known := want[flag]; known {
+			want[flag] = true
+		}
+	}
+	for flag, seen := range want {
+		if !seen {
+			t.Fatalf("target add help lost %s: %#v", flag, got)
+		}
+	}
+	if arguments := stringList(t, commands[0]["arguments"]); len(arguments) != 1 || arguments[0] != "<name>" {
+		t.Fatalf("target add arguments = %#v", arguments)
+	}
+
+	initHelp, code := invoke(t, "init", "--help", "--format=json")
+	if code != 0 || !initHelp.OK {
+		t.Fatalf("init help: code=%d response=%+v", code, initHelp)
+	}
+	commands = commandList(t, resultMap(t, initHelp))
+	initFlags := strings.Join(stringList(t, commands[0]["flags"]), " ")
+	for _, flag := range []string{"--plan", "--fresh", "--resume"} {
+		if !strings.Contains(initFlags, flag) {
+			t.Fatalf("init help lost %s: %#v", flag, initFlags)
+		}
+	}
+}
+
+func TestWorkspaceVerbArgumentAdmission(t *testing.T) {
+	for _, args := range [][]string{
+		{"target", "add"},
+		{"target", "add", "name", "--region", "cn", "--locale", "zhCN", "--remote"},
+		{"target", "add", "name", "--product", "retail", "--locale", "zhCN", "--remote"},
+		{"target", "add", "name", "--product", "retail", "--region", "cn", "--remote"},
+		{"target", "add", "name", "--product", "unsupported", "--region", "cn", "--locale", "zhCN", "--remote"},
+		{"target", "add", "name", "--product", "retail", "--region", "window", "--locale", "zhCN", "--remote"},
+		{"target", "add", "name", "--product", "retail", "--region", "cn", "--locale", "zhCN", "--remote", "--build", "latest"},
+		{"target", "add", "name", "--product", "retail", "--region", "cn", "--locale", "zhCN"},
+		{"target", "add", "name", "--product", "retail", "--region", "cn", "--locale", "zhCN", "--installation", "client", "--remote"},
+		{"target", "remove"},
+		{"target", "available"},
+		{"target", "available", "--region", "window"},
+		{"target", "available", "--offline"},
+		{"cache", "prune", "--target-bytes", "-1"},
+		{"cache", "prune", "--max-objects", "-1"},
+		{"cache", "status", "--dry-run"},
+		{"config", "set"},
+		{"config", "set", "--cache-max-bytes", "-5"},
+		{"config", "set", "--download-workers", "257"},
+		{"config", "show", "--cache-max-bytes", "100"},
+		{"init", "--plan", "--fresh"},
+		{"init", "--plan", "--resume"},
+		{"init", "--fresh", "--resume"},
+		{"init", "--plan", "--fresh", "--resume"},
+		{"doctor", "--remote"},
+		{"evidence", "list", "--limit", "201"},
+	} {
+		argv := append(append([]string{}, args...), "--format=json")
+		// Malformed target fields reach the module validator and carry the
+		// selection.target_format fault; everything else is rejected by the
+		// parser as command.invalid_arguments. Both are exit 2 rejections.
+		if result, code := invoke(t, argv...); code != 2 || result.OK || result.Error == nil {
+			t.Fatalf("invalid %v accepted: code=%d response=%+v", argv, code, result)
+		}
+	}
+}
+
 func TestSubcommandHelpDoesNotMakeUnknownCommandsUsable(t *testing.T) {
-	for _, args := range [][]string{{"missing", "--help"}, {"doctor", "--help"}, {"live", "unknown", "--help"}} {
+	// doctor is implemented; live bugs/reload/cancel and evidence
+	// bundle/keep/remove are not, so their names must stay unrouted.
+	for _, args := range [][]string{{"missing", "--help"}, {"live", "bugs", "--help"}, {"live", "reload", "--help"}, {"live", "cancel", "--help"}, {"evidence", "bundle", "--help"}, {"evidence", "keep", "--help"}, {"evidence", "remove", "--help"}, {"live", "unknown", "--help"}} {
 		response, code := invoke(t, append(args, "--format=json")...)
 		if code != 2 || response.OK || response.Error == nil || response.Error.Code != "command.invalid_arguments" {
 			t.Fatalf("%v: code=%d response=%+v", args, code, response)

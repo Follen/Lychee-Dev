@@ -74,8 +74,16 @@ function checkInvocation(file, invocation) {
   if (!tokens.length || tokens[0] === '--help' || (tokens[0] && tokens[0].startsWith('--'))) return;
   let path = tokens[0];
   let consumed = 1;
-  if (tokens.length > 1 && contracts.has(`${tokens[0]} ${tokens[1]}`)) { path = `${tokens[0]} ${tokens[1]}`; consumed = 2; }
-  else if (!contracts.has(tokens[0]) && !oneTokenPaths.has(tokens[0])) {
+  // Prefer the longest matching command path (3-word rows like
+  // "data decor list" have no 2-word contract for their prefix).
+  for (const depth of [3, 2]) {
+    if (tokens.length >= depth && contracts.has(tokens.slice(0, depth).join(' '))) {
+      path = tokens.slice(0, depth).join(' ');
+      consumed = depth;
+      break;
+    }
+  }
+  if (consumed === 1 && !contracts.has(tokens[0]) && !oneTokenPaths.has(tokens[0])) {
     // Unknown leading word pair: only report when it looks like a command.
     if (topGroups.has(tokens[0])) violations.push(`${file}: unknown command reference "${tokens.slice(0, 2).join(' ')}" in ${JSON.stringify(invocation)}`);
     return;

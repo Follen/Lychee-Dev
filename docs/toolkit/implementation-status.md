@@ -569,6 +569,53 @@ implementation-status「首次连接体验」节与能力覆盖「游戏运行�
   （旧 `UI/AutomationOverlay.lua`）：TOPLEFT 锚点、白底卡片上限 480px、模块尺寸
   = max(2, ceil(3×物理像素)) UI 单位、静区 4 模块。涉及 `addon/Bridge/ReceiptView.lua`
   的 Show 与 ShowIdentity 两条显示路径（当前 TOPRIGHT、4px/模块无上限）。
+  **（已修复并真机验证，见下节。）**
+
+## 真机验收（2026-09-23，Retail 单实例，用户裁决：只测正式服）
+
+用户最新裁决：真机测试只做 Retail（正式服）单实例；不允许 Computer Use，全部经
+工具链（CLI 自身 WGC 捕获、原生输入）操作并截图验证。
+
+前置修复与重建（本日）：
+- `ReceiptView.lua` 按旧版规格重写（TOPLEFT、480px 上限、物理像素模块、4 模块静区）；
+  协议四端测试（`tests/protocol` 身份标记+宿主解码）与工作台 13 套件全绿。
+- 发行工具三处修复并并入检查点提交 `82aea78`：`tools/release.mjs` 的
+  `go version -m` VCS 正则（行首制表符）、GNU tar `C:\` 路径（改相对路径提取）、
+  离线重建比对（GOTOOLCHAIN 模块校验死锁 → 解析 GOROOT 内 go 二进制 +
+  两侧对称 vendor 构建；autocrlf 工作树 CRLF 与 archive LF 差异 →
+  `.gitattributes` 强制 `* text=auto eol=lf` 并 renormalize 工作树，
+  比对侧改为 `git checkout-index` 禁用过滤器导出）。
+- 三客户端安装经正规链路重建：`release.mjs assemble` 产出完整发行根
+  （5 平台二进制、addon ZIP、对应源码包、tgz、sealed 清单，
+  `correspondingSource` 就位）→ `addon install`：retail 升级路径因旧安装 drift
+  被设计内拒绝（`modified`），删除漂移目录后全新安装；classic/titan 此前因
+  robocopy 误删归属清单处于 `unmanaged`，同目录删除后全新安装。三者现为
+  `managed`（receipt version 2.0.0-dev，commit 82aea78）。此前覆盖式同步
+  （交接 §5 方法）今后不可用于已受管安装——队列要求安装与清单逐字节一致。
+
+真机闭环（Retail `12.1.0.69875` / Interface `120100`，单实例，PID 18468）：
+- `live instances`：发现已装+运行候选，逐窗口一次性身份标记，回执解码成功，
+  输出角色/服务器/输入就绪（识别失败状态如 busy 如实呈现）。
+- `live connect`（自动 bootstrap）：唯一匹配自动连接，会话保存。
+- `live run`：有界只读探针在真实游戏内执行，返回
+  `{"probeStatus":"completed","result":{"addonLoaded":true,"build":120100,...}}`，
+  `report.state=verified`、`cleanup=complete`。两轮完整闭环通过。
+- 清理路径的重载带 nonce 核验（RuntimeEpoch+1）；**重载后插件回到默认关闭**，
+  旧会话等不到 ready（`command.cancelled`，退出 7），必须重新 `live connect`
+  bootstrap 建立新会话后运行——此为设计行为，已两轮验证（对应 SKL-13/14）。
+- 探针排队要求"干净受管安装"（`delivery/queue.go` 校验 receipt 一致），漂移安装
+  在 `load_requested` 被拒（`delivery.invalid_installation`）——安全门按设计工作。
+- 二维码几何截图验证：`internal/desktop.CaptureFrames`（CLI 自身 WGC 链路）在
+  身份回执显示期间抓帧 2560×1440 PNG；截图证实白底卡片位于**左上角**、卡片
+  远小于 480 上限、模块精细（新几何生效）。截图（本机临时目录，含角色画面，
+  不入库）`%TEMP%\lychee-frames\frame-1790116978095.png`。回执本体证据链
+  （decoded-window-session / decoded-load-readiness / decoded-game-reentry 等
+  18 份 capture）已归档并通过核验。
+- 真机已知边界：身份回执在聊天输入框获得焦点时按设计隐藏（防误读），CLI 的
+  识别在隐藏前完成解码；截帧需在显示窗口期内。
+- 未做（如实标注 not_run）：WKB-01..13 工作台逐项 UI 手测（需要游戏内人工
+  交互验证，含前后截图）；classic/titan 真机（用户裁决排除）；Forever 全部
+  （排除）。
 
 ## 上轮验证（2026-09-21）
 
