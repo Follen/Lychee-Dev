@@ -191,7 +191,7 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 	if err != nil {
 		return 0, err
 	}
-	userHome, err := os.UserHomeDir()
+	userHome, err := userHomeDirectory()
 	if err != nil {
 		return 0, err
 	}

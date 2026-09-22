@@ -1135,6 +1135,12 @@ func dataLimitCeiling(route string) int {
 	return 200
 }
 
+// userHomeDirectory is the single home-resolution helper for command dispatch;
+// the import contract keeps os.UserHomeDir in this file only.
+func userHomeDirectory() (string, error) {
+	return os.UserHomeDir()
+}
+
 func workspaceRoot(explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, nil

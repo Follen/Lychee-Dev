@@ -14,7 +14,8 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const modulePath = 'github.com/follenfang/lycheedev';
 const goRoots = ['cmd', 'internal', 'tests', 'tools'];
 const shippedRoots = [join('packages', 'npm', 'lycheedev', 'bin'), 'addon'];
-const homeResolutionFile = join('internal', 'command', 'entry.go');
+// Slash-joined to match the normalized relativePath used in comparisons.
+const homeResolutionFile = ['internal', 'command', 'entry.go'].join('/');
 const forbiddenImportPatterns = [
   /spf13\/cobra/i, /\bcobra\b/, /automation(\.py)?/, /packages\/cli/, /Lychee Dev skill/, /python/i,
 ];
