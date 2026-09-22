@@ -1,4 +1,0 @@
-interface:
-  display_name: "Lychee Dev"
-  short_description: "Orchestrate background WoW tasks and verified Ticket evidence"
-  default_prompt: "Use $lychee-dev to complete a background WoW investigation through verified Ticket evidence, acknowledgement, cleanup, and recovery if interrupted."

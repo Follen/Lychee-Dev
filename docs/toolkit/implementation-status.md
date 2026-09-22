@@ -68,8 +68,8 @@
 | CI/npm | 开发构建与 Windows 隔离安装脚本 | 远端完整门禁证据、各平台运行、许可闭环和正式发布 |
 
 新链路不调用旧 wowdoc、wowdata 或 Python。旧 `add-on/`、`packages/cli/` 和旧
-skill 仍是功能比对基线，替代能力未齐备，不能提前删除。根 README 的 1.x 基线
-有明确标注，全部文档切换尚未完成。
+skill 已于 2.0 发布准备中退役（2026-09-23，检查点 `6b08e14` 之后），历史版本
+保留在 git；根 README/README_zhCN/AGENTS.md 已改述 2.0 产品与三客户端矩阵。
 
 ## 2026-09-22 增量验证
 

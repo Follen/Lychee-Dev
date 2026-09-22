@@ -268,7 +268,7 @@ The Lua 5.1.5 interpreter used by the test matrix is built at test time from
 the [official Lua source](https://www.lua.org/ftp/) (MIT, PUC-Rio) and is not
 redistributed.
 
-## Legacy tree (baseline inputs, not shipped in any 2.0 payload)
+## Legacy tree (retired 2026-09-23; history in git, never shipped in 2.0 payloads)
 
 `add-on/`, `packages/cli/` and `Lychee Dev skill/` are declared MIT baseline
 inputs (design.md section 12) and are not packaged by the 2.0 pipeline. Their
