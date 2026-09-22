@@ -1,0 +1,346 @@
+name: toolkit foundation
+
+# Toolkit 2.0 foundation CI (docs/toolkit/release-2.0.0.md §2-§4).
+#
+# Six REQUIRED job names, referenced literally by branch protection (do not
+# rename, and do not turn a required job into a matrix — matrix legs would
+# suffixed the check names and break the literal references):
+#
+#   windows-contract          format, vet, naming/import + skill/schema
+#                             consistency, full Go suite with Lua 5.1 REQUIRED
+#   windows-process           real multi-CLI-process, OS-lock and same-window
+#                             exclusivity contracts, run natively on Windows
+#   windows-addon             four-client offline Lua matrix, locale, TOC
+#                             order, event catalogs, addon ZIP structure
+#   windows-package           Windows-native release exe, real npm tgz,
+#                             isolated --ignore-scripts install (space +
+#                             Chinese paths), offline business smoke
+#   cross-platform-contract   Linux-native pure Go/Git/persistence/package
+#                             contracts plus darwin amd64/arm64 cross-compile
+#                             contracts (native darwin runtime evidence is
+#                             produced by toolkit-release.yml's platform smokes)
+#   ci-required               aggregation; skipped/cancelled never counts as
+#                             passed
+#
+# `race` is an additional non-required job.
+#
+# This workflow is also a reusable workflow: toolkit-release.yml calls it as
+# the release verification gate.
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# §2: superseded PR runs may be cancelled; push runs stay sequential.
+concurrency:
+  group: toolkit-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-contract:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Pin the Go release toolchain (release-2.0.0.md §4)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = go version
+          if ($LASTEXITCODE -ne 0) { throw 'go version failed' }
+          if ($version -notmatch '^go version go1\.27\.1 ') { throw "toolchain drift: $version" }
+      - run: go mod verify
+      - run: node tools/version.mjs --check
+      - name: Node tool tests (version, release, tar, tgz, addon-package)
+        run: |
+          node --test tools/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'tools tests failed' }
+      - name: Naming and import constraints
+        run: |
+          node tools/import-contract.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'import contract failed' }
+      - run: go vet ./...
+      - name: Build checksum-pinned Lua 5.1.5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $luaDirectory = Join-Path $env:RUNNER_TEMP 'toolkit-lua51'
+          node tests/tools/build-lua.mjs $luaDirectory gcc
+          if ($LASTEXITCODE -ne 0) { throw 'Lua interpreter build failed' }
+          "LYCHEEDEV_LUA51=$(Join-Path $luaDirectory 'lua.exe')" >> $env:GITHUB_ENV
+          'LYCHEEDEV_REQUIRE_LUA51=1' >> $env:GITHUB_ENV
+      - name: Preserve Windows Lua build identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-contract-lua51-report
+          path: ${{ runner.temp }}/toolkit-lua51/build-report.json
+          if-no-files-found: error
+      - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
+        run: |
+          go test -count=1 -timeout=5m ./...
+          if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
+      - name: Native release-shape build
+        run: |
+          $env:CGO_ENABLED = '0'
+          go build -buildvcs=true ./cmd/lycheedev
+          if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
+      - run: go run ./cmd/lycheedev describe --format json
+      - name: Skill / command-reference consistency (schema vs documented commands)
+        run: |
+          node tools/skill-contract.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'skill contract failed' }
+
+  windows-process:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Real multi-process, OS-lock and same-window exclusivity contracts
+        # tests/process          two real native CLI processes race on one
+        #                        output; only one may publish
+        # internal/delivery      install/upgrade worker processes, killed
+        #                        process recovery, queue OS locks, junctions
+        # internal/vault         lease-based OS locks
+        # internal/selection     project lock contracts
+        # internal/live/journal  same-window exclusivity (window owner/run
+        #                        work leases across processes)
+        run: |
+          go test -count=1 -timeout=20m ./tests/process/... ./internal/delivery/... ./internal/vault/... ./internal/selection/... ./internal/live/journal/...
+          if ($LASTEXITCODE -ne 0) { throw 'multi-process contracts failed' }
+
+  windows-addon:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Build checksum-pinned Lua 5.1.5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $luaDirectory = Join-Path $env:RUNNER_TEMP 'toolkit-lua51'
+          node tests/tools/build-lua.mjs $luaDirectory gcc
+          if ($LASTEXITCODE -ne 0) { throw 'Lua interpreter build failed' }
+          "LYCHEEDEV_LUA51=$(Join-Path $luaDirectory 'lua.exe')" >> $env:GITHUB_ENV
+          'LYCHEEDEV_REQUIRE_LUA51=1' >> $env:GITHUB_ENV
+      - name: Four-client offline Lua matrix and offline protocol suites
+        # LYCHEEDEV_LUA51 arrives through GITHUB_ENV from the build step.
+        env:
+          LYCHEEDEV_REQUIRE_LUA51: '1'
+        run: |
+          go test -count=1 -timeout=10m ./tests/addon/... ./tests/protocol/...
+          if ($LASTEXITCODE -ne 0) { throw 'four-client Lua matrix failed' }
+      - name: TOC order, load lists and event catalog contracts
+        run: |
+          go test -count=1 -timeout=5m ./internal/codebase/
+          if ($LASTEXITCODE -ne 0) { throw 'codebase TOC contracts failed' }
+      - name: Addon release ZIP structure check (build + verify, "Lychee Dev/" root)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'addon-zip'
+          node tools/addon-package.mjs build --out $out
+          if ($LASTEXITCODE -ne 0) { throw 'addon ZIP structure check failed' }
+          "zip_directory=$out" >> $env:GITHUB_OUTPUT
+        id: addon-zip
+      - name: Preserve the addon release ZIP
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-addon-release-zip
+          path: ${{ steps.addon-zip.outputs.zip_directory }}/*.zip
+          if-no-files-found: error
+
+  windows-package:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Pin npm build tool
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
+          $actual = npm --version
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+      - name: Packaging license gate
+        # Same semantics as licenseGate in tools/release.mjs: the combined-work
+        # license decision belongs to the project owner; packaging refuses to
+        # proceed until packages/npm/lycheedev/LICENSE exists.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $license = 'packages/npm/lycheedev/LICENSE'
+          if (-not (Test-Path $license) -or (Get-Item $license).Length -eq 0) {
+            throw "license decision pending: $license is absent; the combined-work license decision belongs to the project owner (see THIRD_PARTY_NOTICES.md owner-decision section), and packaging refuses to proceed until the owner supplies LICENSE"
+          }
+      - name: Windows-native release exe build and identity check
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:RUNNER_TEMP 'lycheedev-release.exe'
+          $env:CGO_ENABLED = '0'
+          go build -trimpath -buildvcs=true -o $exe ./cmd/lycheedev
+          if ($LASTEXITCODE -ne 0) { throw 'release exe build failed' }
+          $version = & $exe version --format=json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $version.ok) { throw 'release exe version command failed' }
+          $commit = (git rev-parse HEAD).Trim()
+          if ($version.result.commit -ne $commit) { throw "release exe commit $($version.result.commit) != HEAD $commit" }
+      - name: Launcher contracts
+        run: |
+          node --test packages/npm/lycheedev/test/launcher.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'launcher tests failed' }
+      - name: Actual tgz and isolated addon-skill deployment without scripts
+        # install-smoke packs a real tgz, installs it into an isolated prefix
+        # under a path containing spaces and Chinese characters with
+        # --ignore-scripts, then runs the offline business smoke (version,
+        # init, target resolve, project lock discovery, Hotfix/asset decode
+        # through the installed launcher, recovery, skill/addon deploy).
+        id: package-smoke
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $npmDirectory = Split-Path (Get-Command npm.cmd).Source
+          $npmCli = Join-Path $npmDirectory 'node_modules/npm/bin/npm-cli.js'
+          node packages/npm/lycheedev/test/install-smoke.mjs $npmCli
+          if ($LASTEXITCODE -ne 0) { throw 'isolated package installation failed' }
+      - name: Preserve package smoke report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-package-report
+          path: ${{ steps.package-smoke.outputs.report }}
+          if-no-files-found: error
+
+  cross-platform-contract:
+    # Single job by design: required status checks reference this name
+    # literally, and matrix legs would produce suffixed check names. Linux
+    # contracts run natively; the darwin targets are cross-compile contract
+    # checks here. Native darwin runtime evidence comes from the
+    # toolkit-release.yml five-platform run smokes.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - run: go mod verify
+      - run: node tools/version.mjs --check
+      - name: Node tool tests
+        run: |
+          node --test tools/*.test.mjs
+          if [ $? -ne 0 ]; then echo '::error::tools tests failed'; exit 1; fi
+      - name: Naming and import constraints
+        run: |
+          node tools/import-contract.mjs
+          if [ $? -ne 0 ]; then echo '::error::import contract failed'; exit 1; fi
+      - run: go vet ./...
+      - name: Pure Go suite (Lua-gated suites skip without an interpreter)
+        run: go test -count=1 -timeout=5m ./...
+      - name: darwin cross-compile contracts (amd64)
+        run: |
+          export CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
+          go vet ./...
+          go build -trimpath -o "$RUNNER_TEMP/lycheedev-darwin-amd64" ./cmd/lycheedev
+      - name: darwin cross-compile contracts (arm64)
+        run: |
+          export CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
+          go vet ./...
+          go build -trimpath -o "$RUNNER_TEMP/lycheedev-darwin-arm64" ./cmd/lycheedev
+      - run: go run ./cmd/lycheedev describe --format json
+      - name: Skill / command-reference consistency
+        run: |
+          node tools/skill-contract.mjs
+          if [ $? -ne 0 ]; then echo '::error::skill contract failed'; exit 1; fi
+      - name: Package launcher contract tests (cross-platform selection)
+        run: |
+          node --test packages/npm/lycheedev/test/launcher.test.mjs
+          if [ $? -ne 0 ]; then echo '::error::launcher tests failed'; exit 1; fi
+
+  race:
+    name: shared-state race detection
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+      - run: go test -race -count=1 -timeout=5m ./...
+
+  ci-required:
+    # §2/§3: this aggregation always runs and rejects every non-success result;
+    # skipped or cancelled required jobs never count as passed.
+    if: always()
+    needs:
+      - windows-contract
+      - windows-process
+      - windows-addon
+      - windows-package
+      - cross-platform-contract
+      - race
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Reject failures, skipped jobs and cancellation
+        env:
+          WINDOWS_CONTRACT_RESULT: ${{ needs.windows-contract.result }}
+          WINDOWS_PROCESS_RESULT: ${{ needs.windows-process.result }}
+          WINDOWS_ADDON_RESULT: ${{ needs.windows-addon.result }}
+          WINDOWS_PACKAGE_RESULT: ${{ needs.windows-package.result }}
+          CROSS_PLATFORM_CONTRACT_RESULT: ${{ needs.cross-platform-contract.result }}
+          RACE_RESULT: ${{ needs.race.result }}
+        run: |
+          status=0
+          check() {
+            local name="$1" result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error::required job ${name} finished with ${result}"
+              status=1
+            fi
+          }
+          check windows-contract "$WINDOWS_CONTRACT_RESULT"
+          check windows-process "$WINDOWS_PROCESS_RESULT"
+          check windows-addon "$WINDOWS_ADDON_RESULT"
+          check windows-package "$WINDOWS_PACKAGE_RESULT"
+          check cross-platform-contract "$CROSS_PLATFORM_CONTRACT_RESULT"
+          check race "$RACE_RESULT"
+          exit $status

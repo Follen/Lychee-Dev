@@ -1,8 +1,14 @@
 # Lychee Dev Toolkit 2.0 实施路线
 
-状态：设计阶段工作分解，未实施。日期：2026-09-21。
+状态：已开始实施，S0 基线与基础内核部分完成；S1 尚未通过。日期：2026-09-21。详细记录见 [implementation-status.md](implementation-status.md)。
 
-架构与命名以 [design.md](design.md) 为准，验收以 [regression.md](regression.md) 为准，Windows CI 与 npm 发布以 [release-2.0.0.md](release-2.0.0.md) 为准。本次正式版本固定为 `2.0.0`、tag 为 `v2.0.0`。本文只规划实现与交付，不授权当前执行发布、删除旧数据或操作正在运行的游戏。
+本轮调整实施顺序：先按 design.md 收敛现有实现，完成“固定目标 → 源码/数据
+研究 → 游戏运行 → 结果交接 → 恢复”的纵向验收，再补齐下表全部能力。
+S0–S5 的能力范围不缩减，但不再按通用基础设施层层堆叠。actions 已撤销，
+游戏阶段由 live 独占，持久记录位于 live/journal；assets/Hotfix 共用 records
+内核，不单独复制数据访问。下表原类型名仅表示早期分工，不要求创建对应抽象。
+
+架构与命名以 [design.md](design.md) 为准，验收以 [regression.md](regression.md) 为准，Windows CI 与 npm 发布以 [release-2.0.0.md](release-2.0.0.md) 为准。本次正式版本固定为 `2.0.0`、tag 为 `v2.0.0`。本文本身不授予操作权限；设计提交后用户已授权实施和真机测试，随后授权全部完成并通过测试后发布 npm。旧用户数据不得删除或导入。
 
 ## 1. 能力迁入清单
 

@@ -1,0 +1,78 @@
+{
+  "schema": "lycheedev.fixture-provenance.v1",
+  "description": "Controlled source-research fixture samples copied from the legacy wowdoc repository for Toolkit 2.0 module tests. Old fixtures are comparison oracles, not blind expected values.",
+  "origin": {
+    "repositoryPath": "D:\\Code\\wow\\wowdoc",
+    "repositoryURL": "https://github.com/follenfang/wowdoc",
+    "headCommit": "bd1fa8a010cb2b8d7cea8f21cb971705f54a1423",
+    "copiedAtBranch": "codex/toolkit-2.0.0",
+    "license": "MIT",
+    "licenseFile": "D:\\Code\\wow\\wowdoc\\LICENSE",
+    "attribution": "Copyright (c) 2026 follenfang. Fixture content originates from wowdoc (MIT) testdata/sources and is reproduced here with attribution per the MIT license conditions.",
+    "note": "Copied read-only; the legacy repository was neither modified nor executed."
+  },
+  "files": [
+    {
+      "copiedPath": "sources/valid-retail/version.txt",
+      "originalPath": "testdata/sources/valid-retail/version.txt",
+      "sha256": "603acf420f2b0fb3fac5c98bdd0ba110b4e51fefcfd7ac6ac0531ef37f4b3a81",
+      "bytes": 14
+    },
+    {
+      "copiedPath": "sources/valid-retail/Interface/ui-code-list.txt",
+      "originalPath": "testdata/sources/valid-retail/Interface/ui-code-list.txt",
+      "sha256": "a53ea657d03b6c3a7203b215660e6d7d93351fb96aa432acd5c980ebdfa94186",
+      "bytes": 136
+    },
+    {
+      "copiedPath": "sources/valid-retail/Interface/AddOns/Blizzard_APIDocumentationGenerated/GeneratedDocumentation.lua",
+      "originalPath": "testdata/sources/valid-retail/Interface/AddOns/Blizzard_APIDocumentationGenerated/GeneratedDocumentation.lua",
+      "sha256": "f14c65e567e88b070de74c48b96da0bc4ded9bb9e63ca496c47ba01e6343ba7e",
+      "bytes": 2389
+    },
+    {
+      "copiedPath": "sources/valid-retail/Interface/AddOns/Blizzard_FrameXML/CVars.lua",
+      "originalPath": "testdata/sources/valid-retail/Interface/AddOns/Blizzard_FrameXML/CVars.lua",
+      "sha256": "673031dea7e7d22e51a24b661d535c797c2abb0ee05a6d7abdf1109464c42c90",
+      "bytes": 205
+    },
+    {
+      "copiedPath": "sources/partial-classic/version.txt",
+      "originalPath": "testdata/sources/partial-classic/version.txt",
+      "sha256": "a14929c459d9aa1e670a8a0d564775df13c07cad38fc90d4e2c73fb7656875ab",
+      "bytes": 14
+    },
+    {
+      "copiedPath": "sources/partial-classic/Interface/AddOns/Blizzard_FrameXML/SecureTemplates.lua",
+      "originalPath": "testdata/sources/partial-classic/Interface/AddOns/Blizzard_FrameXML/SecureTemplates.lua",
+      "sha256": "da3223dfcc179cb36a03a1abfa6c2492b62a85021fee6e76108705b66dee9aac",
+      "bytes": 116
+    },
+    {
+      "copiedPath": "sources/partial-classic/Interface/AddOns/Blizzard_TestAddon/TestAddon.lua",
+      "originalPath": "testdata/sources/partial-classic/Interface/AddOns/Blizzard_TestAddon/TestAddon.lua",
+      "sha256": "ec842739cb483fd6fc53a6a86257c389e860dd369a49387b4247bb113158a51b",
+      "bytes": 133
+    },
+    {
+      "copiedPath": "sources/partial-classic/Interface/AddOns/Blizzard_TestAddon/TestAddon.xml",
+      "originalPath": "testdata/sources/partial-classic/Interface/AddOns/Blizzard_TestAddon/TestAddon.xml",
+      "sha256": "b751f6bfef0590021f40f78fb9940d9e8b23aae2037dcdc648ec18f739fe0a71",
+      "bytes": 112
+    }
+  ],
+  "adaptedInlineCases": [
+    {
+      "source": "D:\\Code\\wow\\wowdoc\\internal\\validator\\closure_test.go",
+      "headCommit": "bd1fa8a010cb2b8d7cea8f21cb971705f54a1423",
+      "license": "MIT",
+      "cases": [
+        "TestBuildClosureUsesOrderedTOCClosure (TOC BOM + CRLF, backslash paths, mixed-case namespace-prefixed x:sCrIpT/x:FiLe)",
+        "TestBuildClosureDuplicatePreservesSources (duplicate load traceability)",
+        "TestBuildClosureXMLCycleTerminates (bounded include cycle)",
+        "TestBuildClosureReportsFailuresAndContinues (missing file, path escape, unsupported type, XML parse failure)"
+      ],
+      "note": "Adapted as inline assertions in internal/codebase/validate_test.go against the Toolkit 2.0 module interfaces; expected values were re-derived from the legacy behavior contract, not copied blindly."
+    }
+  ]
+}

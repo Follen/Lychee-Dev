@@ -1,0 +1,45 @@
+{
+  "schema": "lycheedev.test-fixtures.v1",
+  "note": "Minimal binary samples and behavioral oracles copied from the legacy wowdata toolkit for Toolkit 2.0 regression tests. wowdata declares AGPL-3.0-or-later; these bytes are redistributed under AGPL-3.0-or-later with attribution, and only the minimal bytes needed for the AST-01/AST-02 demux coverage are copied. No wowdata user data, workspace data or executable code is included.",
+  "sourceRepository": {
+    "path": "D:/Code/wow/wowdata",
+    "url": "https://github.com/follenfang/wowdata",
+    "commit": "6191d3dc567966b7a474849f3a11e7411390091c",
+    "license": "AGPL-3.0-or-later",
+    "verifiedAt": "2026-09-23"
+  },
+  "fixtures": [
+    {
+      "path": "inputs/minimal-vp9.avi",
+      "sourcePath": "fixtures/golden/inputs/minimal-vp9.avi",
+      "bytes": 356,
+      "sha256": "67871eb07c8904164787eb6327f0e351bf84a44e67cdefe0da0f4af9428ae308",
+      "license": "AGPL-3.0-or-later",
+      "purpose": "Real minimal VP9-in-AVI sample used as the video demux input fixture (AST-02)."
+    },
+    {
+      "path": "oracles/demux-minimal-vp9.json",
+      "sourcePath": "fixtures/golden/go/video/demux-minimal-vp9.json",
+      "bytes": 763,
+      "sha256": "35ec9d16fb8faf6aa48a5360b05faab7ddd31d9e4587ff6e8abe4e872ac444be",
+      "license": "AGPL-3.0-or-later",
+      "purpose": "Legacy video demux golden output, used as a cross-check oracle for width/height/frameRate/frame metadata (not a blind expected value; the legacy run wrote no frame files)."
+    },
+    {
+      "path": "db2/JournalEncounterSection-classic-era.db2",
+      "sourcePath": "fixtures/golden/inputs/JournalEncounterSection-classic-era.db2",
+      "bytes": 264,
+      "sha256": "992c9edb6bdaa11a0001e846d267b89a8477d3fed6fb7b4497c9dc642235c73a",
+      "license": "AGPL-3.0-or-later",
+      "purpose": "Real minimal WDC5 DB2 sample (zero rows) for DAT-03/DAT-09 real-format parsing and the empty-result encounter oracle semantics of fixtures/golden/go/encounter/get-1-classic-era.json. Game-format static data only; no user data."
+    },
+    {
+      "path": null,
+      "sourcePath": "fixtures/golden/inputs/ItemSparse-classic-era.db2",
+      "bytes": 10566360,
+      "sha256": "20930902d7f9a474900c123ccdec87cf74ad60238da517e2c90cc8f14b42da0a",
+      "license": "AGPL-3.0-or-later",
+      "purpose": "Recorded but intentionally NOT copied: 10.5 MB exceeds the small-controlled-sample budget. Item semantics are cross-checked against fixtures/golden/go/item/*.json with hand-built equivalents in internal/records/navigatetest instead."
+    }
+  ]
+}

@@ -11,3 +11,12 @@ __pycache__/
 node_modules/
 packages/cli/vendor/
 packages/cli/*.tgz
+
+# Native toolkit build output
+/lycheedev
+/lycheedev.exe
+/dist/
+packages/npm/lycheedev/native/
+packages/npm/lycheedev/payload/
+packages/npm/lycheedev/release.json
+packages/npm/lycheedev/*.tgz

@@ -1,0 +1,4 @@
+<Ui>
+	<Frame name="AuctionHouseFrame" inherits="SecureActionButtonTemplate" virtual="true">
+	</Frame>
+</Ui>

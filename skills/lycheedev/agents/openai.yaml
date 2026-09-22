@@ -1,0 +1,7 @@
+interface:
+  display_name: "Lychee Dev Toolkit"
+  short_description: "Evidence-first WoW source, data, asset, and live workflows"
+  default_prompt: "Use $lycheedev to investigate this World of Warcraft question with pinned sources and complete evidence."
+
+policy:
+  allow_implicit_invocation: true

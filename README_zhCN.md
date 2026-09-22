@@ -1,3 +1,7 @@
+> **2.0 开发分支：**统一 Go Toolkit 正在实施，尚未发布。
+> 已实现命令与验证范围见[实施状态](docs/toolkit/implementation-status.md)。
+> 下方 1.x 安装说明属于现有发布基线，不代表新 Toolkit；暂勿把此分支部署为 2.0.0。
+
 <div align="center">
   <img src="add-on/Media/Logo.png" width="112" alt="荔枝开发工具 Logo">
   <h1>荔枝开发工具</h1>

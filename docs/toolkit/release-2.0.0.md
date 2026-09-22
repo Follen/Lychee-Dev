@@ -1,12 +1,37 @@
 # Lychee Dev 2.0.0：Windows CI 与 npm 发布规范
 
-状态：已纳入方案，工作流尚未修改或执行。日期：2026-09-21。
+状态：实施中，基础 Go CI 与 npm 开发启动包装已落地，正式发布工作流和门槛尚未完成。日期：2026-09-21。
+
+当前本地 npm smoke 仅验证 Windows 单平台开发包，含空格/中文路径、实际 tgz、
+隔离 prefix、禁用安装脚本及原生启动，并已打入当前 addon/skill 源码，在模拟客户端
+完成安装、升级、恢复、归档移除及用户编辑冲突检查；不是五平台或游戏运行验收。
+`terminalRecovery` 另记录实际安装的启动器对受控完成任务执行 `live resume` 的
+成功释放与重复调用测试；它不代表未完成任务续跑或真实游戏执行通过。
+开发 manifest 暂时 private=true，最终许可未核定。实际证据见
+[实施状态](implementation-status.md)，下方正式检查表不得据此勾选完成。
+
+在有交互桌面的 Windows amd64 主机上，可显式设置
+`$env:LYCHEEDEV_TEST_DESKTOP='1'` 后运行
+`node packages/npm/lycheedev/test/install-smoke.mjs <npm-cli.js绝对路径>`。
+此模式还通过实际安装的 Node 启动器执行 `init → target resolve → live bind →
+evidence verify → live session`，以独立进程的自建 QR 窗口验证原生捕获和会话存储。
+报告的 `nativeBinding` 记录启动器路径、结果和测试输出；未开启时明确为 `not-run`，
+不得计入原生桌面验收。测试不向 WoW 发键、不替换游戏插件，亦不证明游戏运行闭环。
+普通托管 CI 不假定交互桌面可用，继续保留此显式开关。
 
 本次正式发行版本固定为 **2.0.0**，Git tag 固定为 **v2.0.0**，正式 npm 包固定为 **lycheedev@2.0.0**。本文补充 [架构设计](design.md)、[回归方案](regression.md) 和 [实施路线](roadmap.md)。当前文档修改不创建 tag、不发布 npm、不修改生产安装。
 
 ## 1. 版本的单一来源
 
-实现阶段增加 `release/version.json`，正式候选值为 `2.0.0`。版本生成工具将其同步到 npm manifest、锁文件根版本、四个 TOC、内嵌构建信息、skill 发行清单和资源 manifest。验证阶段只检查，不静默修复版本差异。
+`release/version.json` 已作为版本源落地，当前为 `2.0.0-dev`，正式目标为 `2.0.0`。
+`node tools/version.mjs --write` 同步 npm manifest、锁文件根与包条目、四个 TOC、
+addon Runtime 和 Go buildinfo 常量；先验证所有目标再执行生成。
+`node tools/version.mjs --check` 只检查，不静默修复；CI 与开发打包入口执行此门槛。
+skill/addon 资源发行清单从校验后的包版本生成。生成器不改变 private、许可或
+发布授权，也不创建 tag。CLI `version` 已从 Go 内嵌 VCS 信息读取 `commit` 与
+`workspaceDirty`；未知状态保留 null，不回退读取调用者目录。开发打包强制
+`-buildvcs=true` 并核对安装后二进制与清单的提交/工作树状态；正式发行仍必须拒绝
+dirty 或未知身份，并完成候选 Commit、跨平台产物、tag 与发布门槛绑定。
 
 | 对象 | 本次正式值 / 规则 |
 | --- | --- |
@@ -62,6 +87,10 @@ Windows 多进程测试采用临时工作空间和 barrier，不对真实桌面�
 
 - Go 发行工具链固定为 `1.27.1`；`go.mod` 的语言基线为 `1.27.0`，CI 核对实际 go version。
 - Windows Lua 固定 `5.1.5`。下载或构建输入必须有校验和，不能只信任一个可变下载链接。
+  当前 `tests/tools/build-lua.mjs` 使用[Lua 官方源码及校验清单](https://www.lua.org/ftp/)
+  的 `lua-5.1.5.tar.gz`，SHA256 为 `2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333`。
+  Windows contract 设置必需解释器环境，缺失时测试失败，不接受跳过；构建报告保留
+  C 编译器版本及解释器摘要。此离线协议门槛不等同于四端完整 UI 或实机矩阵。
 - CI Node 选择受支持的 24.x 补丁，并在 S0 核实后把精确补丁写入工具链清单。npm 可采用已核实流程使用的 `11.18.0`，后续调整需提交清单变更，不使用 `npm@latest`。
 - npm Trusted Publishing 的最低要求为 Node `22.14.0`、npm `11.5.1`；启动包装的用户引擎要求定为 Node `>=22.14.0`，并在最低版本和发行 Node 上测试。原生发行包不依赖 Node。[npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
 - GitHub Actions 固定到审核过的完整 commit SHA，并保留动作版本注释；实现时填真实 SHA，不在设计文档里编造。
@@ -71,6 +100,17 @@ Windows 多进程测试采用临时工作空间和 barrier，不对真实桌面�
 目标原生发行矩阵为 Windows amd64、Linux amd64/arm64、macOS amd64/arm64；每个声明平台必须执行匹配架构的安装/运行 smoke。允许交叉构建，但目标运行验证缺失时不能声称该平台已验收。
 
 ## 5. npm 包形态：一个公开包，零运行依赖
+
+Go 安装层读取的 `release.json` 使用 `lycheedev.release.v1`：`version`、
+`commit`（完整小写 Git SHA-1）、`binaries`（平台键到文件记录）和 `resources`
+（资源记录数组）。每条文件记录为 `path`、`bytes`、`sha256`；资源路径相对
+`payload/`，仅允许 `addon/` 和 `skill/`。部署载荷必须含 skill 入口与四 TOC，
+并与资源清单完整匹配。读取拒绝重复/未知 JSON 字段、超限输入和版本不匹配。
+原生压缩包可只声明对应平台；npm 组装门槛仍要求五个平台。当前安装层核验
+二进制记录结构，不代替启动器的二进制内容校验、发行来源认证或 TOC 语义测试。
+只有二进制、缺少资源的包不能用于该安装接口。开发 smoke 现已包含当前 addon/skill
+资源，但只有宿主平台二进制；报告同时记录 HEAD 和 workspaceDirty，不能将未提交
+工作树的载荷称为该 Commit 可复现的正式发行。
 
 为遵守项目现有的零运行时 npm 依赖约束，2.0.0 只发布一个 `lycheedev` npm 包。主包内携带五个平台的二进制与共用插件/skill 资源；不引入 optionalDependencies 平台包链。之前方案中的“平台包”在 2.0.0 指独立原生发行压缩包，而不是多个互相依赖的 npm 包。
 

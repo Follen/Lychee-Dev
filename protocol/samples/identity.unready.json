@@ -1,0 +1,17 @@
+{
+  "schema": "lycheedev.signal.v1",
+  "release": "2.0.0-dev",
+  "kind": "identity",
+  "sessionNonce": "",
+  "requestId": "",
+  "probeNonce": "0123456789abcdef0123456789abcdef",
+  "actorState": "ok",
+  "inputReason": "input_keyboard_focus",
+  "character": "Paladin",
+  "realm": "Realm",
+  "guid": "Player-1-123",
+  "product": "retail",
+  "build": "12.1.0.69875",
+  "sequence": 0,
+  "inputReady": false
+}

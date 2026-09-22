@@ -1,0 +1,103 @@
+name: toolkit desktop verification
+
+# Manual, trusted interactive-desktop verification (docs/toolkit/release-2.0.0.md
+# §2-§3). Managed CI must not assume an interactive desktop, WGC/GPU capture or
+# a real logged-in session, so those checks live here and nowhere else.
+#
+# What this verifies, on a Windows amd64 machine that HAS an interactive
+# desktop (the `windows-2025` hosted image usually provides one; a SELF-HOSTED
+# interactive runner may be substituted on the `runs-on` line below when WGC
+# capture or native input proves flaky on the hosted image — checks and
+# evidence intake are identical):
+#
+#   1. internal/desktop self-window suite with LYCHEEDEV_TEST_DESKTOP=1:
+#      native WGC capture of the suite's OWN synthetic QR fixture window
+#      (TestWGCQRCodeOwnWindow) and native input submission/lock against those
+#      same owned windows only. Never WoW, never arbitrary processes, never
+#      input to a window the suite did not create.
+#   2. The desktop-enabled install smoke through the real npm-installed
+#      launcher: LYCHEEDEV_TEST_DESKTOP=1 ... install-smoke.mjs additionally
+#      drives TestLiveBindNativeCLI — an independent process builds its own QR
+#      window, native capture verifies it, and the session store round-trips.
+#
+# Real-machine evidence intake for a release (REL-04/05, §3/§7):
+# toolkit-release.yml's release gate requires, for the release commit, a
+# `desktop-evidence` ARTIFACT (single desktop-evidence.json) attached to the
+# successful toolkit-desktop.yml run of exactly that commit. The owner
+# assembles it from this run's uploaded report with:
+#
+#   node tools/release.mjs desktop-evidence \
+#     --manifest <out/sealed/release-manifest.json of the release assembly> \
+#     --smoke <report.json downloaded from this run> \
+#     --operator <name> --game-build <client builds tested> \
+#     --clients <clients> --notes <observations> [--evidence-dir <screenshots/>]
+#
+# and uploads the result as an artifact named `desktop-evidence`. The gate
+# binds its commit, worktree state, binary and resource digests to the sealed
+# manifest; not-run or missing native binding evidence never counts as passed.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop:
+    name: toolkit desktop verification
+    # Substitute a self-hosted interactive runner (same label syntax) when the
+    # hosted image cannot provide a usable desktop/GPU session.
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Pin npm build tool
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
+          $actual = npm --version
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+      - name: WGC capture and native input self-window suite
+        # Tests that need the interactive desktop are env-gated; everything in
+        # this suite touches only windows the test itself created. Diagnostics
+        # that need an explicitly authorized external PID stay skipped.
+        env:
+          LYCHEEDEV_TEST_DESKTOP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go test -count=1 -timeout=15m ./internal/desktop/...
+          if ($LASTEXITCODE -ne 0) { throw 'desktop self-window suite failed' }
+      - name: Desktop-enabled install smoke through the installed launcher
+        # Packs a real tgz, installs it isolated with --ignore-scripts, and
+        # with LYCHEEDEV_TEST_DESKTOP=1 additionally runs TestLiveBindNativeCLI
+        # through the installed launcher (independent-process self-built QR
+        # window + native capture + session store). The report records
+        # nativeBinding; when this step is not run it stays `not-run` and must
+        # never be counted as desktop acceptance.
+        id: desktop-smoke
+        env:
+          LYCHEEDEV_TEST_DESKTOP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $npmRoot = npm root -g
+          if ($LASTEXITCODE -ne 0) { throw 'npm root -g failed' }
+          $npmCli = Join-Path $npmRoot 'npm/bin/npm-cli.js'
+          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
+          node packages/npm/lycheedev/test/install-smoke.mjs $npmCli
+          if ($LASTEXITCODE -ne 0) { throw 'desktop install smoke failed' }
+      - name: Preserve desktop verification report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-verification
+          path: ${{ steps.desktop-smoke.outputs.report }}
+          if-no-files-found: error

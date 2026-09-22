@@ -1,0 +1,14 @@
+{
+  "schema": "lycheedev.signal.v1",
+  "release": "2.0.0-dev",
+  "kind": "ready",
+  "sessionNonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "requestId": "",
+  "character": "Paladin",
+  "realm": "Realm",
+  "guid": "Player-1-123",
+  "product": "retail",
+  "build": "12.1.0.69875",
+  "sequence": 1,
+  "inputReady": true
+}

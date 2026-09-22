@@ -1,3 +1,8 @@
+> **2.0 development branch:** the unified Go toolkit is being implemented, not released.
+> See [implementation status](docs/toolkit/implementation-status.md) for executable
+> commands and verified results. The 1.x instructions below describe the existing
+> release baseline, not the new toolkit. Do not deploy this branch as 2.0.0 yet.
+
 <div align="center">
   <img src="add-on/Media/Logo.png" width="112" alt="Lychee Dev logo">
   <h1>Lychee Dev</h1>

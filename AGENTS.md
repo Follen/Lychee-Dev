@@ -2,6 +2,27 @@
 
 Guidance for agents working in this repository.
 
+## 2.0 implementation branch
+
+The owner has approved the unified Go 1.27 rewrite on `codex/toolkit-2.0.0`.
+For new code, `docs/toolkit/design.md` supersedes the legacy Python-delegation,
+workspace, naming and packaging rules below. Current implementation and honest
+verification boundaries live in `docs/toolkit/implementation-status.md`.
+Use `go test ./...` and `go vet ./...` at the repository root for the new kernel.
+The design-convergence revision removes `internal/actions`: use cases belong to
+`codebase`, `records`, `delivery`, `selection`, `evidence`, and `live`. Game-only
+durable coordination belongs to `live/journal`, not a generic task framework.
+CLI and skills consume whole-task interfaces; protocol stages are private to live.
+Keep verified report availability separate from cleanup completion. Historical
+progress lives in `docs/toolkit/implementation-history.md`, not the current contract.
+The versioned unified skill source is now `skills/lycheedev/`; the old skill,
+addon and npm sources remain baseline inputs until their replacements pass.
+Do not invoke those old entrypoints from the new Go toolkit or inherit their
+user data. Do not deploy over a live task registry or claim planned commands
+are available. All Lua safety, client scope and evidence rules below still apply.
+The new CI workflow verifies foundation code only; it is not the complete
+2.0 release gate and does not publish. Publishing still requires explicit scope.
+
 ## What this project is
 
 Lychee Dev is a lightweight graphical World of Warcraft data inspection addon plus

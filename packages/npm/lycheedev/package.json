@@ -1,0 +1,21 @@
+{
+  "name": "lycheedev",
+  "version": "2.0.0-dev",
+  "private": true,
+  "description": "Unified native World of Warcraft development toolkit",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "lycheedev": "bin/lycheedev.mjs" },
+  "files": ["bin/", "native/", "payload/", "release.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"],
+  "engines": { "node": ">=22.14.0" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Follen/Lychee-Dev.git",
+    "directory": "packages/npm/lycheedev"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}

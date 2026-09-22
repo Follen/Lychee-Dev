@@ -1,0 +1,3 @@
+local _, ns = ...
+ns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={
+}}

@@ -1,0 +1,2 @@
+Interface/AddOns/Blizzard_APIDocumentationGenerated/GeneratedDocumentation.lua
+Interface/AddOns/Blizzard_FrameXML/SecureTemplates.lua

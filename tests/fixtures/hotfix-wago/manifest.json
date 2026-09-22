@@ -1,0 +1,69 @@
+{
+  "schema": "lycheedev.fixture-provenance.v1",
+  "name": "hotfix-wago",
+  "description": "Controlled offline Wago hotfixes Inertia-HTML pages used as parser and pagination oracles.",
+  "sourceRepository": "D:/Code/wow/wowdata",
+  "sourceCommit": "6191d3dc567966b7a474849f3a11e7411390091c",
+  "sourcePath": "internal/hotfix/testdata/wago-hotfix-offline",
+  "capturedAt": "2026-08-07",
+  "parser": "wago-inertia-v1",
+  "licenseNote": "Copied from wowdata, licensed AGPL-3.0-or-later. These fixtures remain under AGPL-3.0-or-later with attribution to the wowdata project; see THIRD_PARTY_NOTICES.md.",
+  "items": [
+    {
+      "file": "response-page-1.html",
+      "sha256": "cdd1124fae509bc845df8ffdff190559e01c31648e4305eeb1b42a6c1e1812df",
+      "bytes": 52107,
+      "kind": "wago-html-inertia",
+      "request": "GET /hotfixes"
+    },
+    {
+      "file": "response-page-2.html",
+      "sha256": "b33b441d8cd7b5c274fc6c57519b065481b1ad60ccc1ad5a4b9417e261d32bad",
+      "bytes": 52593,
+      "kind": "wago-html-inertia",
+      "request": "GET /hotfixes?version=12.0.7.68974 (server-rendered page 1)"
+    },
+    {
+      "file": "response-page-2-real.html",
+      "sha256": "de2574ba958be267e3ca634405b9b40ff05ac474e34502dd9eb086486aa723bb",
+      "bytes": 49297,
+      "kind": "wago-html-inertia",
+      "request": "GET /hotfixes?page=2",
+      "capturedAt": "2026-08-07"
+    }
+  ],
+  "oracleCases": [
+    {
+      "id": "wago-retail-page1-build68974-region71-enUS",
+      "file": "response-page-1.html",
+      "query": {
+        "product": "retail",
+        "fullBuild": "12.0.7.68974",
+        "regionId": 71,
+        "locale": "enUS",
+        "search": "68974"
+      },
+      "expect": {
+        "page": 1,
+        "lastPage": 680096,
+        "total": 17002386
+      }
+    },
+    {
+      "id": "wago-pagination-page2",
+      "file": "response-page-2-real.html",
+      "query": {
+        "product": "retail",
+        "fullBuild": "12.0.7.68974",
+        "regionId": 71,
+        "locale": "enUS",
+        "search": "68974"
+      },
+      "expect": {
+        "page": 2,
+        "lastPage": 680111,
+        "total": 17002775
+      }
+    }
+  ]
+}

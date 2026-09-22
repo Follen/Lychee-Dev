@@ -1,0 +1,659 @@
+name: toolkit release
+
+# Toolkit 2.0 release pipeline (docs/toolkit/release-2.0.0.md §2, §6-§9).
+#
+# Triggers: a strictly validated `v*` tag push, or manual workflow_dispatch
+# which is DRY-RUN ONLY (a manual run with dry_run=false fails fast in the
+# identity job; publishing happens exclusively from version tag pushes).
+#
+# Order (§8): freeze identity -> reusable toolkit CI gate -> CGO_ENABLED=0
+# pre-step -> assemble ONCE (five native builds + payload + release.json +
+# native archives + addon ZIP + ONE npm pack + whitelist audit + corresponding
+# source) -> five-platform run smoke -> seal digests -> release gate
+# (recompute sealed digests, platform evidence, desktop evidence) -> OIDC
+# publish of the SAME tgz -> registry read-back + clean install -> GitHub
+# Release. The publish job never rebuilds or re-packs; it consumes the sealed
+# bundle only (§6/§9).
+#
+# npm Trusted Publisher binding (§7): the npm package must be bound to this
+# workflow filename (toolkit-release.yml) + repository + environment `npm`.
+# If this file is renamed, update the remote binding before the next release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Manual runs may only rehearse (build + verify, never publish)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  # actions: read lets the release gate discover and download the
+  # `desktop-evidence` artifact from the toolkit-desktop.yml run of the same
+  # commit (real-machine evidence intake, REL-04/05).
+  actions: read
+
+concurrency:
+  group: toolkit-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  identity:
+    name: freeze version and release identity
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      mode: ${{ steps.freeze.outputs.mode }}           # release (tag push) | dryrun (manual)
+      version: ${{ steps.freeze.outputs.version }}
+      dist_tag: ${{ steps.freeze.outputs.dist_tag }}   # latest | next (release) | empty (dryrun)
+      commit: ${{ steps.freeze.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Guard - manual dispatch is dry-run only
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "::error::manual workflow_dispatch may only rehearse (dry_run=true); publishing requires the strictly validated v* tag push (release-2.0.0.md §7)"
+            exit 1
+          fi
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Freeze identity (REL-01/05/11)
+        id: freeze
+        run: |
+          set -e
+          node tools/version.mjs --check
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Strict validation: tag syntax, tag <-> version source, tag ->
+            # HEAD commit, clean worktree, non-private package.
+            node tools/release.mjs release-identity --ref "$GITHUB_REF" --tag "$GITHUB_REF_NAME" > identity.json
+            mode=release
+          else
+            version="$(node -p "JSON.parse(require('fs').readFileSync('release/version.json','utf8')).version")"
+            commit="$(git rev-parse HEAD)"
+            node -e "
+              const fs = require('fs');
+              fs.writeFileSync('identity.json', JSON.stringify({
+                version: process.argv[1], commit: process.argv[2], distTag: null,
+                tag: 'v' + process.argv[1], tagVerified: false, dryRun: true,
+              }, null, 2) + '\n');
+            " "$version" "$commit"
+            mode=dryrun
+          fi
+          {
+            echo "mode=$mode"
+            echo "version=$(node -p "JSON.parse(require('fs').readFileSync('identity.json','utf8')).version")"
+            echo "dist_tag=$(node -p "JSON.parse(require('fs').readFileSync('identity.json','utf8')).distTag ?? ''")"
+            echo "commit=$(node -p "JSON.parse(require('fs').readFileSync('identity.json','utf8')).commit")"
+          } >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: toolkit CI verification gate
+    uses: ./.github/workflows/toolkit-ci.yml
+
+  verify-cgo:
+    name: CGO_ENABLED=0 capture/decode pre-step
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Prove Hotfix/asset capture and decode survive a pure-Go build
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/release.mjs verify-cgo --out (Join-Path $env:RUNNER_TEMP 'cgo')
+          if ($LASTEXITCODE -ne 0) { throw 'CGO_ENABLED=0 pre-step failed; the release may not claim CGO_ENABLED=0' }
+      - name: Preserve CGO evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cgo-evidence
+          path: ${{ runner.temp }}/cgo/cgo-evidence.json
+          if-no-files-found: error
+
+  assemble:
+    name: build and pack once (windows native)
+    needs: [identity, ci, verify-cgo]
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Pin npm build tool
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
+          $actual = npm --version
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
+      - name: Assemble the release bundle (§6: pack exactly once)
+        # tools/release.mjs assemble performs: license gate (license decision
+        # pending), identity + VCS stamps, five CGO_ENABLED=0 -trimpath
+        # -buildvcs=true builds, binary identity verification, addon/skill
+        # payload staging, release.json with REQUIRED correspondingSource
+        # (git archive + go mod vendor + offline rebuild comparison), five
+        # native archives, addon ZIP + byte comparison against the payload,
+        # ONE npm pack with deterministic tar modes, whitelist audit and the
+        # external sealed manifest + SHA256SUMS.
+        id: assemble
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $npmRoot = npm root -g
+          if ($LASTEXITCODE -ne 0) { throw 'npm root -g failed' }
+          $npmCli = Join-Path $npmRoot 'npm/bin/npm-cli.js'
+          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
+          $out = Join-Path $env:RUNNER_TEMP 'release-out'
+          $arguments = @('tools/release.mjs', 'assemble', '--out', $out, '--npm-cli', $npmCli, '--cgo', 'zero')
+          if ('${{ needs.identity.outputs.mode }}' -eq 'release') {
+            $arguments += @('--require-tag-ref', '--tag', 'v${{ needs.identity.outputs.version }}')
+          }
+          node @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'release assembly failed' }
+          "out=$out" >> $env:GITHUB_OUTPUT
+      - name: Upload the sealed npm tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-tgz
+          path: ${{ steps.assemble.outputs.out }}/lycheedev-*.tgz
+          if-no-files-found: error
+      - name: Upload native archives, addon ZIP and corresponding source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-native-archives
+          path: |
+            ${{ steps.assemble.outputs.out }}/lycheedev-*.zip
+            ${{ steps.assemble.outputs.out }}/lycheedev-*-corresponding-source.tar.gz
+          if-no-files-found: error
+      - name: Upload the sealed manifest and SHA256SUMS
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-sealed-manifest
+          path: ${{ steps.assemble.outputs.out }}/sealed/*
+          if-no-files-found: error
+
+  platform-smoke:
+    name: run smoke (${{ matrix.target }})
+    needs: [identity, assemble]
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - windows-amd64
+          - linux-amd64
+          - linux-arm64
+          - darwin-amd64
+          - darwin-arm64
+        include:
+          - target: windows-amd64
+            os: windows-2025
+          - target: linux-amd64
+            os: ubuntu-24.04
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: darwin-amd64
+            os: macos-15-intel
+          - target: darwin-arm64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      SMOKE_TARGET: ${{ matrix.target }}
+      SMOKE_VERSION: ${{ needs.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download the sealed tarball and manifest
+        uses: actions/download-artifact@v4 # TODO: pin SHA (verify the current v4 release SHA before the first real release run)
+        with:
+          name: release-tgz
+          path: bundle/tgz
+      - name: Download the sealed manifest
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: release-sealed-manifest
+          path: bundle/sealed
+      - name: Install the sealed tarball and run the offline business smoke
+        # release-smoke audits the tgz against the release.json whitelist,
+        # installs it into an isolated --global --prefix under a path with
+        # spaces and Chinese characters using --ignore-scripts, verifies every
+        # declared platform binary digest plus the Unix executable bit from
+        # the real installed directory, runs the offline business commands,
+        # and (non-Windows) asserts that `live` reports
+        # desktop.unsupported_platform instead of faking success (PKG-08).
+        if: runner.os != 'Windows'
+        run: |
+          set -e
+          mkdir -p reports
+          npm_cli="$(npm root -g)/npm/bin/npm-cli.js"
+          [ -f "$npm_cli" ] || { echo "::error::npm-cli.js not found at $npm_cli"; exit 1; }
+          tgz="bundle/tgz/lycheedev-$SMOKE_VERSION.tgz"
+          [ -f "$tgz" ] || { echo "::error::missing sealed tarball $tgz"; exit 1; }
+          node packages/npm/lycheedev/test/release-smoke.mjs "$tgz" "$npm_cli" --report "reports/$SMOKE_TARGET-release-smoke.json" | tee smoke-stdout.json
+          node -e "
+            const fs = require('fs');
+            const report = 'reports/' + process.env.SMOKE_TARGET + '-release-smoke.json';
+            const data = JSON.parse(fs.readFileSync(report, 'utf8'));
+            data.status = JSON.parse(fs.readFileSync('smoke-stdout.json', 'utf8')).status;
+            if (data.status !== 'passed') throw new Error('smoke did not report passed');
+            fs.writeFileSync(report, JSON.stringify(data, null, 2) + '\n');
+          "
+      - name: Install the sealed tarball and run the offline business smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path reports | Out-Null
+          $npmCli = Join-Path (npm root -g) 'npm/bin/npm-cli.js'
+          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
+          $tgz = "bundle/tgz/lycheedev-$env:SMOKE_VERSION.tgz"
+          if (-not (Test-Path $tgz)) { throw "missing sealed tarball $tgz" }
+          node packages/npm/lycheedev/test/release-smoke.mjs $tgz $npmCli --report "reports/$env:SMOKE_TARGET-release-smoke.json" | Tee-Object -FilePath smoke-stdout.json
+          if ($LASTEXITCODE -ne 0) { throw 'release smoke failed' }
+          node -e "const fs=require('fs');const p='reports/'+process.env.SMOKE_TARGET+'-release-smoke.json';const d=JSON.parse(fs.readFileSync(p,'utf8'));d.status=JSON.parse(fs.readFileSync('smoke-stdout.json','utf8')).status;if(d.status!=='passed')throw new Error('smoke did not report passed');fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n')"
+      - name: Emit platform run evidence
+        run: |
+          set -e
+          mkdir -p evidence
+          node tools/release.mjs platform-evidence \
+            --manifest bundle/sealed/release-manifest.json \
+            --smoke "reports/$SMOKE_TARGET-release-smoke.json" \
+            --target "$SMOKE_TARGET" \
+            --out "evidence/$SMOKE_TARGET.json"
+      - name: Preserve platform evidence and smoke report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: platform-evidence-${{ matrix.target }}
+          path: |
+            evidence/*
+            reports/*
+          if-no-files-found: error
+
+  seal:
+    name: seal digests and SHA256SUMS
+    needs: [identity, assemble, platform-smoke]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download the assembled bundle and all verification reports
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: release-tgz
+          path: bundle/tgz
+      - name: Download native archives
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: release-native-archives
+          path: bundle/archives
+      - name: Download the sealed manifest
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: release-sealed-manifest
+          path: bundle/sealed
+      - name: Download CGO evidence
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: cgo-evidence
+          path: bundle/cgo
+      - name: Download five-platform evidence
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          pattern: platform-evidence-*
+          merge-multiple: true
+          path: gather
+      - name: Recreate the release bundle layout
+        run: |
+          set -e
+          mkdir -p out/sealed evidence reports
+          mv bundle/tgz/* out/
+          mv bundle/archives/* out/
+          mv bundle/sealed/* out/sealed/
+          mv bundle/cgo/cgo-evidence.json reports/cgo-evidence.json
+          mv gather/evidence/* evidence/
+          mv gather/reports/* reports/
+          # REL-13: a missing platform's evidence is a gate failure, never a warning.
+          for target in windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            [ -f "evidence/$target.json" ] || { echo "::error::missing run evidence for $target"; exit 1; }
+          done
+      - name: Fold report digests into the sealed manifest (§6)
+        run: |
+          set -e
+          node tools/release.mjs seal --out out \
+            --report reports/cgo-evidence.json \
+            --report reports/windows-amd64-release-smoke.json \
+            --report reports/linux-amd64-release-smoke.json \
+            --report reports/linux-arm64-release-smoke.json \
+            --report reports/darwin-amd64-release-smoke.json \
+            --report reports/darwin-arm64-release-smoke.json
+      - name: Recompute every sealed digest
+        run: |
+          set -e
+          node tools/release.mjs verify-sealed --out out --report-dir reports > sealed-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('sealed-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::sealed digest violations: ' + r.violations.join('; ')); process.exit(1); }
+            console.log('sealed bundle verified for ' + r.version + ' @ ' + r.commit);
+          "
+      - name: Verify five-platform run evidence (REL-13)
+        run: |
+          set -e
+          node tools/release.mjs verify-platform-evidence --out out --evidence evidence > platform-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('platform-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::platform evidence violations: ' + r.violations.join('; ')); process.exit(1); }
+            console.log('platform evidence verified for: ' + r.platforms.join(', '));
+          "
+      - name: Stage the sealed release bundle
+        # A flat, deterministic staging layout so the artifact root is stable
+        # and the publish job can consume exact paths (§6: no re-packing).
+        run: |
+          set -e
+          mkdir -p staged/sealed
+          cp out/*.tgz out/*.zip out/*.tar.gz staged/
+          cp out/sealed/* staged/sealed/
+          cp -r evidence staged/evidence
+          cp -r reports staged/reports
+      - name: Upload the sealed release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sealed-bundle
+          path: staged/**
+          if-no-files-found: error
+
+  release-gate:
+    name: release gate (sealed digests, platform and desktop evidence)
+    needs: [identity, ci, seal]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      GATE_MODE: ${{ needs.identity.outputs.mode }}
+      GATE_COMMIT: ${{ needs.identity.outputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download the sealed bundle
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: sealed-bundle
+          path: bundle
+      - name: Recreate the bundle layout
+        run: |
+          set -e
+          mkdir -p out/sealed evidence reports
+          mv bundle/*.tgz bundle/*.zip bundle/*.tar.gz out/
+          mv bundle/sealed/* out/sealed/
+          mv bundle/evidence/* evidence/
+          mv bundle/reports/* reports/
+      - name: Recompute every sealed digest right before publish (§6)
+        run: |
+          set -e
+          node tools/release.mjs verify-sealed --out out --report-dir reports > sealed-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('sealed-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::sealed digest violations: ' + r.violations.join('; ')); process.exit(1); }
+            console.log('sealed bundle verified for ' + r.version + ' @ ' + r.commit);
+          "
+      - name: Verify five-platform run evidence
+        run: |
+          set -e
+          node tools/release.mjs verify-platform-evidence --out out --evidence evidence > platform-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('platform-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::platform evidence violations: ' + r.violations.join('; ')); process.exit(1); }
+            console.log('platform evidence verified for: ' + r.platforms.join(', '));
+          "
+      - name: Verify real-machine desktop evidence binding (REL-04/05)
+        # A real (tag) release requires the `desktop-evidence` artifact from
+        # the toolkit-desktop.yml run of exactly this commit, assembled by the
+        # owner with `node tools/release.mjs desktop-evidence ...` and bound to
+        # the sealed binary/resource digests. not-run or missing evidence
+        # fails the gate; dry-run rehearsals record it as pending.
+        run: |
+          set -e
+          if [ "$GATE_MODE" != release ]; then
+            echo '::warning::desktop evidence pending (REL-04): not required for a dry-run rehearsal, but the release gate of a real tag publish fails without it; run toolkit-desktop.yml on the interactive-desktop runner and assemble the desktop-evidence artifact for the release commit'
+            exit 0
+          fi
+          run_id="$(gh run list --workflow toolkit-desktop.yml --json databaseId,headSha,conclusion --limit 100 \
+            | node -e "
+                let data = '';
+                process.stdin.on('data', chunk => data += chunk);
+                process.stdin.on('end', () => {
+                  const runs = JSON.parse(data).filter(run => run.headSha === process.env.GATE_COMMIT && run.conclusion === 'success');
+                  if (!runs.length) { console.error('::error::desktop evidence missing (REL-04): no successful toolkit-desktop.yml run for commit ' + process.env.GATE_COMMIT + '; run it on the interactive-desktop runner, assemble the desktop-evidence artifact and re-run this release'); process.exit(3); }
+                  console.log(String(runs[0].databaseId));
+                });
+              \")" || { echo '::error::desktop evidence lookup failed'; exit 3; }
+          mkdir -p evidence-desktop
+          gh run download "$run_id" --name desktop-evidence --dir evidence-desktop
+          node tools/release.mjs verify-desktop-evidence --out out --evidence evidence-desktop/desktop-evidence.json > desktop-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('desktop-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::desktop evidence violations: ' + r.violations.join('; ')); process.exit(1); }
+            console.log('desktop evidence verified (native binding: ' + (r.nativeBinding?.status ?? 'unknown') + ')');
+          "
+
+  publish:
+    name: OIDC publish and registry read-back
+    needs: [identity, release-gate]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      PUBLISH_VERSION: ${{ needs.identity.outputs.version }}
+      PUBLISH_DIST_TAG: ${{ needs.identity.outputs.dist_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.14.0' # npm Trusted Publishing minimum (§4)
+          registry-url: https://registry.npmjs.org
+      - name: Pin npm to the verified trusted-publishing release
+        run: |
+          set -e
+          npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+          [ "$(npm --version)" = "11.18.0" ] || { echo '::error::npm tool version mismatch'; exit 1; }
+      - name: Download the sealed bundle
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: sealed-bundle
+          path: bundle
+      - name: Recreate the bundle layout
+        run: |
+          set -e
+          mkdir -p out/sealed reports evidence
+          mv bundle/*.tgz bundle/*.zip bundle/*.tar.gz out/
+          mv bundle/sealed/* out/sealed/
+          mv bundle/reports/* reports/
+          mv bundle/evidence/* evidence/
+          # Flat asset staging: the GitHub Release asset set (§6/§9).
+          mkdir -p assets
+          cp out/*.tgz out/*.zip out/*.tar.gz assets/
+          cp out/sealed/SHA256SUMS out/sealed/release-manifest.json assets/
+      - name: Recompute every sealed digest (no publish on drift)
+        run: |
+          set -e
+          node tools/release.mjs verify-sealed --out out --report-dir reports > sealed-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('sealed-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::sealed digest violations: ' + r.violations.join('; ')); process.exit(1); }
+          "
+      - name: Registry state check (REL-09)
+        id: registry
+        run: |
+          set -e
+          integrity="$(node -p "JSON.parse(require('fs').readFileSync('out/sealed/release-manifest.json','utf8')).npm.integrity")"
+          node tools/release.mjs registry-state --name lycheedev --version "$PUBLISH_VERSION" --integrity "$integrity" > registry-state.json
+          state="$(node -p "JSON.parse(require('fs').readFileSync('registry-state.json','utf8')).state")"
+          case "$state" in
+            absent) echo "publish_needed=true" >> "$GITHUB_OUTPUT" ;;
+            exists-matching)
+              # §9: the same bytes are already published (e.g. an earlier run
+              # published but a later stage failed). Never publish again;
+              # continue with post-verification only.
+              echo "publish_needed=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::registry state $state blocks publish (REL-09)"; exit 1 ;;
+          esac
+      - name: Publish the sealed tarball via OIDC trusted publishing
+        if: steps.registry.outputs.publish_needed == 'true'
+        # No NPM_TOKEN / NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC
+        # token for short-lived registry credentials; provenance is generated
+        # automatically for the public repository. Dist-tag is `latest`, or
+        # `next` for 2.0.0-rc.N candidates (REL-11).
+        run: |
+          set -e
+          npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz" --access public --tag "$PUBLISH_DIST_TAG"
+      - name: Registry read-back (name, version, integrity, provenance)
+        run: |
+          set -e
+          npm view "lycheedev@$PUBLISH_VERSION" --json > registry-view.json
+          node tools/release.mjs verify-registry-readback \
+            --name lycheedev --version "$PUBLISH_VERSION" \
+            --view registry-view.json --tgz "out/lycheedev-$PUBLISH_VERSION.tgz" > readback-check.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('readback-check.json', 'utf8'));
+            if (!r.ok) { console.error('::error::registry read-back violations: ' + r.violations.join('; ')); process.exit(1); }
+            console.log('registry integrity verified; provenance: ' + JSON.stringify(r.attestations ?? null));
+          "
+      - name: Clean install re-verification from the registry
+        run: |
+          set -e
+          fresh="$RUNNER_TEMP/registry-install 空格 中文"
+          printf '' > empty.npmrc
+          npm install --global --prefix "$fresh" "lycheedev@$PUBLISH_VERSION" \
+            --ignore-scripts --no-audit --no-fund --userconfig "$PWD/empty.npmrc"
+          launcher="$fresh/lib/node_modules/lycheedev/bin/lycheedev.mjs"
+          [ -f "$launcher" ] || { echo '::error::installed launcher missing after registry install'; exit 1; }
+          node "$launcher" version --format=json > installed-version.json
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('out/sealed/release-manifest.json', 'utf8'));
+            const installed = JSON.parse(fs.readFileSync('installed-version.json', 'utf8'));
+            if (!installed.ok) throw new Error('installed CLI version command failed');
+            if (installed.result.version !== manifest.version) throw new Error('registry install version ' + installed.result.version + ' != ' + manifest.version);
+            if (installed.result.commit !== manifest.commit) throw new Error('registry install commit ' + installed.result.commit + ' != ' + manifest.commit);
+            console.log('registry install verified: ' + installed.result.version + ' @ ' + installed.result.commit);
+          "
+      - name: Release notes from the sealed manifest
+        run: |
+          set -e
+          node tools/release.mjs release-notes --out NOTES.md --sealed out/sealed
+      - name: Create or repair the GitHub Release (§9)
+        env:
+          ASSET_NAMES: "lycheedev-${{ needs.identity.outputs.version }}.tgz,lycheedev-${{ needs.identity.outputs.version }}-windows-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-linux-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-linux-arm64.zip,lycheedev-${{ needs.identity.outputs.version }}-darwin-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-darwin-arm64.zip,lycheedev-${{ needs.identity.outputs.version }}-addon.zip,lycheedev-${{ needs.identity.outputs.version }}-corresponding-source.tar.gz,SHA256SUMS,release-manifest.json"
+        run: |
+          set -e
+          if gh release view "v$PUBLISH_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # npm succeeded earlier but the GitHub Release failed: repair only
+            # the release, never re-publish and never replace published bytes.
+            mkdir -p downloaded
+            gh release download "v$PUBLISH_VERSION" --repo "$GITHUB_REPOSITORY" --dir downloaded || true
+            node tools/release.mjs check-assets --local assets --downloaded downloaded --names "$ASSET_NAMES" > assets-check.json
+            node -e "
+              const fs = require('fs');
+              const r = JSON.parse(fs.readFileSync('assets-check.json', 'utf8'));
+              if (r.conflicting.length) { console.error('::error::published release assets conflict with the sealed bytes (never replaced, §9): ' + r.conflicting.join(', ')); process.exit(1); }
+              fs.writeFileSync('missing-assets.txt', r.missing.join('\n'));
+              console.log('matching assets: ' + r.matching.length + '; missing: ' + r.missing.length);
+            "
+            if [ -s missing-assets.txt ]; then
+              gh release upload "v$PUBLISH_VERSION" $(sed 's|^|assets/|' missing-assets.txt) --repo "$GITHUB_REPOSITORY"
+            fi
+          else
+            gh release create "v$PUBLISH_VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "lycheedev $PUBLISH_VERSION" \
+              --notes-file NOTES.md \
+              assets/*
+          fi
+
+  release-complete:
+    name: release pipeline required
+    if: always()
+    needs:
+      - identity
+      - ci
+      - verify-cgo
+      - assemble
+      - platform-smoke
+      - seal
+      - release-gate
+      - publish
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Assert the release pipeline result
+        env:
+          MODE: ${{ needs.identity.outputs.mode }}
+          CI_RESULT: ${{ needs.ci.result }}
+          VERIFY_CGO_RESULT: ${{ needs.verify-cgo.result }}
+          ASSEMBLE_RESULT: ${{ needs.assemble.result }}
+          PLATFORM_SMOKE_RESULT: ${{ needs.platform-smoke.result }}
+          SEAL_RESULT: ${{ needs.seal.result }}
+          RELEASE_GATE_RESULT: ${{ needs.release-gate.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          status=0
+          check() {
+            local name="$1" result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error::release stage ${name} finished with ${result}"
+              status=1
+            fi
+          }
+          check ci "$CI_RESULT"
+          check verify-cgo "$VERIFY_CGO_RESULT"
+          check assemble "$ASSEMBLE_RESULT"
+          check platform-smoke "$PLATFORM_SMOKE_RESULT"
+          check seal "$SEAL_RESULT"
+          check release-gate "$RELEASE_GATE_RESULT"
+          if [ "$MODE" = "release" ]; then
+            check publish "$PUBLISH_RESULT"
+          else
+            if [ "$PUBLISH_RESULT" != "skipped" ]; then
+              echo "::error::publish must be skipped for dry-run runs (observed $PUBLISH_RESULT)"
+              status=1
+            fi
+          fi
+          exit $status
