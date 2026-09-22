@@ -144,7 +144,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'npm tool installation failed' }
           $actual = npm --version
           if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
-      - name: Assemble the release bundle (§6: pack exactly once)
+      - name: Assemble the release bundle (§6 - pack exactly once)
         # tools/release.mjs assemble performs: license gate (license decision
         # pending), identity + VCS stamps, five CGO_ENABLED=0 -trimpath
         # -buildvcs=true builds, binary identity verification, addon/skill
@@ -209,7 +209,7 @@ jobs:
           - target: linux-arm64
             os: ubuntu-24.04-arm
           - target: darwin-amd64
-            os: macos-15-intel
+            os: macos-15-large
           - target: darwin-arm64
             os: macos-15
     runs-on: ${{ matrix.os }}
