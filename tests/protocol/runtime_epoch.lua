@@ -2,7 +2,7 @@ local root = assert(arg[1])
 local secret = {}
 issecretvalue = function(v) return rawequal(v, secret) end
 CreateFrame = function() error("epoch allocated runtime machinery") end
-local ns = { Release="2.0.0-dev", Startup={ready=true,identity={product="retail",build="12.1.0.12345"}},
+local ns = { Release="2.0.0", Startup={ready=true,identity={product="retail",build="12.1.0.12345"}},
     Platform={ObserveActor=function() return {character="Paladin",realm="Realm",guid="Player-1-123"} end,
         ObserveInputState=function() return true end} }
 for _, file in ipairs({"Core/Persistence.lua","Bridge/Session.lua","Bridge/CaptureWriter.lua"}) do

@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
@@ -14,7 +16,7 @@ func TestCommittedLuaStateReadByGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output)
 	}
-	expected := bridge.SignalExpectation{Kind: "reported", Release: "2.0.0-dev", SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RequestID: "OP-persisted", Character: "character", Realm: "realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 3}
+	expected := bridge.SignalExpectation{Kind: "reported", Release: buildinfo.Version, SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RequestID: "OP-persisted", Character: "character", Realm: "realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 3}
 	report, err := bridge.ReadPersistedReport(bytes.NewReader(output), []byte("return 42"), expected)
 	if err != nil {
 		t.Fatal(err)

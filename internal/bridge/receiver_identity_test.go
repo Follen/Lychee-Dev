@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"image"
 	"image/draw"
 	"strings"
@@ -15,7 +16,7 @@ func TestIdentityDiscoveryCorrelatesProbeNonce(t *testing.T) {
 	own := identitySignal()
 	foreign := identitySignal()
 	foreign.ProbeNonce = strings.Repeat("f", 32)
-	ready := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "ready", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.69875", Sequence: 1, InputReady: true}
+	ready := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "ready", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.69875", Sequence: 1, InputReady: true}
 	expected := SignalExpectation{Kind: "identity", Release: own.Release, ProbeNonce: own.ProbeNonce, Product: own.Product, Build: own.Build}
 	end := errors.New("no more frames")
 	for _, mode := range []string{"valid", "filtered-actor", "stale-probe", "wrong-product", "ready-kind", "ready-display-only", "ambiguous", "not-identity-expectation", "incomplete", "session-expectation", "require-ready"} {
@@ -101,7 +102,7 @@ func TestIdentityDiscoveryWaitsForTheRefreshedDisplay(t *testing.T) {
 
 func TestIdentityDiscoveryRejectsInvalidExpectations(t *testing.T) {
 	reader := ObserveSignals(&queuedFrames{end: errors.New("ended")})
-	base := SignalExpectation{Kind: "identity", Release: "2.0.0-dev", ProbeNonce: strings.Repeat("a", 32), Product: "retail", Build: "12.1.0.69875"}
+	base := SignalExpectation{Kind: "identity", Release: buildinfo.Version, ProbeNonce: strings.Repeat("a", 32), Product: "retail", Build: "12.1.0.69875"}
 	for _, mutate := range []func(*SignalExpectation){
 		func(e *SignalExpectation) { e.Kind = "ready" },
 		func(e *SignalExpectation) { e.Release = "" },
@@ -121,7 +122,7 @@ func TestIdentityDiscoveryRejectsInvalidExpectations(t *testing.T) {
 			t.Fatalf("accepted expectation %+v", invalid)
 		}
 	}
-	invalid := SignalExpectation{Kind: "ready", Release: "2.0.0-dev", Product: "retail", Build: "12.1.0.69875", RequireInputReady: true, ProbeNonce: strings.Repeat("a", 32)}
+	invalid := SignalExpectation{Kind: "ready", Release: buildinfo.Version, Product: "retail", Build: "12.1.0.69875", RequireInputReady: true, ProbeNonce: strings.Repeat("a", 32)}
 	if _, err := reader.DiscoverReady(context.Background(), invalid); err == nil {
 		t.Fatal("ready discovery accepted identity filters")
 	}

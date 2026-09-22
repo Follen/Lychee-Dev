@@ -2,12 +2,13 @@ package bridge
 
 import (
 	"encoding/json"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"strings"
 	"testing"
 )
 
 func identitySignal() Signal {
-	return Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "identity",
+	return Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "identity",
 		ProbeNonce: strings.Repeat("0123456789abcdef", 2), ActorState: "ok",
 		Character: "Paladin", Realm: "Realm", GUID: "Player-1-123",
 		Product: "retail", Build: "12.1.0.69875", Sequence: 0, InputReady: true}
@@ -132,7 +133,7 @@ func TestIdentitySignalProbeNonceAndActorStateAreExact(t *testing.T) {
 
 func TestIdentityExpectationsNeverCrossKinds(t *testing.T) {
 	identity := identitySignal()
-	ready := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "ready", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.69875", Sequence: 1, InputReady: true}
+	ready := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "ready", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.69875", Sequence: 1, InputReady: true}
 	parsedIdentity, err := ParseSignal(encoded(t, identity))
 	if err != nil {
 		t.Fatal(err)
@@ -150,8 +151,8 @@ func TestIdentityExpectationsNeverCrossKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, rejected := range []struct {
-		name       string
-		signal     Signal
+		name        string
+		signal      Signal
 		expectation SignalExpectation
 	}{
 		{"ready-vs-identity", parsedReady, identityExpectation},

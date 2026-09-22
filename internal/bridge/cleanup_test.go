@@ -2,12 +2,13 @@ package bridge
 
 import (
 	"encoding/json"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"strings"
 	"testing"
 )
 
 func TestClearedSignalRejectsIncompleteOrMixedEvidence(t *testing.T) {
-	valid := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "cleared", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-cleanup", CleanupNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Sequence: 1}
+	valid := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "cleared", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-cleanup", CleanupNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Sequence: 1}
 	for name, change := range map[string]func(*Signal){
 		"missing-nonce":    func(s *Signal) { s.CleanupNonce = "" },
 		"uppercase-nonce":  func(s *Signal) { s.CleanupNonce = strings.Repeat("B", 32) },
@@ -37,7 +38,7 @@ func TestClearedSignalRejectsIncompleteOrMixedEvidence(t *testing.T) {
 }
 
 func TestClearedSignalAcceptsRuntimeEpochBoundaryAndRejectsOverflow(t *testing.T) {
-	valid := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "cleared", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-cleanup", CleanupNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Sequence: 1, RuntimeEpoch: 9007199254740991}
+	valid := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "cleared", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-cleanup", CleanupNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Sequence: 1, RuntimeEpoch: 9007199254740991}
 	raw, err := json.Marshal(valid)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestClearedSignalAcceptsRuntimeEpochBoundaryAndRejectsOverflow(t *testing.T
 }
 
 func TestOnlyReadyAndClearedSignalsAcceptRuntimeEpoch(t *testing.T) {
-	signal := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "loaded", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-runtime", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.12345", Sequence: 1, CodeBytes: 1, CodeAdler32: "00000001", RuntimeEpoch: 1}
+	signal := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "loaded", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-runtime", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.12345", Sequence: 1, CodeBytes: 1, CodeAdler32: "00000001", RuntimeEpoch: 1}
 	raw, err := json.Marshal(signal)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestOnlyReadyAndClearedSignalsAcceptRuntimeEpoch(t *testing.T) {
 }
 
 func TestClearedSignalMatchRejectsDifferentRuntimeEpoch(t *testing.T) {
-	signal := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "cleared", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-cleanup", CleanupNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Sequence: 2, RuntimeEpoch: 42}
+	signal := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "cleared", SessionNonce: strings.Repeat("a", 32), RequestID: "REQ-cleanup", CleanupNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Sequence: 2, RuntimeEpoch: 42}
 	raw, err := json.Marshal(signal)
 	if err != nil {
 		t.Fatal(err)

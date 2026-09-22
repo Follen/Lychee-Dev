@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -21,7 +23,7 @@ func TestLuaPersistenceArchivesAndReopensExactReport(t *testing.T) {
 	}
 	expected := bridge.SignalExpectation{
 		Kind:          "reported",
-		Release:       "2.0.0-dev",
+		Release:       buildinfo.Version,
 		SessionNonce:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		RequestID:     "OP-persisted",
 		Character:     "character",

@@ -1,6 +1,6 @@
 local root, queue = assert(arg[1]), assert(arg[2])
 local receiptPath, sequence = assert(arg[3]), assert(arg[4])
-local ns = {Release="2.0.0-dev",Startup={ready=true,identity={product="retail",build="12.1.0.12345"}}}
+local ns = {Release="2.0.0",Startup={ready=true,identity={product="retail",build="12.1.0.12345"}}}
 ns.Platform = {ObserveActor=function() return {character="Paladin",realm="Realm",guid="Player-1-123"} end}
 issecretvalue = function() return false end
 CreateFrame = function() error("unexpected frame") end

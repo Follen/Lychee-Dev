@@ -10,12 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
 func TestHostQueueToLuaExecution(t *testing.T) {
 	code := "queueExecuted = 1; return { text = '世界', escaped = '\"\\\\' } -- ]] injected delimiters"
-	d := bridge.ProbeDefinition{RequestID: "OP-target", Release: "2.0.0-dev", SessionNonce: strings.Repeat("a", 32), ReloadNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Code: code}
+	d := bridge.ProbeDefinition{RequestID: "OP-target", Release: buildinfo.Version, SessionNonce: strings.Repeat("a", 32), ReloadNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Code: code}
 	other := d
 	other.RequestID = "OP-other"
 	other.Character = "Other"

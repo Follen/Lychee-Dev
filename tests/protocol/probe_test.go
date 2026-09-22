@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
@@ -23,7 +25,7 @@ func TestFourClientProbeExecution(t *testing.T) {
 	products := []string{"retail", "classic", "titan", "forever"}
 	builds := []string{"12.1.0.12345", "5.5.4.12345", "3.80.2.12345", "1.60.1.12345"}
 	for i, result := range results {
-		expected := bridge.SignalExpectation{Release: "2.0.0-dev", Kind: "loaded", SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RequestID: "OP-main", Character: "Paladin", Realm: "Realm", Product: products[i], Build: builds[i]}
+		expected := bridge.SignalExpectation{Release: buildinfo.Version, Kind: "loaded", SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RequestID: "OP-main", Character: "Paladin", Realm: "Realm", Product: products[i], Build: builds[i]}
 		loaded, err := bridge.ParseSignal([]byte(result.Loaded))
 		if err != nil {
 			t.Fatal(err)

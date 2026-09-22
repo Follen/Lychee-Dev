@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"os"
@@ -14,7 +15,7 @@ import (
 	"testing"
 )
 
-const Version = "2.0.0-dev"
+const Version = buildinfo.Version
 
 func Client(t *testing.T, identity string) string {
 	t.Helper()

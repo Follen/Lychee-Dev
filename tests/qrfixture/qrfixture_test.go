@@ -14,7 +14,10 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 )
 
-// Keep this as literal JSON: the decoder contract is byte preservation, not
+// The encoder is the shipped addon/Bridge/MatrixSymbol.lua (the retired 1.x
+// Libs/AutomationQR.lua remains accepted); the decoder contract is byte
+// preservation, not JSON reserialization. The fixture deliberately includes
+// ASCII and UTF-8.: the decoder contract is byte preservation, not
 // JSON reserialization. The fixture deliberately includes ASCII and UTF-8.
 const qrFixture = `{"v":1,"message":"ASCII + 世界 + café ☕"}`
 
@@ -27,7 +30,7 @@ func TestLuaAutomationQRToGoDecoder(t *testing.T) {
 	fixtureDir := filepath.Dir(thisFile)
 	root := filepath.Clean(filepath.Join(fixtureDir, "..", ".."))
 	harness := filepath.Join(fixtureDir, "harness.lua")
-	encoder := filepath.Join(root, "add-on", "Libs", "AutomationQR.lua")
+	encoder := filepath.Join(root, "addon", "Bridge", "MatrixSymbol.lua")
 
 	modules := runLuaEncoder(t, lua, harness, encoder, []byte(qrFixture))
 	decoded, err := desktop.DecodeSymbols(modulesImage(modules, 4, 8))

@@ -28,12 +28,17 @@ if not loaded then
     os.exit(2)
 end
 
-if not namespace.AutomationQR or type(namespace.AutomationQR.Encode) ~= "function" then
-    io.stderr:write("AutomationQR.Encode is unavailable\n")
+-- The 2.0 addon ships MatrixSymbol.lua (same luaqrcode lineage, fixed M
+-- correction); the retired 1.x Libs/AutomationQR.lua remains accepted so the
+-- oracle still covers the historical encoder if it is present.
+if not (namespace.MatrixSymbol and type(namespace.MatrixSymbol.Encode) == "function")
+    and not (namespace.AutomationQR and type(namespace.AutomationQR.Encode) == "function") then
+    io.stderr:write("QR encoder module is unavailable\n")
     os.exit(2)
 end
 
-local matrix, encode_error = namespace.AutomationQR.Encode(payload, 2)
+local encoder = namespace.MatrixSymbol or namespace.AutomationQR
+local matrix, encode_error = encoder.Encode(payload)
 if not matrix then
     io.stderr:write("AutomationQR.Encode: " .. tostring(encode_error) .. "\n")
     os.exit(2)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"image"
 	"image/color"
 	"image/draw"
@@ -100,7 +101,7 @@ func TestMissingFramesNeverProveAcknowledgement(t *testing.T) {
 }
 
 func TestSignalReaderSelectsReportThenReadinessFromPairedDisplay(t *testing.T) {
-	report := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "reported", SessionNonce: "one", RequestID: "REQ-one", Character: "role", Realm: "realm", Product: "retail", Build: "12.1.0.69875", Sequence: 3, ReportBytes: 2, ReportAdler32: "00000001"}
+	report := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "reported", SessionNonce: "one", RequestID: "REQ-one", Character: "role", Realm: "realm", Product: "retail", Build: "12.1.0.69875", Sequence: 3, ReportBytes: 2, ReportAdler32: "00000001"}
 	ready := report
 	ready.Kind, ready.RequestID, ready.GUID = "ready", "", "Player-1-123"
 	ready.Sequence, ready.InputReady, ready.ReportBytes, ready.ReportAdler32 = 4, true, 0, ""
@@ -126,7 +127,7 @@ func TestSignalReaderSelectsReportThenReadinessFromPairedDisplay(t *testing.T) {
 }
 
 func TestReadyDiscoveryRequiresSelectedBuildAndUnambiguousFreshPixels(t *testing.T) {
-	signal := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "ready", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.69875", Sequence: 1, InputReady: true}
+	signal := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "ready", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.69875", Sequence: 1, InputReady: true}
 	want := SignalExpectation{Kind: "ready", Release: signal.Release, Product: signal.Product, Build: signal.Build, RequireInputReady: true}
 	end := errors.New("no more frames")
 	for _, mode := range []string{"valid", "filtered", "wrong-build", "wrong-release", "wrong-actor", "not-ready", "old-frame", "ambiguous", "incomplete", "not-discovery"} {

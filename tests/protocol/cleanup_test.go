@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
@@ -26,7 +28,7 @@ func TestLuaRetirementConfirmation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		expected := bridge.SignalExpectation{Kind: "cleared", Release: "2.0.0-dev", SessionNonce: strings.Repeat("a", 32), RequestID: "OP-target", CleanupNonce: strings.Repeat("c", 32), Character: "Paladin", Realm: "Realm"}
+		expected := bridge.SignalExpectation{Kind: "cleared", Release: buildinfo.Version, SessionNonce: strings.Repeat("a", 32), RequestID: "OP-target", CleanupNonce: strings.Repeat("c", 32), Character: "Paladin", Realm: "Realm"}
 		if err := signal.Match(expected); err != nil || signal.GUID != "Player-1-123" {
 			t.Fatal("cleanup identity", err)
 		}

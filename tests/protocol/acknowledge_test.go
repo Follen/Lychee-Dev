@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
@@ -18,7 +20,7 @@ func TestLuaAcknowledgementAfterSessionRecreation(t *testing.T) {
 	if err := json.Unmarshal(output, &payload); err != nil {
 		t.Fatal(err)
 	}
-	expected := bridge.SignalExpectation{Release: "2.0.0-dev", Kind: "reported", SessionNonce: strings.Repeat("a", 32), RequestID: "OP-ack", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 101}
+	expected := bridge.SignalExpectation{Release: buildinfo.Version, Kind: "reported", SessionNonce: strings.Repeat("a", 32), RequestID: "OP-ack", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 101}
 	report, err := bridge.VerifyReport([]byte(payload.Receipt), []byte(payload.Body), []byte(payload.Code), expected)
 	if err != nil {
 		t.Fatal(err)

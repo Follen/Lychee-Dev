@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -33,7 +34,7 @@ func TestOperationReportPersistsIntentBeforeAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer metadata.Close()
-	expected := bridge.SignalExpectation{Kind: "reported", Release: "2.0.0-dev", SessionNonce: "session", RequestID: "request", Character: "paladin", Realm: "realm", Product: "retail", Build: "12.1.0.69875"}
+	expected := bridge.SignalExpectation{Kind: "reported", Release: buildinfo.Version, SessionNonce: "session", RequestID: "request", Character: "paladin", Realm: "realm", Product: "retail", Build: "12.1.0.69875"}
 	raw, _ := json.Marshal(ReportIntent{Schema: "lycheedev.report-intent.v1", Expected: expected})
 	book := journal.OpenBook(metadata)
 	record, err := book.BeginWork(ctx, journal.WorkIntent{Kind: "probe", Resource: "window/test", Session: "session", Snapshot: "PIN-test", Request: raw})

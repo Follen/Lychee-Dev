@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bytes"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"os"
 	"reflect"
 	"strings"
@@ -9,7 +10,7 @@ import (
 )
 
 func queueFixture(id string) ProbeDefinition {
-	return ProbeDefinition{RequestID: id, Release: "2.0.0-dev", SessionNonce: strings.Repeat("a", 32), ReloadNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Code: "return { text = '世界\\\"\n' }"}
+	return ProbeDefinition{RequestID: id, Release: buildinfo.Version, SessionNonce: strings.Repeat("a", 32), ReloadNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Code: "return { text = '世界\\\"\n' }"}
 }
 func TestProbeQueueCodec(t *testing.T) {
 	a, b := queueFixture("OP-a"), queueFixture("OP-b")

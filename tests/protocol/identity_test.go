@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/desktop"
 )
@@ -55,7 +57,7 @@ func TestIdentityMarkerFourClients(t *testing.T) {
 			restricted := parseIdentityReceipt(t, report.Restricted, report.Product, report.Build)
 			for _, signal := range []bridge.Signal{first, refreshed, noActor, restricted} {
 				if signal.Kind != "identity" || signal.ProbeNonce != identityProbeNonce || signal.Sequence != 0 ||
-					signal.SessionNonce != "" || signal.RequestID != "" || signal.Release != "2.0.0-dev" {
+					signal.SessionNonce != "" || signal.RequestID != "" || signal.Release != buildinfo.Version {
 					t.Fatalf("identity marker: %+v", signal)
 				}
 			}

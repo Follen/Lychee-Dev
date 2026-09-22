@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"testing"
 )
 
@@ -36,7 +37,7 @@ func TestSignalsMatchExactIdentityAndFreshSequence(t *testing.T) {
 }
 
 func TestSignalSequenceMustFitLuaIntegerRange(t *testing.T) {
-	s := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "ready", SessionNonce: "session", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.12345", Sequence: 9007199254740991}
+	s := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "ready", SessionNonce: "session", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.12345", Sequence: 9007199254740991}
 	raw, _ := json.Marshal(s)
 	if _, err := ParseSignal(raw); err != nil {
 		t.Fatal("safe upper bound rejected", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/selection"
@@ -24,7 +25,7 @@ func (f *sessionFixtureFrames) Close() { f.closed = true }
 func TestWindowSessionObservation(t *testing.T) {
 	ctx := context.Background()
 	target := ClientWindow{Client: selection.ClientInstallation{Product: "retail", FullBuild: "12.1.0.69875"}, Window: desktop.WindowIdentity{Handle: 1, ProcessID: 2, ProcessStartedAt: 3}}
-	expected := bridge.SignalExpectation{Kind: "ready", Release: "2.0.0-dev", SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", Product: target.Client.Product, Build: target.Client.FullBuild, RequireInputReady: true}
+	expected := bridge.SignalExpectation{Kind: "ready", Release: buildinfo.Version, SessionNonce: strings.Repeat("a", 32), Character: "Paladin", Realm: "Realm", Product: target.Client.Product, Build: target.Client.FullBuild, RequireInputReady: true}
 	signal := bridge.Signal{Schema: "lycheedev.signal.v1", Kind: "ready", Release: expected.Release, SessionNonce: expected.SessionNonce, Character: expected.Character, Realm: expected.Realm, Product: expected.Product, Build: expected.Build, GUID: "Player-1-123", Sequence: 1, InputReady: true}
 	for _, mode := range []string{"valid", "discovery", "discovery-invalid-nonce", "discovery-invalid-actor", "missing-guid", "wrong-nonce", "not-ready", "payload", "request", "changed-window", "invalid-expectation"} {
 		t.Run(mode, func(t *testing.T) {

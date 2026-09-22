@@ -3,6 +3,7 @@ package bridge
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"hash/adler32"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func TestPersistedReportRejectsInvalidState(t *testing.T) {
 
 func TestPersistedReportRemoval(t *testing.T) {
 	code, body := []byte("return 42"), "42"
-	signal := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.0-dev", Kind: "reported", SessionNonce: "session", RequestID: "OP-test", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.69875", Sequence: 3, CodeBytes: uint32(len(code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(code)), ReportBytes: 2, ReportAdler32: fmt.Sprintf("%08x", adler32.Checksum([]byte(body)))}
+	signal := Signal{Schema: "lycheedev.signal.v1", Release: buildinfo.Version, Kind: "reported", SessionNonce: "session", RequestID: "OP-test", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.69875", Sequence: 3, CodeBytes: uint32(len(code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(code)), ReportBytes: 2, ReportAdler32: fmt.Sprintf("%08x", adler32.Checksum([]byte(body)))}
 	raw, _ := json.Marshal(signal)
 	before := fmt.Sprintf(`LycheeToolkitDB={schema=1,reports={["OP-test"]={receipt=%q,body=%q}}}`, raw, body)
 	expected := SignalExpectation{Release: signal.Release, Kind: "reported", RequestID: "OP-test", SessionNonce: "session", Character: signal.Character, Realm: signal.Realm, Product: signal.Product, Build: signal.Build, AfterSequence: 2}
