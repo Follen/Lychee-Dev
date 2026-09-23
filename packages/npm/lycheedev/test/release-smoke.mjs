@@ -5,7 +5,7 @@
 //
 //   node packages/npm/lycheedev/test/release-smoke.mjs <lycheedev-x.y.z.tgz> <npm-cli.js> [--report <path>]
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
