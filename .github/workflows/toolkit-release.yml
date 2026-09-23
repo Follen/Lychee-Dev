@@ -392,9 +392,12 @@ jobs:
         with:
           node-version: '24.18.1'
       - name: Download the sealed manifest from this run
+        # The manifest is produced by assemble (release-sealed-manifest);
+        # the consolidated sealed-bundle only exists after seal, which runs
+        # in parallel with this job.
         uses: actions/download-artifact@v4 # TODO: pin SHA
         with:
-          name: sealed-bundle
+          name: release-sealed-manifest
           path: sealed-bundle
       - name: WGC capture and native input self-window suite
         # Only windows this suite created itself; never the game.
@@ -418,7 +421,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           node tools/release.mjs desktop-evidence `
-            --manifest "sealed-bundle/sealed/release-manifest.json" `
+            --manifest "sealed-bundle/release-manifest.json" `
             --smoke "${{ steps.desktop-smoke.outputs.report }}" `
             --operator 'Follen' `
             --notes 'Self-hosted interactive-desktop verification of this release run: WGC self-window capture, native input lock, installed-launcher bind round-trip.' `
