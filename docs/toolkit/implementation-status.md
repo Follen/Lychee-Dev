@@ -1,7 +1,7 @@
 # Toolkit 2.0 实施状态
 
-日期：2026-09-23。2.0.0 已发布；当前分支正在准备 2.0.1 修复版，
-版本源为 `release/version.json`。发行条件见 [2.0.1 发布合同](release-2.0.1.md)。
+日期：2026-09-23。2.0.1 已发布；版本源为 `release/version.json`。
+发行条件及本次后验恢复见 [2.0.1 发布合同](release-2.0.1.md)。
 
 ## 当前状态
 
@@ -16,8 +16,13 @@
   Titan `38002` 为支持客户端；Forever `16001` 保留代码/TOC 但
   未获真机验收。CI 保留托管 Windows 上的 Go、Lua、进程和安装包验证，
   不再要求 self-hosted 交互桌面或 desktop-evidence 门禁。
-- 2.0.1 的源代码、CI 与发行结果尚待本轮修复、合并、标签构建和 registry
-  回读验证。不能把当前工作树的通过结果当成正式 tag 的结果。
+- `v2.0.1` 指向 `baa83e9d7ec80091dce5de68c4295bb233139613`；
+  标签 CI、Windows 原生组装、安装 smoke、封存和 release-gate 均通过。
+  npm Trusted Publishing 成功，`latest` 为 2.0.1，registry integrity 与
+  封存 tgz 一致，provenance 和隔离安装回读已验证。GitHub Release 及六个
+  封存附件已人工补齐并逐项核对。标签工作流因发布后即时回读延迟和
+  Release 步骤缺少 `GH_TOKEN` 留有失败记录；不能称整条自动流程全绿。
+  主分支已修复这两个工作流问题，已发布的标签和 tgz 不变。
 
 ## 历史实施记录（以下为当时快照，不代表当前缺项或发布状态）
 

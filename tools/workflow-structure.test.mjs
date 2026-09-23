@@ -62,6 +62,10 @@ test('release publishes the sealed tarball via OIDC with no token fallback', () 
   assert.doesNotMatch(publishCode, /authToken|NODE_AUTH_TOKEN\s*[=:]|NPM_TOKEN\s*[=:]/);
   assert.match(release, /environment: npm/);
   assert.match(release, /id-token: write/);
+  assert.match(publishCode, /contents: write/);
+  assert.match(publishCode, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(publishCode, /for attempt in \$\(seq 1 60\)/);
+  assert.match(publishCode, /\[ "\$visible" = true \]/);
 });
 
 test('windows amd64 is the only shipped platform', () => {

@@ -360,8 +360,8 @@ Windows 固定 required jobs、工具链和托管 runner 遵守 [2.0.1 发布规
 | REL-06 | P0 | 验收后的 tgz 被修改或 publish 前重新 pack | 摘要校验失败；发布器只能消费封存的准确文件 |
 | REL-07 | P0 | OIDC workflow/repo/environment 不匹配或认证失败 | 停止，不退到长效 token；dry-run 不具备真实发布路径 |
 | REL-08 | P0 | npm 包有 optional/runtime 依赖或安装时下载 | 白名单检查失败；包内二进制齐全且 ignore-scripts 可运行 |
-| REL-09 | P0 | registry 已有同版本或 publish 超时 | 区分存在/不存在/未知；只在 integrity 相同时继续后验证 |
-| REL-10 | P0 | npm 成功但 Release 创建失败 | 重跑只补后验证与 Release，不重复 publish 或移动 tag |
+| REL-09 | P0 | registry 已有同版本、publish 超时或发布后暂不可见 | 区分存在/不存在/未知；已接受的 publish 只重试有界回读，不重复发布；仅在 integrity 相同时继续后验证 |
+| REL-10 | P0 | npm 成功但 Release 创建失败 | Release job 必须具备 `GH_TOKEN` 和 `contents: write`；失败时只补后验证与 Release，不重复 publish 或移动 tag |
 | REL-11 | P0 | RC 与正式版本渠道 | 2.0.1-rc.N 只进入 next，正式 2.0.1 进入 latest；不得先占用正式版试装 |
 | REL-12 | P0 | 发布后 registry 回读与干净安装 | version/Commit/integrity/来源证明/资源一致，所有声明平台可运行 |
 | REL-13 | P0 | 一个原生平台产物缺失或许可清单不完整 | 发行失败，不将缺失转换成 warning 后继续 |

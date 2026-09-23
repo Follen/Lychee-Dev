@@ -688,9 +688,9 @@ function releaseNotesCommand(argv) {
     '',
     '## Verification',
     '',
-    '- Windows required jobs and the windows-amd64 run smoke are attached as reports; digests are sealed in `release-manifest.json` / `SHA256SUMS`.',
+    '- Windows required jobs and the windows-amd64 run smoke passed in the release workflow; reports remain in its sealed-bundle artifact. Digests are sealed in `release-manifest.json` / `SHA256SUMS`.',
     '- This release does not import or migrate any legacy tool data; new-format state is created from scratch on first use.',
-    '- Third-party components and their licenses: `THIRD_PARTY_NOTICES` (attached).',
+    '- Third-party components and their licenses: `THIRD_PARTY_NOTICES` inside the npm package.',
   ];
   if (manifest.deviations.length) lines.push('', '## Recorded deviations', '', ...manifest.deviations.map(item => `- ${item}`));
   writeFileSync(out, `${lines.join('\n')}\n`);

@@ -428,7 +428,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: npm
     permissions:
-      contents: read
+      contents: write
       id-token: write
     defaults:
       run:
@@ -436,6 +436,7 @@ jobs:
     env:
       PUBLISH_VERSION: ${{ needs.identity.outputs.version }}
       PUBLISH_DIST_TAG: ${{ needs.identity.outputs.dist_tag }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Normalize TMP to the long runner temp path
         # Hosted windows runners expose an 8.3 short TEMP
@@ -507,7 +508,18 @@ jobs:
       - name: Registry read-back (name, version, integrity, provenance)
         run: |
           set -e
-          npm view "lycheedev@$PUBLISH_VERSION" --json > registry-view.json
+          # npm can accept a publish while the new version is still processing.
+          # Retry only the read; never submit the same tarball again.
+          visible=false
+          for attempt in $(seq 1 60); do
+            if npm view "lycheedev@$PUBLISH_VERSION" --json > registry-view.json; then
+              visible=true
+              break
+            fi
+            echo "registry version not visible yet (attempt $attempt/60)"
+            sleep 10
+          done
+          [ "$visible" = true ] || { echo '::error::published version did not become visible after 10 minutes'; exit 1; }
           node tools/release.mjs verify-registry-readback \
             --name lycheedev --version "$PUBLISH_VERSION" \
             --view registry-view.json --tgz "out/lycheedev-$PUBLISH_VERSION.tgz" > readback-check.json
