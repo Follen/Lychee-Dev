@@ -45,15 +45,6 @@ jobs:
   identity:
     name: freeze version and release identity
     runs-on: ubuntu-24.04
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: bash
@@ -63,6 +54,13 @@ jobs:
       dist_tag: ${{ steps.freeze.outputs.dist_tag }}   # latest | next (release) | empty (dryrun)
       commit: ${{ steps.freeze.outputs.commit }}
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Guard - manual dispatch is dry-run only
         run: |
@@ -111,19 +109,17 @@ jobs:
   verify-cgo:
     name: CGO_ENABLED=0 capture/decode pre-step
     runs-on: windows-2025
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -145,19 +141,17 @@ jobs:
     name: build and pack once (windows native)
     needs: [identity, ci, verify-cgo]
     runs-on: windows-2025
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -242,15 +236,6 @@ jobs:
           - target: darwin-arm64
             os: macos-15
     runs-on: ${{ matrix.os }}
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: bash
@@ -258,6 +243,13 @@ jobs:
       SMOKE_TARGET: ${{ matrix.target }}
       SMOKE_VERSION: ${{ needs.identity.outputs.version }}
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -332,19 +324,17 @@ jobs:
     name: seal digests and SHA256SUMS
     needs: [identity, assemble, platform-smoke]
     runs-on: ubuntu-24.04
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: bash
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -438,15 +428,6 @@ jobs:
     name: release gate (sealed digests, platform and desktop evidence)
     needs: [identity, ci, seal]
     runs-on: ubuntu-24.04
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: bash
@@ -455,6 +436,13 @@ jobs:
       GATE_COMMIT: ${{ needs.identity.outputs.commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -526,15 +514,6 @@ jobs:
     needs: [identity, release-gate]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     environment: npm
     permissions:
       contents: read
@@ -546,6 +525,13 @@ jobs:
       PUBLISH_VERSION: ${{ needs.identity.outputs.version }}
       PUBLISH_DIST_TAG: ${{ needs.identity.outputs.dist_tag }}
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -684,19 +670,17 @@ jobs:
       - release-gate
       - publish
     runs-on: ubuntu-24.04
-      # Long-path TMP: hosted windows runners expose an 8.3 short TEMP
-      # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it;
-      # runner.* context is not available in job env, so the first step
-      # exports the long runner.temp through GITHUB_ENV.
-      - name: Normalize TMP to the long runner temp path
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
     defaults:
       run:
         shell: bash
     steps:
+      - name: Normalize TMP to the long runner temp path
+        # Hosted windows runners expose an 8.3 short TEMP
+        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Assert the release pipeline result
         env:
           MODE: ${{ needs.identity.outputs.mode }}
