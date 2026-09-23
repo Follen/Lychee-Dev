@@ -110,10 +110,12 @@ from acceptance. A client folder is a location, not an identity: read
 
 - Version source is `release/version.json`; `node tools/version.mjs --write`
   syncs package, TOCs, addon runtime and Go buildinfo. `--check` gates CI.
-- Publishing requires: clean tree at the tagged commit, six required CI jobs
-  green, `release.mjs assemble` (license gate, five platforms,
+- Publishing requires: clean tree at the tagged commit, required CI jobs
+  green, `release.mjs assemble` (license gate, windows-amd64 binary,
   corresponding-source rebuild compare), sealed digests, isolated
-  `--ignore-scripts` install smoke, five-platform run evidence, OIDC publish
+  `--ignore-scripts` install smoke, windows run evidence, OIDC publish
   without token fallback, registry read-back, then the GitHub Release.
+- The product ships Windows amd64 only (2026-09-23 owner decision):
+  non-Windows platforms are not built, shipped or accepted.
 - A published tgz is immutable; failures after publish use new versions, never
   a moved tag.

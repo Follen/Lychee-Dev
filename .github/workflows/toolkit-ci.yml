@@ -15,10 +15,8 @@ name: toolkit foundation
 #   windows-package           Windows-native release exe, real npm tgz,
 #                             isolated --ignore-scripts install (space +
 #                             Chinese paths), offline business smoke
-#   cross-platform-contract   Linux-native pure Go/Git/persistence/package
-#                             contracts plus darwin amd64/arm64 cross-compile
-#                             contracts (native darwin runtime evidence is
-#                             produced by toolkit-release.yml's platform smokes)
+#   windows-amd64 is the only shipped platform; its run smoke lives in
+#   toolkit-release.yml's platform-smoke stage.
 #   ci-required               aggregation; skipped/cancelled never counts as
 #                             passed
 #
@@ -270,68 +268,9 @@ jobs:
           path: ${{ steps.package-smoke.outputs.report }}
           if-no-files-found: error
 
-  cross-platform-contract:
-    # Single job by design: required status checks reference this name
-    # literally, and matrix legs would produce suffixed check names. Linux
-    # contracts run natively; the darwin targets are cross-compile contract
-    # checks here. Native darwin runtime evidence comes from the
-    # toolkit-release.yml five-platform run smokes.
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Normalize TMP to the long runner temp path
-        # Hosted windows runners expose an 8.3 short TEMP
-        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: '1.27.1'
-          cache: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24.18.1'
-      - run: go mod verify
-      - run: node tools/version.mjs --check
-      - name: Node tool tests
-        run: |
-          node --test tools/*.test.mjs
-          if [ $? -ne 0 ]; then echo '::error::tools tests failed'; exit 1; fi
-      - name: Naming and import constraints
-        run: |
-          node tools/import-contract.mjs
-          if [ $? -ne 0 ]; then echo '::error::import contract failed'; exit 1; fi
-      - run: go vet ./...
-      - name: Pure Go suite (Lua-gated suites skip without an interpreter)
-        run: go test -count=1 -timeout=5m ./...
-      - name: darwin cross-compile contracts (amd64)
-        run: |
-          export CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
-          go vet ./...
-          go build -trimpath -o "$RUNNER_TEMP/lycheedev-darwin-amd64" ./cmd/lycheedev
-      - name: darwin cross-compile contracts (arm64)
-        run: |
-          export CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
-          go vet ./...
-          go build -trimpath -o "$RUNNER_TEMP/lycheedev-darwin-arm64" ./cmd/lycheedev
-      - run: go run ./cmd/lycheedev describe --format json
-      - name: Skill / command-reference consistency
-        run: |
-          node tools/skill-contract.mjs
-          if [ $? -ne 0 ]; then echo '::error::skill contract failed'; exit 1; fi
-      - name: Package launcher contract tests (cross-platform selection)
-        run: |
-          node --test packages/npm/lycheedev/test/launcher.test.mjs
-          if [ $? -ne 0 ]; then echo '::error::launcher tests failed'; exit 1; fi
-
   race:
     name: shared-state race detection
-    runs-on: ubuntu-24.04
+    runs-on: windows-2025
     steps:
       - name: Normalize TMP to the long runner temp path
         # Hosted windows runners expose an 8.3 short TEMP
@@ -355,9 +294,8 @@ jobs:
       - windows-process
       - windows-addon
       - windows-package
-      - cross-platform-contract
       - race
-    runs-on: ubuntu-24.04
+    runs-on: windows-2025
     defaults:
       run:
         shell: bash
@@ -375,7 +313,6 @@ jobs:
           WINDOWS_PROCESS_RESULT: ${{ needs.windows-process.result }}
           WINDOWS_ADDON_RESULT: ${{ needs.windows-addon.result }}
           WINDOWS_PACKAGE_RESULT: ${{ needs.windows-package.result }}
-          CROSS_PLATFORM_CONTRACT_RESULT: ${{ needs.cross-platform-contract.result }}
           RACE_RESULT: ${{ needs.race.result }}
         run: |
           status=0
@@ -390,6 +327,5 @@ jobs:
           check windows-process "$WINDOWS_PROCESS_RESULT"
           check windows-addon "$WINDOWS_ADDON_RESULT"
           check windows-package "$WINDOWS_PACKAGE_RESULT"
-          check cross-platform-contract "$CROSS_PLATFORM_CONTRACT_RESULT"
           check race "$RACE_RESULT"
           exit $status

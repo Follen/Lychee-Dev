@@ -481,7 +481,7 @@ skill 已于 2.0 发布准备中退役（2026-09-23，检查点 `6b08e14` 之后
 | Hotfix 远程提供方 + CSV | internal/records hotfix/编码 | DAT-06/06a/06b/07 | 实现中 |
 | 文档增补（inventory 工作台范围+修正+关闭 unmapped；regression WKB-01..13、SKL-12..16） | docs/toolkit/capability-inventory.md、regression.md | 发布判定完整性 | 已交付（主 agent 复核并补决策 14） |
 | 第三方许可闭环（AGPL 派生审查、完整通知、对应源码交付） | THIRD_PARTY_NOTICES.md、packages/npm/lycheedev/THIRD_PARTY_NOTICES | PKG-07、许可门槛 | 实现中 |
-| Windows CI + 发行闭环（六 required job、五平台产物、tgz 封存/OIDC/回读） | .github/workflows、tools/、packages/npm 测试 | REL-01..14、PKG-01..08 | 实现中 |
+| Windows CI + 发行闭环（required job、Windows 产物、tgz 封存/OIDC/回读；2026-09-23 收缩为仅 Windows amd64） | .github/workflows、tools/、packages/npm 测试 | REL-01..14、PKG-01..08 | 实现中 |
 
 尚未开工/待前置：`internal/command` 统一接线（含 `live bugs`/`reload`/`cancel`、
 `evidence list/bundle/keep/remove`，等 Go 连接包完成后避免同文件并发）；skill

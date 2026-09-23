@@ -23,6 +23,11 @@ single workspace, a single evidence chain, and reproducible pinned references.
 Forever (`16001`) code paths remain in the tree but are **not verified and not
 part of the 2.0 acceptance matrix**.
 
+## Requirements
+
+**Windows 10/11 x64 only.** The toolkit ships, verifies and accepts Windows
+amd64; a logged-in desktop session is required for live game automation.
+
 ## Install
 
 ```bash

@@ -4,7 +4,7 @@
 
 当前本地 npm smoke 仅验证 Windows 单平台开发包，含空格/中文路径、实际 tgz、
 隔离 prefix、禁用安装脚本及原生启动，并已打入当前 addon/skill 源码，在模拟客户端
-完成安装、升级、恢复、归档移除及用户编辑冲突检查；不是五平台或游戏运行验收。
+完成安装、升级、恢复、归档移除及用户编辑冲突检查；不是全部游戏运行验收。
 `terminalRecovery` 另记录实际安装的启动器对受控完成任务执行 `live resume` 的
 成功释放与重复调用测试；它不代表未完成任务续跑或真实游戏执行通过。
 开发 manifest 暂时 private=true，最终许可未核定。实际证据见
@@ -76,7 +76,7 @@ PowerShell 使用 `pwsh`，设置失败即停，并在调用 go/npm/lua 等外�
 | `windows-process` | 真实 CLI 多进程、OS 锁、同窗口排他、双 Agent 并行、进程死亡及未决恢复 |
 | `windows-addon` | Lua 5.1 语法、四客户端离线矩阵、locale、TOC 顺序、事件目录和 ZIP 结构 |
 | `windows-package` | Windows 原生发行 exe、npm 实际 tgz 内容、隔离全局安装、禁用安装脚本、离线业务 smoke |
-| `cross-platform-contract` | Linux/macOS 的适用纯 Go、Git、持久化、包与命令契约 |
+| `race` | 共享状态竞态检测（非必需，Windows 原生） |
 | `ci-required` | 核对必需结果、归档报告，不接受缺失或跳过作为通过 |
 
 Windows 多进程测试采用临时工作空间和 barrier，不对真实桌面发送输入。消息投递模拟和自建接收窗口可用于基础 CI，但有交互桌面要求的用例应进入 desktop workflow。
@@ -97,7 +97,9 @@ Windows 多进程测试采用临时工作空间和 barrier，不对真实桌面�
 - release 构建使用 `-trimpath`，明确 GOOS/GOARCH、版本和 Commit。CGO_ENABLED=0 的发行目标与需要 CGO/本地编译器的 race 测试 job 分开配置。
 - 模块与工具缓存键包含 OS、架构、工具链和 go.sum/lockfile；构建产物不能只依据缓存命中即被接受。
 
-目标原生发行矩阵为 Windows amd64、Linux amd64/arm64、macOS amd64/arm64；每个声明平台必须执行匹配架构的安装/运行 smoke。允许交叉构建，但目标运行验证缺失时不能声称该平台已验收。
+目标原生发行矩阵为 **Windows amd64**（2026-09-23 owner 裁决收缩：清理 macOS 与
+Linux 支持，产品只发布并验收 Windows amd64）。每个声明平台必须执行匹配架构的
+安装/运行 smoke；纯 Go 包保持可移植，但非 Windows 平台不构建、不发行、不验收。
 
 ## 5. npm 包形态：一个公开包，零运行依赖
 
@@ -106,13 +108,13 @@ Go 安装层读取的 `release.json` 使用 `lycheedev.release.v1`：`version`�
 （资源记录数组）。每条文件记录为 `path`、`bytes`、`sha256`；资源路径相对
 `payload/`，仅允许 `addon/` 和 `skill/`。部署载荷必须含 skill 入口与四 TOC，
 并与资源清单完整匹配。读取拒绝重复/未知 JSON 字段、超限输入和版本不匹配。
-原生压缩包可只声明对应平台；npm 组装门槛仍要求五个平台。当前安装层核验
+原生压缩包声明其对应平台；npm 组装门槛要求 windows-amd64 平台。当前安装层核验
 二进制记录结构，不代替启动器的二进制内容校验、发行来源认证或 TOC 语义测试。
 只有二进制、缺少资源的包不能用于该安装接口。开发 smoke 现已包含当前 addon/skill
 资源，但只有宿主平台二进制；报告同时记录 HEAD 和 workspaceDirty，不能将未提交
 工作树的载荷称为该 Commit 可复现的正式发行。
 
-为遵守项目现有的零运行时 npm 依赖约束，2.0.0 只发布一个 `lycheedev` npm 包。主包内携带五个平台的二进制与共用插件/skill 资源；不引入 optionalDependencies 平台包链。之前方案中的“平台包”在 2.0.0 指独立原生发行压缩包，而不是多个互相依赖的 npm 包。
+为遵守项目现有的零运行时 npm 依赖约束，2.0.0 只发布一个 `lycheedev` npm 包。主包内携带 windows-amd64 二进制与共用插件/skill 资源；不引入 optionalDependencies 平台包链。之前方案中的“平台包”在 2.0.0 指独立原生发行压缩包，而不是多个互相依赖的 npm 包。
 
 ```text
 packages/npm/lycheedev/
@@ -120,10 +122,6 @@ packages/npm/lycheedev/
   bin/lycheedev.mjs            仅选择平台、转发 argv/stdio/退出码
   native/
     windows-amd64/lycheedev.exe
-    linux-amd64/lycheedev
-    linux-arm64/lycheedev
-    darwin-amd64/lycheedev
-    darwin-arm64/lycheedev
   payload/addon/
   payload/skill/
   release.json
@@ -180,7 +178,7 @@ release-gate 验证既有实机报告时必须核对来源、Commit 和二进制
 ```text
 冻结版本与来源
   -> Windows / 跨平台 CI
-  -> 构建五平台原生产物及共用资源
+  -> 构建 Windows amd64 原生产物及共用资源
   -> pack 实际 tgz
   -> 从实际 tgz/原生包安装验证 + 四端实机证据核对
   -> release-gate 封存 SHA / checksums / 报告
@@ -216,7 +214,7 @@ release-gate 验证既有实机报告时必须核对来源、Commit 和二进制
 - [ ] v2.0.0 指向最终验收 Commit，协议和工作空间 schema 单独记录。
 - [ ] Windows required jobs、跨平台 smoke、回归矩阵和四客户端实机门槛通过。
 - [ ] 实际 tgz 安装通过，禁用脚本也可用，且运行时 npm 依赖为零。
-- [ ] 五平台二进制、原生包、addon ZIP、skill 和 checksums 完整且相互匹配。
+- [ ] Windows amd64 二进制、原生包、addon ZIP、skill 和 checksums 完整且相互匹配。
 - [ ] 新 workflow 对应的 npm Trusted Publisher 绑定正确，OIDC 发布来源证明可验证。
 - [ ] 实际 publish 消费已验收的 tgz；没有重新构建、重新 pack 或版本漂移。
 - [ ] registry 回读和安装 smoke 通过，latest 指向 2.0.0。

@@ -213,49 +213,22 @@ jobs:
           if-no-files-found: error
 
   platform-smoke:
-    name: run smoke (${{ matrix.target }})
+    name: run smoke (windows-amd64)
     needs: [identity, assemble]
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - windows-amd64
-          - linux-amd64
-          - linux-arm64
-          - darwin-amd64
-          - darwin-arm64
-        include:
-          - target: windows-amd64
-            os: windows-2025
-          - target: linux-amd64
-            os: ubuntu-24.04
-          - target: linux-arm64
-            os: ubuntu-24.04-arm
-          - target: darwin-amd64
-            os: macos-15-large
-          - target: darwin-arm64
-            os: macos-15
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-2025
     defaults:
       run:
-        shell: bash
+        shell: pwsh
     env:
-      SMOKE_TARGET: ${{ matrix.target }}
+      SMOKE_TARGET: windows-amd64
       SMOKE_VERSION: ${{ needs.identity.outputs.version }}
     steps:
-      - name: Normalize TMP to the long runner temp path
-        # Hosted windows runners expose an 8.3 short TEMP
-        # (C:\Users\RUNNER~1\...) and every t.TempDir() fixture inherits it.
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.18.1'
       - name: Download the sealed tarball and manifest
-        uses: actions/download-artifact@v4 # TODO: pin SHA (verify the current v4 release SHA before the first real release run)
+        uses: actions/download-artifact@v4 # TODO: pin SHA
         with:
           name: release-tgz
           path: bundle/tgz
@@ -267,56 +240,32 @@ jobs:
       - name: Install the sealed tarball and run the offline business smoke
         # release-smoke audits the tgz against the release.json whitelist,
         # installs it into an isolated --global --prefix under a path with
-        # spaces and Chinese characters using --ignore-scripts, verifies every
-        # declared platform binary digest plus the Unix executable bit from
-        # the real installed directory, runs the offline business commands,
-        # and (non-Windows) asserts that `live` reports
-        # desktop.unsupported_platform instead of faking success (PKG-08).
-        if: runner.os != 'Windows'
-        run: |
-          set -e
-          mkdir -p reports
-          # npm ships inside the node install; the layout differs per OS and
-          # require.resolve cannot see it from the repo. Derive from execPath.
-          npm_cli="$(node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);const c=process.platform==='win32'?[p.join(d,'node_modules','npm','bin','npm-cli.js')]:[p.join(p.dirname(d),'lib','node_modules','npm','bin','npm-cli.js'),p.join(d,'node_modules','npm','bin','npm-cli.js')];process.stdout.write(c.find(x=>f.existsSync(x))||'')")"
-          [ -f "$npm_cli" ] || { echo "::error::npm-cli.js not found next to the running node"; exit 1; }
-          tgz="bundle/tgz/lycheedev-$SMOKE_VERSION.tgz"
-          [ -f "$tgz" ] || { echo "::error::missing sealed tarball $tgz"; exit 1; }
-          node packages/npm/lycheedev/test/release-smoke.mjs "$tgz" "$npm_cli" --report "reports/$SMOKE_TARGET-release-smoke.json" | tee smoke-stdout.json
-          node -e "
-            const fs = require('fs');
-            const report = 'reports/' + process.env.SMOKE_TARGET + '-release-smoke.json';
-            const data = JSON.parse(fs.readFileSync(report, 'utf8'));
-            data.status = JSON.parse(fs.readFileSync('smoke-stdout.json', 'utf8')).status;
-            if (data.status !== 'passed') throw new Error('smoke did not report passed');
-            fs.writeFileSync(report, JSON.stringify(data, null, 2) + '\n');
-          "
-      - name: Install the sealed tarball and run the offline business smoke (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+        # spaces and Chinese characters using --ignore-scripts, verifies the
+        # declared binary digest, and runs the offline business commands.
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path reports | Out-Null
-          $npmCli = node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);const c=process.platform==='win32'?[p.join(d,'node_modules','npm','bin','npm-cli.js')]:[p.join(p.dirname(d),'lib','node_modules','npm','bin','npm-cli.js'),p.join(d,'node_modules','npm','bin','npm-cli.js')];process.stdout.write(c.find(x=>f.existsSync(x))||'')"
-          if (-not (Test-Path $npmCli)) { throw 'npm-cli.js not found next to the running node' }
+          $npmCli = node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);process.stdout.write(p.join(d,'node_modules','npm','bin','npm-cli.js'))"
+          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
           $tgz = "bundle/tgz/lycheedev-$env:SMOKE_VERSION.tgz"
           if (-not (Test-Path $tgz)) { throw "missing sealed tarball $tgz" }
-          node packages/npm/lycheedev/test/release-smoke.mjs $tgz $npmCli --report "reports/$env:SMOKE_TARGET-release-smoke.json" | Tee-Object -FilePath smoke-stdout.json
+          node packages/npm/lycheedev/test/release-smoke.mjs $tgz $npmCli --report "reports/windows-amd64-release-smoke.json" | Tee-Object -FilePath smoke-stdout.json
           if ($LASTEXITCODE -ne 0) { throw 'release smoke failed' }
-          node -e "const fs=require('fs');const p='reports/'+process.env.SMOKE_TARGET+'-release-smoke.json';const d=JSON.parse(fs.readFileSync(p,'utf8'));d.status=JSON.parse(fs.readFileSync('smoke-stdout.json','utf8')).status;if(d.status!=='passed')throw new Error('smoke did not report passed');fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n')"
+          node -e "const fs=require('fs');const p='reports/windows-amd64-release-smoke.json';const d=JSON.parse(fs.readFileSync(p,'utf8'));d.status=JSON.parse(fs.readFileSync('smoke-stdout.json','utf8')).status;if(d.status!=='passed')throw new Error('smoke did not report passed');fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n')"
       - name: Emit platform run evidence
+        shell: bash
         run: |
           set -e
           mkdir -p evidence
           node tools/release.mjs platform-evidence \
             --manifest bundle/sealed/release-manifest.json \
-            --smoke "reports/$SMOKE_TARGET-release-smoke.json" \
-            --target "$SMOKE_TARGET" \
-            --out "evidence/$SMOKE_TARGET.json"
+            --smoke "reports/windows-amd64-release-smoke.json" \
+            --target "windows-amd64" \
+            --out "evidence/windows-amd64.json"
       - name: Preserve platform evidence and smoke report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: platform-evidence-${{ matrix.target }}
+          name: platform-evidence-windows-amd64
           path: |
             evidence/*
             reports/*
@@ -378,7 +327,7 @@ jobs:
           mv gather/evidence/* evidence/
           mv gather/reports/* reports/
           # REL-13: a missing platform's evidence is a gate failure, never a warning.
-          for target in windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+          for target in windows-amd64; do
             [ -f "evidence/$target.json" ] || { echo "::error::missing run evidence for $target"; exit 1; }
           done
       - name: Fold report digests into the sealed manifest (§6)
@@ -387,10 +336,6 @@ jobs:
           node tools/release.mjs seal --out out \
             --report reports/cgo-evidence.json \
             --report reports/windows-amd64-release-smoke.json \
-            --report reports/linux-amd64-release-smoke.json \
-            --report reports/linux-arm64-release-smoke.json \
-            --report reports/darwin-amd64-release-smoke.json \
-            --report reports/darwin-arm64-release-smoke.json
       - name: Recompute every sealed digest
         run: |
           set -e
@@ -631,7 +576,7 @@ jobs:
           node tools/release.mjs release-notes --out NOTES.md --sealed out/sealed
       - name: Create or repair the GitHub Release (§9)
         env:
-          ASSET_NAMES: "lycheedev-${{ needs.identity.outputs.version }}.tgz,lycheedev-${{ needs.identity.outputs.version }}-windows-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-linux-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-linux-arm64.zip,lycheedev-${{ needs.identity.outputs.version }}-darwin-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-darwin-arm64.zip,lycheedev-${{ needs.identity.outputs.version }}-addon.zip,lycheedev-${{ needs.identity.outputs.version }}-corresponding-source.tar.gz,SHA256SUMS,release-manifest.json"
+          ASSET_NAMES: "lycheedev-${{ needs.identity.outputs.version }}.tgz,lycheedev-${{ needs.identity.outputs.version }}-windows-amd64.zip,lycheedev-${{ needs.identity.outputs.version }}-addon.zip,lycheedev-${{ needs.identity.outputs.version }}-corresponding-source.tar.gz,SHA256SUMS,release-manifest.json"
         run: |
           set -e
           if gh release view "v$PUBLISH_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then

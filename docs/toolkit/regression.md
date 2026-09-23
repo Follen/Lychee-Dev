@@ -329,7 +329,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | PKG-05 | P0 | 发行文件白名单和离线启动 | 不含 Python、旧内核、用户数据、本地任务、测试/调查资料或空壳代理 |
 | PKG-06 | P0 | 安装/卸载有用户文件的目录 | 只处理明确拥有文件；保留额外文件；删除数据需显式范围 |
 | PKG-07 | P0 | release 版本、tag、schema、校验和 | 可追溯且一致；第三方许可及署名齐全 |
-| PKG-08 | P0 | Windows/Linux/macOS 发行目标 | 声明能力与实际验证一致；Linux/macOS live 返回 unsupported，不伪装成功 |
+| PKG-08 | P0 | Windows 发行目标 | 声明能力与实际验证一致；产品只发行 Windows amd64（2026-09-23 裁决），非 Windows 平台不声明、不验收 |
 
 ## 14. 性能回归与预算
 
@@ -369,7 +369,7 @@ Windows 固定 required jobs、工具链、托管 runner 与真实桌面的分�
 
 | 执行时机 | 内容 | 环境与门槛 |
 | --- | --- | --- |
-| 每个变更 | 格式、vet、契约、模块测试、离线 fixtures、Lua 四端、技能引用 | Windows/Linux/macOS 的适用子集；无真实账号与公网依赖 |
+| 每个变更 | 格式、vet、契约、模块测试、离线 fixtures、Lua 四端、技能引用 | Windows 的适用子集；无真实账号与公网依赖 |
 | 每个合并候选 | 真实 CLI 多进程、恢复故障矩阵、包安装 | 临时独立 workspace；P0 全过 |
 | 每晚 | fuzz、重复交错种子、资源泄漏、固定性能 | 记录预算和种子；捕获机器与普通 runner 分开 |
 | 发行候选 | 上述全部 + 原生捕获 + 真实网络 + 四端实机 + skill 情景 | 缺实机证据不能记通过；报告与发行 Commit 绑定 |
