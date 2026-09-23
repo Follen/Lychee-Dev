@@ -47,7 +47,8 @@ func UpgradeInstallation(ctx context.Context, releaseDirectory, target, archive,
 	if err := outsideDiscovery(parent, archive); err != nil {
 		return Upgrade{}, err
 	}
-	lease, err := vault.AcquireLease(ctx, filepath.Join(parent, ".lycheedev-locks"), "installation:"+strings.ToLower(target))
+	scope, resource := installationLeaseIdentity(parent, target)
+	lease, err := vault.AcquireLease(ctx, scope, resource)
 	if err != nil {
 		return Upgrade{}, err
 	}
@@ -104,7 +105,8 @@ func ResumeUpgrade(ctx context.Context, target, archive, component string) (Upgr
 	if err := outsideDiscovery(parent, archive); err != nil {
 		return Upgrade{}, err
 	}
-	lease, err := vault.AcquireLease(ctx, filepath.Join(parent, ".lycheedev-locks"), "installation:"+strings.ToLower(target))
+	scope, resource := installationLeaseIdentity(parent, target)
+	lease, err := vault.AcquireLease(ctx, scope, resource)
 	if err != nil {
 		return Upgrade{}, err
 	}

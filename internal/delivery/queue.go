@@ -52,26 +52,20 @@ func changeProbeQueue(ctx context.Context, addonDirectory string, definition bri
 	if _, err = bridge.EncodeProbeQueue([]bridge.ProbeDefinition{definition}); err != nil {
 		return revision, err
 	}
-	abs, err := filepath.Abs(addonDirectory)
+	parent, target, err := installationDestination(addonDirectory)
 	if err != nil {
 		return revision, err
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
-	if err != nil {
-		return revision, err
-	}
-	target := filepath.Join(parent, filepath.Base(abs))
 	if err = ordinaryQueuePath(target, true); err != nil {
 		return revision, err
 	}
-	scope := filepath.Join(parent, ".lycheedev-locks")
+	scope, resource := installationLeaseIdentity(parent, target)
 	if err = os.Mkdir(scope, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 		return revision, err
 	}
 	if err = ordinaryQueuePath(scope, true); err != nil {
 		return revision, err
 	}
-	resource := "installation:" + strings.ToLower(target)
 	lockDigest := sha256.Sum256([]byte(resource))
 	lockPath := filepath.Join(scope, fmt.Sprintf("%x.lock", lockDigest))
 	if err = ordinaryQueuePath(lockPath, false); err != nil && !errors.Is(err, os.ErrNotExist) {

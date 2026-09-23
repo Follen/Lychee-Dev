@@ -3,6 +3,7 @@
 package evidence
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/vault"
 )
+
+// capturedAt is the single source of capture timestamps. Tests pin it so that
+// content-address identity collisions become deterministic instead of relying
+// on scheduler timing.
+var capturedAt = func() time.Time { return time.Now().UTC() }
 
 type Provenance struct {
 	Kind             string `json:"kind"`
@@ -63,7 +69,7 @@ func (a *Archive) CommitCapture(ctx context.Context, draft CaptureDraft) (Captur
 	if err != nil {
 		return CaptureRef{}, err
 	}
-	ref := CaptureRef{Schema: "lycheedev.capture.v1", Blob: blob, MediaType: draft.MediaType, Provenance: draft.Provenance, Complete: draft.Complete, Truncated: draft.Truncated, CapturedAt: time.Now().UTC()}
+	ref := CaptureRef{Schema: "lycheedev.capture.v1", Blob: blob, MediaType: draft.MediaType, Provenance: draft.Provenance, Complete: draft.Complete, Truncated: draft.Truncated, CapturedAt: capturedAt()}
 	identity, err := json.Marshal(ref)
 	if err != nil {
 		return CaptureRef{}, err
@@ -74,10 +80,44 @@ func (a *Archive) CommitCapture(ctx context.Context, draft CaptureDraft) (Captur
 	if err != nil {
 		return CaptureRef{}, err
 	}
-	if err := a.metadata.CommitDocuments(ctx, vault.Mutation{Key: "capture/" + ref.ID, Value: payload}); err != nil {
+	if err := a.commitCaptureDocument(ctx, "capture/"+ref.ID, payload); err != nil {
 		return CaptureRef{}, err
 	}
 	return ref, nil
+}
+
+// commitCaptureDocument inserts one immutable, content-addressed document. The
+// key digests the whole manifest, so an insert generation conflict means
+// another process committed an object under the same key. Immutable committed
+// objects allow parallel access, and conflicting committers reuse the validated
+// object instead of failing (design §9): an identically encoded stored document
+// is accepted, while diverging bytes stay a conflict. Captures are never
+// deleted, so the read-back after a conflict observes the winning document;
+// the retry bound exists for transient read failures and never waits on
+// wall-clock time.
+func (a *Archive) commitCaptureDocument(ctx context.Context, key string, payload []byte) error {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = a.metadata.CommitDocuments(ctx, vault.Mutation{Key: key, Value: payload})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, vault.ErrGeneration) {
+			return err
+		}
+		if attempt == 2 {
+			return err
+		}
+		doc, readErr := a.metadata.ReadDocument(ctx, key)
+		if readErr != nil {
+			continue
+		}
+		if bytes.Equal(doc.Value, payload) {
+			return nil
+		}
+		return err
+	}
+	return err
 }
 
 func (a *Archive) InspectCapture(ctx context.Context, id string) (CaptureRef, error) {

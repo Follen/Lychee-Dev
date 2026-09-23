@@ -38,7 +38,10 @@ func testReadInstalledReport(t *testing.T, identity string) {
 	}
 	expected := bridge.SignalExpectation{Release: signal.Release, Kind: signal.Kind, SessionNonce: signal.SessionNonce, RequestID: signal.RequestID, Character: signal.Character, Realm: signal.Realm, Product: signal.Product, Build: signal.Build, AfterSequence: 1}
 	report, err := ReadInstalledReport(context.Background(), client, "Account-A", code, expected)
-	if err != nil || report.Path != path || report.FileSHA256 != fmt.Sprintf("%x", sha256.Sum256(saved)) || string(report.Report.Body) != body {
+	// The recorded path uses the canonical client spelling production resolved
+	// (InspectClientInstallation expands 8.3 short names), so compare the same
+	// canonical path instead of the fixture's literal spelling.
+	if err != nil || report.Path != testkit.CanonicalPath(t, path) || report.FileSHA256 != fmt.Sprintf("%x", sha256.Sum256(saved)) || string(report.Report.Body) != body {
 		t.Fatalf("%+v %v", report, err)
 	}
 	for _, account := range []string{"", ".", "..", "../Account-A", "Account-A/../Account-A", "Account-A:stream", "Account-A.", "Account-A ", "Account-B", "bad\x00"} {

@@ -3,8 +3,6 @@ package delivery
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -34,7 +32,8 @@ func RemoveInstallation(ctx context.Context, target, archive, component string) 
 	if err := outsideDiscovery(parent, archive); err != nil {
 		return Removal{}, err
 	}
-	lease, err := vault.AcquireLease(ctx, filepath.Join(parent, ".lycheedev-locks"), "installation:"+strings.ToLower(target))
+	scope, resource := installationLeaseIdentity(parent, target)
+	lease, err := vault.AcquireLease(ctx, scope, resource)
 	if err != nil {
 		return Removal{}, err
 	}

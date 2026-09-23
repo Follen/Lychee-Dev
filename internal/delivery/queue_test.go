@@ -108,12 +108,11 @@ func TestQueueStoreMergeAndExactRemoval(t *testing.T) {
 }
 func TestQueueStoreSharedInstallationLease(t *testing.T) {
 	root := queueStoreFixture(t)
-	parent, err := filepath.EvalSymlinks(filepath.Dir(root))
+	scope, resource, err := InstallationLease(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(parent, filepath.Base(root))
-	lock, err := vault.AcquireLease(context.Background(), filepath.Join(parent, ".lycheedev-locks"), "installation:"+strings.ToLower(target))
+	lock, err := vault.AcquireLease(context.Background(), scope, resource)
 	if err != nil {
 		t.Fatal(err)
 	}

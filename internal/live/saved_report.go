@@ -120,7 +120,14 @@ type reportContextReader struct {
 
 // Shared path policy for report discovery and reading. Every directory must be
 // owned by the selected installation; links and junctions are not traversed.
+// The resolved spelling is compared against the canonical base, never the
+// literal one: GitHub runner TMP is the 8.3 short name C:\Users\RUNNER~1\...
+// and filepath.EvalSymlinks expands it, which made an unredirected path look
+// redirected. A short-name or aliased spelling of the client directory itself
+// is one location, not a redirection; only a component that resolves somewhere
+// else is rejected.
 func reportPath(root *os.Root, directory string, parts []string, regularFile bool) (string, error) {
+	base := canonicalPath(directory)
 	relative := ""
 	for i, part := range parts {
 		relative = filepath.Join(relative, part)
@@ -132,11 +139,11 @@ func reportPath(root *os.Root, directory string, parts []string, regularFile boo
 		if info.Mode()&os.ModeSymlink != 0 || (!file && !info.IsDir()) || (file && !info.Mode().IsRegular()) {
 			return "", errors.New("live.report_redirected_path")
 		}
-		resolved, err := filepath.EvalSymlinks(filepath.Join(directory, relative))
+		resolved, err := filepath.EvalSymlinks(filepath.Join(base, relative))
 		if err != nil {
 			return "", err
 		}
-		if !strings.EqualFold(resolved, filepath.Join(directory, relative)) {
+		if !strings.EqualFold(resolved, filepath.Join(base, relative)) {
 			return "", errors.New("live.report_redirected_path")
 		}
 	}

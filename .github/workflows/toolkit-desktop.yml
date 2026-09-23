@@ -45,9 +45,10 @@ permissions:
 jobs:
   windows-desktop:
     name: toolkit desktop verification
-    # Substitute a self-hosted interactive runner (same label syntax) when the
-    # hosted image cannot provide a usable desktop/GPU session.
-    runs-on: windows-2025
+    # A dedicated self-hosted interactive-desktop runner. WGC capture and
+    # native input need a logged-in desktop session; the label is exclusive to
+    # this workflow so general release jobs never land on the desktop machine.
+    runs-on: [self-hosted, Windows, desktop-evidence]
     defaults:
       run:
         shell: pwsh
@@ -100,4 +101,30 @@ jobs:
         with:
           name: desktop-verification
           path: ${{ steps.desktop-smoke.outputs.report }}
+          if-no-files-found: error
+      - name: Fold the desktop-evidence artifact the release gate consumes
+        # Requires the release pipeline run of THIS commit to have completed
+        # its assemble stage (the sealed manifest defines the binary/resource
+        # digests the evidence binds to). Re-run this workflow after a fresh
+        # release assembly for a new commit.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = gh run list --workflow toolkit-release.yml --headSha $env:GITHUB_SHA --json databaseId --jq '.[0].databaseId'
+          if (-not $release) { throw "no toolkit-release run found for commit $env:GITHUB_SHA; run the release pipeline first" }
+          gh run download "$release" --name sealed-bundle --dir sealed-bundle
+          if ($LASTEXITCODE -ne 0) { throw 'sealed bundle artifact not found; the release run must reach the seal stage first' }
+          node tools/release.mjs desktop-evidence `
+            --manifest (Join-Path 'sealed-bundle' 'sealed/release-manifest.json') `
+            --smoke "${{ steps.desktop-smoke.outputs.report }}" `
+            --operator 'Follen' `
+            --notes 'Automated self-hosted interactive-desktop verification: WGC self-window capture, native input lock, installed-launcher bind round-trip.' `
+            --out desktop-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw 'desktop evidence assembly failed' }
+      - name: Upload the release-gate evidence artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-evidence
+          path: desktop-evidence.json
           if-no-files-found: error

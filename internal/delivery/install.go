@@ -69,7 +69,8 @@ func InstallFresh(ctx context.Context, releaseDirectory, target, component, vers
 	if check.State != "managed" {
 		return receipt, fmt.Errorf("%w: staged content", ErrInstallation)
 	}
-	lease, err := vault.AcquireLease(ctx, filepath.Join(parent, ".lycheedev-locks"), "installation:"+strings.ToLower(target))
+	scope, resource := installationLeaseIdentity(parent, target)
+	lease, err := vault.AcquireLease(ctx, scope, resource)
 	if err != nil {
 		return receipt, err
 	}
@@ -125,4 +126,35 @@ func installationDestination(target string) (parent, destination string, err err
 		return "", "", ErrInstallation
 	}
 	return parent, filepath.Join(parent, name), nil
+}
+
+// InstallationLease derives the scope and resource of the shared installation
+// lease for one addon or skill directory. Both values come from the resolved
+// parent, so every spelling of the same installation (8.3 short names on
+// runner TMP, symlinks, aliased discovery directories) contends for exactly
+// one OS lock. Installation, upgrade, removal and queue publication share this
+// identity; rebuilding it from a literal path silently creates a second lock
+// domain next to the canonical one.
+func InstallationLease(addonDirectory string) (scope, resource string, err error) {
+	parent, target, err := installationDestination(addonDirectory)
+	if err != nil {
+		return "", "", err
+	}
+	scope, resource = installationLeaseIdentity(parent, target)
+	return scope, resource, nil
+}
+
+// installationLeaseIdentity is the single definition of the installation lease
+// identity used by every holder of the same installation. The resource resolves
+// the full target so one installation has one lock under any spelling: an
+// existing directory may be named with 8.3 short names (runner TMP) or reached
+// through a final alias, and an absent target keeps the parent-resolved
+// spelling because a missing directory has no filesystem alias. Redirected
+// targets stay rejected by the individual install/remove/upgrade/queue flows;
+// this identity only decides which OS lock they contend for.
+func installationLeaseIdentity(parent, target string) (string, string) {
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	return filepath.Join(parent, ".lycheedev-locks"), "installation:" + strings.ToLower(target)
 }

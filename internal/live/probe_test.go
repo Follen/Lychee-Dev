@@ -866,7 +866,14 @@ func TestProbeQueueIntentBeforeFileEffect(t *testing.T) {
 	root, client, book, record, _ := probeOperationFixture(t)
 	parent := filepath.Join(client, "Interface", "AddOns")
 	target := filepath.Join(parent, "Lychee Dev")
-	lease, err := vault.AcquireLease(context.Background(), filepath.Join(parent, ".lycheedev-locks"), "installation:"+strings.ToLower(target))
+	// The lease identity must come from the shared canonical derivation; a
+	// literal-path spelling (8.3 short names on runner TMP) would select a
+	// different lock file and stop excluding the queue writer at all.
+	scope, resource, err := delivery.InstallationLease(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := vault.AcquireLease(context.Background(), scope, resource)
 	if err != nil {
 		t.Fatal(err)
 	}
