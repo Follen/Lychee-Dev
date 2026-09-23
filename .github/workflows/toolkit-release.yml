@@ -371,9 +371,69 @@ jobs:
           path: staged/**
           if-no-files-found: error
 
+  desktop:
+    name: desktop verification (interactive self-hosted)
+    # WGC capture and native input need a real logged-in desktop; this runs on
+    # THIS project's dedicated self-hosted runner and verifies the exact
+    # sealed binaries of this release run. Dry-run rehearsals skip it.
+    needs: [identity, assemble]
+    if: needs.identity.outputs.mode == 'release'
+    runs-on: [self-hosted, Windows, desktop-evidence]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Download the sealed manifest from this run
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: sealed-bundle
+          path: sealed-bundle
+      - name: WGC capture and native input self-window suite
+        # Only windows this suite created itself; never the game.
+        env:
+          LYCHEEDEV_TEST_DESKTOP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go test -count=1 -timeout=15m ./internal/desktop/...
+          if ($LASTEXITCODE -ne 0) { throw 'desktop self-window suite failed' }
+      - name: Desktop-enabled install smoke through the installed launcher
+        id: desktop-smoke
+        env:
+          LYCHEEDEV_TEST_DESKTOP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $npmCli = node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);process.stdout.write(p.join(d,'node_modules','npm','bin','npm-cli.js'))"
+          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
+          node packages/npm/lycheedev/test/install-smoke.mjs $npmCli
+          if ($LASTEXITCODE -ne 0) { throw 'desktop install smoke failed' }
+      - name: Fold the desktop-evidence record
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/release.mjs desktop-evidence `
+            --manifest "sealed-bundle/sealed/release-manifest.json" `
+            --smoke "${{ steps.desktop-smoke.outputs.report }}" `
+            --operator 'Follen' `
+            --notes 'Self-hosted interactive-desktop verification of this release run: WGC self-window capture, native input lock, installed-launcher bind round-trip.' `
+            --out desktop-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw 'desktop evidence assembly failed' }
+      - name: Upload the desktop evidence artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-evidence
+          path: desktop-evidence.json
+          if-no-files-found: error
+
   release-gate:
     name: release gate (sealed digests, platform and desktop evidence)
-    needs: [identity, ci, seal]
+    needs: [identity, ci, seal, desktop]
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -426,33 +486,28 @@ jobs:
             console.log('platform evidence verified for: ' + r.platforms.join(', '));
           "
       - name: Verify real-machine desktop evidence binding (REL-04/05)
-        # A real (tag) release requires the `desktop-evidence` artifact from
-        # the toolkit-desktop.yml run of exactly this commit, assembled by the
-        # owner with `node tools/release.mjs desktop-evidence ...` and bound to
-        # the sealed binary/resource digests. not-run or missing evidence
-        # fails the gate; dry-run rehearsals record it as pending.
+        # The inline desktop job of THIS run produced the evidence from the
+        # same sealed binaries; dry-run rehearsals skip desktop and record it
+        # as pending.
+        if: needs.identity.outputs.mode == 'release'
+        uses: actions/download-artifact@v4 # TODO: pin SHA
+        with:
+          name: desktop-evidence
+          path: evidence-desktop
+      - name: Bind desktop evidence to the sealed digests (REL-04/05)
+        if: needs.identity.outputs.mode == 'release'
         run: |
           set -e
-          if [ "$GATE_MODE" != release ]; then
-            echo '::warning::desktop evidence pending (REL-04): not required for a dry-run rehearsal, but the release gate of a real tag publish fails without it; run toolkit-desktop.yml on the interactive-desktop runner and assemble the desktop-evidence artifact for the release commit'
-            exit 0
-          fi
-          # Look up the successful desktop verification run of THIS commit via
-          # the runs API (gh run list has no head-sha filter).
-          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GATE_COMMIT&per_page=50" \
-            --jq '.workflow_runs | map(select(.path == ".github/workflows/toolkit-desktop.yml" and .conclusion == "success")) | .[0].id' 2>/dev/null)"
-          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-            echo "::error::desktop evidence missing (REL-04): no successful toolkit-desktop.yml run for commit $GATE_COMMIT; run it on the interactive-desktop runner, then re-run this release"
-            exit 3
-          fi
-          mkdir -p evidence-desktop
-          gh run download "$run_id" --name desktop-evidence --dir evidence-desktop
           node tools/release.mjs verify-desktop-evidence --out out --evidence evidence-desktop/desktop-evidence.json > desktop-check.json
           node -e "
             const r = JSON.parse(require('fs').readFileSync('desktop-check.json', 'utf8'));
             if (!r.ok) { console.error('::error::desktop evidence violations: ' + r.violations.join('; ')); process.exit(1); }
             console.log('desktop evidence verified (native binding: ' + (r.nativeBinding?.status ?? 'unknown') + ')');
           "
+      - name: Record desktop evidence as pending for dry-run rehearsals
+        if: needs.identity.outputs.mode != 'release'
+        run: |
+          echo '::warning::desktop evidence pending (REL-04): dry-run rehearsals do not run the desktop job; a real tag publish requires it'
 
   publish:
     name: OIDC publish and registry read-back
@@ -611,6 +666,7 @@ jobs:
       - verify-cgo
       - assemble
       - platform-smoke
+      - desktop
       - seal
       - release-gate
       - publish
@@ -629,6 +685,7 @@ jobs:
       - name: Assert the release pipeline result
         env:
           MODE: ${{ needs.identity.outputs.mode }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
           CI_RESULT: ${{ needs.ci.result }}
           VERIFY_CGO_RESULT: ${{ needs.verify-cgo.result }}
           ASSEMBLE_RESULT: ${{ needs.assemble.result }}
@@ -650,6 +707,9 @@ jobs:
           check assemble "$ASSEMBLE_RESULT"
           check platform-smoke "$PLATFORM_SMOKE_RESULT"
           check seal "$SEAL_RESULT"
+          if [ "$MODE" = "release" ]; then
+            check desktop "$DESKTOP_RESULT"
+          fi
           check release-gate "$RELEASE_GATE_RESULT"
           if [ "$MODE" = "release" ]; then
             check publish "$PUBLISH_RESULT"
