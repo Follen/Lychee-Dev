@@ -665,7 +665,9 @@ function desktopEvidenceCommand(argv) {
   const record = {
     schema: 'lycheedev.desktop-evidence.v1',
     commit: manifest.commit,
-    workspaceDirty: manifest.identity.workspaceDirty === false,
+    // Passthrough the manifest's truth: clean (false) passes the gate,
+    // a dirty assembly records true and verify-desktop-evidence rejects it.
+    workspaceDirty: manifest.identity.workspaceDirty === true,
     binaries: Object.fromEntries(Object.entries(manifest.binaries).map(([name, entry]) => [name, entry.sha256])),
     resources: manifest.resources.map(resource => ({ path: resource.path, sha256: resource.sha256 })),
     nativeBinding: smoke.nativeBinding ?? { status: 'not-run' },
