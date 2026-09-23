@@ -21,7 +21,14 @@ func TestInstallationLeaseIdentityShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(scope) != ".lycheedev-locks" || filepath.Dir(scope) != filepath.Dir(target) {
+	// The lease scope hangs off the CANONICAL parent: InstallationLease
+	// resolves 8.3 short paths and symlinks before deriving the identity, so
+	// the comparison must canonicalize the expectation the same way.
+	canonicalParent, err := filepath.EvalSymlinks(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(scope) != ".lycheedev-locks" || filepath.Dir(scope) != canonicalParent {
 		t.Fatalf("scope = %q, want the parent-scoped lock directory of %q", scope, target)
 	}
 	if want := "installation:" + strings.ToLower(target); resource != want {
