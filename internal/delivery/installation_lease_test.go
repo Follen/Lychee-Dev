@@ -40,14 +40,8 @@ func TestInstallationLeaseIdentityShape(t *testing.T) {
 	if want := "installation:" + strings.ToLower(canonicalTarget); resource != want {
 		t.Fatalf("resource = %q, want the canonical %q", resource, want)
 	}
-	againScope, againResource, err := InstallationLease(strings.ToLower(target))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if againScope != scope || againResource != resource {
-		t.Fatalf("case-spelled input changed the identity: (%q, %q) != (%q, %q)", againScope, againResource, scope, resource)
-	}
-	if want := "installation:" + strings.ToLower(canonicalTarget); resource != want {
-		t.Fatalf("resource = %q, want the canonical %q", resource, want)
-	}
+	// Case-spelled inputs hold the same identity only where the filesystem
+	// folds case; that assertion lives in the windows build-tagged file. On
+	// case-sensitive platforms a folded spelling is a different directory and
+	// legitimately derives a different identity.
 }
