@@ -111,7 +111,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $release = gh run list --workflow toolkit-release.yml --headSha $env:GITHUB_SHA --json databaseId --jq '.[0].databaseId'
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs?head_sha=$env:GITHUB_SHA&per_page=50" --jq '.workflow_runs | map(select(.name == "toolkit release")) | .[0].id'
           if (-not $release) { throw "no toolkit-release run found for commit $env:GITHUB_SHA; run the release pipeline first" }
           gh run download "$release" --name sealed-bundle --dir sealed-bundle
           if ($LASTEXITCODE -ne 0) { throw 'sealed bundle artifact not found; the release run must reach the seal stage first' }
