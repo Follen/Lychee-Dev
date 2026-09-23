@@ -71,14 +71,19 @@ func imageExportFixture(t *testing.T, content []byte) (workspace, project, snaps
 
 func invokeAssetImage(t *testing.T, args ...string) (Envelope, int) {
 	t.Helper()
+	// LAUNCHER alone executes a native binary directly; NODE+LAUNCHER drives
+	// the npm launcher (bin/lycheedev.mjs) through node.
 	node, launcher := os.Getenv("LYCHEEDEV_ASSET_NODE"), os.Getenv("LYCHEEDEV_ASSET_LAUNCHER")
-	if (node == "") != (launcher == "") {
-		t.Fatal("both installed asset test launcher variables are required")
+	if launcher == "" && node != "" {
+		t.Fatal("installed asset test requires LYCHEEDEV_ASSET_LAUNCHER")
 	}
 	if launcher == "" {
 		return invoke(t, args...)
 	}
 	t.Logf("using installed asset launcher: %s", launcher)
+	if node == "" {
+		return invokeExecutable(t, launcher, args...)
+	}
 	return invokeExecutable(t, node, append([]string{launcher}, args...)...)
 }
 

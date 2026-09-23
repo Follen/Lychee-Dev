@@ -20,7 +20,17 @@ func TestStageIsIndependentAndPreservesParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Dir(stage) != parent {
+	// Canonicalize both sides: runner TMP can be an 8.3 short path while the
+	// staging directory resolves to its long form.
+	shortParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shortProbe, err := filepath.EvalSymlinks(filepath.Dir(stage))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(shortProbe, shortParent) {
 		t.Fatalf("outside parent: %s", stage)
 	}
 	if err := os.WriteFile(filepath.Join(source, filepath.FromSlash(inventory[0].Path)), []byte("changed"), 0600); err != nil {

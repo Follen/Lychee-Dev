@@ -325,12 +325,17 @@ func TestHotfixNamedTableAndLatestCLI(t *testing.T) {
 
 func invokeHotfix(t *testing.T, args ...string) (Envelope, int) {
 	t.Helper()
+	// LAUNCHER alone executes a native binary directly; NODE+LAUNCHER drives
+	// the npm launcher (bin/lycheedev.mjs) through node.
 	node, launcher := os.Getenv("LYCHEEDEV_HOTFIX_NODE"), os.Getenv("LYCHEEDEV_HOTFIX_LAUNCHER")
 	if node == "" && launcher == "" {
 		return invoke(t, args...)
 	}
-	if node == "" || launcher == "" {
-		t.Fatal("both installed Hotfix test launcher variables are required")
+	if launcher == "" {
+		t.Fatal("installed Hotfix test requires LYCHEEDEV_HOTFIX_LAUNCHER")
+	}
+	if node == "" {
+		return invokeExecutable(t, launcher, args...)
 	}
 	return invokeExecutable(t, node, append([]string{launcher}, args...)...)
 }

@@ -33,13 +33,18 @@ func TestAssetExportArguments(t *testing.T) {
 }
 
 func TestAssetExportProjectOffline(t *testing.T) {
+	// LAUNCHER alone executes a native binary directly; NODE+LAUNCHER drives
+	// the npm launcher (bin/lycheedev.mjs) through node.
 	node, launcher := os.Getenv("LYCHEEDEV_ASSET_NODE"), os.Getenv("LYCHEEDEV_ASSET_LAUNCHER")
-	if (node == "") != (launcher == "") {
-		t.Fatal("both installed asset test launcher variables are required")
+	if launcher == "" && node != "" {
+		t.Fatal("installed asset test requires LYCHEEDEV_ASSET_LAUNCHER")
 	}
 	call := func(args ...string) (Envelope, int) {
 		if launcher == "" {
 			return invoke(t, args...)
+		}
+		if node == "" {
+			return invokeExecutable(t, launcher, args...)
 		}
 		return invokeExecutable(t, node, append([]string{launcher}, args...)...)
 	}

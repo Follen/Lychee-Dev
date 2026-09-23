@@ -123,7 +123,8 @@ const EMPTY_PROBE_QUEUE = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lyc
 export function identity({ allowDirty = false, requireTagRef = false, tag } = {}) {
   const commit = git(['rev-parse', 'HEAD']).toLowerCase();
   if (!HEX40.test(commit)) throw new Error('release.unknown_identity: commit');
-  const dirty = git(['status', '--porcelain']).length > 0;
+  const dirtyStatus = git(['status', '--porcelain']);
+  const dirty = dirtyStatus.length > 0;
   const claimedTag = tag ?? null;
   let tagVerified = false;
   if (requireTagRef) {
@@ -137,7 +138,7 @@ export function identity({ allowDirty = false, requireTagRef = false, tag } = {}
     } catch { tagVerified = false; }
   }
   if (dirty && !allowDirty) {
-    throw new Error('release.identity_dirty: uncommitted worktree state never enters a release (REL-01/REL-05); use --allow-dirty for development rehearsals only');
+    throw new Error(`release.identity_dirty: uncommitted worktree state never enters a release (REL-01/REL-05); use --allow-dirty for development rehearsals only\n${dirtyStatus.split('\n').slice(0, 20).join('\n')}`);
   }
   return { commit, dirty, tag: claimedTag, tagVerified, developmentEscape: dirty && allowDirty };
 }
