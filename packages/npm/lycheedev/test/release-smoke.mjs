@@ -127,7 +127,7 @@ bytes.write('XFTH', 44); bytes.writeUInt32LE(5, 48);
 bytes.writeUInt32LE(0xabcdef01, 60); bytes.writeUInt32LE(42, 64);
 bytes.writeUInt32LE(2, 68); bytes[72] = 1; bytes[77] = 0xff;
 writeFileSync(cacheFile, bytes);
-const hotfix = JSON.parse(run(process.execPath, [launcher, 'data', 'hotfix', '--snapshot', pin, '--file', cacheFile, '--home', home, '--format=json']));
+const hotfix = JSON.parse(run(process.execPath, [launcher, 'data', 'hotfix', '--source', 'dbcache', '--snapshot', pin, '--dbcache', cacheFile, '--home', home, '--format=json']));
 assert.equal(hotfix.ok, true);
 assert.equal(hotfix.result.page.entries[0].payloadHex, '00ff');
 for (const capture of hotfix.captures) {
