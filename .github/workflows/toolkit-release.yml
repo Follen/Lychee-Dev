@@ -276,8 +276,10 @@ jobs:
         run: |
           set -e
           mkdir -p reports
-          npm_cli="$(node -p "require.resolve('npm/bin/npm-cli.js')")"
-          [ -f "$npm_cli" ] || { echo "::error::npm-cli.js not found at $npm_cli"; exit 1; }
+          # npm ships inside the node install; the layout differs per OS and
+          # require.resolve cannot see it from the repo. Derive from execPath.
+          npm_cli="$(node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);const c=process.platform==='win32'?[p.join(d,'node_modules','npm','bin','npm-cli.js')]:[p.join(p.dirname(d),'lib','node_modules','npm','bin','npm-cli.js'),p.join(d,'node_modules','npm','bin','npm-cli.js')];process.stdout.write(c.find(x=>f.existsSync(x))||'')")"
+          [ -f "$npm_cli" ] || { echo "::error::npm-cli.js not found next to the running node"; exit 1; }
           tgz="bundle/tgz/lycheedev-$SMOKE_VERSION.tgz"
           [ -f "$tgz" ] || { echo "::error::missing sealed tarball $tgz"; exit 1; }
           node packages/npm/lycheedev/test/release-smoke.mjs "$tgz" "$npm_cli" --report "reports/$SMOKE_TARGET-release-smoke.json" | tee smoke-stdout.json
@@ -295,8 +297,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path reports | Out-Null
-          $npmCli = node -p "require.resolve('npm/bin/npm-cli.js')"
-          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
+          $npmCli = node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);const c=process.platform==='win32'?[p.join(d,'node_modules','npm','bin','npm-cli.js')]:[p.join(p.dirname(d),'lib','node_modules','npm','bin','npm-cli.js'),p.join(d,'node_modules','npm','bin','npm-cli.js')];process.stdout.write(c.find(x=>f.existsSync(x))||'')"
+          if (-not (Test-Path $npmCli)) { throw 'npm-cli.js not found next to the running node' }
           $tgz = "bundle/tgz/lycheedev-$env:SMOKE_VERSION.tgz"
           if (-not (Test-Path $tgz)) { throw "missing sealed tarball $tgz" }
           node packages/npm/lycheedev/test/release-smoke.mjs $tgz $npmCli --report "reports/$env:SMOKE_TARGET-release-smoke.json" | Tee-Object -FilePath smoke-stdout.json
