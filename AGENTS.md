@@ -17,7 +17,7 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-2.0.0.md` — Windows CI and release contract.
+4. `docs/toolkit/release-2.0.1.md` — Windows CI and release contract.
 
 Use `go test ./...` and `go vet ./...` at the repository root. The Lua protocol
 suites need a Lua 5.1 interpreter (`LYCHEEDEV_REQUIRE_LUA51=1`); build one with
@@ -82,13 +82,15 @@ from acceptance. A client folder is a location, not an identity: read
   `addon install` from a release root; overlay-copying the repo onto a managed
   installation makes it `modified` and the queue will (correctly) refuse it.
 - A completed run's cleanup reload returns the addon to its disabled default;
-  the old session nonce is dead. Re-run `live connect` to build a new session
-  before the next run.
+  the old session nonce is dead. The agent invokes `live connect` to build a
+  new session before the next run; the user never types `/dev connect`.
 - Live results distinguish `report.state` (verified/unavailable) from
   `cleanup` (pending/complete). A verified report with pending cleanup is a
   usable result plus a recovery obligation — never report it as a failure.
 - Real-machine observation goes through `internal/desktop` WGC capture; screen
   screenshots are not evidence for D3D windows.
+- Interactive desktop and game acceptance are recorded manually by the owner.
+  CI has no self-hosted interactive desktop job or desktop-evidence gate.
 
 ## Change and verification workflow
 

@@ -4,10 +4,10 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { synchronizeVersion } from './version.mjs';
+import { synchronizeVersion, versionedLuaFixtures, versionedSignalSamples } from './version.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const targets = ['internal/buildinfo/version.go', 'packages/npm/lycheedev/package.json', 'packages/npm/lycheedev/package-lock.json', 'addon/Core/Runtime.lua', ...['Mainline', 'Mists', 'Wrath', 'Forever'].map(client => `addon/Lychee Dev_${client}.toc`)];
+const targets = ['internal/buildinfo/version.go', 'packages/npm/lycheedev/package.json', 'packages/npm/lycheedev/package-lock.json', 'addon/Core/Runtime.lua', ...['Mainline', 'Mists', 'Wrath', 'Forever'].map(client => `addon/Lychee Dev_${client}.toc`), ...versionedLuaFixtures, ...versionedSignalSamples, 'tests/addon/env.lua', 'tests/addon/t_about.lua'];
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'lycheedev-version-'));
   t.after(() => rmSync(root, { recursive: true }));

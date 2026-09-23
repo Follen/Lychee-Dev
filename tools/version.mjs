@@ -4,6 +4,16 @@ import { fileURLToPath } from 'node:url';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tocs = ['Mainline', 'Mists', 'Wrath', 'Forever'];
+// Protocol fixtures exercise the currently shipped Lua runtime, so they must
+// advance with its release identity rather than silently becoming stale.
+export const versionedLuaFixtures = [
+  'acknowledge', 'identity', 'loaded_ready', 'persistence', 'queue',
+  'queue_ack', 'reentry', 'report', 'runtime_epoch',
+].map(name => `tests/protocol/${name}.lua`);
+export const versionedSignalSamples = [
+  'identity.actor_restricted', 'identity.no_actor', 'identity.ok',
+  'identity.unready', 'ready',
+].map(name => `protocol/samples/${name}.json`);
 function replaceOne(text, pattern, replacement, path) {
   if ([...text.matchAll(pattern)].length !== 1) throw new Error(`version.invalid_target: ${path}`);
   return text.replace(pattern, replacement);
@@ -43,6 +53,20 @@ export function synchronizeVersion(root, write = false) {
     target(path, text => replaceOne(text, /^## Version: .*$/gm, `## Version: ${version}`, path));
   }
   target('addon/Core/Runtime.lua', text => replaceOne(text, /^ns\.Release = "[^"\n]*"$/gm, `ns.Release = "${version}"`, 'Runtime.lua'));
+  for (const path of versionedLuaFixtures) {
+    target(path, text => replaceOne(text, /(\b(?:Release|release)\s*=\s*")[^"]+(")/g,
+      (_, prefix, suffix) => `${prefix}${version}${suffix}`, path));
+  }
+  for (const path of versionedSignalSamples) {
+    target(path, text => replaceOne(text, /("release"\s*:\s*")[^"]+(")/g,
+      (_, prefix, suffix) => `${prefix}${version}${suffix}`, path));
+  }
+  target('tests/addon/env.lua', text => replaceOne(text,
+    /(GetAddOnMetadata = function[\s\S]*?\breturn ")[^"]+(")/g,
+    (_, prefix, suffix) => `${prefix}${version}${suffix}`, 'tests/addon/env.lua'));
+  target('tests/addon/t_about.lua', text => replaceOne(text,
+    /(aboutPage\.metaItems\.version\.value:GetText\(\) == ")[^"]+(")/g,
+    (_, prefix, suffix) => `${prefix}${version}${suffix}`, 'tests/addon/t_about.lua'));
   if (write) for (const plan of plans) writeFileSync(join(root, plan.path), plan.expected);
   else if (plans.length) throw new Error(`version.drift: ${plans.map(plan => plan.path).join(', ')}`);
   return { version, changed: plans.map(plan => plan.path), mode: write ? 'write' : 'check' };

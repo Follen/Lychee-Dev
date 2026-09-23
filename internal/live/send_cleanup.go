@@ -13,7 +13,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"path/filepath"
 	"time"
 )
 
@@ -83,7 +82,7 @@ func (p *ProbeOperation) prepareCleanupInput(ctx context.Context) (string, error
 		if observed.QueueRetirement == nil || observed.QueueRetirement.Revision.SHA256 == "" {
 			return "", errors.New("live.cleanup_prerequisite_missing")
 		}
-		if _, err := delivery.VerifyProbeRetired(ctx, filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev"), definition); err != nil {
+		if _, err := delivery.VerifyProbeRetired(ctx, delivery.AddonDirectory(p.session.target.Client.Directory), definition); err != nil {
 			return "", err
 		}
 		_, rawAck, err := archive.FetchCapture(ctx, observed.AcknowledgementID, 4096)
@@ -129,7 +128,7 @@ func (p *ProbeOperation) prepareCleanupInput(ctx context.Context) (string, error
 		}
 		observed.CleanupReadyID = capture.ID
 		raw, _ = json.Marshal(observed)
-		if _, err := delivery.VerifyProbeRetired(ctx, filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev"), definition); err != nil {
+		if _, err := delivery.VerifyProbeRetired(ctx, delivery.AddonDirectory(p.session.target.Client.Directory), definition); err != nil {
 			return "", err
 		}
 		if err := p.check(ctx); err != nil {

@@ -1,8 +1,8 @@
 name: toolkit foundation
 
-# Toolkit 2.0 foundation CI (docs/toolkit/release-2.0.0.md §2-§4).
+# Toolkit 2.0.1 foundation CI (docs/toolkit/release-2.0.1.md).
 #
-# Six REQUIRED job names, referenced literally by branch protection (do not
+# Five REQUIRED job names, referenced literally by branch protection (do not
 # rename, and do not turn a required job into a matrix — matrix legs would
 # suffixed the check names and break the literal references):
 #
@@ -10,7 +10,8 @@ name: toolkit foundation
 #                             consistency, full Go suite with Lua 5.1 REQUIRED
 #   windows-process           real multi-CLI-process, OS-lock and same-window
 #                             exclusivity contracts, run natively on Windows
-#   windows-addon             four-client offline Lua matrix, locale, TOC
+#   windows-addon             supported-client Lua matrix plus retained
+#                             Forever fixture, locale, TOC
 #                             order, event catalogs, addon ZIP structure
 #   windows-package           Windows-native release exe, real npm tgz,
 #                             isolated --ignore-scripts install (space +
@@ -63,7 +64,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.18.1'
-      - name: Pin the Go release toolchain (release-2.0.0.md §4)
+      - name: Pin the Go release toolchain (release-2.0.1.md)
         run: |
           $ErrorActionPreference = 'Stop'
           $version = go version
@@ -169,13 +170,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Lua interpreter build failed' }
           "LYCHEEDEV_LUA51=$(Join-Path $luaDirectory 'lua.exe')" >> $env:GITHUB_ENV
           'LYCHEEDEV_REQUIRE_LUA51=1' >> $env:GITHUB_ENV
-      - name: Four-client offline Lua matrix and offline protocol suites
+      - name: Supported-client Lua matrix and retained Forever fixture
         # LYCHEEDEV_LUA51 arrives through GITHUB_ENV from the build step.
         env:
           LYCHEEDEV_REQUIRE_LUA51: '1'
         run: |
           go test -count=1 -timeout=10m ./tests/addon/... ./tests/protocol/...
-          if ($LASTEXITCODE -ne 0) { throw 'four-client Lua matrix failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Lua client matrix failed' }
       - name: TOC order, load lists and event catalog contracts
         run: |
           go test -count=1 -timeout=5m ./internal/codebase/

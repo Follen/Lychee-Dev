@@ -3,7 +3,7 @@
 状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-23（本次修订新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
 当前执行证据见 [implementation-status.md](implementation-status.md)，不以本清单充当测试结果。
 
-适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和本次 `2.0.0` / `v2.0.0` 发布合同：[release-2.0.0.md](release-2.0.0.md)。本文件中阈值是建议的验收政策，不是已经测得的性能或成功率。
+适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和本次 `2.0.1` / `v2.0.1` 发布合同：[release-2.0.1.md](release-2.0.1.md)。本文件中阈值是建议的验收政策，不是已经测得的性能或成功率。
 
 ## 1. 验证原则与结果状态
 
@@ -52,7 +52,7 @@ tests/
   process/              两个或多个真实 CLI 进程
   protocol/             Go 与 Lua 共享的信号/报告样本
   native/               Windows 消息接收窗、WGC 与 QR
-  client/               四客户端实机用例与记录格式
+  client/               用户真机验收记录格式；CI 不运行游戏实测
   fixtures/             固定小样本及来源清单
   skill/                工作流情景和工具轨迹评估
   performance/          冷热启动、内存、IO、并发和捕获
@@ -251,14 +251,14 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 
 纯 Go QR 方案必须与旧方案对同一公开可用的回执样本集合比较识别率和耗时。若关键样本失败，阶段 S1 不通过；不能把切回 Python 作为完成重写。
 
-## 11. 四客户端与 Lua 端
+## 11. 支持客户端与 Lua 端
 
 | 客户端 | 当前 Interface | 每次必录 |
 | --- | --- | --- |
 | Retail | 120100 | 实际完整 Build、地区、语言、插件版本 |
 | Classic | 50504 | 同上 |
 | Titan | 38002 | 同上 |
-| Forever | 16001 | 同上，尤其核对目录与产品身份 |
+| Forever | 16001 | 保留源码/TOC；未获真机验收，2.0.1 不声明支持 |
 
 这些 Interface 是项目当前基线，不能由测试日期推断仍有效。实现期间若客户端更新，按项目要求同步 TOC、配置、目录、README 和测试基线。
 
@@ -273,7 +273,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | LUA-07 | P1 | 运行、对象、事件、追踪、错误、导出、工作台 UI | 不再笼统验收：各能力按 11a 的 WKB-01..12 分项执行；本行只保留跨能力断言（能力存在、有界工作、长本地化与代表缩放验证） |
 | LUA-08 | P0 | 新目录/私有模块/机器入口 | 无旧路由或 namespace 兼容层；修改过的视觉内容有前后截图 |
 
-离线 Lua 矩阵继续覆盖现有八类能力，换为新接口断言。四客户端矩阵通过与四客户端实机通过分别报告；无法取得某客户端实机证据时，该发布能力仍未完成验收。
+离线 Lua fixture 可以保留四份用于兼容性检查；2.0.1 的产品验收对象为 Retail、Classic、Titan 三端。用户已完成游戏真机手测，结论与详细记录分别写入实施状态。CI 不使用交互桌面或游戏内实测作为门禁，不将离线 fixture 称为真实游戏验收。
 
 ## 11a. 工作台能力回归
 
@@ -293,7 +293,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | WKB-10 | P0 | 自动化页面 | 队列/执行/历史视图与游戏侧队列一致；报告查看 48 KB 显示上限（不改存储正文）；与 CLI 驱动同一游戏侧能力，不重复实现、不引入任务注册表或 `/dev auto` 兼容语法 |
 | WKB-11 | P1 | 关于页、双语、稳定布局 | zhCN 基表 + enUS 覆盖（zhTW→zhCN，其余→英文）；键数与占位符一致；英文 ASCII；代表缩放下布局稳定；可视变更有前后截图 |
 | WKB-12 | P0 | 共享生命周期 | 首次安装、/reload、退出/登录、禁用/启用、记录上限、资源释放（OnHide/combat shutdown 停止 owned 工作）均正确；UI 与 agent 同时操作同一游戏侧能力时任务/回执/结果互不覆盖 |
-| WKB-13 | P0 | 四客户端矩阵（120100/50504/38002/16001）逐项执行 WKB-01..12 | Lua 5.1 语法、TOC 顺序、事件目录正确；真机记录实际 Build/Interface |
+| WKB-13 | P0 | 三个支持客户端矩阵（120100/50504/38002）核对 WKB-01..12 | Lua 5.1 语法、TOC 顺序、事件目录正确；用户真机手测单独记录；Forever 16001 仅留兼容 fixture，不计支持端 |
 
 ## 12. Skill 编排回归
 
@@ -348,21 +348,21 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 
 ## 15. CI 与执行节奏
 
-Windows 固定 required jobs、工具链、托管 runner 与真实桌面的分工遵守 [2.0.0 发布规范](release-2.0.0.md)。以下额外测试验证 CI/发布合同，模拟发布器用于离线故障测试，不在普通测试中向真实 registry 写入。
+Windows 固定 required jobs、工具链和托管 runner 遵守 [2.0.1 发布规范](release-2.0.1.md)。真实游戏手测由用户完成并单独记录，不属于 CI 或发布门禁。以下额外测试验证 CI/发布合同，模拟发布器用于离线故障测试，不在普通测试中向真实 registry 写入。
 
 | ID | 级别 | 场景 | 必须观察到的结果 |
 | --- | --- | --- | --- |
-| REL-01 | P0 | package/lock/TOC/CLI/manifest 任一不是 2.0.0 | 正式版本门槛失败，禁止以 v2.0.0 发布 |
+| REL-01 | P0 | package/lock/TOC/CLI/manifest 任一不是 2.0.1 | 正式版本门槛失败，禁止以 v2.0.1 发布 |
 | REL-02 | P0 | 任一 Windows required job 失败、跳过或取消 | ci-required/release-gate 明确失败，不能由 Linux 通过抵消 |
 | REL-03 | P0 | Windows 原生 exe 与实际 npm tgz | 在 Windows 隔离安装并执行，空格/中文路径和退出码正常 |
-| REL-04 | P0 | 托管 runner 缺 WGC 或四端实机证据 | 基础 CI 与实机状态分别记录，缺证据不能通过发行门槛 |
+| REL-04 | P0 | 托管 runner 无交互桌面 | 不创建 self-hosted desktop job；游戏真机由用户人工验收并在实施状态单独记录，自动发行门禁不等待桌面 artifact |
 | REL-05 | P0 | tag Commit 与测试/实机/产物 Commit 或摘要不同 | 拒绝发布，不能借用另一个 RC 的 passed 报告 |
 | REL-06 | P0 | 验收后的 tgz 被修改或 publish 前重新 pack | 摘要校验失败；发布器只能消费封存的准确文件 |
 | REL-07 | P0 | OIDC workflow/repo/environment 不匹配或认证失败 | 停止，不退到长效 token；dry-run 不具备真实发布路径 |
 | REL-08 | P0 | npm 包有 optional/runtime 依赖或安装时下载 | 白名单检查失败；包内二进制齐全且 ignore-scripts 可运行 |
 | REL-09 | P0 | registry 已有同版本或 publish 超时 | 区分存在/不存在/未知；只在 integrity 相同时继续后验证 |
 | REL-10 | P0 | npm 成功但 Release 创建失败 | 重跑只补后验证与 Release，不重复 publish 或移动 tag |
-| REL-11 | P0 | RC 与正式版本渠道 | 2.0.0-rc.N 只进入 next，正式 2.0.0 进入 latest；不得先占用正式版试装 |
+| REL-11 | P0 | RC 与正式版本渠道 | 2.0.1-rc.N 只进入 next，正式 2.0.1 进入 latest；不得先占用正式版试装 |
 | REL-12 | P0 | 发布后 registry 回读与干净安装 | version/Commit/integrity/来源证明/资源一致，所有声明平台可运行 |
 | REL-13 | P0 | 一个原生平台产物缺失或许可清单不完整 | 发行失败，不将缺失转换成 warning 后继续 |
 | REL-14 | P1 | npm 聚合包压缩/解包体积和安装耗时 | 达到冻结门槛；不静默引入平台依赖改变分发合同 |
@@ -372,7 +372,7 @@ Windows 固定 required jobs、工具链、托管 runner 与真实桌面的分�
 | 每个变更 | 格式、vet、契约、模块测试、离线 fixtures、Lua 四端、技能引用 | Windows 的适用子集；无真实账号与公网依赖 |
 | 每个合并候选 | 真实 CLI 多进程、恢复故障矩阵、包安装 | 临时独立 workspace；P0 全过 |
 | 每晚 | fuzz、重复交错种子、资源泄漏、固定性能 | 记录预算和种子；捕获机器与普通 runner 分开 |
-| 发行候选 | 上述全部 + 原生捕获 + 真实网络 + 四端实机 + skill 情景 | 缺实机证据不能记通过；报告与发行 Commit 绑定 |
+| 发行候选 | 上述自动化检查 + Windows amd64 运行 smoke、真实网络与 skill 情景 | 游戏真机手测由用户完成并单独记载；自动 CI 只以可在托管 runner 稳定执行的检查为门禁 |
 
 建议执行 `go test ./...`、`go vet ./...`，在受支持 runner 上执行 race；race 测试环境可能需要 CGO/工具链，与 CGO_ENABLED=0 的发行构建分别配置。fuzz 聚焦 SV、QR 信号、DB2/BLTE、SQL、TOC/XML 和协议状态，定时保存能复现的失败输入。
 

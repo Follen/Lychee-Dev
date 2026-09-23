@@ -1,5 +1,5 @@
 local root = assert(arg[1])
-local ns = { Release = "2.0.0", Startup = { ready = true,
+local ns = { Release = "2.0.1", Startup = { ready = true,
     identity = { product = "retail", build = "12.1.0.69875" } } }
 ns.Platform = { ObserveActor = function() return { character = "Paladin", realm = "Realm", guid = "Player-1-123" } end }
 local secret = {}

@@ -46,7 +46,7 @@ lycheedev init                                        # new-format workspace (~/
 lycheedev target resolve --installation <client> --region cn --locale zhCN
 lycheedev source query C_Spell.GetSpellInfo --snapshot <pin>
 lycheedev data db2 schema Map --snapshot <pin> --cdn
-lycheedev live connect --snapshot <pin>               # discover, identify, connect
+lycheedev live connect --snapshot <pin>               # automatic discovery, identity and in-game opt-in
 lycheedev live run --session <id> --file probe.lua
 lycheedev doctor
 ```
@@ -66,9 +66,9 @@ node tools/skill-contract.mjs                      # skill ↔ command-surface c
 node tools/release.mjs assemble --out <dir> --npm-cli <npm-cli.js> --cgo zero
 ```
 
-Windows CI is the release gate: six required jobs (`windows-contract`,
-`windows-process`, `windows-addon`, `windows-package`, `cross-platform-contract`,
-`ci-required`). See [docs/toolkit/release-2.0.0.md](docs/toolkit/release-2.0.0.md)
+Windows CI is the release gate: five required jobs (`windows-contract`,
+`windows-process`, `windows-addon`, `windows-package`, `ci-required`).
+See [docs/toolkit/release-2.0.1.md](docs/toolkit/release-2.0.1.md)
 for the release contract and [docs/toolkit/regression.md](docs/toolkit/regression.md)
 for the acceptance matrix.
 

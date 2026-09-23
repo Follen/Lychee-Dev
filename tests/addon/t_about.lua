@@ -18,7 +18,7 @@ local aboutPage = assert(W.GetPage("about"), "about page object was not built")
 assert(aboutPage.metaItems, "about metadata rows were not created")
 
 -- Version comes from TOC metadata with the release string as fallback.
-assert(aboutPage.metaItems.version.value:GetText() == "2.0.0",
+assert(aboutPage.metaItems.version.value:GetText() == "2.0.1",
     "about page did not read the addon version")
 assert(aboutPage.metaItems.command.value:GetText() == "/dev", "about open command changed")
 assert(aboutPage.metaItems.author.value:GetText() == "Follen", "about author changed")

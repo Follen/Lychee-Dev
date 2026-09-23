@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 )
 
 func TestLuaReportVerifiedByHost(t *testing.T) {
@@ -18,7 +19,7 @@ func TestLuaReportVerifiedByHost(t *testing.T) {
 	if err := json.Unmarshal(output, &payload); err != nil {
 		t.Fatal(err)
 	}
-	expected := bridge.SignalExpectation{Kind: "reported", Release: "2.0.0", SessionNonce: "session", RequestID: "OP-protocol", Character: "character", Realm: "realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 3}
+	expected := bridge.SignalExpectation{Kind: "reported", Release: buildinfo.Version, SessionNonce: "session", RequestID: "OP-protocol", Character: "character", Realm: "realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 3}
 	report, err := bridge.VerifyReport([]byte(payload.Receipt), []byte(payload.Body), []byte(payload.Code), expected)
 	if err != nil {
 		t.Fatal(err)

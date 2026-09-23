@@ -38,6 +38,13 @@ func RemoveAddon(ctx context.Context, clientDirectory, archive string) (Removal,
 	return RemoveInstallation(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
 }
 
+// AddonDirectory is the single layout rule for the managed addon in a client.
+// Callers still use ResolveAddonDestination or a queue operation to verify the
+// installation and its ownership before touching files.
+func AddonDirectory(clientDirectory string) string {
+	return filepath.Join(clientDirectory, "Interface", "AddOns", "Lychee Dev")
+}
+
 func ResolveAddonDestination(ctx context.Context, clientDirectory string) (AddonDeployment, string, error) {
 	deployment, err := InspectAddonDeployment(ctx, clientDirectory)
 	if err != nil {

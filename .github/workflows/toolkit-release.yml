@@ -1,16 +1,16 @@
 name: toolkit release
 
-# Toolkit 2.0 release pipeline (docs/toolkit/release-2.0.0.md §2, §6-§9).
+# Toolkit 2.0.1 release pipeline (docs/toolkit/release-2.0.1.md).
 #
 # Triggers: a strictly validated `v*` tag push, or manual workflow_dispatch
 # which is DRY-RUN ONLY (a manual run with dry_run=false fails fast in the
 # identity job; publishing happens exclusively from version tag pushes).
 #
 # Order (§8): freeze identity -> reusable toolkit CI gate -> CGO_ENABLED=0
-# pre-step -> assemble ONCE (five native builds + payload + release.json +
+# pre-step -> assemble ONCE (Windows amd64 build + payload + release.json +
 # native archives + addon ZIP + ONE npm pack + whitelist audit + corresponding
-# source) -> five-platform run smoke -> seal digests -> release gate
-# (recompute sealed digests, platform evidence, desktop evidence) -> OIDC
+# source) -> Windows run smoke -> seal digests -> release gate
+# (recompute sealed digests and platform evidence) -> OIDC
 # publish of the SAME tgz -> registry read-back + clean install -> GitHub
 # Release. The publish job never rebuilds or re-packs; it consumes the sealed
 # bundle only (§6/§9).
@@ -32,10 +32,6 @@ on:
 
 permissions:
   contents: read
-  # actions: read lets the release gate discover and download the
-  # `desktop-evidence` artifact from the toolkit-desktop.yml run of the same
-  # commit (real-machine evidence intake, REL-04/05).
-  actions: read
 
 concurrency:
   group: toolkit-release-${{ github.ref }}
@@ -65,7 +61,7 @@ jobs:
       - name: Guard - manual dispatch is dry-run only
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" != "true" ]; then
-            echo "::error::manual workflow_dispatch may only rehearse (dry_run=true); publishing requires the strictly validated v* tag push (release-2.0.0.md §7)"
+            echo "::error::manual workflow_dispatch may only rehearse (dry_run=true); publishing requires the strictly validated v* tag push (release-2.0.1.md)"
             exit 1
           fi
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -88,7 +84,7 @@ jobs:
             commit="$(git rev-parse HEAD)"
             node -e "
               const fs = require('fs');
-              fs.writeFileSync('identity.json', JSON.stringify({
+              fs.writeFileSync(require('path').join(process.env.RUNNER_TEMP, 'identity.json'), JSON.stringify({
                 version: process.argv[1], commit: process.argv[2], distTag: null,
                 tag: 'v' + process.argv[1], tagVerified: false, dryRun: true,
               }, null, 2) + '\n');
@@ -169,10 +165,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -ne '11.18.0') { throw 'npm tool version mismatch' }
       - name: Assemble the release bundle (§6 - pack exactly once)
         # tools/release.mjs assemble performs: license gate (license decision
-        # pending), identity + VCS stamps, five CGO_ENABLED=0 -trimpath
+        # checked), identity + VCS stamps, Windows amd64 CGO_ENABLED=0 -trimpath
         # -buildvcs=true builds, binary identity verification, addon/skill
         # payload staging, release.json with REQUIRED correspondingSource
-        # (git archive + go mod vendor + offline rebuild comparison), five
+        # (git archive + go mod vendor + offline rebuild comparison), one
         # native archives, addon ZIP + byte comparison against the payload,
         # ONE npm pack with deterministic tar modes, whitelist audit and the
         # external sealed manifest + SHA256SUMS.
@@ -310,7 +306,7 @@ jobs:
         with:
           name: cgo-evidence
           path: bundle/cgo
-      - name: Download five-platform evidence
+      - name: Download Windows amd64 evidence
         uses: actions/download-artifact@v4 # TODO: pin SHA
         with:
           pattern: platform-evidence-*
@@ -335,7 +331,7 @@ jobs:
           set -e
           node tools/release.mjs seal --out out \
             --report reports/cgo-evidence.json \
-            --report reports/windows-amd64-release-smoke.json \
+            --report reports/windows-amd64-release-smoke.json
       - name: Recompute every sealed digest
         run: |
           set -e
@@ -345,7 +341,7 @@ jobs:
             if (!r.ok) { console.error('::error::sealed digest violations: ' + r.violations.join('; ')); process.exit(1); }
             console.log('sealed bundle verified for ' + r.version + ' @ ' + r.commit);
           "
-      - name: Verify five-platform run evidence (REL-13)
+      - name: Verify Windows amd64 run evidence (REL-13)
         run: |
           set -e
           node tools/release.mjs verify-platform-evidence --out out --evidence evidence > platform-check.json
@@ -371,72 +367,9 @@ jobs:
           path: staged/**
           if-no-files-found: error
 
-  desktop:
-    name: desktop verification (interactive self-hosted)
-    # WGC capture and native input need a real logged-in desktop; this runs on
-    # THIS project's dedicated self-hosted runner and verifies the exact
-    # sealed binaries of this release run. Dry-run rehearsals skip it.
-    needs: [identity, assemble]
-    if: needs.identity.outputs.mode == 'release'
-    runs-on: [self-hosted, Windows, desktop-evidence]
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: '1.27.1'
-          cache: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24.18.1'
-      - name: Download the sealed manifest from this run
-        # The manifest is produced by assemble (release-sealed-manifest);
-        # the consolidated sealed-bundle only exists after seal, which runs
-        # in parallel with this job.
-        uses: actions/download-artifact@v4 # TODO: pin SHA
-        with:
-          name: release-sealed-manifest
-          path: sealed-bundle
-      - name: WGC capture and native input self-window suite
-        # Only windows this suite created itself; never the game.
-        env:
-          LYCHEEDEV_TEST_DESKTOP: '1'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          go test -count=1 -timeout=15m ./internal/desktop/...
-          if ($LASTEXITCODE -ne 0) { throw 'desktop self-window suite failed' }
-      - name: Desktop-enabled install smoke through the installed launcher
-        id: desktop-smoke
-        env:
-          LYCHEEDEV_TEST_DESKTOP: '1'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $npmCli = node -e "const p=require('path'),f=require('fs');const d=p.dirname(process.execPath);process.stdout.write(p.join(d,'node_modules','npm','bin','npm-cli.js'))"
-          if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
-          node packages/npm/lycheedev/test/install-smoke.mjs $npmCli
-          if ($LASTEXITCODE -ne 0) { throw 'desktop install smoke failed' }
-      - name: Fold the desktop-evidence record
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node tools/release.mjs desktop-evidence `
-            --manifest "sealed-bundle/release-manifest.json" `
-            --smoke "${{ steps.desktop-smoke.outputs.report }}" `
-            --operator 'Follen' `
-            --notes 'Self-hosted interactive-desktop verification of this release run: WGC self-window capture, native input lock, installed-launcher bind round-trip.' `
-            --out desktop-evidence.json
-          if ($LASTEXITCODE -ne 0) { throw 'desktop evidence assembly failed' }
-      - name: Upload the desktop evidence artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: desktop-evidence
-          path: desktop-evidence.json
-          if-no-files-found: error
-
   release-gate:
-    name: release gate (sealed digests, platform and desktop evidence)
-    needs: [identity, ci, seal, desktop]
+    name: release gate (sealed digests and Windows run evidence)
+    needs: [identity, ci, seal]
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -479,7 +412,7 @@ jobs:
             if (!r.ok) { console.error('::error::sealed digest violations: ' + r.violations.join('; ')); process.exit(1); }
             console.log('sealed bundle verified for ' + r.version + ' @ ' + r.commit);
           "
-      - name: Verify five-platform run evidence
+      - name: Verify Windows amd64 run evidence
         run: |
           set -e
           node tools/release.mjs verify-platform-evidence --out out --evidence evidence > platform-check.json
@@ -488,30 +421,6 @@ jobs:
             if (!r.ok) { console.error('::error::platform evidence violations: ' + r.violations.join('; ')); process.exit(1); }
             console.log('platform evidence verified for: ' + r.platforms.join(', '));
           "
-      - name: Verify real-machine desktop evidence binding (REL-04/05)
-        # The inline desktop job of THIS run produced the evidence from the
-        # same sealed binaries; dry-run rehearsals skip desktop and record it
-        # as pending.
-        if: needs.identity.outputs.mode == 'release'
-        uses: actions/download-artifact@v4 # TODO: pin SHA
-        with:
-          name: desktop-evidence
-          path: evidence-desktop
-      - name: Bind desktop evidence to the sealed digests (REL-04/05)
-        if: needs.identity.outputs.mode == 'release'
-        run: |
-          set -e
-          node tools/release.mjs verify-desktop-evidence --out out --evidence evidence-desktop/desktop-evidence.json > desktop-check.json
-          node -e "
-            const r = JSON.parse(require('fs').readFileSync('desktop-check.json', 'utf8'));
-            if (!r.ok) { console.error('::error::desktop evidence violations: ' + r.violations.join('; ')); process.exit(1); }
-            console.log('desktop evidence verified (native binding: ' + (r.nativeBinding?.status ?? 'unknown') + ')');
-          "
-      - name: Record desktop evidence as pending for dry-run rehearsals
-        if: needs.identity.outputs.mode != 'release'
-        run: |
-          echo '::warning::desktop evidence pending (REL-04): dry-run rehearsals do not run the desktop job; a real tag publish requires it'
-
   publish:
     name: OIDC publish and registry read-back
     needs: [identity, release-gate]
@@ -591,7 +500,7 @@ jobs:
         # No NPM_TOKEN / NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC
         # token for short-lived registry credentials; provenance is generated
         # automatically for the public repository. Dist-tag is `latest`, or
-        # `next` for 2.0.0-rc.N candidates (REL-11).
+        # `next` for 2.0.1-rc.N candidates (REL-11).
         run: |
           set -e
           npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz" --access public --tag "$PUBLISH_DIST_TAG"
@@ -619,7 +528,7 @@ jobs:
           # This job runs on ubuntu and the product ships windows-amd64 only:
           # the launcher must refuse to select a binary here (correct product
           # behavior), while native execution evidence comes from the windows
-          # platform smoke and the inline desktop job of the same release run.
+          # platform smoke from the same release run.
           set +e
           node "$launcher" version --format=json > installed-version.json 2> installed-unsupported.log
           code=$?
@@ -678,7 +587,6 @@ jobs:
       - verify-cgo
       - assemble
       - platform-smoke
-      - desktop
       - seal
       - release-gate
       - publish
@@ -697,7 +605,6 @@ jobs:
       - name: Assert the release pipeline result
         env:
           MODE: ${{ needs.identity.outputs.mode }}
-          DESKTOP_RESULT: ${{ needs.desktop.result }}
           CI_RESULT: ${{ needs.ci.result }}
           VERIFY_CGO_RESULT: ${{ needs.verify-cgo.result }}
           ASSEMBLE_RESULT: ${{ needs.assemble.result }}
@@ -719,9 +626,6 @@ jobs:
           check assemble "$ASSEMBLE_RESULT"
           check platform-smoke "$PLATFORM_SMOKE_RESULT"
           check seal "$SEAL_RESULT"
-          if [ "$MODE" = "release" ]; then
-            check desktop "$DESKTOP_RESULT"
-          fi
           check release-gate "$RELEASE_GATE_RESULT"
           if [ "$MODE" = "release" ]; then
             check publish "$PUBLISH_RESULT"

@@ -10,7 +10,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"path/filepath"
 	"time"
 )
 
@@ -81,7 +80,7 @@ func (p *ProbeOperation) prepareBootstrapInput(ctx context.Context) (string, err
 		if err != nil {
 			return "", err
 		}
-		queuePath := filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev")
+		queuePath := delivery.AddonDirectory(p.session.target.Client.Directory)
 		if _, err := delivery.VerifyProbePrepared(ctx, queuePath, definition); err != nil {
 			return "", err
 		}
@@ -174,7 +173,7 @@ func (p *ProbeOperation) ObserveBootstrap(ctx context.Context) (evidence.Capture
 		if err != nil {
 			return zero, err
 		}
-		queuePath := filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev")
+		queuePath := delivery.AddonDirectory(p.session.target.Client.Directory)
 		if _, err := delivery.VerifyProbePrepared(ctx, queuePath, definition); err != nil {
 			return zero, err
 		}

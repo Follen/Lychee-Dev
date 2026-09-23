@@ -10,7 +10,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"path/filepath"
 	"time"
 )
 
@@ -67,7 +66,7 @@ func (p *ProbeOperation) prepareLoadInput(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		queue := filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev")
+		queue := delivery.AddonDirectory(p.session.target.Client.Directory)
 		if _, err := delivery.VerifyProbePrepared(ctx, queue, definition); err != nil {
 			return "", err
 		}

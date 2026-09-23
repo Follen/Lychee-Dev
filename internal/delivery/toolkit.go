@@ -25,7 +25,7 @@ func InspectAddonDeployment(ctx context.Context, clientDirectory string) (AddonD
 	if err != nil {
 		return AddonDeployment{}, err
 	}
-	status, err := InspectInstallation(ctx, filepath.Join(client.Directory, "Interface", "AddOns", "Lychee Dev"), "addon")
+	status, err := InspectInstallation(ctx, AddonDirectory(client.Directory), "addon")
 	if err != nil {
 		return AddonDeployment{}, err
 	}

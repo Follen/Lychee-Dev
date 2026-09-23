@@ -11,7 +11,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"path/filepath"
 	"time"
 )
 
@@ -218,7 +217,7 @@ func (p *ProbeOperation) observeCleanupReentry(ctx context.Context) (bridge.Sign
 		if err != nil {
 			return zero, err
 		}
-		queuePath := filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev")
+		queuePath := delivery.AddonDirectory(p.session.target.Client.Directory)
 		if _, err := delivery.VerifyProbeRetired(ctx, queuePath, definition); err != nil {
 			return zero, err
 		}

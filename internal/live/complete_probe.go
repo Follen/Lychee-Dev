@@ -42,7 +42,7 @@ func (p *ProbeOperation) cleanupInput(ctx context.Context) (journal.WorkRecord, 
 	if observed.Schema != "lycheedev.report-observation.v1" || observed.RemovalID == "" || observed.QueueRetirement == nil || observed.QueueRetirement.Revision.SHA256 == "" {
 		return record, input, observed, errors.New("live.cleanup_prerequisite_missing")
 	}
-	_, err = delivery.VerifyProbeRetired(ctx, filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev"), definition)
+	_, err = delivery.VerifyProbeRetired(ctx, delivery.AddonDirectory(p.session.target.Client.Directory), definition)
 	return record, input, observed, err
 }
 

@@ -194,7 +194,7 @@ func PrepareOperationQueue(ctx context.Context, root, operationID string) (deliv
 		if err != nil {
 			return zero, err
 		}
-		deployment, parent, err := delivery.ResolveAddonDestination(ctx, input.Load.Installation)
+		deployment, _, err := delivery.ResolveAddonDestination(ctx, input.Load.Installation)
 		if err != nil {
 			return zero, err
 		}
@@ -219,7 +219,7 @@ func PrepareOperationQueue(ctx context.Context, root, operationID string) (deliv
 				return zero, errors.New("live.invalid_probe_load_observation")
 			}
 		}
-		revision, err := delivery.ChangeProbeQueue(ctx, filepath.Join(parent, "Lychee Dev"), definition, false)
+		revision, err := delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(deployment.Client.Directory), definition, false)
 		if err != nil {
 			return zero, err
 		}

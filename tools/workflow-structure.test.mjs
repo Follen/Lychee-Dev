@@ -1,9 +1,9 @@
 // Structural pin for the release pipelines (regression ARC/CI): the job graph,
-// needs edges, desktop-evidence binding and platform scope of the workflow
+// needs edges, hosted-runner scope and platform scope of the workflow
 // files are asserted literally. A YAML/Actions mistake that changes the shape
 // fails here before any runner burns minutes. Line-based on purpose: these
 // files are hand-maintained and every load-bearing line is a single constant.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -14,7 +14,6 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const release = readFileSync(join(repository, '.github/workflows/toolkit-release.yml'), 'utf8');
 const ci = readFileSync(join(repository, '.github/workflows/toolkit-ci.yml'), 'utf8');
-const desktop = readFileSync(join(repository, '.github/workflows/toolkit-desktop.yml'), 'utf8');
 
 function jobsOf(text) {
   const jobs = {};
@@ -32,30 +31,25 @@ function jobsOf(text) {
   return jobs;
 }
 
-test('release pipeline job graph: identity -> ci/cgo -> assemble -> smoke+desktop -> seal -> gate -> publish', () => {
+test('release pipeline job graph: identity -> ci/cgo -> assemble -> smoke -> seal -> gate -> publish', () => {
   const jobs = jobsOf(release);
   assert.deepEqual(Object.keys(jobs), [
     'identity', 'ci', 'verify-cgo', 'assemble', 'platform-smoke',
-    'seal', 'desktop', 'release-gate', 'publish', 'release-complete',
+    'seal', 'release-gate', 'publish', 'release-complete',
   ]);
   for (const [name, job] of Object.entries(jobs)) {
     if (name === 'ci') assert.ok(job.usesJob, 'ci must call the shared workflow');
     else assert.ok(job.steps === 1, `job ${name} must have exactly one steps key, found ${job.steps}`);
   }
-  assert.match(release, /  desktop:\n[\s\S]*?runs-on: \[self-hosted, Windows, desktop-evidence\]/);
-  assert.match(release, /  desktop:\n[\s\S]*?needs: \[identity, assemble\]/);
-  assert.match(release, /  release-gate:\n[\s\S]*?needs: \[identity, ci, seal, desktop\]/);
+  assert.match(release, /  release-gate:\n[\s\S]*?needs: \[identity, ci, seal\]/);
   assert.match(release, /  publish:\n[\s\S]*?needs: \[identity, release-gate\]/);
   assert.match(release, /  seal:\n[\s\S]*?needs: \[identity, assemble, platform-smoke\]/);
 });
 
-test('desktop verification binds evidence to the sealed binaries inside the same run', () => {
-  assert.match(release, /node tools\/release\.mjs desktop-evidence/);
-  assert.match(release, /name: desktop-evidence\n/);
-  assert.match(release, /verify-desktop-evidence --out out --evidence evidence-desktop\/desktop-evidence\.json/);
-  // The gate consumes the same-run artifact; no cross-run lookups.
-  assert.doesNotMatch(release, /gh run list --workflow toolkit-desktop/);
-  assert.doesNotMatch(release, /actions\/runs\?head_sha=/);
+test('release has no interactive desktop job or desktop evidence gate', () => {
+  assert.equal(existsSync(join(repository, '.github/workflows/toolkit-desktop.yml')), false);
+  assert.doesNotMatch(release, /^  desktop:$/m);
+  assert.doesNotMatch(release, /self-hosted|desktop-evidence|verify-desktop-evidence/);
 });
 
 test('release publishes the sealed tarball via OIDC with no token fallback', () => {
@@ -76,6 +70,11 @@ test('windows amd64 is the only shipped platform', () => {
   }
   assert.match(release, /SMOKE_TARGET: windows-amd64/);
   assert.doesNotMatch(release, /for target in windows-amd64 linux-amd64/);
+});
+
+test('manual dry-run writes release identity outside the checkout', () => {
+  assert.match(release, /fs\.writeFileSync\(require\('path'\)\.join\(process\.env\.RUNNER_TEMP, 'identity\.json'\)/);
+  assert.doesNotMatch(release, /fs\.writeFileSync\('identity\.json'/);
 });
 
 test('ci gate: required windows jobs aggregate strictly and stay callable', () => {
@@ -102,10 +101,4 @@ test('every windows job normalizes TMP before any test runs', () => {
       assert.match(body, /Normalize TMP to the long runner temp path/, `job ${job} in ${name} lacks TMP normalization`);
     }
   }
-});
-
-test('desktop workflow stays dispatchable and uploads the gate artifact', () => {
-  assert.match(desktop, /workflow_dispatch:/);
-  assert.match(desktop, /name: desktop-evidence/);
-  assert.match(desktop, /LYCHEEDEV_TEST_DESKTOP: '1'/);
 });

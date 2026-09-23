@@ -1,6 +1,6 @@
 ## Interface: 50504
 ## Title: Lychee Dev
-## Version: 2.0.0
+## Version: 2.0.1
 ## SavedVariables: LycheeToolkitDB
 
 Clients\Pandaria.lua

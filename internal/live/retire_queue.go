@@ -10,7 +10,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"path/filepath"
 )
 
 // RetireQueue removes only this operation's exact original definition after ACK.
@@ -84,7 +83,7 @@ func (p *ProbeOperation) RetireQueue(ctx context.Context) (delivery.QueueRevisio
 		if err := p.check(ctx); err != nil {
 			return zero, err
 		}
-		revision, err := delivery.ChangeProbeQueue(ctx, filepath.Join(p.session.target.Client.Directory, "Interface", "AddOns", "Lychee Dev"), definition, true)
+		revision, err := delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(p.session.target.Client.Directory), definition, true)
 		if err != nil {
 			return zero, err
 		}

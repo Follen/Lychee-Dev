@@ -3,15 +3,57 @@
 // classification (REL-09) and the sealed tarball whitelist audit (PKG-05).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, REPOSITORY_URL, TARGETS,
+  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS,
 } from './release.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('registry-state returns one complete document and --out persists the same state', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lycheedev-registry-'));
+  const previousExit = process.exitCode;
+  const fetchImpl = async () => ({ status: 200, text: async () => JSON.stringify({ dist: { integrity: 'sha512-match' } }) });
+  try {
+    const args = ['--name', 'lycheedev', '--version', '2.0.0', '--integrity', 'sha512-match'];
+    const record = await registryStateCommand(args, fetchImpl);
+    assert.deepEqual(record, {
+      name: 'lycheedev', version: '2.0.0', url: 'https://registry.npmjs.org/lycheedev/2.0.0',
+      state: 'exists-matching', integrity: 'sha512-match',
+    });
+    const path = join(directory, 'registry.json');
+    assert.deepEqual(await registryStateCommand([...args, '--out', path], fetchImpl), {
+      state: 'exists-matching', integrity: 'sha512-match',
+    });
+    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), record);
+  } finally {
+    process.exitCode = previousExit;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('registry-state CLI prints one JSON document without --out', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lycheedev-registry-cli-'));
+  try {
+    const preload = join(directory, 'fetch.mjs');
+    writeFileSync(preload, 'globalThis.fetch = async () => ({ status: 404, text: async () => "" });\n');
+    const script = fileURLToPath(new URL('./release.mjs', import.meta.url));
+    const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, script, 'registry-state',
+      '--name', 'lycheedev', '--version', '2.0.1'], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), {
+      name: 'lycheedev', version: '2.0.1',
+      url: 'https://registry.npmjs.org/lycheedev/2.0.1', state: 'absent',
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('VCS identity parsing accepts real `go version -m` output with indented build lines (REL-01)', () => {
   // Real output shape: every build line starts with a tab before the "build" key.

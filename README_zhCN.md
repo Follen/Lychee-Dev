@@ -43,7 +43,7 @@ lycheedev init                                        # 新格式工作空间（
 lycheedev target resolve --installation <客户端> --region cn --locale zhCN
 lycheedev source query C_Spell.GetSpellInfo --snapshot <pin>
 lycheedev data db2 schema Map --snapshot <pin> --cdn
-lycheedev live connect --snapshot <pin>               # 发现、识别、自动连接
+lycheedev live connect --snapshot <pin>               # 自动发现、识别并在游戏内启用连接；无需手输 /dev connect
 lycheedev live run --session <id> --file probe.lua
 lycheedev doctor
 ```
@@ -63,9 +63,9 @@ node tools/skill-contract.mjs                      # skill 与命令面一致性
 node tools/release.mjs assemble --out <目录> --npm-cli <npm-cli.js> --cgo zero
 ```
 
-Windows CI 是发布门槛：六个必需 job（`windows-contract`、`windows-process`、
-`windows-addon`、`windows-package`、`cross-platform-contract`、`ci-required`）。
-发布合同见 [docs/toolkit/release-2.0.0.md](docs/toolkit/release-2.0.0.md)，
+Windows CI 是发布门槛：五个必需 job（`windows-contract`、`windows-process`、
+`windows-addon`、`windows-package`、`ci-required`）。
+发布合同见 [docs/toolkit/release-2.0.1.md](docs/toolkit/release-2.0.1.md)，
 验收矩阵见 [docs/toolkit/regression.md](docs/toolkit/regression.md)。
 
 ## 设计与状态

@@ -1,5 +1,5 @@
 // Release assembly, sealing and release-gate checks for the lycheedev package
-// (docs/toolkit/release-2.0.0.md §5-§9, regression REL-01..14 / PKG-01..08).
+// (docs/toolkit/release-2.0.1.md, regression REL-01..14 / PKG-01..08).
 // Subcommands are driven by .github/workflows/toolkit-release.yml and
 // toolkit-ci.yml. Nothing here publishes, tags, or mutates tracked sources.
 //
@@ -12,12 +12,11 @@
 //                       manifest + SHA256SUMS after verification
 //   verify-sealed       recompute every sealed digest right before publish
 //   release-identity    strict tag <-> version source binding (REL-01/05/11)
-//   dist-tag            2.0.0-rc.N -> next, otherwise latest (REL-11)
+//   dist-tag            2.0.1-rc.N -> next, otherwise latest (REL-11)
 //   registry-state      exists-matching / exists-conflicting / absent / unknown
 //                       (REL-09: unknown is never treated as absent)
 //   verify-platform-evidence   windows-amd64 run evidence completeness (REL-13)
-//   verify-desktop-evidence    real-machine evidence binding (REL-04/05)
-//   platform-evidence / desktop-evidence / release-notes / check-assets
+//   platform-evidence / release-notes / check-assets
 //                       small report helpers used by the workflows
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -566,7 +565,7 @@ export function classifyRegistry({ status, body, expectedIntegrity }) {
   }
 }
 
-async function registryStateCommand(argv) {
+export async function registryStateCommand(argv, fetchImpl = fetch) {
   const options = parseOptions(argv);
   const name = requiredOption(options, '--name');
   const version = requiredOption(options, '--version');
@@ -574,20 +573,18 @@ async function registryStateCommand(argv) {
   const url = `https://registry.npmjs.org/${name}/${version}`;
   let result;
   try {
-    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30000) });
+    const response = await fetchImpl(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30000) });
     result = classifyRegistry({ status: response.status, body: await response.text(), expectedIntegrity });
   } catch (error) {
     result = { state: 'unknown', error: String(error?.message ?? error) };
   }
-  // --out writes the single JSON document to a file; without it the value is
-  // printed, but the dispatcher prints the command's return value too, which
-  // would leave two JSON documents on stdout.
   const record = { name, version, url, ...result };
   if (options['--out']) writeJson(resolve(options['--out']), record);
-  else process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
   if (result.state === 'exists-conflicting') process.exitCode = 1;
   if (result.state === 'unknown') process.exitCode = 2;
-  return result;
+  // The top-level dispatcher is the only stdout writer. The --out variant
+  // keeps the compact return used by release CI and persists the full record.
+  return options['--out'] ? result : record;
 }
 
 function verifyPlatformEvidenceCommand(argv) {
@@ -615,30 +612,6 @@ function verifyPlatformEvidenceCommand(argv) {
   return { ok: violations.length === 0, violations, platforms: Object.keys(platforms) };
 }
 
-function verifyDesktopEvidenceCommand(argv) {
-  const options = parseOptions(argv);
-  const out = resolve(requiredOption(options, '--out'));
-  const path = resolve(requiredOption(options, '--evidence'));
-  const manifest = JSON.parse(readFileSync(join(out, 'sealed', 'release-manifest.json'), 'utf8'));
-  const violations = [];
-  if (!existsSync(path)) return { ok: false, violations: [`desktop evidence missing: ${path} (REL-04) — managed CI has no interactive desktop; not-run never counts as passed`] };
-  const evidence = JSON.parse(readFileSync(path, 'utf8'));
-  if (evidence.schema !== 'lycheedev.desktop-evidence.v1') violations.push('desktop evidence schema');
-  if (evidence.commit !== manifest.commit) violations.push(`desktop evidence commit ${evidence.commit} != ${manifest.commit} (REL-05)`);
-  if (evidence.workspaceDirty !== false) violations.push('desktop evidence was captured from a dirty worktree (REL-05)');
-  if (evidence.nativeBinding?.status !== 'passed') violations.push(`native binding status ${evidence.nativeBinding?.status ?? 'absent'}: not-run never counts as passed (REL-04)`);
-  for (const entry of TARGETS) {
-    const expected = manifest.binaries[entry.target]?.sha256;
-    const observed = evidence.binaries?.[entry.target];
-    if (observed !== expected) violations.push(`${entry.target}: desktop evidence binary digest mismatch (REL-05)`);
-  }
-  const observedResources = new Map((evidence.resources ?? []).map(resource => [resource.path, resource.sha256]));
-  for (const resource of manifest.resources) {
-    if (observedResources.get(resource.path) !== resource.sha256) violations.push(`${resource.path}: desktop evidence resource digest mismatch (REL-05)`);
-  }
-  return { ok: violations.length === 0, violations, nativeBinding: evidence.nativeBinding, realMachine: evidence.realMachine };
-}
-
 function platformEvidenceCommand(argv) {
   const options = parseOptions(argv);
   const manifestPath = resolve(requiredOption(options, '--manifest'));
@@ -651,38 +624,6 @@ function platformEvidenceCommand(argv) {
     platform: target, version: manifest.version, commit: manifest.commit,
     binarySha256: manifest.binaries[target]?.sha256, status: smoke.status,
     launcher: smoke.launcher ?? null, report: smokePath,
-  };
-  writeJson(outPath, record);
-  return record;
-}
-
-function desktopEvidenceCommand(argv) {
-  const options = parseOptions(argv);
-  const manifestPath = resolve(requiredOption(options, '--manifest'));
-  const smokePath = resolve(requiredOption(options, '--smoke'));
-  const outPath = resolve(requiredOption(options, '--out'));
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const smoke = JSON.parse(readFileSync(smokePath, 'utf8'));
-  const files = [];
-  if (options['--evidence-dir']) {
-    for (const file of walkFiles(resolve(options['--evidence-dir']))) files.push(file.name);
-  }
-  const record = {
-    schema: 'lycheedev.desktop-evidence.v1',
-    commit: manifest.commit,
-    // Passthrough the manifest's truth: clean (false) passes the gate,
-    // a dirty assembly records true and verify-desktop-evidence rejects it.
-    workspaceDirty: manifest.identity.workspaceDirty === true,
-    binaries: Object.fromEntries(Object.entries(manifest.binaries).map(([name, entry]) => [name, entry.sha256])),
-    resources: manifest.resources.map(resource => ({ path: resource.path, sha256: resource.sha256 })),
-    nativeBinding: smoke.nativeBinding ?? { status: 'not-run' },
-    realMachine: {
-      operator: options['--operator'] ?? null,
-      gameBuild: options['--game-build'] ?? null,
-      clients: options['--clients'] ?? null,
-      notes: options['--notes'] ?? null,
-      files,
-    },
   };
   writeJson(outPath, record);
   return record;
@@ -747,7 +688,7 @@ function releaseNotesCommand(argv) {
     '',
     '## Verification',
     '',
-    '- Windows required jobs, the windows-amd64 run smoke and the real-machine desktop evidence are attached as reports; digests are sealed in `release-manifest.json` / `SHA256SUMS`.',
+    '- Windows required jobs and the windows-amd64 run smoke are attached as reports; digests are sealed in `release-manifest.json` / `SHA256SUMS`.',
     '- This release does not import or migrate any legacy tool data; new-format state is created from scratch on first use.',
     '- Third-party components and their licenses: `THIRD_PARTY_NOTICES` (attached).',
   ];
@@ -933,9 +874,7 @@ const commands = {
   'dist-tag': argv => ({ tag: distTagFor(requiredOption(parseOptions(argv), '--version')) }),
   'registry-state': registryStateCommand,
   'verify-platform-evidence': verifyPlatformEvidenceCommand,
-  'verify-desktop-evidence': verifyDesktopEvidenceCommand,
   'platform-evidence': platformEvidenceCommand,
-  'desktop-evidence': desktopEvidenceCommand,
   'verify-registry-readback': verifyRegistryReadbackCommand,
   'check-assets': checkAssetsCommand,
   'release-notes': releaseNotesCommand,

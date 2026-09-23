@@ -8,7 +8,7 @@ S0–S5 的能力范围不缩减，但不再按通用基础设施层层堆叠。
 游戏阶段由 live 独占，持久记录位于 live/journal；assets/Hotfix 共用 records
 内核，不单独复制数据访问。下表原类型名仅表示早期分工，不要求创建对应抽象。
 
-架构与命名以 [design.md](design.md) 为准，验收以 [regression.md](regression.md) 为准，Windows CI 与 npm 发布以 [release-2.0.0.md](release-2.0.0.md) 为准。本次正式版本固定为 `2.0.0`、tag 为 `v2.0.0`。本文本身不授予操作权限；设计提交后用户已授权实施和真机测试，随后授权全部完成并通过测试后发布 npm。旧用户数据不得删除或导入。
+本路线记录 2.0.0 实施过程；当前架构以 [design.md](design.md) 为准，验收以 [regression.md](regression.md) 为准，Windows CI 与 2.0.1 npm 发布以 [release-2.0.1.md](release-2.0.1.md) 为准。以下旧阶段目标中的 2.0.0、四客户端实机和五平台表述是历史规划，不覆盖当前 Windows amd64／三客户端合同。旧用户数据不得删除或导入。
 
 ## 1. 能力迁入清单
 
@@ -112,10 +112,10 @@ codebase、records/changes、assets 可以在 S2 的契约稳定后并行实施�
 - 删除已经被替代的旧实现、旧内部结构测试、旧脚本和旧协议入口。
 - 更新 AGENTS、双语 README、构建/发行脚本与支持矩阵，确保它们描述新产品。
 - 完成命名/依赖/产物审计，不保留 shim、旧函数 wrapper 或另一套配置。
-- 对最终发行 Commit 运行完整回归，执行四客户端实机验证并记录实际 Build。
+- 对最终发行 Commit 运行完整回归；用户已完成游戏真机手测，详细记录单独归档。托管 CI 验证三客户端离线矩阵，不要求交互桌面 runner。
 - fresh 安装、旧根隔离、新数据持久化和未来 schema 拒绝降级检查完成。
-- 正式版本源、npm/lock、四 TOC、CLI、skill/resource manifest 统一为 2.0.0，准确 tag 为 v2.0.0；RC 使用 2.0.0-rc.N 与 next，不提前占用正式版本。
-- 完成 Windows CI、四端实机和实际 tgz 验收，封存同一 Commit 的产物及摘要。发布时消费同一份 tgz，通过 OIDC 发布并回读 registry 验证；发布本身另按授权执行。
+- 当前修复版版本源、npm/lock、四 TOC、CLI、skill/resource manifest 统一为 2.0.1，准确 tag 为 v2.0.1；2.0.0 已发布，不移动原标签。
+- 完成托管 Windows CI、三端离线矩阵和实际 tgz 验收，封存同一 Commit 的产物及摘要。发布时消费同一份 tgz，通过 OIDC 发布并回读 registry 验证；用户已授权本轮修复完成后发布 2.0.1。
 
 门槛：regression.md 的发布条件全部满足。旧二进制仅可保留在隔离测试基线或归档中，正式产品不依赖它们。
 

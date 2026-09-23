@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-ns.Release = "2.0.0"
+ns.Release = "2.0.1"
 ns.Startup = { ready = false, reason = "addon_not_loaded" }
 
 -- This one-shot loader is core infrastructure, not an enabled bridge feature.
