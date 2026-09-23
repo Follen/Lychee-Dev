@@ -44,7 +44,7 @@ const tgzBytes = readFileSync(tgzPath);
 const entries = readTgz(tgzBytes);
 const manifestEntry = entries.find(entry => entry.name === 'package/release.json');
 assert(manifestEntry, 'sealed tgz has no release.json');
-const manifest = JSON.parse(manifestEntry.toString('utf8'));
+const manifest = JSON.parse(Buffer.from(manifestEntry.bytes).toString('utf8'));
 const versionRecord = JSON.parse(readFileSync(join(repository, 'release/version.json'), 'utf8'));
 const audit = auditTgz(entries, {
   version: versionRecord.version,
