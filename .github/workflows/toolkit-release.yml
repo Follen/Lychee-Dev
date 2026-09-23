@@ -276,7 +276,7 @@ jobs:
         run: |
           set -e
           mkdir -p reports
-          npm_cli="$(npm root -g)/npm/bin/npm-cli.js"
+          npm_cli="$(node -p "require.resolve('npm/bin/npm-cli.js')")"
           [ -f "$npm_cli" ] || { echo "::error::npm-cli.js not found at $npm_cli"; exit 1; }
           tgz="bundle/tgz/lycheedev-$SMOKE_VERSION.tgz"
           [ -f "$tgz" ] || { echo "::error::missing sealed tarball $tgz"; exit 1; }
@@ -295,7 +295,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path reports | Out-Null
-          $npmCli = Join-Path (npm root -g) 'npm/bin/npm-cli.js'
+          $npmCli = node -p "require.resolve('npm/bin/npm-cli.js')"
           if (-not (Test-Path $npmCli)) { throw "npm-cli.js not found at $npmCli" }
           $tgz = "bundle/tgz/lycheedev-$env:SMOKE_VERSION.tgz"
           if (-not (Test-Path $tgz)) { throw "missing sealed tarball $tgz" }
