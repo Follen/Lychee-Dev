@@ -437,16 +437,14 @@ jobs:
             echo '::warning::desktop evidence pending (REL-04): not required for a dry-run rehearsal, but the release gate of a real tag publish fails without it; run toolkit-desktop.yml on the interactive-desktop runner and assemble the desktop-evidence artifact for the release commit'
             exit 0
           fi
-          run_id="$(gh run list --workflow toolkit-desktop.yml --json databaseId,headSha,conclusion --limit 100 \
-            | node -e "
-                let data = '';
-                process.stdin.on('data', chunk => data += chunk);
-                process.stdin.on('end', () => {
-                  const runs = JSON.parse(data).filter(run => run.headSha === process.env.GATE_COMMIT && run.conclusion === 'success');
-                  if (!runs.length) { console.error('::error::desktop evidence missing (REL-04): no successful toolkit-desktop.yml run for commit ' + process.env.GATE_COMMIT + '; run it on the interactive-desktop runner, assemble the desktop-evidence artifact and re-run this release'); process.exit(3); }
-                  console.log(String(runs[0].databaseId));
-                });
-              \")" || { echo '::error::desktop evidence lookup failed'; exit 3; }
+          # Look up the successful desktop verification run of THIS commit via
+          # the runs API (gh run list has no head-sha filter).
+          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GATE_COMMIT&per_page=50" \
+            --jq '.workflow_runs | map(select(.path == ".github/workflows/toolkit-desktop.yml" and .conclusion == "success")) | .[0].id' 2>/dev/null)"
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "::error::desktop evidence missing (REL-04): no successful toolkit-desktop.yml run for commit $GATE_COMMIT; run it on the interactive-desktop runner, then re-run this release"
+            exit 3
+          fi
           mkdir -p evidence-desktop
           gh run download "$run_id" --name desktop-evidence --dir evidence-desktop
           node tools/release.mjs verify-desktop-evidence --out out --evidence evidence-desktop/desktop-evidence.json > desktop-check.json
