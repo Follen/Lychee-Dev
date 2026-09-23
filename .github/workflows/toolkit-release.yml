@@ -37,6 +37,13 @@ permissions:
   # commit (real-machine evidence intake, REL-04/05).
   actions: read
 
+# Runner TMP on windows images is an 8.3 short path (C:\Users\RUNNER~1\...);
+# every job resolves fixtures through t.TempDir(), so normalize it to the long
+# runner.temp spelling before any test runs.
+env:
+  TMP: ${{ runner.temp }}
+  TEMP: ${{ runner.temp }}
+
 concurrency:
   group: toolkit-release-${{ github.ref }}
   cancel-in-progress: false

@@ -31,15 +31,14 @@ func TestInstallationLeaseIdentityShape(t *testing.T) {
 	if filepath.Base(scope) != ".lycheedev-locks" || filepath.Dir(scope) != canonicalParent {
 		t.Fatalf("scope = %q, want the parent-scoped lock directory of %q", scope, target)
 	}
-	if want := "installation:" + strings.ToLower(target); resource != want {
-		t.Fatalf("resource = %q, want %q", resource, want)
-	}
-	// A case- or short-spelled input yields the SAME identity: the derivation
-	// canonicalizes before hashing, so the expected resource string is built
-	// from the canonical spelling, never from the raw input.
+	// The derivation canonicalizes before hashing (8.3 short runner TMP,
+	// symlinks), so every expectation is built from the canonical spelling.
 	canonicalTarget, err := filepath.EvalSymlinks(target)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if want := "installation:" + strings.ToLower(canonicalTarget); resource != want {
+		t.Fatalf("resource = %q, want the canonical %q", resource, want)
 	}
 	againScope, againResource, err := InstallationLease(strings.ToLower(target))
 	if err != nil {
