@@ -575,7 +575,7 @@ jobs:
         run: |
           set -e
           integrity="$(node -p "JSON.parse(require('fs').readFileSync('out/sealed/release-manifest.json','utf8')).npm.integrity")"
-          node tools/release.mjs registry-state --name lycheedev --version "$PUBLISH_VERSION" --integrity "$integrity" > registry-state.json
+          node tools/release.mjs registry-state --name lycheedev --version "$PUBLISH_VERSION" --integrity "$integrity" --out registry-state.json
           state="$(node -p "JSON.parse(require('fs').readFileSync('registry-state.json','utf8')).state")"
           case "$state" in
             absent) echo "publish_needed=true" >> "$GITHUB_OUTPUT" ;;

@@ -579,7 +579,12 @@ async function registryStateCommand(argv) {
   } catch (error) {
     result = { state: 'unknown', error: String(error?.message ?? error) };
   }
-  process.stdout.write(`${JSON.stringify({ name, version, url, ...result }, null, 2)}\n`);
+  // --out writes the single JSON document to a file; without it the value is
+  // printed, but the dispatcher prints the command's return value too, which
+  // would leave two JSON documents on stdout.
+  const record = { name, version, url, ...result };
+  if (options['--out']) writeJson(resolve(options['--out']), record);
+  else process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
   if (result.state === 'exists-conflicting') process.exitCode = 1;
   if (result.state === 'unknown') process.exitCode = 2;
   return result;
