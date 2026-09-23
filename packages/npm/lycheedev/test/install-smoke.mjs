@@ -133,7 +133,9 @@ projectCache.writeUInt32LE(0xabcdef01, 60); projectCache.writeUInt32LE(42, 64);
 projectCache.writeUInt32LE(2, 68); projectCache[72] = 1; projectCache[77] = 0xff;
 const projectCachePath = join(root, 'project-cache.bin');
 writeFileSync(projectCachePath, projectCache);
-const projectQuery = projectCLI(['data', 'hotfix', '--source', 'dbcache', '--snapshot', projectPin, '--dbcache', projectCachePath, '--home', home], projectChild);
+// No --snapshot: the nearest project lock supplies the pin and the envelope
+// reports the discovered project directory (the behavior under test).
+const projectQuery = projectCLI(['data', 'hotfix', '--source', 'dbcache', '--dbcache', projectCachePath, '--home', home], projectChild);
 assert.equal(projectQuery.ok, true);
 assert.equal(projectQuery.context.project, projectDirectory);
 assert.equal(projectQuery.result.page.entries[0].payloadHex, '00ff');
