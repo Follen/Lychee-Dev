@@ -3,6 +3,7 @@ package command
 import (
 	"crypto/md5"
 	"fmt"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,7 @@ func TestTargetResolveFromClientReturnsReusablePinAndEvidence(t *testing.T) {
 	}
 	pin := resultMap(t, result)
 	data := pin["data"].(map[string]any)
-	if data["product"] != "retail" || data["fullBuild"] != "12.1.0.69875" || data["buildConfig"] != keys[0] || result.Context["snapshot"] != pin["id"] || result.Context["installation"] != game || len(result.Captures) != 1 {
+	if data["product"] != "retail" || data["fullBuild"] != "12.1.0.69875" || data["buildConfig"] != keys[0] || result.Context["snapshot"] != pin["id"] || result.Context["installation"] != testkit.CanonicalPath(t, game) || len(result.Captures) != 1 {
 		t.Fatal(result)
 	}
 	shown, code := invoke(t, "target", "show", pin["id"].(string), "--home", workspace, "--format=json")

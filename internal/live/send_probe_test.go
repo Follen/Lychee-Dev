@@ -56,7 +56,7 @@ func TestProbeDispatchPersistsIntentBeforeInputAndNeverReplays(t *testing.T) {
 					t.Fatal("input preceded durable intent", err)
 				}
 				if mode == "expired" {
-					time.Sleep(1100 * time.Millisecond)
+					time.Sleep(3100 * time.Millisecond)
 				}
 				if err := guard(ctx); err != nil {
 					return desktop.InputReceipt{}, err

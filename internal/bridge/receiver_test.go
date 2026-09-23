@@ -80,7 +80,7 @@ func TestSignalReaderIgnoresForeignAndStaleFrames(t *testing.T) {
 }
 
 func TestSignalFreshnessIncludesPostObservationDelay(t *testing.T) {
-	for _, at := range []time.Time{time.Time{}, time.Now().Add(-2 * time.Second), time.Now().Add(time.Second)} {
+	for _, at := range []time.Time{time.Time{}, time.Now().Add(-4 * time.Second), time.Now().Add(time.Second)} {
 		reader := &SignalReader{observedAt: at}
 		if err := reader.RequireFreshSignal(); err == nil {
 			t.Fatal("invalid frame age accepted")

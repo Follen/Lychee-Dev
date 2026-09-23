@@ -145,7 +145,10 @@ func discoverInstallations(ctx context.Context, roots, runningDirs []string, run
 	seen := map[string]bool{}
 	installations := make([]InstallationCandidate, 0)
 	add := func(directory string) {
-		key := strings.ToLower(directory)
+		// Deduplicate on the canonical spelling: a scan root spelled through
+		// an 8.3 short path (or symlink) is the same directory as its long
+		// form observed behind a running window.
+		key := strings.ToLower(canonicalPath(directory))
 		if seen[key] {
 			return
 		}
@@ -155,7 +158,7 @@ func discoverInstallations(ctx context.Context, roots, runningDirs []string, run
 		}
 		seen[key] = true
 		state := InstallationInstalled
-		if running[strings.ToLower(client.Directory)] {
+		if running[strings.ToLower(canonicalPath(client.Directory))] {
 			state = InstallationRunning
 		}
 		installations = append(installations, InstallationCandidate{Client: client, State: state})
@@ -196,4 +199,15 @@ func workspaceIdentity(ctx context.Context, root string) string {
 		return ""
 	}
 	return id
+}
+
+// canonicalPath resolves symlinks and 8.3 short names (GitHub runner TMP is
+// C:\Users\RUNNER~1\...) so identity comparisons compare one spelling. It
+// falls back to the input when the path cannot be resolved, including for
+// absent directories that are only checked for deduplication.
+func canonicalPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }

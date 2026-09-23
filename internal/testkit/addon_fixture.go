@@ -87,3 +87,15 @@ func WriteFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// CanonicalPath resolves 8.3 short paths (GitHub runner TMP is
+// C:\Users\RUNNER~1\...) and symlinks so identity comparisons compare one
+// spelling. It falls back to the input when the path cannot be resolved.
+func CanonicalPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
+}

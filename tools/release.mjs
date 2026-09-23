@@ -895,9 +895,12 @@ function verifyCgoCommand(argv) {
       ['hotfix capture decode', '^TestHotfixNamedTableAndLatestCLI$', 'LYCHEEDEV_HOTFIX'],
       ['asset export decode', '^(TestAssetExportProjectOffline|TestAssetImageExport(ProjectOffline|FailuresPreserveOutput))$', 'LYCHEEDEV_ASSET'],
     ]) {
+      // LYCHEEDEV_*_LAUNCHER alone makes the tests execute the native CGO=0
+      // binary directly; adding _NODE would route through node and try to
+      // parse the executable as JavaScript.
       const output = runOk('go', ['test', '-count=1', '-run', pattern, '-v', './internal/command'], {
         cwd: repository,
-        env: { ...process.env, [`${envPrefix}_NODE`]: process.execPath, [`${envPrefix}_LAUNCHER`]: binary },
+        env: { ...process.env, [`${envPrefix}_LAUNCHER`]: binary },
       });
       if (!output.includes('using installed') || !output.includes('--- PASS:')) {
         throw new Error(`release.cgo_pre_step_failed: ${name} did not pass through the CGO_ENABLED=0 binary`);

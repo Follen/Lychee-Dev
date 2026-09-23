@@ -80,7 +80,7 @@ func TestDiscoveredClientWindowInfersInstallationAndOptionalPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Window != window || got.Client.Directory != directory {
+	if got.Window != window || got.Client.Directory != testkit.CanonicalPath(t, directory) {
 		t.Fatalf("got %+v, want window and directory %q", got, directory)
 	}
 

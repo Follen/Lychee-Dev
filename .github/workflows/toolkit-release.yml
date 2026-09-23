@@ -72,7 +72,9 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             # Strict validation: tag syntax, tag <-> version source, tag ->
             # HEAD commit, clean worktree, non-private package.
-            node tools/release.mjs release-identity --ref "$GITHUB_REF" --tag "$GITHUB_REF_NAME" > identity.json
+            # Write outside the worktree: an untracked file here would make the
+            # identity check itself report a dirty worktree.
+            node tools/release.mjs release-identity --ref "$GITHUB_REF" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/identity.json"
             mode=release
           else
             version="$(node -p "JSON.parse(require('fs').readFileSync('release/version.json','utf8')).version")"
@@ -88,9 +90,9 @@ jobs:
           fi
           {
             echo "mode=$mode"
-            echo "version=$(node -p "JSON.parse(require('fs').readFileSync('identity.json','utf8')).version")"
-            echo "dist_tag=$(node -p "JSON.parse(require('fs').readFileSync('identity.json','utf8')).distTag ?? ''")"
-            echo "commit=$(node -p "JSON.parse(require('fs').readFileSync('identity.json','utf8')).commit")"
+            echo "version=$(node -p "JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP + '/identity.json','utf8')).version")"
+            echo "dist_tag=$(node -p "JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP + '/identity.json','utf8')).distTag ?? ''")"
+            echo "commit=$(node -p "JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP + '/identity.json','utf8')).commit")"
           } >> "$GITHUB_OUTPUT"
 
   ci:

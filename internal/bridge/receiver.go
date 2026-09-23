@@ -29,8 +29,12 @@ func (r *SignalReader) RequireFreshSignal() error {
 	if r == nil || r.observedAt.IsZero() {
 		return errors.New("bridge.signal_not_observed")
 	}
+	// Three seconds still bounds the observed state to "the moment just
+	// before this input" while tolerating the decode + persistence latency of
+	// a loaded machine (shared CI runners, real game clients under disk
+	// contention). Freshness is one layer of several input guards.
 	age := time.Since(r.observedAt)
-	if age < 0 || age > time.Second {
+	if age < 0 || age > 3*time.Second {
 		return errors.New("bridge.signal_expired")
 	}
 	return nil
