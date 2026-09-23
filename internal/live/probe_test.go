@@ -264,7 +264,7 @@ func testOperationFilePreparation(t *testing.T, persisted bool, ackMode string) 
 	if err := json.Unmarshal(archived.Observation, &provenance); err != nil {
 		t.Fatal(err)
 	}
-	if provenance.SourcePath != source || len(provenance.SourceSHA256) != 64 {
+	if provenance.SourcePath != testkit.CanonicalPath(t, source) || len(provenance.SourceSHA256) != 64 {
 		t.Fatal("missing source provenance")
 	}
 	for i := 0; i < 2; i++ {

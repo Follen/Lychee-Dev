@@ -73,8 +73,9 @@ func (p *ProbeOperation) submitInput(ctx context.Context, stage string, send pre
 		return receipt, sendErr
 	}
 	// Cancellation or partial submission must remain inspectable. This bounded
-	// metadata-only write cannot send input or release window ownership.
-	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	// metadata-only write cannot send input or release window ownership. The
+	// budget tolerates metadata commit latency on a loaded machine.
+	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	book := journal.OpenBook(p.metadata)
 	current, err := book.InspectWork(persist, p.id)
