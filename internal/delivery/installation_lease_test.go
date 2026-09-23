@@ -34,11 +34,21 @@ func TestInstallationLeaseIdentityShape(t *testing.T) {
 	if want := "installation:" + strings.ToLower(target); resource != want {
 		t.Fatalf("resource = %q, want %q", resource, want)
 	}
+	// A case- or short-spelled input yields the SAME identity: the derivation
+	// canonicalizes before hashing, so the expected resource string is built
+	// from the canonical spelling, never from the raw input.
+	canonicalTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	againScope, againResource, err := InstallationLease(strings.ToLower(target))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if againScope != scope || againResource != resource {
 		t.Fatalf("case-spelled input changed the identity: (%q, %q) != (%q, %q)", againScope, againResource, scope, resource)
+	}
+	if want := "installation:" + strings.ToLower(canonicalTarget); resource != want {
+		t.Fatalf("resource = %q, want the canonical %q", resource, want)
 	}
 }
