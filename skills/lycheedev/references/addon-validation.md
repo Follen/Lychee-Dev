@@ -13,12 +13,17 @@ lycheedev source index --snapshot <pin> --format json
 lycheedev source validate --path <addon-root> --toc <relative-toc-file> --snapshot <pin> --format json
 ```
 
-Check `describe` before use. Matrix-file validation is not implemented yet; keep
-each explicit TOC/snapshot invocation separate rather than inventing a matrix
-flag. Keep each client result
-separate, including interface/build identity, missing files, parser issues,
-unresolved dynamic edges, and representative locations. Do not validate a
-recursive directory scan when the question is about the release TOC.
+For a fixed multi-client check, provide a matrix config:
+
+```text
+lycheedev source validate --matrix <config.json> --format json
+```
+
+Otherwise validate one pinned closure as above. Check `describe` for the
+accepted config shape and options. Keep each client result separate, including
+interface/build identity, missing files, parser issues, unresolved dynamic
+edges, and representative locations. Do not validate a recursive directory
+scan when the question is about the release TOC.
 
 `load.loadValid` covers paths, ordered references and syntax. `staticValid` adds
 the checks listed in `checks`; source-name presence is not binding-identity or

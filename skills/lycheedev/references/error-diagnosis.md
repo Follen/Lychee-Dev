@@ -24,6 +24,15 @@ question-specific probe must name the actual inspected error store; do not
 imply it captures every addon error. Keep error counts, scope, ordering and
 completeness tied to the returned evidence.
 
+To package a known set of verified captures, use `evidence bundle`:
+
+```text
+lycheedev evidence bundle --ids <CAP-a,CAP-b> --output <new-file.zip> --format json
+```
+
+It accepts 1–100 verified capture IDs, writes a ZIP to a new output path, and
+caps unique payload bytes at 128 MiB. It refuses to replace an existing output.
+
 ## Explain without overclaiming
 
 Report the concrete error code/message, stage, fixed identity, and complete

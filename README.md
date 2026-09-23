@@ -66,7 +66,7 @@ node tools/skill-contract.mjs                      # skill ↔ command-surface c
 node tools/release.mjs assemble --out <dir> --npm-cli <npm-cli.js> --cgo zero
 ```
 
-Windows CI is the release gate: five required jobs (`windows-contract`,
+Windows-only CI is the release gate for the Windows amd64 product: required jobs (`windows-contract`,
 `windows-process`, `windows-addon`, `windows-package`, `ci-required`).
 See [docs/toolkit/release-2.0.1.md](docs/toolkit/release-2.0.1.md)
 for the release contract and [docs/toolkit/regression.md](docs/toolkit/regression.md)

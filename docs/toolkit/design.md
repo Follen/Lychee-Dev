@@ -2,7 +2,7 @@
 
 状态：整体设计收敛后的实施基线。日期：2026-09-21。实际覆盖见 [implementation-status.md](implementation-status.md)。
 
-本文定义目标架构与契约。实际能力以命令目录和实施状态核对。配套文件：[回归测试方案](regression.md)、[实施路线与能力映射](roadmap.md)、[Windows CI 与 2.0.1 发布规范](release-2.0.1.md)。2.0.0 已发布；本轮修复完成并通过验收后目标为 2.0.1。
+本文定义目标架构与契约。实际能力以命令目录和实施状态核对。配套文件：[回归测试方案](regression.md)、[实施路线与能力映射](roadmap.md)、[Windows CI 与 2.0.1 发布规范](release-2.0.1.md)。2.0.1 已发布；当前工作分支的增量能力尚未发行，验收状态以实施状态页为准。
 
 ## 1. 产品决策
 
@@ -11,7 +11,7 @@
 - 宿主实现使用 Go 1.27；首个构建基线建议固定 Go 1.27.1。本机已观察到 Go 1.27.0。
 - 游戏内执行端使用 WoW Lua 5.1 子集，继续遵守禁用零开销、事件驱动、secret 值检查与无污染约束。
 - 用户入口为 `lycheedev`，npm 包为 `lycheedev`，插件安装目录为 `Lychee Dev/`。
-- 本次修复版固定为 `2.0.1`，Git tag 为 `v2.0.1`，正式 npm 发布为 `lycheedev@2.0.1`。
+- 已发布的修复版为 `2.0.1`，Git tag 为 `v2.0.1`，npm 包为 `lycheedev@2.0.1`。后续版本须单独通过发行门禁；不得改写该标签或包。
 - 直接发行原生二进制及配套资源包；npm 仅是另一种分发渠道。npm 脚本不包含产品选择、业务处理或 Python 引导逻辑，保持无运行时 npm 依赖。
 - 单一 npm 包携带 Windows amd64 二进制和共用资源，不使用 optionalDependencies 平台依赖链；Windows 原生压缩包独立提供。包体积和安装成本纳入验收。
 - 发布程序和正式验证链路不依赖 Python，不调用旧的 wowdoc、wowdata、automation.py。Git 可作为源码同步的明确依赖；doctor 按能力检查，不阻断不需要 Git 的数据查询。
@@ -131,7 +131,8 @@ BLP2 解码在 `records/texture` 内完成，只有接收字节、mip 与像素�
 PNG 与无损 WebP 返回原始、清单、编码产物三份证据，不建立另一套图像任务系统。
 `--mipmap` 选原有层级，`--channels` 选择实际输出通道，单通道显示为不透明灰度。
 像素预算在分配前检查，输出也受字节预算约束；WebP 编码器内部缓冲，取消在其
-编码前后检查，不宣称硬 CPU 截止或总内存上限。文件名检索和视频 demux 仍需实现。
+编码前后检查，不宣称硬 CPU 截止或总内存上限。资产名称检索与有界视频 demux
+已有公开命令；完整真实样本覆盖仍按 implementation-status.md 标注。
 
 `desktop` 不依赖业务模块。`live` 集中拥有窗口会话、外部输入、协议推进和恢复；原生输入/捕获与模拟器在实际 I/O 处替换。其他模块优先使用具体类型，仅在真实变化点和外部依赖处增加接口。
 
@@ -246,12 +247,18 @@ identity_unreadable 等），不臆造角色信息；插件未加载、登录界
 ```text
 lycheedev target resolve --target retail-cn --format json
 lycheedev source query C_Spell.GetSpellInfo --snapshot <pin> --format json
+lycheedev data sql --sql "SELECT ID FROM Map LIMIT 10" --snapshot <pin> --format json
 lycheedev data sql --file query.sql --snapshot <pin> --format json
+lycheedev data sql --stdin --snapshot <pin> --format json
 lycheedev live bind --pid <pid> --snapshot <pin> --format json
 lycheedev live run --file probe.lua --session <binding> --format json
 lycheedev live resume <operation-id> --format json
-lycheedev evidence bundle --ids <capture-a>,<capture-b> --output ./report
+lycheedev evidence bundle --ids <capture-a>,<capture-b> --output ./report.zip
 ```
+
+SQL accepts exactly one of `--sql <text>`, `--file <query.sql|query.json>`, or
+`--stdin`; repeated `--param <name=scalar>` binds named values. The named-target
+example resolves an existing configured target. Evidence bundles are ZIP files.
 
 ## 7. 统一结果与证据
 

@@ -165,7 +165,8 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 
 func allowsTransition(kind, from, to, status string) bool {
 	if to == "cleaned" {
-		return from == "acknowledged" && (status == "completed" || status == "cancelled")
+		return from == "acknowledged" && (status == "completed" || status == "cancelled") ||
+			from == "prepared" && status == "cancelled"
 	}
 	if status != "running" && status != "unresolved" && status != "failed" {
 		return false

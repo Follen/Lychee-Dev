@@ -9,7 +9,7 @@ Lua 工作台插件、一个 agent skill。源码研究、游戏数据查询、�
 | CLI | `cmd/lycheedev`、`internal/` | 原生 Go 二进制：源码、数据、资源、游戏运行、证据与安装命令 |
 | 插件 | `addon/` | 游戏内 `/dev` 工作台与 CLI 驱动的协议桥 |
 | Skill | `skills/lycheedev/` | agent skill：工作流路由与证据纪律 |
-| npm 包 | `packages/npm/lycheedev/` | 发行载体：各平台二进制 + 插件/skill 载荷，零运行时依赖 |
+| npm 包 | `packages/npm/lycheedev/` | 发行载体：Windows amd64 二进制 + 插件/skill 载荷，零运行时依赖 |
 
 ## 支持客户端（2.0 验收矩阵）
 
@@ -63,7 +63,7 @@ node tools/skill-contract.mjs                      # skill 与命令面一致性
 node tools/release.mjs assemble --out <目录> --npm-cli <npm-cli.js> --cgo zero
 ```
 
-Windows CI 是发布门槛：五个必需 job（`windows-contract`、`windows-process`、
+仅 Windows CI 是 Windows amd64 产品的发布门槛：必需 job（`windows-contract`、`windows-process`、
 `windows-addon`、`windows-package`、`ci-required`）。
 发布合同见 [docs/toolkit/release-2.0.1.md](docs/toolkit/release-2.0.1.md)，
 验收矩阵见 [docs/toolkit/regression.md](docs/toolkit/regression.md)。

@@ -12,6 +12,13 @@ CASC keys or a DataPin by hand:
 lycheedev target resolve --installation <client-directory> --region cn --locale zhCN --format json
 ```
 
+When a named target has already been configured, resolve that fixed
+configuration with `lycheedev target resolve --target <name> --format json`.
+Use `lycheedev target show <name>` to inspect the named configuration, or
+`lycheedev target show <PIN-id>` to inspect a resolved selection. Showing a
+target reads it; it does not resolve or refresh it. Use `target add` to create
+or explicitly replace a named configuration.
+
 Region and locale are explicit choices; use those requested for the task.
 The CLI reads product/build/config identities from the installation and resolves
 WoWDBDefs `refs/heads/master` once to an exact commit. Use `--definitions` for a
@@ -106,7 +113,8 @@ from this command yet.
 
 ## Implemented static SQL
 
-Create a UTF-8 JSON request file (at most 1 MiB), not a raw `.sql` file:
+Supply SQL as text, from a `.sql` or `.json` file, or from stdin. Exactly one
+input mode is accepted. For JSON requests, use a UTF-8 file (at most 1 MiB):
 
 ```json
 {"sql":"SELECT ID, Filename FROM ChrClasses WHERE ID=:id","parameters":{"id":1}}
@@ -114,14 +122,17 @@ Create a UTF-8 JSON request file (at most 1 MiB), not a raw `.sql` file:
 
 ```text
 lycheedev data sql --snapshot <pin> --installation <game-root> --file <query.json> --format json
+lycheedev data sql --snapshot <pin> --cdn --sql 'SELECT ID FROM ChrClasses WHERE ID=:id' --param id=1 --format json
+lycheedev data sql --snapshot <pin> --installation <game-root> --stdin --encoding csv --output <new-file.csv> --format json
 ```
 
-Parameters must exactly match named SQL parameters and contain only JSON scalar
-values. Integer tokens retain 64-bit precision; avoid generating them through
-a floating-point JSON intermediary. Duplicate or unknown request fields fail.
-Use SQL LIMIT/OFFSET, not CLI `--limit`. `--offline` and `--max-bytes` have the
-same cache and per-file meanings as DB2 reading. Replace `--installation` with
-`--cdn` for explicitly selected remote content.
+Repeat `--param <name=scalar>` for named SQL parameters; values must be scalar
+JSON values. JSON request parameters must exactly match SQL parameters, and
+integer tokens retain 64-bit precision. Duplicate or unknown request fields
+fail. `--encoding csv` requires `--output <file>` and writes a CSV export with
+its capture/manifest. Use SQL LIMIT/OFFSET, not CLI `--limit`. `--offline` and
+`--max-bytes` have the same cache and per-file meanings as DB2 reading. Replace
+`--installation` with `--cdn` for explicitly selected remote content.
 
 Only static tables are available. Qualified `static.Table` bypasses CTE
 names; no Hotfix overlay or implicit source fallback occurs. Query output contains `query`,
@@ -152,10 +163,13 @@ Syntax faults include `error.location` with byte offset and line/column.
 Correct the request or report the limitation; repeating an unchanged query
 does not resolve these failures. Source/cache/I/O faults retain their own codes.
 
-Domain commands are not implemented in this development
-build. Answer a semantic question with the available static tables only when
-their schema and relationships support it; otherwise report the missing
-capability. A static table result is not a substitute for requested Hotfix data.
+Domain commands are implemented for spells (`data spell info`, `data spell auras`,
+`data spell summons`), items (`data item get`, `data item models`,
+`data item geosets`, `data item textures`), creatures (`data creature display`,
+`data creature model`), journal encounters (`data encounter get`), and house
+decor (`data decor list`, `data decor get`). Prefer the domain command when it owns
+the relationship needed to answer the question; use SQL/DB2 for other supported
+tables. A static table result is not a substitute for requested Hotfix data.
 Preserve source, table/record, locale, filters, row counts and capture hashes.
 
 ## Local Hotfix records
@@ -221,8 +235,12 @@ and at most 8 MiB of raw payload per page. Decoded fields have an 8 MiB JSON
 page budget; each record allows 1 MiB of text and 65,536 field elements. Corrupt tails invalidate the query
 even when the first page would otherwise fit. Version/build/identity errors
 must not be worked around by silently changing the selected build or cache.
-Remote providers remain unavailable; report that limitation when the question
-requires server-side coverage rather than the selected local cache.
+Wago is supported for remote Hotfix records using explicit product, build,
+region and locale context; `--offline` uses its verified cached pages only.
+Raidbots is supported as a separate source for a supplied `DBCache.bin` less
+than 30 days old. Keep provider and coverage explicit: neither source is an
+effective static table overlay, and an incomplete result cannot establish
+absence outside its reported coverage.
 
 ## Schema and change boundaries
 

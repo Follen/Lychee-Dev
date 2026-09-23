@@ -49,6 +49,7 @@ type Envelope struct {
 
 type Options struct {
 	project                              string
+	target                               string
 	latest                               bool
 	tableHash, afterIndex                *uint32
 	dataRegion, locale, definitionRef    string
@@ -77,6 +78,15 @@ type Options struct {
 	fullBuild                            string
 	from, to                             string
 	toc                                  string
+	matrix, searchMode, topic, listfile  string
+	symbol, targetPath                   string
+	extension, fileName                  string
+	maxFrames                            int
+	allowPartial                         bool
+	stdin                                bool
+	sql                                  string
+	parameters                           map[string]any
+	ids                                  string
 	line, count, limit                   int
 	limitSet                             bool
 	spellID, itemID, npcID               uint32
@@ -140,7 +150,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if contract.positional != "" && len(opts.words) > len(strings.Fields(route)) {
 			argument = opts.words[len(opts.words)-1]
 		}
-		if contract.projectSelection() && opts.snapshot == "" {
+		if contract.projectSelection() && opts.snapshot == "" && route != "source list" && !(route == "source validate" && opts.matrix != "") && !(route == "asset demux" && opts.path != "") {
 			var project selection.ProjectStatus
 			project, err = selectProject(ctx, &opts)
 			if err == nil && project.Lock != nil {
@@ -271,12 +281,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 				code, err = hotfixCode, hotfixErr
 			case "data sql":
-				if opts.snapshot == "" || !opts.cdn && opts.installation == "" || opts.file == "" {
-					err, code = errors.New("data sql requires --snapshot, --file, and either --installation or --cdn"), 2
+				if opts.snapshot == "" || !opts.cdn && opts.installation == "" || boolCount(opts.file != "", opts.sql != "", opts.stdin) != 1 {
+					err, code = errors.New("data sql requires --snapshot, one data source, and exactly one of --sql, --file or --stdin"), 2
+					break
+				}
+				if opts.encoding == "csv" && opts.output == "" || opts.encoding != "csv" && (opts.output != "" || opts.overwrite) {
+					err, code = errors.New("data sql CSV export requires --encoding csv and --output; --overwrite is CSV-only"), 2
 					break
 				}
 				var request records.DataQuery
-				request, err = readDataQuery(opts.file)
+				request, err = readSelectedDataQuery(opts)
 				if err != nil {
 					code = 2
 					break
@@ -289,9 +303,19 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				var reading records.QueryReading
 				reading, err = records.QueryData(ctx, root, opts.snapshot, opts.fileQuery(), request)
 				if err == nil {
-					response.Result = reading.Result
+					if opts.encoding == "csv" {
+						var exported records.QueryCSVExport
+						exported, err = records.ExportQueryCSV(ctx, root, opts.snapshot, reading, opts.output, opts.overwrite)
+						if err != nil {
+							break
+						}
+						response.Result = exported.Manifest
+						response.Captures = append(response.Captures, reading.Capture, exported.Capture)
+					} else {
+						response.Result = reading.Result
+						response.Captures = append(response.Captures, reading.Capture)
+					}
 					response.Context["snapshot"] = opts.snapshot
-					response.Captures = append(response.Captures, reading.Capture)
 				}
 			case "data db2":
 				if opts.snapshot == "" || !opts.cdn && opts.installation == "" || opts.table == "" {
@@ -329,6 +353,63 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				"data creature display", "data creature model", "data encounter get",
 				"data decor list", "data decor get":
 				code, err = runDataVerb(ctx, route, argument, opts, &response)
+			case "asset search":
+				if opts.snapshot == "" || opts.listfile == "" || boolCount(opts.queryText != "", opts.extension != "", opts.fileName != "", opts.fileID != 0) != 1 {
+					err, code = errors.New("asset search requires --snapshot, --listfile and exactly one of --query, --extension, --name, --file-id"), 2
+					break
+				}
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err != nil {
+					break
+				}
+				listfile := records.ListfileRequest{Kind: records.ListfileKind(opts.listfile), Offline: opts.offline, Fetch: records.PublicListfileFetcher{}}
+				var truncated bool
+				switch {
+				case opts.queryText != "":
+					var found records.FileSearchResult
+					found, err = records.SearchFileNames(ctx, root, records.FileSearchRequest{Snapshot: opts.snapshot, Listfile: listfile, Query: opts.queryText, Limit: opts.limit})
+					response.Result, truncated = found, found.Truncated
+				case opts.extension != "":
+					var found records.FileExtensionResult
+					found, err = records.ListFileExtensions(ctx, root, records.FileExtensionRequest{Snapshot: opts.snapshot, Listfile: listfile, Extension: opts.extension, Limit: opts.limit})
+					response.Result, truncated = found, found.Truncated
+				case opts.fileName != "":
+					response.Result, err = records.ResolveFileDataIDs(ctx, root, records.FileNameResolveRequest{Snapshot: opts.snapshot, Listfile: listfile, FileName: opts.fileName})
+				default:
+					response.Result, err = records.LookupFileNames(ctx, root, records.FileNameLookupRequest{Snapshot: opts.snapshot, Listfile: listfile, FileDataIDs: []uint32{opts.fileID}})
+				}
+				if err == nil {
+					response.Context["snapshot"] = opts.snapshot
+					if truncated {
+						response.Warnings = append(response.Warnings, "File-name search was truncated by --limit.")
+					}
+				} else {
+					response.Result = nil
+				}
+			case "asset demux":
+				if opts.output == "" || (opts.path == "") == (opts.fileID == 0) || opts.path == "" && (opts.snapshot == "" || !opts.cdn && opts.installation == "") || opts.path != "" && (opts.snapshot != "" || opts.cdn || opts.installation != "") {
+					err, code = errors.New("asset demux requires --output and exactly one input: --path, or --snapshot/--file-id with --installation or --cdn"), 2
+					break
+				}
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err != nil {
+					break
+				}
+				var demux records.AssetDemux
+				demux, err = records.DemuxAsset(ctx, root, opts.snapshot, records.AssetDemuxRequest{File: opts.fileQuery(), Path: opts.path, Output: opts.output, Overwrite: opts.overwrite, MaxInputBytes: opts.maxBytes, MaxFrames: opts.maxFrames, AllowPartial: opts.allowPartial})
+				if err == nil {
+					response.Result = demux.Manifest
+					response.Context["snapshot"] = opts.snapshot
+					response.Captures = append(response.Captures, demux.Source, demux.Capture)
+					for _, capture := range demux.Frames {
+						response.Captures = append(response.Captures, capture)
+					}
+					if demux.Manifest.Truncated {
+						response.Warnings = append(response.Warnings, "Demux output is truncated; inspect truncationReason and limits.")
+					}
+				}
 			case "asset inspect", "asset export":
 				if opts.snapshot == "" || !opts.cdn && opts.installation == "" || opts.fileID == 0 {
 					err, code = fmt.Errorf("%s requires --snapshot, --file-id, and either --installation or --cdn", route), 2
@@ -366,7 +447,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			case "version":
 				response.Result = buildinfo.Current()
 			case "describe":
-				response.Result = map[string]any{"commands": definitions, "formats": []string{"text", "json", "jsonl"}, "development": true}
+				response.Result = map[string]any{"commands": definitions, "formats": []string{"text", "json", "jsonl"}, "development": strings.Contains(Version, "-")}
 			case "init":
 				var root string
 				root, err = workspaceRoot(opts.home)
@@ -400,10 +481,19 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 				response.Result, err = live.DiscoverCandidates(ctx, root, request)
 			case "source list":
-				response.Result = codebase.Repositories()
+				if opts.snapshot == "" {
+					response.Result = codebase.Repositories()
+				} else {
+					var root string
+					root, err = workspaceRoot(opts.home)
+					if err == nil {
+						response.Result, err = codebase.SourceSnapshotStatus(ctx, root, opts.snapshot)
+						response.Context["snapshot"] = opts.snapshot
+					}
+				}
 			case "source validate":
-				if opts.snapshot == "" || opts.path == "" || opts.toc == "" {
-					err, code = errors.New("source validate requires --snapshot, --path, and --toc"), 2
+				if opts.matrix != "" && (opts.snapshot != "" || opts.path != "" || opts.toc != "") || opts.matrix == "" && (opts.snapshot == "" || opts.path == "" || opts.toc == "") {
+					err, code = errors.New("source validate requires either --matrix or --snapshot/--path/--toc"), 2
 					break
 				}
 				var root string
@@ -411,16 +501,28 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				var assessment codebase.AddonAssessment
-				assessment, err = codebase.AssessAddon(ctx, root, opts.snapshot, codebase.AddonInput{Root: opts.path, Manifest: opts.toc})
-				if err == nil {
-					response.Result = assessment.Result
-					response.Context["snapshot"] = opts.snapshot
-					response.Captures = append(response.Captures, assessment.Capture)
-					if !assessment.Result.StaticValid {
-						err = codebase.ErrInvalidAddon
-					} else if !assessment.Result.Complete {
-						response.Warnings = append(response.Warnings, "Static coverage is incomplete; inspect unresolved references and notChecked.")
+				if opts.matrix != "" {
+					var assessment codebase.MatrixValidation
+					assessment, err = codebase.ValidateSourceMatrix(ctx, root, opts.matrix, nil)
+					if err == nil {
+						response.Result = assessment.Result
+						response.Captures = append(response.Captures, assessment.Capture)
+						if !assessment.Result.Valid {
+							err = codebase.ErrInvalidAddon
+						}
+					}
+				} else {
+					var assessment codebase.AddonAssessment
+					assessment, err = codebase.AssessAddon(ctx, root, opts.snapshot, codebase.AddonInput{Root: opts.path, Manifest: opts.toc})
+					if err == nil {
+						response.Result = assessment.Result
+						response.Context["snapshot"] = opts.snapshot
+						response.Captures = append(response.Captures, assessment.Capture)
+						if !assessment.Result.StaticValid {
+							err = codebase.ErrInvalidAddon
+						} else if !assessment.Result.Complete {
+							response.Warnings = append(response.Warnings, "Static coverage is incomplete; inspect unresolved references and notChecked.")
+						}
 					}
 				}
 			case "source diff":
@@ -454,16 +556,21 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if route == "source index" {
 					response.Result, err = codebase.BuildSourceIndex(ctx, root, opts.snapshot)
 				} else {
-					var search codebase.SourceSearch
-					search, err = codebase.SearchSource(ctx, root, opts.snapshot, argument, opts.limit)
+					var search codebase.SourceQueryReading
+					search, err = codebase.QuerySource(ctx, root, opts.snapshot, codebase.SearchQuery{Mode: codebase.SearchMode(opts.searchMode), Text: argument, Topic: opts.topic, Limit: opts.limit})
 					if err == nil {
 						response.Result = search.Result
 						response.Captures = append(response.Captures, search.Capture)
+						if search.Result.Truncated {
+							response.Warnings = append(response.Warnings, "Source search was truncated by --limit.")
+						} else if !search.Result.Complete {
+							response.Warnings = append(response.Warnings, "The source index has parse diagnostics; search coverage is incomplete.")
+						}
 					}
 				}
 			case "source sync", "source inspect":
-				if route == "source sync" && (opts.source == "" || opts.product == "") || route == "source inspect" && (opts.snapshot == "" || opts.path == "") {
-					err, code = errors.New("source sync requires --source/--product; source inspect requires --snapshot/--path"), 2
+				if route == "source sync" && (opts.source == "" || opts.product == "") || route == "source inspect" && (opts.snapshot == "" || boolCount(opts.path != "", opts.symbol != "", opts.targetPath != "") != 1) {
+					err, code = errors.New("source sync requires --source/--product; source inspect requires --snapshot and exactly one of --path, --symbol, --target-path"), 2
 					break
 				}
 				var root string
@@ -473,6 +580,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 				if route == "source sync" {
 					response.Result, err = codebase.SynchronizeSource(ctx, root, opts.source, opts.product, opts.ref)
+				} else if opts.symbol != "" || opts.targetPath != "" {
+					var reading codebase.TargetReading
+					reading, err = codebase.InspectSourceTarget(ctx, root, opts.snapshot, codebase.TargetQuery{Symbol: opts.symbol, Path: opts.targetPath})
+					if err == nil {
+						response.Result = reading.Result
+						response.Context["snapshot"] = opts.snapshot
+						response.Captures = append(response.Captures, reading.Capture)
+					}
 				} else {
 					var reading codebase.SourceReading
 					reading, err = codebase.InspectSource(ctx, root, opts.snapshot, codebase.SpanQuery{Path: opts.path, FirstLine: opts.line, LineCount: opts.count})
@@ -485,7 +600,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			case "target resolve":
 				request := records.LocalTargetRequest{Installation: opts.installation, Region: opts.dataRegion, Locale: opts.locale, Definitions: opts.definitionRef, Parent: opts.from, Offline: opts.offline}
 				remote := records.RemoteTargetRequest{Product: opts.product, Region: opts.dataRegion, Locale: opts.locale, FullBuild: opts.fullBuild, Definitions: opts.definitionRef, Parent: opts.from, Offline: opts.offline}
-				if opts.file == "" {
+				if opts.file == "" && opts.target == "" {
 					var validation error
 					if opts.product != "" {
 						validation = remote.Validate()
@@ -502,7 +617,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				if opts.file != "" {
+				if opts.target != "" {
+					var resolved selection.ResolvedTarget
+					resolved, err = selection.ResolveTarget(ctx, root, opts.target, selection.ResolveOptions{Preparer: recordsTargetPreparer{}, Parent: opts.from, Definitions: opts.definitionRef, Offline: opts.offline})
+					if err == nil {
+						response.Result = resolved
+						response.Context["target"], response.Context["snapshot"] = resolved.Config.Name, resolved.Pin.ID
+					}
+				} else if opts.file != "" {
 					response.Result, err = selection.ResolveSelectionFile(ctx, root, opts.file)
 				} else if opts.product != "" {
 					var target records.RemoteTarget
@@ -524,7 +646,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "target list", "target add", "target remove", "target available":
 				code, err = runTargetVerb(ctx, route, argument, opts, &response)
-			case "target show", "live status", "live resume", "live session", "evidence show", "evidence verify":
+			case "target show", "live status", "live resume", "live cancel", "live session", "evidence show", "evidence verify":
 				if argument == "" {
 					err, code = errors.New("missing selection file or record ID; use describe"), 2
 					break
@@ -536,7 +658,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 				switch route {
 				case "target show":
-					response.Result, err = selection.InspectSelection(ctx, root, argument)
+					if strings.HasPrefix(argument, "PIN-") {
+						response.Result, err = selection.InspectSelection(ctx, root, argument)
+					} else {
+						response.Result, err = selection.ShowTarget(ctx, root, argument)
+					}
 				case "live status":
 					response.Result, err = live.Status(ctx, root, argument)
 					response.OperationID = argument
@@ -547,6 +673,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					if record.OperationID != "" {
 						response.Context["stage"] = record.Stage
 						response.Result = record
+					}
+				case "live cancel":
+					var record live.Outcome
+					record, err = live.Cancel(ctx, root, argument)
+					response.OperationID = argument
+					if record.OperationID != "" {
+						response.Result = record
+						response.Context["stage"] = record.Stage
 					}
 				case "live session":
 					var session live.RecordedSession
@@ -564,6 +698,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "evidence list":
 				code, err = runEvidenceList(ctx, opts, &response)
+			case "evidence bundle":
+				if opts.ids == "" || opts.output == "" {
+					err, code = errors.New("evidence bundle requires --ids and --output"), 2
+					break
+				}
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err == nil {
+					response.Result, err = evidence.Bundle(ctx, root, strings.Split(opts.ids, ","), opts.output)
+				}
 			default:
 				err, code = fmt.Errorf("unknown command %q; use --help", strings.Join(opts.words, " ")), 2
 			}
@@ -577,6 +721,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			switch {
 			case errors.Is(err, journal.ErrBusy):
 				code, faultCode = 3, "journal.resource_busy"
+			case errors.Is(err, journal.ErrTransition):
+				code, faultCode = 3, "journal.invalid_transition"
 			case errors.Is(err, live.ErrCandidateAmbiguous):
 				code, faultCode = 2, "live.candidate_ambiguous"
 			case errors.Is(err, live.ErrCandidateMissing):
@@ -717,7 +863,7 @@ func parseOptions(args []string) (Options, error) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" ||
+		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" || arg == "--allow-partial" || arg == "--stdin" ||
 			arg == "--remote" || arg == "--replace" || arg == "--uncommitted" || arg == "--dry-run" || arg == "--plan" || arg == "--fresh" {
 			if _, ok := commandFlag(contract, arg); !ok {
 				return opts, unsupportedRouteFlag(route, arg)
@@ -727,6 +873,10 @@ func parseOptions(args []string) (Options, error) {
 			}
 			seen[arg] = true
 			switch arg {
+			case "--stdin":
+				opts.stdin = true
+			case "--allow-partial":
+				opts.allowPartial = true
 			case "--overwrite":
 				opts.overwrite = true
 			case "--cdn":
@@ -767,7 +917,7 @@ func parseOptions(args []string) (Options, error) {
 		if !spec.value {
 			return opts, fmt.Errorf("unknown flag %s", key)
 		}
-		if seen[key] {
+		if seen[key] && key != "--param" {
 			return opts, fmt.Errorf("repeated flag %s", key)
 		}
 		seen[key] = true
@@ -790,11 +940,14 @@ func parseOptions(args []string) (Options, error) {
 		switch key {
 		case "--encoding":
 			if value == "csv" {
-				if route != "data hotfix" {
-					return opts, errors.New("--encoding csv is only supported by data hotfix")
+				if route != "data hotfix" && route != "data sql" {
+					return opts, errors.New("--encoding csv is only supported by data hotfix and data sql")
 				}
 				opts.encoding = value
 				break
+			}
+			if route == "data sql" {
+				return opts, errors.New("data sql --encoding must be csv")
 			}
 			if value != "raw" && value != "png" && value != "webp" {
 				return opts, errors.New("--encoding must be raw, png, or webp")
@@ -816,6 +969,10 @@ func parseOptions(args []string) (Options, error) {
 			opts.maxPixels = n
 		case "--project":
 			opts.project = value
+		case "--target":
+			opts.target = value
+		case "--ids":
+			opts.ids = value
 		case "--session":
 			opts.session = value
 		case "--account":
@@ -927,8 +1084,53 @@ func parseOptions(args []string) (Options, error) {
 			opts.snapshot = value
 		case "--path":
 			opts.path = value
+		case "--symbol":
+			opts.symbol = value
+		case "--target-path":
+			opts.targetPath = value
 		case "--toc":
 			opts.toc = value
+		case "--matrix":
+			opts.matrix = value
+		case "--mode":
+			if value != "precise" && value != "exploratory" {
+				return opts, errors.New("--mode must be precise or exploratory")
+			}
+			opts.searchMode = value
+		case "--topic":
+			if value != "api" && value != "lua" && value != "xml" && value != "toc" && value != "asset" {
+				return opts, errors.New("--topic must be api, lua, xml, toc, or asset")
+			}
+			opts.topic = value
+		case "--listfile":
+			if value != string(records.ListfileCommunityCSV) && value != string(records.ListfileWowExportText) && value != string(records.ListfileWowExportBinary) {
+				return opts, errors.New("invalid --listfile source")
+			}
+			opts.listfile = value
+		case "--extension":
+			opts.extension = value
+		case "--name":
+			opts.fileName = value
+		case "--sql":
+			opts.sql = value
+		case "--param":
+			name, raw, found := strings.Cut(value, "=")
+			if !found || name == "" || len(name) > 128 {
+				return opts, errors.New("--param requires name=scalar")
+			}
+			if opts.parameters == nil {
+				opts.parameters = map[string]any{}
+			}
+			if _, exists := opts.parameters[name]; exists {
+				return opts, fmt.Errorf("duplicate --param %s", name)
+			}
+			opts.parameters[name] = parseQueryScalar(raw)
+		case "--max-frames":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || n > 1000000 {
+				return opts, errors.New("--max-frames must be between 1 and 1000000")
+			}
+			opts.maxFrames = n
 		case "--from":
 			opts.from = value
 		case "--to":
@@ -1078,9 +1280,16 @@ func parseOptions(args []string) (Options, error) {
 		return opts, errors.New("addon status accepts --installation or --path, not both")
 	}
 	if route == "target resolve" && seen["--file"] {
-		for _, flag := range []string{"--installation", "--product", "--build", "--region", "--locale", "--definitions", "--from", "--offline"} {
+		for _, flag := range []string{"--target", "--installation", "--product", "--build", "--region", "--locale", "--definitions", "--from", "--offline"} {
 			if seen[flag] {
 				return opts, fmt.Errorf("target resolve --file cannot be combined with %s", flag)
+			}
+		}
+	}
+	if route == "target resolve" && seen["--target"] {
+		for _, flag := range []string{"--file", "--installation", "--product", "--build", "--region", "--locale"} {
+			if seen[flag] {
+				return opts, fmt.Errorf("target resolve --target cannot be combined with %s", flag)
 			}
 		}
 	}
@@ -1111,6 +1320,16 @@ func parseOptions(args []string) (Options, error) {
 		return opts, errors.New("choose either --cdn or --installation, not both")
 	}
 	return opts, nil
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
 }
 
 func (opts Options) fileQuery() records.FileQuery {

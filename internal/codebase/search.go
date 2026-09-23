@@ -225,7 +225,7 @@ SELECT 'name_prefix',80,'header',name,target,category,confidence,path,line,end_l
 		return response, err
 	}
 	response.Truncated = response.Truncated || relationsCut
-	response.Complete = !response.Truncated
+	response.Complete = summary.Complete && !response.Truncated
 	if len(response.Results) == 0 {
 		response.Suggestions = []string{"use explore for broader text and symbol matches", "check the topic, product and ref"}
 	}

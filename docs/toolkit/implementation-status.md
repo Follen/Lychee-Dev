@@ -2,6 +2,8 @@
 
 日期：2026-09-23。2.0.1 已发布；版本源为 `release/version.json`。
 发行条件及本次后验恢复见 [2.0.1 发布合同](release-2.0.1.md)。
+本页新增命令状态针对 `codex/toolkit-parity-2.0.2` 工作分支；
+已发布的 2.0.1 标签和 npm 包不含这些未发布改动。未完成项清零、完整回归及新版本发行门禁前不得宣称新版本可发布。
 
 ## 当前状态
 
@@ -65,8 +67,9 @@
   同一个客户端目录，也接受 CASC 根目录；安装、运行与数据共用客户端身份读取。
 
 架构收敛尚未全部完成：传输仍有六次提交、三次重载，尚未实现有界保留与延后清理。
-阶段/执行状态已分别保留协议进度与未决信息，不能据此宣称传输已经简化。连接/运行真机验收、
-命名目标配置和完整结果渲染也未完成。不能把目录迁移或读取视图当作这些工作的替代。
+阶段/执行状态已分别保留协议进度与未决信息，不能据此宣称传输已经简化。连接/运行真机验收和
+完整结果渲染也未完成。命名目标配置已在当前工作分支接线，但尚无发布版验收；
+不能把目录迁移、命令接线或读取视图当作这些工作的替代。
 
 ## 能力覆盖
 
@@ -80,17 +83,25 @@
 启停/记录）、诊断（错误采集筛选详情/有界快照）、导出（落盘/记录/复制交互）、自动化
 （队列/执行/历史查看）、关于（版本/双语/导航）。裸 `/dev` 打开工作台，connect 等
 子命令共存，本地交互不得要求先连接；游戏内工作台与 CLI 共用同一游戏侧能力实现；
-`LycheeToolkitDB` 不导入旧数据。旧源码盘点证实新 `addon/` 目前仅有桥接模块，八类
-能力全部待迁入——下表各行的能力状态以此为准，界面可打开不等于功能通过。
+`LycheeToolkitDB` 不导入旧数据。早期源码盘点曾显示新 `addon/` 仅有桥接模块；该
+盘点是历史快照，不代表当前实现。当前源码已包含八类能力，但 WKB-01..13 逐项真机
+验收及前后截图仍未完成；界面可打开不等于功能通过。
 
 | 范围 | 已有实现 | 主要缺项 |
 | --- | --- | --- |
-| 工作空间/目标 | 新格式初始化、本地及远程发布目标准备、精确固定引用、可携带项目锁与默认选择、对象存储与短事务 | 命名目标配置、历史远程 Build 来源、旧根显式隔离、缓存维护 |
-| 源码 | 同步、索引、查询、查看、比较、TOC/XML 静态验证 | 目标解析贯通、全部旧能力端到端验收 |
-| 数据/资源 | 本地/CDN CASC、DBD/WDC、DB2、只读 SQL、原始资产检查与原子导出、BLP2 转 PNG/无损 WebP、本地 Hotfix 原始/命名字段与 latest 批次 | CDN 冷索引定位优化、Hotfix 远程来源及完整筛选/覆盖、领域查询、名称查找、视频转换及完整实样覆盖 |
-| 游戏运行 | Windows 输入/捕获、bootstrap 身份标记与自动发现/连接（`live instances`/`live connect`）、账号目录选择、运行/恢复链路及报告读取、工作台八类能力已迁入 | 首连及执行真机闭环、工作台逐项真机验收与前后截图 |
+| 工作空间/目标 | 新格式初始化、命名目标（list/add/show/resolve/remove）、本地及远程目标准备、精确固定引用、项目锁与默认选择、对象存储及缓存维护 | 完整语义 legacy fixture compare；逐目标历史远程 Build 来源仍受发布清单限制 |
+| 源码 | 同步、索引、topic/tier 查询、查看、比较、TOC/XML 静态验证及矩阵验证 | 全部历史能力的端到端语义对照仍待完成 |
+| 数据/资源 | 本地/CDN CASC、DBD/WDC、DB2/schema/search/foreign-key/stream、只读 SQL、多领域查询、Hotfix（Wago/DBCache/Raidbots）、资产 search/inspect/export/demux 与 BLP2 转 PNG/无损 WebP | CDN 冷索引定位优化及完整真实样本覆盖；Hotfix 来源/筛选不等于完整服务器覆盖 |
+| 游戏运行 | Windows 输入/捕获、bootstrap 身份标记与自动发现/连接（`live instances`/`live connect`）、账号目录选择、运行/恢复、仅对未发布队列的 prepared 操作可用的 `live cancel`、报告读取；工作台八类能力已迁入源码 | `live bugs`、独立 `live reload` 尚无公开实现；取消其他阶段仍须恢复收尾；WKB-01..13 逐项、逐支持客户端的证据及前后截图 |
 | 安装 | 清单验证、安装、归档升级、恢复和移除 | 新旧产品切换体验、正式载荷验收 |
-| CI/npm | 开发构建与 Windows 隔离安装脚本 | 远端完整门禁证据、各平台运行、许可闭环和正式发布 |
+| 证据 | capture 查询、校验与 ZIP bundle 命令 | evidence keep/remove 仍待实现和验证 |
+| CI/npm | Windows amd64 CI、发行与隔离安装验证（2.0.1 已发布） | 后续版本门禁与许可/发布验收以对应合同和新证据为准；本页不表示当前分支可发布 |
+
+当前分支的命令目录以 `internal/command/command_contract.go` 为准。命令存在
+不代表相应真实数据覆盖或发布验收已经完成。仍待完成：`live bugs`、
+独立 `live reload`、`live cancel` 已实现范围的真机及故障验证、
+`evidence keep/remove`、完整语义 legacy fixture compare，
+以及 Retail/Classic/Titan 各自的 WKB 逐项证据。不得据此状态宣称本分支已具备发布条件。
 
 新链路不调用旧 wowdoc、wowdata 或 Python。旧 `add-on/`、`packages/cli/` 和旧
 skill 已于 2.0 发布准备中退役（2026-09-23，检查点 `6b08e14` 之后），历史版本
@@ -485,10 +496,11 @@ skill 已于 2.0 发布准备中退役（2026-09-23，检查点 `6b08e14` 之后
 - `git diff --check` 通过（仅现有 CRLF 提示）；skill quick_validate 通过。
   下节保留上轮证据，不替代以上最终重跑结果。
 
-## 2026-09-23 实施批次（进行中）
+## 2026-09-23 实施批次（历史工作包快照；状态不可代表当前实现）
 
-统一交付拆为互不重叠写集的并行工作包；下表是当前事实台账（结果以各包回报与
-最终回归证据为准，未落证据不得改判）。集成职责归主 agent：Controls.lua 双接线
+统一交付曾拆为互不重叠写集的并行工作包；下表记录该批次开始时的计划与状态，
+不是当前事实台账。其 `实现中` 状态不得覆盖本页当前状态及后续完成记录。集成职责
+当时归主 agent：Controls.lua 双接线
 （`bridge identify` + 裸 `/dev` 工作台）、四 TOC 汇入、`internal/command` 统一
 接线、skill 终稿验证。
 
@@ -508,7 +520,7 @@ skill 已于 2.0 发布准备中退役（2026-09-23，检查点 `6b08e14` 之后
 | 第三方许可闭环（AGPL 派生审查、完整通知、对应源码交付） | THIRD_PARTY_NOTICES.md、packages/npm/lycheedev/THIRD_PARTY_NOTICES | PKG-07、许可门槛 | 实现中 |
 | Windows CI + 发行闭环（required job、Windows 产物、tgz 封存/OIDC/回读；2026-09-23 收缩为仅 Windows amd64） | .github/workflows、tools/、packages/npm 测试 | REL-01..14、PKG-01..08 | 实现中 |
 
-尚未开工/待前置：`internal/command` 统一接线（含 `live bugs`/`reload`/`cancel`、
+当时尚未开工/待前置（历史记录，非当前状态）：`internal/command` 统一接线（含 `live bugs`/`reload`/`cancel`、
 `evidence list/bundle/keep/remove`，等 Go 连接包完成后避免同文件并发）；skill
 终稿对安装载荷验证 + quick_validate + SKL-12..16 独立前向测试；四端 Lua 与
 npm tgz 全量回归；真机闭环（扫描→选择→连接→探针→结果→恢复）与工作台逐项

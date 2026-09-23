@@ -1,5 +1,6 @@
 // Package addon_test drives the workbench Lua suites under tests/addon across
-// the four supported client profiles with a standalone Lua 5.1 interpreter.
+// the four client profiles represented by the test harness with a standalone
+// Lua 5.1 interpreter. Forever is exercised as an unverified, non-acceptance profile.
 // New suites are discovered by glob: drop a t_*.lua file into this directory.
 package addon_test
 

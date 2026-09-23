@@ -323,7 +323,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | ID | 级别 | 场景 | 必须观察到的结果 |
 | --- | --- | --- | --- |
 | PKG-01 | P0 | 干净机器原生包 | 无 Python/Node 也可启动；缺 Git 仅影响相应源码能力 |
-| PKG-02 | P0 | 单一 npm 包携带各平台二进制且禁用安装脚本 | 启动器选择包内正确平台，无运行依赖；version 和离线业务可用；插件/skill 由显式命令部署 |
+| PKG-02 | P0 | 单一 npm 包携带 Windows amd64 二进制且禁用安装脚本 | Windows 启动器选择包内二进制，无运行依赖；version 和离线业务可用；插件/skill 由显式命令部署；不声明或验收非 Windows 平台 |
 | PKG-03 | P0 | binary/插件/skill 版本错配 | 安装清单和 doctor 可识别，不直接启动不兼容 live 操作 |
 | PKG-04 | P0 | 四 TOC 发行 ZIP | 顶层 Lychee Dev/，每个引用存在，共享顺序一致 |
 | PKG-05 | P0 | 发行文件白名单和离线启动 | 不含 Python、旧内核、用户数据、本地任务、测试/调查资料或空壳代理 |

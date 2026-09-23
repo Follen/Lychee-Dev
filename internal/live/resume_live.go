@@ -19,7 +19,7 @@ func Resume(ctx context.Context, root, id string) (Outcome, error) {
 		return Outcome{}, err
 	}
 	var region image.Rectangle
-	if record.Stage != "cleaned" || record.Status != "completed" {
+	if record.Stage != "cleaned" || record.Status != "completed" && record.Status != "cancelled" {
 		input, _, err := probeDefinition(record)
 		if err != nil {
 			return finishOutcome(ctx, root, record, err)
@@ -48,6 +48,9 @@ func resumeLiveOperation(ctx context.Context, root, id string, region image.Rect
 	}
 	if record.Stage == "cleaned" && record.Status == "completed" {
 		return ReleaseCompletedProbe(ctx, root, id)
+	}
+	if record.Stage == "cleaned" && record.Status == "cancelled" {
+		return record, nil
 	}
 	if record.Status != "pending" && record.Status != "running" && record.Status != "unresolved" {
 		return record, journal.ErrTransition

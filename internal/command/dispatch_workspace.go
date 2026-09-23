@@ -49,7 +49,7 @@ func runTargetVerb(ctx context.Context, route, argument string, opts Options, re
 		}
 		config := selection.TargetConfig{
 			Name: argument, Product: opts.product, Region: opts.dataRegion, Locale: opts.locale,
-			FullBuild: opts.fullBuild, Installation: opts.installation,
+			FullBuild: opts.fullBuild, Installation: opts.installation, Definitions: opts.definitionRef,
 		}
 		if opts.remote {
 			config.Source = selection.TargetSourceRemote

@@ -95,8 +95,33 @@ The lossless WebP encoder buffers internally and cannot interrupt its CPU phase;
 cancellation is checked before/after encoding and before publication, not a hard
 encoding deadline. Choose a smaller existing mip or pixel limit for large images.
 
-Name search and media demux are not yet implemented. Report those limitations
-when needed; do not fall back to a legacy executable.
+### Name search and media demux
+
+Find named files in a pinned target with a supported listfile:
+
+```text
+lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --query <text> --limit 50 --format json
+lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --extension blp --limit 50 --format json
+lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --name 'Interface/Icons/*' --format json
+lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --file-id <id> --format json
+```
+
+Choose exactly one lookup mode: `--query <text>`, `--extension <ext>`,
+`--name <path>`, or `--file-id <id>`. `--limit` bounds text search and extension
+pages. The command reuses a verified cached listfile when available. Search
+results identify candidates; inspect or export a selected file ID before
+interpreting its contents.
+
+Demux a supported VP9 AVI from a local file or pinned CASC source:
+
+```text
+lycheedev asset demux --path <local-file> --output <existing-directory> --max-frames 500 --format json
+```
+
+For CASC input, supply `--snapshot <pin> --file-id <id>` and exactly one of
+`--installation <client-or-game-root>` or `--cdn`. Frame, byte and partial
+output bounds are explicit; retain the returned completion and truncation
+state. Do not treat partial output as a complete media export.
 
 Confirm the resolved file data ID or path, size, encoding, content hash, build,
 and locale where applicable before interpreting the artifact. Metadata is not

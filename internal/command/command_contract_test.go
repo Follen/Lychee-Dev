@@ -164,7 +164,7 @@ func TestWorkspaceVerbContractsAreAdvertised(t *testing.T) {
 			t.Fatalf("describe does not advertise %q", path)
 		}
 	}
-	for _, path := range []string{"live bugs", "live reload", "live cancel", "evidence bundle", "evidence keep", "evidence remove"} {
+	for _, path := range []string{"live bugs", "live reload", "evidence keep", "evidence remove"} {
 		if advertised[path] {
 			t.Fatalf("describe advertises unimplemented %q", path)
 		}
@@ -249,9 +249,9 @@ func TestWorkspaceVerbArgumentAdmission(t *testing.T) {
 }
 
 func TestSubcommandHelpDoesNotMakeUnknownCommandsUsable(t *testing.T) {
-	// doctor is implemented; live bugs/reload/cancel and evidence
-	// bundle/keep/remove are not, so their names must stay unrouted.
-	for _, args := range [][]string{{"missing", "--help"}, {"live", "bugs", "--help"}, {"live", "reload", "--help"}, {"live", "cancel", "--help"}, {"evidence", "bundle", "--help"}, {"evidence", "keep", "--help"}, {"evidence", "remove", "--help"}, {"live", "unknown", "--help"}} {
+	// Implemented verbs are advertised; future live bugs/reload and evidence
+	// keep/remove must remain unrouted even when a caller asks for help.
+	for _, args := range [][]string{{"missing", "--help"}, {"live", "bugs", "--help"}, {"live", "reload", "--help"}, {"evidence", "keep", "--help"}, {"evidence", "remove", "--help"}, {"live", "unknown", "--help"}} {
 		response, code := invoke(t, append(args, "--format=json")...)
 		if code != 2 || response.OK || response.Error == nil || response.Error.Code != "command.invalid_arguments" {
 			t.Fatalf("%v: code=%d response=%+v", args, code, response)

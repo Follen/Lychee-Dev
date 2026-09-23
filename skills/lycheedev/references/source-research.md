@@ -11,17 +11,21 @@ immutable evidence. Keep the exact commit in the report. If the requested exact
 source cannot be resolved, stop with an actionable unresolved result; do not
 silently substitute the newest snapshot.
 
-Check `describe --format json` first. The current development implementation
-supports catalog discovery, explicit source preparation, syntax indexing,
-exact-name queries and pinned file reads:
+Check `describe --format json` first. The current implementation supports
+catalog discovery, explicit source preparation, syntax indexing, topic and
+evidence-tier queries, indexed symbol or target-path inspection, pinned file
+reads and static addon validation:
 
 ```text
 lycheedev source list --format json
 lycheedev source sync --source <catalog-key> --product <track> --ref <commit-or-full-ref> --format json
 lycheedev source index --snapshot <pin> --format json
-lycheedev source query <exact-symbol-or-relation-name> --snapshot <pin> --limit 50 --format json
+lycheedev source query <term> --snapshot <pin> --mode precise --topic api --limit 50 --format json
 lycheedev source inspect --snapshot <pin> --path <repository-relative-file> --line <first-line> --count <line-count> --format json
+lycheedev source inspect --snapshot <pin> --symbol <qualified-name> --format json
+lycheedev source inspect --snapshot <pin> --target-path <path> --format json
 lycheedev source diff --from <pin-a> --to <pin-b> --limit 50 --format json
+lycheedev source validate --matrix <config.json> --format json
 ```
 
 `source sync` returns the immutable PinnedSet directly. Its `--ref` accepts a
@@ -41,10 +45,14 @@ available for preparation and reads; this workflow does not invoke the old CLI.
 can still have `complete: false`: retain the diagnostic count and sample, rather
 than treating an unparsed file as empty. Index completeness covers syntax
 extraction, not load-closure validation or runtime behavior. `source query`
-currently matches exact case-sensitive declaration or relationship names; it is
-not fuzzy/full-text search. Calls are inferred, dynamic calls remain unresolved,
-and generated API definitions are separately categorized. Keep query truncation
+supports `precise` and `exploratory` modes and the `api`, `lua`, `xml`, `toc` and
+asset topics. Precise mode prioritizes stronger matches; exploratory mode
+broadens matching, so treat results as candidates and verify them in their
+pinned locations. Calls are inferred, dynamic calls remain unresolved, and
+generated API definitions are separately categorized. Keep query truncation
 visible; inspect returned source locations to obtain original-file evidence.
+`source inspect --symbol` searches indexed symbols; `--target-path` inspects
+indexed file or asset metadata. Both require an index.
 
 `source diff` requires two explicitly fixed, complete indexes from the same
 repository and parser revision. It compares indexed Lua/XML/TOC content and
@@ -55,10 +63,10 @@ change groups; totals and `truncated` describe the full comparison. The capture
 records both snapshot IDs and both commits. An incomplete index is rejected
 rather than making an unparsed declaration appear removed.
 
-For implemented load/syntax/source-name checks, use the addon-validation
-reference. Broader search, alias-aware validation and matrix aggregation remain
-planned until the command catalog advertises them. Do not execute future commands
-or substitute the legacy tool when those capabilities are unavailable.
+For load/syntax/source-name checks and fixed multi-client validation, use the
+addon-validation reference. A matrix validates only the clients and pinned
+inputs declared in its config; preserve unresolved coverage and per-client
+results.
 
 Choose the narrowest stable symbol, path, event, template, TOC field, or API
 name in the question. Use a broader query only to discover candidates, then

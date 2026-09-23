@@ -203,7 +203,7 @@ func TestNativeWorkspaceAcrossProcesses(t *testing.T) {
 	}
 	query := run("source", "query", "NotDeclared", "--project", project, "--limit", "5")
 	matches := query["result"].(map[string]any)
-	if len(matches["matches"].([]any)) != 0 || matches["index"].(map[string]any)["complete"] != false {
+	if len(matches["results"].([]any)) != 0 || matches["complete"] != false {
 		t.Fatalf("query hid incomplete index: %v", matches)
 	}
 	queryCapture := query["captures"].([]any)[0].(map[string]any)

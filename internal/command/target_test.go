@@ -59,6 +59,18 @@ func TestTargetResolveFromClientReturnsReusablePinAndEvidence(t *testing.T) {
 	if code != 0 || resultMap(t, shown)["id"] != pin["id"] {
 		t.Fatal(shown)
 	}
+	added, code := invoke(t, "target", "add", "retail-cn", "--product", "retail", "--region", "cn", "--locale", "zhCN", "--installation", client, "--build", "12.1.0.69875", "--definitions", strings.Repeat("d", 40), "--home", workspace, "--format=json")
+	if code != 0 || !added.OK {
+		t.Fatal(added, code)
+	}
+	named, code := invoke(t, "target", "show", "retail-cn", "--home", workspace, "--format=json")
+	if code != 0 || resultMap(t, named)["config"].(map[string]any)["name"] != "retail-cn" {
+		t.Fatal(named, code)
+	}
+	resolved, code := invoke(t, "target", "resolve", "--target", "retail-cn", "--offline", "--home", workspace, "--format=json")
+	if code != 0 || resultMap(t, resolved)["pin"].(map[string]any)["id"] != pin["id"] {
+		t.Fatal(resolved, code)
+	}
 	capture := result.Captures[0].(map[string]any)
 	verified, code := invoke(t, "evidence", "verify", capture["id"].(string), "--home", workspace, "--format=json")
 	if code != 0 || !verified.OK {

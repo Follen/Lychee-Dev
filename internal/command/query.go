@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
@@ -12,6 +13,8 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -55,6 +58,10 @@ func queryFault(err error) (int, string, bool) {
 		{texture.ErrMipmap, 3, "texture.mipmap_unavailable"},
 		{texture.ErrLimit, 3, "texture.pixel_limit"},
 		{records.ErrImageOutputLimit, 3, "records.image_output_limit"},
+		{records.ErrQueryCSVLimit, 3, "records.query_csv_limit"},
+		{evidence.ErrBundleSelection, 2, "evidence.bundle_selection"},
+		{evidence.ErrBundleOutput, 2, "evidence.bundle_output"},
+		{evidence.ErrBundleLimit, 3, "evidence.bundle_limit"},
 		{selection.ErrProjectMissing, 3, "selection.project_missing"},
 		{selection.ErrProjectUnlocked, 3, "selection.project_unlocked"},
 		{selection.ErrProjectFormat, 4, "selection.project_format"},
@@ -137,6 +144,67 @@ func readDataQuery(path string) (records.DataQuery, error) {
 		return records.DataQuery{}, errors.New("invalid query file encoding or size")
 	}
 	return decodeDataQuery(raw)
+}
+
+// readSelectedDataQuery preserves the JSON query-document contract while also
+// accepting plain SQL from a file, stdin or an inline flag. Source selection is
+// checked by dispatch before this helper runs; no fallback to ambient input.
+func readSelectedDataQuery(opts Options) (records.DataQuery, error) {
+	if opts.file != "" && strings.EqualFold(filepath.Ext(opts.file), ".json") {
+		if len(opts.parameters) != 0 {
+			return records.DataQuery{}, errors.New("--param cannot be combined with a JSON query document")
+		}
+		return readDataQuery(opts.file)
+	}
+	var raw []byte
+	var err error
+	switch {
+	case opts.sql != "":
+		raw = []byte(opts.sql)
+	case opts.stdin:
+		raw, err = io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
+	case opts.file != "":
+		file, openErr := os.Open(opts.file)
+		if openErr != nil {
+			return records.DataQuery{}, openErr
+		}
+		defer file.Close()
+		info, statErr := file.Stat()
+		if statErr != nil {
+			return records.DataQuery{}, statErr
+		}
+		if !info.Mode().IsRegular() || info.Size() > 1<<20 {
+			return records.DataQuery{}, errors.New("SQL file must be regular and at most 1 MiB")
+		}
+		raw, err = io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	}
+	if err != nil {
+		return records.DataQuery{}, err
+	}
+	if len(raw) > 1<<20 || !utf8.Valid(raw) || strings.TrimSpace(string(raw)) == "" {
+		return records.DataQuery{}, errors.New("SQL input must be UTF-8, nonempty and at most 1 MiB")
+	}
+	return records.DataQuery{SQL: string(raw), Parameters: opts.parameters}, nil
+}
+
+// Scalars use JSON spelling when it is unambiguous; all other text is a
+// string, so IDs such as 001 and natural-language values are not mangled.
+func parseQueryScalar(raw string) any {
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return raw
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return raw
+	}
+	switch value.(type) {
+	case nil, string, bool, json.Number:
+		return value
+	default:
+		return raw
+	}
 }
 
 // Tokens permit duplicate-key rejection, including parameter names. Numeric

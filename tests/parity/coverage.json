@@ -1,0 +1,25 @@
+{
+  "schema": "lycheedev.semantic-parity-coverage.v1",
+  "purpose": "Read-only semantic regression coverage for retained legacy fixtures and current public surfaces. Coverage entries are evidence pointers, not claims that the retired executable was run.",
+  "offline": true,
+  "groups": [
+    {"legacy": "wowdoc.source", "current": ["source list", "source sync", "source index", "source query", "source inspect", "source diff", "source validate"], "evidence": ["internal/codebase/*_test.go", "internal/command/query_test.go", "tests/fixtures/codebase/provenance.json"], "status": "fixture-backed-partial"},
+    {"legacy": "wowdoc.doctor", "current": ["doctor"], "evidence": ["internal/command/entry_test.go"], "status": "current-tests"},
+    {"legacy": "wowdoc.index", "current": ["source index", "source list"], "evidence": ["internal/codebase/*_test.go"], "status": "current-tests"},
+    {"legacy": "wowdoc.lifecycle", "current": ["init", "cache prune", "addon remove", "skill remove"], "evidence": ["internal/command/dispatch_workspace_test.go", "internal/delivery/remove_test.go"], "status": "intentional-change"},
+    {"legacy": "wowdata.sql", "current": ["data sql"], "evidence": ["internal/command/data_fixture_test.go", "internal/records/relational/*_test.go"], "status": "current-tests"},
+    {"legacy": "wowdata.db2", "current": ["data db2"], "evidence": ["internal/command/data_fixture_test.go", "tests/fixtures/db2/JournalEncounterSection-classic-era.db2", "tests/fixtures/provenance.json"], "status": "fixture-backed-partial"},
+    {"legacy": "wowdata.hotfix", "current": ["data hotfix"], "evidence": ["internal/command/hotfix_test.go", "tests/fixtures/hotfix-wago/manifest.json"], "status": "fixture-backed-partial"},
+    {"legacy": "wowdata.relationships", "current": ["data spell", "data encounter", "data item", "data creature", "data decor"], "evidence": ["internal/records/navigatetest/*_test.go", "internal/command/data_verbs_test.go"], "status": "current-tests"},
+    {"legacy": "wowdata.assets", "current": ["asset search", "asset inspect", "asset export"], "evidence": ["internal/command/asset_test.go", "internal/command/asset_export_test.go", "internal/records/texture/decode_test.go"], "status": "current-tests"},
+    {"legacy": "wowdata.video", "current": ["asset demux"], "evidence": ["internal/records/video/avi_test.go", "tests/fixtures/oracles/demux-minimal-vp9.json", "tests/fixtures/inputs/minimal-vp9.avi"], "status": "fixture-backed"},
+    {"legacy": "wowdata.casc", "current": ["target show", "target list", "doctor", "cache status", "cache verify"], "evidence": ["internal/selection/*_test.go", "internal/records/cdn_index_test.go"], "status": "current-tests"},
+    {"legacy": "wowdata.profile", "current": ["target list", "target add", "target show", "target remove"], "evidence": ["internal/command/target_test.go", "internal/selection/target_config_test.go"], "status": "current-tests"},
+    {"legacy": "wowdata.cache", "current": ["cache status", "cache verify", "cache prune"], "evidence": ["internal/vault/cache_test.go", "internal/command/dispatch_workspace_test.go"], "status": "current-tests"},
+    {"legacy": "wowdata.golden", "current": ["tests/parity"], "evidence": ["tests/fixtures/provenance.json", "tests/fixtures/oracles/demux-minimal-vp9.json"], "status": "fixture-backed-partial"},
+    {"legacy": "wowdata.lifecycle", "current": ["init", "doctor", "addon remove", "skill remove"], "evidence": ["internal/command/entry_test.go", "internal/delivery/remove_test.go"], "status": "intentional-change"},
+    {"legacy": "wowdata.warmup", "current": ["target resolve", "on-demand data preparation", "cache status"], "evidence": ["internal/selection/target_config_test.go", "internal/command/data_fixture_test.go"], "status": "intentional-change"},
+    {"legacy": "wowdata.remote-builds", "current": ["target list", "target resolve"], "evidence": ["internal/selection/target_config_test.go", "internal/records/cdn_index_test.go"], "status": "current-tests"}
+  ],
+  "normalizers": ["remote-products-v1", "cache-state-v1", "profile-state-v1"]
+}

@@ -62,7 +62,7 @@ func Status(ctx context.Context, root, id string) (Outcome, error) {
 
 func pendingOutcome(record journal.WorkRecord) Outcome {
 	result := Outcome{OperationID: record.OperationID, Snapshot: record.Intent.Snapshot, Status: record.Status, Stage: record.Stage, Report: ReportOutcome{State: "unavailable"}, Cleanup: "pending"}
-	if record.Stage == "cleaned" && record.Status == "completed" {
+	if record.Stage == "cleaned" && (record.Status == "completed" || record.Status == "cancelled") {
 		result.Cleanup = "complete"
 	}
 	return result
