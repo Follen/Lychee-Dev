@@ -616,16 +616,25 @@ jobs:
             --ignore-scripts --no-audit --no-fund --userconfig "$PWD/empty.npmrc"
           launcher="$fresh/lib/node_modules/lycheedev/bin/lycheedev.mjs"
           [ -f "$launcher" ] || { echo '::error::installed launcher missing after registry install'; exit 1; }
-          node "$launcher" version --format=json > installed-version.json
+          # This job runs on ubuntu and the product ships windows-amd64 only:
+          # the launcher must refuse to select a binary here (correct product
+          # behavior), while native execution evidence comes from the windows
+          # platform smoke and the inline desktop job of the same release run.
+          set +e
+          node "$launcher" version --format=json > installed-version.json 2> installed-unsupported.log
+          code=$?
+          set -e
           node -e "
             const fs = require('fs');
             const manifest = JSON.parse(fs.readFileSync('out/sealed/release-manifest.json', 'utf8'));
-            const installed = JSON.parse(fs.readFileSync('installed-version.json', 'utf8'));
-            if (!installed.ok) throw new Error('installed CLI version command failed');
-            if (installed.result.version !== manifest.version) throw new Error('registry install version ' + installed.result.version + ' != ' + manifest.version);
-            if (installed.result.commit !== manifest.commit) throw new Error('registry install commit ' + installed.result.commit + ' != ' + manifest.commit);
-            console.log('registry install verified: ' + installed.result.version + ' @ ' + installed.result.commit);
+            const installedPkg = JSON.parse(fs.readFileSync('$fresh/lib/node_modules/lycheedev/package.json', 'utf8'));
+            if (installedPkg.version !== manifest.version) throw new Error('registry install version ' + installedPkg.version + ' != ' + manifest.version);
+            if (process.exitCode === 1) { /* handled below */ }
+            const unsupported = fs.readFileSync('installed-unsupported.log', 'utf8');
+            if (!unsupported.includes('distribution.unsupported_platform')) throw new Error('non-windows launcher did not fail closed: ' + unsupported.slice(0, 200));
+            console.log('registry install verified: package ' + installedPkg.version + '; launcher correctly refuses linux (windows-only product)');
           "
+          [ "$code" -ne 0 ] || { echo '::error::launcher unexpectedly ran on linux'; exit 1; }
       - name: Release notes from the sealed manifest
         run: |
           set -e
