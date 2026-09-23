@@ -5,12 +5,10 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+// The 2.0 distribution ships a windows-amd64 binary only; every other platform
+// fails closed with distribution.unsupported_platform (no downloads, no fallbacks).
 const targets = new Map([
   ['win32:x64', 'windows-amd64'],
-  ['linux:x64', 'linux-amd64'],
-  ['linux:arm64', 'linux-arm64'],
-  ['darwin:x64', 'darwin-amd64'],
-  ['darwin:arm64', 'darwin-arm64'],
 ]);
 
 export function nativePath(root, platform = process.platform, arch = process.arch) {

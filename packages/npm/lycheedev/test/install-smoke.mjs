@@ -1,5 +1,5 @@
-// Development-only host package smoke. This is not the five-platform release
-// assembly or release gate: one host binary plus current addon/skill sources.
+// Development-only host package smoke. This is not the release assembly or
+// release gate: the windows-amd64 host binary plus current addon/skill sources.
 import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -12,8 +12,10 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(packageRoot, '../../..');
 const npmCLI = process.argv[2];
 if (!npmCLI || !existsSync(npmCLI)) throw new Error('Pass the absolute npm-cli.js path; no shell or download fallback is used');
+// windows-amd64 is the only shipped target; the smoke builds and runs that
+// binary, so it only supports a Windows amd64 host.
 const target = `${process.platform === 'win32' ? 'windows' : process.platform}-${process.arch === 'x64' ? 'amd64' : process.arch}`;
-if (!['windows-amd64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64'].includes(target)) throw new Error('unsupported test host');
+if (target !== 'windows-amd64') throw new Error('unsupported test host: the toolkit ships windows-amd64 only');
 const root = mkdtempSync(join(tmpdir(), 'lycheedev npm 隔离-'));
 const stage = join(root, 'package');
 const prefix = join(root, 'prefix');
@@ -39,7 +41,7 @@ function run(binary, args, cwd = root, extraEnv = {}) {
   if (result.error || result.status !== 0) throw new Error(`${binary}: ${result.error || result.status}\n${result.stdout}\n${result.stderr}`);
   return result.stdout;
 }
-const binaryPath = `native/${target}/lycheedev${process.platform === 'win32' ? '.exe' : ''}`;
+const binaryPath = 'native/windows-amd64/lycheedev.exe';
 run(process.execPath, ['tools/version.mjs', '--check'], repository);
 const commit = run('git', ['rev-parse', 'HEAD'], repository).trim();
 assert.match(commit, /^[a-f0-9]{40}$/);
@@ -79,7 +81,7 @@ assert(packed.files.some(file => file.path === 'THIRD_PARTY_NOTICES'));
 for (const resource of resources) assert(packed.files.some(file => file.path === `payload/${resource.path}`), `missing packed ${resource.path}`);
 assert(!packed.files.some(file => /(^test\/|\.py$|node_modules|workspace\.json)/.test(file.path)));
 run(process.execPath, [npmCLI, 'install', '--global', '--prefix', prefix, tgz, ...flags]);
-const installed = process.platform === 'win32' ? join(prefix, 'node_modules/lycheedev') : join(prefix, 'lib/node_modules/lycheedev');
+const installed = join(prefix, 'node_modules/lycheedev');
 assert.deepEqual(readFileSync(join(installed, 'THIRD_PARTY_NOTICES')), sourceThirdPartyNotices);
 const launcher = join(installed, 'bin/lycheedev.mjs');
 const version = JSON.parse(run(process.execPath, [launcher, 'version', '--format=json']));
@@ -87,11 +89,9 @@ assert.equal(version.ok, true);
 assert.equal(version.result.version, manifest.version);
 assert.equal(version.result.commit, commit);
 assert.equal(version.result.workspaceDirty, workspaceDirty);
-assert.equal(version.result.platform, target.replace('windows-', 'windows/').replace('linux-', 'linux/').replace('darwin-', 'darwin/'));
-const shim = process.platform === 'win32' ? join(prefix, 'lycheedev.cmd') : join(prefix, 'bin/lycheedev');
-const shimVersion = JSON.parse(process.platform === 'win32'
-  ? run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', '& $env:LYCHEEDEV_SMOKE_SHIM version --format=json; exit $LASTEXITCODE'], root, { LYCHEEDEV_SMOKE_SHIM: shim })
-  : run(shim, ['version', '--format=json']));
+assert.equal(version.result.platform, 'windows/amd64');
+const shim = join(prefix, 'lycheedev.cmd');
+const shimVersion = JSON.parse(run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', '& $env:LYCHEEDEV_SMOKE_SHIM version --format=json; exit $LASTEXITCODE'], root, { LYCHEEDEV_SMOKE_SHIM: shim }));
 assert.deepEqual(shimVersion, version);
 const home = join(root, 'fresh-home');
 const initialized = JSON.parse(run(process.execPath, [launcher, 'init', '--home', home, '--format=json']));

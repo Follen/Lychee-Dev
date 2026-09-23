@@ -3,8 +3,9 @@
 // Subcommands are driven by .github/workflows/toolkit-release.yml and
 // toolkit-ci.yml. Nothing here publishes, tags, or mutates tracked sources.
 //
-//   assemble            five native builds + payload + release.json + native
-//                       archives + addon ZIP + ONE npm pack + whitelist audit
+//   assemble            windows-amd64 native build + payload + release.json +
+//                       native archive + addon ZIP + ONE npm pack + whitelist
+//                       audit
 //   verify-cgo          pre-step proving capture/decode still work with
 //                       CGO_ENABLED=0 before the release build claims it
 //   seal                fold test report digests into the external sealed
@@ -14,7 +15,7 @@
 //   dist-tag            2.0.0-rc.N -> next, otherwise latest (REL-11)
 //   registry-state      exists-matching / exists-conflicting / absent / unknown
 //                       (REL-09: unknown is never treated as absent)
-//   verify-platform-evidence   five-platform run evidence completeness (REL-13)
+//   verify-platform-evidence   windows-amd64 run evidence completeness (REL-13)
 //   verify-desktop-evidence    real-machine evidence binding (REL-04/05)
 //   platform-evidence / desktop-evidence / release-notes / check-assets
 //                       small report helpers used by the workflows
@@ -34,16 +35,14 @@ import { synchronizeVersion } from './version.mjs';
 
 export const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const REPOSITORY_URL = 'https://github.com/Follen/Lychee-Dev';
+// Owner decision: the 2.0 release ships Windows amd64 ONLY. The Go source stays
+// portable, but nothing else is built, packaged or verified.
 export const TARGETS = [
   { target: 'windows-amd64', goos: 'windows', goarch: 'amd64', binary: 'native/windows-amd64/lycheedev.exe' },
-  { target: 'linux-amd64', goos: 'linux', goarch: 'amd64', binary: 'native/linux-amd64/lycheedev' },
-  { target: 'linux-arm64', goos: 'linux', goarch: 'arm64', binary: 'native/linux-arm64/lycheedev' },
-  { target: 'darwin-amd64', goos: 'darwin', goarch: 'amd64', binary: 'native/darwin-amd64/lycheedev' },
-  { target: 'darwin-arm64', goos: 'darwin', goarch: 'arm64', binary: 'native/darwin-arm64/lycheedev' },
 ];
-const HOST_TARGET = process.platform === 'win32' ? 'windows-amd64'
-  : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-amd64')
-    : `linux-${process.arch === 'x64' ? 'amd64' : process.arch}`;
+// Assembly, binary identity verification and the host `version` check run on the
+// Windows release host, the only platform that can execute the shipped binary.
+const HOST_TARGET = 'windows-amd64';
 
 const HEX64 = /^[a-f0-9]{64}$/;
 const HEX40 = /^[a-f0-9]{40}$/;
@@ -352,8 +351,9 @@ async function assembleCommand(argv) {
     version, commit: id.commit, binaries, resources, correspondingSource: source.correspondingSource,
   }));
 
-  // Per-platform native archives: single-platform release.json declarations are
-  // allowed there; binary/addon/skill bytes must equal the npm package's.
+  // Native archive (windows-amd64 only): single-platform release.json
+  // declarations are allowed there; binary/addon/skill bytes must equal the npm
+  // package's.
   const artifacts = { [source.artifact.name]: source.artifact };
   for (const entry of TARGETS) {
     const record = releaseJson({
@@ -405,10 +405,10 @@ async function assembleCommand(argv) {
   const packed = JSON.parse(pack.stdout)[0];
   const tgzName = `lycheedev-${version}.tgz`;
   renameSync(join(out, packed.filename), join(out, tgzName));
-  // npm pack on Windows emits mode 0644 for every entry; restore the POSIX
-  // exec bits the Unix platforms need, in the same tarball (never re-packed).
+  // npm pack on Windows emits mode 0644 for every entry; restore the POSIX exec
+  // bit the launcher needs, in the same tarball (never re-packed).
   const normalized = setTgzModes(readFileSync(join(out, tgzName)), name => (
-    /^package\/bin\/lycheedev\.mjs$/.test(name) || /^package\/native\/(?:linux|darwin)-/.test(name) ? 0o755 : undefined
+    /^package\/bin\/lycheedev\.mjs$/.test(name) ? 0o755 : undefined
   ));
   writeFileSync(join(out, tgzName), normalized);
   const tgzBytes = readFileSync(join(out, tgzName));
@@ -740,7 +740,7 @@ function releaseNotesCommand(argv) {
     '',
     '## Verification',
     '',
-    '- Windows required jobs, five-platform run smoke and the real-machine desktop evidence are attached as reports; digests are sealed in `release-manifest.json` / `SHA256SUMS`.',
+    '- Windows required jobs, the windows-amd64 run smoke and the real-machine desktop evidence are attached as reports; digests are sealed in `release-manifest.json` / `SHA256SUMS`.',
     '- This release does not import or migrate any legacy tool data; new-format state is created from scratch on first use.',
     '- Third-party components and their licenses: `THIRD_PARTY_NOTICES` (attached).',
   ];
@@ -831,7 +831,7 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot } = {}) 
       const binaryTargets = Object.keys(manifest.binaries ?? {});
       for (const entry of TARGETS) {
         const record = manifest.binaries?.[entry.target];
-        if (!record) { violations.push(`release.json missing binary ${entry.target} (npm assembly requires all five)`); continue; }
+        if (!record) { violations.push(`release.json missing binary ${entry.target} (npm assembly requires exactly the shipped target)`); continue; }
         if (record.path !== entry.binary) violations.push(`release.json binary path ${record.path}`);
         const bytes = byName.get(`package/${entry.binary}`);
         if (!bytes) continue;

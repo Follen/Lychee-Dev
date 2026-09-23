@@ -60,8 +60,9 @@ func validateSourceArchive(source *SourceArchive, releaseCommit string) error {
 
 // InspectRelease reads the common npm/native release manifest and verifies the
 // deployable payload. Binary records are validated here, but binary bytes remain
-// the launcher's responsibility. A native archive may declare one platform; the
-// npm assembly gate must require all five. This does not authenticate a release.
+// the launcher's responsibility. The release declares the shipped platform set
+// (windows-amd64 only for 2.0); the npm assembly gate must require exactly it.
+// This does not authenticate a release.
 func InspectRelease(ctx context.Context, directory, expectedVersion string) (Release, error) {
 	var release Release
 	root, err := os.OpenRoot(directory)

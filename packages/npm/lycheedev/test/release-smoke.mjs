@@ -2,10 +2,12 @@
 // installs the SEALED npm tarball produced by `node tools/release.mjs assemble`
 // and runs every check from the real installed directory. Unlike
 // install-smoke.mjs this consumes a finished tgz and never re-packs.
+// The sealed package carries only the windows-amd64 binary, so the smoke must
+// run on a Windows amd64 host (it executes the shipped binary).
 //
 //   node packages/npm/lycheedev/test/release-smoke.mjs <lycheedev-x.y.z.tgz> <npm-cli.js> [--report <path>]
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -62,7 +64,10 @@ const installStarted = process.hrtime.bigint();
 run(process.execPath, [npmCLI, 'install', '--global', '--prefix', prefix, resolve(tgzPath),
   '--userconfig', userconfig, '--cache', cache, '--offline', '--ignore-scripts', '--no-audit', '--no-fund']);
 const installMs = Number(process.hrtime.bigint() - installStarted) / 1e6;
-const installed = process.platform === 'win32' ? join(prefix, 'node_modules/lycheedev') : join(prefix, 'lib/node_modules/lycheedev');
+// Windows amd64 is the only shipped target, so the smoke only supports the
+// Windows global-install layout (prefix/node_modules).
+assert.equal(target, 'windows-amd64', 'the release smoke must run on the shipped windows-amd64 host');
+const installed = join(prefix, 'node_modules/lycheedev');
 const launcher = join(installed, 'bin/lycheedev.mjs');
 
 // 3. Notices, README and LICENSE must survive installation byte-identically.
@@ -71,8 +76,9 @@ for (const name of ['THIRD_PARTY_NOTICES', 'README.md', 'LICENSE']) {
   assert.deepEqual(readFileSync(join(installed, name)), readFileSync(join(packageRoot, name)), `${name} is not byte-identical to source`);
 }
 
-// 4. Per-platform launcher selection and binary content integrity from the
-//    real installed directory (PKG-01/02).
+// 4. Launcher selection and binary content integrity from the real installed
+//    directory (PKG-01/02). The package carries one binary; every other
+//    platform, including formerly shipped ones, must fail closed.
 const launcherModule = await import(`${pathToFileURL(launcher).href}?release-smoke`);
 const launcherSelection = {};
 for (const entry of TARGETS) {
@@ -86,10 +92,9 @@ for (const entry of TARGETS) {
   assert.equal(sha256(bytes), record.sha256, `binary digest mismatch ${entry.target} (REL-06)`);
   launcherSelection[entry.target] = { path: entry.binary, bytes: bytes.length, sha256: record.sha256 };
 }
-assert.throws(() => launcherModule.nativePath(installed, 'win32', 'arm64'), /unsupported_platform/);
-const hostBinary = join(installed, ...TARGETS.find(entry => entry.target === target).binary.split('/'));
-const executableBit = process.platform === 'win32' ? null : (statSync(hostBinary).mode & 0o111) !== 0;
-if (process.platform !== 'win32') assert.equal(executableBit, true, 'Unix binary lost its executable bit in the installed package');
+for (const [platform, arch] of [['win32', 'arm64'], ['linux', 'x64'], ['linux', 'arm64'], ['darwin', 'x64'], ['darwin', 'arm64']]) {
+  assert.throws(() => launcherModule.nativePath(installed, platform, arch), /unsupported_platform/, `${platform}/${arch} must not resolve`);
+}
 
 // 5. version and offline business smoke from the INSTALLED entry (PKG-02).
 const version = JSON.parse(run(process.execPath, [launcher, 'version', '--format=json']));
@@ -135,19 +140,9 @@ for (const capture of hotfix.captures) {
 }
 const business = { status: 'passed', scope: 'installed CLI target pinning, synthetic local Hotfix decode and evidence verification; no network', pin };
 
-// 6. PKG-08: Linux/macOS live must report unsupported, never fake success.
-let liveSupport = { status: 'not_applicable', scope: 'host is Windows' };
-if (process.platform !== 'win32') {
-  const attempt = spawnSync(process.execPath, [launcher, 'live', 'instances', '--home', home, '--format=json'], {
-    cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 60000,
-  });
-  assert.ifError(attempt.error);
-  const result = JSON.parse(attempt.stdout);
-  assert.equal(result.ok, false, 'live discovery faked success on a platform without native capture');
-  assert.equal(result.error.code, 'desktop.unsupported_platform', `live must report desktop.unsupported_platform, got ${result.error.code}`);
-  assert.notEqual(attempt.status, 0);
-  liveSupport = { status: 'passed', scope: 'live reports desktop.unsupported_platform and exits non-zero; no fake success' };
-}
+// 6. Live desktop capture needs a real game session on the shipped Windows
+//    platform; there is no non-Windows fallback to assert unsupported anymore.
+const liveSupport = { status: 'not_applicable', scope: 'windows-amd64 is the only shipped platform; live desktop capture requires a real game session' };
 
 const report = {
   scope: 'sealed release tarball content audit, isolated --ignore-scripts install and offline business smoke; no game execution',
@@ -155,7 +150,7 @@ const report = {
   correspondingSource: manifest.correspondingSource, audit, entryCount: audit.entryCount,
   compressedBytes: tgzBytes.length, unpackedBytes, installMs: Math.round(installMs), // REL-14 measurements
   policy: { development: policy.development, npmDistTag: policy.npmDistTag },
-  ignoreScripts: true, executableBit, launcherSelection, versionOutput: version.result, describeCommands: describe.result.commands.length,
+  ignoreScripts: true, launcherSelection, versionOutput: version.result, describeCommands: describe.result.commands.length,
   initialized, business, liveSupport,
 };
 if (reportPath) writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);

@@ -1,8 +1,8 @@
 # lycheedev
 
 Unified native World of Warcraft development toolkit. One npm package carries the
-native `lycheedev` CLI for five platforms (`native/<os-arch>/`) plus the deployable
-Lychee Dev addon (`payload/addon/`) and the `lycheedev` agent skill
+native `lycheedev` CLI for Windows amd64 (`native/windows-amd64/`) plus the
+deployable Lychee Dev addon (`payload/addon/`) and the `lycheedev` agent skill
 (`payload/skill/`).
 
 ## Requirements
@@ -36,8 +36,7 @@ The launcher never downloads fallback binaries and never reads legacy tool homes
 ## Contents
 
 - `bin/lycheedev.mjs` — platform selector and process forwarder.
-- `native/<os-arch>/lycheedev[.exe]` — windows-amd64, linux-amd64, linux-arm64,
-  darwin-amd64, darwin-arm64.
+- `native/windows-amd64/lycheedev.exe` — the shipped Windows amd64 binary.
 - `payload/addon/`, `payload/skill/` — deployable resources listed in
   `release.json` (`lycheedev.release.v1`) with byte sizes and SHA-256 digests.
 - `release.json` — release manifest consumed by the launcher and the installer.

@@ -22,12 +22,14 @@ function fixture(t, platform = process.platform, arch = process.arch) {
   return { root, path, target, manifest, save };
 }
 
-test('selects each declared platform without network or installation scripts', t => {
-  for (const [platform, arch] of [['win32', 'x64'], ['linux', 'x64'], ['linux', 'arm64'], ['darwin', 'x64'], ['darwin', 'arm64']]) {
-    const f = fixture(t, platform, arch);
-    assert.equal(nativePath(f.root, platform, arch), join(f.root, f.path));
+test('selects the shipped windows-amd64 target and fails closed everywhere else', t => {
+  const f = fixture(t, 'win32', 'x64');
+  assert.equal(nativePath(f.root, 'win32', 'x64'), join(f.root, f.path));
+  // windows-amd64 is the only shipped target; removed and unknown platforms
+  // must all fail closed without touching the filesystem.
+  for (const [platform, arch] of [['win32', 'arm64'], ['linux', 'x64'], ['linux', 'arm64'], ['darwin', 'x64'], ['darwin', 'arm64']]) {
+    assert.throws(() => nativePath('unused', platform, arch), /unsupported_platform/, `${platform}/${arch} must not resolve`);
   }
-  assert.throws(() => nativePath('unused', 'win32', 'arm64'), /unsupported_platform/);
 });
 
 test('rejects changed bytes, manifest paths and version mismatches', t => {
