@@ -2,8 +2,9 @@ THIRD-PARTY NOTICES for the lycheedev package (payload/addon, payload/skill and
 the native/ lycheedev binaries).
 
 Development status: the npm manifest declares "license": "MIT" (owner licensing
-decision recorded 2026-09-23, see below) and stays "private": true until the
-2.0.0 release freeze flips it for publication. This file is the complete
+decision recorded 2026-09-23, see below). Development versions may be private
+under the version policy; a released or release-candidate package is publishable.
+This file is the complete
 third-party inventory for the current tree, not a partial image-codec list. The
 repository root THIRD_PARTY_NOTICES.md records the source-side provenance
 detail. Component versions are the versions pinned in go.sum and compiled into

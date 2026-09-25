@@ -141,7 +141,7 @@ func selectCandidate(candidates []Candidate, request ConnectRequest) (Candidate,
 		if request.PID != 0 && candidate.Window.ProcessID != request.PID {
 			continue
 		}
-		if request.Installation != "" && !strings.EqualFold(candidate.Client.Directory, request.Installation) {
+		if request.Installation != "" && !sameInstallationPath(candidate.Client.Directory, request.Installation) {
 			continue
 		}
 		if request.Character != "" && candidate.Character != request.Character {
@@ -265,7 +265,7 @@ func reviveConstraints(request ConnectRequest, bound RecordedSession) error {
 	mismatch = mismatch || request.Snapshot != "" && request.Snapshot != bound.Record.Snapshot
 	mismatch = mismatch || request.Character != "" && request.Character != bound.Ready.Character
 	mismatch = mismatch || request.Realm != "" && request.Realm != bound.Ready.Realm
-	mismatch = mismatch || request.Installation != "" && !strings.EqualFold(request.Installation, bound.Target.Client.Directory)
+	mismatch = mismatch || request.Installation != "" && !sameInstallationPath(request.Installation, bound.Target.Client.Directory)
 	mismatch = mismatch || request.PID != 0 && request.PID != bound.Target.Window.ProcessID
 	mismatch = mismatch || request.CaptureArea != (image.Rectangle{}) && request.CaptureArea != bound.Record.Region
 	if mismatch {

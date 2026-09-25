@@ -1,7 +1,8 @@
 local ADDON_NAME, ns = ...
 
-local frame, strips, lastBytes, lastReady, lastGeneration, lastScale
+local frame, strips, lastBytes, lastReady, lastGeneration, lastScale, lastRefresh
 local focusWatch
+local revision = 0
 local focusEvent = "ChatFrame.OnEditBoxFocusGained"
 -- The white receipt card matches the legacy automation notice: anchored to the
 -- top-left corner, at most 480 UI units on a side, with module size derived
@@ -16,10 +17,12 @@ local function stopFocusWatch()
     if watch then watch.registry:UnregisterCallback(focusEvent, watch) end
 end
 local function hide()
+    revision = revision + 1
     stopFocusWatch()
     if ns.Session and type(ns.Session.CancelInputWait) == "function" then ns.Session.CancelInputWait() end
     if ns.Identity and type(ns.Identity.CancelWait) == "function" then ns.Identity.CancelWait() end
     lastBytes, lastReady, lastGeneration, lastScale = nil, nil, nil, nil
+    lastRefresh = nil
     if frame then
         frame:Hide()
         frame:UnregisterAllEvents()
@@ -69,7 +72,35 @@ local function cardGeometry(sizes)
     return modules, across, tall
 end
 
-local function display(receipt, readiness, generation)
+local display
+-- Focus invalidates pixels, not the pending result. Restore only through a
+-- producer which observes current state; never latch an old inputReady=true.
+local function suspend(refresh, generation)
+    hide()
+    if type(refresh) ~= "function" then return end
+    local expected = revision
+    local source = generation == 0 and ns.Identity or ns.Session
+    if not source or type(source.WhenInputReady) ~= "function" then return end
+    -- Explicit Hide, replacement, opt-out and leaving the world invalidate this
+    -- one-shot wait. No frame is allocated until the first displayed receipt.
+    frame:RegisterEvent("PLAYER_LEAVING_WORLD")
+    frame:RegisterEvent("LOADING_SCREEN_ENABLED")
+    frame:SetScript("OnEvent", hide)
+    local waiting = source.WhenInputReady(function(ready)
+        if revision ~= expected then return end
+        if not ready then hide(); return end
+        if generation ~= 0 then
+            local current = ns.Session.Current()
+            if not current or current.generation ~= generation then hide(); return end
+        end
+        local ok, receipt, readiness = pcall(refresh)
+        if revision ~= expected then return end
+        if not ok or not receipt then hide(); return end
+        display(receipt, readiness, generation, refresh)
+    end)
+    if not waiting and revision == expected then hide() end
+end
+display = function(receipt, readiness, generation, refresh)
     local valid, failure = payload(receipt)
     if not valid then hide(); return nil, failure end
     if readiness ~= nil then
@@ -85,7 +116,11 @@ local function display(receipt, readiness, generation)
     if restricted(scale) or type(scale) ~= "number" or scale ~= scale or scale <= 0 or scale == math.huge then
         hide(); return nil, "receipt_invalid_scale"
     end
-    if lastBytes == receipt and lastReady == readiness and lastGeneration == generation and lastScale == scale then return true end
+    if lastBytes == receipt and lastReady == readiness and lastGeneration == generation
+        and lastScale == scale and lastRefresh == refresh then return true end
+    -- A replacement owns the card and its input wait, even with identical
+    -- pixels. Cancel the previous producer before installing the new one.
+    hide()
     -- Merge horizontal black runs instead of allocating a texture per cell.
     -- Matrix coordinates are [x][y]. Every symbol owns a 4-module quiet zone;
     -- both share invalidation and one frame.
@@ -131,6 +166,7 @@ local function display(receipt, readiness, generation)
     for index = #runs + 1, #strips do strips[index]:Hide() end
     frame:SetScript("OnEvent", hide)
     frame:RegisterEvent("PLAYER_LEAVING_WORLD")
+    frame:RegisterEvent("LOADING_SCREEN_ENABLED")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     -- Visible receipts are point-in-time observations, not latched input
     -- permission. Invalidate on known focus/combat changes without polling.
@@ -138,23 +174,41 @@ local function display(receipt, readiness, generation)
     local watch = { registry = EventRegistry }
     focusWatch = watch
     watch.registry:RegisterCallback(focusEvent, function()
-        if focusWatch == watch then hide() end
+        if focusWatch == watch then suspend(refresh, generation) end
     end, watch)
     lastBytes, lastReady, lastGeneration, lastScale = receipt, readiness, generation, scale
+    lastRefresh = refresh
     frame:Show()
     return true
 end
 
 ns.ReceiptView = {
     Hide = hide,
-    Show = function(receipt, readiness)
+    -- Explicit host dismissal after the displayed receipt's evidence has been
+    -- archived. A request-scoped operation in flight owns the display, so
+    -- uncertainty fails closed; clearing without a shown card is a no-op.
+    Dismiss = function()
+        if type(ns.ProbeQueue) == "table" and type(ns.ProbeQueue.Busy) == "function" then
+            local busy, reason = ns.ProbeQueue.Busy()
+            if busy == nil then return nil, reason end
+            if busy then return nil, "receipt_busy" end
+        end
+        if type(ns.Reentry) == "table" and type(ns.Reentry.Busy) == "function" then
+            local busy, reason = ns.Reentry.Busy()
+            if busy == nil then return nil, reason end
+            if busy then return nil, "receipt_busy" end
+        end
+        hide()
+        return true
+    end,
+    Show = function(receipt, readiness, refresh)
         local session, failure = ns.Session.Current()
         if not session then hide(); return nil, failure end
-        return display(receipt, readiness, session.generation)
+        return display(receipt, readiness, session.generation, refresh)
     end,
     -- Identity markers bind no session. They share the exact display,
     -- invalidation and focus/combat rules; only the memo key differs.
-    ShowIdentity = function(receipt)
-        return display(receipt, nil, 0)
+    ShowIdentity = function(receipt, refresh)
+        return display(receipt, nil, 0, refresh)
     end,
 }

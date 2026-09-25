@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/evidence"
+	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
@@ -36,6 +37,9 @@ func queryFault(err error) (int, string, bool) {
 		code  string
 	}{
 		{errDoctorUnhealthy, 3, "doctor.check_failed"},
+		{live.ErrAckReadinessPending, 6, "live.ack_readiness_pending"},
+		{live.ErrReceiptHidePending, 6, "live.receipt_hide_pending"},
+		{live.ErrReceiptWindowBusy, 3, "live.receipt_window_busy"},
 		{selection.ErrTargetMissing, 3, "selection.target_missing"},
 		{selection.ErrTargetExists, 3, "selection.target_exists"},
 		{selection.ErrTargetAmbiguous, 2, "selection.target_ambiguous"},

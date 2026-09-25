@@ -17,7 +17,9 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-2.0.1.md` — Windows CI and release contract.
+4. `docs/toolkit/release-2.0.2.md` — Windows CI and release contract for the current candidate.
+   `release-2.0.1.md` is retained as the immutable historical contract for the
+   already-published release.
 
 Use `go test ./...` and `go vet ./...` at the repository root. The Lua protocol
 suites need a Lua 5.1 interpreter (`LYCHEEDEV_REQUIRE_LUA51=1`); build one with
@@ -81,12 +83,19 @@ from acceptance. A client folder is a location, not an identity: read
   installation receipt byte for byte. Deploy addon updates with
   `addon install` from a release root; overlay-copying the repo onto a managed
   installation makes it `modified` and the queue will (correctly) refuse it.
-- A completed run's cleanup reload returns the addon to its disabled default;
-  the old session nonce is dead. The agent invokes `live connect` to build a
-  new session before the next run; the user never types `/dev connect`.
+- `live run` executes only an already loaded operation and stops at a verified
+  report. `live ack` explicitly acknowledges that exact operation, retires its
+  queue entry and releases its window ownership; ACK does not trigger a cleanup
+  reload. Use standalone `live reload` when requested or needed within the
+  authorized task; the agent performs it automatically. Reconnect automatically
+  when a reload changes readiness, retaining the selected window and character.
 - Live results distinguish `report.state` (verified/unavailable) from
   `cleanup` (pending/complete). A verified report with pending cleanup is a
   usable result plus a recovery obligation — never report it as a failure.
+- `live abandon` requires an explicit decision to stop cleanup of a verified
+  probe before ACK. It preserves evidence, retires only the exact disk queue
+  entry and releases ownership without game input. `cleanup=abandoned` and
+  `complete=false` never mean ACK or runtime unload succeeded.
 - Real-machine observation goes through `internal/desktop` WGC capture; screen
   screenshots are not evidence for D3D windows.
 - Interactive desktop and game acceptance are recorded manually by the owner.

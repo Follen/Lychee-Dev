@@ -41,7 +41,7 @@ func TestRunAccountChoicePrecedesOperationAndInput(t *testing.T) {
 				sends++
 				return desktop.InputReceipt{}, errors.New("unexpected input")
 			}
-			record, err := runProbe(ctx, root, RunRequest{Session: bound.ID, Code: input.Code}, open, send)
+			record, err := executePrepared(ctx, root, ExecutionRequest{Session: bound.ID, Code: input.Code}, open, send)
 			var choice *AccountSelectionError
 			if !errors.As(err, &choice) || record.OperationID != "" || sends != 0 || !frames.closed {
 				t.Fatal(record, err, sends)
@@ -116,7 +116,7 @@ func TestRunReconnectsSavedSessionAndRetainsUncertainSubmission(t *testing.T) {
 				}
 				return desktop.InputReceipt{MessagesQueued: 1}, uncertain
 			}
-			record, err := runProbe(ctx, root, RunRequest{Session: bound.ID, Account: input.Load.Account, Code: input.Code}, open, send)
+			record, err := executePrepared(ctx, root, ExecutionRequest{Session: bound.ID, Account: input.Load.Account, Code: input.Code}, open, send)
 			if !frames.closed {
 				t.Fatal("capture not closed")
 			}

@@ -11,11 +11,16 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
+	"io"
 	"time"
 	// Acknowledge sends one short command only after archiving/verifying the report
 	// and observing current input readiness. No queue rewrite or reload is involved.
 	// Input submission is not acknowledgement; Observe must confirm the receipt.
 )
+
+// Missing fresh readiness is a recoverable observation boundary, not a
+// cancelled probe. The verified report and ownership remain available.
+var ErrAckReadinessPending = errors.New("live.ack_readiness_pending")
 
 func (p *ProbeOperation) Acknowledge(ctx context.Context) (desktop.InputReceipt, error) {
 	return p.acknowledge(ctx, desktop.QueuePreparedCommand)
@@ -65,8 +70,8 @@ func (p *ProbeOperation) prepareAcknowledgement(ctx context.Context) error {
 		if err := json.Unmarshal(record.Observation, &observed); err != nil {
 			return false, err
 		}
-		if observed.Schema != "lycheedev.report-observation.v1" || observed.ReloadedCapture == "" {
-			return false, errors.New("live.reload_not_observed")
+		if observed.Schema != "lycheedev.report-observation.v1" {
+			return false, errors.New("live.invalid_report_observation")
 		}
 		archive := evidence.OpenArchive(store, metadata)
 		if _, err := archive.ReadVerifiedReport(ctx, observed.BodyID, observed.ReceiptID, input.Code, input.Expected, p.id, record.Intent.Snapshot); err != nil {
@@ -83,12 +88,39 @@ func (p *ProbeOperation) prepareAcknowledgement(ctx context.Context) error {
 		expected.Kind, expected.RequestID, expected.ReloadNonce = "ready", "", ""
 		expected.RuntimeEpoch, expected.RequireInputReady = p.session.ready.RuntimeEpoch, true
 		expected.AfterSequence = p.session.ready.Sequence - 1
+		if observed.ReloadedCapture == "" {
+			if input.Revision == "" {
+				return false, errors.New("live.reload_not_observed")
+			}
+			binding, err := ReadWindowSession(ctx, p.root, input.Binding)
+			if err != nil {
+				return false, err
+			}
+			base, err := executionBase(ctx, p.root, record, input, binding)
+			if err != nil {
+				return false, err
+			}
+			expected, err = reloadExpectation(input, base)
+			if err != nil {
+				return false, err
+			}
+			if observed.AckReadyCapture != "" {
+				anchor, err := readAckReadiness(ctx, p.root, record, input, binding, p.session.ready, observed.AckReadyCapture, false)
+				if err != nil {
+					return false, err
+				}
+				expected.AfterSequence = anchor.Sequence - 1
+			}
+		}
 		wait, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		// Fresh pixels of the unchanged post-reload QR suffice; no input has
 		// consumed that readiness yet. The native frame watermark never resets.
 		signal, err := p.session.reader.WaitForSignal(wait, expected)
 		if err != nil {
+			if ctx.Err() == nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF)) {
+				return false, errors.Join(ErrAckReadinessPending, err)
+			}
 			return false, err
 		}
 		generic := signal.RequestID == "" && signal.ReloadNonce == ""
@@ -110,6 +142,9 @@ func (p *ProbeOperation) prepareAcknowledgement(ctx context.Context) error {
 			return false, err
 		}
 		err = book.AdvanceStage(ctx, journal.StageChange{OperationID: p.id, ExpectedGeneration: record.Generation, ExpectedStage: "verified", Stage: "verified", Status: "running", Observation: raw})
+		if err == nil {
+			p.session.ready = signal
+		}
 		return true, err
 	})
 	return err

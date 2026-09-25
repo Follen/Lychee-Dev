@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: Lychee Dev
-## Version: 2.0.1
+## Version: 2.0.2
 ## SavedVariables: LycheeToolkitDB
 
 Clients\Live.lua
@@ -31,6 +31,7 @@ Bridge\Identity.lua
 Modules\ObjectInspector.lua
 Modules\FunctionTrace.lua
 Modules\Diagnostics.lua
+Bridge\FaultRunner.lua
 # --- Event catalog (per client) and bounded monitor ---
 Modules\Events\CatalogData_Mainline.lua
 Modules\Events\Catalog.lua

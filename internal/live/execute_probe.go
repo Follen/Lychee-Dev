@@ -40,6 +40,9 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 		if record.Status != "pending" && record.Status != "running" && record.Status != "unresolved" {
 			return record, journal.ErrTransition
 		}
+		if operationGoalReached(record) {
+			return record, nil
+		}
 		var observed struct {
 			bootstrapObservation
 			LoadReadyCapture string `json:"loadReadyCapture"`
@@ -62,6 +65,10 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 				_, err = p.ObserveBootstrap(ctx)
 			case observed.LoadReadyCapture == "":
 				_, err = p.load(ctx, send)
+			case record.Intent.Goal == "loaded":
+				// Load-only work must archive readiness without dispatching. A
+				// later run reacquires fresh loaded evidence under its input lock.
+				_, err = p.Observe(ctx)
 			default:
 				// Dispatch observes loaded readiness while holding the input
 				// mutex. Observing separately here could consume the final ready
@@ -75,16 +82,62 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 		case "reported":
 			_, err = p.flush(ctx, send)
 		case "flush_requested":
+			input, inputErr := reportInput(record)
+			if inputErr != nil {
+				err = inputErr
+				break
+			}
+			// Retained pre-atomic operations include a correlated cleanup
+			// reload and keep their original completion contract.
+			if input.Revision == "" {
+				if observed.ReloadedCapture == "" {
+					_, err = p.ObserveReload(ctx)
+				} else {
+					_, err = p.PrepareFiles(ctx)
+				}
+				break
+			}
+			// The exact durable report proves the result independently of the
+			// transient reentry display. Try it before waiting for pixels.
+			prepared, prepareErr := p.PrepareFiles(ctx)
+			err = prepareErr
+			if err == nil {
+				break
+			}
+			// Archival failures after persistence are not reload failures.
+			if prepared.OperationID == "" {
+				prepared, _ = InspectOperation(ctx, p.root, p.id)
+			}
+			if prepared.Stage != "flush_requested" {
+				break
+			}
 			if observed.ReloadedCapture == "" {
-				_, err = p.ObserveReload(ctx)
-			} else {
+				_, reloadErr := p.ObserveReload(ctx)
+				// Saving may finish while the display is unavailable. One final
+				// bounded file check, never replay reload or the probe.
 				_, err = p.PrepareFiles(ctx)
+				if err != nil {
+					err = errors.Join(errors.New("live.report_persistence_unconfirmed"), err, reloadErr)
+				}
 			}
 		case "persisted":
 			_, err = p.PrepareFiles(ctx)
 		case "verified":
 			_, err = p.acknowledge(ctx, send)
 		case "acknowledged":
+			input, inputErr := reportInput(record)
+			if inputErr != nil {
+				err = inputErr
+				break
+			}
+			if input.Revision != "" {
+				var completed journal.WorkRecord
+				completed, err = p.FinalizeAcknowledged(ctx)
+				if err == nil {
+					return completed, nil
+				}
+				break
+			}
 			if observed.CleanupReadyID != "" {
 				var completed journal.WorkRecord
 				completed, err = p.Complete(ctx)
@@ -110,4 +163,17 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 		}
 	}
 	return record, errors.New("live.execution_step_limit")
+}
+
+func operationGoalReached(record journal.WorkRecord) bool {
+	switch record.Intent.Goal {
+	case "loaded":
+		return record.Stage == "loaded"
+	case "verified":
+		return record.Stage == "verified"
+	case "cleaned", "": // Empty is the retained 2.0.1 work-record contract.
+		return record.Stage == "cleaned" && (record.Status == "completed" || record.Status == "cancelled")
+	default:
+		return false
+	}
 }

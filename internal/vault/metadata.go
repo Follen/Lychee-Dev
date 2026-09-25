@@ -212,7 +212,7 @@ func (m *Metadata) DeleteDocuments(ctx context.Context, removals ...Deletion) er
 }
 
 func (m *Metadata) ListDocuments(ctx context.Context, prefix, after string, limit int) ([]Document, error) {
-	if prefix == "" || limit < 1 || limit > 1000 {
+	if limit < 1 || limit > 1000 {
 		return nil, errors.New("vault: invalid document page")
 	}
 	rows, err := m.db.QueryContext(ctx, "SELECT key,generation,value FROM documents WHERE substr(key,1,length(?))=? AND key>? ORDER BY key LIMIT ?", prefix, prefix, after, limit)

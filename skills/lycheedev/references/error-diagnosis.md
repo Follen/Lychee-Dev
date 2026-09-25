@@ -1,50 +1,31 @@
 # Error diagnosis
 
-Use this workflow when the user asks about an existing game error, a failed
-Toolkit operation, or a symptom that may require a live probe.
+Separate source facts, static data, live evidence and operation state before
+acting. Start with `live status` when an operation ID already exists; do not run
+another probe merely to recreate an error.
 
-## Classify before acting
+For an authorized snapshot of errors already retained by the addon provider:
 
-First separate the evidence classes:
+```text
+lycheedev live bugs --session <session-id> --request <stable-key> --count <1-100> --format json
+```
 
-- source evidence: what the pinned code/API/TOC contains;
-- data evidence: what the fixed static or change dataset returns;
-- live evidence: what the selected client reported and persisted;
-- operation evidence: what the host requested, confirmed, or left unresolved.
+This reports !BugGrabber provider storage newest-first. It does not claim to
+capture every addon error. `provider_unavailable`, partial fields, zero returned
+rows and incomplete coverage must remain distinct. After reading the verified
+report, acknowledge its operation explicitly with `live ack <operation-id>`.
 
-Use an existing capture when it answers the question. Do not rerun a probe just
-to obtain a familiar error or to fill a requested count. If the issue is a
-failed operation, use `live status <operation-id>` to inspect its available
-report and cleanup status before starting anything new.
+Use a question-specific probe only when the retained error snapshot cannot
+distinguish the hypotheses. Follow [live-investigation.md](live-investigation.md)
+and keep sampling, output and async lifetime bounded.
 
-For new, explicitly authorized live collection, use the bounded `live run`
-path from [live-investigation.md](live-investigation.md), then inspect the
-verified report. A dedicated error-store command is not implemented yet. A
-question-specific probe must name the actual inspected error store; do not
-imply it captures every addon error. Keep error counts, scope, ordering and
-completeness tied to the returned evidence.
-
-To package a known set of verified captures, use `evidence bundle`:
+To package known verified evidence:
 
 ```text
 lycheedev evidence bundle --ids <CAP-a,CAP-b> --output <new-file.zip> --format json
 ```
 
-It accepts 1–100 verified capture IDs, writes a ZIP to a new output path, and
-caps unique payload bytes at 128 MiB. It refuses to replace an existing output.
-
-## Explain without overclaiming
-
-Report the concrete error code/message, stage, fixed identity, and complete
-capture or log location. Then distinguish:
-
-1. observed fact;
-2. causal hypothesis and the evidence that would distinguish alternatives;
-3. safe next investigation or implementation option;
-4. unverified or unavailable coverage.
-
-Do not convert a parse failure, timeout, empty result, or missing dependency
-into “no error.” Do not switch source/build/locale or recommend destructive
-cleanup to make the symptom disappear. If a host crash occurred after an
-external input was accepted, keep the operation unresolved until a matching
-report or protocol state proves what happened.
+Explain the observed error and fixed identity first, then the causal hypothesis,
+the evidence that would distinguish alternatives, and any unverified coverage.
+Never convert a timeout, missing provider, parse failure or empty candidate page
+into “no error”.

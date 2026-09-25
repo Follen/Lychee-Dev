@@ -9,7 +9,7 @@ local profiles={
 }
 local outputs={}
 for _,profile in ipairs(profiles) do
-    for _,mode in ipairs({"success","login","initial","secret","actor","epoch","queue","code","body","replace","edit","off","disabled","future","submission","cleanup","cleanup-queue","cleanup-report","prepare","prepare-missing","prepare-nonce","prepare-actor","prepare-login"}) do
+    for _,mode in ipairs({"success","world-first","loading-restart","world-exit","login","initial","secret","actor","epoch","queue","code","body","replace","edit","off","disabled","future","submission","cleanup","cleanup-queue","cleanup-report","prepare","prepare-missing","prepare-nonce","prepare-actor","prepare-login"}) do
         local cleanup=mode:sub(1,7)=="cleanup"
         local preparing=mode:sub(1,7)=="prepare"
         local actor={character="Paladin",realm="Realm",guid="Player-1-123"}
@@ -47,7 +47,7 @@ for _,profile in ipairs(profiles) do
                 if line~="" and line:sub(1,1)~="#" then
                     if line=="Bridge/ProbeQueue.lua" then
                         ns.ProbeDefinitions={schema="lycheedev.queue.v1",entries={ ["Reload-A"]={
-                            release="2.0.1",product=profile.product,build=profile.version..".12345",
+                            release="2.0.2",product=profile.product,build=profile.version..".12345",
                             character="Paladin",realm="Realm",guid="Player-1-123",sessionNonce=nonce,
                             reloadNonce=changedQueue==true and string.rep("c",32) or reloadNonce,
                             code=code,codeBytes=#code,codeAdler32=ns.CaptureWriter.DigestBytes(code),codeSHA256=changedQueue=="code" and string.rep("e",64) or string.rep("d",64),
@@ -84,6 +84,7 @@ for _,profile in ipairs(profiles) do
             assert(ns.Controls.Handle(command)==nil and reloads==1)
             ns,loader=loadRuntime(mode=="prepare-missing" and "retired" or mode=="prepare-nonce")
             if mode=="prepare-actor" then actor.guid="Player-1-other" end
+            loader.callback(loader,"LOADING_SCREEN_DISABLED")
             loader.callback(loader,"PLAYER_ENTERING_WORLD",false,mode~="prepare-login")
             assert(next(loader.events)==nil and loader.callback==nil and LycheeToolkitDB.reentry==nil)
             if mode=="prepare" then
@@ -122,6 +123,7 @@ for _,profile in ipairs(profiles) do
             -- then a second reload which flushes deletion and unloads the queue.
             assert(ns.Controls.Handle(command)=="reload_requested")
             ns,loader=loadRuntime()
+            loader.callback(loader,"LOADING_SCREEN_DISABLED")
             loader.callback(loader,"PLAYER_ENTERING_WORLD",false,true)
             assert(ns.Session.Current().runtimeEpoch==2 and ns.ReportStore.Read("Reload-A")==report)
             local sequence=assert(report:match('"sequence":(%d+)'))
@@ -156,9 +158,20 @@ for _,profile in ipairs(profiles) do
             if mode=="replace" then replacement={schema="foreign"};LycheeToolkitDB.reentry=replacement end
             if mode=="edit" then LycheeToolkitDB.reentry.reloadNonce=string.rep("e",32) end
             if mode=="off" then assert(ns.Controls.Handle("bridge off")) end
+            if mode=="world-first" or mode=="world-exit" then
+                callback(loader,"PLAYER_ENTERING_WORLD",false,true)
+                assert(ns.Session.Current()==nil and shown==nil and LycheeToolkitDB.reentry,"premature reentry")
+                if mode=="world-exit" then callback(loader,"PLAYER_LEAVING_WORLD") end
+            elseif mode=="loading-restart" then
+                callback(loader,"LOADING_SCREEN_DISABLED")
+                callback(loader,"LOADING_SCREEN_ENABLED")
+                callback(loader,"PLAYER_ENTERING_WORLD",false,true)
+                assert(ns.Session.Current()==nil and shown==nil,"old loading completion reused")
+            end
+            callback(loader,"LOADING_SCREEN_DISABLED")
             callback(loader,"PLAYER_ENTERING_WORLD",mode=="initial",mode=="secret" and secret or mode~="login")
             assert(next(loader.events)==nil and loader.callback==nil)
-            local restored=mode=="success" or mode=="submission" or mode=="cleanup"
+            local restored=mode=="success" or mode=="submission" or mode=="cleanup" or mode=="world-first" or mode=="loading-restart"
             if restored then
                 assert(ns.Session.Current().runtimeEpoch==expectedReloads+1 and shown and LycheeToolkitDB.reentry==nil)
                 if cleanup then

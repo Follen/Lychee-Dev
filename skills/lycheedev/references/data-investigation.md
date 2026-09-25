@@ -242,6 +242,13 @@ than 30 days old. Keep provider and coverage explicit: neither source is an
 effective static table overlay, and an incomplete result cannot establish
 absence outside its reported coverage.
 
+Treat Wago text search as candidate acceleration only. Establish a fact from
+the returned physical records after applying the exact product, full build,
+region, locale, table/hash, record, push and status filters relevant to the
+question. A zero-candidate page is not proof of absence unless the returned
+coverage is complete for that exact scope. Raidbots never acts as an implicit
+Wago fallback.
+
 ## Schema and change boundaries
 
 Never map a semantic word such as “name”, “model”, or “description” to a field
@@ -258,3 +265,16 @@ success is not by itself proof of absence when coverage is incomplete.
 For schema, cache or preparation errors, investigate the cause while retaining
 the same explicit identity. Never switch product, region, build or locale just
 to make a query return rows.
+
+If Wago returns zero candidates while `coverage.complete=false`, the result is
+unresolved rather than absence. Continue with the returned `nextCursor` or page
+continuation using the same product, build, region, locale, table, record,
+status and push identity. If `--search` was the only narrowing filter, remove
+that filter for a wider query while keeping the identity and provider fixed.
+If the budget is exhausted or coverage remains incomplete, report the result as
+inconclusive and preserve the coverage metadata; only a complete scan of the
+exact scope can support saying that no record was found.
+
+Product aliases and region/locale availability belong to the CLI resolver.
+Carry the canonical values it returns; do not infer a product from the install
+folder, a CDN slot, or an old tool's alias table.

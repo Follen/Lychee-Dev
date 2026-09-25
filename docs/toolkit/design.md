@@ -2,7 +2,7 @@
 
 状态：整体设计收敛后的实施基线。日期：2026-09-21。实际覆盖见 [implementation-status.md](implementation-status.md)。
 
-本文定义目标架构与契约。实际能力以命令目录和实施状态核对。配套文件：[回归测试方案](regression.md)、[实施路线与能力映射](roadmap.md)、[Windows CI 与 2.0.1 发布规范](release-2.0.1.md)。2.0.1 已发布；当前工作分支的增量能力尚未发行，验收状态以实施状态页为准。
+本文定义目标架构与契约。实际能力以命令目录和实施状态核对。配套文件：[回归测试方案](regression.md)、[实施路线与能力映射](roadmap.md)、[Windows CI 与 2.0.2 发布规范](release-2.0.2.md)。2.0.1 已发布；当前工作分支是 2.0.2 候选，尚未发行，验收状态以实施状态页为准。
 
 ## 1. 产品决策
 
@@ -11,7 +11,7 @@
 - 宿主实现使用 Go 1.27；首个构建基线建议固定 Go 1.27.1。本机已观察到 Go 1.27.0。
 - 游戏内执行端使用 WoW Lua 5.1 子集，继续遵守禁用零开销、事件驱动、secret 值检查与无污染约束。
 - 用户入口为 `lycheedev`，npm 包为 `lycheedev`，插件安装目录为 `Lychee Dev/`。
-- 已发布的修复版为 `2.0.1`，Git tag 为 `v2.0.1`，npm 包为 `lycheedev@2.0.1`。后续版本须单独通过发行门禁；不得改写该标签或包。
+- 已发布的修复版为 `2.0.1`，Git tag 为 `v2.0.1`，npm 包为 `lycheedev@2.0.1`；当前候选为 `2.0.2`。后续版本须单独通过发行门禁；不得改写既有标签或包。
 - 直接发行原生二进制及配套资源包；npm 仅是另一种分发渠道。npm 脚本不包含产品选择、业务处理或 Python 引导逻辑，保持无运行时 npm 依赖。
 - 单一 npm 包携带 Windows amd64 二进制和共用资源，不使用 optionalDependencies 平台依赖链；Windows 原生压缩包独立提供。包体积和安装成本纳入验收。
 - 发布程序和正式验证链路不依赖 Python，不调用旧的 wowdoc、wowdata、automation.py。Git 可作为源码同步的明确依赖；doctor 按能力检查，不阻断不需要 Git 的数据查询。
@@ -155,7 +155,7 @@ PNG 与无损 WebP 返回原始、清单、编码产物三份证据，不建立�
 
 源码 Commit、游戏 Build、插件版本和 Hotfix 时间分别存储。对应关系明确为 `exact`、`compatible`、`mismatch`、`unknown`；精确匹配无法获得时返回可操作错误，不自动借用最新源码。
 
-纯源码研究只要求 SourcePin；纯数据查询只要求 DataPin；离线证据读取无需实时窗口。客户端目录只表示位置，身份依次来自本地产品元数据和 Build，目录名仅作有证据的最后回退。
+纯源码研究只要求 SourcePin；纯数据查询只要求 DataPin；离线证据读取无需实时窗口。客户端目录只表示位置，身份必须来自本地产品元数据和 Build；元数据缺失或矛盾时返回身份错误，不把目录名当作产品身份。
 
 产品映射、地区映射、支持能力和 TOC Interface 的已验证事实来自统一目录。生成 Go/Lua/文档需要的视图，禁止 skill 手写第二份事实表。复用测试轨道必须核对其实际内容。
 
@@ -186,12 +186,21 @@ PNG 与无损 WebP 返回原始、清单、编码产物三份证据，不建立�
 | `source` | `list / sync / index / query / inspect / diff / validate` |
 | `data` | `sql / db2 / hotfix / spell / item / creature / encounter / decor` |
 | `asset` | `search / inspect / export / demux`，文件、图标、图片、视频 |
-| `live` | `instances / connect / bind / run / bugs / reload / status / resume / cancel`；`instances` 为发现+身份识别，`connect` 为整任务自动连接 |
+| `live` | `instances / connect / bind / probe put / probe load / run / ack / bugs / reload / status / resume / cancel / abandon`；`instances` 为发现+身份识别，`connect` 为整任务自动连接 |
 | `evidence` | `list / show / verify / bundle / keep / remove` |
 | `cache` | `status / verify / prune` |
 | `addon`、`skill` | 各自 `install / status / remove` |
 
 参数规则：`--home` 是完整工作空间根；`--snapshot` 接受 PinnedSet ID；`--session` 接受 WindowBinding ID；`--output` 是明确的产物位置；`--format` 统一为 text/json/jsonl；`--offline` 阻止联网。CSV 属于导出编码，通过 `--encoding csv` 选择，附带机器可读 manifest。
+
+证据生命周期是显式的、有界的存储操作：`evidence keep <capture-id>` 在 capture
+manifest 旁写入 `lycheedev.evidence-retention.v1` retention ledger，重复执行幂等，
+不改变 capture 或 blob 身份；普通 `cache prune` 不会代替该保留决定。
+`evidence remove <capture-id>` 是唯一的证据破坏操作：它以 metadata generation 做
+CAS，同时删除 manifest 及其 retention marker；存在其他 metadata 引用时拒绝删除，
+共享 blob 只删除当前 manifest，不删除仍被其他 capture 使用的对象。独占 blob 的
+删除在同一 blob lease 下进行，缺失或完整性异常必须显式返回。该命令不是
+`cache prune` 的别名，也不提供绕过引用检查的隐式 force。
 
 目标选择顺序为显式固定快照、显式目标配置、项目锁定。唯一匹配可以自动解析；歧义才要求选择。不使用全局“最后操作窗口”。连接建立后，run 只引用 session；安装目录、角色、nonce、截图区域不成为每次运行的参数。resume 只引用 operation ID，不能覆盖原请求身份。
 
@@ -204,7 +213,8 @@ live run/resume、双端 source diff 和证据读取不受项目默认值重定�
 锁不保存账号、安装路径或窗口，只保存固定引用；导入新 workspace 时验证内容 ID，
 原始内容和父集合历史不随锁复制。缺失内容仍由已有准备/读取模块处理，不另造项目下载器。
 项目写入按目录持有 OS 锁，声明不覆盖，更新锁文件通过临时文件发布；
-`.lycheedev-locks/` 是本机协调文件，不提交版本控制。命名目标配置仍待实现。
+`.lycheedev-locks/` 是本机协调文件，不提交版本控制。命名目标配置由
+`target add/show/list/resolve/remove` 和 vault reference ledger 管理。
 
 首次连接由统一的“发现 → 身份识别 → 选择 → 自动连接 → 会话复用/恢复”用例完成。
 这是用户 2026-09-23 的明确修订：替代此前“宿主只观察、不主动启用连接”的旧约束，
@@ -217,7 +227,10 @@ live run/resume、双端 source diff 和证据读取不受项目默认值重定�
 分开：扫描期间未做选择，不构成对任何候选执行调查探针的授权。一扇窗口识别失败
 不影响其他候选；身份缺失如实留空并给出明确状态（busy / no_actor /
 identity_unreadable 等），不臆造角色信息；插件未加载、登录界面、黑屏、身份不可读
-均给出明确状态，不随机选择或无限重试。同 Build、同名角色或同服务器的多个窗口保持
+应按可观测证据区分；只有超时不能断言插件未加载。首次加载及恢复的具体编排见
+[首次加载与连接恢复方案](live-startup-recovery.md)。安装成功不等于插件运行；
+无 session 时的首次界面启用不通过 CLI bootstrap 发送重载。
+不随机选择或无限重试。同 Build、同名角色或同服务器的多个窗口保持
 独立候选，PID/HWND 只是内部参数；唯一且匹配的候选自动选中，真实歧义才由用户选择，
 绝不按序号猜测。用户选定后宿主重新核对该候选仍是原进程（PID/启动时间/HWND/路径）
 与同一角色（guid），再自动完成 `/dev connect`、以新的 ready 画面核验并保存会话；
@@ -233,7 +246,10 @@ identity_unreadable 等），不臆造角色信息；插件未加载、登录界
 执行及恢复的精确身份匹配。该流程仍需游戏实测，不将自有原生窗口或四端 Lua fixture
 当作真机证据。
 
-运行只需 session 和探针文件。宿主根据已验证角色及服务器，在选定客户端的
+探针注册、加载、执行和确认是四个独立动作。注册返回不可变内容修订；加载只把
+指定修订放入选定客户端并返回 operationId；执行只推进该 operation 到 verified；
+确认只回收该 operation 的报告和队列条目。每个游戏动作使用稳定幂等键，重试沿用
+原键，改变业务输入必须换键。宿主根据已验证角色及服务器，在选定客户端的
 `WTF/Account` 下查找精确角色目录；唯一匹配的账号固定进原操作请求，恢复不重选。
 这里只读取目录元数据，不读取旧 SavedVariables 作为账号证据。路径只是报告位置，
 不是登录身份认证；落盘报告仍须通过请求/会话/正文校验。没有匹配、多账号匹配
@@ -242,7 +258,7 @@ identity_unreadable 等），不臆造角色信息；插件未加载、登录界
 
 源码验证支持单 TOC 和 `--matrix <file>`。移除旧工具独立的 install/update/profile/doctor/cache 生命周期，保留一份 Toolkit 行为。npm 自身更新交给 npm；独立发行包更新使用发行清单对应的安装流程。
 
-示意工作流（ID 由上一步真实返回，以下不是可直接执行的现有命令）：
+示意工作流（ID 由上一步真实返回）：
 
 ```text
 lycheedev target resolve --target retail-cn --format json
@@ -250,8 +266,12 @@ lycheedev source query C_Spell.GetSpellInfo --snapshot <pin> --format json
 lycheedev data sql --sql "SELECT ID FROM Map LIMIT 10" --snapshot <pin> --format json
 lycheedev data sql --file query.sql --snapshot <pin> --format json
 lycheedev data sql --stdin --snapshot <pin> --format json
-lycheedev live bind --pid <pid> --snapshot <pin> --format json
-lycheedev live run --file probe.lua --session <binding> --format json
+lycheedev live connect --snapshot <pin> --format json
+lycheedev live probe put --name inspect-spell --file probe.lua --format json
+lycheedev live probe load --session <session> --probe <revision> --request <stable-key> --format json
+lycheedev live run <operation-id> --format json
+lycheedev live ack <operation-id> --format json
+lycheedev live reload --session <session> --request <stable-key> --format json
 lycheedev live resume <operation-id> --format json
 lycheedev evidence bundle --ids <capture-a>,<capture-b> --output ./report.zip
 ```
@@ -265,7 +285,7 @@ example resolves an existing configured target. Evidence bundles are ZIP files.
 JSON 外层字段固定为 `schema`、`ok`、`operationId`、`context`、`result`、`captures`、`warnings`、`error`。context 保存实际解析后的引用及匹配关系；error 包含 `code`、`message`、`stage`、`retryable`、`resumeOperationId`。恢复信息是受约束的数据，不是可以从外部响应直接执行的 shell 字符串。
 
 - `ok` 表示请求的操作合同是否完成。游戏任务另有 `result.probeStatus`；探针报错也可以完成采集与收尾。
-- 游戏结果独立报告 `report.state`（unavailable / verified）及完整正文、来源 capture；收尾报告 `cleanup`（pending / complete）。`complete` 仅在报告验证与收尾都成立时为 true。这些是同一操作记录及归档的读取视图，不新增一套持久状态。
+- 探针结果独立报告 `report.state`（unavailable / verified）及完整正文、来源 capture；收尾报告 `cleanup`（pending / complete / abandoned）。abandoned 表示显式放弃游戏端收尾，不等于 ACK 成功。探针的 `complete` 仅在报告验证与收尾都成立时为 true。独立 reload 不产生探针报告：归档的新运行态回执经身份、nonce 和来源校验且收尾完成后，返回 `complete: true`、`runtimeCapture`，`report.state` 保持 unavailable。这些是同一操作记录及归档的读取视图，不新增一套持久状态。
 - 报告已验证但清理未确认时，仍返回可用报告与恢复 ID，不把报告描述为失败，也不输出整个操作完成。协议内部 observation/nonce/输入消息计数不作为普通结果暴露。
 - `result.complete`、`truncated` 和截止原因不能省略；结果上限触发时不可把部分查询描述为完整结果。
 - JSONL 使用带类型的 begin/record/end/error 帧；只有合法 end 且退出 0 才是完整成功，broken pipe 不伪造完成。
@@ -350,7 +370,15 @@ prepared -> load_requested -> loaded -> dispatch_requested -> reported
          -> acknowledged -> cleaned
 ```
 
-已有内置错误快照不需要临时探针加载。每次外部副作用前持久记录 intent，回执后再确认阶段。主状态另有 pending/running/unresolved/failed/cancelled/completed，不将所有失败压成一个布尔值。
+已有内置错误快照不需要临时探针加载。每次外部副作用前持久记录 intent，回执后再确认阶段。主状态另有 pending/running/unresolved/failed/cancelled/completed/abandoned，不将所有失败压成一个布尔值。
+
+`live abandon <operation-id>` 是显式放弃收尾，不是 ACK 或 cancel 的别名。
+仅限报告可重新核验且尚未提交 ACK 的 probe：`verified -> abandoning -> abandoned`。
+持有原窗口执行租约，先保存放弃意图，再精确移除原磁盘队列项，最后提交终态并
+释放所有权；崩溃后 `resume` 只完成这段宿主恢复，不输入游戏。其他队列项、
+SavedVariables 与归档证据不变。返回 `report.state=verified`、`cleanup=abandoned`、
+`complete=false`，明确游戏未被 ACK、未卸载旧运行态；不得视为完整链路通过。
+busy 或角色切换不自动授权放弃；新任务仍需重新验证角色及 readiness。
 
 收敛要求：live 单独拥有推进和恢复；每个已提交动作只有一个权威记录，不允许 Stage、观察布尔标记、会话副本和归档各自成为独立状态机。历史证据负责核验，当前输入资格仍由新画面确认。Run 与 Resume 进入同一执行内核。
 
@@ -360,7 +388,27 @@ prepared -> load_requested -> loaded -> dispatch_requested -> reported
 缺失时只允许核对并完成幂等文件修改，不证明游戏已加载或卸载。阶段表示协议进度，
 执行状态表示正常或未决，两者不各自驱动另一套执行器。
 
-报告获取和数据回收分开设计。优先验证“有界保留 + 确认 + 后续安全回收”，去掉仅为立即删除已归档报告而进行的重载；在真机与故障恢复证据证明替代方案前，保留现有清理路径，不能直接删除安全检查或宣称已减少重载。清理未完成不能抹去可用结果，也不能绕过尚未释放的窗口所有权开始新执行。
+报告获取和数据回收分开设计。`live run` 只负责执行并把结果推进到
+`verified`；`live ack` 负责确认精确报告、回收对应队列项并释放窗口所有权，
+不为删除已归档报告额外触发重载。独立的 `live reload` 用于明确请求或完成
+已授权任务所必需的重载，由 agent 自动执行，使用独立 nonce 关联其回执。
+ACK 成功后插件内存中该项不再阻止身份识别，也不能重新加载执行；其他角色
+的共享安装队列项不占用当前窗口。磁盘队列仍由 CLI 精确回收。
+清理未完成不能抹去可用结果，也不能绕过
+尚未释放的窗口所有权开始新执行。
+
+原子探针的完整持久报告与瞬时 reload 画面是两条独立证据。即使未捕获
+重入 QR，`live resume` 也可在原 operation 的独占执行租约下，从冻结的安装/
+账号位置核验请求、代码、角色、Build、正文摘要并归档到 verified；此路径
+不依赖在线进程、不发送输入、不释放窗口或回收队列，也不证明 reload 成功。
+ACK 仍需当前窗口的新鲜 inputReady 证据；缺少原重入证据时，须严格匹配
+原请求/reload nonce、角色 GUID 与预期下一 runtime epoch，单独归档 ACK
+readiness。历史归档只用于恢复关联，不能替代当前帧。等待此证据到期返回
+`live.ack_readiness_pending` / exit 6，保留 verified 报告、cleanup=pending、
+complete=false 和恢复 ID；调用者主动取消仍为 exit 7。输入意图落盘后的
+ACK 恢复只观察确认，不重发；唯一例外是落盘回执本身证明零键盘消息入队
+（没有任何 PostMessage 成功，效果未进入不确定区间）时可重新准备并重发，
+部分入队或缺少回执时仍只观察。保留的非原子操作仍遵循其原有 reload 合同。
 
 - 启动任务分配新请求 ID；恢复沿用原请求 ID、代码摘要和原重载 nonce。
 - 预期 reload 会改变插件的 Lua 会话标记；只有匹配原 reload nonce、相同进程/角色/Build 的 ready 信号才允许在原操作内更新 WindowBinding。无此关联的身份变化使绑定失效。
@@ -370,11 +418,25 @@ prepared -> load_requested -> loaded -> dispatch_requested -> reported
 - `Resume` 只执行尚未完成且能够证明安全的阶段。无法判断时保留未决操作，不重发输入。
 - 取消能力仍需实现：只能尝试协议支持的取消，读取确认并清理自有资源；不承诺强制中断任意同步 Lua 或杀死游戏进程。
 - 同步 Lua 无法被宿主可靠抢占，超时只终止宿主等待。skill 必须生成有界探针。
+- 异步探针通过受控 API 显式声明 1..120 秒生命周期、完成/失败、最多 16 个清理
+  回调及有界日志；超时和会话失效执行清理。它不引入轮询，也不承诺抢占同步 Lua。
 - 完整正文保持 SV 通路，受限解析器不执行 Lua；校验深度、字节预算、编码、摘要和引用身份。
 
 Go 原生输入继续使用指定 HWND 的 `PostMessageW`，正确组装键盘参数及 UTF-16 字符。逐次发送重新核对身份；后台模式不调用前台激活、剪贴板或 SendInput。发送成功仅表示入队：[Windows 接口说明](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew)。
+打开聊天后等待 150 ms，每个 UTF-16 单元后等待 50 ms，再提交 Enter；
+保留旧版逐字后台节奏，不恢复 Escape 清草稿行为。任一消息或等待失败立即停止，
+不补发、不追加提交；原有身份、所有权、超时检查仍在每条消息前执行。
+reload 重入必须同时观察到 `PLAYER_ENTERING_WORLD(false, true)` 与
+`LOADING_SCREEN_DISABLED`，顺序不限，再校验原票据和角色绑定。新的加载开始
+使旧加载完成状态失效；离开世界取消等待。聊天获得焦点时暂隐光学回执，
+焦点释放后由原生产者重新验证身份并生成新 readiness，不重跑探针或改写报告。
+加载开始、离开世界、禁用和显示所有者更换均阻止旧回执恢复。显示的回执默认
+常驻（晚到恢复与跨进程观察依赖它）；证据归档后的主动清理走
+`/dev bridge hide`（`live hide`）：请求作用域操作在飞时 fail-closed 拒绝，
+成功清屏不打印、不产生新回执、幂等；CLI 只在有效帧连续零符号时报告清除，
+残留回执返回 pending。隐藏是整洁性要求，不是正确性依赖。
 
-后台输入的前置合同包含输入资格：启用后的插件在新协议信号中报告可验证的输入状态，宿主使用新到达帧核对身份与资格。无法确认当前编辑状态、自定义聊天键或已有草稿时拒绝自动提交，不以 Escape 入队代替确认。具体可观察的输入状态与事件须按四端精确源码验证，作为 S1 的技术门槛；不能假设宿主可以原子隔离人工操作。自动化模块默认关闭，首次启用需显式操作；没有有效就绪信号时返回未启用或未就绪，而非猜测发送。唯一的受控例外是首次接入的 bootstrap 输入（2026-09-23 修订）：宿主可向尚未识别的候选窗口发送固定的 `/dev bridge identify <nonce>` 与 `/dev connect` 两条协议命令，逐窗口、逐条、有界、持窗口输入锁、每条消息前重核窗口身份；识别结果与输入就绪都必须以新的、nonce 相关的回执核验后才成立，`/dev connect` 只在新回执确认 inputReady 后发送。该例外不构成通用文本通道；除此之外的一切输入仍要求先有新到达的输入就绪证据。宿主仍不自动登录游戏。
+后台输入的前置合同包含输入资格：启用后的插件在新协议信号中报告可验证的输入状态，宿主使用新到达帧核对身份与资格。无法确认当前编辑状态、自定义聊天键或已有草稿时拒绝自动提交，不以 Escape 入队代替确认。具体可观察的输入状态与事件须按四端精确源码验证，作为 S1 的技术门槛；不能假设宿主可以原子隔离人工操作。自动化模块默认关闭，首次启用需显式操作；没有有效就绪信号时返回未启用或未就绪，而非猜测发送。唯一的受控例外是 bootstrap 输入（2026-09-23 修订，2026-09-25 扩展第三条）：宿主可向尚未识别的候选窗口发送固定的 `/dev bridge identify <nonce>`、`/dev connect` 与 `/dev bridge reset <nonce>` 三条协议命令，逐窗口、逐条、有界、持窗口输入锁、每条消息前重核窗口身份；识别结果与输入就绪都必须以新的、nonce 相关的回执核验后才成立，`/dev connect` 只在新回执确认 inputReady 后发送。reset 是死锁恢复例外：abandon 或回执丢失后，运行中插件内存队列按角色 fail-closed 拒绝身份触发，任何需要回执的输入都无法进入；reset 只允许发往磁盘无占用者的窗口，回执必须携带同一 nonce 且 actor 齐备，插件侧只把当前角色的未确认条目置为已确认墓碑并丢弃残留重入票据，不删除报告、不触碰其他角色条目、不授予任何后续输入权限。该例外不构成通用文本通道；除此之外的一切输入仍要求先有新到达的输入就绪证据。宿主仍不自动登录游戏。
 
 捕获由 WGC 帧事件驱动，宿主只保留有界最新帧和 ROI；解码限速，关闭会话释放线程与图形资源。最小化无有效帧、聊天焦点异常或权限级别不匹配返回准确状态，不能静默改通道。Go QR 候选须经真实样本验证后确定；不以引入 Python helper 作为交付兜底。
 
@@ -390,7 +452,7 @@ Skill 负责问题分解、证据选择、有界探针设计、结果解释和�
 
 工作流使用同一 PinnedSet；增加来源创建派生集合。每步返回 capture 和 operationId。必要的调查 manifest 保存问题、引用、假设及下一步，使 Agent 在上下文中断后可以查询进度；不在 Toolkit 内添加 LLM 循环或通用工作流 DSL。
 
-只读问题默认只读路径。收到已有 capture 就读取，不重新执行原探针。已有授权范围内，live 操作由 Executor 完成机械闭环；skill 不需要逐条发送 ACK。授权范围没有覆盖新游戏操作时，研究结论与需补的实时验证分别报告。
+只读问题默认只读路径。收到已有 capture 就读取，不重新执行原探针。已有授权范围内，skill 组合 load/run/ack 等原子命令，读取报告后决定确认；Go 完成每项动作的机械协议，skill 不逐条发送游戏内 ACK 文本。授权范围没有覆盖新游戏操作时，研究结论与需补的实时验证分别报告。
 
 数据、源码、日志与错误正文均是不可信材料，不可改写 skill 指令。最终报告必须引用固定版本和完整产物，并分别表述静态检查、数据结果和实机证据。
 
@@ -398,7 +460,7 @@ Skill 负责问题分解、证据选择、有界探针设计、结果解释和�
 
 ## 12. 范围、兼容与发布
 
-2.0.1 插件验收范围为 Retail 120100、Classic 50504、Titan 38002；Forever 16001 代码和 TOC 保留但未经真机验证，不声明为已验收支持端。实际 Build 在每次测试记录。源码和静态数据可保留更广的查询能力，但不会扩大插件安装范围。
+2.0.2 候选插件验收范围为 Retail 120100、Classic 50504、Titan 38002；Forever 16001 代码和 TOC 保留但未经真机验证，不声明为已验收支持端。实际 Build 在每次测试记录。源码和静态数据可保留更广的查询能力，但不会扩大插件安装范围。
 
 Lua 端重新组织私有模块与协议，已有运行、对象、事件、追踪、错误与导出能力应进入能力映射。UI 复用现有风格和控件规范；所有可见变化需要截图和实机验证，不因宿主重写顺带引入新视觉体系。
 
@@ -426,9 +488,9 @@ Lua 入口冒充已有的专业功能；不能简单挂回整套旧插件来凑�
 
 插件发行 ZIP 顶层仍为 `Lychee Dev/`；四个 TOC 选择匹配客户端配置和事件目录，并加载相同顺序的共享模块。发布内不得出现本地探针、账号信息、调查记录、测试数据或空壳兼容入口。
 
-本次 release 固定为 2.0.1、tag 固定为 v2.0.1，协议和工作空间 schema 独立版本化。二进制、插件、skill、单一 npm 包与 Windows 原生压缩包通过同一发行 manifest 校验；doctor 按实际能力报告。CGO_ENABLED=0 的可运行解码检查须通过。
+本次候选 release 固定为 2.0.2、tag 固定为 v2.0.2，协议和工作空间 schema 独立版本化。二进制、插件、skill、单一 npm 包与 Windows 原生压缩包通过同一发行 manifest 校验；doctor 按实际能力报告。CGO_ENABLED=0 的可运行解码检查须通过。
 
-Windows CI 是硬门槛，不能用 Linux 交叉编译代替；实际 npm tgz 必须先安装验证再原样发布。OIDC、版本检查、required jobs、失败恢复和发布顺序遵守 [2.0.1 发布规范](release-2.0.1.md)。用户已完成真机手测，人工验收记录与自动 CI 分开保存；发布不依赖交互桌面 CI。
+Windows CI 是硬门槛，不能用 Linux 交叉编译代替；实际 npm tgz 必须先安装验证再原样发布。OIDC、版本检查、required jobs、失败恢复和发布顺序遵守 [2.0.2 发布规范](release-2.0.2.md)。用户已完成的人工真机验收记录与自动 CI 分开保存；本轮静态收口不执行真机操作，发布不依赖交互桌面 CI。
 
 许可证是发布前的明确交付项：wowdata 当前声明 AGPL-3.0-or-later，wowdoc 与旧 Lychee
 npm 包声明 MIT（新 `lycheedev` 包在许可裁决前为 UNLICENSED/private）。2026-09-23

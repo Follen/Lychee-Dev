@@ -32,6 +32,8 @@ removal is an explicit command that only touches files the toolkit owns.
 
 The launcher never downloads fallback binaries and never reads legacy tool homes
 (`~/.wowdoc`, `~/.wowdata`). Unsupported platforms fail with a precise error.
+The current workspace is `~/.lycheedev`; legacy homes and legacy SavedVariables
+are intentionally not imported.
 
 ## Contents
 

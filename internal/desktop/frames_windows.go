@@ -113,6 +113,9 @@ func CaptureFrames(parent context.Context, target WindowIdentity, roi image.Rect
 	if roi != (image.Rectangle{}) && (roi.Empty() || roi.Min.X < 0 || roi.Min.Y < 0 || roi.Dx() > 4096 || roi.Dy() > 4096) {
 		return nil, errors.New("desktop.invalid_capture_region")
 	}
+	if err := retainCaptureRuntime(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(parent)
 	frames := make(chan *CapturedFrame, 1)
 	failures := make(chan error, 1)

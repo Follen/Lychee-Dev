@@ -15,13 +15,17 @@ import (
 
 var ErrBusy = errors.New("journal.resource_busy")
 var ErrTransition = errors.New("journal.invalid_transition")
+var ErrRequestConflict = errors.New("journal.request_conflict")
 
 type WorkIntent struct {
-	Kind     string          `json:"kind"`
-	Resource string          `json:"resource"`
-	Snapshot string          `json:"snapshot"`
-	Session  string          `json:"session"`
-	Request  json.RawMessage `json:"request"`
+	Kind          string          `json:"kind"`
+	Resource      string          `json:"resource"`
+	Snapshot      string          `json:"snapshot"`
+	Session       string          `json:"session"`
+	Request       json.RawMessage `json:"request"`
+	RequestKey    string          `json:"requestKey,omitempty"`
+	RequestDigest string          `json:"requestDigest,omitempty"`
+	Goal          string          `json:"goal,omitempty"`
 }
 
 type WorkRecord struct {
@@ -53,6 +57,42 @@ type ownership struct {
 	OperationID string `json:"operationId"`
 }
 
+type requestIdentity struct {
+	OperationID string `json:"operationId"`
+	Digest      string `json:"digest"`
+}
+
+func (b *Book) resolveRequest(ctx context.Context, intent WorkIntent) (WorkRecord, bool, error) {
+	if intent.RequestKey == "" {
+		return WorkRecord{}, false, nil
+	}
+	if len(intent.RequestKey) > 128 || len(intent.RequestDigest) != 64 {
+		return WorkRecord{}, false, errors.New("journal.invalid_request_identity")
+	}
+	if _, err := hex.DecodeString(intent.RequestDigest); err != nil {
+		return WorkRecord{}, false, errors.New("journal.invalid_request_identity")
+	}
+	doc, err := b.metadata.ReadDocument(ctx, "request/"+intent.RequestKey)
+	if errors.Is(err, vault.ErrMissingRecord) {
+		return WorkRecord{}, false, nil
+	}
+	if err != nil {
+		return WorkRecord{}, false, err
+	}
+	var identity requestIdentity
+	if err := json.Unmarshal(doc.Value, &identity); err != nil || identity.OperationID == "" || len(identity.Digest) != 64 {
+		return WorkRecord{}, false, errors.New("journal.corrupt_request_identity")
+	}
+	if identity.Digest != intent.RequestDigest {
+		return WorkRecord{}, false, ErrRequestConflict
+	}
+	record, err := b.InspectWork(ctx, identity.OperationID)
+	if err != nil {
+		return WorkRecord{}, false, err
+	}
+	return record, true, nil
+}
+
 // BeginWork reserves a resource durably. OS-lock release alone cannot make an
 // unresolved operation disappear; a new operation must recover that record.
 func (b *Book) BeginWork(ctx context.Context, intent WorkIntent) (WorkRecord, error) {
@@ -60,11 +100,14 @@ func (b *Book) BeginWork(ctx context.Context, intent WorkIntent) (WorkRecord, er
 }
 
 func (b *Book) beginWork(ctx context.Context, intent WorkIntent, reserve func(WorkRecord) error) (WorkRecord, error) {
-	if intent.Kind != "probe" && intent.Kind != "faults" {
+	if intent.Kind != "probe" && intent.Kind != "faults" && intent.Kind != "reload" {
 		return WorkRecord{}, errors.New("journal: unsupported work kind")
 	}
 	if intent.Resource == "" || len(intent.Resource) > 256 || !json.Valid(intent.Request) {
 		return WorkRecord{}, errors.New("journal: invalid work intent")
+	}
+	if existing, found, err := b.resolveRequest(ctx, intent); err != nil || found {
+		return existing, err
 	}
 	key := "ownership/" + intent.Resource
 	owner, err := b.metadata.ReadDocument(ctx, key)
@@ -96,7 +139,12 @@ func (b *Book) beginWork(ctx context.Context, intent WorkIntent, reserve func(Wo
 			return record, err
 		}
 	}
-	err = b.metadata.CommitDocuments(ctx, vault.Mutation{Key: "work/" + record.OperationID, Value: payload}, vault.Mutation{Key: key, ExpectedGeneration: owner.Generation, Value: claim})
+	mutations := []vault.Mutation{{Key: "work/" + record.OperationID, Value: payload}, {Key: key, ExpectedGeneration: owner.Generation, Value: claim}}
+	if intent.RequestKey != "" {
+		request, _ := json.Marshal(requestIdentity{OperationID: record.OperationID, Digest: intent.RequestDigest})
+		mutations = append(mutations, vault.Mutation{Key: "request/" + intent.RequestKey, Value: request})
+	}
+	err = b.metadata.CommitDocuments(ctx, mutations...)
 	if errors.Is(err, vault.ErrGeneration) {
 		return WorkRecord{}, ErrBusy
 	}
@@ -118,6 +166,39 @@ func (b *Book) InspectWork(ctx context.Context, id string) (WorkRecord, error) {
 	return record, nil
 }
 
+// SetGoal records the terminal promised by the next explicit public command.
+// Goals only move forward; resume never invents or broadens one.
+func (b *Book) SetGoal(ctx context.Context, id, expectedStage, goal string) (WorkRecord, error) {
+	record, err := b.InspectWork(ctx, id)
+	if err != nil {
+		return record, err
+	}
+	if record.Stage == "abandoning" || record.Stage == "abandoned" {
+		return record, ErrTransition
+	}
+	if record.Intent.Goal == goal {
+		return record, nil
+	}
+	if record.Stage != expectedStage || record.Status != "running" && record.Status != "unresolved" {
+		return record, ErrTransition
+	}
+	allowed := record.Intent.Goal == "loaded" && goal == "verified" || record.Intent.Goal == "verified" && goal == "cleaned"
+	if !allowed {
+		return record, ErrTransition
+	}
+	record.Intent.Goal = goal
+	record.Generation++
+	record.UpdatedAt = time.Now().UTC()
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return WorkRecord{}, err
+	}
+	if err := b.metadata.CommitDocuments(ctx, vault.Mutation{Key: "work/" + id, ExpectedGeneration: record.Generation - 1, Value: payload}); err != nil {
+		return WorkRecord{}, err
+	}
+	return record, nil
+}
+
 func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 	record, err := b.InspectWork(ctx, change.OperationID)
 	if err != nil {
@@ -126,7 +207,7 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 	if record.Generation != change.ExpectedGeneration || record.Stage != change.ExpectedStage {
 		return vault.ErrGeneration
 	}
-	if record.Status == "completed" || record.Status == "cancelled" {
+	if record.Status == "completed" || record.Status == "cancelled" || record.Status == "abandoned" {
 		return ErrTransition
 	}
 	if !allowsTransition(record.Intent.Kind, record.Stage, change.Stage, change.Status) {
@@ -145,7 +226,7 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 		return err
 	}
 	mutations := []vault.Mutation{{Key: "work/" + record.OperationID, ExpectedGeneration: change.ExpectedGeneration, Value: payload}}
-	if change.Stage == "cleaned" {
+	if change.Stage == "cleaned" || change.Stage == "abandoned" {
 		key := "ownership/" + record.Intent.Resource
 		owner, err := b.metadata.ReadDocument(ctx, key)
 		if err != nil {
@@ -164,9 +245,13 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 }
 
 func allowsTransition(kind, from, to, status string) bool {
+	if from == "abandoning" || to == "abandoning" || to == "abandoned" {
+		return kind == "probe" && (from == "verified" && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
+	}
 	if to == "cleaned" {
 		return from == "acknowledged" && (status == "completed" || status == "cancelled") ||
-			from == "prepared" && status == "cancelled"
+			from == "prepared" && status == "cancelled" ||
+			kind == "reload" && from == "reload_requested" && status == "completed"
 	}
 	if status != "running" && status != "unresolved" && status != "failed" {
 		return false
@@ -175,6 +260,9 @@ func allowsTransition(kind, from, to, status string) bool {
 		return true
 	} // Observation or failure never implies a new effect.
 	if kind == "faults" && from == "prepared" && to == "dispatch_requested" {
+		return true
+	}
+	if kind == "reload" && from == "prepared" && to == "reload_requested" {
 		return true
 	}
 	stages := []string{"prepared", "load_requested", "loaded", "dispatch_requested", "reported", "flush_requested", "persisted", "verified", "ack_requested", "acknowledged", "cleaned"}

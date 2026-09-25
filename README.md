@@ -12,7 +12,7 @@ single workspace, a single evidence chain, and reproducible pinned references.
 | Skill | `skills/lycheedev/` | Agent skill: workflow routing and evidence discipline over the CLI |
 | npm package | `packages/npm/lycheedev/` | Distribution: platform binaries + addon/skill payload, zero runtime dependencies |
 
-## Supported clients (2.0 acceptance)
+## Supported clients (2.0.2 acceptance target)
 
 | Client | Interface | Build |
 | --- | --- | --- |
@@ -47,7 +47,10 @@ lycheedev target resolve --installation <client> --region cn --locale zhCN
 lycheedev source query C_Spell.GetSpellInfo --snapshot <pin>
 lycheedev data db2 schema Map --snapshot <pin> --cdn
 lycheedev live connect --snapshot <pin>               # automatic discovery, identity and in-game opt-in
-lycheedev live run --session <id> --file probe.lua
+lycheedev live probe put --name inspect --file probe.lua
+lycheedev live probe load --session <id> --probe inspect --request inspect-1
+lycheedev live run <operation-id>                      # stop at verified report
+lycheedev live ack <operation-id>                      # explicit cleanup, no extra reload
 lycheedev doctor
 ```
 
@@ -62,13 +65,14 @@ evidence captures; every live action is recoverable by operation ID.
 go build ./... && go vet ./...
 LYCHEEDEV_REQUIRE_LUA51=1 go test -count=1 ./...   # full matrix; Lua 5.1.5 required on Windows
 node tools/version.mjs --check                     # version-source consistency
+node tools/skill-commands.mjs                      # regenerate the command reference
 node tools/skill-contract.mjs                      # skill ↔ command-surface consistency
 node tools/release.mjs assemble --out <dir> --npm-cli <npm-cli.js> --cgo zero
 ```
 
 Windows-only CI is the release gate for the Windows amd64 product: required jobs (`windows-contract`,
 `windows-process`, `windows-addon`, `windows-package`, `ci-required`).
-See [docs/toolkit/release-2.0.1.md](docs/toolkit/release-2.0.1.md)
+See [docs/toolkit/release-2.0.2.md](docs/toolkit/release-2.0.2.md)
 for the release contract and [docs/toolkit/regression.md](docs/toolkit/regression.md)
 for the acceptance matrix.
 

@@ -2,6 +2,8 @@ package live
 
 import (
 	"context"
+	"errors"
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -34,6 +36,7 @@ type Candidate struct {
 	BusyOperation  string                       `json:"busyOperationId,omitempty"`
 	ForeignOwner   bool                         `json:"foreignOwner,omitempty"`
 	Reason         string                       `json:"reason,omitempty"`
+	RuntimeRelease string                       `json:"runtimeRelease,omitempty"`
 	GUID           string                       `json:"-"`
 }
 
@@ -96,13 +99,14 @@ func discoverCandidates(ctx context.Context, root string, request DiscoveryReque
 			continue
 		}
 		candidate.Client = client
-		if request.Installation != "" && !strings.EqualFold(client.Directory, request.Installation) {
+		if request.Installation != "" && !sameInstallationPath(client.Directory, request.Installation) {
 			continue
 		}
-		if !running[strings.ToLower(client.Directory)] {
+		key := strings.ToLower(canonicalPath(client.Directory))
+		if !running[key] {
 			runningDirs = append(runningDirs, client.Directory)
 		}
-		running[strings.ToLower(client.Directory)] = true
+		running[key] = true
 		owner, occupied, foreign, err := windowOwnership(ctx, workspaceID, ClientWindow{Client: client, Window: window}, io)
 		if occupied {
 			candidate.State, candidate.BusyOperation, candidate.ForeignOwner = CandidateBusy, owner.OperationID, foreign
@@ -114,10 +118,17 @@ func discoverCandidates(ctx context.Context, root string, request DiscoveryReque
 		}
 		observation, err := probeIdentity(ctx, ClientWindow{Client: client, Window: window}, image.Rectangle{}, false, io)
 		candidate.Capture = observation.Capture
+		candidate.RuntimeRelease = observation.Signal.Release
 		if err != nil {
 			// No correlated receipt within the bounded window: addon missing,
 			// black screen or input not delivered all land here.
 			candidate.State, candidate.Reason = CandidateUnreadable, err.Error()
+			var mismatch *bridge.RuntimeReleaseMismatch
+			if errors.As(err, &mismatch) {
+				candidate.State = "runtime_mismatch"
+				candidate.Character, candidate.Realm = observation.Signal.Character, observation.Signal.Realm
+				candidate.InputReady, candidate.NotReadyReason = observation.Signal.InputReady, observation.Signal.InputReason
+			}
 			report.Candidates = append(report.Candidates, candidate)
 			continue
 		}
@@ -203,11 +214,21 @@ func workspaceIdentity(ctx context.Context, root string) string {
 
 // canonicalPath resolves symlinks and 8.3 short names (GitHub runner TMP is
 // C:\Users\RUNNER~1\...) so identity comparisons compare one spelling. It
-// falls back to the input when the path cannot be resolved, including for
+// falls back to a cleaned absolute path when it cannot be resolved, including for
 // absent directories that are only checked for deduplication.
 func canonicalPath(path string) string {
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	path = filepath.Clean(path)
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		return resolved
 	}
 	return path
+}
+
+// Path spelling is not installation identity. Use the same normalization for
+// discovery filters, candidate selection and saved-session constraints.
+func sameInstallationPath(a, b string) bool {
+	return a != "" && b != "" && strings.EqualFold(canonicalPath(a), canonicalPath(b))
 }

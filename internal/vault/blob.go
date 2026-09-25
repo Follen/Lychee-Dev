@@ -139,6 +139,41 @@ func (s *Store) ReadBlob(ctx context.Context, ref BlobRef, maxBytes int64) ([]by
 	return data, nil
 }
 
+// RemoveBlob deletes one exact content-addressed object while holding the
+// same object lease used by publishers and readers. It never follows a
+// symlink and treats an already missing object as an explicit no-op.
+func (s *Store) RemoveBlob(ctx context.Context, ref BlobRef) (bool, error) {
+	if !validDigest(ref.SHA256) || ref.Bytes < 0 {
+		return false, ErrBlobIntegrity
+	}
+	lease, err := AcquireLease(ctx, filepath.Join(s.root, "locks"), "blob:"+ref.SHA256)
+	if err != nil {
+		return false, err
+	}
+	defer lease.Close()
+	path := s.blobPath(ref.SHA256)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() != ref.Bytes {
+		return false, ErrBlobIntegrity
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) blobPath(digest string) string {
 	return filepath.Join(s.root, "blobs", digest[:2], digest[2:])
 }

@@ -5,6 +5,7 @@ package desktop
 import (
 	"fmt"
 	"runtime"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -25,6 +26,19 @@ var (
 )
 
 type nativeInterface struct{ vtable *[128]uintptr }
+
+// WGC's free-threaded workers can finish after the capture objects are closed.
+// If the last per-thread RoUninitialize tears down the process MTA in that gap,
+// GraphicsCapture.dll can unload under a returning native worker. Retain one
+// lazy process-lifetime MTA usage reference, not any capture/device objects.
+// Do not decrement between streams: the OS reclaims this reference at process
+// exit. Each capture still balances its own RoInitialize/RoUninitialize.
+var retainCaptureRuntime = sync.OnceValue(func() error {
+	var cookie uintptr
+	retain := windows.NewLazySystemDLL("ole32.dll").NewProc("CoIncrementMTAUsage")
+	code, _, _ := retain.Call(uintptr(unsafe.Pointer(&cookie)))
+	return runtimeFailure("retain_capture_runtime", code)
+})
 
 // Pointer arguments travel through this helper before SyscallN. Keep their Go
 // allocations alive and off moving stacks across the intervening call frame.

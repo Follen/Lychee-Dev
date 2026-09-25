@@ -1,6 +1,6 @@
 local root, queue = assert(arg[1]), assert(arg[2])
 local receiptPath, sequence = assert(arg[3]), assert(arg[4])
-local ns = {Release="2.0.1",Startup={ready=true,identity={product="retail",build="12.1.0.12345"}}}
+local ns = {Release="2.0.2",Startup={ready=true,identity={product="retail",build="12.1.0.12345"}}}
 ns.Platform = {ObserveActor=function() return {character="Paladin",realm="Realm",guid="Player-1-123"} end}
 issecretvalue = function() return false end
 CreateFrame = function() error("unexpected frame") end
@@ -37,6 +37,7 @@ for _, suffix in ipairs({"", " 0", " 01", " -1", " 1.5", " 1e3", " 9007199254740
     assert(ns.ReportStore.Read("OP-target"), "failed acknowledgement deleted report")
 end
 local stored = LycheeToolkitDB.reports["OP-target"]
+assert(ns.ProbeQueue.Busy() == true, "unacknowledged queue must remain busy")
 local body = stored.body
 stored.body = body.." "
 assert(ns.Controls.Handle("bridge ack OP-target "..sequence) == nil)
@@ -47,6 +48,8 @@ local acknowledged = assert(displayed)
 local ready = assert(readiness, "ACK did not expose separate readiness")
 assert(reply == "Lychee Dev: "..acknowledged)
 assert(ns.ReportStore.Read("OP-target") == nil)
+assert(ns.ProbeQueue.Busy() == false, "ACK left the runtime queue busy")
+assert(ns.ProbeQueue.Load("OP-target") == nil, "ACK allowed source to load again")
 SlashCmdList.LYCHEETOOLKIT("bridge ack OP-target "..sequence)
 assert(displayed == nil and reply == "Lychee Dev: report_unavailable")
 assert(queueExecuted == 1, "acknowledgement re-executed code")

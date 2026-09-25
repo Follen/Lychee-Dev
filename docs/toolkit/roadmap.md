@@ -8,7 +8,7 @@ S0–S5 的能力范围不缩减，但不再按通用基础设施层层堆叠。
 游戏阶段由 live 独占，持久记录位于 live/journal；assets/Hotfix 共用 records
 内核，不单独复制数据访问。下表原类型名仅表示早期分工，不要求创建对应抽象。
 
-本路线记录 2.0.0 实施过程；当前架构以 [design.md](design.md) 为准，验收以 [regression.md](regression.md) 为准，Windows CI 与 2.0.1 npm 发布以 [release-2.0.1.md](release-2.0.1.md) 为准。以下旧阶段目标中的 2.0.0、四客户端实机和五平台表述是历史规划，不覆盖当前 Windows amd64／三客户端合同。旧用户数据不得删除或导入。
+本路线记录 2.0.0 重写过程；当前架构以 [design.md](design.md) 为准，验收以 [regression.md](regression.md) 为准，Windows CI 与 2.0.2 npm 发布以 [release-2.0.2.md](release-2.0.2.md) 为准。以下旧阶段目标中的 2.0.0、四客户端实机和五平台表述是历史规划，不覆盖当前 Windows amd64／三客户端合同。旧用户数据不得删除或导入。
 
 ## 1. 能力迁入清单
 
@@ -22,14 +22,14 @@ S0–S5 的能力范围不缩减，但不再按通用基础设施层层堆叠。
 | wowdoc TOC/XML validate、matrix | codebase.Checker | 保留有序闭包和未决语义；统一 source validate --matrix | SRC-03、04、08 |
 | wowdata CASC、BLTE、DB2、DBD、TACT | records 的格式实现 | 保留已验证格式知识及算法；去除旧 root/config/runtime 装配 | DAT-01–03、09 |
 | wowdata SQL | records.Reader | 维持只读、有界与流式能力；新请求和错误类型 | DAT-04、05 |
-| wowdata Hotfix | changes.Feed | 独立提供方和快照，保留原始与解码证据 | DAT-06、07 |
+| wowdata Hotfix | records hotfix providers | 独立提供方和快照，保留原始与解码证据 | DAT-06、07 |
 | wowdata spell/item/creature/encounter/decor | records.Navigator | 新领域请求及关系输出，去除命令层业务拼装 | DAT-08、AST-04 |
 | wowdata file/icon/BLP/video | assets.Exporter | 统一文件、图像和视频资产语义；保留解码能力 | AST-01–04 |
 | 三套 profile/home/cache/doctor | selection、vault、delivery 和统一 CLI | 重写，仅一个生命周期；旧配置不转换 | STO、CLI、PKG |
 | JS 与 Python 客户端/实例解析 | selection、bridge.Binder、desktop | Go 单一实现，进程启动身份和角色复核 | SEL-01–03、10、WIN-04 |
 | Python 后台消息输入 | desktop 原生实现 | Go 重写，保留 Win32 语义和有界发送，新函数名 | WIN-01–04、07 |
 | Python WGC/NumPy/QR 链 | desktop 捕获与 bridge 信号接收 | Go 重写；纯 Go 解码候选先验证，正式链路无 Python | WIN-05、06、08、09 |
-| Python SV、registry、reload、session | bridge、evidence、jobs、vault | 重写受限解析、所有权、持久化状态机和完整收尾 | STO-07、08、RUN、CON |
+| Python SV、registry、reload、session | bridge、evidence、live/journal、vault | 重写受限解析、所有权、持久化状态机和完整收尾 | STO-07、08、RUN、CON |
 | Lua 执行、对象、事件、追踪、诊断、导出 | 新私有 Lua 模块及 CaptureWriter | 能力覆盖、新 namespace/协议/命名；维持 UI 规范 | LUA-01–08 |
 | 三个独立 skill | skills/lycheedev | 重新编写一个入口及按需工作流，机械编排下沉到 Go | SKL-01–11 |
 | 旧 npm 安装/启动/更新 | delivery 与薄 npm 平台包装 | 去除业务和 Python 安装逻辑，统一发行清单 | PKG-01–08 |
@@ -66,9 +66,9 @@ S0–S5 的能力范围不缩减，但不再按通用基础设施层层堆叠。
 
 ## 4. S2：统一基础设施
 
-- 建立新 module、command/actions 装配、selection.Pinner 和统一 catalog。
+- 建立新 module、command 入口、selection.Pinner 和统一 catalog。
 - 实现 workspace 标记、短事务、不可变对象、原子发布、跨进程锁和引用保护。
-- 实现 jobs.Book、资源准入、结果渲染与 evidence.Archive。
+- 实现 live/journal operation records、资源准入、结果渲染与 evidence.Archive。
 - 实现干净初始化、显式旧根归档计划与新格式拒绝降级写入。
 - 建立 CLI 进程测试、伪 CDN/Hotfix、固定 Git 仓库和协议 adapter。
 
@@ -76,7 +76,7 @@ S0–S5 的能力范围不缩减，但不再按通用基础设施层层堆叠。
 
 ## 5. S3：源码、记录与资产模块
 
-codebase、records/changes、assets 可以在 S2 的契约稳定后并行实施，但不得各自再引入工作空间、profile、网络预算或输出协议。
+codebase、records（含 hotfix providers）、assets 可以在 S2 的契约稳定后并行实施，但不得各自再引入工作空间、profile、网络预算或输出协议。
 
 - 将源码解析、索引和 TOC 检查接到新接口。
 - 将数据格式解析、只读 SQL、领域查询和独立 Hotfix 接到新接口。
@@ -114,8 +114,8 @@ codebase、records/changes、assets 可以在 S2 的契约稳定后并行实施�
 - 完成命名/依赖/产物审计，不保留 shim、旧函数 wrapper 或另一套配置。
 - 对最终发行 Commit 运行完整回归；用户已完成游戏真机手测，详细记录单独归档。托管 CI 验证三客户端离线矩阵，不要求交互桌面 runner。
 - fresh 安装、旧根隔离、新数据持久化和未来 schema 拒绝降级检查完成。
-- 当前修复版版本源、npm/lock、四 TOC、CLI、skill/resource manifest 统一为 2.0.1，准确 tag 为 v2.0.1；2.0.0 已发布，不移动原标签。
-- 完成托管 Windows CI、三端离线矩阵和实际 tgz 验收，封存同一 Commit 的产物及摘要。发布时消费同一份 tgz，通过 OIDC 发布并回读 registry 验证；用户已授权本轮修复完成后发布 2.0.1。
+- 当前候选版本源、npm/lock、四 TOC、CLI、skill/resource manifest 统一为 2.0.2；2.0.1 已发布，不移动原标签。
+- 2.0.2 仍需完成托管 Windows CI、三端离线矩阵和实际 tgz 验收，封存同一 Commit 的产物及摘要。发布时消费同一份 tgz，通过 OIDC 发布并回读 registry 验证；本轮不执行真机操作。
 
 门槛：regression.md 的发布条件全部满足。旧二进制仅可保留在隔离测试基线或归档中，正式产品不依赖它们。
 
@@ -124,11 +124,11 @@ codebase、records/changes、assets 可以在 S2 的契约稳定后并行实施�
 | 工作包 | 主范围 | 依赖 | 可并行范围 |
 | --- | --- | --- | --- |
 | 基础契约与命名 | protocol、catalog、selection、command | S0 | 原生能力试验 |
-| 存储与调度 | vault、jobs、evidence | 基础合同 | 源码和数据模块的纯解析部分 |
-| 源码研究 | codebase | 固定引用与存储接口 | records/changes、assets |
-| 游戏数据 | records、changes | 固定引用与资源预算 | codebase |
+| 存储与调度 | vault、live/journal、evidence | 基础合同 | 源码和数据模块的纯解析部分 |
+| 源码研究 | codebase | 固定引用与存储接口 | records、assets |
+| 游戏数据 | records（含 hotfix providers） | 固定引用与资源预算 | codebase |
 | 资产输出 | assets | records 文件读取接口 | source、bridge |
-| 游戏桥接 | bridge、desktop、Lua | 原生试验、jobs/evidence | 静态能力与安装 |
+| 游戏桥接 | bridge、desktop、Lua | 原生试验、live/journal、evidence | 静态能力与安装 |
 | 交付与编排 | delivery、npm、skills | command/protocol 稳定 | 各模块后期验证 |
 | 回归与实机 | tests、tools | 随各阶段递增 | 所有工作包，但同一游戏窗口排他 |
 

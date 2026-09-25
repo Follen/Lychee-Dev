@@ -11,7 +11,7 @@ Lua 工作台插件、一个 agent skill。源码研究、游戏数据查询、�
 | Skill | `skills/lycheedev/` | agent skill：工作流路由与证据纪律 |
 | npm 包 | `packages/npm/lycheedev/` | 发行载体：Windows amd64 二进制 + 插件/skill 载荷，零运行时依赖 |
 
-## 支持客户端（2.0 验收矩阵）
+## 支持客户端（2.0.2 验收目标矩阵）
 
 | 客户端 | Interface | 版本 |
 | --- | --- | --- |
@@ -44,7 +44,10 @@ lycheedev target resolve --installation <客户端> --region cn --locale zhCN
 lycheedev source query C_Spell.GetSpellInfo --snapshot <pin>
 lycheedev data db2 schema Map --snapshot <pin> --cdn
 lycheedev live connect --snapshot <pin>               # 自动发现、识别并在游戏内启用连接；无需手输 /dev connect
-lycheedev live run --session <id> --file probe.lua
+lycheedev live probe put --name inspect --file probe.lua
+lycheedev live probe load --session <id> --probe inspect --request inspect-1
+lycheedev live run <operation-id>                      # 停在已验证报告
+lycheedev live ack <operation-id>                      # 显式收尾，不额外 reload
 lycheedev doctor
 ```
 
@@ -59,13 +62,14 @@ lycheedev doctor
 go build ./... && go vet ./...
 LYCHEEDEV_REQUIRE_LUA51=1 go test -count=1 ./...   # 全量矩阵；Windows 需要 Lua 5.1.5
 node tools/version.mjs --check                     # 版本源一致性
+node tools/skill-commands.mjs                      # 重新生成命令参考
 node tools/skill-contract.mjs                      # skill 与命令面一致性
 node tools/release.mjs assemble --out <目录> --npm-cli <npm-cli.js> --cgo zero
 ```
 
 仅 Windows CI 是 Windows amd64 产品的发布门槛：必需 job（`windows-contract`、`windows-process`、
 `windows-addon`、`windows-package`、`ci-required`）。
-发布合同见 [docs/toolkit/release-2.0.1.md](docs/toolkit/release-2.0.1.md)，
+当前候选发布合同见 [docs/toolkit/release-2.0.2.md](docs/toolkit/release-2.0.2.md)，
 验收矩阵见 [docs/toolkit/regression.md](docs/toolkit/regression.md)。
 
 ## 设计与状态

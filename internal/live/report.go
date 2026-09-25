@@ -18,6 +18,7 @@ import (
 // from the selected live session, never from the report being verified.
 type ReportIntent struct {
 	Schema   string                   `json:"schema"`
+	Revision string                   `json:"revision,omitempty"`
 	Expected bridge.SignalExpectation `json:"expected"`
 	Code     []byte                   `json:"code"`
 	Load     *ProbeLoadIntent         `json:"load,omitempty"`
@@ -26,18 +27,27 @@ type ReportIntent struct {
 
 type reportObservation struct {
 	bootstrapObservation
-	Schema            string                `json:"schema"`
-	SourcePath        string                `json:"sourcePath,omitempty"`
-	SourceSHA256      string                `json:"sourceSHA256,omitempty"`
-	BodyID            string                `json:"bodyId"`
-	ReceiptID         string                `json:"receiptId"`
-	AcknowledgementID string                `json:"acknowledgementId,omitempty"`
-	RemovalID         string                `json:"removalId,omitempty"`
-	RemovalSHA256     string                `json:"removalSHA256,omitempty"`
-	QueueRetirement   *queueRetirement      `json:"queueRetirement,omitempty"`
-	CleanupNonce      string                `json:"cleanupNonce,omitempty"`
-	ClearedID         string                `json:"clearedId,omitempty"`
-	ReloadedCapture   string                `json:"reloadedCapture,omitempty"`
+	Schema            string           `json:"schema"`
+	SourcePath        string           `json:"sourcePath,omitempty"`
+	SourceSHA256      string           `json:"sourceSHA256,omitempty"`
+	BodyID            string           `json:"bodyId"`
+	ReceiptID         string           `json:"receiptId"`
+	AcknowledgementID string           `json:"acknowledgementId,omitempty"`
+	RemovalID         string           `json:"removalId,omitempty"`
+	RemovalSHA256     string           `json:"removalSHA256,omitempty"`
+	QueueRetirement   *queueRetirement `json:"queueRetirement,omitempty"`
+	CleanupNonce      string           `json:"cleanupNonce,omitempty"`
+	ClearedID         string           `json:"clearedId,omitempty"`
+	ReloadedCapture   string           `json:"reloadedCapture,omitempty"`
+	// Submission is diagnostic, not execution evidence. Preserve the earlier
+	// transport chain through verification and ACK; old records may omit it.
+	LoadedCapture     string                `json:"loadedCapture,omitempty"`
+	LoadReadyCapture  string                `json:"loadReadyCapture,omitempty"`
+	ReportedCapture   string                `json:"reportedCapture,omitempty"`
+	FlushReadyCapture string                `json:"flushReadyCapture,omitempty"`
+	LoadInput         *desktop.InputReceipt `json:"loadInput,omitempty"`
+	DispatchInput     *desktop.InputReceipt `json:"dispatchInput,omitempty"`
+	FlushInput        *desktop.InputReceipt `json:"flushInput,omitempty"`
 	AckReadyCapture   string                `json:"ackReadyCapture,omitempty"`
 	AckInput          *desktop.InputReceipt `json:"ackInput,omitempty"`
 	CleanupReadyID    string                `json:"cleanupReadyId,omitempty"`
@@ -209,7 +219,14 @@ func ArchiveInstalledOperationReport(ctx context.Context, root, operationID stri
 		if err := json.Unmarshal(record.Observation, &prior); err != nil {
 			return zero, err
 		}
-		observation, _ := json.Marshal(reportObservation{bootstrapObservation: prior.bootstrapObservation, Schema: "lycheedev.report-observation.v1", BodyID: pair.Body.ID, ReceiptID: pair.Receipt.ID, SourcePath: installed.Path, SourceSHA256: installed.FileSHA256, ReloadedCapture: prior.ReloadedCapture})
+		observation, _ := json.Marshal(reportObservation{
+			bootstrapObservation: prior.bootstrapObservation, Schema: "lycheedev.report-observation.v1",
+			BodyID: pair.Body.ID, ReceiptID: pair.Receipt.ID, SourcePath: installed.Path, SourceSHA256: installed.FileSHA256,
+			ReloadedCapture: prior.ReloadedCapture, LoadedCapture: prior.LoadedCapture,
+			LoadReadyCapture: prior.LoadReadyCapture, ReportedCapture: prior.ReportedCapture,
+			FlushReadyCapture: prior.FlushReadyCapture, LoadInput: prior.LoadInput,
+			DispatchInput: prior.DispatchInput, FlushInput: prior.FlushInput,
+		})
 		err = book.AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: "verified", Status: "running", Observation: observation})
 		return pair, err
 	})

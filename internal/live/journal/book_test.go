@@ -154,6 +154,27 @@ func TestBookRejectsStageSkip(t *testing.T) {
 	}
 }
 
+func TestBookRequestIdentityIsIdempotentAndConflicting(t *testing.T) {
+	ctx := context.Background()
+	_, _, book := newTestBook(t)
+	intent := testIntent("resource/request")
+	intent.RequestKey = "agent-run-1"
+	intent.RequestDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	first, err := book.BeginWork(ctx, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := book.BeginWork(ctx, intent)
+	if err != nil || repeated.OperationID != first.OperationID || repeated.Generation != first.Generation {
+		t.Fatalf("repeated request = %+v, %v", repeated, err)
+	}
+	conflict := intent
+	conflict.RequestDigest = "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if _, err := book.BeginWork(ctx, conflict); !errors.Is(err, ErrRequestConflict) {
+		t.Fatalf("conflicting request = %v", err)
+	}
+}
+
 func TestBookRejectsStaleGeneration(t *testing.T) {
 	ctx := context.Background()
 	_, _, book := newTestBook(t)

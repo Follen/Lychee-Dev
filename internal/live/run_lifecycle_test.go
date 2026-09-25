@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/adler32"
 	"image"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -25,8 +27,43 @@ func TestRunProbeLifecycle(t *testing.T) {
 	}
 }
 
+func TestAtomicProbeLifecycleStopsAtEachGoal(t *testing.T) {
+	testRunProbeLifecycle(t, "atomic")
+}
+
+func TestAtomicProbeRecoversPersistedReportWithoutReloadReceipt(t *testing.T) {
+	testRunProbeLifecycle(t, "lost-reentry")
+}
+
+func TestAtomicProbeOfflineRecovery(t *testing.T) {
+	testRunProbeLifecycle(t, "offline-recovery")
+}
+
+func TestAbandonVerifiedProbeRetainsReportAndReleasesWindow(t *testing.T) {
+	for _, mode := range []string{"normal", "intent-crash", "queue-crash", "conflict", "other-entry", "invalid-report", "ack-submitted"} {
+		t.Run(mode, func(t *testing.T) { testRunProbeLifecycle(t, "abandon-"+mode) })
+	}
+}
+
+func TestAtomicProbeAckRestartNeverReplaysInput(t *testing.T) {
+	for _, mode := range []string{"before-input", "after-input"} {
+		t.Run(mode, func(t *testing.T) { testRunProbeLifecycle(t, "ack-restart-"+mode) })
+	}
+}
+
+func TestAtomicProbeMissingReloadRejectsUnsafeAckReadiness(t *testing.T) {
+	for _, mode := range []string{"missing", "actor", "nonce", "request", "reload-nonce", "old-epoch", "future-epoch", "unready", "payload"} {
+		t.Run(mode, func(t *testing.T) { testRunProbeLifecycle(t, "unsafe-ack-"+mode) })
+	}
+}
+
 func testRunProbeLifecycle(t *testing.T, mode string) {
 	t.Helper()
+	unsafeAck := strings.HasPrefix(mode, "unsafe-ack-")
+	ackRestart := strings.HasPrefix(mode, "ack-restart-")
+	abandon := strings.HasPrefix(mode, "abandon-")
+	atomic := mode == "atomic" || mode == "lost-reentry" || mode == "offline-recovery" || abandon || unsafeAck || ackRestart
+	interrupted := errors.New("fixture: interrupted after flush submission")
 	ctx := context.Background()
 	root, client, _, pin, original, input := unpreparedProbeFixture(t, 9)
 	original.region = image.Rect(10, 20, 610, 620)
@@ -138,10 +175,34 @@ func testRunProbeLifecycle(t *testing.T, mode string) {
 		case 1:
 			frames.signals = append(frames.signals, bootstrapSignal(1, 2))
 		case 2:
+			if atomic {
+				frames.signals = append(frames.signals, loadedSignal())
+			}
 		case 3:
 			frames.signals = append(frames.signals, readySignal(12, 2))
 		case 4:
-			frames.signals = append(frames.signals, reloadedSignal())
+			ready := reloadedSignal()
+			switch strings.TrimPrefix(mode, "unsafe-ack-") {
+			case "actor":
+				ready.GUID = "Player-other"
+			case "nonce":
+				ready.SessionNonce = strings.Repeat("f", 32)
+			case "request":
+				ready.RequestID = "REQ-other"
+			case "reload-nonce":
+				ready.ReloadNonce = strings.Repeat("f", 32)
+			case "old-epoch":
+				ready.RuntimeEpoch--
+			case "future-epoch":
+				ready.RuntimeEpoch++
+			case "unready":
+				ready.InputReady = false
+			case "payload":
+				ready.CodeBytes, ready.CodeAdler32 = 1, "00000001"
+			}
+			if mode != "unsafe-ack-missing" {
+				frames.signals = append(frames.signals, ready)
+			}
 		case 5:
 			frames.signals = append(frames.signals, readySignal(13, 3))
 		default:
@@ -197,7 +258,13 @@ func testRunProbeLifecycle(t *testing.T, mode string) {
 		if step < 5 && command != wantCommands[step] {
 			t.Fatalf("unexpected command at step %d: %s", step, command)
 		}
+		if step == 4 && mode == "ack-restart-before-input" {
+			return desktop.InputReceipt{}, interrupted
+		}
 		commands = append(commands, command)
+		if step == 4 && mode == "ack-restart-after-input" {
+			return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: true}, interrupted
+		}
 
 		switch step {
 		case 0:
@@ -218,7 +285,12 @@ func testRunProbeLifecycle(t *testing.T, mode string) {
 					t.Fatal(err)
 				}
 			}
-			frames.signals = append(frames.signals, reloadedSignal())
+			if mode != "lost-reentry" && mode != "offline-recovery" && !unsafeAck && !ackRestart {
+				frames.signals = append(frames.signals, reloadedSignal())
+			}
+			if mode == "offline-recovery" {
+				return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: true}, interrupted
+			}
 		case 4:
 			frames.signals = append(frames.signals, acknowledgedSignal())
 		case 5:
@@ -245,7 +317,241 @@ func testRunProbeLifecycle(t *testing.T, mode string) {
 		return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: true}, nil
 	}
 
-	record, runErr := runProbe(ctx, root, RunRequest{Session: bound.ID, Code: input.Code}, open, sendFake)
+	var record journal.WorkRecord
+	var runErr error
+	if atomic {
+		session, snapshot, err := observeRecordedSession(ctx, root, bound.ID, open)
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision, err := PutProbe(ctx, root, "atomic-smoke", input.Code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err = session.PrepareProbeRevision(ctx, root, snapshot, "", "atomic-request", revision.Revision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		op, err := session.OpenOperation(ctx, root, record.OperationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer op.Close()
+		defer session.Close()
+		record, runErr = op.execute(ctx, sendFake)
+		if runErr != nil || record.Stage != "loaded" || len(commands) != 2 {
+			t.Fatalf("load crossed its boundary: stage=%s commands=%v err=%v", record.Stage, commands, runErr)
+		}
+		if _, err = setOperationGoal(ctx, root, record.OperationID, "loaded", "verified"); err != nil {
+			t.Fatal(err)
+		}
+		record, runErr = op.execute(ctx, sendFake)
+		if mode == "offline-recovery" {
+			if !errors.Is(runErr, interrupted) || record.Stage != "flush_requested" || record.Status != "unresolved" {
+				t.Fatalf("missing interruption: %+v %v", record, runErr)
+			}
+			// The public recovery path must not steal an active writer's lease.
+			if _, err := Resume(ctx, root, record.OperationID); !errors.Is(err, journal.ErrBusy) {
+				t.Fatalf("offline recovery bypassed writer: %v", err)
+			}
+			op.Close()
+			session.Close()
+			saved, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A wrong body cannot become verified or cause recovery input.
+			if err := os.WriteFile(source, []byte(strings.ReplaceAll(string(saved), "answer", "wrongx")), 0600); err != nil {
+				t.Fatal(err)
+			}
+			bad, err := Resume(ctx, root, record.OperationID)
+			if err == nil || bad.Report.State != "unavailable" || bad.Stage != "flush_requested" {
+				t.Fatalf("accepted corrupt report: %+v %v", bad, err)
+			}
+			if err := os.WriteFile(source, saved, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				outcome, err := Resume(ctx, root, record.OperationID)
+				if err != nil || outcome.Stage != "verified" || outcome.Report.State != "verified" || string(outcome.Report.Content) != body || outcome.Complete || outcome.Cleanup != "pending" {
+					t.Fatalf("offline recovery: %+v %v", outcome, err)
+				}
+			}
+			if len(commands) != 4 || len(operationQueue(t, client)) != 1 {
+				t.Fatal("offline recovery sent input or retired queue")
+			}
+			owner, occupied, err := journal.InspectWindowOwner(ctx, filepath.Join(client, "Interface", "AddOns"), record.Intent.Resource)
+			if err != nil || !occupied || owner.OperationID != record.OperationID {
+				t.Fatal("offline recovery released owner", err)
+			}
+			// The fake process has no native window: only the later ACK may open
+			// capture, with the original identity and a new reader.
+			if _, err := setOperationGoal(ctx, root, record.OperationID, "verified", "cleaned"); err != nil {
+				t.Fatal(err)
+			}
+			frames = &lifecycleFrames{t: t}
+			record, runErr = resumeLiveOperation(ctx, root, record.OperationID, original.region,
+				func(_ context.Context, target ClientWindow, region image.Rectangle) (sessionFrames, error) {
+					if target != original.target || region != original.region {
+						t.Fatal("recovery retargeted capture")
+					}
+					return frames, nil
+				}, func(context.Context, ClientWindow) error { return nil }, sendFake)
+		} else {
+			if runErr != nil || record.Stage != "verified" || len(commands) != 4 {
+				t.Fatalf("run crossed its boundary: stage=%s commands=%v err=%v", record.Stage, commands, runErr)
+			}
+			if abandon {
+				if _, err := Abandon(ctx, root, record.OperationID); !errors.Is(err, journal.ErrBusy) {
+					t.Fatal("abandon did not refuse active writer", err)
+				}
+				op.Close()
+				session.Close()
+				change := func(stage, status string, observation json.RawMessage) {
+					t.Helper()
+					_, err := withOperation(ctx, root, record.OperationID, func(_ *vault.Store, metadata *vault.Metadata) (bool, error) {
+						return true, journal.OpenBook(metadata).AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: stage, Status: status, Observation: observation})
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					record, err = InspectOperation(ctx, root, record.OperationID)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "abandon-invalid-report" || mode == "abandon-ack-submitted" {
+					var observed reportObservation
+					if err := json.Unmarshal(record.Observation, &observed); err != nil {
+						t.Fatal(err)
+					}
+					if mode == "abandon-invalid-report" {
+						observed.BodyID = observed.ReceiptID
+					} else {
+						observed.AckInput = &desktop.InputReceipt{}
+					}
+					raw, _ := json.Marshal(observed)
+					change("verified", "running", raw)
+					if _, err := Abandon(ctx, root, record.OperationID); err == nil {
+						t.Fatal("abandon accepted invalid evidence or ACK")
+					}
+					if len(operationQueue(t, client)) != 1 {
+						t.Fatal("refused abandon modified queue")
+					}
+					if _, occupied, err := journal.InspectWindowOwner(ctx, filepath.Join(client, "Interface", "AddOns"), record.Intent.Resource); err != nil || !occupied {
+						t.Fatal("refused abandon lost owner", err)
+					}
+					return
+				}
+				if mode == "abandon-intent-crash" || mode == "abandon-queue-crash" {
+					change("abandoning", "running", record.Observation)
+					if mode == "abandon-queue-crash" {
+						if _, err := delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(client), definition, true); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if result, err := Resume(ctx, root, record.OperationID); err != nil || result.Status != "abandoned" {
+						t.Fatal("abandon recovery failed", result, err)
+					}
+				}
+				expectedEntries := 0
+				if mode == "abandon-conflict" || mode == "abandon-other-entry" {
+					other := definition
+					if mode == "abandon-conflict" {
+						other.Character = "DifferentActor"
+						if _, err := delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(client), definition, true); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						other.RequestID = "REQ-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+						expectedEntries = 1
+					}
+					if _, err := delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(client), other, false); err != nil {
+						t.Fatal(err)
+					}
+					if mode == "abandon-conflict" {
+						if _, err := Abandon(ctx, root, record.OperationID); !errors.Is(err, delivery.ErrQueueConflict) {
+							t.Fatal("abandon ignored queue conflict", err)
+						}
+						if queue := operationQueue(t, client); len(queue) != 1 || queue[0] != other {
+							t.Fatal("abandon touched conflicting queue")
+						}
+						if _, occupied, err := journal.InspectWindowOwner(ctx, filepath.Join(client, "Interface", "AddOns"), record.Intent.Resource); err != nil || !occupied {
+							t.Fatal("conflict lost owner", err)
+						}
+						return
+					}
+				}
+				saved, err := os.ReadFile(source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for attempt := 0; attempt < 2; attempt++ {
+					outcome, err := Abandon(ctx, root, record.OperationID)
+					if err != nil || outcome.Status != "abandoned" || outcome.Cleanup != "abandoned" || outcome.Complete || outcome.Report.State != "verified" || string(outcome.Report.Content) != body {
+						t.Fatalf("abandon: %+v %v", outcome, err)
+					}
+				}
+				if len(operationQueue(t, client)) != expectedEntries || len(commands) != 4 {
+					t.Fatal("abandon retained queue or sent input")
+				}
+				if _, occupied, err := journal.InspectWindowOwner(ctx, filepath.Join(client, "Interface", "AddOns"), record.Intent.Resource); err != nil || occupied {
+					t.Fatal("abandon retained owner", err)
+				}
+				after, err := os.ReadFile(source)
+				if err != nil || string(after) != string(saved) {
+					t.Fatal("abandon modified game saved variables", err)
+				}
+				resumed, err := Resume(ctx, root, record.OperationID)
+				if err != nil || resumed.Status != "abandoned" {
+					t.Fatal("abandoned operation resumed execution", err)
+				}
+				if _, err := RunLoaded(ctx, root, record.OperationID); err == nil {
+					t.Fatal("abandoned operation allowed run")
+				}
+				if _, err := AcknowledgeVerified(ctx, root, record.OperationID); err == nil {
+					t.Fatal("abandoned operation allowed ack")
+				}
+				return
+			}
+			var retained probeLoadObservation
+			if err := json.Unmarshal(record.Observation, &retained); err != nil {
+				t.Fatal(err)
+			}
+			if retained.LoadedCapture == "" || retained.LoadReadyCapture == "" || retained.ReportedCapture == "" || retained.FlushReadyCapture == "" ||
+				retained.LoadInput == nil || retained.DispatchInput == nil || retained.FlushInput == nil || !retained.FlushInput.SubmissionComplete {
+				t.Fatal("verified report discarded transport evidence", string(record.Observation))
+			}
+			if _, err = setOperationGoal(ctx, root, record.OperationID, "verified", "cleaned"); err != nil {
+				t.Fatal(err)
+			}
+			record, runErr = op.execute(ctx, sendFake)
+			op.Close()
+			session.Close()
+			if ackRestart {
+				if !errors.Is(runErr, interrupted) || record.Stage != "ack_requested" {
+					t.Fatalf("missing ACK interruption: %+v %v", record, runErr)
+				}
+				frames = &lifecycleFrames{t: t}
+				if mode == "ack-restart-after-input" {
+					frames.signals = append(frames.signals, acknowledgedSignal())
+				}
+				record, runErr = resumeLiveOperation(ctx, root, record.OperationID, original.region,
+					func(_ context.Context, target ClientWindow, region image.Rectangle) (sessionFrames, error) {
+						if target != original.target || region != original.region {
+							t.Fatal("ACK restart retargeted capture")
+						}
+						return frames, nil
+					}, func(context.Context, ClientWindow) error { return nil },
+					func(context.Context, desktop.WindowIdentity, func(context.Context) (string, error), func(context.Context) error) (desktop.InputReceipt, error) {
+						t.Fatal("ACK restart replayed input")
+						return desktop.InputReceipt{}, nil
+					})
+			}
+		}
+	} else {
+		record, runErr = executePrepared(ctx, root, ExecutionRequest{Session: bound.ID, Code: input.Code}, open, sendFake)
+	}
 	if !frames.closed {
 		t.Fatal("run leaked the capture stream")
 	}
@@ -253,12 +559,31 @@ func testRunProbeLifecycle(t *testing.T, mode string) {
 	if record.OperationID == "" || outcome.OperationID != record.OperationID || outcome.Snapshot != pin.ID {
 		t.Fatalf("run lost its recovery identity: %+v", outcome)
 	}
-	if len(commands) != map[string]int{"complete": 6, "report-not-persisted": 4, "removal-not-persisted": 6}[mode] {
+	if ackRestart {
+		if mode == "ack-restart-before-input" {
+			if runErr == nil || len(commands) != 4 || record.Stage != "ack_requested" || outcome.Report.State != "verified" || outcome.Complete || outcome.Cleanup != "pending" || len(operationQueue(t, client)) != 1 {
+				t.Fatalf("unconfirmed ACK was replayed or discarded: %+v %v", outcome, runErr)
+			}
+		} else if runErr != nil || outcomeErr != nil || len(commands) != 5 || !outcome.Complete || outcome.Report.State != "verified" || outcome.Cleanup != "complete" || len(operationQueue(t, client)) != 0 {
+			t.Fatalf("ACK receipt recovery failed: %+v %v", outcome, runErr)
+		}
+		return
+	}
+	if unsafeAck {
+		if mode == "unsafe-ack-missing" && !errors.Is(runErr, ErrAckReadinessPending) {
+			t.Fatalf("missing readiness is not recoverable pending: %v", runErr)
+		}
+		if runErr == nil || outcomeErr == nil || len(commands) != 4 || record.Stage != "verified" || outcome.Report.State != "verified" || outcome.Complete || outcome.Cleanup != "pending" {
+			t.Fatalf("unsafe ACK: commands=%v outcome=%+v err=%v", commands, outcome, runErr)
+		}
+		return
+	}
+	if len(commands) != map[string]int{"offline-recovery": 5, "atomic": 5, "lost-reentry": 5, "complete": 6, "report-not-persisted": 4, "removal-not-persisted": 6}[mode] {
 		t.Fatalf("unexpected submitted commands: %v pending-signals=%d record=%+v run=%v finish=%v outcome=%+v", commands, len(frames.signals), record, runErr, outcomeErr, outcome)
 	}
 
 	switch mode {
-	case "complete":
+	case "complete", "atomic", "lost-reentry", "offline-recovery":
 		if runErr != nil || outcomeErr != nil || outcome.Report.State != "verified" || !outcome.Complete || outcome.Cleanup != "complete" || outcome.Status != "completed" || string(outcome.Report.Content) != body {
 			t.Fatalf("complete outcome did not retain verified report: %+v run=%v finish=%v", outcome, runErr, outcomeErr)
 		}

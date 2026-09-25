@@ -1,11 +1,17 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
-状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-23（本次修订新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
+状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-24（本次修订新增 wowdoc/wowdata 逐业务 parity 台账说明；此前已新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
 当前执行证据见 [implementation-status.md](implementation-status.md)，不以本清单充当测试结果。
 
-适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和本次 `2.0.1` / `v2.0.1` 发布合同：[release-2.0.1.md](release-2.0.1.md)。本文件中阈值是建议的验收政策，不是已经测得的性能或成功率。
+适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.0.2` / `v2.0.2` 发布合同：[release-2.0.2.md](release-2.0.2.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
 
 ## 1. 验证原则与结果状态
+
+新增恢复验收：`live abandon` 仅允许 verified 且未提交 ACK 的 probe。
+覆盖运行中 writer 拒绝、未验证阶段拒绝、损坏归档/ACK 痕迹拒绝、
+队列内容冲突保留所有权、保留其他队列项、意图提交后/队列移除后崩溃恢复、
+重复调用幂等以及终态禁止 run/ack。必须断言无游戏输入、SavedVariables 不变、
+原报告仍 verified、cleanup=abandoned 且 complete=false；此项不替代真实 ACK 验收。
 
 测试通过新模块接口和真实 CLI 进程观察行为，不断言旧内部函数调用顺序。纯解析直接测试；文件、SQLite 与 Git 用临时真实环境；外部 CDN、Hotfix 和游戏信号用可控 adapter。最后另做真实网络和真实游戏验证。
 
@@ -17,15 +23,44 @@ P0 是交付阻断项；P1 在对应能力发布时同样必须通过，但可�
 
 优先验收完整用户场景：固定目标、源码与数据研究、游戏运行、结果交接和中断
 恢复。低层算法保留精确单元测试；调用方不需要经过内部阶段函数才能测试用例。
-`live run` 从 session 取身份，`live resume` 从 operation 取身份；参数覆盖必须拒绝。
+`live probe load` 从 session 取身份，`live run`/`live ack`/`live resume` 从
+operation 取身份；参数覆盖必须拒绝。注册、加载、执行、确认和独立 reload 分别测试，
+任何一步都不得暗中执行相邻动作。
 专门验证报告已归档而清理失败时，结果仍为 verified、cleanup 为 pending、complete
 为 false，正文和恢复 ID 可用；归档缺失/损坏不能仅凭阶段记录变成 verified。
 skill 测试应验证这一判断，而不是匹配文案或要求 agent 手动操作协议。
+
+原子链回归还须覆盖：load 实际驱动状态机后仅发送 prepare/load，run 停在
+verified，ACK 不追加 reload；ACK 后同一运行态可接新任务，不能重载旧源码，
+共享队列中其他角色的条目不阻挡当前角色。独立 reload 的完成结果必须引用
+可验证的 runtimeCapture；缺失回执、跨操作回执、错误角色/nonce 均不能完成。
+reload 后下一项任务自动刷新原窗口连接，切号、战斗、进程变化和占用必须拒绝。
+
+报告恢复回归：`TestAtomicProbeRecoversPersistedReportWithoutReloadReceipt`
+覆盖 SV 已持久化但重入 QR 缺失；`TestAtomicProbeOfflineRecovery` 通过公开
+Resume 验证无在线窗口仍可归档、重复恢复幂等、活动 writer 不被抢占、损坏
+正文拒绝、队列与所有权保留且不发送输入。
+`TestAtomicProbeMissingReloadRejectsUnsafeAckReadiness` 覆盖缺失回执、错误
+GUID/session nonce/request/reload nonce、旧/未来 epoch、未就绪和混入载荷；
+`TestAtomicProbeAckRestartNeverReplaysInput` 覆盖 ACK 意图已存但未发送、
+已发送但发送回执未存两种重启路径，前者保留未决、后者只观察匹配确认。
+命令层覆盖 ACK 就绪等待映射 pending/6、调用者取消不冒充 pending。
+这些是可控 Go fixture，不代表真实窗口丢失 QR 后已能自动恢复显示；
+真实报告恢复、ACK 和后续任务的实测结果分别记录在 implementation-status。
 
 游戏恢复须覆盖两个容易混淆的崩溃窗口：意图已落盘但尚未发送、发送已发生但
 发送回执尚未落盘。两者不能靠“回执缺失”决定补发。前者没有游戏证据时保持未决；
 后者只有收到原请求的有效游戏证据才继续，后续新阶段可执行、原输入不得重发。
 现有完整生命周期 fixture 对六次提交分别覆盖这两类窗口；不等同于进程强杀或真机证据。
+
+后台输入与光学生命周期回归：`TestBackgroundTextPacingAndInterruptedSubmission`
+覆盖实际发送编排的 Enter/150 ms/逐 UTF-16 单元 50 ms/Enter 顺序、中文、
+surrogate pair，以及每个回调位置失败后立即停止。`receipt_recovery.lua`
+使用真实 Controls/Session/ProbeRunner/Reentry/ReceiptView，覆盖聊天焦点恢复、
+被拒绝的 reload、异步报告替换、禁用、角色更换、加载开始和离开世界。
+`reentry.lua` 与 `atomic_live.lua` 覆盖两种加载事件顺序、加载重新开始、
+离开世界取消与旧回调失效；四 profile fixture 不代表四客户端实测通过。
+报告归档须保留加载、执行、flush 的输入及捕获证据，便于诊断但不能充当新输入许可。
 
 ## 2. 现有基线
 
@@ -61,6 +96,28 @@ tests/
 每份测试报告保存 testId、suite、seed、gitCommit、工具链/平台、发行版本、协议版本、workspaceId、实际输入、实际固定引用、开始结束时间、状态、断言结果和产物摘要。实机额外记录游戏 Build、Interface、角色标识的受限表示、窗口状态、分辨率、UI 缩放、显示缩放和权限级别。
 
 测试使用合成账号、清理过的二进制样本和必要片段；禁止把完整用户 SV、账号路径或私有探针作为公开 fixture。失败保留最小复现、阶段日志及必要截图，正常流程不上传整屏。
+
+### 3.1 wowdoc/wowdata 逐业务 parity 台账
+
+`tests/parity/coverage.json` 是离线语义回归台账，不是旧 wowdoc/wowdata
+可执行程序的重放器，也不会读取旧工具的 workspace、SavedVariables 或用户数据。
+它把历史业务拆成 55 个可追踪 case：wowdoc 19 个、wowdata 36 个；每个 case
+都必须列出当前命令、断言意图、证据路径和状态。测试会通过当前
+`describe --format=json` 校验命令仍存在，并对证据路径、重复 ID、状态和
+normalizer 做 fail-closed 校验。
+
+截至 2026-09-24，台账统计为：`passed=25`、`fixture-backed=6`、
+`fixture-backed-partial=8`、`intentional-change=16`、`not_run=0`。其中：
+
+- `passed`：当前代码对该 case 的自动化断言已通过；不是历史程序重跑证明。
+- `fixture-backed`：有可复用的固定输入/oracle，但范围不是完整真实来源。
+- `fixture-backed-partial`：只证明了明确的一部分，缺口必须保留在报告中。
+- `intentional-change`：2.0 有意拆分、收敛或删除旧入口，不应补回兼容别名。
+- `not_run`：没有足够离线证据时必须使用；不能为了好看改成 passed。
+
+因此 parity 不能证明真实 CDN 的所有 Build、完整 Hotfix 服务、多客户端实机、
+全量 DB2 表或所有历史数据边界。发行报告必须把这些作为独立的 network/client
+验收项，不能用 55 个离线 case 的数量替代。
 
 ## 4. 命名、结构与 CLI 契约
 
@@ -171,6 +228,20 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | STO-09 | P0 | cache prune 与保留证据、未决操作并存 | 活跃/保留引用不可删除，回收后 retained capture 可校验读取 |
 | STO-10 | P0 | 新旧 SV 同时存在、reload/logout/login | 新命名空间持久化，旧历史不导入；新数据升级/重置规则正确 |
 
+## 7a. 证据生命周期
+
+证据保留和删除不属于普通 cache 回收。测试使用真实临时 workspace、metadata
+generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入口。
+
+| ID | 级别 | 场景 | 必须观察到的结果 |
+| --- | --- | --- | --- |
+| EVD-01 | P0 | `evidence keep <capture-id>` 首次及重复执行 | 首次创建 `lycheedev.evidence-retention.v1`；重复调用幂等，capture/blob identity 不变 |
+| EVD-02 | P0 | 删除有 retention marker 的独占 capture | `evidence remove` 以 generation CAS 删除 manifest 与 marker，并删除独占 blob；删除结果可审计 |
+| EVD-03 | P0 | 其他 metadata 记录引用 capture | remove 返回 `evidence.capture_referenced`，原 manifest、marker 和 blob 均保留 |
+| EVD-04 | P0 | 两个 capture 共享同一 blob | 删除其中一个只移除自身 manifest/marker，共享 blob 和另一 capture 仍可读 |
+| EVD-05 | P1 | blob 缺失或损坏后 remove | 不伪造删除成功；缺失/完整性状态显式返回，metadata 删除与 blob 状态可区分 |
+| EVD-06 | P0 | cache prune 与 retained capture 并存 | prune 不代替 keep/remove，也不删除 evidence blob；显式 remove 仍执行引用与共享检查 |
+
 ## 8. 多 Agent / 多进程回归
 
 下列测试必须启动真实的独立 CLI 进程；goroutine 测试和 go test -race 不能替代文件锁、数据库与进程退出验证。用 barrier 控制交错点，不依赖随机 sleep 碰运气。
@@ -204,7 +275,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | RUN-03 | P0 | 旧 QR、错误请求/角色/Build/摘要 | 丢弃不匹配信号，不触发 reload 或 ACK |
 | RUN-04 | P0 | 提交成功但宿主立刻退出 | 恢复不盲目补发，无法证明的效果保持 unresolved |
 | RUN-05 | P0 | 输入或输出 reload 超时 | 恢复复用原 nonce，不重复 reload；两类 reload 不混淆 |
-| RUN-06 | P0 | 报告已在 SV，但没有观察到 mtime 更新 | 依据精确报告和阶段证据处理，不仅凭 mtime 拒绝/接受 |
+| RUN-06 | P0 | 报告已在 SV，但未观察到 mtime 更新或重入 QR | 原子探针可离线精确校验并归档；不发送输入、不声称 reload 成功、不释放 owner；损坏正文拒绝 |
 | RUN-07 | P0 | 报告 verified 后 ACK 失败 | 返回 capture；resume 只补 ACK 和清理，不重跑或重载 |
 | RUN-08 | P0 | ACK 已确认但清理没有有效帧 | 不能把无帧当无标记；保持收尾未决并可继续 |
 | RUN-09 | P0 | 执行中取消、窗口关闭、进程崩溃 | 释放宿主资源；无法确认的游戏效果标明，绝不强杀游戏 |
@@ -216,6 +287,9 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | RUN-15 | P0 | 任务清理时存在其他所有者条目 | 只清理自己的磁盘条目和标记，保留他人任务与证据 |
 | RUN-16 | P0 | 正常 reload 更换 Lua 会话标记 | 只有匹配原 nonce、相同进程/角色/Build 才更新绑定，其他变化拒绝 |
 | RUN-17 | P0 | 宿主 SHA-256 与游戏字节数/Adler-32 | 各自核对实际原始字节，不以回显摘要冒充代码内容验证 |
+| RUN-18 | P0 | faults 清理重载后另一进程执行 `live ack` | 输入前以归档重入锚点观测当前 inputReady 回执，超时映射 pending 而非 signal_not_observed；零消息回执证明未入队时安全重发，否则只观察且等待有界 |
+| RUN-19 | P1 | 已归档证据的显示回执被 `live hide` 收起 | 有对话帧且输入就绪才发送 `/dev bridge hide`；忙窗口拒绝并保留显示；有效帧连续零符号才算清除，残留回执返回 pending；幂等且不产生新回执或聊天输出 |
+| RUN-20 | P0 | abandon/回执丢失后内存队列阻塞身份的死锁 | `live reset` 只触碰磁盘无占用者窗口；固定 nonce 关联触发只清理当前角色未确认条目并丢弃残留重入票据，其他角色条目保留；无关联回执永不假称已解锁；成功后经正常 bootstrap 重连 |
 
 完整性不是“成功消息数等于预期”，而是每个状态转换有合法前置状态、匹配身份、内容校验与可追溯的外部确认。执行不确定性必须保留，不能通过刷新 requestId 隐藏。
 
@@ -230,7 +304,8 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 的宽松匹配；必须核对原进程/角色/nonce。`--capture-area` 只限定选定窗口中的
 捕获区域，省略时整窗捕获。断开只停止连接，不删除报告或修改别人的任务。
 
-从该连接直接 `live run --session <id> --file <probe.lua>`，验证账号目录自动
+从该连接执行 `live probe put`、`live probe load --session <id> --probe <revision>
+--request <key>`、`live run <operation-id>`、`live ack <operation-id>`，验证账号目录自动
 选择、Unicode/空格名字、不同角色/服务器排除、零/多个候选、扫描预算、路径跳转
 拒绝。选择失败不得留下操作或发送输入；选择成功后新增其他匹配目录不得改变原
 操作及恢复的账号。首次登录可显式 `--account`，目录只是位置选择，不能替代
@@ -248,6 +323,10 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | WIN-08 | P0 | QR 低对比度、错误码、两个不同回执同屏 | 正确过滤，匹配身份，失败有界；不选“第一个码” |
 | WIN-09 | P0 | 连续 100 次打开/关闭捕获和恢复 | 预热后线程、原生句柄、显存/内存无持续增长，退出能结束 |
 | WIN-10 | P1 | 用户在自动化期间操作游戏 | 明确观察失效/冲突并停下；不宣称能隔离人工操作 |
+| WIN-11 | P0 | 独立 `live reload` 重试与恢复 | 同一幂等键只提交一次；只接受 nonce、runtime epoch、进程、角色和 Build 全匹配的新 ready |
+| WIN-12 | P0 | load/run/ack 分步执行 | load 不执行，run 停在 verified，ack 不触发额外 reload 且只回收精确条目 |
+| WIN-13 | P0 | `live bugs --count 1..100` | 只读取既有 provider 存储；缺 provider/不完整字段/零条目保持各自语义 |
+| WIN-14 | P0 | 同安装的正反斜杠、点段、相对路径、大小写、尾分隔符 | 发现、选择和 session 约束一致；不会过滤掉在线目标，也不会向其他安装发送输入；多窗口保持独立 |
 
 纯 Go QR 方案必须与旧方案对同一公开可用的回执样本集合比较识别率和耗时。若关键样本失败，阶段 S1 不通过；不能把切回 Python 作为完成重写。
 
@@ -258,7 +337,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | Retail | 120100 | 实际完整 Build、地区、语言、插件版本 |
 | Classic | 50504 | 同上 |
 | Titan | 38002 | 同上 |
-| Forever | 16001 | 保留源码/TOC；未获真机验收，2.0.1 不声明支持 |
+| Forever | 16001 | 保留源码/TOC；未获真机验收，2.0.2 不声明支持 |
 
 这些 Interface 是项目当前基线，不能由测试日期推断仍有效。实现期间若客户端更新，按项目要求同步 TOC、配置、目录、README 和测试基线。
 
@@ -273,7 +352,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | LUA-07 | P1 | 运行、对象、事件、追踪、错误、导出、工作台 UI | 不再笼统验收：各能力按 11a 的 WKB-01..12 分项执行；本行只保留跨能力断言（能力存在、有界工作、长本地化与代表缩放验证） |
 | LUA-08 | P0 | 新目录/私有模块/机器入口 | 无旧路由或 namespace 兼容层；修改过的视觉内容有前后截图 |
 
-离线 Lua fixture 可以保留四份用于兼容性检查；2.0.1 的产品验收对象为 Retail、Classic、Titan 三端。用户已完成游戏真机手测，结论与详细记录分别写入实施状态。CI 不使用交互桌面或游戏内实测作为门禁，不将离线 fixture 称为真实游戏验收。
+离线 Lua fixture 可以保留四份用于兼容性检查；2.0.2 的产品验收对象为 Retail、Classic、Titan 三端。用户已完成的游戏真机手测与本轮静态回归分开记录。CI 不使用交互桌面或游戏内实测作为门禁，不将离线 fixture 称为真实游戏验收。
 
 ## 11a. 工作台能力回归
 
@@ -318,6 +397,14 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | SKL-15 | P0 | 跨 agent 交接与数据/游戏并行 | session/snapshot/capture ID 随交接传递，第二个 agent 续用而非重新连接；数据查询与游戏运行并行时目标与状态独立、产物可组合、工具轨迹无串操作 |
 | SKL-16 | P0 | 未决操作恢复；报告已验证但清理未完 | 以 operation ID 恢复，绝不重跑探针或把重连当恢复；verified 报告 + cleanup pending + complete:false 解释为“结果可用、收尾未完”，不描述为失败或完全完成 |
 
+新增首次加载回归（方案见 [连接恢复](live-startup-recovery.md)，真机状态仍为 not_run）：
+
+| ID | 级别 | 场景 | 必须观察到的结果 |
+| --- | --- | --- | --- |
+| SKL-17 | P0 | managed + identity_unreadable；candidate_missing 空/非空候选 | 区分磁盘与运行状态，超时不臆断加载状态；不循环 connect/reload，不要求手输 connect |
+| SKL-18 | P0 | 无 session 的首次加载、禁用插件和运行中升级 | 在已有授权与可用桌面工具下按实际界面启用，再由 CLI 验证身份/ready；桌面能力缺失如实报告，不新增输入后门 |
+| SKL-19 | P0 | 限定 Classic、Retail 正被其他 agent 使用 | 发现限定授权安装；界面维护不抢占目标所有权，不操作 Retail；source/data 可继续并行 |
+
 ## 13. 安装与发行回归
 
 | ID | 级别 | 场景 | 必须观察到的结果 |
@@ -348,11 +435,11 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 
 ## 15. CI 与执行节奏
 
-Windows 固定 required jobs、工具链和托管 runner 遵守 [2.0.1 发布规范](release-2.0.1.md)。真实游戏手测由用户完成并单独记录，不属于 CI 或发布门禁。以下额外测试验证 CI/发布合同，模拟发布器用于离线故障测试，不在普通测试中向真实 registry 写入。
+Windows 固定 required jobs、工具链和托管 runner 遵守 [2.0.2 发布规范](release-2.0.2.md)。真实游戏手测由用户完成并单独记录，不属于 CI 或发布门禁。以下额外测试验证 CI/发布合同，模拟发布器用于离线故障测试，不在普通测试中向真实 registry 写入。
 
 | ID | 级别 | 场景 | 必须观察到的结果 |
 | --- | --- | --- | --- |
-| REL-01 | P0 | package/lock/TOC/CLI/manifest 任一不是 2.0.1 | 正式版本门槛失败，禁止以 v2.0.1 发布 |
+| REL-01 | P0 | package/lock/TOC/CLI/manifest 任一不是 2.0.2 | 正式版本门槛失败，禁止以 v2.0.2 发布 |
 | REL-02 | P0 | 任一 Windows required job 失败、跳过或取消 | ci-required/release-gate 明确失败，不能由 Linux 通过抵消 |
 | REL-03 | P0 | Windows 原生 exe 与实际 npm tgz | 在 Windows 隔离安装并执行，空格/中文路径和退出码正常 |
 | REL-04 | P0 | 托管 runner 无交互桌面 | 不创建 self-hosted desktop job；游戏真机由用户人工验收并在实施状态单独记录，自动发行门禁不等待桌面 artifact |
@@ -362,7 +449,7 @@ Windows 固定 required jobs、工具链和托管 runner 遵守 [2.0.1 发布规
 | REL-08 | P0 | npm 包有 optional/runtime 依赖或安装时下载 | 白名单检查失败；包内二进制齐全且 ignore-scripts 可运行 |
 | REL-09 | P0 | registry 已有同版本、publish 超时或发布后暂不可见 | 区分存在/不存在/未知；已接受的 publish 只重试有界回读，不重复发布；仅在 integrity 相同时继续后验证 |
 | REL-10 | P0 | npm 成功但 Release 创建失败 | Release job 必须具备 `GH_TOKEN` 和 `contents: write`；失败时只补后验证与 Release，不重复 publish 或移动 tag |
-| REL-11 | P0 | RC 与正式版本渠道 | 2.0.1-rc.N 只进入 next，正式 2.0.1 进入 latest；不得先占用正式版试装 |
+| REL-11 | P0 | RC 与正式版本渠道 | 2.0.2-rc.N 只进入 next，正式 2.0.2 进入 latest；不得先占用正式版试装 |
 | REL-12 | P0 | 发布后 registry 回读与干净安装 | version/Commit/integrity/来源证明/资源一致，所有声明平台可运行 |
 | REL-13 | P0 | 一个原生平台产物缺失或许可清单不完整 | 发行失败，不将缺失转换成 warning 后继续 |
 | REL-14 | P1 | npm 聚合包压缩/解包体积和安装耗时 | 达到冻结门槛；不静默引入平台依赖改变分发合同 |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -131,5 +132,87 @@ func TestCaptureCommitReusesIdenticalContentAddressedObject(t *testing.T) {
 	}
 	if _, err := a.CommitCapture(ctx, newDraft()); !errors.Is(err, vault.ErrGeneration) {
 		t.Fatalf("diverging content under one content address: %v", err)
+	}
+}
+
+func TestCaptureRetentionAndExplicitRemoval(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "workspace")
+	s, err := vault.Initialize(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	a := OpenArchive(s, m)
+	ref, err := a.CommitCapture(ctx, CaptureDraft{Reader: strings.NewReader("payload"), MaxBytes: 1024, MediaType: "text/plain", Complete: true, Provenance: Provenance{Kind: "fixture", Locator: "retention"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := a.KeepCapture(ctx, ref.ID)
+	if err != nil || !kept.Created || kept.Retention.CaptureID != ref.ID {
+		t.Fatalf("keep = %+v, err=%v", kept, err)
+	}
+	again, err := a.KeepCapture(ctx, ref.ID)
+	if err != nil || again.Created || again.Retention != kept.Retention {
+		t.Fatalf("idempotent keep = %+v, err=%v", again, err)
+	}
+	removed, err := a.RemoveCapture(ctx, ref.ID)
+	if err != nil || !removed.ManifestRemoved || !removed.RetentionRemoved || !removed.BlobRemoved || removed.BlobShared || removed.BlobMissing {
+		t.Fatalf("remove = %+v, err=%v", removed, err)
+	}
+	if _, err := a.InspectCapture(ctx, ref.ID); !errors.Is(err, vault.ErrMissingRecord) {
+		t.Fatalf("removed capture still readable: %v", err)
+	}
+	if _, err := s.ReadBlob(ctx, ref.Blob, 1024); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("removed blob = %v, want not-exist", err)
+	}
+}
+
+func TestCaptureRemovalRejectsReferencesAndPreservesSharedBlob(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "workspace")
+	s, err := vault.Initialize(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	a := OpenArchive(s, m)
+	draft := func(locator string) CaptureDraft {
+		return CaptureDraft{Reader: strings.NewReader("shared"), MaxBytes: 1024, MediaType: "text/plain", Complete: true, Provenance: Provenance{Kind: "fixture", Locator: locator}}
+	}
+	first, err := a.CommitCapture(ctx, draft("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CommitCapture(ctx, draft("second")); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CommitDocuments(ctx, vault.Mutation{Key: "fixture/reference", Value: json.RawMessage(`{"capture":"` + first.ID + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RemoveCapture(ctx, first.ID); !errors.Is(err, ErrCaptureReferenced) {
+		t.Fatalf("referenced remove err = %v", err)
+	}
+	if _, err := a.InspectCapture(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DeleteDocuments(ctx, vault.Deletion{Key: "fixture/reference", ExpectedGeneration: 1}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := a.RemoveCapture(ctx, first.ID)
+	if err != nil || !removed.BlobShared || removed.BlobRemoved {
+		t.Fatalf("shared remove = %+v, err=%v", removed, err)
+	}
+	page, err := a.ListCaptures(ctx, "", 10)
+	if err != nil || len(page) != 1 {
+		t.Fatalf("remaining capture = %+v, err=%v", page, err)
 	}
 }

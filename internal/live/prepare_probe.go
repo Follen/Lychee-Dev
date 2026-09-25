@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,23 @@ import (
 // evidence before reserving work. It neither edits the addon queue nor sends
 // input. Admission is shared at the installation, not a machine input lease.
 func (s *WindowSession) PrepareProbe(ctx context.Context, root, snapshot, account string, code []byte) (journal.WorkRecord, error) {
+	return s.prepareProbe(ctx, root, snapshot, account, "", "", "cleaned", code)
+}
+
+// PrepareProbeRevision freezes one immutable registry revision and a caller
+// supplied idempotency key. Repeating the same request returns the original
+// operation; changing any frozen input under that key is a conflict.
+func (s *WindowSession) PrepareProbeRevision(ctx context.Context, root, snapshot, account, requestKey string, revision ProbeRevision) (journal.WorkRecord, error) {
+	if !validProbeRevision(revision) {
+		return journal.WorkRecord{}, errors.New("live.probe_revision_corrupt")
+	}
+	if requestKey == "" || len(requestKey) > 128 {
+		return journal.WorkRecord{}, errors.New("live.request_key_invalid")
+	}
+	return s.prepareProbe(ctx, root, snapshot, account, requestKey, revision.ID, "loaded", revision.Code)
+}
+
+func (s *WindowSession) prepareProbe(ctx context.Context, root, snapshot, account, requestKey, revision, goal string, code []byte) (journal.WorkRecord, error) {
 	var zero journal.WorkRecord
 	if s == nil || s.closed || s.reader == nil || s.confirm == nil {
 		return zero, errors.New("live.session_closed")
@@ -39,6 +57,7 @@ func (s *WindowSession) PrepareProbe(ctx context.Context, root, snapshot, accoun
 	ready := s.ready
 	input := ReportIntent{
 		Schema:   "lycheedev.report-intent.v1",
+		Revision: revision,
 		Expected: bridge.SignalExpectation{Kind: "reported", Release: ready.Release, SessionNonce: ready.SessionNonce, RequestID: "REQ-" + hex.EncodeToString(entropy[:16]), Character: ready.Character, Realm: ready.Realm, Product: ready.Product, Build: ready.Build, AfterSequence: ready.Sequence},
 		Code:     append([]byte(nil), code...),
 		Load:     &ProbeLoadIntent{Installation: s.target.Client.Directory, Account: account, GUID: ready.GUID, ReloadNonce: hex.EncodeToString(entropy[16:])},
@@ -47,7 +66,20 @@ func (s *WindowSession) PrepareProbe(ctx context.Context, root, snapshot, accoun
 	if err != nil {
 		return zero, err
 	}
-	intent := journal.WorkIntent{Kind: "probe", Resource: windowResource(s.target), Snapshot: snapshot, Session: ready.SessionNonce, Request: raw}
+	intent := journal.WorkIntent{Kind: "probe", Resource: windowResource(s.target), Snapshot: snapshot, Session: ready.SessionNonce, Request: raw, Goal: goal}
+	if requestKey != "" {
+		requestIdentity, _ := json.Marshal(struct {
+			Resource string `json:"resource"`
+			Snapshot string `json:"snapshot"`
+			Account  string `json:"account"`
+			Revision string `json:"revision"`
+			SHA256   string `json:"sha256"`
+		}{intent.Resource, snapshot, account, revision, fmt.Sprintf("%x", sha256.Sum256(code))})
+		digest := sha256.Sum256(requestIdentity)
+		key := sha256.Sum256([]byte(intent.Resource + "\x00" + requestKey))
+		intent.RequestKey = "live-" + hex.EncodeToString(key[:])
+		intent.RequestDigest = hex.EncodeToString(digest[:])
+	}
 	if _, _, err := probeDefinition(journal.WorkRecord{Intent: intent}); err != nil {
 		return zero, err
 	}

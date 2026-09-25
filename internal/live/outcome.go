@@ -14,13 +14,14 @@ import (
 // Outcome is a read model, not another persisted state machine. A verified
 // report remains usable even when the game's cleanup has not been confirmed.
 type Outcome struct {
-	OperationID string        `json:"operationId"`
-	Snapshot    string        `json:"snapshot"`
-	Status      string        `json:"status"`
-	Complete    bool          `json:"complete"`
-	Report      ReportOutcome `json:"report"`
-	Cleanup     string        `json:"cleanup"`
-	Stage       string        `json:"-"`
+	OperationID    string        `json:"operationId"`
+	Snapshot       string        `json:"snapshot"`
+	Status         string        `json:"status"`
+	Complete       bool          `json:"complete"`
+	RuntimeCapture string        `json:"runtimeCapture,omitempty"`
+	Report         ReportOutcome `json:"report"`
+	Cleanup        string        `json:"cleanup"`
+	Stage          string        `json:"-"`
 }
 
 type ReportOutcome struct {
@@ -39,6 +40,9 @@ func Status(ctx context.Context, root, id string) (Outcome, error) {
 			return Outcome{}, err
 		}
 		result := pendingOutcome(record)
+		if record.Intent.Kind == "reload" {
+			return reloadOutcome(ctx, evidence.OpenArchive(store, metadata), record, result)
+		}
 		var observed reportObservation
 		if err := json.Unmarshal(record.Observation, &observed); err != nil {
 			return result, err
@@ -62,6 +66,9 @@ func Status(ctx context.Context, root, id string) (Outcome, error) {
 
 func pendingOutcome(record journal.WorkRecord) Outcome {
 	result := Outcome{OperationID: record.OperationID, Snapshot: record.Intent.Snapshot, Status: record.Status, Stage: record.Stage, Report: ReportOutcome{State: "unavailable"}, Cleanup: "pending"}
+	if record.Stage == "abandoned" && record.Status == "abandoned" {
+		result.Cleanup = "abandoned"
+	}
 	if record.Stage == "cleaned" && (record.Status == "completed" || record.Status == "cancelled") {
 		result.Cleanup = "complete"
 	}

@@ -164,9 +164,9 @@ func TestWorkspaceVerbContractsAreAdvertised(t *testing.T) {
 			t.Fatalf("describe does not advertise %q", path)
 		}
 	}
-	for _, path := range []string{"live bugs", "live reload", "evidence keep", "evidence remove"} {
-		if advertised[path] {
-			t.Fatalf("describe advertises unimplemented %q", path)
+	for _, path := range []string{"evidence keep", "evidence remove"} {
+		if !advertised[path] {
+			t.Fatalf("describe does not advertise %q", path)
 		}
 	}
 
@@ -237,6 +237,10 @@ func TestWorkspaceVerbArgumentAdmission(t *testing.T) {
 		{"init", "--plan", "--fresh", "--resume"},
 		{"doctor", "--remote"},
 		{"evidence", "list", "--limit", "201"},
+		{"evidence", "keep"},
+		{"evidence", "keep", "CAP-example", "extra"},
+		{"evidence", "remove"},
+		{"evidence", "remove", "CAP-example", "extra"},
 	} {
 		argv := append(append([]string{}, args...), "--format=json")
 		// Malformed target fields reach the module validator and carry the
@@ -249,9 +253,8 @@ func TestWorkspaceVerbArgumentAdmission(t *testing.T) {
 }
 
 func TestSubcommandHelpDoesNotMakeUnknownCommandsUsable(t *testing.T) {
-	// Implemented verbs are advertised; future live bugs/reload and evidence
-	// keep/remove must remain unrouted even when a caller asks for help.
-	for _, args := range [][]string{{"missing", "--help"}, {"live", "bugs", "--help"}, {"live", "reload", "--help"}, {"evidence", "keep", "--help"}, {"evidence", "remove", "--help"}, {"live", "unknown", "--help"}} {
+	// Unknown verbs remain unrouted even when a caller asks for help.
+	for _, args := range [][]string{{"missing", "--help"}, {"live", "unknown", "--help"}} {
 		response, code := invoke(t, append(args, "--format=json")...)
 		if code != 2 || response.OK || response.Error == nil || response.Error.Code != "command.invalid_arguments" {
 			t.Fatalf("%v: code=%d response=%+v", args, code, response)
@@ -261,7 +264,23 @@ func TestSubcommandHelpDoesNotMakeUnknownCommandsUsable(t *testing.T) {
 
 func TestLiveCommandFlagAdmissionComesFromItsContract(t *testing.T) {
 	for _, args := range [][]string{
-		{"live", "run", "--session", "SESSION", "--account", "ACCOUNT", "--file", "probe.lua", "--home", "root", "--help", "--format=json"},
+		{"live", "run"},
+		{"live", "ack"},
+		{"live", "status"},
+		{"live", "session"},
+	} {
+		response, code := invoke(t, append(args, "--format=json")...)
+		if code != 2 || response.OK || response.Error == nil || response.Error.Code != "command.invalid_arguments" {
+			t.Fatalf("missing positional argument accepted for %v: code=%d response=%+v", args, code, response)
+		}
+	}
+
+	for _, args := range [][]string{
+		{"live", "run", "OP-loaded", "--home", "root", "--help", "--format=json"},
+		{"live", "reload", "--session", "SESSION", "--request", "reload-1", "--home", "root", "--help", "--format=json"},
+		{"live", "probe", "load", "--session", "SESSION", "--request", "load-1", "--probe", "probe-name", "--account", "ACCOUNT", "--home", "root", "--help", "--format=json"},
+		{"live", "bugs", "--session", "SESSION", "--request", "bugs-1", "--count", "10", "--account", "ACCOUNT", "--home", "root", "--help", "--format=json"},
+		{"live", "ack", "OP-verified", "--home", "root", "--help", "--format=json"},
 		{"live", "resume", "OP-existing", "--home", "root", "--help", "--format=json"},
 	} {
 		response, code := invoke(t, args...)
@@ -271,7 +290,7 @@ func TestLiveCommandFlagAdmissionComesFromItsContract(t *testing.T) {
 	}
 
 	for _, flag := range []string{"--installation=other", "--pid=7", "--character=Other", "--realm=Other", "--nonce=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--snapshot=PIN-other", "--region=window"} {
-		response, code := invoke(t, "live", "run", "--session=S", "--account=A", "--file=probe.lua", flag, "--format=json")
+		response, code := invoke(t, "live", "run", "OP-loaded", flag, "--format=json")
 		if code != 2 || response.OK || response.Error == nil || !strings.Contains(response.Error.Message, flag[:strings.IndexByte(flag, '=')]) {
 			t.Fatalf("live run accepted %s: code=%d response=%+v", flag, code, response)
 		}

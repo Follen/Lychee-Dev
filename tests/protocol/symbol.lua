@@ -31,7 +31,7 @@ CreateFrame = function(kind, name, parent)
     function frame:SetScale(value) self.scale = value end
     function frame:SetSize(w, h) self.width, self.height = w, h end
     function frame:UnregisterAllEvents() self.events = {} end
-    function frame:RegisterEvent(event) assert(event == "PLAYER_LEAVING_WORLD" or event == "PLAYER_REGEN_DISABLED"); self.events[event] = true end
+    function frame:RegisterEvent(event) assert(event == "PLAYER_LEAVING_WORLD" or event == "PLAYER_REGEN_DISABLED" or event == "LOADING_SCREEN_ENABLED"); self.events[event] = true end
     function frame:SetScript(event, fn) assert(event == "OnEvent"); self.callback = fn end
     function frame:CreateTexture(_, layer)
         local texture = { layer = layer }

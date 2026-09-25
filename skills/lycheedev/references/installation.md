@@ -16,3 +16,9 @@ An installation result proves filesystem work only. It does not prove that the
 running client loaded the release, that the addon is enabled, or that live
 input is available. Installation/update/removal must not be used to import old
 task definitions, queue state, bindings, or SavedVariables into a new run.
+
+If the authorized task includes using the running client, follow
+[live-startup.md](live-startup.md) after deployment. Activation precedes a
+bridge session when the addon is not running; do not require that session as
+the prerequisite for its own first activation. Installation alone does not
+authorize a game restart or a switch of character.

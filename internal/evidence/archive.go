@@ -52,6 +52,35 @@ type CaptureRef struct {
 	CapturedAt time.Time     `json:"capturedAt"`
 }
 
+var (
+	ErrCaptureReferenced  = errors.New("evidence.capture_referenced")
+	ErrInvalidRetention   = errors.New("evidence.invalid_retention")
+	ErrReferenceScanLimit = errors.New("evidence.reference_scan_limit")
+	ErrCaptureScanLimit   = errors.New("evidence.capture_scan_limit")
+)
+
+type RetentionRecord struct {
+	Schema    string        `json:"schema"`
+	CaptureID string        `json:"captureId"`
+	Blob      vault.BlobRef `json:"blob"`
+	KeptAt    time.Time     `json:"keptAt"`
+}
+
+type KeepResult struct {
+	Capture   CaptureRef      `json:"capture"`
+	Retention RetentionRecord `json:"retention"`
+	Created   bool            `json:"created"`
+}
+
+type RemoveResult struct {
+	CaptureID        string `json:"captureId"`
+	ManifestRemoved  bool   `json:"manifestRemoved"`
+	RetentionRemoved bool   `json:"retentionRemoved"`
+	BlobRemoved      bool   `json:"blobRemoved"`
+	BlobShared       bool   `json:"blobShared"`
+	BlobMissing      bool   `json:"blobMissing"`
+}
+
 type Archive struct {
 	store    *vault.Store
 	metadata *vault.Metadata
@@ -91,8 +120,9 @@ func (a *Archive) CommitCapture(ctx context.Context, draft CaptureDraft) (Captur
 // another process committed an object under the same key. Immutable committed
 // objects allow parallel access, and conflicting committers reuse the validated
 // object instead of failing (design §9): an identically encoded stored document
-// is accepted, while diverging bytes stay a conflict. Captures are never
-// deleted, so the read-back after a conflict observes the winning document;
+// is accepted, while diverging bytes stay a conflict. The explicit removal
+// path below is the only way a capture manifest can leave the archive; the
+// read-back after a conflict observes the winning document;
 // the retry bound exists for transient read failures and never waits on
 // wall-clock time.
 func (a *Archive) commitCaptureDocument(ctx context.Context, key string, payload []byte) error {
@@ -180,4 +210,154 @@ func (a *Archive) ListCaptures(ctx context.Context, after string, limit int) ([]
 		refs = append(refs, checked)
 	}
 	return refs, nil
+}
+
+// KeepCapture records an explicit retention decision beside the immutable
+// capture manifest. Repeating the command is idempotent.
+func (a *Archive) KeepCapture(ctx context.Context, id string) (KeepResult, error) {
+	ref, err := a.InspectCapture(ctx, id)
+	if err != nil {
+		return KeepResult{}, err
+	}
+	record := RetentionRecord{Schema: "lycheedev.evidence-retention.v1", CaptureID: id, Blob: ref.Blob, KeptAt: capturedAt()}
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return KeepResult{}, err
+	}
+	key := "evidence/keep/" + id
+	doc, readErr := a.metadata.ReadDocument(ctx, key)
+	created := false
+	if errors.Is(readErr, vault.ErrMissingRecord) {
+		if err := a.metadata.CommitDocuments(ctx, vault.Mutation{Key: key, Value: payload}); err != nil {
+			if !errors.Is(err, vault.ErrGeneration) {
+				return KeepResult{}, err
+			}
+			doc, err = a.metadata.ReadDocument(ctx, key)
+			if err != nil {
+				return KeepResult{}, err
+			}
+		} else {
+			created = true
+			doc.Value = payload
+		}
+	} else if readErr != nil {
+		return KeepResult{}, readErr
+	}
+	var existing RetentionRecord
+	if err := json.Unmarshal(doc.Value, &existing); err != nil || existing.Schema != record.Schema || existing.CaptureID != id || existing.Blob != ref.Blob {
+		return KeepResult{}, ErrInvalidRetention
+	}
+	return KeepResult{Capture: ref, Retention: existing, Created: created}, nil
+}
+
+// RemoveCapture is the only destructive evidence operation. It refuses any
+// metadata record that still names the capture, removes its retention marker
+// in the same metadata transaction, and deletes the blob only when no other
+// capture manifest shares it.
+func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, error) {
+	ref, err := a.InspectCapture(ctx, id)
+	if err != nil {
+		return RemoveResult{CaptureID: id}, err
+	}
+	doc, err := a.metadata.ReadDocument(ctx, "capture/"+id)
+	if err != nil {
+		return RemoveResult{CaptureID: id}, err
+	}
+	keepKey := "evidence/keep/" + id
+	keepDoc, keepErr := a.metadata.ReadDocument(ctx, keepKey)
+	if keepErr != nil && !errors.Is(keepErr, vault.ErrMissingRecord) {
+		return RemoveResult{CaptureID: id}, keepErr
+	}
+	if keepErr == nil {
+		var kept RetentionRecord
+		if err := json.Unmarshal(keepDoc.Value, &kept); err != nil || kept.CaptureID != id || kept.Blob != ref.Blob {
+			return RemoveResult{CaptureID: id}, ErrInvalidRetention
+		}
+	}
+	if referenced, err := a.findExternalReference(ctx, id); err != nil {
+		return RemoveResult{CaptureID: id}, err
+	} else if referenced {
+		return RemoveResult{CaptureID: id}, ErrCaptureReferenced
+	}
+	shared, err := a.blobSharedByAnotherCapture(ctx, id, ref.Blob)
+	if err != nil {
+		return RemoveResult{CaptureID: id}, err
+	}
+	removals := []vault.Deletion{{Key: "capture/" + id, ExpectedGeneration: doc.Generation}}
+	retentionRemoved := false
+	if keepErr == nil {
+		removals = append(removals, vault.Deletion{Key: keepKey, ExpectedGeneration: keepDoc.Generation})
+		retentionRemoved = true
+	}
+	if err := a.metadata.DeleteDocuments(ctx, removals...); err != nil {
+		return RemoveResult{CaptureID: id}, err
+	}
+	result := RemoveResult{CaptureID: id, ManifestRemoved: true, RetentionRemoved: retentionRemoved, BlobShared: shared}
+	if shared {
+		return result, nil
+	}
+	removed, err := a.store.RemoveBlob(ctx, ref.Blob)
+	if err != nil {
+		return result, err
+	}
+	result.BlobRemoved = removed
+	result.BlobMissing = !removed
+	return result, nil
+}
+
+func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, error) {
+	needle := []byte("\"" + id + "\"")
+	after := ""
+	for page := 0; page < 100; page++ {
+		docs, err := a.metadata.ListDocuments(ctx, "", after, 1000)
+		if err != nil {
+			return false, err
+		}
+		if len(docs) == 0 {
+			return false, nil
+		}
+		for _, doc := range docs {
+			if doc.Key == "capture/"+id || doc.Key == "evidence/keep/"+id {
+				continue
+			}
+			if bytes.Contains(doc.Value, needle) {
+				return true, nil
+			}
+		}
+		after = docs[len(docs)-1].Key
+		if len(docs) < 1000 {
+			return false, nil
+		}
+	}
+	return false, ErrReferenceScanLimit
+}
+
+func (a *Archive) blobSharedByAnotherCapture(ctx context.Context, id string, blob vault.BlobRef) (bool, error) {
+	after := "capture/"
+	for page := 0; page < 100; page++ {
+		docs, err := a.metadata.ListDocuments(ctx, "capture/", after, 1000)
+		if err != nil {
+			return false, err
+		}
+		if len(docs) == 0 {
+			return false, nil
+		}
+		for _, doc := range docs {
+			if doc.Key == "capture/"+id {
+				continue
+			}
+			var other CaptureRef
+			if err := json.Unmarshal(doc.Value, &other); err != nil {
+				return false, err
+			}
+			if other.Blob == blob {
+				return true, nil
+			}
+		}
+		after = docs[len(docs)-1].Key
+		if len(docs) < 1000 {
+			return false, nil
+		}
+	}
+	return false, ErrCaptureScanLimit
 }

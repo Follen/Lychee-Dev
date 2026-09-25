@@ -74,6 +74,8 @@ func ParseSignal(data []byte) (Signal, error) {
 	switch signal.Kind {
 	case "identity":
 		return parseIdentitySignal(signal)
+	case "reset":
+		return parseResetSignal(signal)
 	case "ready", "loaded", "reported", "acknowledged", "cancelled", "cleared":
 	default:
 		return signal, errors.New("bridge.invalid_signal_kind")
@@ -115,6 +117,24 @@ func parseSessionSignal(signal Signal) (Signal, error) {
 	}
 	if signal.CodeBytes > 0 && !checksum(signal.CodeAdler32) || signal.ReportBytes > 0 && !checksum(signal.ReportAdler32) {
 		return signal, errors.New("bridge.invalid_signal_checksum")
+	}
+	return signal, nil
+}
+
+// parseResetSignal validates the session-free recovery receipt. The actor is
+// mandatory because the reset only ever tombstones that actor's own entries,
+// and inputReady stays false: the receipt proves delivery, never readiness.
+func parseResetSignal(signal Signal) (Signal, error) {
+	if !queueHex(signal.ProbeNonce, 32) {
+		return signal, errors.New("bridge.invalid_signal_probe_nonce")
+	}
+	if signal.SessionNonce != "" || signal.RequestID != "" || signal.ReloadNonce != "" || signal.CleanupNonce != "" ||
+		signal.Sequence != 0 || signal.CodeBytes != 0 || signal.ReportBytes != 0 || signal.CodeAdler32 != "" || signal.ReportAdler32 != "" ||
+		signal.ActorState != "" || signal.InputReason != "" || signal.InputReady {
+		return signal, errors.New("bridge.invalid_reset_signal")
+	}
+	if !queueLabel(signal.Character) || !queueLabel(signal.Realm) || !queueLabel(signal.GUID) {
+		return signal, errors.New("bridge.invalid_reset_actor")
 	}
 	return signal, nil
 }
@@ -185,8 +205,9 @@ func (s Signal) Match(expected SignalExpectation) error {
 			return ErrSignalIdentity
 		}
 	}
-	if s.Kind == "identity" {
-		// probeNonce correlation replaces sequence freshness for identity.
+	if s.Kind == "identity" || s.Kind == "reset" {
+		// Session-free discovery receipts replace sequence freshness with
+		// mandatory nonce correlation enforced by their discovery entries.
 		if expected.AfterSequence != 0 {
 			return fmt.Errorf("%w: stale sequence", ErrSignalIdentity)
 		}

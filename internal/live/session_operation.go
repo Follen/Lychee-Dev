@@ -38,6 +38,7 @@ func operationAnchor(ctx context.Context, root string, record journal.WorkRecord
 	ready := base.Ready
 	var observed struct {
 		ReloadedCapture string `json:"reloadedCapture"`
+		AckReadyCapture string `json:"ackReadyCapture"`
 		ClearedID       string `json:"clearedId"`
 		CleanupReadyID  string `json:"cleanupReadyId"`
 	}
@@ -48,6 +49,12 @@ func operationAnchor(ctx context.Context, root string, record journal.WorkRecord
 	}
 	if observed.ReloadedCapture != "" {
 		ready, _, err = readReloadEvidence(ctx, root, record, input, binding, observed.ReloadedCapture)
+		if err != nil {
+			return bridge.Signal{}, err
+		}
+	}
+	if observed.AckReadyCapture != "" {
+		ready, err = readAckReadiness(ctx, root, record, input, binding, ready, observed.AckReadyCapture, observed.ReloadedCapture != "")
 		if err != nil {
 			return bridge.Signal{}, err
 		}

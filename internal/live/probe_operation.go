@@ -118,16 +118,20 @@ func (p *ProbeOperation) PrepareFiles(ctx context.Context) (journal.WorkRecord, 
 			return journal.WorkRecord{}, err
 		}
 		stop := false
-		switch record.Stage {
-		case "flush_requested", "persisted", "verified", "ack_requested":
-			var observed struct {
-				ReloadedCapture string `json:"reloadedCapture"`
-			}
-			if err := json.Unmarshal(record.Observation, &observed); err != nil {
-				return journal.WorkRecord{}, err
-			}
-			if observed.ReloadedCapture == "" {
-				return journal.WorkRecord{}, errors.New("live.reload_not_observed")
+		input, err := reportInput(record)
+		if err != nil {
+			return record, err
+		}
+		if input.Revision == "" {
+			switch record.Stage {
+			case "flush_requested", "persisted", "verified", "ack_requested":
+				var observed reportObservation
+				if err := json.Unmarshal(record.Observation, &observed); err != nil {
+					return record, err
+				}
+				if observed.ReloadedCapture == "" {
+					return record, errors.New("live.reload_not_observed")
+				}
 			}
 		}
 		switch record.Stage {

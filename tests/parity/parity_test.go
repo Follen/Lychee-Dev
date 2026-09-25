@@ -11,17 +11,10 @@ import (
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/command"
+	semanticparity "github.com/follenfang/lycheedev/internal/parity"
 	"github.com/follenfang/lycheedev/internal/records/video"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
-
-type ledger struct {
-	Schema      string   `json:"schema"`
-	Purpose     string   `json:"purpose"`
-	Offline     bool     `json:"offline"`
-	Groups      []group  `json:"groups"`
-	Normalizers []string `json:"normalizers"`
-}
 
 // These checks consume retained bytes and the recorded oracle as data. They do
 // not invoke the retired executable; the legacy result is only a golden value.
@@ -137,54 +130,55 @@ func TestDemuxGoldenThroughParserAndCurrentCLI(t *testing.T) {
 	}
 }
 
-type group struct {
-	Legacy   string   `json:"legacy"`
-	Current  []string `json:"current"`
-	Evidence []string `json:"evidence"`
-	Status   string   `json:"status"`
-}
-
-func TestCoverageLedgerIsCompleteAndGrounded(t *testing.T) {
+func TestCoverageCatalogIsCompleteAndGrounded(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
-	raw, err := os.ReadFile("coverage.json")
+	catalog, err := semanticparity.Load("coverage.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc ledger
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&doc); err != nil {
+	commands, err := semanticparity.DiscoverCommands(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Schema != "lycheedev.semantic-parity-coverage.v1" || !doc.Offline {
-		t.Fatalf("unexpected ledger contract: %+v", doc)
+	report, err := semanticparity.Validate(catalog, root, commands)
+	if err != nil {
+		t.Fatal(err)
 	}
-	seen := map[string]bool{}
-	for _, g := range doc.Groups {
-		if g.Legacy == "" || seen[g.Legacy] || len(g.Current) == 0 || len(g.Evidence) == 0 {
-			t.Fatalf("incomplete or duplicate group: %+v", g)
-		}
-		seen[g.Legacy] = true
-		if g.Status != "fixture-backed" && g.Status != "fixture-backed-partial" && g.Status != "current-tests" && g.Status != "intentional-change" {
-			t.Fatalf("unknown status %q", g.Status)
-		}
-		for _, pattern := range g.Evidence {
-			matches, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(pattern)))
-			if err != nil || len(matches) == 0 {
-				t.Errorf("%s evidence %q has no repository match (err=%v)", g.Legacy, pattern, err)
-			}
-		}
+	if report.Summary.Total != len(catalog.Cases) || report.Summary.Total < 50 {
+		t.Fatalf("unexpected parity summary: %+v", report.Summary)
 	}
-	for _, want := range []string{"wowdoc.source", "wowdata.sql", "wowdata.db2", "wowdata.hotfix", "wowdata.video", "wowdata.cache", "wowdata.golden"} {
-		if !seen[want] {
-			t.Errorf("legacy group missing from ledger: %s", want)
-		}
-	}
+	t.Logf("offline parity inventory: %+v", report.Summary)
 	wantNormalizers := []string{"cache-state-v1", "profile-state-v1", "remote-products-v1"}
-	got := append([]string(nil), doc.Normalizers...)
+	got := append([]string(nil), catalog.Normalizers...)
 	sort.Strings(got)
 	if strings.Join(got, ",") != strings.Join(wantNormalizers, ",") {
 		t.Fatalf("normalizer set = %v, want %v", got, wantNormalizers)
+	}
+}
+
+func TestCoverageCatalogFailsClosedOnMissingCommandOrEvidence(t *testing.T) {
+	catalog, err := semanticparity.Load("coverage.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join("..", ".."))
+	commands, err := semanticparity.DiscoverCommands(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missingCommand := catalog
+	missingCommand.Cases = append([]semanticparity.Case(nil), catalog.Cases...)
+	missingCommand.Cases[0].Current = []string{"removed command"}
+	if _, err := semanticparity.Validate(missingCommand, root, commands); err == nil || !strings.Contains(err.Error(), "missing evidence") {
+		t.Fatalf("missing command must fail closed, got %v", err)
+	}
+
+	missingEvidence := catalog
+	missingEvidence.Cases = append([]semanticparity.Case(nil), catalog.Cases...)
+	missingEvidence.Cases[0].Evidence = []string{"tests/parity/does-not-exist.test"}
+	if _, err := semanticparity.Validate(missingEvidence, root, commands); err == nil || !strings.Contains(err.Error(), "missing evidence") {
+		t.Fatalf("missing evidence must fail closed, got %v", err)
 	}
 }
 

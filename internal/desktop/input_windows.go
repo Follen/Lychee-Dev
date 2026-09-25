@@ -107,21 +107,9 @@ func queueCommand(parent context.Context, target WindowIdentity, command string,
 			return ctx.Err()
 		}
 	}
-	if err := key(); err != nil {
-		return receipt, err
-	}
-	if err := wait(150 * time.Millisecond); err != nil {
-		return receipt, err
-	}
-	for _, unit := range units {
-		if err := post(0x102, uintptr(unit), 1); err != nil {
-			return receipt, err
-		}
-		if err := wait(10 * time.Millisecond); err != nil {
-			return receipt, err
-		}
-	}
-	if err := key(); err != nil {
+	if err := transmitText(units, key, func(unit uint16) error {
+		return post(0x102, uintptr(unit), 1)
+	}, wait); err != nil {
 		return receipt, err
 	}
 	receipt.SubmissionComplete = true

@@ -32,7 +32,7 @@ for _, profile in ipairs(profiles) do
         function frame:SetSize(w, h) self.width, self.height = w, h end
         function frame:UnregisterAllEvents() self.events = {} end
         function frame:RegisterEvent(event)
-            assert(event == "PLAYER_LEAVING_WORLD" or event == "PLAYER_REGEN_DISABLED")
+            assert(event == "PLAYER_LEAVING_WORLD" or event == "PLAYER_REGEN_DISABLED" or event == "LOADING_SCREEN_ENABLED")
             self.events[event] = true
         end
         function frame:SetScript(event, fn) assert(event == "OnEvent"); self.callback = fn end
@@ -65,7 +65,7 @@ for _, profile in ipairs(profiles) do
             callbacks[owner] = nil
         end,
     }
-    local ns = { Release = "2.0.1", Startup = { ready = true, identity = {} } }
+    local ns = { Release = "2.0.2", Startup = { ready = true, identity = {} } }
     -- This harness lists addon modules explicitly (the TOC entry is added by
     -- the integrator); Identity.lua is exercised through the real TOC-adjacent
     -- modules it depends on, not a mock.
@@ -118,10 +118,16 @@ for _, profile in ipairs(profiles) do
     end
     assert(owner, "no one-shot readiness callback")
     -- A busy request-scoped operation must not disturb the displayed receipt.
-    ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = { ["Busy-A"] = {} } }
+    ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = { ["Busy-A"] = {
+        release=ns.Release, product=profile.product, build=profile.version..".12345",
+        character=character, realm="Realm", guid=guid,
+        sessionNonce=string.rep("a",32), reloadNonce=string.rep("b",32),
+        code="return 1", codeBytes=8, codeSHA256=string.rep("c",64),
+        codeAdler32=ns.CaptureWriter.DigestBytes("return 1"),
+    } } }
     assert(loadfile(root .. "/Bridge/ProbeQueue.lua"))("Lychee Dev", ns)
     local busyReceipt, busyReason = ns.Identity.Trigger(nonce)
-    assert(busyReceipt == nil and busyReason == "identity_busy" and frames[1].visible)
+    assert(busyReceipt == nil and busyReason == "identity_busy" and frames[1].visible, tostring(busyReason))
     local refreshReceipt, refreshReason = ns.Identity.Refresh(nonce)
     assert(refreshReceipt == nil and refreshReason == "identity_busy" and frames[1].visible)
     ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = {} }

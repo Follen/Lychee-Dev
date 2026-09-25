@@ -55,6 +55,8 @@ type Options struct {
 	dataRegion, locale, definitionRef    string
 	session                              string
 	account                              string
+	probe, request, name                 string
+	includeRemoved                       bool
 	pid                                  uint32
 	character, realm                     string
 	region                               image.Rectangle
@@ -189,12 +191,91 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err == nil {
 					response.Context["snapshot"] = opts.snapshot
 				}
-			case "live run":
+			case "live probe put":
+				response.Result, err, code = putLiveProbe(ctx, opts)
+			case "live probe load":
+				var root string
+				root, err = workspaceRoot(opts.home)
 				var record live.Outcome
-				record, err, code = runLiveProbe(ctx, opts)
+				if err == nil {
+					record, err = live.LoadProbe(ctx, root, live.LoadProbeRequest{Session: opts.session, Account: opts.account, Probe: opts.probe, Request: opts.request})
+				}
 				if record.OperationID != "" {
 					response.Result, response.OperationID = record, record.OperationID
 					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
+			case "live probe list":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err == nil {
+					response.Result, err = live.ListProbes(ctx, root, opts.includeRemoved, opts.limit)
+				}
+			case "live probe show":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err == nil {
+					response.Result, err = live.ShowProbe(ctx, root, argument)
+				}
+			case "live probe remove":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err == nil {
+					response.Result, err = live.RemoveProbe(ctx, root, argument)
+				}
+			case "live run":
+				var record live.Outcome
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err == nil {
+					record, err = live.RunLoaded(ctx, root, argument)
+				}
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
+			case "live reload":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				var record live.Outcome
+				if err == nil {
+					record, err = live.ReloadClient(ctx, root, live.ReloadRequest{Session: opts.session, Request: opts.request})
+				}
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
+			case "live ack":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				var record live.Outcome
+				if err == nil {
+					record, err = live.AcknowledgeVerified(ctx, root, argument)
+				}
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
+			case "live bugs":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				var record live.Outcome
+				if err == nil {
+					record, err = live.Bugs(ctx, root, live.BugsRequest{Session: opts.session, Account: opts.account, Request: opts.request, Count: opts.count})
+				}
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
+			case "live hide":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				var dismissal live.HideReceiptResult
+				if err == nil {
+					dismissal, err = live.HideReceipt(ctx, root, opts.session)
+				}
+				if err == nil {
+					response.Result = dismissal
+					response.Context["session"] = dismissal.Session
 				}
 			case "live connect":
 				request := live.ConnectRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation, Session: opts.session, CaptureArea: opts.region}
@@ -213,6 +294,24 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Result = connection
 					response.Context["session"], response.Context["snapshot"] = connection.ID, connection.Snapshot
 					response.Warnings = append(response.Warnings, "Connected through the two fixed bootstrap commands only; identity markers bound no session. The retained identity is a reconnection target, not standing input authority.")
+				}
+			case "live reset":
+				request := live.ResetRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation}
+				if err = request.Validate(); err != nil {
+					code = 2
+					break
+				}
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err != nil {
+					break
+				}
+				var outcome live.ResetOutcome
+				outcome, err = live.ResetWindow(ctx, root, request)
+				if err == nil {
+					response.Result = outcome
+					response.Context["session"], response.Context["snapshot"] = outcome.Connection.ID, outcome.Connection.Snapshot
+					response.Warnings = append(response.Warnings, "Reset sent one fixed nonce-correlated recovery trigger to an unowned window and reconnected through the normal bootstrap; retained reports were never acknowledged or deleted.")
 				}
 			case "live bind":
 				request := live.WindowBindingRequest{Installation: opts.installation, PID: opts.pid, Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, Region: opts.region}
@@ -646,7 +745,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "target list", "target add", "target remove", "target available":
 				code, err = runTargetVerb(ctx, route, argument, opts, &response)
-			case "target show", "live status", "live resume", "live cancel", "live session", "evidence show", "evidence verify":
+			case "target show", "live status", "live resume", "live cancel", "live abandon", "live session", "evidence show", "evidence verify", "evidence keep", "evidence remove":
 				if argument == "" {
 					err, code = errors.New("missing selection file or record ID; use describe"), 2
 					break
@@ -674,13 +773,20 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Context["stage"] = record.Stage
 						response.Result = record
 					}
-				case "live cancel":
+				case "live cancel", "live abandon":
 					var record live.Outcome
-					record, err = live.Cancel(ctx, root, argument)
+					if route == "live abandon" {
+						record, err = live.Abandon(ctx, root, argument)
+					} else {
+						record, err = live.Cancel(ctx, root, argument)
+					}
 					response.OperationID = argument
 					if record.OperationID != "" {
 						response.Result = record
 						response.Context["stage"] = record.Stage
+					}
+					if record.Status == "abandoned" {
+						response.Warnings = append(response.Warnings, "Cleanup abandoned explicitly; archived report retained. No game ACK or runtime unload was performed.")
 					}
 				case "live session":
 					var session live.RecordedSession
@@ -692,6 +798,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					}
 				case "evidence show", "evidence verify":
 					response.Result, err = evidence.InspectEvidence(ctx, root, argument, route == "evidence verify")
+				case "evidence keep":
+					response.Result, err = vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (evidence.KeepResult, error) {
+						return evidence.OpenArchive(s, m).KeepCapture(ctx, argument)
+					})
+				case "evidence remove":
+					response.Result, err = vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (evidence.RemoveResult, error) {
+						return evidence.OpenArchive(s, m).RemoveCapture(ctx, argument)
+					})
 				}
 				if err != nil && (route == "live status" || route == "target show" || route == "evidence show" || route == "evidence verify") {
 					response.Result = nil
@@ -755,6 +869,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				code, faultCode = 4, "vault.unsupported_workspace"
 			case errors.Is(err, vault.ErrBlobIntegrity):
 				code, faultCode = 4, "vault.blob_integrity"
+			case errors.Is(err, vault.ErrGeneration):
+				code, faultCode = 3, "vault.generation_conflict"
+			case errors.Is(err, evidence.ErrCaptureReferenced):
+				code, faultCode = 2, "evidence.capture_referenced"
+			case errors.Is(err, evidence.ErrInvalidRetention):
+				code, faultCode = 4, "evidence.invalid_retention"
+			case errors.Is(err, evidence.ErrReferenceScanLimit):
+				code, faultCode = 3, "evidence.reference_scan_limit"
+			case errors.Is(err, evidence.ErrCaptureScanLimit):
+				code, faultCode = 3, "evidence.capture_scan_limit"
 			case errors.Is(err, codebase.ErrInvalidAddon):
 				code, faultCode = 4, "codebase.addon_static_check_failed"
 			case errors.Is(err, vault.ErrMissingRecord):
@@ -800,11 +924,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
-		if response.OperationID != "" && len(opts.words) >= 2 && opts.words[0] == "live" && (opts.words[1] == "resume" || opts.words[1] == "run") {
+		if response.OperationID != "" && len(opts.words) >= 2 && opts.words[0] == "live" {
 			if actual, ok := response.Context["stage"].(string); ok {
 				response.Error.Stage = actual
 				response.Error.ResumeOperationID = response.OperationID
-				response.Error.Retryable = errors.Is(err, journal.ErrBusy)
+				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || errors.Is(err, live.ErrAckReadinessPending)
 			}
 		}
 		var diagnostic *relational.Diagnostic
@@ -860,10 +984,19 @@ func parseOptions(args []string) (Options, error) {
 	if err != nil {
 		return opts, err
 	}
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			opts.help = true
+			break
+		}
+	}
+	if !opts.help && contract != nil && contract.positional != "" && len(opts.words) == len(strings.Fields(route)) {
+		return opts, fmt.Errorf("missing required argument %s", contract.positional)
+	}
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" || arg == "--allow-partial" || arg == "--stdin" ||
+		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" || arg == "--allow-partial" || arg == "--stdin" || arg == "--include-removed" ||
 			arg == "--remote" || arg == "--replace" || arg == "--uncommitted" || arg == "--dry-run" || arg == "--plan" || arg == "--fresh" {
 			if _, ok := commandFlag(contract, arg); !ok {
 				return opts, unsupportedRouteFlag(route, arg)
@@ -899,6 +1032,8 @@ func parseOptions(args []string) (Options, error) {
 				opts.plan = true
 			case "--fresh":
 				opts.fresh = true
+			case "--include-removed":
+				opts.includeRemoved = true
 			}
 			continue
 		}
@@ -977,6 +1112,10 @@ func parseOptions(args []string) (Options, error) {
 			opts.session = value
 		case "--account":
 			opts.account = value
+		case "--probe":
+			opts.probe = value
+		case "--request":
+			opts.request = value
 		case "--pid":
 			n, err := strconv.ParseUint(value, 10, 32)
 			if err != nil || n == 0 {
@@ -1110,7 +1249,11 @@ func parseOptions(args []string) (Options, error) {
 		case "--extension":
 			opts.extension = value
 		case "--name":
-			opts.fileName = value
+			if route == "live probe put" {
+				opts.name = value
+			} else {
+				opts.fileName = value
+			}
 		case "--sql":
 			opts.sql = value
 		case "--param":

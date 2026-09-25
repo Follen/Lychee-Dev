@@ -1,9 +1,10 @@
 # Toolkit 2.0 capability inventory
 
-Status: source inventory for the original 2.0.0 design baseline. This file records what the
-current command sources actually expose and where each capability is intended to
-land in `docs/toolkit/design.md`. It is not an implementation plan and does not
-claim that any 2.0 command exists yet.
+Status: source inventory for the Toolkit 2.0 capability surface. This file records
+the migrated behavior, its current command owner and the contracts in
+`docs/toolkit/design.md`. It is not an implementation plan; current availability
+is checked against `lycheedev describe --format json` and the generated skill
+command reference.
 
 The design-convergence revision supersedes module/type names in this mapping:
 application use cases now belong directly to codebase, records, delivery and live;
@@ -15,7 +16,9 @@ Use implementation-status.md and CLI describe for current availability.
 The current shared content reader backs DB2, SQL, asset inspection and raw/BLP2
 image exports from either an installation or CDN. Source selection is explicit;
 offline mode uses verified workspace caches. Historical build discovery, full
-warmup, domain queries and video demux remain required.
+warmup, domain queries and video demux are represented in the inventory and
+covered by the parity ledger at the level supported by current fixtures and
+adapters; real-source coverage remains a separate acceptance concern.
 
 Revision 2026-09-23: the legacy `add-on/` workbench (v1.2.0) is first-class
 inventory scope (see "Legacy addon workbench" below); the wowdata/wowdoc rows
@@ -34,24 +37,46 @@ surface by owner request.
 - The old command names in this document are provenance only. Design section 2
   explicitly forbids compatibility aliases, old private protocols, and old helper
   names.
+- The parity status of a row is tracked separately in
+  `tests/parity/coverage.json`. A command mapping is not proof of complete legacy
+  behavior. `passed` means current automated assertions passed;
+  `fixture-backed` and `fixture-backed-partial` retain their source/coverage
+  limits; `intentional-change` records a deliberate 2.0 contract change.
 
-The 2.0 module names below are the design names: `selection`, `codebase`,
-`records`, `changes`, `assets`, `bridge`, `evidence`, `jobs`, `vault`, `desktop`,
-`delivery`, and the `command`/`actions` assembly layers.
+The current module names below are the design names: `selection`, `codebase`,
+`records`, `assets`, `bridge`, `evidence`, `vault`, `desktop`, `delivery`, `live`,
+and `command`. Coordination state belongs to `live/journal`; there is no
+separate `actions`, `changes` or shared `jobs` assembly layer.
+
+## wowdoc/wowdata parity ledger
+
+The migrated wowdoc and wowdata inventory is tracked as 55 business cases in
+`tests/parity/coverage.json` rather than as a single “command exists” checklist:
+19 wowdoc cases and 36 wowdata cases. On 2026-09-24 the offline ledger contains
+25 `passed`, 6 `fixture-backed`, 8 `fixture-backed-partial`, 16
+`intentional-change`, and 0 `not_run` cases. The parity test checks that every
+case has a current command mapping and repository evidence, but it intentionally
+does not invoke retired binaries or import their user data.
+
+This is enough to make every migrated area reviewable and to expose deliberate
+2.0 changes. It is not a claim that every historical CDN Build, Hotfix provider
+record, DB2 table, locale, or client has been exercised. Those boundaries remain
+explicit in the case notes and in the network/client sections of
+`docs/toolkit/regression.md`.
 
 ## Target command surface from the design
 
 | 2.0 group | Public actions | Primary modules |
 | --- | --- | --- |
-| `init`, `doctor`, `version`, `describe` | workspace initialization, capability checks, version, machine-readable contract | `command`, `actions`, `vault`, `delivery` |
+| `describe`, `version`, `project` | machine-readable contract, version, workspace/project identity | `command`, `selection`, `vault` |
 | `target` | `list`, `add`, `show`, `resolve`, `remove` | `selection`, `vault` |
-| `project` | `init`, `lock`, `status` | `selection`, `vault`, `jobs` |
+| `project` | `init`, `lock`, `status` | `selection`, `vault` |
 | `source` | `list`, `sync`, `index`, `query`, `inspect`, `diff`, `validate` | `codebase`, `selection`, `vault` |
 | `data` | `sql`, `db2`, `hotfix`, `spell`, `item`, `creature`, `encounter`, `decor` | `records`, `selection` |
 | `asset` | `search`, `inspect`, `export`, `demux` | `assets`, `records`, `selection` |
-| `live` | `instances`, `connect`, `bind`, `run`, `bugs`, `reload`, `status`, `resume`, `cancel` | `bridge`, `desktop`, `jobs`, `evidence` |
+| `live` | `instances`, `connect`, `probe put|list|show|remove|load`, `run`, `ack`, `bugs`, `reload`, `status`, `resume`, `cancel` | `bridge`, `desktop`, `live`, `evidence` |
 | `evidence` | `list`, `show`, `verify`, `bundle`, `keep`, `remove` | `evidence`, `vault` |
-| `cache` | `status`, `verify`, `prune` | `vault`, `jobs` resource admission |
+| `cache` | `status`, `verify`, `prune` | `vault` resource admission |
 | `addon`, `skill` | `install`, `status`, `remove` | `delivery`, `selection` |
 
 The design also makes `--home` the complete workspace root, `--snapshot` the
@@ -80,23 +105,23 @@ help answer; `--help` and `--version` are global answers, not subcommands.
 | --- | --- | --- |
 | `install` | Installs Python dependencies, the skill, and the addon; records client configuration. | `addon install` + `skill install` and workspace setup; **change**: no Python bootstrap or old npm lifecycle implementation. |
 | `update` | Re-runs install with `force`. | **change**: no `lycheedev update` alias; npm updates the npm distribution and release artifacts use the 2.0 delivery flow. |
-| `doctor` | Reports installed/missing addon, skill, Python, and client state. | `doctor`, with capability checks owned by `actions`/`delivery`; it must not read legacy roots. |
+| `doctor` | Reports installed/missing addon, skill, and client state. | `doctor` with capability checks owned by `command`/`delivery`; it must not read legacy roots or bootstrap Python. |
 | `clients` | Scans detected installations and reports product/build/addon state. | `live instances` (installed + running candidates with identity states) per the resolved client-enumeration decision; named data targets stay `target list`/`add`/`show`/`remove`. Do not silently make this the current target. |
 | `instances` | Lists running clients, PID, HWND, product/build, and optional identity markers. | `live instances` (`bridge.Binder`/`desktop`). Preserve product metadata and Build resolution. |
 | `use [index]`, `use --character <name>`, `use --clear` | Pins a running window/build for later commands, or clears that pin. | `live bind` with an explicit `WindowBinding`; **change**: no implicit current window, last-used fallback, or `use` alias. |
 | `help` | Prints the hand-written wrapper help text. | Generated `--help` plus `describe`; **change**: one generated 2.0 contract is authoritative. |
 | `send <text>` | Sends one slash command to a resolved live window. | **change** (resolved): no public arbitrary-send command; raw slash send stays a private protocol stage, and supported work goes through `live run`/bridge protocol. |
-| `reload` | Sends reload, decodes the nonce-bound readiness notice, and locally confirms readiness. `--resume <nonce>` waits/cleans up without sending reload again. | `live reload` and `live resume` (`bridge.Executor`, `jobs.Book`, `evidence`). Preserve one-send/resume semantics. |
+| `reload` | Sends reload, decodes the nonce-bound readiness notice, and locally confirms readiness. | `live reload`; interrupted reloads use `live status`/`live resume` without duplicating the send. |
 | `capture` | Polls a live window and decodes a completion notice. | **split**: private bridge signal handling plus `evidence` capture/archive; no public QR-only capture operation is specified. |
-| `run --task <id>` | Delivers a registered task, decodes its notice, reloads once, reads the matching SavedVariables ticket, and forwards the result. | `live run` plus `evidence`/`jobs`; **change**: design example uses `--file <probe.lua>` and explicit `--snapshot`/`--session`, not a task-registry alias. |
+| `run --task <id>` | Delivers a registered task, decodes its notice, reloads once, reads the matching SavedVariables ticket, and forwards the result. | **split**: `live probe put` registers immutable source, `live probe load` loads without execution, and `live run <operation-id>` advances only that loaded operation to verified. |
 | `bugs --count <n>` | Requests a bounded recent-error snapshot and reads the result ticket. | `live bugs` (`bridge.Executor.CollectFaults` + `evidence`). Preserve the bound and do not manufacture errors. |
-| `ack --ticket <t> --status received|failed` | Reports ticket-read status to the game and waits for matching receipt and marker cleanup. | **split** (resolved): bridge/evidence closure is required; ACK submission stays a private protocol stage, with no public `live ack` command. |
-| `task upsert|list|remove` | Owns the installed `auto.lua` task registry, including revision, expiry, interface, and output limits. | **change** (resolved): no task-registry compatibility surface; delivery is `live run --file` + the probe queue (`lycheedev.queue.v1`) with `live/journal` operation records. |
+| `ack --ticket <t> --status received|failed` | Reports ticket-read status to the game and waits for matching receipt and marker cleanup. | **change**: `live ack <operation-id>` acknowledges only the exact verified operation, retires its exact queue entry and releases ownership without a cleanup reload. |
+| `task upsert|list|remove` | Owns the installed `auto.lua` task registry, including revision, expiry, interface, and output limits. | **change**: immutable `live probe put/show/list/remove` revisions plus `live probe load`; there is no executable mutable task registry or compatibility alias. |
 | `sv find` | Finds account-level `Lychee Dev.lua` candidates under the configured client track. | **change**: no legacy SavedVariables discovery command; evidence is selected by `CaptureID`/workspace records. Client identity still follows product metadata, Build, then folder evidence. |
 | `sv read --ticket <t>` | Reads and verifies a ticket from an exact SavedVariables path, including task/request/revision checks. | `evidence show`/`verify` as an internal archive operation; **change**: no direct old SV path or `LycheeDevDB`/old addon namespace import. |
 | `profile` | Forwards profile management to `automation.py`. | **change** (resolved): old automation profiles are not 2.0 targets or sessions; use `target` for immutable selection and `live bind` for a live window. |
 | `status` | Prints host session-log events. | `live status` and/or `project status`; choose based on whether the record is a live binding or a workspace operation. |
-| `recover` | Lists unresolved reload requests and handshake cleanup instructions. | `live status`/`live resume` backed by `jobs.Book`; no separate legacy recovery alias is specified. |
+| `recover` | Lists unresolved reload requests and handshake cleanup instructions. | `live status`/`live resume` backed by `live/journal`; no separate legacy recovery alias is specified. |
 
 Wrapper options that need explicit regression coverage are `--wow-root`,
 `--client`, `--instance`, `--character`, `--hwnd`, `--pid`, `--python`,
@@ -114,7 +139,7 @@ wrapper does not forward (`identify`). Shared helper options are
 
 | Current command | Current behavior | 2.0 mapping |
 | --- | --- | --- |
-| `task upsert` | Writes or replaces one owned task block in `Modules/Automation/auto/auto.lua`, with ID/source/request/revision/expiry/interface/output-limit checks. | **change** (resolved): no task registry and no `task` compatibility group; delivery is `live run --file` + the probe queue (`lycheedev.queue.v1`) with `live/journal` operation records. |
+| `task upsert` | Writes or replaces one owned task block in `Modules/Automation/auto/auto.lua`, with ID/source/request/revision/expiry/interface/output-limit checks. | **change**: `live probe put` creates content-addressed immutable revisions under mutable names; load/run use the revision frozen into `live/journal`. No executable mutable task registry is restored. |
 | `task remove` | Removes one task block by ID. | Same **change** (resolved) as `task upsert`; there is no registry to remove from. |
 | `task list` | Lists task ID, request ID, revision, expiry, and interface metadata. | Same **change** (resolved); queued/executed work is inspected through `live/journal` operation records and the workbench Automation page. |
 | `profile set` | Saves a named client, WoW root, addon directory, and exact SavedVariables path. | **change**: replace with `target add`/`target show` for a user target and `live bind` for a verified window; no old profile file import. |
@@ -123,12 +148,12 @@ wrapper does not forward (`identify`). Shared helper options are
 | `sv read` | Reads one exact `Lychee Dev.lua` ticket, retries torn/replaced files, validates identity, and prints report metadata/content. | `evidence show` + `evidence verify`; preserve retry and identity checks in the archive reader. |
 | `send` | Sends exactly one slash command through foreground clipboard mode or background `messages` mode. | **change** (resolved): bridge operations are explicit and protocol-scoped; arbitrary slash injection is not a 2.0 command and raw slash send stays a private protocol stage. |
 | `reload` | Sends a nonce-bound reload, waits for readiness, and clears the marker; `--resume` continues an existing nonce without another reload. | `live reload`/`live resume`. Preserve no-duplicate-reload, marker identity, cleanup, and unresolved-stage reporting. |
-| `ack` | Sends received/failed acknowledgement, validates a matching receipt, then observes marker cleanup. | Private `bridge` + `evidence`/`jobs` completion stages; no public legacy `ack` name is defined. |
+| `ack` | Sends received/failed acknowledgement, validates a matching receipt, then observes marker cleanup. | `live ack <operation-id>` is the public atomic closure action; it uses archived report identity and does not accept a raw ticket. |
 | `capture` | Polls a window and decodes a nonce/task/ticket/status completion notice. | Private `bridge` signal decoder feeding `evidence`; QR/signal is never the complete report. |
 | `identify` | Reads character/build identity markers from one or more windows or a JSON instance list. | `live instances`/`live bind`; preserve ambiguity refusal and verified identity binding. |
-| `run` | Sends a task command, rejects stale/mismatched notices, reloads once, waits for SV write, reads and verifies the ticket, and saves an artifact. | `live run` + `jobs.Book` + `evidence.Archive`; preserve the staged outcome instead of collapsing it to one success bit. |
+| `run` | Sends a task command, rejects stale/mismatched notices, reloads once, waits for SV write, reads and verifies the ticket, and saves an artifact. | `live probe load` + `live run` + `live/journal` + `evidence.Archive`; loading and execution are separate atomic actions and preserve the staged outcome. |
 | `bugs` | Sends a bounded error snapshot request, resolves the notice, reloads once, reads the report, and saves an artifact. | `live bugs` + `evidence`; preserve `1..100` bounds and existing-error semantics. |
-| `status` | Prints recent host log events, optionally filtered by event and installation scope. | `live status`/`project status`; redesign the record schema under `jobs`/`vault`. |
+| `status` | Prints recent host log events, optionally filtered by event and installation scope. | `live status`/`project status`; records are owned by `live/journal` and `vault`. |
 | `recover` | Finds reload requests and handshakes without confirmed receipt/cleanup and tells the operator to use `reload --resume`. | `live status` + `live resume`; no old `recover` command. |
 
 The helper's documented default `--mode messages` is a behavior regression to
@@ -153,7 +178,7 @@ points are provenance names only.
 | Function tracing + trace results: `Modules/FunctionTrace.lua`, `UI/Pages/Trace.lua` | `hooksecurefunc` per traced path (never removed, only disabled); one active path at a time; trace ring 300 records / 16 args / 180 B per arg. | `addon/` trace module; preserve disable-only hook ownership, the single active path, and ring bounds. |
 | Error diagnostics: collection, filter, detail: `Modules/Diagnostics.lua`, `UI/Pages/Diagnostics.lua` | !BugGrabber as collection provider; current-session/all scopes; keyword filter; Agent Report formatting with a 48 KB field cap; machine snapshot `SnapshotRecentErrors(1..100)` with `missingFields`/`incomplete` semantics; live refresh on `BugGrabber.BugGrabbed`. | `live bugs` evidence path + `addon/` diagnostics page. **change**: soft !BugGrabber integration — no hard TOC dependency, explicit unavailable state. |
 | Result export, export records, view/copy interaction: `UI/Export.lua`, `UI/Pages/ExportRecords.lua`, `Core/Database.lua` | Evidence envelope `lychee.evidence.v1`; tickets `LYCHEE-YYYYMMDD-HHMMSS-%04d`, monotonic and never reused; 16 MB / 200-record budget with protected + pending lifecycle; post-save ticket popup (select + Ctrl+C copy); records page with list/detail/two-click delete/clear/reload. | `evidence` + `addon/` export records. **change**: envelope becomes `lycheedev.export.v1`, and history/exports are NEW data in `LycheeToolkitDB` (no legacy namespace import). |
-| Automation tasks: in-game view, execute, history: `UI/Pages/Automation.lua`, `Modules/Automation/` (Controller/Report/Reload/auto registry) | In-game view of queued and executed automation work plus history against the `auto.lua` task registry. | The queue/execution transport already exists (`Bridge/ProbeQueue\|ProbeRunner\|ReportStore\|Reentry`); the workbench Automation page views queued/executed work + history over the same game-side capability the CLI drives. **change**: no task-registry compatibility — `auto.lua` blocks are NOT reintroduced; task delivery is `live run --file` + the probe queue; `/dev auto` grammar is NOT restored as a compatibility surface. |
+| Automation tasks: in-game view, execute, history: `UI/Pages/Automation.lua`, `Modules/Automation/` (Controller/Report/Reload/auto registry) | In-game view of queued and executed automation work plus history against the `auto.lua` task registry. | The workbench view remains over `ProbeQueue\|ProbeRunner\|ReportStore\|Reentry`. **change**: no `auto.lua` registry or `/dev auto` grammar; CLI delivery is immutable `live probe put/load`, then atomic `live run` and `live ack`. |
 | About/version page, bilingual UI, complete navigation: `UI/Pages/About.lua`, `Core/Locale.lua`, `Core/Locale_enUS.lua` | About/version page and the complete 8-tab navigation; zhCN base + enUS overlay (~300 keys); zhTW falls back to zhCN, all other locales get English; placeholder parity. | `addon/` About page and locale modules; preserve key-count/placeholder parity and the fallback order. |
 
 ## wowdoc: `D:/Code/wow/wowdoc/internal/app`
@@ -197,7 +222,7 @@ action is normally expected below them.
 | Current command | Current behavior | 2.0 mapping |
 | --- | --- | --- |
 | `sql [query]` | Executes read-only `wowdata-sql-v1` against static DB2, with file/stdin, named `--param` parameters (type inference), an exactly-one-source rule for inline text/file/stdin, JSON/JSONL/CSV output, and plan/metrics output. | `data sql` / `records.Reader.SelectRows`; preserve read-only enforcement, parameter typing, the exactly-one-source rule, plan/metrics, limits, and output completeness. |
-| `hotfix query` | Reads independent Hotfix records from Wago, DBCache, or Raidbots using product/build/region/locale/table and optional raw/decoded/latest filters. Providers: Wago (Inertia parser, identity-keyed cache receipts, MaxPages 2048), DBCache (`HFS1` sidecar index), Raidbots (30-day-bounded snapshot, composable as Wago fallback). Filters `--table-hash/--record/--push/--status/--from/--to/--search/--page/--dbcache/--raidbots/--dbd`; CSV columns `id,push_id,record_id,table_name,status,build,region_id,locale,payload_length`. | `data hotfix` / `records.InspectHotfix`; local raw/typed DBCache queries, largest-push batches, captured-source pagination and derived targets implemented. Remote providers and their full filter/coverage contracts remain required. No implicit static DB2 overlay. |
+| `hotfix query` | Reads independent Hotfix records from Wago, DBCache, or Raidbots using product/build/region/locale/table and optional raw/decoded/latest filters. Providers: Wago (Inertia parser, identity-keyed cache receipts, MaxPages 2048), DBCache (`HFS1` sidecar index), Raidbots (30-day-bounded snapshot). Filters `--table-hash/--record/--push/--status/--from/--to/--search/--page/--dbcache/--raidbots/--dbd`; CSV columns `id,push_id,record_id,table_name,status,build,region_id,locale,payload_length`. | `data hotfix`; Wago, local DBCache and bounded Raidbots snapshots are implemented with explicit provider/identity/coverage, cursor drift checks and verified cache pages. Providers never fall back to one another and never overlay static DB2 rows. |
 | `warmup` | Prepares a complete local or remote target, including selected tables, listfile, DBD manifest, and cache. Every data command auto-prepares with a per-command table/listfile dependency merge (warmup is not a separate step for queries). Defaults: table list `SpellName,Spell,SpellEffect,SpellMisc,SpellCastTimes,SpellDuration,SpellRange,JournalEncounterSection`, `listfile=true`, `listfile-format=binary`, `dbd-manifest=true`, TACT-key warm; post-warm prune keeps only the current build when invoked as `warmup`; persists BuildSnapshot with RecentBuilds cap 2. | `target resolve` prepares local installation or current remote release identity, verifies configurations and pins definitions. **split** (resolved): identity preparation stays `target resolve`; bulk content preparation becomes on-demand query preparation plus the cache maintenance surface (`cache status\|verify\|prune` + workspace `config.json`); there is no `warmup` verb. Historical release selection is only via exact `--build`. No implicit current target. |
 | `db2` | DB2 query group. | `data db2` / `records.Reader`. |
 | `db2 schema <table>` | Prints parsed table schema metadata. | `data db2` schema operation; preserve table identity and DataPin. |
@@ -277,8 +302,10 @@ that the rewrite must retain unless the table above explicitly marks a change.
 ### Selection and identity
 
 - A client folder is only a location. Resolve product identity from `.flavor.info`
-  and Build from `version.txt`, then use the folder as a last evidenced fallback.
-  This matters especially for `_classic_beta_` carrying WoW: Forever.
+  and Build from `version.txt`; if those authoritative metadata files are absent
+  or contradictory, return an identity error instead of using the folder name as
+  a product fallback. This matters especially for `_classic_beta_` carrying WoW:
+  Forever.
 - Multiple live windows remain ambiguous unless a verified character/build marker
   distinguishes them. Refuse to send to an uncertain window.
 - A pinned binding may survive a restart by immutable identity (Build/install
@@ -330,7 +357,7 @@ that the rewrite must retain unless the table above explicitly marks a change.
   `LYCHEEDEV_HOME`, then the documented default. A legacy-looking occupied path
   is detected and handled by an explicit archive/fresh flow, not merged or
   silently deleted.
-- Destructive cache/workspace operations protect snapshots, unfinished jobs,
+- Destructive cache/workspace operations protect snapshots, unfinished operations,
   evidence, and pinned objects; external output refuses overwrite unless explicit.
 - The addon side continues to require zero cost while disabled, event-driven work
   while enabled, WoW Lua 5.1 syntax, secret-value checks, and no tainting of
@@ -409,7 +436,7 @@ source-grounded provenance facts and now cite these decisions.
    `cache status` (cache accounting); `casc products` → `target list` (remote
    manifest listing, bounded); `casc diagnose` → `doctor` + `cache verify`.
 6. **Automation task blocks — resolved:** NOT retained; replaced by
-   `live run --file` + the probe queue (`lycheedev.queue.v1`) + `live/journal`
+   immutable `live probe put/load` + the probe queue (`lycheedev.queue.v1`) + `live/journal`
    operation records. No task-registry compatibility surface.
 7. **SavedVariables reading — resolved:** internal to `evidence show|verify`
    (archived captures); no public raw-SV command, no legacy namespace import.

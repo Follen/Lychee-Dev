@@ -1,12 +1,15 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 )
@@ -29,6 +32,7 @@ func TestQueryStructuredErrors(t *testing.T) {
 		exit  int
 		code  string
 	}{
+		{errors.Join(live.ErrAckReadinessPending, context.DeadlineExceeded), 6, "live.ack_readiness_pending"},
 		{records.ErrRemoteRange, 4, "records.remote_range"}, {records.ErrRemoteObjectMissing, 3, "records.remote_object_missing"},
 		{relational.ErrSyntax, 2, "query.invalid_syntax"}, {relational.ErrBinding, 2, "query.unresolved_binding"},
 		{relational.ErrUnsupported, 3, "query.unsupported_expression"}, {relational.ErrBudget, 3, "query.budget_exceeded"},
@@ -46,6 +50,14 @@ func TestQueryStructuredErrors(t *testing.T) {
 	result, code := invoke(t, "data", "sql", "--snapshot", "unused", "--installation", "unused", "--file", path, "--home", filepath.Join(t.TempDir(), "unopened"), "--format=json")
 	if code != 2 || result.Error == nil || result.Error.Code != "query.invalid_syntax" || result.Error.Stage != "query" || result.Error.Location == nil || result.Error.Location.Line != 2 {
 		t.Fatal(result, code)
+	}
+}
+
+func TestCallerCancellationIsNotAckPending(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		if _, code, ok := queryFault(cause); ok {
+			t.Fatalf("caller cancellation incorrectly classified: %s", code)
+		}
 	}
 }
 

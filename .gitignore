@@ -20,3 +20,6 @@ packages/npm/lycheedev/native/
 packages/npm/lycheedev/payload/
 packages/npm/lycheedev/release.json
 packages/npm/lycheedev/*.tgz
+
+# Local working artifacts and evidence (never shipped)
+.tmp/

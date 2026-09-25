@@ -57,6 +57,9 @@ func (b *Book) BeginWindowWork(ctx context.Context, addonParent, workspaceID str
 	if !strings.HasPrefix(intent.Resource, "window/") || len(intent.Resource) > 256 {
 		return record, errors.New("journal.invalid_window_resource")
 	}
+	if existing, found, resolveErr := b.resolveRequest(ctx, intent); resolveErr != nil || found {
+		return existing, resolveErr
+	}
 	scope, lease, err := lockWindowScope(ctx, addonParent)
 	if err != nil {
 		return record, err
@@ -104,14 +107,14 @@ func (b *Book) BeginWindowWork(ctx context.Context, addonParent, workspaceID str
 	})
 }
 
-// RetireWindowWork releases only this workspace's proven cleaned operation.
+// RetireWindowWork releases only this workspace's proven cleaned or abandoned operation.
 // It never clears unresolved/partial claims and never removes work or evidence.
 func (b *Book) RetireWindowWork(ctx context.Context, addonParent, workspaceID, operationID string) (err error) {
 	record, err := b.InspectWork(ctx, operationID)
 	if err != nil {
 		return err
 	}
-	if record.Stage != "cleaned" || record.Status != "completed" && record.Status != "cancelled" {
+	if !(record.Stage == "cleaned" && (record.Status == "completed" || record.Status == "cancelled")) && !(record.Stage == "abandoned" && record.Status == "abandoned") {
 		return ErrTransition
 	}
 	scope, lease, err := lockWindowScope(ctx, addonParent)

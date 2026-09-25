@@ -33,10 +33,26 @@ ns.Controls = {
             and #verifyRequest <= 128 and #cleanupNonce <= 16 and string.match(cleanupNonce, "^[1-9]%d*$") then
             action, requestId, reportSequence = "ack", verifyRequest, tonumber(cleanupNonce)
         end
+        if verifyPrefix and string.lower(verifyPrefix) == "bridge" and string.lower(verifyVerb) == "bugs"
+            and #verifyRequest <= 128 and #cleanupNonce <= 3 and string.match(cleanupNonce,"^%d+$") then
+            action,requestId,reportSequence="bugs",verifyRequest,tonumber(cleanupNonce)
+        end
+        if verifyPrefix and string.lower(verifyPrefix) == "bridge" and string.lower(verifyVerb) == "bugs-ack"
+            and #verifyRequest <= 128 and #cleanupNonce <= 16 and string.match(cleanupNonce,"^[1-9]%d*$") then
+            action,requestId,reportSequence="bugs-ack",verifyRequest,tonumber(cleanupNonce)
+        end
+        if verifyPrefix and string.lower(verifyPrefix) == "bridge" and string.lower(verifyVerb) == "flush"
+            and #verifyRequest <= 128 and #cleanupNonce == 32 then
+            action,requestId="flush",verifyRequest
+        end
         if command == "bridge ready" then action = "ready" end
+        if command == "bridge hide" then action = "hide" end
+        local resetNonce = string.match(command, "^bridge reset ([0-9a-f]+)$")
+        if resetNonce and #resetNonce == 32 then action = "reset" end
         if prefix and string.lower(prefix) == "bridge" and #requestId <= 128 then
             verb = string.lower(verb)
             if verb == "load" or verb == "run" or verb == "reload" then action = verb end
+            if verb == "refresh" and #requestId == 32 and string.match(requestId,"^[0-9a-f]+$") then action = verb end
         end
         if command ~= "" and command ~= "status" and command ~= "connect" and command ~= "disconnect" and command ~= "bridge on" and command ~= "bridge off"
             and command ~= "bridge unbind" and not nonce and not identify and not action then
@@ -67,21 +83,41 @@ ns.Controls = {
             -- operation's displayed receipt: Trigger fails closed when busy.
             local receipt, reason = ns.Identity.Trigger(identify)
             if not receipt then return nil, reason end
-            local shown, displayFailure = ns.ReceiptView.ShowIdentity(receipt)
+            local function refreshIdentity() return ns.Identity.Refresh(identify) end
+            local shown, displayFailure = ns.ReceiptView.ShowIdentity(receipt, refreshIdentity)
             if not shown then return nil, displayFailure end
             ns.Identity.WhenInputReady(function(ready)
                 if not ready then return end
                 local refreshed, refreshFailure = ns.Identity.Refresh(identify)
                 if not refreshed then print("Lychee Dev: " .. refreshFailure); return end
-                local visible, showFailure = ns.ReceiptView.ShowIdentity(refreshed)
+                local visible, showFailure = ns.ReceiptView.ShowIdentity(refreshed, refreshIdentity)
                 if not visible then ns.ReceiptView.Hide(); print("Lychee Dev: " .. showFailure) end
             end)
             return receipt
         end
+        if action == "hide" then
+            -- Dismissal answers no new receipt: success must not re-display a
+            -- card or print, otherwise the command would defeat itself.
+            local dismissed, reason = ns.ReceiptView.Dismiss()
+            if not dismissed then return nil, reason end
+            return true
+        end
+        if action == "reset" then
+            -- Recovery trigger, not an operation: the nonce-correlated receipt
+            -- proves this exact trigger reached a live runtime and unblocked
+            -- its queue. The card displays session-free, like an identity.
+            local receipt, reason = ns.ProbeQueue.Reset(resetNonce)
+            if not receipt then return nil, reason end
+            local shown, displayFailure = ns.ReceiptView.ShowIdentity(receipt, nil)
+            if not shown then return nil, displayFailure end
+            return receipt
+        end
         if action then
+            if action == "refresh" then return ns.Reentry.Refresh(requestId) end
             if action == "prepare" then return ns.Reentry.LoadQueue(requestId, cleanupNonce) end
             if action == "clean" then return ns.Reentry.Reload(requestId, cleanupNonce) end
             if action == "reload" then return ns.Reentry.Reload(requestId) end
+            if action == "flush" then return ns.Reentry.Flush(requestId,cleanupNonce) end
             -- Remove the old optical signal before loading or executing work.
             -- Preserve request ID case; only command words are case-insensitive.
             ns.Session.CancelInputWait()
@@ -90,23 +126,36 @@ ns.Controls = {
             if action == "load" then receipt, reason = ns.ProbeQueue.Load(requestId)
             elseif action == "ready" then receipt, reason = ns.Session.ReadyReceipt()
             elseif action == "ack" then receipt, reason = ns.ProbeQueue.Acknowledge(requestId, reportSequence)
+            elseif action == "bugs" then receipt, reason = ns.FaultRunner.Run(requestId,reportSequence)
+            elseif action == "bugs-ack" then receipt, reason = ns.FaultRunner.Acknowledge(requestId,reportSequence)
             elseif action == "verify" then receipt, reason = ns.ProbeQueue.VerifyRetired(requestId, cleanupNonce)
             else receipt, reason = ns.ProbeRunner.Dispatch(requestId) end
             if not receipt then return nil, reason end
-            local shown, displayFailure = ns.ReceiptView.Show(receipt)
+            local paired = action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack"
+            local refresh
+            if paired or action == "ready" or action == "load" then
+                refresh = function()
+                    if action == "load" then return ns.ProbeRunner.RefreshLoaded(requestId) end
+                    local current, failure = ns.Session.ReadyReceipt()
+                    if not current then return nil, failure end
+                    if paired then return receipt, current end
+                    return current
+                end
+            end
+            local shown, displayFailure = ns.ReceiptView.Show(receipt, nil, refresh)
             if not shown then return nil, displayFailure end
-            if action == "load" or action == "ready" or action == "run" or action == "ack" then
+            if action == "load" or action == "ready" or action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack" then
                 ns.Session.WhenInputReady(function(ready)
                     if not ready then return end
                     local refreshed, refreshFailure
-                    if action == "ready" or action == "run" or action == "ack" then refreshed, refreshFailure = ns.Session.ReadyReceipt()
+                    if action == "ready" or action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack" then refreshed, refreshFailure = ns.Session.ReadyReceipt()
                     else refreshed, refreshFailure = ns.ProbeRunner.RefreshLoaded(requestId) end
                     if not refreshed then print("Lychee Dev: " .. refreshFailure); return end
                     local visible, reason
-                    if action == "run" or action == "ack" then visible, reason = ns.ReceiptView.Show(receipt, refreshed)
-                    else visible, reason = ns.ReceiptView.Show(refreshed) end
+                    if paired then visible, reason = ns.ReceiptView.Show(receipt, refreshed, refresh)
+                    else visible, reason = ns.ReceiptView.Show(refreshed, nil, refresh) end
                     if not visible then ns.ReceiptView.Hide(); print("Lychee Dev: " .. reason); return end
-                    if action ~= "run" and action ~= "ack" then receipt = refreshed end
+                    if action ~= "run" and action ~= "ack" and action ~= "bugs" and action ~= "bugs-ack" then receipt = refreshed end
                 end)
             end
             if command == "connect" then

@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/desktop"
@@ -18,6 +19,13 @@ type SignalReader struct {
 	feed       FrameFeed
 	lastTicks  int64
 	observedAt time.Time
+}
+
+// RuntimeReleaseMismatch is diagnostic identity evidence, never a session.
+type RuntimeReleaseMismatch struct{ Observed, Expected string }
+
+func (e *RuntimeReleaseMismatch) Error() string {
+	return fmt.Sprintf("bridge.runtime_release_mismatch: observed=%s expected=%s", e.Observed, e.Expected)
 }
 
 func ObserveSignals(feed FrameFeed) *SignalReader { return &SignalReader{feed: feed} }
@@ -75,6 +83,20 @@ func (r *SignalReader) DiscoverIdentity(ctx context.Context, expected SignalExpe
 	return r.waitForSignal(ctx, expected)
 }
 
+// DiscoverReset observes the nonce-correlated receipt of the fixed bootstrap
+// reset trigger on the already selected window. It binds no session, requires
+// no input readiness, and grants no authority beyond the reported actor.
+func (r *SignalReader) DiscoverReset(ctx context.Context, expected SignalExpectation) (Signal, error) {
+	r.observedAt = time.Time{}
+	if expected.Kind != "reset" || expected.Release == "" || expected.Product == "" || expected.Build == "" ||
+		!queueHex(expected.ProbeNonce, 32) ||
+		expected.SessionNonce != "" || expected.RequestID != "" || expected.ReloadNonce != "" || expected.CleanupNonce != "" ||
+		expected.AfterSequence != 0 || expected.RuntimeEpoch != 0 || expected.RequireInputReady {
+		return Signal{}, errors.New("bridge.invalid_discovery_reset")
+	}
+	return r.waitForSignal(ctx, expected)
+}
+
 func (r *SignalReader) waitForSignal(ctx context.Context, expected SignalExpectation) (Signal, error) {
 	if r.feed == nil {
 		return Signal{}, errors.New("bridge.missing_frame_feed")
@@ -105,7 +127,11 @@ func (r *SignalReader) waitForSignal(ctx context.Context, expected SignalExpecta
 			if err != nil {
 				continue
 			}
-			if err := signal.Match(expected); err != nil {
+			match := expected
+			if expected.Kind == "identity" {
+				match.Release = ""
+			}
+			if err := signal.Match(match); err != nil {
 				continue
 			}
 			if matching != nil {
@@ -118,6 +144,9 @@ func (r *SignalReader) waitForSignal(ctx context.Context, expected SignalExpecta
 			if err := r.RequireFreshSignal(); err != nil {
 				r.observedAt = time.Time{}
 				continue
+			}
+			if expected.Kind == "identity" && matching.Release != expected.Release {
+				return *matching, &RuntimeReleaseMismatch{Observed: matching.Release, Expected: expected.Release}
 			}
 			return *matching, nil
 		}

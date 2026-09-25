@@ -23,6 +23,7 @@ Read only the relevant reference:
 - Files, icons, textures or media: [asset-export.md](references/asset-export.md).
 - Addon load closure and compatibility: [addon-validation.md](references/addon-validation.md).
 - Running-game investigation or recovery: [live-investigation.md](references/live-investigation.md).
+  First installation or failed contact without a session: [live-startup.md](references/live-startup.md).
 - Existing errors: [error-diagnosis.md](references/error-diagnosis.md).
 - Requested installation or removal: [installation.md](references/installation.md).
 
@@ -32,11 +33,22 @@ and arguments; the skill must not advertise unimplemented commands. Do not
 substitute legacy wowdoc, wowdata or Python entrypoints for a missing
 capability.
 
+When reviewing wowdoc/wowdata migration coverage, use the repository parity
+ledger (`tests/parity/coverage.json` and `docs/toolkit/regression.md`). It is
+case-level offline evidence, not a replay of retired executables. Read the case
+status and note: `passed` is current automated assertion coverage,
+`fixture-backed`/`fixture-backed-partial` retain fixture limits, and
+`intentional-change` is a deliberate 2.0 contract. Never describe the 55-case
+ledger as proof of complete real CDN, Hotfix, DB2, or multi-client coverage.
+
 ## Respect the authorization boundary
 
 Only run live commands inside the user's granted authorization.
 `live instances` is a game operation, not read-only discovery: it sends one
-identity trigger to every running window. Under read-only or local-only
+identity trigger to each matching, unoccupied running window. Scope discovery
+to the authorized installation/PID when supplied. A named character also limits
+mutation: retain its verified window binding and never fall back to a different
+online character. Under read-only or local-only
 authorization, state what a live check would need and ask; do not send it.
 
 ## Keep the investigation reproducible
@@ -59,9 +71,9 @@ the project lock must not retarget an investigation already in progress.
 
 For live work, use a saved session to identify the target. The CLI must reconnect
 and verify current readiness before input; historical evidence alone cannot do
-that. When no session exists yet, `live instances` discovers installed and
-running candidates and `live connect` completes identification, selection and
-connection mechanically: present the candidates (product/build, character,
+that. When no session exists yet, `live connect` handles a known target directly;
+use `live instances` when candidate discovery is needed. The CLI completes
+identification, selection and connection mechanically: present the candidates (product/build, character,
 realm) and resolve only the ambiguity the CLI reports. A unique match needs no
 question; several identical candidates stay separate until the user chooses.
 An interrupted operation is recovered by its operation ID, not by starting the
@@ -74,6 +86,12 @@ not require a CLI connection.
 Read the structured result, including warnings and completeness, rather than just
 the exit code. Empty query results are valid. Static validation does not prove
 runtime safety. A short game receipt identifies a result; it is not its full body.
+
+Evidence retention is explicit: use `evidence keep <capture-id>` when an agent
+needs a durable retention decision, and `evidence remove <capture-id>` only when
+the capture is no longer referenced. Keep is idempotent; remove is a destructive
+CAS operation that refuses external references and never deletes a blob shared by
+another capture. Do not use `cache prune` as a substitute for either decision.
 
 For a live result, distinguish `report.state`, report content and `cleanup`.
 A verified report remains useful when cleanup is pending; `complete: false` must

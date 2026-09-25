@@ -497,3 +497,26 @@ func TestEvidenceListReportsArchivedCaptures(t *testing.T) {
 		t.Fatalf("captures = %#v", captures)
 	}
 }
+
+func TestEvidenceKeepAndRemoveCommandsAreAuditable(t *testing.T) {
+	root := initWorkspace(t)
+	var ref evidence.CaptureRef
+	if _, err := vault.WriteMetadata(context.Background(), root, func(s *vault.Store, m *vault.Metadata) (struct{}, error) {
+		var err error
+		ref, err = evidence.OpenArchive(s, m).CommitCapture(context.Background(), evidence.CaptureDraft{
+			Reader: strings.NewReader("lifecycle"), MaxBytes: 1 << 20, MediaType: "text/plain",
+			Provenance: evidence.Provenance{Kind: "fixture", Locator: "dispatch_lifecycle"}, Complete: true,
+		})
+		return struct{}{}, err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kept, code := invoke(t, "evidence", "keep", ref.ID, "--home", root, "--format=json")
+	if code != 0 || !kept.OK || resultMap(t, kept)["created"] != true {
+		t.Fatalf("keep: code=%d response=%+v error=%+v", code, kept, kept.Error)
+	}
+	removed, code := invoke(t, "evidence", "remove", ref.ID, "--home", root, "--format=json")
+	if code != 0 || !removed.OK || resultMap(t, removed)["manifestRemoved"] != true || resultMap(t, removed)["retentionRemoved"] != true {
+		t.Fatalf("remove: code=%d response=%+v", code, removed)
+	}
+}

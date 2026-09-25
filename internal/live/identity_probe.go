@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"image"
 	"path/filepath"
@@ -66,14 +67,16 @@ const (
 // identityObservation is one nonce-correlated identity receipt plus a cheap
 // capture hint for unreadable windows.
 type identityObservation struct {
-	Signal  bridge.Signal
-	Capture string
+	Signal     bridge.Signal
+	Capture    string
+	ObservedAt time.Time
 }
 
 type captureHints struct {
-	feed   sessionFrames
-	frames int
-	hint   string
+	feed       sessionFrames
+	frames     int
+	hint       string
+	observedAt time.Time
 }
 
 func (h *captureHints) Next(ctx context.Context) (*desktop.CapturedFrame, error) {
@@ -83,6 +86,9 @@ func (h *captureHints) Next(ctx context.Context) (*desktop.CapturedFrame, error)
 	}
 	h.frames++
 	h.hint = frameHint(frame)
+	if frame != nil {
+		h.observedAt = frame.ObservedAt
+	}
 	return frame, nil
 }
 
@@ -91,7 +97,7 @@ func (h *captureHints) observation(signal bridge.Signal) identityObservation {
 	if h.frames > 0 {
 		hint = h.hint
 	}
-	return identityObservation{Signal: signal, Capture: hint}
+	return identityObservation{Signal: signal, Capture: hint, ObservedAt: h.observedAt}
 }
 
 // frameHint samples a fixed 5x5 grid; it is a hint for humans, not evidence.
@@ -146,7 +152,8 @@ func probeIdentity(ctx context.Context, target ClientWindow, region image.Rectan
 	wait, cancel := context.WithTimeout(ctx, io.wait)
 	defer cancel()
 	signal, err := reader.DiscoverIdentity(wait, expected)
-	if err != nil {
+	var mismatch *bridge.RuntimeReleaseMismatch
+	if err != nil && !errors.As(err, &mismatch) {
 		return hints.observation(bridge.Signal{}), err
 	}
 	observation := hints.observation(signal)
@@ -155,6 +162,7 @@ func probeIdentity(ctx context.Context, target ClientWindow, region image.Rectan
 		// addon re-displays a refreshed receipt once focus is released. Waiting
 		// for that display is observation, not a second trigger or a guess.
 		refreshed := expected
+		refreshed.Release = signal.Release
 		refreshed.RequireInputReady = true
 		wait, cancel := context.WithTimeout(ctx, io.refresh)
 		defer cancel()
@@ -162,7 +170,7 @@ func probeIdentity(ctx context.Context, target ClientWindow, region image.Rectan
 			observation = hints.observation(next)
 		}
 	}
-	return observation, nil
+	return observation, err
 }
 
 // windowOwnership reports whether an in-flight operation owns this window's

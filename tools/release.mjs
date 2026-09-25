@@ -1,5 +1,5 @@
 // Release assembly, sealing and release-gate checks for the lycheedev package
-// (docs/toolkit/release-2.0.1.md, regression REL-01..14 / PKG-01..08).
+// (docs/toolkit/release-2.0.2.md, regression REL-01..14 / PKG-01..08).
 // Subcommands are driven by .github/workflows/toolkit-release.yml and
 // toolkit-ci.yml. Nothing here publishes, tags, or mutates tracked sources.
 //
@@ -12,7 +12,7 @@
 //                       manifest + SHA256SUMS after verification
 //   verify-sealed       recompute every sealed digest right before publish
 //   release-identity    strict tag <-> version source binding (REL-01/05/11)
-//   dist-tag            2.0.1-rc.N -> next, otherwise latest (REL-11)
+//   dist-tag            2.0.2-rc.N -> next, otherwise latest (REL-11)
 //   registry-state      exists-matching / exists-conflicting / absent / unknown
 //                       (REL-09: unknown is never treated as absent)
 //   verify-platform-evidence   windows-amd64 run evidence completeness (REL-13)
@@ -52,7 +52,7 @@ export function policyFor(version) {
   return {
     development,
     // §5: the published package cannot be private; the development manifest
-    // stays private until the owner's combined-work license decision lands.
+    // remains private only for development versions by explicit version policy.
     privateMustBeTrue: development,
     // Development versions are never published, so they have no dist-tag.
     npmDistTag: development ? null : distTagFor(version),

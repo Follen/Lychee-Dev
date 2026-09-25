@@ -197,11 +197,12 @@ func readyReceipt(mutate func(*bridge.Signal)) bridge.Signal {
 
 // nonceFromCommand echoes the trigger nonce exactly like the game machine verb.
 func nonceFromCommand(command string) string {
-	const prefix = "/dev bridge identify "
-	if !strings.HasPrefix(command, prefix) {
-		return ""
+	for _, prefix := range []string{"/dev bridge identify ", "/dev bridge reset "} {
+		if strings.HasPrefix(command, prefix) {
+			return strings.TrimPrefix(command, prefix)
+		}
 	}
-	return strings.TrimPrefix(command, prefix)
+	return ""
 }
 
 // identityResponder returns the standard first-display + focus-refresh pair.

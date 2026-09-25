@@ -1,23 +1,229 @@
 # Toolkit 2.0 实施状态
 
-日期：2026-09-23。2.0.1 已发布；版本源为 `release/version.json`。
-发行条件及本次后验恢复见 [2.0.1 发布合同](release-2.0.1.md)。
-本页新增命令状态针对 `codex/toolkit-parity-2.0.2` 工作分支；
-已发布的 2.0.1 标签和 npm 包不含这些未发布改动。未完成项清零、完整回归及新版本发行门禁前不得宣称新版本可发布。
+日期：2026-09-25。2.0.1 已发布；当前版本源为 `release/version.json`，候选版本为 2.0.2。
+发行条件及本候选的 Windows/npm 合同见 [2.0.2 发布合同](release-2.0.2.md)；
+2.0.1 的后验恢复记录保留在 [2.0.1 发布合同](release-2.0.1.md)。
+本页新增命令状态针对下一主版本工作分支；
+已发布的 2.0.1 标签和 npm 包不含这些未发布改动。2.0.2 在未完成静态门禁、Windows CI、发行组装和发布前回读前，不得宣称可发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
 
 ## 当前状态
 
-- 游戏内工作台八类能力的源码和四份 TOC 已进入 2.0.0。用户确认已完成
+- 2026-09-25 死锁恢复命令 `live reset` 与 Lychee 插件真机测试：回执收起后
+  的实际使用暴露一个协议缺口——abandon 只清理磁盘队列条目，运行中插件的
+  内存队列按角色 fail-closed 拒绝身份触发（聊天可见 `Lychee Dev:
+  identity_busy`），而一切输入都需要在屏回执，形成死锁；昨晚交接中
+  "身份回执超时"的机制与此同源。修复为 bootstrap 例外的第三条固定命令
+  `/dev bridge reset <nonce>`：仅允许发往磁盘无占用者的窗口，回执必须
+  携带同一 nonce 且 actor 齐备（新增 `bridge.DiscoverReset` 与
+  `parseResetSignal`，reset 类与会话无关、免 sequence 新鲜度但强制 nonce
+  关联）；插件侧 `ProbeQueue.Reset` 只把当前角色的未确认条目置为已确认
+  墓碑并丢弃格式有效的残留重入票据，不删除报告、不触碰其他角色条目。
+  合同 79 命令；四客户端 Lua `TestReceiptResetCommand`、Go
+  `TestReset{UnblocksBusyQueueAndConnects,RefusesOwnedWindow,
+  StaysPendingWithoutReceipt,RejectsForeignReceiptNonce}` 及白名单回归；
+  design 例外条款修订（2026-09-25 扩展）、regression 新增 RUN-20。发行根
+  与 hide 版同根重建部署（备份 `.tmp/retail-upgrade-reset-20260925`）。
+  真机自证：烟测探针 load→run（sum=55 verified）→abandon 制造死锁→
+  `live connect` 被拒（candidate_missing）→`live reset` 一次触发解锁并
+  重连（reset=true，`SESSION-4f82353e…`），WGC 捕获 reset 后 ready 回执
+  （epoch 36）。Computer Use 按交接复核仍不可用（native pipe），未用于
+  本次恢复。Lychee 插件真机测试用 live 探针执行：健康探针
+  （19 Provider 全部 enabled、成就目录 6616 条 schema 4、全部内部组件
+  在位、namedFrames=0 且无 OnUpdate——零成本禁用合同实测达标；
+  `I.Builtin` 已随架构重构移除，旧 Audio 探针面失效；报告正文与捕获
+  已归档，其 ack 因回执被用户关闭未能观察，经 `live abandon` 释放，
+  cleanup=abandoned 如实记录）；搜索探针经 StaticIndex 真实查询：
+  "宏伟宝库"/"炉石"/"坐骑"命中对应 Provider，"剧毒冲击"（近期历史可
+  解析但索引为空）与 garbage 查询为空、诊断计数 FUZZY_CANDIDATE_LIMIT=2
+  ——属 Provider 索引范围问题待源码核对，未定为缺陷；探针身份段曾用
+  已移除的 GetAddOnMetadata，改 C_AddOns 后正常（0.3.38 荔枝启动器）。
+  两个探针 operation 均 ack 收尾、`live hide` 清屏验证 symbols=[]。
+  未提交、未发布。
+
+- 2026-09-25 回执显式收起（`live hide`，用户反馈驱动）：显示的回执默认常驻
+  （跨进程晚到观察依赖它），但操作终了后无人再读的卡片会一直占据游戏画面。
+  新增协议命令 `/dev bridge hide`（`ReceiptView.Dismiss`）：请求作用域操作
+  在飞时 fail-closed 返回 `receipt_busy`，成功清屏不打印、不产生新回执、
+  幂等；新增 CLI `live hide --session`：经固定 bootstrap 重连并验证 readiness
+  后恰好发送该命令，占用窗口直接拒绝（`live.receipt_window_busy`/exit 3），
+  有效帧连续零符号才报告 cleared，残留回执返回
+  `live.receipt_hide_pending`/exit 6，唤醒等待 15 s 有界。合同表增至 78 命令，
+  skill commands.md 再生成，live-investigation 补充"读完即收起"编排
+  （隐藏是整洁性要求，不替代读取与归档）。回归：四客户端 Lua
+  `TestReceiptHideCommand`（解析/忙拒/幂等/无新回执）与 Go
+  `TestHideReceipt{ClearsDisplayedReceipt,RefusesOwnedWindow,PendingWhenStillVisible,
+  ReadinessPending,MatchesSessionIdentity}`；design 补显示策略段，
+  regression 新增 RUN-19。发行根
+  `.tmp/release-2.0.2-receipt-hide-20260925/npm-stage`（dirty 本地组装）经
+  `addon install --output` 升级事务部署，回执 ReceiptView/Controls 哈希与
+  工作树一致，备份 `.tmp/retail-upgrade-hide-20260925`；`live reload`
+  （cleanup=complete，`CAP-41933cfe…`）激活。真机闭环：bugs
+  `OP-37311b59…` verified → 独立 ack cleaned/completed → hide 前 WGC 捕获
+  acknowledged+ready 两卡在屏 → `live hide` cleared=true → 隐藏后捕获
+  symbols=[]、无新聊天输出。全量 Lua5.1 必需测试与门禁通过。
+  未提交、未发布。
+
+- 2026-09-25 身份回执复核与 faults ACK 修复：游戏 08:42 重启（新 PID 41860、
+  HWND 122624736），原授权角色灵止光—死亡之翼在线，磁盘仍为 2.0.2 managed
+  （commit 28c0a99）。用当前工作树构建的 CLI 一次限定 connect 成功
+  （`SESSION-e8ab82cfc6c01905d67da934d1966c5d6551cf97e3392904dee4d531946733eb`，
+  capture `CAP-da83a101…`），身份识别、WGC 解码、会话绑定全链路正常；
+  昨日 20:04 的 identity_unreadable/超时在今日栈未复现，其根因仍无定位证据
+  （原进程内状态已随重启销毁），不宣称已修复。WGC MTA 崩溃修复整日真机
+  操作中未再出现原生异常。独立 reload `OP-b8b389dd…`（cleanup=complete，
+  nonce 关联新运行态回执 `CAP-f1aa64b5…`）首次真机验证输入恢复版运行态激活；
+  probe load `OP-c5e4d9b5…` 正确停在 loaded，run 首次即 verified
+  （sum=55、iterations=10，正文 SHA-256 `18879cbb…`），ack 完成
+  cleaned/completed、无额外 reload——完整原子链首次真机通过。
+  随后 bugs 任务 `OP-f24f3d91…` verified 后独立进程 `live ack` 失败：
+  `bridge.signal_not_observed`、messagesQueued=0。离线红绿复现定位根因：
+  faults 清理重载后，新进程的 SignalReader 无任何观测，`sendAck` 首输入
+  guard 的 `RequireFreshSignal` 直接拒绝，而旧代码在输入前从不观测 readiness
+  （probe 路径有对称的 `prepareAcknowledgement` 等待）；`ack_requested`
+  恢复另有 `observeAcknowledgement` 无 15 秒界的无界等待缺陷（真机表现为
+  持续解码空转，修复前一次 resume 进程被终止）。修复：`sendAck` 输入前
+  锚定归档重入锚点观测当前 inputReady 回执，超时映射
+  `live.ack_readiness_pending`；落盘回执证明零键盘消息入队（无任何
+  PostMessage 成功）时 `ack_requested` 恢复安全重发，阶段保持
+  ack_requested、不经过 verified 门，否则只观察且 15 秒有界。
+  新增 `TestFaultsAckFreshProcessObservesReadinessBeforeInput`、
+  `TestFaultsAckResendsAfterUnsentIntent` 红→绿回归（后者先以无界等待
+  复现错误结局），既有 faults 生命周期测试夹具补充回执持续显示的帧。
+  design 的 ACK 恢复不重发条款补充零消息回执例外，regression 新增 RUN-18。
+  真机验证：原 ID `live resume` 完成 `OP-f24f3d91…`
+  （cleaned/completed/cleanup=complete）；下一任务 bugs `OP-b056a5eb…`
+  在已释放窗口 verified，独立 `live ack` 一次通过（cleaned/completed）——
+  同时验证窗口释放与修复后的 faults 工作流。本轮无 addon 变更、未提交、未发布。
+
+- 2026-09-24 深夜 WGC 原生崩溃修复（本轮补记，证据在 `.tmp`）：CDB 捕获
+  CLI 子进程 `0xc0000005`，执行地址落在 `<Unloaded_GraphicsCapture.dll>+0x1115c`
+  （执行非可执行地址），只调试 CLI、未附加游戏；`.tmp/capture-check/main.go`
+  只读最小复现（开 WGC、读一帧、关闭、等 500 ms 循环，不发输入）在第 8 轮
+  崩溃过一次，证实竞态。根因为进程内最后一个捕获流关闭后 MTA 引用归零、
+  GraphicsCapture.dll 卸载，而原生 worker 尚未返回。修复：
+  `internal/desktop/capture_windows.go` 以 `sync.OnceValue`+`CoIncrementMTAUsage`
+  懒初始化并进程生命周期保留一个 MTA 引用，`frames_windows.go` 在身份与
+  ROI 校验后、启动捕获前调用；每流仍释放线程、事件委托、纹理、设备、
+  会话并配对 RoInitialize/RoUninitialize。红绿：修复前回归第 0 轮即报
+  `capture runtime unloaded between sessions`；仅保留 MTA 的对照实验与
+  正式修复各通过真实窗口 60 轮。新增
+  `internal/desktop/lifetime_fixture_windows_test.go`（需
+  `LYCHEEDEV_TEST_DESKTOP=1`）。修复版二进制 `.tmp/lycheedev-native-fixed.exe`
+  构建 2026-09-24 19:59。build/vet 与 Lua5.1 全量当时已通过。
+
+- 2026-09-24 19:32 +08:00 后续恢复：新增原子命令 `live abandon`，仅允许
+  已归档验证且尚未提交 ACK 的 probe；先持久化 abandoning 意图，再精确移除
+  原磁盘队列条目，最后释放窗口占用。保留报告，不发送输入、不改 SavedVariables，
+  返回 cleanup=abandoned、complete=false，不伪称 ACK 成功。覆盖执行租约冲突、
+  意图/队列阶段中断恢复、其他条目保留、损坏归档及已提交 ACK 拒绝。
+  用户明确授权后，真实旧任务 `OP-6aa7e30a25a525bdfbd9f5b1790f2236` 已
+  abandon，原 sum=55 报告与 capture 保留；此结论替代下文历史记录的“仍占用”。
+  新版后台输入/重入修复已从正规发行根
+  `.tmp/release-2.0.2-input-recovery-20260924/npm-stage` 部署，旧安装备份于
+  `.tmp/retail-before-input-recovery-20260924`。这是 dirty 本地测试组装，非发布包。
+  部署后仅对灵止光—死亡之翼（PID 31732）进行一次限定 connect，子进程以
+  `0xc0000005` 原生访问异常退出，没有 JSON/session；输入提交进度未知，未重发。
+  WGC `.tmp/retail-after-connect-crash-20260924.png` 确认该角色仍在线且无 QR。
+  新磁盘版本尚无 reload/运行态验证，完整 load/run/ACK 链仍未通过。
+  只读三轮共 90 帧捕获解码与独立窗口输入、WGC 二维码各 10 次均通过，
+  不能据此排除连接路径的原生崩溃；未找到对应 Application 崩溃事件或本地 dump。
+  新增独立窗口并发 WGC 捕获/逐字 bootstrap 测试，核验完整输入与二维码正文，
+  交互桌面模式运行 10 次通过（30.239 s），GOGC=1 高频回收下再跑 10 次通过
+  （30.521 s）；仅覆盖原生传输组合，不是游戏接入证明，仍未复现该原生崩溃。
+  abandon 改动已通过 build、vet、Lua 5.1 必需的全量 Go 测试
+  （live 157.642 s、protocol 15.050 s）、77 命令/171 引用 skill 合同、
+  version --check 和 skill-creator quick_validate；skill 已编排显式放弃与恢复边界。
+  补充并发原生测试后再次通过 build、vet 与 Lua 5.1 必需的全量测试
+  （live 148.642 s、protocol 12.542 s）；diff --check 无错误。
+  未提交、未发布；原生崩溃根因未定位，真机验收不得标为通过。
+
+- 2026-09-24 后台输入/重入修复：对照 Git v1.2.0，恢复打开聊天后
+  150 ms、逐 UTF-16 单元 50 ms 的发送节奏；保留新版逐消息身份检查、
+  多客户端绑定、窗口独占和不确定效果不重放。重入等待进入世界与加载结束
+  两个事件，支持任意顺序；聊天焦点释放后重建 readiness，加载/离开世界
+  不复活旧回执。报告归档保留输入与捕获诊断材料。回归先复现 10 ms
+  节奏偏差和加载结束前提前 ready，再修复；这些缺陷不证明原真机事故的
+  唯一根因。19:04:27 +08:00 WGC 只读观察同一 PID 31732 / HWND 38342164，
+  `.tmp/retail-input-fix-observe-20260924.png` 仍无可解码符号，decodeError=nil。
+  本轮尚未部署新代码或发送游戏输入，原任务 ACK 与后续任务仍未通过实测。
+  本轮修复后离线门禁已通过：`go build ./...`、`go vet ./...`、
+  `LYCHEEDEV_REQUIRE_LUA51=1 go test -count=1 ./...`（live 143.718 s、
+  protocol 13.218 s）、version --check、76 命令 skill 合同及 skill-creator
+  quick_validate。skill 补充缺失回执不能推断战斗或 reload 失败；未提交、未发布。
+
+- 2026-09-24 Retail 定向实测只操作灵止光—死亡之翼（PID 31732，
+  Build 12.1.0.69933 / interface 120100），另一个在线角色未接收本轮输入。
+  自动连接 2.0.2、独立 reload 成功：`OP-4021e959ea66c8b7cbf44d956da31ca3`，
+  新运行态回执 `CAP-878823b6cf956bc416cac8efd9d7b89cb4006b38edc8f8b6d980711b90cc4970`。
+  修复完成 reload 被误报 complete=false，以及下一项动作误读重载专用 ready。
+  有界求和探针返回 55，但操作 `OP-361f7eade0aa4907f0c565ff0b4f9aea`
+  暴露 load 越过运行/确认停止点，不能算原子链通过。已补真实状态机回归并修复。
+  修复后新 load 请求在接入前超时，未创建 operation；WGC 确认仍为目标角色，
+  聊天显示 identity_busy。Lua 回归复现 ACK 后内存队列仍占用身份识别，
+  并覆盖共享队列其他角色隔离；修复保留精确 ACK、禁止重载已确认源码。
+  此 Lua 修复随后已通过正规发行根部署（安装回执 2.0.2，ProbeQueue.lua
+  SHA-256 `a826ab1c03868286d6814c8220c98447b0779010a74556532c88b358e43b4938`），
+  旧安装备份于 `.tmp/retail-before-ack-fix-20260924`。用户明确改为操作同窗口
+  的晴昼秋岚—白银之手后，重新绑定并完成独立 reload：
+  `OP-7d7dd3fc435c092fbc27668ec9b05963`，complete=true、cleanup=complete，
+  新运行态证据 `CAP-aefbb65111cf1ef5dab163dcddbe50b05d06c6ed33fb12135158f058636b02ff`。
+  后续真机原子链操作 `OP-6aa7e30a25a525bdfbd9f5b1790f2236`：load 正确停在
+  loaded、report unavailable；run 到 flush_requested 后等待超时，一次原 ID resume
+  仍超时（当时误报 command.cancelled / context deadline exceeded）。
+  WGC 截图 `.tmp/retail-qingzhou-atomic-flush-20260924.png` 显示目标角色在线、
+  无可解码二维码；聊天中保留 reported 文本，但这不替代完整报告或重载证据。
+  后续回归复现并修复 CLI 错误地把报告归档绑在瞬时重入 QR 上：持久正文
+  已精确匹配时，原子操作可在原执行租约下离线恢复报告，无需先看到 QR。
+  同一真机 operation 的 `live resume` 已成功返回 report.state=verified，
+  正文为 completed / iterations=10 / sum=55；cleanup=pending、complete=false。
+  正文 capture `CAP-8394736ced93e90e45039276271e7c307e9ed7c957fe1912ebb0e137626857e8`，
+  回执 capture `CAP-8dd435ef2d1f25041b0f5bdd6abeb55d269d019ffbac449581d102c71a3eab70`，
+  正文 SHA-256 `18879cbb9010f54c0d507b2513cbbefb0d7bc1b3d379ba5c53ee0b5403c247af`。
+  ACK 有界尝试未取得有效 readiness，未发送 ACK 输入；修复后 CLI 返回
+  live.ack_readiness_pending（子程序 exit 6，go run 外壳 exit 1），保留
+  verified 正文、retryable=true 和原 resumeOperationId，不再误报取消。
+  WGC 只读捕获 `.tmp/retail-report-recovery-20260924.png`（17:58:59 +08:00）
+  显示同一角色在线，但未解码出 QR。真实瞬时 QR 丢失/未重入的原因仍未证明，
+  完整报告恢复不证明该 reload 成功；保留原操作与窗口所有权，不重放执行、
+  不强行清理。ACK 收尾仍 blocked，ACK 后下一任务 not_run，完整原子链未通过。
+  新增离线恢复、损坏正文、writer 冲突、幂等、错误 ACK readiness 及 ACK
+  意图前后崩溃的 fixture 回归；它们不替代真实 ACK 收尾证据。
+  2026-09-24 18:09 +08:00 再次真机复测：原 PID 31732 / HWND 38342164
+  仍在线，WGC 捕获 `.tmp/retail-retest-20260924-180909.png` 显示晴昼秋岚，
+  解码结果为空（decodeError=nil）。原 operation 的 status 仍返回 verified
+  报告与 sum=55；一次有界 ACK 再次返回 live.ack_readiness_pending / exit 6，
+  保留原恢复 ID、cleanup=pending、complete=false。未提交 ACK 输入、未重跑
+  探针、未强行释放窗口；ACK 后下一任务仍 not_run，本次未通过完整实机链路。
+  本轮最终离线校验通过：go build ./...、go vet ./...、启用 Lua 5.1 的
+  go test -count=1 ./...、version --check、76 命令 skill 合同及
+  skill-creator quick_validate；未提交、未发布，未覆盖个人目录旧 skill。
+
+- 2026-09-24 Classic 接入尝试：正式安装后磁盘状态为 managed；身份识别
+  返回 unreadable/超时，尚未建立 session，未执行 reload、probe 或 ACK。
+  带正斜杠路径连接时空候选暴露了路径比较缺陷。本次统一发现、选择和
+  session 约束的路径规范化，并修订首次加载 skill 编排。完整方案及待实机
+  验收项见 [首次加载与连接恢复](live-startup-recovery.md)。
+  超时原因仍未验证，不能写成“已确认插件未加载”或“死锁已修复”。
+
+- 游戏内工作台八类能力的源码和四份 TOC 已进入当前 2.0.2 工作树。用户确认已完成
   工作台真机手测；本仓库没有逐项 WKB 记录、实际游戏 Build、截图和检查者签名，
   因而只记录“用户确认”，不把缺失细节补写成自动测试通过。
 - CLI `live instances` 自动发送一次性身份标记，`live connect` 自动完成
   候选选择、游戏内 `/dev connect` opt-in 和新鲜 ready 核验。用户不手输
-  `/dev connect`；清理重载后旧 session 失效，由 agent 再调用
-  `live connect` 自动重建。真实候选歧义仍需用户选择。
-- 2.0.1 只发行 Windows amd64。Retail `120100`、Classic `50504`、
+  `/dev connect`；真实候选歧义仍需用户选择。`live run` 在 verified 报告处
+  停止，`live ack` 精确回收该 operation 的报告、队列项和窗口所有权，且不
+  额外触发 cleanup reload；需要重载时单独使用 `live reload`，重载造成的
+  readiness 变化由 CLI 自动重新连接。
+- 2.0.2 候选只发行 Windows amd64。Retail `120100`、Classic `50504`、
   Titan `38002` 为支持客户端；Forever `16001` 保留代码/TOC 但
   未获真机验收。CI 保留托管 Windows 上的 Go、Lua、进程和安装包验证，
   不再要求 self-hosted 交互桌面或 desktop-evidence 门禁。
+- wowdoc/wowdata 已建立逐业务的离线 parity 台账：`tests/parity/coverage.json`
+  共 55 个 case（wowdoc 19、wowdata 36）。当前统计为 `passed=25`、
+  `fixture-backed=6`、`fixture-backed-partial=8`、`intentional-change=16`、
+  `not_run=0`。这里的 `passed` 只表示当前实现对该 case 的断言有自动化证据，
+  不表示旧可执行程序被重跑，也不表示真实 CDN、所有 Build、完整 Hotfix
+  服务覆盖或所有客户端的真实数据都已验收。
 - `v2.0.1` 指向 `baa83e9d7ec80091dce5de68c4295bb233139613`；
   标签 CI、Windows 原生组装、安装 smoke、封存和 release-gate 均通过。
   npm Trusted Publishing 成功，`latest` 为 2.0.1，registry integrity 与
@@ -31,7 +237,7 @@
 此前来源、样本摘要及逐轮测试记录另见
 [历史实施记录](implementation-history.md)。以下内容保留用于追溯早期决策，
 其中 `2.0.0-dev`、五平台、四端实机、未迁移工作台与手动 connect 的描述
-均以本页“当前状态”和 2.0.1 合同为准。
+均是历史快照，以本页“当前状态”和 2.0.2 合同为准。
 
 ## 架构与接口
 
@@ -39,8 +245,11 @@
   `delivery`，目标与存储归 `selection` / `vault` / `evidence`。CLI 直接调用用例。
 - 游戏会话、执行、报告及恢复集中在 `live`；原 `jobs` 移入 `live/journal`，
   是游戏操作记录，不再作为所有命令共用的任务框架。
-- `live run --session <id> --file <probe.lua> [--account <account>]` 从保存连接读取
-  目标及截图区域，重新核对进程身份和新的 ready 画面。不能覆盖 PID、安装、角色、
+- `live probe put` 保存不可变代码修订；`live probe load` 从保存连接读取目标及截图
+  区域，只加载修订并返回 operationId；`live run <operation-id>` 只执行已加载操作到
+  verified；`live ack <operation-id>` 精确确认并回收且不再触发清理 reload。
+  `live reload` 只做 nonce 相关独立重载，`live bugs` 只做 1..100 条既有错误快照。
+  这些动作不能覆盖 PID、安装、角色、
   snapshot 或区域。首次连接按 2026-09-23 用户修订改为自动发现/选择/连接：
   `live instances` 发现安装与在线候选并逐窗口做一次性身份识别，`live connect`
   自动完成 opt-in 与 ready 核验并保存会话（唯一匹配自动选中，真实歧义交用户
@@ -50,7 +259,8 @@
 - 运行时自动定位唯一匹配当前角色/服务器的账号目录，固定进操作请求；缺失或
   歧义才需显式账号，恢复不重新扫描。发现只读目录元数据，不继承旧 SavedVariables。
 - `live resume <operation-id>` 从原记录取得全部身份及区域。完成态只整理所有权，
-  不输入游戏；其他状态进入同一执行内核，核验新证据，不重发已记录输入。
+  不输入游戏；原子探针已持久化的报告可在无在线窗口时精确核验并归档，
+  不释放所有权。其他游戏阶段仍核验新证据，不重发已记录输入。
 - run / resume / status 返回任务结果视图，不暴露内部 observation。
   `report.state=verified` 带完整正文和归档引用；`cleanup=pending` 不抹去有效报告。
   `complete` 仅在报告已验证且收尾完成时成立。这是读取视图，不是第二套持久状态。
@@ -58,7 +268,7 @@
   retirement requested/completed 六个布尔标记。输入前提交的证据引用及队列内容
   摘要是单一依据；缺少发送回执不授权重发。
 - 使用 skill-creator 修订统一 skill：调查、证据解释和恢复决策留在 skill，机械
-  协议留在 CLI；安装细节按需读取。本轮没有安装到用户的 skill 目录。
+  协议留在 CLI；命令参考由 `tools/skill-commands.mjs` 从 describe 生成。
 - 命令准入、help 和 describe 共用一份命令定义。子命令 help 只返回自身参数；
   不存在的命令即使带 help 也返回参数错误。运行 skill 不再列出未实现命令的调用示例。
 - 本地数据目标直接由 `target resolve --installation <client> --region <region>
@@ -66,9 +276,12 @@
   commit；无需手写配置键。`--from` 不可变地扩展已有源码目标。数据和资源读取接受
   同一个客户端目录，也接受 CASC 根目录；安装、运行与数据共用客户端身份读取。
 
-架构收敛尚未全部完成：传输仍有六次提交、三次重载，尚未实现有界保留与延后清理。
-阶段/执行状态已分别保留协议进度与未决信息，不能据此宣称传输已经简化。连接/运行真机验收和
-完整结果渲染也未完成。命名目标配置已在当前工作分支接线，但尚无发布版验收；
+新原子链已实现不可变探针修订、稳定请求幂等、加载/执行/确认分离、独立 reload、
+内置 bugs 和异步探针有界 API。本轮 Go/Lua 全量静态回归、Go build/vet、Node
+工具测试、skill 合同、skill quick_validate、开发包隔离安装、实际组装 tgz 的
+隔离安装和 sealed digest 校验均已通过；仍需 Windows required CI、干净提交的
+正式发行门禁及真机验收后才能发布。
+阶段/执行状态继续分别保留协议进度与未决信息。命名目标配置已在当前工作分支接线，但尚无发布版验收；
 不能把目录迁移、命令接线或读取视图当作这些工作的替代。
 
 ## 能力覆盖
@@ -89,19 +302,21 @@
 
 | 范围 | 已有实现 | 主要缺项 |
 | --- | --- | --- |
-| 工作空间/目标 | 新格式初始化、命名目标（list/add/show/resolve/remove）、本地及远程目标准备、精确固定引用、项目锁与默认选择、对象存储及缓存维护 | 完整语义 legacy fixture compare；逐目标历史远程 Build 来源仍受发布清单限制 |
-| 源码 | 同步、索引、topic/tier 查询、查看、比较、TOC/XML 静态验证及矩阵验证 | 全部历史能力的端到端语义对照仍待完成 |
+| 工作空间/目标 | 新格式初始化、命名目标（list/add/show/resolve/remove）、本地及远程目标准备、精确固定引用、项目锁与默认选择、对象存储及缓存维护 | 55-case parity 中仍有 fixture-backed/partial 边界；逐目标历史远程 Build 来源仍受发布清单限制 |
+| 源码 | 同步、索引、topic/tier 查询、查看、比较、TOC/XML 静态验证及矩阵验证 | case-level 离线 parity 已建立；完整历史源码树、真实远程来源和多客户端运行语义仍需单独验收 |
 | 数据/资源 | 本地/CDN CASC、DBD/WDC、DB2/schema/search/foreign-key/stream、只读 SQL、多领域查询、Hotfix（Wago/DBCache/Raidbots）、资产 search/inspect/export/demux 与 BLP2 转 PNG/无损 WebP | CDN 冷索引定位优化及完整真实样本覆盖；Hotfix 来源/筛选不等于完整服务器覆盖 |
-| 游戏运行 | Windows 输入/捕获、bootstrap 身份标记与自动发现/连接（`live instances`/`live connect`）、账号目录选择、运行/恢复、仅对未发布队列的 prepared 操作可用的 `live cancel`、报告读取；工作台八类能力已迁入源码 | `live bugs`、独立 `live reload` 尚无公开实现；取消其他阶段仍须恢复收尾；WKB-01..13 逐项、逐支持客户端的证据及前后截图 |
+| 游戏运行 | Windows 输入/捕获、自动发现/连接、不可变探针注册、原子 load/run/ack、独立 reload、内置 bugs、同步及有界异步探针、恢复、prepared cancel、报告读取；工作台八类能力已迁入源码 | 发布候选的真机故障恢复与 WKB-01..13 逐项、逐支持客户端证据；运行中取消仍只承诺协议可证明的安全范围 |
 | 安装 | 清单验证、安装、归档升级、恢复和移除 | 新旧产品切换体验、正式载荷验收 |
-| 证据 | capture 查询、校验与 ZIP bundle 命令 | evidence keep/remove 仍待实现和验证 |
-| CI/npm | Windows amd64 CI、发行与隔离安装验证（2.0.1 已发布） | 后续版本门禁与许可/发布验收以对应合同和新证据为准；本页不表示当前分支可发布 |
+| 证据 | capture 查询、校验、ZIP bundle、retention ledger、显式 CAS remove | 真机无关；仍需随全量回归确认发布候选证据 |
+| CI/npm | Windows amd64 CI、发行与隔离安装验证（2.0.1 已发布，2.0.2 候选待门禁） | 后续版本门禁与许可/发布验收以 2.0.2 合同和新证据为准；本页不表示当前分支可发布 |
 
 当前分支的命令目录以 `internal/command/command_contract.go` 为准。命令存在
-不代表相应真实数据覆盖或发布验收已经完成。仍待完成：`live bugs`、
-独立 `live reload`、`live cancel` 已实现范围的真机及故障验证、
-`evidence keep/remove`、完整语义 legacy fixture compare，
-以及 Retail/Classic/Titan 各自的 WKB 逐项证据。不得据此状态宣称本分支已具备发布条件。
+不代表相应真实数据覆盖或发布验收已经完成。证据生命周期已在 Go 模块、CLI
+dispatch 和离线回归中接通：keep 写入 retention ledger；remove 进行引用检查、
+generation CAS 和 shared-blob 保护。仍待完成的是 parity 台账中明确标出的
+fixture-backed/partial 真实来源补强、原子 live 链与 `live cancel` 已实现范围的
+真机及故障验证，以及 Retail/Classic/Titan 各自的 WKB 逐项证据。不得据此状态
+宣称本分支已具备发布条件。
 
 新链路不调用旧 wowdoc、wowdata 或 Python。旧 `add-on/`、`packages/cli/` 和旧
 skill 已于 2.0 发布准备中退役（2026-09-23，检查点 `6b08e14` 之后），历史版本
@@ -706,7 +921,7 @@ SavedVariables，未输入新协议。继续真机验收前需重新观察，旧
 已询问用户本机画面是否正常；这不阻塞代码工作，但本轮真机验收尚未执行。
 
 四端 Lua fixture 不替代四端真机，自有 Windows 测试窗口不替代游戏输入资格。
-发布仍需完成 [发布规范](release-2.0.0.md) 的完整能力、许可、平台、安装和实机门槛。
+2.0.2 发布仍需完成 [发布规范](release-2.0.2.md) 的完整能力、许可、平台、安装和人工验收门槛；本轮非真机工作不替代人工验收。
 
 ## 下一条产品链路
 

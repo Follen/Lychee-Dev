@@ -25,8 +25,9 @@ for the AGPL-3.0-or-later option continues to be delivered through the release
 source archive and GitHub Release attachments recorded in the package notices.
 wowdoc-derived portions remain MIT with attribution; all other third-party
 components retain their own licenses in the sections below. The package
-manifest declares `"license": "MIT"` while staying `private` until the 2.0.0
-release freeze flips it for publication.
+manifest declares `"license": "MIT"`. Development versions use
+`private: true` only when the version policy marks them as development builds;
+the current 2.0.2 candidate is not private solely because it is unreleased.
 
 ## luaqrcode
 
@@ -287,19 +288,19 @@ own third-party content, for completeness:
   vendor payload with no license or attribution recorded in the repository;
   their provenance is unverified and is flagged for the owner. The 2.0
   `addon/` payload ships neither image.
-- `Lychee Dev skill/scripts/requirements.txt` pins `zxing-cpp==3.1.1`,
-  `windows-capture==2.0.1`, `numpy==2.5.3`, `opencv-python==5.0.0.93`. These
-  are installed at runtime into `~/.lycheedev/python` and are not redistributed
-  by this repository.
+- `Lychee Dev skill/scripts/requirements.txt` pins the retired 1.x Python
+  helpers (`zxing-cpp==3.1.1`, `windows-capture==2.0.1`, `numpy==2.5.3`,
+  `opencv-python==5.0.0.93`). They are historical provenance only: Toolkit 2.0
+  does not install them, does not use `~/.lycheedev/python`, and does not
+  redistribute them.
 - The legacy TOCs declare `## Dependencies: !BugGrabber`; that addon is not
   bundled.
 - `Analyze/` holds third-party addons used as comparison material (for example
   DevTool with Ace3/LibStub/CallbackHandler bundles, MIT per `Analyze/DevTool/LICENSE`;
   BraunerrsDevTools, AGPL-3.0 per its LICENSE) and is excluded from all payloads.
 
-No root `LICENSE` file currently exists in this repository even though
-`packages/cli/package.json` declares `"license": "MIT"`; that gap must be closed
-as part of the release-license gate.
+The repository root `LICENSE` is the authoritative combined-work license file;
+the npm package copies that file byte-for-byte during release assembly.
 
 ## Blizzard event catalog data (conditional)
 

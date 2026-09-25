@@ -56,7 +56,7 @@ func (r *WindowRun) Check(ctx context.Context) (WorkRecord, error) {
 	if record.Intent.Resource != owner.Resource {
 		return zero, errors.New("journal.window_resource_mismatch")
 	}
-	if record.Stage == "cleaned" || record.Status == "completed" || record.Status == "cancelled" {
+	if record.Stage == "cleaned" || record.Status == "completed" || record.Status == "cancelled" || record.Status == "abandoned" {
 		return zero, ErrTransition
 	}
 	return record, nil

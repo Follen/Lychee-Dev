@@ -34,6 +34,13 @@ it selects the catalog's product branch at preparation time. Do not omit it when
 the user supplied an exact version. A source query product is not evidence that
 the addon supports installation on that client.
 
+When an addon version is the requested identity, inspect `source list`, select
+the exact matching tag, pass its full `refs/tags/...` name to `source sync`, and
+retain both the requested tag and resolved commit. Never fall back to the
+product branch or a newer tag when that exact tag is absent. If a query or
+symbol inspection returns `codebase.index_not_ready`, run `source index` for
+that same snapshot and retry; do not resolve a replacement snapshot.
+
 `source inspect` reads only the prepared exact commit, without network access.
 It archives the **whole original file**, while `result.text` contains only the
 requested lines (at most 2,000). The capture being complete does not mean the

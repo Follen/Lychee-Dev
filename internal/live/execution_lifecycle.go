@@ -5,21 +5,20 @@ import (
 	"errors"
 	"image"
 	"strings"
+	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/buildinfo"
-	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
-	"time"
 )
 
-type RunRequest struct {
+type ExecutionRequest struct {
 	Session string
 	Account string
 	Code    []byte
 }
 
-func (r RunRequest) Validate() error {
+func (r ExecutionRequest) validate() error {
 	if strings.TrimSpace(r.Session) == "" || len(r.Session) > 128 {
 		return errors.New("live.session_required")
 	}
@@ -34,24 +33,16 @@ func (r RunRequest) Validate() error {
 	return nil
 }
 
-// Run starts new work from fresh pixels, never from an archived permission.
-// A returned operation ID must be retained on failure; rerunning creates new
-// work rather than recovering the existing operation.
-func Run(ctx context.Context, root string, request RunRequest) (Outcome, error) {
-	record, err := runProbe(ctx, root, request, OpenWindowSession, desktop.QueuePreparedCommand)
-	return finishOutcome(ctx, root, record, err)
-}
-
-func runProbe(ctx context.Context, root string, request RunRequest,
+func executePrepared(ctx context.Context, root string, request ExecutionRequest,
 	open func(context.Context, ClientWindow, image.Rectangle, bridge.SignalExpectation) (*WindowSession, error),
 	send preparedInput,
 ) (record journal.WorkRecord, err error) {
-	if err = request.Validate(); err != nil {
+	if err = request.validate(); err != nil {
 		return record, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	session, snapshot, err := reconnectSession(ctx, root, request.Session, open)
+	session, snapshot, err := observeRecordedSession(ctx, root, request.Session, open)
 	if err != nil {
 		return record, err
 	}
@@ -75,7 +66,7 @@ func runProbe(ctx context.Context, root string, request RunRequest,
 // A saved connection identifies the target; it does not authorize input.
 // OpenWindowSession verifies the original process identity and observes a new
 // ready frame. Request identity is never accepted from a command-line override.
-func reconnectSession(ctx context.Context, root, id string,
+func observeRecordedSession(ctx context.Context, root, id string,
 	open func(context.Context, ClientWindow, image.Rectangle, bridge.SignalExpectation) (*WindowSession, error),
 ) (*WindowSession, string, error) {
 	bound, err := ReadWindowSession(ctx, root, id)

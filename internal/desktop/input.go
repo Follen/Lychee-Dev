@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -16,6 +17,28 @@ type InputReceipt struct {
 
 const bootstrapIdentifyPrefix = "/dev bridge identify "
 const bootstrapConnectCommand = "/dev connect"
+const bootstrapResetPrefix = "/dev bridge reset "
+
+// transmitText owns pacing only. The native callbacks retain per-message
+// identity/ownership checks and cancellation; no input is retried here.
+func transmitText(units []uint16, enter func() error, character func(uint16) error, wait func(time.Duration) error) error {
+	if err := enter(); err != nil {
+		return err
+	}
+	if err := wait(150 * time.Millisecond); err != nil {
+		return err
+	}
+	for _, unit := range units {
+		if err := character(unit); err != nil {
+			return err
+		}
+		// Preserve the proven background transport cadence from 1.x.
+		if err := wait(50 * time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return enter()
+}
 
 // QueueBootstrapCommand is one narrow, fixed exception used only to obtain the
 // first verifiable receipt: it may send exactly /dev bridge identify <32-hex>
@@ -33,20 +56,30 @@ func QueueBootstrapCommand(parent context.Context, target WindowIdentity, comman
 }
 
 // bootstrapCommand is the complete allowlist of the bootstrap entry. Any other
-// text is a hard error, not a fallback to the general command channel.
+// text is a hard error, not a fallback to the general command channel. The
+// fixed reset trigger is the recovery exception for a runtime whose queue
+// blocks identity after its disk entry was retired; it carries the same
+// nonce-correlation shape as identify.
 func bootstrapCommand(command string) error {
 	if command == bootstrapConnectCommand {
 		return nil
 	}
-	if strings.HasPrefix(command, bootstrapIdentifyPrefix) {
-		nonce := command[len(bootstrapIdentifyPrefix):]
-		if len(nonce) == 32 {
-			for _, c := range nonce {
-				if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-					return errors.New("desktop.bootstrap_command_not_allowed")
+	for _, prefix := range []string{bootstrapIdentifyPrefix, bootstrapResetPrefix} {
+		if strings.HasPrefix(command, prefix) {
+			nonce := command[len(prefix):]
+			if len(nonce) == 32 {
+				valid := true
+				for _, c := range nonce {
+					if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+						valid = false
+						break
+					}
+				}
+				if valid {
+					return nil
 				}
 			}
-			return nil
+			return errors.New("desktop.bootstrap_command_not_allowed")
 		}
 	}
 	return errors.New("desktop.bootstrap_command_not_allowed")

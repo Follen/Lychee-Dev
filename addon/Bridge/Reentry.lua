@@ -8,7 +8,8 @@ end
 local fields = { schema=true, requestId=true, sessionNonce=true, reloadNonce=true,
     release=true, product=true, build=true, character=true, realm=true, guid=true,
     runtimeEpoch=true, receipt=true, bodyBytes=true, bodyAdler32=true,
-    codeSHA256=true, codeAdler32=true, codeBytes=true, cleanupNonce=true, queueReload=true }
+    codeSHA256=true, codeAdler32=true, codeBytes=true, cleanupNonce=true, queueReload=true,
+    standalone=true, builtin=true }
 local function valid(ticket)
     if not plain(ticket) then return false end
     -- Encoding traverses all values before comparisons, rejecting secrets,
@@ -26,6 +27,19 @@ local function valid(ticket)
     end
     if type(ticket.runtimeEpoch)~="number" or ticket.runtimeEpoch<1
         or ticket.runtimeEpoch>=9007199254740991 or ticket.runtimeEpoch%1~=0 then return false end
+    if ticket.standalone~=nil then
+        return ticket.standalone==true and ticket.queueReload==nil and ticket.receipt==nil
+            and ticket.bodyBytes==nil and ticket.bodyAdler32==nil and ticket.codeSHA256==nil
+            and ticket.codeAdler32==nil and ticket.codeBytes==nil and ticket.cleanupNonce==nil
+    end
+    if ticket.builtin~=nil then
+        return ticket.builtin==true and ticket.queueReload==nil and ticket.cleanupNonce==nil
+            and type(ticket.receipt)=="string" and #ticket.receipt>0 and #ticket.receipt<=4096
+            and type(ticket.bodyBytes)=="number" and ticket.bodyBytes>=1 and ticket.bodyBytes<=512*1024
+            and ticket.bodyBytes%1==0 and type(ticket.bodyAdler32)=="string"
+            and #ticket.bodyAdler32==8 and string.match(ticket.bodyAdler32,"^[0-9a-f]+$")~=nil
+            and ticket.codeSHA256==nil and ticket.codeAdler32==nil and ticket.codeBytes==nil
+    end
     if ticket.queueReload~=nil then
         return ticket.queueReload==true and ticket.receipt==nil and ticket.bodyBytes==nil
             and ticket.bodyAdler32==nil and ticket.codeSHA256==nil and ticket.codeAdler32==nil
@@ -51,11 +65,11 @@ local function cancel(discard)
         and ns.CaptureWriter.Encode(state.reentry,8192)==ownedBytes)) then state.reentry=nil end
     ownedTicket,ownedRoot,ownedBytes=nil,nil,nil
 end
-local function show(ticket)
+local function receiptFor(ticket)
     if ticket.cleanupNonce then
         local receipt,reason=ns.ProbeQueue.VerifyRetired(ticket.requestId,ticket.cleanupNonce)
         if not receipt then return nil,reason end
-        return ns.ReceiptView.Show(receipt)
+        return receipt
     end
     local identity,reason=ns.Session.NextIdentity()
     if not identity then return nil,reason end
@@ -68,7 +82,12 @@ local function show(ticket)
         sequence=identity.sequence,runtimeEpoch=identity.runtimeEpoch,inputReady=ready,
     },2048)
     if not receipt then return nil,failure end
-    return ns.ReceiptView.Show(receipt)
+    return receipt
+end
+local function show(ticket)
+    local receipt, failure=receiptFor(ticket)
+    if not receipt then return nil,failure end
+    return ns.ReceiptView.Show(receipt,nil,function() return receiptFor(ticket) end)
 end
 local function submit(state,ticket)
     if not valid(ticket) then return nil,"reload_invalid_ticket" end
@@ -93,6 +112,42 @@ ns.Reentry={
         if not state then return nil,failure end
         if restricted(state.reentry) then return nil,"reload_invalid_ticket" end
         return state.reentry~=nil
+    end,
+    Refresh=function(reloadNonce)
+        if submitted then return nil,"reload_already_submitted" end
+        if type(reloadNonce)~="string" or #reloadNonce~=32 or not string.match(reloadNonce,"^[0-9a-f]+$") then
+            return nil,"reload_invalid_nonce"
+        end
+        local session,reason=ns.Session.Current()
+        if not session then return nil,reason end
+        local state,failure=ns.Persistence.Current()
+        if not state then return nil,failure end
+        if restricted(state.reentry) or state.reentry~=nil then return nil,"reload_ticket_exists" end
+        return submit(state,{schema="lycheedev.reentry.v1",standalone=true,
+            requestId="RELOAD-"..reloadNonce,sessionNonce=session.sessionNonce,
+            reloadNonce=reloadNonce,runtimeEpoch=session.runtimeEpoch,
+            character=session.character,realm=session.realm,guid=session.guid,
+            release=ns.Release,product=ns.Startup.identity.product,build=ns.Startup.identity.build})
+    end,
+    Flush=function(requestId,reloadNonce)
+        if submitted then return nil,"reload_already_submitted" end
+        if type(requestId)~="string" or #requestId==0 or #requestId>128
+            or not string.match(requestId,"^[%w_%-]+$") or type(reloadNonce)~="string"
+            or #reloadNonce~=32 or not string.match(reloadNonce,"^[0-9a-f]+$") then
+            return nil,"reload_invalid_request"
+        end
+        local session,reason=ns.Session.Current()
+        if not session then return nil,reason end
+        local state,failure=ns.Persistence.Current()
+        if not state then return nil,failure end
+        if restricted(state.reentry) or state.reentry~=nil then return nil,"reload_ticket_exists" end
+        local receipt,body=ns.ReportStore.Read(requestId)
+        if not receipt then return nil,body end
+        return submit(state,{schema="lycheedev.reentry.v1",builtin=true,requestId=requestId,
+            sessionNonce=session.sessionNonce,reloadNonce=reloadNonce,runtimeEpoch=session.runtimeEpoch,
+            character=session.character,realm=session.realm,guid=session.guid,
+            release=ns.Release,product=ns.Startup.identity.product,build=ns.Startup.identity.build,
+            receipt=receipt,bodyBytes=#body,bodyAdler32=ns.CaptureWriter.DigestBytes(body)})
     end,
     LoadQueue=function(requestId,reloadNonce)
         if submitted then return nil,"reload_already_submitted" end
@@ -149,27 +204,40 @@ ns.Reentry={
         for key,value in pairs(ticket) do copy[key]=value end
         ticket=copy
         waiting=frame
+        local entered,loadingDone=false,false
         frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        frame:RegisterEvent("LOADING_SCREEN_DISABLED")
+        frame:RegisterEvent("LOADING_SCREEN_ENABLED")
+        frame:RegisterEvent("PLAYER_LEAVING_WORLD")
         frame:SetScript("OnEvent",function(_,event,initialLogin,reloading)
-            if event~="PLAYER_ENTERING_WORLD" or waiting~=frame then return end
+            if waiting~=frame then return end
+            if event=="PLAYER_LEAVING_WORLD" then cancel();return end
+            if event=="LOADING_SCREEN_ENABLED" then loadingDone=false;return end
+            if event=="PLAYER_ENTERING_WORLD" then
+                if restricted(initialLogin) or restricted(reloading) or initialLogin~=false or reloading~=true then cancel();return end
+                entered=true
+            elseif event=="LOADING_SCREEN_DISABLED" then loadingDone=true
+            else return end
+            -- Neither event alone proves the new world is ready. Their order
+            -- varies; retain the exact ticket until both have been observed.
+            if not entered or not loadingDone then return end
             local unchanged=rawequal(state.reentry,ownedTicket) and ns.CaptureWriter.Encode(state.reentry,8192)==ownedBytes
             cancel()
             if not unchanged then return end
             local current=ns.Persistence.Current()
             if current~=state or not current.options or current.options.bridgeEnabled~=true then return end
-            if restricted(initialLogin) or restricted(reloading) or initialLogin~=false or reloading~=true then return end
             if restricted(state.runtimeEpoch) or state.runtimeEpoch~=ticket.runtimeEpoch then return end
             local actor=ns.Platform.ObserveActor()
             if not actor or actor.character~=ticket.character or actor.realm~=ticket.realm or actor.guid~=ticket.guid
                 or ns.Release~=ticket.release or ns.Startup.identity.product~=ticket.product or ns.Startup.identity.build~=ticket.build then return end
             local receipt,body=ns.ReportStore.Read(ticket.requestId)
-            if ticket.cleanupNonce or ticket.queueReload then
+            if ticket.cleanupNonce or ticket.queueReload or ticket.standalone then
                 if receipt~=nil or body~="report_unavailable" then return end
             elseif receipt~=ticket.receipt or type(body)~="string" or #body~=ticket.bodyBytes or ns.CaptureWriter.DigestBytes(body)~=ticket.bodyAdler32 then return end
             local bound=ns.Session.Bind(ticket.sessionNonce)
             if not bound then return end
             if bound.runtimeEpoch~=ticket.runtimeEpoch+1 then ns.Session.Release(); return end
-            if not ticket.cleanupNonce then
+            if not ticket.cleanupNonce and not ticket.standalone and not ticket.builtin then
                 local scope=ns.ProbeQueue.ReloadScope(ticket.requestId)
                 if not scope then ns.Session.Release(); return end
                 for key,value in pairs(scope) do
