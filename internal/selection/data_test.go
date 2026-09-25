@@ -96,3 +96,29 @@ func validDataIdentityPin() DataPin {
 		DefinitionCommit: strings.Repeat("c", 40),
 	}
 }
+
+// A product ID names a reusable manifest slot, not a fixed game: the Forever
+// install flavor (wow_forever) differs from the slot carrying its data
+// (wow_classic_beta). URL construction must use the slot.
+func TestDataProductSlotDiffersFromInstallFlavor(t *testing.T) {
+	want := map[string]string{
+		"retail":  "wow",
+		"classic": "wow_classic",
+		"titan":   "wow_classic_titan",
+		"forever": "wow_classic_beta",
+	}
+	for product, slot := range want {
+		got, err := DataProductSlot(product)
+		if err != nil || got != slot {
+			t.Fatalf("%s: slot=%q err=%v, want %q", product, got, err, slot)
+		}
+	}
+	if _, err := DataProductSlot("nope"); err == nil {
+		t.Fatal("unknown product accepted")
+	}
+	// The installation flavor code stays wow_forever for install identity.
+	got, err := DataProduct("forever")
+	if err != nil || got != "wow_forever" {
+		t.Fatalf("install flavor changed: %q %v", got, err)
+	}
+}

@@ -17,6 +17,21 @@ func DataIdentity(pin DataPin) (product string, locale uint32, err error) {
 	return
 }
 
+// DataProductSlot returns the versions-manifest slot a track's data is
+// published under. The installation flavor code and the data slot differ for
+// tracks that reuse another product's slot (Forever on wow_classic_beta).
+func DataProductSlot(product string) (string, error) {
+	for _, baseline := range VerifiedClientBaselines() {
+		if baseline.Product == product {
+			if baseline.DataSlot != "" {
+				return baseline.DataSlot, nil
+			}
+			return baseline.ProductCode, nil
+		}
+	}
+	return "", errors.New("selection.unsupported_data_product")
+}
+
 // DataProduct translates a toolkit track without deriving identity from a path.
 func DataProduct(product string) (string, error) {
 	for _, baseline := range VerifiedClientBaselines() {

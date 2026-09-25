@@ -100,7 +100,11 @@ func ListRemoteAvailability(ctx context.Context, options AvailabilityOptions) (A
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		locator := VersionsLocator(options.Region, baseline.ProductCode)
+		slot, err := DataProductSlot(baseline.Product)
+		if err != nil {
+			return Availability{}, err
+		}
+		locator := VersionsLocator(options.Region, slot)
 		entry := ProductAvailability{Product: baseline.Product, ProductCode: baseline.ProductCode, Locator: locator}
 		raw, err := fetch(ctx, options.Region, baseline.ProductCode)
 		if err != nil {

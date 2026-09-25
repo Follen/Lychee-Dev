@@ -12,7 +12,19 @@
   --product forever` 无 region/locale 时按合同拒绝（unsupported_data_language，
   永恒服无默认语言）；显式 `--region cn --locale zhCN` 后真实请求暴补丁服务
   `cn.version.battlenet.com.cn` 返回 404——`wow_forever` 不是暴雪产品，
-  数据身份在真实世界不可解析，fail-fast 正确。`data hotfix --source wago
+  数据身份解析失败的根因当天即定位并修复：暴雪清单里没有 `wow_forever`
+  槽位——永恒服数据发布在可复用的 `wow_classic_beta` 槽位（旧 wowdata
+  clients.yaml 参考即如此映射），2.0 误把安装 flavor 码当清单槽位。基线表
+  新增 DataSlot 字段（forever → wow_classic_beta），清单 URL 与可用性
+  列举改用槽位，安装识别保持 wow_forever。修复后真实验证：cn 区域精确
+  拒绝（`records.build_unavailable`——versions 清单 cn 行未发布，与预期
+  一致）；us 区域 versions/cdns 均按 `wow_classic_beta` 拉到
+  **1.60.1.70009**（build config `05215079…`），其 build config 已从
+  网易雷火 CDN `blzdist-wow.necdn.leihuo.netease.com`（cdns cn 行）实际
+  取回全套 TACT 配置；us 区 config 抓取在本机失败仅为
+  `us.cdn.blizzard.com` 的本地 DNS 污染（证书属于腾讯 CDN），非代码
+  缺陷。数据侧的槽位映射缺陷已修复，其余结论（wago 分页守卫、源码侧
+  全通）不变。`data hotfix --source wago
   --product forever` 真实到达 Wago 并取得分页数据，但被分页完整性守卫拒绝
   （`records.hotfix_page_drift`：记录 id 跨页重复）——远端数据质量问题被
   fail-closed 拦截，未静默返回。源码侧完整通过：`source sync --product

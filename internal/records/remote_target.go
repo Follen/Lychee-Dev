@@ -72,6 +72,7 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (RemoteTarget, error) {
 		var result RemoteTarget
 		product, _ := selection.DataProduct(request.Product)
+		slot, _ := selection.DataProductSlot(request.Product)
 		pinner := selection.OpenPinner(metadata)
 		definitions := request.Definitions
 		if request.Parent != "" {
@@ -104,7 +105,7 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 		} else if !errors.Is(err, vault.ErrMissingRecord) {
 			return result, err
 		}
-		base := remoteVersionBase(request.Region) + product + "/"
+		base := remoteVersionBase(request.Region) + slot + "/"
 		if request.Offline {
 			if generation == 0 {
 				return result, ErrRemoteUnavailable
