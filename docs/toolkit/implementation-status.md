@@ -8,6 +8,26 @@
 
 ## 当前状态
 
+- 2026-09-25 Forever（16001）非插件侧真实网络验收：数据侧 `target resolve
+  --product forever` 无 region/locale 时按合同拒绝（unsupported_data_language，
+  永恒服无默认语言）；显式 `--region cn --locale zhCN` 后真实请求暴补丁服务
+  `cn.version.battlenet.com.cn` 返回 404——`wow_forever` 不是暴雪产品，
+  数据身份在真实世界不可解析，fail-fast 正确。`data hotfix --source wago
+  --product forever` 真实到达 Wago 并取得分页数据，但被分页完整性守卫拒绝
+  （`records.hotfix_page_drift`：记录 id 跨页重复）——远端数据质量问题被
+  fail-closed 拦截，未静默返回。源码侧完整通过：`source sync --product
+  forever` 真实拉取 Gethe/wow-ui-source forever 分支（固定
+  `PIN-7fdd5a88…`，commit `bd2470ae`）；`source index` 4412 文档、71981
+  声明、255143 关系、0 解析诊断；`source query/inspect` 命中并返回完整
+  出处三件套（发现该镜像含现代 generated API 文档，证实永恒服为混合
+  内核）；`source validate` 以真实 1.60.1 源码校验 `Lychee
+  Dev_Forever.toc` 闭包 44 文档 staticValid=true，引用解析 strict 模式
+  4056 调用 4040 未解析（样本为 Lua 内建/引擎全局，无权威声明属设计内），
+  binding/combat/taint 明确 notChecked。结论维持合同："保留未验收"——
+  源码研究对 forever 实际可用，数据侧真实世界无暴雪身份、Wago 数据
+  质量存疑，插件侧真机仍未验证。未提交变更仅本轮文档；此前工作已于
+  `900ef2e`/`238c912` 提交。
+
 - 2026-09-25 死锁恢复命令 `live reset` 与 Lychee 插件真机测试：回执收起后
   的实际使用暴露一个协议缺口——abandon 只清理磁盘队列条目，运行中插件的
   内存队列按角色 fail-closed 拒绝身份触发（聊天可见 `Lychee Dev:
