@@ -69,7 +69,10 @@ for _, profile in ipairs(profiles) do
     -- This harness lists addon modules explicitly (the TOC entry is added by
     -- the integrator); Identity.lua is exercised through the real TOC-adjacent
     -- modules it depends on, not a mock.
-    assert(loadfile(root .. "/Clients/" .. profile.client .. ".lua"))("Lychee Dev", ns)
+    do local v, i = profile.version, profile.interface
+      GetBuildInfo = function() return v, "12345", "date", i end
+    end
+    assert(loadfile(root .. "/Core/ClientGate.lua"))("Lychee Dev", ns)
     for _, name in ipairs({ "Core/Platform.lua", "Core/Persistence.lua", "Bridge/CaptureWriter.lua",
         "Bridge/Session.lua", "Bridge/MatrixSymbol.lua", "Bridge/ReceiptView.lua" }) do
         assert(loadfile(root .. "/" .. name))("Lychee Dev", ns)

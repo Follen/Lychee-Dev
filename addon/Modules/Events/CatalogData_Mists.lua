@@ -2,7 +2,7 @@ local ADDON_NAME, ns = ...
 
 -- Generated from official Classic 5.5.4 Blizzard_APIDocumentationGenerated.
 -- wow-ui-source/classic commit: 1028c1e687f721ba9d3af14d1b12a5745e4227c7.
-ns.EventCatalogData = {
+ns.EventCatalogData_classic = {
     "ACCOUNT_CHARACTER_CURRENCY_DATA_RECEIVED", "",
     "ACCOUNT_CVARS_LOADED", "",
     "ACCOUNT_STORE_CURRENCY_AVAILABLE_UPDATED", "currencyID",

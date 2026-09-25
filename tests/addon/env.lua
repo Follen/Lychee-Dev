@@ -24,11 +24,13 @@ local TEST_BUILDS = {
     forever = { "1.60.1", "69893", "Sep 17 2026", 16001 },
 }
 
+-- ClientGate.lua derives the profile from GetBuildInfo()'s interface, which
+-- the stub below serves from TEST_BUILDS for the selected test client.
 local CLIENT_PROFILES = {
-    retail = "Clients/Live.lua",
-    classic = "Clients/Pandaria.lua",
-    titan = "Clients/Titan.lua",
-    forever = "Clients/Evergreen.lua",
+    retail = "Core/ClientGate.lua",
+    classic = "Core/ClientGate.lua",
+    titan = "Core/ClientGate.lua",
+    forever = "Core/ClientGate.lua",
 }
 
 Env.testBuilds = TEST_BUILDS

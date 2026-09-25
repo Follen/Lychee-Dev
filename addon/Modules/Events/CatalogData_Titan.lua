@@ -2,7 +2,7 @@ local ADDON_NAME, ns = ...
 
 -- Generated from official Classic Titan 3.80.2 Blizzard_APIDocumentationGenerated.
 -- wow-ui-source/titan commit: 825d29d3662b372f0bead725ee6abd339e4a77b5.
-ns.EventCatalogData = {
+ns.EventCatalogData_titan = {
     "ACCOUNT_CHARACTER_CURRENCY_DATA_RECEIVED", "",
     "ACCOUNT_CVARS_LOADED", "",
     "ACCOUNT_STORE_CURRENCY_AVAILABLE_UPDATED", "currencyID",

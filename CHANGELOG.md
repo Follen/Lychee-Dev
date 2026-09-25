@@ -15,6 +15,13 @@ static gates, Windows CI, release assembly and registry read-back in
 
 ### Added
 
+- Unified single-manifest addon architecture (the Ellesmere pattern): one
+  flat `Lychee Dev.toc` declaring every supported interface
+  (`120100, 50504, 38002, 16001`) with `Core/ClientGate.lua` as the first
+  load selecting the product profile from the running build at load time —
+  replacing the four per-client TOC files and the Clients profile files.
+  Real-machine acceptance on WoW Forever (Auto—Forever, 1.60.1.70009):
+  connect, probe load/run(sum=55)/ack and hide all passed; retail untouched.
 - Atomic live operations with a journaled state machine
   (`live probe put/load`, `live run`, `live ack`): every stage requires a
   nonce-correlated receipt, persists intent before effects and resumes by the

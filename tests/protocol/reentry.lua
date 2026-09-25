@@ -2,10 +2,10 @@ local root=assert(arg[1])
 local secret={}
 issecretvalue=function(value) return rawequal(value,secret) end
 local profiles={
-    {toc="Mainline",version="12.1.0",interface=120100,product="retail"},
-    {toc="Mists",version="5.5.4",interface=50504,product="classic"},
-    {toc="Wrath",version="3.80.2",interface=38002,product="titan"},
-    {toc="Forever",version="1.60.1",interface=16001,product="forever"},
+    {version="12.1.0",interface=120100,product="retail"},
+    {version="5.5.4",interface=50504,product="classic"},
+    {version="3.80.2",interface=38002,product="titan"},
+    {version="1.60.1",interface=16001,product="forever"},
 }
 local outputs={}
 for _,profile in ipairs(profiles) do
@@ -41,7 +41,7 @@ for _,profile in ipairs(profiles) do
         local function loadRuntime(changedQueue)
             SlashCmdList,SLASH_LYCHEETOOLKIT1={},nil
             local ns={}
-            local toc=assert(io.open(root.."/Lychee Dev_"..profile.toc..".toc","r"))
+            local toc=assert(io.open(root.."/Lychee Dev.toc","r"))
             for line in toc:lines() do
                 line=line:gsub("\r",""):gsub("\\","/")
                 if line~="" and line:sub(1,1)~="#" then

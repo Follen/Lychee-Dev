@@ -15,6 +15,11 @@ func TestClientEvidencePrecedence(t *testing.T) {
 	}{
 		{name: "retail catalog", folder: "_retail_", flavor: "wow", want: "retail", active: []ClientBuild{{"wow", "12.1.0.69875"}}},
 		{name: "reused Forever slot", folder: "_classic_beta_", flavor: "wow_forever", version: "1.60.1.69893", want: "forever"},
+		// The real Forever client: the flavor names the reusable slot, the
+		// launcher catalog carries the build, and version.txt does not exist.
+		{name: "slot flavor resolved by catalog", folder: "_classic_beta_", flavor: "wow_classic_beta", want: "forever", active: []ClientBuild{{"wow_classic_beta", "1.60.1.70009"}}},
+		// A beta slot carrying a non-Forever build stays unsupported.
+		{name: "slot flavor wrong series", folder: "_classic_beta_", flavor: "wow_classic_beta", want: "", active: []ClientBuild{{"wow_classic_beta", "5.5.4.69934"}}},
 		{name: "version before folder", folder: "_classic_beta_", version: "1.60.1.69893", want: "forever"},
 		{name: "product before folder", folder: "custom", flavor: "wow_classic_titan", version: "3.80.2.12345", want: "titan"},
 		{name: "unknown product no fallback", folder: "_retail_", flavor: "wow_beta", version: "12.1.0.69875"},

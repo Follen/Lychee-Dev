@@ -16,11 +16,11 @@ import (
 )
 
 func TestAddonReleaseManifestContracts(t *testing.T) {
-	for _, variant := range []string{"valid", "valid-queue", "bad-queue", "nonempty-queue", "valid-xml", "xml-missing", "xml-cycle", "xml-malformed", "lua-invalid", "wrong-interface", "wrong-version", "legacy-storage", "duplicate-header", "missing-load", "escape-load", "duplicate-load", "empty-load"} {
+	for _, variant := range []string{"valid", "valid-queue", "bad-queue", "nonempty-queue", "valid-xml", "xml-missing", "xml-cycle", "xml-malformed", "lua-invalid", "wrong-interface", "missing-interface", "wrong-version", "legacy-storage", "duplicate-header", "missing-load", "escape-load", "duplicate-load", "empty-load"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
 			release := delivery.Release{Schema: "lycheedev.release.v1", Version: "2.0.0-dev", Commit: strings.Repeat("a", 40), Binaries: map[string]delivery.Resource{"windows-amd64": {Path: "native/windows-amd64/lycheedev.exe", Bytes: 1, SHA256: strings.Repeat("a", 64)}}}
-			files := map[string]string{"skill/SKILL.md": "skill fixture", "addon/Core/Start.lua": "local name, ns = ...\n"}
+			files := map[string]string{"skill/SKILL.md": "skill fixture", "addon/Core/Start.lua": "local name, ns = ...\n", "addon/Core/ClientGate.lua": "local name, ns = ...\n"}
 			if strings.HasSuffix(variant, "-queue") {
 				var definitions []bridge.ProbeDefinition
 				if variant == "nonempty-queue" {
@@ -51,31 +51,35 @@ func TestAddonReleaseManifestContracts(t *testing.T) {
 					files["addon/Core/Late.lua"] = "local = invalid"
 				}
 			}
+			interfaces := make([]string, 0, 4)
 			for _, baseline := range selection.VerifiedClientBaselines() {
-				body := fmt.Sprintf("## Interface: %d\n## Version: 2.0.0-dev\n## SavedVariables: LycheeToolkitDB\nCore\\Start.lua\n", baseline.Interface)
-				if recursive {
-					body += "UI/Root.xml\n"
-				}
-				switch variant {
-				case "wrong-interface":
-					body = strings.Replace(body, fmt.Sprint(baseline.Interface), "99999", 1)
-				case "wrong-version":
-					body = strings.Replace(body, "2.0.0-dev", "1.2.0", 1)
-				case "legacy-storage":
-					body = strings.Replace(body, "LycheeToolkitDB", "LycheeDevDB", 1)
-				case "duplicate-header":
-					body += "## Version: 2.0.0-dev\n"
-				case "missing-load":
-					body += "Missing.lua\n"
-				case "escape-load":
-					body += "../outside.lua\n"
-				case "duplicate-load":
-					body += "Core/Start.lua\n"
-				case "empty-load":
-					body = strings.Replace(body, "Core\\Start.lua\n", "", 1)
-				}
-				files["addon/"+baseline.TOC] = body
+				interfaces = append(interfaces, fmt.Sprint(baseline.Interface))
 			}
+			body := fmt.Sprintf("## Interface: %s\n## Version: 2.0.0-dev\n## SavedVariables: LycheeToolkitDB\nCore\\ClientGate.lua\nCore\\Start.lua\n", strings.Join(interfaces, ", "))
+			if recursive {
+				body += "UI/Root.xml\n"
+			}
+			switch variant {
+			case "wrong-interface":
+				body = strings.Replace(body, "120100", "99999", 1)
+			case "missing-interface":
+				body = strings.Replace(body, "120100, ", "", 1)
+			case "wrong-version":
+				body = strings.Replace(body, "2.0.0-dev", "1.2.0", 1)
+			case "legacy-storage":
+				body = strings.Replace(body, "LycheeToolkitDB", "LycheeDevDB", 1)
+			case "duplicate-header":
+				body += "## Version: 2.0.0-dev\n"
+			case "missing-load":
+				body += "Missing.lua\n"
+			case "escape-load":
+				body += "../outside.lua\n"
+			case "duplicate-load":
+				body += "Core/Start.lua\n"
+			case "empty-load":
+				body = strings.Replace(body, "Core\\ClientGate.lua\n", "", 1)
+			}
+			files["addon/"+selection.MainTOC] = body
 			for name, content := range files {
 				file := filepath.Join(root, "payload", filepath.FromSlash(name))
 				if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
@@ -96,10 +100,10 @@ func TestAddonReleaseManifestContracts(t *testing.T) {
 			}
 			manifests, err := delivery.InspectAddonRelease(context.Background(), root, release.Version)
 			if strings.HasPrefix(variant, "valid") {
-				if err != nil || len(manifests) != 4 {
+				if err != nil || len(manifests) != 1 {
 					t.Fatalf("%+v %v", manifests, err)
 				}
-				if recursive && len(manifests[0].LoadedFiles) != 5 {
+				if recursive && len(manifests[0].LoadedFiles) != 6 {
 					t.Fatalf("incomplete closure: %+v", manifests[0])
 				}
 			} else if err == nil || manifests != nil {

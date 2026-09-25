@@ -3,7 +3,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const tocs = ['Mainline', 'Mists', 'Wrath', 'Forever'];
 // Protocol fixtures exercise the currently shipped Lua runtime, so they must
 // advance with its release identity rather than silently becoming stale.
 export const versionedLuaFixtures = [
@@ -48,10 +47,7 @@ export function synchronizeVersion(root, write = false) {
     lock.packages[''].version = version;
     return JSON.stringify(lock, null, 2) + '\n';
   });
-  for (const client of tocs) {
-    const path = `addon/Lychee Dev_${client}.toc`;
-    target(path, text => replaceOne(text, /^## Version: .*$/gm, `## Version: ${version}`, path));
-  }
+  target("addon/Lychee Dev.toc", text => replaceOne(text, /^## Version: .*$/gm, `## Version: ${version}`, "addon/Lychee Dev.toc"));
   target('addon/Core/Runtime.lua', text => replaceOne(text, /^ns\.Release = "[^"\n]*"$/gm, `ns.Release = "${version}"`, 'Runtime.lua'));
   for (const path of versionedLuaFixtures) {
     target(path, text => replaceOne(text, /(\b(?:Release|release)\s*=\s*")[^"]+(")/g,

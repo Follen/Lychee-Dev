@@ -68,7 +68,10 @@ for _, profile in ipairs(profiles) do
     local printed = {}
     print = function(message) printed[#printed + 1] = message end
     local ns = { Release = "2.0.2", Startup = { ready = true, identity = {} } }
-    assert(loadfile(root .. "/Clients/" .. profile.client .. ".lua"))("Lychee Dev", ns)
+    do local v, i = profile.version, profile.interface
+      GetBuildInfo = function() return v, "12345", "date", i end
+    end
+    assert(loadfile(root .. "/Core/ClientGate.lua"))("Lychee Dev", ns)
     for _, name in ipairs({ "Core/Platform.lua", "Core/Persistence.lua", "Bridge/CaptureWriter.lua",
         "Bridge/Session.lua", "Bridge/MatrixSymbol.lua", "Bridge/ReceiptView.lua",
         "Core/Controls.lua" }) do

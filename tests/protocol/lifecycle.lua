@@ -39,7 +39,7 @@ for _, profile in ipairs(profiles) do
         if scenario == "invalid" then LycheeToolkitDB = { schema = 1, options = "bad" } end
         local before = LycheeToolkitDB
         local ns = {}
-        local toc = assert(io.open(root .. "/Lychee Dev_" .. profile.toc .. ".toc", "r"))
+        local toc = assert(io.open(root .. "/Lychee Dev.toc", "r"))
         for line in toc:lines() do
             line = line:gsub("\r", "")
             if line ~= "" and line:sub(1, 1) ~= "#" then

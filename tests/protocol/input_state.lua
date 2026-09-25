@@ -3,9 +3,11 @@ local secret = {}
 issecretvalue = function(value) return rawequal(value,secret) end
 CreateFrame = function() error("input observation must not create frames") end
 local products = {"Live","Pandaria","Titan","Evergreen"}
+    local builds = {Live={"12.1.0",120100},Pandaria={"5.5.4",50504},Titan={"3.80.2",38002},Evergreen={"1.60.1",16001}}
 for _,product in ipairs(products) do
     local ns = {}
-    assert(loadfile(root.."/Clients/"..product..".lua"))("Lychee Dev",ns)
+    do local v,i = unpack(builds[product]); GetBuildInfo = function() return v, "12345", "date", i end end
+    assert(loadfile(root.."/Core/ClientGate.lua"))("Lychee Dev",ns)
     assert(loadfile(root.."/Core/Platform.lua"))("Lychee Dev",ns)
     local loggedIn,combat,focus = true,false,nil
     local counts = {login=0,combat=0,focus=0}

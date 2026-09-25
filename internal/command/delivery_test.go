@@ -17,7 +17,7 @@ import (
 func TestSkillInstallCommand(t *testing.T) {
 	root := t.TempDir()
 	release := delivery.Release{Schema: "lycheedev.release.v1", Version: Version, Commit: strings.Repeat("a", 40), Binaries: map[string]delivery.Resource{"windows-amd64": {Path: "native/windows-amd64/lycheedev.exe", Bytes: 1, SHA256: strings.Repeat("b", 64)}}}
-	for _, name := range []string{"skill/SKILL.md", "addon/Lychee Dev_Mainline.toc", "addon/Lychee Dev_Mists.toc", "addon/Lychee Dev_Wrath.toc", "addon/Lychee Dev_Forever.toc"} {
+	for _, name := range []string{"skill/SKILL.md", "addon/Lychee Dev.toc"} {
 		content := []byte("fixture " + name)
 		digest := sha256.Sum256(content)
 		file := filepath.Join(root, "payload", filepath.FromSlash(name))
@@ -124,9 +124,12 @@ func TestAddonInstallCommand(t *testing.T) {
 	root := t.TempDir()
 	release := delivery.Release{Schema: "lycheedev.release.v1", Version: Version, Commit: strings.Repeat("a", 40), Binaries: map[string]delivery.Resource{"windows-amd64": {Path: "native/windows-amd64/lycheedev.exe", Bytes: 1, SHA256: strings.Repeat("b", 64)}}}
 	files := map[string]string{"skill/SKILL.md": "fixture", "addon/Core/Start.lua": "local name, ns = ...\n"}
+	interfaces := make([]string, 0, len(selection.VerifiedClientBaselines()))
 	for _, baseline := range selection.VerifiedClientBaselines() {
-		files["addon/"+baseline.TOC] = fmt.Sprintf("## Interface: %d\n## Version: %s\n## SavedVariables: LycheeToolkitDB\nCore/Start.lua\n", baseline.Interface, Version)
+		interfaces = append(interfaces, fmt.Sprint(baseline.Interface))
 	}
+	files["addon/"+selection.MainTOC] = fmt.Sprintf("## Interface: %s\n## Version: %s\n## SavedVariables: LycheeToolkitDB\nCore/ClientGate.lua\nCore/Start.lua\n", strings.Join(interfaces, ", "), Version)
+	files["addon/Core/ClientGate.lua"] = "local name, ns = ...\n"
 	for name, content := range files {
 		file := filepath.Join(root, "payload", filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {

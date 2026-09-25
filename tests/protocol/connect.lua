@@ -1,9 +1,9 @@
 local root = assert(arg[1])
 local profiles = {
-    {toc="Mainline",version="12.1.0",interface=120100},
-    {toc="Mists",version="5.5.4",interface=50504},
-    {toc="Wrath",version="3.80.2",interface=38002},
-    {toc="Forever",version="1.60.1",interface=16001},
+    {version="12.1.0",interface=120100},
+    {version="5.5.4",interface=50504},
+    {version="3.80.2",interface=38002},
+    {version="1.60.1",interface=16001},
 }
 local secret = {}
 issecretvalue = function(value) return rawequal(value, secret) end
@@ -36,7 +36,7 @@ for _, profile in ipairs(profiles) do
         end,
     }
     local ns = {}
-    local toc = assert(io.open(root .. "/Lychee Dev_" .. profile.toc .. ".toc", "r"))
+    local toc = assert(io.open(root .. "/Lychee Dev.toc", "r"))
     for line in toc:lines() do
         line = line:gsub("\r", "")
         if line ~= "" and line:sub(1,1) ~= "#" then

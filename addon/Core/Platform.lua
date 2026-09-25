@@ -1,6 +1,9 @@
 local ADDON_NAME, ns = ...
 
-local profile = assert(ns.PlatformProfile, "platform_profile_required")
+-- The profile comes from Core\ClientGate.lua's runtime build observation.
+-- An unsupported build has no profile; ObserveBuild reports that failure and
+-- Runtime surfaces it to the user instead of loading with a guessed identity.
+local profile = ns.PlatformProfile
 local function restricted(value)
     return issecretvalue and issecretvalue(value)
 end
@@ -41,6 +44,7 @@ ns.Platform = {
         return { character = character, realm = realm, guid = guid }
     end,
     ObserveBuild = function()
+        if not profile then return nil, "platform_unsupported_build" end
         local version, build, _, interface = GetBuildInfo()
         if restricted(version) or restricted(build) or restricted(interface) then
             return nil, "platform_restricted_identity"

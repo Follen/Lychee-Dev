@@ -18,7 +18,7 @@ func releaseFixture(t *testing.T) (string, Release) {
 	release := Release{Schema: "lycheedev.release.v1", Version: "2.0.0-dev", Commit: strings.Repeat("a", 40), Binaries: map[string]Resource{
 		"windows-amd64": {Path: "native/windows-amd64/lycheedev.exe", Bytes: 1, SHA256: strings.Repeat("b", 64)},
 	}}
-	for _, name := range []string{"skill/SKILL.md", "addon/Lychee Dev_Mainline.toc", "addon/Lychee Dev_Mists.toc", "addon/Lychee Dev_Wrath.toc", "addon/Lychee Dev_Forever.toc"} {
+	for _, name := range []string{"skill/SKILL.md", "addon/Lychee Dev.toc"} {
 		content := []byte("fixture " + name)
 		file := filepath.Join(root, "payload", filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
@@ -48,7 +48,7 @@ func writeRelease(t *testing.T, root string, release Release) {
 func TestInspectRelease(t *testing.T) {
 	root, expected := releaseFixture(t)
 	actual, err := InspectRelease(context.Background(), root, expected.Version)
-	if err != nil || actual.Commit != expected.Commit || len(actual.Resources) != 5 {
+	if err != nil || actual.Commit != expected.Commit || len(actual.Resources) != 2 {
 		t.Fatalf("%+v %v", actual, err)
 	}
 	if _, err := InspectRelease(context.Background(), root, "2.0.0"); !errors.Is(err, ErrRelease) {
@@ -79,7 +79,7 @@ func TestReleaseRejectsMalformedContracts(t *testing.T) {
 			case "missing-skill":
 				release.Resources = release.Resources[1:]
 			case "missing-client":
-				release.Resources = release.Resources[:4]
+				release.Resources = release.Resources[:1]
 			case "digest":
 				release.Resources[0].SHA256 = strings.Repeat("0", 64)
 			}

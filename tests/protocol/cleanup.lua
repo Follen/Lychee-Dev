@@ -20,7 +20,7 @@ for _, profile in ipairs(products) do
     GetBuildInfo = function() return profile[2], "12345", "date", profile[3] end
     UnitFullName = function() return "Paladin", "Realm" end
     UnitGUID = function() return "Player-1-123" end
-    local toc = assert(io.open(root .. "/Lychee Dev_" .. profile[1] .. ".toc"))
+    local toc = assert(io.open(root .. "/Lychee Dev.toc"))
     for line in toc:lines() do
         line = line:gsub("\r", "")
         if line ~= "" and line:sub(1, 1) ~= "#" then

@@ -18,7 +18,7 @@ type ClientWindow struct {
 
 func gameExecutable(path string) bool {
 	switch strings.ToLower(filepath.Base(path)) {
-	case "wow.exe", "wowclassic.exe":
+	case "wow.exe", "wowclassic.exe", "wowb.exe":
 		return true
 	}
 	return false

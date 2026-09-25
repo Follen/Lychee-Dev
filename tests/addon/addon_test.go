@@ -79,66 +79,58 @@ func TestWorkbenchLuaSuites(t *testing.T) {
 	}
 }
 
-// TestTOCSharedSections keeps the four TOC files identical apart from the
-// client profile line and its per-client event-catalog data line, and proves
-// every referenced load file exists.
-func TestTOCSharedSections(t *testing.T) {
+// TestUnifiedTOCContract locks the single-manifest contract: one TOC for all
+// supported clients, multi-interface declaration, ClientGate leading the
+// loads, all four event catalogs present, and every referenced file existing.
+func TestUnifiedTOCContract(t *testing.T) {
 	tocDir := filepath.Join("..", "..", "addon")
-	tocs := []string{
-		"Lychee Dev_Mainline.toc",
-		"Lychee Dev_Mists.toc",
-		"Lychee Dev_Wrath.toc",
-		"Lychee Dev_Forever.toc",
+	name := "Lychee Dev.toc"
+	data, err := os.ReadFile(filepath.Join(tocDir, name))
+	if err != nil {
+		t.Fatal(err)
 	}
-	var shared []string
-	for index, name := range tocs {
-		data, err := os.ReadFile(filepath.Join(tocDir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-		tailStart := -1
-		for lineIndex, line := range lines {
-			if strings.HasPrefix(line, "Clients\\") {
-				tailStart = lineIndex + 1
-				break
-			}
-		}
-		if tailStart < 0 {
-			t.Fatalf("%s: client profile line missing", name)
-		}
-		tailLines := make([]string, 0, len(lines)-tailStart)
-		for _, line := range lines[tailStart:] {
-			// The per-client generated event catalog is the one shared-slot
-			// line allowed to differ, mirroring the client profile line above.
-			if strings.HasPrefix(line, "Modules\\Events\\CatalogData_") {
-				line = "Modules\\Events\\CatalogData_<client>.lua"
-			}
-			tailLines = append(tailLines, line)
-		}
-		if index == 0 {
-			shared = tailLines
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	var loads []string
+	for _, line := range lines {
+		line = strings.TrimRight(line, "")
+		if line == "" || strings.HasPrefix(line, "##") || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.Join(tailLines, "\n") != strings.Join(shared, "\n") {
-			t.Fatalf("%s: shared load list differs from %s", name, tocs[0])
+		loads = append(loads, line)
+	}
+	if len(loads) == 0 {
+		t.Fatal("empty TOC")
+	}
+	if !strings.EqualFold(loads[0], "Core\\ClientGate.lua") {
+		t.Fatalf("first load must be Core\\ClientGate.lua, got %q", loads[0])
+	}
+	interfaceLine := ""
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## Interface:") {
+			interfaceLine = strings.TrimSpace(strings.TrimPrefix(line, "## Interface:"))
 		}
 	}
-	for _, name := range tocs {
-		data, err := os.ReadFile(filepath.Join(tocDir, name))
-		if err != nil {
-			t.Fatal(err)
+	declared := map[string]bool{}
+	for _, part := range strings.Split(interfaceLine, ",") {
+		declared[strings.TrimSpace(part)] = true
+	}
+	for _, iface := range []string{"120100", "50504", "38002", "16001"} {
+		if !declared[iface] {
+			t.Fatalf("missing declared interface %s", iface)
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(strings.ReplaceAll(line, "\r", ""))
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			relative := strings.ReplaceAll(line, "\\", string(filepath.Separator))
-			if _, err := os.Stat(filepath.Join(tocDir, relative)); err != nil {
-				t.Fatalf("%s: referenced file missing: %s", name, line)
-			}
+	}
+	catalogs := 0
+	for _, line := range loads {
+		relative := strings.ReplaceAll(line, "\\", string(filepath.Separator))
+		if _, err := os.Stat(filepath.Join(tocDir, relative)); err != nil {
+			t.Fatalf("referenced file missing: %s", line)
 		}
+		if strings.HasPrefix(line, "Modules\\Events\\CatalogData_") {
+			catalogs++
+		}
+	}
+	if catalogs != 4 {
+		t.Fatalf("expected all four event catalogs, found %d", catalogs)
 	}
 }
 
@@ -154,4 +146,5 @@ func TestLocaleFilesAnchorMarker(t *testing.T) {
 			t.Fatalf("%s: missing the -- LOCALE:END marker", name)
 		}
 	}
+
 }

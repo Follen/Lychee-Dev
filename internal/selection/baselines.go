@@ -1,5 +1,10 @@
 package selection
 
+// MainTOC is the single manifest shipped for every supported client. It
+// declares all supported interface versions; the runtime client gate selects
+// the product profile from the running build, never from TOC file choice.
+const MainTOC = "Lychee Dev.toc"
+
 // ClientBaseline is a project-approved Interface observation at an exact source
 // commit. It is not a formula derived from a version string, and does not prove
 // which client is currently running. Unknown commits remain unverified.
@@ -18,12 +23,12 @@ type ClientBaseline struct {
 
 func VerifiedClientBaselines() []ClientBaseline {
 	return []ClientBaseline{
-		{Product: "retail", ProductCode: "wow", BuildSeries: "12.1.0", TOC: "Lychee Dev_Mainline.toc", Interface: 120100, SourceCommit: "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"},
-		{Product: "classic", ProductCode: "wow_classic", BuildSeries: "5.5.4", TOC: "Lychee Dev_Mists.toc", Interface: 50504, SourceCommit: "1028c1e687f721ba9d3af14d1b12a5745e4227c7"},
-		{Product: "titan", ProductCode: "wow_classic_titan", BuildSeries: "3.80.2", TOC: "Lychee Dev_Wrath.toc", Interface: 38002, SourceCommit: "825d29d3662b372f0bead725ee6abd339e4a77b5"},
+		{Product: "retail", ProductCode: "wow", BuildSeries: "12.1.0", TOC: MainTOC, Interface: 120100, SourceCommit: "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"},
+		{Product: "classic", ProductCode: "wow_classic", BuildSeries: "5.5.4", TOC: MainTOC, Interface: 50504, SourceCommit: "1028c1e687f721ba9d3af14d1b12a5745e4227c7"},
+		{Product: "titan", ProductCode: "wow_classic_titan", BuildSeries: "3.80.2", TOC: MainTOC, Interface: 38002, SourceCommit: "825d29d3662b372f0bead725ee6abd339e4a77b5"},
 		// Forever installs report flavor wow_forever, but its data is published
 		// in the reusable wow_classic_beta manifest slot (1.60.x); the two codes differ.
-		{Product: "forever", ProductCode: "wow_forever", DataSlot: "wow_classic_beta", BuildSeries: "1.60.1", TOC: "Lychee Dev_Forever.toc", Interface: 16001, SourceCommit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069"},
+		{Product: "forever", ProductCode: "wow_forever", DataSlot: "wow_classic_beta", BuildSeries: "1.60.1", TOC: MainTOC, Interface: 16001, SourceCommit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069"},
 	}
 }
 func SourceInterface(pin SourcePin) (int, bool) {

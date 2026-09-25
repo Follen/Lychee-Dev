@@ -126,11 +126,8 @@ func InspectRelease(ctx context.Context, directory, expectedVersion string) (Rel
 		}
 	}
 	required := map[string]bool{
-		"skill/SKILL.md":                false,
-		"addon/Lychee Dev_Mainline.toc": false,
-		"addon/Lychee Dev_Mists.toc":    false,
-		"addon/Lychee Dev_Wrath.toc":    false,
-		"addon/Lychee Dev_Forever.toc":  false,
+		"skill/SKILL.md":      false,
+		"addon/Lychee Dev.toc": false,
 	}
 	for _, resource := range release.Resources {
 		if _, ok := required[resource.Path]; ok {

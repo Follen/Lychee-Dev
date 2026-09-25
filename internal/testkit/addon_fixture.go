@@ -43,20 +43,25 @@ func Release(t *testing.T, variant string) string {
 	files := map[string][]byte{
 		"skill/SKILL.md":       []byte("skill fixture\n"),
 		"addon/Core/Start.lua": []byte("local name, ns = ...\n"),
+		"addon/Core/ClientGate.lua": []byte("local name, ns = ...\n"),
 	}
 	if variant == "queue" {
 		files["addon/Bridge/Definitions.lua"], _ = bridge.EncodeProbeQueue(nil)
 	}
+	// One manifest declares every supported interface; ClientGate selects the
+	// product from the running build at load time.
+	interfaces := make([]string, 0, 4)
 	for _, baseline := range selection.VerifiedClientBaselines() {
-		toc := fmt.Sprintf("## Interface: %d\n## Version: %s\n## SavedVariables: LycheeToolkitDB\nCore\\Start.lua\n", baseline.Interface, Version)
-		if variant == "queue" {
-			toc += "Bridge/Definitions.lua\n"
-		}
-		if variant == "wrong-interface" && baseline.Product == "retail" {
-			toc = strings.Replace(toc, fmt.Sprint(baseline.Interface), "99999", 1)
-		}
-		files["addon/"+baseline.TOC] = []byte(toc)
+		interfaces = append(interfaces, fmt.Sprint(baseline.Interface))
 	}
+	toc := fmt.Sprintf("## Interface: %s\n## Version: %s\n## SavedVariables: LycheeToolkitDB\nCore\\ClientGate.lua\nCore\\Start.lua\n", strings.Join(interfaces, ", "), Version)
+	if variant == "queue" {
+		toc += "Bridge/Definitions.lua\n"
+	}
+	if variant == "wrong-interface" {
+		toc = strings.Replace(toc, "120100", "99999", 1)
+	}
+	files["addon/"+selection.MainTOC] = []byte(toc)
 	resources := make([]delivery.Resource, 0, len(files))
 	for name, content := range files {
 		WriteFile(t, filepath.Join(root, "payload", filepath.FromSlash(name)), string(content))

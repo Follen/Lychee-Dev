@@ -54,78 +54,95 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 		}
 	}
 	var result []AddonManifest
-	for _, baseline := range selection.VerifiedClientBaselines() {
-		name := "addon/" + baseline.TOC
-		record, ok := files[name]
-		if !ok || record.Bytes > 1<<20 {
-			return nil, fmt.Errorf("%w: TOC size or presence %s", ErrPayload, name)
-		}
-		file, err := root.Open(name)
-		if err != nil {
-			return nil, err
-		}
-		raw, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-		closeErr := file.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		if len(raw) > 1<<20 {
-			return nil, ErrPayload
-		}
-		facts, err := codebase.AnalyzeDocument(ctx, name, raw)
-		if err != nil {
-			return nil, err
-		}
-		headers := make(map[string]string)
-		for _, header := range facts.Headers {
-			key := strings.ToLower(header.Key)
-			if _, exists := headers[key]; exists {
-				return nil, fmt.Errorf("%w: duplicate TOC header %s in %s", ErrPayload, key, name)
-			}
-			headers[key] = header.Value
-		}
-		if headers["interface"] != strconv.Itoa(baseline.Interface) || headers["version"] != version || headers["savedvariables"] != "LycheeToolkitDB" || headers["savedvariablespercharacter"] != "" {
-			return nil, fmt.Errorf("%w: TOC identity/version/storage mismatch in %s", ErrPayload, name)
-		}
-		if len(facts.Loads) == 0 {
-			return nil, fmt.Errorf("%w: empty TOC %s", ErrPayload, name)
-		}
-		manifest := AddonManifest{Product: baseline.Product, TOC: baseline.TOC, Interface: baseline.Interface, Loads: []string{}}
-		seen := make(map[string]bool)
-		for _, load := range facts.Loads {
-			ref := strings.ReplaceAll(load.Path, "\\", "/")
-			if ref == "" || path.IsAbs(ref) || strings.ContainsAny(ref, ":\x00") || path.Clean(ref) != ref || ref == ".." || strings.HasPrefix(ref, "../") {
-				return nil, fmt.Errorf("%w: invalid TOC load %q", ErrPayload, load.Path)
-			}
-			ext := strings.ToLower(path.Ext(ref))
-			if ext != ".lua" && ext != ".xml" {
-				return nil, fmt.Errorf("%w: unsupported TOC load %q", ErrPayload, ref)
-			}
-			if _, exists := files["addon/"+ref]; !exists || seen[strings.ToLower(ref)] {
-				return nil, fmt.Errorf("%w: missing or repeated TOC load %q", ErrPayload, ref)
-			}
-			seen[strings.ToLower(ref)] = true
-			manifest.Loads = append(manifest.Loads, ref)
-		}
-		graph, err := codebase.InspectLocalLoad(ctx, codebase.AddonInput{Root: filepath.Join(directory, "payload", "addon"), Manifest: baseline.TOC})
-		if err != nil {
-			return nil, err
-		}
-		if !graph.LoadValid {
-			return nil, fmt.Errorf("%w: invalid load graph for %s: %+v", ErrPayload, baseline.TOC, graph.Issues)
-		}
-		manifest.LoadedFiles = []string{}
-		for _, document := range graph.Documents {
-			expected, exists := files["addon/"+document.Path]
-			if !exists || document.Blob.SHA256 != expected.SHA256 || document.Blob.Bytes != expected.Bytes {
-				return nil, fmt.Errorf("%w: changed or unlisted load %s", ErrPayload, document.Path)
-			}
-			manifest.LoadedFiles = append(manifest.LoadedFiles, document.Path)
-		}
-		result = append(result, manifest)
+	name := "addon/" + selection.MainTOC
+	record, ok := files[name]
+	if !ok || record.Bytes > 1<<20 {
+		return nil, fmt.Errorf("%w: TOC size or presence %s", ErrPayload, name)
 	}
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if len(raw) > 1<<20 {
+		return nil, ErrPayload
+	}
+	facts, err := codebase.AnalyzeDocument(ctx, name, raw)
+	if err != nil {
+		return nil, err
+	}
+	headers := make(map[string]string)
+	for _, header := range facts.Headers {
+		key := strings.ToLower(header.Key)
+		if _, exists := headers[key]; exists {
+			return nil, fmt.Errorf("%w: duplicate TOC header %s in %s", ErrPayload, key, name)
+		}
+		headers[key] = header.Value
+	}
+	// One manifest declares every supported engine; the runtime client gate
+	// selects the product from the observed build. Version and storage headers
+	// stay release-wide invariants.
+	declared := map[string]bool{}
+	for _, part := range strings.Split(headers["interface"], ",") {
+		declared[strings.TrimSpace(part)] = true
+	}
+	for _, baseline := range selection.VerifiedClientBaselines() {
+		if !declared[strconv.Itoa(baseline.Interface)] {
+			return nil, fmt.Errorf("%w: TOC interface %d missing from %s", ErrPayload, baseline.Interface, name)
+		}
+	}
+	if len(declared) != len(selection.VerifiedClientBaselines()) {
+		return nil, fmt.Errorf("%w: TOC declares unsupported interfaces in %s", ErrPayload, name)
+	}
+	if headers["version"] != version || headers["savedvariables"] != "LycheeToolkitDB" || headers["savedvariablespercharacter"] != "" {
+		return nil, fmt.Errorf("%w: TOC identity/version/storage mismatch in %s", ErrPayload, name)
+	}
+	if len(facts.Loads) == 0 {
+		return nil, fmt.Errorf("%w: empty TOC %s", ErrPayload, name)
+	}
+	first := facts.Loads[0].Path
+	if !strings.EqualFold(strings.ReplaceAll(first, "\\", "/"), "Core/ClientGate.lua") {
+		return nil, fmt.Errorf("%w: %s must load Core/ClientGate.lua first, got %q", ErrPayload, name, first)
+	}
+	manifest := AddonManifest{Product: "multi", TOC: selection.MainTOC, Interface: 0, Loads: []string{}}
+	seen := make(map[string]bool)
+	for _, load := range facts.Loads {
+		ref := strings.ReplaceAll(load.Path, "\\", "/")
+		if ref == "" || path.IsAbs(ref) || strings.ContainsAny(ref, ":\x00") || path.Clean(ref) != ref || ref == ".." || strings.HasPrefix(ref, "../") {
+			return nil, fmt.Errorf("%w: invalid TOC load %q", ErrPayload, load.Path)
+		}
+		ext := strings.ToLower(path.Ext(ref))
+		if ext != ".lua" && ext != ".xml" {
+			return nil, fmt.Errorf("%w: unsupported TOC load %q", ErrPayload, ref)
+		}
+		if _, exists := files["addon/"+ref]; !exists || seen[strings.ToLower(ref)] {
+			return nil, fmt.Errorf("%w: MISSING/REPEATED TOC load %q", ErrPayload, ref)
+		}
+		seen[strings.ToLower(ref)] = true
+		manifest.Loads = append(manifest.Loads, ref)
+	}
+	graph, err := codebase.InspectLocalLoad(ctx, codebase.AddonInput{Root: filepath.Join(directory, "payload", "addon"), Manifest: selection.MainTOC})
+	if err != nil {
+		return nil, err
+	}
+	if !graph.LoadValid {
+		return nil, fmt.Errorf("%w: invalid load graph for %s: %+v", ErrPayload, selection.MainTOC, graph.Issues)
+	}
+	manifest.LoadedFiles = []string{}
+	for _, document := range graph.Documents {
+		expected, exists := files["addon/"+document.Path]
+		if !exists || document.Blob.SHA256 != expected.SHA256 || document.Blob.Bytes != expected.Bytes {
+			return nil, fmt.Errorf("%w: changed or unlisted load %s", ErrPayload, document.Path)
+		}
+		manifest.LoadedFiles = append(manifest.LoadedFiles, document.Path)
+	}
+	result = append(result, manifest)
 	return result, nil
 }

@@ -2,7 +2,7 @@ local ADDON_NAME, ns = ...
 
 -- Generated from official Forever 1.60.1 Blizzard_APIDocumentationGenerated.
 -- wow-ui-source/forever commit: 4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069.
-ns.EventCatalogData = {
+ns.EventCatalogData_forever = {
     "ACCOUNT_CHARACTER_CURRENCY_DATA_RECEIVED", "",
     "ACCOUNT_CVARS_LOADED", "",
     "ACCOUNT_MONEY", "",

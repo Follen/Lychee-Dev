@@ -2,7 +2,7 @@ local ADDON_NAME, ns = ...
 
 -- Generated from official Retail 12.1.0 Blizzard_APIDocumentationGenerated.
 -- wow-ui-source/retail commit: 31c7f7b9cc79e56c986b365c06a6afbcf3c9177b.
-ns.EventCatalogData = {
+ns.EventCatalogData_retail = {
     "ACCOUNT_CHARACTER_CURRENCY_DATA_RECEIVED", "",
     "ACCOUNT_CVARS_LOADED", "",
     "ACCOUNT_MONEY", "",

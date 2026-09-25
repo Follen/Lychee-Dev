@@ -102,6 +102,8 @@ for index = 1, #clients do
     LoadAddonFile("Core/Locale.lua", namespace)
     LoadAddonFile("Core/Locale_enUS.lua", namespace)
     LoadAddonFile(client.file, namespace)
+    -- The unified catalog selects its per-product data field by ns.Client.
+    namespace.Client = client.id
     LoadAddonFile("Modules/Events/Catalog.lua", namespace)
     catalogNamespaces[index] = namespace
 

@@ -8,6 +8,27 @@
 
 ## 当前状态
 
+- 2026-09-25 深夜 统一 TOC 架构重构（Ellesmere 模式）与 Forever 真机验收：
+  永恒服真机排查确证三件事——camelot 引擎按现代语义解析平名 TOC（本机
+  BugGrabber/BugSack 平名单值 16001 正常运行；EllesmereUI 上游以平名
+  多 interface + `ClientGate.lua` 首文件 + `AllowLoadGameType: camelot`
+  子插件形态支持永恒服）；WoW 只在客户端启动时扫描插件目录（/reload
+  不重扫，运行中改名/新增文件夹在列表"消失"是发现缓存，非加载失败）；
+  永恒服 WTF 账号目录多一层 `70/`（自动发现失败需显式 --account）。
+  据此废弃四后缀 TOC：单一 `Lychee Dev.toc`（`## Interface: 120100,
+  50504, 38002, 16001` 多声明），新增 `Core/ClientGate.lua` 为首个加载
+  文件——按运行时 GetBuildInfo 实测 interface 在基线表选 profile
+  （客户端差异唯一来源），事件目录四份全载、`Catalog.lua` 按
+  `ns.Client` 选表；删除 Clients/*.lua 与四份后缀 TOC。交付层改单清单
+  合同（interface 多声明完备性、ClientGate 必须首载、四目录数据必须
+  在载）；addon-package/selection.MainTOC/testkit/protocol 与 addon
+  测试全部跟随。全量 Lua5.1 测试与 vet exit 0。发行根
+  `.tmp/unified-root/npm-stage`（61 资源）经升级事务部署永恒服。
+  真机验收（Auto—Forever，1.60.1.70009，重启发现后）：connect
+  `SESSION-8f49299b…` 一次成功；烟测探针 load 停在 loaded（显式
+  --account）→ run verified sum=55 → ack cleaned/complete → hide
+  cleared=true。零售安装全程 managed 未动。未提交（随本条目一起提交）。
+
 - 2026-09-25 Forever（16001）非插件侧真实网络验收：数据侧 `target resolve
   --product forever` 无 region/locale 时按合同拒绝（unsupported_data_language，
   永恒服无默认语言）；显式 `--region cn --locale zhCN` 后真实请求暴补丁服务

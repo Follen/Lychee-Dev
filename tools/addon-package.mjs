@@ -11,11 +11,11 @@ import { readZip, writeZip } from './zip.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = 'Lychee Dev';
-const CLIENTS = ['Mainline', 'Mists', 'Wrath', 'Forever'];
+const MAIN_TOC = 'Lychee Dev.toc';
+const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
+const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
 // The event catalog line is per-client like the Clients\ file; every other load
 // after the first line must match verbatim and in order across all four TOCs.
-const CLIENT_CATALOG = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
-const CATALOG_SLOT = 'Modules\\Events\\CatalogData_*.lua';
 const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.
 const BANNED_FRAGMENTS = [
@@ -24,7 +24,7 @@ const BANNED_FRAGMENTS = [
   'fixtures', 'node_modules', 'vendor/', '.git',
 ];
 
-const tocKey = client => `${ROOT}/Lychee Dev_${client}.toc`;
+const tocKey = client => `${ROOT}/Lychee Dev${client === "Main" ? "" : `_${client}`}.toc`;
 const loadKey = line => `${ROOT}/${line.replaceAll('\\', '/')}`;
 
 function walkFiles(root, prefix = '') {
@@ -71,14 +71,21 @@ export function collectAddonZipEntries(repoRoot) {
   const tocs = [];
   const report = [];
   const loads = new Map();
-  for (const client of CLIENTS) {
-    const key = tocKey(client);
-    const bytes = readFileSync(join(repoRoot, 'addon', `Lychee Dev_${client}.toc`));
+  {
+    const bytes = readFileSync(join(repoRoot, 'addon', MAIN_TOC));
     const parse = parseToc(bytes.toString('utf8'));
-    tocs.push({ name: `Lychee Dev_${client}.toc`, parse });
-    entries.set(key, bytes);
-    report.push({ path: key, selected: 'toc' });
+    tocs.push({ name: MAIN_TOC, parse });
+    entries.set(tocKey('Main'), bytes);
+    report.push({ path: tocKey('Main'), selected: 'toc' });
     for (const line of parse.loads) if (!loads.has(loadKey(line))) loads.set(loadKey(line), line);
+  }
+  // Event catalog data files are per-client content selected at runtime; make
+  // sure every product's table ships even when the TOC list is edited.
+  for (const entry of walkFiles(join(repoRoot, 'addon', 'Modules', 'Events'))) {
+    const backslash = "\\";
+    if (CATALOG_DATA.test(entry) && !loads.has(loadKey(entry.split('/').join(backslash)))) {
+      loads.set(loadKey(entry.split('/').join(backslash)), entry.split('/').join(backslash));
+    }
   }
   for (const [key, line] of loads) {
     const disk = join(repoRoot, 'addon', ...line.split(/[\\/]/));
@@ -139,8 +146,8 @@ export function verifyAddonZip(input, options = {}) {
   }
 
   const parsed = new Map();
-  for (const client of CLIENTS) {
-    const key = tocKey(client);
+  {
+    const key = tocKey('Main');
     const bytes = zip.get(key);
     if (!bytes) violations.push(`missing TOC: ${key}`);
     else parsed.set(key, parseToc(bytes.toString('utf8')));
@@ -151,35 +158,26 @@ export function verifyAddonZip(input, options = {}) {
       const target = loadKey(line);
       if (!zip.has(target)) violations.push(`missing load file: ${target} (referenced by ${key})`);
     }
-  }
-
-  const shared = new Map();
-  for (const [key, parse] of parsed) {
-    const first = parse.loads[0] ?? '';
-    const clients = parse.loads.filter(line => /^Clients[\\/]/i.test(line));
-    if (!/^Clients[\\/][^\\/]+$/.test(first)) {
-      violations.push(`${key}: first load line is not one file under Clients\\: ${first || '<none>'}`);
+    // One manifest declares every supported engine; the runtime client gate
+    // selects the profile, so all four interfaces must be present and nothing
+    // outside the supported set may slip in.
+    const declared = String(parse.interface ?? '').split(',').map(part => part.trim()).filter(Boolean);
+    for (const iface of SUPPORTED_INTERFACES) {
+      if (!declared.includes(iface)) violations.push(`${key}: ## Interface: missing ${iface} (declared: ${parse.interface})`);
     }
-    if (clients.length !== 1) {
-      violations.push(`${key}: expected exactly one Clients\\ load line, found ${clients.length}`);
-    }
-    shared.set(key, parse.loads.slice(1).map(line => (CLIENT_CATALOG.test(line) ? CATALOG_SLOT : line)));
-  }
-  const reference = [...shared][0];
-  const refKey = reference?.[0] ?? null;
-  const refOrder = reference?.[1] ?? [];
-  for (const [key, order] of shared) {
-    if (key === refKey) continue;
-    if (order.length !== refOrder.length) {
-      violations.push(`${key}: shared load count ${order.length} != ${refOrder.length} (${refKey})`);
-    }
-    for (let i = 0; i < Math.max(order.length, refOrder.length); i++) {
-      if (order[i] !== refOrder[i]) {
-        violations.push(`${key}: shared load order at ${i} is "${order[i] ?? '<missing>'}", ${refKey} has "${refOrder[i] ?? '<missing>'}"`);
+    for (const iface of declared) {
+      if (!SUPPORTED_INTERFACES.includes(iface)) {
+        violations.push(`${key}: ## Interface: declares unsupported value ${iface}`);
       }
     }
+    if (!parse.loads.some(line => /^Core[\\/]ClientGate\.lua$/i.test(line))) {
+      violations.push(`${key}: Core\\ClientGate.lua must be loaded (runtime profile selection)`);
+    }
+    const catalogData = parse.loads.filter(line => CATALOG_DATA.test(line));
+    if (catalogData.length !== 4) {
+      violations.push(`${key}: expected all four event catalog data files, found ${catalogData.length}`);
+    }
   }
-
   const expected = options.repoRoot
     ? JSON.parse(readFileSync(join(options.repoRoot, 'release/version.json'), 'utf8')).version
     : null;
@@ -201,7 +199,7 @@ export function verifyAddonZip(input, options = {}) {
     violations.push(`missing Media content: ${ROOT}/Media/`);
   }
 
-  const tocKeys = new Set(CLIENTS.map(tocKey));
+  const tocKeys = new Set([tocKey('Main')]);
   const loadKeys = new Set();
   for (const parse of parsed.values()) for (const line of parse.loads) loadKeys.add(loadKey(line));
   for (const name of names) {
@@ -228,7 +226,7 @@ export function verifyAddonZip(input, options = {}) {
     ok: violations.length === 0,
     violations,
     files: [...names].sort(),
-    sharedOrder: refKey ? [...refOrder] : null,
+    sharedOrder: null,
   };
 }
 
