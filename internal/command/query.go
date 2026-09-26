@@ -7,6 +7,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
+	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/records/texture"
@@ -75,6 +76,11 @@ func queryFault(err error) (int, string, bool) {
 		{records.ErrRemoteUnavailable, 3, "records.remote_unavailable_offline"},
 		{records.ErrRemoteIdentity, 4, "records.remote_identity"},
 		{records.ErrRemoteHTTP, 5, "records.remote_http"},
+		{container.ErrKeyUnavailable, 3, "container.key_unavailable"},
+		{container.ErrUnsupported, 3, "container.unsupported_encoding"},
+		{container.ErrLimit, 3, "container.resource_limit"},
+		{container.ErrMalformed, 4, "container.invalid_format"},
+		{container.ErrIntegrity, 4, "container.integrity_mismatch"},
 		{records.ErrMetadataFormat, 4, "records.invalid_metadata"},
 		{records.ErrMetadataLimit, 3, "records.metadata_limit"},
 		{records.ErrConfigurationIntegrity, 4, "records.configuration_integrity"},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
+	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 )
 
@@ -34,6 +35,11 @@ func TestQueryStructuredErrors(t *testing.T) {
 	}{
 		{errors.Join(live.ErrAckReadinessPending, context.DeadlineExceeded), 6, "live.ack_readiness_pending"},
 		{records.ErrRemoteRange, 4, "records.remote_range"}, {records.ErrRemoteObjectMissing, 3, "records.remote_object_missing"},
+		{container.ErrKeyUnavailable, 3, "container.key_unavailable"},
+		{container.ErrUnsupported, 3, "container.unsupported_encoding"},
+		{container.ErrLimit, 3, "container.resource_limit"},
+		{container.ErrMalformed, 4, "container.invalid_format"},
+		{container.ErrIntegrity, 4, "container.integrity_mismatch"},
 		{relational.ErrSyntax, 2, "query.invalid_syntax"}, {relational.ErrBinding, 2, "query.unresolved_binding"},
 		{relational.ErrUnsupported, 3, "query.unsupported_expression"}, {relational.ErrBudget, 3, "query.budget_exceeded"},
 		{relational.ErrType, 4, "query.type_mismatch"}, {relational.ErrNumericRange, 4, "query.numeric_range"}, {relational.ErrCardinality, 4, "query.invalid_cardinality"},
