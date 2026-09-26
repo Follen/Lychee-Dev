@@ -10,10 +10,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS,
+  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs,
 } from './release.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('release source inputs accept the committed flat addon manifest and reject missing blobs', () => {
+  const result = verifySourceInputs();
+  assert.ok(result.requiredPaths.includes('addon/Lychee Dev.toc'));
+  assert.throws(() => verifySourceInputs('HEAD', ['addon/nonexistent-release-input.toc']), /release.source_archive_incomplete/);
+});
 
 test('registry-state returns one complete document and --out persists the same state', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'lycheedev-registry-'));

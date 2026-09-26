@@ -219,6 +219,22 @@ export function verifyBinaryIdentity(stage, { commit, dirty, version }) {
  * commit + `go mod vendor` output + go.mod/go.sum + notices, provably buildable
  * offline, hashed into SHA256SUMS and the external sealed manifest.
  */
+const SOURCE_REQUIRED_PATHS = [
+  'go.mod', 'go.sum', 'cmd/lycheedev/main.go', 'THIRD_PARTY_NOTICES.md',
+  'packages/npm/lycheedev/THIRD_PARTY_NOTICES', 'addon/Lychee Dev.toc',
+  'skills/lycheedev/SKILL.md',
+];
+
+// Check committed blobs before spending time building release binaries.
+// The archive stage repeats this check against the extracted bytes.
+export function verifySourceInputs(commit = 'HEAD', requiredPaths = SOURCE_REQUIRED_PATHS) {
+  const files = new Set(runOk('git', ['ls-tree', '-r', '--name-only', '-z', commit], { cwd: repository }).split('\0'));
+  for (const name of requiredPaths) {
+    if (!files.has(name)) throw new Error(`release.source_archive_incomplete: ${name} is not in git archive ${commit}`);
+  }
+  return { commit, requiredPaths };
+}
+
 export function buildCorrespondingSource({
   commit, version, tag, outDirectory, cgo = 'zero',
   buildPackage = './cmd/lycheedev', requiredPaths,
@@ -232,11 +248,8 @@ async function buildCorrespondingSourceArchive({
 }) {
   const archiveName = `lycheedev-${version}-corresponding-source.tar.gz`;
   const prefix = `lycheedev-${version}-corresponding-source/`;
-  const required = requiredPaths ?? [
-    'go.mod', 'go.sum', 'cmd/lycheedev/main.go', 'THIRD_PARTY_NOTICES.md',
-    'packages/npm/lycheedev/THIRD_PARTY_NOTICES', 'addon/Lychee Dev_Mainline.toc',
-    'skills/lycheedev/SKILL.md',
-  ];
+  const required = requiredPaths ?? SOURCE_REQUIRED_PATHS;
+  verifySourceInputs(commit, required);
   const scratch = mkdtempSync(join(tmpdir(), 'lycheedev-source-'));
   try {
     const tarPath = join(scratch, 'source.tar');
@@ -323,6 +336,7 @@ async function assembleCommand(argv) {
     throw new Error(`release.tag_version_mismatch: ${wantTag} != v${version} (REL-01)`);
   }
   licenseGate(packageRoot); // forces the owner's combined-work license decision
+  verifySourceInputs(id.commit);
   mkdirSync(out, { recursive: true });
   const stage = join(out, 'npm-stage');
   rmSync(stage, { recursive: true, force: true });
@@ -863,6 +877,7 @@ function verifyCgoCommand(argv) {
 }
 
 const commands = {
+  'verify-source-inputs': () => verifySourceInputs(),
   assemble: assembleCommand,
   'verify-cgo': verifyCgoCommand,
   seal: sealCommand,

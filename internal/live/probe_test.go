@@ -97,6 +97,8 @@ func TestOperationReportLifecycleUsesArchivedEvidence(t *testing.T) {
 
 func testOperationFilePreparation(t *testing.T, persisted bool, ackMode string) {
 	t.Helper()
+	// This scenario creates its own installation and metadata database.
+	t.Parallel()
 	ctx := context.Background()
 	withBootstrap := strings.HasSuffix(ackMode, "-bootstrap")
 	ackMode = strings.TrimSuffix(ackMode, "-bootstrap")

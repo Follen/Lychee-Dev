@@ -55,7 +55,12 @@ func TestExecuteCompletesLifecycle(t *testing.T) {
 		}
 	}
 	for _, mode := range modes {
-		t.Run(mode, func(t *testing.T) { testExecuteLifecycle(t, mode) })
+		t.Run(mode, func(t *testing.T) {
+			// Each scenario owns its client, workspace, frame queue and journal.
+			// Overlap independent filesystem work without weakening durability.
+			t.Parallel()
+			testExecuteLifecycle(t, mode)
+		})
 	}
 }
 

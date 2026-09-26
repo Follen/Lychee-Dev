@@ -72,6 +72,7 @@ jobs:
         run: |
           set -e
           node tools/version.mjs --check
+          node tools/release.mjs verify-source-inputs
           if [ "${{ github.event_name }}" = "push" ]; then
             # Strict validation: tag syntax, tag <-> version source, tag ->
             # HEAD commit, clean worktree, non-private package.
@@ -100,10 +101,12 @@ jobs:
 
   ci:
     name: toolkit CI verification gate
+    needs: [identity]
     uses: ./.github/workflows/toolkit-ci.yml
 
   verify-cgo:
     name: CGO_ENABLED=0 capture/decode pre-step
+    needs: [identity]
     runs-on: windows-2025
     defaults:
       run:

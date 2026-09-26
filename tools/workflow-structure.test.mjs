@@ -44,6 +44,9 @@ test('release pipeline job graph: identity -> ci/cgo -> assemble -> smoke -> sea
   assert.match(release, /  release-gate:\n[\s\S]*?needs: \[identity, ci, seal\]/);
   assert.match(release, /  publish:\n[\s\S]*?needs: \[identity, release-gate\]/);
   assert.match(release, /  seal:\n[\s\S]*?needs: \[identity, assemble, platform-smoke\]/);
+  assert.match(release, /  ci:\n\s+name:[^\n]+\n\s+needs: \[identity\]/);
+  assert.match(release, /  verify-cgo:\n\s+name:[^\n]+\n\s+needs: \[identity\]/);
+  assert.match(release.slice(0, release.indexOf('  ci:')), /node tools\/release.mjs verify-source-inputs/);
 });
 
 test('release has no interactive desktop job or desktop evidence gate', () => {

@@ -72,6 +72,7 @@ jobs:
           if ($version -notmatch '^go version go1\.27\.1 ') { throw "toolchain drift: $version" }
       - run: go mod verify
       - run: node tools/version.mjs --check
+      - run: node tools/release.mjs verify-source-inputs
       - name: Node tool tests (version, release, tar, tgz, addon-package)
         run: |
           node --test tools/*.test.mjs
@@ -97,7 +98,7 @@ jobs:
           if-no-files-found: error
       - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
         run: |
-          go test -count=1 -timeout=5m ./...
+          go test -parallel=4 -count=1 -timeout=5m ./...
           if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
       - name: Native release-shape build
         run: |
@@ -287,7 +288,9 @@ jobs:
       # The live package exercises real QR decoding and bounded freshness
       # waits. Race instrumentation exceeded the old five-minute package
       # budget on hosted Windows; retain all tests with a bounded larger limit.
-      - run: go test -race -count=1 -timeout=15m ./...
+      # Independent lifecycle scenarios overlap disk waits; bound concurrency
+      # so race instrumentation cannot flood the runner or starve readiness.
+      - run: go test -race -parallel=4 -count=1 -timeout=15m ./...
 
   ci-required:
     # §2/§3: this aggregation always runs and rejects every non-success result;
