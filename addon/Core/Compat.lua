@@ -33,9 +33,17 @@ ns.Compat = {
     end,
 
     -- UI units per physical screen pixel, for screen-space overlays such as
-    -- the automation status blocks and QR notice. GetPhysicalScreenSize was
-    -- verified on the Retail 12.1.0 baseline only; other clients use the
-    -- legacy 768-height approximation until verified.
+    -- the automation status blocks and QR notice. The caller multiplies by a
+    -- physical-pixel target to get UI units, so a large value means "one
+    -- physical pixel is worth many UI units" and would draw a huge overlay.
+    --
+    -- GetPhysicalScreenSize was verified on the Retail 12.1.0 baseline only.
+    -- Elsewhere the UI height is the only scale available: a taller UI means
+    -- more UI units per physical pixel is wrong, because the UI is measured in
+    -- units that already track the display. The safe direction is to assume the
+    -- UI is at most the reference 768-unit layout, i.e. uiHeight / 768 UI units
+    -- per physical pixel, capped at one so a fallback can never inflate an
+    -- overlay. The cap keeps this a floor on readability, not a floor on size.
     GetPhysicalPixelSize = function()
         if GetPhysicalScreenSize then
             local succeeded, width, height = pcall(GetPhysicalScreenSize)
@@ -43,16 +51,16 @@ ns.Compat = {
                 and width and width > 0 and GetScreenWidth then
                 local uiWidth = GetScreenWidth()
                 if uiWidth and uiWidth > 0 and not (issecretvalue and issecretvalue(uiWidth)) then
-                    return uiWidth / width
+                    local ratio = uiWidth / width
+                    if ratio > 0 and ratio < math.huge then
+                        return math.min(ratio, 1)
+                    end
                 end
             end
         end
-        -- Fallback for clients without a verified GetPhysicalScreenSize: the
-        -- legacy 768-height approximation treats the screen as 768 physical
-        -- pixels tall, so one physical pixel spans (uiHeight / 768) UI units.
         local uiHeight = GetScreenHeight and GetScreenHeight() or nil
         if uiHeight and uiHeight > 0 and not (issecretvalue and issecretvalue(uiHeight)) then
-            return uiHeight / 768
+            return math.min(uiHeight / 768, 1)
         end
         return 1
     end,

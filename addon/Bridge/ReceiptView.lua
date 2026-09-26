@@ -53,12 +53,12 @@ end
 -- symbol plus its quiet zones. Layout and module size together decide whether
 -- the host can read the card at all: the host decodes a capture of the real
 -- window, so a module only two physical pixels wide has no reliable edge to
--- sample. Module size therefore targets TARGET_PHYSICAL_MODULES physical
--- pixels. GetPhysicalPixelSize reports physical pixels per UI unit, so the
--- module size in UI units is the target times that ratio, floored at
--- MIN_CARD_MODULES UI units. The card never exceeds MAX_CARD_UI_SIZE: a symbol
--- denser than the budget allows is drawn smaller rather than off-screen, and
--- the host reports the failure honestly instead of reading a blurred grid.
+-- sample. Compat.GetPhysicalPixelSize reports UI units per physical pixel, so
+-- the module size in UI units is the physical-pixel target times that ratio.
+-- The result is clamped two ways: at least MIN_CARD_MODULES UI units, and small
+-- enough that the whole card stays inside MAX_CARD_UI_SIZE. Overshooting the
+-- pixel target is acceptable; a card that covers the screen is not, and a
+-- blurred grid is worse than either because the host reports a dead operation.
 local TARGET_PHYSICAL_MODULES = 6
 local MIN_CARD_MODULES = 4
 local function cardGeometry(sizes)
