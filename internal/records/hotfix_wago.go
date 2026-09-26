@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Wago hotfix provider adapted from wowdata; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// Wago hotfix provider adapted from wowdata; see LICENSE.
 package records
 
 import (

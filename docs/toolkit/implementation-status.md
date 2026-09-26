@@ -8,6 +8,12 @@
 
 ## 当前状态
 
+- 2026-09-26 owner 统一项目许可：Lychee Dev Toolkit 自有代码统一采用 MIT，
+  不再以作者旧项目的独立许可或双许可展示；根目录/npm LICENSE 与源码 SPDX
+  标记已同步。真实第三方依赖的许可正文保持不变。此决定取代本页历史审查中
+  针对自有代码的待裁决、AGPL 或双许可描述，历史产物不改写。见
+  [许可决定记录](licensing.md)。各版 README 已移除旧项目名称及相关说明。
+
 - 2026-09-26 wowdoc/wowdata 业务全量清单回归：逐项审计 55 项迁移合同，
   执行 76 次当前 CLI 调用。三构建源码/ChrClasses、Classic CDN、三套 DBCache、
   中文 Hotfix 解码、真实 listfile 与图标导出已有实数证据；17 次法术/物品/

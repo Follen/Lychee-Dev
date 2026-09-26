@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Hotfix provider semantics adapted from wowdata; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// Hotfix provider semantics adapted from wowdata; see LICENSE.
 package records
 
 import (

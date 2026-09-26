@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Page cache receipts adapted from wowdata's wago cache; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// Page cache receipts adapted from wowdata's wago cache; see LICENSE.
 package records
 
 import (

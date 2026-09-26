@@ -40,7 +40,6 @@ Find where Blizzard defines an API, query the records behind a spell or item, ex
 | **Live automation** | Identify a client, load a bounded Lua probe, verify its report, acknowledge it and clear the receipt; recover interrupted operations | Run this check on the selected character and bring back the result. |
 | **Evidence & projects** | Fixed project references, archived captures, verification and bundles; explicit cache budgets and cleanup | Can I reproduce this answer and inspect its original evidence? |
 
-These capabilities replace the former **wowdoc/wowdata workflows**. They do not wrap the retired tools or import their workspaces.
 
 ### Requirements
 
@@ -183,4 +182,4 @@ Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned i
 
 ## License
 
-[MIT](LICENSE). Components adapted from the author's wowdata are dual-licensed **AGPL-3.0-or-later OR MIT**; wowdoc-derived portions are MIT. See [third-party notices](THIRD_PARTY_NOTICES.md). Corresponding source is included with releases.
+Lychee Dev Toolkit is licensed under [MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for dependency licenses and attribution.

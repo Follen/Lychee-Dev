@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // CASC layout adapted from wowdata; format validation follows CascLib's
 // documented v7 guarded directory. See THIRD_PARTY_NOTICES.md.
 package archive

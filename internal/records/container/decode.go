@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// BLTE format handling adapted from wowdata (see THIRD_PARTY_NOTICES.md).
+// SPDX-License-Identifier: MIT
+// BLTE format handling adapted from wowdata (see LICENSE).
 // Package container decodes bounded CASC payloads without owning caches or keys.
 package container
 

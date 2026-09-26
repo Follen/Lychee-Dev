@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// BLP2 layout and block decompression adapted from wowdata; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// BLP2 layout and block decompression adapted from wowdata; see LICENSE.
 // Package texture decodes bounded, complete texture levels without filesystem
 // state, image encoders, game access or global format registration.
 package texture

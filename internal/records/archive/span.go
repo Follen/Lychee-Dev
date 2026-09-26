@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// CASC format handling adapted from wowdata; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// CASC format handling adapted from wowdata; see LICENSE.
 package archive
 
 import (

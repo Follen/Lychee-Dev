@@ -40,7 +40,6 @@
 | **游戏自动化** | 识别客户端、加载有界 Lua 探针、验证报告、ACK 并清除回执；恢复中断操作 | 在指定角色上完成检查并带回结果。 |
 | **证据与项目** | 固定项目引用、归档 capture、校验与打包；明确的缓存预算和清理 | 能否复现这个结论、检查原始依据？ |
 
-这些功能承接原来的 **wowdoc/wowdata 业务**，不会包装调用退役工具，也不会导入它们的旧工作空间。
 
 ### 环境要求
 
@@ -183,4 +182,4 @@ Lua 测试需要 Lua 5.1；`node tests/tools/build-lua.mjs` 可构建固定版�
 
 ## 许可
 
-[MIT](LICENSE)。从作者 wowdata 项目移入的组件采用 **AGPL-3.0-or-later OR MIT** 双许可，wowdoc 来源部分采用 MIT。详见[第三方说明](THIRD_PARTY_NOTICES.md)。每次发行附带对应源码。
+Lychee Dev Toolkit 采用 [MIT 许可](LICENSE)。第三方依赖的许可与署名见[第三方说明](THIRD_PARTY_NOTICES.md)。

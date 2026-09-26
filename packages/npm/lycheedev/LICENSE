@@ -19,31 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
--------------------------------------------------------------------------------
-Scope of this license and dual-licensed derived portions
--------------------------------------------------------------------------------
-
-This MIT license covers the lycheedev package (native binaries, payload/addon,
-payload/skill) as a combined work, excluding third-party components that retain
-their own licenses as documented in THIRD_PARTY_NOTICES.
-
-Portions of the toolkit were adapted from the same author's wowdata repository
-(https://github.com/follenfang/wowdata, baseline commit
-6191d3dc567966b7a474849f3a11e7411390091c), which is licensed
-AGPL-3.0-or-later. The complete git history of that repository shows a single
-author (Follen / FollenFang) with no external contributors, so the sole
-copyright holder grants the following license option (owner decision recorded
-2026-09-23): every file adapted from wowdata is dual-licensed under
-AGPL-3.0-or-later OR MIT. Those adapted files carry per-file
-"SPDX-License-Identifier: AGPL-3.0-or-later" markers and provenance comments in
-the source repository; the complete file list is recorded in
-THIRD_PARTY_NOTICES.md and THIRD_PARTY_NOTICES. Recipients may redistribute
-those portions under either license they choose. The corresponding source for
-the AGPL-3.0-or-later option remains available as recorded in
-THIRD_PARTY_NOTICES ("Corresponding source").
-
-wowdoc-derived portions (https://github.com/Follen/wowdoc) are MIT and retain
-their attribution. All other third-party components retain their own licenses
-as documented in THIRD_PARTY_NOTICES, which travels with every distribution of
-this package.

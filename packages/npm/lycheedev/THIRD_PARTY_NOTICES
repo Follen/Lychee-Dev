@@ -1,71 +1,13 @@
-THIRD-PARTY NOTICES for the lycheedev package (payload/addon, payload/skill and
-the native/ lycheedev binaries).
+THIRD-PARTY NOTICES for Lychee Dev Toolkit
 
-Development status: the npm manifest declares "license": "MIT" (owner licensing
-decision recorded 2026-09-23, see below). Development versions may be private
-under the version policy; a released or release-candidate package is publishable.
-This file is the complete
-third-party inventory for the current tree, not a partial image-codec list. The
-repository root THIRD_PARTY_NOTICES.md records the source-side provenance
-detail. Component versions are the versions pinned in go.sum and compiled into
-the shipped binaries (verified with "go version -m"); build- and test-only
-modules are not redistributed and are not listed here.
+Project-owned code is distributed under the MIT license in LICENSE.
+The third-party components below retain their own licenses and attribution.
+Component versions are pinned in go.sum and compiled into the shipped binaries;
+build- and test-only modules are not redistributed and are not listed here.
 
-Combined-work statement (modified works): portions of the native binaries are
-adapted from wowdata (https://github.com/follenfang/wowdata, baseline commit
-6191d3dc567966b7a474849f3a11e7411390091c), licensed AGPL-3.0-or-later. Those
-adapted files carry "SPDX-License-Identifier: AGPL-3.0-or-later" headers and
-were modified during 2026 (CASC/BLTE/TACT/DB2/DBD/hotfix/listfile/BLP/AVI
-format handling redesigned for explicit budgets, streaming output and
-validation).
-Owner licensing decision (2026-09-23): the sole copyright holder of wowdata
-(single author Follen / FollenFang across all three repositories, no external
-contributors) grants an additional MIT license option for every wowdata-derived
-file, which is therefore dual-licensed AGPL-3.0-or-later OR MIT; the combined
-work is distributed under MIT per the package LICENSE. Recipients may
-redistribute the adapted portions under either license. The AGPL-3.0-or-later
-option keeps its full license text at https://www.gnu.org/licenses/agpl-3.0.html
-and https://www.gnu.org/licenses/agpl-3.0.txt, with corresponding source per
-"Corresponding source" below.
-
-Corresponding source: the corresponding source for every binary in native/ is
-the public repository https://github.com/Follen/Lychee-Dev at the exact commit
-recorded in the release.json shipped in this package ("commit" field), tagged
-v<version>, together with the release source archive and the
-lycheedev-<version>-corresponding-source archive attached to
-https://github.com/Follen/Lychee-Dev/releases/tag/v<version> . Each recipient of
-a binary also receives these notices and that source location; on request to
-the repository issue tracker the corresponding source is supplied on physical
-media at cost.
-
-===============================================================================
-wowdoc-derived portions of the lycheedev binaries (internal/codebase role and
-asset classification, source query/index/validate algorithms)
-https://github.com/Follen/wowdoc (npm: @follenfang/wowdoc)
-License: MIT
-===============================================================================
-
-MIT License
-
-Copyright (c) 2026 follenfang
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Corresponding source: https://github.com/Follen/Lychee-Dev at the exact commit
+recorded in release.json, with source archives attached to the matching release
+at https://github.com/Follen/Lychee-Dev/releases/tag/v<version>.
 
 ===============================================================================
 luaqrcode (adapted) - payload/addon/Bridge/MatrixSymbol.lua

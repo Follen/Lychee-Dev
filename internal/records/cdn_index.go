@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// TACT index layouts adapted from wowdata; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// TACT index layouts adapted from wowdata; see LICENSE.
 package records
 
 import (

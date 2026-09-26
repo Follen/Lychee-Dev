@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Adapted from wowdata's BLTE/Salsa20 handling; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// Adapted from wowdata's BLTE/Salsa20 handling; see LICENSE.
 package container
 
 import (

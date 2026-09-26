@@ -52,4 +52,4 @@ See the [Agent guide](https://github.com/Follen/Lychee-Dev#for-agents) and [skil
 - `release.json` — component sizes and SHA-256 digests checked by the installer.
 - `LICENSE`, `THIRD_PARTY_NOTICES` — licensing and third-party attribution.
 
-The launcher never downloads fallback binaries. The toolkit uses `~/.lycheedev` and does not import retired wowdoc/wowdata homes or legacy SavedVariables. Uninstalling npm does not remove deployed resources; component removal is explicit.
+The launcher never downloads fallback binaries. The toolkit uses `~/.lycheedev` and does not import legacy workspaces or SavedVariables. Uninstalling npm does not remove deployed resources; component removal is explicit.

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Video demux use case built on wowdata's AVI semantics; see THIRD_PARTY_NOTICES.md.
+// SPDX-License-Identifier: MIT
+// Video demux use case built on wowdata's AVI semantics; see LICENSE.
 package records
 
 import (
