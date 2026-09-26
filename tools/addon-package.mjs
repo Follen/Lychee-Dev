@@ -1,5 +1,5 @@
 // Addon release ZIP build and structural verification (regression PKG-04/PKG-05):
-// the archive must be exactly the four TOC manifests, their load files and
+// the archive must be exactly the one flat manifest, its load files and
 // Media/ under one `Lychee Dev/` directory — tests, tools, docs, local task
 // blocks and user data never ship. Built with the deterministic writer in
 // tools/zip.mjs; zero dependencies.
@@ -12,10 +12,12 @@ import { readZip, writeZip } from './zip.mjs';
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = 'Lychee Dev';
 const MAIN_TOC = 'Lychee Dev.toc';
+// One manifest declares every supported engine; Core\ClientGate.lua selects the
+// product profile from the running build at load time. A per-client TOC variant
+// is exactly the engine selection rule this architecture removed, so the
+// archive ships exactly one manifest and it must declare all of these.
 const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
 const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
-// The event catalog line is per-client like the Clients\ file; every other load
-// after the first line must match verbatim and in order across all four TOCs.
 const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.
 const BANNED_FRAGMENTS = [
@@ -24,7 +26,7 @@ const BANNED_FRAGMENTS = [
   'fixtures', 'node_modules', 'vendor/', '.git',
 ];
 
-const tocKey = client => `${ROOT}/Lychee Dev${client === "Main" ? "" : `_${client}`}.toc`;
+const tocKey = () => `${ROOT}/${MAIN_TOC}`;
 const loadKey = line => `${ROOT}/${line.replaceAll('\\', '/')}`;
 
 function walkFiles(root, prefix = '') {
@@ -147,7 +149,7 @@ export function verifyAddonZip(input, options = {}) {
 
   const parsed = new Map();
   {
-    const key = tocKey('Main');
+    const key = tocKey();
     const bytes = zip.get(key);
     if (!bytes) violations.push(`missing TOC: ${key}`);
     else parsed.set(key, parseToc(bytes.toString('utf8')));
@@ -199,7 +201,7 @@ export function verifyAddonZip(input, options = {}) {
     violations.push(`missing Media content: ${ROOT}/Media/`);
   }
 
-  const tocKeys = new Set([tocKey('Main')]);
+  const tocKeys = new Set([tocKey()]);
   const loadKeys = new Set();
   for (const parse of parsed.values()) for (const line of parse.loads) loadKeys.add(loadKey(line));
   for (const name of names) {

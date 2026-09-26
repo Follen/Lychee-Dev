@@ -25,7 +25,7 @@ local original = {schema="lycheedev.signal.v1",release=ns.Release,kind="reported
     requestId="OP-ack",character="Paladin",realm="Realm",product="retail",build="12.1.0.69875",
     sequence=102,inputReady=false,codeBytes=#code,codeAdler32=ns.CaptureWriter.DigestBytes(code),
     reportBytes=#body,reportAdler32=ns.CaptureWriter.DigestBytes(body)}
-assert(ns.CaptureWriter.Encode(original) == receipt)
+assert(ns.CaptureWriter.EncodeSignal(original) == receipt)
 -- Recreate the Session module, preserving only the persisted reports.
 assert(loadfile(root .. "/Bridge/Session.lua"))("Lychee Dev",ns)
 assert(ns.Session.Bind(string.rep("b",32)))
@@ -61,7 +61,7 @@ local other = {}
 for key,item in pairs(original) do other[key] = item end
 other.requestId, other.sequence, other.codeBytes, other.codeAdler32 = "OP-other", 103, nil, nil
 other.reportBytes, other.reportAdler32 = #otherBody, ns.CaptureWriter.DigestBytes(otherBody)
-assert(ns.CaptureWriter.Encode(other) == otherReceipt)
+assert(ns.CaptureWriter.EncodeSignal(other) == otherReceipt)
 value,reason = ns.ReportStore.Acknowledge(other)
 assert(value == nil and reason == "session_sequence_exhausted" and ns.ReportStore.Read("OP-other") == otherReceipt)
 LycheeToolkitDB.options.bridgeEnabled = nil

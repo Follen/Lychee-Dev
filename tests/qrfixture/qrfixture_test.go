@@ -17,8 +17,7 @@ import (
 // The encoder is the shipped addon/Bridge/MatrixSymbol.lua (the retired 1.x
 // Libs/AutomationQR.lua remains accepted); the decoder contract is byte
 // preservation, not JSON reserialization. The fixture deliberately includes
-// ASCII and UTF-8.: the decoder contract is byte preservation, not
-// JSON reserialization. The fixture deliberately includes ASCII and UTF-8.
+// ASCII and UTF-8.
 const qrFixture = `{"v":1,"message":"ASCII + 世界 + café ☕"}`
 
 func TestLuaAutomationQRToGoDecoder(t *testing.T) {
@@ -40,8 +39,12 @@ func TestLuaAutomationQRToGoDecoder(t *testing.T) {
 	if len(decoded) != 1 {
 		t.Fatalf("desktop.DecodeSymbols returned %d symbols, want 1: %#v", len(decoded), decoded)
 	}
-	if !bytes.Equal([]byte(decoded[0]), []byte(qrFixture)) {
-		t.Fatalf("decoded bytes = % x, want % x", []byte(decoded[0]), []byte(qrFixture))
+	// DecodeSymbols preserves the transmitted bytes by reading byte mode with
+	// ISO-8859-1: one returned rune is one payload byte. BytesFromSymbolText
+	// reverses that one step, and the addon's own encoder plus the host decoder
+	// must agree on the exact UTF-8 fixture bytes.
+	if want := string(desktop.BytesFromSymbolText(decoded[0])); want != qrFixture {
+		t.Fatalf("decoded bytes = % x, want % x", []byte(want), []byte(qrFixture))
 	}
 }
 

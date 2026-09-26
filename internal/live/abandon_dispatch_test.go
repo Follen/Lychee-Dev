@@ -9,14 +9,26 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/journal"
 )
 
-// A dispatched probe whose reported receipt was lost (hidden card, client
-// restart) wedges the window: every other exit requires evidence that no
-// longer exists. Abandoning from dispatch_requested is the honest release -
-// it requires the durable proof that the queue input was actually sent, then
-// removes the on-disk queue entry and releases ownership without input.
-func TestAbandonReleasesDispatchedOperation(t *testing.T) {
-	for _, submitted := range []bool{true, false} {
-		t.Run(submittedLabel(submitted), func(t *testing.T) {
+// A probe whose reported receipt was lost wedges the window: every other exit
+// requires evidence that no longer exists. Abandoning from dispatch_requested
+// or flush_requested is the honest release - it requires the durable proof that
+// the run input was actually queued, then removes the on-disk queue entry and
+// releases ownership without game input. flush_requested needs the same escape:
+// the host already sent the correlation reload, so no later phase can ever
+// reconcile a report that the client never persisted.
+func TestAbandonReleasesOperationWithoutReportEvidence(t *testing.T) {
+	cases := []struct {
+		name      string
+		stage     string
+		submitted bool
+	}{
+		{name: "dispatched-with-input", stage: "dispatch_requested", submitted: true},
+		{name: "dispatched-without-input", stage: "dispatch_requested", submitted: false},
+		{name: "flushed-with-input", stage: "flush_requested", submitted: true},
+		{name: "flushed-without-input", stage: "flush_requested", submitted: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			root, client, book, record, _ := probeOperationFixture(t)
 			if _, err := PrepareOperationQueue(ctx, root, record.OperationID); err != nil {
@@ -58,39 +70,42 @@ func TestAbandonReleasesDispatchedOperation(t *testing.T) {
 				}
 			}
 			advance("loaded", nil)
-			if submitted {
-				advance("dispatch_requested", map[string]any{
-					"dispatchInput": desktop.InputReceipt{MessagesQueued: 56, SubmissionComplete: true},
-				})
-			} else {
-				advance("dispatch_requested", nil)
+			// The durable receipt chain accumulates: a later stage keeps the
+			// earlier dispatch receipt, which is the proof abandon relies on.
+			var receipts map[string]any
+			if test.submitted {
+				receipts = map[string]any{"dispatchInput": desktop.InputReceipt{MessagesQueued: 56, SubmissionComplete: true}}
+			}
+			advance("dispatch_requested", receipts)
+			if test.stage == "flush_requested" {
+				next := map[string]any{
+					"reportedCapture": "CAP-reported",
+					"flushInput":      desktop.InputReceipt{MessagesQueued: 59, SubmissionComplete: true},
+				}
+				for key, value := range receipts {
+					next[key] = value
+				}
+				advance("reported", next)
+				advance("flush_requested", receipts)
 			}
 			record, err = book.InspectWork(ctx, record.OperationID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var abandonErr error
-			_, abandonErr = Abandon(ctx, root, record.OperationID)
+			_, abandonErr := Abandon(ctx, root, record.OperationID)
 			after, _ := book.InspectWork(ctx, record.OperationID)
-			if submitted {
+			if test.submitted {
 				if abandonErr != nil || after.Stage != "abandoned" || after.Status != "abandoned" {
-					t.Fatalf("dispatched abandon: %+v %v", after, abandonErr)
+					t.Fatalf("abandon: %+v %v", after, abandonErr)
 				}
 				if _, occupied, err := journal.InspectWindowOwner(ctx, client+"/Interface/AddOns", record.Intent.Resource); err != nil || occupied {
 					t.Fatalf("owner not released: %v occupied=%v", err, occupied)
 				}
-			} else {
-				if abandonErr == nil || after.Stage != "dispatch_requested" {
-					t.Fatalf("unproven dispatch accepted: %+v %v", after, abandonErr)
-				}
+				return
+			}
+			if abandonErr == nil || after.Stage != test.stage {
+				t.Fatalf("unproven input accepted: %+v %v", after, abandonErr)
 			}
 		})
 	}
-}
-
-func submittedLabel(submitted bool) string {
-	if submitted {
-		return "dispatch-input-submitted"
-	}
-	return "no-dispatch-input"
 }

@@ -110,10 +110,7 @@ function walkFiles(root, prefix = '') {
 const PAYLOAD_BAN = /(^|\/)(?:vendor|node_modules|tests?|\.git)(\/|$)|\.py$|(^|\/)(?:wowdoc|wowdata|wowdump|automation\.py)/i;
 const REQUIRED_RESOURCES = [
   'skill/SKILL.md',
-  'addon/Lychee Dev_Mainline.toc',
-  'addon/Lychee Dev_Mists.toc',
-  'addon/Lychee Dev_Wrath.toc',
-  'addon/Lychee Dev_Forever.toc',
+  'addon/Lychee Dev.toc',
 ];
 const EMPTY_PROBE_QUEUE = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 

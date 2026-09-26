@@ -208,7 +208,7 @@ func ArchiveInstalledOperationReport(ctx context.Context, root, operationID stri
 		if err != nil {
 			return zero, err
 		}
-		if installed.Report.Receipt != signal {
+		if !sameReceiptIdentity(installed.Report.Receipt, signal) {
 			return zero, errors.New("live.persisted_receipt_mismatch")
 		}
 		pair, err := evidence.OpenArchive(store, metadata).CommitReport(ctx, installed.Report.ReceiptBytes, installed.Report.Body, input.Code, input.Expected, record.OperationID, record.Intent.Snapshot)

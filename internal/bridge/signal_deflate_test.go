@@ -7,11 +7,13 @@ import (
 	"testing"
 )
 
-// The addon deflates larger signal payloads behind the 0x1F marker to keep
-// QR module density low on engines with soft UI rendering. The QR decoder
-// expands each raw byte to one ISO-8859-1 rune in the decoded text; the host
-// must convert back to raw bytes before inflating, and reject damaged
-// deflate streams.
+// ParseSignal takes the exact transmitted payload in bytes; desktop.DecodeSymbols
+// is the one place that converts the QR reader's ISO-8859-1 text back to bytes
+// (desktop.BytesFromSymbolText). The 0x1F marker documents a transport the
+// shipped addon no longer produces, because a raw DEFLATE stream is not valid
+// UTF-8 and a SavedVariables document must stay valid UTF-8. The host still
+// accepts the marker so a receipt drawn and archived by an earlier build stays
+// verifiable.
 func TestParseSignalInflatesDeflatedPayload(t *testing.T) {
 	signal := Signal{Schema: "lycheedev.signal.v1", Release: "2.0.2", Kind: "reported",
 		SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RequestID: "REQ-" + string(mkRepeat('a', 29)),
@@ -34,16 +36,7 @@ func TestParseSignalInflatesDeflatedPayload(t *testing.T) {
 	}
 	rawPayload := append([]byte{0x1F}, buf.Bytes()...)
 
-	// Simulate the QR decode round trip: gozxing maps each raw byte to one
-	// ISO-8859-1 rune and returns the text as a UTF-8 encoded Go string.
-	runes := make([]rune, len(rawPayload))
-	for i, b := range rawPayload {
-		runes[i] = rune(b)
-	}
-	text := string(runes)
-	data := []byte(text)
-
-	parsed, err := ParseSignal(data)
+	parsed, err := ParseSignal(rawPayload)
 	if err != nil {
 		t.Fatalf("inflated parse: %v", err)
 	}
@@ -53,11 +46,7 @@ func TestParseSignalInflatesDeflatedPayload(t *testing.T) {
 
 	// A damaged deflate stream must not parse as anything.
 	damaged := append([]byte{0x1F, 0x00}, rawPayload[2:12]...)
-	damagedRunes := make([]rune, len(damaged))
-	for i, b := range damaged {
-		damagedRunes[i] = rune(b)
-	}
-	if _, err := ParseSignal([]byte(string(damagedRunes))); err == nil {
+	if _, err := ParseSignal(damaged); err == nil {
 		t.Fatal("damaged payload accepted")
 	}
 

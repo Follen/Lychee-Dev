@@ -253,7 +253,9 @@ func TestWGCQRCodeOwnWindow(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, text := range texts {
-			if text == payload {
+			// DecodeSymbols returns the transmitted bytes re-spelled as
+			// ISO-8859-1 text; BytesFromSymbolText is the exact payload.
+			if string(BytesFromSymbolText(text)) == payload {
 				t.Log("native WGC ROI decoded exact UTF-8 fixture bytes")
 				return
 			}

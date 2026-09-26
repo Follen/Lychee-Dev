@@ -79,7 +79,7 @@ local function observe(probeNonce)
         marker.realm = actor.realm
         marker.guid = actor.guid
     end
-    return ns.CaptureWriter.Encode(marker, 4096)
+    return ns.CaptureWriter.EncodeSignal(marker, 4096)
 end
 
 ns.Identity = {

@@ -11,7 +11,7 @@ import (
 )
 
 func TestFourClientProbeExecution(t *testing.T) {
-	output, err := exec.Command(luaRuntime(t), "probe.lua", "../../addon").CombinedOutput()
+	output, err := exec.Command(luaRuntime(t), "probe.lua", "../../addon", wowGlobals(t)).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output)
 	}
@@ -26,10 +26,7 @@ func TestFourClientProbeExecution(t *testing.T) {
 	builds := []string{"12.1.0.12345", "5.5.4.12345", "3.80.2.12345", "1.60.1.12345"}
 	for i, result := range results {
 		expected := bridge.SignalExpectation{Release: buildinfo.Version, Kind: "loaded", SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RequestID: "OP-main", Character: "Paladin", Realm: "Realm", Product: products[i], Build: builds[i]}
-		loaded, err := bridge.ParseSignal([]byte(result.Loaded))
-		if err != nil {
-			t.Fatal(err)
-		}
+		loaded := parseSessionSignal(t, []byte(result.Loaded), sessionBaseline(products[i], builds[i]))
 		if err := loaded.Match(expected); err != nil {
 			t.Fatal(err)
 		}
@@ -37,6 +34,9 @@ func TestFourClientProbeExecution(t *testing.T) {
 			t.Fatalf("invalid load receipt: %+v", loaded)
 		}
 		expected.Kind, expected.AfterSequence = "reported", loaded.Sequence
+		// VerifyReport parses the receipt from the wire and has no session
+		// baseline, so it verifies the digests and the expectation the caller
+		// supplies rather than the compacted actor identity.
 		report, err := bridge.VerifyReport([]byte(result.Receipt), []byte(result.Body), []byte(result.Code), expected)
 		if err != nil {
 			t.Fatal(err)

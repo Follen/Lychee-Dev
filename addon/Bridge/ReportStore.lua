@@ -62,7 +62,7 @@ ns.ReportStore = {
             signal.codeBytes = #code
             signal.codeAdler32 = ns.CaptureWriter.DigestBytes(code)
         end
-        local receipt, encodeFailure = ns.CaptureWriter.Encode(signal, 4096)
+        local receipt, encodeFailure = ns.CaptureWriter.EncodeSignal(signal, 4096)
         if not receipt then return nil, encodeFailure end
         local count, bytes = 0, #receipt + #body
         for key, record in pairs(state.reports) do
@@ -107,24 +107,32 @@ ns.ReportStore = {
             return nil, "bridge_disabled"
         end
         if not plain(reported) then return nil, "report_invalid_acknowledgement" end
-        -- Encoding rejects restricted values, metatables and cycles before any
-        -- field comparisons. The host returns the archived original fields.
-        local receipt, encodeFailure = ns.CaptureWriter.Encode(reported, 4096)
-        if not receipt then return nil, encodeFailure end
-        local requestId, bodyBytes, bodyAdler32 = reported.requestId, reported.reportBytes, reported.reportAdler32
-        if not requestKey(requestId) or reported.schema ~= "lycheedev.signal.v1" or reported.kind ~= "reported"
-            or type(reported.sequence) ~= "number" or reported.sequence < 1 or reported.sequence > 9007199254740991
-            or reported.sequence % 1 ~= 0 or type(bodyBytes) ~= "number" or bodyBytes < 1 or bodyBytes > 512 * 1024
-            or bodyBytes % 1 ~= 0 or type(bodyAdler32) ~= "string" or #bodyAdler32 ~= 8
-            or not string.match(bodyAdler32, "^[0-9a-f]+$") then
-            return nil, "report_invalid_acknowledgement"
-        end
+        -- Identity is compared before the receipt fingerprint, because the wire
+        -- receipt is compacted: it omits the actor and build the host already
+        -- holds, so those fields are canonicalized from the live session rather
+        -- than trusted from the caller. Comparing identity first also gives a
+        -- wrong-actor acknowledgement its own reason instead of a digest error.
         local session, sessionFailure = ns.Session.Current()
         if not session then return nil, sessionFailure end
         if reported.sessionNonce ~= session.sessionNonce or reported.character ~= session.character
             or reported.realm ~= session.realm or reported.release ~= ns.Release
             or reported.product ~= ns.Startup.identity.product or reported.build ~= ns.Startup.identity.build then
             return nil, "report_acknowledgement_identity"
+        end
+        local requestId, bodyBytes, bodyAdler32 = reported.requestId, reported.reportBytes, reported.reportAdler32
+        if not requestKey(requestId) or reported.schema ~= "lycheedev.signal.v1" or reported.kind ~= "reported" then
+            return nil, "report_invalid_acknowledgement"
+        end
+        -- Encoding rejects restricted values, metatables and cycles before any
+        -- value comparison, so a secret field reports that it is secret rather
+        -- than failing a shape check. The canonical wire form is what was stored.
+        local receipt, encodeFailure = ns.CaptureWriter.EncodeSignal(reported, 4096)
+        if not receipt then return nil, encodeFailure end
+        if type(reported.sequence) ~= "number" or reported.sequence < 1 or reported.sequence > 9007199254740991
+            or reported.sequence % 1 ~= 0 or type(bodyBytes) ~= "number" or bodyBytes < 1 or bodyBytes > 512 * 1024
+            or bodyBytes % 1 ~= 0 or type(bodyAdler32) ~= "string" or #bodyAdler32 ~= 8
+            or not string.match(bodyAdler32, "^[0-9a-f]+$") then
+            return nil, "report_invalid_acknowledgement"
         end
         local storedReceipt, body = ns.ReportStore.Read(requestId)
         if not storedReceipt then return nil, body end
@@ -139,7 +147,7 @@ ns.ReportStore = {
         local signal = {}
         for key, value in pairs(reported) do signal[key] = value end
         signal.kind, signal.sequence, signal.inputReady = "acknowledged", identity.sequence, false
-        local acknowledgement, signalFailure = ns.CaptureWriter.Encode(signal, 2048)
+        local acknowledgement, signalFailure = ns.CaptureWriter.EncodeSignal(signal, 2048)
         if not acknowledgement then return nil, signalFailure end
         -- Prepare the bounded optical receipt before deletion. The executor must
         -- have archived and verified the full original report before this call.

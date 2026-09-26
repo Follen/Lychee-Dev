@@ -246,7 +246,7 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 
 func allowsTransition(kind, from, to, status string) bool {
 	if from == "abandoning" || to == "abandoning" || to == "abandoned" {
-		return kind == "probe" && (from == "verified" && to == "abandoning" && status == "running" || from == "dispatch_requested" && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
+		return kind == "probe" && (from == "verified" && to == "abandoning" && status == "running" || from == "dispatch_requested" && to == "abandoning" && status == "running" || from == "flush_requested" && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
 	}
 	if to == "cleaned" {
 		return from == "acknowledged" && (status == "completed" || status == "cancelled") ||

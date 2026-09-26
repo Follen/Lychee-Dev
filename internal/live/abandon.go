@@ -40,9 +40,15 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	// no longer exists. Release is honest here only when the durable
 	// observation proves the run input was fully queued; the in-game effect
 	// stays unknown and a client reload clears the runtime queue copy.
+	//
+	// flush_requested is the same wedge one phase later: the host sent the
+	// correlation reload, the report never reached SavedVariables, so neither
+	// reconciliation nor acknowledgement can ever succeed. A stale reentry
+	// ticket in the client's SavedVariables proves only that a reload was
+	// requested, never that a report was stored, so it stays out of the proof.
 	var dispatched probeLoadObservation
-	dispatchedStage := record.Stage == "dispatch_requested"
-	if dispatchedStage {
+	unprovenReportStage := record.Stage == "dispatch_requested" || record.Stage == "flush_requested"
+	if unprovenReportStage {
 		if err := json.Unmarshal(record.Observation, &dispatched); err != nil {
 			return record, err
 		}
@@ -96,7 +102,7 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	if err != nil {
 		return record, err
 	}
-	if dispatchedStage {
+	if unprovenReportStage {
 		observed = reportObservation{Schema: "lycheedev.probe-load.v1"}
 		if err := advance("abandoning", "running"); err != nil {
 			return record, err

@@ -4,9 +4,24 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"testing"
 )
+
+// wowGlobals returns the absolute path of the client-global shim every protocol
+// fixture loads first. A plain Lua 5.1 interpreter does not expose the client's
+// short library aliases (strmatch and friends), and addon or vendored source may
+// call them, so the shim must be installed before any addon file is loaded.
+func wowGlobals(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(thisFile), "..", "lib", "wow_globals.lua")
+}
 
 func luaRuntime(t *testing.T) string {
 	t.Helper()

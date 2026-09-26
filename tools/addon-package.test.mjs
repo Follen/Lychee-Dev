@@ -8,8 +8,8 @@ import { writeZip } from './zip.mjs';
 import { buildAddonZip, collectAddonZipEntries, parseToc, verifyAddonZip } from './addon-package.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CLIENTS = ['Mainline', 'Mists', 'Wrath', 'Forever'];
-const CATALOG = /^Modules[\\/]Events[\\/]CatalogData_/;
+const MANIFEST = 'Lychee Dev/Lychee Dev.toc';
+const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
 
 // Fixture ZIPs are written with writeZip into temp dirs; the repository is
 // never modified. `mutate` edits the collected entry map in memory.
@@ -38,7 +38,7 @@ test('parseToc reads headers and skips comments and blank lines', () => {
     '## SavedVariables: LycheeToolkitDB',
     '',
     '# --- section comment ---',
-    'Clients\\Live.lua',
+    'Core\\ClientGate.lua',
     '   ',
     'Core\\Locale.lua',
     '# trailing comment',
@@ -48,34 +48,35 @@ test('parseToc reads headers and skips comments and blank lines', () => {
     title: 'Lychee Dev',
     version: '2.0.0-dev',
     savedVariables: 'LycheeToolkitDB',
-    loads: ['Clients\\Live.lua', 'Core\\Locale.lua'],
+    loads: ['Core\\ClientGate.lua', 'Core\\Locale.lua'],
   });
 });
 
 test('parseToc leaves absent headers null and tolerates CRLF', () => {
-  const toc = parseToc('Clients\\Live.lua\r\n\r\nCore\\Runtime.lua');
+  const toc = parseToc('Core\\ClientGate.lua\r\n\r\nCore\\Runtime.lua');
   assert.deepEqual(toc, {
     interface: null, title: null, version: null, savedVariables: null,
-    loads: ['Clients\\Live.lua', 'Core\\Runtime.lua'],
+    loads: ['Core\\ClientGate.lua', 'Core\\Runtime.lua'],
   });
 });
 
-test('collectAddonZipEntries ships TOCs, shared loads and Media', () => {
+test('collectAddonZipEntries ships one flat manifest, its loads and Media', () => {
   const { entries, tocs, report } = collectAddonZipEntries(repo);
-  assert.deepEqual(tocs.map(toc => toc.name), CLIENTS.map(client => `Lychee Dev_${client}.toc`));
-  for (const client of CLIENTS) assert.ok(entries.has(`Lychee Dev/Lychee Dev_${client}.toc`));
+  assert.deepEqual(tocs.map(toc => toc.name), ['Lychee Dev.toc']);
+  assert.ok(entries.has(MANIFEST));
+  // A per-client TOC variant is the engine selection rule the single-manifest
+  // architecture removed; the archive must not carry one.
+  for (const client of ['Mainline', 'Mists', 'Wrath', 'Forever']) {
+    assert.equal(entries.has(`Lychee Dev/Lychee Dev_${client}.toc`), false);
+  }
   assert.ok(entries.has('Lychee Dev/Media/Logo.png'));
   assert.equal(entries.size, report.length);
-  for (const toc of tocs) {
-    for (const line of toc.parse.loads) assert.ok(entries.has(`Lychee Dev/${line.replaceAll('\\', '/')}`), line);
-  }
-  // Apart from the per-client Clients\ file and event catalog, the four TOCs
-  // must share one load list in one order.
-  const shared = tocs.map(toc => toc.parse.loads.slice(1)
-    .map(line => (CATALOG.test(line) ? 'catalog' : line)));
-  assert.ok(shared[0].length > 0);
-  for (const list of shared.slice(1)) assert.deepEqual(list, shared[0]);
-  assert.equal(shared[0].at(-1), 'Core\\Runtime.lua');
+  const toc = tocs[0].parse;
+  for (const line of toc.loads) assert.ok(entries.has(`Lychee Dev/${line.replaceAll('\\', '/')}`), line);
+  const declared = toc.interface.split(',').map(part => part.trim());
+  assert.deepEqual(declared, SUPPORTED_INTERFACES);
+  assert.ok(toc.loads.some(line => /^Core\\ClientGate\.lua$/i.test(line)));
+  assert.equal(toc.loads.at(-1), 'Core\\Runtime.lua');
 });
 
 test('built addon zip verifies clean', async t => {
@@ -88,7 +89,6 @@ test('built addon zip verifies clean', async t => {
   const clean = verifyAddonZip(readFileSync(result.path));
   assert.deepEqual(clean.violations, []);
   assert.equal(clean.ok, true);
-  assert.ok(Array.isArray(clean.sharedOrder) && clean.sharedOrder.length > 0);
   assert.equal(verifyAddonZip(result.path, { repoRoot: repo }).ok, true);
 });
 
@@ -115,15 +115,29 @@ test('a task block in Definitions.lua fails verification', async t => {
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Bridge\/Definitions\.lua/);
 });
 
-test('changed shared load order in one TOC fails verification', async t => {
+test('an incomplete Interface declaration fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => {
-    const key = 'Lychee Dev/Lychee Dev_Mists.toc';
-    const text = entries.get(key).toString('utf8');
-    const eol = text.includes('\r\n') ? '\r\n' : '\n';
-    const swapped = text.replace(`Core\\Locale.lua${eol}Core\\Locale_enUS.lua`,
-      `Core\\Locale_enUS.lua${eol}Core\\Locale.lua`);
-    assert.notEqual(swapped, text);
-    entries.set(key, Buffer.from(swapped));
+    const text = entries.get(MANIFEST).toString('utf8');
+    const trimmed = text.replace('## Interface: 120100, 50504, 38002, 16001', '## Interface: 120100, 50504, 38002');
+    assert.notEqual(trimmed, text);
+    entries.set(MANIFEST, Buffer.from(trimmed));
+  });
+  assertViolation(verifyAddonZip(buffer), /Interface: missing 16001/);
+});
+
+test('an unsupported Interface value fails verification', async t => {
+  const { buffer } = await fixtureZip(t, entries => {
+    const text = entries.get(MANIFEST).toString('utf8');
+    const doctored = text.replace('## Interface: 120100', '## Interface: 99999');
+    assert.notEqual(doctored, text);
+    entries.set(MANIFEST, Buffer.from(doctored));
+  });
+  assertViolation(verifyAddonZip(buffer), /declares unsupported value 99999/);
+});
+
+test('a per-client TOC variant fails verification', async t => {
+  const { buffer } = await fixtureZip(t, entries => {
+    entries.set('Lychee Dev/Lychee Dev_Mists.toc', entries.get(MANIFEST));
   });
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Lychee Dev_Mists\.toc/);
 });

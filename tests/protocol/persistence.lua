@@ -60,7 +60,7 @@ local original = { schema = "lycheedev.signal.v1", release = ns.Release, kind = 
     product = "retail", build = "12.1.0.69875", inputReady = false,
     sequence = tonumber(string.match(ackReceipt, '"sequence":(%d+)')),
     reportBytes = #ackBody, reportAdler32 = ackDigest }
-assert(ns.CaptureWriter.Encode(original) == ackReceipt)
+assert(ns.CaptureWriter.EncodeSignal(original) == ackReceipt)
 local function amended(field, value)
     local copy = {}
     for key, item in pairs(original) do copy[key] = item end
@@ -72,7 +72,13 @@ local function rejectAck(value, expected)
     assert(success == nil and reason == expected, tostring(reason))
     assert(LycheeToolkitDB.reports[ackId] ~= nil)
 end
-rejectAck(amended("extra", true), "report_acknowledgement_mismatch")
+-- An added field is not part of the transmitted signal, so the canonical
+-- projection ignores it and the stored receipt still matches; a field the wire
+-- does carry cannot be changed without changing that projection.
+assert(ns.ReportStore.Acknowledge(amended("extra", true)) ~= nil)
+assert(LycheeToolkitDB.reports[ackId] == nil)
+LycheeToolkitDB.reports[ackId] = { receipt = ackReceipt, body = ackBody }
+rejectAck(amended("inputReady", true), "report_acknowledgement_mismatch")
 rejectAck(amended("reportBytes", #ackBody + 1), "report_acknowledgement_mismatch")
 rejectAck(amended("reportAdler32", "ffffffff"), "report_acknowledgement_mismatch")
 rejectAck(amended("requestId", "OP-missing"), "report_unavailable")

@@ -131,8 +131,7 @@ function fixturePackage(version = '2.0.0') {
     files.set(`package/${entry.binary}`, bytes);
   }
   const resources = [];
-  for (const path of ['skill/SKILL.md', 'addon/Lychee Dev_Mainline.toc', 'addon/Lychee Dev_Mists.toc',
-    'addon/Lychee Dev_Wrath.toc', 'addon/Lychee Dev_Forever.toc', 'addon/Core/Runtime.lua']) {
+  for (const path of ['skill/SKILL.md', 'addon/Lychee Dev.toc', 'addon/Core/Runtime.lua']) {
     const bytes = Buffer.from(`content of ${path}\n`);
     resources.push({ path, bytes: bytes.length, sha256: sha256(bytes) });
     files.set(`package/payload/${path}`, bytes);

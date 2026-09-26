@@ -12,7 +12,7 @@ import (
 )
 
 func TestLuaRetirementConfirmation(t *testing.T) {
-	output, err := exec.Command(luaRuntime(t), "cleanup.lua", "../../addon").CombinedOutput()
+	output, err := exec.Command(luaRuntime(t), "cleanup.lua", "../../addon", wowGlobals(t)).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output)
 	}

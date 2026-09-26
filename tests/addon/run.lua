@@ -13,6 +13,10 @@ end
 local client = arg[2] or os.getenv("LYCHEEDEV_TEST_CLIENT") or "retail"
 local addonRoot = arg[3] or (scriptDir .. "/../../addon")
 
+-- Client globals (strmatch and friends) must exist before any addon source or
+-- vendored library is loaded; env.lua installs the rest of the WoW surface.
+dofile(scriptDir .. "/../lib/wow_globals.lua")
+
 local Env = dofile(scriptDir .. "/env.lua")
 Env.Init(client, addonRoot)
 

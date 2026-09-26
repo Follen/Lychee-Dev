@@ -112,7 +112,7 @@ ns.ProbeQueue = {
         if not identity then return nil, identityFailure end
         -- This observes loaded memory, never disk or host ownership. No report,
         -- queue entry or executable is removed to manufacture a success receipt.
-        return ns.CaptureWriter.Encode({
+        return ns.CaptureWriter.EncodeSignal({
             schema = "lycheedev.signal.v1", release = ns.Release, kind = "cleared",
             sessionNonce = identity.sessionNonce, requestId = requestId, cleanupNonce = nonce,
             character = identity.character, realm = identity.realm, guid = identity.guid,
@@ -171,7 +171,7 @@ ns.ProbeQueue = {
         end
         local identity, identityFailure = ns.Platform.ObserveBuild()
         if not identity then return nil, identityFailure end
-        return ns.CaptureWriter.Encode({
+        return ns.CaptureWriter.EncodeSignal({
             schema = "lycheedev.signal.v1", release = ns.Release, kind = "reset",
             sessionNonce = "", probeNonce = nonce,
             requestId = "", character = actor.character, realm = actor.realm,

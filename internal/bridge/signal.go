@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"compress/flate"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,21 +51,54 @@ type SignalExpectation struct {
 	RequireInputReady                                                 bool
 }
 
-// signalDeflateMarker prefixes compressed signal payloads: 0x1F followed by
-// raw DEFLATE bytes of the JSON document. The addon emits it whenever
-// deflation shrinks the transport (dense reported/ready QRs). The QR decoder
-// reads byte-mode payloads with ISO-8859-1, mapping each byte to one rune;
-// the caller must convert the text back to raw bytes before inflating.
-const signalDeflateMarker = 0x1F
+// Signal transport markers. A receipt is drawn into a QR symbol, so its size is
+// the difference between a card the host can sample and one it cannot.
+//
+//   - signalDeflateMarker (0x1F) prefixes raw DEFLATE bytes. It is read for
+//     compatibility with a receipt drawn by an earlier build; the shipped addon
+//     no longer emits it, because a raw DEFLATE stream is not valid UTF-8 and
+//     SavedVariables must stay valid UTF-8 for the host to read any state.
+//   - signalEncodedMarker (0x1E) prefixes base64 text carrying raw DEFLATE
+//     bytes. Base64 is pure ASCII, so the compressed transport stays valid
+//     UTF-8 and survives both the QR byte mode and the SavedVariables document.
+const (
+	signalDeflateMarker = 0x1F
+	signalEncodedMarker = 0x1E
+)
 
-// iso88591ToBytes converts a string of ISO-8859-1 runes back to raw bytes.
-func iso88591ToBytes(s string) []byte {
-	runes := []rune(s)
-	out := make([]byte, len(runes))
-	for i, r := range runes {
-		out[i] = byte(r)
+// SignalIdentity is the actor and build identity a retained session already
+// proved. A receipt on the wire carries only what correlates it to an operation
+// and proves the payload digest; replaying the identity the host already holds
+// in every symbol wastes QR modules and buys nothing, because the host compares
+// the filled value against this same baseline before accepting the receipt.
+type SignalIdentity struct {
+	Release, Character, Realm, GUID, Product, Build string
+}
+
+// FillSignalIdentity completes any identity field the wire omitted from the
+// caller's baseline. A field the wire did carry is never overwritten: a signal
+// that contradicts the baseline stays a mismatch for the caller's comparison
+// rather than being silently repaired into agreement.
+func FillSignalIdentity(signal Signal, baseline SignalIdentity) Signal {
+	if signal.Release == "" {
+		signal.Release = baseline.Release
 	}
-	return out
+	if signal.Character == "" {
+		signal.Character = baseline.Character
+	}
+	if signal.Realm == "" {
+		signal.Realm = baseline.Realm
+	}
+	if signal.GUID == "" {
+		signal.GUID = baseline.GUID
+	}
+	if signal.Product == "" {
+		signal.Product = baseline.Product
+	}
+	if signal.Build == "" {
+		signal.Build = baseline.Build
+	}
+	return signal
 }
 
 func ParseSignal(data []byte) (Signal, error) {
@@ -72,14 +106,27 @@ func ParseSignal(data []byte) (Signal, error) {
 	if len(data) == 0 || len(data) > 4096 {
 		return signal, errors.New("bridge.signal_budget_or_encoding")
 	}
-	if data[0] == signalDeflateMarker {
-		// The QR decoder mapped each raw byte to one ISO-8859-1 rune; convert
-		// back to the original deflate bytes before inflating.
-		raw := iso88591ToBytes(string(data))
-		if len(raw) < 2 {
+	switch data[0] {
+	case signalDeflateMarker:
+		// Archived raw-DEFLATE transport: inflate the bytes after the marker.
+		if len(data) < 2 {
 			return signal, errors.New("bridge.signal_budget_or_encoding")
 		}
-		inflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(raw[1:])))
+		inflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(data[1:])))
+		if err != nil {
+			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
+		}
+		data = inflated
+	case signalEncodedMarker:
+		// Base64 text carrying raw DEFLATE bytes.
+		if len(data) < 2 {
+			return signal, errors.New("bridge.signal_budget_or_encoding")
+		}
+		compressed, err := base64.StdEncoding.DecodeString(string(data[1:]))
+		if err != nil {
+			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
+		}
+		inflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(compressed)))
 		if err != nil {
 			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
 		}
@@ -99,7 +146,11 @@ func ParseSignal(data []byte) (Signal, error) {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return signal, errors.New("bridge.signal_trailing_data")
 	}
-	if signal.Schema != "lycheedev.signal.v1" || signal.Release == "" || signal.Product == "" || signal.Build == "" {
+	// The schema is the only field every kind must carry. Identity, reset and
+	// cleared markers are session-free and re-establish the actor, so they are
+	// allowed to omit the release and build; a session-shaped receipt is not,
+	// and parseSessionSignal enforces that below.
+	if signal.Schema != "lycheedev.signal.v1" {
 		return signal, errors.New("bridge.invalid_signal")
 	}
 	if signal.RuntimeEpoch > 9007199254740991 {
@@ -123,9 +174,37 @@ func ParseSignal(data []byte) (Signal, error) {
 // parseSessionSignal validates the session/request shaped kinds. Identity-only
 // fields must stay empty there so a ready or reported receipt can never carry
 // probe correlation into identity matching.
+//
+// The actor and build fields are optional on the wire: a retained session
+// already proved them, so the caller fills them from its baseline with
+// FillSignalIdentity and then compares them through Match, which still rejects
+// a value that contradicts the baseline. Requiring them here only forced every
+// symbol to repeat bytes the host already had, at the cost of QR modules. Any
+// field the wire does carry must still be a well-formed label.
 func parseSessionSignal(signal Signal) (Signal, error) {
-	if signal.SessionNonce == "" || signal.Character == "" || signal.Realm == "" || signal.Sequence == 0 || signal.Sequence > 9007199254740991 {
+	if signal.SessionNonce == "" || signal.Sequence == 0 || signal.Sequence > 9007199254740991 {
 		return signal, errors.New("bridge.invalid_signal")
+	}
+	// A session-shaped receipt still names the release, product and build it
+	// belongs to; the host fills the actor from its baseline, but a missing
+	// build identity is a malformed receipt, not a compact one.
+	if signal.Release == "" || signal.Product == "" || signal.Build == "" {
+		return signal, errors.New("bridge.invalid_signal")
+	}
+	if err := checkOptionalLabel(signal.Release); err != nil {
+		return signal, err
+	}
+	if err := checkOptionalLabel(signal.Character); err != nil {
+		return signal, err
+	}
+	if err := checkOptionalLabel(signal.Realm); err != nil {
+		return signal, err
+	}
+	if err := checkOptionalLabel(signal.Product); err != nil {
+		return signal, err
+	}
+	if err := checkOptionalLabel(signal.Build); err != nil {
+		return signal, err
 	}
 	if signal.ProbeNonce != "" || signal.ActorState != "" || signal.InputReason != "" {
 		return signal, errors.New("bridge.invalid_identity_signal")
@@ -133,7 +212,10 @@ func parseSessionSignal(signal Signal) (Signal, error) {
 	if signal.Kind != "ready" && signal.RequestID == "" {
 		return signal, errors.New("bridge.signal_missing_request")
 	}
-	if signal.GUID != "" && (signal.Kind != "ready" && signal.Kind != "cleared" || !queueLabel(signal.GUID)) {
+	// A GUID may appear on any session-shaped receipt: it is the actor the
+	// session already proved, so the host fills it from its baseline when the
+	// wire omits it and compares it when the caller names one.
+	if signal.GUID != "" && !queueLabel(signal.GUID) {
 		return signal, errors.New("bridge.invalid_signal_guid")
 	}
 	if signal.Kind == "cleared" {
@@ -215,6 +297,19 @@ func inputReasonLabel(value string) bool {
 		}
 	}
 	return true
+}
+
+// checkOptionalLabel accepts an omitted field but rejects a malformed one, so
+// dropping identity bytes from the wire never weakens validation of the bytes
+// that are still transmitted.
+func checkOptionalLabel(value string) error {
+	if value == "" {
+		return nil
+	}
+	if !queueLabel(value) {
+		return errors.New("bridge.invalid_signal_label")
+	}
+	return nil
 }
 
 func (s Signal) Match(expected SignalExpectation) error {

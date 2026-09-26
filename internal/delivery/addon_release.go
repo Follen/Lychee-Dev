@@ -87,12 +87,10 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 		headers[key] = header.Value
 	}
 	// One manifest declares every supported engine; the runtime client gate
-	// selects the product from the observed build. Version and storage headers
+	// selects the product from the observed build. A deployment target never
+	// re-spells the manifest: per-client TOC variants are exactly the engine
+	// selection rule this architecture removed. Version and storage headers
 	// stay release-wide invariants.
-	// One manifest serves one deployment target. A multi-interface declaration
-	// must cover every supported engine; a single-interface declaration must
-	// match one supported engine exactly (per-client deployment payloads for
-	// engines whose TOC parser cannot handle comma-separated lists).
 	declared := map[string]bool{}
 	for _, part := range strings.Split(headers["interface"], ",") {
 		declared[strings.TrimSpace(part)] = true
@@ -104,6 +102,11 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 	for declaredInterface := range declared {
 		if !baselineInterfaces[declaredInterface] {
 			return nil, fmt.Errorf("%w: TOC declares unsupported interface %s in %s", ErrPayload, declaredInterface, name)
+		}
+	}
+	for baselineInterface := range baselineInterfaces {
+		if !declared[baselineInterface] {
+			return nil, fmt.Errorf("%w: TOC %s must declare every supported interface; %s is missing", ErrPayload, name, baselineInterface)
 		}
 	}
 	if headers["version"] != version || headers["savedvariables"] != "LycheeToolkitDB" || headers["savedvariablespercharacter"] != "" {

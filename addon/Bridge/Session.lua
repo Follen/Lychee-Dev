@@ -70,7 +70,7 @@ ns.Session = {
         end
         local identity, identityFailure = ns.Session.NextIdentity()
         if not identity then return nil, identityFailure end
-        return ns.CaptureWriter.Encode({
+        return ns.CaptureWriter.EncodeSignal({
             schema = "lycheedev.signal.v1", release = ns.Release, kind = "ready",
             sessionNonce = identity.sessionNonce, requestId = "",
             character = identity.character, realm = identity.realm, guid = identity.guid,

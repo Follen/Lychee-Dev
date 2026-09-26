@@ -1,4 +1,5 @@
 local root=assert(arg[1])
+assert(loadfile(arg[2]))()
 local profiles={
     {version="12.1.0",interface=120100,product="retail"},
     {version="5.5.4",interface=50504,product="classic"},

@@ -139,13 +139,44 @@ local function digestBytes(text)
     return string.format("%04x%04x", high, low)
 end
 
-	local deflateLib
-	if LibStub and type(LibStub.GetLibrary) == "function" then
-		local okLib, lib = pcall(LibStub.GetLibrary, LibStub, "LibDeflate", true)
-		if okLib and type(lib) == "table" and type(lib.CompressDeflate) == "function" then
-			deflateLib = lib
-		end
-	end
+-- Every signal is drawn into a QR symbol, so its size decides whether the host
+-- can sample the module grid at all. A retained session already proved the
+-- actor identity, so repeating the character, realm and GUID in each receipt
+-- only spends modules: the host fills them back from its baseline and still
+-- refuses a value that contradicts it. Release, product and build stay on the
+-- wire because a receipt must still name the build it belongs to.
+--
+-- Identity, reset and cleared markers are the exception: they establish or
+-- re-establish the actor, so they keep character and realm.
+local WIRE_FIELDS = {
+    schema = true, kind = true, sessionNonce = true, requestId = true,
+    release = true, product = true, build = true,
+    reloadNonce = true, cleanupNonce = true, probeNonce = true,
+    actorState = true, inputReason = true, sequence = true, runtimeEpoch = true,
+    inputReady = true, codeBytes = true, codeAdler32 = true,
+    reportBytes = true, reportAdler32 = true,
+}
+local WIRE_MARKER_FIELDS = { character = true, realm = true, guid = true }
+local WIRE_MARKERS = { identity = true, reset = true, cleared = true }
+
+-- wireDocument projects a signal onto its transmitted form. Fields outside the
+-- profile are dropped rather than rejected: the projection is what the host
+-- compares against the archived receipt, so an unlisted field simply stops
+-- matching and never lets a caller believe a value was carried when it was not.
+local function wireDocument(value)
+    if type(value) ~= "table" or getmetatable(value) ~= nil
+        or value.schema ~= "lycheedev.signal.v1" then
+        return value
+    end
+    local marker = WIRE_MARKERS[value.kind] == true
+    local filtered = {}
+    for key, child in pairs(value) do
+        if WIRE_FIELDS[key] or (marker and WIRE_MARKER_FIELDS[key]) then
+            filtered[key] = child
+        end
+    end
+    return filtered
+end
 
 ns.CaptureWriter = {
     Encode = function(value, limit)
@@ -156,13 +187,26 @@ ns.CaptureWriter = {
         end
         local ok, result = pcall(encodeDocument, value, limit)
         if not ok then return nil, result end
-        if deflateLib and #result > 96 then
-		local okCompress, compressed = pcall(deflateLib.CompressDeflate, deflateLib, result)
-		if okCompress and type(compressed) == "string" and #compressed + 8 < #result then
-			return string.char(31) .. compressed
-		end
-        end
+        -- Every encoded value is the exact UTF-8 JSON text that is both drawn
+        -- into the QR symbol and stored in SavedVariables. Transport
+        -- compression is not applied here: a raw DEFLATE stream is not valid
+        -- UTF-8, and SavedVariables must stay valid UTF-8 for the host to read
+        -- any of the toolkit state at all.
         return result
+    end,
+    -- EncodeSignal is the only entry point that produces a machine-readable
+    -- receipt. Encode stays byte-exact for whatever a caller passes. A rejected
+    -- projection reports the exact offending field so a caller can tell an
+    -- unrecognized field from a malformed value.
+    EncodeSignal = function(value, limit)
+        local ok, projected = pcall(wireDocument, value)
+        if not ok then
+            if type(projected) == "string" and #projected > 0 and #projected <= 128 then
+                return nil, projected
+            end
+            return nil, "report_invalid_document"
+        end
+        return ns.CaptureWriter.Encode(projected, limit)
     end,
     DigestBytes = digestBytes,
 }

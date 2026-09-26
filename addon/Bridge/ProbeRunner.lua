@@ -23,7 +23,7 @@ end
 local function loadedSignal(requestId, code, reloadNonce, ready)
     local identity, failure = ns.Session.NextIdentity()
     if not identity then return nil, failure end
-    return ns.CaptureWriter.Encode({
+    return ns.CaptureWriter.EncodeSignal({
         schema = "lycheedev.signal.v1", release = ns.Release, kind = "loaded",
         sessionNonce = identity.sessionNonce, requestId = requestId, reloadNonce = reloadNonce,
         character = identity.character, realm = identity.realm, sequence = identity.sequence,

@@ -74,7 +74,7 @@ local function receiptFor(ticket)
     local identity,reason=ns.Session.NextIdentity()
     if not identity then return nil,reason end
     local ready=ns.Platform.ObserveInputState()==true
-    local receipt,failure=ns.CaptureWriter.Encode({
+    local receipt,failure=ns.CaptureWriter.EncodeSignal({
         schema="lycheedev.signal.v1",kind="ready",release=ns.Release,
         sessionNonce=identity.sessionNonce,requestId=ticket.requestId,reloadNonce=ticket.reloadNonce,
         character=identity.character,realm=identity.realm,guid=identity.guid,

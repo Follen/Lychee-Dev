@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { synchronizeVersion, versionedLuaFixtures, versionedSignalSamples } from './version.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const targets = ['internal/buildinfo/version.go', 'packages/npm/lycheedev/package.json', 'packages/npm/lycheedev/package-lock.json', 'addon/Core/Runtime.lua', ...['Mainline', 'Mists', 'Wrath', 'Forever'].map(client => `addon/Lychee Dev_${client}.toc`), ...versionedLuaFixtures, ...versionedSignalSamples, 'tests/addon/env.lua', 'tests/addon/t_about.lua'];
+// The addon ships one flat multi-interface manifest; there are no per-client
+// TOC variants to synchronize.
+const targets = ['internal/buildinfo/version.go', 'packages/npm/lycheedev/package.json', 'packages/npm/lycheedev/package-lock.json', 'addon/Core/Runtime.lua', 'addon/Lychee Dev.toc', ...versionedLuaFixtures, ...versionedSignalSamples, 'tests/addon/env.lua', 'tests/addon/t_about.lua'];
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'lycheedev-version-'));
   t.after(() => rmSync(root, { recursive: true }));
@@ -42,7 +44,7 @@ test('malformed or duplicated target prevents any partial generation', t => {
   const root = fixture(t);
   changeSource(root, '2.0.0-rc.1');
   const generated = readFileSync(join(root, targets[0]), 'utf8');
-  writeFileSync(join(root, 'addon/Lychee Dev_Forever.toc'), '## Version: old\n## Version: other\n');
+  writeFileSync(join(root, 'addon/Lychee Dev.toc'), '## Version: old\n## Version: other\n');
   assert.throws(() => synchronizeVersion(root, true), /version.invalid_target/);
   assert.equal(readFileSync(join(root, targets[0]), 'utf8'), generated);
 });

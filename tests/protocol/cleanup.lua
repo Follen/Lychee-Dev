@@ -1,4 +1,5 @@
 local root = assert(arg[1])
+assert(loadfile(arg[2]))()
 local products = {
     { "Mainline", "12.1.0", 120100 }, { "Mists", "5.5.4", 50504 },
     { "Wrath", "3.80.2", 38002 }, { "Forever", "1.60.1", 16001 },

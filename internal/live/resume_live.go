@@ -132,7 +132,7 @@ func resumeLiveOperation(ctx context.Context, root, id string, region image.Rect
 	if err != nil {
 		return record, err
 	}
-	session := &WindowSession{target: binding.Target, region: region, ready: anchor, reader: bridge.ObserveSignals(frames), frames: frames, confirm: confirm}
+	session := newWindowSession(binding.Target, region, anchor, bridge.ObserveSignals(frames), frames, confirm)
 	defer session.Close()
 	operation, err := session.OpenOperation(ctx, root, id)
 	if err != nil {

@@ -23,6 +23,12 @@ type VerifiedReport struct {
 // VerifyReport joins independently observed identity, the original submitted
 // code and persisted report bytes. code must come from the operation's immutable
 // input, never from the saved report. Built-in requests have no submitted code.
+//
+// The receipt may omit the actor and build identity to save QR modules, so the
+// caller's expectation is also the baseline: omitted fields are filled from it
+// and every field it names is still compared, because Match checks a field the
+// expectation sets. Verification therefore cannot pass on a receipt that
+// contradicts the identity the caller independently observed.
 func VerifyReport(receiptBytes, body, code []byte, expected SignalExpectation) (VerifiedReport, error) {
 	var result VerifiedReport
 	if expected.Kind != "reported" || expected.Release == "" || expected.SessionNonce == "" || expected.RequestID == "" || expected.Character == "" || expected.Realm == "" || expected.Product == "" || expected.Build == "" {
@@ -32,6 +38,10 @@ func VerifyReport(receiptBytes, body, code []byte, expected SignalExpectation) (
 	if err != nil {
 		return result, err
 	}
+	receipt = FillSignalIdentity(receipt, SignalIdentity{
+		Release: expected.Release, Character: expected.Character, Realm: expected.Realm,
+		Product: expected.Product, Build: expected.Build,
+	})
 	if err := receipt.Match(expected); err != nil {
 		return result, err
 	}

@@ -16,7 +16,7 @@ import (
 )
 
 func TestAddonReleaseManifestContracts(t *testing.T) {
-	for _, variant := range []string{"valid", "valid-queue", "bad-queue", "nonempty-queue", "valid-xml", "xml-missing", "xml-cycle", "xml-malformed", "lua-invalid", "wrong-interface", "wrong-version", "legacy-storage", "duplicate-header", "missing-load", "escape-load", "duplicate-load", "empty-load"} {
+	for _, variant := range []string{"valid", "valid-queue", "bad-queue", "nonempty-queue", "valid-xml", "xml-missing", "xml-cycle", "xml-malformed", "lua-invalid", "wrong-interface", "incomplete-interface", "wrong-version", "legacy-storage", "duplicate-header", "missing-load", "escape-load", "duplicate-load", "empty-load"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
 			release := delivery.Release{Schema: "lycheedev.release.v1", Version: "2.0.0-dev", Commit: strings.Repeat("a", 40), Binaries: map[string]delivery.Resource{"windows-amd64": {Path: "native/windows-amd64/lycheedev.exe", Bytes: 1, SHA256: strings.Repeat("a", 64)}}}
@@ -62,7 +62,7 @@ func TestAddonReleaseManifestContracts(t *testing.T) {
 			switch variant {
 			case "wrong-interface":
 				body = strings.Replace(body, "120100", "99999", 1)
-			case "missing-interface":
+			case "incomplete-interface":
 				body = strings.Replace(body, "120100, ", "", 1)
 			case "wrong-version":
 				body = strings.Replace(body, "2.0.0-dev", "1.2.0", 1)

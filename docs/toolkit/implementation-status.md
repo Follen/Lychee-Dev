@@ -8,6 +8,75 @@
 
 ## 当前状态
 
+- 2026-09-26 回执传输精简（深协议优化）与二维码可读性：Classic 真机截帧确认
+  白色回执卡片确实被绘制，问题不在"卡片没出现"而在宿主采样不到模块网格——
+  旧布局把 receipt 与 readiness 两个符号左右并排，卡片宽度是两个符号之和，
+  在 2560×1440、UIParent 1280×720 的比例下每个模块只有约 3 UI 单位，放大后
+  边缘仍不可靠。修复分三层，全部以真机字节为准：
+
+  1. **协议瘦身**：受会话已证明的身份不再随每个回执重发。
+     `CaptureWriter.EncodeSignal` 是唯一的机器回执编码入口，按
+     `WIRE_FIELDS`（+ identity/reset/cleared 的 `WIRE_MARKER_FIELDS`）投影；
+     宿主 `bridge.SignalIdentity` / `FillSignalIdentity` 从保留会话的基线补回
+     缺失字段，`Match` 仍逐字段拒绝与基线矛盾的值，所以省略不等于放宽。
+     实测一张 Classic reported 回执 370 → 329 字节（-41），QR 版本 15 → 13。
+  2. **布局**：符号改为上下堆叠，卡片宽度只剩一个符号加静区；模块目标由
+     `TARGET_PHYSICAL_MODULES`(6) 按 `GetPhysicalPixelSize` 的比例换算，
+     下限 4 UI 单位。宽度不再是两符号之和，模块物理像素几乎翻倍。
+  3. **压缩**：raw deflate 确实不是合法 UTF-8，写进 SavedVariables 会让整个
+     `LycheeToolkitDB` 被宿主以 `bridge.saved_state_encoding` 拒读，所以它
+     不能作为存储形态。宿主实现并验证了 ASCII 安全的
+     `0x1E + base64(raw deflate)` 传输（`TestBase64TransportRoundTrips`），
+     同时保留 `0x1F` raw 读取以兼容旧回执。实测该压缩在 M 级纠错下只让
+     329 → 309 字节，不跨越任何 QR 版本边界（v13→v13），而协议瘦身单独就
+     跨越两级（v15→v13）；完整代价见
+     `internal/bridge/transport_cost_test.go`。因此发布形态选协议瘦身而不选
+     压缩传输，压缩能力保留在宿主并有用例覆盖。
+
+  测试侧：`tests/protocol` 新增 `parseSessionSignal`/`sessionBaseline` 帮助函数，
+  让断言走与生产相同的"读取→基线补齐→比对"路径；`tools/live-stage.mjs` 是
+  开发用发行根暂存器（不做 npm pack/对应源码，不可发布），配合
+  `tools/live-baseline.mjs` 做真机验收。
+
+- 2026-09-26 Classic 50504 live 链根因定位与修复（承接 2026-09-25 交接）：
+  交接把 Classic 卡住归因为"QR 密度高、gozxing 解码不稳 + flush 超时 +
+  账号目录多一层"，真机复测证明三条都不成立——磁盘上的回执证据
+  （`reportedCapture`）证明解码成功，`reportedCapture`/`flushReadyCapture`
+  都在超时前落盘，WTF 账号目录在 `_classic_` 下也是标准两层
+  （`Account/<id>/<realm>/<char>`），只有 `70/` 那份属于永恒服。真实根因两条，
+  都在字节边界上：
+
+  1. **信号字节保真被破坏两次**：`CaptureWriter` 改为对 >96 字节的回执做
+     raw deflate（0x1F 前缀）后，压缩流不是合法 UTF-8，写进 SavedVariables
+     使整个 `LycheeToolkitDB` 文档不再是 UTF-8，宿主 `DecodeSavedState`
+     直接以 `bridge.saved_state_encoding` 拒读全文——回执永远进不了磁盘。
+     同时 `DecodeSymbols` 改 ISO-8859-1 后，未压缩回执的字节转换被做了两遍
+     （`ParseSignal` 与 `DecodeSymbols` 各一次），中文角色名/服务器名
+     （`匕首岭`）被截断成 `\x15\x96\xad`，所有身份比对必然失败。
+  2. **`live abandon` 在 `flush_requested` 无出口**：dispatched 阶段已有
+     "回执丢失"逃生门，但 flush 之后既不满足 reconcile 也不满足 ack，窗口
+     被永久占住，`live connect` 一律 `live.candidate_missing`。
+
+  修复：字节转回原始 payload 的唯一位置是
+  `desktop.BytesFromSymbolText`（`ParseSignal` 只接受真实字节，不再重解释
+  文本）；addon 侧删除压缩（`Bridge/CaptureWriter` 只输出 UTF-8 JSON 文本，
+  删掉 vendored `Libs/LibDeflate.lua`、`Libs/LibStub.lua` 与 TOC 两行），
+  宿主保留 0x1F 读取能力以便旧回执仍可验证；`abandon` 在
+  `flush_requested` 复用 `dispatch_requested` 的已提交输入证明，
+  `allowsTransition` 增加 `flush_requested → abandoning`。
+
+  真机验证（`_classic_`，5.5.4.69934，Follen—匕首岭）：统一多声明 TOC
+  （`## Interface: 120100, 50504, 38002, 16001`）经完整重启后 50504 引擎
+  确实加载并选中 classic profile——connect 一次成功，角色/服务器中文名
+  正确解码。上一轮遗留的压缩回执已污染 SavedVariables，备份后清空重写为
+  合法空文档（备份 `.tmp/classic-lychee-sv-corrupt-20260926.lua.bak`）。
+
+  测试侧同步：`tools/addon-package.mjs`/`release.mjs`/`version.test.mjs`
+  原封不动按四 TOC 编写（d2e0152 重构漏改），已改为单一平名清单合同，
+  `REQUIRED_RESOURCES` 同步；Lua 5.1 离线 harness 补上客户端短别名
+  （`strmatch` 等，`tests/lib/wow_globals.lua`），此前
+  `LibStub.lua` 在纯 Lua 5.1 下直接报 `attempt to call global 'strmatch'`。
+
 - 2026-09-25 深夜 统一 TOC 架构重构（Ellesmere 模式）与 Forever 真机验收：
   永恒服真机排查确证三件事——camelot 引擎按现代语义解析平名 TOC（本机
   BugGrabber/BugSack 平名单值 16001 正常运行；EllesmereUI 上游以平名

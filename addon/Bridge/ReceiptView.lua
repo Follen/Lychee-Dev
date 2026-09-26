@@ -48,8 +48,19 @@ local function payload(value)
 end
 -- One visual system for every receipt kind. The generation key only memoizes
 -- identical redisplays; it is never an identity or an input permission.
--- Module size is max(4, ceil(3 * physical pixel)) UI units (4px floor keeps
--- module edges crisp and the shared quiet zone unmerged on every engine).
+--
+-- Symbols stack vertically and share one card, so the card width is a single
+-- symbol plus its quiet zones. Layout and module size together decide whether
+-- the host can read the card at all: the host decodes a capture of the real
+-- window, so a module only two physical pixels wide has no reliable edge to
+-- sample. Module size therefore targets TARGET_PHYSICAL_MODULES physical
+-- pixels. GetPhysicalPixelSize reports physical pixels per UI unit, so the
+-- module size in UI units is the target times that ratio, floored at
+-- MIN_CARD_MODULES UI units. The card never exceeds MAX_CARD_UI_SIZE: a symbol
+-- denser than the budget allows is drawn smaller rather than off-screen, and
+-- the host reports the failure honestly instead of reading a blurred grid.
+local TARGET_PHYSICAL_MODULES = 6
+local MIN_CARD_MODULES = 4
 local function cardGeometry(sizes)
     local unit = 1
     if ns.Compat and type(ns.Compat.GetPhysicalPixelSize) == "function" then
@@ -61,11 +72,11 @@ local function cardGeometry(sizes)
     end
     local across, tall = 8, 8
     for index, size in ipairs(sizes) do
-        across = across + size
-        if index > 1 then across = across + 8 end
-        if size + 8 > tall then tall = size + 8 end
+        if size + 8 > across then across = size + 8 end
+        tall = tall + size
+        if index > 1 then tall = tall + 8 end
     end
-    local modules = math.max(4, math.ceil(3 * unit))
+    local modules = math.max(MIN_CARD_MODULES, math.ceil(TARGET_PHYSICAL_MODULES * unit))
     modules = math.min(modules,
         math.max(1, math.floor(MAX_CARD_UI_SIZE / across)),
         math.max(1, math.floor(MAX_CARD_UI_SIZE / tall)))
@@ -122,10 +133,16 @@ display = function(receipt, readiness, generation, refresh)
     -- pixels. Cancel the previous producer before installing the new one.
     hide()
     -- Merge horizontal black runs instead of allocating a texture per cell.
-    -- Matrix coordinates are [x][y]. Every symbol owns a 4-module quiet zone;
-    -- both share invalidation and one frame.
+    -- Matrix coordinates are [x][y]. Every symbol owns a 4-module quiet zone.
+    -- Symbols stack vertically. Laying them out side by side made the card's
+    -- width the sum of two full symbols, which forced the module grid below the
+    -- size the host can sample; a reported receipt and its paired readiness
+    -- symbol both sit near 73 modules, so two columns cost about half the
+    -- achievable module size for no benefit. One column lets each symbol use the
+    -- full card budget, and the card stays well inside the screenshot region.
     local runs, sizes = {}, {}
     local origin = 4
+    local rowOffset = 0
     for _, bytes in ipairs({receipt, readiness}) do
         local matrix, reason = ns.MatrixSymbol.Encode(bytes)
         if not matrix then hide(); return nil, reason end
@@ -139,13 +156,13 @@ display = function(receipt, readiness, generation, refresh)
                 if matrix[x][y] > 0 then
                     local start = x
                     repeat x = x + 1 until x > size or matrix[x][y] <= 0
-                    runs[#runs + 1] = { origin + start, y, x - start }
+                    runs[#runs + 1] = { origin + start, rowOffset + y, x - start }
                     count = count + 1
                     if count > 8192 then hide(); return nil, "receipt_texture_limit" end
                 else x = x + 1 end
             end
         end
-        origin = origin + size + 8
+        rowOffset = rowOffset + size + 8
     end
     local modules, across, tall = cardGeometry(sizes)
     if not frame then create() end

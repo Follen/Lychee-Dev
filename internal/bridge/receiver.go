@@ -19,6 +19,7 @@ type SignalReader struct {
 	feed       FrameFeed
 	lastTicks  int64
 	observedAt time.Time
+	baseline   SignalIdentity
 }
 
 // RuntimeReleaseMismatch is diagnostic identity evidence, never a session.
@@ -29,6 +30,17 @@ func (e *RuntimeReleaseMismatch) Error() string {
 }
 
 func ObserveSignals(feed FrameFeed) *SignalReader { return &SignalReader{feed: feed} }
+
+// SetIdentityBaseline installs the actor and build identity a retained session
+// already proved. Every later receipt on the wire may omit those fields to save
+// QR modules, and the reader fills them from here before matching. It is
+// write-once per reader so a caller cannot relax matching mid-operation.
+func (r *SignalReader) SetIdentityBaseline(baseline SignalIdentity) {
+	if r == nil {
+		return
+	}
+	r.baseline = baseline
+}
 
 // RequireFreshSignal rechecks the age of the last successfully matched frame,
 // including time spent decoding and persisting it. It grants no input permission
@@ -123,10 +135,11 @@ func (r *SignalReader) waitForSignal(ctx context.Context, expected SignalExpecta
 		}
 		var matching *Signal
 		for _, text := range symbols {
-			signal, err := ParseSignal([]byte(text))
+			signal, err := ParseSignal(desktop.BytesFromSymbolText(text))
 			if err != nil {
 				continue
 			}
+			signal = FillSignalIdentity(signal, r.baseline)
 			match := expected
 			if expected.Kind == "identity" {
 				match.Release = ""

@@ -31,8 +31,9 @@ npm 包和发行字节不可改写；历史发布与恢复记录见
 ## 版本与产物
 
 `release/version.json` 是唯一版本源，目标值为 `2.0.2`。
-`node tools/version.mjs --write` 同步 npm package/lock、四个 TOC、Lua Runtime、
-协议 fixture 和 Go buildinfo；`--check` 在 CI 拒绝漂移。
+`node tools/version.mjs --write` 同步 npm package/lock、单一平名清单
+`addon/Lychee Dev.toc`、Lua Runtime、协议 fixture 和 Go buildinfo；
+`--check` 在 CI 拒绝漂移。
 
 标签必须是 `v2.0.2` 并指向最终验收提交。发行物包括：
 

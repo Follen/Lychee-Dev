@@ -421,7 +421,7 @@ func resumeStandaloneReload(ctx context.Context, root, id string, region image.R
 	if record.Stage == "reload_requested" {
 		ready.RuntimeEpoch = input.Expected.RuntimeEpoch
 	}
-	session := &WindowSession{target: bound.Target, region: region, ready: ready, reader: bridge.ObserveSignals(frames), frames: frames, confirm: confirm}
+	session := newWindowSession(bound.Target, region, ready, bridge.ObserveSignals(frames), frames, confirm)
 	defer session.Close()
 	op, err := session.openStandaloneReload(ctx, root, id)
 	if err != nil {

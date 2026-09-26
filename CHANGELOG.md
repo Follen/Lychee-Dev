@@ -47,6 +47,22 @@ static gates, Windows CI, release assembly and registry read-back in
 
 ### Fixed
 
+- Byte fidelity across the QR boundary: `desktop.DecodeSymbols` preserves
+  transmitted bytes by reading byte mode with ISO-8859-1, and the single
+  conversion back to bytes now happens once, in
+  `desktop.BytesFromSymbolText`. A non-ASCII identity (Chinese character or
+  realm name) was previously re-encoded twice and every receipt comparison
+  failed, which is what made Classic `50504` live runs stall after dispatch.
+- Transport compression removed from `Bridge/CaptureWriter`: a raw DEFLATE
+  stream is not valid UTF-8 and the host rejects a SavedVariables document that
+  is not valid UTF-8, so one compressed receipt made the whole
+  `LycheeToolkitDB` unreadable and forced the command output to print binary
+  bytes into chat. The host still reads the archived `0x1F` transport, so a
+  receipt drawn by an earlier build stays verifiable.
+- `live abandon` releases a probe stalled at `flush_requested` when the client
+  never persisted a report, using the same durable dispatch-input proof it
+  already required at `dispatch_requested`; a window is no longer wedged with
+  no legal recovery path.
 - Native `0xc0000005` crash in capture sessions: the process now retains one
   MTA reference for its lifetime so `GraphicsCapture.dll` is never unloaded
   while a capture worker is still returning.
@@ -62,6 +78,12 @@ static gates, Windows CI, release assembly and registry read-back in
 
 ### Changed
 
+- The single flat manifest is the only manifest: the delivery contract requires
+  one `Lychee Dev.toc` declaring every supported interface, and a per-client TOC
+  variant is rejected by `tools/addon-package.mjs` and
+  `delivery.InspectAddonRelease`. `tools/addon-package.mjs`, `tools/release.mjs`
+  and `tools/version.test.mjs` were still built around four TOC files and are
+  realigned.
 - Release scope is Windows amd64 only; Retail `120100`, Classic `50504` and
   Titan `38002` are the acceptance clients. Forever `16001` source stays in
   the tree unverified.

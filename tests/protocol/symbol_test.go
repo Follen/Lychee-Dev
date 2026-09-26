@@ -69,7 +69,10 @@ func TestLuaReceiptDrawingDecodedByHost(t *testing.T) {
 				if len(runs) > 0 {
 					module = runs[0].h
 				}
-				if module < 2 || drawing.Width < 29*module || drawing.Width > 1480 || drawing.Height < 29*module || drawing.Height > 740 || len(drawing.Runs) > 16384 || (i < 2 && drawing.Width != drawing.Height) {
+				// Symbols stack vertically in one card, so a paired receipt is
+				// taller than it is wide and a single symbol is square. Both
+				// stay inside the card budget and keep a 4-module quiet ring.
+				if module < 2 || drawing.Width < 29*module || drawing.Width > 1480 || drawing.Height < 29*module || drawing.Height > 1480 || len(drawing.Runs) > 16384 || (i < 2 && drawing.Width != drawing.Height) || (i == 2 && drawing.Height <= drawing.Width) {
 					t.Fatalf("invalid drawing: %dx%d module %d", drawing.Width, drawing.Height, module)
 				}
 				pixels := image.NewNRGBA(image.Rect(0, 0, drawing.Width, drawing.Height))
@@ -89,15 +92,24 @@ func TestLuaReceiptDrawingDecodedByHost(t *testing.T) {
 					}
 				}
 				texts, err := desktop.DecodeSymbols(pixels)
+				// DecodeSymbols preserves transmitted bytes by reading byte mode
+				// with ISO-8859-1, so the payload is recovered with
+				// BytesFromSymbolText, one rune per byte. Comparing the reader's
+				// text form directly would pass only for pure ASCII.
 				expected := []string{payload}
 				if i == 1 {
 					expected = []string{"small"}
 				} else if i == 2 {
 					expected = append(expected, "next-ready")
 				}
+				recovered := make([]string, 0, len(texts))
+				for _, text := range texts {
+					recovered = append(recovered, string(desktop.BytesFromSymbolText(text)))
+				}
 				slices.Sort(expected)
-				if err != nil || !slices.Equal(texts, expected) {
-					t.Fatalf("decode mismatch: %v, got %q, want %q", err, texts, expected)
+				slices.Sort(recovered)
+				if err != nil || !slices.Equal(recovered, expected) {
+					t.Fatalf("decode mismatch: %v, got %q, want %q", err, recovered, expected)
 				}
 			}
 		})

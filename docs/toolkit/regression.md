@@ -194,7 +194,7 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | SRC-05 | P0 | 两个分支内容相同、部分文件不同 | 对象可去重，快照成员关系不泄漏，结果版本正确 |
 | SRC-06 | P0 | 索引更新中止或旧 schema | 旧已发布索引仍可读；临时索引不被当完整索引 |
 | SRC-07 | P1 | 两个固定源码版本做差异 | 变更与来源准确；不受当前仓库分支影响 |
-| SRC-08 | P0 | 四 TOC matrix、长路径和路径越界输入 | 四配置正确；越界拒绝；Windows 长路径有明确结果 |
+| SRC-08 | P0 | 多目标 matrix、长路径和路径越界输入 | 每个目标正确；越界拒绝；Windows 长路径有明确结果 |
 | DAT-01 | P0 | CASC/BLTE/DB2 固定二进制样本 | 解码记录、语言和字段值与独立预期一致 |
 | DAT-02 | P0 | 同 Build 不同语言和地区 | 查询与缓存身份正确，不混用本地化文本 |
 | DAT-03 | P0 | DB2 schema、ID、外键和流式 limit | 返回结构准确，limit 生效，取消后停止读取 |
@@ -412,7 +412,7 @@ generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入�
 | PKG-01 | P0 | 干净机器原生包 | 无 Python/Node 也可启动；缺 Git 仅影响相应源码能力 |
 | PKG-02 | P0 | 单一 npm 包携带 Windows amd64 二进制且禁用安装脚本 | Windows 启动器选择包内二进制，无运行依赖；version 和离线业务可用；插件/skill 由显式命令部署；不声明或验收非 Windows 平台 |
 | PKG-03 | P0 | binary/插件/skill 版本错配 | 安装清单和 doctor 可识别，不直接启动不兼容 live 操作 |
-| PKG-04 | P0 | 四 TOC 发行 ZIP | 顶层 Lychee Dev/，每个引用存在，共享顺序一致 |
+| PKG-04 | P0 | 单一平名清单发行 ZIP | 顶层 Lychee Dev/，只有一个 `Lychee Dev.toc` 且声明全部支持的 interface，`Core/ClientGate.lua` 首载，每个引用存在，无 per-client TOC 变体 |
 | PKG-05 | P0 | 发行文件白名单和离线启动 | 不含 Python、旧内核、用户数据、本地任务、测试/调查资料或空壳代理 |
 | PKG-06 | P0 | 安装/卸载有用户文件的目录 | 只处理明确拥有文件；保留额外文件；删除数据需显式范围 |
 | PKG-07 | P0 | release 版本、tag、schema、校验和 | 可追溯且一致；第三方许可及署名齐全 |

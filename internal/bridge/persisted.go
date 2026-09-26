@@ -8,6 +8,11 @@ import (
 // ReadPersistedReport selects one exact request from the new database, then
 // verifies its original bytes against independently supplied operation identity.
 // Reading or verifying does not acknowledge the game or delete any report.
+//
+// The stored receipt is the compact wire form, so the returned signal is filled
+// from the caller's expectation before it is compared with a receipt that was
+// read from the display, which the live reader already filled from its session
+// baseline. Both sides of that comparison are then complete signals.
 func ReadPersistedReport(reader io.Reader, code []byte, expected SignalExpectation) (VerifiedReport, error) {
 	if expected.RequestID == "" {
 		return VerifiedReport{}, errors.New("bridge.report_request_required")
@@ -32,7 +37,15 @@ func ReadPersistedReport(reader io.Reader, code []byte, expected SignalExpectati
 	if !receiptOK || !bodyOK {
 		return VerifiedReport{}, errors.New("bridge.invalid_report_record")
 	}
-	return VerifyReport([]byte(receipt), []byte(body), code, expected)
+	report, err := VerifyReport([]byte(receipt), []byte(body), code, expected)
+	if err != nil {
+		return VerifiedReport{}, err
+	}
+	report.Receipt = FillSignalIdentity(report.Receipt, SignalIdentity{
+		Release: expected.Release, Character: expected.Character, Realm: expected.Realm,
+		Product: expected.Product, Build: expected.Build,
+	})
+	return report, nil
 }
 
 // VerifyPersistedReportRemoval verifies the selected original report and its

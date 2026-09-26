@@ -9,6 +9,24 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
+// sameReceiptIdentity compares two observations of the same receipt on the
+// fields the wire actually carries.
+//
+// The actor identity is excluded because the compact wire form omits it: a
+// receipt decoded from the display may carry the session baseline's character,
+// realm and GUID while the same receipt read from SavedVariables may not, and
+// the two must still compare equal. Those fields are enforced where they carry
+// authority: queue identity checks and each caller's own expectation.
+func sameReceiptIdentity(left, right bridge.Signal) bool {
+	left.Release, right.Release = "", ""
+	left.Character, right.Character = "", ""
+	left.Realm, right.Realm = "", ""
+	left.GUID, right.GUID = "", ""
+	left.Product, right.Product = "", ""
+	left.Build, right.Build = "", ""
+	return left == right
+}
+
 func reportedOperationEvidence(ctx context.Context, archive *evidence.Archive, record journal.WorkRecord, input ReportIntent, definition bridge.ProbeDefinition) (bridge.Signal, error) {
 	var zero bridge.Signal
 	observed, loaded, err := loadedOperationEvidence(ctx, archive, record, input, definition)
@@ -95,7 +113,7 @@ func ObserveInstalledOperationPersisted(ctx context.Context, root, operationID s
 		if err != nil {
 			return zero, err
 		}
-		if installed.Report.Receipt != signal {
+		if !sameReceiptIdentity(installed.Report.Receipt, signal) {
 			return zero, errors.New("live.persisted_receipt_mismatch")
 		}
 		err = book.AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: "persisted", Status: "running", Observation: record.Observation})

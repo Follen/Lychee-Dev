@@ -110,7 +110,7 @@ func testOperationFilePreparation(t *testing.T, persisted bool, ackMode string) 
 	}
 	e := input.Expected
 	body := `{"answer":42}`
-	signal := bridge.Signal{Schema: "lycheedev.signal.v1", Release: e.Release, Kind: "reported", SessionNonce: e.SessionNonce, RequestID: e.RequestID, Character: e.Character, Realm: e.Realm, Product: e.Product, Build: e.Build, Sequence: 10, CodeBytes: uint32(len(input.Code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(input.Code)), ReportBytes: uint32(len(body)), ReportAdler32: fmt.Sprintf("%08x", adler32.Checksum([]byte(body)))}
+	signal := bridge.Signal{Schema: "lycheedev.signal.v1", Release: e.Release, Kind: "reported", SessionNonce: e.SessionNonce, RequestID: e.RequestID, Character: e.Character, Realm: e.Realm, GUID: input.Load.GUID, Product: e.Product, Build: e.Build, Sequence: 10, CodeBytes: uint32(len(input.Code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(input.Code)), ReportBytes: uint32(len(body)), ReportAdler32: fmt.Sprintf("%08x", adler32.Checksum([]byte(body)))}
 	loaded := signal
 	loaded.Kind, loaded.Sequence, loaded.ReloadNonce, loaded.InputReady = "loaded", 2, input.Load.ReloadNonce, true
 	loaded.ReportBytes, loaded.ReportAdler32 = 0, ""
@@ -939,7 +939,7 @@ func TestProbePrepareConcurrentRetryAndLoadedEvidence(t *testing.T) {
 	if len(definitions) != 1 || definitions[0].Code != string(input.Code) {
 		t.Fatal("queue retry changed request")
 	}
-	signal := bridge.Signal{Schema: "lycheedev.signal.v1", Release: input.Expected.Release, Kind: "loaded", SessionNonce: input.Expected.SessionNonce, ReloadNonce: input.Load.ReloadNonce, RequestID: input.Expected.RequestID, Character: input.Expected.Character, Realm: input.Expected.Realm, Product: input.Expected.Product, Build: input.Expected.Build, Sequence: 2, CodeBytes: uint32(len(input.Code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(input.Code))}
+	signal := bridge.Signal{Schema: "lycheedev.signal.v1", Release: input.Expected.Release, Kind: "loaded", SessionNonce: input.Expected.SessionNonce, ReloadNonce: input.Load.ReloadNonce, RequestID: input.Expected.RequestID, Character: input.Expected.Character, Realm: input.Expected.Realm, GUID: input.Load.GUID, Product: input.Expected.Product, Build: input.Expected.Build, Sequence: 2, CodeBytes: uint32(len(input.Code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(input.Code))}
 	for _, variant := range []string{"missing", "wrong-reload", "wrong-code", "stale"} {
 		changed := signal
 		feed := &ackFrames{}

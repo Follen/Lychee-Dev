@@ -448,7 +448,9 @@ func (p *faultOperation) observeAndArchive(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if installed.Report.Receipt != reported {
+	// The wire receipt omits the actor identity, so both observations are
+	// compared on the fields the wire actually carries.
+	if !sameReceiptIdentity(installed.Report.Receipt, reported) {
 		return errors.New("live.persisted_receipt_mismatch")
 	}
 	pair, err := archive.CommitReport(ctx, installed.Report.ReceiptBytes, installed.Report.Body, nil, input.Expected, record.OperationID, record.Intent.Snapshot)
@@ -665,7 +667,7 @@ func resumeFaults(ctx context.Context, root, id string, region image.Rectangle, 
 			return record, err
 		}
 	}
-	session := &WindowSession{target: bound.Target, region: region, ready: ready, reader: bridge.ObserveSignals(frames), frames: frames, confirm: confirm}
+	session := newWindowSession(bound.Target, region, ready, bridge.ObserveSignals(frames), frames, confirm)
 	defer session.Close()
 	op, err := session.openFaultOperation(ctx, root, id)
 	if err != nil {

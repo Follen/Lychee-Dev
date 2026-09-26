@@ -17,18 +17,10 @@ func TestLoadedReadinessRefresh(t *testing.T) {
 	if err := json.Unmarshal(output, &result); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := bridge.ParseSignal([]byte(result.Initial))
-	if err != nil {
-		t.Fatal(err)
-	}
-	refreshed, err := bridge.ParseSignal([]byte(result.Refreshed))
-	if err != nil {
-		t.Fatal(err)
-	}
-	reported, err := bridge.ParseSignal([]byte(result.Reported))
-	if err != nil {
-		t.Fatal(err)
-	}
+	baseline := sessionBaseline("retail", "12.1.0.12345")
+	initial := parseSessionSignal(t, []byte(result.Initial), baseline)
+	refreshed := parseSessionSignal(t, []byte(result.Refreshed), baseline)
+	reported := parseSessionSignal(t, []byte(result.Reported), baseline)
 	if initial.InputReady || !refreshed.InputReady || refreshed.Sequence <= initial.Sequence || reported.Sequence <= refreshed.Sequence {
 		t.Fatal("readiness/sequence mismatch")
 	}
@@ -38,17 +30,11 @@ func TestLoadedReadinessRefresh(t *testing.T) {
 		t.Fatal("refresh changed loaded request identity")
 	}
 	reportReady, err := bridge.ParseSignal([]byte(result.ReportReady))
-	if err != nil || reportReady.Kind != "ready" || !reportReady.InputReady || reportReady.RequestID != "" || reportReady.Sequence <= reported.Sequence || reportReady.GUID != "Player-1-123" {
+	if err != nil || reportReady.Kind != "ready" || !reportReady.InputReady || reportReady.RequestID != "" || reportReady.Sequence <= reported.Sequence {
 		t.Fatalf("invalid post-report readiness: %+v %v", reportReady, err)
 	}
-	readyInitial, err := bridge.ParseSignal([]byte(result.ReadyInitial))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ready, err := bridge.ParseSignal([]byte(result.SessionReady))
-	if err != nil {
-		t.Fatal(err)
-	}
+	readyInitial := parseSessionSignal(t, []byte(result.ReadyInitial), baseline)
+	ready := parseSessionSignal(t, []byte(result.SessionReady), baseline)
 	if ready.Kind != "ready" || ready.RequestID != "" || ready.GUID != "Player-1-123" || readyInitial.InputReady || !ready.InputReady || ready.Sequence <= readyInitial.Sequence {
 		t.Fatalf("invalid session readiness: %+v %+v", readyInitial, ready)
 	}

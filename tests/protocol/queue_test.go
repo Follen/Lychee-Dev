@@ -38,10 +38,13 @@ func TestHostQueueToLuaExecution(t *testing.T) {
 	if err := json.Unmarshal(output, &payload); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := bridge.ParseSignal([]byte(payload.Loaded))
-	if err != nil {
-		t.Fatal(err)
+	// The receipt omits the actor identity to save QR modules; the retained
+	// session baseline supplies it before matching.
+	baseline := bridge.SignalIdentity{
+		Release: d.Release, Character: d.Character, Realm: d.Realm,
+		Product: d.Product, Build: d.Build,
 	}
+	loaded := parseSessionSignal(t, []byte(payload.Loaded), baseline)
 	expected := bridge.SignalExpectation{Release: d.Release, Kind: "loaded", SessionNonce: d.SessionNonce, ReloadNonce: d.ReloadNonce, RequestID: d.RequestID, Character: d.Character, Realm: d.Realm, Product: d.Product, Build: d.Build}
 	if err := loaded.Match(expected); err != nil {
 		t.Fatal(err)
@@ -66,13 +69,13 @@ func TestHostQueueToLuaExecution(t *testing.T) {
 	if err := json.Unmarshal(output, &cleanup); err != nil {
 		t.Fatal(err)
 	}
-	ack, err := bridge.ParseSignal([]byte(cleanup.Acknowledged))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ready, err := bridge.ParseSignal([]byte(cleanup.Ready))
-	if err != nil || ready.Kind != "ready" || ready.Sequence <= ack.Sequence || !ready.InputReady || ready.RuntimeEpoch != 2 || ready.RequestID != "" || ready.GUID != d.GUID {
-		t.Fatalf("invalid post-ACK readiness: %+v %v", ready, err)
+	// Receipts omit the actor identity; the retained session baseline supplies
+	// it, including the GUID the readiness comparison needs.
+	ackBaseline := bridge.SignalIdentity{Release: d.Release, Character: d.Character, Realm: d.Realm, GUID: d.GUID, Product: d.Product, Build: d.Build}
+	ack := parseSessionSignal(t, []byte(cleanup.Acknowledged), ackBaseline)
+	ready := parseSessionSignal(t, []byte(cleanup.Ready), ackBaseline)
+	if ready.Kind != "ready" || ready.Sequence <= ack.Sequence || !ready.InputReady || ready.RuntimeEpoch != 2 || ready.RequestID != "" || ready.GUID != d.GUID {
+		t.Fatalf("invalid post-ACK readiness: %+v", ready)
 	}
 	expected.Kind, expected.AfterSequence = "acknowledged", report.Receipt.Sequence
 	if err := ack.Match(expected); err != nil {

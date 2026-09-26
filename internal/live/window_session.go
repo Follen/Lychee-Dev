@@ -45,6 +45,29 @@ func (s *WindowSession) Close() {
 func (s *WindowSession) Target() ClientWindow { return s.target }
 func (s *WindowSession) Ready() bridge.Signal { return s.ready }
 
+// sessionSignalIdentity returns the actor and build identity this retained
+// session already proved. Every receipt seen on its window may omit those
+// fields to save QR modules, and the reader fills them from here before
+// matching, so the comparison still rejects a contradicting value.
+func sessionSignalIdentity(ready bridge.Signal) bridge.SignalIdentity {
+	return bridge.SignalIdentity{
+		Release:   ready.Release,
+		Character: ready.Character,
+		Realm:     ready.Realm,
+		GUID:      ready.GUID,
+		Product:   ready.Product,
+		Build:     ready.Build,
+	}
+}
+
+// newWindowSession is the only constructor: it installs the identity baseline
+// on the reader so no caller can hold a session whose reader matches receipts
+// against an incomplete identity.
+func newWindowSession(target ClientWindow, region image.Rectangle, ready bridge.Signal, reader *bridge.SignalReader, frames sessionFrames, confirm func(context.Context, ClientWindow) error) *WindowSession {
+	reader.SetIdentityBaseline(sessionSignalIdentity(ready))
+	return &WindowSession{target: target, region: region, ready: ready, reader: reader, frames: frames, confirm: confirm}
+}
+
 func sessionExpectation(target ClientWindow, expected bridge.SignalExpectation) error {
 	if !bindingLabel(expected.Character) || !bindingLabel(expected.Realm) {
 		return errors.New("live.invalid_binding_identity")
@@ -74,14 +97,16 @@ func OpenWindowSession(ctx context.Context, target ClientWindow, region image.Re
 	if err != nil {
 		return nil, err
 	}
-	session, err := observeWindowSession(ctx, target, expected, frames, ConfirmClientWindow)
-	if err == nil {
-		session.region = region
-	}
-	return session, err
+	// The caller's region is the capture region for this session; internal
+	// observation paths pass an empty region and keep the caller's.
+	return observeWindowSessionAt(ctx, target, region, expected, frames, ConfirmClientWindow)
 }
 
 func observeWindowSession(ctx context.Context, target ClientWindow, expected bridge.SignalExpectation, frames sessionFrames, confirm func(context.Context, ClientWindow) error) (*WindowSession, error) {
+	return observeWindowSessionAt(ctx, target, image.Rectangle{}, expected, frames, confirm)
+}
+
+func observeWindowSessionAt(ctx context.Context, target ClientWindow, region image.Rectangle, expected bridge.SignalExpectation, frames sessionFrames, confirm func(context.Context, ClientWindow) error) (*WindowSession, error) {
 	success := false
 	defer func() {
 		if !success {
@@ -119,7 +144,7 @@ func observeWindowSession(ctx context.Context, target ClientWindow, expected bri
 		return nil, err
 	}
 	success = true
-	return &WindowSession{target: target, ready: signal, reader: reader, frames: frames, confirm: confirm}, nil
+	return newWindowSession(target, region, signal, reader, frames, confirm), nil
 }
 
 // CaptureWindowSession retains normalized decoded evidence, not a screenshot

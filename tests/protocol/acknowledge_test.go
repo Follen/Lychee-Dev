@@ -21,14 +21,12 @@ func TestLuaAcknowledgementAfterSessionRecreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := bridge.SignalExpectation{Release: buildinfo.Version, Kind: "reported", SessionNonce: strings.Repeat("a", 32), RequestID: "OP-ack", Character: "Paladin", Realm: "Realm", Product: "retail", Build: "12.1.0.69875", AfterSequence: 101}
+	baseline := sessionBaseline("retail", "12.1.0.69875")
 	report, err := bridge.VerifyReport([]byte(payload.Receipt), []byte(payload.Body), []byte(payload.Code), expected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	acknowledgement, err := bridge.ParseSignal([]byte(payload.Acknowledgement))
-	if err != nil {
-		t.Fatal(err)
-	}
+	acknowledgement := parseSessionSignal(t, []byte(payload.Acknowledgement), baseline)
 	expected.Kind, expected.AfterSequence = "acknowledged", report.Receipt.Sequence
 	if err := acknowledgement.Match(expected); err != nil {
 		t.Fatal(err)

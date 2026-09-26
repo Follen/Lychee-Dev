@@ -1,4 +1,5 @@
 local root = assert(arg[1])
+assert(loadfile(arg[2]))()
 local secret = {}
 issecretvalue = function(value) return rawequal(value, secret) end
 local products = {

@@ -8,7 +8,7 @@ import (
 
 func TestFourClientLifecycle(t *testing.T) {
 	lua := luaRuntime(t)
-	output, err := exec.Command(lua, "lifecycle.lua", "../../addon").CombinedOutput()
+	output, err := exec.Command(lua, "lifecycle.lua", "../../addon", wowGlobals(t)).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output)
 	}
