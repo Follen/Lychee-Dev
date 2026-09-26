@@ -48,8 +48,8 @@ local function payload(value)
 end
 -- One visual system for every receipt kind. The generation key only memoizes
 -- identical redisplays; it is never an identity or an input permission.
--- Module size is max(2, ceil(3 * physical pixel)) UI units, every symbol keeps
--- a 4-module quiet zone, and the whole card is clamped to MAX_CARD_UI_SIZE.
+-- Module size is max(4, ceil(3 * physical pixel)) UI units (4px floor keeps
+-- module edges crisp and the shared quiet zone unmerged on every engine).
 local function cardGeometry(sizes)
     local unit = 1
     if ns.Compat and type(ns.Compat.GetPhysicalPixelSize) == "function" then
@@ -65,7 +65,7 @@ local function cardGeometry(sizes)
         if index > 1 then across = across + 8 end
         if size + 8 > tall then tall = size + 8 end
     end
-    local modules = math.max(2, math.ceil(3 * unit))
+    local modules = math.max(4, math.ceil(3 * unit))
     modules = math.min(modules,
         math.max(1, math.floor(MAX_CARD_UI_SIZE / across)),
         math.max(1, math.floor(MAX_CARD_UI_SIZE / tall)))

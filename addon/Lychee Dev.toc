@@ -20,6 +20,8 @@ Core\Platform.lua
 Core\Persistence.lua
 Bridge\Session.lua
 Core\Controls.lua
+Libs\LibStub.lua
+Libs\LibDeflate.lua
 Bridge\CaptureWriter.lua
 Bridge\MatrixSymbol.lua
 Bridge\ReceiptView.lua

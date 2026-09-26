@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bytes"
+	"compress/flate"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,8 +50,41 @@ type SignalExpectation struct {
 	RequireInputReady                                                 bool
 }
 
+// signalDeflateMarker prefixes compressed signal payloads: 0x1F followed by
+// raw DEFLATE bytes of the JSON document. The addon emits it whenever
+// deflation shrinks the transport (dense reported/ready QRs). The QR decoder
+// reads byte-mode payloads with ISO-8859-1, mapping each byte to one rune;
+// the caller must convert the text back to raw bytes before inflating.
+const signalDeflateMarker = 0x1F
+
+// iso88591ToBytes converts a string of ISO-8859-1 runes back to raw bytes.
+func iso88591ToBytes(s string) []byte {
+	runes := []rune(s)
+	out := make([]byte, len(runes))
+	for i, r := range runes {
+		out[i] = byte(r)
+	}
+	return out
+}
+
 func ParseSignal(data []byte) (Signal, error) {
 	var signal Signal
+	if len(data) == 0 || len(data) > 4096 {
+		return signal, errors.New("bridge.signal_budget_or_encoding")
+	}
+	if data[0] == signalDeflateMarker {
+		// The QR decoder mapped each raw byte to one ISO-8859-1 rune; convert
+		// back to the original deflate bytes before inflating.
+		raw := iso88591ToBytes(string(data))
+		if len(raw) < 2 {
+			return signal, errors.New("bridge.signal_budget_or_encoding")
+		}
+		inflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(raw[1:])))
+		if err != nil {
+			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
+		}
+		data = inflated
+	}
 	if len(data) == 0 || len(data) > 4096 || !utf8.Valid(data) {
 		return signal, errors.New("bridge.signal_budget_or_encoding")
 	}

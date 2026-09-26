@@ -4,7 +4,6 @@ import (
 	"errors"
 	"image"
 	"sort"
-	"unicode/utf8"
 
 	"github.com/makiuchi-d/gozxing"
 	multiqr "github.com/makiuchi-d/gozxing/multi/qrcode"
@@ -25,7 +24,7 @@ func DecodeSymbols(frame image.Image) ([]string, error) {
 		return nil, err
 	}
 	reader := multiqr.NewQRCodeMultiReader()
-	results, err := reader.DecodeMultiple(bitmap, map[gozxing.DecodeHintType]interface{}{gozxing.DecodeHintType_TRY_HARDER: true, gozxing.DecodeHintType_CHARACTER_SET: "UTF-8"})
+	results, err := reader.DecodeMultiple(bitmap, map[gozxing.DecodeHintType]interface{}{gozxing.DecodeHintType_TRY_HARDER: true, gozxing.DecodeHintType_CHARACTER_SET: "ISO-8859-1"})
 	if err != nil {
 		var missing gozxing.NotFoundException
 		if errors.As(err, &missing) {
@@ -36,7 +35,9 @@ func DecodeSymbols(frame image.Image) ([]string, error) {
 	unique := make(map[string]bool)
 	for _, result := range results {
 		text := result.GetText()
-		if len(text) > 4096 || !utf8.ValidString(text) {
+		// ISO-8859-1 keeps the QR byte payload byte-exact: compressed signal
+		// payloads are binary (deflate) and must survive the text round trip.
+		if len(text) > 4096 {
 			return nil, errors.New("desktop.invalid_symbol_payload")
 		}
 		unique[text] = true

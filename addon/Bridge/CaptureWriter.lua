@@ -139,6 +139,14 @@ local function digestBytes(text)
     return string.format("%04x%04x", high, low)
 end
 
+	local deflateLib
+	if LibStub and type(LibStub.GetLibrary) == "function" then
+		local okLib, lib = pcall(LibStub.GetLibrary, LibStub, "LibDeflate", true)
+		if okLib and type(lib) == "table" and type(lib.CompressDeflate) == "function" then
+			deflateLib = lib
+		end
+	end
+
 ns.CaptureWriter = {
     Encode = function(value, limit)
         if issecretvalue and issecretvalue(limit) then return nil, "report_invalid_budget" end
@@ -148,6 +156,12 @@ ns.CaptureWriter = {
         end
         local ok, result = pcall(encodeDocument, value, limit)
         if not ok then return nil, result end
+        if deflateLib and #result > 96 then
+		local okCompress, compressed = pcall(deflateLib.CompressDeflate, deflateLib, result)
+		if okCompress and type(compressed) == "string" and #compressed + 8 < #result then
+			return string.char(31) .. compressed
+		end
+        end
         return result
     end,
     DigestBytes = digestBytes,
