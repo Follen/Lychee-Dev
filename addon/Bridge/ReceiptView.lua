@@ -60,8 +60,8 @@ end
 -- readable size everywhere; the UI scale, not this addon, decides how many
 -- physical pixels that is. The only other bound is the card budget, which keeps
 -- a dense symbol on screen instead of clipping it.
-local TARGET_CARD_MODULES = 5
-local MIN_CARD_MODULES = 4
+local TARGET_CARD_MODULES = 3
+local MIN_CARD_MODULES = 3
 local function cardGeometry(sizes)
     local across, tall = 8, 8
     for index, size in ipairs(sizes) do
