@@ -20,6 +20,16 @@ function fromPath() {
 }
 
 function fromNpmGlobal() {
+  if (windows) {
+    // npm exposes .cmd/.ps1 shims on Windows, not an executable. Resolve the
+    // package beside its PATH shim and invoke JavaScript through Node; never
+    // send forwarded arguments through a shell.
+    for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+      if (!directory || !existsSync(join(directory, 'lycheedev.cmd'))) continue;
+      const launcher = join(directory, 'node_modules', 'lycheedev', 'bin', 'lycheedev.mjs');
+      if (existsSync(launcher)) return { command: process.execPath, args: [launcher] };
+    }
+  }
   const npm = windows ? 'npm.cmd' : 'npm';
   const found = spawnSync(npm, ['prefix', '-g'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000 });
   if (found.status !== 0 || !found.stdout) return undefined;

@@ -13,7 +13,10 @@ lycheedev live bugs --session <session-id> --request <stable-key> --count <1-100
 This reports !BugGrabber provider storage newest-first. It does not claim to
 capture every addon error. `provider_unavailable`, partial fields, zero returned
 rows and incomplete coverage must remain distinct. After reading the verified
-report, acknowledge its operation explicitly with `live ack <operation-id>`.
+report, acknowledge its operation with `live ack <operation-id>` and dismiss the
+final receipt with `live hide --session <session-id>`. Perform this within the
+authorized task without asking for a separate ACK confirmation. A QR or verified
+report with pending cleanup is not the end of this workflow.
 
 Use a question-specific probe only when the retained error snapshot cannot
 distinguish the hypotheses. Follow [live-investigation.md](live-investigation.md)

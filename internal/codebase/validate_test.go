@@ -247,6 +247,26 @@ func TestValidateTOCCompatibilityCodesAndUnresolved(t *testing.T) {
 	}
 }
 
+func TestValidateTOCMultipleInterfaces(t *testing.T) {
+	for _, declared := range []string{"120100, 50504, 38002, 16001", "50504, 120100", "1201000, 50504"} {
+		t.Run(declared, func(t *testing.T) {
+			addon := map[string]string{"Addon.toc": "## Interface: " + declared + "\nmain.lua\n", "main.lua": "C_Good.Do()\n"}
+			b, pin, root := validationFixture(t, addon, "multiple")
+			result, err := b.ValidateTOC(context.Background(), pin, "PIN-TEST", AddonInput{Root: root, Manifest: "Addon.toc"}, ValidationIdentity{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if strings.Contains(declared, "1201000") {
+				want = 1
+			}
+			if got := issueCodes(result.Diagnostics)["toc_interface_mismatch"]; got != want {
+				t.Fatalf("declaration %q: mismatch count %d, want %d", declared, got, want)
+			}
+		})
+	}
+}
+
 func TestValidateTOCInterfaceMismatchAndUnknownEvidence(t *testing.T) {
 	addon := map[string]string{"Addon.toc": "## Interface: 99999\nmain.lua\n", "main.lua": "C_Good.Do()\n"}
 	b, pin, root := validationFixture(t, addon, "mismatch")

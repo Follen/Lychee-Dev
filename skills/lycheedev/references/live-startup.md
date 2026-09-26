@@ -81,6 +81,8 @@ deadlock or claim that `/dev connect` must be entered manually.
 Once connected, use [live-investigation.md](live-investigation.md): standalone
 reload requires the returned session and a stable request key; an interrupted
 operation resumes by its original ID. A successful connection is not a probe,
-reload, upgrade or full regression pass. Handoff the selected installation,
-snapshot, session/operation IDs, actual disk/runtime observations and the next
-action; do not hand off an unverified cause as fact.
+reload, upgrade or full regression pass. Continue the authorized task through
+report retrieval, acknowledgement and final receipt dismissal in the same turn.
+Only when genuinely blocked, hand off the selected installation, snapshot,
+session/operation IDs, actual disk/runtime observations and the next action;
+do not hand off an unverified cause as fact.

@@ -108,7 +108,10 @@ lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text
 
 Choose exactly one lookup mode: `--query <text>`, `--extension <ext>`,
 `--name <path>`, or `--file-id <id>`. `--limit` bounds text search and extension
-pages. The command reuses a verified cached listfile when available. Search
+pages. `--max-bytes` bounds total listfile input (default 256 MiB, maximum
+512 MiB); the current community listfile exceeds 150 MB. A budget or download
+failure is not a negative file lookup. The command reuses a verified cached
+listfile when available. Search
 results identify candidates; inspect or export a selected file ID before
 interpreting its contents.
 

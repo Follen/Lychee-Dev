@@ -1,0 +1,3334 @@
+{
+  "schema": "lycheedev.business-regression.v1",
+  "date": "2026-09-26",
+  "baseCommit": "39ea9764cc279d728c13f72e279160e39be36a34",
+  "candidate": "uncommitted working-tree fixes; not a published release",
+  "rawEvidenceDirectory": ".tmp/business-full-20260926",
+  "clients": [
+    {
+      "client": "retail",
+      "source": {
+        "schema": "lycheedev.selection.v1",
+        "id": "PIN-f5ca7507c049580ad68831744678771cc49525719fdc901a91c739db2871b38b",
+        "source": {
+          "repository": "wow-ui-source",
+          "product": "retail",
+          "requestedRef": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+          "exactCommit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+          "parserRevision": "source-v1"
+        }
+      },
+      "data": {
+        "schema": "lycheedev.selection.v1",
+        "id": "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "data": {
+          "product": "retail",
+          "region": "cn",
+          "fullBuild": "12.1.0.69933",
+          "buildConfig": "dcfc90fffd79ba00406ae46f5f657592",
+          "cdnConfig": "9b3c456dbb837d133a026d380c7c13e9",
+          "language": "zhCN",
+          "definitionCommit": "e989e99e6f5f97c57b2e138d4d28b16066b4ee9c"
+        }
+      }
+    },
+    {
+      "client": "classic",
+      "source": {
+        "schema": "lycheedev.selection.v1",
+        "id": "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "source": {
+          "repository": "wow-ui-source",
+          "product": "classic",
+          "requestedRef": "1028c1e687f721ba9d3af14d1b12a5745e4227c7",
+          "exactCommit": "1028c1e687f721ba9d3af14d1b12a5745e4227c7",
+          "parserRevision": "source-v1"
+        }
+      },
+      "data": {
+        "schema": "lycheedev.selection.v1",
+        "id": "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "data": {
+          "product": "classic",
+          "region": "cn",
+          "fullBuild": "5.5.4.69934",
+          "buildConfig": "ad6184fe0582294d2e5faaf3598a3688",
+          "cdnConfig": "9b3c456dbb837d133a026d380c7c13e9",
+          "language": "zhCN",
+          "definitionCommit": "e989e99e6f5f97c57b2e138d4d28b16066b4ee9c"
+        }
+      }
+    },
+    {
+      "client": "titan",
+      "source": {
+        "schema": "lycheedev.selection.v1",
+        "id": "PIN-5919a64afc7b75e3489be9d2cc1394495c8218ed7938e55b67ecf57b94097552",
+        "source": {
+          "repository": "wow-ui-source",
+          "product": "titan",
+          "requestedRef": "825d29d3662b372f0bead725ee6abd339e4a77b5",
+          "exactCommit": "825d29d3662b372f0bead725ee6abd339e4a77b5",
+          "parserRevision": "source-v1"
+        }
+      },
+      "data": {
+        "schema": "lycheedev.selection.v1",
+        "id": "PIN-c35054c2ea79e6ac2fe8d6cd457d3f3d8ae01b530b66f2e788c4b0bded0d1615",
+        "data": {
+          "product": "titan",
+          "region": "cn",
+          "fullBuild": "3.80.2.69874",
+          "buildConfig": "492e24cc5d330710df21349f8e8647ba",
+          "cdnConfig": "9b3c456dbb837d133a026d380c7c13e9",
+          "language": "zhCN",
+          "definitionCommit": "e989e99e6f5f97c57b2e138d4d28b16066b4ee9c"
+        }
+      }
+    }
+  ],
+  "tests": {
+    "go": "LYCHEEDEV_REQUIRE_LUA51=1 go test -count=1 -parallel=4 ./...: exit 0",
+    "node": "node --test tools/*.test.mjs: 46 passed",
+    "skillContract": "79 commands, 185 references, 0 violations",
+    "freshAgentAutomaticSelection": "not_run",
+    "realGameQRClosure": "not_run this pass; prior manual records remain separate"
+  },
+  "images": {
+    "pixelsSHA256": "8814594594101df3005b9af59109c305d7564074b6128461845d3813ebcda189",
+    "match": true
+  },
+  "streamEnd": {
+    "frame": "end",
+    "end": {
+      "count": 3,
+      "complete": false,
+      "truncated": true,
+      "truncationReason": "limit_reached"
+    }
+  },
+  "runs": [
+    {
+      "name": "retail-source-sync",
+      "argv": [
+        "source",
+        "sync",
+        "--source",
+        "wow-ui-source",
+        "--product",
+        "retail",
+        "--ref",
+        "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 1.84,
+      "outputSHA256": "38cc0eabd55925ee9defd746702c536e8ed6bb241c4269ec7c24f806d12df83b",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-source-index",
+      "argv": [
+        "source",
+        "index",
+        "--snapshot",
+        "PIN-f5ca7507c049580ad68831744678771cc49525719fdc901a91c739db2871b38b",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 0,
+      "seconds": 23.22,
+      "outputSHA256": "d016bc8e0b42b2ca1c7adaa0a74c84c10afc7833f2800657c1e79a6ee8fd6b43",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-resolve",
+      "argv": [
+        "target",
+        "resolve",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_retail_",
+        "--definitions",
+        "e989e99e6f5f97c57b2e138d4d28b16066b4ee9c",
+        "--region",
+        "cn",
+        "--locale",
+        "zhCN",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.18,
+      "outputSHA256": "13203f696a91a7b0300f9b9ae5f5cbd940933536a97d4ddbe06f598dab2edc71",
+      "captureIDs": [
+        "CAP-bbdc7b87cfa5221ce7cb1c74766060e153c5244ded34dd846625e8f99feed03c"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-db2",
+      "argv": [
+        "data",
+        "db2",
+        "--table",
+        "ChrClasses",
+        "--limit",
+        "3",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_retail_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "This page is not the complete table; preserve the snapshot, table and cursor when continuing."
+      ],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.9,
+      "outputSHA256": "b6f0915f76d38d5ddd837d38388cf3178020eafc149cac0c3ec9fc362a9ef08f",
+      "captureIDs": [
+        "CAP-9ad86a74a126e2c9f532e5192a9c58d3b41f0ddace7318a5dfdf81867eb0c82c"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-spell",
+      "argv": [
+        "data",
+        "spell",
+        "info",
+        "--spell-id",
+        "17",
+        "--max-depth",
+        "2",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_retail_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 30: BLTE decryption key unavailable: 14f4b11d7b067aa2",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.9,
+      "outputSHA256": "f989772a188c06a77637eba08c4856c81837a434baef7a8a8de6c0e3769f2747",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-item",
+      "argv": [
+        "data",
+        "item",
+        "get",
+        "--item-id",
+        "19019",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_retail_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 10: BLTE decryption key unavailable: 055c2c56039a6e5e",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.9,
+      "outputSHA256": "4b462fe6e72e41948ecd9edabed23f72c194c957f0d92a7c5d22943b1133364c",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-creature",
+      "argv": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "49",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_retail_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 9: BLTE decryption key unavailable: 1dacce2b44c78902",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.94,
+      "outputSHA256": "01af9d9f70fa8aaea18201a2e6ff9ef865e4bc72c1e21fcdc0a5ac3ba981c162",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "retail-decor",
+      "argv": [
+        "data",
+        "decor",
+        "list",
+        "--limit",
+        "3",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_retail_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 2: BLTE decryption key unavailable: 2fef3aa89ffbbe7f",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 1.51,
+      "outputSHA256": "7edc163010bb16f055fdc353911f7c6f6dbf59c9e4acce879ce96c568ed690db",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-source-sync",
+      "argv": [
+        "source",
+        "sync",
+        "--source",
+        "wow-ui-source",
+        "--product",
+        "classic",
+        "--ref",
+        "1028c1e687f721ba9d3af14d1b12a5745e4227c7",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 1.41,
+      "outputSHA256": "acd63659360f461167b5a11d346248dcc21913f0cdc911079d9bfe676bd7c350",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-source-index",
+      "argv": [
+        "source",
+        "index",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 0,
+      "seconds": 0.2,
+      "outputSHA256": "74494f0261b733f2098fd95b291e34c6f490f006e8b630eff1468ca2e325fd02",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-resolve",
+      "argv": [
+        "target",
+        "resolve",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_",
+        "--definitions",
+        "e989e99e6f5f97c57b2e138d4d28b16066b4ee9c",
+        "--region",
+        "cn",
+        "--locale",
+        "zhCN",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.17,
+      "outputSHA256": "60244208442c74d17f3a5814dca4f150c480a8554c91e064cff180a03d69eeb6",
+      "captureIDs": [
+        "CAP-e954ed8e9fff7591e0e6dd5148ff81ec04e9f02c4d29934fb1db3f0cbd3691df"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-db2",
+      "argv": [
+        "data",
+        "db2",
+        "--table",
+        "ChrClasses",
+        "--limit",
+        "3",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "This page is not the complete table; preserve the snapshot, table and cursor when continuing."
+      ],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.57,
+      "outputSHA256": "4b9de9d2e012e1cfdaa3dbc3b23f10c3e977b8ccc0f3164e3174c53becca778a",
+      "captureIDs": [
+        "CAP-05ffa3952a07efea5027a035184495ae476171dcaff7e1393a6776f35e07da06"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-spell",
+      "argv": [
+        "data",
+        "spell",
+        "info",
+        "--spell-id",
+        "17",
+        "--max-depth",
+        "2",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 9: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.5,
+      "outputSHA256": "d1a7318bb79139eee2994df74d82ec0153ad769411b137edf5e64eace4bf3a5c",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-item",
+      "argv": [
+        "data",
+        "item",
+        "get",
+        "--item-id",
+        "19019",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 7: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.51,
+      "outputSHA256": "d080a6ff498ecd4e3bdd30f169b7331bea91579bd1d1239d970a5e2d8a796350",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-creature",
+      "argv": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "49",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 3: BLTE decryption key unavailable: 0759d1f6d8ce459e",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.5,
+      "outputSHA256": "5fef730a55e01489b20f0d70f9b96d3ef2c28e283fe5f6e37b2da3f80cae7e97",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-source-sync",
+      "argv": [
+        "source",
+        "sync",
+        "--source",
+        "wow-ui-source",
+        "--product",
+        "titan",
+        "--ref",
+        "825d29d3662b372f0bead725ee6abd339e4a77b5",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 3.13,
+      "outputSHA256": "7e65221156fb3080b6add3204ed23ce3a7eb277d8075cd009cd5c95ecdcfea7d",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-source-index",
+      "argv": [
+        "source",
+        "index",
+        "--snapshot",
+        "PIN-5919a64afc7b75e3489be9d2cc1394495c8218ed7938e55b67ecf57b94097552",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 0,
+      "seconds": 29.09,
+      "outputSHA256": "9ce863f3fbe5789cf75f72715b61e97bb829395b157ed971a01eb5920ef590be",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-resolve",
+      "argv": [
+        "target",
+        "resolve",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_titan_",
+        "--definitions",
+        "e989e99e6f5f97c57b2e138d4d28b16066b4ee9c",
+        "--region",
+        "cn",
+        "--locale",
+        "zhCN",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.18,
+      "outputSHA256": "d2db97a97cfb1d21251dfaa0b9cad731a62e285c540c3fa9611aa649e4f6a3e1",
+      "captureIDs": [
+        "CAP-b317fd24e5078c68d28db7d20a118a1327b6b9984fcee959801f2f3f9eaae5c8"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-db2",
+      "argv": [
+        "data",
+        "db2",
+        "--table",
+        "ChrClasses",
+        "--limit",
+        "3",
+        "--snapshot",
+        "PIN-c35054c2ea79e6ac2fe8d6cd457d3f3d8ae01b530b66f2e788c4b0bded0d1615",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_titan_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "This page is not the complete table; preserve the snapshot, table and cursor when continuing."
+      ],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.42,
+      "outputSHA256": "f840e9d174d2c167230f24b441b621f4c7e239b152eb6dc9abbf9a3f90aaf215",
+      "captureIDs": [
+        "CAP-530cacc8baf7148260956caf07dd14c09fbb4bd0303452e8840ace96cf5d8961"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-spell",
+      "argv": [
+        "data",
+        "spell",
+        "info",
+        "--spell-id",
+        "17",
+        "--max-depth",
+        "2",
+        "--snapshot",
+        "PIN-c35054c2ea79e6ac2fe8d6cd457d3f3d8ae01b530b66f2e788c4b0bded0d1615",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_titan_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 5: BLTE decryption key unavailable: 01bc7a3177a13951",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.35,
+      "outputSHA256": "476aa1daa4927fc3dab82e0329b5421962f71fad592f8f754681f04ab3c5a44c",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-item",
+      "argv": [
+        "data",
+        "item",
+        "get",
+        "--item-id",
+        "19019",
+        "--snapshot",
+        "PIN-c35054c2ea79e6ac2fe8d6cd457d3f3d8ae01b530b66f2e788c4b0bded0d1615",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_titan_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 4: BLTE decryption key unavailable: 01bc7a3177a13951",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.4,
+      "outputSHA256": "2297622a77469a93212b6e3832654f4c6f646713be08cc22327b1ef3424c5b96",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "titan-creature",
+      "argv": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "49",
+        "--snapshot",
+        "PIN-c35054c2ea79e6ac2fe8d6cd457d3f3d8ae01b530b66f2e788c4b0bded0d1615",
+        "--installation",
+        "D:\\Game\\World of Warcraft\\_classic_titan_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 3: BLTE decryption key unavailable: 01bc7a3177a13951",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.43,
+      "outputSHA256": "8f3a607a893546927cc3abfeac799b342c8d0cf9237d65702e6c9f49aecd7aff",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-list",
+      "argv": [
+        "source",
+        "list",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 0,
+      "seconds": 0.04,
+      "outputSHA256": "fca519589f05a91aa27a371145526d6775e123b2c10879cbd0ae66d04b626cb6",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-precise",
+      "argv": [
+        "source",
+        "query",
+        "C_Spell.GetSpellInfo",
+        "--snapshot",
+        "PIN-f5ca7507c049580ad68831744678771cc49525719fdc901a91c739db2871b38b",
+        "--mode",
+        "precise",
+        "--topic",
+        "api",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Source search was truncated by --limit."
+      ],
+      "complete": false,
+      "captureCount": 1,
+      "seconds": 1,
+      "outputSHA256": "a5887e43093363e99aa385df7a12dbe99121e17ef4a9a647b9fa820ad0bbf715",
+      "captureIDs": [
+        "CAP-3de33b8bc56b9c5b4850f72e86d752eec86fb1b69411d2711b48943227f5c2cc"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-explore",
+      "argv": [
+        "source",
+        "query",
+        "ActionButton",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--mode",
+        "exploratory",
+        "--topic",
+        "lua",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Source search was truncated by --limit."
+      ],
+      "complete": false,
+      "captureCount": 1,
+      "seconds": 1.11,
+      "outputSHA256": "bd7fe26387be6601841c6a529b3726e9a365a9c6e5b61973d73eff7beb8add67",
+      "captureIDs": [
+        "CAP-54c6b4991a39d298e0d6a16c05104db137b68e702b06a8a8a40fd234eec1344d"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-symbol",
+      "argv": [
+        "source",
+        "inspect",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--symbol",
+        "ActionButton_Update",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 1,
+      "seconds": 0.29,
+      "outputSHA256": "8abe9220db7ddaee18c4e6cbf284f76a0e0e8cc0e7b120cf6c7852b3e608cf82",
+      "captureIDs": [
+        "CAP-cfc8300626f77b8e10d9682703931d60a327ed3fbb7cf290a468d870cf1496c2"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-path",
+      "argv": [
+        "source",
+        "inspect",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--path",
+        "Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua",
+        "--line",
+        "1",
+        "--count",
+        "12",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.27,
+      "outputSHA256": "00986addccfdfa5522b59d1aa7e2348c710e180f97ff79331bcc7a7b18fa331e",
+      "captureIDs": [
+        "CAP-55af3b2fe21b76fd4af20b89e28f9c2368a85e18608f54dbb4878318b10f4da4"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-diff",
+      "argv": [
+        "source",
+        "diff",
+        "--from",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--to",
+        "PIN-f5ca7507c049580ad68831744678771cc49525719fdc901a91c739db2871b38b",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.76,
+      "outputSHA256": "1d7c2a20586dc30eb2d191b72c0296f4b5ebc0c3752d76bf5472b8323807dc23",
+      "captureIDs": [
+        "CAP-8911376e0e68a005b5548ffed7eca82acc8512acbc4c4b899e07f653bfd68039"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-matrix",
+      "argv": [
+        "source",
+        "validate",
+        "--matrix",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\matrix.json",
+        "--format",
+        "json"
+      ],
+      "exit": 4,
+      "ok": false,
+      "error": {
+        "code": "codebase.addon_static_check_failed",
+        "message": "codebase.addon_static_check_failed",
+        "stage": "dispatch",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 7.98,
+      "outputSHA256": "0b8581c0194670b73f1aba11bd51274b2b9b1de0400807c7abe0583fc247ec2a",
+      "captureIDs": [
+        "CAP-11fd528796a65ccbd0afaf62eaaffc8471b172e620bc1e0a19abd37b4c4c196e"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "schema",
+      "argv": [
+        "data",
+        "db2",
+        "schema",
+        "ChrClasses",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 1,
+      "seconds": 0.52,
+      "outputSHA256": "49a6e739a428f8bcfa9a7092ccc2cf5340bd073f896430e565c5e2ef7599a4f4",
+      "captureIDs": [
+        "CAP-18b4fe8ca1a75e04fabd1b3b1ae4b6fa5a13956a124fdb6c55729e19bd017bb5"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "search",
+      "argv": [
+        "data",
+        "db2",
+        "search",
+        "ChrClasses",
+        "--field",
+        "Name_lang",
+        "--query",
+        "战",
+        "--limit",
+        "3",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 1,
+      "seconds": 0.5,
+      "outputSHA256": "f6b7b75e4df622f09f93503a4117f3b1b3e3968787d5538340d78ba6ec82b359",
+      "captureIDs": [
+        "CAP-bd4411421fe97eb29ac7d9764acf4ce5c6953df192029ba64fc7e008080bf913"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "foreign-key",
+      "argv": [
+        "data",
+        "db2",
+        "foreign-key",
+        "ChrClasses",
+        "--field",
+        "DisplayPower",
+        "--value",
+        "0",
+        "--limit",
+        "3",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "This result is truncated; preserve the snapshot and the stated truncation reason when continuing."
+      ],
+      "complete": false,
+      "captureCount": 1,
+      "seconds": 0.45,
+      "outputSHA256": "d8bb8d206cc8b7f8bc6efa659e463e773408642245b7e5081446b7b559e25773",
+      "captureIDs": [
+        "CAP-8e94d196fa1f877374a6799cda6d39e87a5dfaeb01ac1ec69c7c3239cc2c312d"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "sql",
+      "argv": [
+        "data",
+        "sql",
+        "--sql",
+        "SELECT ID, Name_lang FROM ChrClasses WHERE ID = :class LIMIT 3",
+        "--param",
+        "class=1",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.46,
+      "outputSHA256": "8fa6a362744fa07e6283398260e78d7e3417f99d7efdbe1db0a9d3dc0678f70d",
+      "captureIDs": [
+        "CAP-4e6bfe6982f2b973650b4988e092611d61b02e1b809feb330f6fa894a8a5e97d"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "sql-csv",
+      "argv": [
+        "data",
+        "sql",
+        "--sql",
+        "SELECT ID, Name_lang FROM ChrClasses LIMIT 3",
+        "--encoding",
+        "csv",
+        "--output",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\classes.csv",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 2,
+      "seconds": 0.51,
+      "outputSHA256": "6ab25c1dd151a4c25d7c37f9e65d2aca889580ae3663b08d0f0b7bcbc18f2ff0",
+      "captureIDs": [
+        "CAP-1da0ce384349944aa8ce17bc9bf601f90e193ac1ad7130f69087819c7da913ad",
+        "CAP-769e7241955249c4ad9b4f3f044ea84ba2b1e2e0669762f6216d5fba5cf5b7a8"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "stream",
+      "argv": [
+        "data",
+        "db2",
+        "stream",
+        "ChrClasses",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--limit",
+        "3",
+        "--fields",
+        "ID,Name_lang",
+        "--format",
+        "jsonl"
+      ],
+      "exit": 0,
+      "ok": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "error": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "warnings": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "complete": null,
+      "captureCount": 5,
+      "seconds": 0.5,
+      "outputSHA256": "3786bd73822400b40235692eeaf794943e48c9eb2b07b4f3f98f3cb5fb12c0f2",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "next-page",
+      "argv": [
+        "data",
+        "db2",
+        "--table",
+        "ChrClasses",
+        "--limit",
+        "3",
+        "--after-id",
+        "3",
+        "--offline",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "This page is not the complete table; preserve the snapshot, table and cursor when continuing."
+      ],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.47,
+      "outputSHA256": "705ab493f5bf599c6fc13254b6588b3c7cd7b2c8505f741133cfd6076ae05b07",
+      "captureIDs": [
+        "CAP-1e9858bb8ea184b231b96ee60ba3c8fb4a95c744f1b497489be4642970112834"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "spell-auras",
+      "argv": [
+        "data",
+        "spell",
+        "auras",
+        "--spell-id",
+        "17",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 26: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.45,
+      "outputSHA256": "5648c13273e6746bc16a531489e06326db3f2ba007ad2a7b758f353bf50e701b",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "spell-summons",
+      "argv": [
+        "data",
+        "spell",
+        "summons",
+        "--spell-id",
+        "17",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 26: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.45,
+      "outputSHA256": "5648c13273e6746bc16a531489e06326db3f2ba007ad2a7b758f353bf50e701b",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "item-models",
+      "argv": [
+        "data",
+        "item",
+        "models",
+        "--item-id",
+        "19019",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 2281: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.61,
+      "outputSHA256": "7e140ee5ed2aedb88801e48c641d04b05996847a496411a6563e4e1459f1f777",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "item-geosets",
+      "argv": [
+        "data",
+        "item",
+        "geosets",
+        "--item-id",
+        "19019",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 2281: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.63,
+      "outputSHA256": "7e140ee5ed2aedb88801e48c641d04b05996847a496411a6563e4e1459f1f777",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "item-textures",
+      "argv": [
+        "data",
+        "item",
+        "textures",
+        "--item-id",
+        "19019",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 2281: BLTE decryption key unavailable: 03893b2a239c5105",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.65,
+      "outputSHA256": "7e140ee5ed2aedb88801e48c641d04b05996847a496411a6563e4e1459f1f777",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "creature-model",
+      "argv": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "124640",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 3: BLTE decryption key unavailable: 0759d1f6d8ce459e",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.44,
+      "outputSHA256": "5fef730a55e01489b20f0d70f9b96d3ef2c28e283fe5f6e37b2da3f80cae7e97",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "encounter",
+      "argv": [
+        "data",
+        "encounter",
+        "get",
+        "--journal-encounter-id",
+        "1122",
+        "--max-depth",
+        "2",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 2,
+      "seconds": 0.47,
+      "outputSHA256": "76e57e6822ba1709308621e2c52d55790367813cd30e18c6b404bf7c39b0cf69",
+      "captureIDs": [
+        "CAP-e9a4b1dd5eb74e0132b0977e261dd25292bfe37a767cbe5013ae202b4def1000",
+        "CAP-d8a4b20d021bf946baa5f3d4809b60574522e40ed25342a25bfd1d55f3d07f3e"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "decor-get",
+      "argv": [
+        "data",
+        "decor",
+        "get",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--installation",
+        "D:/Game/World of Warcraft/_retail_",
+        "--id",
+        "1",
+        "--format",
+        "json"
+      ],
+      "exit": 3,
+      "ok": false,
+      "error": {
+        "code": "container.key_unavailable",
+        "message": "chunk 2: BLTE decryption key unavailable: 2fef3aa89ffbbe7f",
+        "stage": "query",
+        "retryable": false,
+        "resumeOperationId": ""
+      },
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.85,
+      "outputSHA256": "7edc163010bb16f055fdc353911f7c6f6dbf59c9e4acce879ce96c568ed690db",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-inspect",
+      "argv": [
+        "asset",
+        "inspect",
+        "--file-id",
+        "626008",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.36,
+      "outputSHA256": "20646cf267bbf251fea16a12ee6dd8ce8de69f12a053f2a446751004270d0752",
+      "captureIDs": [
+        "CAP-d36c86357a86bdec5a04da4b9e600c8adf56776a955420ec021540eaef39bff5"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-raw",
+      "argv": [
+        "asset",
+        "export",
+        "--file-id",
+        "626008",
+        "--encoding",
+        "raw",
+        "--output",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\class-icon.raw",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 2,
+      "seconds": 0.38,
+      "outputSHA256": "83168819b11c1d5a730e7a4dc6a742f128db8baeb1f088b3b0af8ff76723a2c5",
+      "captureIDs": [
+        "CAP-14db3f00494418b8b70952972900f6094f35412c9ccafa52b8d5a0d14a4d7bd0",
+        "CAP-57a51c49ba3b6384a0fcac2ac02fa0cae971d840e2b1b9623b11b3d61cb9801c"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-png",
+      "argv": [
+        "asset",
+        "export",
+        "--file-id",
+        "626008",
+        "--encoding",
+        "png",
+        "--output",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\class-icon.png",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 3,
+      "seconds": 0.35,
+      "outputSHA256": "46fe9d977af6afe2ace0f02b3584314e578dd3a47ef565adeb5ed965c023c27c",
+      "captureIDs": [
+        "CAP-d0424ad538cb8f7b6f50d466c36001da8ec1b09a898da230ed92553b56203185",
+        "CAP-6b1538344c3f276ca0c99ad75bcd7640f78e968b37aa611fe1a63a0a4631b336",
+        "CAP-9138ad8fe9aaec45c5ea9e36811945bd2b593c95fa00e3c071883c491834941e"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-webp",
+      "argv": [
+        "asset",
+        "export",
+        "--file-id",
+        "626008",
+        "--encoding",
+        "webp",
+        "--output",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\class-icon.webp",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 3,
+      "seconds": 0.36,
+      "outputSHA256": "7acf1b7e608f4253a3fc5f465e16f040772b9dec6135d90c1ca429bc8fa3fd39",
+      "captureIDs": [
+        "CAP-9931230a081e97952b0cc73efd6144d858837476ae4f24e192371a29b41b155a",
+        "CAP-c1739fba5edff87c2e00973d5e503510682d5ac82e337c6183c237b65a066aae",
+        "CAP-25c93ec88648c63ee7bf209d9c2536e1e66919734874df4266aadb541d393229"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "target-available",
+      "argv": [
+        "target",
+        "available",
+        "--region",
+        "cn",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "At least one product manifest could not be read; inspect products[].error for the exact failure."
+      ],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.36,
+      "outputSHA256": "269664aa0750041ce5d65ea041821db384f90f1670a4486b2c119993a6e5042c",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "hotfix-wago",
+      "argv": [
+        "data",
+        "hotfix",
+        "--source",
+        "wago",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--product",
+        "classic",
+        "--build",
+        "5.5.4.69934",
+        "--region",
+        "cn",
+        "--locale",
+        "zhCN",
+        "--limit",
+        "3",
+        "--max-pages",
+        "1",
+        "--max-requests",
+        "2",
+        "--max-bytes",
+        "1048576",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "records.wago_cache_hit",
+        "This page is not the complete record set; preserve the cursor and query scope when continuing."
+      ],
+      "complete": false,
+      "captureCount": 1,
+      "seconds": 0.04,
+      "outputSHA256": "940555595fd4bcdf15d06b5380aca86ea66620c9ae174dca650abc38d2d8a05d",
+      "captureIDs": [
+        "CAP-f0345e5580d90b43897e9e7ba9568b5a78ff7da683b916f9e54706a32ac0d2c7"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-matrix-fixed",
+      "argv": [
+        "source",
+        "validate",
+        "--matrix",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926/matrix.json",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 6.79,
+      "outputSHA256": "1a97f7cdc50c7f4dc242800acf345cbdb7a5c929e4deb25c2510d284da33d48c",
+      "captureIDs": [
+        "CAP-1e4e72a6aea2547ab09d3f7a514637d0d73490428f264a7df7cfec3813d1d375"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "encounter-seed",
+      "argv": [
+        "data",
+        "sql",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--sql",
+        "SELECT ID, JournalEncounterID FROM JournalEncounterSection LIMIT 3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 0.33,
+      "outputSHA256": "77e4cc7a5d413d970bab91eaeba8fe0d8ee9acde1f5f51c9566ebaae8a9403fc",
+      "captureIDs": [
+        "CAP-b1f93a74f9c3dd5822ecad7833279adf0177f511014db0705f984d7d81368348"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "classic-hotfix-dbcache",
+      "argv": [
+        "data",
+        "hotfix",
+        "--source",
+        "dbcache",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--dbcache",
+        "D:/Game/World of Warcraft/_classic_/Cache/ADB/zhCN/DBCache.bin",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Independent local-cache records in physical order, not a DB2 overlay. Complete describes the selected cache query, not server coverage; product, region and locale are selected context, not authenticated by this file. Named tables use the pinned build definition; records without valid payloads retain raw metadata without fields."
+      ],
+      "complete": null,
+      "captureCount": 2,
+      "seconds": 0.04,
+      "outputSHA256": "455f741ffafaf6e8abfaf6ce371f22270d79afc8163367f895a888fc9c7a2293",
+      "captureIDs": [
+        "CAP-2606c2d905cbb6dced70330fd742ba81e836cd85b7f8e8ce5305ca4ee57351d0",
+        "CAP-db954e0a296bf561ef6250c8290b15240e7b2b2647c48615bc7058916436e2f7"
+      ],
+      "pageComplete": false,
+      "pageTruncated": true
+    },
+    {
+      "name": "retail-hotfix-dbcache",
+      "argv": [
+        "data",
+        "hotfix",
+        "--source",
+        "dbcache",
+        "--snapshot",
+        "PIN-844e56206c15b8a81da4ca386208008d855bf69b077af8b0cbcbd6adeb14657a",
+        "--dbcache",
+        "D:/Game/World of Warcraft/_retail_/Cache/ADB/zhCN/DBCache.bin",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Independent local-cache records in physical order, not a DB2 overlay. Complete describes the selected cache query, not server coverage; product, region and locale are selected context, not authenticated by this file. Named tables use the pinned build definition; records without valid payloads retain raw metadata without fields."
+      ],
+      "complete": null,
+      "captureCount": 2,
+      "seconds": 0.04,
+      "outputSHA256": "3655b3ab1491d0fb2180430f4c0ae8e8b3017e72738914d6687c9c1fc9e05d2b",
+      "captureIDs": [
+        "CAP-01c95e9d61e70e9dd8b60316af3dc1dbea410aba5c2a2563ab1fa6c4ddf8f460",
+        "CAP-f24a284839175b2d72581a30844e598631ce5194f73b7ca64f29d2732c5e7cbc"
+      ],
+      "pageComplete": false,
+      "pageTruncated": true
+    },
+    {
+      "name": "titan-hotfix-dbcache",
+      "argv": [
+        "data",
+        "hotfix",
+        "--source",
+        "dbcache",
+        "--snapshot",
+        "PIN-c35054c2ea79e6ac2fe8d6cd457d3f3d8ae01b530b66f2e788c4b0bded0d1615",
+        "--dbcache",
+        "D:/Game/World of Warcraft/_classic_titan_/Cache/ADB/zhCN/DBCache.bin",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Independent local-cache records in physical order, not a DB2 overlay. Complete describes the selected cache query, not server coverage; product, region and locale are selected context, not authenticated by this file. Named tables use the pinned build definition; records without valid payloads retain raw metadata without fields."
+      ],
+      "complete": null,
+      "captureCount": 2,
+      "seconds": 0.04,
+      "outputSHA256": "d395cc18801802cd8972693233eadd0dd1d6590bd1acb269fe494265c7040fa2",
+      "captureIDs": [
+        "CAP-4d0c5b35fb00687018cbb6d84c5c9275679e539d27b0a376aa02820772f4f076",
+        "CAP-c5b84f9b95cdf8fa12821800bc6f77247ecbbeb8c0b5e51aca1aecbd944c6b0c"
+      ],
+      "pageComplete": false,
+      "pageTruncated": true
+    },
+    {
+      "name": "asset-search-retry",
+      "argv": [
+        "asset",
+        "search",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--listfile",
+        "community-csv",
+        "--file-id",
+        "626008",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 75.75,
+      "outputSHA256": "95d925ebf7bc220a58447f8cf46227217e0e04baa64ce8785e746f50e9cd3676",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "encounter-populated",
+      "argv": [
+        "data",
+        "encounter",
+        "get",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--journal-encounter-id",
+        "132",
+        "--max-depth",
+        "2",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 2,
+      "seconds": 0.45,
+      "outputSHA256": "39712dc6b207a6a98c9db709b47e455bea8a45b093d8386ab80dc28c8ae02791",
+      "captureIDs": [
+        "CAP-e67146791ccb1d22f5675b70f91a26b8f4179f7923e5a7c45418bd6253b636ea",
+        "CAP-70b946f90eff0832d3244ba84ef294489c0bb0fbddaac741707095034a1023ef"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "hotfix-capture-page",
+      "argv": [
+        "data",
+        "hotfix",
+        "--source",
+        "dbcache",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--from",
+        "CAP-2606c2d905cbb6dced70330fd742ba81e836cd85b7f8e8ce5305ca4ee57351d0",
+        "--after-index",
+        "2",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Independent local-cache records in physical order, not a DB2 overlay. Complete describes the selected cache query, not server coverage; product, region and locale are selected context, not authenticated by this file. Named tables use the pinned build definition; records without valid payloads retain raw metadata without fields."
+      ],
+      "complete": null,
+      "captureCount": 2,
+      "seconds": 0.06,
+      "outputSHA256": "4c903d45ed1f9db3e2b347a8d2c783a6eb5066ab4bee45589e6e1ca7df8c8054",
+      "captureIDs": [
+        "CAP-2606c2d905cbb6dced70330fd742ba81e836cd85b7f8e8ce5305ca4ee57351d0",
+        "CAP-96fc8f126b93bf066e9cc7d309f7812649c866d7834f08ba706c66fabdf680f8"
+      ],
+      "pageComplete": false,
+      "pageTruncated": true
+    },
+    {
+      "name": "cdn-db2",
+      "argv": [
+        "data",
+        "db2",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--cdn",
+        "--table",
+        "ChrClasses",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "This page is not the complete table; preserve the snapshot, table and cursor when continuing."
+      ],
+      "complete": null,
+      "captureCount": 1,
+      "seconds": 9.08,
+      "outputSHA256": "058c18892b87d3ed2023f913d84b6d25f8f6e0b55606757e81e5e806257268b0",
+      "captureIDs": [
+        "CAP-d87ac09f609e18a795baf1237209189f914a9ef811c29d65ed19221d1ab1096d"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "fresh-init",
+      "argv": [
+        "init",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.03,
+      "outputSHA256": "dad40934111361667de85620c58849d79dfe346edfbfbbdfcca6e8a3245d1600",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "config-set",
+      "argv": [
+        "config",
+        "set",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--cache-max-bytes",
+        "67108864",
+        "--download-workers",
+        "2",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.03,
+      "outputSHA256": "914faedca4aeec89972ce114556109af6792ebae3463fcc43fce005b6aad823d",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "config-show",
+      "argv": [
+        "config",
+        "show",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.02,
+      "outputSHA256": "914faedca4aeec89972ce114556109af6792ebae3463fcc43fce005b6aad823d",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "target-add",
+      "argv": [
+        "target",
+        "add",
+        "regression",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--product",
+        "classic",
+        "--region",
+        "cn",
+        "--locale",
+        "zhCN",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.05,
+      "outputSHA256": "1bca071537bf091e61fca1b1a3f84679edb61b35ae40ff08a8c596531de94c08",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "target-list",
+      "argv": [
+        "target",
+        "list",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.03,
+      "outputSHA256": "a70a664b9c6b3ede83e264636b355219d8c1988404b0592337c7988d925dee55",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "target-show",
+      "argv": [
+        "target",
+        "show",
+        "regression",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.03,
+      "outputSHA256": "a00060d63c0795978309738ba652703e9cef9c179748dc8807fe1611e6ba7d9e",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "target-remove",
+      "argv": [
+        "target",
+        "remove",
+        "regression",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.04,
+      "outputSHA256": "6f62e7f0b1a8b13858ffac08bf601e67068cd3a9892c42284073e91cee02cd0b",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "cache-status",
+      "argv": [
+        "cache",
+        "status",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.02,
+      "outputSHA256": "4462b3ea5bcdc2879bd62526e446c0533d095ba686e4d693b62919cc01641fa0",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "cache-verify",
+      "argv": [
+        "cache",
+        "verify",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.02,
+      "outputSHA256": "9aa70f4b070ee1d48697bc66d945c85429449654fd91602269f60c96b90fed51",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "cache-prune",
+      "argv": [
+        "cache",
+        "prune",
+        "--home",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.tmp\\business-full-20260926\\isolated",
+        "--target-bytes",
+        "0",
+        "--dry-run",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Dry run: nothing was deleted."
+      ],
+      "complete": true,
+      "captureCount": 0,
+      "seconds": 0.02,
+      "outputSHA256": "bf8c5cdb10c4a03d425424e4e1083e10937af825fe6e8e04990d52fadd3508c0",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "doctor",
+      "argv": [
+        "doctor",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 0.09,
+      "outputSHA256": "351dc631695bf674a6eaccc41afd5fc29fd4db28ebbd25d8b4f7ebaf7613873e",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-search-query",
+      "argv": [
+        "asset",
+        "search",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--listfile",
+        "community-csv",
+        "--query",
+        "classicon_warrior",
+        "--limit",
+        "3",
+        "--offline",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 1.45,
+      "outputSHA256": "2efe1605aebff254330680d5c41d6496927d2613e68373d401d272b817cdb504",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-search-extension",
+      "argv": [
+        "asset",
+        "search",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--listfile",
+        "community-csv",
+        "--extension",
+        "blp",
+        "--limit",
+        "3",
+        "--offline",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "File-name search was truncated by --limit."
+      ],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 1.61,
+      "outputSHA256": "95ac3d73607f5d8908d02711ed26202ac7f9078e12e949a31147568b4fcf870c",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "asset-search-name",
+      "argv": [
+        "asset",
+        "search",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--listfile",
+        "community-csv",
+        "--name",
+        "interface/icons/classicon_warrior.blp",
+        "--limit",
+        "3",
+        "--offline",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": null,
+      "captureCount": 0,
+      "seconds": 1.37,
+      "outputSHA256": "1c4e71bc2ff03956e15ee0b9ef9471f9b270947ac29820a18d7ba69366b5c1a0",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "hotfix-typed",
+      "argv": [
+        "data",
+        "hotfix",
+        "--source",
+        "dbcache",
+        "--snapshot",
+        "PIN-73c1d8fe72d16051de7c5856045dc27fdf09dd3fa25f65bd989fd87f7942ab9c",
+        "--dbcache",
+        "D:/Game/World of Warcraft/_classic_/Cache/ADB/zhCN/DBCache.bin",
+        "--table",
+        "SpellName",
+        "--limit",
+        "3",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Independent local-cache records in physical order, not a DB2 overlay. Complete describes the selected cache query, not server coverage; product, region and locale are selected context, not authenticated by this file. Named tables use the pinned build definition; records without valid payloads retain raw metadata without fields."
+      ],
+      "complete": null,
+      "captureCount": 2,
+      "seconds": 0.33,
+      "outputSHA256": "57c577b384995d67082f0ab525e575bb86679ca3acab08f7cf8eb495e0ffd28f",
+      "captureIDs": [
+        "CAP-ffe533feed4ac277d31078324fe9c98b9120df20e670de9cdbebed3123f51f3a",
+        "CAP-f2b41c0b8116c010453c3a8b885aeb4cdfd23b97217c468f9ab8d8cb7e380a66"
+      ],
+      "pageComplete": false,
+      "pageTruncated": true
+    },
+    {
+      "name": "source-addon",
+      "argv": [
+        "source",
+        "validate",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--path",
+        "D:/Code/wow/addons/Lychee Dev/addon",
+        "--toc",
+        "Lychee Dev.toc",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [
+        "Static coverage is incomplete; inspect unresolved references and notChecked."
+      ],
+      "complete": false,
+      "captureCount": 1,
+      "seconds": 0.49,
+      "outputSHA256": "8a83d19514ed3969ab7ef27483bcfcbdab01ec696a1c70f77190dbd22114631d",
+      "captureIDs": [
+        "CAP-288bd7396bff4c65686ca24452489b68eac01d2f83679af8666cdd748e56232e"
+      ],
+      "pageComplete": null,
+      "pageTruncated": null
+    },
+    {
+      "name": "source-reindex",
+      "argv": [
+        "source",
+        "index",
+        "--snapshot",
+        "PIN-d3072fa23874a7faf838cd4bb9c6fae473fbfb7756e522ab7e85648055e9c869",
+        "--format",
+        "json"
+      ],
+      "exit": 0,
+      "ok": true,
+      "error": null,
+      "warnings": [],
+      "complete": true,
+      "captureCount": 0,
+      "seconds": 0.08,
+      "outputSHA256": "74494f0261b733f2098fd95b291e34c6f490f006e8b630eff1468ca2e325fd02",
+      "captureIDs": [],
+      "pageComplete": null,
+      "pageTruncated": null
+    }
+  ],
+  "cases": [
+    {
+      "id": "DOC-001",
+      "legacy": "--version",
+      "current": [
+        "version"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/command/entry_test.go"
+      ],
+      "runs": [],
+      "observation": "Automated version/build provenance assertions."
+    },
+    {
+      "id": "DOC-002",
+      "legacy": "init",
+      "current": [
+        "init",
+        "source sync",
+        "source index"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/command/dispatch_workspace_test.go",
+        "internal/vault/cache_test.go"
+      ],
+      "runs": [
+        "fresh-init",
+        "retail-source-sync",
+        "classic-source-sync",
+        "titan-source-sync"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-003",
+      "legacy": "update",
+      "current": [
+        "version"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "docs/toolkit/capability-inventory.md",
+        "internal/command/command_contract_test.go"
+      ],
+      "runs": [],
+      "observation": "Intentional package update contract; no retired updater run."
+    },
+    {
+      "id": "DOC-004",
+      "legacy": "clean",
+      "current": [
+        "cache prune",
+        "init"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/command/dispatch_workspace_test.go",
+        "internal/vault/cache_test.go"
+      ],
+      "runs": [
+        "cache-prune",
+        "fresh-init"
+      ],
+      "observation": "Isolated empty-cache dry run only; populated deletion covered by fixtures."
+    },
+    {
+      "id": "DOC-005",
+      "legacy": "uninstall",
+      "current": [
+        "addon remove",
+        "skill remove"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/delivery/remove_test.go",
+        "docs/toolkit/design.md"
+      ],
+      "runs": [],
+      "observation": "Managed remove/upgrade fixtures; no user installation removed in this regression."
+    },
+    {
+      "id": "DOC-006",
+      "legacy": "doctor",
+      "current": [
+        "doctor"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/command/entry_test.go"
+      ],
+      "runs": [
+        "doctor"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-007",
+      "legacy": "source list",
+      "current": [
+        "source list"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/mirror_test.go",
+        "internal/codebase/index_status_test.go"
+      ],
+      "runs": [
+        "source-list"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-008",
+      "legacy": "source check",
+      "current": [
+        "doctor"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/codebase/mirror_test.go",
+        "docs/toolkit/capability-inventory.md"
+      ],
+      "runs": [
+        "doctor"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-009",
+      "legacy": "source sync",
+      "current": [
+        "source sync"
+      ],
+      "offlineStatus": "fixture-backed",
+      "offlineEvidence": [
+        "internal/codebase/mirror_test.go",
+        "internal/selection/pins_test.go"
+      ],
+      "runs": [
+        "retail-source-sync",
+        "classic-source-sync",
+        "titan-source-sync"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-010",
+      "legacy": "index build",
+      "current": [
+        "source index"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/index_test.go",
+        "internal/codebase/index_status_test.go"
+      ],
+      "runs": [
+        "retail-source-index",
+        "classic-source-index",
+        "titan-source-index"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-011",
+      "legacy": "index refresh",
+      "current": [
+        "source index"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/codebase/index_test.go",
+        "docs/toolkit/capability-inventory.md"
+      ],
+      "runs": [
+        "source-reindex"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-012",
+      "legacy": "index status",
+      "current": [
+        "source list"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/index_status_test.go"
+      ],
+      "runs": [
+        "source-list"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-013",
+      "legacy": "query precise",
+      "current": [
+        "source query"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/search_test.go",
+        "internal/command/query_test.go"
+      ],
+      "runs": [
+        "source-precise"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-014",
+      "legacy": "explore",
+      "current": [
+        "source query"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/search_test.go",
+        "docs/toolkit/capability-inventory.md"
+      ],
+      "runs": [
+        "source-explore"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-015",
+      "legacy": "inspect symbol",
+      "current": [
+        "source inspect"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/inspect_test.go"
+      ],
+      "runs": [
+        "source-symbol"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-016",
+      "legacy": "inspect path",
+      "current": [
+        "source inspect"
+      ],
+      "offlineStatus": "fixture-backed",
+      "offlineEvidence": [
+        "internal/codebase/inspect_test.go",
+        "tests/fixtures/codebase/provenance.json"
+      ],
+      "runs": [
+        "source-path"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-017",
+      "legacy": "diff",
+      "current": [
+        "source diff"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/compare_test.go"
+      ],
+      "runs": [
+        "source-diff"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DOC-018",
+      "legacy": "validate addon",
+      "current": [
+        "source validate"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/codebase/closure_test.go",
+        "internal/codebase/validate_test.go",
+        "tests/fixtures/codebase/sources/valid-retail"
+      ],
+      "runs": [
+        "source-addon"
+      ],
+      "observation": "Static valid; unresolved references remain, runtime safety not established."
+    },
+    {
+      "id": "DOC-019",
+      "legacy": "validate-matrix",
+      "current": [
+        "source validate"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/codebase/matrix_test.go"
+      ],
+      "runs": [
+        "source-matrix",
+        "source-matrix-fixed"
+      ],
+      "observation": "Multi-Interface false mismatch reproduced then fixed; all three static targets valid, each has 2471 unresolved references."
+    },
+    {
+      "id": "DAT-001",
+      "legacy": "sql",
+      "current": [
+        "data sql"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/command/sql_input_test.go",
+        "internal/records/relational/aggregate_subquery_test.go",
+        "internal/records/relational/subquery_test.go",
+        "internal/records/relational/explain_test.go",
+        "internal/records/relational/execute_test.go",
+        "internal/records/encode_csv_test.go",
+        "internal/records/encode_jsonl_test.go"
+      ],
+      "runs": [
+        "sql",
+        "sql-csv"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-002",
+      "legacy": "hotfix query",
+      "current": [
+        "data hotfix"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/command/hotfix_test.go",
+        "internal/command/hotfix_source_test.go",
+        "tests/fixtures/hotfix-wago/manifest.json"
+      ],
+      "runs": [
+        "classic-hotfix-dbcache",
+        "retail-hotfix-dbcache",
+        "titan-hotfix-dbcache",
+        "hotfix-typed",
+        "hotfix-capture-page",
+        "hotfix-wago"
+      ],
+      "observation": "DBCache raw/typed/capture pagination works; Wago bounded page is incomplete. Raidbots: fixtures only, no current external input."
+    },
+    {
+      "id": "DAT-003",
+      "legacy": "warmup",
+      "current": [
+        "target resolve",
+        "cache status"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/records/target_test.go",
+        "internal/selection/target_config_test.go",
+        "docs/toolkit/capability-inventory.md"
+      ],
+      "runs": [
+        "classic-resolve",
+        "cache-status"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-004",
+      "legacy": "db2 schema",
+      "current": [
+        "data db2 schema"
+      ],
+      "offlineStatus": "fixture-backed",
+      "offlineEvidence": [
+        "internal/records/schema/definition_test.go",
+        "internal/command/data_fixture_test.go"
+      ],
+      "runs": [
+        "schema"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-005",
+      "legacy": "db2 rows",
+      "current": [
+        "data db2"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/records/navigatetest/db2_query_test.go",
+        "internal/command/data_fixture_test.go"
+      ],
+      "runs": [
+        "retail-db2",
+        "classic-db2",
+        "titan-db2",
+        "next-page"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-006",
+      "legacy": "db2 search",
+      "current": [
+        "data db2 search"
+      ],
+      "offlineStatus": "fixture-backed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/db2_query_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "search"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-007",
+      "legacy": "db2 foreign-key",
+      "current": [
+        "data db2 foreign-key"
+      ],
+      "offlineStatus": "fixture-backed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/db2_query_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "foreign-key"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-008",
+      "legacy": "db2 stream",
+      "current": [
+        "data db2 stream"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/records/navigatetest/db2_query_test.go",
+        "internal/command/data_fixture_test.go"
+      ],
+      "runs": [
+        "stream"
+      ],
+      "observation": "Three records plus legal end frame, complete=false/truncated=true. Large real stream not_run."
+    },
+    {
+      "id": "DAT-009",
+      "legacy": "spell info",
+      "current": [
+        "data spell info"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "retail-spell",
+        "classic-spell",
+        "titan-spell"
+      ],
+      "observation": "Blocked on encrypted table key."
+    },
+    {
+      "id": "DAT-010",
+      "legacy": "spell auras",
+      "current": [
+        "data spell auras"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go"
+      ],
+      "runs": [
+        "spell-auras"
+      ],
+      "observation": "Blocked on encrypted table key."
+    },
+    {
+      "id": "DAT-011",
+      "legacy": "spell summons",
+      "current": [
+        "data spell summons"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go"
+      ],
+      "runs": [
+        "spell-summons"
+      ],
+      "observation": "Blocked on encrypted table key."
+    },
+    {
+      "id": "DAT-012",
+      "legacy": "encounter get",
+      "current": [
+        "data encounter get"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "encounter",
+        "encounter-populated"
+      ],
+      "observation": "ID1122 absent; selected ID132 from real DB2 and read 16 sections. Does not prove spell expansion."
+    },
+    {
+      "id": "DAT-013",
+      "legacy": "encounter export",
+      "current": [
+        "data encounter get",
+        "asset export"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/command/data_verbs_test.go",
+        "internal/command/asset_export_test.go"
+      ],
+      "runs": [
+        "asset-raw"
+      ],
+      "observation": "Split export contract. Icon export proved, encounter asset-set integration not_run."
+    },
+    {
+      "id": "DAT-014",
+      "legacy": "file lookup/search/extension",
+      "current": [
+        "asset search",
+        "asset inspect"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/listfile_test.go",
+        "internal/command/asset_test.go"
+      ],
+      "runs": [
+        "asset-search-retry",
+        "asset-search-query",
+        "asset-search-extension",
+        "asset-search-name"
+      ],
+      "observation": "Real community CSV 152780332 bytes; four lookup modes pass. wowexport text/binary remain fixture-only."
+    },
+    {
+      "id": "DAT-015",
+      "legacy": "file get/export",
+      "current": [
+        "asset export"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/command/asset_export_test.go",
+        "internal/records/export_test.go"
+      ],
+      "runs": [
+        "asset-raw"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-016",
+      "legacy": "file exists/encoding",
+      "current": [
+        "asset inspect"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/filemeta_test.go",
+        "internal/command/asset_test.go"
+      ],
+      "runs": [
+        "asset-inspect"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-017",
+      "legacy": "icon export",
+      "current": [
+        "asset export"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/records/texture/decode_test.go",
+        "internal/command/asset_image_export_test.go",
+        "internal/records/image_export_test.go"
+      ],
+      "runs": [
+        "asset-png",
+        "asset-webp"
+      ],
+      "observation": "Real BLP2 64x64; PNG and WebP decoded-pixel hashes match."
+    },
+    {
+      "id": "DAT-018",
+      "legacy": "casc info",
+      "current": [
+        "target show",
+        "cache status"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/records/target_test.go",
+        "internal/vault/cache_test.go"
+      ],
+      "runs": [
+        "classic-resolve",
+        "cache-status"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-019",
+      "legacy": "casc products",
+      "current": [
+        "target list",
+        "target available"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/records/remote_catalog_test.go",
+        "internal/records/cdn_index_test.go"
+      ],
+      "runs": [
+        "target-list",
+        "target-available"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-020",
+      "legacy": "casc diagnose",
+      "current": [
+        "doctor",
+        "cache verify"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/command/entry_test.go",
+        "internal/vault/cache_test.go",
+        "internal/records/cdn_index_test.go"
+      ],
+      "runs": [
+        "doctor",
+        "cache-verify"
+      ],
+      "observation": "Read-only doctor and isolated empty-cache verification; corruption checks are fixture-backed."
+    },
+    {
+      "id": "DAT-021",
+      "legacy": "item get/models/geosets/textures",
+      "current": [
+        "data item get",
+        "data item models",
+        "data item geosets",
+        "data item textures"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "retail-item",
+        "classic-item",
+        "titan-item",
+        "item-models",
+        "item-geosets",
+        "item-textures"
+      ],
+      "observation": "All sampled get/models/geosets/textures blocked on encrypted table key."
+    },
+    {
+      "id": "DAT-022",
+      "legacy": "creature display/model",
+      "current": [
+        "data creature display",
+        "data creature model"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "retail-creature",
+        "classic-creature",
+        "titan-creature",
+        "creature-model"
+      ],
+      "observation": "Display/model samples blocked on encrypted table key."
+    },
+    {
+      "id": "DAT-023",
+      "legacy": "decor list/get",
+      "current": [
+        "data decor list",
+        "data decor get"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/records/navigatetest/*_test.go",
+        "internal/command/data_verbs_test.go"
+      ],
+      "runs": [
+        "retail-decor",
+        "decor-get"
+      ],
+      "observation": "Retail list/get blocked on encrypted table key."
+    },
+    {
+      "id": "DAT-024",
+      "legacy": "video demux",
+      "current": [
+        "asset demux"
+      ],
+      "offlineStatus": "fixture-backed",
+      "offlineEvidence": [
+        "internal/records/video/avi_test.go",
+        "tests/fixtures/oracles/demux-minimal-vp9.json",
+        "tests/fixtures/inputs/minimal-vp9.avi",
+        "tests/parity/parity_test.go"
+      ],
+      "runs": [],
+      "observation": "VP9/Opus demux fixtures pass; no real supported media supplied."
+    },
+    {
+      "id": "DAT-025",
+      "legacy": "profile list/show/set/remove",
+      "current": [
+        "target list",
+        "target show",
+        "target add",
+        "target remove"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/selection/target_config_test.go",
+        "internal/command/target_test.go"
+      ],
+      "runs": [
+        "target-add",
+        "target-list",
+        "target-show",
+        "target-remove"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-026",
+      "legacy": "cache status",
+      "current": [
+        "cache status"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/vault/cache_test.go"
+      ],
+      "runs": [
+        "cache-status"
+      ],
+      "observation": "Isolated fresh cache."
+    },
+    {
+      "id": "DAT-027",
+      "legacy": "cache verify",
+      "current": [
+        "cache verify"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/vault/cache_test.go"
+      ],
+      "runs": [
+        "cache-verify"
+      ],
+      "observation": "Isolated fresh cache; corrupt/populated cases use fixtures."
+    },
+    {
+      "id": "DAT-028",
+      "legacy": "cache prune",
+      "current": [
+        "cache prune"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/vault/cache_test.go",
+        "internal/command/dispatch_workspace_test.go"
+      ],
+      "runs": [
+        "cache-prune"
+      ],
+      "observation": "Dry run only on isolated fresh cache; populated deletion uses fixtures."
+    },
+    {
+      "id": "DAT-029",
+      "legacy": "cache clear",
+      "current": [
+        "cache prune"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/vault/cache_test.go",
+        "docs/toolkit/capability-inventory.md"
+      ],
+      "runs": [
+        "cache-prune"
+      ],
+      "observation": "Explicit pruning replaces broad clearing; no user cache removed."
+    },
+    {
+      "id": "DAT-030",
+      "legacy": "cache config",
+      "current": [
+        "config show",
+        "config set"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/command/dispatch_workspace_test.go",
+        "docs/toolkit/design.md"
+      ],
+      "runs": [
+        "config-set",
+        "config-show"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-031",
+      "legacy": "doctor",
+      "current": [
+        "doctor"
+      ],
+      "offlineStatus": "passed",
+      "offlineEvidence": [
+        "internal/command/entry_test.go",
+        "internal/selection/checks_test.go"
+      ],
+      "runs": [
+        "doctor"
+      ],
+      "observation": "Current command executed against the fixed source/data or isolated workspace; see run evidence."
+    },
+    {
+      "id": "DAT-032",
+      "legacy": "update",
+      "current": [
+        "version"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "docs/toolkit/capability-inventory.md",
+        "internal/command/command_contract_test.go"
+      ],
+      "runs": [],
+      "observation": "Retired updater intentionally absent."
+    },
+    {
+      "id": "DAT-033",
+      "legacy": "uninstall",
+      "current": [
+        "addon remove",
+        "skill remove"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "internal/delivery/remove_test.go",
+        "docs/toolkit/design.md"
+      ],
+      "runs": [],
+      "observation": "Explicit managed removal covered by fixtures; no actual user removal."
+    },
+    {
+      "id": "DAT-034",
+      "legacy": "golden capture/compare",
+      "current": [
+        "describe"
+      ],
+      "offlineStatus": "intentional-change",
+      "offlineEvidence": [
+        "tests/parity/parity_test.go",
+        "tests/fixtures/provenance.json"
+      ],
+      "runs": [],
+      "observation": "Command contract and existing golden/parity tests; retired golden generator not run."
+    },
+    {
+      "id": "DAT-035",
+      "legacy": "remote current-build discovery",
+      "current": [
+        "target available",
+        "target resolve"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/records/remote_catalog_test.go",
+        "internal/records/remote_target_test.go"
+      ],
+      "runs": [
+        "target-available",
+        "cdn-db2"
+      ],
+      "observation": "CN availability and exact Classic pin CDN read, no latest fallback."
+    },
+    {
+      "id": "DAT-036",
+      "legacy": "multi-build/cache reuse",
+      "current": [
+        "target add",
+        "target resolve",
+        "cache status"
+      ],
+      "offlineStatus": "fixture-backed-partial",
+      "offlineEvidence": [
+        "internal/selection/target_config_test.go",
+        "internal/vault/cache_test.go",
+        "internal/records/target_test.go"
+      ],
+      "runs": [
+        "retail-resolve",
+        "classic-resolve",
+        "titan-resolve",
+        "next-page"
+      ],
+      "observation": "Three current builds and cached page; historical same-product build reuse remains fixture-only."
+    }
+  ]
+}

@@ -1,12 +1,21 @@
 # Toolkit 2.0 实施状态
 
-日期：2026-09-26。2.0.1 已发布；当前版本源为 `release/version.json`，候选版本为 2.0.3。
-发行条件及本候选的 Windows/npm 合同见 [2.0.3 发布合同](release-2.0.3.md)；
+日期：2026-09-26。2.0.3 已发布（release run 36234516759 成功）；当前版本源为 `release/version.json`，候选版本为 2.0.4。
+发行条件及本候选的 Windows/npm 合同见 [2.0.4 发布合同](release-2.0.4.md)；
 2.0.1 的后验恢复记录保留在 [2.0.1 发布合同](release-2.0.1.md)。
 本页新增命令状态针对下一主版本工作分支；
-已发布的 2.0.1 标签和 npm 包不含这些未发布改动。2.0.3 在未完成静态门禁、Windows CI、发行组装和发布前回读前，不得宣称可发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
+已发布的标签和 npm 包不含后续候选改动。2.0.4 在未完成静态门禁、Windows CI、发行组装和发布后回读前，不得宣称已发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
 
 ## 当前状态
+
+- 2026-09-26 wowdoc/wowdata 业务全量清单回归：逐项审计 55 项迁移合同，
+  执行 76 次当前 CLI 调用。三构建源码/ChrClasses、Classic CDN、三套 DBCache、
+  中文 Hotfix 解码、真实 listfile 与图标导出已有实数证据；17 次法术/物品/
+  模型/装饰查询被缺失 BLTE 密钥阻塞，不能记为业务通过。修复多 Interface
+  TOC 矩阵误判、listfile 下载预算及 Windows skill launcher；skill 明确
+  读取报告→同 operation ACK→最终 hide 的同轮收口责任。全套 Go/Lua 与
+  46 项 Node 测试通过。这些是 2.0.3 之后的工作区改动，尚未发布；本轮未做
+  新的游戏输入或新 Agent 自动触发实测。见 [逐项业务报告](business-regression-2026-09-26.md)。
 
 - 2026-09-26 Titan 定向真机补验：3.80.2.69874 / 38002，Qingtianjiuz—时光I。
   受管升级后由用户重启客户端激活 2.0.2；connect、load→verified(sum=55)→ACK

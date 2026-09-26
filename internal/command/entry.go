@@ -462,7 +462,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				listfile := records.ListfileRequest{Kind: records.ListfileKind(opts.listfile), Offline: opts.offline, Fetch: records.PublicListfileFetcher{}}
+				listfile := records.ListfileRequest{Kind: records.ListfileKind(opts.listfile), Offline: opts.offline, Fetch: records.PublicListfileFetcher{}, Limits: records.ListfileLimits{Bytes: opts.maxBytes}}
 				var truncated bool
 				switch {
 				case opts.queryText != "":
@@ -983,6 +983,11 @@ func parseOptions(args []string) (Options, error) {
 	contract, route, err := findCommandContract(opts.words)
 	if err != nil {
 		return opts, err
+	}
+	if route == "asset search" {
+		// The public community listfile exceeds 128 MiB. Keep a bounded
+		// route-specific default and allow callers to choose a smaller budget.
+		opts.maxBytes = 256 << 20
 	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {

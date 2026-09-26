@@ -33,6 +33,36 @@ and arguments; the skill must not advertise unimplemented commands. Do not
 substitute legacy wowdoc, wowdata or Python entrypoints for a missing
 capability.
 
+## Finish the authorized live task
+
+A visible QR card, successful input, connection, or loaded probe is an
+intermediate state. Keep working in the same turn. For a probe, run its returned
+operation, read its verified report and capture IDs, ACK that exact operation, then hide
+the receipt when no next live step needs it. Report retrieval, ACK and dismissal
+are part of an authorized investigation; do not ask the user to approve each
+step or to scan the QR. Respect an explicit request to pause or leave a report
+unacknowledged.
+
+`live run` returns before acknowledgement by CLI design; that is not permission
+for the agent to end the task. A completed probe task requires a verified report,
+`cleanup: complete`, and a successful final `live hide` with `result.cleared:
+true`. Keep report completion and screen dismissal separate. A verified probe
+error still needs cleanup after its diagnostic evidence is retained.
+
+A connection-only task or standalone reload has no probe report to ACK. Verify
+its own completion/readiness fields and dismiss the final receipt; do not invent
+a probe just to satisfy the probe lifecycle.
+
+On interruption or exit 6, inspect/resume the same operation and follow
+[live-investigation.md](references/live-investigation.md#recover-without-replay).
+Use the returned state to choose the next action; never replace the probe,
+switch windows, abandon ownership, or repeat uncertain input to force success.
+A pending result calls for recovery or diagnosis, not an immediate final answer.
+If the remaining action is blocked by user input, missing capability, or an
+unchanged external condition with no safe progress, explain the specific blocker,
+retained operation/session IDs, verified findings and unfinished cleanup. Never
+present that handoff as a completed task.
+
 When reviewing wowdoc/wowdata migration coverage, use the repository parity
 ledger (`tests/parity/coverage.json` and `docs/toolkit/regression.md`). It is
 case-level offline evidence, not a replay of retired executables. Read the case

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/codebase"
@@ -65,10 +66,20 @@ func TestAssetSearchCachedListfileAndDemuxCLI(t *testing.T) {
 	}
 	pin := testkit.CachedAsset(t, workspace, []byte("asset bytes"))
 	listfile := records.ListfileRequest{Kind: records.ListfileCommunityCSV, Fetch: records.ListfileFetchFunc(func(context.Context, string, int64) ([]byte, error) {
-		return []byte("11;Interface\\Icons\\Test.blp\n12;Other.blp\n"), nil
+		return []byte("11;Interface\\Icons\\Test.blp\n12;Other.blp\n13;" + strings.Repeat("x", 1100) + ".blp\n"), nil
 	})}
 	if _, err := records.PrepareListfile(context.Background(), workspace, listfile); err != nil {
 		t.Fatal(err)
+	}
+	for _, limit := range []string{"1024", "2048"} {
+		response, code := invoke(t, "asset", "search", "--snapshot", pin.ID, "--listfile", "community-csv", "--query", "blp", "--offline", "--max-bytes", limit, "--home", workspace, "--format=json")
+		if limit == "1024" {
+			if code != 3 || response.OK || response.Error.Code != "records.listfile_limit" {
+				t.Fatalf("cached listfile exceeded explicit budget: %+v (%d)", response, code)
+			}
+		} else if code != 0 || !response.OK {
+			t.Fatalf("listfile within explicit budget rejected: %+v (%d)", response, code)
+		}
 	}
 	result, code := invoke(t, "asset", "search", "--snapshot", pin.ID, "--listfile", "community-csv", "--query", "blp", "--limit", "1", "--offline", "--home", workspace, "--format=json")
 	if code != 0 || !result.OK || resultMap(t, result)["truncated"] != true || len(result.Warnings) == 0 {

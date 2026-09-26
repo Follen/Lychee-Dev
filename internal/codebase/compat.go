@@ -242,8 +242,10 @@ func compatibilityMatches(ctx context.Context, db *sql.DB, pin selection.SourceP
 // requested Interface value. Declarations may list several builds ("50503, 50504").
 func interfaceValueMatches(value, name string) bool {
 	for _, part := range strings.Split(value, ",") {
-		if strings.TrimSpace(part) == strings.TrimSpace(name) {
-			return true
+		for _, requested := range strings.Split(name, ",") {
+			if strings.TrimSpace(part) != "" && strings.TrimSpace(part) == strings.TrimSpace(requested) {
+				return true
+			}
 		}
 	}
 	return false

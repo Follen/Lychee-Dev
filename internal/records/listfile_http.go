@@ -20,7 +20,9 @@ func (PublicListfileFetcher) FetchListfile(ctx context.Context, locator string, 
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || maxBytes < 1 {
 		return nil, ErrListfileQuery
 	}
-	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	// The public community listfile exceeds 150 MB; keep a bounded download
+	// deadline that accommodates the supported byte budget on ordinary links.
+	client := &http.Client{Timeout: 120 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 || req.URL.Scheme != "https" || req.URL.User != nil {
 			return ErrListfileQuery
 		}

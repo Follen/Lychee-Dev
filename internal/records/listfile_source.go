@@ -91,7 +91,7 @@ func PrepareListfile(ctx context.Context, root string, request ListfileRequest) 
 				if errors.Is(cacheErr, vault.ErrMissingRecord) {
 					return ListfileReading{}, fmt.Errorf("%w: no %s listfile cached in this workspace", ErrListfileUnavailable, request.Kind)
 				}
-				return ListfileReading{}, fmt.Errorf("%w: cached %s listfile is unusable: %v", ErrListfileUnavailable, request.Kind, cacheErr)
+				return ListfileReading{}, fmt.Errorf("%w: cached %s listfile is unusable: %w", ErrListfileUnavailable, request.Kind, cacheErr)
 			}
 			return reading, nil
 		}
@@ -153,7 +153,7 @@ func loadCachedListfile(ctx context.Context, s *vault.Store, m *vault.Metadata, 
 		if !matches {
 			return ListfileReading{}, fmt.Errorf("%w: cached origin differs from requested source", ErrListfileUnavailable)
 		}
-		if total >= limits.Bytes {
+		if total >= limits.Bytes || file.Blob.Bytes > limits.Bytes-total {
 			return ListfileReading{}, ErrListfileLimit
 		}
 		blob, err := s.ReadBlob(ctx, file.Blob, limits.Bytes-total)
@@ -252,7 +252,7 @@ func fetchListfile(ctx context.Context, s *vault.Store, m *vault.Metadata, reque
 			if lastErr == nil {
 				lastErr = errors.New("no source URL succeeded")
 			}
-			return ListfileReading{}, fmt.Errorf("%w: %s listfile component %q: %v", ErrListfileUnavailable, request.Kind, component, lastErr)
+			return ListfileReading{}, fmt.Errorf("%w: %s listfile component %q: %w", ErrListfileUnavailable, request.Kind, component, lastErr)
 		}
 	}
 	index, err := parseListfilePayloads(request.Kind, limits, payloads)
