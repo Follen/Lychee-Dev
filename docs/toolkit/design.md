@@ -380,10 +380,14 @@ prepared -> load_requested -> loaded -> dispatch_requested -> reported
 已有内置错误快照不需要临时探针加载。每次外部副作用前持久记录 intent，回执后再确认阶段。主状态另有 pending/running/unresolved/failed/cancelled/completed/abandoned，不将所有失败压成一个布尔值。
 
 `live abandon <operation-id>` 是显式放弃收尾，不是 ACK 或 cancel 的别名。
-仅限报告可重新核验且尚未提交 ACK 的 probe：`verified -> abandoning -> abandoned`。
+允许报告可重新核验且尚未提交 ACK 的 probe：`verified -> abandoning -> abandoned`；
+也允许 `dispatch_requested` / `flush_requested` 且持久 DispatchInput 证明
+MessagesQueued > 0、SubmissionComplete=true 的 probe 显式放弃。后者仅证明
+派发完成，执行结果仍未知，report.state 保持 unavailable。两条路径完整保留
+原观察证据，abandoning/abandoned 的恢复按原 schema 校验，不强求不存在的报告。
 持有原窗口执行租约，先保存放弃意图，再精确移除原磁盘队列项，最后提交终态并
 释放所有权；崩溃后 `resume` 只完成这段宿主恢复，不输入游戏。其他队列项、
-SavedVariables 与归档证据不变。返回 `report.state=verified`、`cleanup=abandoned`、
+SavedVariables 与归档证据不变。已有可验证报告时 `report.state=verified`，均返回 `cleanup=abandoned`、
 `complete=false`，明确游戏未被 ACK、未卸载旧运行态；不得视为完整链路通过。
 busy 或角色切换不自动授权放弃；新任务仍需重新验证角色及 readiness。
 

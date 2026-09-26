@@ -1,12 +1,27 @@
 # Toolkit 2.0 实施状态
 
-日期：2026-09-26。2.0.3 已发布（release run 36234516759 成功）；当前版本源为 `release/version.json`，候选版本为 2.0.4。
-发行条件及本候选的 Windows/npm 合同见 [2.0.4 发布合同](release-2.0.4.md)；
+日期：2026-09-27。2.0.4 已发布（release run 36237902766 成功）；当前版本源为 `release/version.json`，候选版本为 2.0.5。
+发行条件及本候选的 Windows/npm 合同见 [2.0.5 发布合同](release-2.0.5.md)；
 2.0.1 的后验恢复记录保留在 [2.0.1 发布合同](release-2.0.1.md)。
 本页新增命令状态针对下一主版本工作分支；
-已发布的标签和 npm 包不含后续候选改动。2.0.4 在未完成静态门禁、Windows CI、发行组装和发布后回读前，不得宣称已发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
+已发布的标签和 npm 包不含后续候选改动。2.0.5 在未完成静态门禁、Windows CI、发行组装和发布后回读前，不得宣称已发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
 
 ## 当前状态
+
+- 2026-09-27 正式服恢复补验：用户明确决定后，旧任务 OP-c06b8b0b4f6b8bc546fa244398393c5a
+  在修复后的本地构建中 abandon 成功，同 ID resume 幂等通过；结果保持 unavailable、
+  abandoned、complete=false。PID 37868 / 12.1.0.69933 重新发现为运行态 2.0.3，
+  被本地构建 2.0.4 的版本校验拒绝连接，未加载新探针。按用户指示先发布 2.0.5，
+  新探针真机闭环仍待继续；本机安装未升级。
+
+- 2026-09-27 abandon 恢复说明及证据保留修复：describe/skill/设计合同同步已有的
+  dispatch_requested、flush_requested 完整派发后显式放弃路径。发现原实现将
+  probe-load 观察覆盖为空记录，导致 abandon 重试及 abandoning 恢复错误要求
+  report-observation；现完整保留原 schema、派发与 capture 证据，按两种观察
+  分别校验。定向回归覆盖首次放弃、意图后/队列移除后中断、终态重复调用、
+  部分派发拒绝及原 verified 分支。无报告始终 unavailable，cleanup=abandoned、
+  complete=false；没有向现场客户端输入、释放现场任务或更改本机已安装版本。
+  此修复尚未发布，旧版本已经丢失的证据不会凭空重建。
 
 - 2026-09-26 owner 统一项目许可：Lychee Dev Toolkit 自有代码统一采用 MIT，
   不再以作者旧项目的独立许可或双许可展示；根目录/npm LICENSE 与源码 SPDX

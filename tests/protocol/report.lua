@@ -5,7 +5,7 @@ local writer = ns.CaptureWriter
 local code = "return { answer = 42 }"
 local body = assert(writer.Encode({ answer = 42, text = "\228\184\150\231\149\140", complete = true }))
 local receipt = assert(writer.Encode({
-    schema = "lycheedev.signal.v1", release = "2.0.4", kind = "reported",
+    schema = "lycheedev.signal.v1", release = "2.0.5", kind = "reported",
     sessionNonce = "session", requestId = "OP-protocol", character = "character",
     realm = "realm", product = "retail", build = "12.1.0.69875", sequence = 4,
     inputReady = false, codeBytes = #code, codeAdler32 = assert(writer.DigestBytes(code)),

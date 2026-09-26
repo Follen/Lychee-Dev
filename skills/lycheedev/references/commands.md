@@ -150,7 +150,7 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live cancel <operation-id>` — mutates. Cancel only a prepared operation before queue publication or game input: live cancel <operation-id>; later stages require live resume for safe cleanup
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live abandon <operation-id>` — mutates. Explicitly abandon cleanup of a verified probe before ACK; preserve report, retire its exact disk queue entry and release ownership without game input or claiming ACK
+- `live abandon <operation-id>` — mutates. Explicitly abandon a probe before ACK: verified report, or dispatch_requested/flush_requested with durable fully queued dispatch input; preserve evidence and unknown results, retire its exact disk queue entry and release ownership without game input or claiming ACK; interrupted abandonment resumes by the same operation ID
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live session <session-id>` — read-only. Verify a retained session and its evidence: live session <session-id>; does not reconnect or authorize input
   Flags: `--home <root>`, `--format text|json|jsonl`.

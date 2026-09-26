@@ -46,17 +46,8 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	// reconciliation nor acknowledgement can ever succeed. A stale reentry
 	// ticket in the client's SavedVariables proves only that a reload was
 	// requested, never that a report was stored, so it stays out of the proof.
-	var dispatched probeLoadObservation
-	unprovenReportStage := record.Stage == "dispatch_requested" || record.Stage == "flush_requested"
-	if unprovenReportStage {
-		if err := json.Unmarshal(record.Observation, &dispatched); err != nil {
-			return record, err
-		}
-		if dispatched.Schema != "lycheedev.probe-load.v1" || dispatched.DispatchInput == nil ||
-			dispatched.DispatchInput.MessagesQueued == 0 || !dispatched.DispatchInput.SubmissionComplete {
-			return record, journal.ErrTransition
-		}
-	} else if record.Stage != "verified" && record.Stage != "abandoning" && record.Stage != "abandoned" {
+	if record.Stage != "dispatch_requested" && record.Stage != "flush_requested" &&
+		record.Stage != "verified" && record.Stage != "abandoning" && record.Stage != "abandoned" {
 		return record, journal.ErrTransition
 	}
 	input, definition, err := probeDefinition(record)
@@ -64,20 +55,45 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 		return record, err
 	}
 	parent := filepath.Join(input.Load.Installation, "Interface", "AddOns")
-	var observed reportObservation
-	verify := func() (reportObservation, error) {
+	verify := func() error {
 		var observed reportObservation
 		if err := json.Unmarshal(record.Observation, &observed); err != nil {
-			return observed, err
+			return err
 		}
-		if observed.Schema != "lycheedev.report-observation.v1" || observed.AckInput != nil || observed.AcknowledgementID != "" {
-			return observed, journal.ErrTransition
+		if observed.AckInput != nil || observed.AcknowledgementID != "" {
+			return journal.ErrTransition
+		}
+		if observed.Schema == "lycheedev.probe-load.v1" {
+			if record.Stage == "verified" || observed.BodyID != "" || observed.ReceiptID != "" ||
+				observed.DispatchInput == nil || observed.DispatchInput.MessagesQueued <= 0 ||
+				!observed.DispatchInput.SubmissionComplete {
+				return journal.ErrTransition
+			}
+			return nil
+		}
+		if observed.Schema != "lycheedev.report-observation.v1" ||
+			record.Stage == "dispatch_requested" || record.Stage == "flush_requested" {
+			return journal.ErrTransition
 		}
 		_, err := evidence.OpenArchive(store, metadata).ReadVerifiedReport(ctx, observed.BodyID, observed.ReceiptID, input.Code, input.Expected, id, record.Intent.Snapshot)
-		return observed, err
+		return err
 	}
+	var retirement *queueRetirement
 	advance := func(stage, status string) error {
-		raw, err := json.Marshal(observed)
+		// Preserve the entire original observation, including dispatch and capture
+		// evidence. Both report and load schemas must survive interrupted cleanup.
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(record.Observation, &fields); err != nil {
+			return err
+		}
+		if retirement != nil {
+			raw, err := json.Marshal(retirement)
+			if err != nil {
+				return err
+			}
+			fields["queueRetirement"] = raw
+		}
+		raw, err := json.Marshal(fields)
 		if err != nil {
 			return err
 		}
@@ -88,7 +104,7 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 		return err
 	}
 	if record.Stage == "abandoned" && record.Status == "abandoned" {
-		if _, err := verify(); err != nil {
+		if err := verify(); err != nil {
 			return record, err
 		}
 		return record, book.RetireWindowWork(ctx, parent, store.Identity().WorkspaceID, id)
@@ -102,21 +118,12 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	if err != nil {
 		return record, err
 	}
-	if unprovenReportStage {
-		observed = reportObservation{Schema: "lycheedev.probe-load.v1"}
+	if err := verify(); err != nil {
+		return record, err
+	}
+	if record.Stage != "abandoning" {
 		if err := advance("abandoning", "running"); err != nil {
 			return record, err
-		}
-	} else {
-		var verifyErr error
-		observed, verifyErr = verify()
-		if verifyErr != nil {
-			return record, verifyErr
-		}
-		if record.Stage == "verified" {
-			if err := advance("abandoning", "running"); err != nil {
-				return record, err
-			}
 		}
 	}
 	if _, err := run.Check(ctx); err != nil {
@@ -126,7 +133,7 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	if err != nil {
 		return record, err
 	}
-	observed.QueueRetirement = &queueRetirement{Revision: revision}
+	retirement = &queueRetirement{Revision: revision}
 	if err := advance("abandoned", "abandoned"); err != nil {
 		return record, err
 	}

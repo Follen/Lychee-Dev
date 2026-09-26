@@ -48,7 +48,7 @@ for _,profile in ipairs(profiles) do
                 if line~="" and line:sub(1,1)~="#" then
                     if line=="Bridge/ProbeQueue.lua" then
                         ns.ProbeDefinitions={schema="lycheedev.queue.v1",entries={ ["Reload-A"]={
-                            release="2.0.4",product=profile.product,build=profile.version..".12345",
+                            release="2.0.5",product=profile.product,build=profile.version..".12345",
                             character="Paladin",realm="Realm",guid="Player-1-123",sessionNonce=nonce,
                             reloadNonce=changedQueue==true and string.rep("c",32) or reloadNonce,
                             code=code,codeBytes=#code,codeAdler32=ns.CaptureWriter.DigestBytes(code),codeSHA256=changedQueue=="code" and string.rep("e",64) or string.rep("d",64),

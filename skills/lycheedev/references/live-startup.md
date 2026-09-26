@@ -14,7 +14,7 @@ whose identity could not be read.
 | --- | --- |
 | Empty candidate list | Check current process and installation constraints. A path spelling mismatch is not proof that the game is offline. Reuse the installation spelling returned by discovery with older CLIs. |
 | Several eligible matches | Present product/build, character and realm; resolve the remaining ambiguity before mutation. |
-| `busy` | Preserve the owner's operation ID. Recover your own operation; do not steal another agent's window or reload it through desktop tools. For explicit user-authorized abandonment of a verified probe before ACK, follow [live-investigation.md](live-investigation.md). Source/data work can continue. |
+| `busy` | Preserve the owner's operation ID. Recover your own operation; do not steal another agent's window or reload it through desktop tools. For explicit user-authorized abandonment of an eligible probe, follow [live-investigation.md](live-investigation.md). Source/data work can continue. |
 | `identity_unreadable` | Inspect disk status and runtime evidence below. A timeout does not identify the cause. `capture: frame` does not prove the game is logged in or the addon loaded. |
 | `no_actor`, restricted identity, or not-ready input | Act on the returned reason. Login/character selection needs task authorization; combat or text focus must actually clear before retrying. |
 

@@ -179,13 +179,25 @@ characters and want to release an old verified task), inspect its status and use
 lycheedev live abandon <operation-id> --format json
 ```
 
-This is only for a verified probe before ACK submission, not an automatic
-fallback for busy, missing readiness, or an unknown in-flight effect. It preserves
-the verified archive, retires only that exact disk queue entry and releases its
+Two probe states are eligible: a verified report before ACK submission, or
+`dispatch_requested` / `flush_requested` with durable dispatch evidence showing
+`MessagesQueued > 0` and `SubmissionComplete = true`. The latter explicitly
+releases a stranded task whose report is unavailable; submission is not proof of
+execution. The CLI checks these journal facts. Status alone cannot prove them,
+and agents must not edit the journal to force eligibility.
+
+Abandon requires the user's explicit decision, never an automatic fallback for
+busy, missing readiness, or an unknown effect. It preserves the available
+evidence, retires only that exact disk queue entry and releases its
 window ownership without game input. `cleanup: abandoned`, `complete: false`
 means the game was not ACKed or unloaded; old runtime/SavedVariables content may
 remain. Do not describe this as successful cleanup or re-run the old request.
+For a missing report, `report.state` stays `unavailable` and the execution result
+stays unknown; a verified report remains verified.
 Interrupted abandonment resumes by the same operation ID, without game input.
+Older releases may lose dispatch evidence during abandonment and reject its
+retry/resume. Do not assume a newer skill fixes an older executable or invent
+the lost evidence; retain the error and operation ID for diagnosis.
 After success, a new authorized task still requires fresh identity and readiness.
 
 An absent optical receipt alone does not establish combat, player activity,

@@ -786,7 +786,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Context["stage"] = record.Stage
 					}
 					if record.Status == "abandoned" {
-						response.Warnings = append(response.Warnings, "Cleanup abandoned explicitly; archived report retained. No game ACK or runtime unload was performed.")
+						response.Warnings = append(response.Warnings, "Cleanup abandoned explicitly; available evidence retained; missing report results remain unknown. No game ACK or runtime unload was performed.")
 					}
 				case "live session":
 					var session live.RecordedSession

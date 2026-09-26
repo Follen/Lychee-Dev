@@ -17,7 +17,7 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-2.0.4.md` — Windows CI and release contract for the current candidate.
+4. `docs/toolkit/release-2.0.5.md` — Windows CI and release contract for the current candidate.
    `release-2.0.1.md` is retained as the immutable historical contract for the
    already-published release.
 
@@ -92,8 +92,10 @@ from acceptance. A client folder is a location, not an identity: read
 - Live results distinguish `report.state` (verified/unavailable) from
   `cleanup` (pending/complete). A verified report with pending cleanup is a
   usable result plus a recovery obligation — never report it as a failure.
-- `live abandon` requires an explicit decision to stop cleanup of a verified
-  probe before ACK. It preserves evidence, retires only the exact disk queue
+- `live abandon` requires an explicit decision: a verified probe before ACK,
+  or dispatch_requested/flush_requested with durable DispatchInput showing
+  MessagesQueued > 0 and SubmissionComplete=true. Missing reports stay unavailable
+  and execution remains unknown. It preserves evidence, retires only the exact disk queue
   entry and releases ownership without game input. `cleanup=abandoned` and
   `complete=false` never mean ACK or runtime unload succeeded.
 - Real-machine observation goes through `internal/desktop` WGC capture; screen

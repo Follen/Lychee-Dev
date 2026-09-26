@@ -7,11 +7,14 @@
 
 ## 1. 验证原则与结果状态
 
-新增恢复验收：`live abandon` 仅允许 verified 且未提交 ACK 的 probe。
-覆盖运行中 writer 拒绝、未验证阶段拒绝、损坏归档/ACK 痕迹拒绝、
+新增恢复验收：`live abandon` 允许 verified 且未提交 ACK 的 probe，或
+dispatch_requested/flush_requested 且完整派发已持久化的 probe。
+覆盖运行中 writer 拒绝、不具备完整派发证据的未验证阶段拒绝、损坏归档/ACK 痕迹拒绝、
 队列内容冲突保留所有权、保留其他队列项、意图提交后/队列移除后崩溃恢复、
 重复调用幂等以及终态禁止 run/ack。必须断言无游戏输入、SavedVariables 不变、
-原报告仍 verified、cleanup=abandoned 且 complete=false；此项不替代真实 ACK 验收。
+原报告仍 verified（没有报告则 unavailable）、cleanup=abandoned 且 complete=false。
+无报告分支须覆盖派发证据保留、abandoning 恢复、队列已移除后的恢复以及终态
+abandon/resume 幂等；此项不替代真实 ACK 验收。
 
 测试通过新模块接口和真实 CLI 进程观察行为，不断言旧内部函数调用顺序。纯解析直接测试；文件、SQLite 与 Git 用临时真实环境；外部 CDN、Hotfix 和游戏信号用可控 adapter。最后另做真实网络和真实游戏验证。
 
