@@ -50,36 +50,37 @@ end
 -- identical redisplays; it is never an identity or an input permission.
 --
 -- Symbols stack vertically and share one card, so the card width is a single
--- symbol plus its quiet zones. Layout and module size together decide whether
--- the host can read the card at all: the host decodes a capture of the real
--- window, so a module only two physical pixels wide has no reliable edge to
--- sample. Compat.GetPhysicalPixelSize reports UI units per physical pixel, so
--- the module size in UI units is the physical-pixel target times that ratio.
--- The result is clamped two ways: at least MIN_CARD_MODULES UI units, and small
--- enough that the whole card stays inside MAX_CARD_UI_SIZE. Overshooting the
--- pixel target is acceptable; a card that covers the screen is not, and a
--- blurred grid is worse than either because the host reports a dead operation.
-local TARGET_PHYSICAL_MODULES = 6
+-- symbol plus its quiet zones. The module size is a fixed number of UI units.
+--
+-- It is deliberately NOT derived from the screen: the engines disagree about
+-- what GetScreenHeight means (Retail reports the UIParent height, Classic the
+-- display height), and GetPhysicalScreenSize is unavailable on several clients,
+-- so any ratio built from them either shrinks or inflates the card by a large
+-- factor on the clients that matter. A fixed module makes the card the same
+-- readable size everywhere; the UI scale, not this addon, decides how many
+-- physical pixels that is. The only other bound is the card budget, which keeps
+-- a dense symbol on screen instead of clipping it.
+local TARGET_CARD_MODULES = 5
 local MIN_CARD_MODULES = 4
 local function cardGeometry(sizes)
-    local unit = 1
-    if ns.Compat and type(ns.Compat.GetPhysicalPixelSize) == "function" then
-        local measured = ns.Compat.GetPhysicalPixelSize()
-        if not (issecretvalue and issecretvalue(measured)) and type(measured) == "number"
-            and measured == measured and measured > 0 and measured < math.huge then
-            unit = measured
-        end
-    end
     local across, tall = 8, 8
     for index, size in ipairs(sizes) do
         if size + 8 > across then across = size + 8 end
         tall = tall + size
         if index > 1 then tall = tall + 8 end
     end
-    local modules = math.max(MIN_CARD_MODULES, math.ceil(TARGET_PHYSICAL_MODULES * unit))
-    modules = math.min(modules,
+    -- The card budget is a ceiling, not a target: a module that would push a
+    -- dense symbol past MAX_CARD_UI_SIZE is reduced, but never below the floor
+    -- that keeps the grid readable. A symbol too dense for even the floor is
+    -- drawn oversized, because the host reading a clipped grid is exactly the
+    -- failure this whole path exists to avoid.
+    local modules = math.max(MIN_CARD_MODULES, TARGET_CARD_MODULES)
+    local budget = math.min(
         math.max(1, math.floor(MAX_CARD_UI_SIZE / across)),
         math.max(1, math.floor(MAX_CARD_UI_SIZE / tall)))
+    if budget >= MIN_CARD_MODULES then
+        modules = math.min(modules, budget)
+    end
     return modules, across, tall
 end
 

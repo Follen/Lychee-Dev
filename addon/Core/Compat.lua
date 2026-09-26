@@ -32,35 +32,25 @@ ns.Compat = {
         return foci[1]
     end,
 
-    -- UI units per physical screen pixel, for screen-space overlays such as
-    -- the automation status blocks and QR notice. The caller multiplies by a
-    -- physical-pixel target to get UI units, so a large value means "one
-    -- physical pixel is worth many UI units" and would draw a huge overlay.
+    -- UI units per physical screen pixel, for screen-space overlays. The
+    -- caller multiplies by a physical-pixel target to get UI units.
     --
-    -- GetPhysicalScreenSize was verified on the Retail 12.1.0 baseline only.
-    -- Elsewhere the UI height is the only scale available: a taller UI means
-    -- more UI units per physical pixel is wrong, because the UI is measured in
-    -- units that already track the display. The safe direction is to assume the
-    -- UI is at most the reference 768-unit layout, i.e. uiHeight / 768 UI units
-    -- per physical pixel, capped at one so a fallback can never inflate an
-    -- overlay. The cap keeps this a floor on readability, not a floor on size.
+    -- Only the width ratio is trustworthy: GetScreenWidth and the physical
+    -- width are both display measurements. GetScreenHeight is NOT usable as a
+    -- fallback, because the engines disagree about what it returns (Retail
+    -- reports the UIParent height, Classic the display height), so a ratio
+    -- built from it inflates or shrinks an overlay by a large factor on exactly
+    -- the clients that lack GetPhysicalScreenSize. When the physical width is
+    -- unavailable this reports 1: one UI unit per pixel, the neutral answer.
     GetPhysicalPixelSize = function()
-        if GetPhysicalScreenSize then
-            local succeeded, width, height = pcall(GetPhysicalScreenSize)
-            if succeeded and not (issecretvalue and (issecretvalue(width) or issecretvalue(height)))
-                and width and width > 0 and GetScreenWidth then
-                local uiWidth = GetScreenWidth()
-                if uiWidth and uiWidth > 0 and not (issecretvalue and issecretvalue(uiWidth)) then
-                    local ratio = uiWidth / width
-                    if ratio > 0 and ratio < math.huge then
-                        return math.min(ratio, 1)
-                    end
-                end
+        if GetPhysicalScreenSize and GetScreenWidth then
+            local succeeded, width = pcall(GetPhysicalScreenSize)
+            local uiWidth = GetScreenWidth()
+            if succeeded and not (issecretvalue and (issecretvalue(width) or issecretvalue(uiWidth)))
+                and type(width) == "number" and width > 0 and width < math.huge
+                and type(uiWidth) == "number" and uiWidth > 0 and uiWidth < math.huge then
+                return math.min(uiWidth / width, 1)
             end
-        end
-        local uiHeight = GetScreenHeight and GetScreenHeight() or nil
-        if uiHeight and uiHeight > 0 and not (issecretvalue and issecretvalue(uiHeight)) then
-            return math.min(uiHeight / 768, 1)
         end
         return 1
     end,
