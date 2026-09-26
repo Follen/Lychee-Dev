@@ -10,13 +10,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/journal"
 )
 
-// A probe whose reported receipt was lost wedges the window: every other exit
-// requires evidence that no longer exists. Abandoning from dispatch_requested
-// or flush_requested is the honest release - it requires the durable proof that
-// the run input was actually queued, then removes the on-disk queue entry and
-// releases ownership without game input. flush_requested needs the same escape:
-// the host already sent the correlation reload, so no later phase can ever
-// reconcile a report that the client never persisted.
+// Explicit host-only recovery preserves unknown execution for any input receipt.
 func TestAbandonReleasesOperationWithoutReportEvidence(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -114,27 +108,21 @@ func TestAbandonReleasesOperationWithoutReportEvidence(t *testing.T) {
 			}
 			_, abandonErr := Abandon(ctx, root, record.OperationID)
 			after, _ := book.InspectWork(ctx, record.OperationID)
-			if test.submitted && !test.partial {
-				if abandonErr != nil || after.Stage != "abandoned" || after.Status != "abandoned" {
-					t.Fatalf("abandon: %+v %v", after, abandonErr)
-				}
-				if _, occupied, err := journal.InspectWindowOwner(ctx, client+"/Interface/AddOns", record.Intent.Resource); err != nil || occupied {
-					t.Fatalf("owner not released: %v occupied=%v", err, occupied)
-				}
-				var retained probeLoadObservation
-				if err := json.Unmarshal(after.Observation, &retained); err != nil || retained.DispatchInput == nil || !retained.DispatchInput.SubmissionComplete {
-					t.Fatalf("dispatch evidence lost: %s %v", after.Observation, err)
-				}
-				for _, call := range []func(context.Context, string, string) (Outcome, error){Abandon, Resume} {
-					out, err := call(ctx, root, record.OperationID)
-					if err != nil || out.Report.State != "unavailable" || out.Cleanup != "abandoned" || out.Complete {
-						t.Fatalf("repeat/recovery: %+v %v", out, err)
-					}
-				}
-				return
+			if abandonErr != nil || after.Stage != "abandoned" || after.Status != "abandoned" {
+				t.Fatalf("abandon: %+v %v", after, abandonErr)
 			}
-			if abandonErr == nil || after.Stage != test.stage {
-				t.Fatalf("unproven input accepted: %+v %v", after, abandonErr)
+			if _, occupied, err := journal.InspectWindowOwner(ctx, client+"/Interface/AddOns", record.Intent.Resource); err != nil || occupied {
+				t.Fatalf("owner not released: %v occupied=%v", err, occupied)
+			}
+			var retained probeLoadObservation
+			if err := json.Unmarshal(after.Observation, &retained); err != nil || test.submitted && (retained.DispatchInput == nil || retained.DispatchInput.SubmissionComplete == test.partial) {
+				t.Fatalf("dispatch evidence lost: %s %v", after.Observation, err)
+			}
+			for _, call := range []func(context.Context, string, string) (Outcome, error){Abandon, Resume} {
+				out, err := call(ctx, root, record.OperationID)
+				if err != nil || out.Report.State != "unavailable" || out.Cleanup != "abandoned" || out.Complete {
+					t.Fatalf("repeat/recovery: %+v %v", out, err)
+				}
 			}
 		})
 	}

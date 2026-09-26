@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
+	"io"
 	"time"
 )
 
@@ -26,6 +27,7 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 		return record, errors.New("live.input_sender_missing")
 	}
 	book := journal.OpenBook(p.metadata)
+	ackRetried := false
 	// Every successful step advances a phase or commits an evidence reference.
 	// This bound detects accidental non-progress without a polling loop.
 	for step := 0; step < 20; step++ {
@@ -77,8 +79,35 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 			}
 		case "loaded":
 			_, err = p.dispatch(ctx, send)
-		case "dispatch_requested", "ack_requested":
+		case "dispatch_requested":
 			_, err = p.Observe(ctx)
+		case "ack_requested":
+			input, inputErr := reportInput(record)
+			if inputErr != nil {
+				err = inputErr
+				break
+			}
+			// Retained pre-atomic records keep their original observe-only
+			// protocol. The atomic revision uses the idempotent ACK endpoint.
+			canRetry := input.Revision != "" && !ackRetried
+			if canRetry && unsentAckIntent(record) {
+				ackRetried = true
+				_, err = p.retryAcknowledgement(ctx, send)
+				break
+			}
+			_, err = p.Observe(ctx)
+			if canRetry && ctx.Err() == nil && (errors.Is(err, io.EOF) || errors.Is(err, context.DeadlineExceeded)) {
+				// ACK is idempotent for the exact request and report sequence.
+				// A retry still requires new input-ready pixels under the input
+				// lock. Never resend the probe, and never treat missing pixels as ACK.
+				ackRetried = true
+				_, retryErr := p.retryAcknowledgement(ctx, send)
+				if retryErr == nil {
+					err = nil
+				} else {
+					err = errors.Join(err, retryErr)
+				}
+			}
 		case "reported":
 			_, err = p.flush(ctx, send)
 		case "flush_requested":

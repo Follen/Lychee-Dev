@@ -82,10 +82,53 @@ local function cardGeometry(sizes)
     return modules, across, tall
 end
 
-local display
+local display, suspend, suspendEnvironment
+local function environmentEvent(refresh, generation, event)
+    if event == "PLAYER_REGEN_DISABLED" or event == "LOADING_SCREEN_ENABLED" or event == "PLAYER_LEAVING_WORLD" then
+        suspendEnvironment(refresh, generation, event)
+    else hide() end
+end
+suspendEnvironment = function(refresh, generation, event)
+    hide()
+    if type(refresh) ~= "function" then return end
+    local expected = revision
+    local loading = event == "LOADING_SCREEN_ENABLED"
+    local leaving = event == "PLAYER_LEAVING_WORLD"
+    local function retry()
+        if revision ~= expected or loading or leaving then return end
+        if generation ~= 0 then
+            local current = ns.Session.Current()
+            if not current or current.generation ~= generation then hide(); return end
+        end
+        local ready, reason = ns.Platform.ObserveInputState()
+        if not ready then
+            if reason == "input_keyboard_focus" then suspend(refresh, generation)
+            elseif reason ~= "input_combat_lockdown" then hide() end
+            return
+        end
+        local ok, receipt, readiness, readySignal = pcall(refresh)
+        if revision ~= expected then return end
+        if not ok or not receipt then hide(); return end
+        display(receipt, readiness, generation, refresh, readySignal)
+    end
+    frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    frame:RegisterEvent("LOADING_SCREEN_ENABLED")
+    frame:RegisterEvent("LOADING_SCREEN_DISABLED")
+    frame:RegisterEvent("PLAYER_LEAVING_WORLD")
+    frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    frame:SetScript("OnEvent", function(_, received)
+        if revision ~= expected then return end
+        if received == "PLAYER_LEAVING_WORLD" then leaving = true
+        elseif received == "PLAYER_ENTERING_WORLD" then leaving = false
+        elseif received == "LOADING_SCREEN_ENABLED" then loading = true
+        elseif received == "LOADING_SCREEN_DISABLED" then loading = false end
+        retry()
+    end)
+end
 -- Focus invalidates pixels, not the pending result. Restore only through a
 -- producer which observes current state; never latch an old inputReady=true.
-local function suspend(refresh, generation)
+suspend = function(refresh, generation)
     hide()
     if type(refresh) ~= "function" then return end
     local expected = revision
@@ -95,10 +138,16 @@ local function suspend(refresh, generation)
     -- one-shot wait. No frame is allocated until the first displayed receipt.
     frame:RegisterEvent("PLAYER_LEAVING_WORLD")
     frame:RegisterEvent("LOADING_SCREEN_ENABLED")
-    frame:SetScript("OnEvent", hide)
+    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    frame:SetScript("OnEvent", function(_, event) environmentEvent(refresh, generation, event) end)
     local waiting = source.WhenInputReady(function(ready)
         if revision ~= expected then return end
-        if not ready then hide(); return end
+        if not ready then
+            local _, reason = ns.Platform.ObserveInputState()
+            if reason == "input_combat_lockdown" then suspendEnvironment(refresh, generation, "PLAYER_REGEN_DISABLED")
+            else hide() end
+            return
+        end
         if generation ~= 0 then
             local current = ns.Session.Current()
             if not current or current.generation ~= generation then hide(); return end
@@ -182,7 +231,7 @@ display = function(receipt, readiness, generation, refresh, readySignal)
         texture:Show()
     end
     for index = #runs + 1, #strips do strips[index]:Hide() end
-    frame:SetScript("OnEvent", hide)
+    frame:SetScript("OnEvent", function(_, event) environmentEvent(refresh, generation, event) end)
     frame:RegisterEvent("PLAYER_LEAVING_WORLD")
     frame:RegisterEvent("LOADING_SCREEN_ENABLED")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -196,6 +245,15 @@ display = function(receipt, readiness, generation, refresh, readySignal)
     end, watch)
     lastBytes, lastReady, lastGeneration, lastScale = receipt, readiness, generation, scale
     lastRefresh = refresh
+    -- A producer may finish while combat is already active; there will be no
+    -- second combat-start event to invalidate this newly produced receipt.
+    if ns.Platform and type(ns.Platform.ObserveInputState) == "function" then
+        local _, reason = ns.Platform.ObserveInputState()
+        if reason == "input_combat_lockdown" then
+            suspendEnvironment(refresh, generation, "PLAYER_REGEN_DISABLED")
+            return true
+        end
+    end
     frame:Show()
     return true
 end

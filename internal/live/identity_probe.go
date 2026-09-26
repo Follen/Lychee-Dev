@@ -132,6 +132,11 @@ func frameHint(frame *desktop.CapturedFrame) string {
 // gate set it also tolerates the standard focus-delayed redisplay so callers
 // can gate on a single input-ready observation.
 func probeIdentity(ctx context.Context, target ClientWindow, region image.Rectangle, gate bool, io *liveIO) (identityObservation, error) {
+	return probeIdentityRelease(ctx, target, region, gate, buildinfo.Version, io)
+}
+
+// Only the managed upgrade path may select the previously proved release.
+func probeIdentityRelease(ctx context.Context, target ClientWindow, region image.Rectangle, gate bool, release string, io *liveIO) (identityObservation, error) {
 	var zero identityObservation
 	entropy := make([]byte, 16)
 	if _, err := rand.Read(entropy); err != nil {
@@ -148,7 +153,7 @@ func probeIdentity(ctx context.Context, target ClientWindow, region image.Rectan
 		return hints.observation(bridge.Signal{}), err
 	}
 	reader := bridge.ObserveSignals(hints)
-	expected := bridge.SignalExpectation{Kind: "identity", Release: buildinfo.Version, ProbeNonce: nonce, Product: target.Client.Product, Build: target.Client.FullBuild}
+	expected := bridge.SignalExpectation{Kind: "identity", Release: release, ProbeNonce: nonce, Product: target.Client.Product, Build: target.Client.FullBuild}
 	wait, cancel := context.WithTimeout(ctx, io.wait)
 	defer cancel()
 	signal, err := reader.DiscoverIdentity(wait, expected)
@@ -198,5 +203,5 @@ func notReadyReason(signal bridge.Signal) string {
 }
 
 func identityUnreadable(err error) error {
-	return fmt.Errorf("%w: %v", ErrIdentityUnreadable, err)
+	return fmt.Errorf("%w: %w", ErrIdentityUnreadable, err)
 }

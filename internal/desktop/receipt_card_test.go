@@ -18,7 +18,7 @@ func TestReceiptCardFractionalModuleSampling(t *testing.T) {
 	}
 	m := qr.GetMatrix()
 	cells := m.GetWidth() + 8
-	for _, factor := range []float64{2, 2.35, 2.625, 3.1} {
+	for _, factor := range []float64{1.28, 1.42, 1.6, 1.8, 2, 2.35, 2.625, 3.1} {
 		side := int(float64(cells) * factor)
 		frame := image.NewNRGBA(image.Rect(0, 0, 600, 500))
 		for y := 0; y < side; y++ {

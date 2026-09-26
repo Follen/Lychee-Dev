@@ -238,7 +238,7 @@ func TestFaultsAckFreshProcessObservesReadinessBeforeInput(t *testing.T) {
 // reached the window (the pre-fix ack path recorded exactly this) must be
 // re-sent on recovery, not blocked waiting for an acknowledgement that was
 // never requested.
-func TestFaultsAckResendsAfterUnsentIntent(t *testing.T) {
+func testFaultsAckRecovery(t *testing.T, prior desktop.InputReceipt) {
 	ctx := context.Background()
 	root, client, book, pin, template, _ := unpreparedProbeFixture(t, 7)
 	initial := template.ready
@@ -302,13 +302,12 @@ func TestFaultsAckResendsAfterUnsentIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	session.Close()
-	// The interrupted host persisted its ack intent together with the durable
-	// proof that no keyboard message was queued.
+	// Retain the interrupted submission evidence without inferring ACK success.
 	var observed reportObservation
 	if err := json.Unmarshal(verified.Observation, &observed); err != nil {
 		t.Fatal(err)
 	}
-	observed.AckInput = &desktop.InputReceipt{}
+	observed.AckInput = &prior
 	raw, _ := json.Marshal(observed)
 	if err := book.AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: verified.Generation, ExpectedStage: "verified", Stage: "ack_requested", Status: "unresolved", Observation: raw}); err != nil {
 		t.Fatal(err)
@@ -316,9 +315,10 @@ func TestFaultsAckResendsAfterUnsentIntent(t *testing.T) {
 	if _, err := book.SetGoal(ctx, record.OperationID, "ack_requested", "cleaned"); err != nil {
 		t.Fatal(err)
 	}
-	restart := &lifecycleFrames{t: t, signals: []bridge.Signal{reentry}}
+	restart := &lifecycleFrames{t: t}
 	var acked []string
 	resend := func(ctx context.Context, target desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+		restart.signals = append(restart.signals, reentry)
 		if target != template.target.Window {
 			t.Fatal("changed target")
 		}
@@ -353,5 +353,11 @@ func TestFaultsAckResendsAfterUnsentIntent(t *testing.T) {
 	}
 	if len(acked) != 1 {
 		t.Fatalf("resent ack commands: %#v", acked)
+	}
+}
+
+func TestFaultsAckRecoversUnsentPartialAndLostReceipt(t *testing.T) {
+	for name, prior := range map[string]desktop.InputReceipt{"unsent": {}, "partial": {MessagesQueued: 2}, "lost-receipt": {MessagesQueued: 42, SubmissionComplete: true}} {
+		t.Run(name, func(t *testing.T) { testFaultsAckRecovery(t, prior) })
 	}
 }

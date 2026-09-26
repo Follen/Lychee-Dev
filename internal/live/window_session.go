@@ -65,6 +65,11 @@ func sessionSignalIdentity(ready bridge.Signal) bridge.SignalIdentity {
 // on the reader so no caller can hold a session whose reader matches receipts
 // against an incomplete identity.
 func newWindowSession(target ClientWindow, region image.Rectangle, ready bridge.Signal, reader *bridge.SignalReader, frames sessionFrames, confirm func(context.Context, ClientWindow) error) *WindowSession {
+	if region == (image.Rectangle{}) || region == desktop.WholeWindowCapture() {
+		if actual, ok := frames.(interface{ CaptureArea() image.Rectangle }); ok {
+			region = actual.CaptureArea()
+		}
+	}
 	reader.SetIdentityBaseline(sessionSignalIdentity(ready))
 	return &WindowSession{target: target, region: region, ready: ready, reader: reader, frames: frames, confirm: confirm}
 }
@@ -158,6 +163,9 @@ func observeWindowSessionAt(ctx context.Context, target ClientWindow, region ima
 func CaptureWindowSession(ctx context.Context, root, snapshot string, session *WindowSession) (evidence.CaptureRef, error) {
 	if session == nil || session.closed || session.confirm == nil {
 		return evidence.CaptureRef{}, errors.New("live.session_closed")
+	}
+	if session.region == desktop.WholeWindowCapture() {
+		return evidence.CaptureRef{}, errors.New("live.capture_extent_unresolved")
 	}
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (evidence.CaptureRef, error) {
 		var zero evidence.CaptureRef

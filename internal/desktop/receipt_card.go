@@ -7,9 +7,10 @@ import (
 	"github.com/makiuchi-d/gozxing/qrcode/decoder"
 )
 
-// Small UI-scaled modules alternate between two and three physical pixels.
+// Small UI-scaled modules can alternate between one and two physical pixels.
 // The general detector can miss their finder patterns. The receipt's square
 // white backing supplies a second geometric observation: sample module centres
+// and the first covered pixels (fractional one-pixel modules have no centre pixel)
 // for the bounded QR versions, then use the normal QR error-correcting decoder.
 // This only recovers bytes; all identity, nonce and freshness checks stay above
 // the desktop layer. No prior payload or expected result is used here.
@@ -62,23 +63,29 @@ func decodeReceiptCard(frame image.Image) []string {
 				for version := 1; version <= 40; version++ {
 					dimension := 17 + 4*version
 					cells := dimension + 8 // four-module quiet zone on every edge
-					if side < cells*2 || side > cells*4 {
+					if side*100 < cells*125 || side > cells*4 {
 						continue
 					}
-					matrix, _ := gozxing.NewBitMatrix(dimension, dimension)
-					for row := 0; row < dimension; row++ {
-						for col := 0; col < dimension; col++ {
-							px := x + (2*(col+4)+1)*extent/(2*cells)
-							py := y + (2*(row+4)+1)*extent/(2*cells)
-							r, g, blue, _ := frame.At(px, py).RGBA()
-							if (r+g+blue)/3 < 0x8000 {
-								matrix.Set(col, row)
+					for _, firstPixel := range []bool{false, true} {
+						matrix, _ := gozxing.NewBitMatrix(dimension, dimension)
+						for row := 0; row < dimension; row++ {
+							for col := 0; col < dimension; col++ {
+								px := x + (2*(col+4)+1)*extent/(2*cells)
+								py := y + (2*(row+4)+1)*extent/(2*cells)
+								if firstPixel {
+									px = x + ((col+4)*extent+cells-1)/cells
+									py = y + ((row+4)*extent+cells-1)/cells
+								}
+								r, g, blue, _ := frame.At(px, py).RGBA()
+								if (r+g+blue)/3 < 0x8000 {
+									matrix.Set(col, row)
+								}
 							}
 						}
-					}
-					result, err := decoder.NewDecoder().Decode(matrix, map[gozxing.DecodeHintType]interface{}{gozxing.DecodeHintType_CHARACTER_SET: "ISO-8859-1"})
-					if err == nil && len(result.GetText()) <= 4096 {
-						return []string{result.GetText()}
+						result, err := decoder.NewDecoder().Decode(matrix, map[gozxing.DecodeHintType]interface{}{gozxing.DecodeHintType_CHARACTER_SET: "ISO-8859-1"})
+						if err == nil && len(result.GetText()) <= 4096 {
+							return []string{result.GetText()}
+						}
 					}
 				}
 			}

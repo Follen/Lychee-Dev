@@ -17,7 +17,7 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-2.0.5.md` — Windows CI and release contract for the current candidate.
+4. `docs/toolkit/release-2.0.6.md` — Windows CI and release contract for the current candidate.
    `release-2.0.1.md` is retained as the immutable historical contract for the
    already-published release.
 
@@ -92,10 +92,17 @@ from acceptance. A client folder is a location, not an identity: read
 - Live results distinguish `report.state` (verified/unavailable) from
   `cleanup` (pending/complete). A verified report with pending cleanup is a
   usable result plus a recovery obligation — never report it as a failure.
-- `live abandon` requires an explicit decision: a verified probe before ACK,
-  or dispatch_requested/flush_requested with durable DispatchInput showing
-  MessagesQueued > 0 and SubmissionComplete=true. Missing reports stay unavailable
-  and execution remains unknown. It preserves evidence, retires only the exact disk queue
+- `live finish` combines ACK with verified display cleanup and archives the clear
+  evidence. Its `complete=true` also requires `display.state=cleared`; retrying a
+  successfully finished operation is read-only. Keep atomic `live ack` for requests
+  that intentionally retain the display.
+- `live reload` may activate an older runtime only when the current CLI's exact
+  version is installed as a clean managed addon. It records from/to release and
+  manifest commit, preserves window/actor/nonce checks and rechecks bytes before input.
+- `live abandon` requires an explicit decision for unresolved probe/bugs work
+  after preparation through ack_requested, including zero/partial/unknown input.
+  Missing reports stay unavailable and execution/ACK remain unconfirmed.
+  It preserves evidence, retires only the exact disk queue
   entry and releases ownership without game input. `cleanup=abandoned` and
   `complete=false` never mean ACK or runtime unload succeeded.
 - Real-machine observation goes through `internal/desktop` WGC capture; screen

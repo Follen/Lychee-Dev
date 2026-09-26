@@ -138,19 +138,19 @@ Examples of requests:
 ### A QR card is a checkpoint, not completion
 
 ```text
-connect → put probe → load → run → read verified report → ACK → hide receipt
+connect → put probe → load → run → read verified report → finish
                          │                              │
                          └──── recover by operation ID ─┘
 ```
 
-`live run` returns after report verification and before ACK. **The Agent must continue** with the same operation: retain the report and captures, call `live ack`, then `live hide` when no next live step needs the card. Do not ask the user to scan it or approve routine cleanup. Respect an explicit request to pause or retain the report.
+`live run` returns after report verification. **The Agent must continue** with `live finish` for the same operation: the CLI acknowledges the report, retires its queue entry, clears the receipt and verifies the clear. A failed clear keeps the verified report usable; retry the same operation to finish cleanup. Successful finish retains evidence and repeated calls send no game input. Use atomic `live ack` when the user explicitly wants to retain the display. Do not ask the user to scan the card or approve routine cleanup.
 
 | Evidence | What it establishes |
 | --- | --- |
 | A visible QR, a sent command, or a loaded probe | An intermediate step; not the investigation result |
 | `report.state: verified` | The report is usable; cleanup may still be pending |
 | `cleanup: complete` | The operation has been acknowledged and its ownership released |
-| Successful `live hide` with `result.cleared: true` | Final receipt dismissal was observed |
+| `live finish`: `display.state: cleared`, `complete: true` | Report, ACK and final display cleanup are verified |
 | JSONL with a legal `end` frame and exit 0 | The stream completed according to its reported scope |
 
 On pending or uncertain input, inspect/resume the original operation. Do not create a replacement probe, switch characters, blindly reload, or automatically abandon ownership. If progress requires an external action, report the exact blocker, verified findings and retained IDs as an **incomplete handoff**. See [live orchestration](skills/lycheedev/references/live-investigation.md).
@@ -178,7 +178,7 @@ Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned i
 | Agent workflow | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm distribution | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | Contracts and verification | [Design](docs/toolkit/design.md) · [Status](docs/toolkit/implementation-status.md) · [Regression matrix](docs/toolkit/regression.md) |
-| Release | [Release contract](docs/toolkit/release-2.0.3.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| Release | [Release contract](docs/toolkit/release-2.0.6.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## License
 

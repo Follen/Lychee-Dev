@@ -65,7 +65,7 @@ for _, profile in ipairs(profiles) do
             callbacks[owner] = nil
         end,
     }
-    local ns = { Release = "2.0.5", Startup = { ready = true, identity = {} } }
+    local ns = { Release = "2.0.6", Startup = { ready = true, identity = {} } }
     -- This harness lists addon modules explicitly (the TOC entry is added by
     -- the integrator); Identity.lua is exercised through the real TOC-adjacent
     -- modules it depends on, not a mock.

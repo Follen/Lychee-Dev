@@ -380,15 +380,15 @@ prepared -> load_requested -> loaded -> dispatch_requested -> reported
 已有内置错误快照不需要临时探针加载。每次外部副作用前持久记录 intent，回执后再确认阶段。主状态另有 pending/running/unresolved/failed/cancelled/completed/abandoned，不将所有失败压成一个布尔值。
 
 `live abandon <operation-id>` 是显式放弃收尾，不是 ACK 或 cancel 的别名。
-允许报告可重新核验且尚未提交 ACK 的 probe：`verified -> abandoning -> abandoned`；
-也允许 `dispatch_requested` / `flush_requested` 且持久 DispatchInput 证明
-MessagesQueued > 0、SubmissionComplete=true 的 probe 显式放弃。后者仅证明
-派发完成，执行结果仍未知，report.state 保持 unavailable。两条路径完整保留
+允许 probe / bugs 从 `load_requested`、`loaded`、`dispatch_requested`、`reported`、
+`flush_requested`、`persisted`、`verified`、`ack_requested` 显式放弃，包括零输入、
+部分输入和 ACK 未确认。`prepared` 仍走 cancel；已确认 ACK 走确定的宿主收尾。
+输入记录只证明入队情况，不证明执行结果；无报告时 report.state 保持 unavailable。完整保留
 原观察证据，abandoning/abandoned 的恢复按原 schema 校验，不强求不存在的报告。
 持有原窗口执行租约，先保存放弃意图，再精确移除原磁盘队列项，最后提交终态并
 释放所有权；崩溃后 `resume` 只完成这段宿主恢复，不输入游戏。其他队列项、
 SavedVariables 与归档证据不变。已有可验证报告时 `report.state=verified`，均返回 `cleanup=abandoned`、
-`complete=false`，明确游戏未被 ACK、未卸载旧运行态；不得视为完整链路通过。
+`complete=false`，游戏 ACK / 运行态卸载未确认；不得视为完整链路通过。
 busy 或角色切换不自动授权放弃；新任务仍需重新验证角色及 readiness。
 
 收敛要求：live 单独拥有推进和恢复；每个已提交动作只有一个权威记录，不允许 Stage、观察布尔标记、会话副本和归档各自成为独立状态机。历史证据负责核验，当前输入资格仍由新画面确认。Run 与 Resume 进入同一执行内核。
@@ -417,9 +417,22 @@ ACK 仍需当前窗口的新鲜 inputReady 证据；缺少原重入证据时，�
 readiness。历史归档只用于恢复关联，不能替代当前帧。等待此证据到期返回
 `live.ack_readiness_pending` / exit 6，保留 verified 报告、cleanup=pending、
 complete=false 和恢复 ID；调用者主动取消仍为 exit 7。输入意图落盘后的
-ACK 恢复只观察确认，不重发；唯一例外是落盘回执本身证明零键盘消息入队
-（没有任何 PostMessage 成功，效果未进入不确定区间）时可重新准备并重发，
-部分入队或缺少回执时仍只观察。保留的非原子操作仍遵循其原有 reload 合同。
+原子 ACK 恢复先观察，必要时在新鲜 readiness、精确报告与 actor/session 校验后，
+有界重取同一 request + report sequence 的幂等 ACK；绝不重派探针。运行态缓存
+只在相同 session/actor/generation 内有效，不跨 reload/login伪造 ACK 历史。
+缓存永久丢失时保留 pending，可由用户明确 abandon。保留的非原子操作只观察，
+仍遵循其原有 reload 合同。
+
+`live finish <operation-id>` 是默认整任务收口：核验 ACK/队列退休后清屏，连续有效
+非黑帧确认零符号，并把 clear 证据归档。返回 `display.state=pending|cleared` 与
+clear capture；顶层 complete 同时要求报告 verified、cleanup complete 和 display
+cleared。清屏失败不抹去报告；同 ID 重试跳过已完成 ACK，成功后的再次调用只读
+核验归档，不重连、不再隐藏新画面。原子 ACK 和独立 hide 保留原合同。
+
+受管升级 reload 冻结 from/to release 与目标安装 receipt commit；目标必须等于
+当前 CLI，且输入前重验受管文件。只对该 reload 允许连接归档中已证明的旧 release，
+重载后精确核验新 release、原窗口/角色/nonce/下一 epoch。普通业务仍要求当前
+release；旧 session 可作为同窗口重连目标。请求 key 先查已存在操作，避免重复刷新。
 
 - 启动任务分配新请求 ID；恢复沿用原请求 ID、代码摘要和原重载 nonce。
 - 预期 reload 会改变插件的 Lua 会话标记；只有匹配原 reload nonce、相同进程/角色/Build 的 ready 信号才允许在原操作内更新 WindowBinding。无此关联的身份变化使绑定失效。
@@ -441,11 +454,17 @@ reload 重入必须同时观察到 `PLAYER_ENTERING_WORLD(false, true)` 与
 `LOADING_SCREEN_DISABLED`，顺序不限，再校验原票据和角色绑定。新的加载开始
 使旧加载完成状态失效；离开世界取消等待。聊天获得焦点时暂隐光学回执，
 焦点释放后由原生产者重新验证身份并生成新 readiness，不重跑探针或改写报告。
-加载开始、离开世界、禁用和显示所有者更换均阻止旧回执恢复。显示的回执默认
+战斗、加载与同一运行态的离开世界暂时暂停显示，结束后生产者重新验证角色、
+session generation 和输入资格；禁用、显式隐藏或显示所有者更换阻止旧回执恢复。显示的回执默认
 常驻（晚到恢复与跨进程观察依赖它）；证据归档后的主动清理走
 `/dev bridge hide`（`live hide`）：请求作用域操作在飞时 fail-closed 拒绝，
 成功清屏不打印、不产生新回执、幂等；CLI 只在有效帧连续零符号时报告清除，
 残留回执返回 pending。隐藏是整洁性要求，不是正确性依赖。
+
+默认 WGC 区域为窗口左上不超过 1024×1024 的区域，保存实际解析坐标；显式
+`--capture-area window` 保留全窗语义，仍受 4096 单边解码预算约束。小二维码
+读取采用有界中心/首覆盖像素采样，测试包含实际 Lua 编码的分数物理像素缩放；
+不以放大显示或取消像素预算代替读取健壮性。
 
 后台输入的前置合同包含输入资格：启用后的插件在新协议信号中报告可验证的输入状态，宿主使用新到达帧核对身份与资格。无法确认当前编辑状态、自定义聊天键或已有草稿时拒绝自动提交，不以 Escape 入队代替确认。具体可观察的输入状态与事件须按四端精确源码验证，作为 S1 的技术门槛；不能假设宿主可以原子隔离人工操作。自动化模块默认关闭，首次启用需显式操作；没有有效就绪信号时返回未启用或未就绪，而非猜测发送。唯一的受控例外是 bootstrap 输入（2026-09-23 修订，2026-09-25 扩展第三条）：宿主可向尚未识别的候选窗口发送固定的 `/dev bridge identify <nonce>`、`/dev connect` 与 `/dev bridge reset <nonce>` 三条协议命令，逐窗口、逐条、有界、持窗口输入锁、每条消息前重核窗口身份；识别结果与输入就绪都必须以新的、nonce 相关的回执核验后才成立，`/dev connect` 只在新回执确认 inputReady 后发送。reset 是死锁恢复例外：abandon 或回执丢失后，运行中插件内存队列按角色 fail-closed 拒绝身份触发，任何需要回执的输入都无法进入；reset 只允许发往磁盘无占用者的窗口，回执必须携带同一 nonce 且 actor 齐备，插件侧只把当前角色的未确认条目置为已确认墓碑并丢弃残留重入票据，不删除报告、不触碰其他角色条目、不授予任何后续输入权限。该例外不构成通用文本通道；除此之外的一切输入仍要求先有新到达的输入就绪证据。宿主仍不自动登录游戏。
 

@@ -69,18 +69,24 @@ func executePrepared(ctx context.Context, root string, request ExecutionRequest,
 func observeRecordedSession(ctx context.Context, root, id string,
 	open func(context.Context, ClientWindow, image.Rectangle, bridge.SignalExpectation) (*WindowSession, error),
 ) (*WindowSession, string, error) {
+	return observeRecordedSessionRelease(ctx, root, id, buildinfo.Version, open)
+}
+
+func observeRecordedSessionRelease(ctx context.Context, root, id, release string,
+	open func(context.Context, ClientWindow, image.Rectangle, bridge.SignalExpectation) (*WindowSession, error),
+) (*WindowSession, string, error) {
 	bound, err := ReadWindowSession(ctx, root, id)
 	if err != nil {
 		return nil, "", err
 	}
-	if bound.Ready.Release != buildinfo.Version {
+	if bound.Ready.Release != release {
 		return nil, "", errors.New("live.session_release_mismatch")
 	}
 	request := WindowBindingRequest{Installation: bound.Target.Client.Directory, Snapshot: bound.Record.Snapshot, PID: bound.Target.Window.ProcessID, Character: bound.Ready.Character, Realm: bound.Ready.Realm, Nonce: bound.Ready.SessionNonce, Region: bound.Record.Region}
 	if err := request.Validate(); err != nil {
 		return nil, "", err
 	}
-	expected := bridge.SignalExpectation{Kind: "ready", Release: buildinfo.Version, SessionNonce: bound.Ready.SessionNonce, Character: bound.Ready.Character, Realm: bound.Ready.Realm, Product: bound.Ready.Product, Build: bound.Ready.Build, RequireInputReady: true}
+	expected := bridge.SignalExpectation{Kind: "ready", Release: release, SessionNonce: bound.Ready.SessionNonce, Character: bound.Ready.Character, Realm: bound.Ready.Realm, Product: bound.Ready.Product, Build: bound.Ready.Build, RequireInputReady: true}
 	session, err := open(ctx, bound.Target, bound.Record.Region, expected)
 	if err != nil {
 		return nil, "", err
@@ -89,6 +95,8 @@ func observeRecordedSession(ctx context.Context, root, id string,
 		session.Close()
 		return nil, "", errors.New("live.session_identity_changed")
 	}
-	session.region = bound.Record.Region
+	if bound.Record.Region != (image.Rectangle{}) {
+		session.region = bound.Record.Region
+	}
 	return session, bound.Record.Snapshot, nil
 }

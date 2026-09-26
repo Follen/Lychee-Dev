@@ -27,6 +27,14 @@ func (p *ProbeOperation) Acknowledge(ctx context.Context) (desktop.InputReceipt,
 }
 
 func (p *ProbeOperation) acknowledge(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {
+	return p.sendAcknowledgement(ctx, send, false)
+}
+
+func (p *ProbeOperation) retryAcknowledgement(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {
+	return p.sendAcknowledgement(ctx, send, true)
+}
+
+func (p *ProbeOperation) sendAcknowledgement(ctx context.Context, send preparedInput, retry bool) (desktop.InputReceipt, error) {
 	if err := p.check(ctx); err != nil {
 		return desktop.InputReceipt{}, err
 	}
@@ -34,14 +42,14 @@ func (p *ProbeOperation) acknowledge(ctx context.Context, send preparedInput) (d
 	if err != nil {
 		return desktop.InputReceipt{}, err
 	}
-	if record.Stage != "verified" || record.Status != "running" {
+	if (record.Stage != "verified" && !(retry && record.Stage == "ack_requested")) || (record.Status != "running" && record.Status != "unresolved") {
 		return desktop.InputReceipt{}, journal.ErrTransition
 	}
 	return p.submitInput(ctx, "ack_requested", send, func(ctx context.Context) (string, error) {
 		if err := p.prepareAcknowledgement(ctx); err != nil {
 			return "", err
 		}
-		report, err := RequestReportAcknowledgement(ctx, p.root, p.id)
+		report, err := requestReportAcknowledgement(ctx, p.root, p.id, true)
 		if err != nil {
 			return "", err
 		}
@@ -59,7 +67,7 @@ func (p *ProbeOperation) prepareAcknowledgement(ctx context.Context) error {
 		if err != nil {
 			return false, err
 		}
-		if record.Stage != "verified" || record.Status != "running" {
+		if (record.Stage != "verified" && record.Stage != "ack_requested") || (record.Status != "running" && record.Status != "unresolved") {
 			return false, journal.ErrTransition
 		}
 		input, _, err := probeDefinition(record)
@@ -141,7 +149,7 @@ func (p *ProbeOperation) prepareAcknowledgement(ctx context.Context) error {
 		if err := p.check(ctx); err != nil {
 			return false, err
 		}
-		err = book.AdvanceStage(ctx, journal.StageChange{OperationID: p.id, ExpectedGeneration: record.Generation, ExpectedStage: "verified", Stage: "verified", Status: "running", Observation: raw})
+		err = book.AdvanceStage(ctx, journal.StageChange{OperationID: p.id, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: record.Stage, Status: "running", Observation: raw})
 		if err == nil {
 			p.session.ready = signal
 		}

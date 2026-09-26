@@ -216,8 +216,9 @@ func (p *faultOperation) check(ctx context.Context) error {
 }
 
 // unsentAckIntent reports durable proof that a persisted ack intent queued no
-// keyboard message at all. Only such a receipt makes re-sending safe; a missing
-// receipt leaves the delivered state unknowable and stays observe-only.
+// keyboard message at all. It permits skipping the initial ACK observation.
+// Other attempts observe first, then retry only the same idempotent ACK with
+// fresh readiness. Unknown probe execution is never replayed.
 func unsentAckIntent(record journal.WorkRecord) bool {
 	if record.Stage != "ack_requested" {
 		return false
@@ -229,7 +230,9 @@ func unsentAckIntent(record journal.WorkRecord) bool {
 	return observed.AckInput != nil && observed.AckInput.MessagesQueued == 0 && !observed.AckInput.SubmissionComplete
 }
 
-func (p *faultOperation) execute(ctx context.Context, send preparedInput) (journal.WorkRecord, error) {	for step := 0; step < 8; step++ {
+func (p *faultOperation) execute(ctx context.Context, send preparedInput) (journal.WorkRecord, error) {
+	ackRetried := false
+	for step := 0; step < 8; step++ {
 		record, err := journal.OpenBook(p.metadata).InspectWork(ctx, p.id)
 		if err != nil {
 			return record, err
@@ -251,7 +254,8 @@ func (p *faultOperation) execute(ctx context.Context, send preparedInput) (journ
 		case "verified":
 			err = p.sendAck(ctx, send)
 		case "ack_requested":
-			if unsentAckIntent(record) {
+			if !ackRetried && unsentAckIntent(record) {
+				ackRetried = true
 				// The persisted receipt proves no keyboard message reached the
 				// window, so re-preparing and re-sending cannot replay input.
 				err = p.sendAck(ctx, send)
@@ -260,6 +264,15 @@ func (p *faultOperation) execute(ctx context.Context, send preparedInput) (journ
 			wait, cancel := context.WithTimeout(ctx, 15*time.Second)
 			_, err = p.observeAcknowledgement(wait)
 			cancel()
+			if !ackRetried && ctx.Err() == nil && (errors.Is(err, io.EOF) || errors.Is(err, context.DeadlineExceeded)) {
+				ackRetried = true
+				retryErr := p.sendAck(ctx, send)
+				if retryErr == nil {
+					err = nil
+				} else {
+					err = errors.Join(err, retryErr)
+				}
+			}
 		case "acknowledged":
 			return p.finalize(ctx)
 		case "cleaned":
@@ -491,7 +504,7 @@ func (p *faultOperation) sendAck(ctx context.Context, send preparedInput) error 
 		if err != nil {
 			return "", err
 		}
-		if record.Stage != "verified" && !unsentAckIntent(record) {
+		if record.Stage != "verified" && record.Stage != "ack_requested" {
 			return "", journal.ErrTransition
 		}
 		// The ack input guard demands a freshly observed signal, but a resumed
@@ -521,7 +534,7 @@ func (p *faultOperation) sendAck(ctx context.Context, send preparedInput) error 
 		if record.Stage == "verified" {
 			report, err = RequestReportAcknowledgement(ctx, p.root, p.id)
 		} else {
-			// Recovery of an intent whose receipt proves no message was queued:
+			// Recovery of the same idempotent ACK after fresh readiness:
 			// the durable verified report is the same evidence, and the stage
 			// machine stays at ack_requested for the post-send persistence.
 			_, err = vault.ReadWorkspace(ctx, p.root, func(store *vault.Store, metadata *vault.Metadata) (struct{}, error) {

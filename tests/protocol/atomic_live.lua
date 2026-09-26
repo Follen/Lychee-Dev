@@ -90,6 +90,10 @@ for _,profile in ipairs(profiles) do
     local sequence=assert(reported:match('"sequence":(%d+)'))
     local acknowledged=assert(ns.Controls.Handle("bridge bugs-ack BUGS-A "..sequence))
     assert(reloads==2 and ns.ReportStore.Read("BUGS-A")==nil)
+    local repeated=assert(ns.Controls.Handle("bridge bugs-ack BUGS-A "..sequence))
+    assert(repeated~=acknowledged and reloads==2, "bugs ACK recovery must only reissue its receipt")
+    assert(ns.Controls.Handle("bridge bugs-ack BUGS-A "..(tonumber(sequence)+1))==nil,
+        "bugs ACK recovery accepted another report sequence")
     outputs[#outputs+1]=acknowledged
 end
 

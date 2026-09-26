@@ -3,7 +3,7 @@
 
 # Command reference
 
-79 implemented commands. Every command accepts `--format text|json|jsonl`;
+80 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -138,11 +138,13 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`.
 - `live ack <operation-id>` — mutates. Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
+- `live finish <operation-id>` — mutates. Acknowledge one verified operation and verify its receipt display is cleared; retry the same operation to finish pending display cleanup: live finish <operation-id>
+  Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live bugs` — mutates. Capture 1-100 existing addon errors from the selected client as a verified report and stop before acknowledgement
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--count <1-100>`, `--account <account>`.
 - `live hide` — mutates. Dismiss the displayed bridge receipt on the selected client after its evidence is archived: --session <session-id>; refuses windows owned by in-flight operations and verifies the clear from valid frames
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`.
-- `live bind` — mutates. Observe /dev connect in the selected game and save a connection: --snapshot <pin>; unique window discovered automatically, optional --pid/--installation/--character/--realm filters; whole-window capture by default; never types; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+- `live bind` — mutates. Observe /dev connect in the selected game and save a connection: --snapshot <pin>; unique window discovered automatically, optional --pid/--installation/--character/--realm filters; bounded top-left capture by default, explicit --capture-area window requests the whole window; never types; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--installation <client>`, `--pid <pid>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--capture-area <window|x,y,width,height>`.
 - `live status <operation-id>` — read-only. Read persisted work without sending input: live status <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
@@ -150,7 +152,7 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live cancel <operation-id>` — mutates. Cancel only a prepared operation before queue publication or game input: live cancel <operation-id>; later stages require live resume for safe cleanup
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live abandon <operation-id>` — mutates. Explicitly abandon a probe before ACK: verified report, or dispatch_requested/flush_requested with durable fully queued dispatch input; preserve evidence and unknown results, retire its exact disk queue entry and release ownership without game input or claiming ACK; interrupted abandonment resumes by the same operation ID
+- `live abandon <operation-id>` — mutates. Explicitly stop unresolved probe or bugs recovery after preparation through ack_requested, including zero/partial/unknown input; preserve evidence and unknown results, retire only its exact queue entry and release ownership without game input or claiming ACK; interrupted abandonment resumes by the same operation ID
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live session <session-id>` — read-only. Verify a retained session and its evidence: live session <session-id>; does not reconnect or authorize input
   Flags: `--home <root>`, `--format text|json|jsonl`.

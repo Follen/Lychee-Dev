@@ -24,6 +24,9 @@ Read only the relevant reference:
 - Addon load closure and compatibility: [addon-validation.md](references/addon-validation.md).
 - Running-game investigation or recovery: [live-investigation.md](references/live-investigation.md).
   First installation or failed contact without a session: [live-startup.md](references/live-startup.md).
+- Memory, CPU, stutter or repeated-operation measurements: also read
+  [runtime-investigations.md](references/runtime-investigations.md) for measurement
+  scope, observer cost and safe isolation.
 - Existing errors: [error-diagnosis.md](references/error-diagnosis.md).
 - Requested installation or removal: [installation.md](references/installation.md).
 
@@ -37,21 +40,23 @@ capability.
 
 A visible QR card, successful input, connection, or loaded probe is an
 intermediate state. Keep working in the same turn. For a probe, run its returned
-operation, read its verified report and capture IDs, ACK that exact operation, then hide
-the receipt when no next live step needs it. Report retrieval, ACK and dismissal
+operation, read its verified report and capture IDs, then call `live finish` on
+that exact operation to acknowledge and dismiss its receipt. Report retrieval,
+ACK and dismissal
 are part of an authorized investigation; do not ask the user to approve each
 step or to scan the QR. Respect an explicit request to pause or leave a report
 unacknowledged.
 
 `live run` returns before acknowledgement by CLI design; that is not permission
 for the agent to end the task. A completed probe task requires a verified report,
-`cleanup: complete`, and a successful final `live hide` with `result.cleared:
-true`. Keep report completion and screen dismissal separate. A verified probe
-error still needs cleanup after its diagnostic evidence is retained.
+`cleanup: complete`, and `display.state: cleared` from `live finish`, whose
+`complete` includes screen dismissal. Do not send another hide after successful
+finish. A verified probe error still needs cleanup after its diagnostic evidence
+is retained.
 
 A connection-only task or standalone reload has no probe report to ACK. Verify
-its own completion/readiness fields and dismiss the final receipt; do not invent
-a probe just to satisfy the probe lifecycle.
+its own completion/readiness fields and use `live hide` to dismiss the final
+receipt; do not invent a probe just to satisfy the probe lifecycle.
 
 On interruption or exit 6, inspect/resume the same operation and follow
 [live-investigation.md](references/live-investigation.md#recover-without-replay).

@@ -17,11 +17,13 @@ local function requestKey(value)
 end
 
 ns.ReportStore = {
-    Acknowledged = function(requestId)
+    Acknowledged = function(requestId, sequence)
         if not requestKey(requestId) then return nil, "report_invalid_request" end
         local state = ns.Persistence.Current()
         local session = ns.Session.Current()
         local ack = lastAcknowledgement
+        if sequence ~= nil and (restricted(sequence) or type(sequence) ~= "number"
+            or not ack or sequence ~= ack.reportSequence) then return nil, "report_invalid_sequence" end
         if not ack or not session or ack.root ~= state or ack.requestId ~= requestId
             or ack.sessionNonce ~= session.sessionNonce or ack.guid ~= session.guid
             or ack.generation ~= session.generation then
@@ -29,6 +31,18 @@ ns.ReportStore = {
         end
         local receipt, reason = ns.ReportStore.Read(requestId)
         if receipt or reason ~= "report_unavailable" then return nil, "report_still_retained" end
+        if sequence ~= nil then
+            -- Reissue with a fresh sequence: input readiness may have advanced
+            -- beyond the original optical ACK. The payload identity is fixed.
+            local identity, failure = ns.Session.NextIdentity(ack.signal.sequence)
+            if not identity then return nil, failure end
+            local signal = {}
+            for key, value in pairs(ack.signal) do signal[key] = value end
+            signal.sequence = identity.sequence
+            local encoded, encodeFailure = ns.CaptureWriter.EncodeSignal(signal, 2048)
+            if not encoded then return nil, encodeFailure end
+            ack.signal, ack.receipt = signal, encoded
+        end
         return ack.receipt
     end,
     Commit = function(requestId, code, value)
@@ -163,7 +177,7 @@ ns.ReportStore = {
         -- This proves only in-memory cleanup, not a SavedVariables disk flush.
         state.reports[requestId] = nil
         -- One bounded runtime-only handoff, never inherited across reload/login.
-        lastAcknowledgement = { root=state, requestId=requestId, receipt=acknowledgement,
+        lastAcknowledgement = { root=state, requestId=requestId, receipt=acknowledgement, signal=signal, reportSequence=reported.sequence,
             sessionNonce=session.sessionNonce, guid=session.guid, generation=session.generation }
         return acknowledgement
     end,

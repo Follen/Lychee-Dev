@@ -41,6 +41,8 @@ func queryFault(err error) (int, string, bool) {
 		{live.ErrAckReadinessPending, 6, "live.ack_readiness_pending"},
 		{live.ErrReceiptHidePending, 6, "live.receipt_hide_pending"},
 		{live.ErrReceiptWindowBusy, 3, "live.receipt_window_busy"},
+		{live.ErrUpgradeInstallation, 3, "live.upgrade_requires_current_managed_addon"},
+		{live.ErrUpgradeChanged, 3, "live.upgrade_installation_changed"},
 		{selection.ErrTargetMissing, 3, "selection.target_missing"},
 		{selection.ErrTargetExists, 3, "selection.target_exists"},
 		{selection.ErrTargetAmbiguous, 2, "selection.target_ambiguous"},

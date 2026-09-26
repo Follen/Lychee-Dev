@@ -20,10 +20,15 @@ func Cancel(ctx context.Context, root, id string) (Outcome, error) {
 		if err != nil {
 			return record, err
 		}
-		if record.Intent.Kind != "probe" {
+		if record.Intent.Kind != "probe" && record.Intent.Kind != "faults" {
 			return record, journal.ErrTransition
 		}
-		input, _, err := probeDefinition(record)
+		var input ReportIntent
+		if record.Intent.Kind == "faults" {
+			input, _, err = faultInput(record)
+		} else {
+			input, _, err = probeDefinition(record)
+		}
 		if err != nil {
 			return record, err
 		}

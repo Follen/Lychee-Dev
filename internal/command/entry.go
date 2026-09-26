@@ -255,6 +255,17 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Result, response.OperationID = record, record.OperationID
 					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
 				}
+			case "live finish":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				var record live.FinishOutcome
+				if err == nil {
+					record, err = live.FinishProbe(ctx, root, argument)
+				}
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
 			case "live bugs":
 				var root string
 				root, err = workspaceRoot(opts.home)
@@ -928,7 +939,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			if actual, ok := response.Context["stage"].(string); ok {
 				response.Error.Stage = actual
 				response.Error.ResumeOperationID = response.OperationID
-				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || errors.Is(err, live.ErrAckReadinessPending)
+				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || errors.Is(err, live.ErrAckReadinessPending) || errors.Is(err, live.ErrReceiptHidePending)
 			}
 		}
 		var diagnostic *relational.Diagnostic
@@ -1135,6 +1146,7 @@ func parseOptions(args []string) (Options, error) {
 			opts.dataRegion = value
 		case "--capture-area":
 			if value == "window" {
+				opts.region = desktop.WholeWindowCapture()
 				break
 			}
 			parts := strings.Split(value, ",")

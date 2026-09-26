@@ -1,6 +1,7 @@
 local root=assert(arg[1])
 local ns={Release='2.0.2',Startup={ready=true,identity={product='retail',build='12.1.0.12345'}}}
 local focus, frame, draws=nil,nil,{}
+local combat=false
 local actor={character='Paladin',realm='Realm',guid='Player-1-123'}
 local callbacks={}
 EventRegistry={
@@ -29,6 +30,7 @@ CreateFrame=function()
  return frame
 end
 ns.Platform={ObserveActor=function() return actor end,ObserveInputState=function()
+ if combat then return false,'input_combat_lockdown' end
  if focus then return false,'input_keyboard_focus' end;return true
 end}
 -- Only graphics encoding is a fixture. Controls, session, persistence, probe,
@@ -70,6 +72,29 @@ assert(recoveryExecutions==1 and draws[#draws]:find('"receipt":'..report,1,true)
 -- the last readiness. No combat or player activity is involved.
 gain();assert(ns.Controls.Handle('bridge reload Missing-Request')==nil);lose()
 assert(frame.visible and recoveryExecutions==1,'rejected reload stranded the optical channel')
+-- Combat and a loading screen suspend the optical channel, not the operation.
+for _,events in ipairs({{'PLAYER_REGEN_DISABLED','PLAYER_REGEN_ENABLED'}, {'LOADING_SCREEN_ENABLED','LOADING_SCREEN_DISABLED'}}) do
+ local before=draws[#draws]
+ assert(frame.events[events[1]])
+ frame.callback(frame,events[1]);assert(not frame.visible)
+ assert(frame.events[events[2]], 'missing bounded recovery listener')
+ frame.callback(frame,events[2])
+ assert(frame.visible and draws[#draws]~=before,'transient state permanently lost report')
+ assert(recoveryExecutions==1 and draws[#draws]:find('"receipt":'..report,1,true),'recovery replayed probe or changed report')
+end
+-- Loading can overlap combat; ending one condition must not publish permission.
+combat=true;frame.callback(frame,'PLAYER_REGEN_DISABLED')
+frame.callback(frame,'LOADING_SCREEN_ENABLED')
+frame.callback(frame,'PLAYER_REGEN_ENABLED');assert(not frame.visible)
+frame.callback(frame,'LOADING_SCREEN_DISABLED');assert(not frame.visible)
+combat=false;frame.callback(frame,'PLAYER_REGEN_ENABLED');assert(frame.visible)
+-- Zoning can include leaving/entering world, without a Lua runtime change.
+frame.callback(frame,'LOADING_SCREEN_ENABLED');frame.callback(frame,'PLAYER_LEAVING_WORLD')
+frame.callback(frame,'LOADING_SCREEN_DISABLED');assert(not frame.visible)
+frame.callback(frame,'PLAYER_ENTERING_WORLD');assert(frame.visible and recoveryExecutions==1)
+-- Combat during a chat suspension cannot discard the pending producer.
+gain();combat=true;frame.callback(frame,'PLAYER_REGEN_DISABLED');lose();assert(not frame.visible)
+combat=false;frame.callback(frame,'PLAYER_REGEN_ENABLED');assert(frame.visible)
 -- Simulate a real reentry, retaining SV and queue but not runtime session.
 InCombatLockdown=function() return false end
 C_UI={Reload=function() end}
@@ -123,4 +148,11 @@ gain();local asyncReport=assert(finishRecovery());lose()
 assert(frame.visible and draws[#draws]:find('"receipt":'..asyncReport,1,true),'async completion restored obsolete running receipt')
 cycle('async reported')
 assert(draws[#draws]:find('"receipt":'..asyncReport,1,true))
+-- A changed actor and explicit dismissal permanently cancel environment waits.
+frame.callback(frame,'PLAYER_REGEN_DISABLED');actor.guid='Player-other'
+frame.callback(frame,'PLAYER_REGEN_ENABLED');assert(not frame.visible and next(frame.events)==nil)
+actor.guid='Player-1-123';assert(ns.Session.Bind(nonce));assert(ns.Controls.Handle('bridge ready'))
+frame.callback(frame,'LOADING_SCREEN_ENABLED');local staleEnvironment=frame.callback
+ns.ReceiptView.Hide();staleEnvironment(frame,'LOADING_SCREEN_DISABLED')
+assert(not frame.visible and next(frame.events)==nil,'dismissal resurrected receipt')
 io.write('receipt recovery: passed')

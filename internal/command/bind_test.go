@@ -1,6 +1,8 @@
 package command
 
 import (
+	"github.com/follenfang/lycheedev/internal/desktop"
+	"image"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,10 +44,14 @@ func TestLiveBindArgumentsAndNoImplicitInitialization(t *testing.T) {
 	}
 }
 
-func TestCaptureAreaDefaultsToWholeSelectedWindow(t *testing.T) {
+func TestCaptureAreaDefaultsToAutomaticRegion(t *testing.T) {
 	for _, flags := range [][]string{{}, {"--capture-area", "window"}} {
 		opts, err := parseOptions(append([]string{"live", "bind"}, flags...))
-		if err != nil || !opts.region.Empty() {
+		want := image.Rectangle{}
+		if len(flags) > 0 {
+			want = desktop.WholeWindowCapture()
+		}
+		if err != nil || opts.region != want {
 			t.Fatalf("whole window: %+v %v", opts, err)
 		}
 	}

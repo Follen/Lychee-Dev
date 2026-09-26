@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
@@ -15,6 +16,17 @@ import (
 func Abandon(ctx context.Context, root, id string) (Outcome, error) {
 	record, err := abandonProbe(ctx, root, id)
 	return finishOutcome(ctx, root, record, err)
+}
+
+// Abandon is a user decision to stop recovery, never evidence that input ran or
+// that the runtime is clean. In particular, partial and unsent input must not
+// trap a disk owner forever. Prepared work still uses Cancel.
+func abandonableProbeStage(stage string) bool {
+	switch stage {
+	case "load_requested", "loaded", "dispatch_requested", "reported", "flush_requested", "persisted", "verified", "ack_requested":
+		return true
+	}
+	return false
 }
 
 func abandonProbe(ctx context.Context, root, id string) (record journal.WorkRecord, err error) {
@@ -32,25 +44,20 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	if err != nil {
 		return record, err
 	}
-	if record.Intent.Kind != "probe" {
+	if record.Intent.Kind != "probe" && record.Intent.Kind != "faults" {
 		return record, journal.ErrTransition
 	}
-	// A dispatched probe whose reported receipt was lost (hidden card, client
-	// restart) wedges the window: every other exit requires the evidence that
-	// no longer exists. Release is honest here only when the durable
-	// observation proves the run input was fully queued; the in-game effect
-	// stays unknown and a client reload clears the runtime queue copy.
-	//
-	// flush_requested is the same wedge one phase later: the host sent the
-	// correlation reload, the report never reached SavedVariables, so neither
-	// reconciliation nor acknowledgement can ever succeed. A stale reentry
-	// ticket in the client's SavedVariables proves only that a reload was
-	// requested, never that a report was stored, so it stays out of the proof.
-	if record.Stage != "dispatch_requested" && record.Stage != "flush_requested" &&
-		record.Stage != "verified" && record.Stage != "abandoning" && record.Stage != "abandoned" {
+	// Explicit abandonment retires host ownership without inferring execution.
+	if !abandonableProbeStage(record.Stage) && record.Stage != "abandoning" && record.Stage != "abandoned" {
 		return record, journal.ErrTransition
 	}
-	input, definition, err := probeDefinition(record)
+	var input ReportIntent
+	var definition bridge.ProbeDefinition
+	if record.Intent.Kind == "faults" {
+		input, _, err = faultInput(record)
+	} else {
+		input, definition, err = probeDefinition(record)
+	}
 	if err != nil {
 		return record, err
 	}
@@ -60,19 +67,16 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 		if err := json.Unmarshal(record.Observation, &observed); err != nil {
 			return err
 		}
-		if observed.AckInput != nil || observed.AcknowledgementID != "" {
+		if observed.AcknowledgementID != "" {
 			return journal.ErrTransition
 		}
-		if observed.Schema == "lycheedev.probe-load.v1" {
-			if record.Stage == "verified" || observed.BodyID != "" || observed.ReceiptID != "" ||
-				observed.DispatchInput == nil || observed.DispatchInput.MessagesQueued <= 0 ||
-				!observed.DispatchInput.SubmissionComplete {
+		if observed.Schema == "lycheedev.probe-load.v1" || record.Intent.Kind == "faults" && observed.Schema == "lycheedev.fault-observation.v1" {
+			if record.Stage == "verified" || record.Stage == "ack_requested" || observed.BodyID != "" || observed.ReceiptID != "" {
 				return journal.ErrTransition
 			}
 			return nil
 		}
-		if observed.Schema != "lycheedev.report-observation.v1" ||
-			record.Stage == "dispatch_requested" || record.Stage == "flush_requested" {
+		if observed.Schema != "lycheedev.report-observation.v1" {
 			return journal.ErrTransition
 		}
 		_, err := evidence.OpenArchive(store, metadata).ReadVerifiedReport(ctx, observed.BodyID, observed.ReceiptID, input.Code, input.Expected, id, record.Intent.Snapshot)
@@ -129,7 +133,10 @@ func abandonProbe(ctx context.Context, root, id string) (record journal.WorkReco
 	if _, err := run.Check(ctx); err != nil {
 		return record, err
 	}
-	revision, err := delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(input.Load.Installation), definition, true)
+	var revision delivery.QueueRevision
+	if record.Intent.Kind == "probe" {
+		revision, err = delivery.ChangeProbeQueue(ctx, delivery.AddonDirectory(input.Load.Installation), definition, true)
+	}
 	if err != nil {
 		return record, err
 	}

@@ -31,7 +31,10 @@ ns.FaultRunner={
         local session,reason=ns.Session.Current()
         if not session then return nil,reason end
         local receipt,body=ns.ReportStore.Read(requestId)
-        if not receipt then return nil,body end
+        if not receipt then
+            if body~="report_unavailable" then return nil,body end
+            return ns.ReportStore.Acknowledged(requestId,sequence)
+        end
         return ns.ReportStore.Acknowledge({schema="lycheedev.signal.v1",release=ns.Release,
             kind="reported",sessionNonce=session.sessionNonce,requestId=requestId,
             character=session.character,realm=session.realm,sequence=sequence,

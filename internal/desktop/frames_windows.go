@@ -104,13 +104,13 @@ func (n *frameNotice) drop() uintptr {
 	return uintptr(remaining)
 }
 
-// A zero rectangle selects the entire resolved window, not the desktop.
-// Native extent validation still enforces the decoder's 4096-pixel limit.
+// A zero rectangle selects a bounded top-left receipt region of the resolved
+// window. CaptureArea returns its exact coordinates after native extent validation.
 func CaptureFrames(parent context.Context, target WindowIdentity, roi image.Rectangle) (*FrameStream, error) {
 	if err := ConfirmWindow(parent, target); err != nil {
 		return nil, err
 	}
-	if roi != (image.Rectangle{}) && (roi.Empty() || roi.Min.X < 0 || roi.Min.Y < 0 || roi.Dx() > 4096 || roi.Dy() > 4096) {
+	if roi != (image.Rectangle{}) && roi != WholeWindowCapture() && (roi.Empty() || roi.Min.X < 0 || roi.Min.Y < 0 || roi.Dx() > 4096 || roi.Dy() > 4096) {
 		return nil, errors.New("desktop.invalid_capture_region")
 	}
 	if err := retainCaptureRuntime(); err != nil {
@@ -140,9 +140,12 @@ func CaptureFrames(parent context.Context, target WindowIdentity, roi image.Rect
 			return
 		}
 		defer capture.close()
-		if roi == (image.Rectangle{}) {
-			roi = image.Rect(0, 0, int(capture.extent.Width), int(capture.extent.Height))
+		roi, err = ResolveCaptureArea(roi, image.Pt(int(capture.extent.Width), int(capture.extent.Height)))
+		if err != nil {
+			ready <- err
+			return
 		}
+		s.area = roi
 		ready <- nil
 		var lastCopy time.Time
 		for {
@@ -247,11 +250,8 @@ func startFrameCapture(target WindowIdentity, roi image.Rectangle) (result *fram
 	if err != nil {
 		return nil, err
 	}
-	if roi.Max.X > int(extent.Width) || roi.Max.Y > int(extent.Height) {
-		return nil, errors.New("desktop.capture_region_outside_window")
-	}
-	if roi == (image.Rectangle{}) && (extent.Width <= 0 || extent.Height <= 0 || extent.Width > 4096 || extent.Height > 4096) {
-		return nil, errors.New("desktop.invalid_capture_region")
+	if _, err := ResolveCaptureArea(roi, image.Pt(int(extent.Width), int(extent.Height))); err != nil {
+		return nil, err
 	}
 	c.extent = extent
 	factory, err := activationFactory("Windows.Graphics.Capture.Direct3D11CaptureFramePool", &framePoolFactoryID)

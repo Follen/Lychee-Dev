@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
@@ -36,12 +37,14 @@ func (r ReloadRequest) Validate() error {
 }
 
 type standaloneReloadIntent struct {
-	Schema       string                   `json:"schema"`
-	Binding      string                   `json:"binding"`
-	Installation string                   `json:"installation"`
-	GUID         string                   `json:"guid"`
-	ReloadNonce  string                   `json:"reloadNonce"`
-	Expected     bridge.SignalExpectation `json:"expected"`
+	Schema        string                   `json:"schema"`
+	Binding       string                   `json:"binding"`
+	Installation  string                   `json:"installation"`
+	GUID          string                   `json:"guid"`
+	ReloadNonce   string                   `json:"reloadNonce"`
+	Expected      bridge.SignalExpectation `json:"expected"`
+	FromRelease   string                   `json:"fromRelease,omitempty"`
+	ManagedCommit string                   `json:"managedCommit,omitempty"`
 }
 
 type standaloneReloadObservation struct {
@@ -63,7 +66,18 @@ func ReloadClient(ctx context.Context, root string, request ReloadRequest) (Outc
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	session, snapshot, err := reconnectSession(ctx, root, request.Session, nativeIO())
+	bound, err := ReadWindowSession(ctx, root, request.Session)
+	if err != nil {
+		return Outcome{}, err
+	}
+	existing, err := existingReloadRequest(ctx, root, bound, request.Request)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if existing.OperationID != "" {
+		return Resume(ctx, root, existing.OperationID)
+	}
+	session, snapshot, err := reconnectForReload(ctx, root, request.Session, nativeIO())
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -97,10 +111,15 @@ func (s *WindowSession) prepareStandaloneReload(ctx context.Context, root, snaps
 		return journal.WorkRecord{}, err
 	}
 	ready := s.ready
+	commit, err := managedReloadUpgrade(ctx, s.target.Client.Directory, ready.Release)
+	if err != nil {
+		return journal.WorkRecord{}, err
+	}
 	input := standaloneReloadIntent{
 		Schema: "lycheedev.reload-intent.v1", Binding: binding.ID, Installation: s.target.Client.Directory,
 		GUID: ready.GUID, ReloadNonce: hex.EncodeToString(nonce[:]),
-		Expected: bridge.SignalExpectation{Kind: "ready", Release: ready.Release, SessionNonce: ready.SessionNonce,
+		FromRelease: ready.Release, ManagedCommit: commit,
+		Expected: bridge.SignalExpectation{Kind: "ready", Release: buildinfo.Version, SessionNonce: ready.SessionNonce,
 			RequestID: "RELOAD-" + hex.EncodeToString(nonce[:]), ReloadNonce: hex.EncodeToString(nonce[:]),
 			Character: ready.Character, Realm: ready.Realm, Product: ready.Product, Build: ready.Build,
 			AfterSequence: 0, RuntimeEpoch: ready.RuntimeEpoch + 1, RequireInputReady: true},
@@ -148,9 +167,10 @@ func (s *WindowSession) openStandaloneReload(ctx context.Context, root, id strin
 		return nil, err
 	}
 	op = &standaloneReloadOperation{session: s, root: store.Root(), id: id, metadata: metadata}
+	opened := op
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, op.close())
+			err = errors.Join(err, opened.close())
 		}
 	}()
 	record, err := journal.OpenBook(metadata).InspectWork(ctx, id)
@@ -204,7 +224,17 @@ func (p *standaloneReloadOperation) check(ctx context.Context) error {
 		return err
 	}
 	ready := p.session.ready
-	if ready.Release != input.Expected.Release || ready.SessionNonce != input.Expected.SessionNonce || ready.Character != input.Expected.Character || ready.Realm != input.Expected.Realm || ready.Product != input.Expected.Product || ready.Build != input.Expected.Build || ready.GUID != input.GUID || ready.RuntimeEpoch+1 != input.Expected.RuntimeEpoch && ready.RuntimeEpoch != input.Expected.RuntimeEpoch {
+	from := input.FromRelease
+	if from == "" {
+		from = input.Expected.Release
+	}
+	if from != input.Expected.Release {
+		commit, err := managedReloadUpgrade(ctx, input.Installation, from)
+		if err != nil || commit != input.ManagedCommit || input.Expected.Release != buildinfo.Version {
+			return errors.Join(err, ErrUpgradeChanged)
+		}
+	}
+	if (ready.Release != from && ready.Release != input.Expected.Release) || ready.SessionNonce != input.Expected.SessionNonce || ready.Character != input.Expected.Character || ready.Realm != input.Expected.Realm || ready.Product != input.Expected.Product || ready.Build != input.Expected.Build || ready.GUID != input.GUID || ready.RuntimeEpoch+1 != input.Expected.RuntimeEpoch && ready.RuntimeEpoch != input.Expected.RuntimeEpoch {
 		return errors.New("live.reload_session_mismatch")
 	}
 	return nil
@@ -305,6 +335,11 @@ func (p *standaloneReloadOperation) observe(ctx context.Context) (journal.WorkRe
 	}
 	wait, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	// Compact receipts may omit identity fields. Only a recorded managed
+	// transition can supply the new release; actor and nonce remain fixed.
+	baseline := sessionSignalIdentity(p.session.ready)
+	baseline.Release = input.Expected.Release
+	p.session.reader.SetIdentityBaseline(baseline)
 	signal, err := p.session.reader.WaitForSignal(wait, input.Expected)
 	if err != nil {
 		return record, err
@@ -420,6 +455,7 @@ func resumeStandaloneReload(ctx context.Context, root, id string, region image.R
 	ready := bound.Ready
 	if record.Stage == "reload_requested" {
 		ready.RuntimeEpoch = input.Expected.RuntimeEpoch
+		ready.Release = input.Expected.Release
 	}
 	session := newWindowSession(bound.Target, region, ready, bridge.ObserveSignals(frames), frames, confirm)
 	defer session.Close()

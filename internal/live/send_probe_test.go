@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/desktop"
+	"github.com/follenfang/lycheedev/internal/live/journal"
 	"hash/adler32"
 	"testing"
 	"time"
@@ -100,6 +101,16 @@ func TestProbeDispatchPersistsIntentBeforeInputAndNeverReplays(t *testing.T) {
 			}
 			if _, err := operation.dispatch(context.Background(), send); err == nil || calls != 1 {
 				t.Fatal("dispatch repeated")
+			}
+			if mode != "success" {
+				operation.Close()
+				out, err := Abandon(context.Background(), root, record.OperationID)
+				if err != nil || out.Cleanup != "abandoned" || out.Report.State != "unavailable" || out.Complete {
+					t.Fatalf("explicit interrupted-input recovery: %+v %v", out, err)
+				}
+				if _, occupied, err := journal.InspectWindowOwner(context.Background(), client+"/Interface/AddOns", record.Intent.Resource); err != nil || occupied {
+					t.Fatal("interrupted input retained owner", err)
+				}
 			}
 		})
 	}

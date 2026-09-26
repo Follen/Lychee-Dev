@@ -48,8 +48,9 @@ lycheedev live reset --pid <pid> --installation <client> --snapshot <pin> --form
 
 It sends one fixed nonce-correlated trigger that tombstones the current
 character's unacknowledged queue entries and reconnects through the normal
-bootstrap. Disk-owned windows are refused; a pending result without a receipt
-means the trigger never displayed — do not repeat it without new evidence.
+bootstrap. Disk-owned windows are refused. A pending result means no matching
+receipt was observed; the trigger may already have executed or displayed a
+receipt. Keep that outcome unknown and do not repeat it without new evidence.
 
 When the task already authorizes initial setup or game maintenance and a
 supported desktop tool is available, the agent can perform the needed UI action

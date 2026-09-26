@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/delivery"
@@ -44,13 +45,13 @@ func TestAtomicProbeOfflineRecovery(t *testing.T) {
 }
 
 func TestAbandonVerifiedProbeRetainsReportAndReleasesWindow(t *testing.T) {
-	for _, mode := range []string{"normal", "intent-crash", "queue-crash", "conflict", "other-entry", "invalid-report", "ack-submitted"} {
+	for _, mode := range []string{"normal", "intent-crash", "queue-crash", "conflict", "other-entry", "invalid-report"} {
 		t.Run(mode, func(t *testing.T) { testRunProbeLifecycle(t, "abandon-"+mode) })
 	}
 }
 
-func TestAtomicProbeAckRestartNeverReplaysInput(t *testing.T) {
-	for _, mode := range []string{"before-input", "after-input"} {
+func TestAtomicProbeAckRestartRecoversWithoutReexecutingProbe(t *testing.T) {
+	for _, mode := range []string{"before-input", "after-input", "lost-receipt", "lost-permanent", "partial-input"} {
 		t.Run(mode, func(t *testing.T) { testRunProbeLifecycle(t, "ack-restart-"+mode) })
 	}
 }
@@ -66,7 +67,7 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 	unsafeAck := strings.HasPrefix(mode, "unsafe-ack-")
 	ackRestart := strings.HasPrefix(mode, "ack-restart-")
 	abandon := strings.HasPrefix(mode, "abandon-")
-	atomic := mode == "atomic" || mode == "lost-reentry" || mode == "offline-recovery" || abandon || unsafeAck || ackRestart
+	atomic := mode == "atomic" || mode == "finish" || mode == "lost-reentry" || mode == "offline-recovery" || abandon || unsafeAck || ackRestart
 	interrupted := errors.New("fixture: interrupted after flush submission")
 	ctx := context.Background()
 	root, client, _, pin, original, input := unpreparedProbeFixture(t, 9)
@@ -267,8 +268,8 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 			return desktop.InputReceipt{}, interrupted
 		}
 		commands = append(commands, command)
-		if step == 4 && mode == "ack-restart-after-input" {
-			return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: true}, interrupted
+		if step == 4 && ackRestart && mode != "ack-restart-before-input" {
+			return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: mode != "ack-restart-partial-input"}, interrupted
 		}
 
 		switch step {
@@ -294,7 +295,7 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 				frames.signals = append(frames.signals, reloadedSignal())
 			}
 			if mode == "offline-recovery" {
-				return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: true}, interrupted
+				return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: mode != "ack-restart-partial-input"}, interrupted
 			}
 		case 4:
 			frames.signals = append(frames.signals, acknowledgedSignal())
@@ -548,9 +549,32 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 						}
 						return frames, nil
 					}, func(context.Context, ClientWindow) error { return nil },
-					func(context.Context, desktop.WindowIdentity, func(context.Context) (string, error), func(context.Context) error) (desktop.InputReceipt, error) {
-						t.Fatal("ACK restart replayed input")
-						return desktop.InputReceipt{}, nil
+					func(ctx context.Context, target desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+						if target != original.target.Window {
+							t.Fatal("ACK retry retargeted window")
+						}
+						if mode == "ack-restart-after-input" {
+							t.Fatal("visible ACK was unnecessarily resent")
+						}
+						if mode != "ack-restart-lost-permanent" {
+							frames.signals = append(frames.signals, reloadedSignal())
+						}
+						if err := guard(ctx); err != nil {
+							return desktop.InputReceipt{}, err
+						}
+						command, err := prepare(ctx)
+						if err != nil {
+							return desktop.InputReceipt{}, err
+						}
+						if command != fmt.Sprintf("/dev bridge ack %s %d", definition.RequestID, reportedSignal().Sequence) {
+							t.Fatal("retry changed operation or executed probe", command)
+						}
+						if err := guard(ctx); err != nil {
+							return desktop.InputReceipt{}, err
+						}
+						commands = append(commands, command)
+						frames.signals = append(frames.signals, acknowledgedSignal())
+						return desktop.InputReceipt{MessagesQueued: len(command) + 1, SubmissionComplete: true}, nil
 					})
 			}
 		}
@@ -565,12 +589,27 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 		t.Fatalf("run lost its recovery identity: %+v", outcome)
 	}
 	if ackRestart {
-		if mode == "ack-restart-before-input" {
-			if runErr == nil || len(commands) != 4 || record.Stage != "ack_requested" || outcome.Report.State != "verified" || outcome.Complete || outcome.Cleanup != "pending" || len(operationQueue(t, client)) != 1 {
-				t.Fatalf("unconfirmed ACK was replayed or discarded: %+v %v", outcome, runErr)
+		if mode == "ack-restart-lost-permanent" {
+			if runErr == nil || outcome.Report.State != "verified" || outcome.Cleanup != "pending" {
+				t.Fatalf("lost ACK claimed success: %+v %v", outcome, runErr)
 			}
-		} else if runErr != nil || outcomeErr != nil || len(commands) != 5 || !outcome.Complete || outcome.Report.State != "verified" || outcome.Cleanup != "complete" || len(operationQueue(t, client)) != 0 {
-			t.Fatalf("ACK receipt recovery failed: %+v %v", outcome, runErr)
+			for _, recover := range []func(context.Context, string, string) (Outcome, error){Abandon, Resume, Abandon} {
+				abandoned, err := recover(ctx, root, record.OperationID)
+				if err != nil || abandoned.Report.State != "verified" || abandoned.Cleanup != "abandoned" || abandoned.Complete {
+					t.Fatalf("lost ACK recovery: %+v %v", abandoned, err)
+				}
+			}
+			if _, occupied, err := journal.InspectWindowOwner(ctx, filepath.Join(client, "Interface", "AddOns"), record.Intent.Resource); err != nil || occupied {
+				t.Fatal("abandon retained owner", err)
+			}
+		} else {
+			wantCommands := 6
+			if mode == "ack-restart-before-input" || mode == "ack-restart-after-input" {
+				wantCommands = 5
+			}
+			if runErr != nil || outcomeErr != nil || len(commands) != wantCommands || !outcome.Complete || outcome.Report.State != "verified" || outcome.Cleanup != "complete" || len(operationQueue(t, client)) != 0 {
+				t.Fatalf("ACK recovery failed: commands=%v %+v %v", commands, outcome, runErr)
+			}
 		}
 		return
 	}
@@ -583,12 +622,12 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 		}
 		return
 	}
-	if len(commands) != map[string]int{"offline-recovery": 5, "atomic": 5, "lost-reentry": 5, "complete": 6, "report-not-persisted": 4, "removal-not-persisted": 6}[mode] {
+	if len(commands) != map[string]int{"offline-recovery": 5, "atomic": 5, "finish": 5, "lost-reentry": 5, "complete": 6, "report-not-persisted": 4, "removal-not-persisted": 6}[mode] {
 		t.Fatalf("unexpected submitted commands: %v pending-signals=%d record=%+v run=%v finish=%v outcome=%+v", commands, len(frames.signals), record, runErr, outcomeErr, outcome)
 	}
 
 	switch mode {
-	case "complete", "atomic", "lost-reentry", "offline-recovery":
+	case "complete", "atomic", "finish", "lost-reentry", "offline-recovery":
 		if runErr != nil || outcomeErr != nil || outcome.Report.State != "verified" || !outcome.Complete || outcome.Cleanup != "complete" || outcome.Status != "completed" || string(outcome.Report.Content) != body {
 			t.Fatalf("complete outcome did not retain verified report: %+v run=%v finish=%v", outcome, runErr, outcomeErr)
 		}
@@ -599,6 +638,35 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 	case "removal-not-persisted":
 		if runErr == nil || outcomeErr == nil || outcome.Report.State != "verified" || string(outcome.Report.Content) != body || outcome.Complete || outcome.Cleanup != "pending" {
 			t.Fatalf("verified report was hidden by cleanup failure: %+v run=%v finish=%v", outcome, runErr, outcomeErr)
+		}
+	}
+	if mode == "finish" {
+		savedInput, inputErr := reportInput(record)
+		if inputErr != nil {
+			t.Fatal(inputErr)
+		}
+		for attempt := 0; attempt < 3; attempt++ {
+			finished, err := finishProbe(ctx, root, record.OperationID, AcknowledgeVerified, func(_ context.Context, gotRoot, binding string) (HideReceiptResult, error) {
+				if attempt == 2 {
+					t.Fatal("completed finish called hide again")
+				}
+				if gotRoot != root || binding != savedInput.Binding {
+					t.Fatal("finish changed session")
+				}
+				if attempt == 0 {
+					return HideReceiptResult{}, ErrReceiptHidePending
+				}
+				return HideReceiptResult{Cleared: true, Session: binding, ObservedAt: time.Now()}, nil
+			})
+			if finished.OperationID != record.OperationID || finished.Report.State != "verified" || string(finished.Report.Content) != body || finished.Cleanup != "complete" || finished.Complete != (attempt >= 1) {
+				t.Fatalf("finish changed verified result: %+v", finished)
+			}
+			if attempt == 0 && !errors.Is(err, ErrReceiptHidePending) || attempt >= 1 && err != nil {
+				t.Fatal(err)
+			}
+			if len(commands) != 5 {
+				t.Fatal("finish replayed ACK", commands)
+			}
 		}
 	}
 }
@@ -621,4 +689,8 @@ func runLifecycleWorkRecord(ctx context.Context, root string) (journal.WorkRecor
 		}
 		return record, nil
 	})
+}
+
+func TestAtomicProbeFinishRetriesDisplayWithoutAckReplay(t *testing.T) {
+	testRunProbeLifecycle(t, "finish")
 }

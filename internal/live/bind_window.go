@@ -27,13 +27,7 @@ func (r WindowBindingRequest) Validate() error {
 			return errors.New("live.invalid_binding_identity")
 		}
 	}
-	if r.Region == (image.Rectangle{}) {
-		return nil
-	}
-	if r.Region.Empty() || r.Region.Min.X < 0 || r.Region.Min.Y < 0 || r.Region.Dx() > 4096 || r.Region.Dy() > 4096 || r.Region.Max.X > 16384 || r.Region.Max.Y > 16384 {
-		return errors.New("live.invalid_binding_region")
-	}
-	return nil
+	return validateCaptureArea(r.Region)
 }
 
 func bindingLabel(label string) bool {

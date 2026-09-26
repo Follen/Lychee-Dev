@@ -236,6 +236,9 @@ func ArchiveInstalledOperationReport(ctx context.Context, root, operationID stri
 // It deliberately rejects ack_requested retries: an interrupted external effect
 // must first be reconciled with fresh game evidence, never blindly replayed.
 func RequestReportAcknowledgement(ctx context.Context, root, operationID string) (bridge.VerifiedReport, error) {
+	return requestReportAcknowledgement(ctx, root, operationID, false)
+}
+func requestReportAcknowledgement(ctx context.Context, root, operationID string, retry bool) (bridge.VerifiedReport, error) {
 	return withOperation(ctx, root, operationID, func(store *vault.Store, metadata *vault.Metadata) (bridge.VerifiedReport, error) {
 		var zero bridge.VerifiedReport
 		book := journal.OpenBook(metadata)
@@ -243,7 +246,7 @@ func RequestReportAcknowledgement(ctx context.Context, root, operationID string)
 		if err != nil {
 			return zero, err
 		}
-		if record.Stage != "verified" || record.Status != "running" {
+		if (record.Stage != "verified" && !(retry && record.Stage == "ack_requested")) || (record.Status != "running" && record.Status != "unresolved") {
 			return zero, journal.ErrTransition
 		}
 		input, err := reportInput(record)

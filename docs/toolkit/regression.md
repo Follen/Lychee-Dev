@@ -3,18 +3,24 @@
 状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-24（本次修订新增 wowdoc/wowdata 逐业务 parity 台账说明；此前已新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
 当前执行证据见 [implementation-status.md](implementation-status.md)，不以本清单充当测试结果。
 
-适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.0.2` / `v2.0.2` 发布合同：[release-2.0.2.md](release-2.0.2.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
+适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.0.6` / `v2.0.6` 发布合同：[release-2.0.6.md](release-2.0.6.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
 
 ## 1. 验证原则与结果状态
 
-新增恢复验收：`live abandon` 允许 verified 且未提交 ACK 的 probe，或
-dispatch_requested/flush_requested 且完整派发已持久化的 probe。
-覆盖运行中 writer 拒绝、不具备完整派发证据的未验证阶段拒绝、损坏归档/ACK 痕迹拒绝、
+新增恢复验收：`live abandon` 允许 probe/bugs 从 load_requested 到 ack_requested
+的未确认工作，包括零、部分、未知输入；prepared 用 cancel，确认 ACK 后正常 finalize。
+覆盖运行中 writer 拒绝、损坏归档/已确认 ACK 拒绝、
 队列内容冲突保留所有权、保留其他队列项、意图提交后/队列移除后崩溃恢复、
 重复调用幂等以及终态禁止 run/ack。必须断言无游戏输入、SavedVariables 不变、
 原报告仍 verified（没有报告则 unavailable）、cleanup=abandoned 且 complete=false。
 无报告分支须覆盖派发证据保留、abandoning 恢复、队列已移除后的恢复以及终态
 abandon/resume 幂等；此项不替代真实 ACK 验收。
+
+2.0.6 桥接回归还须覆盖：受管跨版本 reload、旧 session 升级前后重连、同 request
+公开入口重复调用不重发；ACK 回执丢失/部分 ACK 的同报告幂等恢复及永久丢失出口；
+战斗/loading/聊天交错、角色变化、显式隐藏和过期 callback；实际 Lua 编码器的
+1.28/1.42/1.6/1.8/2/2.35/3 物理像素矩阵；5K 默认 ROI、显式窗口预算与实际区域
+持久化；真实完整生命周期 finish 清屏 pending→成功→再次调用零游戏输入。
 
 测试通过新模块接口和真实 CLI 进程观察行为，不断言旧内部函数调用顺序。纯解析直接测试；文件、SQLite 与 Git 用临时真实环境；外部 CDN、Hotfix 和游戏信号用可控 adapter。最后另做真实网络和真实游戏验证。
 

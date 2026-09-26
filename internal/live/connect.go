@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/follenfang/lycheedev/internal/desktop"
 	"image"
 	"strings"
 	"time"
@@ -82,7 +83,7 @@ func (r ConnectRequest) Validate() error {
 }
 
 func validateCaptureArea(region image.Rectangle) error {
-	if region == (image.Rectangle{}) {
+	if region == (image.Rectangle{}) || region == desktop.WholeWindowCapture() {
 		return nil
 	}
 	if region.Empty() || region.Min.X < 0 || region.Min.Y < 0 || region.Dx() > 4096 || region.Dy() > 4096 || region.Max.X > 16384 || region.Max.Y > 16384 {
@@ -167,6 +168,10 @@ func selectCandidate(candidates []Candidate, request ConnectRequest) (Candidate,
 // performs the single opt-in and archives the ready handshake through the
 // existing session machinery.
 func connectCandidate(ctx context.Context, root, snapshot string, region image.Rectangle, chosen Candidate, io *liveIO) (Connection, error) {
+	return connectCandidateRelease(ctx, root, snapshot, region, chosen, buildinfo.Version, io)
+}
+
+func connectCandidateRelease(ctx context.Context, root, snapshot string, region image.Rectangle, chosen Candidate, release string, io *liveIO) (Connection, error) {
 	target := ClientWindow{Client: chosen.Client, Window: chosen.Window}
 	// Re-verify before any effect: never connect to a closed or reused handle.
 	if err := io.confirm(ctx, target); err != nil {
@@ -177,7 +182,7 @@ func connectCandidate(ctx context.Context, root, snapshot string, region image.R
 	if occupied {
 		return Connection{}, &journal.WindowOccupied{Owner: owner, Foreign: foreign}
 	}
-	observation, err := probeIdentity(ctx, target, region, true, io)
+	observation, err := probeIdentityRelease(ctx, target, region, true, release, io)
 	if err != nil {
 		return Connection{}, identityUnreadable(err)
 	}
@@ -196,13 +201,12 @@ func connectCandidate(ctx context.Context, root, snapshot string, region image.R
 		return Connection{}, err
 	}
 	defer frames.Close()
-	expected := bridge.SignalExpectation{Kind: "ready", Release: buildinfo.Version, Character: identity.Character, Realm: identity.Realm, Product: target.Client.Product, Build: target.Client.FullBuild, RequireInputReady: true}
+	expected := bridge.SignalExpectation{Kind: "ready", Release: release, Character: identity.Character, Realm: identity.Realm, Product: target.Client.Product, Build: target.Client.FullBuild, RequireInputReady: true}
 	session, err := observeWindowSessionAt(ctx, target, region, expected, sessionSignalIdentity(identity), frames, io.confirm)
 	if err != nil {
 		return Connection{}, err
 	}
 	defer session.Close()
-	session.region = region
 	if session.Ready().GUID != identity.GUID {
 		return Connection{}, fmt.Errorf("%w: ready handshake actor changed", ErrActorChanged)
 	}

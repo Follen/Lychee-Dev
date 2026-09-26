@@ -1,6 +1,6 @@
 local root, queue = assert(arg[1]), assert(arg[2])
 local receiptPath, sequence = assert(arg[3]), assert(arg[4])
-local ns = {Release="2.0.5",Startup={ready=true,identity={product="retail",build="12.1.0.12345"}}}
+local ns = {Release="2.0.6",Startup={ready=true,identity={product="retail",build="12.1.0.12345"}}}
 ns.Platform = {ObserveActor=function() return {character="Paladin",realm="Realm",guid="Player-1-123"} end}
 issecretvalue = function() return false end
 CreateFrame = function() error("unexpected frame") end
@@ -51,7 +51,9 @@ assert(ns.ReportStore.Read("OP-target") == nil)
 assert(ns.ProbeQueue.Busy() == false, "ACK left the runtime queue busy")
 assert(ns.ProbeQueue.Load("OP-target") == nil, "ACK allowed source to load again")
 SlashCmdList.LYCHEETOOLKIT("bridge ack OP-target "..sequence)
-assert(displayed == nil and reply == "Lychee Dev: report_unavailable")
+assert(displayed and displayed ~= acknowledged and reply == "Lychee Dev: "..displayed)
+assert(ns.Controls.Handle("bridge ack OP-target "..(tonumber(sequence)+1)) == nil)
+assert(displayed == nil, "changed sequence redisplayed ACK")
 assert(queueExecuted == 1, "acknowledgement re-executed code")
 assert(LycheeToolkitDB.reports["OP-foreign"] == foreign)
 -- Serialize the resulting live table as a fixture, not as evidence of a real
