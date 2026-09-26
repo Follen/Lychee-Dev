@@ -106,6 +106,10 @@ func FillSignalIdentity(signal Signal, baseline SignalIdentity) Signal {
 		signal.Build = baseline.Build
 	}
 	if signal.SessionNonce == "" {
+		// The identity marker establishes the session; it never echoes one, and
+		// the host has no nonce to lend it. Filling an empty marker from an empty
+		// baseline is harmless, but filling it for a session-shaped receipt is
+		// what lets the compact wire form work, so both go through the same rule.
 		signal.SessionNonce = baseline.SessionNonce
 	}
 	return signal
@@ -196,6 +200,14 @@ func ParseSignal(data []byte) (Signal, error) {
 func parseSessionSignal(signal Signal) (Signal, error) {
 	if signal.Sequence == 0 || signal.Sequence > 9007199254740991 {
 		return signal, errors.New("bridge.invalid_signal")
+	}
+	// A ready receipt establishes the session, so it must name one: it is the
+	// only receipt the host sees before it can fill anything, and an omitted
+	// nonce there would leave it correlating nothing. Every later receipt echoes
+	// that session and may omit the nonce, which is what makes the compact wire
+	// form work.
+	if signal.Kind == "ready" && signal.SessionNonce == "" {
+		return signal, errors.New("bridge.signal_missing_session")
 	}
 	if err := checkOptionalLabel(signal.SessionNonce); err != nil {
 		return signal, err

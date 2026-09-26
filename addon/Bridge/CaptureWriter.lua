@@ -140,14 +140,16 @@ local function digestBytes(text)
 end
 
 -- Every signal is drawn into a QR symbol, so its size decides whether the host
--- can sample the module grid at all. A retained session already proved the
--- actor, the build and the session nonce, so repeating them in each receipt only
--- spends modules: the host fills them back from its baseline and still refuses a
--- value that contradicts it. The session nonce is the largest single saving,
--- because every receipt of one session repeats the same 32 hex characters.
+-- can sample the module grid at all. A retained session already proved the actor
+-- and the build, so repeating them in each receipt only spends modules: the host
+-- fills them back from its baseline and still refuses a value that contradicts
+-- it. Identity, reset and cleared markers are the exception, because they
+-- establish or re-establish the actor.
 --
--- Identity, reset and cleared markers are the exception: they establish or
--- re-establish the actor, so they keep character and realm.
+-- The session nonce is different and must NOT be dropped blindly: the ready and
+-- loaded receipts are what establish it, so the host has nothing to fill from
+-- until one of them has been read. Only the receipts that echo an
+-- already-established session may omit it.
 local WIRE_FIELDS = {
     schema = true, kind = true, sessionNonce = true, requestId = true,
     release = true, product = true, build = true,
@@ -158,11 +160,10 @@ local WIRE_FIELDS = {
 }
 local WIRE_MARKER_FIELDS = { character = true, realm = true, guid = true }
 local WIRE_MARKERS = { identity = true, reset = true, cleared = true }
-
--- Session-shaped receipts drop the session nonce as well, because the host
--- bound that nonce and compares it before accepting the receipt. Identity,
--- reset and cleared markers are session-free and keep it only if they carry one.
-local WIRE_DROPPED = { sessionNonce = true }
+-- Kinds whose session nonce is redundant because the session provably exists on
+-- the host already: they answer a request the host itself created for that
+-- nonce, and the host compares the nonce it filled in.
+local WIRE_ECHOES_SESSION = { reported = true, acknowledged = true, cancelled = true }
 
 -- wireDocument projects a signal onto its transmitted form. Fields outside the
 -- profile are dropped rather than rejected: the projection is what the host
@@ -174,10 +175,11 @@ local function wireDocument(value)
         return value
     end
     local marker = WIRE_MARKERS[value.kind] == true
+    local echoes = WIRE_ECHOES_SESSION[value.kind] == true
     local filtered = {}
     for key, child in pairs(value) do
         local carried = WIRE_FIELDS[key] or (marker and WIRE_MARKER_FIELDS[key])
-        if carried and not (WIRE_DROPPED[key] and not marker) then
+        if carried and not (key == "sessionNonce" and echoes) then
             filtered[key] = child
         end
     end
