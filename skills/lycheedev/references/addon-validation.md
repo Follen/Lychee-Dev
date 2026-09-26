@@ -19,8 +19,32 @@ For a fixed multi-client check, provide a matrix config:
 lycheedev source validate --matrix <config.json> --format json
 ```
 
-Otherwise validate one pinned closure as above. Check `describe` for the
-accepted config shape and options. Keep each client result separate, including
+The minimum config has one target; add a target for each selected client:
+
+```json
+{
+  "path": "./addon",
+  "targets": [
+    {
+      "id": "classic",
+      "toc": "Example.toc",
+      "product": "classic",
+      "ref": "<40-character-source-commit>"
+    }
+  ]
+}
+```
+
+Replace the example path, TOC and commit with the actual inputs. `path` resolves
+relative to the config file; `toc` is relative to that addon root. Each target
+requires a unique `id`, `toc`, `product` and `ref`; the optional source field defaults to
+`wow-ui-source`. Use the exact 40-character commit for a fixed comparison, or an
+explicit full `refs/tags/...` / `refs/heads/...` ref whose resolved commit is
+retained. A branch ref selects its current commit at preparation time, not a
+historical version. Unknown fields are rejected.
+
+Otherwise validate one pinned closure as above. Check `describe` for command
+options; it does not provide the matrix JSON schema. Keep each client result separate, including
 interface/build identity, missing files, parser issues, unresolved dynamic
 edges, and representative locations. Do not validate a recursive directory
 scan when the question is about the release TOC.
@@ -41,7 +65,7 @@ proof of in-game loading, taint safety, combat behavior, performance, or
 visual correctness. Those require the appropriate live or visual evidence and
 must be reported as untested when absent.
 
-When a client directory is reused by a test track, identify the actual product
-from its own metadata and build before using the directory name as a fallback.
+Identify a client from its `.flavor.info` and `version.txt` metadata and build,
+never from its directory name. Missing or conflicting identity stays unresolved.
 Do not add unsupported client branches or hand-maintain a second product/build
 catalog in this workflow.

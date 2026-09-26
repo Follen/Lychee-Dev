@@ -65,7 +65,7 @@ assert(recoveryExecutions==nil and draws[#draws]:find('"kind":"loaded"',1,true))
 local report=assert(ns.Controls.Handle('bridge run Recovery-A'))
 assert(recoveryExecutions==1)
 cycle('reported')
-assert(recoveryExecutions==1 and draws[#draws-1]==report,'restoration executed probe or changed report')
+assert(recoveryExecutions==1 and draws[#draws]:find('"receipt":'..report,1,true),'restoration executed probe or changed report')
 -- The CLI opens chat itself; a rejected command must not permanently consume
 -- the last readiness. No combat or player activity is involved.
 gain();assert(ns.Controls.Handle('bridge reload Missing-Request')==nil);lose()
@@ -120,7 +120,7 @@ local asyncCode='local api=...;assert(api:Async(5));finishRecovery=function() re
 assert(ns.ProbeRunner.Load('Recovery-Async',asyncCode,reloadNonce))
 assert(ns.Controls.Handle('bridge run Recovery-Async'))
 gain();local asyncReport=assert(finishRecovery());lose()
-assert(frame.visible and draws[#draws-1]==asyncReport,'async completion restored obsolete running receipt')
+assert(frame.visible and draws[#draws]:find('"receipt":'..asyncReport,1,true),'async completion restored obsolete running receipt')
 cycle('async reported')
-assert(draws[#draws-1]==asyncReport)
+assert(draws[#draws]:find('"receipt":'..asyncReport,1,true))
 io.write('receipt recovery: passed')

@@ -39,6 +39,11 @@ func signalFrame(t *testing.T, s Signal, ticks int64) *desktop.CapturedFrame {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return opticalFrame(t, data, ticks)
+}
+
+func opticalFrame(t *testing.T, data []byte, ticks int64) *desktop.CapturedFrame {
+	t.Helper()
 	bitmap, err := qrcode.NewQRCodeWriter().Encode(string(data), gozxing.BarcodeFormat_QR_CODE, 600, 600, map[gozxing.EncodeHintType]interface{}{gozxing.EncodeHintType_CHARACTER_SET: "UTF-8"})
 	if err != nil {
 		t.Fatal(err)

@@ -87,6 +87,22 @@ func TestResolveLocalTargetFourClients(t *testing.T) {
 	}
 }
 
+func TestResolveLocalTargetForeverReusableDataSlot(t *testing.T) {
+	fixture, client, store, _ := targetFixture(t, "wow_classic_beta", "1.60.1.70009", "_classic_beta_")
+	result, err := records.ResolveLocalTarget(context.Background(), store.Root(), records.LocalTargetRequest{
+		Installation: client, Region: "us", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Client.ProductCode != "wow_forever" || result.Pin.Data.Product != "forever" || result.Pin.Data.BuildConfig != fixture.buildKey {
+		t.Fatalf("wrong identity: %+v", result)
+	}
+	if _, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wow_classic", fixture.fullBuild); !errors.Is(err, records.ErrBuildUnavailable) {
+		t.Fatalf("borrowed another product: %v", err)
+	}
+}
+
 func TestResolveLocalTargetExtendsSourceWithoutChangingParent(t *testing.T) {
 	_, client, store, metadata := targetFixture(t, "wow", "12.1.0.69875", "_retail_")
 	ctx := context.Background()

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://follenfang.github.io/lycheedev/protocol/receipt.v1.schema.json",
+  "title": "lycheedev.receipt.v1",
+  "description": "Optical-only envelope (maximum 4096 UTF-8 bytes). The immutable receipt and a fresh readiness observation share one QR. ready is [sessionNonce, sequence, runtimeEpoch]; its sequence must exceed receipt.sequence and any explicit receipt nonce must agree. Cross-field rules are enforced by ParseOpticalSignals.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "receipt", "ready"],
+  "properties": {
+    "schema": { "const": "lycheedev.receipt.v1" },
+    "receipt": {
+      "allOf": [
+        { "$ref": "signal.v1.schema.json" },
+        { "properties": { "kind": { "enum": ["loaded", "reported", "acknowledged", "cancelled"] } } }
+      ]
+    },
+    "ready": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+      ]
+    }
+  }
+}

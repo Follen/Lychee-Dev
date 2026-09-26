@@ -10,8 +10,10 @@ Recover a supplied operation ID before starting another action. Otherwise reuse
 a saved session with `live connect --session <id>`. With a fixed snapshot and
 known target, call `live connect` directly with its constraints; it already
 discovers candidates. Use `lycheedev live instances --format json` when the
-target needs discovery, scoped with `--installation` or `--pid` if the user
-limited the task to one client. A unique eligible client needs no question.
+target needs discovery, scoped with `--installation` when the user limited the
+installation. For a PID-scoped task, use `live connect --pid <pid>` with the
+fixed snapshot and any character constraints; `live instances` has no PID filter.
+A unique eligible client needs no question.
 If several candidates remain, present product/build,
 character and realm, adding the installation path only when needed, then retry
 with an exact filter:

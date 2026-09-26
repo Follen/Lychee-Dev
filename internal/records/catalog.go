@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/follenfang/lycheedev/internal/selection"
 )
 
 var (
@@ -105,6 +107,14 @@ func ResolveLocalBuild(ctx context.Context, root, product, fullBuild string) (Bu
 		found = true
 	}
 	if !found {
+		// A verified client flavor can use a different CASC catalog slot.
+		// Keep the raw row/config identity intact and only permit the explicit
+		// baseline mapping for its exact build series, never a folder guess.
+		for _, baseline := range selection.VerifiedClientBaselines() {
+			if baseline.ProductCode == product && baseline.DataSlot != "" && baseline.DataSlot != product && strings.HasPrefix(fullBuild, baseline.BuildSeries+".") {
+				return ResolveLocalBuild(ctx, root, baseline.DataSlot, fullBuild)
+			}
+		}
 		return result, ErrBuildUnavailable
 	}
 	sum := sha256.Sum256(raw)

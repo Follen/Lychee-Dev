@@ -81,13 +81,20 @@ end
 local first = capture()
 assert(ns.ReceiptView.Show("small"))
 local second = capture()
-assert(ns.ReceiptView.Show(payload, "next-ready"))
+local pairReceipt = assert(ns.CaptureWriter.EncodeSignal({schema="lycheedev.signal.v1",kind="reported",
+ release="2.0.2",product="classic",build="5.5.4.69934",requestId="R-symbol",sequence=8,
+ inputReady=false,reportBytes=13,reportAdler32="209c046d"}))
+local readyBytes, _, readySignal = ns.CaptureWriter.EncodeSignal({schema="lycheedev.signal.v1",kind="ready",
+ release="2.0.2",product="classic",build="5.5.4.69934",requestId="",sequence=9,
+ sessionNonce=string.rep("a",32),runtimeEpoch=2,inputReady=true})
+local pairBytes = assert(ns.CaptureWriter.EncodeReceiptPair(pairReceipt,readySignal))
+assert(ns.ReceiptView.Show(pairReceipt, readyBytes, nil, readySignal))
 local paired = capture()
 allocated = #frame.textures
 local registrations = registered
-assert(ns.ReceiptView.Show(payload, "next-ready") and #frame.textures == allocated and registered == registrations)
+assert(ns.ReceiptView.Show(pairReceipt, readyBytes, nil, readySignal) and #frame.textures == allocated and registered == registrations)
 assert(ns.ReceiptView.Show(payload, secret) == nil and not frame.visible)
-assert(ns.ReceiptView.Show(payload, "next-ready"))
+assert(ns.ReceiptView.Show(pairReceipt, readyBytes, nil, readySignal))
 local _, staleFocus = next(callbacks)
 local before = cancellations
 staleFocus()
@@ -115,4 +122,4 @@ assert(ns.ReceiptView.Show(payload) == nil and not frame.visible)
 scale = 1
 session = nil
 assert(ns.ReceiptView.Show(payload) == nil and next(frame.events) == nil)
-io.write(assert(ns.CaptureWriter.Encode({first=first, second=second, paired=paired})))
+io.write(assert(ns.CaptureWriter.Encode({first=first, second=second, paired=paired,pairBytes=pairBytes})))

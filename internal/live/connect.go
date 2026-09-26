@@ -197,7 +197,7 @@ func connectCandidate(ctx context.Context, root, snapshot string, region image.R
 	}
 	defer frames.Close()
 	expected := bridge.SignalExpectation{Kind: "ready", Release: buildinfo.Version, Character: identity.Character, Realm: identity.Realm, Product: target.Client.Product, Build: target.Client.FullBuild, RequireInputReady: true}
-	session, err := observeWindowSession(ctx, target, expected, frames, io.confirm)
+	session, err := observeWindowSessionAt(ctx, target, region, expected, sessionSignalIdentity(identity), frames, io.confirm)
 	if err != nil {
 		return Connection{}, err
 	}

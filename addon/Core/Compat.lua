@@ -25,8 +25,8 @@ ns.Compat = {
         end
         local succeeded, foci = pcall(GetMouseFoci)
         if not succeeded or (issecretvalue and issecretvalue(foci))
-            or type(foci) ~= "table" or not foci[1]
-            or (issecretvalue and issecretvalue(foci[1])) then
+            or type(foci) ~= "table"
+            or (issecretvalue and issecretvalue(foci[1])) or not foci[1] then
             return nil
         end
         return foci[1]

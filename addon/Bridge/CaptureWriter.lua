@@ -159,7 +159,10 @@ local WIRE_FIELDS = {
     reportBytes = true, reportAdler32 = true,
 }
 local WIRE_MARKER_FIELDS = { character = true, realm = true, guid = true }
-local WIRE_MARKERS = { identity = true, reset = true, cleared = true }
+-- A standalone ready can establish a read-only live bind without a preceding
+-- identity probe. Keep its actor on the wire; paired readiness is compacted
+-- only after the host already owns a request-scoped session.
+local WIRE_MARKERS = { identity = true, reset = true, cleared = true, ready = true }
 -- Kinds whose session nonce is redundant because the session provably exists on
 -- the host already: they answer a request the host itself created for that
 -- nonce, and the host compares the nonce it filled in.
@@ -170,14 +173,18 @@ local WIRE_ECHOES_SESSION = { reported = true, acknowledged = true, cancelled = 
 -- compares against the archived receipt, so an unlisted field simply stops
 -- matching and never lets a caller believe a value was carried when it was not.
 local function wireDocument(value)
-    if type(value) ~= "table" or getmetatable(value) ~= nil
-        or value.schema ~= "lycheedev.signal.v1" then
+    rejectRestricted(value)
+    if type(value) ~= "table" or getmetatable(value) ~= nil then
         return value
     end
+    rejectRestricted(value.schema)
+    if value.schema ~= "lycheedev.signal.v1" then return value end
+    rejectRestricted(value.kind)
     local marker = WIRE_MARKERS[value.kind] == true
     local echoes = WIRE_ECHOES_SESSION[value.kind] == true
     local filtered = {}
     for key, child in pairs(value) do
+        rejectRestricted(key)
         local carried = WIRE_FIELDS[key] or (marker and WIRE_MARKER_FIELDS[key])
         if carried and not (key == "sessionNonce" and echoes) then
             filtered[key] = child
@@ -214,7 +221,31 @@ ns.CaptureWriter = {
             end
             return nil, "report_invalid_document"
         end
-        return ns.CaptureWriter.Encode(projected, limit)
+        local encoded, failure = ns.CaptureWriter.Encode(projected, limit)
+        return encoded, failure, encoded and projected or nil
+    end,
+    -- Optical-only envelope: the stored receipt stays byte-exact. Readiness is
+    -- a fresh, independently sequenced observation of the same session. The
+    -- host expands this tuple into a second signal, never into report content.
+    EncodeReceiptPair = function(receipt, ready)
+        local ok, suffix = pcall(function()
+            rejectRestricted(receipt); rejectRestricted(ready)
+            if type(receipt) ~= "string" or #receipt > 2048 or not isUTF8(receipt)
+                or type(ready) ~= "table" or getmetatable(ready) then error("receipt_invalid_pair", 0) end
+            -- Traverse before branching, including any secret-valued fields.
+            encodeDocument(ready, 4096)
+            if ready.kind ~= "ready" or ready.inputReady ~= true or ready.requestId ~= ""
+                or type(ready.sessionNonce) ~= "string" or #ready.sessionNonce ~= 32
+                or not string.match(ready.sessionNonce, "^[0-9a-f]+$")
+                or type(ready.sequence) ~= "number" or type(ready.runtimeEpoch) ~= "number" then
+                error("receipt_invalid_pair", 0)
+            end
+            return encodeDocument({ready.sessionNonce, ready.sequence, ready.runtimeEpoch}, 256)
+        end)
+        if not ok then return nil, "receipt_invalid_pair" end
+        local result = '{"schema":"lycheedev.receipt.v1","receipt":' .. receipt .. ',"ready":' .. suffix .. '}'
+        if #result > 4096 then return nil, "receipt_invalid_pair" end
+        return result
     end,
     DigestBytes = digestBytes,
 }

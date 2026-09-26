@@ -71,6 +71,29 @@ func TestPrepareListfileCachesAndReusesWithoutNetwork(t *testing.T) {
 	}
 }
 
+func TestPrepareListfileDoesNotReuseAnotherOrigin(t *testing.T) {
+	ctx := context.Background()
+	workspace := workspaceRoot(t)
+	other := "https://example.invalid/other.csv"
+	fetch := &fakeListfileFetcher{bodies: map[string][]byte{communityURL: []byte("11;a.blp\n"), other: []byte("22;b.blp\n")}}
+	if _, err := records.PrepareListfile(ctx, workspace, communityRequest(fetch)); err != nil {
+		t.Fatal(err)
+	}
+	request := communityRequest(fetch)
+	request.URLs, request.Offline = []string{other}, true
+	if _, err := records.PrepareListfile(ctx, workspace, request); !errors.Is(err, records.ErrListfileUnavailable) {
+		t.Fatalf("offline substituted cached origin: %v", err)
+	}
+	request.Offline = false
+	reading, err := records.PrepareListfile(ctx, workspace, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetch.calls != 2 || len(reading.Index.Names(22)) != 1 || reading.Provenance.Files[0].URL != other {
+		t.Fatalf("selected origin was ignored: calls=%d provenance=%+v", fetch.calls, reading.Provenance)
+	}
+}
+
 func TestPrepareListfileOfflineSemantics(t *testing.T) {
 	ctx := context.Background()
 	workspace := workspaceRoot(t)

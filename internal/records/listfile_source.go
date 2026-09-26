@@ -135,7 +135,28 @@ func loadCachedListfile(ctx context.Context, s *vault.Store, m *vault.Metadata, 
 	payloads := make(map[string][]byte, len(document.Provenance.Files))
 	var total int64
 	for _, file := range document.Provenance.Files {
-		blob, err := s.ReadBlob(ctx, file.Blob, limits.Bytes)
+		urls := request.URLs
+		if len(urls) == 0 {
+			urls = ListfileSourceSpec(request.Kind)
+		}
+		matches := false
+		for _, template := range urls {
+			origin := template
+			if request.Kind == ListfileWowExportBinary {
+				origin = fmt.Sprintf(template, file.Component)
+			}
+			if file.URL == origin {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			return ListfileReading{}, fmt.Errorf("%w: cached origin differs from requested source", ErrListfileUnavailable)
+		}
+		if total >= limits.Bytes {
+			return ListfileReading{}, ErrListfileLimit
+		}
+		blob, err := s.ReadBlob(ctx, file.Blob, limits.Bytes-total)
 		if err != nil {
 			return ListfileReading{}, err
 		}
@@ -186,19 +207,23 @@ func fetchListfile(ctx context.Context, s *vault.Store, m *vault.Metadata, reque
 	payloads := make(map[string][]byte, len(components))
 	var files []ListfileSourceFile
 	var lastErr error
+	var total int64
 	for _, component := range components {
+		if total >= limits.Bytes {
+			return ListfileReading{}, ErrListfileLimit
+		}
 		fetched := false
 		for _, template := range urls {
 			url := template
 			if component != "" {
 				url = fmt.Sprintf(template, component)
 			}
-			body, err := request.Fetch.FetchListfile(ctx, url, limits.Bytes)
+			body, err := request.Fetch.FetchListfile(ctx, url, limits.Bytes-total)
 			if err != nil {
 				lastErr = err
 				continue
 			}
-			if int64(len(body)) > limits.Bytes {
+			if int64(len(body)) > limits.Bytes-total {
 				lastErr = ErrListfileLimit
 				continue
 			}
@@ -207,6 +232,7 @@ func fetchListfile(ctx context.Context, s *vault.Store, m *vault.Metadata, reque
 				name = "listfile"
 			}
 			payloads[name] = body
+			total += int64(len(body))
 			digest := sha256.Sum256(body)
 			ref, err := s.PublishBlob(ctx, vault.BlobInput{Reader: bytes.NewReader(body), MaxBytes: limits.Bytes})
 			if err != nil {

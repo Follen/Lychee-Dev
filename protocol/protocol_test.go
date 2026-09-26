@@ -73,7 +73,7 @@ func TestSignalSchemaIsSelfConsistent(t *testing.T) {
 		value, _ := kind.(string)
 		declared = append(declared, value)
 	}
-	want := []string{"ready", "loaded", "reported", "acknowledged", "cancelled", "cleared", "identity"}
+	want := []string{"ready", "loaded", "reported", "acknowledged", "cancelled", "cleared", "identity", "reset"}
 	slices.Sort(declared)
 	slices.Sort(want)
 	if !slices.Equal(declared, want) {

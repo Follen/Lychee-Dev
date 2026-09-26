@@ -31,6 +31,10 @@ func TestAtomicProbeLifecycleStopsAtEachGoal(t *testing.T) {
 	testRunProbeLifecycle(t, "atomic")
 }
 
+func TestAtomicProbeLifecycleWithCompactReceipts(t *testing.T) {
+	testRunProbeLifecycle(t, "atomic", true)
+}
+
 func TestAtomicProbeRecoversPersistedReportWithoutReloadReceipt(t *testing.T) {
 	testRunProbeLifecycle(t, "lost-reentry")
 }
@@ -57,7 +61,7 @@ func TestAtomicProbeMissingReloadRejectsUnsafeAckReadiness(t *testing.T) {
 	}
 }
 
-func testRunProbeLifecycle(t *testing.T, mode string) {
+func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 	t.Helper()
 	unsafeAck := strings.HasPrefix(mode, "unsafe-ack-")
 	ackRestart := strings.HasPrefix(mode, "ack-restart-")
@@ -96,6 +100,7 @@ func testRunProbeLifecycle(t *testing.T, mode string) {
 	original.Close()
 
 	frames := &lifecycleFrames{t: t, signals: []bridge.Signal{candidate}}
+	frames.compact = len(compact) > 0 && compact[0]
 	open := func(ctx context.Context, target ClientWindow, region image.Rectangle, expected bridge.SignalExpectation) (*WindowSession, error) {
 		if target != original.target || region != original.region || expected.SessionNonce != candidate.SessionNonce || !expected.RequireInputReady {
 			t.Fatal("run changed the saved window identity")

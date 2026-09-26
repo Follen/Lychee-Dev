@@ -136,9 +136,9 @@ ns.Controls = {
             if paired or action == "ready" or action == "load" then
                 refresh = function()
                     if action == "load" then return ns.ProbeRunner.RefreshLoaded(requestId) end
-                    local current, failure = ns.Session.ReadyReceipt()
+                    local current, failure, signal = ns.Session.ReadyReceipt()
                     if not current then return nil, failure end
-                    if paired then return receipt, current end
+                    if paired then return receipt, current, signal end
                     return current
                 end
             end
@@ -147,12 +147,12 @@ ns.Controls = {
             if action == "load" or action == "ready" or action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack" then
                 ns.Session.WhenInputReady(function(ready)
                     if not ready then return end
-                    local refreshed, refreshFailure
-                    if action == "ready" or action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack" then refreshed, refreshFailure = ns.Session.ReadyReceipt()
+                    local refreshed, refreshFailure, signal
+                    if action == "ready" or action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack" then refreshed, refreshFailure, signal = ns.Session.ReadyReceipt()
                     else refreshed, refreshFailure = ns.ProbeRunner.RefreshLoaded(requestId) end
                     if not refreshed then print("Lychee Dev: " .. refreshFailure); return end
                     local visible, reason
-                    if paired then visible, reason = ns.ReceiptView.Show(receipt, refreshed, refresh)
+                    if paired then visible, reason = ns.ReceiptView.Show(receipt, refreshed, refresh, signal)
                     else visible, reason = ns.ReceiptView.Show(refreshed, nil, refresh) end
                     if not visible then ns.ReceiptView.Hide(); print("Lychee Dev: " .. reason); return end
                     if action ~= "run" and action ~= "ack" and action ~= "bugs" and action ~= "bugs-ack" then receipt = refreshed end

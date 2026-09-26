@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/desktop"
 )
 
@@ -59,7 +60,10 @@ func TestLuaReceiptDrawingDecodedByHost(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, output)
 			}
-			var drawings struct{ First, Second, Paired symbolDrawing }
+			var drawings struct {
+				First, Second, Paired symbolDrawing
+				PairBytes             string
+			}
 			if err := json.Unmarshal(output, &drawings); err != nil {
 				t.Fatal(err)
 			}
@@ -69,10 +73,8 @@ func TestLuaReceiptDrawingDecodedByHost(t *testing.T) {
 				if len(runs) > 0 {
 					module = runs[0].h
 				}
-				// Symbols stack vertically in one card, so a paired receipt is
-				// taller than it is wide and a single symbol is square. Both
-				// stay inside the card budget and keep a 4-module quiet ring.
-				if module < 2 || drawing.Width < 29*module || drawing.Width > 1480 || drawing.Height < 29*module || drawing.Height > 1480 || len(drawing.Runs) > 16384 || (i < 2 && drawing.Width != drawing.Height) || (i == 2 && drawing.Height <= drawing.Width) {
+				// Each card, including the paired proof, uses one square symbol.
+				if module < 2 || drawing.Width < 29*module || drawing.Width > 1480 || drawing.Height < 29*module || drawing.Height > 1480 || len(drawing.Runs) > 16384 || drawing.Width != drawing.Height {
 					t.Fatalf("invalid drawing: %dx%d module %d", drawing.Width, drawing.Height, module)
 				}
 				pixels := image.NewNRGBA(image.Rect(0, 0, drawing.Width, drawing.Height))
@@ -100,7 +102,11 @@ func TestLuaReceiptDrawingDecodedByHost(t *testing.T) {
 				if i == 1 {
 					expected = []string{"small"}
 				} else if i == 2 {
-					expected = append(expected, "next-ready")
+					expected = []string{drawings.PairBytes}
+					signals, err := bridge.ParseOpticalSignals([]byte(drawings.PairBytes))
+					if err != nil || len(signals) != 2 || signals[0].Kind != "reported" || signals[1].Kind != "ready" || signals[1].Sequence <= signals[0].Sequence || !signals[1].InputReady {
+						t.Fatalf("invalid paired proof: %+v %v", signals, err)
+					}
 				}
 				recovered := make([]string, 0, len(texts))
 				for _, text := range texts {

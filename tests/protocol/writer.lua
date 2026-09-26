@@ -101,7 +101,7 @@ local nonce = string.rep("a", 32)
 local binding = '"sessionNonce":"' .. nonce .. '"'
 -- Identity, reset and cleared markers re-establish the actor, so they are the
 -- only kinds allowed to repeat it.
-local actorBearing = { identity = true, reset = true, cleared = true }
+local actorBearing = { identity = true, reset = true, cleared = true, ready = true }
 local function projected(kind)
     local text = assert(writer.EncodeSignal({
         schema = "lycheedev.signal.v1", kind = kind, sessionNonce = nonce,

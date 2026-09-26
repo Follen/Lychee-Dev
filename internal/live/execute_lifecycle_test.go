@@ -22,6 +22,7 @@ type lifecycleFrames struct {
 	signals []bridge.Signal
 	ticks   int64
 	closed  bool
+	compact bool
 }
 
 func (f *lifecycleFrames) Close() { f.closed = true }
@@ -33,6 +34,12 @@ func (f *lifecycleFrames) Next(ctx context.Context) (*desktop.CapturedFrame, err
 		return nil, io.EOF
 	}
 	signal := f.signals[0]
+	if f.compact && signal.Kind != "ready" && signal.Kind != "cleared" {
+		signal.Character, signal.Realm, signal.GUID = "", "", ""
+		if signal.Kind == "reported" || signal.Kind == "acknowledged" || signal.Kind == "cancelled" {
+			signal.SessionNonce = ""
+		}
+	}
 	f.signals = f.signals[1:]
 	f.ticks++
 	frame := makeAckFrame(f.t, signal)

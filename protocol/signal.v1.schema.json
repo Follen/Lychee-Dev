@@ -5,11 +5,11 @@
   "description": "Optical game-to-host receipt. It is identity/status only and never carries a report body. Kind identity is a session-free identity marker correlated by probeNonce; it binds no session and grants no input authority.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "release", "kind", "sessionNonce", "requestId", "product", "build", "sequence", "inputReady"],
+  "required": ["schema", "kind", "sequence", "inputReady"],
   "properties": {
     "schema": { "const": "lycheedev.signal.v1" },
     "release": { "type": "string", "minLength": 1, "maxLength": 128 },
-    "kind": { "enum": ["ready", "loaded", "reported", "acknowledged", "cancelled", "cleared", "identity"] },
+    "kind": { "enum": ["ready", "loaded", "reported", "acknowledged", "cancelled", "cleared", "identity", "reset"] },
     "sessionNonce": { "type": "string", "maxLength": 64 },
     "requestId": { "type": "string", "maxLength": 128 },
     "reloadNonce": { "type": "string", "maxLength": 64 },
@@ -70,15 +70,39 @@
     {
       "if": { "properties": { "kind": { "enum": ["ready", "loaded", "reported", "acknowledged", "cancelled", "cleared"] } }, "required": ["kind"] },
       "then": {
-        "required": ["sessionNonce", "character", "realm"],
+        "required": ["release", "product", "build"],
         "properties": {
-          "sessionNonce": { "minLength": 1 },
-          "character": { "minLength": 1 },
-          "realm": { "minLength": 1 },
+          "release": { "minLength": 1 },
+          "product": { "minLength": 1 },
+          "build": { "minLength": 1 },
           "sequence": { "minimum": 1 },
           "probeNonce": { "maxLength": 0 },
           "actorState": { "maxLength": 0 },
           "inputReason": { "maxLength": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "ready" } }, "required": ["kind"] },
+      "then": { "required": ["sessionNonce"], "properties": { "sessionNonce": { "minLength": 1 } } }
+    },
+    {
+      "if": { "properties": { "kind": { "enum": ["loaded", "reported", "acknowledged", "cancelled", "cleared"] } }, "required": ["kind"] },
+      "then": { "required": ["requestId"], "properties": { "requestId": { "minLength": 1 } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "reset" } }, "required": ["kind"] },
+      "then": {
+        "required": ["probeNonce", "character", "realm", "guid"],
+        "properties": {
+          "probeNonce": { "pattern": "^[0-9a-f]{32}$" },
+          "character": { "minLength": 1 }, "realm": { "minLength": 1 }, "guid": { "minLength": 1 },
+          "sequence": { "const": 0 }, "inputReady": { "const": false },
+          "sessionNonce": { "const": "" }, "requestId": { "const": "" },
+          "reloadNonce": { "const": "" }, "cleanupNonce": { "const": "" },
+          "actorState": { "const": "" }, "inputReason": { "const": "" },
+          "codeBytes": { "const": 0 }, "reportBytes": { "const": 0 },
+          "codeAdler32": { "const": "" }, "reportAdler32": { "const": "" }
         }
       }
     }

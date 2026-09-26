@@ -34,7 +34,7 @@ func ObserveSignals(feed FrameFeed) *SignalReader { return &SignalReader{feed: f
 // SetIdentityBaseline installs the actor and build identity a retained session
 // already proved. Every later receipt on the wire may omit those fields to save
 // QR modules, and the reader fills them from here before matching. It is
-// write-once per reader so a caller cannot relax matching mid-operation.
+// replaced only when the owner adopts a freshly proved session.
 func (r *SignalReader) SetIdentityBaseline(baseline SignalIdentity) {
 	if r == nil {
 		return
@@ -135,22 +135,24 @@ func (r *SignalReader) waitForSignal(ctx context.Context, expected SignalExpecta
 		}
 		var matching *Signal
 		for _, text := range symbols {
-			signal, err := ParseSignal(desktop.BytesFromSymbolText(text))
+			signals, err := ParseOpticalSignals(desktop.BytesFromSymbolText(text))
 			if err != nil {
 				continue
 			}
-			signal = FillSignalIdentity(signal, r.baseline)
-			match := expected
-			if expected.Kind == "identity" {
-				match.Release = ""
+			for _, signal := range signals {
+				signal = FillSignalIdentity(signal, r.baseline)
+				match := expected
+				if expected.Kind == "identity" {
+					match.Release = ""
+				}
+				if err := signal.Match(match); err != nil {
+					continue
+				}
+				if matching != nil {
+					return Signal{}, errors.New("bridge.ambiguous_signal")
+				}
+				matching = &signal
 			}
-			if err := signal.Match(match); err != nil {
-				continue
-			}
-			if matching != nil {
-				return Signal{}, errors.New("bridge.ambiguous_signal")
-			}
-			matching = &signal
 		}
 		if matching != nil {
 			r.observedAt = frame.ObservedAt

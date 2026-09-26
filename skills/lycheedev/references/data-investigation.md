@@ -189,7 +189,7 @@ change static DB2 queries. Product, locale and region are selected context;
 the file alone does not authenticate them. A record's numeric `region`, when
 present in its format, is preserved separately.
 
-For named fields, add `--table <name>` and optionally `--id <record-id>`:
+For named fields, add `--table <name>` and optionally `--record <record-id>`:
 
 ```text
 lycheedev data hotfix --source dbcache --snapshot <data-pin> --dbcache <DBCache.bin> --table ItemSparse --record <id> --format json

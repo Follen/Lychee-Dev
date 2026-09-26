@@ -33,7 +33,7 @@ func reconnectSession(ctx context.Context, root, id string, io *liveIO) (*Window
 			if err != nil {
 				return nil, err
 			}
-			return observeWindowSession(ctx, target, expected, frames, io.confirm)
+			return observeWindowSessionAt(ctx, target, region, expected, sessionSignalIdentity(bound.Ready), frames, io.confirm)
 		})
 	if err != nil {
 		return nil, "", err

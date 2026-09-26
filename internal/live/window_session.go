@@ -51,12 +51,13 @@ func (s *WindowSession) Ready() bridge.Signal { return s.ready }
 // matching, so the comparison still rejects a contradicting value.
 func sessionSignalIdentity(ready bridge.Signal) bridge.SignalIdentity {
 	return bridge.SignalIdentity{
-		Release:   ready.Release,
-		Character: ready.Character,
-		Realm:     ready.Realm,
-		GUID:      ready.GUID,
-		Product:   ready.Product,
-		Build:     ready.Build,
+		Release:      ready.Release,
+		Character:    ready.Character,
+		Realm:        ready.Realm,
+		GUID:         ready.GUID,
+		Product:      ready.Product,
+		Build:        ready.Build,
+		SessionNonce: ready.SessionNonce,
 	}
 }
 
@@ -99,14 +100,14 @@ func OpenWindowSession(ctx context.Context, target ClientWindow, region image.Re
 	}
 	// The caller's region is the capture region for this session; internal
 	// observation paths pass an empty region and keep the caller's.
-	return observeWindowSessionAt(ctx, target, region, expected, frames, ConfirmClientWindow)
+	return observeWindowSessionAt(ctx, target, region, expected, bridge.SignalIdentity{}, frames, ConfirmClientWindow)
 }
 
 func observeWindowSession(ctx context.Context, target ClientWindow, expected bridge.SignalExpectation, frames sessionFrames, confirm func(context.Context, ClientWindow) error) (*WindowSession, error) {
-	return observeWindowSessionAt(ctx, target, image.Rectangle{}, expected, frames, confirm)
+	return observeWindowSessionAt(ctx, target, image.Rectangle{}, expected, bridge.SignalIdentity{}, frames, confirm)
 }
 
-func observeWindowSessionAt(ctx context.Context, target ClientWindow, region image.Rectangle, expected bridge.SignalExpectation, frames sessionFrames, confirm func(context.Context, ClientWindow) error) (*WindowSession, error) {
+func observeWindowSessionAt(ctx context.Context, target ClientWindow, region image.Rectangle, expected bridge.SignalExpectation, baseline bridge.SignalIdentity, frames sessionFrames, confirm func(context.Context, ClientWindow) error) (*WindowSession, error) {
 	success := false
 	defer func() {
 		if !success {
@@ -120,6 +121,10 @@ func observeWindowSessionAt(ctx context.Context, target ClientWindow, region ima
 		return nil, err
 	}
 	reader := bridge.ObserveSignals(frames)
+	// Ready must carry its own nonce. Only a previously proved actor can fill
+	// omitted identity fields; caller filters are never evidence.
+	baseline.SessionNonce = ""
+	reader.SetIdentityBaseline(baseline)
 	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	var signal bridge.Signal

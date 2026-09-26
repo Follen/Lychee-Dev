@@ -4,9 +4,8 @@ local frame, strips, lastBytes, lastReady, lastGeneration, lastScale, lastRefres
 local focusWatch
 local revision = 0
 local focusEvent = "ChatFrame.OnEditBoxFocusGained"
--- The white receipt card matches the legacy automation notice: anchored to the
--- top-left corner, at most 480 UI units on a side, with module size derived
--- from physical pixels so high-resolution screens do not grow giant symbols.
+-- One optical symbol in the top-left corner. Paired report/readiness proofs
+-- share a transport envelope, not two separately padded QR symbols.
 local MAX_CARD_UI_SIZE = 480
 local function restricted(value)
     return issecretvalue and issecretvalue(value)
@@ -49,8 +48,7 @@ end
 -- One visual system for every receipt kind. The generation key only memoizes
 -- identical redisplays; it is never an identity or an input permission.
 --
--- Symbols stack vertically and share one card, so the card width is a single
--- symbol plus its quiet zones. The module size is a fixed number of UI units.
+-- One square symbol and its quiet zone. Module size is fixed in UI units.
 --
 -- It is deliberately NOT derived from the screen: the engines disagree about
 -- what GetScreenHeight means (Retail reports the UIParent height, Classic the
@@ -60,8 +58,8 @@ end
 -- readable size everywhere; the UI scale, not this addon, decides how many
 -- physical pixels that is. The only other bound is the card budget, which keeps
 -- a dense symbol on screen instead of clipping it.
-local TARGET_CARD_MODULES = 3
-local MIN_CARD_MODULES = 3
+local TARGET_CARD_MODULES = 2
+local MIN_CARD_MODULES = 2
 local function cardGeometry(sizes)
     local across, tall = 8, 8
     for index, size in ipairs(sizes) do
@@ -105,14 +103,14 @@ local function suspend(refresh, generation)
             local current = ns.Session.Current()
             if not current or current.generation ~= generation then hide(); return end
         end
-        local ok, receipt, readiness = pcall(refresh)
+        local ok, receipt, readiness, readySignal = pcall(refresh)
         if revision ~= expected then return end
         if not ok or not receipt then hide(); return end
-        display(receipt, readiness, generation, refresh)
+        display(receipt, readiness, generation, refresh, readySignal)
     end)
     if not waiting and revision == expected then hide() end
 end
-display = function(receipt, readiness, generation, refresh)
+display = function(receipt, readiness, generation, refresh, readySignal)
     local valid, failure = payload(receipt)
     if not valid then hide(); return nil, failure end
     if readiness ~= nil then
@@ -135,16 +133,18 @@ display = function(receipt, readiness, generation, refresh)
     hide()
     -- Merge horizontal black runs instead of allocating a texture per cell.
     -- Matrix coordinates are [x][y]. Every symbol owns a 4-module quiet zone.
-    -- Symbols stack vertically. Laying them out side by side made the card's
-    -- width the sum of two full symbols, which forced the module grid below the
-    -- size the host can sample; a reported receipt and its paired readiness
-    -- symbol both sit near 73 modules, so two columns cost about half the
-    -- achievable module size for no benefit. One column lets each symbol use the
-    -- full card budget, and the card stays well inside the screenshot region.
+    -- Pairing changes only the optical transport. Producers retain the original
+    -- receipt and refresh readiness from current state after focus changes.
+    local optical = receipt
+    if readiness ~= nil then
+        local reason
+        optical, reason = ns.CaptureWriter.EncodeReceiptPair(receipt, readySignal)
+        if not optical then hide(); return nil, reason end
+    end
     local runs, sizes = {}, {}
     local origin = 4
     local rowOffset = 0
-    for _, bytes in ipairs({receipt, readiness}) do
+    for _, bytes in ipairs({optical}) do
         local matrix, reason = ns.MatrixSymbol.Encode(bytes)
         if not matrix then hide(); return nil, reason end
         local size = #matrix
@@ -219,10 +219,10 @@ ns.ReceiptView = {
         hide()
         return true
     end,
-    Show = function(receipt, readiness, refresh)
+    Show = function(receipt, readiness, refresh, readySignal)
         local session, failure = ns.Session.Current()
         if not session then hide(); return nil, failure end
-        return display(receipt, readiness, session.generation, refresh)
+        return display(receipt, readiness, session.generation, refresh, readySignal)
     end,
     -- Identity markers bind no session. They share the exact display,
     -- invalidation and focus/combat rules; only the memo key differs.

@@ -126,7 +126,7 @@ func ParseSignal(data []byte) (Signal, error) {
 		if len(data) < 2 {
 			return signal, errors.New("bridge.signal_budget_or_encoding")
 		}
-		inflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(data[1:])))
+		inflated, err := inflateSignal(data[1:])
 		if err != nil {
 			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
 		}
@@ -140,7 +140,7 @@ func ParseSignal(data []byte) (Signal, error) {
 		if err != nil {
 			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
 		}
-		inflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(compressed)))
+		inflated, err := inflateSignal(compressed)
 		if err != nil {
 			return signal, fmt.Errorf("%w: %v", errors.New("bridge.signal_budget_or_encoding"), err)
 		}
@@ -183,6 +183,13 @@ func ParseSignal(data []byte) (Signal, error) {
 		return signal, errors.New("bridge.invalid_runtime_epoch")
 	}
 	return parseSessionSignal(signal)
+}
+
+func inflateSignal(compressed []byte) ([]byte, error) {
+	reader := flate.NewReader(bytes.NewReader(compressed))
+	defer reader.Close()
+	// Reject oversized output before allocating the full expansion.
+	return io.ReadAll(io.LimitReader(reader, 4097))
 }
 
 // parseSessionSignal validates the session/request shaped kinds. Identity-only

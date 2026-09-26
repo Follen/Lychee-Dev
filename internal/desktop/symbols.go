@@ -36,9 +36,12 @@ func DecodeSymbols(frame image.Image) ([]string, error) {
 	if err != nil {
 		var missing gozxing.NotFoundException
 		if errors.As(err, &missing) {
-			return []string{}, nil
+			return decodeReceiptCard(frame), nil
 		}
 		return nil, err
+	}
+	if len(results) == 0 {
+		return decodeReceiptCard(frame), nil
 	}
 	unique := make(map[string]bool)
 	for _, result := range results {

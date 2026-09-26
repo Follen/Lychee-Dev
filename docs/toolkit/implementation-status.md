@@ -8,6 +8,37 @@
 
 ## 当前状态
 
+- 2026-09-26 Titan 定向真机补验：3.80.2.69874 / 38002，Qingtianjiuz—时光I。
+  受管升级后由用户重启客户端激活 2.0.2；connect、load→verified(sum=55)→ACK
+  →hide 全部通过，WGC 完整解码小尺寸单码。最终 managed、磁盘队列为空。
+  此次未新增运行代码，记录见 [审计补验](audit-2026-09-26.md)。
+
+- 2026-09-26 Forever 定向真机补验：1.60.1.70009 / 16001，Auto—Forever，
+  小尺寸单码的 connect、受管升级、reload、load→verified(sum=55)→ACK→hide
+  全链路通过。发现并修复本地目标解析遗漏 wow_forever→wow_classic_beta
+  数据槽位映射，保留原始 CASC 行及配置校验。此条仅证明这次指定构建的链路，
+  不将 Forever 升格为 2.0 全功能验收矩阵成员。见 [审计记录](audit-2026-09-26.md)。
+
+- 2026-09-26 单码再次缩小：模块由 3 改为 2 UI 单位，CLI 增加有界方形卡片
+  采样补偿，解决分数像素缩放时通用 QR 定位失败。Classic 同类 ACK 回执 WGC
+  实测 335×335 → 223×223 像素（面积 -55.7%）；恢复原 reload 后完成新一轮
+  load→verified(sum=55)→ACK→hide。addon 与 CLI 需配套更新；其他 UI 缩放
+  与 Retail/Titan 尚未真机验收。详见 [审计补验](audit-2026-09-26.md)。
+
+- 2026-09-26 交接修复及全功能审计：WindowSession 统一保留已证明的 sessionNonce，
+  connect/reconnect 的首次观察使用已证明的角色基线；ready 自带 nonce，不从历史
+  基线猜会话。独立 ready 恢复角色身份以支持只读 bind。精简回执的
+  load→verified→ACK 离线生命周期通过。
+  成对回执改用单码 `lycheedev.receipt.v1` 光学封装，保持原报告与独立就绪证明；
+  Classic 样本在相同模块尺寸下由 219×426 变为 255×255，面积减少 30.3%。
+  焦点恢复、异步完成、禁用、旧帧拒绝及 Lua 绘制→宿主解码测试通过。
+  同轮修复 listfile 缓存串源/总预算、历史回执解压上限、secret 检查顺序、协议
+  schema 漂移及四处 skill 编排失配。完整范围、证据及未验证项见
+  [2026-09-26 审计](audit-2026-09-26.md)。随后在在线 Classic 5.5.4.69934 上
+  完成受管升级、reload、load→verified（sum=55）→ACK→hide；WGC 成功解码
+  单码 acknowledged/readiness 封装，最终 managed 且磁盘队列为空。其他客户端
+  与工作台逐项手测仍未验收；离线尺寸不冒充真机前后尺寸对比。
+
 - 2026-09-26 回执传输精简（深协议优化）与二维码可读性：Classic 真机截帧确认
   白色回执卡片确实被绘制，问题不在"卡片没出现"而在宿主采样不到模块网格——
   旧布局把 receipt 与 readiness 两个符号左右并排，卡片宽度是两个符号之和，

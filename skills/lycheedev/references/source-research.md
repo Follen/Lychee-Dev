@@ -34,10 +34,13 @@ it selects the catalog's product branch at preparation time. Do not omit it when
 the user supplied an exact version. A source query product is not evidence that
 the addon supports installation on that client.
 
-When an addon version is the requested identity, inspect `source list`, select
-the exact matching tag, pass its full `refs/tags/...` name to `source sync`, and
-retain both the requested tag and resolved commit. Never fall back to the
-product branch or a newer tag when that exact tag is absent. If a query or
+`source list` lists repositories and product branches, not tags. When the user
+supplies an exact commit or full ref, pass it directly to `source sync`. When
+only an addon version is supplied, establish its exact tag or commit from public
+repository evidence, or ask for the missing reference when that evidence is
+unavailable or ambiguous. Do not guess a tag or treat its absence from
+`source list` as proof that it does not exist. Retain the requested version/tag
+and resolved commit; never fall back to a product branch or newer tag. If a query or
 symbol inspection returns `codebase.index_not_ready`, run `source index` for
 that same snapshot and retry; do not resolve a replacement snapshot.
 

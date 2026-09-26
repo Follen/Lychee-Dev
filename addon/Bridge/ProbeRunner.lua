@@ -45,15 +45,15 @@ end
 local function publish(request,receipt)
     local function refresh()
         if request.state~="reported" then return nil end
-        local current=ns.Session.ReadyReceipt()
-        if current then return receipt,current end
+        local current,_,signal=ns.Session.ReadyReceipt()
+        if current then return receipt,current,signal end
     end
     local visible=ns.ReceiptView.Show(receipt,nil,refresh)
     if not visible then return end
     ns.Session.WhenInputReady(function(ready)
         if not ready or request.state~="reported" then return end
-        local current=ns.Session.ReadyReceipt()
-        if current then ns.ReceiptView.Show(receipt,current,refresh) end
+        local current,_,signal=ns.Session.ReadyReceipt()
+        if current then ns.ReceiptView.Show(receipt,current,refresh,signal) end
     end)
 end
 local function complete(request,status,value,display)
