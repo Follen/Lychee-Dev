@@ -21,7 +21,7 @@ name: toolkit foundation
 #   ci-required               aggregation; skipped/cancelled never counts as
 #                             passed
 #
-# `race` is an additional non-required job.
+# `race` also gates ci-required.
 #
 # This workflow is also a reusable workflow: toolkit-release.yml calls it as
 # the release verification gate.
@@ -284,7 +284,10 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.1'
-      - run: go test -race -count=1 -timeout=5m ./...
+      # The live package exercises real QR decoding and bounded freshness
+      # waits. Race instrumentation exceeded the old five-minute package
+      # budget on hosted Windows; retain all tests with a bounded larger limit.
+      - run: go test -race -count=1 -timeout=15m ./...
 
   ci-required:
     # §2/§3: this aggregation always runs and rejects every non-success result;
