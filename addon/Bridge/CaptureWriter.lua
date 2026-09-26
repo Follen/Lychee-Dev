@@ -141,10 +141,10 @@ end
 
 -- Every signal is drawn into a QR symbol, so its size decides whether the host
 -- can sample the module grid at all. A retained session already proved the
--- actor identity, so repeating the character, realm and GUID in each receipt
--- only spends modules: the host fills them back from its baseline and still
--- refuses a value that contradicts it. Release, product and build stay on the
--- wire because a receipt must still name the build it belongs to.
+-- actor, the build and the session nonce, so repeating them in each receipt only
+-- spends modules: the host fills them back from its baseline and still refuses a
+-- value that contradicts it. The session nonce is the largest single saving,
+-- because every receipt of one session repeats the same 32 hex characters.
 --
 -- Identity, reset and cleared markers are the exception: they establish or
 -- re-establish the actor, so they keep character and realm.
@@ -159,6 +159,11 @@ local WIRE_FIELDS = {
 local WIRE_MARKER_FIELDS = { character = true, realm = true, guid = true }
 local WIRE_MARKERS = { identity = true, reset = true, cleared = true }
 
+-- Session-shaped receipts drop the session nonce as well, because the host
+-- bound that nonce and compares it before accepting the receipt. Identity,
+-- reset and cleared markers are session-free and keep it only if they carry one.
+local WIRE_DROPPED = { sessionNonce = true }
+
 -- wireDocument projects a signal onto its transmitted form. Fields outside the
 -- profile are dropped rather than rejected: the projection is what the host
 -- compares against the archived receipt, so an unlisted field simply stops
@@ -171,7 +176,8 @@ local function wireDocument(value)
     local marker = WIRE_MARKERS[value.kind] == true
     local filtered = {}
     for key, child in pairs(value) do
-        if WIRE_FIELDS[key] or (marker and WIRE_MARKER_FIELDS[key]) then
+        local carried = WIRE_FIELDS[key] or (marker and WIRE_MARKER_FIELDS[key])
+        if carried and not (WIRE_DROPPED[key] and not marker) then
             filtered[key] = child
         end
     end

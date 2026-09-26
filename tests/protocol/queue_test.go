@@ -42,7 +42,7 @@ func TestHostQueueToLuaExecution(t *testing.T) {
 	// session baseline supplies it before matching.
 	baseline := bridge.SignalIdentity{
 		Release: d.Release, Character: d.Character, Realm: d.Realm,
-		Product: d.Product, Build: d.Build,
+		Product: d.Product, Build: d.Build, SessionNonce: d.SessionNonce,
 	}
 	loaded := parseSessionSignal(t, []byte(payload.Loaded), baseline)
 	expected := bridge.SignalExpectation{Release: d.Release, Kind: "loaded", SessionNonce: d.SessionNonce, ReloadNonce: d.ReloadNonce, RequestID: d.RequestID, Character: d.Character, Realm: d.Realm, Product: d.Product, Build: d.Build}
@@ -71,7 +71,7 @@ func TestHostQueueToLuaExecution(t *testing.T) {
 	}
 	// Receipts omit the actor identity; the retained session baseline supplies
 	// it, including the GUID the readiness comparison needs.
-	ackBaseline := bridge.SignalIdentity{Release: d.Release, Character: d.Character, Realm: d.Realm, GUID: d.GUID, Product: d.Product, Build: d.Build}
+	ackBaseline := bridge.SignalIdentity{Release: d.Release, Character: d.Character, Realm: d.Realm, GUID: d.GUID, Product: d.Product, Build: d.Build, SessionNonce: d.SessionNonce}
 	ack := parseSessionSignal(t, []byte(cleanup.Acknowledged), ackBaseline)
 	ready := parseSessionSignal(t, []byte(cleanup.Ready), ackBaseline)
 	if ready.Kind != "ready" || ready.Sequence <= ack.Sequence || !ready.InputReady || ready.RuntimeEpoch != 2 || ready.RequestID != "" || ready.GUID != d.GUID {

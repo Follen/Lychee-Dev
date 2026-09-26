@@ -21,14 +21,16 @@ func parseSessionSignal(t *testing.T, raw []byte, baseline bridge.SignalIdentity
 }
 
 // sessionBaseline is the identity a retained fixture session proved: the same
-// values the Lua fixtures feed ObserveActor.
+// values the Lua fixtures feed ObserveActor, plus the session nonce the host
+// bound. The compact wire form omits all of them.
 func sessionBaseline(product, build string) bridge.SignalIdentity {
 	return bridge.SignalIdentity{
-		Release:   "2.0.2",
-		Character: "Paladin",
-		Realm:     "Realm",
-		GUID:      "Player-1-123",
-		Product:   product,
-		Build:     build,
+		Release:      "2.0.2",
+		Character:    "Paladin",
+		Realm:        "Realm",
+		GUID:         "Player-1-123",
+		Product:      product,
+		Build:        build,
+		SessionNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 }

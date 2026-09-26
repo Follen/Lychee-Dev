@@ -43,7 +43,7 @@ func ReadPersistedReport(reader io.Reader, code []byte, expected SignalExpectati
 	}
 	report.Receipt = FillSignalIdentity(report.Receipt, SignalIdentity{
 		Release: expected.Release, Character: expected.Character, Realm: expected.Realm,
-		Product: expected.Product, Build: expected.Build,
+		Product: expected.Product, Build: expected.Build, SessionNonce: expected.SessionNonce,
 	})
 	return report, nil
 }

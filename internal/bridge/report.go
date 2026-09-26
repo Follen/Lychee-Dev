@@ -40,7 +40,7 @@ func VerifyReport(receiptBytes, body, code []byte, expected SignalExpectation) (
 	}
 	receipt = FillSignalIdentity(receipt, SignalIdentity{
 		Release: expected.Release, Character: expected.Character, Realm: expected.Realm,
-		Product: expected.Product, Build: expected.Build,
+		Product: expected.Product, Build: expected.Build, SessionNonce: expected.SessionNonce,
 	})
 	if err := receipt.Match(expected); err != nil {
 		return result, err

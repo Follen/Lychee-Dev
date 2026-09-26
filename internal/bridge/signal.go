@@ -71,8 +71,15 @@ const (
 // and proves the payload digest; replaying the identity the host already holds
 // in every symbol wastes QR modules and buys nothing, because the host compares
 // the filled value against this same baseline before accepting the receipt.
+//
+// SessionNonce belongs here for the same reason and is the largest single win:
+// every receipt of one session repeats the same 32-hex-character nonce, which is
+// 40 bytes of a roughly 300-byte symbol. The host already stored it when it
+// bound the session and compares it against the operation's expected value, so
+// an omitted nonce is filled and still verified.
 type SignalIdentity struct {
 	Release, Character, Realm, GUID, Product, Build string
+	SessionNonce                                    string
 }
 
 // FillSignalIdentity completes any identity field the wire omitted from the
@@ -97,6 +104,9 @@ func FillSignalIdentity(signal Signal, baseline SignalIdentity) Signal {
 	}
 	if signal.Build == "" {
 		signal.Build = baseline.Build
+	}
+	if signal.SessionNonce == "" {
+		signal.SessionNonce = baseline.SessionNonce
 	}
 	return signal
 }
@@ -175,15 +185,20 @@ func ParseSignal(data []byte) (Signal, error) {
 // fields must stay empty there so a ready or reported receipt can never carry
 // probe correlation into identity matching.
 //
-// The actor and build fields are optional on the wire: a retained session
-// already proved them, so the caller fills them from its baseline with
-// FillSignalIdentity and then compares them through Match, which still rejects
-// a value that contradicts the baseline. Requiring them here only forced every
-// symbol to repeat bytes the host already had, at the cost of QR modules. Any
-// field the wire does carry must still be a well-formed label.
+// The actor, build and session identity are optional on the wire: a retained
+// session already proved them, so the caller fills them from its baseline with
+// FillSignalIdentity and then compares them through Match, which still rejects a
+// value that contradicts the baseline. The session nonce is the largest single
+// saving, because every receipt of one session repeats the same 32 hex
+// characters. Requiring these fields here only forced every symbol to repeat
+// bytes the host already had, at the cost of QR modules. Any field the wire does
+// carry must still be well formed.
 func parseSessionSignal(signal Signal) (Signal, error) {
-	if signal.SessionNonce == "" || signal.Sequence == 0 || signal.Sequence > 9007199254740991 {
+	if signal.Sequence == 0 || signal.Sequence > 9007199254740991 {
 		return signal, errors.New("bridge.invalid_signal")
+	}
+	if err := checkOptionalLabel(signal.SessionNonce); err != nil {
+		return signal, err
 	}
 	// A session-shaped receipt still names the release, product and build it
 	// belongs to; the host fills the actor from its baseline, but a missing

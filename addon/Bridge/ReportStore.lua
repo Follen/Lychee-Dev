@@ -107,25 +107,13 @@ ns.ReportStore = {
             return nil, "bridge_disabled"
         end
         if not plain(reported) then return nil, "report_invalid_acknowledgement" end
-        -- Identity is compared before the receipt fingerprint, because the wire
-        -- receipt is compacted: it omits the actor and build the host already
-        -- holds, so those fields are canonicalized from the live session rather
-        -- than trusted from the caller. Comparing identity first also gives a
-        -- wrong-actor acknowledgement its own reason instead of a digest error.
-        local session, sessionFailure = ns.Session.Current()
-        if not session then return nil, sessionFailure end
-        if reported.sessionNonce ~= session.sessionNonce or reported.character ~= session.character
-            or reported.realm ~= session.realm or reported.release ~= ns.Release
-            or reported.product ~= ns.Startup.identity.product or reported.build ~= ns.Startup.identity.build then
-            return nil, "report_acknowledgement_identity"
-        end
         local requestId, bodyBytes, bodyAdler32 = reported.requestId, reported.reportBytes, reported.reportAdler32
         if not requestKey(requestId) or reported.schema ~= "lycheedev.signal.v1" or reported.kind ~= "reported" then
             return nil, "report_invalid_acknowledgement"
         end
-        -- Encoding rejects restricted values, metatables and cycles before any
-        -- value comparison, so a secret field reports that it is secret rather
-        -- than failing a shape check. The canonical wire form is what was stored.
+        -- Encoding runs before the numeric shape checks: it rejects restricted
+        -- values, metatables and cycles, so a secret field reports that it is
+        -- secret instead of failing a type comparison it can never satisfy.
         local receipt, encodeFailure = ns.CaptureWriter.EncodeSignal(reported, 4096)
         if not receipt then return nil, encodeFailure end
         if type(reported.sequence) ~= "number" or reported.sequence < 1 or reported.sequence > 9007199254740991
@@ -134,6 +122,27 @@ ns.ReportStore = {
             or not string.match(bodyAdler32, "^[0-9a-f]+$") then
             return nil, "report_invalid_acknowledgement"
         end
+        local session, sessionFailure = ns.Session.Current()
+        if not session then return nil, sessionFailure end
+        -- The live session is authoritative for the actor and the nonce. The
+        -- compact wire form still carries both while a caller can supply them,
+        -- so an acknowledgement that contradicts the current session is refused
+        -- rather than canonicalized into agreement. The host echoes the fields it
+        -- archived, and the archived receipt is the compact form, so a caller
+        -- that omits them is consistent and still passes.
+        if reported.sessionNonce ~= nil and reported.sessionNonce ~= session.sessionNonce
+            or reported.character ~= nil and reported.character ~= session.character
+            or reported.realm ~= nil and reported.realm ~= session.realm
+            or reported.release ~= nil and reported.release ~= ns.Release
+            or reported.product ~= nil and reported.product ~= ns.Startup.identity.product
+            or reported.build ~= nil and reported.build ~= ns.Startup.identity.build then
+            return nil, "report_acknowledgement_identity"
+        end
+        -- The stored receipt is the canonical wire form. A caller echoes the
+        -- fields the host archived, so both sides are projected the same way and
+        -- the session nonce, which the wire omits, never has to be restated.
+        local receipt, encodeFailure = ns.CaptureWriter.EncodeSignal(reported, 4096)
+        if not receipt then return nil, encodeFailure end
         local storedReceipt, body = ns.ReportStore.Read(requestId)
         if not storedReceipt then return nil, body end
         if storedReceipt ~= receipt or #body ~= bodyBytes
