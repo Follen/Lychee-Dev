@@ -11,7 +11,7 @@ issecretvalue = function(value) return rawequal(value, secret) end
 for _, profile in ipairs(profiles) do
     local frames, callbacks, shown = {}, {}, {}
     local character, guid, focus = "Paladin", "Player-1-123", {}
-    SlashCmdList, SLASH_LYCHEETOOLKIT1, LycheeToolkitDB = {}, nil, nil
+    SlashCmdList, SLASH_LYCHEETOOLKIT1, LycheeToolkitDB, LycheeToolkitBridgeDB = {}, nil, nil, nil
     GetBuildInfo = function() return profile.version, "12345", "date", profile.interface end
     UnitFullName = function() return character, "Realm" end
     UnitGUID = function() return guid end
@@ -73,7 +73,7 @@ for _, profile in ipairs(profiles) do
     io.write(shown[#shown], "\n")
     assert(ns.Controls.Handle("connect").connected)
     assert(ns.Session.Current().sessionNonce == first.sessionNonce, "connect rotated active identity")
-    local reports = LycheeToolkitDB.reports
+    local reports = LycheeToolkitBridgeDB.reports
     reports.keep = {body="retained"}
     assert(ns.Controls.Handle("disconnect"))
     assert(ns.Session.Current() == nil and next(callbacks) == nil and hidden > 0)

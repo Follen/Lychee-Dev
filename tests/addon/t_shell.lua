@@ -51,7 +51,7 @@ assert(W.RegisterExportHook({
 
 -- Unknown verbs keep their legacy usage error (bridge parsing untouched).
 local usageOk, usageError = ns.Controls.Handle("frobnicate")
-assert(usageOk == nil and usageError == "usage: /dev status | connect | disconnect",
+assert(usageOk == nil and usageError == "usage: /dev status | connect | disconnect | receiver bind <wake|submit|close> <chord> | receiver reset",
     "unknown /dev verbs changed their usage contract")
 
 -- First /dev builds the window lazily.
@@ -60,11 +60,11 @@ assert(Env.framesCreated > 0, "UI did not create frames on first /dev")
 local window = assert(LycheeToolkitWindow, "window frame was not created")
 assert(window:IsShown(), "window did not open")
 assert(UISpecialFrames[1] == "LycheeToolkitWindow", "window was not registered for escape close")
-assert(window.width == 1040 and window.height == 720, "window did not use the workbench size")
+assert(window.width == 960 and window.height == 660, "window did not use the workbench size")
 assert(window:GetFrameStrata() == "DIALOG", "window strata changed")
 assert(window.clampedToScreen and window.movable, "window lost its drag/clamp behavior")
 
--- Eight tabs from the page registry.
+-- Eight page destinations stay available in a dedicated navigation column.
 local expectedOrder = {
     "runner", "objects", "events", "trace", "diagnostics", "exports", "automation", "about",
 }
@@ -73,19 +73,21 @@ for _ in pairs(window.pageTabs) do
     tabCount = tabCount + 1
 end
 assert(tabCount == 8, "window did not create all eight workbench tabs")
-assert(window.pageTabs.runner.point[1] == "BOTTOMLEFT", "first tab anchor changed")
-assert(window.pageTabs.objects.point[4] == 8, "main navigation did not use a consistent visual gap")
+assert(window.pageTabs.runner.point[1] == "TOPLEFT" and window.navScroll,
+    "pages did not use the bounded sidebar viewport")
+assert(window.pageTabs.objects.navTop > window.pageTabs.runner.navTop,
+    "page destinations are not ordered vertically")
 
--- Label-fit sizing: width = rendered label + 22 px, minimum 48.
+-- Navigation remains readable and each destination has its own hit target.
 for index = 1, #expectedOrder do
     local tab = window.pageTabs[expectedOrder[index]]
     assert(tab, "missing tab: " .. expectedOrder[index])
-    assert(tab:GetHeight() == 32, "tab height changed")
-    assert(tab:GetWidth() >= math.max(48, tab.label:GetStringWidth() + 22),
-        "main navigation did not preserve text padding")
+    assert(tab:GetHeight() >= 40, "page destination is too short")
+    assert(tab:GetWidth() >= tab.label:GetStringWidth() + 14,
+        "page destination clips its label")
 end
-assert(window.pageTabs.exports:GetWidth() > window.pageTabs.runner:GetWidth(),
-    "main navigation did not size tabs from their rendered labels")
+assert(window.settingsButton:GetParent() ~= window,
+    "settings should live in the navigation column")
 
 -- Pages build lazily on first activation.
 assert(probe.build == 0, "page was constructed before its first activation")
@@ -93,8 +95,10 @@ window.pageTabs.objects:Click()
 assert(probe.build == 1 and probe.activate == 1, "page did not build and activate")
 assert(W.GetActivePage() == "objects", "active page was not tracked")
 assert(probeRail and probeRail.root:IsShown(), "history rail did not follow its page")
-assert(probeRail.content:GetWidth() == 206 and probeRail.rowWidth == 206
-        and probeRail.rowHeight == 52, "history rail layout changed")
+assert(probeRail.root:GetParent() ~= window,
+    "history rail belongs to the page canvas, not over the permanent navigation")
+assert(probeRail.content:GetWidth() == 150 and probeRail.rowWidth == 150
+        and probeRail.rowHeight == 58, "history rail layout changed")
 
 window.pageTabs.about:Click()
 assert(probe.suspend == 1, "page was not suspended on navigation")

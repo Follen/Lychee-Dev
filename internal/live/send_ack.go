@@ -23,7 +23,7 @@ import (
 var ErrAckReadinessPending = errors.New("live.ack_readiness_pending")
 
 func (p *ProbeOperation) Acknowledge(ctx context.Context) (desktop.InputReceipt, error) {
-	return p.acknowledge(ctx, desktop.QueuePreparedCommand)
+	return p.acknowledge(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) acknowledge(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {
@@ -118,6 +118,16 @@ func (p *ProbeOperation) prepareAcknowledgement(ctx context.Context) error {
 					return false, err
 				}
 				expected.AfterSequence = anchor.Sequence - 1
+			}
+		}
+		if record.Intent.Goal == "finished" {
+			anchor, found, err := readCheckpointAnchor(ctx, p.root, record, input)
+			if err != nil {
+				return false, err
+			}
+			if found && anchor.RuntimeEpoch >= expected.RuntimeEpoch {
+				expected.Kind, expected.RequestID, expected.ReloadNonce = "ready", "", ""
+				expected.RuntimeEpoch, expected.AfterSequence = anchor.RuntimeEpoch, anchor.Sequence
 			}
 		}
 		wait, cancel := context.WithTimeout(ctx, 15*time.Second)

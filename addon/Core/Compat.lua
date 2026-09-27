@@ -5,6 +5,25 @@ local ADDON_NAME, ns = ...
 -- before it is compared, formatted, indexed or branched on; failures open to a
 -- harmless visible state instead of throwing.
 ns.Compat = {
+    ReceiverChord = function(key)
+        if (issecretvalue and issecretvalue(key)) or type(key)~="string" then return nil end
+        local number=string.match(key,"^F([1-9]%d?)$")
+        if key~="[" and key~="]" and not (number and tonumber(number)<=12) then return nil end
+        local function down(callback)
+            if type(callback)~="function" then return false end
+            local ok,value=pcall(callback)
+            return ok and not (issecretvalue and issecretvalue(value)) and value==true
+        end
+        if not down(IsControlKeyDown) or not down(IsAltKeyDown) then return nil end
+        return "ALT-CTRL-"..(down(IsShiftKeyDown) and "SHIFT-" or "")..key
+    end,
+    MonotonicSeconds = function()
+        if type(GetTime) ~= "function" then return nil end
+        local ok, value = pcall(GetTime)
+        if not ok or (issecretvalue and issecretvalue(value)) or type(value) ~= "number"
+            or value ~= value or value < 0 or value == math.huge then return nil end
+        return value
+    end,
     GetAddOnMetadata = function(addonName, field)
         if type(C_AddOns) ~= "table" or type(C_AddOns.GetAddOnMetadata) ~= "function" then
             return nil

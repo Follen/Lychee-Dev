@@ -212,6 +212,17 @@ func testExecuteLifecycle(t *testing.T, mode string) {
 				// receipt. Only the pre-send intent/evidence survives.
 				panic(crashed)
 			}
+			if step == 1 {
+				frames.signals = append(frames.signals, loaded)
+			}
+			if strings.HasPrefix(mode, "resume-missing-") {
+				frames.signals = nil
+			}
+			if strings.HasPrefix(mode, "resume-foreign-") {
+				for i := range frames.signals {
+					frames.signals[i].SessionNonce = strings.Repeat("f", 32)
+				}
+			}
 			return desktop.InputReceipt{MessagesQueued: len(command) + 3}, partial
 		}
 		return desktop.InputReceipt{MessagesQueued: len(command) + 4, SubmissionComplete: true}, nil
@@ -229,6 +240,11 @@ func testExecuteLifecycle(t *testing.T, mode string) {
 		}()
 		return operation.execute(ctx, send)
 	}()
+	// A post-commit transport error may be resolved by the exact business
+	// receipt in the same call; no process restart or second input is needed.
+	if resumeAt >= 0 && mode == "resume-"+resumePhase && err == nil && completed.Stage == "cleaned" {
+		resumeAt = -1
+	}
 	if resumeAt >= 0 {
 		crashMode := strings.HasPrefix(mode, "resume-unrecorded-") || strings.HasPrefix(mode, "resume-unsent-")
 		if crashMode {

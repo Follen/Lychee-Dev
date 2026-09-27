@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -11,6 +12,31 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestCompleteRequestUsesStableTargetIdentity(t *testing.T) {
+	target := ClientWindow{Client: selection.ClientInstallation{Directory: t.TempDir(), Product: "retail", FullBuild: "12.1.0.69933"}}
+	target.Window = testWindow(5, target.Client.Directory)
+	ready := bridge.Signal{GUID: "Player-1-123", RuntimeEpoch: 1}
+	identity := func() journal.WorkIntent {
+		return probeRequestIdentity(target, ready, "pin", "account", "request", "revision", "display-cleared", []byte("return 1"), 10)
+	}
+	first := identity()
+	target.Window.Title = "renamed window"
+	target.Client.IdentitySource = "version.txt"
+	ready.RuntimeEpoch, ready.Sequence, ready.SessionNonce = 99, 123, "fresh"
+	if identity().RequestKey != first.RequestKey || identity().RequestDigest != first.RequestDigest {
+		t.Fatal("transient observation changed request identity")
+	}
+	ready.GUID = "Player-1-456"
+	if identity().RequestDigest == first.RequestDigest {
+		t.Fatal("actor change was ignored")
+	}
+	ready.GUID = "Player-1-123"
+	target.Client.FullBuild = "12.1.0.70000"
+	if identity().RequestDigest == first.RequestDigest {
+		t.Fatal("build change was ignored")
+	}
+}
 
 func TestPrepareProbeFreezesSessionAndCodeWithoutQueueEffect(t *testing.T) {
 	ctx := context.Background()

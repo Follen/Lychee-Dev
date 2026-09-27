@@ -18,7 +18,8 @@ import (
 var ErrPayload = errors.New("delivery.invalid_payload")
 
 // Resource paths are relative to the payload directory, using slash separators.
-// Only addon/ and skill/ are deployable; the npm wrapper is not a resource.
+// addon/ and skill/ are deployable. tool/luals is private CLI runtime data;
+// component installation never deploys it into the game or skill directory.
 type Resource struct {
 	Path   string `json:"path"`
 	Bytes  int64  `json:"bytes"`
@@ -113,6 +114,11 @@ func verifyInventory(ctx context.Context, directory string, inventory []Resource
 			if component != "" {
 				logical = component + "/" + name
 			}
+			if component == "" && logical == "tool" {
+				// The private LuaLS runtime has one mandatory ancestor outside
+				// the deployable addon/ and skill/ trees.
+				return nil
+			}
 			if !resourcePath(logical + "/placeholder") {
 				return fmt.Errorf("%w: directory %q", ErrPayload, name)
 			}
@@ -156,7 +162,7 @@ func verifyInventory(ctx context.Context, directory string, inventory []Resource
 }
 
 func resourcePath(name string) bool {
-	if !fs.ValidPath(name) || len(name) > 240 || (!strings.HasPrefix(name, "addon/") && !strings.HasPrefix(name, "skill/")) {
+	if !fs.ValidPath(name) || len(name) > 240 || (!strings.HasPrefix(name, "addon/") && !strings.HasPrefix(name, "skill/") && !strings.HasPrefix(name, "tool/luals/")) {
 		return false
 	}
 	parts := strings.Split(name, "/")

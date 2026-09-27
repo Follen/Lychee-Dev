@@ -7,7 +7,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"image"
 	"strings"
-	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/buildinfo"
@@ -65,6 +64,7 @@ type ConnectRequest struct {
 	Installation string
 	Session      string
 	CaptureArea  image.Rectangle
+	WakeBinding  string
 }
 
 func (r ConnectRequest) Validate() error {
@@ -79,7 +79,28 @@ func (r ConnectRequest) Validate() error {
 			return errors.New("live.invalid_binding_identity")
 		}
 	}
+	if _, err := requestedReceiverBindings(r.WakeBinding); err != nil {
+		return err
+	}
 	return validateCaptureArea(r.CaptureArea)
+}
+
+func requestedReceiverBindings(wake string) (desktop.ReceiverBindings, error) {
+	bindings := desktop.DefaultReceiverBindings()
+	if wake != "" {
+		bindings.WakeBinding = wake
+		// Only wake is used before receiver_ready advertises the effective
+		// profile. Pick provisional secondary chords by terminal-key validation.
+		for _, submit := range []string{"ALT-CTRL-SHIFT-]", "ALT-CTRL-F9", "ALT-CTRL-F10", "ALT-CTRL-F11"} {
+			for _, close := range []string{"ALT-CTRL-[", "ALT-CTRL-F12", "ALT-CTRL-F10", "ALT-CTRL-F9"} {
+				candidate := desktop.ReceiverBindings{WakeBinding: wake, SubmitBinding: submit, CloseBinding: close}
+				if desktop.ValidateReceiverBindings(candidate) == nil {
+					return candidate, nil
+				}
+			}
+		}
+	}
+	return bindings, desktop.ValidateReceiverBindings(bindings)
 }
 
 func validateCaptureArea(region image.Rectangle) error {
@@ -98,14 +119,21 @@ func validateCaptureArea(region image.Rectangle) error {
 // store. A unique match connects automatically; genuine ambiguity is returned
 // as data. Identity marking is the only game action before the choice.
 func ConnectWindow(ctx context.Context, root string, request ConnectRequest) (Connection, error) {
-	return connectWindow(ctx, root, request, nativeIO())
+	io := nativeIO()
+	io.root = root
+	io.bindings, _ = requestedReceiverBindings(request.WakeBinding)
+	return connectWindow(ctx, root, request, io)
 }
 
 func connectWindow(ctx context.Context, root string, request ConnectRequest, io *liveIO) (Connection, error) {
+	io.root = root
 	if err := request.Validate(); err != nil {
 		return Connection{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	if request.WakeBinding != "" {
+		io.bindings, _ = requestedReceiverBindings(request.WakeBinding)
+	}
+	ctx, cancel := context.WithTimeout(ctx, bootstrapLifecycleBudget)
 	defer cancel()
 	if request.Session != "" {
 		return reviveConnection(ctx, root, request, io)
@@ -118,7 +146,7 @@ func firstConnection(ctx context.Context, root string, request ConnectRequest, i
 	if err != nil {
 		return Connection{}, err
 	}
-	report, err := discoverCandidates(ctx, root, DiscoveryRequest{PID: request.PID, Installation: request.Installation}, io)
+	report, err := discoverCandidates(ctx, root, DiscoveryRequest{PID: request.PID, Installation: request.Installation, WakeBinding: request.WakeBinding}, io)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -193,7 +221,8 @@ func connectCandidateRelease(ctx context.Context, root, snapshot string, region 
 	if identity.ActorState != "ok" || identity.GUID != chosen.GUID || identity.Character != chosen.Character || identity.Realm != chosen.Realm {
 		return Connection{}, fmt.Errorf("%w: window actor changed", ErrActorChanged)
 	}
-	if _, err := io.send(ctx, target.Window, "/dev connect"); err != nil {
+	_, attemptID, err := io.sendBootstrap(withBootstrapPriorReady(ctx, chosen.PriorReady), target, region, "/dev connect")
+	if err != nil && !bootstrapBusinessMayHaveExecuted(ctx, root, attemptID) {
 		return Connection{}, err
 	}
 	frames, err := io.capture(ctx, target.Window, region)
@@ -209,6 +238,16 @@ func connectCandidateRelease(ctx context.Context, root, snapshot string, region 
 	defer session.Close()
 	if session.Ready().GUID != identity.GUID {
 		return Connection{}, fmt.Errorf("%w: ready handshake actor changed", ErrActorChanged)
+	}
+	if attemptID != "" {
+		if err := confirmBootstrapReceiver(ctx, root, attemptID, session.Ready()); err != nil {
+			return Connection{}, err
+		}
+		attempt, err := InspectBootstrapReceiver(ctx, root, attemptID)
+		if err != nil {
+			return Connection{}, err
+		}
+		session.bindings = attempt.Bindings
 	}
 	record, err := SaveWindowSession(ctx, root, snapshot, session)
 	if err != nil {
@@ -226,6 +265,10 @@ func reviveConnection(ctx context.Context, root string, request ConnectRequest, 
 	if err != nil {
 		return Connection{}, err
 	}
+	if request.WakeBinding != "" && request.WakeBinding != bound.Record.Bindings.WakeBinding {
+		return Connection{}, ErrSessionConstraint
+	}
+	io.bindings = bound.Record.Bindings
 	if err := reviveConstraints(request, bound); err != nil {
 		return Connection{}, err
 	}
@@ -238,6 +281,7 @@ func reviveConnection(ctx context.Context, root string, request ConnectRequest, 
 		Realm:        bound.Ready.Realm,
 		Installation: bound.Target.Client.Directory,
 		CaptureArea:  bound.Record.Region,
+		WakeBinding:  bound.Record.Bindings.WakeBinding,
 	}
 	if err := reconnect.Validate(); err != nil {
 		return Connection{}, err
@@ -272,6 +316,7 @@ func reviveConstraints(request ConnectRequest, bound RecordedSession) error {
 	mismatch = mismatch || request.Installation != "" && !sameInstallationPath(request.Installation, bound.Target.Client.Directory)
 	mismatch = mismatch || request.PID != 0 && request.PID != bound.Target.Window.ProcessID
 	mismatch = mismatch || request.CaptureArea != (image.Rectangle{}) && request.CaptureArea != bound.Record.Region
+	mismatch = mismatch || request.WakeBinding != "" && request.WakeBinding != bound.Record.Bindings.WakeBinding
 	if mismatch {
 		return fmt.Errorf("%w: a revived session keeps its recorded identity", ErrSessionConstraint)
 	}

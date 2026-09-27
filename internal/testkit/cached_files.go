@@ -63,6 +63,14 @@ func CachedFiles(t testing.TB, workspace string, files map[uint32]FileObject) se
 		return ref
 	}
 	md5key := func(raw []byte) string { digest := md5.Sum(raw); return hex.EncodeToString(digest[:]) }
+	objectKey := func(raw []byte) string {
+		if len(raw) >= 8 && string(raw[:4]) == "BLTE" {
+			if size := binary.BigEndian.Uint32(raw[4:8]); size >= 12 && uint64(size) <= uint64(len(raw)) {
+				return md5key(raw[:size])
+			}
+		}
+		return md5key(raw)
+	}
 	keyBytes := func(key string) []byte { raw, _ := hex.DecodeString(key); return raw }
 	frame := func(raw []byte) []byte { return append([]byte{'B', 'L', 'T', 'E', 0, 0, 0, 0, 'N'}, raw...) }
 
@@ -94,7 +102,7 @@ func CachedFiles(t testing.TB, workspace string, files map[uint32]FileObject) se
 			object = frame(files[id].Decoded)
 		}
 		entries = append(entries, entry{
-			content: md5key(files[id].Decoded), encoding: md5key(object),
+			content: md5key(files[id].Decoded), encoding: objectKey(object),
 			decoded: len(files[id].Decoded), encoded: len(object),
 		})
 		root = append(root, keyBytes(entries[len(entries)-1].content)...)
@@ -186,7 +194,7 @@ func CachedFiles(t testing.TB, workspace string, files map[uint32]FileObject) se
 		if object == nil {
 			object = frame(files[id].Decoded)
 		}
-		cacheObject(t, save, blob, cdnKey, md5key(object), object)
+		cacheObject(t, save, blob, cdnKey, objectKey(object), object)
 	}
 	cacheObject(t, save, blob, cdnKey, rootObjectKey, rootObject)
 	cacheObject(t, save, blob, cdnKey, encodingKey, encoding)

@@ -16,7 +16,7 @@ import (
 // Load requests compilation once after confirmed queue reentry. Observe must
 // independently verify the resulting code receipt before Dispatch can execute.
 func (p *ProbeOperation) Load(ctx context.Context) (desktop.InputReceipt, error) {
-	return p.load(ctx, desktop.QueuePreparedCommand)
+	return p.load(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) load(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {

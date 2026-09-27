@@ -61,10 +61,10 @@ func inspectData(ctx context.Context, root, snapshot, name string, query FileQue
 		if err != nil {
 			return RecordReading{}, err
 		}
-		kind, complete, truncated := "data-record", true, false
+		kind, complete, truncated := "data-record", reading.Complete, reading.Truncated
 		if reading.Page != nil {
 			kind = "data-page"
-			complete = reading.Page.After == nil && !reading.Page.More
+			complete = reading.Complete
 			truncated = reading.Page.More
 		}
 		capture, err := evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(raw), MaxBytes: 16 << 20, MediaType: "application/json", Complete: complete, Truncated: truncated, Provenance: evidence.Provenance{Kind: kind, Locator: locator, Snapshot: snapshot, DataBuild: pin.Data.FullBuild}})

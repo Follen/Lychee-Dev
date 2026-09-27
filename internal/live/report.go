@@ -17,12 +17,21 @@ import (
 // ReportIntent is frozen in WorkIntent.Request before dispatch. Identity comes
 // from the selected live session, never from the report being verified.
 type ReportIntent struct {
-	Schema   string                   `json:"schema"`
-	Revision string                   `json:"revision,omitempty"`
-	Expected bridge.SignalExpectation `json:"expected"`
-	Code     []byte                   `json:"code"`
-	Load     *ProbeLoadIntent         `json:"load,omitempty"`
-	Binding  string                   `json:"binding,omitempty"`
+	Schema         string                   `json:"schema"`
+	Revision       string                   `json:"revision,omitempty"`
+	BudgetSeconds  int                      `json:"budgetSeconds,omitempty"`
+	DeclaredBudget bool                     `json:"-"`
+	Expected       bridge.SignalExpectation `json:"expected"`
+	Code           []byte                   `json:"code"`
+	Load           *ProbeLoadIntent         `json:"load,omitempty"`
+	Binding        string                   `json:"binding,omitempty"`
+}
+
+func reportScope(input ReportIntent) string {
+	if input.Load == nil {
+		return ""
+	}
+	return input.Load.ReportScope
 }
 
 type reportObservation struct {
@@ -134,6 +143,16 @@ func reportInput(record journal.WorkRecord) (ReportIntent, error) {
 	if input.Schema != "lycheedev.report-intent.v1" || record.Intent.Snapshot == "" || record.Intent.Session == "" || input.Expected.SessionNonce != record.Intent.Session {
 		return input, errors.New("live.invalid_report_intent")
 	}
+	input.DeclaredBudget = input.BudgetSeconds != 0
+	if reportScope(input) != "" && reportScope(input) != "character-v1" {
+		return input, errors.New("bridge.invalid_report_scope")
+	}
+	if input.BudgetSeconds == 0 { // Retained 2.0 records predate declared budgets.
+		input.BudgetSeconds = 120
+	}
+	if input.BudgetSeconds < 1 || input.BudgetSeconds > 120 {
+		return input, errors.New("live.execution_budget_invalid")
+	}
 	var bootstrap bootstrapObservation
 	if len(record.Observation) != 0 {
 		if err := json.Unmarshal(record.Observation, &bootstrap); err != nil {
@@ -168,7 +187,7 @@ func ArchiveOperationReport(ctx context.Context, root, operationID string, saved
 		if input.Load != nil {
 			return zero, errors.New("live.bound_report_source_required")
 		}
-		report, err := bridge.ReadPersistedReport(saved, input.Code, input.Expected)
+		report, err := bridge.ReadPersistedReport(saved, input.Code, input.Expected, reportScope(input))
 		if err != nil {
 			return zero, err
 		}
@@ -204,7 +223,7 @@ func ArchiveInstalledOperationReport(ctx context.Context, root, operationID stri
 		if err != nil {
 			return zero, err
 		}
-		installed, err := ReadInstalledReport(ctx, input.Load.Installation, input.Load.Account, input.Code, input.Expected)
+		installed, err := ReadInstalledReport(ctx, input.Load.Installation, input.Load.Account, input.Code, input.Expected, reportScope(input))
 		if err != nil {
 			return zero, err
 		}

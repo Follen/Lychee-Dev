@@ -190,6 +190,24 @@ func ReleaseCompletedProbe(ctx context.Context, root, operationID string) (journ
 		if err := json.Unmarshal(record.Observation, &observed); err != nil {
 			return record, err
 		}
+		if input.Revision != "" {
+			if _, err := acknowledgedReport(ctx, evidence.OpenArchive(store, metadata), record, input, observed); err != nil {
+				return record, err
+			}
+			if observed.QueueRetirement == nil || observed.QueueRetirement.Revision.SHA256 == "" {
+				return record, errors.New("live.queue_retirement_unconfirmed")
+			}
+			if record.Intent.Goal == "finished" {
+				display, err := readDisplayProof(ctx, store, metadata, record, input.Binding)
+				if err != nil {
+					return record, err
+				}
+				if display.State != "cleared" {
+					return record, ErrReceiptHidePending
+				}
+			}
+			return record, book.RetireWindowWork(ctx, filepath.Join(input.Load.Installation, "Interface", "AddOns"), store.Identity().WorkspaceID, operationID)
+		}
 		if observed.Schema != "lycheedev.report-observation.v1" || observed.CleanupNonce == "" || observed.ClearedID == "" || observed.QueueRetirement == nil || observed.QueueRetirement.Revision.SHA256 == "" {
 			return record, errors.New("live.cleanup_evidence_missing")
 		}

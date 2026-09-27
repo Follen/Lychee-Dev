@@ -3,30 +3,14 @@ local L = ns.L
 
 -- Trace workbench page: one bounded function trace at a time with a 300-record
 -- call list and a per-call argument detail pane.
-local ROW_HEIGHT = 38
-local LIST_WIDTH = 520
+local ROW_HEIGHT = 44
+local LIST_WIDTH = 292
 local VISIBLE_ROWS = 18
 
 -- The single built page instance; only read by the shell export hook.
 local builtPage
 
-local function CreateLineInput(parent)
-    local W = ns.Widgets
-    local colors = W.Colors
-    local panel = W.CreatePanel(parent, colors.editor[1], colors.editor[2], colors.editor[3], 1)
-    local editBox = CreateFrame("EditBox", nil, panel)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject(ChatFontNormal)
-    editBox:SetTextColor(0.94, 0.95, 0.96)
-    editBox:SetTextInsets(9, 9, 0, 0)
-    editBox:SetPoint("TOPLEFT", 1, -1)
-    editBox:SetPoint("BOTTOMRIGHT", -1, 1)
-    editBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    panel.editBox = editBox
-    return panel
-end
+local CreateLineInput = ns.Widgets.CreateLineInput
 
 local function BuildTracePage(parent)
     local W = ns.Widgets
@@ -36,11 +20,12 @@ local function BuildTracePage(parent)
 
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
+    W.CreatePageHeading(page, L.TAB_TRACE, L.TRACE_PAGE_HELP)
 
     local input = CreateLineInput(page)
     input:SetPoint("TOPLEFT", 14, -84)
     input:SetPoint("TOPRIGHT", -250, -84)
-    input:SetHeight(30)
+    input:SetHeight(36)
     input.editBox:SetText("C_AddOns.GetAddOnInfo")
 
     local traceButton = W.CreateButton(page, 112, L.START_TRACE, "primary")
@@ -53,6 +38,7 @@ local function BuildTracePage(parent)
     dot:SetSize(5, 5)
     dot:SetPoint("TOPLEFT", input, "BOTTOMLEFT", 2, -15)
     local status = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ns.Theme.SetFont(status, 12, ns.Theme.text)
     status:SetPoint("LEFT", dot, "RIGHT", 7, 0)
     local function SetStatus(text, r, g, b)
         status:SetText(text)
@@ -65,9 +51,9 @@ local function BuildTracePage(parent)
     local detailLabel = W.CreateSectionLabel(page, L.CALL_ARGUMENTS)
     detailLabel:SetPoint("TOPLEFT", LIST_WIDTH + 29, -152)
 
-    local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
+    local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
     listPanel:SetPoint("TOPLEFT", 14, -172)
-    listPanel:SetPoint("BOTTOMLEFT", 14, 54)
+    listPanel:SetPoint("BOTTOMLEFT", 14, 64)
     listPanel:SetWidth(LIST_WIDTH)
     local scroll = W.CreateScrollArea(listPanel, 8, 8, 7, 8)
     local content = CreateFrame("Frame", nil, scroll)
@@ -75,14 +61,15 @@ local function BuildTracePage(parent)
     content:SetHeight(1)
     scroll:SetScrollChild(content)
     local empty = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(empty, 11, ns.Theme.textDim)
     empty:SetPoint("TOP", 0, -24)
     empty:SetText(L.NO_CALLS_CAPTURED)
-    empty:SetTextColor(1, 1, 1, 0.32)
+    empty:SetTextColor(unpack(ns.Theme.textDim))
 
     local selected
     local detail = W.CreateTextArea(page, true)
     detail:SetPoint("TOPLEFT", LIST_WIDTH + 26, -172)
-    detail:SetPoint("BOTTOMRIGHT", -14, 54)
+    detail:SetPoint("BOTTOMRIGHT", -14, 64)
     detail.editBox:SetWidth(layout.WINDOW_WIDTH - LIST_WIDTH - 78)
     W.SetReadOnlyText(detail, L.SELECT_CALL_DETAIL)
 
@@ -134,23 +121,26 @@ local function BuildTracePage(parent)
         local row = W.CreateListRow(content, ROW_HEIGHT)
         row:SetWidth(LIST_WIDTH - 26)
         local elapsed = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(elapsed, 11, ns.Theme.textDim)
         elapsed:SetPoint("LEFT", 8, 0)
         elapsed:SetWidth(62)
         elapsed:SetJustifyH("LEFT")
-        elapsed:SetTextColor(1, 1, 1, 0.38)
+        elapsed:SetTextColor(unpack(ns.Theme.textDim))
         row.elapsed = elapsed
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(name, 12, ns.Theme.text)
         name:SetPoint("TOPLEFT", 72, -5)
         name:SetPoint("TOPRIGHT", -8, -5)
         name:SetJustifyH("LEFT")
         name:SetWordWrap(false)
         row.name = name
         local summary = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(summary, 11, ns.Theme.textDim)
         summary:SetPoint("BOTTOMLEFT", 72, 5)
         summary:SetPoint("BOTTOMRIGHT", -8, 5)
         summary:SetJustifyH("LEFT")
         summary:SetWordWrap(false)
-        summary:SetTextColor(1, 1, 1, 0.38)
+        summary:SetTextColor(unpack(ns.Theme.textDim))
         row.summary = summary
         row:SetScript("OnEnter", function(self)
             self.isHovered = true
@@ -221,14 +211,14 @@ local function BuildTracePage(parent)
     traceButton:SetScript("OnClick", function()
         if ns.FunctionTrace.IsRunning() then
             ns.FunctionTrace.Stop()
-            SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+            SetStatus(L.STOPPED, unpack(ns.Theme.textMuted))
             SyncTraceButton()
             return
         end
 
         local succeeded, errorMessage = ns.FunctionTrace.Start(input.editBox:GetText(), QueueRefresh)
         if succeeded then
-            SetStatus(string.format(L.TRACING_FUNCTION, ns.FunctionTrace.GetActivePath()), 0.42, 0.76, 0.43)
+            SetStatus(string.format(L.TRACING_FUNCTION, ns.FunctionTrace.GetActivePath()), unpack(ns.Theme.success))
         else
             SetStatus(errorMessage, accent[1], accent[2], accent[3])
         end
@@ -276,11 +266,11 @@ local function BuildTracePage(parent)
     -- disabled there and the hook drops back to its inert guard.
     function page.HandleShutdown()
         ns.FunctionTrace.Stop()
-        SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+        SetStatus(L.STOPPED, unpack(ns.Theme.textMuted))
         SyncTraceButton()
     end
 
-    SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+    SetStatus(L.STOPPED, unpack(ns.Theme.textMuted))
     SyncTraceButton()
     RefreshList()
     builtPage = page

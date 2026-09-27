@@ -1,7 +1,8 @@
 ## Interface: 120100, 50504, 38002, 16001
 ## Title: Lychee Dev
-## Version: 2.0.6
+## Version: 2.5.0
 ## SavedVariables: LycheeToolkitDB
+## SavedVariablesPerCharacter: LycheeToolkitBridgeDB
 
 # One manifest for every supported client. The engine loads this file when its
 # own build matches any declared interface; the running build's profile is
@@ -21,15 +22,21 @@ Core\Persistence.lua
 Bridge\Session.lua
 Core\Controls.lua
 Bridge\CaptureWriter.lua
+Bridge\InputProtocol.lua
 Bridge\MatrixSymbol.lua
 Bridge\ReceiptView.lua
+Bridge\ActivityView.lua
 Bridge\ReportStore.lua
+Bridge\Investigation.lua
 Bridge\ProbeRunner.lua
 Bridge\Definitions.lua
 Modules\AutomationView.lua
 Bridge\ProbeQueue.lua
 Bridge\Reentry.lua
 Bridge\Identity.lua
+Bridge\ReceiverBindings.lua
+Bridge\StartupBeacon.lua
+Bridge\Receiver.lua
 # --- Event catalogs: all four load; Catalog.lua selects ns.Client's table ---
 Modules\Events\CatalogData_Mainline.lua
 Modules\Events\CatalogData_Mists.lua
@@ -43,10 +50,12 @@ Modules\FunctionTrace.lua
 Modules\Diagnostics.lua
 Bridge\FaultRunner.lua
 # --- Workbench UI foundation (Widgets, TreeView, Export popup, Window shell) ---
+UI\Theme.lua
 UI\Widgets.lua
 UI\TreeView.lua
 UI\Export.lua
 UI\Window.lua
+UI\Pages\Settings.lua
 # --- Workbench pages: later page modules insert their load line here ---
 UI\Pages\About.lua
 UI\Pages\Run.lua

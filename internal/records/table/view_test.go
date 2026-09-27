@@ -120,6 +120,33 @@ func TestBoundSparseOrderedFields(t *testing.T) {
 	}
 }
 
+func TestSparseZeroPaddingToFourByteBoundary(t *testing.T) {
+	for _, padding := range []int{0, 1, 2, 3, 7} {
+		for _, poison := range []bool{false, true} {
+			if padding == 0 && poison {
+				continue
+			}
+			raw := typedSparseFixture()
+			end := int(binary.LittleEndian.Uint32(raw[92:96]))
+			out := append([]byte(nil), raw[:end]...)
+			out = append(out, make([]byte, padding)...)
+			if poison {
+				out[len(out)-1] = 1
+			}
+			out = append(out, raw[end:]...)
+			binary.LittleEndian.PutUint32(out[92:96], uint32(end+padding))
+			binary.LittleEndian.PutUint16(out[end+padding+12:], uint16(13+padding))
+			doc := definition(t, "int ID\nstring Name\nint Score\nfloat Ratio\nint Flags\nint Parent", "$noninline,id$ID\nName\nScore<8>\nRatio\nFlags<u16>[2]\n$noninline,relation$Parent")
+			v := bind(t, out, doc)
+			got, err := v.Row(context.Background(), 10, 32)
+			valid := !poison && (padding == 0 || padding == 3)
+			if valid && (err != nil || got["Name"] != "猫") || !valid && !errors.Is(err, table.ErrFormat) {
+				t.Fatalf("padding=%d poison=%v row=%v err=%v", padding, poison, got, err)
+			}
+		}
+	}
+}
+
 func TestBoundRowsRejectWrongSchemaAndNonfiniteFloat(t *testing.T) {
 	raw := recordFixture(true, nil, nil)
 	records, err := table.OpenRecords(context.Background(), bytes.NewReader(raw), int64(len(raw)), limits)
@@ -142,6 +169,13 @@ func TestBoundRowsRejectWrongSchemaAndNonfiniteFloat(t *testing.T) {
 	_, _, start := fixture(3)
 	binary.LittleEndian.PutUint32(raw[start:start+4], math.Float32bits(float32(math.Inf(1))))
 	v := bind(t, raw, definition(t, "int ID\nfloat Value", "$noninline,id$ID\nValue"))
+	projected, err := v.WithProjection([]string{"ID"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row, err := projected.Row(context.Background(), 10, 10); !errors.Is(err, table.ErrFormat) || row != nil {
+		t.Fatalf("projection hid corrupt unselected float: %v %v", row, err)
+	}
 	if got, err := v.Row(context.Background(), 10, 10); !errors.Is(err, table.ErrFormat) || got != nil {
 		t.Fatalf("%v %v", got, err)
 	}

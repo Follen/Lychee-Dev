@@ -84,9 +84,9 @@ func TestHostQueueToLuaExecution(t *testing.T) {
 	if ack.ReportBytes != report.Receipt.ReportBytes || ack.ReportAdler32 != report.Receipt.ReportAdler32 || ack.CodeBytes != report.Receipt.CodeBytes || ack.CodeAdler32 != report.Receipt.CodeAdler32 {
 		t.Fatal("ack payload identity changed")
 	}
-	before := fmt.Sprintf(`LycheeToolkitDB={schema=1,reports={[%q]={receipt=%q,body=%q}}}`, d.RequestID, payload.Receipt, payload.Body)
+	before := fmt.Sprintf(`LycheeToolkitBridgeDB={schema=1,reports={[%q]={receipt=%q,body=%q}}}`, d.RequestID, payload.Receipt, payload.Body)
 	expected.Kind, expected.AfterSequence = "reported", loaded.Sequence
-	if _, err := bridge.VerifyPersistedReportRemoval(strings.NewReader(before), strings.NewReader(cleanup.Saved), []byte(code), expected); err != nil {
+	if _, err := bridge.VerifyPersistedReportRemoval(strings.NewReader(before), strings.NewReader(cleanup.Saved), []byte(code), expected, "character-v1"); err != nil {
 		t.Fatalf("actual Lua removal: %v", err)
 	}
 }

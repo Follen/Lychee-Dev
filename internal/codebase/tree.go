@@ -23,6 +23,7 @@ type treeFile struct {
 	path, object string
 	size         int64
 	asset        bool
+	oversized    bool
 }
 
 const (
@@ -72,10 +73,7 @@ func (b *Browser) sourceTree(ctx context.Context, pin selection.SourcePin) ([]tr
 		if err != nil || size < 0 || fields[1] != "blob" || !objectID(fields[2]) || !sourcePath(string(name)) {
 			return nil, errors.New("codebase.invalid_document_object")
 		}
-		if document && size > maxSourceBytes {
-			return nil, errors.New("codebase.invalid_document_object")
-		}
-		file := treeFile{path: string(name), object: fields[2], size: size, asset: asset}
+		file := treeFile{path: string(name), object: fields[2], size: size, asset: asset, oversized: document && size > maxSourceBytes}
 		if asset {
 			assets++
 			if assets > maxAssetEntries {
@@ -101,7 +99,7 @@ func (b *Browser) sourceTree(ctx context.Context, pin selection.SourcePin) ([]tr
 // treeNeedsRead reports whether the indexer reads the file's bytes. Assets
 // above the asset byte limit stay metadata-only rows.
 func treeNeedsRead(file treeFile) bool {
-	return !file.asset || file.size <= maxAssetBytes
+	return !file.oversized && (!file.asset || file.size <= maxAssetBytes)
 }
 
 // directoryTree lists fixture-directory documents and assets with the same
@@ -139,10 +137,7 @@ func directoryTree(root string) ([]treeFile, error) {
 		if size < 0 || !sourcePath(relative) {
 			return errors.New("codebase.invalid_document_object")
 		}
-		if document && size > maxSourceBytes {
-			return errors.New("codebase.invalid_document_object")
-		}
-		file := treeFile{path: relative, size: size, asset: asset}
+		file := treeFile{path: relative, size: size, asset: asset, oversized: document && size > maxSourceBytes}
 		if asset {
 			assets++
 			if assets > maxAssetEntries {

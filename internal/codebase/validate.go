@@ -49,6 +49,8 @@ type ValidationIdentity struct {
 // legacy contract; ResolvedCommit is always the fixed evidence commit and no
 // step ever falls back to a moving ref.
 type TOCValidation struct {
+	Semantic       *SemanticAssessment `json:"semantic,omitempty"`
+	load           LoadAssessment
 	ID             string                 `json:"id,omitempty"`
 	Valid          bool                   `json:"valid"`
 	Path           string                 `json:"path"`
@@ -89,6 +91,7 @@ func (b *Browser) ValidateTOC(ctx context.Context, pin selection.SourcePin, snap
 		return result, err
 	}
 	result.TOC = load.Manifest
+	result.load = load
 	for _, doc := range load.Documents {
 		if doc.Path != load.Manifest {
 			continue

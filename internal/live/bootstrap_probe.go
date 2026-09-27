@@ -16,7 +16,7 @@ import (
 // Bootstrap publishes the owned queue and submits one initial reload. It does
 // not compile or execute the probe; ObserveBootstrap must confirm the handoff.
 func (p *ProbeOperation) Bootstrap(ctx context.Context) (desktop.InputReceipt, error) {
-	return p.bootstrap(ctx, desktop.QueuePreparedCommand)
+	return p.bootstrap(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) bootstrap(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {

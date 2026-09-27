@@ -1,5 +1,5 @@
 local root = assert(arg[1])
-local ns = { Release = "2.0.6", Startup = { ready = true,
+local ns = { Release = "2.5.0", Startup = { ready = true,
     identity = { product = "retail", build = "12.1.0.69875" } } }
 ns.Platform = { ObserveActor = function() return { character = "character", realm = "realm", guid = "Player-1-123" } end }
 local secret = {}
@@ -12,7 +12,7 @@ assert(ns.Persistence.Load())
 local requestId, nonce = "OP-persisted", string.rep("a", 32)
 local code = "return 42"
 local result, failure = ns.ReportStore.Commit(requestId, code, { answer = 42 })
-assert(result == nil and failure == "bridge_disabled" and next(LycheeToolkitDB.reports) == nil)
+assert(result == nil and failure == "bridge_disabled" and next(LycheeToolkitBridgeDB.reports) == nil)
 LycheeToolkitDB.options.bridgeEnabled = true
 result, failure = ns.ReportStore.Commit(requestId, code, { answer = 42 })
 assert(result == nil and failure == "session_unbound")
@@ -23,16 +23,16 @@ for sequence = 1, 3 do assert(ns.Session.NextIdentity().sequence == sequence) en
 assert(ns.Session.Bind(nonce).sequence == 3, "idempotent binding reset sequence")
 local receipt = assert(ns.ReportStore.Commit(requestId, code, { answer = 42, text = "\228\184\150\231\149\140" }))
 assert(ns.Session.Current().sequence == 4)
-local saved = LycheeToolkitDB.reports[requestId]
+local saved = LycheeToolkitBridgeDB.reports[requestId]
 result, failure = ns.ReportStore.Commit(requestId, code, { answer = 99 })
-assert(result == nil and failure == "report_request_exists" and LycheeToolkitDB.reports[requestId] == saved)
+assert(result == nil and failure == "report_request_exists" and LycheeToolkitBridgeDB.reports[requestId] == saved)
 assert(ns.Session.Current().sequence == 4, "duplicate report consumed sequence")
 local originalReceipt, originalBody = ns.ReportStore.Read(requestId)
 assert(originalReceipt == receipt and originalBody == saved.body)
 local function reject(id, value, expected)
     local success, reason = ns.ReportStore.Commit(id, code, value)
     assert(success == nil and reason == expected, tostring(reason))
-    assert(LycheeToolkitDB.reports[id] == nil)
+    assert(LycheeToolkitBridgeDB.reports[id] == nil)
 end
 reject("OP-secret", secret, "report_secret_value")
 reject("OP-large", string.rep("x", 512 * 1024 + 1), "report_byte_limit")
@@ -44,14 +44,14 @@ for index = 2, 100 do
     assert(ns.Session.Current().sequence == previousSequence + 1)
 end
 reject("OP-overflow", { answer = 1 }, "report_count_limit")
-local retained = LycheeToolkitDB.reports
-LycheeToolkitDB.reports = {}
+local retained = LycheeToolkitBridgeDB.reports
+LycheeToolkitBridgeDB.reports = {}
 local large = string.rep("x", 512 * 1024 - 4)
 for index = 1, 31 do
     assert(ns.ReportStore.Commit("OP-budget-" .. index, "", large))
 end
 reject("OP-budget-overflow", large, "report_store_limit")
-LycheeToolkitDB.reports = retained
+LycheeToolkitBridgeDB.reports = retained
 local ackId = "OP-2"
 local ackReceipt, ackBody = ns.ReportStore.Read(ackId)
 local ackDigest = ns.CaptureWriter.DigestBytes(ackBody)
@@ -70,14 +70,14 @@ end
 local function rejectAck(value, expected)
     local success, reason = ns.ReportStore.Acknowledge(value)
     assert(success == nil and reason == expected, tostring(reason))
-    assert(LycheeToolkitDB.reports[ackId] ~= nil)
+    assert(LycheeToolkitBridgeDB.reports[ackId] ~= nil)
 end
 -- An added field is not part of the transmitted signal, so the canonical
 -- projection ignores it and the stored receipt still matches; a field the wire
 -- does carry cannot be changed without changing that projection.
 assert(ns.ReportStore.Acknowledge(amended("extra", true)) ~= nil)
-assert(LycheeToolkitDB.reports[ackId] == nil)
-LycheeToolkitDB.reports[ackId] = { receipt = ackReceipt, body = ackBody }
+assert(LycheeToolkitBridgeDB.reports[ackId] == nil)
+LycheeToolkitBridgeDB.reports[ackId] = { receipt = ackReceipt, body = ackBody }
 rejectAck(amended("inputReady", true), "report_acknowledgement_mismatch")
 rejectAck(amended("reportBytes", #ackBody + 1), "report_acknowledgement_mismatch")
 rejectAck(amended("reportAdler32", "ffffffff"), "report_acknowledgement_mismatch")
@@ -94,7 +94,7 @@ rejectAck(amended("build", "12.1.0.99999"), "report_acknowledgement_identity")
 LycheeToolkitDB.options.bridgeEnabled = false
 rejectAck(original, "bridge_disabled")
 LycheeToolkitDB.options.bridgeEnabled = true
-local ackRecord = LycheeToolkitDB.reports[ackId]
+local ackRecord = LycheeToolkitBridgeDB.reports[ackId]
 ackRecord.body = ackBody .. " "
 rejectAck(original, "report_acknowledgement_mismatch")
 ackRecord.body = ackBody
@@ -104,12 +104,12 @@ assert(ns.Session.Bind(nonce).sequence == 0)
 local acknowledgement = assert(ns.ReportStore.Acknowledge(original))
 assert(ns.Session.Current().sequence == original.sequence + 1)
 assert(string.find(acknowledgement, '"kind":"acknowledged"', 1, true))
-assert(LycheeToolkitDB.reports[ackId] == nil)
-assert(LycheeToolkitDB.reports["OP-persisted"] == saved)
+assert(LycheeToolkitBridgeDB.reports[ackId] == nil)
+assert(LycheeToolkitBridgeDB.reports["OP-persisted"] == saved)
 local acknowledged, ackFailure = ns.ReportStore.Acknowledge(original)
 assert(acknowledged == nil and ackFailure == "report_unavailable")
 -- Emit a SavedVariables literal from the real committed record, not a JSON
 -- surrogate. No user database or game file is read or written by this fixture.
-io.write("LycheeToolkitDB = { schema = 1, reports = { [\"OP-persisted\"] = { receipt = ")
+io.write("LycheeToolkitBridgeDB = { schema = 1, reports = { [\"OP-persisted\"] = { receipt = ")
 io.write(string.format("%q", originalReceipt))
 io.write(", body = " .. string.format("%q", originalBody) .. " }, }, }\n")

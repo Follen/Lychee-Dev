@@ -25,13 +25,16 @@ type sessionFrames interface {
 // It is a live observation, not a persistent permission or an input sender.
 // The caller must Close it and must not use it concurrently across operations.
 type WindowSession struct {
-	target  ClientWindow
-	region  image.Rectangle
-	ready   bridge.Signal
-	reader  *bridge.SignalReader
-	frames  sessionFrames
-	confirm func(context.Context, ClientWindow) error
-	closed  bool
+	target      ClientWindow
+	bindings    desktop.ReceiverBindings
+	region      image.Rectangle
+	ready       bridge.Signal
+	reader      *bridge.SignalReader
+	frames      sessionFrames
+	confirm     func(context.Context, ClientWindow) error
+	writerIO    *liveIO
+	reportScope string
+	closed      bool
 }
 
 func (s *WindowSession) Close() {
@@ -58,6 +61,7 @@ func sessionSignalIdentity(ready bridge.Signal) bridge.SignalIdentity {
 		Product:      ready.Product,
 		Build:        ready.Build,
 		SessionNonce: ready.SessionNonce,
+		RuntimeEpoch: ready.RuntimeEpoch,
 	}
 }
 
@@ -71,7 +75,7 @@ func newWindowSession(target ClientWindow, region image.Rectangle, ready bridge.
 		}
 	}
 	reader.SetIdentityBaseline(sessionSignalIdentity(ready))
-	return &WindowSession{target: target, region: region, ready: ready, reader: reader, frames: frames, confirm: confirm}
+	return &WindowSession{target: target, bindings: desktop.DefaultReceiverBindings(), region: region, ready: ready, reportScope: ready.ReportScope, reader: reader, frames: frames, confirm: confirm}
 }
 
 func sessionExpectation(target ClientWindow, expected bridge.SignalExpectation) error {

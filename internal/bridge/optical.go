@@ -20,6 +20,12 @@ func ParseOpticalSignals(data []byte) ([]Signal, error) {
 	if len(data) == 0 || len(data) > 4096 || !utf8.Valid(data) {
 		return nil, invalid
 	}
+	var header struct {
+		Schema string `json:"schema"`
+	}
+	if json.Unmarshal(data, &header) != nil {
+		return nil, invalid
+	}
 	if err := validateJSON(data, 3, 40); err != nil {
 		return nil, err
 	}
@@ -38,7 +44,7 @@ func ParseOpticalSignals(data []byte) ([]Signal, error) {
 		return nil, err
 	}
 	switch receipt.Kind {
-	case "loaded", "reported", "acknowledged", "cancelled":
+	case "loaded", "reported", "acknowledged", "cancelled", "checkpoint":
 	default:
 		return nil, invalid
 	}

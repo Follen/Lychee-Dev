@@ -17,7 +17,7 @@ for _, profile in ipairs(profiles) do
     IsLoggedIn = function() return true end
     InCombatLockdown = function() return false end
     GetCurrentKeyBoardFocus = function() return focus end
-    LycheeToolkitDB = nil
+    LycheeToolkitDB, LycheeToolkitBridgeDB = nil, nil
     local scale = 1
     UIParent = { GetEffectiveScale = function() return scale end }
     CreateFrame = function(kind, name, parent)
@@ -65,7 +65,7 @@ for _, profile in ipairs(profiles) do
             callbacks[owner] = nil
         end,
     }
-    local ns = { Release = "2.0.6", Startup = { ready = true, identity = {} } }
+    local ns = { Release = "2.5.0", Startup = { ready = true, identity = {} } }
     -- This harness lists addon modules explicitly (the TOC entry is added by
     -- the integrator); Identity.lua is exercised through the real TOC-adjacent
     -- modules it depends on, not a mock.
@@ -74,7 +74,7 @@ for _, profile in ipairs(profiles) do
     end
     assert(loadfile(root .. "/Core/ClientGate.lua"))("Lychee Dev", ns)
     for _, name in ipairs({ "Core/Platform.lua", "Core/Persistence.lua", "Bridge/CaptureWriter.lua",
-        "Bridge/Session.lua", "Bridge/MatrixSymbol.lua", "Bridge/ReceiptView.lua" }) do
+        "Bridge/Session.lua", "Bridge/ProbeRunner.lua", "Bridge/MatrixSymbol.lua", "Bridge/ReceiptView.lua" }) do
         assert(loadfile(root .. "/" .. name))("Lychee Dev", ns)
     end
     ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = {} }
@@ -135,10 +135,10 @@ for _, profile in ipairs(profiles) do
     assert(refreshReceipt == nil and refreshReason == "identity_busy" and frames[1].visible)
     ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = {} }
     assert(loadfile(root .. "/Bridge/ProbeQueue.lua"))("Lychee Dev", ns)
-    LycheeToolkitDB.reentry = { schema = "lycheedev.reentry.v1" }
+    LycheeToolkitBridgeDB.reentry = { schema = "lycheedev.reentry.v1" }
     busyReceipt, busyReason = ns.Identity.Trigger(nonce)
     assert(busyReceipt == nil and busyReason == "identity_busy" and frames[1].visible)
-    LycheeToolkitDB.reentry = nil
+    LycheeToolkitBridgeDB.reentry = nil
     -- Focus release prompts one fresh observation; it is not itself proof.
     focus = nil
     watch(owner)

@@ -74,6 +74,8 @@ type Partition struct {
 	Copies        uint32
 	SparseOffset  uint32
 	SparseCount   uint32
+	EncryptedIDs  []uint32
+	IDsComplete   bool
 }
 
 // Inspect reads only bounded WDC metadata from an immutable, already verified
@@ -224,7 +226,9 @@ func Inspect(ctx context.Context, source io.ReaderAt, size int64, budget Budget)
 	}
 	// WDC4+ stores an encrypted-ID list for each partition with a key identity.
 	if out.Version >= 4 {
-		for _, partition := range out.Partitions {
+		var totalIDs uint64
+		for i := range out.Partitions {
+			partition := &out.Partitions[i]
 			if partition.KeyID == 0 {
 				continue
 			}
@@ -232,9 +236,29 @@ func Inspect(ctx context.Context, source io.ReaderAt, size int64, budget Budget)
 			if err != nil {
 				return Layout{}, err
 			}
-			if err := r.skip(int64(binary.LittleEndian.Uint32(b)) * 4); err != nil {
+			count := binary.LittleEndian.Uint32(b)
+			totalIDs += uint64(count)
+			if totalIDs > uint64(budget.Rows) {
+				return Layout{}, ErrLimit
+			}
+			ids, err := r.take(int64(count) * 4)
+			if err != nil {
 				return Layout{}, err
 			}
+			partition.EncryptedIDs = make([]uint32, count)
+			seen := make(map[uint32]bool, count)
+			for j := range partition.EncryptedIDs {
+				if err := ctx.Err(); err != nil {
+					return Layout{}, err
+				}
+				id := binary.LittleEndian.Uint32(ids[j*4:])
+				if seen[id] {
+					return Layout{}, ErrFormat
+				}
+				seen[id] = true
+				partition.EncryptedIDs[j] = id
+			}
+			partition.IDsComplete = uint64(count) == uint64(partition.Rows)+uint64(partition.Copies)
 		}
 	}
 	out.MetadataEnd = r.offset

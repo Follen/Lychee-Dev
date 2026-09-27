@@ -30,7 +30,7 @@
 
 | 工作流 | 具体功能 | 典型问题 |
 | --- | --- | --- |
-| **源码研究** | 同步暴雪 UI 和受支持的插件仓库；索引 Lua/XML/TOC；精确或探索查询；查看符号和原文；比较固定版本 | 这个 API 在哪里使用？不同客户端改了什么？ |
+| **源码研究** | 固定暴雪 UI 或插件 Git 版本；检索 Lua/XML/TOC 和正文；查看定义、有界引用与上下文、比较版本。包内附带验真的 LuaLS；秘密值传播结果保留条件和未知边界 | 这个 API 在哪里使用？不同客户端改了什么？ |
 | **插件验证** | 检查 TOC/XML 加载链、语法、源码名称引用；按明确配置验证多个客户端 | 是否漏了加载文件？Interface 声明是否匹配？ |
 | **DB2 与 SQL** | 类型化 schema/记录、字段搜索、外键筛选、分页、JSONL 流、只读 SQL 和 CSV 导出 | 哪些记录符合这个条件？ |
 | **游戏业务数据** | 法术引用、光环和召唤；物品模型、geoset 和纹理；生物 display/模型；副本遭遇；住宅装饰 | 这个 ID 关联了哪些数据和资源？ |
@@ -62,7 +62,7 @@
 PowerShell：
 
 ```powershell
-npm install --global lycheedev --ignore-scripts
+npm install --global lycheedev
 lycheedev version --format json
 lycheedev describe --format json
 ```
@@ -84,14 +84,18 @@ lycheedev skill install --release $release --path $skill
 
 ### 研究一个 API
 
+首次使用源码命令前，先初始化工作区：
+
 ```powershell
+lycheedev init
 $source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
 $sourcePin = $source.result.id
-lycheedev source index --snapshot $sourcePin --format json
-lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json
+$matches = lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json | ConvertFrom-Json
+$symbol = $matches.result.results | Where-Object { $_.symbolId } | Select-Object -First 1
+lycheedev source context --snapshot $sourcePin --symbol-id $symbol.symbolId --format json
 ```
 
-分支只解析一次，后续沿用返回的不可变 pin。研究历史版本时传入精确 commit 或完整 tag ref；用 `source inspect` 读取原始行，用 `source diff --from <pin-a> --to <pin-b>` 比较版本。
+分支只解析一次，后续沿用返回的不可变 pin。query/context 会自动准备所需源码映射；按路径和作用域确认候选后再传递 `symbolId`，需要调用及引用关系时用 `source refs`。研究历史版本时传入精确 commit 或完整 tag ref；用 `source inspect` 读取原始行，用 `source diff --from <pin-a> --to <pin-b>` 比较版本。
 
 ### 查询真实游戏数据
 
@@ -178,7 +182,7 @@ Lua 测试需要 Lua 5.1；`node tests/tools/build-lua.mjs` 可构建固定版�
 | Agent 工作流 | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm 分发 | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | 合同与验证 | [设计](docs/toolkit/design.md) · [状态](docs/toolkit/implementation-status.md) · [回归矩阵](docs/toolkit/regression.md) |
-| 发行 | [发布合同](docs/toolkit/release-2.0.6.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| 发行 | [发布合同](docs/toolkit/release-2.5.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## 许可
 

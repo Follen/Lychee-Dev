@@ -42,11 +42,24 @@ type Record struct {
 // relationships. Budget.Rows includes copies. Sparse typed decoding requires
 // an ordered schema; Lookup returns the correctly bounded raw record for now.
 func OpenRecords(ctx context.Context, source io.ReaderAt, size int64, budget Budget) (*Records, error) {
+	return OpenAvailableRecords(ctx, source, size, budget, nil)
+}
+
+// OpenAvailableRecords excludes explicitly unavailable encrypted partitions.
+// The caller must derive these indices from authenticated missing byte ranges,
+// and its ReaderAt must reject reads into those ranges (including strings).
+// Partition order/counts remain intact for WDC relative string addressing.
+func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, budget Budget, unavailable map[int]bool) (*Records, error) {
 	columns, err := OpenColumns(ctx, source, size, budget)
 	if err != nil {
 		return nil, err
 	}
 	layout := columns.layout
+	for index := range unavailable {
+		if index < 0 || index >= len(layout.Partitions) || layout.Partitions[index].KeyID == 0 {
+			return nil, ErrFormat
+		}
+	}
 	if layout.Stride > 1<<20 {
 		return nil, ErrLimit
 	}
@@ -54,6 +67,9 @@ func OpenRecords(ctx context.Context, source io.ReaderAt, size int64, budget Bud
 	copies := make(map[uint32]uint32)
 	var auxiliary int64 = layout.MetadataEnd
 	for pi, p := range layout.Partitions {
+		if unavailable[pi] {
+			continue
+		}
 		sparse := layout.Flags&1 != 0
 		if !sparse && p.SparseCount != 0 {
 			return nil, ErrUnsupported

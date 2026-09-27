@@ -38,7 +38,8 @@ end}
 ns.MatrixSymbol={Encode=function(bytes)
  draws[#draws+1]=bytes;local matrix={};for x=1,21 do matrix[x]={};for y=1,21 do matrix[x][y]=0 end end;return matrix
 end}
-for _,name in ipairs({'Core/Persistence.lua','Bridge/CaptureWriter.lua','Bridge/Session.lua',
+GetTime=function() return 0 end
+for _,name in ipairs({'Core/Compat.lua','Core/Persistence.lua','Bridge/CaptureWriter.lua','Bridge/Session.lua',
  'Bridge/ReceiptView.lua','Bridge/ReportStore.lua','Bridge/ProbeRunner.lua','Bridge/Reentry.lua','Core/Controls.lua'}) do
  assert(loadfile(root..'/'..name))('Lychee Dev',ns)
 end

@@ -56,9 +56,10 @@ assert(page:GetResultMode() == "text" and page.resultPanel:IsShown()
         and not page.treeView.panel:IsShown(),
     "Run page did not start in text result mode")
 assert(page.status:GetText() == L.READY, "Run page did not start READY")
-assert(#page.historyButtons == 1 and page.historyButtons[1]:GetHeight() == 52,
-    "history rows did not use the 52 px row height")
-assert(page.historyButtons[1]:GetWidth() == 206, "history rows did not fit the 232 px rail")
+assert(#page.historyButtons == 1 and page.historyButtons[1]:GetHeight() == 58,
+    "history rows did not use the 58 px row height")
+assert(page.historyButtons[1]:GetWidth() == page.rail.rowWidth,
+    "history rows did not fit the history rail")
 assert(not page.rail.empty:IsShown(), "history empty label showed over a seeded entry")
 assert(page.historyButtons[1].preview:GetText() == persistedCode,
     "history preview did not show the first code line")

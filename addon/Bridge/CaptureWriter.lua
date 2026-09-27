@@ -157,12 +157,22 @@ local WIRE_FIELDS = {
     actorState = true, inputReason = true, sequence = true, runtimeEpoch = true,
     inputReady = true, codeBytes = true, codeAdler32 = true,
     reportBytes = true, reportAdler32 = true,
+    receiverNonce = true, attemptId = true, bodyBytes = true,
+    bodyAdler32 = true, commitNonce = true, accepted = true, errorCode = true,
+    wakeBinding = true, submitBinding = true, closeBinding = true,
+    priorSessionSequence = true, priorSessionEpoch = true, receiverProtocol = true,
+    reportScope = true,
+    workState = true, codeSHA256 = true, receipt = true, resourcesReleased = true,
 }
 local WIRE_MARKER_FIELDS = { character = true, realm = true, guid = true }
 -- A standalone ready can establish a read-only live bind without a preceding
 -- identity probe. Keep its actor on the wire; paired readiness is compacted
 -- only after the host already owns a request-scoped session.
-local WIRE_MARKERS = { identity = true, reset = true, cleared = true, ready = true }
+local WIRE_MARKERS = { identity = true, reset = true, cleared = true, ready = true,
+    receiver_ready = true, receiver_staged = true, receiver_commit_ready = true,
+    receiver_accepted = true, receiver_rejected = true,
+    receiver_cancelled = true, receiver_timeout = true,
+    report_error = true, checkpoint = true }
 -- Kinds whose session nonce is redundant because the session provably exists on
 -- the host already: they answer a request the host itself created for that
 -- nonce, and the host compares the nonce it filled in.

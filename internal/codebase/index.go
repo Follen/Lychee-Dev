@@ -1,38 +1,37 @@
 package codebase
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net/url"
+	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
-	_ "modernc.org/sqlite"
 )
 
-const indexSchema = "lycheedev.source-index.v2"
-
-// indexSchemaV1 stays readable so a published index from the previous schema
-// is never silently unusable. Asset rows require the current schema and report
-// a rebuild hint instead of pretending an asset search was empty.
-const indexSchemaV1 = "lycheedev.source-index.v1"
+const indexSchema = "lycheedev.source-map.v2"
 
 type IndexSummary struct {
 	Schema           string           `json:"schema"`
+	Storage          string           `json:"storage"`
 	Repository       string           `json:"repository"`
 	Product          string           `json:"product"`
 	Commit           string           `json:"commit"`
 	Parser           string           `json:"parser"`
 	Documents        int              `json:"documents"`
+	SkippedDocuments int              `json:"skippedDocuments,omitempty"`
 	Declarations     int              `json:"declarations"`
 	Relationships    int              `json:"relationships"`
 	Assets           int              `json:"assets"`
@@ -41,38 +40,79 @@ type IndexSummary struct {
 	DiagnosticSample []FileDiagnostic `json:"diagnosticSample,omitempty"`
 }
 
+type SourceCoverage struct {
+	AnalyzedDocuments int              `json:"analyzedDocuments"`
+	SkippedDocuments  int              `json:"skippedDocuments"`
+	Diagnostics       int              `json:"diagnostics"`
+	DiagnosticSample  []FileDiagnostic `json:"diagnosticSample,omitempty"`
+	Complete          bool             `json:"complete"`
+}
+
+func (s IndexSummary) Coverage() SourceCoverage {
+	return SourceCoverage{AnalyzedDocuments: s.Documents, SkippedDocuments: s.SkippedDocuments, Diagnostics: s.Diagnostics, DiagnosticSample: s.DiagnosticSample, Complete: s.Complete}
+}
+
 type FileDiagnostic struct {
 	Path    string `json:"path"`
 	Line    int    `json:"line"`
 	Message string `json:"message"`
 }
 
-func (b *Browser) indexPathFor(schema string, pin selection.SourcePin) string {
-	digest := sha256.Sum256([]byte(schema + "\x00" + pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + pin.ParserRevision))
-	return filepath.Join(b.store.Root(), "indexes", "source-"+hex.EncodeToString(digest[:])+".sqlite")
+type sourceRecord struct {
+	Kind       string          `json:"kind"`
+	Path       string          `json:"path"`
+	Object     string          `json:"object,omitempty"`
+	SHA256     string          `json:"sha256,omitempty"`
+	Bytes      int64           `json:"bytes,omitempty"`
+	Symbol     *SymbolMatch    `json:"symbol,omitempty"`
+	Asset      *AssetRow       `json:"asset,omitempty"`
+	Diagnostic *FileDiagnostic `json:"diagnostic,omitempty"`
 }
+
+type cacheManifest struct {
+	Summary       IndexSummary `json:"summary"`
+	RecordsHash   string       `json:"recordsHash"`
+	RecordBytes   int64        `json:"recordBytes"`
+	FixtureRoot   string       `json:"fixtureRoot,omitempty"`
+	FixtureDigest string       `json:"fixtureDigest,omitempty"`
+}
+
+type factEnvelope struct {
+	Schema      string        `json:"schema"`
+	Parser      string        `json:"parser"`
+	Mode        string        `json:"mode"`
+	InputSHA256 string        `json:"inputSHA256"`
+	FactsSHA256 string        `json:"factsSHA256"`
+	Facts       DocumentFacts `json:"facts"`
+}
+
+const maxFactCacheBytes = 32 << 20
+
+type snapshotCache struct {
+	b         *Browser
+	pin       selection.SourcePin
+	dir       string
+	manifest  cacheManifest
+	pathsOnce sync.Once
+	documents map[string]sourceRecord
+	assets    map[string]sourceRecord
+	pathsErr  error
+}
+
+func (c *snapshotCache) Close() error { return nil }
 
 func (b *Browser) indexPath(pin selection.SourcePin) string {
-	return b.indexPathFor(indexSchema, pin)
+	key := sha256.Sum256([]byte(indexSchema + "\x00" + pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + pin.ParserRevision))
+	return filepath.Join(b.store.Root(), "source", "v1", "facts", "snapshots", hex.EncodeToString(key[:]))
 }
 
-// IndexSource builds a private database and publishes it only after the whole
-// pinned tree is processed. Existing readers never observe a partial rebuild.
-// Syntax failures are retained as diagnostics and make Complete false.
 func (b *Browser) IndexSource(ctx context.Context, pin selection.SourcePin) (IndexSummary, error) {
 	files, err := b.sourceTree(ctx, pin)
 	if err != nil {
 		return IndexSummary{}, err
 	}
-	enumerate := func(list []treeFile, visit func(treeFile, []byte) error) error {
-		return b.visitDocuments(ctx, pin, list, visit)
-	}
-	return b.buildIndex(ctx, pin, files, enumerate)
+	return b.buildIndex(ctx, pin, files, "", "", func(visit func(treeFile, []byte) error) error { return b.visitDocuments(ctx, pin, files, visit) })
 }
-
-// IndexFixture indexes a local fixture directory under the deterministic
-// synthetic commit of its absolute path. It is the offline fixture counterpart
-// of IndexSource and publishes through the same atomic pipeline.
 func (b *Browser) IndexFixture(ctx context.Context, pin selection.SourcePin, root string) (IndexSummary, error) {
 	if pin.Repository == "" || pin.Product == "" || !objectID(pin.ExactCommit) || pin.ParserRevision != ParserRevision {
 		return IndexSummary{}, errors.New("codebase.invalid_source_pin")
@@ -81,125 +121,159 @@ func (b *Browser) IndexFixture(ctx context.Context, pin selection.SourcePin, roo
 	if err != nil {
 		return IndexSummary{}, err
 	}
-	enumerate := func(list []treeFile, visit func(treeFile, []byte) error) error {
-		return visitDirectory(ctx, root, list, visit)
+	digest, err := fixtureDigest(ctx, root, files)
+	if err != nil {
+		return IndexSummary{}, err
 	}
-	return b.buildIndex(ctx, pin, files, enumerate)
+	return b.buildIndex(ctx, pin, files, root, digest, func(visit func(treeFile, []byte) error) error { return visitDirectory(ctx, root, files, visit) })
 }
 
-func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files []treeFile, enumerate func([]treeFile, func(treeFile, []byte) error) error) (IndexSummary, error) {
-	var summary IndexSummary
-	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "index:"+b.indexPath(pin))
+func fixtureDigest(ctx context.Context, root string, files []treeFile) (string, error) {
+	h := sha256.New()
+	err := visitDirectory(ctx, root, files, func(file treeFile, data []byte) error {
+		fmt.Fprintf(h, "%s\x00%d\x00", file.path, file.size)
+		sum := sha256.Sum256(data)
+		h.Write(sum[:])
+		return nil
+	})
 	if err != nil {
-		return summary, err
+		return "", err
+	}
+	for _, file := range files {
+		if !treeNeedsRead(file) {
+			fmt.Fprintf(h, "%s\x00%d\x00metadata-only\x00", file.path, file.size)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files []treeFile, fixtureRoot, fixtureDigest string, enumerate func(func(treeFile, []byte) error) error) (IndexSummary, error) {
+	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:map:"+pin.Repository+":"+pin.ExactCommit)
+	if err != nil {
+		return IndexSummary{}, err
 	}
 	defer lease.Close()
-	if _, err := os.Lstat(b.indexPath(pin)); err == nil {
-		db, s, err := b.openIndex(ctx, pin)
-		if db != nil {
-			db.Close()
+	if existing, summary, err := b.openIndex(ctx, pin); err == nil {
+		if fixtureRoot != "" && existing.manifest.FixtureDigest != fixtureDigest {
+			return IndexSummary{}, errors.New("codebase.fixture_changed: frozen source path has different bytes")
 		}
-		return s, err
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return summary, err
+		existing.Close()
+		return summary, nil
+	} else if !errors.Is(err, errIndexNotReady) {
+		return IndexSummary{}, err
 	}
-	stage, err := os.CreateTemp(filepath.Join(b.store.Root(), "tmp"), "source-index-*.sqlite")
+	destination := b.indexPath(pin)
+	capacity, err := b.reserveSourceCapacity(ctx, 8<<20, destination)
 	if err != nil {
-		return summary, err
+		return IndexSummary{}, err
 	}
-	stagePath := stage.Name()
-	stage.Close()
-	defer os.Remove(stagePath)
-	defer os.Remove(stagePath + "-journal")
-	db, err := sql.Open("sqlite", stagePath)
-	if err != nil {
-		return summary, err
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
-CREATE TABLE manifest(summary TEXT NOT NULL);
-CREATE TABLE documents(path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL);
-CREATE TABLE entries(kind TEXT NOT NULL, name TEXT NOT NULL, target TEXT NOT NULL, category TEXT NOT NULL, confidence TEXT NOT NULL, path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, signature TEXT NOT NULL);
-CREATE TABLE diagnostics(path TEXT NOT NULL, line INTEGER NOT NULL, message TEXT NOT NULL);
-CREATE TABLE assets(path TEXT PRIMARY KEY, normalized_path TEXT NOT NULL, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, extension TEXT NOT NULL, mime TEXT NOT NULL, format TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL);
-CREATE INDEX entry_name ON entries(name);
-CREATE INDEX entry_target ON entries(target);
-CREATE INDEX entry_path ON entries(path,line);
-CREATE INDEX asset_norm ON assets(normalized_path);`); err != nil {
-		return summary, err
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return summary, err
-	}
-	defer tx.Rollback()
-	row, err := tx.PrepareContext(ctx, "INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?)")
-	if err != nil {
-		return summary, err
-	}
-	defer row.Close()
-	summary = IndexSummary{Schema: indexSchema, Repository: pin.Repository, Product: pin.Product, Commit: pin.ExactCommit, Parser: pin.ParserRevision, Complete: true}
-	recordAsset := func(file treeFile, data []byte) error {
-		extension := strings.ToLower(path.Ext(file.path))
-		width, height, format := 0, 0, strings.TrimPrefix(extension, ".")
-		digest := ""
-		if data != nil {
-			width, height, format = assetImageInfo(data, extension)
-			sum := sha256.Sum256(data)
-			digest = hex.EncodeToString(sum[:])
-			if _, err := b.store.PublishBlob(ctx, vault.BlobInput{Reader: bytes.NewReader(data), MaxBytes: maxAssetBytes, ExpectedSHA256: digest}); err != nil {
+	defer capacity.Close()
+	var granted, consumed int64 = 8 << 20, 0
+	reserve := func(bytes int64) error {
+		if bytes < 0 {
+			return ErrSourceBudget
+		}
+		if consumed+bytes > granted {
+			more := max(int64(8<<20), consumed+bytes-granted)
+			if err := capacity.Grow(ctx, more); err != nil {
 				return err
 			}
+			granted += more
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO assets VALUES(?,?,?,?,?,?,?,?,?)",
-			file.path, normalizeAssetPath(file.path), digest, file.size, extension, assetMIME(extension), format, width, height); err != nil {
-			return err
-		}
-		summary.Assets++
+		consumed += bytes
 		return nil
 	}
-	err = enumerate(files, func(file treeFile, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return IndexSummary{}, err
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(destination), ".source-map-")
+	if err != nil {
+		return IndexSummary{}, err
+	}
+	defer os.RemoveAll(stage)
+	f, err := os.Create(filepath.Join(stage, "records.jsonl"))
+	if err != nil {
+		return IndexSummary{}, err
+	}
+	hash := sha256.New()
+	w := bufio.NewWriterSize(io.MultiWriter(f, hash), 64<<10)
+	write := func(r sourceRecord) error {
+		data, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		if len(data) > 1<<20 {
+			return errors.New("codebase.record_budget")
+		}
+		if err := reserve(int64(len(data) + 1)); err != nil {
+			return err
+		}
+		if _, err := w.Write(data); err != nil {
+			return err
+		}
+		return w.WriteByte('\n')
+	}
+	summary := IndexSummary{Schema: indexSchema, Storage: "file-cache", Repository: pin.Repository, Product: pin.Product, Commit: pin.ExactCommit, Parser: pin.ParserRevision, Complete: true}
+	visit := func(file treeFile, data []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if file.asset {
-			return recordAsset(file, data)
+			ext := strings.ToLower(path.Ext(file.path))
+			width, height, format := assetImageInfo(data, ext)
+			asset := AssetRow{Path: file.path, Bytes: file.size, Extension: ext, MIME: assetMIME(ext), Format: format, Width: width, Height: height, Normalized: normalizeAssetPath(file.path)}
+			if data != nil {
+				sum := sha256.Sum256(data)
+				asset.SHA256Stored = hex.EncodeToString(sum[:])
+				asset.ContentHash = asset.SHA256Stored
+			}
+			if err := write(sourceRecord{Kind: "asset", Path: file.path, Object: file.object, Bytes: file.size, Asset: &asset}); err != nil {
+				return err
+			}
+			summary.Assets++
+			return nil
 		}
-		facts, err := AnalyzeDocument(ctx, file.path, data)
+		sum := sha256.Sum256(data)
+		digest := hex.EncodeToString(sum[:])
+		if err := write(sourceRecord{Kind: "document", Path: file.path, Object: file.object, SHA256: digest, Bytes: file.size}); err != nil {
+			return err
+		}
+		facts, err := b.fileFacts(ctx, file.path, data, digest, reserve)
 		if err != nil {
 			return err
 		}
-		blob, err := b.store.PublishBlob(ctx, vault.BlobInput{Reader: bytes.NewReader(data), MaxBytes: maxSourceBytes})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO documents VALUES(?,?,?)", file.path, blob.SHA256, blob.Bytes); err != nil {
-			return err
-		}
-		for _, d := range facts.Declarations {
-			if _, err := row.ExecContext(ctx, "declaration", d.Name, "", d.Category, "exact", file.path, d.Line, d.EndLine, d.Signature); err != nil {
+		for ordinal, d := range facts.Declarations {
+			s := SymbolMatch{Kind: "declaration", Name: d.Name, Category: d.Category, Scope: d.Scope, Ordinal: ordinal, Confidence: "exact", Path: file.path, Line: d.Line, EndLine: d.EndLine, Signature: d.Signature}
+			s.ID = stableSymbolID(pin, s)
+			if err := write(sourceRecord{Kind: "symbol", Path: file.path, Symbol: &s}); err != nil {
 				return err
 			}
 		}
 		for _, r := range facts.Relationships {
-			if _, err := row.ExecContext(ctx, "relationship", r.From, r.To, r.Category, r.Confidence, file.path, r.Line, r.Line, ""); err != nil {
+			s := SymbolMatch{Kind: "relationship", Name: r.From, Target: r.To, Category: r.Category, Confidence: r.Confidence, Path: file.path, Line: r.Line, EndLine: r.Line}
+			if err := write(sourceRecord{Kind: "symbol", Path: file.path, Symbol: &s}); err != nil {
 				return err
 			}
 		}
-		for _, load := range facts.Loads {
-			if _, err := row.ExecContext(ctx, "load", file.path, load.Path, "file", "exact", file.path, load.Line, load.Line, ""); err != nil {
+		for _, l := range facts.Loads {
+			s := SymbolMatch{Kind: "load", Name: file.path, Target: l.Path, Category: l.Kind, Confidence: "exact", Path: file.path, Line: l.Line, EndLine: l.Line}
+			if err := write(sourceRecord{Kind: "symbol", Path: file.path, Symbol: &s}); err != nil {
 				return err
 			}
 		}
-		for _, header := range facts.Headers {
-			if _, err := row.ExecContext(ctx, "header", header.Key, header.Value, "toc-field", "exact", file.path, header.Line, header.Line, ""); err != nil {
+		for _, h := range facts.Headers {
+			s := SymbolMatch{Kind: "header", Name: h.Key, Target: h.Value, Category: "toc-field", Confidence: "exact", Path: file.path, Line: h.Line, EndLine: h.Line}
+			if err := write(sourceRecord{Kind: "symbol", Path: file.path, Symbol: &s}); err != nil {
 				return err
 			}
 		}
-		for _, note := range facts.Diagnostics {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO diagnostics VALUES(?,?,?)", file.path, note.Line, note.Message); err != nil {
+		for _, n := range facts.Diagnostics {
+			d := FileDiagnostic{Path: file.path, Line: n.Line, Message: n.Message}
+			if err := write(sourceRecord{Kind: "diagnostic", Path: file.path, Diagnostic: &d}); err != nil {
 				return err
 			}
 			if len(summary.DiagnosticSample) < 20 {
-				summary.DiagnosticSample = append(summary.DiagnosticSample, FileDiagnostic{Path: file.path, Line: note.Line, Message: note.Message})
+				summary.DiagnosticSample = append(summary.DiagnosticSample, d)
 			}
 		}
 		summary.Documents++
@@ -207,117 +281,300 @@ CREATE INDEX asset_norm ON assets(normalized_path);`); err != nil {
 		summary.Relationships += len(facts.Relationships)
 		summary.Diagnostics += len(facts.Diagnostics)
 		return nil
-	})
-	if err != nil {
+	}
+	if err := enumerate(visit); err != nil {
+		f.Close()
 		return IndexSummary{}, err
 	}
-	// Assets above the read budget keep metadata-only rows from listing facts.
 	for _, file := range files {
+		if file.oversized {
+			d := FileDiagnostic{Path: file.path, Message: fmt.Sprintf("source file has %d bytes, exceeding the %d-byte analysis limit; skipped", file.size, maxSourceBytes)}
+			if err := write(sourceRecord{Kind: "diagnostic", Path: file.path, Diagnostic: &d}); err != nil {
+				f.Close()
+				return IndexSummary{}, err
+			}
+			summary.SkippedDocuments++
+			summary.Diagnostics++
+			if len(summary.DiagnosticSample) < 20 {
+				summary.DiagnosticSample = append(summary.DiagnosticSample, d)
+			}
+			continue
+		}
 		if file.asset && !treeNeedsRead(file) {
-			if err := recordAsset(file, nil); err != nil {
+			if err := visit(file, nil); err != nil {
+				f.Close()
 				return IndexSummary{}, err
 			}
 		}
 	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return IndexSummary{}, err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return IndexSummary{}, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return IndexSummary{}, err
+	}
+	if err := f.Close(); err != nil {
+		return IndexSummary{}, err
+	}
 	summary.Complete = summary.Diagnostics == 0
-	raw, err := json.Marshal(summary)
+	manifest := cacheManifest{Summary: summary, RecordsHash: hex.EncodeToString(hash.Sum(nil)), RecordBytes: info.Size(), FixtureRoot: fixtureRoot, FixtureDigest: fixtureDigest}
+	raw, err := json.Marshal(manifest)
 	if err != nil {
 		return IndexSummary{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO manifest VALUES(?)", string(raw)); err != nil {
+	if err := reserve(int64(len(raw))); err != nil {
 		return IndexSummary{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return IndexSummary{}, err
-	}
-	if err := row.Close(); err != nil {
-		return IndexSummary{}, err
-	}
-	if err := db.Close(); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, "manifest.json"), raw, 0o644); err != nil {
 		return IndexSummary{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return IndexSummary{}, err
 	}
-	if err := os.Rename(stagePath, b.indexPath(pin)); err != nil {
+	if err := os.Rename(stage, destination); err != nil {
 		return IndexSummary{}, err
 	}
 	return summary, nil
 }
 
-// errIndexNotReady reports a missing published index for the requested pin.
-var errIndexNotReady = errors.New("codebase.index_not_ready: run source index with the same snapshot")
-
-func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*sql.DB, IndexSummary, error) {
-	var summary IndexSummary
-	for _, schema := range []string{indexSchema, indexSchemaV1} {
-		name := b.indexPathFor(schema, pin)
-		if _, err := os.Stat(name); err != nil {
-			continue
-		}
-		uriPath := filepath.ToSlash(name)
-		if !strings.HasPrefix(uriPath, "/") {
-			uriPath = "/" + uriPath
-		}
-		uri := (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=ro"}).String()
-		db, err := sql.Open("sqlite", uri)
-		if err != nil {
-			return nil, summary, err
-		}
-		db.SetMaxOpenConns(1)
-		var raw string
-		err = db.QueryRowContext(ctx, "SELECT summary FROM manifest").Scan(&raw)
-		if err == nil {
-			err = json.Unmarshal([]byte(raw), &summary)
-		}
-		if err == nil && (summary.Schema != schema || summary.Commit != pin.ExactCommit || summary.Repository != pin.Repository || summary.Product != pin.Product || summary.Parser != pin.ParserRevision) {
-			err = errors.New("codebase.index_identity_mismatch")
-		}
-		if err != nil {
-			db.Close()
-			return nil, summary, err
-		}
-		// Older cache entries may lack the bounded preview; diagnostics themselves
-		// have always been stored independently of the completion manifest.
-		if summary.Diagnostics > 0 && len(summary.DiagnosticSample) == 0 {
-			rows, err := db.QueryContext(ctx, "SELECT path,line,message FROM diagnostics ORDER BY path,line LIMIT 20")
-			if err != nil {
-				db.Close()
-				return nil, summary, err
-			}
-			for rows.Next() {
-				var note FileDiagnostic
-				if err := rows.Scan(&note.Path, &note.Line, &note.Message); err != nil {
-					rows.Close()
-					db.Close()
-					return nil, summary, err
-				}
-				summary.DiagnosticSample = append(summary.DiagnosticSample, note)
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				db.Close()
-				return nil, summary, err
-			}
-		}
-		return db, summary, nil
+func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, digest string, reserveCallbacks ...func(int64) error) (DocumentFacts, error) {
+	mode := strings.ToLower(path.Ext(name))
+	if mode == ".lua" && strings.Contains(name, "/Blizzard_APIDocumentationGenerated/") {
+		mode += ":generated-api"
 	}
-	return nil, summary, errIndexNotReady
+	key := sha256.Sum256([]byte(ParserRevision + "\x00" + mode + "\x00" + digest))
+	file := filepath.Join(b.store.Root(), "source", "v1", "facts", "files", ParserRevision, hex.EncodeToString(key[:])+".json")
+	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:fact:"+hex.EncodeToString(key[:]))
+	if err != nil {
+		return DocumentFacts{}, err
+	}
+	defer lease.Close()
+	if f, err := os.Open(file); err == nil {
+		raw, readErr := io.ReadAll(io.LimitReader(f, maxFactCacheBytes+1))
+		closeErr := f.Close()
+		if readErr == nil && closeErr == nil && len(raw) <= maxFactCacheBytes {
+			var envelope factEnvelope
+			if json.Unmarshal(raw, &envelope) == nil && envelope.Schema == "lycheedev.source-file-facts.v2" && envelope.Parser == ParserRevision && envelope.Mode == mode && envelope.InputSHA256 == digest {
+				payload, _ := json.Marshal(envelope.Facts)
+				sum := sha256.Sum256(payload)
+				if envelope.FactsSHA256 == hex.EncodeToString(sum[:]) {
+					return envelope.Facts, nil
+				}
+			}
+		}
+	}
+	facts, err := AnalyzeDocument(ctx, name, data)
+	if err != nil {
+		return facts, err
+	}
+	payload, err := json.Marshal(facts)
+	if err != nil {
+		return facts, err
+	}
+	sum := sha256.Sum256(payload)
+	raw, err := json.Marshal(factEnvelope{Schema: "lycheedev.source-file-facts.v2", Parser: ParserRevision, Mode: mode, InputSHA256: digest, FactsSHA256: hex.EncodeToString(sum[:]), Facts: facts})
+	if err != nil {
+		return facts, err
+	}
+	if len(raw) > maxFactCacheBytes {
+		return facts, errors.New("codebase.fact_budget")
+	}
+	// The index writer owns the source-capacity lease. Read-only standalone
+	// analysis may reuse an existing fact cache but must not publish new bytes
+	// while holding the fact-key lease without that shared reservation.
+	if len(reserveCallbacks) == 0 {
+		return facts, nil
+	}
+	if err := reserveCallbacks[0](int64(len(raw))); err != nil {
+		return facts, err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return facts, err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".fact-")
+	if err != nil {
+		return facts, err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return facts, err
+	}
+	if err := tmp.Close(); err != nil {
+		return facts, err
+	}
+	if _, err := os.Stat(file); err == nil {
+		if err := os.Remove(file); err != nil {
+			return facts, err
+		}
+	}
+	if err := os.Rename(tmp.Name(), file); err != nil {
+		return facts, err
+	}
+	return facts, nil
 }
 
-// requireAssetIndex refuses asset lookups on a legacy-schema index instead of
-// reporting an empty, misleading result.
-func requireAssetIndex(summary IndexSummary) error {
-	if summary.Schema != indexSchema {
-		return errors.New("codebase.index_rebuild_required: asset rows need the current index schema")
+var errIndexNotReady = errors.New("codebase.index_not_ready: run source index with the same snapshot")
+
+func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*snapshotCache, IndexSummary, error) {
+	dir := b.indexPath(pin)
+	f, err := os.Open(filepath.Join(dir, "manifest.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, IndexSummary{}, errIndexNotReady
+	}
+	if err != nil {
+		return nil, IndexSummary{}, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 64<<10))
+	closeErr := f.Close()
+	if err != nil || closeErr != nil {
+		return nil, IndexSummary{}, errors.Join(err, closeErr)
+	}
+	var m cacheManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, IndexSummary{}, err
+	}
+	if m.Summary.Schema != indexSchema || m.Summary.Storage != "file-cache" || m.Summary.Repository != pin.Repository || m.Summary.Product != pin.Product || m.Summary.Commit != pin.ExactCommit || m.Summary.Parser != pin.ParserRevision {
+		return nil, IndexSummary{}, errors.New("codebase.index_identity_mismatch")
+	}
+	if len(m.RecordsHash) != 64 || m.RecordBytes < 0 || m.RecordBytes > 1<<30 {
+		return nil, IndexSummary{}, errors.New("codebase.index_manifest_invalid")
+	}
+	cache := &snapshotCache{b: b, pin: pin, dir: dir, manifest: m}
+	if err := cache.verify(ctx); err != nil {
+		return nil, IndexSummary{}, err
+	}
+	return cache, m.Summary, nil
+}
+func (c *snapshotCache) verify(ctx context.Context) error {
+	f, err := os.Open(filepath.Join(c.dir, "records.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() != c.manifest.RecordBytes {
+		return errors.New("codebase.index_content_mismatch")
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if hex.EncodeToString(h.Sum(nil)) != c.manifest.RecordsHash {
+		return errors.New("codebase.index_content_mismatch")
 	}
 	return nil
 }
+func (c *snapshotCache) scan(ctx context.Context, visit func(sourceRecord) error) error {
+	f, err := os.Open(filepath.Join(c.dir, "records.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 64<<10), 1<<20)
+	for s.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var r sourceRecord
+		if err := json.Unmarshal(s.Bytes(), &r); err != nil {
+			return fmt.Errorf("codebase.index_record_invalid: %w", err)
+		}
+		if err := visit(r); err != nil {
+			return err
+		}
+	}
+	return s.Err()
+}
+
+func (c *snapshotCache) loadPaths(ctx context.Context) error {
+	c.pathsOnce.Do(func() {
+		c.documents = map[string]sourceRecord{}
+		c.assets = map[string]sourceRecord{}
+		c.pathsErr = c.scan(ctx, func(r sourceRecord) error {
+			switch r.Kind {
+			case "document":
+				c.documents[r.Path] = r
+			case "asset":
+				c.assets[r.Path] = r
+			}
+			return nil
+		})
+	})
+	return c.pathsErr
+}
+
+func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, string, error) {
+	if !sourcePath(name) {
+		return nil, "", errors.New("codebase.invalid_span")
+	}
+	if err := c.loadPaths(ctx); err != nil {
+		return nil, "", err
+	}
+	found, ok := c.documents[name]
+	if !ok {
+		return nil, "", os.ErrNotExist
+	}
+	if found.Bytes < 0 || found.Bytes > maxSourceBytes {
+		return nil, "", errors.New("codebase.source_byte_limit")
+	}
+	var data []byte
+	var err error
+	if c.manifest.FixtureRoot != "" {
+		full := filepath.Join(c.manifest.FixtureRoot, filepath.FromSlash(name))
+		info, err := os.Lstat(full)
+		if err != nil {
+			return nil, "", err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, "", errors.New("codebase.not_regular_source_file")
+		}
+		f, err := os.Open(full)
+		if err != nil {
+			return nil, "", err
+		}
+		data, err = io.ReadAll(io.LimitReader(f, found.Bytes+1))
+		closeErr := f.Close()
+		if err != nil || closeErr != nil {
+			return nil, "", errors.Join(err, closeErr)
+		}
+	} else {
+		if !objectID(found.Object) {
+			return nil, "", errors.New("codebase.index_record_invalid")
+		}
+		data, err = gitBytes(ctx, c.b.mirror(c.pin.Repository), int(found.Bytes)+1, "cat-file", "blob", found.Object)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	if int64(len(data)) != found.Bytes || digest != found.SHA256 || !utf8.Valid(data) {
+		return nil, "", errors.New("codebase.source_content_mismatch")
+	}
+	return data, digest, nil
+}
 
 type SymbolMatch struct {
+	ID         string `json:"id,omitempty"`
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
+	Scope      string `json:"scope,omitempty"`
+	Ordinal    int    `json:"ordinal,omitempty"`
 	Target     string `json:"target,omitempty"`
 	Category   string `json:"category"`
 	Confidence string `json:"confidence"`
@@ -332,32 +589,44 @@ type SymbolMatches struct {
 	Truncated bool          `json:"truncated"`
 }
 
+func stableSymbolID(pin selection.SourcePin, s SymbolMatch) string {
+	h := sha256.Sum256([]byte(pin.Repository + "\x00" + pin.ExactCommit + "\x00" + s.Path + "\x00" + fmt.Sprint(s.Line) + "\x00" + fmt.Sprint(s.EndLine) + "\x00" + s.Name + "\x00" + s.Category + "\x00" + s.Scope + "\x00" + fmt.Sprint(s.Ordinal)))
+	return "SYM-" + hex.EncodeToString(h[:16])
+}
 func (b *Browser) FindSymbols(ctx context.Context, pin selection.SourcePin, term string, limit int) (SymbolMatches, error) {
 	result := SymbolMatches{Matches: []SymbolMatch{}}
 	if term == "" || len(term) > 512 || limit < 1 || limit > 200 {
 		return result, errors.New("codebase.invalid_symbol_query")
 	}
-	db, summary, err := b.openIndex(ctx, pin)
+	cache, summary, err := b.openIndex(ctx, pin)
 	if err != nil {
 		return result, err
 	}
-	defer db.Close()
 	result.Index = summary
-	rows, err := db.QueryContext(ctx, `SELECT kind,name,target,category,confidence,path,line,end_line,signature FROM entries WHERE name=? OR target=? ORDER BY kind,path,line,name,target,category LIMIT ?`, term, term, limit+1)
+	var matches []SymbolMatch
+	err = cache.scan(ctx, func(r sourceRecord) error {
+		if r.Kind == "symbol" && r.Symbol != nil && (r.Symbol.Name == term || r.Symbol.Target == term) {
+			matches = append(matches, *r.Symbol)
+		}
+		return nil
+	})
 	if err != nil {
 		return result, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var match SymbolMatch
-		if err := rows.Scan(&match.Kind, &match.Name, &match.Target, &match.Category, &match.Confidence, &match.Path, &match.Line, &match.EndLine, &match.Signature); err != nil {
-			return result, err
+	sort.Slice(matches, func(i, j int) bool {
+		a, z := matches[i], matches[j]
+		if a.Kind != z.Kind {
+			return a.Kind < z.Kind
 		}
-		if len(result.Matches) == limit {
-			result.Truncated = true
-			break
+		if a.Path != z.Path {
+			return a.Path < z.Path
 		}
-		result.Matches = append(result.Matches, match)
-	}
-	return result, rows.Err()
+		if a.Line != z.Line {
+			return a.Line < z.Line
+		}
+		return a.Name < z.Name
+	})
+	result.Truncated = len(matches) > limit
+	result.Matches = matches[:min(limit, len(matches))]
+	return result, nil
 }

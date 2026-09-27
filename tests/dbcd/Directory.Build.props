@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../../.tmp/dbcd-oracle-obj/</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)../../.tmp/dbcd-oracle-bin/</BaseOutputPath>
+  </PropertyGroup>
+</Project>

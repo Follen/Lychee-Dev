@@ -1,5 +1,5 @@
 local root, queue = assert(arg[1]), assert(arg[2])
-local ns = { Release = "2.0.6", Startup = {ready=true,identity={product="retail",build="12.1.0.12345"}} }
+local ns = { Release = "2.5.0", Startup = {ready=true,identity={product="retail",build="12.1.0.12345"}} }
 local actor = {character="Paladin",realm="Realm",guid="Player-1-123"}
 ns.Platform = {ObserveActor=function() return actor end}
 local secret = {}
@@ -36,6 +36,7 @@ local function fails(expected)
     local value,reason=ns.ProbeQueue.Load("OP-target")
     assert(value==nil and reason==expected,tostring(reason).." expected "..expected)
 end
+entry.budgetSeconds=121; fails("queue_invalid_budget"); entry.budgetSeconds=nil
 for _,field in ipairs({"character","realm","guid","product","build","release","sessionNonce"}) do
     local held=entry[field]
     entry[field]=field=="sessionNonce" and string.rep("c",32) or "Wrong"

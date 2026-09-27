@@ -61,12 +61,13 @@ assert(english.ADDON_TITLE:find("Lychee", 1, true), "English addon title is inco
 assert(english.ABOUT_CLIENT_VALUE:find("Retail 12.1", 1, true), "English client summary lacks Retail")
 assert(english.ABOUT_CLIENT_VALUE:find("Classic 5.5.4", 1, true), "English client summary lacks Classic")
 assert(english.ABOUT_CLIENT_VALUE:find("Titan 3.80.2", 1, true), "English client summary lacks Titan")
-assert(english.ABOUT_CLIENT_VALUE:find("Forever 1.60.1", 1, true), "English client summary lacks Forever")
+assert(not english.ABOUT_CLIENT_VALUE:find("Forever", 1, true),
+    "unverified Forever path was advertised as an accepted client")
 assert(chinese.ABOUT_CLIENT_VALUE:find("12.1", 1, true)
         and chinese.ABOUT_CLIENT_VALUE:find("5.5.4", 1, true)
         and chinese.ABOUT_CLIENT_VALUE:find("3.80.2", 1, true)
-        and chinese.ABOUT_CLIENT_VALUE:find("1.60.1", 1, true),
-    "Chinese client summary lacks a supported client")
+        and not chinese.ABOUT_CLIENT_VALUE:find("1.60.1", 1, true),
+    "Chinese client summary differs from the acceptance matrix")
 
 -- Every legacy key still exists under its legacy name.
 local legacyKeys = {

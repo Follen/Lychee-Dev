@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"io"
 	"time"
@@ -15,7 +14,7 @@ import (
 // for recovery; Close remains the caller's responsibility. Reopening a session
 // after process loss is separate from advancing this retained session.
 func (p *ProbeOperation) Execute(ctx context.Context) (journal.WorkRecord, error) {
-	return p.execute(ctx, desktop.QueuePreparedCommand)
+	return p.execute(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journal.WorkRecord, error) {
@@ -28,6 +27,8 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 	}
 	book := journal.OpenBook(p.metadata)
 	ackRetried := false
+	flushRetried := false
+	readinessRefreshed := map[string]bool{}
 	// Every successful step advances a phase or commits an evidence reference.
 	// This bound detects accidental non-progress without a polling loop.
 	for step := 0; step < 20; step++ {
@@ -81,6 +82,9 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 			_, err = p.dispatch(ctx, send)
 		case "dispatch_requested":
 			_, err = p.Observe(ctx)
+			if err != nil && record.Intent.Goal == "finished" && ctx.Err() == nil {
+				_, err = p.observeCheckpoint(ctx, send)
+			}
 		case "ack_requested":
 			input, inputErr := reportInput(record)
 			if inputErr != nil {
@@ -96,6 +100,9 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 				break
 			}
 			_, err = p.Observe(ctx)
+			if err != nil && record.Intent.Goal == "finished" && ctx.Err() == nil {
+				_, err = p.observeCheckpoint(ctx, send)
+			}
 			if canRetry && ctx.Err() == nil && (errors.Is(err, io.EOF) || errors.Is(err, context.DeadlineExceeded)) {
 				// ACK is idempotent for the exact request and report sequence.
 				// A retry still requires new input-ready pixels under the input
@@ -111,6 +118,11 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 		case "reported":
 			_, err = p.flush(ctx, send)
 		case "flush_requested":
+			if !flushRetried && unsentFlushIntent(record) {
+				flushRetried = true
+				_, err = p.retryUnsentFlush(ctx, send)
+				break
+			}
 			input, inputErr := reportInput(record)
 			if inputErr != nil {
 				err = inputErr
@@ -161,7 +173,7 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 			}
 			if input.Revision != "" {
 				var completed journal.WorkRecord
-				completed, err = p.FinalizeAcknowledged(ctx)
+				completed, err = p.finalizeAcknowledged(ctx, send)
 				if err == nil {
 					return completed, nil
 				}
@@ -187,11 +199,59 @@ func (p *ProbeOperation) execute(ctx context.Context, send preparedInput) (journ
 			cancel()
 			if inspectErr == nil {
 				record = latest
+				// Read-only checkpoint recovers a hidden business/readiness card.
+				// Retry only a phase whose durable input intent never advanced.
+				var loadState probeLoadObservation
+				_ = json.Unmarshal(record.Observation, &loadState)
+				loadedObservationLost := record.Stage == "loaded" || record.Stage == "load_requested" && loadState.LoadReadyCapture != ""
+				if record.Intent.Goal == "finished" && (record.Stage == "reported" || record.Stage == "verified" || loadedObservationLost || unsentFlushIntent(record)) && !readinessRefreshed[record.Stage] && ctx.Err() == nil {
+					readinessRefreshed[record.Stage] = true
+					if _, _, refreshErr := p.checkpoint(ctx, "observe", send); refreshErr == nil {
+						if unsentFlushIntent(record) {
+							flushRetried = false
+						}
+						continue
+					}
+				}
+				// A reload can replace receiver_accepted before the host samples
+				// it. Exact business reentry or report evidence is sufficient to
+				// continue this already-persisted intent without replaying input.
+				if ctx.Err() == nil && reconcileUncertainBusiness(ctx, p, record) == nil {
+					continue
+				}
 			}
 			return record, errors.Join(err, inspectErr)
 		}
 	}
 	return record, errors.New("live.execution_step_limit")
+}
+
+func reconcileUncertainBusiness(ctx context.Context, p *ProbeOperation, record journal.WorkRecord) error {
+	var observed probeLoadObservation
+	if json.Unmarshal(record.Observation, &observed) != nil {
+		return journal.ErrTransition
+	}
+	switch record.Stage {
+	case "load_requested":
+		if observed.BootstrapReadyID != "" && observed.BootstrapCapture == "" {
+			_, err := p.ObserveBootstrap(ctx)
+			return err
+		}
+		if observed.LoadReadyCapture != "" && observed.LoadedCapture == "" {
+			_, err := p.Observe(ctx)
+			return err
+		}
+	case "dispatch_requested", "ack_requested":
+		_, err := p.Observe(ctx)
+		return err
+	case "flush_requested":
+		if _, err := p.ObserveReload(ctx); err == nil {
+			return nil
+		}
+		_, err := p.PrepareFiles(ctx)
+		return err
+	}
+	return journal.ErrTransition
 }
 
 func operationGoalReached(record journal.WorkRecord) bool {
@@ -200,7 +260,7 @@ func operationGoalReached(record journal.WorkRecord) bool {
 		return record.Stage == "loaded"
 	case "verified":
 		return record.Stage == "verified"
-	case "cleaned", "": // Empty is the retained 2.0.1 work-record contract.
+	case "finished", "cleaned", "": // Empty is the retained 2.0.1 work-record contract.
 		return record.Stage == "cleaned" && (record.Status == "completed" || record.Status == "cancelled")
 	default:
 		return false

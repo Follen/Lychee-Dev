@@ -5,11 +5,10 @@ static addon checks, and cross-client validation.
 
 ## Validate the real closure
 
-Select the exact pinned source and the addon input. Prepare its source index,
-then validate the named relative TOC and ordered Lua/XML closure:
+Select the exact pinned source and the addon input. Validate the named relative
+TOC and ordered Lua/XML closure; the CLI prepares any missing source mapping:
 
 ```text
-lycheedev source index --snapshot <pin> --format json
 lycheedev source validate --path <addon-root> --toc <relative-toc-file> --snapshot <pin> --format json
 ```
 
@@ -64,6 +63,20 @@ Treat `staticValid: true` as “the reported checks found no error.” It is not
 proof of in-game loading, taint safety, combat behavior, performance, or
 visual correctness. Those require the appropriate live or visual evidence and
 must be reported as untested when absent.
+
+Use `--semantic` only when LuaLS diagnostics will answer the question. The CLI
+verifies the bundled runtime before use; a missing tool is a capability gap,
+not a reason to replace the fixed source or skip the ordinary static result.
+For a third-party addon source, pass a fixed client API source with
+`--environment <client-pin>`; the toolkit does not infer Retail from the addon
+folder or product name. This flag applies to a single pinned validation; a
+multi-client semantic matrix uses each target's own pinned client API source.
+If a target is a third-party repository without that environment, report the
+capability gap instead of applying one client's definitions to every target.
+Semantic results include registered captures for the
+checked inputs, generated definitions, configuration and raw report. Verify
+their IDs when preserving or comparing evidence. LuaLS diagnostics and a clean
+static check do not prove secret-value safety or secure execution taint.
 
 Identify a client from its `.flavor.info` and `version.txt` metadata and build,
 never from its directory name. Missing or conflicting identity stays unresolved.

@@ -157,8 +157,18 @@ func TestEncryptedIdentityListsFollowKeyedPartitions(t *testing.T) {
 		withIDs = append(withIDs, words(2, 1, 2)...)
 		withIDs = append(withIDs, raw[start:]...)
 		got, err := table.Inspect(context.Background(), bytes.NewReader(withIDs), int64(len(withIDs)), limits)
-		if err != nil || got.MetadataEnd != int64(start+12) {
+		if err != nil || got.MetadataEnd != int64(start+12) || !got.Partitions[0].IDsComplete || len(got.Partitions[0].EncryptedIDs) != 2 || got.Partitions[0].EncryptedIDs[1] != 2 {
 			t.Fatalf("v%d: %+v %v", version, got, err)
+		}
+		duplicate := append([]byte(nil), withIDs...)
+		binary.LittleEndian.PutUint32(duplicate[start+8:], 1)
+		if _, err := table.Inspect(context.Background(), bytes.NewReader(duplicate), int64(len(duplicate)), limits); !errors.Is(err, table.ErrFormat) {
+			t.Fatalf("duplicate encrypted identities accepted: %v", err)
+		}
+		oversized := append([]byte(nil), withIDs...)
+		binary.LittleEndian.PutUint32(oversized[start:], limits.Rows+1)
+		if _, err := table.Inspect(context.Background(), bytes.NewReader(oversized), int64(len(oversized)), limits); !errors.Is(err, table.ErrLimit) {
+			t.Fatalf("unbounded identity list: %v", err)
 		}
 	}
 	base, _, _ := fixture(4)

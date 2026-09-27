@@ -1,0 +1,23 @@
+[
+  {"name":"identify","requestId":"-","action":"identify","arg":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","valid":true},
+  {"name":"connect","requestId":"-","action":"connect","arg":"-","valid":true},
+  {"name":"reset","requestId":"-","action":"reset","arg":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","valid":true},
+  {"name":"ready","requestId":"-","action":"ready","arg":"-","valid":true},
+  {"name":"hide","requestId":"-","action":"hide","arg":"-","valid":true},
+  {"name":"prepare","requestId":"REQ_1","action":"prepare","arg":"cccccccccccccccccccccccccccccccc","valid":true},
+  {"name":"run","requestId":"REQ_1","action":"run","arg":"-","valid":true},
+  {"name":"flush","requestId":"REQ_1","action":"flush","arg":"dddddddddddddddddddddddddddddddd","valid":true},
+  {"name":"ack-one","requestId":"REQ_1","action":"ack","arg":"1","valid":true},
+  {"name":"ack-max-digits","requestId":"REQ_1","action":"ack","arg":"9999999999999999","valid":true},
+  {"name":"bugs-zero","requestId":"REQ_1","action":"bugs","arg":"0","valid":true},
+  {"name":"bugs-leading-zero","requestId":"REQ_1","action":"bugs","arg":"001","valid":true},
+  {"name":"bugs-999","requestId":"REQ_1","action":"bugs","arg":"999","valid":true},
+  {"name":"bugs-1000","requestId":"REQ_1","action":"bugs","arg":"1000","valid":false},
+  {"name":"ack-zero","requestId":"REQ_1","action":"ack","arg":"0","valid":false},
+  {"name":"ack-leading-zero","requestId":"REQ_1","action":"ack","arg":"01","valid":false},
+  {"name":"unknown-action","requestId":"REQ_1","action":"status","arg":"-","valid":false},
+  {"name":"operation-for-connect","requestId":"REQ_1","action":"connect","arg":"-","valid":false},
+  {"name":"missing-operation","requestId":"-","action":"run","arg":"-","valid":false},
+  {"name":"uppercase-nonce","requestId":"-","action":"identify","arg":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","valid":false},
+  {"name":"polluted-arg","requestId":"REQ_1","action":"run","arg":"-X","valid":false}
+]

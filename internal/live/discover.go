@@ -25,19 +25,23 @@ const (
 // bounded identity observation. Windows stay distinct entries even when every
 // identity field matches; nothing here is a nonce or a permission.
 type Candidate struct {
-	Window         desktop.WindowIdentity       `json:"window"`
-	Client         selection.ClientInstallation `json:"client"`
-	State          string                       `json:"state"`
-	Character      string                       `json:"character,omitempty"`
-	Realm          string                       `json:"realm,omitempty"`
-	InputReady     bool                         `json:"inputReady"`
-	NotReadyReason string                       `json:"notReadyReason,omitempty"`
-	Capture        string                       `json:"capture,omitempty"`
-	BusyOperation  string                       `json:"busyOperationId,omitempty"`
-	ForeignOwner   bool                         `json:"foreignOwner,omitempty"`
-	Reason         string                       `json:"reason,omitempty"`
-	RuntimeRelease string                       `json:"runtimeRelease,omitempty"`
-	GUID           string                       `json:"-"`
+	Window             desktop.WindowIdentity       `json:"window"`
+	Client             selection.ClientInstallation `json:"client"`
+	State              string                       `json:"state"`
+	Character          string                       `json:"character,omitempty"`
+	Realm              string                       `json:"realm,omitempty"`
+	InputReady         bool                         `json:"inputReady"`
+	NotReadyReason     string                       `json:"notReadyReason,omitempty"`
+	Capture            string                       `json:"capture,omitempty"`
+	BusyOperation      string                       `json:"busyOperationId,omitempty"`
+	ForeignOwner       bool                         `json:"foreignOwner,omitempty"`
+	Reason             string                       `json:"reason,omitempty"`
+	RuntimeRelease     string                       `json:"runtimeRelease,omitempty"`
+	BootstrapAttemptID string                       `json:"bootstrapAttemptId,omitempty"`
+	ReceiptKind        string                       `json:"receiptKind,omitempty"`
+	ReceiptBuild       string                       `json:"receiptBuild,omitempty"`
+	GUID               string                       `json:"-"`
+	PriorReady         bridge.Signal                `json:"-"`
 }
 
 type InstallationCandidate struct {
@@ -58,6 +62,8 @@ type DiscoveryRequest struct {
 	Roots        []string
 	PID          uint32
 	Installation string
+	WakeBinding  string
+	Passive      bool
 }
 
 // clientFolders are the only directory names inspected below a known root.
@@ -68,10 +74,18 @@ var clientFolders = []string{"_retail_", "_classic_", "_classic_titan_", "_class
 // time. Per-window failures stay isolated and busy windows are never typed
 // into. Identity marking is the only game action performed here.
 func DiscoverCandidates(ctx context.Context, root string, request DiscoveryRequest) (CandidateReport, error) {
-	return discoverCandidates(ctx, root, request, nativeIO())
+	io := nativeIO()
+	io.root = root
+	var err error
+	io.bindings, err = requestedReceiverBindings(request.WakeBinding)
+	if err != nil {
+		return CandidateReport{}, err
+	}
+	return discoverCandidates(ctx, root, request, io)
 }
 
 func discoverCandidates(ctx context.Context, root string, request DiscoveryRequest, io *liveIO) (CandidateReport, error) {
+	io.root = root
 	var report CandidateReport
 	if err := ctx.Err(); err != nil {
 		return report, err
@@ -116,13 +130,20 @@ func discoverCandidates(ctx context.Context, root string, request DiscoveryReque
 			report.Candidates = append(report.Candidates, candidate)
 			continue
 		}
+		if request.Passive {
+			candidate.State, candidate.NotReadyReason = "unobserved", "passive_discovery"
+			report.Candidates = append(report.Candidates, candidate)
+			continue
+		}
 		observation, err := probeIdentity(ctx, ClientWindow{Client: client, Window: window}, image.Rectangle{}, false, io)
 		candidate.Capture = observation.Capture
 		candidate.RuntimeRelease = observation.Signal.Release
+		candidate.BootstrapAttemptID = observation.BootstrapAttemptID
 		if err != nil {
 			// No correlated receipt within the bounded window: addon missing,
 			// black screen or input not delivered all land here.
 			candidate.State, candidate.Reason = CandidateUnreadable, err.Error()
+			candidate.ReceiptKind, candidate.ReceiptBuild = observation.Signal.Kind, observation.Signal.Build
 			var mismatch *bridge.RuntimeReleaseMismatch
 			if errors.As(err, &mismatch) {
 				candidate.State = "runtime_mismatch"

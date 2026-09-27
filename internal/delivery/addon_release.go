@@ -3,8 +3,8 @@ package delivery
 import (
 	"context"
 	"fmt"
+	"github.com/follenfang/lycheedev/internal/addoncheck"
 	"github.com/follenfang/lycheedev/internal/bridge"
-	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"io"
 	"os"
@@ -74,7 +74,7 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 	if len(raw) > 1<<20 {
 		return nil, ErrPayload
 	}
-	facts, err := codebase.AnalyzeDocument(ctx, name, raw)
+	facts, err := addoncheck.AnalyzeDocument(ctx, name, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 			return nil, fmt.Errorf("%w: TOC %s must declare every supported interface; %s is missing", ErrPayload, name, baselineInterface)
 		}
 	}
-	if headers["version"] != version || headers["savedvariables"] != "LycheeToolkitDB" || headers["savedvariablespercharacter"] != "" {
+	if headers["version"] != version || headers["savedvariables"] != "LycheeToolkitDB" || headers["savedvariablespercharacter"] != "" && headers["savedvariablespercharacter"] != "LycheeToolkitBridgeDB" {
 		return nil, fmt.Errorf("%w: TOC identity/version/storage mismatch in %s", ErrPayload, name)
 	}
 	if len(facts.Loads) == 0 {
@@ -136,7 +136,7 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 		seen[strings.ToLower(ref)] = true
 		manifest.Loads = append(manifest.Loads, ref)
 	}
-	graph, err := codebase.InspectLocalLoad(ctx, codebase.AddonInput{Root: filepath.Join(directory, "payload", "addon"), Manifest: selection.MainTOC})
+	graph, err := addoncheck.InspectLocalLoad(ctx, addoncheck.AddonInput{Root: filepath.Join(directory, "payload", "addon"), Manifest: selection.MainTOC})
 	if err != nil {
 		return nil, err
 	}

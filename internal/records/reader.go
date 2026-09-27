@@ -20,6 +20,8 @@ type Reader struct{ store *vault.Store }
 func OpenReader(store *vault.Store) *Reader { return &Reader{store: store} }
 
 type FileQuery struct {
+	keySource    *KeySource
+	cacheStats   *DecodedCacheStats
 	Installation string
 	CDN          bool
 	Offline      bool
@@ -29,19 +31,26 @@ type FileQuery struct {
 	MetadataBytes int64
 	ContentBytes  int64
 	Keys          container.KeyLookup
+	KeyFile       string
 }
 
 type FileReading struct {
-	Source             string            `json:"source"`
-	Pin                selection.DataPin `json:"pin"`
-	CatalogSHA256      string            `json:"catalogSHA256"`
-	BuildConfiguration vault.BlobRef     `json:"buildConfiguration"`
-	CDNConfiguration   vault.BlobRef     `json:"cdnConfiguration"`
-	EncodingKey        string            `json:"encodingKey"`
-	Root               vault.BlobRef     `json:"root"`
-	Entry              RootRecord        `json:"entry"`
-	PayloadEncodingKey string            `json:"payloadEncodingKey"`
-	Content            vault.BlobRef     `json:"content"`
+	DecodedCache *DecodedCacheStats `json:"decodedCache,omitempty"`
+	KeySource    *KeySource         `json:"keySource,omitempty"`
+	// PartialContent is separate from full CKey-verified Content.
+	PartialContent     *vault.BlobRef          `json:"partialContent,omitempty"`
+	Missing            []container.MissingSpan `json:"missing,omitempty"`
+	ContentVerified    bool                    `json:"contentVerified"`
+	Source             string                  `json:"source"`
+	Pin                selection.DataPin       `json:"pin"`
+	CatalogSHA256      string                  `json:"catalogSHA256"`
+	BuildConfiguration vault.BlobRef           `json:"buildConfiguration"`
+	CDNConfiguration   vault.BlobRef           `json:"cdnConfiguration"`
+	EncodingKey        string                  `json:"encodingKey"`
+	Root               vault.BlobRef           `json:"root"`
+	Entry              RootRecord              `json:"entry"`
+	PayloadEncodingKey string                  `json:"payloadEncodingKey"`
+	Content            vault.BlobRef           `json:"content"`
 }
 
 // ReadFile verifies the selected source against the immutable pin, projects
@@ -50,6 +59,10 @@ type FileReading struct {
 // Encoding is authenticated by EKey and visited page checks, not a claimed full
 // Encoding CKey scan. Root and selected content are completely CKey checked.
 func (r *Reader) ReadFile(ctx context.Context, pin selection.DataPin, q FileQuery) (FileReading, error) {
+	return r.readFile(ctx, pin, q, false)
+}
+
+func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuery, allowMissing bool) (FileReading, error) {
 	if err := ctx.Err(); err != nil {
 		return FileReading{}, err
 	}
@@ -57,6 +70,13 @@ func (r *Reader) ReadFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	if err != nil {
 		return FileReading{}, err
 	}
+	keys, keySource, err := r.prepareKeys(ctx, q)
+	if err != nil {
+		return FileReading{}, err
+	}
+	q.Keys = keys
+	q.keySource = keySource
+	q.cacheStats = &DecodedCacheStats{}
 	src, err := prepareFileSource(ctx, r.store, pin, q)
 	if err != nil {
 		return FileReading{}, err
@@ -84,11 +104,22 @@ func (r *Reader) ReadFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	if err != nil {
 		return FileReading{}, err
 	}
-	content, key, err := r.extractContent(ctx, q, src.open, index, entry.ContentKey, q.ContentBytes)
+	var missing []container.MissingSpan
+	var gaps *[]container.MissingSpan
+	if allowMissing {
+		gaps = &missing
+	}
+	content, key, err := r.extractContentWithCoverage(ctx, q, src.open, index, entry.ContentKey, q.ContentBytes, gaps)
 	if err != nil {
 		return FileReading{}, err
 	}
 	result := FileReading{Pin: pin, CatalogSHA256: meta.CatalogSHA256, EncodingKey: meta.EncodingKey, Root: root, Entry: entry, PayloadEncodingKey: key, Content: content}
+	result.KeySource = keySource
+	result.DecodedCache = q.cacheStats
+	result.ContentVerified = len(missing) == 0
+	if len(missing) > 0 {
+		result.PartialContent, result.Missing, result.Content = &content, missing, vault.BlobRef{}
+	}
 	result.Source = "installation"
 	if q.CDN {
 		result.Source = "cdn"
@@ -141,6 +172,10 @@ type encodedObject interface {
 }
 
 func (r *Reader) extractContent(ctx context.Context, q FileQuery, open func(context.Context, string, int64) (encodedObject, error), index *EncodingIndex, ckey string, limit int64) (vault.BlobRef, string, error) {
+	return r.extractContentWithCoverage(ctx, q, open, index, ckey, limit, nil)
+}
+
+func (r *Reader) extractContentWithCoverage(ctx context.Context, q FileQuery, open func(context.Context, string, int64) (encodedObject, error), index *EncodingIndex, ckey string, limit int64, missing *[]container.MissingSpan) (vault.BlobRef, string, error) {
 	record, err := index.FindContent(ctx, ckey)
 	if err != nil {
 		return vault.BlobRef{}, "", err
@@ -165,7 +200,31 @@ func (r *Reader) extractContent(ctx context.Context, q FileQuery, open func(cont
 		}
 		// Decoder/store budgets are positive; an empty file still has a BLTE
 		// representation. The CKey and exact decoded length below remain binding.
+		cacheKey, cacheErr := decodedCacheKey(ctx, q, object, physical.EncodedBytes, ckey)
+		if cacheErr != nil {
+			_ = object.Close()
+			return vault.BlobRef{}, "", cacheErr
+		}
+		cached, hit, cacheErr := r.readDecodedCache(ctx, q, cacheKey, ckey, record.DecodedBytes)
+		if cacheErr != nil {
+			_ = object.Close()
+			return vault.BlobRef{}, "", cacheErr
+		}
+		if hit {
+			if err := object.Close(); err != nil {
+				return vault.BlobRef{}, "", err
+			}
+			q.cacheStats.Hits++
+			q.cacheStats.ReusedBytes += cached.Bytes
+			return cached, key, nil
+		}
 		ref, extractErr := OpenPayloadArchive(r.store).ExtractContent(ctx, ContentInput{Encoded: object, ContentKey: ckey, Keys: q.Keys, Limits: readLimits(physical.EncodedBytes, max(1, record.DecodedBytes))})
+		if extractErr == nil && cacheKey != "" {
+			extractErr = r.saveDecodedCache(ctx, q, cacheKey, ckey, ref)
+		}
+		if missing != nil && errors.Is(extractErr, container.ErrKeyUnavailable) {
+			ref, *missing, extractErr = r.extractAvailable(ctx, object, physical.EncodedBytes, record.DecodedBytes, q.Keys)
+		}
 		closeErr := object.Close()
 		if extractErr != nil {
 			return vault.BlobRef{}, "", extractErr

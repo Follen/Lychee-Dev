@@ -12,8 +12,40 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs,
 } from './release.mjs';
+import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './luals.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('LuaLS Go identity matches the sole release manifest', () => {
+  generateGoIdentity({ check: true });
+  assert.throws(() => runtimeFiles(Buffer.from('not the pinned archive')), /luals.archive_integrity/);
+});
+
+test('offline LuaLS archive stages a complete inventoried runtime', async t => {
+  const archivePath = process.env.LYCHEEDEV_LUALS_ARCHIVE;
+  if (!archivePath) { t.skip('set LYCHEEDEV_LUALS_ARCHIVE for pinned archive test'); return; }
+  const root=mkdtempSync(join(tmpdir(),'lycheedev-luals-stage-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const resources=[];
+  await stageLuaLS(root,resources,{archivePath});
+  const files=runtimeFiles(readFileSync(archivePath));
+  const pointers=[...files].filter(([name])=>name.endsWith('/.git'));
+  assert.equal(pointers.length,14);
+  for (const [name,bytes] of pointers) {
+    const match=/^meta\/3rd\/([^/]+)\/\.git$/.exec(name);
+    assert.ok(match,`unexpected omitted path: ${name}`);
+    assert.equal(bytes.toString('utf8'),`gitdir: ../../../.git/modules/meta/3rd/${match[1]}\n`);
+    assert.ok(!resources.some(entry=>entry.path===`tool/luals/${name}`));
+  }
+  assert.equal(resources.length,files.size-pointers.length);
+  for (const [name,bytes] of files) {
+    if (name.endsWith('/.git')) continue;
+    const path=`tool/luals/${name}`;
+    const staged=readFileSync(join(root,'payload',...path.split('/')));
+    assert.deepEqual(staged,bytes);
+    assert.ok(resources.some(entry=>entry.path===path && entry.sha256===sha256(bytes)));
+  }
+});
 
 test('release source inputs accept the committed flat addon manifest and reject missing blobs', () => {
   const result = verifySourceInputs();
@@ -137,8 +169,8 @@ function fixturePackage(version = '2.0.0') {
     files.set(`package/${entry.binary}`, bytes);
   }
   const resources = [];
-  for (const path of ['skill/SKILL.md', 'addon/Lychee Dev.toc', 'addon/Core/Runtime.lua']) {
-    const bytes = Buffer.from(`content of ${path}\n`);
+  for (const path of ['skill/SKILL.md', 'addon/Lychee Dev.toc', 'addon/Core/Runtime.lua', 'tool/luals/runtime.json', 'tool/luals/LICENSE', 'tool/luals/bin/lua-language-server.exe', 'tool/luals/bin/main.lua', 'tool/luals/main.lua']) {
+    const bytes = path === 'tool/luals/runtime.json' ? Buffer.from(JSON.stringify(luaRuntime)) : Buffer.from(`content of ${path}\n`);
     resources.push({ path, bytes: bytes.length, sha256: sha256(bytes) });
     files.set(`package/payload/${path}`, bytes);
   }
@@ -170,6 +202,20 @@ test('PKG-05: the sealed tarball whitelist accepts the release shape', () => {
   const audit = auditTgz(entries, { version: '2.0.0', expectedCommit: 'a'.repeat(40) });
   assert.deepEqual(audit.violations, []);
   assert.equal(audit.ok, true);
+});
+
+test('local package is private, marked development only, and rejected by production audit', () => {
+  const {files}=fixturePackage();
+  const pkg=JSON.parse(files.get('package/package.json'));
+  pkg.private=true;
+  pkg.lycheedevDevelopmentOnly={commit:'a'.repeat(40),workspaceDirty:true};
+  files.set('package/package.json',Buffer.from(JSON.stringify(pkg)));
+  const release=JSON.parse(files.get('package/release.json'));
+  delete release.correspondingSource;
+  files.set('package/release.json',Buffer.from(JSON.stringify(release)));
+  const entries=[...files].map(([name,bytes])=>({name,bytes}));
+  assert.equal(auditTgz(entries,{version:'2.0.0',expectedCommit:'a'.repeat(40),developmentOnly:true}).ok,true);
+  assert.match(auditTgz(entries,{version:'2.0.0',expectedCommit:'a'.repeat(40)}).violations.join(),/development-only package|private=true|correspondingSource/);
 });
 
 test('PKG-05/REL-08: extra, banned, missing and tampered content all fail closed', () => {

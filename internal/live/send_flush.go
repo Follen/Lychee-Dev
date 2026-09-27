@@ -16,7 +16,7 @@ import (
 // than the observed report. It cannot manufacture that receipt or prove disk
 // persistence. The supplied readiness must already be displayed in the game.
 func (p *ProbeOperation) Flush(ctx context.Context) (desktop.InputReceipt, error) {
-	return p.flush(ctx, desktop.QueuePreparedCommand)
+	return p.flush(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) flush(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {
@@ -50,7 +50,7 @@ func (p *ProbeOperation) prepareFlushReadiness(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if record.Stage != "reported" || record.Status != "running" {
+	if (record.Stage != "reported" || record.Status != "running") && !unsentFlushIntent(record) {
 		return journal.ErrTransition
 	}
 	input, definition, err := probeDefinition(record)
@@ -95,5 +95,5 @@ func (p *ProbeOperation) prepareFlushReadiness(ctx context.Context) error {
 	if err := p.check(ctx); err != nil {
 		return err
 	}
-	return book.AdvanceStage(ctx, journal.StageChange{OperationID: p.id, ExpectedGeneration: record.Generation, ExpectedStage: "reported", Stage: "reported", Status: "running", Observation: raw})
+	return book.AdvanceStage(ctx, journal.StageChange{OperationID: p.id, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: record.Stage, Status: record.Status, Observation: raw})
 }

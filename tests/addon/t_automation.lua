@@ -208,6 +208,7 @@ local function NewRegion(name)
 
     setmetatable(region, {
         __index = function(target, key)
+            if type(key) ~= "string" or not key:match("^%u") then return nil end
             local noOp = function()
             end
             rawset(target, key, noOp)
@@ -350,7 +351,7 @@ nsA.ProbeDefinitions = {
     },
 }
 nsA.Persistence = {
-    Current = function()
+    Bridge = function()
         return {
             reports = {
                 ["req-reported"] = { receipt = '{"kind":"reported","sequence":7}', body = '{"probeStatus":"completed"}' },
@@ -362,6 +363,27 @@ nsA.Persistence = {
 
 LoadAddonFile("Modules/AutomationView.lua", nsA)
 local viewA = nsA.AutomationView
+
+-- Retained code is not necessarily idle: surface the executor's actual phase.
+local runnerPhase
+nsA.ProbeRunner.State = function(requestId)
+    if requestId == "req-loaded" then return runnerPhase end
+end
+for phase, expected in pairs({ running="running", settling="finalizing", quarantined="unavailable", unresolved="unavailable", loaded="loaded" }) do
+    runnerPhase = phase
+    assert(viewA.DeriveStatus("req-loaded") == expected, "retained " .. phase .. " misreported as loaded")
+end
+runnerPhase = nil
+local changes = 0
+viewA.SetChangeHandler(function() changes=changes+1 end)
+viewA.Changed()
+assert(changes == 1, "visible automation view missed executor change")
+viewA.SetChangeHandler(nil)
+viewA.Changed()
+assert(changes == 1, "hidden automation view retained a subscription")
+viewA.SetChangeHandler(function() error("cosmetic refresh failure") end)
+assert(pcall(viewA.Changed), "view error escaped into executor")
+viewA.SetChangeHandler(nil)
 
 assert(viewA.HasQueueRegistry(), "AutomationView did not capture the queue registry")
 
@@ -411,6 +433,7 @@ print("automation bridge derivation tests passed")
 local nsB = {}
 LoadAddonFile("Core/Locale.lua", nsB)
 LoadAddonFile("Core/Locale_enUS.lua", nsB)
+LoadAddonFile("UI/Theme.lua", nsB)
 LoadAddonFile("UI/Widgets.lua", nsB)
 local L = nsB.L
 
@@ -465,7 +488,7 @@ nsB.ReportStore = {
     end,
 }
 nsB.Persistence = {
-    Current = function()
+    Bridge = function()
         return { reports = {} }
     end,
 }
@@ -509,8 +532,14 @@ local page = nsB.CreateAutomationPage(parent)
 page:Activate()
 
 assert(#page.rows == 3, "automation page did not build one row per record")
-assert(page.rows[1].title:GetText() == "req-long", "row 1 does not render the newest request id")
-assert(page.rows[3].title:GetText() == "req-older", "rows are not ordered newest first")
+assert(page.rows[1].requestId == "req-long" and page.rows[1].title:GetText() == L.AUTO_KIND_LUA,
+    "newest row lost its identity or readable purpose")
+assert(page.rows[3].requestId == "req-older", "rows are not ordered newest first")
+assert(not page.metadata:IsShown(),"technical metadata should start collapsed")
+page.detailsButton:Click()
+assert(page.metadata:IsShown() and page.requestValue:GetText()=="req-long","details lost the full request identity")
+page.viewReportButton:Click()
+assert(not page.metadata:IsShown() and page.reportArea:IsShown(),"result tab did not replace details")
 assert(page.rows[1].meta:GetText() == "3000 | " .. L.AUTO_KIND_LUA,
     "row meta does not render time and kind")
 assert(page.rows[1].status:GetText() == L.AUTO_STATUS_REPORTED,
@@ -519,6 +548,7 @@ assert(page.rows[1].status:GetText() == L.AUTO_STATUS_REPORTED,
 -- Newest record is auto-selected on refresh.
 assert(page.requestValue:GetText() == "req-long", "newest record was not auto-selected")
 assert(page.statusValue:GetText() == L.AUTO_STATUS_REPORTED, "detail status did not follow the selection")
+assert(not page.executeButton:IsEnabled(), "reported work remained executable")
 
 page.SelectRecord("req-older")
 assert(page.requestValue:GetText() == "req-older", "selecting a record did not refresh the detail pane")
@@ -583,3 +613,18 @@ assert(viewB.GetRecord("req-newer") ~= nil, "clear removed a protected record")
 assert(viewB.GetRecord("req-long") ~= nil, "clear removed a record with a pending report")
 
 print("automation page tests passed")
+
+-- A visible running record refreshes from notifications, without a timer.
+viewB.Observe({ requestId="req-running", kind="lua", status="running", observedAt=6000 })
+viewB.Changed()
+page.SelectRecord("req-running")
+assert(page.statusValue:GetText()==L.AUTO_STATUS_RUNNING and not page.executeButton:IsEnabled(),
+    "running work was displayed as idle or executable")
+page:Hide()
+viewB.Observe({ requestId="req-running", status="finalizing" })
+viewB.Changed()
+assert(page.statusValue:GetText()==L.AUTO_STATUS_RUNNING, "hidden page continued to refresh")
+page:Show()
+page:Activate()
+assert(page.statusValue:GetText()==L.AUTO_STATUS_FINALIZING and not page.executeButton:IsEnabled(),
+    "reactivated page missed current executor phase")

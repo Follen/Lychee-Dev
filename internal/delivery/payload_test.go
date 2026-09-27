@@ -41,6 +41,33 @@ func TestPayloadCompleteInventory(t *testing.T) {
 	}
 }
 
+func TestPayloadPrivateLuaLSAncestorIsExact(t *testing.T) {
+	root, inventory := payloadFixture(t)
+	name := "tool/luals/bin/lua-language-server.exe"
+	content := []byte("fixed executable bytes")
+	file := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	inventory = append(inventory, Resource{Path: name, Bytes: int64(len(content)), SHA256: hex.EncodeToString(digest[:])})
+	if err := VerifyPayload(context.Background(), root, inventory); err != nil {
+		t.Fatalf("private runtime rejected: %v", err)
+	}
+	if resourcePath("tool/other/file.lua") {
+		t.Fatal("unrelated tool namespace accepted")
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tool", "other"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPayload(context.Background(), root, inventory); !errors.Is(err, ErrPayload) {
+		t.Fatalf("unlisted tool directory accepted: %v", err)
+	}
+}
+
 func TestPayloadRejectsChanges(t *testing.T) {
 	for _, kind := range []string{"missing", "extra", "corrupt", "size", "duplicate", "collision", "digest", "escape", "budget"} {
 		t.Run(kind, func(t *testing.T) {

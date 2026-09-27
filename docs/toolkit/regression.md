@@ -2,10 +2,41 @@
 
 状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-24（本次修订新增 wowdoc/wowdata 逐业务 parity 台账说明；此前已新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
 当前执行证据见 [implementation-status.md](implementation-status.md)，不以本清单充当测试结果。
+2026-09-28 UI 与活动指示验收见 [本轮记录](ui-polish-2026-09-28.md)：新增接收阶段键鼠遮罩、执行阶段释放输入、活动提示持续到 Finish、只读快捷键、自动化真实运行状态和隐藏页退订断言。真实 Retail 结果有报告与 WGC 证据；其他客户端和人工输入矩阵不据此升级。
+可重复执行的基准入口见 [tests/baseline/README.md](../../tests/baseline/README.md)：
+`node tools/baseline.mjs` 运行全量离线测试及固定功能用例；
+`node tools/live-baseline.mjs --session <session-id> --cli <exe>` 运行生产完整生命周期。
+两者分别保存 JSON 报告、原始输出与恢复信息；真机视觉、多实例及其他客户端验收独立保留 `not_run`，不能由离线结果代替。
+2026-09-27 晚间 Agent Live r4 补充：Retail 生产 execute→角色SV→ACK→显示清理已通过，包含业务失败及9页面调用；接收器硬件确认、RGB 短时提示和执行期间无遮挡有专门回归。具体操作与 WGC 证据见[实施记录](agent-live-implementation-2026-09-27.md)与[可靠性矩阵](agent-live-acceptance-2026-09-27.md)。以下全量审计/vNext 的未通过说明保留为较早批次历史，不代表这些场景仍未修复；多客户端、多实例、人工输入等未运行项目仍分别保持 not_run。
+本轮[全量审计](full-audit-2026-09-27.md)的离线 UI fixture 已覆盖小视口导航、
+Settings 有效绑定刷新和未提交草稿；WKB-01/11、WIN-17 的真实客户端视觉、
+输入及 reload 场景仍为 `not_run`。`.tmp/full-audit-final-go.log` 的强制 Lua
+全量测试通过，`.tmp/full-audit-package-tests.log` 的 release 测试 16/16 通过；
+Retail 新会话已建立，但 BTP 身份唤醒与固定 reload 恢复后来明确 abandon，
+接收器收尾证据和 probe load→run→SV→finish 链仍未通过。
+桥接 vNext 的工作区自动检查、独立 Retail 回显及未测生产范围分别见
+[2026-09-27 验收记录](bridge-vnext-acceptance-2026-09-27.md)：Go build/vet、
+强制 Lua 5.1 全量测试、定向 desktop/bridge-input、16 项 Node release、版本
+一致性、仓库与包内 skill 合同及隔离 npm version smoke 已通过。RUN-21..27、
+WIN-15..18 等条目有对应自动回归。Retail 生产首连先出现 preflight 失败与
+接收器半初始化，两个原 BTP 后来均已按用户授权 abandon；后续身份回执恢复
+confirmed 并建立验证会话。probe load 触发的自动重连 BTP 又在玩家转区后失去
+有效 QR，亦已依授权 abandon，因此完整探针业务链仍未通过。Classic/Titan、布局/IME、
+真实鼠标、视觉/性能验收仍为 `not_run`；不得由整体测试通过推断真机项目已
+passed。Retail 受管 addon 的首轮 53 文件安装与修复后 54 文件 `managed` 状态
+已有独立记录；修复后的强制 Lua 全量自动复验已通过，运行态身份连接后来已
+验证，但业务 stage/load/run/SV/finish 尚未完成验证。
 
-适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.0.6` / `v2.0.6` 发布合同：[release-2.0.6.md](release-2.0.6.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
+适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.5.0` / `v2.5.0` 发布合同：[release-2.5.0.md](release-2.5.0.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
 
 ## 1. 验证原则与结果状态
+
+DB2 缺钥验收：同表明文/已知密钥/未知密钥分区混合时保留可读记录；明确的
+密钥文件恢复整文件 CKey 验证；未知密钥不得伪造零值。公共元数据缺钥、块损坏、
+分区 key 不匹配、密钥来源失败、取消、非零/过长 sparse 填充保持错误。
+分页/schema/search/领域查询/SQL 聚合/JSONL/CSV 与证据 complete 状态一致；
+原始资产导出保持严格失败。离线不下载密钥，私有密钥不缓存；实际 SpellMisc、
+Spell 的安装/CDN 与中文行结果单独记录，剩余加密行不得记作已解密。
 
 新增恢复验收：`live abandon` 允许 probe/bugs 从 load_requested 到 ack_requested
 的未确认工作，包括零、部分、未知输入；prepared 用 cancel，确认 ACK 后正常 finalize。
@@ -201,14 +232,25 @@ archive、group 的 footer/TOC/页完整性。缓存测试需覆盖同键并发�
 | SRC-03 | P0 | 单 TOC 有序 XML/Script/Include 闭包 | 只检查实际加载内容；循环有界；重复来源可追溯 |
 | SRC-04 | P0 | 动态引用、未知 API、缺文件 | 未决项与确定错误区分，不宣称完全实机兼容 |
 | SRC-05 | P0 | 两个分支内容相同、部分文件不同 | 对象可去重，快照成员关系不泄漏，结果版本正确 |
-| SRC-06 | P0 | 索引更新中止或旧 schema | 旧已发布索引仍可读；临时索引不被当完整索引 |
+| SRC-06 | P0 | source 文件映射更新中止或旧 SQLite 索引 | 临时映射不被当完整结果；旧 source 索引不再参与查询，也不影响公共 metadata 或原有证据读取 |
 | SRC-07 | P1 | 两个固定源码版本做差异 | 变更与来源准确；不受当前仓库分支影响 |
 | SRC-08 | P0 | 多目标 matrix、长路径和路径越界输入 | 每个目标正确；越界拒绝；Windows 长路径有明确结果 |
+| SRC-09 | P0 | 同仓库两个固定 commit、离线复用及脏 worktree | 历史 pin 不随分支移动；同版本复用；修改过的分析输入不冒充原版；租约与空间回收不碰其他业务 |
+| SRC-10 | P0 | refs/context 同名局部函数、不同仓库全局名、分页 | 符号 ID 保持仓库/commit/文件/作用域隔离；每条关系有依据和状态；游标稳定且不跨查询复用 |
+| SRC-11 | P0 | 无 LuaLS、缺客户端环境或解析失败 | 原文/结构查询仍可用，语义覆盖与失败原因显式，不把静态候选写成已解析调用 |
+| SRC-12 | P0 | 秘密值规则与有界传播 | 固定版本原文条件、返回槽位、保护分支、跨文件路径及预算边界可核对；无发现不表示运行态安全 |
+| SRC-13 | P0 | addon 安装与 source 分离 | 无 Git/LuaLS 可检查 release TOC/XML/Lua 和字节收据；source 更新不改变受管安装行为 |
+| SRC-14 | P1 | skill 真实源码研究与 source→live 交接 | 固定版本原文足够时完成回答；截断按游标续页；已授权运行态调查推进到验证报告和收尾，未跑真机保持 not_run |
 | DAT-01 | P0 | CASC/BLTE/DB2 固定二进制样本 | 解码记录、语言和字段值与独立预期一致 |
 | DAT-02 | P0 | 同 Build 不同语言和地区 | 查询与缓存身份正确，不混用本地化文本 |
 | DAT-03 | P0 | DB2 schema、ID、外键和流式 limit | 返回结构准确，limit 生效，取消后停止读取 |
 | DAT-04 | P0 | SQL JOIN、NULL、聚合、CTE、参数与排序 | 对小型可手工核对数据集得到准确结果，不只与旧引擎自比 |
 | DAT-05 | P0 | SQL 内存预算、EXPLAIN 与只读限制 | 超预算有明确错误；EXPLAIN 不读数据行；写语句被拒绝 |
+| DAT-06 | P0 | 数据路径优化语义保持 | ID lookup 的零/单行保留 partial；投影不掩盖坏字段；等值 JOIN 保留重复/NULL/LEFT/精确数值，索引预算不足回退；Top-K 稳定排序且不隐藏迟到错误 |
+| DAT-07 | P0 | 本地 Hotfix 全量续扫 | 每页不可变 capture、筛选/源身份一致；取消返回已保存 checkpoint；完成计数等于 matched；原始文件变化不污染续扫 |
+| DAT-08 | P0 | 显式 effective 与语义元数据 | static 不变；多 capture 的 signed push/输入顺序/物理顺序可复现；覆盖/新增/删除保留来源；meta 固定 commit/build、条件显式、64 位 flags 精确 |
+| DAT-09 | P0 | 解码复用隔离 | 完整内容与 partial 不混用；重复查询命中；密钥变化不复用旧明文；源/缓存损坏仍拒绝；现有离线与来源合同不变 |
+| DAT-10 | P1 | 固定 DBCD 独立对照 | 同 DB2/DBD/Build 比较全部可读 ID 摘要、加密 ID 集合及抽样字段；当前两张正式服表通过，不等于全格式矩阵通过；见 tests/dbcd/README.md |
 | DAT-06 | P0 | Hotfix 分页、最大 PushID 批次和删改状态 | 返回完整目标批次及原始状态，保持独立系统语义 |
 | DAT-07 | P0 | 相同 DB2 记录有 Hotfix | DB2 查询不被隐式覆盖；组合报告明确标注两个来源 |
 | DAT-06a | P0 | 本地 DBCache 原始记录、固定字节与分页 | v1–9 格式、v8 双布局/歧义、错误 Build/损坏尾部/预算/取消；保留重复 ID、负 push 和原始状态；文件变化后从 capture 分页仍读取原字节；并行查询独立游标，冲突目标及损坏归档拒绝 |
@@ -299,6 +341,13 @@ generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入�
 | RUN-18 | P0 | faults 清理重载后另一进程执行 `live ack` | 输入前以归档重入锚点观测当前 inputReady 回执，超时映射 pending 而非 signal_not_observed；零消息回执证明未入队时安全重发，否则只观察且等待有界 |
 | RUN-19 | P1 | 已归档证据的显示回执被 `live hide` 收起 | 有对话帧且输入就绪才发送 `/dev bridge hide`；忙窗口拒绝并保留显示；有效帧连续零符号才算清除，残留回执返回 pending；幂等且不产生新回执或聊天输出 |
 | RUN-20 | P0 | abandon/回执丢失后内存队列阻塞身份的死锁 | `live reset` 只触碰磁盘无占用者窗口；固定 nonce 关联触发只清理当前角色未确认条目并丢弃残留重入票据，其他角色条目保留；无关联回执永不假称已解锁；成功后经正常 bootstrap 重连 |
+| RUN-21 | P0 | LDB1 已 staged，旧 attempt 的物理提交键迟到 | 仅发布新 challenge；没有与新 nonce/attempt/challenge/正文摘要匹配的 LDC1 不 dispatch，新旧尝试均保留独立证据 |
+| RUN-22 | P0 | 接收帧被合法 ASCII 污染、截断或重排 | 完整帧拒绝且 accepted=false 才允许同业务最多两次新 nonce/attempt 重传；接收总时限 60 秒，不从脏文本中提取命令 |
+| RUN-23 | P0 | 声明 1、120 和越界执行预算；超 15 秒异步执行 | `live probe load --budget-seconds` 与队列/插件共同核验；运行等待覆盖原预算和持久化余量；resume 不刷新原执行期限；deadline 与人工取消分开 |
+| RUN-24 | P0 | 报告正文编码失败或报告回执丢失 | 独立最小 `report_error` 或精确已存 SV 恢复，保留原 operation；不把错误变成普通成功、超时或重跑脚本 |
+| RUN-25 | P0 | 首连 identify/connect/reset 在任何 session 前中断 | 输入前保留 BTP attempt、所选窗口与安装；`live status` 只读，`live resume` 只观察同一回执；接受未知不重发也不释放 owner |
+| RUN-26 | P0 | 新探针 load 或报告 flush 重载 | 临时 UI/Frame 引用不被当成原现场；在 load 后重建场景、采样与清理先于 flush；原现场无已加载能力可观测时明确未验证 |
+| RUN-27 | P0 | BTP 或固定 reload OP 未决且用户明确选择停止 | `live abandon <id>` 保存未知输入/接受/运行效果并只释放宿主所有权；不发送游戏输入，不把 abandoned 描述为取消、ACK 或运行失败 |
 
 完整性不是“成功消息数等于预期”，而是每个状态转换有合法前置状态、匹配身份、内容校验与可追溯的外部确认。执行不确定性必须保留，不能通过刷新 requestId 隐藏。
 
@@ -306,15 +355,15 @@ generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入�
 
 先用自建消息接收窗口验证 Win32 参数，再用真实游戏验证语义。模拟器成功不能替代游戏验证。
 
-首连场景使用 `live connect`（宿主自动发送 `/dev bridge identify <nonce>` 身份标记
-与固定 `/dev connect`，用户零 `/dev` 输入）：验证候选发现与安装/在线区分、身份
+首连场景使用 `live connect`（宿主通过专用接收器发送受限 identify/connect 动作，
+用户零 `/dev` 输入）：验证候选发现与安装/在线区分、身份
 标记的 probeNonce 回执关联、唯一/歧义选择、PID/安装过滤、角色约束、同屏多个
 回执拒绝、缺失或过期画面失败，以及普通结果不泄漏内部协议。重连与执行不得沿用首次发现
 的宽松匹配；必须核对原进程/角色/nonce。`--capture-area` 只限定选定窗口中的
-捕获区域，省略时整窗捕获。断开只停止连接，不删除报告或修改别人的任务。
+捕获区域，默认左上有界区域而非整窗。断开只停止连接，不删除报告或修改别人的任务。
 
 从该连接执行 `live probe put`、`live probe load --session <id> --probe <revision>
---request <key>`、`live run <operation-id>`、`live ack <operation-id>`，验证账号目录自动
+--request <key> --budget-seconds <1-120>`、`live run <operation-id>`、`live ack <operation-id>`，验证账号目录自动
 选择、Unicode/空格名字、不同角色/服务器排除、零/多个候选、扫描预算、路径跳转
 拒绝。选择失败不得留下操作或发送输入；选择成功后新增其他匹配目录不得改变原
 操作及恢复的账号。首次登录可显式 `--account`，目录只是位置选择，不能替代
@@ -328,7 +377,7 @@ generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入�
 | WIN-04 | P0 | 每条消息之间窗口关闭或被重用 | 停止发送，不向新窗口发送剩余文本 |
 | WIN-05 | P0 | WGC ROI、resize、DPI 和 UI 缩放 | 正确裁切解码，不把旧帧识别成新状态 |
 | WIN-06 | P0 | 最小化、无帧、遮挡、恢复窗口 | 按实际捕获能力报告；不假定最小化可用，不伪造完成 |
-| WIN-07 | P0 | 聊天草稿、其他编辑框、自定义聊天键 | 输入资格不明确时阻止自动提交；不能只把 Escape 入队当作聊天状态已复位 |
+| WIN-07 | P0 | 聊天草稿、其他编辑框、自定义聊天键 | 正常业务走专用接收器，不清理聊天草稿；新 ready、焦点及角色不可证实时阻止提交；仅固定兜底 reload 允许有边界的 Esc 序列 |
 | WIN-08 | P0 | QR 低对比度、错误码、两个不同回执同屏 | 正确过滤，匹配身份，失败有界；不选“第一个码” |
 | WIN-09 | P0 | 连续 100 次打开/关闭捕获和恢复 | 预热后线程、原生句柄、显存/内存无持续增长，退出能结束 |
 | WIN-10 | P1 | 用户在自动化期间操作游戏 | 明确观察失效/冲突并停下；不宣称能隔离人工操作 |
@@ -336,6 +385,10 @@ generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入�
 | WIN-12 | P0 | load/run/ack 分步执行 | load 不执行，run 停在 verified，ack 不触发额外 reload 且只回收精确条目 |
 | WIN-13 | P0 | `live bugs --count 1..100` | 只读取既有 provider 存储；缺 provider/不完整字段/零条目保持各自语义 |
 | WIN-14 | P0 | 同安装的正反斜杠、点段、相对路径、大小写、尾分隔符 | 发现、选择和 session 约束一致；不会过滤掉在线目标，也不会向其他安装发送输入；多窗口保持独立 |
+| WIN-15 | P0 | 首次安装或桥失联的固定 reload 兜底 | 仅选定安装/PID，干净受管版本和无冲突 owner；逐输入前记录并重核进程/窗口，固定 Esc×3 Enter /reload Enter；中断后同 OP 只观察、不重复未知键；以新 runtime/版本/身份验证激活 |
+| WIN-16 | P0 | Retail/Classic/Titan 不同布局、焦点、IME、战斗与人工干扰 | 唤醒/提交/关闭组合键实际可送达，模态有界释放；拒绝污染和迟到提交，失败不锁住玩家；逐客户端记录 WGC 与回执，实验 echo 不替代生产闭环 |
+| WIN-17 | P0 | wake/submit/close 自定义与冲突 | 设置页和 `/dev receiver bind`/`reset` 使用插件自有 override；非法 chord、重复 chord、close 同末端键、已有玩家绑定和未生效 override 均拒绝且保留原配置；不调用 SaveBindings，非战斗配置与 reload 后恢复分别验证 |
+| WIN-18 | P0 | 首连自定义 wake 与旧 ready 回执 | `--wake-binding` 只用于 live instances/connect/reset 的首个唤醒；新 ready 三键 profile 必须有效且 wake 匹配，随后保存连接并按回执投递 submit/close；旧 profile/旧 ready 或 mismatch 不发送 stage |
 
 纯 Go QR 方案必须与旧方案对同一公开可用的回执样本集合比较识别率和耗时。若关键样本失败，阶段 S1 不通过；不能把切回 Python 作为完成重写。
 
@@ -411,7 +464,7 @@ generation 和 content-addressed blob；不调用旧 wowdata/wowdoc/Python 入�
 | ID | 级别 | 场景 | 必须观察到的结果 |
 | --- | --- | --- | --- |
 | SKL-17 | P0 | managed + identity_unreadable；candidate_missing 空/非空候选 | 区分磁盘与运行状态，超时不臆断加载状态；不循环 connect/reload，不要求手输 connect |
-| SKL-18 | P0 | 无 session 的首次加载、禁用插件和运行中升级 | 在已有授权与可用桌面工具下按实际界面启用，再由 CLI 验证身份/ready；桌面能力缺失如实报告，不新增输入后门 |
+| SKL-18 | P0 | 无 session 的首次加载、禁用插件和运行中升级 | 安装激活或桥失联时使用固定目标的 `live reload fallback` 并恢复原 OP；游戏 UI 中明确禁用的插件仍须经授权启用，再由 CLI 验证身份/ready；不得把送键当激活证明 |
 | SKL-19 | P0 | 限定 Classic、Retail 正被其他 agent 使用 | 发现限定授权安装；界面维护不抢占目标所有权，不操作 Retail；source/data 可继续并行 |
 
 ## 13. 安装与发行回归

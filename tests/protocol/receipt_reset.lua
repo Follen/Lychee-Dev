@@ -18,7 +18,7 @@ for _, profile in ipairs(profiles) do
     IsLoggedIn = function() return true end
     InCombatLockdown = function() return false end
     GetCurrentKeyBoardFocus = function() return focus end
-    LycheeToolkitDB = nil
+    LycheeToolkitDB, LycheeToolkitBridgeDB = nil, nil
     local scale = 1
     UIParent = { GetEffectiveScale = function() return scale end }
     CreateFrame = function(kind, name, parent)
@@ -74,7 +74,7 @@ for _, profile in ipairs(profiles) do
     assert(loadfile(root .. "/Core/ClientGate.lua"))("Lychee Dev", ns)
     for _, name in ipairs({ "Core/Platform.lua", "Core/Persistence.lua", "Bridge/CaptureWriter.lua",
         "Bridge/Session.lua", "Bridge/MatrixSymbol.lua", "Bridge/ReceiptView.lua",
-        "Core/Controls.lua" }) do
+        "Bridge/ProbeRunner.lua", "Core/Controls.lua" }) do
         assert(loadfile(root .. "/" .. name))("Lychee Dev", ns)
     end
     ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = {} }
@@ -103,13 +103,13 @@ for _, profile in ipairs(profiles) do
     assert(ns.Identity.Trigger(nonce) == nil) -- identity_busy fail closed
     -- A stale reentry ticket is discarded by the reset; malformed tickets
     -- stay fail-closed by design.
-    LycheeToolkitDB.reentry = { schema = "lycheedev.reentry.v1", standalone = true,
+    LycheeToolkitBridgeDB.reentry = { schema = "lycheedev.reentry.v1", standalone = true,
         requestId = "RELOAD-" .. string.rep("d", 32), sessionNonce = string.rep("a", 32),
         reloadNonce = string.rep("e", 32), runtimeEpoch = 1, character = character,
         realm = "Realm", guid = guid, release = ns.Release, product = profile.product,
         build = profile.version .. ".12345" }
     assert(ns.Controls.Handle("bridge reset " .. nonce))
-    assert(not LycheeToolkitDB.reentry)
+    assert(not LycheeToolkitBridgeDB.reentry)
     assert(ns.Identity.Trigger(nonce), "identity must work after reset")
     -- The reset tombstones only this character's entry; another character's
     -- entry stays pending for its own window.

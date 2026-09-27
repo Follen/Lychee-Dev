@@ -1,5 +1,5 @@
 local root = assert(arg[1])
-local ns = { Release = "2.0.6", Startup = { ready = true,
+local ns = { Release = "2.5.0", Startup = { ready = true,
     identity = { product = "retail", build = "12.1.0.69875" } } }
 ns.Platform = { ObserveActor = function() return { character = "Paladin", realm = "Realm", guid = "Player-1-123" } end }
 local secret = {}
@@ -44,9 +44,9 @@ ns.CaptureWriter.Encode = encoder
 local acknowledgement = assert(ns.ReportStore.Acknowledge(original))
 assert(ns.ReportStore.Acknowledged("OP-ack") == acknowledgement)
 assert(ns.ReportStore.Acknowledged("OP-other") == nil)
-LycheeToolkitDB.reports["OP-ack"] = {receipt=receipt,body=body}
+LycheeToolkitBridgeDB.reports["OP-ack"] = {receipt=receipt,body=body}
 assert(ns.ReportStore.Acknowledged("OP-ack") == nil, "reappeared report granted cleanup")
-LycheeToolkitDB.reports["OP-ack"] = nil
+LycheeToolkitBridgeDB.reports["OP-ack"] = nil
 assert(ns.ReportStore.Acknowledged("OP-ack") == acknowledgement)
 assert(ns.ReportStore.Read("OP-ack") == nil and ns.ReportStore.Read("OP-other"))
 assert(original.kind == "reported" and original.sequence == 102, "caller receipt mutated")

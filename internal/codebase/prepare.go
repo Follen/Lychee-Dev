@@ -3,6 +3,7 @@ package codebase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,17 +23,17 @@ func (b *Browser) PrepareSource(ctx context.Context, key, product, reference str
 	}
 	branch, ok := repo.Tracks[product]
 	if !ok {
-		return zero, errors.New("codebase.unknown_product")
+		return zero, fmt.Errorf("%w: %q for %s", ErrUnknownProduct, product, repo.Key)
 	}
 	if reference == "" {
 		reference = "refs/heads/" + branch
 	}
 	if !objectID(reference) {
 		if !strings.HasPrefix(reference, "refs/heads/") && !strings.HasPrefix(reference, "refs/tags/") {
-			return zero, errors.New("codebase.explicit_ref_required")
+			return zero, fmt.Errorf("%w: explicit branch or tag ref required", ErrInvalidSourceRef)
 		}
 		if _, err := gitBytes(ctx, "", 1024, "check-ref-format", reference); err != nil {
-			return zero, err
+			return zero, fmt.Errorf("%w: %v", ErrInvalidSourceRef, err)
 		}
 	}
 	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:"+repo.Key)
@@ -56,7 +57,7 @@ func (b *Browser) PrepareSource(ctx context.Context, key, product, reference str
 	} else if err != nil {
 		return zero, err
 	} else if !info.IsDir() {
-		return zero, errors.New("codebase.invalid_mirror")
+		return zero, fmt.Errorf("%w: invalid_mirror", ErrSourceIntegrity)
 	}
 	if _, err := gitBytes(ctx, directory, 4096, "-c", "fetch.fsckObjects=true", "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--depth=1", repo.URL, reference); err != nil {
 		return zero, err
@@ -67,7 +68,7 @@ func (b *Browser) PrepareSource(ctx context.Context, key, product, reference str
 	}
 	commit := strings.TrimSpace(string(resolved))
 	if !objectID(commit) || objectID(reference) && reference != commit {
-		return zero, errors.New("codebase.commit_mismatch")
+		return zero, fmt.Errorf("%w: commit_mismatch", ErrSourceIntegrity)
 	}
 	if _, err := gitBytes(ctx, directory, 1024, "update-ref", "refs/pins/"+commit, commit); err != nil {
 		return zero, err

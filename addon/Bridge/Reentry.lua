@@ -60,7 +60,7 @@ local function valid(ticket)
 end
 local function cancel(discard)
     if waiting then waiting:UnregisterAllEvents(); waiting:SetScript("OnEvent",nil); waiting=nil end
-    local state=ns.Persistence.Current()
+    local state=ns.Persistence.Bridge()
     if state and ((discard and valid(state.reentry)) or (state==ownedRoot and rawequal(state.reentry,ownedTicket)
         and ns.CaptureWriter.Encode(state.reentry,8192)==ownedBytes)) then state.reentry=nil end
     ownedTicket,ownedRoot,ownedBytes=nil,nil,nil
@@ -80,6 +80,7 @@ local function receiptFor(ticket)
         character=identity.character,realm=identity.realm,guid=identity.guid,
         product=ns.Startup.identity.product,build=ns.Startup.identity.build,
         sequence=identity.sequence,runtimeEpoch=identity.runtimeEpoch,inputReady=ready,
+        reportScope="character-v1",
     },2048)
     if not receipt then return nil,failure end
     return receipt
@@ -108,7 +109,7 @@ ns.Reentry={
     -- operation is mid-flight and owns the displayed receipt.
     Busy=function()
         if waiting or submitted then return true end
-        local state,failure=ns.Persistence.Current()
+        local state,failure=ns.Persistence.Bridge()
         if not state then return nil,failure end
         if restricted(state.reentry) then return nil,"reload_invalid_ticket" end
         return state.reentry~=nil
@@ -120,7 +121,7 @@ ns.Reentry={
         end
         local session,reason=ns.Session.Current()
         if not session then return nil,reason end
-        local state,failure=ns.Persistence.Current()
+        local state,failure=ns.Persistence.Bridge()
         if not state then return nil,failure end
         if restricted(state.reentry) or state.reentry~=nil then return nil,"reload_ticket_exists" end
         return submit(state,{schema="lycheedev.reentry.v1",standalone=true,
@@ -138,7 +139,7 @@ ns.Reentry={
         end
         local session,reason=ns.Session.Current()
         if not session then return nil,reason end
-        local state,failure=ns.Persistence.Current()
+        local state,failure=ns.Persistence.Bridge()
         if not state then return nil,failure end
         if restricted(state.reentry) or state.reentry~=nil then return nil,"reload_ticket_exists" end
         local receipt,body=ns.ReportStore.Read(requestId)
@@ -153,7 +154,7 @@ ns.Reentry={
         if submitted then return nil,"reload_already_submitted" end
         local session,reason=ns.Session.Current()
         if not session then return nil,reason end
-        local state,failure=ns.Persistence.Current()
+        local state,failure=ns.Persistence.Bridge()
         if not state then return nil,failure end
         if restricted(state.reentry) or state.reentry~=nil then return nil,"reload_ticket_exists" end
         local ticket={schema="lycheedev.reentry.v1",queueReload=true,requestId=requestId,
@@ -171,7 +172,7 @@ ns.Reentry={
         if submitted then return nil,"reload_already_submitted" end
         local session,reason=ns.Session.Current()
         if not session then return nil,reason end
-        local state,failure=ns.Persistence.Current()
+        local state,failure=ns.Persistence.Bridge()
         if not state then return nil,failure end
         if restricted(state.reentry) or state.reentry~=nil then return nil,"reload_ticket_exists" end
         local ticket,scopeFailure=ns.ProbeQueue.ReloadScope(requestId)
@@ -192,8 +193,8 @@ ns.Reentry={
         return submit(state,ticket)
     end,
     Start=function(frame)
-        local state=ns.Persistence.Current()
-        if not state or not state.options or state.options.bridgeEnabled~=true then return true end
+        local state=ns.Persistence.Bridge()
+        if not state or not ns.Persistence.BridgeEnabled() then return true end
         if restricted(state.reentry) then return nil,"reload_invalid_ticket" end
         if state.reentry==nil then return true end
         local ticket=state.reentry
@@ -224,8 +225,8 @@ ns.Reentry={
             local unchanged=rawequal(state.reentry,ownedTicket) and ns.CaptureWriter.Encode(state.reentry,8192)==ownedBytes
             cancel()
             if not unchanged then return end
-            local current=ns.Persistence.Current()
-            if current~=state or not current.options or current.options.bridgeEnabled~=true then return end
+            local current=ns.Persistence.Bridge()
+            if current~=state or not ns.Persistence.BridgeEnabled() then return end
             if restricted(state.runtimeEpoch) or state.runtimeEpoch~=ticket.runtimeEpoch then return end
             local actor=ns.Platform.ObserveActor()
             if not actor or actor.character~=ticket.character or actor.realm~=ticket.realm or actor.guid~=ticket.guid

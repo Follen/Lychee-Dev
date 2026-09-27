@@ -78,7 +78,7 @@ var (
 		if value, ok := fixtureWindows.Load(hwnd); ok {
 			window := value.(*fixtureWindow)
 			switch message {
-			case 0x100, 0x101, 0x102:
+			case 0x100, 0x101, 0x102, 0x104, 0x105:
 				select {
 				case window.packets <- inputPacket{message, wparam, lparam}:
 				default:

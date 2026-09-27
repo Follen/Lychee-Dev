@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/buildinfo"
@@ -14,14 +15,28 @@ import (
 // Resume uses the saved connection, including its capture region. Completed
 // work only retires ownership; unfinished work revalidates fresh game evidence.
 func Resume(ctx context.Context, root, id string) (Outcome, error) {
+	return resumeOperation(ctx, root, id)
+}
+
+func resumeOperation(ctx context.Context, root, id string) (Outcome, error) {
 	record, err := InspectOperation(ctx, root, id)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if record.Status == "failed" && record.Stage == "dispatch_requested" {
+		return finishOutcome(ctx, root, record, errors.New("live.report_encoding_failed"))
 	}
 	if record.Stage == "abandoning" || record.Stage == "abandoned" {
 		return Abandon(ctx, root, id)
 	}
 	if record.Intent.Kind == "reload" {
+		var kind struct {
+			Schema string `json:"schema"`
+		}
+		if json.Unmarshal(record.Intent.Request, &kind) == nil && kind.Schema == "lycheedev.fixed-reload.v1" {
+			record, err = resumeFixedReload(ctx, root, record)
+			return finishOutcome(ctx, root, record, err)
+		}
 		if record.Stage == "cleaned" {
 			record, err = ReleaseCompletedReload(ctx, root, record)
 			return finishOutcome(ctx, root, record, err)
@@ -36,7 +51,7 @@ func Resume(ctx context.Context, root, id string) (Outcome, error) {
 		}
 		record, err = resumeStandaloneReload(ctx, root, id, bound.Record.Region, func(ctx context.Context, target ClientWindow, region image.Rectangle) (sessionFrames, error) {
 			return desktop.CaptureFrames(ctx, target.Window, region)
-		}, ConfirmClientWindow, desktop.QueuePreparedCommand)
+		}, ConfirmClientWindow, nil)
 		return finishOutcome(ctx, root, record, err)
 	}
 	if record.Intent.Kind == "faults" {
@@ -54,7 +69,7 @@ func Resume(ctx context.Context, root, id string) (Outcome, error) {
 		}
 		record, err = resumeFaults(ctx, root, id, bound.Record.Region, func(ctx context.Context, target ClientWindow, region image.Rectangle) (sessionFrames, error) {
 			return desktop.CaptureFrames(ctx, target.Window, region)
-		}, ConfirmClientWindow, desktop.QueuePreparedCommand)
+		}, ConfirmClientWindow, nil)
 		return finishOutcome(ctx, root, record, err)
 	}
 	var region image.Rectangle
@@ -71,7 +86,7 @@ func Resume(ctx context.Context, root, id string) (Outcome, error) {
 	}
 	record, err = resumeLiveOperation(ctx, root, id, region, func(ctx context.Context, target ClientWindow, region image.Rectangle) (sessionFrames, error) {
 		return desktop.CaptureFrames(ctx, target.Window, region)
-	}, ConfirmClientWindow, desktop.QueuePreparedCommand)
+	}, ConfirmClientWindow, nil)
 	return finishOutcome(ctx, root, record, err)
 }
 
@@ -79,12 +94,12 @@ func resumeLiveOperation(ctx context.Context, root, id string, region image.Rect
 	capture func(context.Context, ClientWindow, image.Rectangle) (sessionFrames, error),
 	confirm func(context.Context, ClientWindow) error, send preparedInput,
 ) (record journal.WorkRecord, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	record, err = InspectOperation(ctx, root, id)
 	if err != nil {
 		return record, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, lifecycleBudget(record, time.Now()))
+	defer cancel()
 	if record.Stage == "cleaned" && record.Status == "completed" {
 		return ReleaseCompletedProbe(ctx, root, id)
 	}
@@ -99,7 +114,7 @@ func resumeLiveOperation(ctx context.Context, root, id string, region image.Rect
 		if inputErr != nil {
 			return record, inputErr
 		}
-		if input.Revision != "" {
+		if input.Revision != "" && !unsentFlushIntent(record) {
 			record, err = reconcileProbeReport(ctx, root, id)
 			if err != nil || operationGoalReached(record) {
 				return record, err
@@ -133,12 +148,19 @@ func resumeLiveOperation(ctx context.Context, root, id string, region image.Rect
 		return record, err
 	}
 	session := newWindowSession(binding.Target, region, anchor, bridge.ObserveSignals(frames), frames, confirm)
+	if send == nil {
+		session.writerIO = nativeIO()
+	}
+	session.bindings = binding.Record.Bindings
 	defer session.Close()
 	operation, err := session.OpenOperation(ctx, root, id)
 	if err != nil {
 		return record, err
 	}
 	defer func() { err = errors.Join(err, operation.Close()) }()
+	if send == nil {
+		send = operation.receiverInput
+	}
 	result, err := operation.execute(ctx, send)
 	if result.OperationID != "" {
 		record = result

@@ -93,7 +93,7 @@ func bindTerm(e *evaluation, node *term, fields []field, allowAggregate bool) (*
 				if len(node.args) == 0 {
 					return nil, ErrType
 				}
-			case "NULLIF":
+			case "NULLIF", "HAS_FLAG", "BIT_AND":
 				if len(node.args) != 2 {
 					return nil, ErrType
 				}
@@ -271,6 +271,10 @@ func executeRows(e *evaluation, query *retrieval, fields []field, stream rowStre
 	defer func() { e.column, e.resolved = previousColumn, previousResolved }()
 	e.resolved = nil
 	var projected []groupOutput
+	bounded, err := newTopRows(e, &q, grouped)
+	if err != nil {
+		return rowResult{}, err
+	}
 	err = stream(func(input []any) error {
 		if err := e.spendMatch(); err != nil {
 			return err
@@ -316,6 +320,9 @@ func executeRows(e *evaluation, query *retrieval, fields []field, stream rowStre
 			}
 			row.order = append(row.order, v)
 		}
+		if bounded != nil {
+			return bounded.add(e, row)
+		}
 		cost := int64(64 + 32*(len(row.values)+len(row.order)))
 		for _, values := range [][]any{row.values, row.order} {
 			for _, v := range values {
@@ -336,6 +343,12 @@ func executeRows(e *evaluation, query *retrieval, fields []field, stream rowStre
 	}
 	if grouped {
 		projected, err = groups.finish(e)
+		if err != nil {
+			return rowResult{}, err
+		}
+	}
+	if bounded != nil {
+		projected, err = bounded.finish(e)
 		if err != nil {
 			return rowResult{}, err
 		}

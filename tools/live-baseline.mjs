@@ -1,158 +1,95 @@
-// Live runtime baseline: the standard acceptance flow to run against a real
-// client after every addon or CLI modification. One command drives the whole
-// journaled chain and prints a per-step verdict; exit 0 only when every step
-// passes. Game input happens only through the CLI's own guarded commands.
-//
-// Usage:
-//   node tools/live-baseline.mjs --session <session-id> [--account <acct>] [--probe <name>] [--cli <path>] [--skip-hide]
-//   node tools/live-baseline.mjs --connect "--pid <pid> --installation <dir> --snapshot <pin>" [...]
-// With --connect the tool first runs `live connect` with the given extra args,
-// then continues the chain on the returned session.
-//
-// The default probe is the transport smoke (1..10 sum = 55, no hooks, no
-// game-state mutation). Request keys carry a timestamp so repeated runs never
-// collide with a previous run's journaled operations.
+// Real-client baseline. Uses the production complete execute API; never sends
+// keys, edits an installation, abandons unknown work or selects another actor.
+import { randomUUID } from 'node:crypto';
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { liveCases, manualCases } from '../tests/baseline/catalog.mjs';
+import { assessLive, createReport, options, repository, runCommand, sameLiveEvidence, saveReport, sha256 } from './baseline-common.mjs';
 
-import { spawnSync } from 'node:child_process';
-
-const args = process.argv.slice(2);
-const option = (name) => {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
-};
-const flag = (name) => args.includes(name);
-
-const cli = option('--cli') ?? process.env.LYCHEEDEV_CLI ?? 'lycheedev';
-const session = option('--session');
-const connectArgs = option('--connect');
-const account = option('--account');
-const probe = option('--probe') ?? 'retail-atomic-smoke-20260924';
-const skipHide = flag('--skip-hide');
-const expectSum = Number(option('--expect-sum') ?? 55);
-
-function fail(message) {
-  console.error(`live-baseline: ${message}`);
-  process.exit(2);
+export async function runLive(report, opts, run = runCommand) {
+  const cli = opts['--cli'] ?? process.env.LYCHEEDEV_CLI ?? 'lycheedev';
+  const session = opts['--session'];
+  const common = [...(opts['--home'] ? ['--home', resolve(opts['--home'])] : []), '--format', 'json'];
+  report.target = { session, home: opts['--home'] ? resolve(opts['--home']) : 'CLI default' };
+  report.runId = randomUUID();
+  mkdirSync(join(report.output, 'probes'));
+  for (const spec of report.cases.filter(c => c.file)) {
+    const path = join(report.output, 'probes', spec.file);
+    copyFileSync(join(repository, 'tests/baseline/probes', spec.file), path);
+    spec.request = `baseline-${report.runId}-${spec.id}`;
+    spec.sha256 = sha256(readFileSync(path));
+    spec.args = ['live', 'execute', '--session', session, '--file', path, '--request', spec.request, '--budget-seconds', String(spec.budget),
+      ...(opts['--account'] ? ['--account', opts['--account']] : []), ...common];
+  }
+  saveReport(report);
+  let first = null;
+  async function invoke(id, args, spec) {
+    const processResult = await run(report.output, id, cli, args, { timeout: 600_000 });
+    let envelope;
+    try { envelope = JSON.parse(readFileSync(processResult.stdout, 'utf8')); } catch { /* classifier fails closed */ }
+    return { ...assessLive(processResult, envelope, spec), run: processResult, envelope,
+      operationId: envelope?.operationId, nextAction: envelope?.result?.nextAction ?? envelope?.error?.details?.nextAction };
+  }
+  for (const spec of report.cases.filter(c => c.id.startsWith('LIVE-'))) {
+    console.log(`RUN   ${spec.id} ${spec.title}`);
+    spec.state = 'running'; saveReport(report);
+    try {
+      if (spec.id === 'LIVE-02') {
+        const original = report.cases.find(c => c.id === 'LIVE-01');
+        spec.attempts = [];
+        for (const [index, args] of [original.args, ['live', 'resume', first.operationId, ...common]].entries()) {
+          const result = await invoke(`${spec.id}-${index + 1}`, args, original);
+          if (result.state === 'passed' && !sameLiveEvidence(first, result.envelope)) Object.assign(result, { state: 'failed', reason: 'repeated operation changed identity or evidence' });
+          spec.attempts.push(result); saveReport(report);
+          if (result.state !== 'passed') break;
+        }
+        spec.state = spec.attempts.find(a => a.state !== 'passed')?.state ?? 'passed';
+      } else {
+        Object.assign(spec, await invoke(spec.id, spec.args, spec));
+        if (spec.id === 'LIVE-01') first = spec.envelope;
+      }
+    } catch (error) { Object.assign(spec, { state: 'failed', reason: error.message }); }
+    saveReport(report); console.log(`${spec.state.toUpperCase().padEnd(7)} ${spec.id}`);
+    if (spec.state !== 'passed') break;
+  }
+  const selected = report.cases.filter(c => c.id.startsWith('LIVE-'));
+  report.state = selected.some(c => c.state === 'failed') ? 'failed' : selected.every(c => c.state === 'passed') ? 'passed' : 'blocked';
+  report.finishedAt = new Date().toISOString(); saveReport(report);
+  return report.state === 'passed' ? 0 : report.state === 'blocked' ? 2 : 1;
 }
 
-if (!session && !connectArgs) {
-  fail('provide --session <id> or --connect "<live connect extra args>"');
-}
-
-function run(extraArgs, timeoutMs) {
-  const result = spawnSync(cli, [...extraArgs, '--format', 'json'], {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    windowsHide: true,
-  });
-  let envelope = null;
-  const firstBrace = result.stdout?.indexOf('{');
-  if (firstBrace !== undefined && firstBrace >= 0) {
-    try { envelope = JSON.parse(result.stdout.slice(firstBrace)); } catch { /* keep null */ }
+export async function main(argv = process.argv.slice(2)) {
+  const opts = options(argv, ['--cli', '--session', '--account', '--home', '--out', '--help']);
+  if (opts['--help']) {
+    console.log('node tools/live-baseline.mjs --session <session-id> [--cli <lycheedev.exe>] [--account <account>] [--home <workspace>] [--out <new-directory>]');
+    return 0;
   }
-  return { envelope, status: result.status, stderr: result.stderr ?? '' };
-}
-
-const steps = [];
-let sessionId = session ?? null;
-let operationId = null;
-
-function step(name, fn) {
-  const startedAt = Date.now();
-  try {
-    const detail = fn();
-    const ms = Date.now() - startedAt;
-    steps.push({ name, ok: true, ms, detail });
-    console.log(`PASS  ${name}  (${ms} ms)${detail ? `  ${detail}` : ''}`);
-  } catch (error) {
-    const ms = Date.now() - startedAt;
-    steps.push({ name, ok: false, ms, detail: String(error.message ?? error) });
-    console.error(`FAIL  ${name}  (${ms} ms)  ${error.message ?? error}`);
-    report();
-    process.exit(1);
-  }
-}
-
-function expectOk(envelope, label) {
-  if (!envelope || envelope.ok !== true) {
-    const code = envelope?.error?.code ?? 'no-envelope';
-    const message = envelope?.error?.message ?? '';
-    throw new Error(`${label}: ${code} ${message}`.trimEnd());
-  }
-}
-
-function report() {
-  const passed = steps.filter((s) => s.ok).length;
-  console.log(`\nbaseline: ${passed}/${steps.length} steps passed`);
-}
-
-// --- connect (optional) -----------------------------------------------------
-if (connectArgs) {
-  step('connect', () => {
-    const extra = connectArgs.split(/\s+/).filter(Boolean);
-    const { envelope } = run(['live', 'connect', ...extra], 240_000);
-    expectOk(envelope, 'live connect');
-    sessionId = envelope.context?.session ?? envelope.result?.id;
-    if (!sessionId) throw new Error('connect returned no session id');
-    return `${envelope.result?.character}@${envelope.result?.target?.client?.fullBuild ?? ''}`;
-  });
-}
-
-// --- load -------------------------------------------------------------------
-step('load', () => {
-  const request = `R-baseline-${Date.now()}`;
-  const extra = account ? ['--account', account] : [];
-  const { envelope } = run(['live', 'probe', 'load', '--session', sessionId, '--probe', probe, '--request', request, ...extra], 240_000);
-  expectOk(envelope, 'live probe load');
-  if (envelope.context?.stage !== 'loaded') {
-    throw new Error(`stage ${envelope.context?.stage}, want loaded`);
-  }
-  operationId = envelope.operationId;
-  return operationId;
-});
-
-// --- run --------------------------------------------------------------------
-let reportSequence = null;
-step('run', () => {
-  const { envelope } = run(['live', 'run', operationId], 300_000);
-  expectOk(envelope, 'live run');
-  if (envelope.context?.stage !== 'verified' || envelope.result?.report?.state !== 'verified') {
-    throw new Error(`stage ${envelope.context?.stage}, report ${envelope.result?.report?.state}`);
-  }
-  if (envelope.result?.cleanup !== 'pending') {
-    throw new Error(`cleanup ${envelope.result?.cleanup}, want pending`);
-  }
-  const content = envelope.result.report.content;
-  const sum = content?.result?.sum;
-  if (sum !== expectSum) {
-    throw new Error(`sum ${sum}, want ${expectSum}`);
-  }
-  reportSequence = envelope.result.report.receiptCapture ?? null;
-  return `sum=${sum}`;
-});
-
-// --- ack --------------------------------------------------------------------
-step('ack', () => {
-  const { envelope } = run(['live', 'ack', operationId], 240_000);
-  expectOk(envelope, 'live ack');
-  if (envelope.context?.stage !== 'cleaned' || envelope.result?.status !== 'completed' || envelope.result?.cleanup !== 'complete') {
-    throw new Error(`stage=${envelope.context?.stage} status=${envelope.result?.status} cleanup=${envelope.result?.cleanup}`);
-  }
-  return 'cleaned/complete';
-});
-
-// --- hide -------------------------------------------------------------------
-if (!skipHide) {
-  step('hide', () => {
-    const { envelope } = run(['live', 'hide', '--session', sessionId], 240_000);
-    expectOk(envelope, 'live hide');
-    if (envelope.result?.cleared !== true) {
-      throw new Error('receipt not cleared');
+  if (!opts['--session']) throw new Error('provide --session from live connect; this suite retains that target');
+  if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('live baseline requires Windows amd64');
+  const report = createReport('live', opts['--out'], [...liveCases, ...manualCases]);
+  saveReport(report); console.log(`Baseline evidence: ${report.output}`);
+  const cli = opts['--cli'] ?? process.env.LYCHEEDEV_CLI ?? 'lycheedev';
+  for (const [id, args] of [['CLI', ['version', '--format', 'json']], ['INSTANCES', ['live', 'instances', '--passive', '--format', 'json']]]) {
+    const check = { id, title: id === 'CLI' ? 'CLI identity' : 'Passive client inventory', state: 'running' };
+    report.checks.push(check); saveReport(report);
+    try {
+      check.run = await runCommand(report.output, id, cli, args);
+      check.envelope = JSON.parse(readFileSync(check.run.stdout, 'utf8'));
+      if (check.run.code !== 0 || check.envelope.schema !== 'lycheedev.result.v1' || check.envelope.ok !== true) throw new Error('preflight did not return a successful CLI result');
+      check.state = 'passed';
+    } catch (error) {
+      check.state = 'blocked'; check.reason = error.message;
+      report.state = 'blocked'; report.finishedAt = new Date().toISOString(); saveReport(report);
+      return 2;
     }
-    return 'cleared';
-  });
+    saveReport(report);
+  }
+  const code = await runLive(report, opts);
+  console.log(`Live baseline: ${report.state}. Report: ${join(report.output, 'report.json')}`);
+  return code;
 }
 
-report();
-const failed = steps.filter((s) => !s.ok).length;
-process.exit(failed === 0 ? 0 : 1);
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().then(code => { process.exitCode = code; }).catch(error => { console.error(error.message); process.exitCode = 1; });
+}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/desktop"
@@ -174,6 +175,11 @@ func TestConnectReverifyBeforeEffect(t *testing.T) {
 	for _, mode := range []string{"actor-switched", "window-reused"} {
 		t.Run(mode, func(t *testing.T) {
 			client, fake, root := connectFixture(t)
+			// This case asserts identity, not a deadline. Race-instrumented QR
+			// decoding on hosted Windows can exceed the generic 250ms fixture
+			// budget before the second identity frame has been decoded.
+			io := fake.io()
+			io.wait, io.refresh = 2*time.Second, 2*time.Second
 			fake.windows = []desktop.WindowIdentity{testWindow(1, client)}
 			pin := testPin(t, root)
 			identifies := 0
@@ -195,7 +201,6 @@ func TestConnectReverifyBeforeEffect(t *testing.T) {
 				return []*desktop.CapturedFrame{fake.frame(1, unready), fake.frame(1, refreshed)}
 			}
 			if mode == "window-reused" {
-				io := fake.io()
 				io.confirm = func(context.Context, ClientWindow) error { return desktop.ErrIdentityChanged }
 				_, err := connectWindow(context.Background(), root, ConnectRequest{Snapshot: pin}, io)
 				if !errors.Is(err, desktop.ErrIdentityChanged) {
@@ -211,7 +216,7 @@ func TestConnectReverifyBeforeEffect(t *testing.T) {
 				}
 				return
 			}
-			_, err := connectWindow(context.Background(), root, ConnectRequest{Snapshot: pin}, fake.io())
+			_, err := connectWindow(context.Background(), root, ConnectRequest{Snapshot: pin}, io)
 			if !errors.Is(err, ErrActorChanged) {
 				t.Fatalf("actor switch: %v", err)
 			}
@@ -368,6 +373,24 @@ func TestConnectIdentityUnreadableIsAPreciseFailure(t *testing.T) {
 	}
 	if len(fake.commands()) != 1 {
 		t.Fatalf("unexpected input: %v", fake.commands())
+	}
+}
+
+func TestDiscoveryIncludesRecoverableBootstrapAttemptOnUnreadableIdentity(t *testing.T) {
+	client, fake, root := connectFixture(t)
+	window := testWindow(1, client)
+	fake.windows = []desktop.WindowIdentity{window}
+	io := fake.io()
+	io.bootstrap = func(context.Context, string, ClientWindow, image.Rectangle, string) (desktop.InputReceipt, string, error) {
+		return desktop.InputReceipt{}, "BTP-1234", errors.New("live.receiver_unresolved")
+	}
+	report, err := discoverCandidates(context.Background(), root, DiscoveryRequest{PID: window.ProcessID, Installation: client}, io)
+	if err != nil || len(report.Candidates) != 1 {
+		t.Fatalf("discovery = %+v, %v", report, err)
+	}
+	candidate := report.Candidates[0]
+	if candidate.State != CandidateUnreadable || candidate.BootstrapAttemptID != "BTP-1234" || candidate.Reason != "live.receiver_unresolved" {
+		t.Fatalf("missing recovery details: %+v", candidate)
 	}
 }
 

@@ -1,6 +1,6 @@
 {
   "schema": "lycheedev.signal.v1",
-  "release": "2.0.6",
+  "release": "2.5.0",
   "kind": "ready",
   "sessionNonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "requestId": "",

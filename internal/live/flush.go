@@ -109,7 +109,7 @@ func ObserveInstalledOperationPersisted(ctx context.Context, root, operationID s
 		if err != nil {
 			return zero, err
 		}
-		installed, err := ReadInstalledReport(ctx, input.Load.Installation, input.Load.Account, input.Code, input.Expected)
+		installed, err := ReadInstalledReport(ctx, input.Load.Installation, input.Load.Account, input.Code, input.Expected, reportScope(input))
 		if err != nil {
 			return zero, err
 		}

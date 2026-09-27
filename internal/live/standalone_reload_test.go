@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -102,6 +103,51 @@ func TestStandaloneReloadIsCorrelatedAndIdempotent(t *testing.T) {
 				t.Fatalf("invalid reload claimed complete: %+v %v", got, err)
 			}
 		})
+	}
+}
+
+func TestStandaloneReloadReentryProvesHiddenTransportAcceptance(t *testing.T) {
+	ctx := context.Background()
+	root, _, _, pin, template, _ := unpreparedProbeFixture(t, 7)
+	initial := template.ready
+	template.Close()
+	frames := &lifecycleFrames{t: t, signals: []bridge.Signal{initial}}
+	session, err := observeWindowSession(ctx, template.target, initialExpectation(initial), frames, func(context.Context, ClientWindow) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	record, err := session.prepareStandaloneReload(ctx, root, pin.ID, "hidden-accepted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := session.openStandaloneReload(ctx, root, record.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer op.close()
+	sends := 0
+	send := func(ctx context.Context, _ desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+		sends++
+		if err := guard(ctx); err != nil {
+			return desktop.InputReceipt{}, err
+		}
+		if _, err := prepare(ctx); err != nil {
+			return desktop.InputReceipt{}, err
+		}
+		intent, err := parseStandaloneReload(record)
+		if err != nil {
+			return desktop.InputReceipt{}, err
+		}
+		ready := initial
+		ready.Kind, ready.RequestID, ready.ReloadNonce = "ready", intent.Expected.RequestID, intent.ReloadNonce
+		ready.RuntimeEpoch, ready.Sequence, ready.InputReady = initial.RuntimeEpoch+1, 1, true
+		frames.signals = append(frames.signals, ready)
+		return desktop.InputReceipt{MessagesQueued: 3, SubmissionComplete: true}, errors.New("receiver_accepted hidden by reload")
+	}
+	completed, err := op.execute(ctx, send)
+	if err != nil || completed.Stage != "cleaned" || sends != 1 {
+		t.Fatalf("reentry recovery = %+v, %v; sends=%d", completed, err, sends)
 	}
 }
 

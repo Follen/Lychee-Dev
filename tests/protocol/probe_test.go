@@ -41,7 +41,7 @@ func TestFourClientProbeExecution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(report.Body) != `{"probeStatus":"completed","result":{"answer":42}}` {
+		if string(report.Body) != `{"acceptedBudgetSeconds":120,"probeStatus":"completed","result":{"answer":42}}` {
 			t.Fatalf("unexpected body: %s", report.Body)
 		}
 		if loaded.CodeAdler32 != report.Receipt.CodeAdler32 {

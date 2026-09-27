@@ -69,6 +69,15 @@ func operationAnchor(ctx context.Context, root string, record journal.WorkRecord
 			return bridge.Signal{}, err
 		}
 	}
+	if record.Intent.Goal == "finished" {
+		checkpoint, found, err := readCheckpointAnchor(ctx, root, record, input)
+		if err != nil {
+			return bridge.Signal{}, err
+		}
+		if found && checkpoint.RuntimeEpoch >= ready.RuntimeEpoch {
+			ready = checkpoint
+		}
+	}
 	return ready, nil
 }
 
@@ -114,7 +123,16 @@ func (s *WindowSession) observeOperation(ctx context.Context, root, operationID 
 	if err != nil {
 		return zero, err
 	}
-	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
+	limit := 15 * time.Second
+	if record.Stage == "dispatch_requested" {
+		limit = executionRemaining(record, time.Now())
+		if limit <= 0 {
+			// A completed report may still be recovered by its exact saved file;
+			// this observation alone cannot extend or restart execution.
+			return zero, errors.New("live.execution_deadline_elapsed")
+		}
+	}
+	wait, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	observe := func(ctx context.Context, expected bridge.SignalExpectation) (bridge.Signal, error) {
 		if guard != nil {
@@ -181,7 +199,13 @@ func (s *WindowSession) waitOperationSignal(ctx context.Context, installation st
 		// A correlated reload needs its own explicit transition, not this path.
 		expected.RuntimeEpoch = s.ready.RuntimeEpoch
 	}
-	signal, err := s.reader.WaitForSignal(ctx, expected)
+	var signal bridge.Signal
+	var err error
+	if expected.AllowReportError {
+		signal, err = s.reader.WaitForReportedOutcome(ctx, expected)
+	} else {
+		signal, err = s.reader.WaitForSignal(ctx, expected)
+	}
 	if err != nil {
 		return zero, err
 	}

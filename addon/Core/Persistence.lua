@@ -34,6 +34,15 @@ local function validate(value)
     return value
 end
 
+local function bridgeState(value)
+    if not plain(value) then return nil, "bridge_state_invalid_root" end
+    if restricted(value.schema) or value.schema ~= 1 then return nil, "bridge_state_unsupported_schema" end
+    if restricted(value.reports) or (value.reports ~= nil and not plain(value.reports)) then
+        return nil, "bridge_state_invalid_reports"
+    end
+    return value
+end
+
 ns.Persistence = {
     Load = function()
         ready = false
@@ -44,9 +53,16 @@ ns.Persistence = {
         if value == nil then value = { schema = 1 } end
         local valid, reason = validate(value)
         if not valid then ready = false; return nil, reason end
+        -- New bridge state belongs only to this character. Older account-level
+        -- reports/tickets stay untouched for host archival; never import them.
+        local character = LycheeToolkitBridgeDB
+        if character == nil then character = { schema = 1, reports = {} } end
+        local validBridge, bridgeFailure = bridgeState(character)
+        if not validBridge then return nil, bridgeFailure end
         if value.options == nil then value.options = {} end
-        if value.reports == nil then value.reports = {} end
+        if character.reports == nil then character.reports = {} end
         LycheeToolkitDB = value
+        LycheeToolkitBridgeDB = character
         ready = true
         return true
     end,
@@ -54,5 +70,13 @@ ns.Persistence = {
         if not ready then return nil, "state_not_loaded" end
         -- Read the current root at use time, including after a profile re-root.
         return validate(LycheeToolkitDB)
+    end,
+    Bridge = function()
+        if not ready then return nil, "state_not_loaded" end
+        return bridgeState(LycheeToolkitBridgeDB)
+    end,
+    BridgeEnabled = function()
+        local state = ns.Persistence.Current()
+        return state and state.options and state.options.bridgeEnabled == true or false
     end,
 }

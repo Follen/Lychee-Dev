@@ -41,14 +41,14 @@ func (p *ProbeOperation) ObserveRemoval(ctx context.Context) (evidence.CaptureRe
 		if err != nil {
 			return zero, err
 		}
-		state, err := readInstalledState(ctx, input.Load.Installation, input.Load.Account, input.Expected)
+		state, err := readInstalledState(ctx, input.Load.Installation, input.Load.Account, input.Expected, reportScope(input))
 		if err != nil {
 			return zero, err
 		}
 		if state.Path != observed.SourcePath || state.FileSHA256 == observed.SourceSHA256 {
 			return zero, errors.New("live.removal_source_mismatch")
 		}
-		if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(state.Bytes), input.Code, input.Expected); err != nil {
+		if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(state.Bytes), input.Code, input.Expected, reportScope(input)); err != nil {
 			return zero, err
 		}
 		if err := p.check(ctx); err != nil {

@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-local frame, strips, lastBytes, lastReady, lastGeneration, lastScale, lastRefresh
+local frame, strips, lastBytes, lastReady, lastGeneration, lastScale, lastRefresh, lastReadySignal
 local focusWatch
 local revision = 0
 local focusEvent = "ChatFrame.OnEditBoxFocusGained"
@@ -21,7 +21,7 @@ local function hide()
     if ns.Session and type(ns.Session.CancelInputWait) == "function" then ns.Session.CancelInputWait() end
     if ns.Identity and type(ns.Identity.CancelWait) == "function" then ns.Identity.CancelWait() end
     lastBytes, lastReady, lastGeneration, lastScale = nil, nil, nil, nil
-    lastRefresh = nil
+    lastRefresh, lastReadySignal = nil, nil
     if frame then
         frame:Hide()
         frame:UnregisterAllEvents()
@@ -39,8 +39,9 @@ local function create()
     background:SetColorTexture(1, 1, 1, 1)
     strips = {}
 end
-local function payload(value)
-    if restricted(value) or type(value) ~= "string" or #value == 0 or #value > 2048 then
+local function payload(value, limit)
+    if restricted(value) or type(value) ~= "string" or #value == 0
+        or #value > (limit or 2048) then
         return nil, "receipt_invalid_payload"
     end
     return value
@@ -160,7 +161,7 @@ suspend = function(refresh, generation)
     if not waiting and revision == expected then hide() end
 end
 display = function(receipt, readiness, generation, refresh, readySignal)
-    local valid, failure = payload(receipt)
+    local valid, failure = payload(receipt, 4096)
     if not valid then hide(); return nil, failure end
     if readiness ~= nil then
         local auxiliary, auxiliaryFailure = payload(readiness)
@@ -244,7 +245,7 @@ display = function(receipt, readiness, generation, refresh, readySignal)
         if focusWatch == watch then suspend(refresh, generation) end
     end, watch)
     lastBytes, lastReady, lastGeneration, lastScale = receipt, readiness, generation, scale
-    lastRefresh = refresh
+    lastRefresh, lastReadySignal = refresh, readySignal
     -- A producer may finish while combat is already active; there will be no
     -- second combat-start event to invalidate this newly produced receipt.
     if ns.Platform and type(ns.Platform.ObserveInputState) == "function" then
@@ -255,11 +256,34 @@ display = function(receipt, readiness, generation, refresh, readySignal)
         end
     end
     frame:Show()
+    if ns.ActivityView then ns.ActivityView.Anchor() end
     return true
 end
 
 ns.ReceiptView = {
     Hide = hide,
+    Current = function() return lastBytes end,
+    -- A visual companion stays outside the QR quiet zone, following its
+    -- actual width even when a later receiver receipt changes matrix size.
+    -- This neither creates the display nor grants input readiness.
+    AnchorCompanion = function(companion)
+        if not frame or not lastBytes then return false end
+        companion:ClearAllPoints()
+        companion:SetPoint("TOPLEFT", frame, "TOPRIGHT", 8, -4)
+        return true
+    end,
+    ShowTransient = function(receipt,seconds)
+        if type(C_Timer)~="table" or type(C_Timer.NewTimer)~="function" then return nil,"receipt_timer_unavailable" end
+        local session,reason=ns.Session.Current()
+        if not session then return nil,reason end
+        local shown,failure=display(receipt,nil,session.generation)
+        if not shown then return nil,failure end
+        local owned=revision
+        C_Timer.NewTimer(seconds,function()
+            if revision==owned and lastBytes==receipt then hide() end
+        end)
+        return receipt
+    end,
     -- Explicit host dismissal after the displayed receipt's evidence has been
     -- archived. A request-scoped operation in flight owns the display, so
     -- uncertainty fails closed; clearing without a shown card is a no-op.
@@ -278,6 +302,7 @@ ns.ReceiptView = {
         return true
     end,
     Show = function(receipt, readiness, refresh, readySignal)
+        if not payload(receipt) then hide(); return nil, "receipt_invalid_payload" end
         local session, failure = ns.Session.Current()
         if not session then hide(); return nil, failure end
         return display(receipt, readiness, session.generation, refresh, readySignal)
@@ -285,6 +310,7 @@ ns.ReceiptView = {
     -- Identity markers bind no session. They share the exact display,
     -- invalidation and focus/combat rules; only the memo key differs.
     ShowIdentity = function(receipt, refresh)
+        if not payload(receipt) then hide(); return nil, "receipt_invalid_payload" end
         return display(receipt, nil, 0, refresh)
     end,
 }

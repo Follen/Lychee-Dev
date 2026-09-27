@@ -18,7 +18,8 @@ implemented commands with accepted flags.
 
 Read only the relevant reference:
 
-- API, Lua, XML, TOC or source differences: [source-research.md](references/source-research.md).
+- API, Lua, XML, TOC, source differences or secret-value/secure-taint source analysis:
+  [source-research.md](references/source-research.md).
 - DB2, SQL and game records: [data-investigation.md](references/data-investigation.md).
 - Files, icons, textures or media: [asset-export.md](references/asset-export.md).
 - Addon load closure and compatibility: [addon-validation.md](references/addon-validation.md).
@@ -30,6 +31,21 @@ Read only the relevant reference:
 - Existing errors: [error-diagnosis.md](references/error-diagnosis.md).
 - Requested installation or removal: [installation.md](references/installation.md).
 
+For deep secret-value or secure-taint investigation, combine source research
+with [the live hypothesis workflow](references/live-investigation.md#test-source-hypotheses).
+Source narrows the suspected path; live tests observable conditions; this skill
+chooses the next discriminating check and carries the evidence through cleanup.
+When live work is already in scope, an unresolved static path is a reason to
+continue that investigation, not an automatic stopping point.
+
+For any authorized live question, research the exact client build and target
+addon revision, form a hypothesis, then write the smallest bounded Lua probe that
+can distinguish it. Choose the APIs, events, actions and assertions from that
+source and the task; probes are not restricted to UI or fixed templates. Declare
+the execution budget when loading the immutable revision. The CLI owns receiver
+input, report persistence and recovery; the probe owns its observation bounds,
+cleanup and honest assertion result. See [live-investigation.md](references/live-investigation.md#design-a-discriminating-probe).
+
 The implemented command surface is exactly what `describe --format json`
 reports. Use installed `--help` or that output to discover available commands
 and arguments; the skill must not advertise unimplemented commands. Do not
@@ -39,26 +55,26 @@ capability.
 ## Finish the authorized live task
 
 A visible QR card, successful input, connection, or loaded probe is an
-intermediate state. Keep working in the same turn. For a probe, run its returned
-operation, read its verified report and capture IDs, then call `live finish` on
-that exact operation to acknowledge and dismiss its receipt. Report retrieval,
-ACK and dismissal
-are part of an authorized investigation; do not ask the user to approve each
-step or to scan the QR. Respect an explicit request to pause or leave a report
-unacknowledged.
+intermediate state. Keep working in the same turn. Prefer `live execute` with
+the saved session, a Lua file or immutable probe revision, a stable request key,
+and an explicit execution budget. It owns execution, verified report retrieval,
+ACK and display cleanup as one operation. Read its report and capture IDs;
+completion requires `complete: true`, `cleanup: complete` and
+`display.state: cleared`. A business failure still returns its report and needs
+the same cleanup. Never ask the user to approve each transport step or scan a QR.
+Respect an explicit request to pause or retain an unacknowledged report.
 
-`live run` returns before acknowledgement by CLI design; that is not permission
-for the agent to end the task. A completed probe task requires a verified report,
-`cleanup: complete`, and `display.state: cleared` from `live finish`, whose
-`complete` includes screen dismissal. Do not send another hide after successful
-finish. A verified probe error still needs cleanup after its diagnostic evidence
-is retained.
+Use atomic `live probe load` / `live run` / `live finish` only for an explicitly
+staged investigation. `live run` stops at a verified report; continue with
+`live finish` in the same turn. Do not append another ACK, finish or hide to a
+successfully completed `live execute` operation.
 
 A connection-only task or standalone reload has no probe report to ACK. Verify
 its own completion/readiness fields and use `live hide` to dismiss the final
 receipt; do not invent a probe just to satisfy the probe lifecycle.
 
-On interruption or exit 6, inspect/resume the same operation and follow
+On interruption or exit 6, inspect/resume the same operation, follow its
+structured `nextAction`, and read
 [live-investigation.md](references/live-investigation.md#recover-without-replay).
 Use the returned state to choose the next action; never replace the probe,
 switch windows, abandon ownership, or repeat uncertain input to force success.
@@ -67,6 +83,13 @@ If the remaining action is blocked by user input, missing capability, or an
 unchanged external condition with no safe progress, explain the specific blocker,
 retained operation/session IDs, verified findings and unfinished cleanup. Never
 present that handoff as a completed task.
+
+Treat accepted input, verified report, business assertions and cleared display
+as separate facts. A verified report can contain failed assertions; a pending
+display does not erase the report. New probe loading and report persistence can
+reload the client, so build a reproducible scene after load and finish sampling
+before the report flush. State when the original transient scene could not be
+observed through the available loaded capabilities.
 
 When reviewing wowdoc/wowdata migration coverage, use the repository parity
 ledger (`tests/parity/coverage.json` and `docs/toolkit/regression.md`). It is
@@ -79,7 +102,8 @@ ledger as proof of complete real CDN, Hotfix, DB2, or multi-client coverage.
 ## Respect the authorization boundary
 
 Only run live commands inside the user's granted authorization.
-`live instances` is a game operation, not read-only discovery: it sends one
+Use `live instances --passive` for window inventory without input or capture;
+it does not establish actor identity or readiness. Plain `live instances` sends one
 identity trigger to each matching, unoccupied running window. Scope discovery
 to the authorized installation/PID when supplied. A named character also limits
 mutation: retain its verified window binding and never fall back to a different
@@ -115,6 +139,16 @@ An interrupted operation is recovered by its operation ID, not by starting the
 probe again. This toolkit does not import old tools' data or task registries.
 Purely local in-game inspection lives in the in-game `/dev` workbench and does
 not require a CLI connection.
+
+The receiver's default chords are Ctrl+Alt+] to wake, Ctrl+Alt+Shift+] to
+submit, and Ctrl+Alt+[ to close. A user may change them in the addon's Settings
+page or with its local `/dev receiver bind` command. On first contact with a
+custom wake chord, pass that exact value with `--wake-binding` to `live
+instances`, `live connect`, `live reset`, `live bind`, or sessionless `live reload
+fallback` as applicable; do not cycle through guessed
+chords. A fresh ready receipt supplies the effective wake, submit and close
+profile, which the CLI verifies and saves with the connection. See
+[live-startup.md](references/live-startup.md#custom-receiver-bindings).
 
 ## Interpret the evidence
 

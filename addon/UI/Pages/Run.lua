@@ -19,9 +19,9 @@ local PREVIEW_MAX_CHARS = 22
 local EDITOR_WIDTH = Layout.WINDOW_WIDTH - Layout.CONTENT_LEFT - 58
 local TAB_INDENT = "    " -- Tab inserts 4 spaces
 
-local READY_R, READY_G, READY_B = 0.55, 0.60, 0.65
-local DONE_R, DONE_G, DONE_B = 0.42, 0.76, 0.43
-local ACCENT_R, ACCENT_G, ACCENT_B = 0.847, 0.231, 0.306
+local READY_R, READY_G, READY_B = unpack(ns.Theme.textMuted)
+local DONE_R, DONE_G, DONE_B = unpack(ns.Theme.success)
+local ACCENT_R, ACCENT_G, ACCENT_B = unpack(ns.Theme.danger)
 
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
@@ -40,6 +40,7 @@ local function BuildRunPage(parent)
     local colors = Widgets.Colors
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
+    Widgets.CreatePageHeading(page, L.TAB_RUNNER, L.RUN_PAGE_HELP)
 
     -- Session-only live tree cache. Weak keys: restored rows fall back to the
     -- persisted stored tree once the live tree is gone.
@@ -58,16 +59,17 @@ local function BuildRunPage(parent)
     local inputPanel = Widgets.CreateTextArea(page, false)
     inputPanel:SetPoint("TOPLEFT", Layout.CONTENT_LEFT, Layout.CONTENT_TOP)
     inputPanel:SetPoint("TOPRIGHT", Layout.CONTENT_RIGHT, Layout.CONTENT_TOP)
-    inputPanel:SetHeight(210)
+    inputPanel:SetHeight(164)
+    inputPanel:SetPlaceholder(L.RUN_INPUT_HINT)
     inputPanel.editBox:SetWidth(EDITOR_WIDTH)
     inputPanel.editBox:SetScript("OnTabPressed", function(self)
         self:Insert(TAB_INDENT)
     end)
 
     local actionRow = CreateFrame("Frame", nil, page)
-    actionRow:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 0, -8)
-    actionRow:SetPoint("TOPRIGHT", inputPanel, "BOTTOMRIGHT", 0, -8)
-    actionRow:SetHeight(30)
+    actionRow:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 0, -10)
+    actionRow:SetPoint("TOPRIGHT", inputPanel, "BOTTOMRIGHT", 0, -10)
+    actionRow:SetHeight(36)
 
     local runButton = Widgets.CreateButton(actionRow, 96, L.RUN, "primary")
     runButton:SetPoint("RIGHT", actionRow, "RIGHT", 0, 0)
@@ -80,29 +82,33 @@ local function BuildRunPage(parent)
     statusDot:SetPoint("LEFT", actionRow, "LEFT", 2, 0)
 
     local status = actionRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ns.Theme.SetFont(status, 12, ns.Theme.text)
     status:SetPoint("LEFT", statusDot, "RIGHT", 7, 0)
 
-    local resultLabel = Widgets.CreateSectionLabel(page, L.RESULT)
-    resultLabel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -13)
+    local resultHeader = CreateFrame("Frame", nil, page)
+    resultHeader:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -18)
+    resultHeader:SetPoint("TOPRIGHT", actionRow, "BOTTOMRIGHT", 0, -18)
+    resultHeader:SetHeight(32)
+    local resultLabel = Widgets.CreateSectionLabel(resultHeader, L.RESULT)
+    resultLabel:SetPoint("LEFT", resultHeader, "LEFT", 0, 0)
 
-    local resultTextTab = Widgets.CreateNavTab(page, L.TEXT)
-    Widgets.FitNavTab(resultTextTab, 58, 28)
-    resultTextTab:SetPoint("TOPRIGHT", actionRow, "BOTTOMRIGHT", 0, -4)
+    local resultTextTab = Widgets.CreateModeTab(resultHeader, L.TEXT)
+    resultTextTab:SetPoint("RIGHT", resultHeader, "RIGHT", 0, 0)
 
-    local resultTreeTab = Widgets.CreateNavTab(page, L.TREE)
-    Widgets.FitNavTab(resultTreeTab, 58, 28)
-    resultTreeTab:SetPoint("RIGHT", resultTextTab, "LEFT", -2, 0)
+    local resultTreeTab = Widgets.CreateModeTab(resultHeader, L.TREE)
+    resultTreeTab:SetPoint("RIGHT", resultTextTab, "LEFT", -4, 0)
 
     local resultPanel = Widgets.CreateTextArea(page, true)
-    resultPanel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -35)
+    resultPanel:SetPoint("TOPLEFT", resultHeader, "BOTTOMLEFT", 0, -8)
     resultPanel:SetPoint("BOTTOMRIGHT", Layout.CONTENT_RIGHT, Layout.CONTENT_BOTTOM)
     resultPanel.editBox:SetWidth(EDITOR_WIDTH)
+    resultPanel:SetPlaceholder(L.RUN_RESULT_HINT)
     resultPanel.editBox:SetScript("OnMouseUp", function(self)
         self:SetFocus()
     end)
 
     local treeView = TreeView.Create(page, { contentWidth = EDITOR_WIDTH + 30 })
-    treeView.panel:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, -35)
+    treeView.panel:SetPoint("TOPLEFT", resultHeader, "BOTTOMLEFT", 0, -8)
     treeView.panel:SetPoint("BOTTOMRIGHT", Layout.CONTENT_RIGHT, Layout.CONTENT_BOTTOM)
 
     local selectButton = Widgets.CreateButton(page, 118, L.SELECT_RESULT, "secondary")
@@ -166,14 +172,14 @@ local function BuildRunPage(parent)
         local selected = button.entryIndex == selectedHistoryIndex
         Widgets.SetListRowState(button, selected, button.isHovered)
         if selected then
-            button.time:SetTextColor(1, 1, 1, 0.96)
-            button.preview:SetTextColor(1, 1, 1, 0.68)
+            button.time:SetTextColor(unpack(ns.Theme.text))
+            button.preview:SetTextColor(unpack(ns.Theme.textMuted))
         elseif button.isHovered then
-            button.time:SetTextColor(1, 1, 1, 0.90)
-            button.preview:SetTextColor(1, 1, 1, 0.58)
+            button.time:SetTextColor(unpack(ns.Theme.text))
+            button.preview:SetTextColor(unpack(ns.Theme.textMuted))
         else
-            button.time:SetTextColor(1, 1, 1, 0.68)
-            button.preview:SetTextColor(1, 1, 1, 0.42)
+            button.time:SetTextColor(unpack(ns.Theme.textMuted))
+            button.preview:SetTextColor(unpack(ns.Theme.textDim))
         end
     end
 
@@ -206,6 +212,7 @@ local function BuildRunPage(parent)
         button.entryIndex = index
 
         local timeLabel = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(timeLabel, 12, ns.Theme.text)
         timeLabel:SetPoint("TOPLEFT", 12, -9)
         timeLabel:SetPoint("TOPRIGHT", -9, -9)
         timeLabel:SetJustifyH("LEFT")
@@ -213,6 +220,7 @@ local function BuildRunPage(parent)
         button.time = timeLabel
 
         local preview = button:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(preview, 11, ns.Theme.textDim)
         preview:SetPoint("BOTTOMLEFT", 12, 8)
         preview:SetPoint("BOTTOMRIGHT", -9, 8)
         preview:SetJustifyH("LEFT")
@@ -357,6 +365,8 @@ local function BuildRunPage(parent)
     SetResultMode("text")
 
     page.inputPanel = inputPanel
+    page.actionRow = actionRow
+    page.resultHeader = resultHeader
     page.runButton = runButton
     page.clearInputButton = clearInputButton
     page.statusDot = statusDot

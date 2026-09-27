@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/follenfang/lycheedev/internal/live/journal"
 	"os"
 	"path/filepath"
 )
@@ -23,6 +24,11 @@ func UpgradeAddon(ctx context.Context, releaseDirectory, clientDirectory, archiv
 		if err != nil {
 			return Upgrade{}, err
 		}
+		gate, err := journal.AcquireInstallationMaintenance(ctx, parent)
+		if err != nil {
+			return Upgrade{}, err
+		}
+		defer gate.Close()
 		return ResumeUpgrade(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
 	}
 	return withAddonRelease(ctx, releaseDirectory, clientDirectory, version, func(prepared, target string) (Upgrade, error) {
@@ -35,6 +41,11 @@ func RemoveAddon(ctx context.Context, clientDirectory, archive string) (Removal,
 	if err != nil {
 		return Removal{}, err
 	}
+	gate, err := journal.AcquireInstallationMaintenance(ctx, parent)
+	if err != nil {
+		return Removal{}, err
+	}
+	defer gate.Close()
 	return RemoveInstallation(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
 }
 
@@ -107,5 +118,10 @@ func withAddonRelease[T any](ctx context.Context, releaseDirectory, clientDirect
 	if current.Client != deployment.Client || currentParent != parent {
 		return receipt, fmt.Errorf("%w: client identity changed during preparation", ErrConflict)
 	}
+	gate, err := journal.AcquireInstallationMaintenance(ctx, parent)
+	if err != nil {
+		return receipt, err
+	}
+	defer func() { err = errors.Join(err, gate.Close()) }()
 	return publish(private, filepath.Join(parent, "Lychee Dev"))
 }

@@ -10,6 +10,8 @@ import (
 	"io"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/follenfang/lycheedev/internal/desktop"
 )
 
 var ErrSignalIdentity = errors.New("bridge.signal_identity_mismatch")
@@ -19,28 +21,46 @@ var ErrSignalIdentity = errors.New("bridge.signal_identity_mismatch")
 // Kind "identity" is an identity marker only: it binds no session, carries no
 // request, and its probeNonce correlates exactly one trigger with one receipt.
 type Signal struct {
-	Schema        string `json:"schema"`
-	Release       string `json:"release"`
-	Kind          string `json:"kind"`
-	SessionNonce  string `json:"sessionNonce"`
-	RequestID     string `json:"requestId"`
-	ReloadNonce   string `json:"reloadNonce,omitempty"`
-	CleanupNonce  string `json:"cleanupNonce,omitempty"`
-	ProbeNonce    string `json:"probeNonce,omitempty"`
-	ActorState    string `json:"actorState,omitempty"`
-	InputReason   string `json:"inputReason,omitempty"`
-	Character     string `json:"character,omitempty"`
-	Realm         string `json:"realm,omitempty"`
-	GUID          string `json:"guid,omitempty"`
-	Product       string `json:"product"`
-	Build         string `json:"build"`
-	Sequence      uint64 `json:"sequence"`
-	RuntimeEpoch  uint64 `json:"runtimeEpoch,omitempty"`
-	InputReady    bool   `json:"inputReady"`
-	CodeBytes     uint32 `json:"codeBytes,omitempty"`
-	CodeAdler32   string `json:"codeAdler32,omitempty"`
-	ReportBytes   uint32 `json:"reportBytes,omitempty"`
-	ReportAdler32 string `json:"reportAdler32,omitempty"`
+	Schema               string `json:"schema"`
+	Release              string `json:"release"`
+	Kind                 string `json:"kind"`
+	SessionNonce         string `json:"sessionNonce"`
+	RequestID            string `json:"requestId"`
+	ReloadNonce          string `json:"reloadNonce,omitempty"`
+	CleanupNonce         string `json:"cleanupNonce,omitempty"`
+	ProbeNonce           string `json:"probeNonce,omitempty"`
+	ActorState           string `json:"actorState,omitempty"`
+	InputReason          string `json:"inputReason,omitempty"`
+	Character            string `json:"character,omitempty"`
+	Realm                string `json:"realm,omitempty"`
+	GUID                 string `json:"guid,omitempty"`
+	Product              string `json:"product"`
+	Build                string `json:"build"`
+	Sequence             uint64 `json:"sequence"`
+	RuntimeEpoch         uint64 `json:"runtimeEpoch,omitempty"`
+	InputReady           bool   `json:"inputReady"`
+	CodeBytes            uint32 `json:"codeBytes,omitempty"`
+	CodeAdler32          string `json:"codeAdler32,omitempty"`
+	ReportBytes          uint32 `json:"reportBytes,omitempty"`
+	ReportAdler32        string `json:"reportAdler32,omitempty"`
+	ReceiverProtocol     string `json:"receiverProtocol,omitempty"`
+	ReceiverNonce        string `json:"receiverNonce,omitempty"`
+	AttemptID            string `json:"attemptId,omitempty"`
+	BodyBytes            uint32 `json:"bodyBytes,omitempty"`
+	BodyAdler32          string `json:"bodyAdler32,omitempty"`
+	CommitNonce          string `json:"commitNonce,omitempty"`
+	Accepted             bool   `json:"accepted,omitempty"`
+	ErrorCode            string `json:"errorCode,omitempty"`
+	WakeBinding          string `json:"wakeBinding,omitempty"`
+	SubmitBinding        string `json:"submitBinding,omitempty"`
+	CloseBinding         string `json:"closeBinding,omitempty"`
+	PriorSessionSequence uint64 `json:"priorSessionSequence,omitempty"`
+	PriorSessionEpoch    uint64 `json:"priorSessionEpoch,omitempty"`
+	ReportScope          string `json:"reportScope,omitempty"`
+	WorkState            string `json:"workState,omitempty"`
+	CodeSHA256           string `json:"codeSHA256,omitempty"`
+	Receipt              string `json:"receipt,omitempty"`
+	ResourcesReleased    bool   `json:"resourcesReleased,omitempty"`
 }
 
 type SignalExpectation struct {
@@ -49,6 +69,10 @@ type SignalExpectation struct {
 	AfterSequence                                                     uint64
 	RuntimeEpoch                                                      uint64
 	RequireInputReady                                                 bool
+	ReceiverNonce, AttemptID, BodyAdler32, CommitNonce                string
+	BodyBytes                                                         uint32
+	RequireAccepted                                                   bool
+	AllowReportError                                                  bool
 }
 
 // Signal transport markers. A receipt is drawn into a QR symbol, so its size is
@@ -80,6 +104,7 @@ const (
 type SignalIdentity struct {
 	Release, Character, Realm, GUID, Product, Build string
 	SessionNonce                                    string
+	RuntimeEpoch                                    uint64
 }
 
 // FillSignalIdentity completes any identity field the wire omitted from the
@@ -167,17 +192,37 @@ func ParseSignal(data []byte) (Signal, error) {
 	if signal.Schema != "lycheedev.signal.v1" {
 		return signal, errors.New("bridge.invalid_signal")
 	}
+	if signal.Kind == "checkpoint" {
+		return parseCheckpoint(signal)
+	}
+	if signal.WorkState != "" || signal.CodeSHA256 != "" || signal.Receipt != "" || signal.ResourcesReleased {
+		return signal, errors.New("bridge.unexpected_checkpoint_fields")
+	}
+	if signal.ReportScope != "" && (signal.ReportScope != "character-v1" || signal.Kind != "ready" && signal.Kind != "receiver_ready") {
+		return signal, errors.New("bridge.invalid_report_scope")
+	}
 	if signal.RuntimeEpoch > 9007199254740991 {
 		return signal, errors.New("bridge.invalid_runtime_epoch")
 	}
+	if signal.ReceiverProtocol != "" && (signal.Kind != "receiver_ready" || len(signal.ReceiverProtocol) > 32) {
+		return signal, errors.New("bridge.receiver_protocol_invalid")
+	}
+	if signal.Kind != "receiver_ready" && (signal.PriorSessionSequence != 0 || signal.PriorSessionEpoch != 0) {
+		return signal, errors.New("bridge.receiver_prior_session_invalid")
+	}
 	switch signal.Kind {
+	case "receiver_ready", "receiver_staged", "receiver_commit_ready", "receiver_rejected", "receiver_accepted", "receiver_cancelled", "receiver_timeout":
+		return parseReceiverSignal(signal)
 	case "identity":
 		return parseIdentitySignal(signal)
 	case "reset":
 		return parseResetSignal(signal)
-	case "ready", "loaded", "reported", "acknowledged", "cancelled", "cleared":
+	case "ready", "loaded", "reported", "report_error", "acknowledged", "cancelled", "cleared":
 	default:
 		return signal, errors.New("bridge.invalid_signal_kind")
+	}
+	if signal.WakeBinding != "" || signal.SubmitBinding != "" || signal.CloseBinding != "" {
+		return signal, errors.New("bridge.receiver_bindings_unexpected")
 	}
 	if signal.RuntimeEpoch != 0 && signal.Kind != "ready" && signal.Kind != "cleared" {
 		return signal, errors.New("bridge.invalid_runtime_epoch")
@@ -205,6 +250,12 @@ func inflateSignal(compressed []byte) ([]byte, error) {
 // bytes the host already had, at the cost of QR modules. Any field the wire does
 // carry must still be well formed.
 func parseSessionSignal(signal Signal) (Signal, error) {
+	if signal.ReceiverNonce != "" || signal.AttemptID != "" || signal.BodyBytes != 0 || signal.BodyAdler32 != "" || signal.CommitNonce != "" || signal.Accepted || signal.Kind != "report_error" && signal.ErrorCode != "" {
+		return signal, errors.New("bridge.unexpected_receiver_fields")
+	}
+	if signal.Kind == "report_error" && (!receiverKey(signal.ErrorCode, 64) || signal.ReportBytes != 0 || signal.ReportAdler32 != "" || signal.InputReady) {
+		return signal, errors.New("bridge.invalid_report_error_signal")
+	}
 	if signal.Sequence == 0 || signal.Sequence > 9007199254740991 {
 		return signal, errors.New("bridge.invalid_signal")
 	}
@@ -271,10 +322,83 @@ func parseSessionSignal(signal Signal) (Signal, error) {
 	return signal, nil
 }
 
+func parseReceiverSignal(signal Signal) (Signal, error) {
+	if signal.Release == "" || signal.Product == "" || signal.Build == "" || signal.Sequence == 0 || signal.Sequence > 9007199254740990 || signal.RuntimeEpoch == 0 || signal.RuntimeEpoch > 9007199254740990 || !queueHex(signal.ReceiverNonce, 32) {
+		return signal, errors.New("bridge.receiver_signal_identity")
+	}
+	for _, value := range []string{signal.Release, signal.Product, signal.Build, signal.Character, signal.Realm, signal.GUID} {
+		if err := checkOptionalLabel(value); err != nil {
+			return signal, err
+		}
+	}
+	if (signal.SessionNonce != "" && (signal.Kind != "receiver_ready" || !queueHex(signal.SessionNonce, 32))) || signal.ReloadNonce != "" || signal.CleanupNonce != "" || signal.ProbeNonce != "" || signal.ActorState != "" || signal.InputReason != "" || signal.CodeBytes != 0 || signal.ReportBytes != 0 || signal.CodeAdler32 != "" || signal.ReportAdler32 != "" {
+		return signal, errors.New("bridge.receiver_signal_pollution")
+	}
+	if signal.Kind != "receiver_ready" && (signal.PriorSessionSequence != 0 || signal.PriorSessionEpoch != 0) ||
+		signal.PriorSessionSequence > 9007199254740991 || signal.PriorSessionEpoch > 9007199254740991 {
+		return signal, errors.New("bridge.receiver_prior_session_invalid")
+	}
+	if signal.ErrorCode != "" && !receiverKey(signal.ErrorCode, 64) {
+		return signal, errors.New("bridge.receiver_error_code")
+	}
+	switch signal.Kind {
+	case "receiver_ready":
+		if !signal.InputReady || signal.Accepted || signal.RequestID != "" || signal.AttemptID != "" || signal.BodyBytes != 0 || signal.BodyAdler32 != "" || signal.CommitNonce != "" || signal.ErrorCode != "" {
+			return signal, errors.New("bridge.receiver_ready_invalid")
+		}
+		if signal.SessionNonce == "" && (signal.PriorSessionSequence != 0 || signal.PriorSessionEpoch != 0) ||
+			signal.SessionNonce != "" && signal.PriorSessionEpoch != 0 && signal.PriorSessionEpoch != signal.RuntimeEpoch {
+			return signal, errors.New("bridge.receiver_prior_session_invalid")
+		}
+		if err := desktop.ValidateReceiverBindings(desktop.ReceiverBindings{WakeBinding: signal.WakeBinding, SubmitBinding: signal.SubmitBinding, CloseBinding: signal.CloseBinding}); err != nil {
+			return signal, errors.New("bridge.receiver_bindings_invalid")
+		}
+	case "receiver_staged", "receiver_commit_ready", "receiver_accepted":
+		if signal.WakeBinding != "" || signal.SubmitBinding != "" || signal.CloseBinding != "" {
+			return signal, errors.New("bridge.receiver_bindings_unexpected")
+		}
+		if !receiverKey(signal.RequestID, 80) || !queueHex(signal.AttemptID, 16) || signal.BodyBytes == 0 || signal.BodyBytes > MaxReceiverWireBytes || !checksum(signal.BodyAdler32) || signal.Kind != "receiver_accepted" && signal.ErrorCode != "" {
+			return signal, errors.New("bridge.receiver_stage_receipt_invalid")
+		}
+		if signal.Kind == "receiver_commit_ready" {
+			if !signal.InputReady || signal.Accepted || !queueHex(signal.CommitNonce, 16) {
+				return signal, errors.New("bridge.receiver_challenge_invalid")
+			}
+		} else if signal.CommitNonce != "" {
+			return signal, errors.New("bridge.receiver_challenge_unexpected")
+		}
+		if signal.Kind == "receiver_staged" && (!signal.InputReady || signal.Accepted) {
+			return signal, errors.New("bridge.receiver_staged_invalid")
+		}
+		if signal.Kind == "receiver_accepted" && (signal.InputReady || !signal.Accepted) {
+			return signal, errors.New("bridge.receiver_accepted_invalid")
+		}
+	case "receiver_rejected", "receiver_cancelled", "receiver_timeout":
+		if signal.WakeBinding != "" || signal.SubmitBinding != "" || signal.CloseBinding != "" {
+			return signal, errors.New("bridge.receiver_bindings_unexpected")
+		}
+		if signal.InputReady || signal.Accepted || signal.CommitNonce != "" || signal.ErrorCode == "" {
+			return signal, errors.New("bridge.receiver_rejection_invalid")
+		}
+		if signal.AttemptID != "" && !queueHex(signal.AttemptID, 16) {
+			return signal, errors.New("bridge.receiver_attempt_invalid")
+		}
+		if signal.BodyAdler32 != "" && !checksum(signal.BodyAdler32) {
+			return signal, errors.New("bridge.receiver_digest_invalid")
+		}
+	default:
+		return signal, errors.New("bridge.receiver_signal_kind")
+	}
+	return signal, nil
+}
+
 // parseResetSignal validates the session-free recovery receipt. The actor is
 // mandatory because the reset only ever tombstones that actor's own entries,
 // and inputReady stays false: the receipt proves delivery, never readiness.
 func parseResetSignal(signal Signal) (Signal, error) {
+	if signal.ReceiverNonce != "" || signal.AttemptID != "" || signal.BodyBytes != 0 || signal.BodyAdler32 != "" || signal.CommitNonce != "" || signal.Accepted || signal.ErrorCode != "" {
+		return signal, errors.New("bridge.unexpected_receiver_fields")
+	}
 	if !queueHex(signal.ProbeNonce, 32) {
 		return signal, errors.New("bridge.invalid_signal_probe_nonce")
 	}
@@ -293,6 +417,9 @@ func parseResetSignal(signal Signal) (Signal, error) {
 // fixed at zero because probeNonce, not sequence, correlates one host trigger
 // with exactly one displayed receipt.
 func parseIdentitySignal(signal Signal) (Signal, error) {
+	if signal.ReceiverNonce != "" || signal.AttemptID != "" || signal.BodyBytes != 0 || signal.BodyAdler32 != "" || signal.CommitNonce != "" || signal.Accepted || signal.ErrorCode != "" {
+		return signal, errors.New("bridge.unexpected_receiver_fields")
+	}
 	if !queueHex(signal.ProbeNonce, 32) {
 		return signal, errors.New("bridge.invalid_signal_probe_nonce")
 	}
@@ -355,6 +482,9 @@ func (s Signal) Match(expected SignalExpectation) error {
 	if (s.Kind == "identity") != (expected.Kind == "identity") {
 		return fmt.Errorf("%w: signal kind", ErrSignalIdentity)
 	}
+	if strings.HasPrefix(s.Kind, "receiver_") != strings.HasPrefix(expected.Kind, "receiver_") {
+		return fmt.Errorf("%w: receiver kind", ErrSignalIdentity)
+	}
 	// Identity matching is always probe-correlated; an uncorrelated identity
 	// expectation could adopt whatever marker happens to be on screen.
 	if expected.Kind == "identity" && !queueHex(expected.ProbeNonce, 32) {
@@ -363,10 +493,25 @@ func (s Signal) Match(expected SignalExpectation) error {
 	if expected.RuntimeEpoch != 0 && s.RuntimeEpoch != expected.RuntimeEpoch {
 		return fmt.Errorf("%w: runtime epoch", ErrSignalIdentity)
 	}
-	for _, pair := range [][2]string{{s.Release, expected.Release}, {s.Kind, expected.Kind}, {s.SessionNonce, expected.SessionNonce}, {s.RequestID, expected.RequestID}, {s.ReloadNonce, expected.ReloadNonce}, {s.CleanupNonce, expected.CleanupNonce}, {s.ProbeNonce, expected.ProbeNonce}, {s.ActorState, expected.ActorState}, {s.Character, expected.Character}, {s.Realm, expected.Realm}, {s.Product, expected.Product}, {s.Build, expected.Build}} {
+	matchKind := s.Kind
+	if expected.AllowReportError && expected.Kind == "reported" && s.Kind == "report_error" {
+		matchKind = "reported"
+	}
+	for _, pair := range [][2]string{{s.Release, expected.Release}, {matchKind, expected.Kind}, {s.SessionNonce, expected.SessionNonce}, {s.RequestID, expected.RequestID}, {s.ReloadNonce, expected.ReloadNonce}, {s.CleanupNonce, expected.CleanupNonce}, {s.ProbeNonce, expected.ProbeNonce}, {s.ActorState, expected.ActorState}, {s.Character, expected.Character}, {s.Realm, expected.Realm}, {s.Product, expected.Product}, {s.Build, expected.Build}} {
 		if pair[1] != "" && pair[0] != pair[1] {
 			return ErrSignalIdentity
 		}
+	}
+	for _, pair := range [][2]string{{s.ReceiverNonce, expected.ReceiverNonce}, {s.AttemptID, expected.AttemptID}, {s.BodyAdler32, expected.BodyAdler32}, {s.CommitNonce, expected.CommitNonce}} {
+		if pair[1] != "" && pair[0] != pair[1] {
+			return ErrSignalIdentity
+		}
+	}
+	if expected.BodyBytes != 0 && s.BodyBytes != expected.BodyBytes {
+		return ErrSignalIdentity
+	}
+	if expected.RequireAccepted && !s.Accepted {
+		return ErrSignalIdentity
 	}
 	if s.Kind == "identity" || s.Kind == "reset" {
 		// Session-free discovery receipts replace sequence freshness with

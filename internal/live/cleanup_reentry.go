@@ -127,7 +127,7 @@ func readCleanupEvidence(ctx context.Context, root string, record journal.WorkRe
 			if ref.Provenance != want || !ref.Complete || ref.Truncated || ref.MediaType != "text/plain" || ref.Blob.SHA256 != observed.RemovalSHA256 || observed.RemovalSHA256 == observed.SourceSHA256 {
 				return zero, errors.New("live.removal_provenance_mismatch")
 			}
-			if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(raw), input.Code, input.Expected); err != nil {
+			if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(raw), input.Code, input.Expected, reportScope(input)); err != nil {
 				return zero, err
 			}
 		}

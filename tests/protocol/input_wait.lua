@@ -3,7 +3,8 @@ local ns = {Startup={ready=true}}
 local state = {options={bridgeEnabled=true}}
 local actor = {character="Paladin",realm="Realm",guid="Player-1-123"}
 local ready,reason = false,"input_keyboard_focus"
-ns.Persistence = {Current=function() return state end}
+ns.Persistence = {Current=function() return state end, Bridge=function() return state end,
+    BridgeEnabled=function() return state.options.bridgeEnabled == true end}
 ns.Platform = {ObserveActor=function() return actor end,ObserveInputState=function() return ready,reason end}
 CreateFrame = function() error("input wait must not create frames") end
 local callbacks = {}

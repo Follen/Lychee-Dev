@@ -21,14 +21,17 @@ import (
 // liveIO is the native seam behind discovery and connection. It is replaced
 // wholesale in tests; callers of the deep modules never see these steps.
 type liveIO struct {
-	list    func(context.Context) ([]desktop.WindowIdentity, error)
-	inspect func(context.Context, string) (selection.ClientInstallation, error)
-	capture func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error)
-	send    func(context.Context, desktop.WindowIdentity, string) (desktop.InputReceipt, error)
-	confirm func(context.Context, ClientWindow) error
-	peek    func(context.Context, string, string) (journal.WindowOwner, bool, error)
-	wait    time.Duration
-	refresh time.Duration
+	root      string
+	bindings  desktop.ReceiverBindings
+	list      func(context.Context) ([]desktop.WindowIdentity, error)
+	inspect   func(context.Context, string) (selection.ClientInstallation, error)
+	capture   func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error)
+	send      func(context.Context, desktop.WindowIdentity, string) (desktop.InputReceipt, error)
+	bootstrap func(context.Context, string, ClientWindow, image.Rectangle, string) (desktop.InputReceipt, string, error)
+	confirm   func(context.Context, ClientWindow) error
+	peek      func(context.Context, string, string) (journal.WindowOwner, bool, error)
+	wait      time.Duration
+	refresh   time.Duration
 }
 
 func nativeIO() *liveIO {
@@ -38,12 +41,20 @@ func nativeIO() *liveIO {
 		capture: func(ctx context.Context, window desktop.WindowIdentity, region image.Rectangle) (sessionFrames, error) {
 			return desktop.CaptureFrames(ctx, window, region)
 		},
-		send:    desktop.QueueBootstrapCommand,
-		confirm: ConfirmClientWindow,
-		peek:    journal.InspectWindowOwner,
-		wait:    10 * time.Second,
-		refresh: 8 * time.Second,
+		bootstrap: sendBootstrapReceiver,
+		confirm:   ConfirmClientWindow,
+		peek:      journal.InspectWindowOwner,
+		wait:      10 * time.Second,
+		refresh:   8 * time.Second,
 	}
+}
+
+func (io *liveIO) sendBootstrap(ctx context.Context, target ClientWindow, region image.Rectangle, command string) (desktop.InputReceipt, string, error) {
+	if io.bootstrap != nil {
+		return io.bootstrap(withReceiverBindings(ctx, io.bindings), io.root, target, region, command)
+	}
+	receipt, err := io.send(ctx, target.Window, command)
+	return receipt, "", err
 }
 
 const inputKeyboardFocus = "input_keyboard_focus"
@@ -67,9 +78,10 @@ const (
 // identityObservation is one nonce-correlated identity receipt plus a cheap
 // capture hint for unreadable windows.
 type identityObservation struct {
-	Signal     bridge.Signal
-	Capture    string
-	ObservedAt time.Time
+	Signal             bridge.Signal
+	Capture            string
+	ObservedAt         time.Time
+	BootstrapAttemptID string
 }
 
 type captureHints struct {
@@ -149,8 +161,14 @@ func probeIdentityRelease(ctx context.Context, target ClientWindow, region image
 	}
 	defer frames.Close()
 	hints := &captureHints{feed: frames}
-	if _, err := io.send(ctx, target.Window, "/dev bridge identify "+nonce); err != nil {
-		return hints.observation(bridge.Signal{}), err
+	_, attemptID, err := io.sendBootstrap(ctx, target, region, "/dev bridge identify "+nonce)
+	observed := func(signal bridge.Signal) identityObservation {
+		result := hints.observation(signal)
+		result.BootstrapAttemptID = attemptID
+		return result
+	}
+	if err != nil && !bootstrapBusinessMayHaveExecuted(ctx, io.root, attemptID) {
+		return observed(bridge.Signal{}), err
 	}
 	reader := bridge.ObserveSignals(hints)
 	expected := bridge.SignalExpectation{Kind: "identity", Release: release, ProbeNonce: nonce, Product: target.Client.Product, Build: target.Client.FullBuild}
@@ -159,9 +177,14 @@ func probeIdentityRelease(ctx context.Context, target ClientWindow, region image
 	signal, err := reader.DiscoverIdentity(wait, expected)
 	var mismatch *bridge.RuntimeReleaseMismatch
 	if err != nil && !errors.As(err, &mismatch) {
-		return hints.observation(bridge.Signal{}), err
+		return observed(bridge.Signal{}), err
 	}
-	observation := hints.observation(signal)
+	observation := observed(signal)
+	if attemptID != "" {
+		if err := confirmBootstrapReceiver(ctx, io.root, attemptID, signal); err != nil {
+			return observation, err
+		}
+	}
 	if gate && !signal.InputReady && signal.InputReason == inputKeyboardFocus {
 		// The typed command leaves keyboard focus in the chat edit box and the
 		// addon re-displays a refreshed receipt once focus is released. Waiting
@@ -172,7 +195,7 @@ func probeIdentityRelease(ctx context.Context, target ClientWindow, region image
 		wait, cancel := context.WithTimeout(ctx, io.refresh)
 		defer cancel()
 		if next, err := reader.DiscoverIdentity(wait, refreshed); err == nil {
-			observation = hints.observation(next)
+			observation = observed(next)
 		}
 	}
 	return observation, err

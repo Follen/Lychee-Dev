@@ -13,8 +13,56 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
+
+func TestCharacterReportPathIsFixedAndNeverFallsBackToAccount(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	expected := bridge.SignalExpectation{Product: "retail", Build: "12.1.0.69875", Character: "Paladin", Realm: "Realm"}
+	accountPath := filepath.Join(client, "WTF", "Account", "Account-A", "SavedVariables")
+	characterPath := filepath.Join(client, "WTF", "Account", "Account-A", "Realm", "Paladin", "SavedVariables")
+	for _, path := range []string{accountPath, characterPath} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(accountPath, "Lychee Dev.lua"), []byte("LycheeToolkitDB={schema=1,reports={}}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readInstalledState(ctx, client, "Account-A", expected, "character-v1"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("account fallback: %v", err)
+	}
+	const data = "LycheeToolkitBridgeDB={schema=1,reports={}}"
+	path := filepath.Join(characterPath, "Lychee Dev.lua")
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := readInstalledState(ctx, client, "Account-A", expected, "character-v1")
+	if err != nil || state.Path != testkit.CanonicalPath(t, path) || string(state.Bytes) != data {
+		t.Fatalf("%+v %v", state, err)
+	}
+	if _, err := bridge.ReadToolkitState(strings.NewReader(data), bridge.SavedStateLimits()); err == nil {
+		t.Fatal("character state mistaken for account state")
+	}
+	if _, err := bridge.ReadToolkitState(strings.NewReader(data), bridge.SavedStateLimits(), "character-v1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, actor := range []string{"Other", "..", "Paladin/../../SavedVariables", "Paladin."} {
+		wrong := expected
+		wrong.Character = actor
+		if _, err := readInstalledState(ctx, client, "Account-A", wrong, "character-v1"); err == nil {
+			t.Fatalf("actor %q accepted", actor)
+		}
+	}
+	if err := os.WriteFile(path, []byte("LycheeToolkitDB={schema=1,reports={}}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bridge.ReadToolkitState(strings.NewReader("LycheeToolkitDB={schema=1,reports={}}"), bridge.SavedStateLimits(), "character-v1"); err == nil {
+		t.Fatal("old root imported")
+	}
+}
 
 func TestReadInstalledReport(t *testing.T) {
 	for _, identity := range []string{"flavor", "catalog"} {

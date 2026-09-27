@@ -20,6 +20,8 @@ const MaxProbeQueueFileBytes = 5 << 20
 type ProbeDefinition struct {
 	RequestID, Release, SessionNonce, ReloadNonce string
 	Character, Realm, GUID, Product, Build, Code  string
+	BudgetSeconds                                 int
+	Goal                                          string
 }
 
 func queueLabel(s string) bool {
@@ -101,6 +103,12 @@ func EncodeProbeQueue(definitions []ProbeDefinition) ([]byte, error) {
 		if len(d.Code) == 0 || len(d.Code) > 256<<10 || !utf8.ValidString(d.Code) || strings.IndexByte(d.Code, 0) >= 0 || d.Code[0] == 27 {
 			return nil, errors.New("bridge.queue_invalid_code")
 		}
+		if d.BudgetSeconds < 0 || d.BudgetSeconds > 120 {
+			return nil, errors.New("bridge.queue_invalid_budget")
+		}
+		if d.Goal != "" && d.Goal != "finished" {
+			return nil, errors.New("bridge.queue_invalid_goal")
+		}
 		total += len(d.Code)
 		if total > 1<<20 {
 			return nil, errors.New("bridge.queue_limit")
@@ -115,6 +123,12 @@ func EncodeProbeQueue(definitions []ProbeDefinition) ([]byte, error) {
 			fmt.Fprintf(&out, "%s=%s,", pair[0], luaBytes(pair[1]))
 		}
 		fmt.Fprintf(&out, "codeBytes=%d", len(d.Code))
+		if d.BudgetSeconds != 0 {
+			fmt.Fprintf(&out, ",budgetSeconds=%d", d.BudgetSeconds)
+		}
+		if d.Goal != "" {
+			fmt.Fprintf(&out, ",goal=%s", luaBytes(d.Goal))
+		}
 		out.WriteString("},\n")
 	}
 	out.WriteString("}}\n")
@@ -156,6 +170,14 @@ func DecodeProbeQueue(reader io.Reader) ([]ProbeDefinition, error) {
 		}
 		get := func(key string) string { s, _ := entry[key].(string); return s }
 		definition := ProbeDefinition{RequestID: id, Release: get("release"), SessionNonce: get("sessionNonce"), ReloadNonce: get("reloadNonce"), Character: get("character"), Realm: get("realm"), GUID: get("guid"), Product: get("product"), Build: get("build"), Code: get("code")}
+		definition.Goal = get("goal")
+		if raw, exists := entry["budgetSeconds"]; exists {
+			budget, numeric := raw.(float64)
+			if !numeric || budget != float64(int(budget)) || budget < 1 || budget > 120 {
+				return nil, errors.New("bridge.queue_invalid_budget")
+			}
+			definition.BudgetSeconds = int(budget)
+		}
 		if _, exists := entry["acknowledgement"]; exists {
 			return nil, errors.New("bridge.queue_acknowledgement_not_supported")
 		}

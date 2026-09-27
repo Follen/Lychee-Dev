@@ -12,7 +12,10 @@ func (w *syntaxWalker) documentation(table *ast.TableExpr, namespace string) {
 	kind, name := strings.ToLower(tableText(table, "Type")), tableText(table, "Name")
 	if kind == "system" {
 		namespace = tableText(table, "Namespace")
-		if namespace == "" {
+		// System.Name is a documentation group. Only Namespace, when present,
+		// changes the callable Lua name, except generated C_* systems whose
+		// display name is also their explicit API table name.
+		if namespace == "" && strings.HasPrefix(name, "C_") {
 			namespace = name
 		}
 		w.declare(name, "api-system", table.Line(), table.LastLine(), name)

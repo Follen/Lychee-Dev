@@ -37,12 +37,12 @@ func validateReportAccount(account string) error {
 // file. It never falls back to another account, .bak, or legacy database. Matching
 // the report proves integrity, not that a post-dispatch flush has occurred; the
 // coordinator must establish that ordering independently before advancing state.
-func ReadInstalledReport(ctx context.Context, clientDirectory, account string, code []byte, expected bridge.SignalExpectation) (InstalledReport, error) {
-	state, err := readInstalledState(ctx, clientDirectory, account, expected)
+func ReadInstalledReport(ctx context.Context, clientDirectory, account string, code []byte, expected bridge.SignalExpectation, scope ...string) (InstalledReport, error) {
+	state, err := readInstalledState(ctx, clientDirectory, account, expected, scope...)
 	if err != nil {
 		return InstalledReport{}, err
 	}
-	report, err := bridge.ReadPersistedReport(bytes.NewReader(state.Bytes), code, expected)
+	report, err := bridge.ReadPersistedReport(bytes.NewReader(state.Bytes), code, expected, scope...)
 	if err != nil {
 		return InstalledReport{}, err
 	}
@@ -54,7 +54,7 @@ type installedState struct {
 	Bytes            []byte
 }
 
-func readInstalledState(ctx context.Context, clientDirectory, account string, expected bridge.SignalExpectation) (installedState, error) {
+func readInstalledState(ctx context.Context, clientDirectory, account string, expected bridge.SignalExpectation, scope ...string) (installedState, error) {
 	var zero installedState
 	if err := ctx.Err(); err != nil {
 		return zero, err
@@ -75,6 +75,18 @@ func readInstalledState(ctx context.Context, clientDirectory, account string, ex
 	}
 	defer root.Close()
 	parts := []string{"WTF", "Account", account, "SavedVariables", "Lychee Dev.lua"}
+	if len(scope) > 1 {
+		return zero, errors.New("bridge.invalid_report_scope")
+	}
+	if len(scope) == 1 && scope[0] != "" {
+		if scope[0] != "character-v1" {
+			return zero, errors.New("bridge.invalid_report_scope")
+		}
+		if validateReportAccount(expected.Realm) != nil || validateReportAccount(expected.Character) != nil {
+			return zero, errors.New("live.invalid_report_identity")
+		}
+		parts = []string{"WTF", "Account", account, expected.Realm, expected.Character, "SavedVariables", "Lychee Dev.lua"}
+	}
 	relative, err := reportPath(root, client.Directory, parts, true)
 	if err != nil {
 		return zero, err

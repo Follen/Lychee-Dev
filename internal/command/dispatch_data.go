@@ -291,6 +291,9 @@ func streamFaultExit(err error) int {
 // means stdout already carries the complete typed JSONL stream and Execute
 // must return the given code immediately.
 func runDataHotfix(ctx context.Context, opts Options, response *Envelope, stdout, stderr io.Writer) (bool, int, error) {
+	if opts.scan && opts.source != "dbcache" {
+		return false, 2, errors.New("--scan requires --source dbcache")
+	}
 	switch opts.source {
 	case "":
 		return false, 2, errors.New("data hotfix requires --source")
@@ -321,9 +324,9 @@ func runDataHotfixDBCache(ctx context.Context, opts Options, response *Envelope)
 		"--locale":       opts.locale != "",
 		"--search":       opts.search != "",
 		"--to":           opts.to != "",
-		"--cursor":       opts.cursor != "",
+		"--cursor":       opts.cursor != "" && !opts.scan,
 		"--page":         opts.page != 0,
-		"--max-pages":    opts.maxPages != 0,
+		"--max-pages":    opts.maxPages != 0 && !opts.scan,
 		"--max-requests": opts.maxRequests != 0,
 		"--encoding csv": opts.encoding == "csv",
 	} {
@@ -352,6 +355,23 @@ func runDataHotfixDBCache(ctx context.Context, opts Options, response *Envelope)
 	root, err := workspaceRoot(opts.home)
 	if err != nil {
 		return false, 0, err
+	}
+	if opts.scan {
+		pages := opts.maxPages
+		if pages == 0 {
+			pages = 100
+		}
+		reading, err := records.ScanHotfix(ctx, root, opts.snapshot, request, opts.cursor, pages)
+		if reading.Capture.ID != "" {
+			response.Result = reading
+			response.Context["snapshot"] = reading.Result.Snapshot
+			response.Captures = append(response.Captures, reading.Result.Source, reading.Capture)
+		}
+		if err != nil {
+			return false, 0, err
+		}
+		response.Warnings = append(response.Warnings, "Scan coverage applies only to the selected immutable cache and filters, not server coverage. Page captures contain the records; resume with the returned capture when incomplete.")
+		return false, 0, nil
 	}
 	reading, err := records.InspectHotfix(ctx, root, opts.snapshot, request)
 	if err != nil {

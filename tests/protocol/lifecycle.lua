@@ -11,13 +11,25 @@ local profiles = {
 
 for _, profile in ipairs(profiles) do
     for _, scenario in ipairs({ "fresh", "existing", "enabled", "command_conflict", "future", "invalid", "mismatch", "secret" }) do
-        local frames = {}
+        local frames, overrides = {}, {}
+        UIParent = {}
+        IsLoggedIn = function() return true end
+        InCombatLockdown = function() return false end
+        GetBindingAction = function(key, overridden) return overridden and overrides[key] or "" end
+        ClearOverrideBindings = function() overrides = {} end
+        SetOverrideBindingClick = function(_, priority, key, button)
+            assert(priority == false)
+            overrides[key] = "CLICK " .. button .. ":LeftButton"
+        end
+        SaveBindings = function() error("startup must not change player bindings") end
         SlashCmdList, SLASH_LYCHEETOOLKIT1 = {}, nil
         local foreignHandler = function() end
         if scenario == "command_conflict" then SlashCmdList.LYCHEETOOLKIT = foreignHandler end
-        CreateFrame = function(kind)
-            assert(kind == "Frame")
-            local frame = { events = {}, scripts = {} }
+        CreateFrame = function(kind, name)
+            assert(kind == "Frame" or kind == "Button")
+            local frame = { events = {}, scripts = {}, name = name }
+            function frame:GetName() return self.name end
+            function frame:RegisterForClicks(mode) assert(mode == "AnyDown") end
             function frame:RegisterEvent(event) self.events[event] = true end
             function frame:UnregisterAllEvents() self.events = {} end
             function frame:SetScript(event, callback) self.scripts[event] = callback end
@@ -33,7 +45,7 @@ for _, profile in ipairs(profiles) do
         UnitGUID = function(unit) assert(unit == "player"); return actor.guid end
         LycheeDevDB, DumperDB = { retained = true }, { retained = true }
         local old, older = LycheeDevDB, DumperDB
-        LycheeToolkitDB = nil
+        LycheeToolkitDB, LycheeToolkitBridgeDB = nil, nil
         if scenario == "existing" then LycheeToolkitDB = { schema = 1, custom = "keep", options = { bridgeEnabled = false } } end
         if scenario == "enabled" then LycheeToolkitDB = { schema = 1, options = { bridgeEnabled = true } } end
         if scenario == "future" then LycheeToolkitDB = { schema = 2, future = true } end
@@ -58,20 +70,23 @@ for _, profile in ipairs(profiles) do
         assert(LycheeToolkitDB == before and not ns.Startup.ready)
         callback(frames[1], "ADDON_LOADED", "Lychee Dev")
         assert(next(frames[1].events) == nil and frames[1].scripts.OnEvent == nil)
-        assert(#frames == 1 and LycheeDevDB == old and DumperDB == older)
+        assert(#frames == (ns.Startup.ready and 5 or 1) and LycheeDevDB == old and DumperDB == older)
+        for _, frame in ipairs(frames) do
+            assert(next(frame.events) == nil and frame.scripts.OnUpdate == nil, "idle bootstrap has work")
+        end
         if scenario == "command_conflict" then
             assert(ns.Startup.ready and ns.Startup.commandFailure == "command_registration_conflict")
             assert(SlashCmdList.LYCHEETOOLKIT == foreignHandler and SLASH_LYCHEETOOLKIT1 == nil)
         elseif scenario == "fresh" or scenario == "existing" or scenario == "enabled" then
             assert(ns.Startup.ready and ns.Startup.identity.product == profile.product)
             local state = assert(ns.Persistence.Current())
-            assert(state.schema == 1 and type(state.reports) == "table")
+            assert(state.schema == 1 and type(ns.Persistence.Bridge().reports) == "table")
             assert((state.options.bridgeEnabled == true) == (scenario == "enabled"))
             assert(SLASH_LYCHEETOOLKIT1 == "/dev" and type(SlashCmdList.LYCHEETOOLKIT) == "function")
             assert(SLASH_LYCHEETOOLKIT2 == nil, "unexpected command alias")
             local status = assert(ns.Controls.Handle("status"))
             assert(status.enabled == (scenario == "enabled") and not status.inputReady)
-            local heldReports = state.reports
+            local heldReports = ns.Persistence.Bridge().reports
             heldReports.retained = { body = "keep" }
             status = assert(ns.Controls.Handle("  BRIDGE ON  "))
             assert(status.enabled and not status.inputReady and status.reason == "transport_unavailable")
@@ -104,11 +119,11 @@ for _, profile in ipairs(profiles) do
             assert(unavailable == nil and unavailableReason == "actor_unavailable")
             actor.realm = "Realm"
             assert(ns.Session.Bind(nonce))
-            assert(state.options.bridgeEnabled == true and state.reports == heldReports)
+            assert(state.options.bridgeEnabled == true and ns.Persistence.Bridge().reports == heldReports)
             assert(ns.Controls.Handle("bridge maybe") == nil and state.options.bridgeEnabled == true)
             assert(ns.Controls.Handle(secret) == nil and ns.Controls.Handle(string.rep("x", 129)) == nil)
             status = assert(ns.Controls.Handle("bridge off"))
-            assert(not status.enabled and state.options.bridgeEnabled == nil and state.reports.retained.body == "keep")
+            assert(not status.enabled and state.options.bridgeEnabled == nil and ns.Persistence.Bridge().reports.retained.body == "keep")
             assert(ns.Session.Current() == nil and ns.Session.Bind(nonce) == nil)
             local handler = SlashCmdList.LYCHEETOOLKIT
             assert(ns.Controls.Register() and handler == SlashCmdList.LYCHEETOOLKIT)
@@ -121,8 +136,8 @@ for _, profile in ipairs(profiles) do
             print = originalPrint
             assert(#replies == 3 and string.find(replies[1], '"inputReady":false', 1, true))
             assert(string.find(replies[3], "usage: /dev", 1, true))
-            assert(state.options.bridgeEnabled == nil and state.reports.retained.body == "keep")
-            assert(#frames == 1 and next(frames[1].events) == nil)
+            assert(state.options.bridgeEnabled == nil and ns.Persistence.Bridge().reports.retained.body == "keep")
+            assert(#frames == 5 and next(frames[1].events) == nil)
             if before then assert(state == before) end
             if scenario == "existing" then assert(state.custom == "keep") end
             assert(ns.Controls.Handle("bridge on"))

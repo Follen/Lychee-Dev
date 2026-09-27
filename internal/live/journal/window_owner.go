@@ -19,10 +19,11 @@ import (
 // WindowOwner is coordination metadata only. It remains authoritative after
 // process exit; absence of a live OS lock is not permission to start new work.
 type WindowOwner struct {
-	Schema      string `json:"schema"`
-	WorkspaceID string `json:"workspaceId"`
-	Resource    string `json:"resource"`
-	OperationID string `json:"operationId"`
+	Schema       string `json:"schema"`
+	WorkspaceID  string `json:"workspaceId"`
+	Resource     string `json:"resource"`
+	OperationID  string `json:"operationId"`
+	IntentSHA256 string `json:"intentSha256,omitempty"`
 }
 
 type WindowOccupied struct {
@@ -41,7 +42,7 @@ func (e *WindowOccupied) Unwrap() error { return ErrBusy }
 // BeginWindowWork shares admission across workspaces using the canonical addon
 // parent. Only its short metadata transaction holds the OS lock. This does not
 // grant input eligibility or replace the sender's whole-operation lease.
-// A failed local commit leaves a recovery marker, never an unclaimed window.
+// A shared marker is published only after the local intent is durable.
 // This coordinates cooperating processes; it does not promise hostile-filesystem
 // isolation or survival of every filesystem/power-loss failure.
 func (b *Book) BeginWindowWork(ctx context.Context, addonParent, workspaceID string, intent WorkIntent) (record WorkRecord, err error) {
@@ -57,14 +58,17 @@ func (b *Book) BeginWindowWork(ctx context.Context, addonParent, workspaceID str
 	if !strings.HasPrefix(intent.Resource, "window/") || len(intent.Resource) > 256 {
 		return record, errors.New("journal.invalid_window_resource")
 	}
-	if existing, found, resolveErr := b.resolveRequest(ctx, intent); resolveErr != nil || found {
-		return existing, resolveErr
-	}
 	scope, lease, err := lockWindowScope(ctx, addonParent)
 	if err != nil {
 		return record, err
 	}
 	defer func() { err = errors.Join(err, lease.Close()) }()
+	if existing, found, resolveErr := b.resolveRequest(ctx, intent); resolveErr != nil || found {
+		if resolveErr == nil && existing.Stage == "prepared" && existing.Intent.Admission != nil {
+			_, resolveErr = b.ensureWindowClaim(ctx, scope, workspaceID, existing)
+		}
+		return existing, resolveErr
+	}
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(intent.Resource)))
 	marker := filepath.Join(scope, digest+".json")
 	owner, err := readWindowOwner(marker, intent.Resource)
@@ -86,25 +90,93 @@ func (b *Book) BeginWindowWork(ctx context.Context, addonParent, workspaceID str
 	if count >= 256 {
 		return record, errors.New("journal.window_owner_limit")
 	}
+	intent.Admission = &WindowAdmission{Parent: filepath.Dir(scope), WorkspaceID: workspaceID}
 	return b.beginWork(ctx, intent, func(candidate WorkRecord) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		owner := WindowOwner{"lycheedev.window-owner.v1", workspaceID, intent.Resource, candidate.OperationID}
-		payload, err := json.Marshal(owner)
-		if err != nil {
-			return err
-		}
-		// Exclusive create intentionally leaves even a partial marker on failure:
-		// another workspace must not interpret interrupted admission as freedom.
-		file, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return err
-		}
-		_, writeErr := file.Write(payload)
-		syncErr := file.Sync()
-		return errors.Join(writeErr, syncErr, file.Close())
+		_, err := b.ensureWindowClaim(ctx, scope, workspaceID, candidate)
+		return err
 	})
+}
+
+func intentSHA256(intent WorkIntent) string {
+	intent.Goal = "" // Advancing an atomic command's goal does not retarget work.
+	raw, _ := json.Marshal(intent)
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
+}
+
+// Called under the shared admission lock. Only a new-format prepared intent
+// may recover missing publication; an unknown post-effect owner is never made up.
+func (b *Book) ensureWindowClaim(ctx context.Context, scope, workspaceID string, record WorkRecord) (WindowOwner, error) {
+	var zero WindowOwner
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	marker := filepath.Join(scope, fmt.Sprintf("%x.json", sha256.Sum256([]byte(record.Intent.Resource))))
+	owner, err := readWindowOwner(marker, record.Intent.Resource)
+	if err == nil {
+		if owner.WorkspaceID != workspaceID || owner.OperationID != record.OperationID {
+			return zero, &WindowOccupied{Owner: owner, Foreign: owner.WorkspaceID != workspaceID}
+		}
+		if owner.IntentSHA256 != "" && owner.IntentSHA256 != intentSHA256(record.Intent) {
+			return zero, errors.New("journal.window_intent_changed")
+		}
+		return owner, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return zero, err
+	}
+	admission := record.Intent.Admission
+	if record.Stage != "prepared" || record.Status != "pending" || admission == nil ||
+		admission.WorkspaceID != workspaceID || !strings.EqualFold(admission.Parent, filepath.Dir(scope)) {
+		return zero, errors.New("journal.window_admission_unavailable")
+	}
+	// Re-read the durable record before making it visible to other workspaces.
+	stored, err := b.InspectWork(ctx, record.OperationID)
+	if err != nil {
+		return zero, err
+	}
+	if stored.Generation != record.Generation || intentSHA256(stored.Intent) != intentSHA256(record.Intent) {
+		return zero, vault.ErrGeneration
+	}
+	entries, err := os.ReadDir(scope)
+	if err != nil {
+		return zero, err
+	}
+	count := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			count++
+		}
+	}
+	if count >= 256 {
+		return zero, errors.New("journal.window_owner_limit")
+	}
+	owner = WindowOwner{Schema: "lycheedev.window-owner.v1", WorkspaceID: workspaceID, Resource: record.Intent.Resource, OperationID: record.OperationID, IntentSHA256: intentSHA256(record.Intent)}
+	return owner, publishWindowOwner(ctx, scope, owner)
+}
+
+func publishWindowOwner(ctx context.Context, scope string, owner WindowOwner) error {
+	marker := filepath.Join(scope, fmt.Sprintf("%x.json", sha256.Sum256([]byte(owner.Resource))))
+	payload, err := json.Marshal(owner)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(scope, ".claim-*.part")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(payload)
+	err = errors.Join(writeErr, file.Sync(), file.Close())
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(file.Name(), marker); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RetireWindowWork releases only this workspace's proven cleaned or abandoned operation.
@@ -242,11 +314,25 @@ func readWindowOwner(path, resource string) (WindowOwner, error) {
 		return owner, err
 	}
 	canonical, _ := json.Marshal(owner)
-	if !bytes.Equal(data, canonical) || owner.Schema != "lycheedev.window-owner.v1" || owner.Resource != resource || len(owner.WorkspaceID) != 32 || !strings.HasPrefix(owner.OperationID, "OP-") || len(owner.OperationID) != 35 {
+	id := owner.OperationID
+	if strings.HasPrefix(id, "OP-") {
+		id = strings.TrimPrefix(id, "OP-")
+	} else if strings.HasPrefix(id, "BTP-") {
+		id = strings.TrimPrefix(id, "BTP-")
+	}
+	if !bytes.Equal(data, canonical) || owner.Schema != "lycheedev.window-owner.v1" || owner.Resource != resource || len(owner.WorkspaceID) != 32 || len(id) != 32 || id == owner.OperationID {
 		return owner, errors.New("journal.invalid_window_owner")
 	}
-	if _, err := hex.DecodeString(owner.WorkspaceID + strings.TrimPrefix(owner.OperationID, "OP-")); err != nil {
+	if _, err := hex.DecodeString(owner.WorkspaceID + id); err != nil {
 		return owner, err
+	}
+	if owner.IntentSHA256 != "" {
+		if len(owner.IntentSHA256) != 64 {
+			return owner, errors.New("journal.invalid_window_owner")
+		}
+		if _, err := hex.DecodeString(owner.IntentSHA256); err != nil {
+			return owner, err
+		}
 	}
 	return owner, nil
 }

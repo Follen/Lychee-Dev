@@ -18,7 +18,7 @@ for _, profile in ipairs(profiles) do
     IsLoggedIn = function() return true end
     InCombatLockdown = function() return false end
     GetCurrentKeyBoardFocus = function() return focus end
-    LycheeToolkitDB = nil
+    LycheeToolkitDB, LycheeToolkitBridgeDB = nil, nil
     local scale = 1
     UIParent = { GetEffectiveScale = function() return scale end }
     CreateFrame = function(kind, name, parent)
@@ -74,7 +74,7 @@ for _, profile in ipairs(profiles) do
     assert(loadfile(root .. "/Core/ClientGate.lua"))("Lychee Dev", ns)
     for _, name in ipairs({ "Core/Platform.lua", "Core/Persistence.lua", "Bridge/CaptureWriter.lua",
         "Bridge/Session.lua", "Bridge/MatrixSymbol.lua", "Bridge/ReceiptView.lua",
-        "Core/Controls.lua" }) do
+        "Bridge/ProbeRunner.lua", "Core/Controls.lua" }) do
         assert(loadfile(root .. "/" .. name))("Lychee Dev", ns)
     end
     ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = {} }
@@ -88,7 +88,13 @@ for _, profile in ipairs(profiles) do
     local receipt = assert(ns.Identity.Trigger(nonce))
     assert(ns.ReceiptView.ShowIdentity(receipt))
     assert(#frames == 1 and frames[1].visible)
+    local companion = { ClearAllPoints = function() end,
+        SetPoint = function(self, ...) self.point = {...} end }
+    assert(ns.ReceiptView.AnchorCompanion(companion))
+    assert(companion.point[2] == frames[1] and companion.point[3] == "TOPRIGHT"
+        and companion.point[4] > 0, "companion overlaps the QR quiet zone")
     assert(ns.Controls.Handle("bridge hide") == true)
+    assert(not ns.ReceiptView.AnchorCompanion(companion), "companion resurrected a hidden receipt")
     assert(not frames[1].visible and #printed == 0)
     -- Idempotent: a second dismissal neither fails nor allocates.
     assert(ns.Controls.Handle("BRIDGE HIDE") == true and #frames == 1 and not frames[1].visible)
@@ -96,10 +102,10 @@ for _, profile in ipairs(profiles) do
     assert(ns.ReceiptView.ShowIdentity(assert(ns.Identity.Refresh(nonce))))
     assert(frames[1].visible)
     -- A pending reentry owns the display; dismissal fails closed.
-    LycheeToolkitDB.reentry = { schema = "lycheedev.reentry.v1" }
+    LycheeToolkitBridgeDB.reentry = { schema = "lycheedev.reentry.v1" }
     local refused, reason = ns.Controls.Handle("bridge hide")
     assert(refused == nil and reason == "receipt_busy" and frames[1].visible, tostring(reason))
-    LycheeToolkitDB.reentry = nil
+    LycheeToolkitBridgeDB.reentry = nil
     -- A busy queue entry refuses the same way, keeping the card visible.
     ns.ProbeDefinitions = { schema = "lycheedev.queue.v1", entries = { ["Busy-A"] = {
         release=ns.Release, product=profile.product, build=profile.version..".12345",
@@ -117,7 +123,7 @@ for _, profile in ipairs(profiles) do
     assert(ns.Controls.Handle("bridge hide") == true and not frames[1].visible)
     -- The fixed command vocabulary rejects anything beyond bare dismissal.
     refused, reason = ns.Controls.Handle("bridge hide now")
-    assert(refused == nil and reason == "usage: /dev status | connect | disconnect", tostring(reason))
+    assert(refused == nil and reason == "usage: /dev status | connect | disconnect | receiver bind <wake|submit|close> <chord> | receiver reset", tostring(reason))
     assert(#printed == 0)
 end
 realPrint("receipt hide: four profiles passed")

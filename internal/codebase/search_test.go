@@ -83,7 +83,7 @@ func TestSearchFullTextTierEscalatesAndORJoins(t *testing.T) {
 	}
 	found := false
 	for _, match := range broad.Results {
-		if match.MatchedBy == "fts5" {
+		if match.MatchedBy == "indexed_text" {
 			found = true
 			if match.ScoreParts["match"] < 70 || match.ScoreParts["match"] > 79 {
 				t.Fatalf("fts tier rank out of bounds: %+v", match.ScoreParts)

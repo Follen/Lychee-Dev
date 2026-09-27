@@ -69,6 +69,7 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 	abandon := strings.HasPrefix(mode, "abandon-")
 	atomic := mode == "atomic" || mode == "finish" || mode == "lost-reentry" || mode == "offline-recovery" || abandon || unsafeAck || ackRestart
 	interrupted := errors.New("fixture: interrupted after flush submission")
+	var offlineSaved string
 	ctx := context.Background()
 	root, client, _, pin, original, input := unpreparedProbeFixture(t, 9)
 	original.region = image.Rect(10, 20, 610, 620)
@@ -286,7 +287,10 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 				t.Fatal(err)
 			}
 			saved := fmt.Sprintf(`LycheeToolkitDB={schema=1,reports={[%q]={receipt=%q,body=%q}}}`, definition.RequestID, raw, body)
-			if mode != "report-not-persisted" {
+			if mode == "offline-recovery" {
+				offlineSaved = saved
+			}
+			if mode != "report-not-persisted" && mode != "offline-recovery" {
 				if err := os.WriteFile(source, []byte(saved), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -362,6 +366,9 @@ func testRunProbeLifecycle(t *testing.T, mode string, compact ...bool) {
 			}
 			op.Close()
 			session.Close()
+			if err := os.WriteFile(source, []byte(offlineSaved), 0600); err != nil {
+				t.Fatal(err)
+			}
 			saved, err := os.ReadFile(source)
 			if err != nil {
 				t.Fatal(err)

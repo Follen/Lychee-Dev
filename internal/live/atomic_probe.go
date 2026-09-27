@@ -4,18 +4,17 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
-	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
 type LoadProbeRequest struct {
-	Session string
-	Account string
-	Probe   string
-	Request string
+	Session       string
+	Account       string
+	Probe         string
+	Request       string
+	BudgetSeconds int
 }
 
 func (r LoadProbeRequest) Validate() error {
@@ -29,7 +28,12 @@ func (r LoadProbeRequest) Validate() error {
 		return errors.New("live.request_key_invalid")
 	}
 	if r.Account != "" {
-		return validateReportAccount(r.Account)
+		if err := validateReportAccount(r.Account); err != nil {
+			return err
+		}
+	}
+	if r.BudgetSeconds < 1 || r.BudgetSeconds > 120 {
+		return errors.New("live.execution_budget_invalid: supported range 1..120 seconds")
 	}
 	return nil
 }
@@ -45,14 +49,20 @@ func LoadProbe(ctx context.Context, root string, request LoadProbeRequest) (Outc
 	if err != nil {
 		return Outcome{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	if existing, found, err := lookupProbeRequest(ctx, root, request, revision.Revision, ""); err != nil {
+		return Outcome{}, err
+	} else if found {
+		return Resume(ctx, root, existing.OperationID)
+	}
+	ctx, cancel := context.WithTimeout(ctx, loadPhaseBudget)
 	defer cancel()
 	session, snapshot, err := reconnectSession(ctx, root, request.Session, nativeIO())
 	if err != nil {
 		return Outcome{}, err
 	}
 	defer session.Close()
-	record, err = session.PrepareProbeRevision(ctx, root, snapshot, request.Account, request.Request, revision.Revision)
+	session.writerIO = nativeIO()
+	record, err = session.PrepareProbeRevisionBudget(ctx, root, snapshot, request.Account, request.Request, revision.Revision, request.BudgetSeconds)
 	if err != nil {
 		return finishOutcome(ctx, root, record, err)
 	}
@@ -64,7 +74,7 @@ func LoadProbe(ctx context.Context, root string, request LoadProbeRequest) (Outc
 		return finishOutcome(ctx, root, record, err)
 	}
 	defer operation.Close()
-	record, err = operation.execute(ctx, desktop.QueuePreparedCommand)
+	record, err = operation.execute(ctx, operation.receiverInput)
 	return finishOutcome(ctx, root, record, err)
 }
 

@@ -1,13 +1,11 @@
 local ADDON_NAME, ns = ...
 
--- The one shared visual system for the workbench: spacing, typography, colors,
--- borders and control sizes ported from the existing UI. Do not create a
--- second visual system; extend this kit instead.
-local ACCENT_R, ACCENT_G, ACCENT_B = 0.847, 0.231, 0.306
-local PANEL_R, PANEL_G, PANEL_B = 0.050, 0.070, 0.090
-local SURFACE_R, SURFACE_G, SURFACE_B = 0.061, 0.095, 0.120
-local EDITOR_R, EDITOR_G, EDITOR_B = 0.027, 0.035, 0.043
-local BORDER_R, BORDER_G, BORDER_B = 0.34, 0.39, 0.44
+local Theme = ns.Theme
+local ACCENT_R, ACCENT_G, ACCENT_B = unpack(Theme.accent)
+local PANEL_R, PANEL_G, PANEL_B = unpack(Theme.window)
+local SURFACE_R, SURFACE_G, SURFACE_B = unpack(Theme.surfaceSelected)
+local EDITOR_R, EDITOR_G, EDITOR_B = unpack(Theme.field)
+local BORDER_R, BORDER_G, BORDER_B = unpack(Theme.fieldBorder)
 
 local BACKDROP = {
     bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -20,24 +18,40 @@ local function Clamp(value, minimum, maximum)
 end
 
 local function SetBorderColor(frame, accent, alpha)
-    if accent then
-        frame:SetBackdropBorderColor(ACCENT_R, ACCENT_G, ACCENT_B, alpha or 0.8)
-    else
-        frame:SetBackdropBorderColor(BORDER_R, BORDER_G, BORDER_B, alpha or 0.35)
+    if frame.fieldOutline then
+        -- Resting fields are one continuous surface, like the adjacent lists.
+        -- Only keyboard focus needs an outline.
+        frame.fieldOutline:SetColor(accent and Theme.accent or Theme.field, alpha or 1)
     end
 end
 
 local function CreatePanel(parent, r, g, b, a)
     local panel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    panel:SetBackdrop(BACKDROP)
-    panel:SetBackdropColor(r, g, b, a)
-    SetBorderColor(panel, false, 0.26)
+    Theme.PaintRoundedPanel(panel, {r, g, b, a}, { radius = Theme.controlRadius })
+    return panel
+end
 
-    local innerHighlight = panel:CreateTexture(nil, "ARTWORK")
-    innerHighlight:SetColorTexture(1, 1, 1, 0.026)
-    innerHighlight:SetPoint("TOPLEFT", 1, -1)
-    innerHighlight:SetPoint("TOPRIGHT", -1, -1)
-    innerHighlight:SetHeight(1)
+local function CreateFieldPanel(parent, frameType)
+    local panel = CreateFrame(frameType or "Frame", nil, parent)
+    panel.fieldOutline = Theme.CreateRoundedSurface(panel, Theme.fieldBorder, { radius = Theme.controlRadius, sublevel = -2 })
+    Theme.PaintRoundedPanel(panel, Theme.field, { radius = Theme.controlRadius - 1, inset = 1, sublevel = -1 })
+    SetBorderColor(panel, false)
+    return panel
+end
+
+local function CreateLineInput(parent)
+    local panel = CreateFieldPanel(parent)
+    local edit = CreateFrame("EditBox", nil, panel)
+    edit:SetAutoFocus(false)
+    edit:SetFont(Theme.font, 14, "")
+    edit:SetTextColor(unpack(Theme.text))
+    edit:SetTextInsets(12, 12, 0, 0)
+    edit:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -1)
+    edit:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
+    edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    edit:SetScript("OnEditFocusGained", function() SetBorderColor(panel, true) end)
+    edit:SetScript("OnEditFocusLost", function() SetBorderColor(panel, false) end)
+    panel.editBox = edit
     return panel
 end
 
@@ -65,13 +79,13 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
     scrollbar.syncing = false
 
     local track = scrollbar:CreateTexture(nil, "BACKGROUND")
-    track:SetColorTexture(1, 1, 1, 0.07)
+    track:SetColorTexture(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.35)
     track:SetPoint("TOP", 0, 0)
     track:SetPoint("BOTTOM", 0, 0)
     track:SetWidth(2)
 
     local thumb = scrollbar:CreateTexture(nil, "ARTWORK")
-    thumb:SetColorTexture(0.50, 0.56, 0.61, 0.72)
+    thumb:SetColorTexture(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.72)
     thumb:SetSize(7, 32)
     scrollbar:SetThumbTexture(thumb)
     scrollbar.thumb = thumb
@@ -80,7 +94,7 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         self.thumb:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.95)
     end)
     scrollbar:SetScript("OnLeave", function(self)
-        self.thumb:SetColorTexture(0.50, 0.56, 0.61, 0.72)
+        self.thumb:SetColorTexture(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.72)
     end)
     scrollbar:SetScript("OnValueChanged", function(self, value)
         if not self.syncing then
@@ -212,9 +226,8 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
 end
 
 local function CreateCloseButton(parent)
-    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    button:SetSize(28, 28)
-    button:SetBackdrop(BACKDROP)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(Theme.iconHit, Theme.iconHit)
 
     local firstLine = button:CreateTexture(nil, "ARTWORK")
     firstLine:SetColorTexture(1, 1, 1, 0.72)
@@ -228,127 +241,142 @@ local function CreateCloseButton(parent)
     secondLine:SetPoint("CENTER")
     secondLine:SetRotation(-0.785398)
 
-    local function SetState(hovered, pressed)
-        if pressed then
-            button:SetBackdropColor(ACCENT_R * 0.72, ACCENT_G * 0.72, ACCENT_B * 0.72, 0.95)
-            button:SetBackdropBorderColor(ACCENT_R, ACCENT_G, ACCENT_B, 1)
-        elseif hovered then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.88)
-            button:SetBackdropBorderColor(ACCENT_R, ACCENT_G, ACCENT_B, 1)
-        else
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.78)
-            button:SetBackdropBorderColor(BORDER_R, BORDER_G, BORDER_B, 0.38)
-        end
-        local alpha = hovered and 1 or 0.72
-        firstLine:SetColorTexture(1, 1, 1, alpha)
-        secondLine:SetColorTexture(1, 1, 1, alpha)
+    local function SetState(hovered)
+        local color = hovered and Theme.accentHover or Theme.text
+        firstLine:SetColorTexture(color[1], color[2], color[3], 1)
+        secondLine:SetColorTexture(color[1], color[2], color[3], 1)
     end
 
     button:SetScript("OnEnter", function(self)
         self.isHovered = true
-        SetState(true, false)
+        SetState(true)
     end)
     button:SetScript("OnLeave", function(self)
         self.isHovered = nil
-        SetState(false, false)
+        SetState(false)
     end)
     button:SetScript("OnMouseDown", function()
-        SetState(true, true)
+        SetState(true)
     end)
     button:SetScript("OnMouseUp", function(self)
-        SetState(self.isHovered, false)
+        SetState(self.isHovered)
     end)
 
-    SetState(false, false)
+    SetState(false)
+    return button
+end
+
+local function CreateTextNavButton(parent, labelText)
+    local button = CreateFrame("Button", nil, parent)
+    local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    Theme.SetFont(label, 12, Theme.text)
+    label:SetPoint("CENTER")
+    label:SetText(labelText)
+    button.label = label
+    button:SetSize(math.max(64, math.ceil(label:GetStringWidth()) + 24), 36)
+    local function Tint(hover)
+        local c = hover and Theme.accentHover or Theme.text
+        label:SetTextColor(c[1], c[2], c[3], 1)
+    end
+    button:SetScript("OnEnter", function() Tint(true) end)
+    button:SetScript("OnLeave", function() Tint(false) end)
+    Tint(false)
+    return button
+end
+
+local function CreateBackButton(parent)
+    return CreateTextNavButton(parent, ns.L.BACK or "Back")
+end
+
+local function CreateSettingsButton(parent)
+    return CreateTextNavButton(parent, ns.L.SETTINGS or "Settings")
+end
+
+local function CreateToggle(parent, onChange)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(40, 32)
+    -- Lychee's 32 x 18 pill and 14-unit round thumb, with a larger hit target.
+    local track = CreateFrame("Frame", nil, button)
+    track:SetSize(32, 18)
+    track:SetPoint("CENTER")
+    Theme.PaintRoundedPanel(track, Theme.disabled, { radius = 8 })
+    local thumb = CreateFrame("Frame", nil, track)
+    thumb:SetSize(14, 14)
+    Theme.PaintRoundedPanel(thumb, Theme.text, { radius = 6.9 })
+    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
+    button.track, button.thumb = track, thumb
+    local position = 2
+    local function place(x)
+        position = x
+        thumb:ClearAllPoints()
+        thumb:SetPoint("LEFT", track, "LEFT", x, 0)
+    end
+    local elapsed, start, destination
+    local function finish()
+        button:SetScript("OnUpdate", nil)
+        place(button.checked and 16 or 2)
+    end
+    local function advance(_, delta)
+        elapsed = math.min(.14, elapsed + delta)
+        place(start + (destination - start) * (1 - (1 - elapsed / .14) ^ 3))
+        if elapsed == .14 then finish() end
+    end
+    local function SetChecked(self, checked, instant)
+        self.checked = checked == true
+        track.lycheeSurface:SetColor(self.checked and Theme.accent or Theme.disabled)
+        if instant or Theme.reducedMotion then finish(); return end
+        elapsed, start, destination = 0, position, self.checked and 16 or 2
+        if start == destination then finish() else self:SetScript("OnUpdate", advance) end
+    end
+    button.SetChecked = SetChecked
+    button:SetScript("OnHide", finish)
+    button:SetScript("OnClick", function(self)
+        self:SetChecked(not self.checked)
+        if onChange then onChange(self.checked) end
+        if Theme.reducedMotion then finish() end
+    end)
+    button:SetChecked(false, true)
     return button
 end
 
 local function SetButtonLabelOffset(button, y)
     button.label:ClearAllPoints()
-    button.label:SetPoint("CENTER", 0, y)
+    button.label:SetPoint("CENTER", 0, 0)
 end
 
 local function ApplyButtonState(button, state)
     local enabled = button:IsEnabled()
     local variant = button.variant or (button.primary and "primary" or "secondary")
 
-    if not enabled then
-        if variant == "ghost" then
-            button:SetBackdropColor(0, 0, 0, 0)
-            SetBorderColor(button, false, 0)
-        else
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.34)
-            SetBorderColor(button, false, 0.18)
-        end
-        button.label:SetTextColor(1, 1, 1, 0.28)
-        SetButtonLabelOffset(button, 0)
-        return
-    end
-
-    local emphasized = variant == "primary" or variant == "danger"
-    if state == "pressed" then
-        if emphasized then
-            button:SetBackdropColor(ACCENT_R * 0.78, ACCENT_G * 0.78, ACCENT_B * 0.78, 1)
-        elseif variant == "selected" then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.22)
-        elseif variant == "ghost" then
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.72)
-        else
-            button:SetBackdropColor(SURFACE_R * 0.82, SURFACE_G * 0.82, SURFACE_B * 0.82, 0.86)
-        end
-        SetBorderColor(button, emphasized or variant == "selected",
-            variant == "ghost" and 0.28 or (emphasized and 1 or 0.64))
-    elseif state == "hover" then
-        if emphasized then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 1)
-        elseif variant == "selected" then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.18)
-        elseif variant == "ghost" then
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.48)
-        else
-            button:SetBackdropColor(SURFACE_R * 1.22, SURFACE_G * 1.22, SURFACE_B * 1.22, 0.82)
-        end
-        SetBorderColor(button, emphasized or variant == "selected",
-            variant == "ghost" and 0.20 or (emphasized and 1 or 0.7))
-    else
-        if emphasized then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.88)
-        elseif variant == "selected" then
-            button:SetBackdropColor(ACCENT_R, ACCENT_G, ACCENT_B, 0.12)
-        elseif variant == "ghost" then
-            button:SetBackdropColor(0, 0, 0, 0)
-        else
-            button:SetBackdropColor(SURFACE_R, SURFACE_G, SURFACE_B, 0.42)
-        end
-        SetBorderColor(button, emphasized or variant == "selected",
-            variant == "ghost" and 0
-                or (emphasized and 0.85 or (variant == "selected" and 0.52 or 0.30)))
-    end
-
-    local labelAlpha = 0.76
-    if emphasized then
-        labelAlpha = 1
-    elseif variant == "selected" then
-        labelAlpha = 0.94
-    elseif variant == "ghost" then
-        labelAlpha = state == "normal" and 0.68 or 0.92
-    end
-    button.label:SetTextColor(1, 1, 1, labelAlpha)
+    local selected = variant == "selected"
+    local primary = variant == "primary" or variant == "danger"
+    local field = variant == "field"
+    local background = field and Theme.field or primary and Theme.action or selected and Theme.surfaceSelected or Theme.surfaceHover
+    button.lycheeSurface:SetColor(background, (field or selected or primary or state == "hover" or state == "pressed") and 1 or 0)
+    local color = not enabled and Theme.disabled
+        or state == "hover" and Theme.accentHover
+        or variant == "danger" and Theme.danger
+        or primary and Theme.accentHover
+        or selected and Theme.text
+        or Theme.textMuted
+    button.label:SetTextColor(color[1], color[2], color[3], 1)
 end
 
 -- variant: "primary" / "danger" / "secondary" / "ghost" / "selected", or a
 -- boolean for the historical primary=true shorthand.
 local function CreateButton(parent, width, text, variant)
-    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    button:SetBackdrop(BACKDROP)
-    button.variant = type(variant) == "string" and variant or (variant and "primary" or "secondary")
+    variant = type(variant) == "string" and variant or (variant and "primary" or "secondary")
+    local button = variant == "field" and CreateFieldPanel(parent, "Button") or CreateFrame("Button", nil, parent)
+    if not button.lycheeSurface then Theme.PaintRoundedPanel(button, Theme.window, { radius = Theme.controlRadius }) end
+    button.variant = variant
     button.primary = button.variant == "primary"
 
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    Theme.SetFont(label, 12, Theme.text)
     label:SetPoint("CENTER")
     label:SetText(text)
     button.label = label
-    button:SetSize(math.max(width, math.ceil(label:GetStringWidth()) + 24), 30)
+    button:SetSize(math.max(width, math.ceil(label:GetStringWidth()) + 24), 36)
 
     button:SetScript("OnEnter", function(self)
         self.isHovered = true
@@ -372,10 +400,64 @@ local function CreateButton(parent, width, text, variant)
     return button
 end
 
+-- View choices belong to a compact toolbar, not the vertical page navigation.
+local function CreateModeTab(parent, text)
+    local button = CreateButton(parent, 58, text, "ghost")
+    Theme.SetFont(button.label, 11, Theme.textMuted)
+    button:SetHeight(30)
+    local function refresh(self)
+        self.variant = self.active and "selected" or "ghost"
+        ApplyButtonState(self, self.isHovered and "hover" or "normal")
+    end
+    button.SetActive = function(self, active) self.active = active and true or false; refresh(self) end
+    button.RefreshEnabledState = refresh
+    return button
+end
+
 local function SetButtonVariant(button, variant)
     button.variant = variant or "secondary"
     button.primary = button.variant == "primary"
     ApplyButtonState(button, "normal")
+end
+
+-- A shortcut is a sequence of keys, not an editable text field. The focused
+-- recorder replaces these caps with its instruction without moving the row.
+local function CreateShortcutButton(parent)
+    local button = CreateButton(parent, 220, "", "ghost")
+    local group = CreateFrame("Frame", nil, button)
+    group:SetHeight(28)
+    group:SetPoint("RIGHT", button, "RIGHT", -8, 0)
+    button.keycaps = {}
+    for index = 1, 4 do
+        local cap = CreateFrame("Frame", nil, group)
+        cap:SetHeight(28)
+        Theme.PaintRoundedPanel(cap, Theme.action, { radius = 4 })
+        cap.label = cap:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        Theme.SetFont(cap.label, 11, Theme.text)
+        cap.label:SetPoint("CENTER")
+        button.keycaps[index] = cap
+    end
+    function button:SetShortcut(chord, recording)
+        self.label:SetText(chord)
+        self.label:SetShown(recording)
+        group:SetShown(not recording)
+        if recording then return end
+        local x, count = 0, 0
+        for key in chord:gmatch("[^+]+") do
+            count = count + 1
+            local cap = self.keycaps[count]
+            if not cap then break end
+            cap.label:SetText(key)
+            local width = math.max(26, math.ceil(cap.label:GetStringWidth()) + 16)
+            cap:SetWidth(width)
+            cap:ClearAllPoints(); cap:SetPoint("LEFT", group, "LEFT", x, 0)
+            cap:Show()
+            x = x + width + 4
+        end
+        for index = count + 1, 4 do self.keycaps[index]:Hide() end
+        group:SetWidth(math.max(1, x - 4))
+    end
+    return button
 end
 
 local function SetButtonPrimary(button, primary)
@@ -410,7 +492,7 @@ local function CreateConfirmButton(parent, width, text, confirmText, onConfirm, 
     button.label:SetText(confirmText)
     local confirmWidth = button.label:GetStringWidth()
     button.label:SetText(text)
-    button:SetSize(math.max(width, math.ceil(math.max(measure, confirmWidth)) + 24), 30)
+    button:SetSize(math.max(width, math.ceil(math.max(measure, confirmWidth)) + 24), 36)
 
     local armed = false
 
@@ -441,8 +523,25 @@ end
 
 local function CreateSectionLabel(parent, text)
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    Theme.SetFont(label, 14, Theme.text)
     label:SetText(text)
-    label:SetTextColor(0.70, 0.75, 0.79, 0.92)
+    return label
+end
+
+local function CreatePageHeading(parent, title, help)
+    local label = CreateSectionLabel(parent, title)
+    Theme.SetFont(label, 16, Theme.text)
+    label:SetPoint("TOPLEFT", 17, -22)
+    if help then
+        local description = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        Theme.SetFont(description, 11, Theme.textMuted)
+        description:SetPoint("TOPLEFT", 17, -50)
+        description:SetPoint("TOPRIGHT", -54, -50)
+        description:SetJustifyH("LEFT")
+        description:SetWordWrap(false)
+        description:SetText(help)
+    end
+    parent.heading = label
     return label
 end
 
@@ -457,65 +556,66 @@ local function CreateListRow(parent, height)
 
     local accent = row:CreateTexture(nil, "ARTWORK")
     accent:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
-    accent:SetPoint("TOPLEFT", 0, 0)
-    accent:SetPoint("BOTTOMLEFT", 0, 0)
-    accent:SetWidth(2)
+    accent:SetPoint("LEFT", 0, 0)
+    accent:SetSize(2, 22)
     accent:Hide()
     row.accent = accent
 
-    local divider = row:CreateTexture(nil, "ARTWORK")
-    divider:SetColorTexture(1, 1, 1, 0.055)
-    divider:SetPoint("BOTTOMLEFT", 0, 0)
-    divider:SetPoint("BOTTOMRIGHT", 0, 0)
-    divider:SetHeight(1)
-    row.divider = divider
+    row.divider = row:CreateTexture(nil, "ARTWORK")
+    row.divider:SetColorTexture(0, 0, 0, 0)
     return row
 end
 
 local function SetListRowState(row, selected, hovered)
     if selected then
-        row.background:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.095)
+        row.background:SetColorTexture(unpack(Theme.surfaceSelected))
         row.accent:Show()
-        row.divider:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.28)
     elseif hovered then
-        row.background:SetColorTexture(SURFACE_R, SURFACE_G, SURFACE_B, 0.68)
+        row.background:SetColorTexture(unpack(Theme.surfaceHover))
         row.accent:Hide()
-        row.divider:SetColorTexture(1, 1, 1, 0.08)
     else
         row.background:SetColorTexture(0, 0, 0, 0)
         row.accent:Hide()
-        row.divider:SetColorTexture(1, 1, 1, 0.055)
     end
 end
 
 local function CreateNavTab(parent, text)
     local button = CreateFrame("Button", nil, parent)
-    button:SetSize(82, 32)
+    button:SetSize(120, 40)
+
+    local surface = button:CreateTexture(nil, "BACKGROUND")
+    surface:SetAllPoints()
+    surface:SetColorTexture(0, 0, 0, 0)
+    button.surface = surface
 
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    label:SetPoint("CENTER", 0, 1)
+    Theme.SetFont(label, 12, Theme.textMuted)
+    label:SetPoint("LEFT", 14, 0)
     label:SetText(text)
     button.label = label
 
-    local underline = button:CreateTexture(nil, "ARTWORK")
-    underline:SetPoint("BOTTOMLEFT", 7, 0)
-    underline:SetPoint("BOTTOMRIGHT", -7, 0)
-    underline:SetHeight(2)
-    button.underline = underline
+    local marker = button:CreateTexture(nil, "ARTWORK")
+    marker:SetPoint("LEFT", 0, 0)
+    marker:SetSize(2, 22)
+    button.underline = marker
 
     local function ApplyState(self)
         if not self:IsEnabled() then
-            self.label:SetTextColor(1, 1, 1, 0.24)
+            self.label:SetTextColor(unpack(Theme.disabled))
             self.underline:SetColorTexture(0, 0, 0, 0)
+            self.surface:SetColorTexture(0, 0, 0, 0)
         elseif self.active then
-            self.label:SetTextColor(1, 1, 1, 1)
+            self.label:SetTextColor(unpack(Theme.text))
             self.underline:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
+            self.surface:SetColorTexture(unpack(Theme.surfaceSelected))
         elseif self.isHovered then
-            self.label:SetTextColor(1, 1, 1, 0.86)
-            self.underline:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.35)
-        else
-            self.label:SetTextColor(1, 1, 1, 0.46)
+            self.label:SetTextColor(unpack(Theme.accentHover))
             self.underline:SetColorTexture(0, 0, 0, 0)
+            self.surface:SetColorTexture(unpack(Theme.surfaceHover))
+        else
+            self.label:SetTextColor(unpack(Theme.textMuted))
+            self.underline:SetColorTexture(0, 0, 0, 0)
+            self.surface:SetColorTexture(0, 0, 0, 0)
         end
     end
 
@@ -539,11 +639,11 @@ end
 -- Label-fit sizing: rendered label width + 22 px, never below the minimum.
 local function FitNavTab(button, minimumWidth, height)
     button:SetSize(math.max(minimumWidth or 48,
-        math.ceil(button.label:GetStringWidth()) + 22), height or 30)
+        math.ceil(button.label:GetStringWidth()) + 22), height or 36)
 end
 
 local function CreateTextArea(parent, readOnly)
-    local panel = CreatePanel(parent, EDITOR_R, EDITOR_G, EDITOR_B, 1)
+    local panel = CreateFieldPanel(parent)
 
     local scroll = CreateScrollArea(panel, 10, 10, 8, 10, true)
     panel:EnableMouseWheel(true)
@@ -560,7 +660,7 @@ local function CreateTextArea(parent, readOnly)
     editBox:SetScript("OnMouseWheel", function(_, delta)
         scroll.onMouseWheel(scroll, delta)
     end)
-    editBox:SetFontObject(ChatFontNormal)
+    editBox:SetFont(Theme.font, 14, "")
     editBox:SetTextInsets(4, 4, 4, 4)
     editBox:SetWidth(500)
     editBox:SetHeight(1)
@@ -570,7 +670,7 @@ local function CreateTextArea(parent, readOnly)
         self:ClearFocus()
     end)
     editBox:SetScript("OnEditFocusGained", function()
-        SetBorderColor(panel, true, 0.75)
+        SetBorderColor(panel, true)
     end)
     editBox:SetScript("OnEditFocusLost", function()
         SetBorderColor(panel, false)
@@ -585,6 +685,7 @@ local function CreateTextArea(parent, readOnly)
             self:HighlightText()
             return
         end
+        if panel.placeholder then panel.placeholder:SetShown(self:GetText() == "") end
         scroll:UpdateScrollChildRect()
     end)
 
@@ -622,13 +723,25 @@ local function CreateTextArea(parent, readOnly)
     end)
 
     if readOnly then
-        editBox:SetTextColor(0.79, 0.83, 0.87)
+        editBox:SetTextColor(unpack(Theme.textMuted))
     else
-        editBox:SetTextColor(0.94, 0.95, 0.96)
+        editBox:SetTextColor(unpack(Theme.text))
     end
 
     panel.scroll = scroll
     panel.editBox = editBox
+    panel.SetPlaceholder = function(self, text)
+        if not self.placeholder then
+            self.placeholder = self:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            Theme.SetFont(self.placeholder, 11, Theme.textDim)
+            self.placeholder:SetPoint("TOPLEFT", self, "TOPLEFT", 16, -16)
+            self.placeholder:SetPoint("TOPRIGHT", self, "TOPRIGHT", -16, -16)
+            self.placeholder:SetJustifyH("LEFT")
+            self.placeholder:SetWordWrap(true)
+        end
+        self.placeholder:SetText(text)
+        self.placeholder:SetShown(self.editBox:GetText() == "")
+    end
     panel.SelectAll = function(self)
         self.editBox:SetFocus()
         self.editBox:HighlightText()
@@ -673,11 +786,17 @@ end
 
 ns.Widgets = {
     Colors = {
-        accent = { ACCENT_R, ACCENT_G, ACCENT_B },
-        panel = { PANEL_R, PANEL_G, PANEL_B },
-        surface = { SURFACE_R, SURFACE_G, SURFACE_B },
-        editor = { EDITOR_R, EDITOR_G, EDITOR_B },
-        border = { BORDER_R, BORDER_G, BORDER_B },
+        accent = Theme.accent,
+        panel = Theme.window,
+        surface = Theme.surfaceSelected,
+        editor = Theme.field,
+        border = Theme.fieldBorder,
+        text = Theme.text,
+        textMuted = Theme.textMuted,
+        textDim = Theme.textDim,
+        success = Theme.success,
+        warning = Theme.warning,
+        danger = Theme.danger,
     },
     Backdrop = BACKDROP,
     LOGO_TEXTURE = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\Logo.png",
@@ -685,8 +804,15 @@ ns.Widgets = {
 
     SetBorderColor = SetBorderColor,
     CreatePanel = CreatePanel,
+    CreateFieldPanel = CreateFieldPanel,
+    CreateLineInput = CreateLineInput,
+    CreateShortcutButton = CreateShortcutButton,
+    CreatePageHeading = CreatePageHeading,
     CreateScrollArea = CreateScrollArea,
     CreateCloseButton = CreateCloseButton,
+    CreateBackButton = CreateBackButton,
+    CreateSettingsButton = CreateSettingsButton,
+    CreateToggle = CreateToggle,
     CreateButton = CreateButton,
     CreateConfirmButton = CreateConfirmButton,
     SetButtonVariant = SetButtonVariant,
@@ -697,6 +823,7 @@ ns.Widgets = {
     CreateListRow = CreateListRow,
     SetListRowState = SetListRowState,
     CreateNavTab = CreateNavTab,
+    CreateModeTab = CreateModeTab,
     FitNavTab = FitNavTab,
     CreateTextArea = CreateTextArea,
     SetReadOnlyText = SetReadOnlyText,

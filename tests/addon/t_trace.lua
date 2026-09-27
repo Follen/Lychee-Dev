@@ -168,6 +168,7 @@ local function NewRegion(name)
 
     setmetatable(region, {
         __index = function(target, key)
+            if type(key) ~= "string" or not key:match("^%u") then return nil end
             local noOp = function() end
             rawset(target, key, noOp)
             return noOp
@@ -369,6 +370,7 @@ ns.Workbench = {
     Close = function() end,
     IsShown = function() return true end,
 }
+LoadAddonFile("UI/Theme.lua", ns)
 LoadAddonFile("UI/Widgets.lua", ns)
 LoadAddonFile("UI/Pages/Trace.lua", ns)
 
@@ -395,8 +397,9 @@ for index = 1, 20 do
 end
 FlushTimers()
 assert(#tracePage.callRows == 18, "trace call list did not virtualize 18 rows")
-assert(tracePage.callRows[1]:GetHeight() == 38, "trace call rows were not 38 px")
-assert(tracePage.listPanel:GetWidth() == 520, "trace call list width changed")
+assert(tracePage.callRows[1]:GetHeight() == 44, "trace call rows were not 44 px")
+assert(tracePage.listPanel:GetWidth() < ns.Workbench.Layout.WINDOW_WIDTH / 2,
+    "trace list leaves too little room for call details")
 assert(tracePage.callRows[1]:IsShown() and tracePage.clearButton:IsEnabled() and tracePage.exportDetail:IsEnabled(),
     "trace page actions did not enable after a recorded call")
 
@@ -441,4 +444,3 @@ assert(not ns.FunctionTrace.IsRunning(), "window teardown did not stop the funct
 
 print("Lychee Toolkit trace tests passed")
 return true
-

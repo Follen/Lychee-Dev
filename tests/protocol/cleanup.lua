@@ -7,7 +7,7 @@ local products = {
 local outputs = {}
 for _, profile in ipairs(products) do
     local ns, frames = {}, {}
-    LycheeToolkitDB, SlashCmdList, SLASH_LYCHEETOOLKIT1 = nil, {}, nil
+    LycheeToolkitDB, LycheeToolkitBridgeDB, SlashCmdList, SLASH_LYCHEETOOLKIT1 = nil, nil, {}, nil
     local secret = {}
     issecretvalue = function(value) return rawequal(value, secret) end
     CreateFrame = function()
@@ -29,6 +29,10 @@ for _, profile in ipairs(products) do
         end
     end
     toc:close()
+    -- Renderer lifecycle has its own native-like UI fixture (t_activity.lua).
+    -- Keep this protocol suite's no-executor-frames assertion independent.
+    ns.ActivityView={Begin=function() end,Finish=function() end,Stop=function() end}
+
     frames[1].callback(frames[1], "ADDON_LOADED", "Lychee Dev")
     local nonce, cleanup = string.rep("a", 32), string.rep("c", 32)
     local command = "bridge verify OP-target " .. cleanup
@@ -51,13 +55,13 @@ for _, profile in ipairs(products) do
     rejects(function() return ns.Controls.Handle(command) end, "report_still_retained")
     -- Model a persisted post-ACK reload: rebuild runtime modules with the
     -- report removed. This is a Lua lifecycle fixture, not a running client.
-    LycheeToolkitDB.reports["OP-target"] = nil
+    LycheeToolkitBridgeDB.reports["OP-target"] = nil
     rejects(function() return ns.Controls.Handle(command) end, "probe_still_retained")
     assert(loadfile(root .. "/Bridge/ProbeRunner.lua"))("Lychee Dev", ns)
     local foreign = { receipt = "unchanged", body = "unchanged" }
-    LycheeToolkitDB.reports["OP-foreign"] = foreign
+    LycheeToolkitBridgeDB.reports["OP-foreign"] = foreign
     local receipt = assert(ns.Controls.Handle(command))
-    assert(shown == receipt and LycheeToolkitDB.reports["OP-foreign"] == foreign)
+    assert(shown == receipt and LycheeToolkitBridgeDB.reports["OP-foreign"] == foreign)
     assert(#frames == 1, "cleanup allocated runtime machinery")
     outputs[#outputs + 1] = receipt
     local sequence = ns.Session.Current().sequence

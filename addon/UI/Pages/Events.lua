@@ -7,16 +7,16 @@ local ADDON_NAME, ns = ...
 local L = ns.L
 local W = ns.Widgets
 
-local EVENT_ROW_HEIGHT = 36
-local EVENT_LIST_WIDTH = 540
+local EVENT_ROW_HEIGHT = 42
+local EVENT_LIST_WIDTH = 292
 local EVENT_VISIBLE_ROWS = 18
 local SEARCH_RESULT_LIMIT = 8
-local SEARCH_ROW_HEIGHT = 38
-local SELECTED_ROW_HEIGHT = 28
+local SEARCH_ROW_HEIGHT = 44
+local SELECTED_ROW_HEIGHT = 34
 local SELECTED_VISIBLE_ROWS = 3
 -- Matches the workbench window content width; rows and the detail edit box
 -- size against it so dynamic text never resizes the layout.
-local PAGE_WIDTH = 1040
+local PAGE_WIDTH = 800
 
 local function Restricted(value)
     return issecretvalue and issecretvalue(value)
@@ -41,77 +41,10 @@ local function ShownNumber(value, format, fallback)
     return string.format(format, value)
 end
 
-local function CreateLineInput(parent)
-    local colors = W.Colors
-    local panel = W.CreatePanel(parent, colors.editor[1], colors.editor[2], colors.editor[3], 1)
-    local editBox = CreateFrame("EditBox", nil, panel)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject(ChatFontNormal)
-    editBox:SetTextColor(0.94, 0.95, 0.96)
-    editBox:SetTextInsets(9, 9, 0, 0)
-    editBox:SetPoint("TOPLEFT", 1, -1)
-    editBox:SetPoint("BOTTOMRIGHT", -1, 1)
-    editBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEditFocusGained", function()
-        W.SetBorderColor(panel, true, 0.75)
-    end)
-    editBox:SetScript("OnEditFocusLost", function()
-        W.SetBorderColor(panel, false)
-    end)
-    panel.editBox = editBox
-    return panel
-end
+local CreateLineInput = ns.Widgets.CreateLineInput
 
 local function CreateRemoveButton(parent)
-    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    button:SetSize(22, 22)
-    button:SetBackdrop(W.Backdrop)
-
-    local firstLine = button:CreateTexture(nil, "ARTWORK")
-    firstLine:SetSize(9, 1)
-    firstLine:SetPoint("CENTER")
-    firstLine:SetRotation(0.785398)
-
-    local secondLine = button:CreateTexture(nil, "ARTWORK")
-    secondLine:SetSize(9, 1)
-    secondLine:SetPoint("CENTER")
-    secondLine:SetRotation(-0.785398)
-
-    local colors = W.Colors
-    local function ApplyState(hovered, pressed)
-        if pressed then
-            button:SetBackdropColor(colors.accent[1] * 0.72, colors.accent[2] * 0.72, colors.accent[3] * 0.72, 0.92)
-            button:SetBackdropBorderColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.9)
-        elseif hovered then
-            button:SetBackdropColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.74)
-            button:SetBackdropBorderColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.92)
-        else
-            button:SetBackdropColor(colors.surface[1], colors.surface[2], colors.surface[3], 0.58)
-            W.SetBorderColor(button, false, 0.24)
-        end
-        local alpha = hovered and 0.95 or 0.48
-        firstLine:SetColorTexture(1, 1, 1, alpha)
-        secondLine:SetColorTexture(1, 1, 1, alpha)
-    end
-
-    button:SetScript("OnEnter", function(self)
-        self.isHovered = true
-        ApplyState(true, false)
-    end)
-    button:SetScript("OnLeave", function(self)
-        self.isHovered = nil
-        ApplyState(false, false)
-    end)
-    button:SetScript("OnMouseDown", function()
-        ApplyState(true, true)
-    end)
-    button:SetScript("OnMouseUp", function(self)
-        ApplyState(self.isHovered, false)
-    end)
-    ApplyState(false, false)
-    return button
+    return ns.Widgets.CreateCloseButton(parent)
 end
 
 -- The one export hook shared by every page. The window shell owns the shared
@@ -159,40 +92,45 @@ function ns.CreateEventsPage(parent)
     local colors = W.Colors
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
+    W.CreatePageHeading(page, L.TAB_EVENTS, L.EVENTS_PAGE_HELP)
 
     local inputLabel = W.CreateSectionLabel(page, L.FIND_EVENT)
     inputLabel:SetPoint("TOPLEFT", 17, -84)
+    inputLabel:Hide()
 
     local catalogCount = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    catalogCount:SetPoint("LEFT", inputLabel, "RIGHT", 9, 0)
+    ns.Theme.SetFont(catalogCount, 11, ns.Theme.textDim)
+    catalogCount:SetPoint("LEFT", page.heading, "RIGHT", 12, 0)
     catalogCount:SetText(string.format(L.CATALOG_COUNT, ns.EventCatalog.GetCount()))
-    catalogCount:SetTextColor(1, 1, 1, 0.34)
+    catalogCount:SetTextColor(unpack(ns.Theme.textDim))
 
     local inputPanel = CreateLineInput(page)
-    inputPanel:SetPoint("TOPLEFT", 14, -104)
-    inputPanel:SetPoint("TOPRIGHT", -278, -104)
-    inputPanel:SetHeight(30)
+    inputPanel:SetPoint("TOPLEFT", 14, -84)
+    inputPanel:SetPoint("TOPRIGHT", -166, -84)
+    inputPanel:SetHeight(36)
     page.inputPanel = inputPanel
 
     local inputHint = inputPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(inputHint, 11, ns.Theme.textDim)
     inputHint:SetPoint("LEFT", 10, 0)
     inputHint:SetText(L.EVENT_SEARCH_HINT)
-    inputHint:SetTextColor(1, 1, 1, 0.30)
+    inputHint:SetTextColor(unpack(ns.Theme.textDim))
     page.inputHint = inputHint
 
     local monitorButton = W.CreateButton(page, 140, L.START_MONITORING, "primary")
-    monitorButton:SetPoint("TOPRIGHT", -14, -104)
+    monitorButton:SetPoint("TOPRIGHT", -14, -84)
 
     local clearButton = W.CreateButton(page, 100, L.CLEAR_LOG, "secondary")
-    clearButton:SetPoint("RIGHT", monitorButton, "LEFT", -8, 0)
+    clearButton:SetPoint("BOTTOMLEFT", 14, 14)
     page.monitorButton = monitorButton
     page.clearButton = clearButton
 
     local statusDot = page:CreateTexture(nil, "ARTWORK")
     statusDot:SetSize(5, 5)
-    statusDot:SetPoint("TOPLEFT", inputPanel, "BOTTOMLEFT", 2, -15)
+    statusDot:SetPoint("LEFT", clearButton, "RIGHT", 20, 0)
 
     local status = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ns.Theme.SetFont(status, 12, ns.Theme.text)
     status:SetPoint("LEFT", statusDot, "RIGHT", 7, 0)
 
     local function SetStatus(text, r, g, b)
@@ -206,22 +144,23 @@ function ns.CreateEventsPage(parent)
     local function SetSelectionStatus()
         local count = selection:GetCount()
         if count > 0 then
-            SetStatus(string.format(L.EVENTS_SELECTED_STATUS, count), 0.55, 0.60, 0.65)
+            SetStatus(string.format(L.EVENTS_SELECTED_STATUS, count), unpack(ns.Theme.textMuted))
         else
-            SetStatus(L.EVENT_READY, 0.55, 0.60, 0.65)
+            SetStatus(L.EVENT_READY, unpack(ns.Theme.textMuted))
         end
     end
 
     local selectedLabel = W.CreateSectionLabel(page, L.SELECTED_EVENTS)
-    selectedLabel:SetPoint("TOPLEFT", 17, -169)
+    selectedLabel:SetPoint("TOPLEFT", 17, -140)
 
     local selectedCount = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(selectedCount, 11, ns.Theme.textDim)
     selectedCount:SetPoint("LEFT", selectedLabel, "RIGHT", 9, 0)
-    selectedCount:SetTextColor(1, 1, 1, 0.34)
+    selectedCount:SetTextColor(unpack(ns.Theme.textDim))
 
-    local selectedPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
-    selectedPanel:SetPoint("TOPLEFT", 14, -189)
-    selectedPanel:SetPoint("TOPRIGHT", -14, -189)
+    local selectedPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
+    selectedPanel:SetPoint("TOPLEFT", 14, -162)
+    selectedPanel:SetPoint("TOPRIGHT", -14, -162)
     selectedPanel:SetHeight(42)
     page.selectedPanel = selectedPanel
 
@@ -232,9 +171,10 @@ function ns.CreateEventsPage(parent)
     selectedScroll:SetScrollChild(selectedContent)
 
     local selectedEmpty = selectedPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(selectedEmpty, 11, ns.Theme.textDim)
     selectedEmpty:SetPoint("CENTER")
     selectedEmpty:SetText(L.NO_EVENTS_SELECTED)
-    selectedEmpty:SetTextColor(1, 1, 1, 0.32)
+    selectedEmpty:SetTextColor(unpack(ns.Theme.textDim))
 
     local logLabel = W.CreateSectionLabel(page, L.CAPTURED_EVENTS)
     logLabel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", 3, -22)
@@ -242,9 +182,9 @@ function ns.CreateEventsPage(parent)
     local detailLabel = W.CreateSectionLabel(page, L.PAYLOAD)
     detailLabel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", EVENT_LIST_WIDTH + 15, -22)
 
-    local logPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
+    local logPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
     logPanel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", 0, -42)
-    logPanel:SetPoint("BOTTOMLEFT", 14, 54)
+    logPanel:SetPoint("BOTTOMLEFT", 14, 64)
     logPanel:SetWidth(EVENT_LIST_WIDTH)
 
     local logScroll = W.CreateScrollArea(logPanel, 8, 8, 7, 8)
@@ -254,15 +194,16 @@ function ns.CreateEventsPage(parent)
     logScroll:SetScrollChild(logContent)
 
     local empty = logPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(empty, 11, ns.Theme.textDim)
     empty:SetPoint("TOP", 0, -24)
     empty:SetText(L.NO_EVENTS_CAPTURED)
-    empty:SetTextColor(1, 1, 1, 0.32)
+    empty:SetTextColor(unpack(ns.Theme.textDim))
 
     local selectedRecord
     local FormatDetails
     local detailPanel = W.CreateTextArea(page, true)
     detailPanel:SetPoint("TOPLEFT", selectedPanel, "BOTTOMLEFT", EVENT_LIST_WIDTH + 12, -42)
-    detailPanel:SetPoint("BOTTOMRIGHT", -14, 54)
+    detailPanel:SetPoint("BOTTOMRIGHT", -14, 64)
     detailPanel.editBox:SetWidth(PAGE_WIDTH - EVENT_LIST_WIDTH - 78)
     W.SetReadOnlyText(detailPanel, L.SELECT_EVENT_DETAIL)
 
@@ -307,7 +248,8 @@ function ns.CreateEventsPage(parent)
         W.SetButtonVariant(monitorButton, running and "danger" or "primary")
         W.SetButtonEnabled(monitorButton, running or selection:GetCount() > 0)
         inputPanel.editBox:SetEnabled(not running)
-        inputPanel.editBox:SetTextColor(0.94, 0.95, 0.96, running and 0.38 or 1)
+        local color = running and ns.Theme.disabled or ns.Theme.text
+        inputPanel.editBox:SetTextColor(unpack(color))
         inputHint:SetAlpha(running and 0.22 or 1)
         if running then
             inputPanel.editBox:ClearFocus()
@@ -330,11 +272,11 @@ function ns.CreateEventsPage(parent)
     local function ApplySearchRowStyle(row)
         W.SetListRowState(row, row.resultIndex == highlightedSearchIndex, row.isHovered)
         if row.resultIndex == highlightedSearchIndex then
-            row.name:SetTextColor(1, 1, 1, 0.96)
+            row.name:SetTextColor(unpack(ns.Theme.text))
         elseif row.isHovered then
-            row.name:SetTextColor(1, 1, 1, 0.9)
+            row.name:SetTextColor(unpack(ns.Theme.text))
         else
-            row.name:SetTextColor(1, 1, 1, 0.72)
+            row.name:SetTextColor(unpack(ns.Theme.textMuted))
         end
     end
 
@@ -368,6 +310,7 @@ function ns.CreateEventsPage(parent)
         row.isHovered = false
 
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(name, 12, ns.Theme.text)
         name:SetPoint("TOPLEFT", 9, -5)
         name:SetPoint("TOPRIGHT", -9, -5)
         name:SetJustifyH("LEFT")
@@ -375,11 +318,12 @@ function ns.CreateEventsPage(parent)
         row.name = name
 
         local payload = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(payload, 11, ns.Theme.textDim)
         payload:SetPoint("BOTTOMLEFT", 9, 5)
         payload:SetPoint("BOTTOMRIGHT", -9, 5)
         payload:SetJustifyH("LEFT")
         payload:SetWordWrap(false)
-        payload:SetTextColor(1, 1, 1, 0.38)
+        payload:SetTextColor(unpack(ns.Theme.textDim))
         row.payload = payload
 
         row:SetScript("OnEnter", function(self)
@@ -438,19 +382,21 @@ function ns.CreateEventsPage(parent)
         row.isHovered = false
 
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(name, 12, ns.Theme.text)
         name:SetPoint("LEFT", 9, 0)
         name:SetWidth(330)
         name:SetJustifyH("LEFT")
         name:SetWordWrap(false)
-        name:SetTextColor(0.93, 0.94, 0.96, 0.9)
+        name:SetTextColor(unpack(ns.Theme.text))
         row.name = name
 
         local payload = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(payload, 11, ns.Theme.textDim)
         payload:SetPoint("LEFT", 348, 0)
         payload:SetPoint("RIGHT", -35, 0)
         payload:SetJustifyH("LEFT")
         payload:SetWordWrap(false)
-        payload:SetTextColor(1, 1, 1, 0.36)
+        payload:SetTextColor(unpack(ns.Theme.textDim))
         row.payload = payload
 
         local removeButton = CreateRemoveButton(row)
@@ -503,8 +449,15 @@ function ns.CreateEventsPage(parent)
         end
 
         selectedCount:SetText(string.format(L.SELECTED_COUNT, selectionCount))
-        selectedPanel:SetHeight(math.max(42,
+        selectedPanel:ClearAllPoints()
+        local selectedTop=selectionCount == 0 and -128 or -162
+        selectedPanel:SetPoint("TOPLEFT",14,selectedTop)
+        selectedPanel:SetPoint("TOPRIGHT",-14,selectedTop)
+        selectedPanel:SetHeight(selectionCount == 0 and 1 or math.max(42,
             math.min(selectionCount, SELECTED_VISIBLE_ROWS) * SELECTED_ROW_HEIGHT + 14))
+        selectedPanel:SetAlpha(selectionCount == 0 and 0 or 1)
+        selectedLabel:SetShown(selectionCount > 0)
+        selectedCount:SetShown(selectionCount > 0)
         selectedContent:SetHeight(math.max(1, selectionCount * SELECTED_ROW_HEIGHT))
         selectedScroll:UpdateScrollChildRect()
         selectedEmpty:SetShown(selectionCount == 0)
@@ -582,26 +535,29 @@ function ns.CreateEventsPage(parent)
         row.isHovered = false
 
         local timeLabel = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(timeLabel, 11, ns.Theme.textDim)
         timeLabel:SetPoint("LEFT", 8, 0)
         timeLabel:SetWidth(62)
         timeLabel:SetJustifyH("LEFT")
-        timeLabel:SetTextColor(1, 1, 1, 0.38)
+        timeLabel:SetTextColor(unpack(ns.Theme.textDim))
         row.timeLabel = timeLabel
 
         local eventLabel = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(eventLabel, 12, ns.Theme.text)
         eventLabel:SetPoint("LEFT", 72, 7)
         eventLabel:SetPoint("RIGHT", -8, 7)
         eventLabel:SetJustifyH("LEFT")
         eventLabel:SetWordWrap(false)
-        eventLabel:SetTextColor(0.93, 0.94, 0.96, 0.9)
+        eventLabel:SetTextColor(unpack(ns.Theme.text))
         row.eventLabel = eventLabel
 
         local summary = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(summary, 11, ns.Theme.textDim)
         summary:SetPoint("LEFT", 72, -8)
         summary:SetPoint("RIGHT", -8, -8)
         summary:SetJustifyH("LEFT")
         summary:SetWordWrap(false)
-        summary:SetTextColor(1, 1, 1, 0.38)
+        summary:SetTextColor(unpack(ns.Theme.textDim))
         row.summary = summary
 
         row:SetScript("OnEnter", function(self)
@@ -689,7 +645,7 @@ function ns.CreateEventsPage(parent)
         end
         if ns.EventMonitor.IsRunning() then
             ns.EventMonitor.Stop()
-            SetStatus(L.STOPPED, 0.55, 0.60, 0.65)
+            SetStatus(L.STOPPED, unpack(ns.Theme.textMuted))
             SyncMonitorControls()
             return
         end
@@ -699,7 +655,7 @@ function ns.CreateEventsPage(parent)
             local listeningText = ns.EventMonitor.IsMonitoringAllEvents()
                 and L.MONITORING_ALL_EVENTS
                 or string.format(L.MONITORING_EVENTS, ns.EventMonitor.GetActiveEventCount())
-            SetStatus(listeningText, 0.42, 0.76, 0.43)
+            SetStatus(listeningText, unpack(ns.Theme.success))
             inputPanel.editBox:ClearFocus()
             searchPanel:Hide()
         else

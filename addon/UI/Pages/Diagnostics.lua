@@ -4,8 +4,8 @@ local L = ns.L
 -- Diagnostics workbench page: bounded !BugGrabber error browsing with a scope
 -- toggle, keyword search, a two-click clear and the agent report pane. The
 -- provider is a SOFT integration: nothing is fabricated when it is missing.
-local ERROR_ROW_HEIGHT = 44
-local ERROR_LIST_WIDTH = 430
+local ERROR_ROW_HEIGHT = 52
+local ERROR_LIST_WIDTH = 278
 local VISIBLE_ROWS = 16
 
 -- The single built page instance; only read by the shell export hook.
@@ -22,29 +22,7 @@ local function SafeNumber(value)
     return tonumber(value)
 end
 
-local function CreateLineInput(parent)
-    local W = ns.Widgets
-    local colors = W.Colors
-    local panel = W.CreatePanel(parent, colors.editor[1], colors.editor[2], colors.editor[3], 1)
-    local editBox = CreateFrame("EditBox", nil, panel)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject(ChatFontNormal)
-    editBox:SetTextColor(0.94, 0.95, 0.96)
-    editBox:SetTextInsets(9, 9, 0, 0)
-    editBox:SetPoint("TOPLEFT", 1, -1)
-    editBox:SetPoint("BOTTOMRIGHT", -1, 1)
-    editBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEditFocusGained", function()
-        W.SetBorderColor(panel, true, 0.75)
-    end)
-    editBox:SetScript("OnEditFocusLost", function()
-        W.SetBorderColor(panel, false)
-    end)
-    panel.editBox = editBox
-    return panel
-end
+local CreateLineInput = ns.Widgets.CreateLineInput
 
 local function BuildDiagnosticsPage(parent)
     local W = ns.Widgets
@@ -54,15 +32,17 @@ local function BuildDiagnosticsPage(parent)
 
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
+    W.CreatePageHeading(page, L.TAB_DIAGNOSTICS, L.DIAGNOSTICS_PAGE_HELP)
 
     local refreshButton = W.CreateButton(page, 92, L.REFRESH, false)
     refreshButton:SetPoint("TOPRIGHT", -14, -84)
-    local clearButton = W.CreateButton(page, 178, L.CLEAR_ERRORS, false)
-    clearButton:SetPoint("RIGHT", refreshButton, "LEFT", -8, 0)
+    local clearButton = W.CreateButton(page, 120, L.CLEAR_ERRORS, false)
+    clearButton:SetPoint("BOTTOMLEFT", 14, 14)
 
     local status = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    status:SetPoint("TOPLEFT", 17, -94)
-    status:SetPoint("RIGHT", clearButton, "LEFT", -10, 0)
+    ns.Theme.SetFont(status, 12, ns.Theme.text)
+    status:SetPoint("TOPLEFT", 17, -138)
+    status:SetWidth(ERROR_LIST_WIDTH - 10)
     status:SetJustifyH("LEFT")
     local function SetStatus(text, errorState)
         local r = errorState and accent[1] or 0.55
@@ -73,23 +53,28 @@ local function BuildDiagnosticsPage(parent)
     end
 
     local errorsView = CreateFrame("Frame", nil, page)
-    errorsView:SetPoint("TOPLEFT", 0, -126)
+    errorsView:SetPoint("TOPLEFT", 0, -84)
     errorsView:SetPoint("BOTTOMRIGHT")
 
     local currentScope = W.CreateButton(errorsView, 104, L.CURRENT_SESSION, "selected")
     currentScope:SetPoint("TOPLEFT", 14, 0)
     local allScope = W.CreateButton(errorsView, 104, L.ALL_SESSIONS, "secondary")
-    allScope:SetPoint("LEFT", currentScope, "RIGHT", 8, 0)
+    allScope:SetPoint("LEFT", currentScope, "RIGHT", 4, 0)
     local searchPanel = CreateLineInput(errorsView)
     searchPanel:SetPoint("TOPLEFT", allScope, "TOPRIGHT", 14, 0)
-    searchPanel:SetWidth(260)
-    searchPanel:SetHeight(28)
+    searchPanel:SetPoint("TOPRIGHT", errorsView, "TOPRIGHT", -202, 0)
+    searchPanel:SetHeight(36)
     local searchButton = W.CreateButton(errorsView, 76, L.SEARCH, false)
     searchButton:SetPoint("LEFT", searchPanel, "RIGHT", 8, 0)
     local selectReport = W.CreateButton(errorsView, 110, L.SELECT_REPORT, false)
-    selectReport:SetPoint("TOPRIGHT", -14, 0)
+    selectReport:SetPoint("BOTTOMRIGHT", -14, 14)
     local exportReport = W.CreateButton(errorsView, 92, L.SAVE_TO_DISK, false)
     exportReport:SetPoint("RIGHT", selectReport, "LEFT", -8, 0)
+    local searchHint=searchPanel:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+    ns.Theme.SetFont(searchHint,11,ns.Theme.textMuted)
+    searchHint:SetPoint("LEFT",12,0)
+    searchHint:SetText(L.DIAGNOSTICS_SEARCH_HINT)
+    searchPanel.editBox:SetScript("OnTextChanged",function(self) searchHint:SetShown(self:GetText()=="") end)
     page.currentScope = currentScope
     page.allScope = allScope
     page.refreshButton = refreshButton
@@ -100,13 +85,14 @@ local function BuildDiagnosticsPage(parent)
     page.searchButton = searchButton
 
     local listLabel = W.CreateSectionLabel(errorsView, L.ERROR_LIST)
-    listLabel:SetPoint("TOPLEFT", 17, -48)
+    listLabel:SetPoint("TOPLEFT", 17, -54)
+    listLabel:Hide()
     local reportLabel = W.CreateSectionLabel(errorsView, L.AGENT_REPORT)
-    reportLabel:SetPoint("TOPLEFT", ERROR_LIST_WIDTH + 29, -48)
+    reportLabel:SetPoint("TOPLEFT", ERROR_LIST_WIDTH + 29, -54)
 
-    local listPanel = W.CreatePanel(errorsView, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
-    listPanel:SetPoint("TOPLEFT", 14, -68)
-    listPanel:SetPoint("BOTTOMLEFT", 14, 54)
+    local listPanel = W.CreatePanel(errorsView, colors.editor[1], colors.editor[2], colors.editor[3], 1)
+    listPanel:SetPoint("TOPLEFT", 14, -78)
+    listPanel:SetPoint("BOTTOMLEFT", 14, 64)
     listPanel:SetWidth(ERROR_LIST_WIDTH)
     page.listPanel = listPanel
     local errorScroll = W.CreateScrollArea(listPanel, 8, 8, 7, 8)
@@ -115,13 +101,14 @@ local function BuildDiagnosticsPage(parent)
     errorContent:SetHeight(1)
     errorScroll:SetScrollChild(errorContent)
     local errorEmpty = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(errorEmpty, 11, ns.Theme.textDim)
     errorEmpty:SetPoint("TOP", 0, -24)
     errorEmpty:SetText(L.NO_ERRORS)
-    errorEmpty:SetTextColor(1, 1, 1, 0.32)
+    errorEmpty:SetTextColor(unpack(ns.Theme.textDim))
 
     local reportPanel = W.CreateTextArea(errorsView, true)
-    reportPanel:SetPoint("TOPLEFT", ERROR_LIST_WIDTH + 26, -68)
-    reportPanel:SetPoint("BOTTOMRIGHT", -14, 54)
+    reportPanel:SetPoint("TOPLEFT", ERROR_LIST_WIDTH + 26, -78)
+    reportPanel:SetPoint("BOTTOMRIGHT", -14, 64)
     reportPanel.editBox:SetWidth(layout.WINDOW_WIDTH - ERROR_LIST_WIDTH - 78)
     reportPanel.editBox:SetScript("OnMouseUp", function(self)
         self:SetFocus()
@@ -158,21 +145,24 @@ local function BuildDiagnosticsPage(parent)
         local row = W.CreateListRow(errorContent, ERROR_ROW_HEIGHT)
         row:SetWidth(ERROR_LIST_WIDTH - 26)
         local message = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(message, 12, ns.Theme.text)
         message:SetPoint("TOPLEFT", 9, -6)
         message:SetPoint("TOPRIGHT", -54, -6)
         message:SetJustifyH("LEFT")
         message:SetWordWrap(false)
         row.message = message
         local count = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(count, 11, ns.Theme.textDim)
         count:SetPoint("TOPRIGHT", -9, -6)
-        count:SetTextColor(1, 1, 1, 0.42)
+        count:SetTextColor(unpack(ns.Theme.textDim))
         row.count = count
         local metadata = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(metadata, 11, ns.Theme.textDim)
         metadata:SetPoint("BOTTOMLEFT", 9, 5)
         metadata:SetPoint("BOTTOMRIGHT", -9, 5)
         metadata:SetJustifyH("LEFT")
         metadata:SetWordWrap(false)
-        metadata:SetTextColor(1, 1, 1, 0.34)
+        metadata:SetTextColor(unpack(ns.Theme.textDim))
         row.metadata = metadata
         row:SetScript("OnEnter", function(self)
             self.isHovered = true

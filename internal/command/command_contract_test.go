@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func TestDataKeyFileReachesSharedReader(t *testing.T) {
+	for _, command := range []string{"data db2", "data db2 schema Sample", "data db2 search Sample", "data db2 stream Sample", "data sql", "data spell info", "asset inspect", "asset export", "asset demux"} {
+		args := append(strings.Fields(command), "--key-file", "C:/keys/WoW.txt", "--offline")
+		opts, err := parseOptions(args)
+		if err != nil || opts.fileQuery().KeyFile != "C:/keys/WoW.txt" || !opts.fileQuery().Offline {
+			t.Fatalf("%s: %+v %v", command, opts.fileQuery(), err)
+		}
+	}
+	if _, err := parseOptions([]string{"live", "resume", "OP-test", "--key-file", "C:/keys/WoW.txt"}); err == nil {
+		t.Fatal("key flag admitted outside the data reader")
+	}
+}
+
 func TestHelpAndDescribeExposeTheImplementedContract(t *testing.T) {
 	all, code := invoke(t, "--help", "--format=json")
 	if code != 0 || !all.OK {
@@ -75,7 +88,7 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 	got := stringList(t, commands[0]["flags"])
 	want := []string{"--home <root>", "--format text|json|jsonl", "--project <directory>",
 		"--snapshot <pin>", "--character <name>", "--realm <realm>", "--pid <pid>",
-		"--installation <client>", "--session <session-id>", "--capture-area <window|x,y,width,height>"}
+		"--installation <client>", "--session <session-id>", "--capture-area <window|x,y,width,height>", "--wake-binding <chord>"}
 	if len(got) != len(want) {
 		t.Fatalf("live connect flags = %#v", got)
 	}
@@ -92,7 +105,7 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 	if len(instances) != 1 || instances[0]["path"] != "live instances" || instances[0]["mutates"] != true {
 		t.Fatalf("live instances definition: %#v", instances)
 	}
-	if got := stringList(t, instances[0]["flags"]); len(got) != 3 || got[2] != "--installation <client-or-game-root>" {
+	if got := stringList(t, instances[0]["flags"]); len(got) != 5 || got[2] != "--installation <client-or-game-root>" || got[3] != "--wake-binding <chord>" || got[4] != "--passive" {
 		t.Fatalf("live instances flags = %#v", got)
 	}
 	described, code := invoke(t, "describe", "--format=json")

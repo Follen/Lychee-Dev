@@ -5,6 +5,7 @@ package codebase
 type Declaration struct {
 	Name      string `json:"name"`
 	Category  string `json:"category"`
+	Scope     string `json:"scope,omitempty"`
 	Line      int    `json:"line"`
 	EndLine   int    `json:"endLine"`
 	Signature string `json:"signature,omitempty"`

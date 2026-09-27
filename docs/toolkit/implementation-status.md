@@ -1,12 +1,153 @@
 # Toolkit 2.0 实施状态
 
-日期：2026-09-27。2.0.5 已发布（release run 36255593139 成功）；当前版本源为 `release/version.json`，候选版本为 2.0.6。
-发行条件及本候选的 Windows/npm 合同见 [2.0.6 发布合同](release-2.0.6.md)；
+日期：2026-09-28。2.0.6 已发布（release run 36258410453 成功）；当前版本源为 `release/version.json`，候选版本为 2.5.0。
+发行条件及本候选的 Windows/npm 合同见 [2.5.0 发布合同](release-2.5.0.md)；
 2.0.1 的后验恢复记录保留在 [2.0.1 发布合同](release-2.0.1.md)。
 本页新增命令状态针对下一主版本工作分支；
-已发布的标签和 npm 包不含后续候选改动。2.0.6 在未完成静态门禁、Windows CI、发行组装和发布后回读前，不得宣称已发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
+已发布的标签和 npm 包不含后续候选改动。2.5.0 在未完成静态门禁、Windows CI、发行组装和发布后回读前，不得宣称已发布。WGC 原生崩溃根因（进程级 MTA 引用提前释放导致 GraphicsCapture.dll 卸载后执行）已于 2026-09-24 定位并以 60 轮真实窗口回归验证修复，2026-09-25 全日真机操作无复发；细节见下文 2026-09-24/25 条目。
 
 ## 当前状态
+
+- 2026-09-28 控制台与活动指示修订已受管安装到 Retail，并完成真实客户端最终复验：连接期间拦截输入，执行前释放输入，探针指示保留到精确 Finish；事件选择、诊断、自动化真实运行状态及只读快捷键均有原生断言和 WGC 证据。`OP-52594a0e0d04f1f96410f02fc437f54b` 报告 verified、业务 passed、cleanup complete、display cleared。零消息 flush 与业务提交前 BTP 的原操作恢复也已实测。范围、原始结果、最终离线基准入口及未运行矩阵见 [本轮验收](ui-polish-2026-09-28.md)。下文设置草稿/可编辑绑定和 bootstrap 仅观察描述为旧批次历史，当前设置已移除修改入口，恢复规则按当前 design 与实现。
+
+- 2026-09-27 功能基准测试集已落库，入口及范围见 [tests/baseline/README.md](../../tests/baseline/README.md)。`tools/baseline.mjs` 本轮通过 build/vet、强制 Lua 5.1 全量 Go 测试、20 组固定功能合同、真实 LuaLS 集成、78 项 Node 测试、版本及 skill 合同；Go 结果中 31 个环境可选用例/子进程辅助入口跳过，逐项保留于 `.tmp/baseline-offline-20260927-a/report.json`。`tools/live-baseline.mjs` 在 Retail 12.1.0.69933 / 120100 完成 LIVE-01…04：正常结果、同请求及 completed resume 复用证据、预期业务失败完整收尾、55 秒异步九页面及执行期间无接收器/握手回执。对应操作 `OP-551b3deb6a1245b567a8ca10cf305024`、`OP-99f052d79fabf7382eb99203d0e63b44`、`OP-ce914ec2c4dd22959ff099732e2ffef1` 均已完成 cleanup/display；原始 CLI 结果、请求键、命令与捕获引用见 `.tmp/baseline-live-20260927-a/report.json`。本轮未重新开展人工 WGC 视觉、多实例、多客户端及长时验收，REAL-01…09 保持 `not_run`；该基准通过不等于发行验收通过。
+
+- 2026-09-27 Agent Live r4 正在实施，包含此前 UI 修订。新增完整 `live execute`、角色报告存储、原 owner 下的 observe/finish、首连/安装共享准入、受管回调及紧凑设置/自动化页。离线新增反例与尚未完成的真机项目见[实施记录](agent-live-implementation-2026-09-27.md)。本条不覆盖后文旧候选的历史证据，不表示新候选已经验收或发布。
+
+- 2026-09-27 晚间 Retail 12.1.0.69933 / 120100 生产桥纵向链已实测通过：`OP-b4b2649b7c19c28903e7a09d1b30c193` 与 `OP-6d5da5cd4b115b9ad7c7e254816e98fd` 完成9页面调用、character-v1报告核验、精确ACK及显示清理；`OP-f08c1d918cd85f87d9ea032a0b8e3e89` 正确报告脚本业务失败并完成收尾。先前 Reload 被阻断的根因是 OnTextChanged 分派，已改为 intent-v2 最终按键确认；异步等待重绘握手 QR 的遮挡也已修复。RGB 提示真机观察到轮换、唤醒消失和无唤醒到期消失。完整WGC、操作及尚未验收的多端/多实例范围见实施记录；下文旧候选的“完整探针未通过”是该历史批次的结论。
+
+- 2026-09-27 全量审计阶段记录（工作区，未发布）：
+  [全量审计](full-audit-2026-09-27.md)中的两个 UI 源码缺口已由
+  `addon/UI/Window.lua` 修复并由 `tests/addon/t_visual.lua` 的小视口、
+  导航溢出、Settings 外部绑定更新与本地草稿用例覆盖；真机视觉和绑定交互
+  仍为 `not_run`。源码插件验证的真实固定样本耗时 1.5984892 秒，
+  `.tmp/full-audit-source-20260927/source-addon-fixed-timing.json` 留证；
+  SQL `executionMs:0` 假设已否定，计时试验已撤回，不记为缺陷修复。
+  `.tmp/full-audit-final-go.log` 记录强制 Lua 5.1 全量 `go test -count=1 ./...`
+  通过，`.tmp/full-audit-package-tests.log` 记录 16/16 Node release 测试通过。
+  新私有开发包 `.tmp/full-audit-dev-20260927` 的 addon 已在 Retail
+  12.1.0.69933 / 120100 按 54 文件 receipt clean managed 安装，
+  `.tmp/full-audit-connect.json` 证实新身份会话
+  `SESSION-dec98b3d556d366cadc11d2b28b11d2ae46c63ce23366d30848879912170b7f2`。
+  后续 `BTP-43744f28f245b8b4bc74fcb13f8f53ae` 仅到 `wake_requested`，
+  只读恢复仍 pending，已依用户持续授权 abandon；固定 reload
+  `OP-ed3040d36fa1585003d3156a7a8617f7` 发出 reload 输入后，下一次
+  identify wake 超时，也已依授权 abandon。两者未知游戏效果和证据保留见
+  [桥接 vNext 验收记录](bridge-vnext-acceptance-2026-09-27.md)。
+  accepted 清理缺持久证据与发送后观察 fence 是开放修复项；显式 Close /
+  `receiver_closed` 读回未验收。完整探针业务链仍未通过。
+
+- 2026-09-27 桥接重构（工作区，未发布）：独立 Retail 120100 后台 PostMessage
+  回显实验连续两次通过，覆盖唤醒、ready、staged、accepted、重复提交封存和清屏；
+  详情及限制见[实验验收](../../tests/bridge-input/acceptance-2026-09-27.md)。
+  此实验不执行生产探针，不能替代生产桥真机链。
+  生产代码已接入专用接收器：LDB1 stage 经新鲜回执核对后，物理提交仅取得
+  `receiver_commit_ready` challenge，精确 LDC1 nonce/attempt/challenge/正文摘要
+  才能 dispatch；唤醒 Ctrl+Alt+]、提交 Ctrl+Alt+Shift+]、关闭 Ctrl+Alt+[。
+  `live probe load` 要求 `--budget-seconds <1-120>` 并固定在操作里；首连输入先
+  持久化 BTP attempt，`live status`/`live resume` 只观察未决尝试。独立
+  `live reload fallback --installation <client> --pid <pid> --request <key>
+  [--session <prior-session>]` 已进入命令合同，以 OP journal 记录固定输入和恢复。
+  `live status`/`live resume` 接受 BTP 与 OP；明确决定停止恢复时，`live abandon`
+  也可处理未决 BTP 和固定 reload OP，仅释放宿主所有权，未知游戏效果保留。
+  插件设置页和 `/dev receiver bind <wake|submit|close> <chord>`、`/dev receiver
+  reset` 已提供可编辑绑定；仅允许 ALT-CTRL 加可选 SHIFT 与 `[`, `]` 或
+  F1..F12，close 末端键须不同，冲突或未生效 override 拒绝，配置只存插件选项
+  而不调用 SaveBindings。CLI 的 `live instances`/`connect`/`reset` 接受可选
+  `--wake-binding`，ready 回报实际三键配置并进入保存连接；仍需真机验证。
+  报告仍由 SV 承载；最小 report_error 回执与预算传播已纳入本轮 Go/Lua
+  自动回归，完整实机行为仍待验。Retail 首次身份连接后来已验证成功，但完整探针业务链未通过；
+  Classic/Titan、不同布局/IME、首次安装/升级、战斗/relogin、真实 UI 前后截图、
+  绑定实机交互与性能记录均为 `not_run`，不因实现或实验通过升级状态。
+  详情见[桥接 vNext 验收记录](bridge-vnext-acceptance-2026-09-27.md)。
+
+- 2026-09-27 桥接 vNext 自动验收：`go build ./...`、`go vet ./...` 与
+  `LYCHEEDEV_REQUIRE_LUA51=1 go test -count=1 ./...` 全部通过；完整测试输出见
+  `.tmp/bridge-vnext-root-final.log`。带标签的 desktop/bridge-input 测试、
+  16 项 Node release 测试（含固定 LuaLS）、`tools/version.mjs --check`、
+  仓库及包内 skill-contract（226 引用、0 违规）也通过。私有开发包
+  `.tmp/bridge-vnext-dev-20260927/lycheedev-local-2.0.6.tgz` 已在隔离 npm
+  环境 `--ignore-scripts` 安装并运行 version smoke；它来自未提交工作区，标记
+  developmentOnly，不是 2.0.6 发布产物。各检查与未测边界详见
+  [桥接 vNext 验收记录](bridge-vnext-acceptance-2026-09-27.md)。受管 addon 安装
+  已从私有开发包的 `dev-npm-stage` 完成：安装结果
+  `.tmp/bridge-vnext-addon-install.json`，后续
+  `.tmp/bridge-vnext-addon-status.json` 报告 Retail 12.1.0.69933 / 120100、
+  managed、53 个清单文件。旧独立实验插件的 TOC 经清单和摘要核对后改名为
+  `.toc.disabled`，没有删除文件。该安装轮未向游戏输入或 reload；其后首连时，
+  新接收器代码已在真实 WGC 画面出现，但两次均未进入业务 stage。
+  后续第三次身份回执已成功恢复并建立会话；完整探针游戏链仍未通过。
+  首个 preflight BTP 和第二个半初始化 BTP 均已按用户授权 abandon。
+  修复后的强制 Lua 全量自动复验另见下条；
+  其他客户端/布局、IME、鼠标分派、视觉前后
+  截图及性能仍为 `not_run`。
+
+- 2026-09-27 Retail 首连后的修复与再安装：首个 preflight 容量错误的
+  `BTP-8876e46981f3aec17327a8a966a499f0` 已在用户明确决定后 abandon；
+  第二个 `BTP-febd8c817ef3f697483678ad9c7d4797` 仅到 wake_requested，
+  WGC 证实新接收器出现但半初始化，BugGrabber session 996 指向 EditBox
+  `SetFont` 缺 flags。该 BTP 后来依用户持续授权 abandon，当时没有业务
+  staged/commit/accepted 证据。Go preflight 修复与四处 EditBox/Theme 字体修复已完成定向
+  测试、严格 stub 与回滚测试、build/vet；修复后
+  `LYCHEEDEV_REQUIRE_LUA51=1 go test -count=1 ./...` 已通过（exit 0，
+  `.tmp/bridge-vnext-ui-final.log`），version check、skill-contract
+  84 命令/226 引用/0 违规与 diff check 也通过。
+  新私有开发包 `.tmp/bridge-vnext-ui-dev-20260927` 有 1275 项资源；
+  `.tmp/bridge-vnext-ui-install.json` 成功，
+  `.tmp/bridge-vnext-ui-status.json` 证实 Retail 12.1.0.69933 / 120100 的
+  54 文件 `managed` 安装。只读进程发现随后见 WoW 以 PID 61784 重启，
+  该安装轮未再输入游戏；后续身份已验证，完整业务链仍未验证。
+  详情见[桥接 vNext 验收记录](bridge-vnext-acceptance-2026-09-27.md)。
+
+- 2026-09-27 Retail 后续生产身份恢复：`BTP-2d703...` 的身份回执经原 ID
+  恢复为 confirmed，`.tmp/bridge-vnext-ui-connect-verified.json` 记录成功会话
+  `SESSION-af21566369ba7a9548899142dbd6d707ff2206cbf942f22f1729c8a43a14859d`。
+  请求 probe load 时，自动重连的 `BTP-db822e90e39c1f6fe5172f79a01adad2`
+  （action=`connect`）遇到同 session nonce 的旧记录匹配问题；恢复过滤
+  legacy records 修复后，只读等待因玩家转区导致 QR 消失而超时。
+  用户持续 abandon 授权下，`.tmp/bridge-vnext-reconnect-abandoned.json` 证实该
+  BTP 已 abandon。生产身份连接已验证，探针 stage/commit、load、run、SV 报告
+  与 finish 仍未完成，不能把连接成功称为整条业务链通过。
+
+- 2026-09-27 Source vNext（工作区，未发布）：按
+  [Source vNext 方案](source-vnext.md)实施 Git 固定版本、可重建文件映射、
+  `refs/context`、随包 LuaLS 与 skill 接线。轻量 addoncheck 已从 source
+  借用的 TOC/XML/Lua 检查中提取，delivery 不再依赖 codebase；原 addon
+  release 验证测试已通过。fixture 与真实固定源的 query→symbolId→
+  refs/context、游标和原文 capture 已验证；隔离 npm 安装的包内 LuaLS 3.19.1
+  命令场景通过。真实 Retail/Classic/Titan `UnitHealth` 各有非声明 LuaLS
+  `resolved` 引用（16/13/13），WeakAuras `WeakAuras.Add` 有两条 resolved
+  外呼，后者诚实标记 semantic partial；完整测量见
+  [Source vNext 验收记录](source-vnext-acceptance-2026-09-27.md)。
+  固定 Retail/Forever 原始 UnitDocumentation 字节的规则提取和 Retail
+  UnitHealth→UnitPower 条件候选路径通过离线测试；旧 primitive-only LuaLS
+  声明已改用同一固定 API 环境。输入、声明、配置和原始报告各有可校验 capture，
+  普通 cache prune 后仍可读取。干净 home 的 source prune 回收到 0 且原文
+  CAP 仍可核验；旧 home 的脏 WeakAuras orphan 保留、只回收 verified Retail，
+  Retail 语义查询不受阻，预算未达时 `complete=false`。最终本地隔离包和完整
+  Go/Lua、Node、skill 合同门禁均通过；生产 CI、发行/发布及 source→live
+  真机调查为 `not_run`。上述静态和语义结果
+  不证明运行态秘密值安全。
+  本条不改变已发布 2.0.5/候选 2.0.6 的能力声明，也不提升 Forever
+  为已验收客户端。
+
+- 2026-09-27 数据能力与 SQL 优化（工作区，未发布）：加密 ID 精确归属、CLI
+  Hotfix 全量续扫、固定 enum/flags SQL 元数据、显式多 capture effective SQL、
+  ID 索引查询、投影物化、等值哈希 JOIN、Top-K、完整解码缓存、计时/字段诊断及
+  Agent 查询配方已实现。六表实际扫描 4232 条，3933 条解码、299 条无 payload，
+  25 页全部 complete；SpellMisc effective COUNT 为 417637，仍诚实保留缺钥状态。
+  固定 DBCD 独立对照：SpellMisc 417635 / Spell 414027 个可读 ID 的完整摘要、
+  加密 ID 集合及各前 200 行逐字段相同；未宣称覆盖上游全部格式/测试。
+  细节、性能样本和边界见 [数据能力落地记录](data-improvements-2026-09-27.md)。
+
+- 2026-09-27 DB2 缺钥修复（工作区，未发布）：固定公开 TACTKeys 快照及显式
+  `--key-file` 已接入共享读取器；缺钥只隔离对应加密分区，完整文件与部分字节
+  使用不同证据字段。DB2/领域查询/SQL/JSONL/CSV 均保留不完整状态，资产导出
+  仍要求完整 CKey 校验。同时修复实际 WDC5 Spell sparse 记录的四字节零填充。
+  固定 CN zhCN 12.1.0.69933：SpellMisc 可读 417635 个逻辑 ID，Spell 可读
+  414027 个逻辑 ID；两表各缺 7 分区/55 个逻辑 ID。安装与 CDN 的 SpellMisc
+  结果一致；实际行、中文 Spell 133 和两表 SQL COUNT 已通过。完整证据、固定
+  来源及自动回归见 [DB2 缺钥修复记录](db2-encryption-2026-09-27.md)。
 
 - 2026-09-27 桥接审计修复候选 2.0.6：B01 受管 from/to reload 与公开请求幂等；
   B02/B03 原子 ACK 有界幂等恢复、probe/bugs 显式退出；B04 战斗/loading 恢复；

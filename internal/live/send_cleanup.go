@@ -20,7 +20,7 @@ import (
 // the operation acknowledged until fresh game and disk evidence prove completion.
 // Partial submission is unresolved, never permission to resend the command.
 func (p *ProbeOperation) Clean(ctx context.Context) (desktop.InputReceipt, error) {
-	return p.clean(ctx, desktop.QueuePreparedCommand)
+	return p.clean(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) clean(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {

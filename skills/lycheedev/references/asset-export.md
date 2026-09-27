@@ -16,7 +16,9 @@ lycheedev asset inspect --snapshot <pin> --installation <game-root> --file-id <i
 
 The installation may be the selected client directory or its game root containing
 `.build.info` and `Data/`. This command reads game archives and writes only Toolkit evidence,
-not game files. It performs no network access or game input. The pin must carry
+not game files. It sends no game input and does not fetch game data from CDN;
+an encrypted chunk can require a network fetch of the pinned public key snapshot
+unless `--offline` or an explicit `--key-file` is used. The pin must carry
 canonical Toolkit product, explicit region/language, full build, both config
 keys and exact definition commit. Use the local target preparation described in
 [data-investigation.md](data-investigation.md); do not invent missing values
@@ -35,7 +37,11 @@ and visited-page checks, not a full decoded content-key scan. Region is a
 declared selection, not independently established by a local archive. A changed
 build, ambiguous locale variant, missing file/key, or size limit is an error;
 do not switch locale/build or describe it as an empty successful query.
-The current CLI does not yet accept a decryption-key provider.
+For encrypted BLTE chunks, the reader lazily uses a pinned public TACT key
+snapshot when needed. `--offline` uses only a cached copy. `--key-file
+<WoW.txt|keys.json>` supplies an explicit key set for this request; private
+keys remain in request memory. Missing keys make the affected content
+unavailable, so do not describe a partial read as a complete export.
 
 `--max-bytes` bounds both encoded and decoded selected-file sizes (default
 128 MiB, maximum 512 MiB); Encoding/Root each have a 512 MiB bound. A completed

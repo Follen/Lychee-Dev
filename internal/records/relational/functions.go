@@ -14,6 +14,32 @@ func (e *evaluation) function(node *term) (any, error) {
 	}
 	count := len(node.args)
 	switch node.value {
+	case "HAS_FLAG", "BIT_AND":
+		if count != 2 {
+			return nil, ErrType
+		}
+		var bits [2]uint64
+		for i, arg := range node.args {
+			v, err := e.value(arg)
+			if err != nil {
+				return nil, err
+			}
+			if v == nil {
+				return nil, nil
+			}
+			switch n := v.(type) {
+			case int64:
+				bits[i] = uint64(n)
+			case uint64:
+				bits[i] = n
+			default:
+				return nil, ErrType
+			}
+		}
+		if node.value == "HAS_FLAG" {
+			return bits[0]&bits[1] == bits[1], nil
+		}
+		return bits[0] & bits[1], nil
 	case "LOWER", "UPPER", "LENGTH":
 		if count != 1 {
 			return nil, ErrType

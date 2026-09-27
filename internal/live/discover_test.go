@@ -321,6 +321,26 @@ func TestDiscoveryIdentifiesWindowsWithPerWindowIsolation(t *testing.T) {
 	}
 }
 
+func TestPassiveDiscoveryNeverCapturesOrTypes(t *testing.T) {
+	ctx := context.Background()
+	gameRoot := t.TempDir()
+	client := makeTestClient(t, gameRoot, "_retail_", "wow", "12.1.0.69875")
+	fake := newFakeIO(t)
+	fake.windows = []desktop.WindowIdentity{testWindow(1, client), testWindow(2, client)}
+	report, err := discoverCandidates(ctx, filepath.Join(gameRoot, "home"), DiscoveryRequest{Passive: true}, fake.io())
+	if err != nil || len(report.Candidates) != 2 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	if len(fake.displays) != 0 || len(fake.sent) != 0 {
+		t.Fatal("passive discovery touched game")
+	}
+	for _, candidate := range report.Candidates {
+		if candidate.State != "unobserved" || candidate.InputReady || candidate.Character != "" || candidate.BootstrapAttemptID != "" {
+			t.Fatalf("invented runtime evidence: %+v", candidate)
+		}
+	}
+}
+
 func TestDiscoverySkipsBusyWindowsWithoutTyping(t *testing.T) {
 	ctx := context.Background()
 	gameRoot := t.TempDir()

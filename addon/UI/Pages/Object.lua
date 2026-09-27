@@ -4,40 +4,16 @@ local L = ns.L
 -- Objects workbench page: bounded path inspection over _G with incremental
 -- text streaming, a live value tree, ranked field search and the mouse picker.
 -- Everything here is read-only toward inspected and Blizzard-owned objects.
-local ROW_HEIGHT = 38
+local ROW_HEIGHT = 44
 local VISIBLE_ROWS = 16
-local LIST_WIDTH = 420
+local LIST_WIDTH = 272
 local TEXT_CHUNK_BYTES = 44000
 local TEXT_LOAD_THRESHOLD = 80
-local NODE_POPUP_WIDTH = 760
-local NODE_POPUP_HEIGHT = 520
 
 -- The single built page instance; only read by the shell export hook.
 local builtPage
 
-local function CreateLineInput(parent)
-    local W = ns.Widgets
-    local colors = W.Colors
-    local panel = W.CreatePanel(parent, colors.editor[1], colors.editor[2], colors.editor[3], 1)
-    local editBox = CreateFrame("EditBox", nil, panel)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject(ChatFontNormal)
-    editBox:SetTextColor(0.94, 0.95, 0.96)
-    editBox:SetTextInsets(9, 9, 0, 0)
-    editBox:SetPoint("TOPLEFT", 1, -1)
-    editBox:SetPoint("BOTTOMRIGHT", -1, 1)
-    editBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEditFocusGained", function()
-        W.SetBorderColor(panel, true, 0.75)
-    end)
-    editBox:SetScript("OnEditFocusLost", function()
-        W.SetBorderColor(panel, false)
-    end)
-    panel.editBox = editBox
-    return panel
-end
+local CreateLineInput = ns.Widgets.CreateLineInput
 
 -- Bounded incremental text: one 44 KB chunk is appended whenever the viewport
 -- scrolls within 80 px of the bottom. Close/teardown releases the stream.
@@ -79,6 +55,7 @@ local function BuildObjectPage(parent)
 
     local page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints(parent)
+    W.CreatePageHeading(page, L.TAB_OBJECTS, L.OBJECT_PAGE_HELP)
 
     local mouseButton = W.CreateButton(page, 118, L.CAPTURE_MOUSE)
     mouseButton:SetPoint("TOPRIGHT", -14, -84)
@@ -90,19 +67,21 @@ local function BuildObjectPage(parent)
     local pathPanel = CreateLineInput(page)
     pathPanel:SetPoint("TOPLEFT", 14, -84)
     pathPanel:SetPoint("TOPRIGHT", inspectButton, "TOPLEFT", -8, 0)
-    pathPanel:SetHeight(30)
+    pathPanel:SetHeight(36)
     pathPanel.editBox:SetText("_G")
 
     local inputHint = pathPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(inputHint, 11, ns.Theme.textDim)
     inputHint:SetPoint("LEFT", 10, 0)
     inputHint:SetText(L.OBJECT_INPUT_HINT)
-    inputHint:SetTextColor(1, 1, 1, 0.3)
+    inputHint:SetTextColor(unpack(ns.Theme.textDim))
     inputHint:Hide()
 
     local statusDot = page:CreateTexture(nil, "ARTWORK")
     statusDot:SetSize(5, 5)
     statusDot:SetPoint("TOPLEFT", 17, -135)
     local status = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ns.Theme.SetFont(status, 12, ns.Theme.text)
     status:SetPoint("LEFT", statusDot, "RIGHT", 7, 0)
     status:SetPoint("RIGHT", -14, 0)
     status:SetJustifyH("LEFT")
@@ -118,13 +97,14 @@ local function BuildObjectPage(parent)
     detailLabel:SetPoint("TOPLEFT", LIST_WIDTH + 29, -161)
 
     local treeHint = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    treeHint:SetPoint("LEFT", detailLabel, "RIGHT", 10, 0)
+    ns.Theme.SetFont(treeHint, 11, ns.Theme.textDim)
+    treeHint:SetPoint("BOTTOMLEFT", 17, 24)
     treeHint:SetText(L.TREE_CONTEXT_HINT)
-    treeHint:SetTextColor(1, 1, 1, 0.32)
+    treeHint:SetTextColor(unpack(ns.Theme.textDim))
 
-    local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
+    local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
     listPanel:SetPoint("TOPLEFT", 14, -181)
-    listPanel:SetPoint("BOTTOMLEFT", 14, 54)
+    listPanel:SetPoint("BOTTOMLEFT", 14, 64)
     listPanel:SetWidth(LIST_WIDTH)
     local listScroll = W.CreateScrollArea(listPanel, 8, 8, 7, 8)
     local listContent = CreateFrame("Frame", nil, listScroll)
@@ -132,28 +112,29 @@ local function BuildObjectPage(parent)
     listContent:SetHeight(1)
     listScroll:SetScrollChild(listContent)
     local empty = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(empty, 11, ns.Theme.textDim)
     empty:SetPoint("TOP", 0, -24)
     empty:SetText(L.NO_SEARCH_RESULTS)
-    empty:SetTextColor(1, 1, 1, 0.32)
+    empty:SetTextColor(unpack(ns.Theme.textDim))
 
     local treeView = ns.TreeView.Create(page, {
         contentWidth = layout.WINDOW_WIDTH - LIST_WIDTH - 54,
     })
     treeView.panel:SetPoint("TOPLEFT", LIST_WIDTH + 26, -181)
-    treeView.panel:SetPoint("BOTTOMRIGHT", -14, 54)
+    treeView.panel:SetPoint("BOTTOMRIGHT", -14, 64)
 
     local textView = W.CreateTextArea(page, true)
     textView:SetPoint("TOPLEFT", LIST_WIDTH + 26, -181)
-    textView:SetPoint("BOTTOMRIGHT", -14, 54)
+    textView:SetPoint("BOTTOMRIGHT", -14, 64)
     textView.editBox:SetWidth(layout.WINDOW_WIDTH - LIST_WIDTH - 78)
     textView.editBox:SetScript("OnMouseUp", function(self)
         self:SetFocus()
     end)
 
-    local textModeButton = W.CreateNavTab(page, L.TEXT)
+    local textModeButton = W.CreateModeTab(page, L.TEXT)
     W.FitNavTab(textModeButton, 58, 28)
     textModeButton:SetPoint("TOPRIGHT", -14, -150)
-    local treeModeButton = W.CreateNavTab(page, L.TREE)
+    local treeModeButton = W.CreateModeTab(page, L.TREE)
     W.FitNavTab(treeModeButton, 58, 28)
     treeModeButton:SetPoint("RIGHT", textModeButton, "LEFT", -2, 0)
     local snapshotMode = "tree"
@@ -215,40 +196,41 @@ local function BuildObjectPage(parent)
             return nodePopup
         end
 
-        local overlay = W.CreatePanel(page, 0, 0, 0, 0.76)
-        overlay:SetAllPoints(page)
-        overlay:SetFrameLevel(page:GetFrameLevel() + 40)
+        local overlay = CreateFrame("Frame", nil, ns.Workbench.GetSecondaryRoot())
+        overlay:SetAllPoints(ns.Workbench.GetSecondaryRoot())
         overlay:EnableMouse(true)
 
-        local panel = W.CreatePanel(overlay, colors.surface[1], colors.surface[2], colors.surface[3], 1)
-        panel:SetSize(NODE_POPUP_WIDTH, NODE_POPUP_HEIGHT)
-        panel:SetPoint("CENTER")
-        panel:SetFrameLevel(overlay:GetFrameLevel() + 1)
+        local panel = CreateFrame("Frame", nil, overlay)
+        panel:SetAllPoints(overlay)
 
         local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        ns.Theme.SetFont(title, 16, ns.Theme.text)
         title:SetPoint("TOPLEFT", 18, -17)
         title:SetText(L.NODE_TEXT_TITLE)
+        ns.Theme.SetFont(title, 16, ns.Theme.text)
 
         local path = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(path, 11, ns.Theme.textDim)
         path:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
         path:SetPoint("RIGHT", -18, 0)
         path:SetJustifyH("LEFT")
         path:SetWordWrap(false)
-        path:SetTextColor(1, 1, 1, 0.42)
+        ns.Theme.SetFont(path, 11, ns.Theme.textDim)
 
         local textPanel = W.CreateTextArea(panel, true)
         textPanel:SetPoint("TOPLEFT", 14, -66)
         textPanel:SetPoint("BOTTOMRIGHT", -14, 56)
-        textPanel.editBox:SetWidth(NODE_POPUP_WIDTH - 48)
+        textPanel.editBox:SetWidth(ns.Workbench.Layout.WINDOW_WIDTH - 88)
 
         local progress = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(progress, 11, ns.Theme.textDim)
         progress:SetPoint("BOTTOMLEFT", 18, 21)
-        progress:SetTextColor(1, 1, 1, 0.36)
+        ns.Theme.SetFont(progress, 11, ns.Theme.textDim)
 
         local closeButton = W.CreateButton(panel, 82, L.CLOSE, false)
         closeButton:SetPoint("BOTTOMRIGHT", -14, 14)
         closeButton:SetScript("OnClick", function()
-            overlay:Hide()
+            ns.Workbench.HideSecondary()
             -- Closing releases the incremental stream immediately.
             BindIncrementalText(textPanel, nil)
         end)
@@ -285,6 +267,10 @@ local function BuildObjectPage(parent)
             exportButton = exportButton,
         }
         page.nodePopup = nodePopup
+        overlay:SetScript("OnHide", function()
+            BindIncrementalText(textPanel, nil)
+            textPanel.editBox:ClearFocus()
+        end)
         overlay:Hide()
         return nodePopup
     end
@@ -314,7 +300,12 @@ local function BuildObjectPage(parent)
         end
         BindIncrementalText(popup.textPanel, stream, UpdateProgress)
         UpdateProgress(#popup.textPanel.editBox.savedText, finished, stream:WasLimited())
-        popup.overlay:Show()
+        ns.Workbench.ShowSecondary(popup.overlay)
+        return true
+    end
+
+    function page.OpenSelectedNodeDetail()
+        return OpenNodePopup(treeView:GetSelectedNode())
     end
 
     treeView:SetOnNodeContext(OpenNodePopup)
@@ -352,25 +343,25 @@ local function BuildObjectPage(parent)
         end
 
         pickerDock = CreateFrame("Button", "LycheeToolkitPickerDock", UIParent, "BackdropTemplate")
-        pickerDock:SetSize(48, 48)
+        pickerDock:SetSize(32, 32)
         pickerDock:SetPoint("TOP", UIParent, "TOP", 0, -36)
         pickerDock:SetFrameStrata("TOOLTIP")
         pickerDock:SetClampedToScreen(true)
 
         local logo = pickerDock:CreateTexture(nil, "ARTWORK")
         logo:SetTexture(W.LOGO_TEXTURE)
-        logo:SetTexCoord(0.18, 0.79, 0.17, 0.80)
-        logo:SetPoint("TOPLEFT", 5, -5)
-        logo:SetPoint("BOTTOMRIGHT", -5, 5)
+        logo:SetTexCoord(0, 1, 0, 1)
+        logo:SetAllPoints(pickerDock)
 
         pickerPrompt = W.CreatePanel(pickerDock, colors.editor[1], colors.editor[2], colors.editor[3], 0.98)
         pickerPrompt:SetPoint("TOP", pickerDock, "BOTTOM", 0, -7)
         pickerPrompt:SetSize(220, 28)
         pickerPrompt:SetFrameLevel(pickerDock:GetFrameLevel() + 1)
         local promptText = pickerPrompt:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(promptText, 12, ns.Theme.text)
         promptText:SetPoint("CENTER")
         promptText:SetText(L.PICKER_PROMPT)
-        promptText:SetTextColor(1, 1, 1, 0.86)
+        promptText:SetTextColor(unpack(ns.Theme.text))
         pickerPrompt:Hide()
 
         pickerDock:SetScript("OnClick", function()
@@ -391,7 +382,7 @@ local function BuildObjectPage(parent)
         end
         if restoreWindow and not ns.Safety.IsCombatBlocked() then
             ns.Workbench.Open()
-            SetStatus(statusText or L.PICKER_CANCELLED, 0.55, 0.60, 0.65)
+            SetStatus(statusText or L.PICKER_CANCELLED, unpack(ns.Theme.textMuted))
         end
     end
 
@@ -401,7 +392,7 @@ local function BuildObjectPage(parent)
             return
         end
         EnsurePickerDock()
-        SetStatus(L.PICKER_ACTIVE, 0.42, 0.76, 0.43)
+        SetStatus(L.PICKER_ACTIVE, unpack(ns.Theme.success))
         -- Hiding the window runs the shared teardown first (see the picker
         -- restart below); the picker itself is set up afterwards so it
         -- survives that teardown exactly like the legacy picker did.
@@ -438,10 +429,10 @@ local function BuildObjectPage(parent)
                     SetStatus(L.TEXT_LIMIT_REACHED, accent[1], accent[2], accent[3])
                 elseif finished then
                     SetStatus(string.format(L.OBJECT_READY, inspection.label, inspection.valueType),
-                        0.42, 0.76, 0.43)
+                        unpack(ns.Theme.success))
                 else
                     SetStatus(string.format(L.OBJECT_LOADING_PROGRESS, inspection.label,
-                        inspection.valueType, math.floor(bytes / 1024 + 0.5)), 0.42, 0.76, 0.43)
+                        inspection.valueType, math.floor(bytes / 1024 + 0.5)), unpack(ns.Theme.success))
                 end
             end)
         else
@@ -454,7 +445,7 @@ local function BuildObjectPage(parent)
         if inspection.textStream and not inspection.textStream:IsFinished() then
             readyText = L.OBJECT_READY_MORE
         end
-        SetStatus(string.format(readyText, inspection.label, inspection.valueType), 0.42, 0.76, 0.43)
+        SetStatus(string.format(readyText, inspection.label, inspection.valueType), unpack(ns.Theme.success))
     end
 
     local function InspectPath(path)
@@ -462,10 +453,13 @@ local function BuildObjectPage(parent)
         if succeeded then
             pathPanel.editBox:SetText(path)
             ShowInspection(inspection)
+            return true
         else
             SetStatus(errorMessage or L.OBJECT_NOT_FOUND, accent[1], accent[2], accent[3])
+            return false, errorMessage
         end
     end
+    page.InspectPath = InspectPath
 
     local function ResultPath(root, result)
         local path = result.path or result.key
@@ -479,17 +473,19 @@ local function BuildObjectPage(parent)
         local row = W.CreateListRow(listContent, ROW_HEIGHT)
         row:SetWidth(LIST_WIDTH - 26)
         local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(name, 12, ns.Theme.text)
         name:SetPoint("TOPLEFT", 9, -6)
         name:SetPoint("TOPRIGHT", -9, -6)
         name:SetJustifyH("LEFT")
         name:SetWordWrap(false)
         row.name = name
         local preview = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(preview, 11, ns.Theme.textDim)
         preview:SetPoint("BOTTOMLEFT", 9, 5)
         preview:SetPoint("BOTTOMRIGHT", -9, 5)
         preview:SetJustifyH("LEFT")
         preview:SetWordWrap(false)
-        preview:SetTextColor(1, 1, 1, 0.38)
+        preview:SetTextColor(unpack(ns.Theme.textDim))
         row.preview = preview
         row:SetScript("OnEnter", function(self)
             self.isHovered = true
@@ -582,7 +578,7 @@ local function BuildObjectPage(parent)
             local message = searchedGlobal
                 and string.format(L.GLOBAL_MATCH_COUNT, searchResult.totalMatches)
                 or string.format(L.MATCH_COUNT, searchResult.totalMatches)
-            SetStatus(message, 0.55, 0.60, 0.65)
+            SetStatus(message, unpack(ns.Theme.textMuted))
         else
             SetStatus(errorMessage, accent[1], accent[2], accent[3])
         end
@@ -641,7 +637,7 @@ local function BuildObjectPage(parent)
         end
     end
 
-    SetStatus(L.READY, 0.55, 0.60, 0.65)
+    SetStatus(L.READY, unpack(ns.Theme.textMuted))
     treeView:SetTree(nil)
     W.SetReadOnlyText(textView, "")
     W.SetButtonEnabled(selectSnapshot, false)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -15,11 +16,12 @@ import (
 )
 
 type SessionRecord struct {
-	Schema    string          `json:"schema"`
-	ID        string          `json:"id"`
-	Snapshot  string          `json:"snapshot"`
-	CaptureID string          `json:"captureId"`
-	Region    image.Rectangle `json:"region"`
+	Schema    string                   `json:"schema"`
+	ID        string                   `json:"id"`
+	Snapshot  string                   `json:"snapshot"`
+	CaptureID string                   `json:"captureId"`
+	Region    image.Rectangle          `json:"region"`
+	Bindings  desktop.ReceiverBindings `json:"bindings,omitempty"`
 }
 
 type RecordedSession struct {
@@ -63,7 +65,14 @@ func SaveWindowSession(ctx context.Context, root, snapshot string, session *Wind
 		return SessionRecord{}, err
 	}
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (SessionRecord, error) {
-		record := SessionRecord{Schema: "lycheedev.session.v1", Snapshot: snapshot, CaptureID: capture.ID, Region: session.region}
+		bindings := session.bindings
+		if bindings.WakeBinding == "" {
+			bindings = desktop.DefaultReceiverBindings()
+		}
+		if err := desktop.ValidateReceiverBindings(bindings); err != nil {
+			return SessionRecord{}, err
+		}
+		record := SessionRecord{Schema: "lycheedev.session.v1", Snapshot: snapshot, CaptureID: capture.ID, Region: session.region, Bindings: bindings}
 		record.ID = sessionRecordID(record)
 		if _, err := readSessionEvidence(ctx, store, metadata, record); err != nil {
 			return SessionRecord{}, err
@@ -102,6 +111,12 @@ func readSessionEvidence(ctx context.Context, store *vault.Store, metadata *vaul
 	var zero RecordedSession
 	if record.Schema != "lycheedev.session.v1" || record.ID != sessionRecordID(record) {
 		return zero, errors.New("live.session_record_integrity")
+	}
+	if record.Bindings.WakeBinding == "" {
+		record.Bindings = desktop.DefaultReceiverBindings()
+	}
+	if err := desktop.ValidateReceiverBindings(record.Bindings); err != nil {
+		return zero, err
 	}
 	pin, err := selection.OpenPinner(metadata).ReadPinnedSet(ctx, record.Snapshot)
 	if err != nil {

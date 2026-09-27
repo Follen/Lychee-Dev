@@ -17,6 +17,12 @@ running client loaded the release, that the addon is enabled, or that live
 input is available. Installation/update/removal must not be used to import old
 task definitions, queue state, bindings, or SavedVariables into a new run.
 
+The complete CLI release carries its own pinned LuaLS runtime for source
+semantics. Verify the release inventory through the normal installer and
+`doctor`; do not ask the user to install a global language server. Addon file
+installation uses the lightweight TOC/XML/Lua checker and does not require Git
+or LuaLS on the target machine.
+
 For an authorized running-client upgrade with a saved session, install the
 current release through the managed installer, then use `live reload --session
 <session-id> --request <stable-key>`. This controlled upgrade path can connect

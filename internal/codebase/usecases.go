@@ -18,33 +18,51 @@ type SourceQueryReading struct {
 	Capture evidence.CaptureRef `json:"capture"`
 }
 
+func pinnedSource(ctx context.Context, root, snapshot string) (selection.SourcePin, error) {
+	return vault.ReadWorkspace(ctx, root, func(_ *vault.Store, m *vault.Metadata) (selection.SourcePin, error) {
+		set, err := selection.OpenPinner(m).ReadPinnedSet(ctx, snapshot)
+		if err != nil {
+			return selection.SourcePin{}, err
+		}
+		if set.Source == nil {
+			return selection.SourcePin{}, errors.New("codebase.source_pin_required")
+		}
+		return *set.Source, nil
+	})
+}
+
+func captureSourceJSON(ctx context.Context, root string, value any, complete, truncated bool, provenance evidence.Provenance) (evidence.CaptureRef, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return evidence.CaptureRef{}, err
+	}
+	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (evidence.CaptureRef, error) {
+		return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(raw), MaxBytes: 16 << 20, MediaType: "application/json", Complete: complete, Truncated: truncated, Provenance: provenance})
+	})
+}
+
 // QuerySource runs one documented search-mode query against the fixed
 // snapshot and archives the exact result as evidence.
 func QuerySource(ctx context.Context, root, snapshot string, query SearchQuery) (SourceQueryReading, error) {
-	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (SourceQueryReading, error) {
-		var result SourceQueryReading
-		pin, err := selection.OpenPinner(m).ReadPinnedSet(ctx, snapshot)
-		if err != nil {
-			return result, err
-		}
-		if pin.Source == nil {
-			return result, errors.New("codebase.source_pin_required")
-		}
-		result.Result, err = OpenBrowser(s).Search(ctx, snapshot, *pin.Source, query)
-		if err != nil {
-			return result, err
-		}
-		raw, err := json.Marshal(result.Result)
-		if err != nil {
-			return result, err
-		}
-		result.Capture, err = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-			Reader: bytes.NewReader(raw), MaxBytes: 16 << 20, MediaType: "application/json",
-			Complete: result.Result.Complete, Truncated: result.Result.Truncated,
-			Provenance: evidence.Provenance{Kind: "source-query", Locator: query.Text, Snapshot: snapshot, SourceCommit: pin.Source.ExactCommit},
-		})
+	var result SourceQueryReading
+	pin, err := pinnedSource(ctx, root, snapshot)
+	if err != nil {
 		return result, err
-	})
+	}
+	s, err := vault.OpenStore(root)
+	if err != nil {
+		return result, err
+	}
+	b := OpenBrowser(s)
+	if err := b.EnsureIndex(ctx, pin); err != nil {
+		return result, err
+	}
+	result.Result, err = b.Search(ctx, snapshot, pin, query)
+	if err != nil {
+		return result, err
+	}
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Complete, result.Result.Truncated, evidence.Provenance{Kind: "source-query", Locator: query.Text, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
+	return result, err
 }
 
 // TargetReading is a captured symbol/path inspection result.
@@ -55,34 +73,29 @@ type TargetReading struct {
 
 // InspectSourceTarget inspects one symbol or path of the fixed snapshot.
 func InspectSourceTarget(ctx context.Context, root, snapshot string, query TargetQuery) (TargetReading, error) {
-	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (TargetReading, error) {
-		var result TargetReading
-		pin, err := selection.OpenPinner(m).ReadPinnedSet(ctx, snapshot)
-		if err != nil {
-			return result, err
-		}
-		if pin.Source == nil {
-			return result, errors.New("codebase.source_pin_required")
-		}
-		result.Result, err = OpenBrowser(s).InspectTarget(ctx, snapshot, *pin.Source, query)
-		if err != nil {
-			return result, err
-		}
-		raw, err := json.Marshal(result.Result)
-		if err != nil {
-			return result, err
-		}
-		target := query.Symbol
-		if target == "" {
-			target = query.Path
-		}
-		result.Capture, err = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-			Reader: bytes.NewReader(raw), MaxBytes: 16 << 20, MediaType: "application/json",
-			Complete: result.Result.Complete, Truncated: result.Result.Truncated,
-			Provenance: evidence.Provenance{Kind: "source-inspect", Locator: target, Snapshot: snapshot, SourceCommit: pin.Source.ExactCommit},
-		})
+	var result TargetReading
+	pin, err := pinnedSource(ctx, root, snapshot)
+	if err != nil {
 		return result, err
-	})
+	}
+	s, err := vault.OpenStore(root)
+	if err != nil {
+		return result, err
+	}
+	b := OpenBrowser(s)
+	if err := b.EnsureIndex(ctx, pin); err != nil {
+		return result, err
+	}
+	result.Result, err = b.InspectTarget(ctx, snapshot, pin, query)
+	if err != nil {
+		return result, err
+	}
+	target := query.Symbol
+	if target == "" {
+		target = query.Path
+	}
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Complete, result.Result.Truncated, evidence.Provenance{Kind: "source-inspect", Locator: target, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
+	return result, err
 }
 
 // SourceValidation is a captured TOC validation result.
@@ -94,30 +107,25 @@ type SourceValidation struct {
 // ValidateSourceTOC runs the TOC-closure validation mode against the fixed
 // snapshot. There is no latest fallback: evidence is exactly the pinned commit.
 func ValidateSourceTOC(ctx context.Context, root, snapshot string, input AddonInput) (SourceValidation, error) {
-	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (SourceValidation, error) {
-		var result SourceValidation
-		pin, err := selection.OpenPinner(m).ReadPinnedSet(ctx, snapshot)
-		if err != nil {
-			return result, err
-		}
-		if pin.Source == nil {
-			return result, errors.New("codebase.source_pin_required")
-		}
-		result.Result, err = OpenBrowser(s).ValidateTOC(ctx, *pin.Source, snapshot, input, ValidationIdentity{})
-		if err != nil {
-			return result, err
-		}
-		raw, err := json.Marshal(result.Result)
-		if err != nil {
-			return result, err
-		}
-		result.Capture, err = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-			Reader: bytes.NewReader(raw), MaxBytes: 16 << 20, MediaType: "application/json",
-			Complete: result.Result.Valid, Truncated: false,
-			Provenance: evidence.Provenance{Kind: "addon-validate", Locator: input.Root + "/" + input.Manifest, Snapshot: snapshot, SourceCommit: pin.Source.ExactCommit},
-		})
+	var result SourceValidation
+	pin, err := pinnedSource(ctx, root, snapshot)
+	if err != nil {
 		return result, err
-	})
+	}
+	s, err := vault.OpenStore(root)
+	if err != nil {
+		return result, err
+	}
+	b := OpenBrowser(s)
+	if err := b.EnsureIndex(ctx, pin); err != nil {
+		return result, err
+	}
+	result.Result, err = b.ValidateTOC(ctx, pin, snapshot, input, ValidationIdentity{})
+	if err != nil {
+		return result, err
+	}
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Valid, false, evidence.Provenance{Kind: "addon-validate", Locator: input.Root + "/" + input.Manifest, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
+	return result, err
 }
 
 // MatrixValidation is a captured merged matrix validation result.
@@ -130,58 +138,51 @@ type MatrixValidation struct {
 // fixed evidence (never a moving ref), validates every TOC closure against its
 // own pinned index and merges diagnostics while keeping per-target identity.
 // With a nil resolver, refs are prepared through the repository catalog.
-func ValidateSourceMatrix(ctx context.Context, root, matrixFile string, resolve TargetResolver) (MatrixValidation, error) {
+func ValidateSourceMatrix(ctx context.Context, root, matrixFile string, resolve TargetResolver, options ...ValidationOptions) (MatrixValidation, error) {
 	config, addonRoot, err := ReadMatrixConfig(matrixFile)
 	if err != nil {
 		return MatrixValidation{}, err
 	}
-	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (MatrixValidation, error) {
-		var result MatrixValidation
-		browser := OpenBrowser(s)
-		targets := make([]TOCValidation, 0, len(config.Targets))
-		for _, target := range config.Targets {
-			repository := target.Source
-			if repository == "" {
-				repository = DefaultMatrixSource
-			}
-			var pin selection.SourcePin
-			if resolve != nil {
-				pin, err = resolve(ctx, repository, target.Product, target.Ref)
-			} else {
-				pin, err = browser.PrepareSource(ctx, repository, target.Product, target.Ref)
-			}
-			if err != nil {
-				return result, err
-			}
-			// Fixed evidence only: use an existing published index or prepare
-			// this exact commit once. Nothing resolves a moving ref afterwards.
-			if db, _, openErr := browser.openIndex(ctx, pin); openErr == nil {
-				db.Close()
-			} else if errors.Is(openErr, errIndexNotReady) {
-				if _, err := browser.IndexSource(ctx, pin); err != nil {
-					return result, err
-				}
-			} else {
-				return result, openErr
-			}
-			value, err := browser.ValidateTOC(ctx, pin, "", AddonInput{Root: addonRoot, Manifest: target.TOC}, ValidationIdentity{ID: target.ID, Ref: target.Ref})
-			if err != nil {
-				return result, err
-			}
-			targets = append(targets, value)
+	var result MatrixValidation
+	s, err := vault.OpenStore(root)
+	if err != nil {
+		return result, err
+	}
+	browser := OpenBrowser(s)
+	targets := make([]TOCValidation, 0, len(config.Targets))
+	for _, target := range config.Targets {
+		repository := target.Source
+		if repository == "" {
+			repository = DefaultMatrixSource
 		}
-		result.Result = MergeMatrix(filepath.Clean(addonRoot), targets)
-		raw, err := json.Marshal(result.Result)
+		var pin selection.SourcePin
+		if resolve != nil {
+			pin, err = resolve(ctx, repository, target.Product, target.Ref)
+		} else {
+			pin, err = browser.PrepareSource(ctx, repository, target.Product, target.Ref)
+		}
 		if err != nil {
 			return result, err
 		}
-		result.Capture, err = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-			Reader: bytes.NewReader(raw), MaxBytes: 16 << 20, MediaType: "application/json",
-			Complete: result.Result.Valid, Truncated: false,
-			Provenance: evidence.Provenance{Kind: "addon-matrix-validate", Locator: matrixFile},
-		})
-		return result, err
-	})
+		if err := browser.EnsureIndex(ctx, pin); err != nil {
+			return result, err
+		}
+		value, err := browser.ValidateTOC(ctx, pin, "", AddonInput{Root: addonRoot, Manifest: target.TOC}, ValidationIdentity{ID: target.ID, Ref: target.Ref})
+		if err != nil {
+			return result, err
+		}
+		if len(options) > 0 && options[0].Semantic != nil {
+			value.Semantic, err = browser.checkSemantic(ctx, pin, value.load, options[0].Semantic, options[0].EnvironmentSnapshot)
+			if err != nil {
+				return result, err
+			}
+			value.Valid = value.Valid && value.Semantic.Passed
+		}
+		targets = append(targets, value)
+	}
+	result.Result = MergeMatrix(filepath.Clean(addonRoot), targets)
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Valid, false, evidence.Provenance{Kind: "addon-matrix-validate", Locator: matrixFile})
+	return result, err
 }
 
 // SourceSnapshotStatus reports prepared-snapshot readiness for one pinned set.
@@ -216,16 +217,19 @@ func IndexFixtureSource(ctx context.Context, root, repository, product, sourcePa
 	if err != nil {
 		return FixtureIndexResult{}, err
 	}
-	return vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (FixtureIndexResult, error) {
-		var result FixtureIndexResult
-		result.Pin = pin
-		result.Summary, err = OpenBrowser(s).IndexFixture(ctx, pin, absolute)
-		if err != nil {
-			return result, err
-		}
-		result.Snapshot, err = selection.OpenPinner(m).PinSelection(ctx, selection.SelectionSpec{Source: &pin})
+	result := FixtureIndexResult{Pin: pin}
+	s, err := vault.OpenStore(root)
+	if err != nil {
 		return result, err
+	}
+	result.Summary, err = OpenBrowser(s).IndexFixture(ctx, pin, absolute)
+	if err != nil {
+		return result, err
+	}
+	result.Snapshot, err = vault.WriteMetadata(ctx, root, func(_ *vault.Store, m *vault.Metadata) (selection.PinnedSet, error) {
+		return selection.OpenPinner(m).PinSelection(ctx, selection.SelectionSpec{Source: &pin})
 	})
+	return result, err
 }
 
 // CheckSourceMirror reports mirror health for one catalog repository product.

@@ -7,7 +7,9 @@ import (
 	"os"
 
 	"github.com/follenfang/lycheedev/internal/codebase"
+	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/evidence"
+	"github.com/follenfang/lycheedev/internal/luals"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -197,6 +199,14 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 	}
 	checks := vault.WorkspaceChecks(ctx, root, vault.LegacyRootCandidates(userHome, os.Getenv("LOCALAPPDATA")))
 	checks = append(checks, selection.SelectionChecks(ctx, root)...)
+	toolCheck := vault.Check{ID: "luals.runtime", OK: true, Detail: "bundled LuaLS " + luals.Pinned().Version + " verified"}
+	if _, toolErr := openLuaLS(ctx, ""); toolErr != nil {
+		toolCheck.OK = false
+		toolCheck.Status = "warn"
+		toolCheck.Detail = toolErr.Error()
+		toolCheck.NextStep = "install the complete lycheedev npm package or native release for source refs/context semantic analysis and source validate --semantic"
+	}
+	checks = append(checks, toolCheck)
 	// The mirror check joins only when the nearest project declares a product;
 	// doctor never invents a repository or a product default.
 	if directory, projectErr := projectDirectory(""); projectErr == nil {
@@ -265,4 +275,11 @@ func runEvidenceList(ctx context.Context, opts Options, response *Envelope) (int
 	}
 	response.Result = map[string]any{"captures": captures}
 	return 0, nil
+}
+
+func openLuaLS(ctx context.Context, root string) (*luals.Runtime, error) {
+	return luals.Open(ctx, root, func(ctx context.Context, root string) error {
+		_, err := delivery.InspectRelease(ctx, root, Version)
+		return err
+	})
 }

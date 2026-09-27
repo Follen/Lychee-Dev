@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-ns.Release = "2.0.6"
+ns.Release = "2.5.0"
 ns.Startup = { ready = false, reason = "addon_not_loaded" }
 -- Observability handle: mirrors the addon namespace for host-side /run
 -- introspection (startup state, identity, commandFailure) on every client.
@@ -42,6 +42,9 @@ local function start(trigger)
     started = true
     local registered, registrationFailure = ns.Controls.Register()
     if not registered then ns.Startup.commandFailure = registrationFailure end
+    local receiverRegistered, receiverFailure = ns.Receiver.Register()
+    if not receiverRegistered then ns.Startup.receiverFailure = receiverFailure end
+    if ns.StartupBeacon then ns.StartupBeacon.Arm() end
     if registered then
         local resumed, resumeFailure = ns.Reentry.Start(loader)
         if not resumed then ns.Startup.resumeFailure = resumeFailure end

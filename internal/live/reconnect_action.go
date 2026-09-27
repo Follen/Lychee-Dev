@@ -18,12 +18,14 @@ func reconnectSession(ctx context.Context, root, id string, io *liveIO) (*Window
 }
 
 func reconnectSessionRelease(ctx context.Context, root, id, release string, io *liveIO) (*WindowSession, string, error) {
+	io.root = root
 	bound, err := ReadWindowSession(ctx, root, id)
 	if err != nil {
 		return nil, "", err
 	}
+	io.bindings = bound.Record.Bindings
 	chosen := Candidate{Window: bound.Target.Window, Client: bound.Target.Client,
-		Character: bound.Ready.Character, Realm: bound.Ready.Realm, GUID: bound.Ready.GUID}
+		Character: bound.Ready.Character, Realm: bound.Ready.Realm, GUID: bound.Ready.GUID, PriorReady: bound.Ready}
 	connection, err := connectCandidateRelease(ctx, root, bound.Record.Snapshot, bound.Record.Region, chosen, release, io)
 	if err != nil {
 		return nil, "", err

@@ -2,7 +2,6 @@ package codebase
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"sort"
 	"strconv"
@@ -60,13 +59,21 @@ type compatibilityMatch struct {
 // lookupCompatibility resolves static AddOn usages against one immutable
 // indexed snapshot. It never falls back to facts of another snapshot or to a
 // moving ref: unknown and dynamic references stay visible as unresolved.
-func lookupCompatibility(ctx context.Context, db *sql.DB, pin selection.SourcePin, snapshotID string, usages []ReferenceUsage, interfaceValue string) ([]ValidationFact, []UnresolvedItem, []ValidationDiagnostic, error) {
+func lookupCompatibility(ctx context.Context, db *snapshotCache, pin selection.SourcePin, snapshotID string, usages []ReferenceUsage, interfaceValue string) ([]ValidationFact, []UnresolvedItem, []ValidationDiagnostic, error) {
+	return lookupCompatibilityWithScan(ctx, pin, snapshotID, usages, interfaceValue, db.scan)
+}
+
+func lookupCompatibilityWithScan(ctx context.Context, pin selection.SourcePin, snapshotID string, usages []ReferenceUsage, interfaceValue string, scan func(context.Context, func(sourceRecord) error) error) ([]ValidationFact, []UnresolvedItem, []ValidationDiagnostic, error) {
 	facts := make([]ValidationFact, 0, len(usages)+1)
 	unresolved := make([]UnresolvedItem, 0)
 	diagnostics := make([]ValidationDiagnostic, 0)
 
 	interfaceSeen := false
-	resolver := compatibilityResolver{ctx: ctx, db: db, pin: pin, snapshotID: snapshotID, cache: map[string]compatibilityResolution{}}
+	resolutions, err := compatibilityMatchesForUsages(ctx, pin, usages, interfaceValue, scan)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	resolver := compatibilityResolver{pin: pin, snapshotID: snapshotID, cache: resolutions}
 	for _, usage := range usages {
 		candidate := strings.EqualFold(strings.TrimSpace(usage.Kind), "api-candidate")
 		kind := normalizeCompatibilityKind(usage.Kind)
@@ -126,8 +133,6 @@ type compatibilityResolution struct {
 // compatibilityResolver caches snapshot facts, never caller evidence: each
 // location keeps its own file and line even when many calls share a target.
 type compatibilityResolver struct {
-	ctx        context.Context
-	db         *sql.DB
 	pin        selection.SourcePin
 	snapshotID string
 	cache      map[string]compatibilityResolution
@@ -136,15 +141,7 @@ type compatibilityResolver struct {
 func (r *compatibilityResolver) lookup(usage ReferenceUsage, kind string) (ValidationFact, bool, error) {
 	name := strings.TrimSpace(usage.Name)
 	key := kind + "\x00" + name
-	resolution, cached := r.cache[key]
-	if !cached {
-		matches, known, err := compatibilityMatches(r.ctx, r.db, r.pin, kind, name)
-		if err != nil {
-			return ValidationFact{}, false, err
-		}
-		resolution = compatibilityResolution{matches: matches, known: known}
-		r.cache[key] = resolution
-	}
+	resolution := r.cache[key]
 	matches, categoryKnown := resolution.matches, resolution.known
 	if len(matches) == 0 && (!categoryKnown || kind == "mixin" || kind == "frame-type") {
 		return ValidationFact{}, false, nil
@@ -166,76 +163,101 @@ func (r *compatibilityResolver) lookup(usage ReferenceUsage, kind string) (Valid
 
 const compatibilityEvidenceLimit = 51
 
-func compatibilityMatches(ctx context.Context, db *sql.DB, pin selection.SourcePin, kind, name string) ([]compatibilityMatch, bool, error) {
-	var statement, category string
-	var args []any
-	switch kind {
-	case "api":
-		statement = `SELECT path,line,signature,category FROM entries WHERE kind='declaration' AND category IN ('api-function','api-scriptobject') AND name=? ORDER BY path,line LIMIT ?`
-		args = []any{name, compatibilityEvidenceLimit}
-		category = `SELECT EXISTS(SELECT 1 FROM entries WHERE kind='declaration' AND category IN ('api-function','api-scriptobject'))`
-	case "event":
-		statement = `SELECT path,line,signature,category FROM entries WHERE kind='declaration' AND category='api-event' AND name=? ORDER BY path,line LIMIT ?`
-		args = []any{name, compatibilityEvidenceLimit}
-		category = `SELECT EXISTS(SELECT 1 FROM entries WHERE kind='declaration' AND category='api-event')`
-	case "mixin":
-		statement = `SELECT path,line,signature,category FROM entries WHERE kind='declaration' AND category='mixin' AND name=? ORDER BY path,line LIMIT ?`
-		args = []any{name, compatibilityEvidenceLimit}
-		category = `SELECT EXISTS(SELECT 1 FROM entries WHERE kind='declaration' AND category='mixin')`
-	case "template":
-		statement = `SELECT path,line,signature,category FROM entries WHERE kind='declaration' AND category LIKE 'xml-%' AND name=? ORDER BY path,line LIMIT ?`
-		args = []any{name, compatibilityEvidenceLimit}
-		category = `SELECT EXISTS(SELECT 1 FROM entries WHERE kind='declaration' AND category LIKE 'xml-%' AND name<>'')`
-	case "frame-type":
-		statement = `SELECT path,line,signature,category FROM entries WHERE kind='declaration' AND category=? ORDER BY path,line LIMIT ?`
-		args = []any{"xml-" + name, compatibilityEvidenceLimit}
-		category = `SELECT EXISTS(SELECT 1 FROM entries WHERE kind='declaration' AND category LIKE 'xml-%')`
-	case "interface":
-		statement = `SELECT path,line,target,'Interface' FROM entries WHERE kind='header' AND lower(name) LIKE 'interface%' AND target<>'' ORDER BY path,line LIMIT ?`
-		args = []any{compatibilityEvidenceLimit}
-		category = `SELECT EXISTS(SELECT 1 FROM entries WHERE kind='header' AND lower(name) LIKE 'interface%')`
-	default:
-		return nil, false, compatibilityKindError(kind)
+// Resolve every distinct requested name in one pass over the immutable index.
+// A real addon can reference hundreds of APIs; scanning the whole index once
+// per unique name turned validation into minutes of CPU work.
+func compatibilityMatchesForUsages(ctx context.Context, pin selection.SourcePin, usages []ReferenceUsage, interfaceValue string, scan func(context.Context, func(sourceRecord) error) error) (map[string]compatibilityResolution, error) {
+	requested := map[string]map[string]bool{}
+	add := func(kind, name string) {
+		if kind == "" || name == "" {
+			return
+		}
+		if requested[kind] == nil {
+			requested[kind] = map[string]bool{}
+		}
+		requested[kind][name] = true
 	}
-	rows, err := db.QueryContext(ctx, statement, args...)
+	for _, usage := range usages {
+		add(normalizeCompatibilityKind(usage.Kind), strings.TrimSpace(usage.Name))
+	}
+	add("interface", strings.TrimSpace(interfaceValue))
+	resolutions := map[string]compatibilityResolution{}
+	if len(requested) == 0 {
+		return resolutions, nil
+	}
+	known := map[string]bool{}
+	appendMatch := func(kind, name string, symbol *SymbolMatch) {
+		if !requested[kind][name] {
+			return
+		}
+		key := kind + "\x00" + name
+		resolution := resolutions[key]
+		if len(resolution.matches) < compatibilityEvidenceLimit {
+			signature := symbol.Signature
+			if kind == "interface" {
+				signature = symbol.Target
+			}
+			resolution.matches = append(resolution.matches, compatibilityMatch{Path: symbol.Path, Line: symbol.Line, Role: pathRole(symbol.Path), Signature: signature, Detail: symbol.Category})
+			resolutions[key] = resolution
+		}
+	}
+	err := scan(ctx, func(record sourceRecord) error {
+		if record.Kind != "symbol" || record.Symbol == nil {
+			return nil
+		}
+		symbol := record.Symbol
+		if symbol.Kind == "declaration" {
+			switch symbol.Category {
+			case "api-function", "api-scriptobject":
+				known["api"] = true
+				appendMatch("api", symbol.Name, symbol)
+			case "api-event":
+				known["event"] = true
+				appendMatch("event", symbol.Name, symbol)
+			case "mixin":
+				known["mixin"] = true
+				appendMatch("mixin", symbol.Name, symbol)
+			}
+			if strings.HasPrefix(symbol.Category, "xml-") {
+				known["frame-type"] = true
+				appendMatch("frame-type", strings.TrimPrefix(symbol.Category, "xml-"), symbol)
+				if symbol.Name != "" {
+					known["template"] = true
+					appendMatch("template", symbol.Name, symbol)
+				}
+			}
+		} else if symbol.Kind == "header" && strings.HasPrefix(strings.ToLower(symbol.Name), "interface") {
+			known["interface"] = true
+			for name := range requested["interface"] {
+				if interfaceValueMatches(symbol.Target, name) {
+					appendMatch("interface", name, symbol)
+				}
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	defer rows.Close()
-	matches := make([]compatibilityMatch, 0)
-	for rows.Next() {
-		var match compatibilityMatch
-		if err := rows.Scan(&match.Path, &match.Line, &match.Signature, &match.Detail); err != nil {
-			return nil, false, err
-		}
-		match.Role = pathRole(match.Path)
-		if kind == "interface" {
-			if !interfaceValueMatches(match.Signature, name) {
-				continue
+	for kind, names := range requested {
+		for name := range names {
+			key := kind + "\x00" + name
+			resolution := resolutions[key]
+			resolution.known = known[kind]
+			if kind == "interface" && pin.Repository == "wow-ui-source" {
+				// The verified client baseline supplies authoritative Interface
+				// evidence when the indexed TOC headers do not match.
+				if expected, ok := selection.SourceInterface(pin); ok {
+					resolution.known = true
+					if len(resolution.matches) == 0 && interfaceValueMatches(strconv.Itoa(expected), name) {
+						resolution.matches = []compatibilityMatch{{Path: "selection-baseline", Line: 0, Role: "project", Signature: strconv.Itoa(expected), Detail: "Interface"}}
+					}
+				}
 			}
-			match.Detail = "Interface"
-		}
-		matches = append(matches, match)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	var known bool
-	if err := db.QueryRowContext(ctx, category).Scan(&known); err != nil {
-		return nil, false, err
-	}
-	if kind == "interface" && pin.Repository == "wow-ui-source" {
-		// A verified client baseline is authoritative Interface evidence when
-		// TOC headers carry no usable line, mirroring the legacy version.txt
-		// fallback without inventing build facts.
-		if expected, ok := selection.SourceInterface(pin); ok {
-			known = true
-			if len(matches) == 0 && interfaceValueMatches(strconv.Itoa(expected), name) {
-				matches = []compatibilityMatch{{Path: "selection-baseline", Line: 0, Role: "project", Signature: strconv.Itoa(expected), Detail: "Interface"}}
-			}
+			resolutions[key] = resolution
 		}
 	}
-	return matches, known, nil
+	return resolutions, nil
 }
 
 // interfaceValueMatches reports whether a declared evidence value covers the

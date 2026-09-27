@@ -12,7 +12,7 @@ import (
 )
 
 func TestFlushRequiresNewReadinessAndDoesNotReplay(t *testing.T) {
-	for _, mode := range []string{"success", "partial", "cancelled", "unready", "stale", "guid", "request", "runtime"} {
+	for _, mode := range []string{"success", "partial", "cancelled", "unready", "stale", "guid", "request", "runtime", "zero", "zero-after-stage"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -87,6 +87,19 @@ func TestFlushRequiresNewReadinessAndDoesNotReplay(t *testing.T) {
 				if err := guard(ctx); err != nil {
 					return desktop.InputReceipt{}, err
 				}
+				if (mode == "zero" || mode == "zero-after-stage") && calls == 1 {
+					staged := bridge.ReceiverStage{Action: "reload", RequestID: e.RequestID, Arg: "-", AttemptID: "0123456789abcdef"}
+					if err := operation.recordReceiverProgress(ctx, "wake_requested", staged, 0, bridge.Signal{}); err != nil {
+						t.Fatal(err)
+					}
+					if mode == "zero-after-stage" {
+						staged.ReceiverNonce = "0123456789abcdef0123456789abcdef"
+						if err := operation.recordReceiverProgress(ctx, "stage_requested", staged, 0, bridge.Signal{}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					return desktop.InputReceipt{}, errors.New("lab.key_already_held")
+				}
 				if mode == "partial" {
 					return desktop.InputReceipt{MessagesQueued: 2}, errors.New("fixture.partial_reload")
 				}
@@ -120,6 +133,26 @@ func TestFlushRequiresNewReadinessAndDoesNotReplay(t *testing.T) {
 			var observed probeLoadObservation
 			if err := json.Unmarshal(current.Observation, &observed); err != nil || observed.FlushInput == nil || *observed.FlushInput != receipt {
 				t.Fatal("flush outcome missing", err)
+			}
+			if mode == "zero" || mode == "zero-after-stage" {
+				ready.Sequence = 5
+				frames.frame = makeAckFrame(t, ready)
+				frames.frame.SystemTicks = 5
+				_, retryErr := operation.retryUnsentFlush(ctx, send)
+				if mode == "zero" {
+					if retryErr != nil || calls != 2 {
+						t.Fatalf("proven zero did not recover: %v calls=%d", retryErr, calls)
+					}
+				} else if retryErr == nil || calls != 1 {
+					t.Fatal("contradictory attempt authorized retry")
+				}
+				if _, err := operation.retryUnsentFlush(ctx, send); err == nil {
+					t.Fatal("successful/contradictory retry replayed")
+				}
+				return
+			}
+			if _, err := operation.retryUnsentFlush(ctx, send); err == nil {
+				t.Fatal("unknown or partial flush retried")
 			}
 			if _, err := operation.flush(context.Background(), send); err == nil || calls != 1 {
 				t.Fatal("flush replayed")

@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/codebase"
+	"github.com/follenfang/lycheedev/internal/codebase/environment"
+	"github.com/follenfang/lycheedev/internal/codebase/flow"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live"
+	"github.com/follenfang/lycheedev/internal/luals"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
@@ -38,7 +42,27 @@ func queryFault(err error) (int, string, bool) {
 		code  string
 	}{
 		{errDoctorUnhealthy, 3, "doctor.check_failed"},
+		{codebase.ErrInvalidSearchCursor, 2, "codebase.invalid_search_cursor"},
+		{codebase.ErrUnknownRepository, 2, "codebase.unknown_repository"},
+		{codebase.ErrUnknownProduct, 2, "codebase.unknown_product"},
+		{codebase.ErrInvalidSourceRef, 2, "codebase.invalid_source_ref"},
+		{codebase.ErrInvalidSymbol, 2, "codebase.invalid_symbol"},
+		{codebase.ErrAmbiguousSymbol, 2, "codebase.ambiguous_symbol"},
+		{codebase.ErrSourceNotReady, 3, "codebase.source_not_ready"},
+		{codebase.ErrSourceBudget, 3, "codebase.source_budget"},
+		{codebase.ErrSourceIntegrity, 4, "codebase.source_integrity"},
+		{environment.ErrBudget, 3, "environment.input_budget"},
+		{environment.ErrIdentity, 4, "environment.invalid_identity"},
+		{flow.ErrBudget, 3, "flow.budget"},
+		{flow.ErrInput, 4, "flow.invalid_input"},
+		{luals.ErrUnavailable, 3, "luals.unavailable"},
+		{luals.ErrBudget, 3, "luals.input_budget"},
+		{luals.ErrUnsupported, 3, "luals.unsupported"},
+		{luals.ErrFailed, 5, "luals.check_failed"},
 		{live.ErrAckReadinessPending, 6, "live.ack_readiness_pending"},
+		{live.ErrInvestigationPending, 6, "live.investigation_pending"},
+		{live.ErrBusinessFailed, 5, "live.business_failed"},
+		{live.ErrReportWriterAmbiguous, 3, "live.report_writer_ambiguous"},
 		{live.ErrReceiptHidePending, 6, "live.receipt_hide_pending"},
 		{live.ErrReceiptWindowBusy, 3, "live.receipt_window_busy"},
 		{live.ErrUpgradeInstallation, 3, "live.upgrade_requires_current_managed_addon"},
@@ -83,6 +107,7 @@ func queryFault(err error) (int, string, bool) {
 		{records.ErrListfileQuery, 2, "records.listfile_query"},
 		{records.ErrListfileUnavailable, 5, "records.listfile_unavailable"},
 		{container.ErrKeyUnavailable, 3, "container.key_unavailable"},
+		{records.ErrKeyDocument, 4, "records.invalid_key_document"},
 		{container.ErrUnsupported, 3, "container.unsupported_encoding"},
 		{container.ErrLimit, 3, "container.resource_limit"},
 		{container.ErrMalformed, 4, "container.invalid_format"},
@@ -226,7 +251,7 @@ func parseQueryScalar(raw string) any {
 // Tokens permit duplicate-key rejection, including parameter names. Numeric
 // parameters stay json.Number, never a float64 JSON intermediary.
 func decodeDataQuery(raw []byte) (records.DataQuery, error) {
-	bad := errors.New("query JSON requires sql string and optional scalar parameters object; duplicate/unknown fields are invalid")
+	bad := errors.New("query JSON requires sql string, optional scalar parameters object and optional hotfix capture ID array (1..16); duplicate/unknown fields are invalid")
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
 	start, err := d.Token()
@@ -246,6 +271,10 @@ func decodeDataQuery(raw []byte) (records.DataQuery, error) {
 		}
 		seen[key] = true
 		switch key {
+		case "hotfix":
+			if err := d.Decode(&result.Hotfix); err != nil || len(result.Hotfix) == 0 || len(result.Hotfix) > 16 {
+				return records.DataQuery{}, bad
+			}
 		case "sql":
 			if err := d.Decode(&result.SQL); err != nil || result.SQL == "" {
 				return records.DataQuery{}, bad

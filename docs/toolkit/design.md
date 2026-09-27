@@ -116,6 +116,29 @@ Hotfix 只携带表哈希，命名选择遇到哈希碰撞时拒绝，不借用�
 CDN 内部处理索引、范围缓存和校验，skill 不编排这些细节。`--offline` 禁止网络，
 不改变固定身份或静默切换来源。
 
+BLTE 密钥默认来自固定 commit、大小和 SHA-256 的公开 TACTKeys 快照，首次需要时
+下载并校验入缓存；离线只读缓存。`--key-file` 显式替换密钥来源，私有密钥不入库。
+查询保留 keySource 的来源、摘要和状态。仅 DB2 路径可保留缺钥分区之外的可读数据：
+BLTE 头/EKey 与各块校验仍必须通过；缺失字节范围必须完全归属于相同 key ID 的
+加密分区，公共元数据缺失、损坏、来源失败和取消仍报错。缺失范围的占位字节禁止
+作为字段或字符串读取；分区序号及原始行数保留以维持 WDC 字符串寻址。
+部分字节单独以 partialContent 与 missing 范围图记录，不填充完整 Content，不声称
+整文件 CKey 已验证。DB2、领域查询、SQL/聚合、JSONL 和 CSV 传播 complete=false；
+公开可读行数不等于全表行数。原始文件/资产导出保持完整验证合同。
+
+WDC4+ 的加密 ID 列表保留在 unavailable partition 证据中。只有列表覆盖该分区
+全部逻辑行时，才可把列表外的 ID 判为不存在；不完整/旧格式元数据保持未知。
+完整解码结果可跨进程复用，缓存键包含编码字节、CKey、密钥文档身份与解码版本。
+命中前仍校验当前源字节、密钥身份、缓存 SHA-256 与解码后 CKey；部分内容不写入
+完整缓存。此缓存不缓存 DBD 绑定或表索引，也不绕过显式来源及 offline 合同。
+
+`data hotfix --source dbcache --scan` 对固定 capture 执行有界分页，每页保存
+`hotfix-scan` 清单，累计 decoded/noPayload/notValid/raw 和覆盖计数。默认每次
+100 页，`--max-pages` 限制为 1..1000，累计上限 10000 页；页大小最多 200。
+未完成时使用返回的 snapshot、source、resume（传给 `--cursor`）及相同筛选续扫。
+中途错误返回最后成功保存的清单，不能把未落盘进度作为续扫点。完整仅指选中
+cache 和筛选，不指服务器状态。记录本体保留在清单引用的各 page capture。
+
 `asset export --output <file>` 在同一读取链路取得完整原始字节，将来源及导出清单
 归档，然后在输出父目录暂存并原子发布文件；默认不覆盖，显式 `--overwrite` 才
 替换普通文件，不截断原文件或修改其其他硬链接。父目录必须存在，输出不得落入
@@ -166,13 +189,14 @@ PNG 与无损 WebP 返回原始、清单、编码产物三份证据，不建立�
 | 模块 | 调用方指定 | 模块负责 |
 | --- | --- | --- |
 | selection | 用户目标或固定引用 | 名称、项目配置及版本来源解析；输出确定的上下文 |
-| codebase | 查询、文件范围、比较版本或插件路径 | 按需准备源码/索引，查询与验证并返回来源 |
+| codebase | 查询、文件范围、关系/上下文、比较版本或插件路径 | 固定 Git commit，按需准备源码和有界文件映射；在对应环境中解析语义关系，返回来源、覆盖和续页 |
+| addoncheck | TOC 根和本地插件文件 | 有界 TOC/XML/Lua 加载闭包与语法诊断；不获取 Git、不启动 LuaLS |
 | records | 数据问题或导出请求 | 本地/CDN 访问、格式解码、关系查询与资源输出；Hotfix 独立标注 |
 | live | 连接和有界请求；恢复只需操作 ID | 身份重验、单窗口执行、协议、报告归档及可恢复收尾 |
 | vault / evidence | 对象或结果及来源 | 原子存储、引用保留和完整性读取；不调度游戏 |
 | delivery | 安装目标及发行版本 | 目标发现、内容验证、替换和恢复；不导入旧数据 |
 
-低层 helper 以实际算法职责命名，在实现阶段随所属模块定义，不先制造数百个无实现的函数。旧函数名不会通过 wrapper、type alias 或内部兼容层延续。
+低层 helper 以实际算法职责命名，在实现阶段随所属模块定义，不先制造数百个无实现的函数。source 的轻量加载检查由 codebase 和 delivery 共用 addoncheck；delivery 不反向依赖 codebase。
 
 ## 6. CLI 设计
 
@@ -183,7 +207,7 @@ PNG 与无损 WebP 返回原始、清单、编码产物三份证据，不建立�
 | `init`、`doctor`、`version`、`describe` | 初始化、能力检查、版本、机器可读命令契约 |
 | `target` | `list / add / show / resolve / remove`，目标配置与快照 |
 | `project` | `init / lock / status`，项目级意图和不可变依赖 |
-| `source` | `list / sync / index / query / inspect / diff / validate` |
+| `source` | `list / sync / index / query / inspect / refs / context / diff / validate / prune`；refs/context 以固定符号 ID 和有界游标继续研究；prune 仅显式清理闲置 source 工作树 |
 | `data` | `sql / db2 / hotfix / spell / item / creature / encounter / decor` |
 | `asset` | `search / inspect / export / demux`，文件、图标、图片、视频 |
 | `live` | `instances / connect / bind / probe put / probe load / run / ack / bugs / reload / status / resume / cancel / abandon`；`instances` 为发现+身份识别，`connect` 为整任务自动连接 |
@@ -280,6 +304,33 @@ SQL accepts exactly one of `--sql <text>`, `--file <query.sql|query.json>`, or
 `--stdin`; repeated `--param <name=scalar>` binds named values. The named-target
 example resolves an existing configured target. Evidence bundles are ZIP files.
 
+SQL JSON additionally accepts `hotfix`, an ordered array of 1..16 raw cache
+capture IDs. Unqualified tables and `static.Table` retain static semantics.
+Only explicit `effective.Table` applies the selected captures, whose full data
+context must match the pin. Ordering is signed push, capture array position,
+then physical index. Valid payloads add/replace; invalid/no-payload entries
+delete, except the cached TACTKey tables identified by the upstream policy.
+Unknown modern statuses fail. Overlay rows retain `__hotfix_source`,
+`__hotfix_push` and `__hotfix_index`; query evidence retains capture identities,
+merge policy and counts. Base missing-key coverage stays partial conservatively.
+This is a derived query capture, not a new named pin or server-state guarantee.
+
+`meta.Table` exposes enum/flags mappings at the same definition commit/build,
+including array fields, unnamed values and explicit conditional mappings.
+`HAS_FLAG` and `BIT_AND` operate on exact integers; NULL remains unknown.
+Metadata never silently changes raw row values or applies conditional meanings.
+
+The shared SQL source supports optional exact identity lookup and selected-field
+materialization. Unused DB2 fields are still validated. Eligible bare equality
+joins use bounded hash indexes with the existing nested-loop fallback; eligible
+single-key ORDER BY/LIMIT uses stable Top-K. LIMIT retains bounded output but
+does not suppress later source/expression errors. NULL, exact numeric equality,
+duplicate multiplicity, LEFT JOIN and source completeness remain unchanged.
+EXPLAIN ANALYZE reports actual scan/lookup/work counters. Query timings separate
+definitions, table preparation and execution; decoded byte counts and charged
+budgets are not network traffic or peak RSS. Unknown columns return bounded
+candidate names in structured error details.
+
 ## 7. 统一结果与证据
 
 JSON 外层字段固定为 `schema`、`ok`、`operationId`、`context`、`result`、`captures`、`warnings`、`error`。context 保存实际解析后的引用及匹配关系；error 包含 `code`、`message`、`stage`、`retryable`、`resumeOperationId`。恢复信息是受约束的数据，不是可以从外部响应直接执行的 shell 字符串。
@@ -316,8 +367,9 @@ Capture 使用 `CAP-<id>`，operation 使用 `OP-<id>`，窗口绑定使用 `SES
   state/toolkit.sqlite        目标、工作状态、证据目录和资源准入
   pins/                       不可变固定引用清单
   mirrors/                    Git 镜像
+  source/v1/                  Git worktree、文件事实、环境与语义结果；独立预算
   blobs/                      持久内容对象
-  indexes/                    可重建索引
+  indexes/                    其他业务的既有索引；旧 source SQLite 索引只保留升级兼容，不再写入
   cache/                      可回收网络及派生数据
   runs/<operation-id>/        输入、诊断、恢复材料
   captures/<capture-id>/      完整报告与证据 manifest
@@ -327,7 +379,7 @@ Capture 使用 `CAP-<id>`，operation 使用 `OP-<id>`，窗口绑定使用 `SES
 
 `--home > LYCHEEDEV_HOME > ~/.lycheedev`；环境变量的新含义是完整根路径，不延续旧的“用户主目录再拼 .lycheedev”语义。项目中使用 `lycheedev.json` 与 `lycheedev.lock.json` 保存意图和固定引用，不提交账号或机器路径。
 
-元数据采用 SQLite 短事务；大对象不进入同一个数据库。源码索引仍可按仓库和 schema 分库。CASC 既有外部寻址键保留，内部存储清单负责映射和完整性，避免每次查询重新复制大文件。
+公共元数据采用 SQLite 短事务；大对象不进入同一个数据库。source 私有映射使用可重建的有界文件缓存，不再创建或读取 source SQLite 索引；公共 `state/toolkit.sqlite`、data SQL 和证据合同不受此选择影响。CASC 既有外部寻址键保留，内部存储清单负责映射和完整性，避免每次查询重新复制大文件。
 
 全新安装不读取旧工具目录和旧环境变量。初始化遇到没有新 workspace 标记的占用目录时返回 `workspace.legacy_detected`；显式 fresh 初始化提供已解析的归档计划，将旧根隔离至一个确定的同级归档目录，再创建新根。不合并、不自动删除、不在 npm postinstall 中执行破坏性清理。归档切换中断必须可恢复。
 
@@ -472,6 +524,23 @@ session generation 和输入资格；禁用、显式隐藏或显示所有者更�
 
 初始限额以现有能力为约束：探针 256 KiB、注册队列 16 项/1 MiB、报告默认 384 KiB/最大 512 KiB、已有错误请求 1–100 项。具体限制由协议目录统一发布，所有截断必须可见。
 
+### 2026-09-27 桥接改版决定（待实现）
+
+以下是用户确认的目标合同，实施细节见[桥接与界面重构总方案](bridge-refactor-plan-2026-09-27.md)。工作区实现与真机验收状态分别以 implementation-status 和回归证据为准；describe 与 skill 仅列已实现的命令。
+
+- 专用接收窗口的基础唤醒入口随插件加载可用，不依赖 bridgeEnabled/session。identify/connect/reset 与业务输入使用同一个严格接收通道；唤醒只打开入口，不授予探针权限。最小基础注册与调查 opt-in 资源分别计量，未连接不启动调查或轮询。
+- 身份、握手、状态、摘要、最小错误及清理确认走短回执，完整报告统一走 SV。保留精确已保存报告恢复及 ACK 无额外 reload；本轮不建设通用无 reload 短脚本与完整光学结果通道。SV 持久化的 reload 副作用必须进入探针场景设计。
+- Agent 为实验声明执行预算，CLI/插件校验支持范围并在请求中固定。阶段与总期限覆盖执行及加载/持久化/清理余量；输入接收硬期限独立。恢复不重置原执行预算或重跑业务，宿主等待到期不等于用户取消。
+- 正式输入帧采用 LDB1 暂存，CLI 核对 staged 的 nonce、attempt、正文长度与摘要后投递专用物理提交键；插件生成 `receiver_commit_ready` challenge，CLI 再发携带同一 nonce、attempt、challenge 与正文摘要的 LDC1。只有 LDC1 精确匹配才能 dispatch。旧 attempt 的迟到提交键不能执行新暂存帧。唤醒 Ctrl+Alt+]，提交 Ctrl+Alt+Shift+]，关闭 Ctrl+Alt+[；快捷键的实际投递和绑定冲突仍按客户端/布局验收。
+- 设置页只读展示 receiver wake/submit/close 生效快捷键，不提供修改入口（2026-09-28 用户修订）。兼容接口 `/dev receiver bind` 与 `/dev receiver reset` 保留，约束仍为 `ALT-CTRL-` 加可选 `SHIFT-` 与 `[`, `]`、`F1`..`F12`；close 的末端按键须与 wake/submit 不同。配置验证既有绑定冲突和实际 override 生效后才保存到插件选项，不调用 `SaveBindings`。CLI 首连可由 `live instances`/`live connect`/`live reset` 的 `--wake-binding` 指定已知自定义唤醒键；新 ready 回报三项生效值，CLI 核对并保存到会话。任何待处理输入只能使用当前回执/会话的 profile，不能以旧 ready 或猜测键位补发。
+- 首连、identify、reset 也是持久事务：任何输入前保存 `BTP-...` attempt，`live status` 始终只读。`live resume` 保持原 ID、目标、意图与窗口 owner。持久进度一致且仍在 commit_requested 之前时，可以重做输入握手；历史 attempt 保留，跨进程总共最多三次。已经到达 commit_requested、accepted 或未知提交结果时，只观察相关回执，不能重放业务。
+- 持久化 reload 若停在 flush_requested，只有原生投递记录明确为零消息、未提交，且对应接收 attempt 尚在 wake_requested、没有 nonce 时，才允许在原操作下重试；输入前重新核验 reported readiness 并清除旧零消息证明。部分、未知或矛盾投递证据均不能授权重发。
+- “Agent 连接中”期间，接收器用透明输入层及聚焦 EditBox 拦截游戏内键鼠；普通鼠标与焦点通知不会取消连接，20 秒硬期限及显式关闭仍有效。执行前释放输入所有权；独立、可穿透的荔枝指示器改为“探针运行中”，完整任务 Finish 后隐藏。指示器不参与 QR 编码或协议判定。
+- `live abandon` 仅在用户明确选择停止未决恢复时处理 BTP 或固定 reload OP，保留未知输入、接受和运行效果，释放宿主所有权；不能称为游戏内取消或 ACK。
+- 增加安装激活及桥失联专用的独立重载：固定 `Esc × 3 → Enter → /reload → Enter`，不要求 session、接收器、旧插件 readiness 或二维码。用户明确允许此流程发送三次 Esc；这是上述普通通道禁用 Escape/聊天兜底规则的限定例外，只允许固定 reload，不开放任意文本通道。
+- 兜底重载先记录 attempt、选定窗口/进程和目标安装版本，持锁并逐条核对身份；不得抢占其他操作所有者。输入成功只代表已尝试，随后核验新 runtime/版本并重新握手；结果未知时保留 pending，不能自动重复发送或伪造 ACK。首次安装没有旧 epoch 时只声明新的激活证据，不假造关联重载证明。
+- 正式通道接入前先交付独立测试插件与宿主脚本，验证后台组合键、冷连接、旧提交迟到、硬退出及固定兜底重载。离线与真机验收分开记录。AGENTS.md、命令合同与 skill 随运行时实现同步，现有原子 run/ack/finish 语义保留，完整任务的传输恢复和收尾由 CLI 封装。
+
 ## 11. Skill 编排
 
 唯一安装入口为 `skills/lycheedev/SKILL.md`，名称和安装目录统一为 `lycheedev`。根指引包含路由、固定目标、证据标准和按需读取路径；不得携带脚本实现。
@@ -513,7 +582,7 @@ Lua 端重新组织私有模块与协议，已有运行、对象、事件、追�
 游戏内工作台与外部 CLI 使用统一的游戏侧能力实现：UI 不复制执行/诊断逻辑，CLI 不用通用
 Lua 入口冒充已有的专业功能；不能简单挂回整套旧插件来凑齐功能。新数据模型
 （`LycheeToolkitDB`）不导入 `LycheeDevDB`/`DumperDB` 旧用户数据。全部能力继续遵守
-禁用零开销（首次 `/dev` 前零 frame/事件/hook）、事件驱动、战斗与 secret 值处理、
+opt-in 业务禁用零开销、事件驱动、战斗与 secret 值处理、
 无污染、稳定布局与双语一致规则；逐项验收矩阵见 regression.md 的 WKB 用例。
 
 插件发行 ZIP 顶层仍为 `Lychee Dev/`；采用单一平名清单 `Lychee Dev.toc`（2026-09-25 重构，Ellesmere 模式）：`## Interface` 一次声明全部支持端 interface，`Core/ClientGate.lua` 作为首个加载文件按运行时 GetBuildInfo 实测 interface 选择产品 profile——客户端差异唯一来源是运行时实测，不依赖引擎的 TOC 文件选择规则（camelot 等混合内核的选择器不可控）。四端事件目录数据全部随包加载，按 ns.Client 运行时选表。发布内不得出现本地探针、账号信息、调查记录、测试数据或空壳兼容入口。
@@ -531,3 +600,18 @@ npm 包声明 MIT（新 `lycheedev` 包在许可裁决前为 UNLICENSED/private�
 署名或许可义务。
 
 设计通过条件是：[回归矩阵](regression.md) 中强制场景全部有可追溯结果，且[实施路线](roadmap.md)中的旧能力均完成映射。完成接口迁移后删除替代掉的旧代码与旧内部结构测试，不在新产品内长期维持两套内核。
+
+
+## Agent Live r4 实施合同（2026-09-27）
+
+用户已批准永久快捷键引导及完整任务入口；本节修订旧“首次 /dev 前零 frame”表述。冷启动基础设施为一个一次性 loader、一个绑定 owner 和三个绑定按钮，共5个 frame；正常登录完成后没有常驻事件、OnUpdate、hook 或计时器，保留3条本插件 runtime override。登录/战斗延迟注册只监听对应恢复事件，处理后取消；冲突不覆盖玩家绑定。未启用工作台/监听/追踪/桥业务时不创建其资源。
+
+已 opt-in 的桥在 reload 初始化时可额外创建1个短时提示 frame及4个 texture；世界进入与加载屏结束都已观察后，左上角显示 RGB→GBR→BRG，500ms一档。截止自本次初始化起45秒，不因事件、重试或重复唤醒延长；成功唤醒、离开世界、战斗或禁用立即隐藏并取消事件/计时器。普通登录不显示，禁用桥不创建。提示不是身份、runtime或执行许可。宿主只在新鲜WGC帧中看到两次正确轮换时采用提示，仍须完整握手；提示缺失/过期不阻止正常连接。
+
+接收能力升级为 intent-v2：LDB1报文、摘要挑战、LDC1相关提交校验后，代码只在最后的Enter按键事件中交给业务。OnTextChanged只验证完整提交，不执行业务，解决Reload在文本事件上下文中被保护机制拦截的问题。游戏接受后先释放输入，再分派；旧intent-v1在发送正文前拒绝，新宿主不能向旧接收器追加Enter。提交意图覆盖提交正文和最后按键，任一步未知均不重放业务。
+
+接收器实行一条命令一次唤醒：业务入口之前隐藏面板、撤销输入遮罩、清焦点、取消接收截止与 OnUpdate。执行 Lua 前清除握手回执，异步执行等待期间不重新绘制 loaded/accepted 或进度面板；结束时才发布相关终局回执。视觉采样必须在 Finish/Fail 前完成；传输与终局收尾期间的截图不能当作无遮挡业务画面。完整 execute 最后验证显示清理后释放 owner。
+
+`live execute` 的目标是 finished：保留同一任务直到终局报告核验、资源释放、精确ACK、队列退休、肯定终结回执和两个后续有效无符号WGC画面、共享占用释放。业务失败且收尾完成返回exit5/complete=true；结果可用但待收尾保持complete=false。旧原子命令保留原完成范围。角色级LycheeToolkitBridgeDB持久化桥事实，账号设置继续使用LycheeToolkitDB。独立epoch属于各自存储scope，升级时不得把账号旧计数和角色新计数直接作大小比较。
+
+实施、证据和未验收项分别见 agent-live-implementation-2026-09-27.md、agent-live-acceptance-2026-09-27.md；合同变更本身不等于真机验收通过。

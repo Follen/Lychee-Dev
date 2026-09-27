@@ -17,13 +17,16 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-2.0.6.md` — Windows CI and release contract for the current candidate.
+4. `docs/toolkit/release-2.5.0.md` — Windows CI and release contract for the current candidate.
    `release-2.0.1.md` is retained as the immutable historical contract for the
    already-published release.
 
 Use `go test ./...` and `go vet ./...` at the repository root. The Lua protocol
 suites need a Lua 5.1 interpreter (`LYCHEEDEV_REQUIRE_LUA51=1`); build one with
 `node tests/tools/build-lua.mjs`.
+The repeatable functional baseline is `node tools/baseline.mjs`; setup and the
+separate real-client entry are documented in `tests/baseline/README.md`. Keep
+manual/other-client acceptance separate from automated fixture results.
 
 ## Repository layout
 
@@ -43,7 +46,10 @@ docs/toolkit/       design, status, regression, release contracts
 ## Non-negotiable acceptance criteria
 
 1. **Zero cost while disabled.** Opt-in addon features create no frames, no
-   events, no hooks until enabled.
+   events, no hooks until enabled. The owner-approved r4 bootstrap foundation
+   is separately budgeted: one loader, one binding owner, three binding buttons;
+   no idle events, hooks, timers or OnUpdate after registration. The opted-in
+   reload beacon has a hard 45-second lifetime and stops on receiver wake.
 2. **Zero behavior change without opt-in.** Only narrowly scoped bug fixes may
    change existing behavior.
 3. **Event-driven and bounded.** No polling gates; bounded queues, budgets and
@@ -76,9 +82,25 @@ from acceptance. A client folder is a location, not an identity: read
 
 ## Live (game) rules
 
-- The only bootstrap inputs are `/dev bridge identify <nonce>` and the connect
-  opt-in, sent by `live connect` after per-window identity checks. Everything
-  else requires a saved session and fresh readiness evidence.
+- The dedicated receiver is the machine input path, including first-contact
+  identify/connect/reset. Its minimal wake entry is available when the addon
+  loads; wake does not authorize probe execution. CLI sends bounded LDB1 stage,
+  verifies the staged receipt, triggers physical submit, reads the fresh
+  `receiver_commit_ready` challenge, then sends an exact LDC1 commit and final
+  Enter for intent-v2 dispatch from a key event. OnTextChanged never executes
+  business code. Wake is Ctrl+Alt+], submit Ctrl+Alt+Shift+], close Ctrl+Alt+[.
+  Never interpret a staged receipt or old submit key as accepted execution.
+- Each command hides the receiver and releases focus before business dispatch.
+  Asynchronous execution must leave no waiting panel or handshake QR over the
+  scene. Terminal receipts remain necessary; finish visual sampling before
+  Finish/Fail, and use complete execute/finish to clear the terminal display.
+- Bootstrap input is journaled before sending. A pending `BTP-...` is recovered
+  with `live status`/`live resume` on that ID; resume observes the original
+  receipt and does not resend unknown input. Keep its selected target fixed.
+  For installation activation or bridge loss, `live reload fallback` selects one
+  clean managed installation and PID, journals the fixed Esc×3 Enter /reload
+  Enter sequence, and verifies the runtime. Pending `OP-...` recovery does not
+  replay uncertain keys or override another owner.
 - Probe queues require a **clean managed addon**: files must match the
   installation receipt byte for byte. Deploy addon updates with
   `addon install` from a release root; overlay-copying the repo onto a managed
@@ -89,6 +111,10 @@ from acceptance. A client folder is a location, not an identity: read
   reload. Use standalone `live reload` when requested or needed within the
   authorized task; the agent performs it automatically. Reconnect automatically
   when a reload changes readiness, retaining the selected window and character.
+- `live probe load` requires `--budget-seconds <1-120>`. The budget is immutable
+  for that operation; resume does not restart its execution time. Loading and
+  SV persistence can reload the client, so probes that need transient scenes
+  rebuild them after load and finish observation before report flush.
 - Live results distinguish `report.state` (verified/unavailable) from
   `cleanup` (pending/complete). A verified report with pending cleanup is a
   usable result plus a recovery obligation — never report it as a failure.

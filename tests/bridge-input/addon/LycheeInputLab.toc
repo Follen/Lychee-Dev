@@ -1,0 +1,9 @@
+## Interface: 120100, 50504, 38002
+## Title: Lychee Input Lab
+## Notes: Isolated keyboard transport experiment; no Lua execution.
+## Version: 0.1.0
+## SavedVariables: LycheeInputLabDB
+Config.lua
+MatrixSymbol.lua
+Protocol.lua
+Lab.lua

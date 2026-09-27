@@ -16,6 +16,7 @@ import (
 	"strconv"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
+	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/records/table"
@@ -95,13 +96,18 @@ type RelationLink struct {
 
 // TableProvenance pins one opened table to its resolved identities.
 type TableProvenance struct {
-	Name             string               `json:"name"`
-	Identity         schema.TableIdentity `json:"identity"`
-	LayoutHash       string               `json:"layoutHash"`
-	DefinitionSHA256 string               `json:"definitionSHA256"`
-	FileDataID       uint32               `json:"fileDataID"`
-	ContentKey       string               `json:"contentKey"`
-	LogicalRows      int                  `json:"logicalRows"`
+	PartialContent        *vault.BlobRef          `json:"partialContent,omitempty"`
+	Missing               []container.MissingSpan `json:"missing,omitempty"`
+	KeySource             *KeySource              `json:"keySource,omitempty"`
+	ContentVerified       bool                    `json:"contentVerified"`
+	UnavailablePartitions []UnavailablePartition  `json:"unavailablePartitions,omitempty"`
+	Name                  string                  `json:"name"`
+	Identity              schema.TableIdentity    `json:"identity"`
+	LayoutHash            string                  `json:"layoutHash"`
+	DefinitionSHA256      string                  `json:"definitionSHA256"`
+	FileDataID            uint32                  `json:"fileDataID"`
+	ContentKey            string                  `json:"contentKey"`
+	LogicalRows           int                     `json:"logicalRows"`
 }
 
 // DataContext carries the fixed references and honesty flags every result
@@ -213,9 +219,15 @@ func (n *navigator) open(ctx context.Context, name string) (*preparedTable, erro
 		return nil, err
 	}
 	provenance := TableProvenance{
+		PartialContent: reading.File.PartialContent, Missing: reading.File.Missing,
+		KeySource:       reading.File.KeySource,
+		ContentVerified: reading.File.ContentVerified, UnavailablePartitions: reading.UnavailablePartitions,
 		Name: name, Identity: bundle.Identity, LayoutHash: reading.LayoutHash,
 		DefinitionSHA256: reading.Schema.SHA256, FileDataID: bundle.Identity.DB2FileDataID,
 		ContentKey: reading.File.Entry.ContentKey, LogicalRows: view.LogicalCount(),
+	}
+	if !reading.File.ContentVerified {
+		n.addPartial("encrypted_sections_unavailable")
 	}
 	if reading.File.Source != "" {
 		n.source = reading.File.Source

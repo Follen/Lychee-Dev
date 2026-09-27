@@ -2,6 +2,7 @@ local ADDON_NAME, ns = ...
 
 local binding
 local boundRoot
+local boundOptionsRoot
 local generation = 0
 local runtimeEpoch, epochRoot
 local pendingInput
@@ -12,9 +13,9 @@ local function cancelInput()
     if pending then pending.registry:UnregisterCallback(focusEvent, pending) end
 end
 local function context()
-    local state, failure = ns.Persistence.Current()
+    local state, failure = ns.Persistence.Bridge()
     if not state then return nil, failure end
-    if not ns.Startup.ready or not state.options or state.options.bridgeEnabled ~= true then
+    if not ns.Startup.ready or not ns.Persistence.BridgeEnabled() then
         return nil, "bridge_disabled"
     end
     local actor, reason = ns.Platform.ObserveActor()
@@ -30,7 +31,9 @@ local function current()
     if not actor then cancelInput(); binding, boundRoot = nil, nil; return nil, failure end
     if not binding then return nil, "session_unbound" end
     -- Retain only root identity for invalidation, never read settings through it.
-    if state ~= boundRoot then cancelInput(); binding, boundRoot = nil, nil; return nil, "session_state_changed" end
+    if state ~= boundRoot or ns.Persistence.Current() ~= boundOptionsRoot then
+        cancelInput(); binding, boundRoot = nil, nil; return nil, "session_state_changed"
+    end
     if (issecretvalue and issecretvalue(state.runtimeEpoch)) or state.runtimeEpoch ~= runtimeEpoch then
         cancelInput(); binding, boundRoot = nil, nil; return nil, "session_epoch_changed"
     end
@@ -77,6 +80,7 @@ ns.Session = {
             product = ns.Startup.identity.product, build = ns.Startup.identity.build,
             sequence = identity.sequence, inputReady = eligible,
             runtimeEpoch = identity.runtimeEpoch,
+            reportScope = "character-v1",
         }, 4096)
     end,
     -- One request-scoped callback, never a timer or permanent focus listener.
@@ -154,10 +158,16 @@ ns.Session = {
         generation = generation + 1
         binding = { sessionNonce = nonce, character = actor.character, realm = actor.realm, guid = actor.guid, sequence = 0, generation = generation, runtimeEpoch = runtimeEpoch }
         boundRoot = state
+        boundOptionsRoot = ns.Persistence.Current()
+        if ns.ActivityView and ns.Investigation then
+            local pending = ns.Investigation.ActivityRequest()
+            if pending then ns.ActivityView.Begin(pending) end
+        end
         return copy(binding)
     end,
     Release = function()
         cancelInput()
+        if ns.ActivityView then ns.ActivityView.Stop() end
         binding, boundRoot = nil, nil
     end,
 }

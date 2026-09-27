@@ -32,7 +32,7 @@ func TestLuaPersistenceArchivesAndReopensExactReport(t *testing.T) {
 		Build:         "12.1.0.69875",
 		AfterSequence: 3,
 	}
-	report, err := bridge.ReadPersistedReport(bytes.NewReader(output), []byte("return 42"), expected)
+	report, err := bridge.ReadPersistedReport(bytes.NewReader(output), []byte("return 42"), expected, "character-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,12 @@ var ErrCardinality = errors.New("relational.invalid_cardinality")
 type Source struct {
 	Columns []string
 	Scan    func(context.Context, func([]any) error) error
+	// Equal optionally selects rows for one exact column equality. handled=false
+	// asks the evaluator to use Scan. A handled request must retain scalar types.
+	Equal func(context.Context, string, any, func([]any) error) (handled bool, err error)
+	// ScanSelected keeps the full row width, leaving unused positions nil. It
+	// must retain the source's validation contract for unselected fields.
+	ScanSelected func(context.Context, []int, func([]any) error) error
 }
 type Resolver func(context.Context, TableUse) (Source, error)
 type Limits struct{ Work, MemoryBytes int64 }
@@ -74,6 +80,24 @@ func (p *Program) Execute(ctx context.Context, resolve Resolver, parameters map[
 			source.Scan = func(ctx context.Context, yield func([]any) error) error {
 				measurement.Calls++
 				return scan(ctx, func(row []any) error { measurement.Rows++; return yield(row) })
+			}
+			if source.Equal != nil {
+				equal := source.Equal
+				source.Equal = func(ctx context.Context, column string, value any, yield func([]any) error) (bool, error) {
+					handled, err := equal(ctx, column, value, func(row []any) error { measurement.Rows++; return yield(row) })
+					if handled {
+						measurement.Calls++
+						measurement.Lookups++
+					}
+					return handled, err
+				}
+			}
+			if source.ScanSelected != nil {
+				selected := source.ScanSelected
+				source.ScanSelected = func(ctx context.Context, columns []int, yield func([]any) error) error {
+					measurement.Calls++
+					return selected(ctx, columns, func(row []any) error { measurement.Rows++; return yield(row) })
+				}
 			}
 		}
 		cache[key] = source
@@ -191,9 +215,26 @@ func executeSelect(e *evaluation, root *retrieval, resolve Resolver, scope *quer
 	query.bindings = nil
 	query.input.query = nil
 	stream := func(yield func([]any) error) error {
+		if selected, ok := neededColumns(root, fields); ok {
+			start := 0
+			for i := range sources {
+				if sources[i].ScanSelected != nil {
+					var columns []int
+					for j := start; j < widths[i]; j++ {
+						if selected[j] {
+							columns = append(columns, j-start)
+						}
+					}
+					scan := sources[i].ScanSelected
+					sources[i].Scan = func(ctx context.Context, yield func([]any) error) error { return scan(ctx, columns, yield) }
+				}
+				start = widths[i]
+			}
+		}
 		// Materialize each right table once. Every retained cell is charged and
 		// copied; no provider-owned mutable row is kept after its callback.
 		rights := make([][][]any, len(sources)-1)
+		indexes := make([]*joinIndex, len(rights))
 		for i := 1; i < len(sources); i++ {
 			err := sources[i].Scan(ctx, func(row []any) error {
 				if err := e.spendMatch(); err != nil {
@@ -224,6 +265,10 @@ func executeSelect(e *evaluation, root *retrieval, resolve Resolver, scope *quer
 			if err != nil {
 				return err
 			}
+			indexes[i-1], err = buildJoinIndex(e, conditions[i-1], fields[:widths[i]], widths[i-1], rights[i-1])
+			if err != nil {
+				return err
+			}
 		}
 		var joinRow func(int, []any) error
 		joinRow = func(at int, left []any) error {
@@ -234,7 +279,15 @@ func executeSelect(e *evaluation, root *retrieval, resolve Resolver, scope *quer
 				return yield(left)
 			}
 			matched := false
-			for _, right := range rights[at] {
+			candidates := rights[at]
+			if indexes[at] != nil {
+				var err error
+				candidates, err = indexes[at].candidates(left)
+				if err != nil {
+					return err
+				}
+			}
+			for _, right := range candidates {
 				if err := e.spendMatch(); err != nil {
 					return err
 				}
@@ -279,12 +332,25 @@ func executeSelect(e *evaluation, root *retrieval, resolve Resolver, scope *quer
 			}
 			return nil
 		}
-		return sources[0].Scan(ctx, func(row []any) error {
+		yieldSource := func(row []any) error {
 			if len(row) != len(sources[0].Columns) {
 				return ErrBinding
 			}
 			return joinRow(0, row)
-		})
+		}
+		if len(sources) == 1 && sources[0].Equal != nil {
+			column, value, ok, err := equalitySelection(e, root.filter, fields)
+			if err != nil {
+				return err
+			}
+			if ok {
+				handled, err := sources[0].Equal(ctx, column, value, yieldSource)
+				if handled || err != nil {
+					return err
+				}
+			}
+		}
+		return sources[0].Scan(ctx, yieldSource)
 	}
 	result, err := executeRows(e, &query, fields, stream)
 	if err != nil {

@@ -12,7 +12,7 @@ for _,profile in ipairs(profiles) do
     local actor={character="Paladin",realm="Realm",guid="Player-1-123"}
     local nonce,reloadNonce=string.rep("a",32),string.rep("b",32)
     local frames,shown,reloads={},nil,0
-    LycheeToolkitDB=nil
+    LycheeToolkitDB, LycheeToolkitBridgeDB = nil, nil
     SlashCmdList,SLASH_LYCHEETOOLKIT1={},nil
     issecretvalue=function() return false end
     GetBuildInfo=function() return profile.version,"12345","date",profile.interface end
@@ -65,12 +65,12 @@ for _,profile in ipairs(profiles) do
 
     -- Standalone reload is independently correlated and carries no report.
     assert(ns.Controls.Handle("bridge refresh "..reloadNonce)=="reload_requested")
-    assert(reloads==1 and LycheeToolkitDB.reentry.standalone==true)
+    assert(reloads==1 and LycheeToolkitBridgeDB.reentry.standalone==true)
     ns,loader=loadRuntime()
     loader.callback(loader,"PLAYER_ENTERING_WORLD",false,true)
     assert(ns.Session.Current()==nil and shown==nil,"standalone ready before loading ended")
     loader.callback(loader,"LOADING_SCREEN_DISABLED")
-    assert(ns.Session.Current().runtimeEpoch==2 and shown and LycheeToolkitDB.reentry==nil)
+    assert(ns.Session.Current().runtimeEpoch==2 and shown and LycheeToolkitBridgeDB.reentry==nil)
     outputs[#outputs+1]=shown
 
     -- Built-in bugs is a bounded report operation: report, one persistence
@@ -80,7 +80,7 @@ for _,profile in ipairs(profiles) do
     assert(stored==reported and body:find('"requestType":"bugs"',1,true))
     assert(body:find('"requestedCount":2',1,true) and body:find('"returnedCount":2',1,true))
     assert(ns.Controls.Handle("bridge flush BUGS-A "..reloadNonce)=="reload_requested")
-    assert(reloads==2 and LycheeToolkitDB.reentry.builtin==true)
+    assert(reloads==2 and LycheeToolkitBridgeDB.reentry.builtin==true)
     ns,loader=loadRuntime()
     loader.callback(loader,"LOADING_SCREEN_DISABLED")
     assert(ns.Session.Current()==nil,"builtin ready before world entry")

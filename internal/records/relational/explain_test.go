@@ -26,7 +26,7 @@ func TestExplainDoesNotScan(t *testing.T) {
 	for _, step := range result.Plan.Steps {
 		operations[step.Operation] = true
 	}
-	for _, op := range []string{"input", "nested-loop-join", "order", "slice"} {
+	for _, op := range []string{"input", "adaptive-equality-join", "order", "slice"} {
 		if !operations[op] {
 			t.Fatal(op, result.Plan)
 		}

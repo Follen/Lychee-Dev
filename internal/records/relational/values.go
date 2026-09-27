@@ -131,6 +131,41 @@ func orderScalars(left, right any) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Homogeneous numbers already have an exact total order. Avoid allocating
+	// rational numbers for every sort/join comparison; mixed types still use
+	// the exact rational path below (especially uint64 versus float64).
+	switch x := a.(type) {
+	case int64:
+		if y, ok := b.(int64); ok {
+			if x < y {
+				return -1, nil
+			}
+			if x > y {
+				return 1, nil
+			}
+			return 0, nil
+		}
+	case uint64:
+		if y, ok := b.(uint64); ok {
+			if x < y {
+				return -1, nil
+			}
+			if x > y {
+				return 1, nil
+			}
+			return 0, nil
+		}
+	case float64:
+		if y, ok := b.(float64); ok {
+			if x < y {
+				return -1, nil
+			}
+			if x > y {
+				return 1, nil
+			}
+			return 0, nil
+		}
+	}
 	switch value := a.(type) {
 	case string:
 		other, ok := b.(string)

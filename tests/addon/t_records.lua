@@ -60,7 +60,7 @@ assert(page.usageText:GetText() == string.format(L.EXPORT_STORAGE_USAGE,
 assert(page.pendingText:GetText() == string.format(L.EXPORT_PENDING_COUNT, recordCount - 1),
     "pending count stat was wrong")
 assert(#page.rows == recordCount, "record list did not build one row per record")
-assert(page.rows[1]:GetHeight() == 58, "record rows did not use the 58 px row height")
+assert(page.rows[1]:GetHeight() == 64, "record rows did not use the 64 px row height")
 assert(page.rows[1].background and page.rows[1].divider,
     "record rows did not use the aligned flat-row component")
 

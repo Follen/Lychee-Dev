@@ -60,11 +60,18 @@ type standaloneReloadOperation struct {
 	metadata *vault.Metadata
 }
 
+func (p *standaloneReloadOperation) receiverInput(ctx context.Context, window desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+	progress := func(ctx context.Context, phase string, stage bridge.ReceiverStage, attempt int, signal bridge.Signal) error {
+		return saveReceiverAttempt(ctx, p.metadata, p.id, phase, stage, attempt, signal)
+	}
+	return receiverPreparedInput(p.session.target, p.session.region, sessionSignalIdentity(p.session.ready), progress)(withReceiverBindings(ctx, p.session.bindings), window, prepare, guard)
+}
+
 func ReloadClient(ctx context.Context, root string, request ReloadRequest) (Outcome, error) {
 	if err := request.Validate(); err != nil {
 		return Outcome{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, bootstrapLifecycleBudget)
 	defer cancel()
 	bound, err := ReadWindowSession(ctx, root, request.Session)
 	if err != nil {
@@ -94,7 +101,7 @@ func ReloadClient(ctx context.Context, root string, request ReloadRequest) (Outc
 		return finishOutcome(ctx, root, record, err)
 	}
 	defer operation.close()
-	record, err = operation.execute(ctx, desktop.QueuePreparedCommand)
+	record, err = operation.execute(ctx, operation.receiverInput)
 	return finishOutcome(ctx, root, record, err)
 }
 
@@ -249,6 +256,14 @@ func (p *standaloneReloadOperation) execute(ctx context.Context, send preparedIn
 		switch record.Stage {
 		case "prepared":
 			if err := p.submit(ctx, send); err != nil {
+				if ctx.Err() == nil {
+					latest, inspectErr := journal.OpenBook(p.metadata).InspectWork(ctx, p.id)
+					if inspectErr == nil && latest.Stage == "reload_requested" {
+						if observed, observeErr := p.observe(ctx); observeErr == nil {
+							return observed, nil
+						}
+					}
+				}
 				return latestReloadRecord(ctx, p.metadata, p.id, err)
 			}
 		case "reload_requested":
@@ -265,6 +280,19 @@ func (p *standaloneReloadOperation) execute(ctx context.Context, send preparedIn
 func (p *standaloneReloadOperation) submit(ctx context.Context, send preparedInput) error {
 	if send == nil {
 		return errors.New("live.input_sender_missing")
+	}
+	record, err := journal.OpenBook(p.metadata).InspectWork(ctx, p.id)
+	if err != nil {
+		return err
+	}
+	intent, err := parseStandaloneReload(record)
+	if err != nil {
+		return err
+	}
+	if prior, err := receiverAttemptForWork(ctx, p.metadata, p.id, "refresh", "-", intent.ReloadNonce); err == nil && prior.Phase != "rejected" {
+		return errors.New("live.receiver_attempt_unresolved")
+	} else if err != nil && !errors.Is(err, vault.ErrMissingRecord) {
+		return err
 	}
 	prepared := false
 	firstInput := false
@@ -303,7 +331,7 @@ func (p *standaloneReloadOperation) submit(ctx context.Context, send preparedInp
 	}
 	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	record, err := journal.OpenBook(p.metadata).InspectWork(persist, p.id)
+	record, err = journal.OpenBook(p.metadata).InspectWork(persist, p.id)
 	if err != nil {
 		return errors.Join(sendErr, err)
 	}
@@ -458,12 +486,16 @@ func resumeStandaloneReload(ctx context.Context, root, id string, region image.R
 		ready.Release = input.Expected.Release
 	}
 	session := newWindowSession(bound.Target, region, ready, bridge.ObserveSignals(frames), frames, confirm)
+	session.bindings = bound.Record.Bindings
 	defer session.Close()
 	op, err := session.openStandaloneReload(ctx, root, id)
 	if err != nil {
 		return record, err
 	}
 	defer op.close()
+	if send == nil {
+		send = op.receiverInput
+	}
 	return op.execute(ctx, send)
 }
 

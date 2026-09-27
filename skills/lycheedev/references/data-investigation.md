@@ -108,10 +108,45 @@ to 64 MiB, indexed physical/copy rows to one million, columns/partitions to 4096
 and decoded row text to 1 MiB. A page's serialized row array is capped at 8 MiB;
 any row failure or budget overflow returns no partial page. Page selection uses
 bounded extra memory, but each CLI invocation currently reopens the table and
-checks its selected source. Encrypted-file key provisioning is not available
-from this command yet.
+checks its selected source. Encrypted BLTE chunks use a pinned public TACT key
+snapshot, fetched only when needed and cached with a verified digest. Offline
+uses only cached keys. Supply `--key-file <WoW.txt|keys.json>` to use an explicit
+text or JSON key set instead; private keys stay in request memory.
+
+DB2 reads keep readable encrypted/non-encrypted sections when other sections
+lack keys. Inspect `complete`, `partial`, `unavailablePartitions` (direct DB2)
+or `tables[].unavailablePartitions` (schema/domain results). File provenance
+separates `partialContent` plus missing chunk ranges from full CKey-verified
+`content`; placeholder bytes never become decoded fields. A schema's `rowCount`
+is the readable logical count, not the total number of records in a partial table.
+Report missing keys and row coverage with the answer. Do not describe a partial
+search, empty result, SQL aggregate or CSV as a full-build answer. Changing from
+installation to CDN does not supply a missing key. Raw asset exports still
+require the complete verified file.
 
 ## Implemented static SQL
+
+For parameterized lookups, flags, explicit Hotfix overlays and query diagnostics,
+read [data-query-recipes.md](data-query-recipes.md). The `meta` catalog exposes
+pinned enum/flag definitions; `effective` requires explicitly selected raw cache
+captures in the query JSON. Unqualified and `static` tables retain static values.
+
+For a complete local Hotfix investigation, prefer the CLI-owned bounded scan:
+
+```text
+lycheedev data hotfix --source dbcache --scan --snapshot <pin> --from <raw-cache-capture> --table SpellMisc --limit 200 --max-pages 100 --format json
+```
+
+The result contains cumulative matched/returned/decoded/no-payload counts and
+page capture IDs. If `result.complete` is false, continue with `--cursor` set to
+the returned `resume` capture, the returned snapshot, the same raw cache and the
+same table/filters/limit. Read page captures for records; do not treat the summary
+as their decoded contents. A completed scan covers only that selected cache.
+It does not imply an effective overlay or full server coverage. Resume checkpoints
+are saved after each successful page; a completed checkpoint can be reread.
+If a scan fails after saving pages, its error response retains the last saved
+scan result and `resume`. Report the failure and that checkpoint together;
+resume after addressing the cause instead of restarting from the mutable file.
 
 Supply SQL as text, from a `.sql` or `.json` file, or from stdin. Exactly one
 input mode is accepted. For JSON requests, use a UTF-8 file (at most 1 MiB):
@@ -134,12 +169,19 @@ its capture/manifest. Use SQL LIMIT/OFFSET, not CLI `--limit`. `--offline` and
 `--max-bytes` have the same cache and per-file meanings as DB2 reading. Replace
 `--installation` with `--cdn` for explicitly selected remote content.
 
-Only static tables are available. Qualified `static.Table` bypasses CTE
-names; no Hotfix overlay or implicit source fallback occurs. Query output contains `query`,
+Unqualified tables and qualified `static.Table` read pinned static values;
+`static.Table` also bypasses CTE names. A Hotfix overlay is used only when the
+query document explicitly names raw cache captures and queries `effective.Table`
+as described in [data-query-recipes.md](data-query-recipes.md). There is no
+implicit overlay or source fallback. Query output contains `query`,
 `result` (ordered `columns` and positional `rows`, or `plan` for EXPLAIN), and
 `sources` with each prepared table's provenance. Verify the returned capture
 with `evidence verify <capture-id>`. Complete means the requested query result,
-including any SQL LIMIT, not an unrestricted whole-table export.
+including any SQL LIMIT, not an unrestricted whole-table export. Missing-key
+sections propagate `complete: false` and `partial: true` to SQL; source tables
+retain missing ranges/partitions. CSV captures and manifests also retain
+`complete: false`. JSONL end frames report partial coverage explicitly; a legal
+end frame and exit 0 alone do not prove all encrypted sections were readable.
 
 Supported paths include joins, grouping, ordinary CTEs, UNION ALL, correlated
 expression subqueries (also in GROUP BY and aggregate inputs), and

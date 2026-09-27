@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/buildinfo"
@@ -22,6 +21,7 @@ type ResetRequest struct {
 	Realm        string
 	PID          uint32
 	Installation string
+	WakeBinding  string
 }
 
 func (r ResetRequest) Validate() error {
@@ -32,6 +32,9 @@ func (r ResetRequest) Validate() error {
 		if !bindingLabel(label) {
 			return errors.New("live.invalid_binding_identity")
 		}
+	}
+	if _, err := requestedReceiverBindings(r.WakeBinding); err != nil {
+		return err
 	}
 	return nil
 }
@@ -50,15 +53,19 @@ type ResetOutcome struct {
 // the correlated receipt, then connects through the normal bootstrap. Windows
 // owned by a disk marker are never touched.
 func ResetWindow(ctx context.Context, root string, request ResetRequest) (ResetOutcome, error) {
-	return resetWindow(ctx, root, request, nativeIO())
+	io := nativeIO()
+	io.root = root
+	io.bindings, _ = requestedReceiverBindings(request.WakeBinding)
+	return resetWindow(ctx, root, request, io)
 }
 
 func resetWindow(ctx context.Context, root string, request ResetRequest, io *liveIO) (ResetOutcome, error) {
+	io.root = root
 	var outcome ResetOutcome
 	if err := request.Validate(); err != nil {
 		return outcome, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, bootstrapLifecycleBudget)
 	defer cancel()
 	pin, err := selection.InspectSelection(ctx, root, request.Snapshot)
 	if err != nil {
@@ -126,7 +133,8 @@ func resetCandidate(ctx context.Context, target ClientWindow, region image.Recta
 		return bridge.Signal{}, err
 	}
 	nonce := hex.EncodeToString(entropy)
-	if _, err := io.send(ctx, target.Window, "/dev bridge reset "+nonce); err != nil {
+	_, attemptID, err := io.sendBootstrap(ctx, target, region, "/dev bridge reset "+nonce)
+	if err != nil && !bootstrapBusinessMayHaveExecuted(ctx, io.root, attemptID) {
 		return bridge.Signal{}, err
 	}
 	frames, err := io.capture(ctx, target.Window, region)
@@ -138,8 +146,12 @@ func resetCandidate(ctx context.Context, target ClientWindow, region image.Recta
 	reader := bridge.ObserveSignals(hints)
 	wait, cancel := context.WithTimeout(ctx, io.wait)
 	defer cancel()
-	return reader.DiscoverReset(wait, bridge.SignalExpectation{
+	signal, err := reader.DiscoverReset(wait, bridge.SignalExpectation{
 		Kind: "reset", Release: buildinfo.Version, ProbeNonce: nonce,
 		Product: target.Client.Product, Build: target.Client.FullBuild,
 	})
+	if err == nil && attemptID != "" {
+		err = confirmBootstrapReceiver(ctx, io.root, attemptID, signal)
+	}
+	return signal, err
 }

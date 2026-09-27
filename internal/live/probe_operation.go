@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -77,6 +78,13 @@ func (p *ProbeOperation) Close() error {
 	return err
 }
 
+func (p *ProbeOperation) receiverInput(ctx context.Context, window desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+	if err := p.session.checkReportWriters(ctx); err != nil {
+		return desktop.InputReceipt{}, err
+	}
+	return receiverPreparedInput(p.session.target, p.session.region, sessionSignalIdentity(p.session.ready), p.recordReceiverProgress)(withReceiverBindings(ctx, p.session.bindings), window, prepare, guard)
+}
+
 func (p *ProbeOperation) check(ctx context.Context) error {
 	if p == nil || p.run == nil || p.metadata == nil {
 		return errors.New("live.operation_closed")
@@ -109,6 +117,9 @@ func (p *ProbeOperation) Observe(ctx context.Context) (evidence.CaptureRef, erro
 // Repeating it may reconcile queue publication, but never sends or replays input.
 // On failure, inspect durable work: earlier file effects are not rolled back.
 func (p *ProbeOperation) PrepareFiles(ctx context.Context) (journal.WorkRecord, error) {
+	if err := p.session.checkReportWriters(ctx); err != nil {
+		return journal.WorkRecord{}, err
+	}
 	for step := 0; step < 4; step++ {
 		if err := p.check(ctx); err != nil {
 			return journal.WorkRecord{}, err

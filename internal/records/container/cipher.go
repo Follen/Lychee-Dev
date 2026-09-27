@@ -5,9 +5,16 @@ package container
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/bits"
 )
+
+// MissingKeyError identifies an unavailable key without exposing key material.
+type MissingKeyError struct{ ID uint64 }
+
+func (e *MissingKeyError) Error() string { return fmt.Sprintf("%s: %016x", ErrKeyUnavailable, e.ID) }
+func (e *MissingKeyError) Unwrap() error { return ErrKeyUnavailable }
 
 func (d *decoder) unlock(raw []byte, index int) ([]byte, error) {
 	if len(raw) < 10 || raw[0] != 8 {
@@ -22,14 +29,18 @@ func (d *decoder) unlock(raw []byte, index int) ([]byte, error) {
 		return nil, ErrUnsupported
 	}
 	if d.keys == nil {
-		return nil, fmt.Errorf("%w: %016x", ErrKeyUnavailable, name)
+		return nil, &MissingKeyError{ID: name}
 	}
 	key, err := d.keys(d.ctx, name)
 	if cancel := d.ctx.Err(); cancel != nil {
 		return nil, cancel
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %016x", ErrKeyUnavailable, name)
+		if errors.Is(err, ErrKeyUnavailable) {
+			return nil, &MissingKeyError{ID: name}
+		}
+		// A failed/malformed key provider is not evidence of a missing key.
+		return nil, fmt.Errorf("%w: key provider failed for %016x", ErrKeyUnavailable, name)
 	}
 	if len(key) != 16 && len(key) != 32 {
 		return nil, fmt.Errorf("%w: invalid key length for %016x", ErrKeyUnavailable, name)

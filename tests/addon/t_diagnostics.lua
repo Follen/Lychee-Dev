@@ -168,6 +168,7 @@ local function NewRegion(name)
 
     setmetatable(region, {
         __index = function(target, key)
+            if type(key) ~= "string" or not key:match("^%u") then return nil end
             local noOp = function() end
             rawset(target, key, noOp)
             return noOp
@@ -430,6 +431,7 @@ ns.Workbench = {
     Close = function() end,
     IsShown = function() return true end,
 }
+LoadAddonFile("UI/Theme.lua", ns)
 LoadAddonFile("UI/Widgets.lua", ns)
 LoadAddonFile("UI/Pages/Diagnostics.lua", ns)
 
@@ -454,7 +456,7 @@ assert(diagnosticsPage.clearButton:IsEnabled() and diagnosticsPage.exportReport:
     "diagnostics page actions stayed disabled after a refresh")
 assert(not diagnosticsPage.selectReport:IsEnabled(), "diagnostics selected an error without a click")
 
--- Error rows: 44 px, 16-row pool, 430 px list with the legacy row content.
+-- Error rows: 52 px, 16-row pool, 430 px list with readable content.
 local wideDB = {}
 for index = 1, 25 do
     wideDB[index] = {
@@ -467,8 +469,9 @@ diagnosticsPage.allScope:Click()
 assert(diagnosticsPage.allScope.variant == "selected" and diagnosticsPage.currentScope.variant == "secondary",
     "diagnostic scope toggle did not switch its selected state")
 assert(#diagnosticsPage.errorRows == 16, "diagnostic error list did not virtualize 16 rows")
-assert(diagnosticsPage.errorRows[1]:GetHeight() == 44, "diagnostic error rows were not 44 px")
-assert(diagnosticsPage.listPanel:GetWidth() == 430, "diagnostic error list width changed")
+assert(diagnosticsPage.errorRows[1]:GetHeight() == 52, "diagnostic error rows were not 52 px")
+assert(diagnosticsPage.listPanel:GetWidth() < ns.Workbench.Layout.WINDOW_WIDTH / 2,
+    "diagnostic list leaves too little room for report details")
 local firstRow = diagnosticsPage.errorRows[1]
 assert(firstRow.message:GetText() == "error 25", "diagnostic rows did not show the first message line")
 assert(firstRow.count:GetText() == "x25", "diagnostic rows did not show their counters")
@@ -553,4 +556,3 @@ assert(registeredCallbacks["BugGrabber.BugGrabbed"] == nil,
 
 print("Lychee Toolkit diagnostics tests passed")
 return true
-

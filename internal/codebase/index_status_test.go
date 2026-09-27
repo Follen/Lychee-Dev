@@ -2,6 +2,7 @@ package codebase
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,15 +47,15 @@ func TestSnapshotStatusReportsPreparedReadiness(t *testing.T) {
 	if after.ASTFiles != 1 || after.Complete {
 		t.Fatalf("syntax accounting = %+v", after)
 	}
-	if after.JournalMode != "delete" {
-		t.Fatalf("journal mode = %q", after.JournalMode)
+	if after.Storage != "file-cache" {
+		t.Fatalf("storage = %q", after.Storage)
 	}
-	wantBlobs := filepath.Join(b.store.Root(), "blobs")
-	if after.ContentDatabase != wantBlobs {
-		t.Fatalf("content database = %q, want %q", after.ContentDatabase, wantBlobs)
+	if info, err := os.Stat(filepath.Join(b.indexPath(pin), "records.jsonl")); err != nil || info.Size() == 0 {
+		t.Fatalf("records path = %q %v", b.indexPath(pin), err)
 	}
-	if info, err := os.Stat(after.Database); err != nil || info.Size() == 0 {
-		t.Fatalf("database path = %q %v", after.Database, err)
+	raw, err := json.Marshal(after)
+	if err != nil || string(raw) == "" || containsLegacyDatabaseField(raw) {
+		t.Fatalf("status leaked database fields: %s %v", raw, err)
 	}
 
 	pinned, err := SourceSnapshotStatus(ctx, b.store.Root(), pinID(t, b, pin))
@@ -64,6 +65,14 @@ func TestSnapshotStatusReportsPreparedReadiness(t *testing.T) {
 	if pinned.Ready != after.Ready {
 		t.Fatalf("use case status = %+v", pinned)
 	}
+}
+
+func containsLegacyDatabaseField(raw []byte) bool {
+	var data map[string]any
+	if json.Unmarshal(raw, &data) != nil { return true }
+	_, database := data["database"]
+	_, journal := data["journalMode"]
+	return database || journal
 }
 
 func pinID(t *testing.T, b *Browser, pin selection.SourcePin) string {

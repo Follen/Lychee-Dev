@@ -2,10 +2,10 @@ package live
 
 import (
 	"context"
-	"errors"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"os"
@@ -99,8 +99,10 @@ func TestHideReceiptClearsDisplayedReceipt(t *testing.T) {
 	frames.ackFrames.frame = rearmed
 	var commands []string
 	result, err := hideReceipt(ctx, session, "saved", hideIO{
-		send:      hideSendRecorder(t, &commands),
-		capture:   func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error) { return &repeatFrames{frame: blankFrame(t, time.Now())}, nil },
+		send: hideSendRecorder(t, &commands),
+		capture: func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error) {
+			return &repeatFrames{frame: blankFrame(t, time.Now())}, nil
+		},
 		readiness: 5 * time.Second,
 		grace:     time.Second,
 		verify:    2 * time.Second,
@@ -140,8 +142,11 @@ func TestHideReceiptRefusesOwnedWindow(t *testing.T) {
 	}
 	var commands []string
 	_, err = hideReceipt(ctx, session, "saved", hideIO{
-		send:      hideSendRecorder(t, &commands),
-		capture:   func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error) { t.Fatal("captured on refusal"); return nil, nil },
+		send: hideSendRecorder(t, &commands),
+		capture: func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error) {
+			t.Fatal("captured on refusal")
+			return nil, nil
+		},
 		readiness: time.Second, grace: time.Second, verify: time.Second,
 	})
 	if !errors.Is(err, ErrReceiptWindowBusy) || len(commands) != 0 {
@@ -220,5 +225,53 @@ func TestHideReceiptMatchesSessionIdentity(t *testing.T) {
 	})
 	if err == nil || len(commands) != 0 {
 		t.Fatalf("foreign receipt dismissed: %v commands=%v", err, commands)
+	}
+}
+
+func TestHideReceiptHiddenAcceptanceNeedsExactCommitAndClear(t *testing.T) {
+	for _, mode := range []string{"committed-clear", "uncommitted-clear", "committed-visible"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			root, client, book, record, input := probeOperationFixtureAtSequence(t, 7)
+			releaseFixtureOwner(t, root, client, book, record)
+			session, frames := operationSessionFixtureAtSequence(t, client, input, 7)
+			rearmed := makeAckFrame(t, session.ready)
+			rearmed.SystemTicks = 2
+			frames.ackFrames.frame = rearmed
+			sends, confirmations, captures := 0, 0, 0
+			result, err := hideReceipt(ctx, session, "saved", hideIO{
+				send: func(ctx context.Context, _ desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+					if err := guard(ctx); err != nil {
+						return desktop.InputReceipt{}, err
+					}
+					command, err := prepare(ctx)
+					if err != nil || command != "/dev bridge hide" {
+						t.Fatalf("hide command = %q, %v", command, err)
+					}
+					sends++
+					return desktop.InputReceipt{MessagesQueued: 4}, errors.New("accepted card hidden by clear")
+				},
+				mayHaveExecuted: func(context.Context) bool { return mode != "uncommitted-clear" },
+				confirm:         func(context.Context) error { confirmations++; return nil },
+				capture: func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error) {
+					captures++
+					if mode == "committed-visible" {
+						return &repeatFrames{frame: makeAckFrame(t, session.ready)}, nil
+					}
+					return &repeatFrames{frame: blankFrame(t, time.Now())}, nil
+				},
+				readiness: time.Second, grace: time.Millisecond, verify: 10 * time.Millisecond,
+			})
+			if sends != 1 {
+				t.Fatalf("hide sent %d times", sends)
+			}
+			if mode == "committed-clear" {
+				if err != nil || !result.Cleared || confirmations != 1 || captures != 1 {
+					t.Fatalf("correlated clear = %+v, %v confirm=%d capture=%d", result, err, confirmations, captures)
+				}
+			} else if err == nil || result.Cleared || confirmations != 0 || mode == "uncommitted-clear" && captures != 0 {
+				t.Fatalf("unproven hide completed = %+v, %v confirm=%d capture=%d", result, err, confirmations, captures)
+			}
+		})
 	}
 }

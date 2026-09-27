@@ -10,6 +10,23 @@ recorded in release.json, with source archives attached to the matching release
 at https://github.com/Follen/Lychee-Dev/releases/tag/v<version>.
 
 ===============================================================================
+Lua Language Server (LuaLS) 3.19.1 - payload/tool/luals/
+https://github.com/LuaLS/lua-language-server/releases/tag/3.19.1
+License: MIT for the LuaLS project; full upstream notice is retained at
+payload/tool/luals/LICENSE.
+===============================================================================
+
+The pinned Windows runtime archive is distributed intact as private CLI data.
+It includes Microsoft Visual C++ runtime DLLs under payload/tool/luals/bin/
+(concrt140, msvcp140*, vcruntime140*). Those DLLs are Microsoft components,
+not LuaLS MIT-licensed source. Their redistribution is governed by Microsoft's
+Visual C++ v14 Redistributable and Runtime terms:
+https://visualstudio.microsoft.com/license-terms/
+
+Other files in the pinned LuaLS archive retain their upstream notices and
+licenses. The release inventory records every file's SHA-256 and byte length.
+
+===============================================================================
 luaqrcode (adapted) - payload/addon/Bridge/MatrixSymbol.lua
 https://github.com/speedata/luaqrcode
 License: BSD-3-Clause
@@ -738,18 +755,12 @@ as a format corruption check for CASC archive indexes, not as a cryptographic
 integrity primitive. No upstream source file is redistributed.
 
 ===============================================================================
-Blizzard Entertainment event catalog data - conditional, NOT currently shipped
-in this package
+Blizzard Entertainment event catalog data - payload/addon/Modules/Events/
 ===============================================================================
 
-If generated event catalog data derived from the game client's
-Blizzard_APIDocumentationGenerated interface files (as mirrored in
-https://github.com/Gethe/wow-ui-source) is added to the addon payload in a
-future build, it must carry this attribution: "Generated from official
-Blizzard_APIDocumentationGenerated interface documentation; source mirror
-wow-ui-source (https://github.com/Gethe/wow-ui-source) at the commit recorded
-in the generated file header. World of Warcraft and Blizzard
+Generated from official Blizzard_APIDocumentationGenerated interface
+documentation; source mirror wow-ui-source
+(https://github.com/Gethe/wow-ui-source) at the commit recorded in each
+generated CatalogData_*.lua file header. World of Warcraft and Blizzard
 Battle.net are trademarks or registered trademarks of Blizzard Entertainment,
-Inc. in the U.S. and/or other countries." This package version does not include
-that data; the addon payload currently ships only project-authored Lua and the
-luaqrcode adaptation listed above.
+Inc. in the U.S. and/or other countries.

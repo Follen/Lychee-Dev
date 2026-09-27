@@ -6,6 +6,10 @@
 -- provide the same surface before loading addon code. Require this file from
 -- the harness entry points; it never touches addon state itself.
 
+if type(GetTime) ~= "function" then
+    GetTime = function() return 0 end
+end
+
 if type(strmatch) ~= "function" then
     strmatch = string.match
 end

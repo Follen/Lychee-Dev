@@ -14,6 +14,15 @@ import (
 
 // Abandon explicitly stops host-side cleanup without claiming a game ACK.
 func Abandon(ctx context.Context, root, id string) (Outcome, error) {
+	if record, err := InspectOperation(ctx, root, id); err == nil && record.Intent.Kind == "reload" {
+		var kind struct {
+			Schema string `json:"schema"`
+		}
+		if json.Unmarshal(record.Intent.Request, &kind) == nil && kind.Schema == "lycheedev.fixed-reload.v1" {
+			record, err = abandonFixedReload(ctx, root, record)
+			return finishOutcome(ctx, root, record, err)
+		}
+	}
 	record, err := abandonProbe(ctx, root, id)
 	return finishOutcome(ctx, root, record, err)
 }

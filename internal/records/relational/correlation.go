@@ -31,7 +31,7 @@ func localColumn(fields []field, qualifier, name string) (int, bool, error) {
 		index = i
 	}
 	if owned && index < 0 {
-		return -1, true, ErrBinding
+		return -1, true, missingColumn(fields, qualifier, name)
 	}
 	return index, owned, nil
 }
@@ -63,5 +63,5 @@ func bindColumn(e *evaluation, fields []field, node *term) (*term, error) {
 		}
 		depth++
 	}
-	return nil, ErrBinding
+	return nil, missingColumn(fields, node.qualifier, node.value)
 }

@@ -50,8 +50,8 @@ frame:RegisterUnitEvent("UNIT_AURA", "player")
 	facts := analyzeFixture(t, "Interface/AddOns/Test/Core.lua", data)
 
 	if got, want := facts.Declarations, []Declaration{
-		{Name: "Addon.Start", Category: "function", Line: 1, EndLine: 3, Signature: "function Addon.Start(value)"},
-		{Name: "helper", Category: "local-function", Line: 4, EndLine: 5, Signature: "local function helper()"},
+		{Name: "Addon.Start", Category: "function", Scope: "<file>", Line: 1, EndLine: 3, Signature: "function Addon.Start(value)"},
+		{Name: "helper", Category: "local-function", Scope: "<file>", Line: 4, EndLine: 5, Signature: "local function helper()"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("declarations = %#v, want %#v", got, want)
 	}
@@ -211,7 +211,7 @@ self:Init()
 			t.Errorf("missing XML relationship %#v in %#v", want, firstFacts.Relationships)
 		}
 	}
-	if !hasDeclaration(firstFacts, Declaration{Name: "self:Init", Category: "function", Line: 6, EndLine: 7, Signature: "function self:Init()"}) {
+	if !hasDeclaration(firstFacts, Declaration{Name: "self:Init", Category: "function", Scope: "<file>", Line: 6, EndLine: 7, Signature: "function self:Init()"}) {
 		t.Fatalf("embedded function line missing: %#v", firstFacts.Declarations)
 	}
 	if len(firstFacts.Diagnostics) != 0 {

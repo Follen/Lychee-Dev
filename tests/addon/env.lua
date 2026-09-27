@@ -109,10 +109,12 @@ function Env.LoadWorkbench()
         "Core/Execute.lua",
         "Core/Stores.lua",
         "Core/Persistence.lua",
+        "UI/Theme.lua",
         "UI/Widgets.lua",
         "UI/TreeView.lua",
         "UI/Export.lua",
         "UI/Window.lua",
+        "UI/Pages/Settings.lua",
         "UI/Pages/About.lua",
     }
     for index = 1, #sources do
@@ -273,6 +275,14 @@ local function NewRegion(name, parent, objectType)
         self.fontObject = font
     end
 
+    function region:SetFont(font, height, flags)
+        if self.objectType == "EditBox" then
+            assert(type(flags) == "string",
+                "EditBox:SetFont requires an explicit flags string on WoW")
+        end
+        self.font, self.fontHeight, self.fontFlags = font, height, flags
+    end
+
     function region:SetTextInsets(...)
         self.textInsets = { ... }
     end
@@ -291,6 +301,11 @@ local function NewRegion(name, parent, objectType)
 
     function region:SetTextColor(r, g, b, a)
         self.textColor = { r, g, b, a }
+    end
+
+    function region:GetScript(scriptName)
+        local scripts=rawget(self,"scripts")
+        return scripts and scripts[scriptName]
     end
 
     function region:SetScript(scriptName, handler)
@@ -492,6 +507,16 @@ local function NewRegion(name, parent, objectType)
         return self.verticalScroll
     end
 
+    function region:GetHorizontalScroll()
+        return self.horizontalScroll or 0
+    end
+
+    function region:SetHorizontalScroll(offset)
+        self.horizontalScroll = math.max(0, math.min(offset,
+            math.max(0, (self.scrollChild and self.scrollChild:GetWidth() or 0)
+                - self:GetWidth())))
+    end
+
     function region:SetVerticalScroll(offset)
         self.verticalScroll = offset
         local scripts = rawget(self, "scripts")
@@ -677,7 +702,7 @@ C_AddOns = {
     end,
     GetAddOnMetadata = function(addonName, key)
         if addonName == "Lychee Dev" and key == "Version" then
-            return "2.0.6"
+            return "2.5.0"
         end
         return ""
     end,

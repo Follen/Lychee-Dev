@@ -33,6 +33,30 @@ func readAckReadiness(ctx context.Context, root string, record journal.WorkRecor
 			return zero, err
 		}
 		if !reloaded {
+			if record.Intent.Goal == "finished" {
+				checkpoint, found, err := readCheckpointAnchor(ctx, root, record, input)
+				if err != nil {
+					return zero, err
+				}
+				if found && signal.RequestID == "" && signal.ReloadNonce == "" {
+					expected := input.Expected
+					expected.Kind = "ready"
+					expected.RequestID = ""
+					expected.ReloadNonce = ""
+					expected.AfterSequence = 0
+					expected.RuntimeEpoch = checkpoint.RuntimeEpoch
+					expected.RequireInputReady = true
+					if err := signal.Match(expected); err != nil {
+						return zero, err
+					}
+					generic := signal.RequestID == "" && signal.ReloadNonce == ""
+					correlated := signal.RequestID == input.Expected.RequestID && signal.ReloadNonce == input.Load.ReloadNonce
+					if signal.GUID != input.Load.GUID || (!generic && !correlated) || signal.CodeBytes != 0 || signal.ReportBytes != 0 || signal.CodeAdler32 != "" || signal.ReportAdler32 != "" || signal.CleanupNonce != "" {
+						return zero, errors.New("live.invalid_ack_readiness")
+					}
+					return signal, nil
+				}
+			}
 			if input.Revision == "" {
 				return zero, errors.New("live.reload_not_observed")
 			}

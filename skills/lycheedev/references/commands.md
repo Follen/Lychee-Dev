@@ -3,7 +3,7 @@
 
 # Command reference
 
-80 implemented commands. Every command accepts `--format text|json|jsonl`;
+85 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -19,13 +19,13 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 ## asset
 
 - `asset inspect` — mutates. Verify CASC file: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --file-id <id> [--max-bytes <n>] [--offline]; archive original bytes; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--file-id <id>`, `--max-bytes <n>`, `--offline`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--key-file <WoW.txt|keys.json>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--file-id <id>`, `--max-bytes <n>`, `--offline`.
 - `asset search` — mutates. Use one listfile mode: --query <text>, --extension <ext>, --name <path>, or --file-id <id>; requires --snapshot and --listfile <community-csv|wowexport-text|wowexport-binary>; --limit bounds search and extension pages; --offline reuses verified cache; --max-bytes bounds total listfile input (default 256 MiB, maximum 512 MiB); omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--listfile <community-csv|wowexport-text|wowexport-binary>`, `--query <text>`, `--extension <ext>`, `--name <path>`, `--file-id <id>`, `--limit <1-200>`, `--max-bytes <n>`, `--offline`.
 - `asset export` — mutates. Export CASC file: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --file-id <id> --output <file> [--encoding raw|png|webp] [--mipmap <0..15>] [--channels <rgba-subset>] [--max-pixels <n>] [--overwrite] [--max-bytes <n>] [--offline]; raw default, BLP2 image conversion, existing parent required; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--file-id <id>`, `--output <file>`, `--encoding raw|png|webp`, `--mipmap <0..15>`, `--channels <rgba-subset>`, `--max-pixels <n>`, `--overwrite`, `--max-bytes <n>`, `--offline`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--key-file <WoW.txt|keys.json>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--file-id <id>`, `--output <file>`, `--encoding raw|png|webp`, `--mipmap <0..15>`, `--channels <rgba-subset>`, `--max-pixels <n>`, `--overwrite`, `--max-bytes <n>`, `--offline`.
 - `asset demux` — mutates. Demux a bounded VP9 AVI from --path <local-file> or pinned CASC (--snapshot <pin> and --file-id <id> with --installation or --cdn); --output <existing-directory> [--max-bytes <n>] [--max-frames <n>] [--allow-partial] [--overwrite]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--path <local-file>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--file-id <id>`, `--output <existing-directory>`, `--max-bytes <n>`, `--max-frames <n>`, `--allow-partial`, `--overwrite`, `--offline`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--key-file <WoW.txt|keys.json>`, `--path <local-file>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--file-id <id>`, `--output <existing-directory>`, `--max-bytes <n>`, `--max-frames <n>`, `--allow-partial`, `--overwrite`, `--offline`.
 
 ## cache
 
@@ -45,44 +45,44 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 ## data
 
-- `data hotfix` — mutates. Inspect independent Hotfix records with an explicit source: --source <wago|dbcache|raidbots>. dbcache reads a pinned --snapshot <pin> (--dbcache <DBCache.bin> | --from <cache-capture>); wago queries the remote record set from --product/--build/--region/--locale with an optional --snapshot parent; raidbots reads --raidbots <DBCache.bin> under 30 days. Filters: --table --table-hash --record --push --status --region-id --search and wago --from/--to; --latest selects the largest matching push batch before pagination; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--source <wago|dbcache|raidbots>`, `--snapshot <pin>`, `--dbcache <DBCache.bin>`, `--raidbots <DBCache.bin>`, `--from <cache-capture-or-time>`, `--to <time>`, `--product <retail|classic|titan|forever>`, `--build <full-build>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--table <name>`, `--table-hash <8-hex>`, `--record <n>`, `--push <n>`, `--status <0-255>`, `--region-id <n>`, `--search <text>`, `--latest`, `--offline`, `--limit <1-200>`, `--cursor <opaque>`, `--page <n>`, `--after-index <n>`, `--max-pages <n>`, `--max-requests <n>`, `--max-bytes <n>`, `--encoding csv`, `--output <file>`.
-- `data sql` — mutates. Read-only SQL over a pinned static target: exactly one of --sql <text>, --file <query.sql|query.json>, or --stdin; repeated --param <name=scalar> binds named values; --encoding csv --output <file> writes a captured CSV and manifest; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--sql <text>`, `--file <query.sql|query.json>`, `--stdin`, `--param <name=scalar>`, `--encoding csv`, `--output <file>`, `--overwrite`, `--max-bytes <n>`, `--offline`.
+- `data hotfix` — mutates. Inspect independent Hotfix records with an explicit source: --source <wago|dbcache|raidbots>. dbcache reads a pinned --snapshot <pin> (--dbcache <DBCache.bin> | --from <cache-capture>); wago queries the remote record set from --product/--build/--region/--locale with an optional --snapshot parent; raidbots reads --raidbots <DBCache.bin> under 30 days. Filters: --table --table-hash --record --push --status --region-id --search and wago --from/--to; --latest selects the largest matching push batch before pagination; dbcache --scan owns bounded pagination with --max-pages and a resumable --cursor; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--source <wago|dbcache|raidbots>`, `--snapshot <pin>`, `--dbcache <DBCache.bin>`, `--raidbots <DBCache.bin>`, `--from <cache-capture-or-time>`, `--to <time>`, `--product <retail|classic|titan|forever>`, `--build <full-build>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--table <name>`, `--table-hash <8-hex>`, `--record <n>`, `--push <n>`, `--status <0-255>`, `--region-id <n>`, `--search <text>`, `--latest`, `--scan (dbcache: complete bounded scan; --cursor resumes its capture)`, `--offline`, `--limit <1-200>`, `--cursor <opaque>`, `--page <n>`, `--after-index <n>`, `--max-pages <n>`, `--max-requests <n>`, `--max-bytes <n>`, `--encoding csv`, `--output <file>`.
+- `data sql` — mutates. Read-only SQL over pinned static tables, meta.Table enum/flags metadata, or explicit effective.Table overlays (query JSON hotfix array): exactly one of --sql <text>, --file <query.sql|query.json>, or --stdin; repeated --param <name=scalar> binds named values; --encoding csv --output <file> writes a captured CSV and manifest; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--key-file <WoW.txt|keys.json>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--sql <text>`, `--file <query.sql|query.json>`, `--stdin`, `--param <name=scalar>`, `--encoding csv`, `--output <file>`, `--overwrite`, `--max-bytes <n>`, `--offline`.
 - `data db2` — mutates. Read typed rows: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --table <name> [--id <n> | --limit <n> --after-id <n>] [--max-bytes <n>] [--offline]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--table <name>`, `--id <n>`, `--limit <n>`, `--after-id <n>`, `--max-bytes <n>`, `--offline`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--key-file <WoW.txt|keys.json>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--table <name>`, `--id <n>`, `--limit <n>`, `--after-id <n>`, `--max-bytes <n>`, `--offline`.
 - `data db2 schema <Table>` — mutates. Read parsed table schema fields, keys and relationship columns: data db2 schema <Table>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`.
 - `data db2 search <Table>` — mutates. Case-insensitive substring search over one field: data db2 search <Table> --field <name> --query <text> --limit <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--field <name>`, `--query <text>`, `--limit <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--field <name>`, `--query <text>`, `--limit <n>`.
 - `data db2 foreign-key <Table>` — mutates. Select rows by one foreign-key field and value with a mandatory bound: data db2 foreign-key <Table> --field <name> --value <n> --limit <1-5000>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--field <name>`, `--value <n>`, `--limit <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--field <name>`, `--value <n>`, `--limit <n>`.
 - `data db2 stream <Table>` — mutates. Stream bounded table rows as typed JSONL begin/record/end frames (requires --format jsonl): data db2 stream <Table> [--fields <a,b>] [--filter <field=value>] --limit <n>; only a legal end frame plus exit 0 is a complete success; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--fields <a,b>`, `--filter <field=value>`, `--limit <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--fields <a,b>`, `--filter <field=value>`, `--limit <n>`.
 - `data spell info` — mutates. Resolve the bounded trigger and description-reference closure around one spell: --spell-id <n> [--max-depth <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--spell-id <n>`, `--max-depth <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--spell-id <n>`, `--max-depth <n>`.
 - `data spell auras` — mutates. Report aura-effect presence for one spell: --spell-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--spell-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--spell-id <n>`.
 - `data spell summons` — mutates. List summon effects of one spell, optionally filtered to one NPC: --spell-id <n> [--npc-id <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--spell-id <n>`, `--npc-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--spell-id <n>`, `--npc-id <n>`.
 - `data item get` — mutates. Read one item summary and slot name: --item-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--item-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--item-id <n>`.
 - `data item models` — mutates. Resolve model and texture file IDs for one item: --item-id <n> [--race-id <n> --gender <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--item-id <n>`, `--race-id <n>`, `--gender <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--item-id <n>`, `--race-id <n>`, `--gender <n>`.
 - `data item geosets` — mutates. Read geoset and helmet-hide data for one item: --item-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--item-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--item-id <n>`.
 - `data item textures` — mutates. Read character texture sections for one item: --item-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--item-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--item-id <n>`.
 - `data creature display` — mutates. Resolve one creature display by exactly one key: (--display-id <n> | --file-data-id <n>); omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--display-id <n>`, `--file-data-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--display-id <n>`, `--file-data-id <n>`.
 - `data creature model` — mutates. List every display of one model file with variants: --file-data-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--file-data-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--file-data-id <n>`.
 - `data encounter get` — mutates. Build the bounded journal encounter section tree with related spells and the relation manifest: --journal-encounter-id <n> [--max-depth <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--journal-encounter-id <n>`, `--max-depth <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--journal-encounter-id <n>`, `--max-depth <n>`.
 - `data decor list` — mutates. List house decor rows in ascending ID order with a mandatory bound: --limit <1-5000>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--limit <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--limit <n>`.
 - `data decor get` — mutates. Resolve one decor by exactly one key: (--id <decor-id> | --item-id <n> | --model-file-data-id <n>); omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--id <n>`, `--item-id <n>`, `--model-file-data-id <n>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--offline`, `--max-bytes <n>`, `--key-file <WoW.txt|keys.json>`, `--id <n>`, `--item-id <n>`, `--model-file-data-id <n>`.
 
 ## describe
 
@@ -91,7 +91,7 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 ## doctor
 
-- `doctor` — read-only. Aggregate read-only workspace, target catalog and source-mirror health checks; the mirror check joins only when the nearest project declares a product, and exit 3 reports that at least one check found an error
+- `doctor` — read-only. Aggregate read-only workspace, target catalog, bundled LuaLS and source-mirror health checks; the mirror check joins only when the nearest project declares a product, and exit 3 reports that at least one check found an error
   Flags: `--home <root>`, `--format text|json|jsonl`, `--offline`.
 
 ## evidence
@@ -118,8 +118,10 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 - `live probe put` — mutates. Register immutable bounded Lua source under a mutable name without touching the game: --name <name> --file <probe.lua>; returns a content-addressed revision
   Flags: `--home <root>`, `--format text|json|jsonl`, `--name <name>`, `--file <probe.lua>`.
-- `live probe load` — mutates. Load one immutable probe revision into the selected client without executing it: --session <session-id> --probe <name-or-revision> --request <idempotency-key> [--account <account>]
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--probe <name-or-revision>`, `--request <idempotency-key>`, `--account <account>`.
+- `live execute` — mutates. Execute one complete investigation through verified report, ACK and cleared display; repeat the same request or resume its operation after interruption: --session <session-id> (--file <lua-file> | --probe <name-or-revision>) --request <idempotency-key> --budget-seconds <1-120> [--account <account>]
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--file <lua-file>`, `--session <session-id>`, `--probe <name-or-revision>`, `--request <idempotency-key>`, `--budget-seconds <1-120>`, `--account <account>`.
+- `live probe load` — mutates. Load one immutable probe revision with a declared 1..120 second execution budget: --session <session-id> --probe <name-or-revision> --request <idempotency-key> --budget-seconds <1-120> [--account <account>]
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--probe <name-or-revision>`, `--request <idempotency-key>`, `--budget-seconds <1-120>`, `--account <account>`.
 - `live probe list` — read-only. List active probe names without game input; --include-removed shows tombstoned names
   Flags: `--home <root>`, `--format text|json|jsonl`, `--include-removed`, `--limit <1-1000>`.
 - `live probe show <name-or-revision>` — read-only. Read an exact probe by active name or immutable PRB revision: live probe show <name-or-revision>
@@ -128,14 +130,16 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live run <operation-id>` — mutates. Execute one loaded operation and return its verified report with cleanup pending; acknowledge separately with live ack: live run <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live instances` — mutates. Discover supported installations under known roots and every running game window with its identity state (installed/running; identified/busy/no_actor/identity_unreadable); sends exactly one fixed identity trigger per running window and no other input; output carries no protocol fields
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`.
+- `live instances` — mutates. Discover supported installations and running game windows; --passive lists windows without game input, capture or actor claims; otherwise probes identity with the dedicated receiver
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`, `--wake-binding <chord>`, `--passive`.
 - `live connect` — mutates. Discover, identify and connect a game window automatically: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>] [--session <session-id> to revive] [--capture-area <window|x,y,width,height>]; a unique match connects without manual commands, ambiguity returns exit 2 with context.candidates; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--session <session-id>`, `--capture-area <window|x,y,width,height>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--session <session-id>`, `--capture-area <window|x,y,width,height>`, `--wake-binding <chord>`.
 - `live reset` — mutates. Unblock a stuck window whose in-game queue blocks identity after abandon or a lost receipt: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>]; sends one fixed nonce-correlated reset trigger per unowned matching window, expects its receipt, then reconnects; disk-owned windows are never touched; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--wake-binding <chord>`.
 - `live reload` — mutates. Perform one correlated UI reload on the selected client and verify the new runtime: --session <session-id> --request <idempotency-key>
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`.
+- `live reload fallback` — mutates. Activate a clean managed addon on one fixed client using Esc×3 Enter /reload Enter, then verify identity: --installation <client> --pid <pid> --request <idempotency-key> [--session <prior-session>] [--wake-binding <chord>]
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--request <idempotency-key>`, `--session <prior-session>`, `--wake-binding <chord>`.
 - `live ack <operation-id>` — mutates. Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live finish <operation-id>` — mutates. Acknowledge one verified operation and verify its receipt display is cleared; retry the same operation to finish pending display cleanup: live finish <operation-id>
@@ -144,15 +148,15 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--count <1-100>`, `--account <account>`.
 - `live hide` — mutates. Dismiss the displayed bridge receipt on the selected client after its evidence is archived: --session <session-id>; refuses windows owned by in-flight operations and verifies the clear from valid frames
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`.
-- `live bind` — mutates. Observe /dev connect in the selected game and save a connection: --snapshot <pin>; unique window discovered automatically, optional --pid/--installation/--character/--realm filters; bounded top-left capture by default, explicit --capture-area window requests the whole window; never types; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--installation <client>`, `--pid <pid>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--capture-area <window|x,y,width,height>`.
-- `live status <operation-id>` — read-only. Read persisted work without sending input: live status <operation-id>
+- `live bind` — mutates. Observe /dev connect in the selected game, verify effective receiver bindings with one read-only identity transaction, and save a connection: --snapshot <pin>; optional --wake-binding for a custom first-contact wake; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--installation <client>`, `--pid <pid>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--capture-area <window|x,y,width,height>`, `--wake-binding <chord>`.
+- `live status <operation-id>` — read-only. Read persisted work or a BTP bootstrap attempt without sending input: live status <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live resume <operation-id>` — mutates. Recover live resume <operation-id> using its saved connection; revalidates before new input and never repeats submitted work; completed work performs no game input
+- `live resume <operation-id>` — mutates. Recover the exact operation or BTP bootstrap attempt; revalidate identity and never repeat unknown input
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live cancel <operation-id>` — mutates. Cancel only a prepared operation before queue publication or game input: live cancel <operation-id>; later stages require live resume for safe cleanup
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live abandon <operation-id>` — mutates. Explicitly stop unresolved probe or bugs recovery after preparation through ack_requested, including zero/partial/unknown input; preserve evidence and unknown results, retire only its exact queue entry and release ownership without game input or claiming ACK; interrupted abandonment resumes by the same operation ID
+- `live abandon <operation-or-bootstrap-id>` — mutates. Explicitly stop unresolved probe, bugs, fixed reload, or bootstrap recovery; preserve evidence and unknown results, release host ownership without game input or claiming business completion
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live session <session-id>` — read-only. Verify a retained session and its evidence: live session <session-id>; does not reconnect or authorize input
   Flags: `--home <root>`, `--format text|json|jsonl`.
@@ -177,20 +181,26 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 ## source
 
-- `source list` — read-only. List source repositories and product branches; --snapshot <pin> reports fixed indexed-source readiness; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+- `source list` — read-only. List source repositories and product branches; --snapshot <pin> reports fixed file-mapping readiness; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`.
 - `source sync` — mutates. Fetch --source <key> --product <track> [--ref <full-ref-or-commit>] and return a fixed snapshot
   Flags: `--home <root>`, `--format text|json|jsonl`, `--source <key>`, `--product <track>`, `--ref <full-ref-or-commit>`.
-- `source inspect` — mutates. Inspect one fixed source: --path <file> for an excerpt, --symbol <qualified-name> for indexed symbol search, or --target-path <path> for indexed file/asset metadata; --snapshot required; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+- `source inspect` — mutates. Inspect one fixed source: --path <file> for original lines, --symbol <qualified-name> for symbol candidates, or --target-path <path> for file/asset facts; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--path <file>`, `--symbol <qualified-name>`, `--target-path <path>`, `--line <n>`, `--count <n>`.
-- `source index` — mutates. Build syntax index for --snapshot <pin-id>, retaining parse diagnostics; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+- `source index` — mutates. Explicitly warm the rebuildable file mapping for --snapshot <pin-id>, retaining parse diagnostics; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`.
-- `source query <term>` — mutates. Search a fixed source index by topic and evidence tier: source query <term> --snapshot <pin-id> [--mode precise|exploratory] [--topic api|lua|xml|toc|asset] [--limit <1-200>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--mode precise|exploratory`, `--topic <api|lua|xml|toc|asset>`, `--limit <1-200>`.
+- `source query <term>` — mutates. Prepare and search the exact pinned source mapping by topic and evidence tier with bounded, resumable pages; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--mode precise|exploratory`, `--topic <api|lua|xml|toc|asset>`, `--limit <1-200>`, `--cursor <token>`.
+- `source refs` — mutates. Find bounded relations for one pinned symbol ID (or an unambiguous symbol name); retain relation state, coverage and next cursor; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--symbol-id <id>`, `--symbol <name>`, `--direction <incoming|outgoing|both>`, `--limit <1-200>`, `--cursor <token>`, `--environment <client-pin>`, `--static-only`, `--release <release-root>`.
+- `source context` — mutates. Read bounded source context for one pinned symbol ID (or an unambiguous name), with direct relations and load evidence; --flow requests bounded secret-value analysis; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--symbol-id <id>`, `--symbol <name>`, `--limit <1-200>`, `--max-bytes <1-1048576>`, `--max-lines <1-2000>`, `--depth <0-4>`, `--cursor <token>`, `--environment <client-pin>`, `--flow`, `--static-only`, `--release <release-root>`.
 - `source diff` — mutates. Compare --from <pin-id> --to <pin-id> [--limit <n> per change category]
   Flags: `--home <root>`, `--format text|json|jsonl`, `--from <pin-id>`, `--to <pin-id>`, `--limit <n>`.
-- `source validate` — mutates. Validate one pinned addon closure with --path/--toc/--snapshot, or a fixed multi-client --matrix <config.json>; report unresolved static coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--path <addon-root>`, `--toc <relative-manifest>`, `--snapshot <pin-id>`, `--matrix <config.json>`.
+- `source prune` — mutates. Explicitly reclaim only unused source worktrees toward --target-bytes <n>; fixed Git pins, facts and captures remain
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--target-bytes <n>`.
+- `source validate` — mutates. Validate one pinned addon closure with --path/--toc/--snapshot, or a fixed multi-client --matrix <config.json>; add --semantic for bundled LuaLS using fixed client API metadata; report unresolved coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--semantic`, `--environment <client-pin>`, `--release <release-root>`, `--path <addon-root>`, `--toc <relative-manifest>`, `--snapshot <pin-id>`, `--matrix <config.json>`.
 
 ## target
 

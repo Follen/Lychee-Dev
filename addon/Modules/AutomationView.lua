@@ -9,8 +9,9 @@ local ADDON_NAME, ns = ...
 --
 -- Real status vocabulary (derived from the bridge surface):
 --   queued        lycheedev.queue.v1 entry registered, nothing loaded yet
---   loaded        ProbeRunner retains the request (its internal loaded /
---                 running / unresolved states are not externally separable)
+--   loaded        compiled but not dispatched
+--   running       the shared ProbeRunner is executing
+--   finalizing    the shared ProbeRunner is releasing resources
 --   reported      ReportStore retains the report (awaiting acknowledgement)
 --   acknowledged  report acknowledged and removed (acknowledge lifecycle done)
 --   cleared       retired: no queue entry, no runner request, no report
@@ -28,6 +29,7 @@ local queueDefinitions = ns.ProbeDefinitions
 local records = {}
 local recordIndex = {}
 local observedSequence = 0
+local changeHandler
 
 local function Restricted(value)
     return issecretvalue and issecretvalue(value)
@@ -133,6 +135,12 @@ local function DeriveStatus(requestId)
         end
         return "unavailable", scopeReason
     elseif probeReason == "probe_still_retained" then
+        if type(ns.ProbeRunner.State)=="function" then
+            local phase=ns.ProbeRunner.State(requestId)
+            if phase=="running" then return "running" end
+            if phase=="settling" then return "finalizing" end
+            if phase=="quarantined" or phase=="unresolved" then return "unavailable","probe_"..phase end
+        end
         return "loaded"
     end
     return "unavailable", probeReason
@@ -217,8 +225,8 @@ local function Collect()
     end
 
     local state
-    if ns.Persistence and type(ns.Persistence.Current) == "function" then
-        state = ns.Persistence.Current()
+    if ns.Persistence and type(ns.Persistence.Bridge) == "function" then
+        state = ns.Persistence.Bridge()
     end
     if type(state) == "table" and not Restricted(state) then
         local reports = state.reports
@@ -371,6 +379,8 @@ local function ClearRecords()
 end
 
 ns.AutomationView = {
+    SetChangeHandler = function(handler) changeHandler=handler end,
+    Changed = function() if changeHandler then pcall(changeHandler) end end,
     MAX_RECORDS = MAX_RECORDS,
     REPORT_DISPLAY_BYTES = REPORT_DISPLAY_BYTES,
     Observe = Observe,

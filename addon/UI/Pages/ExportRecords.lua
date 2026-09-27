@@ -12,8 +12,8 @@ local Workbench = ns.Workbench
 local Widgets = ns.Widgets
 local Layout = Workbench.Layout
 
-local ROW_HEIGHT = 58
-local LIST_WIDTH = 354
+local ROW_HEIGHT = 64
+local LIST_WIDTH = 256
 
 local KIND_LABELS = {
     run_result = L.EXPORT_KIND_RUN_RESULT,
@@ -87,16 +87,18 @@ end
 
 local function CreateField(parent, labelText, x, y, width)
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(label, 11, ns.Theme.textDim)
     label:SetPoint("TOPLEFT", x, y)
     label:SetText(labelText)
-    label:SetTextColor(1, 1, 1, 0.34)
+    label:SetTextColor(unpack(ns.Theme.textDim))
 
     local value = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ns.Theme.SetFont(value, 12, ns.Theme.text)
     value:SetPoint("TOPLEFT", x, y - 20)
     value:SetWidth(width)
     value:SetJustifyH("LEFT")
     value:SetWordWrap(false)
-    value:SetTextColor(0.91, 0.93, 0.95, 0.92)
+    value:SetTextColor(unpack(ns.Theme.text))
     return value
 end
 
@@ -117,22 +119,25 @@ local function BuildExportRecordsPage(parent)
     local SelectRecord
     local AcquireRow
 
-    local heading = Widgets.CreateSectionLabel(page, L.EXPORT_RECORDS)
-    heading:SetPoint("TOPLEFT", Layout.PAGE_LEFT, Layout.HEADING_TOP)
+    local heading = Widgets.CreatePageHeading(page, L.EXPORT_RECORDS, L.EXPORTS_PAGE_HELP)
 
     local countText = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(countText, 11, ns.Theme.textDim)
     countText:SetPoint("LEFT", heading, "RIGHT", 12, 0)
-    countText:SetTextColor(1, 1, 1, 0.36)
+    countText:SetTextColor(unpack(ns.Theme.textDim))
 
     local pendingText = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(pendingText, 11, ns.Theme.textDim)
     pendingText:SetPoint("LEFT", countText, "RIGHT", 12, 0)
     pendingText:SetTextColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.92)
 
     local usageText = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    usageText:SetPoint("TOPRIGHT", Layout.CONTENT_RIGHT - 132, Layout.HEADING_TOP + 3)
-    usageText:SetTextColor(1, 1, 1, 0.34)
+    ns.Theme.SetFont(usageText, 11, ns.Theme.textDim)
+    usageText:SetPoint("BOTTOMLEFT", Layout.RAIL_LEFT + 4, 26)
+    page.storageUsage = usageText
+    usageText:SetTextColor(unpack(ns.Theme.textDim))
 
-    local listPanel = Widgets.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
+    local listPanel = Widgets.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
     listPanel:SetPoint("TOPLEFT", Layout.RAIL_LEFT, Layout.CONTENT_TOP - 4)
     listPanel:SetPoint("BOTTOMLEFT", Layout.RAIL_LEFT, Layout.CONTENT_BOTTOM)
     listPanel:SetWidth(LIST_WIDTH)
@@ -144,41 +149,46 @@ local function BuildExportRecordsPage(parent)
     listScroll:SetScrollChild(listContent)
 
     local emptyTitle = listPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ns.Theme.SetFont(emptyTitle, 14, ns.Theme.text)
     emptyTitle:SetPoint("CENTER", listPanel, "CENTER", 0, 14)
     emptyTitle:SetText(L.EXPORT_RECORDS_EMPTY)
-    emptyTitle:SetTextColor(1, 1, 1, 0.58)
+    emptyTitle:SetTextColor(unpack(ns.Theme.textMuted))
 
     local emptyHelp = listPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(emptyHelp, 11, ns.Theme.textDim)
     emptyHelp:SetPoint("TOP", emptyTitle, "BOTTOM", 0, -9)
     emptyHelp:SetWidth(270)
     emptyHelp:SetJustifyH("CENTER")
     emptyHelp:SetText(L.EXPORT_RECORDS_EMPTY_HELP)
-    emptyHelp:SetTextColor(1, 1, 1, 0.32)
+    emptyHelp:SetTextColor(unpack(ns.Theme.textDim))
 
     local detailPanel = CreateFrame("Frame", nil, page)
     detailPanel:SetPoint("TOPLEFT", listPanel, "TOPRIGHT", 12, 0)
     detailPanel:SetPoint("BOTTOMRIGHT", Layout.CONTENT_RIGHT, Layout.CONTENT_BOTTOM)
 
     local detailHeading = detailPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ns.Theme.SetFont(detailHeading, 14, ns.Theme.text)
     detailHeading:SetPoint("TOPLEFT", 4, -4)
     detailHeading:SetText(L.EXPORT_RECORD_DETAIL)
 
     local detailStatus = detailPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ns.Theme.SetFont(detailStatus, 12, ns.Theme.text)
     detailStatus:SetPoint("TOPRIGHT", -4, -4)
 
-    local nameValue = CreateField(detailPanel, L.EXPORT_RECORD_NAME, 4, -48, 282)
-    local kindValue = CreateField(detailPanel, L.EXPORT_RECORD_KIND, 314, -48, 272)
-    local timeValue = CreateField(detailPanel, L.EXPORT_RECORD_TIME, 4, -106, 282)
-    local sizeValue = CreateField(detailPanel, L.EXPORT_RECORD_SIZE, 314, -106, 272)
-    local clientValue = CreateField(detailPanel, L.EXPORT_RECORD_CLIENT, 4, -164, 282)
-    local pathValue = CreateField(detailPanel, L.EXPORT_RECORD_PATH, 314, -164, 272)
+    local nameValue = CreateField(detailPanel, L.EXPORT_RECORD_NAME, 4, -48, 238)
+    local kindValue = CreateField(detailPanel, L.EXPORT_RECORD_KIND, 264, -48, 238)
+    local timeValue = CreateField(detailPanel, L.EXPORT_RECORD_TIME, 4, -106, 238)
+    local sizeValue = CreateField(detailPanel, L.EXPORT_RECORD_SIZE, 264, -106, 238)
+    local clientValue = CreateField(detailPanel, L.EXPORT_RECORD_CLIENT, 4, -164, 238)
+    local pathValue = CreateField(detailPanel, L.EXPORT_RECORD_PATH, 264, -164, 238)
 
     local ticketLabel = detailPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(ticketLabel, 11, ns.Theme.textDim)
     ticketLabel:SetPoint("TOPLEFT", 4, -226)
     ticketLabel:SetText(L.EXPORT_TICKET)
-    ticketLabel:SetTextColor(1, 1, 1, 0.34)
+    ticketLabel:SetTextColor(unpack(ns.Theme.textDim))
 
-    local ticketPanel = Widgets.CreatePanel(detailPanel, colors.editor[1], colors.editor[2], colors.editor[3], 1)
+    local ticketPanel = Widgets.CreateFieldPanel(detailPanel)
     ticketPanel:SetPoint("TOPLEFT", 4, -247)
     ticketPanel:SetPoint("TOPRIGHT", -4, -247)
     ticketPanel:SetHeight(40)
@@ -187,8 +197,8 @@ local function BuildExportRecordsPage(parent)
     ticketBox:SetPoint("TOPLEFT", 10, -1)
     ticketBox:SetPoint("BOTTOMRIGHT", -10, 1)
     ticketBox:SetAutoFocus(false)
-    ticketBox:SetFontObject(ChatFontNormal)
-    ticketBox:SetTextColor(0.94, 0.95, 0.96)
+    ticketBox:SetFont(ns.Theme.font, 14, "")
+    ticketBox:SetTextColor(unpack(ns.Theme.text))
     ticketBox.savedText = ""
     ticketBox.updatingText = false
     ticketBox:SetScript("OnEscapePressed", function(self)
@@ -196,11 +206,12 @@ local function BuildExportRecordsPage(parent)
     end)
 
     local ticketHint = detailPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(ticketHint, 11, ns.Theme.textDim)
     ticketHint:SetPoint("TOPLEFT", ticketPanel, "BOTTOMLEFT", 1, -10)
     ticketHint:SetPoint("RIGHT", -4, 0)
     ticketHint:SetJustifyH("LEFT")
     ticketHint:SetText(L.EXPORT_TICKET_HELP)
-    ticketHint:SetTextColor(1, 1, 1, 0.36)
+    ticketHint:SetTextColor(unpack(ns.Theme.textDim))
 
     ConfirmDelete = function()
         if RefuseInCombat() then
@@ -231,20 +242,27 @@ local function BuildExportRecordsPage(parent)
 
     local clearButton = Widgets.CreateConfirmButton(page, 120,
         L.CLEAR_EXPORT_CACHE, L.CONFIRM_CLEAR_CACHE, ConfirmClear, "secondary")
-    clearButton:SetPoint("TOPRIGHT", Layout.CONTENT_RIGHT, Layout.HEADING_TOP + 7)
+    clearButton:SetPoint("BOTTOMRIGHT", Layout.CONTENT_RIGHT, 14)
 
     local reloadButton = Widgets.CreateButton(detailPanel, 110, L.RELOAD_NOW, "primary")
     reloadButton:SetPoint("BOTTOMRIGHT", -4, 4)
+
+    local emptyDetail = Widgets.CreatePanel(page, unpack(ns.Theme.field))
+    emptyDetail:SetAllPoints(detailPanel)
+    local emptyDetailHint = emptyDetail:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(emptyDetailHint, 12, ns.Theme.textDim)
+    emptyDetailHint:SetPoint("CENTER")
+    emptyDetailHint:SetText(L.EXPORT_SELECT_RECORD)
 
     ApplyRowState = function(row)
         local selected = not IsSecret(row.ticket) and row.ticket == selectedTicket
         Widgets.SetListRowState(row, selected, row.hovered)
         if selected then
-            row.title:SetTextColor(1, 1, 1, 0.96)
+            row.title:SetTextColor(unpack(ns.Theme.text))
         elseif row.hovered then
-            row.title:SetTextColor(1, 1, 1, 0.90)
+            row.title:SetTextColor(unpack(ns.Theme.text))
         else
-            row.title:SetTextColor(1, 1, 1, 0.76)
+            row.title:SetTextColor(unpack(ns.Theme.textMuted))
         end
     end
 
@@ -278,7 +296,7 @@ local function BuildExportRecordsPage(parent)
             if pending then
                 row.status:SetTextColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.92)
             else
-                row.status:SetTextColor(1, 1, 1, 0.30)
+                row.status:SetTextColor(unpack(ns.Theme.textDim))
             end
             row.meta:SetText(FormatTime(entry and entry.createdAt) .. " | "
                 .. GetKindLabel(source and source.kind)
@@ -305,6 +323,8 @@ local function BuildExportRecordsPage(parent)
     RefreshDetail = function()
         local entry = selectedTicket and ns.Stores.Exports.Get(selectedTicket) or nil
         local hasEntry = entry ~= nil
+        detailPanel:SetShown(hasEntry)
+        emptyDetail:SetShown(not hasEntry)
         local source = hasEntry and entry.source or nil
         local payload = hasEntry and entry.payload or nil
         local environment = hasEntry and entry.environment or nil
@@ -317,7 +337,7 @@ local function BuildExportRecordsPage(parent)
         if pending then
             detailStatus:SetTextColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.94)
         else
-            detailStatus:SetTextColor(1, 1, 1, 0.36)
+            detailStatus:SetTextColor(unpack(ns.Theme.textDim))
         end
         nameValue:SetText(hasEntry and (title ~= "" and title or L.UNKNOWN) or "")
         kindValue:SetText(hasEntry and GetKindLabel(kind) or "")
@@ -364,6 +384,7 @@ local function BuildExportRecordsPage(parent)
         row:EnableMouseWheel(true)
 
         local title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(title, 12, ns.Theme.text)
         title:SetPoint("TOPLEFT", 12, -10)
         title:SetPoint("TOPRIGHT", -76, -10)
         title:SetJustifyH("LEFT")
@@ -371,16 +392,18 @@ local function BuildExportRecordsPage(parent)
         row.title = title
 
         local status = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(status, 11, ns.Theme.textDim)
         status:SetPoint("TOPRIGHT", -10, -10)
         status:SetJustifyH("RIGHT")
         row.status = status
 
         local meta = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ns.Theme.SetFont(meta, 11, ns.Theme.textDim)
         meta:SetPoint("BOTTOMLEFT", 12, 9)
         meta:SetPoint("BOTTOMRIGHT", -10, 9)
         meta:SetJustifyH("LEFT")
         meta:SetWordWrap(false)
-        meta:SetTextColor(1, 1, 1, 0.34)
+        meta:SetTextColor(unpack(ns.Theme.textDim))
         row.meta = meta
 
         row:SetScript("OnEnter", function(self)

@@ -6,6 +6,7 @@
 //   assemble            windows-amd64 native build + payload + release.json +
 //                       native archive + addon ZIP + ONE npm pack + whitelist
 //                       audit
+//   dev-package         local dirty-checkout install rehearsal; never release
 //   verify-cgo          pre-step proving capture/decode still work with
 //                       CGO_ENABLED=0 before the release build claims it
 //   seal                fold test report digests into the external sealed
@@ -31,6 +32,7 @@ import { readTgz, setTgzModes } from './tgz.mjs';
 import { readZip, writeZip } from './zip.mjs';
 import { writeTarGz } from './tar.mjs';
 import { synchronizeVersion } from './version.mjs';
+import { stageLuaLS, generateGoIdentity } from './luals.mjs';
 
 export const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const REPOSITORY_URL = 'https://github.com/Follen/Lychee-Dev';
@@ -322,6 +324,7 @@ function releaseJson({ version, commit, binaries, resources, correspondingSource
 function writeJson(path, value) { writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`); }
 
 async function assembleCommand(argv) {
+  generateGoIdentity({ check: true });
   const options = parseOptions(argv);
   const out = resolve(requiredOption(options, '--out'));
   const npmCli = resolve(requiredOption(options, '--npm-cli'));
@@ -352,6 +355,7 @@ async function assembleCommand(argv) {
 
   const resources = [];
   stagePayload(stage, resources);
+  await stageLuaLS(stage, resources, { archivePath: options['--luals-archive'] });
   const binaries = buildBinaries(stage, { cgo });
   const binaryIdentity = verifyBinaryIdentity(stage, { commit: id.commit, dirty: id.dirty, version });
   const source = await buildCorrespondingSource({
@@ -460,6 +464,47 @@ async function assembleCommand(argv) {
   writeJson(join(out, 'sealed', 'release-manifest.json'), manifest);
   writeSha256Sums(out, manifest);
   return { out, version, commit: id.commit, tag: wantTag, tgz: tgzName, artifacts: Object.keys(artifacts), audit };
+}
+
+// Local acceptance from an uncommitted checkout. This deliberately does not
+// produce corresponding-source or sealed publish artifacts; assemble still
+// enforces those production gates unchanged.
+async function devPackageCommand(argv) {
+  generateGoIdentity({ check: true });
+  const options=parseOptions(argv);
+  const out=resolve(requiredOption(options,'--out'));
+  const npmCli=resolve(requiredOption(options,'--npm-cli'));
+  const archivePath=requiredOption(options,'--luals-archive');
+  const packageRoot=join(repository,'packages','npm','lycheedev');
+  const {version}=synchronizeVersion(repository,false);
+  const id=identity({allowDirty:true,requireTagRef:false,tag:`v${version}`});
+  mkdirSync(out,{recursive:true});
+  const stage=join(out,'dev-npm-stage');
+  rmSync(stage,{recursive:true,force:true});
+  mkdirSync(join(stage,'bin'),{recursive:true});
+  for (const name of ['package.json','README.md','LICENSE','THIRD_PARTY_NOTICES']) copyFileSync(join(packageRoot,name),join(stage,name));
+  const devPackage=JSON.parse(readFileSync(join(stage,'package.json'),'utf8'));
+  devPackage.private=true;
+  devPackage.lycheedevDevelopmentOnly={commit:id.commit,workspaceDirty:id.dirty};
+  writeJson(join(stage,'package.json'),devPackage);
+  copyFileSync(join(packageRoot,'bin/lycheedev.mjs'),join(stage,'bin/lycheedev.mjs'));
+  const resources=[];
+  stagePayload(stage,resources);
+  await stageLuaLS(stage,resources,{archivePath});
+  const binaries=buildBinaries(stage,{cgo:'zero'});
+  verifyBinaryIdentity(stage,{commit:id.commit,dirty:id.dirty,version});
+  writeJson(join(stage,'release.json'),releaseJson({version,commit:id.commit,binaries,resources}));
+  const pack=run(process.execPath,[npmCli,'pack','--json','--pack-destination',out,
+    '--userconfig',emptyNpmrc(out),'--cache',join(out,'.npm-cache'),'--offline','--ignore-scripts','--no-audit','--no-fund'],{cwd:stage});
+  if (pack.status!==0) throw new Error(`release.dev_pack_failed\n${pack.stdout}\n${pack.stderr}`);
+  const packed=JSON.parse(pack.stdout)[0];
+  const tgzName=`lycheedev-local-${version}.tgz`;
+  renameSync(join(out,packed.filename),join(out,tgzName));
+  const normalized=setTgzModes(readFileSync(join(out,tgzName)),name => /^package\/bin\/lycheedev\.mjs$/.test(name) ? 0o755 : undefined);
+  writeFileSync(join(out,tgzName),normalized);
+  const audit=auditTgz(readTgz(normalized),{version,expectedCommit:id.commit,sourceRoot:packageRoot,developmentOnly:true});
+  if (audit.violations.length) throw new Error(`release.dev_tgz_audit_failed: ${audit.violations.join('; ')}`);
+  return {out,tgz:join(out,tgzName),version,commit:id.commit,developmentOnly:true,workspaceDirty:id.dirty,resources:resources.length};
 }
 
 function emptyNpmrc(out) {
@@ -741,20 +786,21 @@ function collectOptions(options, name) {
  * Content whitelist audit of the packed npm tarball (PKG-05, REL-08).
  * @param {{name: string, bytes: Buffer}[]} entries `package/...` entries
  */
-export function auditTgz(entries, { version, expectedCommit, sourceRoot } = {}) {
+export function auditTgz(entries, { version, expectedCommit, sourceRoot, developmentOnly = false } = {}) {
   const violations = [];
   const byName = new Map(entries.map(entry => [entry.name, entry.bytes]));
   const allowed = name => name === 'package/package.json' || name === 'package/README.md' || name === 'package/LICENSE'
     || name === 'package/THIRD_PARTY_NOTICES' || name === 'package/bin/lycheedev.mjs' || name === 'package/release.json'
     || TARGETS.some(entry => `package/${entry.binary}` === name)
-    || /^package\/payload\/(?:addon|skill)\/[^/].*$/.test(name);
+    || /^package\/payload\/(?:addon|skill|tool\/luals)\/[^/].*$/.test(name);
   const required = ['package/package.json', 'package/README.md', 'package/LICENSE', 'package/THIRD_PARTY_NOTICES',
     'package/bin/lycheedev.mjs', 'package/release.json',
     ...TARGETS.map(entry => `package/${entry.binary}`),
-    ...REQUIRED_RESOURCES.map(path => `package/payload/${path}`)];
+    ...REQUIRED_RESOURCES.map(path => `package/payload/${path}`),
+    ...['runtime.json', 'LICENSE', 'bin/lua-language-server.exe', 'bin/main.lua', 'main.lua'].map(path => `package/payload/tool/luals/${path}`)];
   for (const entry of entries) {
     if (!allowed(entry.name)) violations.push(`forbidden entry: ${entry.name} (PKG-05 whitelist)`);
-    if (/(^|\/)(?:tests?|docs?|fixtures|node_modules|vendor|\.git)(\/|$)|\.py$|\.test\.mjs$|wowdoc|wowdata|wowdump|automation\.py|workspace\.json|WTF|SavedVariables/i.test(entry.name)) {
+    if (!entry.name.startsWith('package/payload/tool/luals/') && /(^|\/)(?:tests?|docs?|fixtures|node_modules|vendor|\.git)(\/|$)|\.py$|\.test\.mjs$|wowdoc|wowdata|wowdump|automation\.py|workspace\.json|WTF|SavedVariables/i.test(entry.name)) {
       violations.push(`banned content: ${entry.name} (PKG-05)`);
     }
   }
@@ -776,7 +822,12 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot } = {}) 
     if (!(pkg.files ?? []).includes(name)) violations.push(`files whitelist must include ${name}`);
   }
   const policy = version ? policyFor(version) : null;
-  if (policy && (pkg.private === true) !== policy.privateMustBeTrue) violations.push(`private=${pkg.private} violates the ${policy.development ? 'development' : 'release'} version policy (§5)`);
+  if (developmentOnly) {
+    if (pkg.private !== true || pkg.lycheedevDevelopmentOnly?.commit !== expectedCommit || typeof pkg.lycheedevDevelopmentOnly?.workspaceDirty !== 'boolean') violations.push('local development package must be private and explicitly bound to checkout identity');
+  } else {
+    if (policy && (pkg.private === true) !== policy.privateMustBeTrue) violations.push(`private=${pkg.private} violates the ${policy.development ? 'development' : 'release'} version policy (§5)`);
+    if (pkg.lycheedevDevelopmentOnly) violations.push('development-only package cannot pass release audit');
+  }
 
   const manifestBytes = byName.get('package/release.json');
   if (manifestBytes) {
@@ -799,7 +850,7 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot } = {}) 
       for (const extra of binaryTargets) if (!TARGETS.some(entry => entry.target === extra)) violations.push(`release.json unknown binary ${extra}`);
       const listed = new Set();
       for (const resource of manifest.resources ?? []) {
-        if (!/^(?:addon|skill)\//.test(resource.path ?? '')) violations.push(`resource outside payload/addon+skill: ${resource.path}`);
+        if (!/^(?:addon|skill|tool\/luals)\//.test(resource.path ?? '')) violations.push(`resource outside supported payload: ${resource.path}`);
         if (listed.has(resource.path)) violations.push(`duplicate resource ${resource.path}`);
         listed.add(resource.path);
         const bytes = byName.get(`package/payload/${resource.path}`);
@@ -807,14 +858,17 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot } = {}) 
         if (bytes.length !== resource.bytes || sha256(bytes) !== resource.sha256) violations.push(`resource record mismatch ${resource.path} (REL-06)`);
       }
       for (const entry of entries) {
-        const match = /^package\/payload\/((?:addon|skill)\/.*)$/.exec(entry.name);
+        const match = /^package\/payload\/((?:addon|skill|tool\/luals)\/.*)$/.exec(entry.name);
         if (match && !listed.has(match[1])) violations.push(`payload file not in release.json resources: ${match[1]}`);
       }
       const queue = byName.get('package/payload/addon/Bridge/Definitions.lua');
+      const runtimeIdentity = byName.get('package/payload/tool/luals/runtime.json');
+      if (runtimeIdentity && !runtimeIdentity.equals(Buffer.from(JSON.stringify(JSON.parse(readFileSync(join(repository, 'release/tools/luals.json'), 'utf8')))))) violations.push('LuaLS runtime identity differs from canonical manifest');
       if (queue && queue.toString('utf8') !== EMPTY_PROBE_QUEUE) violations.push('payload carries local task blocks: addon/Bridge/Definitions.lua (PKG-05)');
       const source = manifest.correspondingSource;
-      if (!source) violations.push('release.json missing correspondingSource (licensing closure; npm assembly requires it)');
-      else {
+      if (!source && !developmentOnly) violations.push('release.json missing correspondingSource (licensing closure; npm assembly requires it)');
+      if (source && developmentOnly) violations.push('development-only package must omit correspondingSource claim');
+      if (source) {
         if (source.repository !== REPOSITORY_URL) violations.push(`correspondingSource.repository ${source.repository}`);
         if (source.commit !== manifest.commit) violations.push('correspondingSource.commit must equal release.json commit');
         if (version && source.tag !== `v${version}`) violations.push(`correspondingSource.tag ${source.tag} != v${version}`);
@@ -879,6 +933,7 @@ function verifyCgoCommand(argv) {
 const commands = {
   'verify-source-inputs': () => verifySourceInputs(),
   assemble: assembleCommand,
+  'dev-package': devPackageCommand,
   'verify-cgo': verifyCgoCommand,
   seal: sealCommand,
   'verify-sealed': verifySealedCommand,

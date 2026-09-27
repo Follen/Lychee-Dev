@@ -91,5 +91,5 @@ func LookupRepository(key string) (RepositorySpec, error) {
 			return repository, nil
 		}
 	}
-	return RepositorySpec{}, fmt.Errorf("codebase.repository_not_found: %q", key)
+	return RepositorySpec{}, fmt.Errorf("%w: %q", ErrUnknownRepository, key)
 }

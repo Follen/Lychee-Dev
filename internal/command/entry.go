@@ -28,6 +28,7 @@ import (
 const Version = buildinfo.Version
 
 type Fault struct {
+	Details           any            `json:"details,omitempty"`
 	Code              string         `json:"code"`
 	Message           string         `json:"message"`
 	Stage             string         `json:"stage"`
@@ -48,6 +49,10 @@ type Envelope struct {
 }
 
 type Options struct {
+	semantic                             bool
+	staticOnly, sourceFlow               bool
+	scan                                 bool
+	keyFile                              string
 	project                              string
 	target                               string
 	latest                               bool
@@ -56,9 +61,12 @@ type Options struct {
 	session                              string
 	account                              string
 	probe, request, name                 string
+	budgetSeconds                        int
 	includeRemoved                       bool
 	pid                                  uint32
 	character, realm                     string
+	wakeBinding                          string
+	passive                              bool
 	region                               image.Rectangle
 	release                              string
 	output                               string
@@ -81,7 +89,10 @@ type Options struct {
 	from, to                             string
 	toc                                  string
 	matrix, searchMode, topic, listfile  string
-	symbol, targetPath                   string
+	symbol, symbolID, targetPath         string
+	direction                            string
+	environmentSnapshot                  string
+	sourceDepth, sourceMaxLines          int
 	extension, fileName                  string
 	maxFrames                            int
 	allowPartial                         bool
@@ -193,12 +204,23 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "live probe put":
 				response.Result, err, code = putLiveProbe(ctx, opts)
+			case "live execute":
+				var record live.Outcome
+				record, err, code = executeLive(ctx, opts)
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
 			case "live probe load":
+				if opts.budgetSeconds == 0 {
+					err, code = errors.New("live probe load requires --budget-seconds <1-120>"), 2
+					break
+				}
 				var root string
 				root, err = workspaceRoot(opts.home)
 				var record live.Outcome
 				if err == nil {
-					record, err = live.LoadProbe(ctx, root, live.LoadProbeRequest{Session: opts.session, Account: opts.account, Probe: opts.probe, Request: opts.request})
+					record, err = live.LoadProbe(ctx, root, live.LoadProbeRequest{Session: opts.session, Account: opts.account, Probe: opts.probe, Request: opts.request, BudgetSeconds: opts.budgetSeconds})
 				}
 				if record.OperationID != "" {
 					response.Result, response.OperationID = record, record.OperationID
@@ -243,6 +265,17 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if record.OperationID != "" {
 					response.Result, response.OperationID = record, record.OperationID
 					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
+				}
+			case "live reload fallback":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				var record live.Outcome
+				if err == nil {
+					record, err = live.FixedReloadClient(ctx, root, live.FixedReloadRequest{Installation: opts.installation, PID: opts.pid, Request: opts.request, Session: opts.session, WakeBinding: opts.wakeBinding})
+				}
+				if record.OperationID != "" {
+					response.Result, response.OperationID = record, record.OperationID
+					response.Context["stage"] = record.Stage
 				}
 			case "live ack":
 				var root string
@@ -289,7 +322,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Context["session"] = dismissal.Session
 				}
 			case "live connect":
-				request := live.ConnectRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation, Session: opts.session, CaptureArea: opts.region}
+				request := live.ConnectRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation, Session: opts.session, CaptureArea: opts.region, WakeBinding: opts.wakeBinding}
 				if err = request.Validate(); err != nil {
 					code = 2
 					break
@@ -307,7 +340,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Warnings = append(response.Warnings, "Connected through the two fixed bootstrap commands only; identity markers bound no session. The retained identity is a reconnection target, not standing input authority.")
 				}
 			case "live reset":
-				request := live.ResetRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation}
+				request := live.ResetRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation, WakeBinding: opts.wakeBinding}
 				if err = request.Validate(); err != nil {
 					code = 2
 					break
@@ -325,7 +358,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Warnings = append(response.Warnings, "Reset sent one fixed nonce-correlated recovery trigger to an unowned window and reconnected through the normal bootstrap; retained reports were never acknowledged or deleted.")
 				}
 			case "live bind":
-				request := live.WindowBindingRequest{Installation: opts.installation, PID: opts.pid, Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, Region: opts.region}
+				request := live.WindowBindingRequest{Installation: opts.installation, PID: opts.pid, Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, Region: opts.region, WakeBinding: opts.wakeBinding}
 				if err = request.Validate(); err != nil {
 					code = 2
 					break
@@ -340,7 +373,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err == nil {
 					response.Result = bound.Connection()
 					response.Context["session"], response.Context["snapshot"] = bound.Record.ID, bound.Record.Snapshot
-					response.Warnings = append(response.Warnings, "Ready receipt observed and saved; capture stream is closed. This does not enable the addon, send input, or authorize later input from history.")
+					response.Warnings = append(response.Warnings, "Ready receipt observed and saved; capture stream is closed. Binding sends a journaled identity request to an already enabled bridge, but does not execute business work or authorize later input from history.")
 				}
 			case "addon install":
 				if opts.installation == "" || (!opts.resume && opts.release == "") || (opts.resume && (opts.output == "" || opts.release != "")) {
@@ -413,6 +446,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				var reading records.QueryReading
 				reading, err = records.QueryData(ctx, root, opts.snapshot, opts.fileQuery(), request)
 				if err == nil {
+					if reading.Result.Partial {
+						response.Warnings = append(response.Warnings, "Encrypted sections are unavailable; SQL rows and aggregates cover readable records only. Inspect sources for missing keys and partitions.")
+					}
 					if opts.encoding == "csv" {
 						var exported records.QueryCSVExport
 						exported, err = records.ExportQueryCSV(ctx, root, opts.snapshot, reading, opts.output, opts.overwrite)
@@ -449,6 +485,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Captures = append(response.Captures, reading.Capture)
 					if reading.Result.Page != nil && (reading.Result.Page.More || reading.Result.Page.After != nil) {
 						response.Warnings = append(response.Warnings, "This page is not the complete table; preserve the snapshot, table and cursor when continuing.")
+					}
+					if !reading.Result.File.ContentVerified {
+						response.Warnings = append(response.Warnings, "Encrypted sections are unavailable; this result does not cover the complete table. Inspect unavailablePartitions and file.missing.")
 					}
 				}
 			case "data db2 stream":
@@ -585,7 +624,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				request := live.DiscoveryRequest{}
+				request := live.DiscoveryRequest{WakeBinding: opts.wakeBinding, Passive: opts.passive}
 				if opts.installation != "" {
 					request.Roots = []string{opts.installation}
 				}
@@ -601,7 +640,27 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Context["snapshot"] = opts.snapshot
 					}
 				}
+			case "source refs", "source context":
+				code, err = runSourceResearch(ctx, route, opts, &response)
+			case "source prune":
+				var root string
+				root, err = workspaceRoot(opts.home)
+				if err == nil {
+					response.Result, err = codebase.PruneSourceWorktrees(ctx, root, opts.targetBytes)
+				}
 			case "source validate":
+				if opts.release != "" && !opts.semantic {
+					err, code = errors.New("source validate --release requires --semantic"), 2
+					break
+				}
+				if opts.environmentSnapshot != "" && !opts.semantic {
+					err, code = errors.New("source validate --environment requires --semantic"), 2
+					break
+				}
+				if opts.environmentSnapshot != "" && opts.matrix != "" {
+					err, code = errors.New("source validate --environment applies to one pinned source; matrix targets require their own client source"), 2
+					break
+				}
 				if opts.matrix != "" && (opts.snapshot != "" || opts.path != "" || opts.toc != "") || opts.matrix == "" && (opts.snapshot == "" || opts.path == "" || opts.toc == "") {
 					err, code = errors.New("source validate requires either --matrix or --snapshot/--path/--toc"), 2
 					break
@@ -611,9 +670,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
+				validationOptions := codebase.ValidationOptions{EnvironmentSnapshot: opts.environmentSnapshot}
+				if opts.semantic {
+					validationOptions.Semantic, err = openLuaLS(ctx, opts.release)
+					if err != nil {
+						break
+					}
+				}
 				if opts.matrix != "" {
 					var assessment codebase.MatrixValidation
-					assessment, err = codebase.ValidateSourceMatrix(ctx, root, opts.matrix, nil)
+					assessment, err = codebase.ValidateSourceMatrix(ctx, root, opts.matrix, nil, validationOptions)
 					if err == nil {
 						response.Result = assessment.Result
 						response.Captures = append(response.Captures, assessment.Capture)
@@ -623,7 +689,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					}
 				} else {
 					var assessment codebase.AddonAssessment
-					assessment, err = codebase.AssessAddon(ctx, root, opts.snapshot, codebase.AddonInput{Root: opts.path, Manifest: opts.toc})
+					assessment, err = codebase.AssessAddon(ctx, root, opts.snapshot, codebase.AddonInput{Root: opts.path, Manifest: opts.toc}, validationOptions)
 					if err == nil {
 						response.Result = assessment.Result
 						response.Context["snapshot"] = opts.snapshot
@@ -667,12 +733,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					response.Result, err = codebase.BuildSourceIndex(ctx, root, opts.snapshot)
 				} else {
 					var search codebase.SourceQueryReading
-					search, err = codebase.QuerySource(ctx, root, opts.snapshot, codebase.SearchQuery{Mode: codebase.SearchMode(opts.searchMode), Text: argument, Topic: opts.topic, Limit: opts.limit})
+					search, err = codebase.QuerySource(ctx, root, opts.snapshot, codebase.SearchQuery{Mode: codebase.SearchMode(opts.searchMode), Text: argument, Topic: opts.topic, Limit: opts.limit, Cursor: opts.cursor})
 					if err == nil {
 						response.Result = search.Result
 						response.Captures = append(response.Captures, search.Capture)
 						if search.Result.Truncated {
-							response.Warnings = append(response.Warnings, "Source search was truncated by --limit.")
+							if search.Result.NextCursor == "" {
+								response.Warnings = append(response.Warnings, "Source query relation preview is bounded; use source refs with the result symbolId to page relations.")
+							} else {
+								response.Warnings = append(response.Warnings, "Source search was truncated by --limit; pass nextCursor to page matches.")
+							}
 						} else if !search.Result.Complete {
 							response.Warnings = append(response.Warnings, "The source index has parse diagnostics; search coverage is incomplete.")
 						}
@@ -774,9 +844,18 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Result, err = selection.ShowTarget(ctx, root, argument)
 					}
 				case "live status":
-					response.Result, err = live.Status(ctx, root, argument)
+					if strings.HasPrefix(argument, "BTP-") {
+						response.Result, err = live.InspectBootstrapReceiver(ctx, root, argument)
+					} else {
+						response.Result, err = live.Status(ctx, root, argument)
+					}
 					response.OperationID = argument
 				case "live resume":
+					if strings.HasPrefix(argument, "BTP-") {
+						response.Result, err = live.ResumeBootstrapReceiver(ctx, root, argument)
+						response.OperationID = argument
+						break
+					}
 					var record live.Outcome
 					record, err = live.Resume(ctx, root, argument)
 					response.OperationID = argument
@@ -785,6 +864,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Result = record
 					}
 				case "live cancel", "live abandon":
+					if route == "live abandon" && strings.HasPrefix(argument, "BTP-") {
+						response.Result, err = live.AbandonBootstrapReceiver(ctx, root, argument)
+						response.OperationID = argument
+						break
+					}
 					var record live.Outcome
 					if route == "live abandon" {
 						record, err = live.Abandon(ctx, root, argument)
@@ -872,8 +956,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				code, faultCode = 4, "delivery.invalid_release"
 			case errors.Is(err, delivery.ErrPayload):
 				code, faultCode = 4, "delivery.invalid_payload"
-			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			case errors.Is(err, context.Canceled):
 				code, faultCode = 7, "command.cancelled"
+			case errors.Is(err, context.DeadlineExceeded):
+				if len(opts.words) > 0 && opts.words[0] == "live" {
+					code, faultCode = 6, "live.deadline_pending"
+				} else {
+					code, faultCode = 5, "command.deadline"
+				}
 			case errors.Is(err, vault.ErrLegacyWorkspace):
 				code, faultCode = 3, "vault.legacy_detected"
 			case errors.Is(err, vault.ErrWorkspaceFormat):
@@ -939,10 +1029,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			if actual, ok := response.Context["stage"].(string); ok {
 				response.Error.Stage = actual
 				response.Error.ResumeOperationID = response.OperationID
-				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || errors.Is(err, live.ErrAckReadinessPending) || errors.Is(err, live.ErrReceiptHidePending)
+				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || errors.Is(err, live.ErrAckReadinessPending) || errors.Is(err, live.ErrReceiptHidePending) || errors.Is(err, live.ErrInvestigationPending)
 			}
 		}
 		var diagnostic *relational.Diagnostic
+		var binding *relational.BindingDiagnostic
+		if errors.As(err, &binding) {
+			response.Error.Details = binding
+		}
 		if errors.As(err, &diagnostic) {
 			response.Error.Location = &QueryLocation{Offset: diagnostic.Offset, Line: diagnostic.Line, Column: diagnostic.Column}
 		}
@@ -960,6 +1054,15 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if errors.Is(err, live.ErrActorChanged) || errors.Is(err, live.ErrIdentityUnreadable) {
 			response.Error.Retryable = true
 		}
+		var bootstrapPending *live.BootstrapPendingError
+		if errors.As(err, &bootstrapPending) {
+			code, response.Error.Code = 6, "live.input_pending"
+			response.Error.ResumeOperationID = bootstrapPending.ID
+			response.Error.Retryable = true
+			if response.OperationID == "" {
+				response.OperationID = bootstrapPending.ID
+			}
+		}
 	} else {
 		response.OK = true
 	}
@@ -971,7 +1074,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 func parseOptions(args []string) (Options, error) {
-	opts := Options{format: "text", line: 1, count: 80, limit: 50, maxBytes: 128 << 20}
+	opts := Options{format: "text", line: 1, count: 80, limit: 50, maxBytes: 128 << 20, sourceDepth: 1, sourceMaxLines: 120}
 	// Find output format even if an earlier argument is invalid, so errors obey
 	// machine callers' requested encoding. Invalid formats fall back to JSON.
 	for i, arg := range args {
@@ -1000,6 +1103,9 @@ func parseOptions(args []string) (Options, error) {
 		// route-specific default and allow callers to choose a smaller budget.
 		opts.maxBytes = 256 << 20
 	}
+	if route == "source context" {
+		opts.maxBytes = 16 << 10
+	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
 			opts.help = true
@@ -1012,11 +1118,7 @@ func parseOptions(args []string) (Options, error) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--offline" || arg == "--resume" || arg == "--latest" || arg == "--cdn" || arg == "--overwrite" || arg == "--allow-partial" || arg == "--stdin" || arg == "--include-removed" ||
-			arg == "--remote" || arg == "--replace" || arg == "--uncommitted" || arg == "--dry-run" || arg == "--plan" || arg == "--fresh" {
-			if _, ok := commandFlag(contract, arg); !ok {
-				return opts, unsupportedRouteFlag(route, arg)
-			}
+		if spec, known := commandFlag(contract, arg); known && !spec.value {
 			if seen[arg] {
 				return opts, fmt.Errorf("repeated flag %s", arg)
 			}
@@ -1024,6 +1126,14 @@ func parseOptions(args []string) (Options, error) {
 			switch arg {
 			case "--stdin":
 				opts.stdin = true
+			case "--passive":
+				opts.passive = true
+			case "--semantic":
+				opts.semantic = true
+			case "--static-only":
+				opts.staticOnly = true
+			case "--flow":
+				opts.sourceFlow = true
 			case "--allow-partial":
 				opts.allowPartial = true
 			case "--overwrite":
@@ -1034,6 +1144,8 @@ func parseOptions(args []string) (Options, error) {
 				opts.offline = true
 			case "--latest":
 				opts.latest = true
+			case "--scan":
+				opts.scan = true
 			case "--resume":
 				opts.resume = true
 			case "--remote":
@@ -1050,6 +1162,8 @@ func parseOptions(args []string) (Options, error) {
 				opts.fresh = true
 			case "--include-removed":
 				opts.includeRemoved = true
+			default:
+				return opts, fmt.Errorf("flag %s has no option handler", arg)
 			}
 			continue
 		}
@@ -1132,6 +1246,14 @@ func parseOptions(args []string) (Options, error) {
 			opts.probe = value
 		case "--request":
 			opts.request = value
+		case "--wake-binding":
+			opts.wakeBinding = value
+		case "--budget-seconds":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || n > 120 {
+				return opts, errors.New("--budget-seconds must be between 1 and 120")
+			}
+			opts.budgetSeconds = n
 		case "--pid":
 			n, err := strconv.ParseUint(value, 10, 32)
 			if err != nil || n == 0 {
@@ -1213,6 +1335,8 @@ func parseOptions(args []string) (Options, error) {
 			opts.recordID, opts.recordIDSet = uint32(n), true
 		case "--installation":
 			opts.installation = value
+		case "--key-file":
+			opts.keyFile = value
 		case "--file-id":
 			n, err := strconv.ParseUint(value, 10, 32)
 			if err != nil || n == 0 {
@@ -1221,10 +1345,25 @@ func parseOptions(args []string) (Options, error) {
 			opts.fileID = uint32(n)
 		case "--max-bytes":
 			n, err := strconv.ParseInt(value, 10, 64)
+			if route == "source context" && (err != nil || n < 1 || n > 1<<20) {
+				return opts, errors.New("source context --max-bytes must be between 1 and 1048576")
+			}
 			if err != nil || n < 1 || n > 512<<20 {
 				return opts, errors.New("--max-bytes must be between 1 and 536870912")
 			}
 			opts.maxBytes = n
+		case "--max-lines":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || n > 2000 {
+				return opts, errors.New("--max-lines must be between 1 and 2000")
+			}
+			opts.sourceMaxLines = n
+		case "--depth":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > 4 {
+				return opts, errors.New("--depth must be between 0 and 4")
+			}
+			opts.sourceDepth = n
 		case "--source":
 			if route == "data hotfix" && value != "wago" && value != "dbcache" && value != "raidbots" {
 				return opts, errors.New("--source must be wago, dbcache, or raidbots")
@@ -1242,6 +1381,15 @@ func parseOptions(args []string) (Options, error) {
 			opts.path = value
 		case "--symbol":
 			opts.symbol = value
+		case "--symbol-id":
+			opts.symbolID = value
+		case "--direction":
+			if value != "incoming" && value != "outgoing" && value != "both" {
+				return opts, errors.New("--direction must be incoming, outgoing, or both")
+			}
+			opts.direction = value
+		case "--environment":
+			opts.environmentSnapshot = value
 		case "--target-path":
 			opts.targetPath = value
 		case "--toc":
@@ -1462,6 +1610,9 @@ func parseOptions(args []string) (Options, error) {
 	if route == "config set" && !opts.help && !seen["--cache-max-bytes"] && !seen["--download-workers"] {
 		return opts, errors.New("config set requires --cache-max-bytes or --download-workers")
 	}
+	if route == "source prune" && !opts.help && !seen["--target-bytes"] {
+		return opts, errors.New("source prune requires --target-bytes")
+	}
 	if route == "init" && !opts.help {
 		selected := 0
 		for _, flag := range []string{"--plan", "--fresh", "--resume"} {
@@ -1493,7 +1644,7 @@ func boolCount(values ...bool) int {
 }
 
 func (opts Options) fileQuery() records.FileQuery {
-	return records.FileQuery{Installation: opts.installation, CDN: opts.cdn, Offline: opts.offline, FileDataID: opts.fileID, MetadataBytes: 512 << 20, ContentBytes: opts.maxBytes}
+	return records.FileQuery{Installation: opts.installation, CDN: opts.cdn, Offline: opts.offline, FileDataID: opts.fileID, MetadataBytes: 512 << 20, ContentBytes: opts.maxBytes, KeyFile: opts.keyFile}
 }
 
 func unsupportedRouteFlag(route, flag string) error {

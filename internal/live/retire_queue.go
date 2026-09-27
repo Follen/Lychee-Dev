@@ -44,7 +44,7 @@ func (p *ProbeOperation) RetireQueue(ctx context.Context) (delivery.QueueRevisio
 		if err != nil {
 			return zero, err
 		}
-		state, err := readInstalledState(ctx, input.Load.Installation, input.Load.Account, input.Expected)
+		state, err := readInstalledState(ctx, input.Load.Installation, input.Load.Account, input.Expected, reportScope(input))
 		if err != nil {
 			return zero, err
 		}
@@ -52,15 +52,15 @@ func (p *ProbeOperation) RetireQueue(ctx context.Context) (delivery.QueueRevisio
 			return zero, errors.New("live.removal_source_changed")
 		}
 		if observed.RemovalID == "" {
-			persisted, presentErr := bridge.ReadPersistedReport(bytes.NewReader(state.Bytes), input.Code, input.Expected)
+			persisted, presentErr := bridge.ReadPersistedReport(bytes.NewReader(state.Bytes), input.Code, input.Expected, reportScope(input))
 			if presentErr == nil {
 				if !bytes.Equal(persisted.ReceiptBytes, report.ReceiptBytes) || !bytes.Equal(persisted.Body, report.Body) {
 					return zero, errors.New("live.retirement_report_changed")
 				}
-			} else if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(state.Bytes), input.Code, input.Expected); err != nil {
+			} else if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(state.Bytes), input.Code, input.Expected, reportScope(input)); err != nil {
 				return zero, errors.Join(presentErr, err)
 			}
-		} else if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(state.Bytes), input.Code, input.Expected); err != nil {
+		} else if _, err := bridge.VerifyArchivedReportRemoval(report.ReceiptBytes, report.Body, bytes.NewReader(state.Bytes), input.Code, input.Expected, reportScope(input)); err != nil {
 			return zero, err
 		}
 		if err := p.check(ctx); err != nil {

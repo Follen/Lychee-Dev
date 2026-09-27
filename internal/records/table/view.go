@@ -14,6 +14,26 @@ type View struct {
 	records    *Records
 	definition schema.Definition
 	columns    []int
+	selected   map[string]bool
+}
+
+// WithProjection reduces materialized fields while retaining validation of all
+// fields and sparse padding. It never turns a corrupt unused field into success.
+func (v *View) WithProjection(names []string) (*View, error) {
+	selected := map[string]bool{}
+	for _, name := range names {
+		found := false
+		for _, f := range v.definition.Fields {
+			found = found || f.Name == name
+		}
+		if !found {
+			return nil, ErrFormat
+		}
+		selected[name] = true
+	}
+	copy := *v
+	copy.selected = selected
+	return &copy, nil
 }
 
 // Bind selects by the actual WDC layout hash and verifies physical column/ID
@@ -107,15 +127,23 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]any, len(v.definition.Fields))
+	capacity := len(v.definition.Fields)
+	if v.selected != nil {
+		capacity = len(v.selected)
+	}
+	result := make(map[string]any, capacity)
 	sparse := v.records.columns.layout.Flags&1 != 0
 	cursor := uint64(0)
 	remaining := textBytes
 	for index, field := range v.definition.Fields {
+		wanted := v.selected == nil || v.selected[field.Name]
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if !field.Inline {
+			if !wanted {
+				continue
+			}
 			if field.Identity {
 				result[field.Name] = uint64(id)
 			} else if row.HasRelation {
@@ -171,6 +199,9 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 					return nil, ErrLimit
 				}
 			}
+			if !wanted {
+				continue
+			}
 			if field.Array {
 				result[field.Name] = strings
 			} else {
@@ -214,15 +245,27 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 			if len(values) != 1 || values[0] != uint64(row.OriginID) {
 				return nil, ErrFormat
 			}
-			result[field.Name] = uint64(id)
+			if wanted {
+				result[field.Name] = uint64(id)
+			}
 			continue
 		}
-		converted := make([]any, len(values))
+		var converted []any
+		if wanted {
+			converted = make([]any, len(values))
+		}
 		for i, value := range values {
-			converted[i], err = typedNumber(value, field)
+			number, convertErr := typedNumber(value, field)
+			err = convertErr
 			if err != nil {
 				return nil, err
 			}
+			if wanted {
+				converted[i] = number
+			}
+		}
+		if !wanted {
+			continue
 		}
 		if field.Array {
 			result[field.Name] = converted
@@ -232,7 +275,14 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 	}
 	if sparse {
 		total := uint64(len(row.Data)) * 8
-		if cursor > total || total-cursor > 7 {
+		// Sparse records may be padded to a 32-bit boundary (observed in the
+		// pinned retail WDC5 Spell table). Keep accepting packed-byte padding,
+		// but reject excess/alignment gaps and all nonzero trailing bits.
+		paddingLimit := uint64(7)
+		if total%32 == 0 {
+			paddingLimit = 31
+		}
+		if cursor > total || total-cursor > paddingLimit {
 			return nil, ErrFormat
 		}
 		padding, err := extractBits(row.Data, cursor, uint32(total-cursor))

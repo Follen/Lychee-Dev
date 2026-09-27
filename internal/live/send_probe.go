@@ -16,7 +16,7 @@ type preparedInput func(context.Context, desktop.WindowIdentity, func(context.Co
 // only input submission; Observe must establish execution/report evidence.
 // Partial or failed input after intent is never automatically replayed.
 func (p *ProbeOperation) Dispatch(ctx context.Context) (desktop.InputReceipt, error) {
-	return p.dispatch(ctx, desktop.QueuePreparedCommand)
+	return p.dispatch(ctx, p.receiverInput)
 }
 
 func (p *ProbeOperation) dispatch(ctx context.Context, send preparedInput) (desktop.InputReceipt, error) {

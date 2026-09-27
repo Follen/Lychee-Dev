@@ -13,9 +13,10 @@ import (
 )
 
 type ExecutionRequest struct {
-	Session string
-	Account string
-	Code    []byte
+	Session       string
+	Account       string
+	Code          []byte
+	BudgetSeconds int
 }
 
 func (r ExecutionRequest) validate() error {
@@ -30,6 +31,9 @@ func (r ExecutionRequest) validate() error {
 	if len(r.Code) == 0 || len(r.Code) > 256<<10 {
 		return errors.New("bridge.queue_invalid_code")
 	}
+	if r.BudgetSeconds != 0 && (r.BudgetSeconds < 1 || r.BudgetSeconds > 120) {
+		return errors.New("live.execution_budget_invalid")
+	}
 	return nil
 }
 
@@ -40,7 +44,11 @@ func executePrepared(ctx context.Context, root string, request ExecutionRequest,
 	if err = request.validate(); err != nil {
 		return record, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	budget := request.BudgetSeconds
+	if budget == 0 {
+		budget = 120
+	}
+	ctx, cancel := context.WithTimeout(ctx, loadPhaseBudget+time.Duration(budget)*time.Second+resultPersistenceBudget)
 	defer cancel()
 	session, snapshot, err := observeRecordedSession(ctx, root, request.Session, open)
 	if err != nil {
@@ -98,5 +106,6 @@ func observeRecordedSessionRelease(ctx context.Context, root, id, release string
 	if bound.Record.Region != (image.Rectangle{}) {
 		session.region = bound.Record.Region
 	}
+	session.bindings = bound.Record.Bindings
 	return session, bound.Record.Snapshot, nil
 }

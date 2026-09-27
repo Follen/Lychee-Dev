@@ -12,6 +12,10 @@ ns.Controls = {
         end
         local trimmed = string.match(message, "^%s*(.-)%s*$")
         local command = string.lower(trimmed)
+        local receiverAction, receiverChord = string.match(trimmed, "^receiver%s+bind%s+(%S+)%s+(%S+)$")
+        if receiverAction then
+            receiverAction, receiverChord = string.lower(receiverAction), string.upper(receiverChord)
+        end
         local nonce = string.match(command, "^bridge bind ([0-9a-f]+)$")
         local identify = string.match(command, "^bridge identify ([0-9a-f]+)$")
         local prefix, verb, requestId = string.match(trimmed, "^(%S+)%s+(%S+)%s+([%w_%-]+)$")
@@ -20,6 +24,10 @@ ns.Controls = {
         if verifyPrefix and string.lower(verifyPrefix) == "bridge" and string.lower(verifyVerb) == "verify"
             and #verifyRequest <= 128 and #cleanupNonce == 32 then
             action, requestId = "verify", verifyRequest
+        end
+        if verifyPrefix and string.lower(verifyPrefix)=="bridge" and
+            (verifyVerb=="observe" or verifyVerb=="finish") and #verifyRequest<=80 and #cleanupNonce==32 then
+            action,requestId=verifyVerb,verifyRequest
         end
         if verifyPrefix and string.lower(verifyPrefix) == "bridge" and string.lower(verifyVerb) == "clean"
             and #verifyRequest <= 128 and #cleanupNonce == 32 then
@@ -55,8 +63,9 @@ ns.Controls = {
             if verb == "refresh" and #requestId == 32 and string.match(requestId,"^[0-9a-f]+$") then action = verb end
         end
         if command ~= "" and command ~= "status" and command ~= "connect" and command ~= "disconnect" and command ~= "bridge on" and command ~= "bridge off"
-            and command ~= "bridge unbind" and not nonce and not identify and not action then
-            return nil, "usage: /dev status | connect | disconnect"
+            and command ~= "bridge unbind" and command ~= "receiver reset"
+            and not receiverAction and not nonce and not identify and not action then
+            return nil, "usage: /dev status | connect | disconnect | receiver bind <wake|submit|close> <chord> | receiver reset"
         end
         if not ns.Startup.ready then return nil, ns.Startup.reason or "addon_not_ready" end
         -- Bare /dev toggles the workbench. Everything below keeps the exact
@@ -70,6 +79,16 @@ ns.Controls = {
         end
         local state, failure = ns.Persistence.Current()
         if not state then return nil, failure end
+        if command == "receiver reset" then
+            local profile, reason = ns.ReceiverBindings.Reset()
+            if not profile then return nil, reason end
+            return "receiver bindings reset"
+        end
+        if receiverAction then
+            local profile, reason = ns.ReceiverBindings.Configure(receiverAction, receiverChord)
+            if not profile then return nil, reason end
+            return "receiver " .. receiverAction .. " = " .. profile[receiverAction]
+        end
         if command == "connect" then
             if not state.options then state.options = {} end
             local previous = state.options.bridgeEnabled
@@ -118,6 +137,26 @@ ns.Controls = {
             if action == "clean" then return ns.Reentry.Reload(requestId, cleanupNonce) end
             if action == "reload" then return ns.Reentry.Reload(requestId) end
             if action == "flush" then return ns.Reentry.Flush(requestId,cleanupNonce) end
+            if action == "observe" or action == "finish" then
+                local receipt,reason
+                if action=="finish" then receipt,reason=ns.Investigation.Finish(requestId,cleanupNonce)
+                else receipt,reason=ns.Investigation.Observe(requestId,cleanupNonce) end
+                if not receipt then return nil,reason end
+                if action=="finish" then return ns.ReceiptView.ShowTransient(receipt,3) end
+                local function refresh()
+                    local current,failure,signal=ns.Investigation.ReadyReceipt(requestId)
+                    if not current then return nil,failure end
+                    return receipt,current,signal
+                end
+                local shown,failure=ns.ReceiptView.Show(receipt,nil,refresh)
+                if not shown then return nil,failure end
+                ns.Session.WhenInputReady(function(ready)
+                    if not ready then return end
+                    local current,_,signal=ns.Investigation.ReadyReceipt(requestId)
+                    if current then ns.ReceiptView.Show(receipt,current,refresh,signal) end
+                end)
+                return receipt
+            end
             -- Remove the old optical signal before loading or executing work.
             -- Preserve request ID case; only command words are case-insensitive.
             ns.Session.CancelInputWait()
@@ -131,6 +170,7 @@ ns.Controls = {
             elseif action == "verify" then receipt, reason = ns.ProbeQueue.VerifyRetired(requestId, cleanupNonce)
             else receipt, reason = ns.ProbeRunner.Dispatch(requestId) end
             if not receipt then return nil, reason end
+            if action == "run" and receipt == true then return true end
             local paired = action == "run" or action == "ack" or action == "bugs" or action == "bugs-ack"
             local refresh
             if paired or action == "ready" or action == "load" then
@@ -171,6 +211,7 @@ ns.Controls = {
             -- Reports survive opt-out; disabling never acknowledges or deletes.
             state.options.bridgeEnabled = command == "bridge on" and true or nil
             if command ~= "bridge on" then
+                if ns.StartupBeacon then ns.StartupBeacon.Stop() end
                 if ns.Reentry then ns.Reentry.Cancel(true) end
                 ns.Session.Release(); ns.ReceiptView.Hide()
             end

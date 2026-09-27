@@ -24,6 +24,12 @@ Use a question-specific probe only when the retained error snapshot cannot
 distinguish the hypotheses. Follow [live-investigation.md](live-investigation.md)
 and keep sampling, output and async lifetime bounded.
 
+For secret-value or secure-taint errors, connect the relevant fixed source path
+to [live hypothesis testing](live-investigation.md#test-source-hypotheses).
+Use runtime observations to distinguish the remaining source hypotheses, then
+return to those locations to explain the result; an error snapshot alone need
+not end an authorized deep investigation.
+
 To package known verified evidence:
 
 ```text

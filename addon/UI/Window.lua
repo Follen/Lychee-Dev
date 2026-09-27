@@ -1,29 +1,31 @@
 local ADDON_NAME, ns = ...
 
--- Workbench window shell: a lazy 1040x720 DIALOG-strata window with the
--- header, the eight-tab page registry navigation and the shell-owned history
--- rail layout. No frame, event, hook or timer exists before the first /dev.
+-- Lazy workbench shell. The navigation owns a narrow permanent column;
+-- investigation pages own an 800-unit canvas beside it.
 local W = ns.Widgets
 local colors = W.Colors
+local Theme = ns.Theme
 
-local WINDOW_WIDTH = 1040
-local WINDOW_HEIGHT = 720
-local HISTORY_WIDTH = 232
+local WINDOW_WIDTH = 960
+local WINDOW_HEIGHT = 660
+local SIDEBAR_WIDTH = 152
+local PAGE_WIDTH = 800
+local HISTORY_WIDTH = 176
 local WINDOW_NAME = "LycheeToolkitWindow"
 
 local Layout = {
-    WINDOW_WIDTH = WINDOW_WIDTH,
+    WINDOW_WIDTH = PAGE_WIDTH,
     WINDOW_HEIGHT = WINDOW_HEIGHT,
     RAIL_LEFT = 14,
     RAIL_WIDTH = HISTORY_WIDTH,
     -- Main content left edge beside the history rail.
-    CONTENT_LEFT = HISTORY_WIDTH + 36,
+    CONTENT_LEFT = HISTORY_WIDTH + 30,
     -- Full-width content left edge for pages without the rail.
     PAGE_LEFT = 17,
-    HEADING_TOP = -84,
+    HEADING_TOP = -78,
     CONTENT_TOP = -104,
     CONTENT_RIGHT = -14,
-    CONTENT_BOTTOM = 54,
+    CONTENT_BOTTOM = 64,
 }
 
 -- The eight workbench pages in navigation order. Their builders arrive
@@ -54,12 +56,45 @@ local activeKey
 local builtPages = {}
 local shutdownCallbacks = {}
 local exportHooks = {}
+local secondaryRoot
+local secondarySource
+local backButton
+local settingsPage
+local pageViewport, pageCanvas
+local pageOffsets = {}
+local UpdateRailVisibility
+local function ViewportDimension(method, fallback)
+    if not UIParent or type(UIParent[method]) ~= "function" then return fallback end
+    local ok, value = pcall(UIParent[method], UIParent)
+    if not ok or (issecretvalue and issecretvalue(value))
+        or type(value) ~= "number" or value <= 0 then return fallback end
+    return value
+end
+
+local function HideSecondary()
+    if not secondaryRoot or not secondaryRoot:IsShown() then return false end
+    secondaryRoot:Hide()
+    if secondaryRoot.content then secondaryRoot.content:Hide() end
+    secondarySource = nil
+    backButton:Hide()
+    if windowFrame.settingsButton then windowFrame.settingsButton:SetActive(false) end
+    for key, tab in pairs(windowFrame.pageTabs) do tab:SetActive(key == activeKey) end
+    if pageViewport then pageViewport:Show() end
+    if windowFrame.FitPageViewport then windowFrame.FitPageViewport() end
+    if windowFrame.FitNavigation then windowFrame.FitNavigation() end
+    local current = activeKey and builtPages[activeKey]
+    if current then current.container:Show() end
+    UpdateRailVisibility()
+    return true
+end
 
 local function RunShutdowns()
+    Theme.StopAnimation(windowFrame)
     for index = 1, #shutdownCallbacks do
         pcall(shutdownCallbacks[index])
     end
     for _, built in pairs(builtPages) do
+        Theme.StopAnimation(built.container)
         if built.def.shutdown then
             pcall(built.def.shutdown, built.page)
         end
@@ -67,9 +102,10 @@ local function RunShutdowns()
     if exportController then
         exportController:Hide()
     end
+    HideSecondary()
 end
 
-local function UpdateRailVisibility()
+UpdateRailVisibility = function()
     if not railRoot then
         return
     end
@@ -82,8 +118,8 @@ local function BuildPage(key)
     if not def or not def.build or builtPages[key] then
         return builtPages[key]
     end
-    local container = CreateFrame("Frame", nil, windowFrame)
-    container:SetAllPoints(windowFrame)
+    local container = CreateFrame("Frame", nil, pageCanvas)
+    container:SetAllPoints(pageCanvas)
     container:Hide()
     local page = def.build(container)
     builtPages[key] = { def = def, container = container, page = page or container }
@@ -95,20 +131,36 @@ local function ActivatePage(key)
         return false
     end
 
+    HideSecondary()
     local previous = activeKey and builtPages[activeKey] or nil
+    if activeKey and pageViewport then
+        pageOffsets[activeKey] = {
+            pageViewport:GetHorizontalScroll() or 0,
+            pageViewport:GetVerticalScroll() or 0,
+        }
+    end
+    if previous then Theme.StopAnimation(previous.container) end
     if previous and previous.def.suspend then
         previous.def.suspend(previous.page)
     end
 
     activeKey = key
+    if pageViewport then
+        local offset = pageOffsets[key] or { 0, 0 }
+        pageViewport:SetHorizontalScroll(math.min(offset[1],
+            math.max(0, PAGE_WIDTH - (windowFrame:GetWidth() - SIDEBAR_WIDTH - 8))))
+        pageViewport:SetVerticalScroll(math.min(offset[2],
+            math.max(0, WINDOW_HEIGHT - windowFrame:GetHeight())))
+    end
     local built = BuildPage(key)
 
     for pageKey, entry in pairs(builtPages) do
         entry.container:SetShown(pageKey == key)
     end
-    for pageKey, tab in pairs(windowFrame.pageTabs) do
-        tab:SetActive(pageKey == key)
-    end
+    if built then Theme.Reveal(built.container) end
+    for pageKey, tab in pairs(windowFrame.pageTabs) do tab:SetActive(pageKey == key) end
+    if windowFrame.settingsButton then windowFrame.settingsButton:SetActive(false) end
+    if windowFrame.ScrollTabIntoView then windowFrame.ScrollTabIntoView(key) end
     UpdateRailVisibility()
 
     if built and built.def.activate then
@@ -122,7 +174,7 @@ local function CreateHistoryRail()
         return railRoot
     end
 
-    railRoot = CreateFrame("Frame", nil, windowFrame)
+    railRoot = CreateFrame("Frame", nil, pageCanvas)
     railRoot:SetPoint("TOPLEFT", Layout.RAIL_LEFT, Layout.HEADING_TOP)
     railRoot:SetPoint("BOTTOMLEFT", Layout.RAIL_LEFT, Layout.CONTENT_BOTTOM)
     railRoot:SetWidth(HISTORY_WIDTH)
@@ -130,7 +182,7 @@ local function CreateHistoryRail()
     local label = W.CreateSectionLabel(railRoot, ns.L.HISTORY)
     label:SetPoint("TOPLEFT", 3, 0)
 
-    local panel = W.CreatePanel(railRoot, colors.editor[1], colors.editor[2], colors.editor[3], 0.78)
+    local panel = W.CreatePanel(railRoot, colors.panel[1], colors.panel[2], colors.panel[3], 1)
     panel:SetPoint("TOPLEFT", 0, -20)
     panel:SetPoint("BOTTOMLEFT", 0, 0)
     panel:SetWidth(HISTORY_WIDTH)
@@ -142,9 +194,9 @@ local function CreateHistoryRail()
     scroll:SetScrollChild(content)
 
     local empty = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    Theme.SetFont(empty, 12, Theme.textDim)
     empty:SetPoint("TOP", 0, -24)
     empty:SetText(ns.L.NO_HISTORY)
-    empty:SetTextColor(1, 1, 1, 0.32)
 
     local rail = {
         root = railRoot,
@@ -153,7 +205,7 @@ local function CreateHistoryRail()
         scroll = scroll,
         content = content,
         empty = empty,
-        rowHeight = 52,
+        rowHeight = 58,
         rowWidth = HISTORY_WIDTH - 26,
     }
     railRoot.rail = rail
@@ -171,13 +223,23 @@ local function EnsureWindow()
         return nil, reason
     end
 
-    local frame = CreateFrame("Frame", WINDOW_NAME, UIParent, "BackdropTemplate")
-    frame:SetSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+    local frame = CreateFrame("Frame", WINDOW_NAME, UIParent)
+    local function FitViewport()
+        frame:SetSize(math.min(WINDOW_WIDTH,
+            math.max(1, ViewportDimension("GetWidth", WINDOW_WIDTH + 24) - 24)),
+            math.min(WINDOW_HEIGHT,
+                math.max(1, ViewportDimension("GetHeight", WINDOW_HEIGHT + 24) - 24)))
+        if frame.FitNavigation then frame.FitNavigation() end
+        if frame.FitPageViewport then frame.FitPageViewport() end
+    end
+    frame.FitViewport = FitViewport
+    FitViewport()
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
     frame:EnableMouse(true)
+    frame:SetClipsChildren(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", function(self)
         self:StartMoving()
@@ -185,57 +247,158 @@ local function EnsureWindow()
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
     end)
-    frame:SetBackdrop(W.Backdrop)
-    frame:SetBackdropColor(colors.panel[1], colors.panel[2], colors.panel[3], 0.985)
-    frame:SetBackdropBorderColor(0.46, 0.51, 0.56, 0.48)
+    Theme.PaintRoundedPanel(frame)
     frame:Hide()
     tinsert(UISpecialFrames, frame:GetName())
 
-    local header = frame:CreateTexture(nil, "BACKGROUND")
-    header:SetColorTexture(colors.surface[1], colors.surface[2], colors.surface[3], 0.52)
-    header:SetPoint("TOPLEFT", 1, -1)
-    header:SetPoint("TOPRIGHT", -1, -1)
-    header:SetHeight(66)
+    pageViewport = CreateFrame("ScrollFrame", nil, frame)
+    pageViewport:SetPoint("TOPLEFT", SIDEBAR_WIDTH + 8, 0)
+    -- The page owns its bottom actions. Its viewport and canvas must share
+    -- the same height or the last 48 units become permanently unreachable.
+    pageViewport:SetPoint("BOTTOMRIGHT", 0, 0)
+    pageViewport:SetClipsChildren(true)
+    pageViewport:EnableMouseWheel(true)
+    local pageScrollChild = CreateFrame("Frame", nil, pageViewport)
+    pageScrollChild:SetSize(PAGE_WIDTH, WINDOW_HEIGHT)
+    pageViewport:SetScrollChild(pageScrollChild)
+    pageCanvas = CreateFrame("Frame", nil, pageScrollChild)
+    pageCanvas:SetSize(PAGE_WIDTH, WINDOW_HEIGHT)
+    pageCanvas:SetPoint("TOPLEFT", pageScrollChild, "TOPLEFT", 0, 0)
+    pageViewport:SetScript("OnMouseWheel", function(self, delta)
+        if issecretvalue and issecretvalue(delta) then return end
+        local range = math.max(0, WINDOW_HEIGHT - frame:GetHeight())
+        self:SetVerticalScroll(math.max(0, math.min(range,
+            (self:GetVerticalScroll() or 0) - delta * 36)))
+    end)
+    local pagePrevious = W.CreateButton(frame, 32, "<", "secondary")
+    pagePrevious:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -90, -10)
+    local pageNext = W.CreateButton(frame, 32, ">", "secondary")
+    pageNext:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -50, -10)
+    local function FitPageViewport()
+        local range = math.max(0, PAGE_WIDTH - math.max(1, frame:GetWidth() - SIDEBAR_WIDTH - 8))
+        local shown = range > 0 and not (secondaryRoot and secondaryRoot:IsShown())
+        pagePrevious:SetShown(shown)
+        pageNext:SetShown(shown)
+        pageViewport:SetHorizontalScroll(math.min(
+            pageViewport:GetHorizontalScroll() or 0, range))
+        pageViewport:SetVerticalScroll(math.min(
+            pageViewport:GetVerticalScroll() or 0,
+            math.max(0, WINDOW_HEIGHT - frame:GetHeight())))
+    end
+    pagePrevious:SetScript("OnClick", function()
+        pageViewport:SetHorizontalScroll(math.max(0,
+            (pageViewport:GetHorizontalScroll() or 0) - 160))
+    end)
+    pageNext:SetScript("OnClick", function()
+        pageViewport:SetHorizontalScroll(math.min(math.max(0,
+            PAGE_WIDTH - math.max(1, frame:GetWidth() - SIDEBAR_WIDTH - 8)),
+            (pageViewport:GetHorizontalScroll() or 0) + 160))
+    end)
+    frame.pageViewport, frame.pagePrevious, frame.pageNext =
+        pageViewport, pagePrevious, pageNext
+    frame.FitPageViewport = FitPageViewport
+    FitPageViewport()
 
-    local logo = frame:CreateTexture(nil, "ARTWORK")
+    local header = CreateFrame("Frame", nil, frame)
+    header:SetPoint("TOPLEFT", 0, 0)
+    header:SetPoint("BOTTOMLEFT", 0, 0)
+    header:SetWidth(SIDEBAR_WIDTH)
+    -- Flush to the outer contour: only the two outside corners are rounded.
+    Theme.PaintRoundedPanel(header, Theme.sidebar, { squareRight = true })
+    frame.sidebar = header
+
+    local logo = header:CreateTexture(nil, "ARTWORK")
     logo:SetTexture(W.LOGO_TEXTURE)
-    logo:SetTexCoord(0.18, 0.79, 0.17, 0.80)
-    logo:SetSize(46, 46)
-    logo:SetPoint("TOPLEFT", 14, -10)
+    logo:SetTexCoord(0, 1, 0, 1)
+    logo:SetSize(28, 28)
+    logo:SetPoint("TOPLEFT", 14, -18)
 
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
+    local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    Theme.SetFont(title, 12, Theme.text)
+    title:SetPoint("LEFT", logo, "RIGHT", 7, 0)
+    title:SetWidth(SIDEBAR_WIDTH - 60)
+    title:SetJustifyH("LEFT")
     title:SetText(ns.L.ADDON_TITLE)
-    title:SetTextColor(1, 1, 1, 1)
 
     local closeButton = W.CreateCloseButton(frame)
-    closeButton:SetPoint("TOPRIGHT", -14, -14)
+    closeButton:SetPoint("TOPRIGHT", -11, -10)
     closeButton:SetScript("OnClick", function()
         frame:Hide()
     end)
 
+    secondaryRoot = CreateFrame("Frame", nil, frame)
+    secondaryRoot:SetPoint("TOPLEFT", SIDEBAR_WIDTH + 8, 0)
+    secondaryRoot:SetPoint("BOTTOMRIGHT", -14, 0)
+    secondaryRoot:EnableMouse(true)
+    secondaryRoot:Hide()
+
+
+    backButton = W.CreateBackButton(frame)
+    backButton:SetPoint("TOPLEFT", secondaryRoot, "TOPLEFT", 4, -8)
+    backButton:SetScript("OnClick", HideSecondary)
+    backButton:Hide()
+    frame.backButton = backButton
+
+    local settingsButton = W.CreateNavTab(header, ns.L.SETTINGS)
+    settingsButton:SetSize(SIDEBAR_WIDTH - 20, 40)
+    settingsButton:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 10, 16)
+    local function ShowSettings()
+        if not settingsPage then
+            settingsPage=ns.SettingsPage.Create(secondaryRoot,function()
+                return frame:GetWidth()-SIDEBAR_WIDTH-22
+            end)
+        end
+        settingsPage.RefreshBindingFields()
+        settingsPage.FitContent()
+        ns.Workbench.ShowSecondary(settingsPage)
+        return true
+    end
+    settingsButton:SetScript("OnClick", ShowSettings)
+    frame.settingsButton = settingsButton
+    frame.ShowSettings = ShowSettings
+
+    local navScroll = W.CreateScrollArea(header, 10, 86, 10, 72)
+    local navContent = CreateFrame("Frame", nil, navScroll)
+    navContent:SetSize(SIDEBAR_WIDTH - 32, #pageOrder * 44)
+    navScroll:SetScrollChild(navContent)
+    frame.navScroll = navScroll
+    frame.FitNavigation = function() navScroll:UpdateScrollChildRect() end
     frame.pageTabs = {}
-    local previousTab
     for index = 1, #pageOrder do
         local key = pageOrder[index]
         local def = pageDefs[key]
-        local tab = W.CreateNavTab(frame, ns.L[def.titleKey] or key)
-        W.FitNavTab(tab, 48, 32)
-        if previousTab then
-            tab:SetPoint("LEFT", previousTab, "RIGHT", 8, 0)
-        else
-            tab:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 300, 8)
-        end
-        tab:SetScript("OnClick", function()
-            ActivatePage(key)
-        end)
+        local tab = W.CreateNavTab(navContent, ns.L[def.titleKey] or key)
+        tab:SetSize(SIDEBAR_WIDTH - 32, 40)
+        tab:SetPoint("TOPLEFT", navContent, "TOPLEFT", 0, -((index - 1) * 44))
+        tab.navTop = (index - 1) * 44
+        tab:SetScript("OnClick", function() ActivatePage(key) end)
         frame.pageTabs[key] = tab
-        previousTab = tab
+    end
+    frame.FitNavigation()
+    frame.ScrollTabIntoView = function(key)
+        local tab = frame.pageTabs[key]
+        if not tab then return end
+        local offset = navScroll:GetVerticalScroll() or 0
+        if tab.navTop < offset then
+            navScroll:SetVerticalScroll(tab.navTop)
+        elseif tab.navTop + tab:GetHeight() > offset + navScroll:GetHeight() then
+            navScroll:SetVerticalScroll(tab.navTop + tab:GetHeight() - navScroll:GetHeight())
+        end
     end
 
     exportController = ns.ExportUI.Create(frame)
 
-    frame:SetScript("OnHide", RunShutdowns)
+    frame:SetScript("OnShow", function(self)
+        self:RegisterEvent("DISPLAY_SIZE_CHANGED")
+        self:RegisterEvent("UI_SCALE_CHANGED")
+    end)
+    frame:SetScript("OnEvent", function(self)
+        self.FitViewport()
+    end)
+    frame:SetScript("OnHide", function(self)
+        self:UnregisterAllEvents()
+        RunShutdowns()
+    end)
     windowFrame = frame
 
     -- Hiding on combat is registered here (not at file scope) so a session
@@ -263,7 +426,9 @@ ns.Workbench = {
             frame:Hide()
             return false
         end
+        frame.FitViewport()
         frame:Show()
+        Theme.Reveal(frame)
         ActivatePage(activeKey or pageOrder[1])
         return true
     end,
@@ -276,7 +441,10 @@ ns.Workbench = {
         if not frame then
             return false, reason
         end
+        if frame:IsShown() then return true end
+        frame.FitViewport()
         frame:Show()
+        Theme.Reveal(frame)
         ActivatePage(activeKey or pageOrder[1])
         return true
     end,
@@ -300,9 +468,43 @@ ns.Workbench = {
         return ActivatePage(key)
     end,
 
+    ShowSettings = function()
+        local shown, reason = ns.Workbench.Open()
+        if not shown then return false, reason end
+        return windowFrame.ShowSettings()
+    end,
+
+    GetSettingsPage = function() return settingsPage end,
+
     GetActivePage = function()
         return activeKey
     end,
+
+    ShowSecondary = function(content)
+        if not windowFrame or not content or not activeKey then return false end
+        if secondaryRoot.content and secondaryRoot.content ~= content then
+            secondaryRoot.content:Hide()
+        end
+        secondaryRoot.content = content
+        secondarySource = activeKey
+        local current = builtPages[activeKey]
+        if current then current.container:Hide() end
+        pageViewport:Hide()
+        windowFrame.pagePrevious:Hide()
+        windowFrame.pageNext:Hide()
+        if railRoot then railRoot:Hide() end
+        for _, tab in pairs(windowFrame.pageTabs) do tab:SetActive(false) end
+        if windowFrame.settingsButton then
+            windowFrame.settingsButton:SetActive(content == settingsPage)
+        end
+        backButton:Show()
+        content:Show()
+        secondaryRoot:Show()
+        return true
+    end,
+
+    HideSecondary = HideSecondary,
+    GetSecondaryRoot = function() return secondaryRoot end,
 
     -- The built page object (build result) once its tab was activated.
     GetPage = function(key)

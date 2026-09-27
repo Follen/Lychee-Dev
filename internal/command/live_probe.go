@@ -43,3 +43,29 @@ func putLiveProbe(ctx context.Context, opts Options) (live.ProbePutResult, error
 	result, err := live.PutProbe(ctx, root, opts.name, code)
 	return result, err, 0
 }
+
+func executeLive(ctx context.Context, opts Options) (live.Outcome, error, int) {
+	request := live.ExecuteRequest{LoadProbeRequest: live.LoadProbeRequest{
+		Session: opts.session, Account: opts.account, Probe: opts.probe,
+		Request: opts.request, BudgetSeconds: opts.budgetSeconds,
+	}}
+	if (opts.file == "") == (opts.probe == "") {
+		return live.Outcome{}, errors.New("live execute requires exactly one of --file or --probe"), 2
+	}
+	if opts.file != "" {
+		code, err := readProbeFile(opts.file)
+		if err != nil {
+			return live.Outcome{}, err, 2
+		}
+		request.Code = code
+	}
+	if err := request.Validate(); err != nil {
+		return live.Outcome{}, err, 2
+	}
+	root, err := workspaceRoot(opts.home)
+	if err != nil {
+		return live.Outcome{}, err, 0
+	}
+	result, err := live.Execute(ctx, root, request)
+	return result, err, 0
+}

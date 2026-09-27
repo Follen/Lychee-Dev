@@ -21,7 +21,7 @@ import (
 )
 
 const ParserRevision = "source-v1"
-const maxSourceBytes = 16 << 20
+const maxSourceBytes = 32 << 20
 
 type Browser struct{ store *vault.Store }
 

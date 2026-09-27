@@ -9,9 +9,10 @@ type PlanStep struct {
 	Detail    string `json:"detail,omitempty"`
 }
 type ScanMeasurement struct {
-	Table TableUse `json:"table"`
-	Calls int64    `json:"calls"`
-	Rows  int64    `json:"rows"`
+	Table   TableUse `json:"table"`
+	Calls   int64    `json:"calls"`
+	Rows    int64    `json:"rows"`
+	Lookups int64    `json:"lookups,omitempty"`
 }
 type ExecutionMeasurement struct {
 	Scans        []ScanMeasurement `json:"scans"`
@@ -100,7 +101,11 @@ func (p *Program) explanation(e *evaluation) (*Explanation, error) {
 			return err
 		}
 		for _, join := range q.links {
-			child, err := add(id, "nested-loop-join", join.kind+"; materialize right")
+			kind, detail := "nested-loop-join", join.kind+"; materialize right"
+			if bareEquality(join.condition) {
+				kind, detail = "adaptive-equality-join", join.kind+"; bounded hash index when eligible; nested-loop fallback"
+			}
+			child, err := add(id, kind, detail)
 			if err != nil {
 				return err
 			}
@@ -146,7 +151,11 @@ func (p *Program) explanation(e *evaluation) (*Explanation, error) {
 			}
 		}
 		if len(q.order) > 0 {
-			if _, err := add(id, "order", "stable merge sort"); err != nil {
+			detail := "stable merge sort"
+			if !grouped && !q.distinct && q.limit != nil && len(q.order) == 1 {
+				detail = "bounded stable Top-K when offset+limit <= 1000000; otherwise stable merge sort; validates complete input"
+			}
+			if _, err := add(id, "order", detail); err != nil {
 				return err
 			}
 		}

@@ -104,6 +104,7 @@ const (
 )
 
 type StreamBegin struct {
+	Tables     []TableProvenance    `json:"tables"`
 	Snapshot   string               `json:"snapshot"`
 	Source     string               `json:"source"`
 	Table      string               `json:"table"`
@@ -121,10 +122,12 @@ type StreamRecord struct {
 }
 
 type StreamEnd struct {
-	Count            int    `json:"count"`
-	Complete         bool   `json:"complete"`
-	Truncated        bool   `json:"truncated"`
-	TruncationReason string `json:"truncationReason"`
+	Partial          bool     `json:"partial"`
+	PartialReasons   []string `json:"partialReasons"`
+	Count            int      `json:"count"`
+	Complete         bool     `json:"complete"`
+	Truncated        bool     `json:"truncated"`
+	TruncationReason string   `json:"truncationReason"`
 }
 
 type StreamError struct {
@@ -348,6 +351,7 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 			}
 		}
 		begin := StreamBegin{
+			Tables:   nav.resultContext().Tables,
 			Snapshot: snapshot, Source: nav.source, Table: t.provenance.Identity.Name,
 			Identity: t.provenance.Identity, LayoutHash: t.provenance.LayoutHash,
 			Fields: fields, Filter: request.Filter, Limit: request.Limit,
@@ -387,6 +391,7 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 		}
 		contextFrame := nav.resultContext()
 		end := StreamEnd{
+			Partial: contextFrame.Partial, PartialReasons: contextFrame.PartialReasons,
 			Count: count, Complete: contextFrame.Complete, Truncated: contextFrame.Truncated,
 			TruncationReason: contextFrame.TruncationReason,
 		}

@@ -18,14 +18,22 @@ var ErrTransition = errors.New("journal.invalid_transition")
 var ErrRequestConflict = errors.New("journal.request_conflict")
 
 type WorkIntent struct {
-	Kind          string          `json:"kind"`
-	Resource      string          `json:"resource"`
-	Snapshot      string          `json:"snapshot"`
-	Session       string          `json:"session"`
-	Request       json.RawMessage `json:"request"`
-	RequestKey    string          `json:"requestKey,omitempty"`
-	RequestDigest string          `json:"requestDigest,omitempty"`
-	Goal          string          `json:"goal,omitempty"`
+	Kind          string           `json:"kind"`
+	Resource      string           `json:"resource"`
+	Snapshot      string           `json:"snapshot"`
+	Session       string           `json:"session"`
+	Request       json.RawMessage  `json:"request"`
+	RequestKey    string           `json:"requestKey,omitempty"`
+	RequestDigest string           `json:"requestDigest,omitempty"`
+	Goal          string           `json:"goal,omitempty"`
+	Admission     *WindowAdmission `json:"admission,omitempty"`
+}
+
+// WindowAdmission freezes where a prepared operation may publish its claim.
+// It is intent, not evidence that admission or game input has happened.
+type WindowAdmission struct {
+	Parent      string `json:"parent"`
+	WorkspaceID string `json:"workspaceId"`
 }
 
 type WorkRecord struct {
@@ -134,11 +142,6 @@ func (b *Book) beginWork(ctx context.Context, intent WorkIntent, reserve func(Wo
 		return WorkRecord{}, err
 	}
 	claim, _ := json.Marshal(ownership{OperationID: record.OperationID})
-	if reserve != nil {
-		if err := reserve(record); err != nil {
-			return record, err
-		}
-	}
 	mutations := []vault.Mutation{{Key: "work/" + record.OperationID, Value: payload}, {Key: key, ExpectedGeneration: owner.Generation, Value: claim}}
 	if intent.RequestKey != "" {
 		request, _ := json.Marshal(requestIdentity{OperationID: record.OperationID, Digest: intent.RequestDigest})
@@ -147,6 +150,11 @@ func (b *Book) beginWork(ctx context.Context, intent WorkIntent, reserve func(Wo
 	err = b.metadata.CommitDocuments(ctx, mutations...)
 	if errors.Is(err, vault.ErrGeneration) {
 		return WorkRecord{}, ErrBusy
+	}
+	if err == nil && reserve != nil {
+		// A visible shared claim must always refer to a durable local intent.
+		// On publication failure the prepared record is retained for recovery.
+		err = reserve(record)
 	}
 	return record, err
 }
@@ -246,7 +254,8 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 
 func allowsTransition(kind, from, to, status string) bool {
 	if from == "abandoning" || to == "abandoning" || to == "abandoned" {
-		return (kind == "probe" || kind == "faults") && ((from == "load_requested" || from == "loaded" || from == "dispatch_requested" || from == "reported" || from == "flush_requested" || from == "persisted" || from == "verified" || from == "ack_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
+		return (kind == "probe" || kind == "faults") && ((from == "load_requested" || from == "loaded" || from == "dispatch_requested" || from == "reported" || from == "flush_requested" || from == "persisted" || from == "verified" || from == "ack_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned") ||
+			kind == "reload" && ((from == "prepared" || from == "reload_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
 	}
 	if to == "cleaned" {
 		return from == "acknowledged" && (status == "completed" || status == "cancelled") ||

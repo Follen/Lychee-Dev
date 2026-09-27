@@ -14,6 +14,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 	"hash/adler32"
 	"path/filepath"
+	"time"
 )
 
 // ProbeLoadIntent is frozen with the report intent, not reconstructed from a
@@ -21,21 +22,24 @@ import (
 type ProbeLoadIntent struct {
 	Installation string `json:"installation"`
 	Account      string `json:"account,omitempty"`
+	ReportScope  string `json:"reportScope,omitempty"`
 	GUID         string `json:"guid"`
 	ReloadNonce  string `json:"reloadNonce"`
 }
 type probeLoadObservation struct {
 	bootstrapObservation
-	Schema            string                 `json:"schema"`
-	Revision          delivery.QueueRevision `json:"revision"`
-	LoadedCapture     string                 `json:"loadedCapture,omitempty"`
-	LoadReadyCapture  string                 `json:"loadReadyCapture,omitempty"`
-	LoadInput         *desktop.InputReceipt  `json:"loadInput,omitempty"`
-	ReportedCapture   string                 `json:"reportedCapture,omitempty"`
-	DispatchInput     *desktop.InputReceipt  `json:"dispatchInput,omitempty"`
-	FlushInput        *desktop.InputReceipt  `json:"flushInput,omitempty"`
-	FlushReadyCapture string                 `json:"flushReadyCapture,omitempty"`
-	ReloadedCapture   string                 `json:"reloadedCapture,omitempty"`
+	Schema               string                 `json:"schema"`
+	Revision             delivery.QueueRevision `json:"revision"`
+	LoadedCapture        string                 `json:"loadedCapture,omitempty"`
+	LoadReadyCapture     string                 `json:"loadReadyCapture,omitempty"`
+	LoadInput            *desktop.InputReceipt  `json:"loadInput,omitempty"`
+	ReportedCapture      string                 `json:"reportedCapture,omitempty"`
+	ReportErrorCapture   string                 `json:"reportErrorCapture,omitempty"`
+	DispatchInput        *desktop.InputReceipt  `json:"dispatchInput,omitempty"`
+	ExecutionRequestedAt time.Time              `json:"executionRequestedAt,omitempty"`
+	FlushInput           *desktop.InputReceipt  `json:"flushInput,omitempty"`
+	FlushReadyCapture    string                 `json:"flushReadyCapture,omitempty"`
+	ReloadedCapture      string                 `json:"reloadedCapture,omitempty"`
 }
 
 func loadedOperationEvidence(ctx context.Context, archive *evidence.Archive, record journal.WorkRecord, input ReportIntent, definition bridge.ProbeDefinition) (probeLoadObservation, bridge.Signal, error) {
@@ -102,7 +106,13 @@ func RequestOperationDispatch(ctx context.Context, root, operationID string) (st
 		if deployment.Client.Product != definition.Product || deployment.Client.FullBuild != definition.Build {
 			return "", errors.New("live.probe_installation_mismatch")
 		}
-		if err := book.AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: "dispatch_requested", Status: "running", Observation: record.Observation}); err != nil {
+		var observation probeLoadObservation
+		if err := json.Unmarshal(record.Observation, &observation); err != nil {
+			return "", err
+		}
+		observation.ExecutionRequestedAt = time.Now().UTC()
+		frozen, _ := json.Marshal(observation)
+		if err := book.AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: record.Generation, ExpectedStage: record.Stage, Stage: "dispatch_requested", Status: "running", Observation: frozen}); err != nil {
 			return "", err
 		}
 		return "/dev bridge run " + definition.RequestID, nil
@@ -115,7 +125,7 @@ func ObserveOperationReported(ctx context.Context, root, operationID string, rea
 	if reader == nil {
 		return evidence.CaptureRef{}, errors.New("live.missing_signal_reader")
 	}
-	return observeOperationReported(ctx, root, operationID, reader.WaitForSignal)
+	return observeOperationReported(ctx, root, operationID, reader.WaitForReportedOutcome)
 }
 
 func observeOperationReported(ctx context.Context, root, operationID string, wait signalWait) (evidence.CaptureRef, error) {
@@ -140,12 +150,30 @@ func observeOperationReported(ctx context.Context, root, operationID string, wai
 		}
 		expected := input.Expected
 		expected.Kind, expected.ReloadNonce, expected.AfterSequence, expected.RequireInputReady = "reported", "", loaded.Sequence, false
+		expected.AllowReportError = true
 		signal, err := wait(ctx, expected)
 		if err != nil {
 			return zero, err
 		}
 		if signal.ReloadNonce != "" || signal.CodeBytes != loaded.CodeBytes || signal.CodeAdler32 != loaded.CodeAdler32 {
 			return zero, errors.New("live.reported_code_mismatch")
+		}
+		if signal.Kind == "report_error" {
+			payload, _ := json.Marshal(signal)
+			capture, err := archive.CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(payload), MaxBytes: 4096,
+				MediaType: "application/json", Complete: true, Provenance: evidence.Provenance{Kind: "decoded-game-report-error",
+					Locator: definition.RequestID, Snapshot: record.Intent.Snapshot, OperationID: record.OperationID,
+					DataBuild: definition.Build, Session: definition.SessionNonce}})
+			if err != nil {
+				return zero, err
+			}
+			observed.ReportErrorCapture = capture.ID
+			raw, _ := json.Marshal(observed)
+			if err := book.AdvanceStage(ctx, journal.StageChange{OperationID: record.OperationID, ExpectedGeneration: record.Generation,
+				ExpectedStage: record.Stage, Stage: "dispatch_requested", Status: "failed", Observation: raw}); err != nil {
+				return capture, err
+			}
+			return capture, fmt.Errorf("live.report_encoding_failed: %s", signal.ErrorCode)
 		}
 		payload, err := json.Marshal(signal)
 		if err != nil {
@@ -171,7 +199,10 @@ func probeDefinition(record journal.WorkRecord) (ReportIntent, bridge.ProbeDefin
 		return input, bridge.ProbeDefinition{}, errors.New("live.invalid_probe_load_intent")
 	}
 	expected := input.Expected
-	definition := bridge.ProbeDefinition{RequestID: expected.RequestID, Release: expected.Release, SessionNonce: expected.SessionNonce, ReloadNonce: input.Load.ReloadNonce, Character: expected.Character, Realm: expected.Realm, GUID: input.Load.GUID, Product: expected.Product, Build: expected.Build, Code: string(input.Code)}
+	definition := bridge.ProbeDefinition{RequestID: expected.RequestID, Release: expected.Release, SessionNonce: expected.SessionNonce, ReloadNonce: input.Load.ReloadNonce, Character: expected.Character, Realm: expected.Realm, GUID: input.Load.GUID, Product: expected.Product, Build: expected.Build, Code: string(input.Code), BudgetSeconds: input.BudgetSeconds}
+	if record.Intent.Goal == "finished" {
+		definition.Goal = "finished"
+	}
 	_, err = bridge.EncodeProbeQueue([]bridge.ProbeDefinition{definition})
 	return input, definition, err
 }

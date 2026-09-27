@@ -35,7 +35,7 @@ func finishProbe(ctx context.Context, root, id string,
 	if err != nil {
 		return result, err
 	}
-	if outcome.Report.State != "verified" || outcome.Cleanup != "complete" || !outcome.Complete {
+	if outcome.Report.State != "verified" || outcome.Cleanup != "complete" {
 		return result, errors.New("live.finish_requires_acknowledgement")
 	}
 	record, err := InspectOperation(ctx, root, id)

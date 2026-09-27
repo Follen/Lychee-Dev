@@ -31,6 +31,7 @@ const (
 // HideReceiptResult is the read model of one explicit dismissal.
 type HideReceiptResult struct {
 	Session            string    `json:"session"`
+	BootstrapAttemptID string    `json:"bootstrapAttemptId,omitempty"`
 	Cleared            bool      `json:"cleared"`
 	MessagesQueued     int       `json:"messagesQueued"`
 	SubmissionComplete bool      `json:"submissionComplete"`
@@ -40,11 +41,14 @@ type HideReceiptResult struct {
 // hideIO carries the native seams so the dismissal flow stays testable
 // against fixture frames and a fake sender.
 type hideIO struct {
-	send       preparedInput
-	capture    func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error)
-	readiness  time.Duration
-	grace      time.Duration
-	verify     time.Duration
+	send            preparedInput
+	confirm         func(context.Context) error
+	mayHaveExecuted func(context.Context) bool
+	attemptID       func() string
+	capture         func(context.Context, desktop.WindowIdentity, image.Rectangle) (sessionFrames, error)
+	readiness       time.Duration
+	grace           time.Duration
+	verify          time.Duration
 }
 
 // HideReceipt dismisses the displayed bridge receipt on the session's window
@@ -53,16 +57,48 @@ type hideIO struct {
 // observes fresh input readiness, submits exactly /dev bridge hide, and
 // verifies the clear from valid frames.
 func HideReceipt(ctx context.Context, root, sessionID string) (HideReceiptResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, bootstrapLifecycleBudget)
 	defer cancel()
 	session, _, err := reconnectSession(ctx, root, sessionID, nativeIO())
 	if err != nil {
 		return HideReceiptResult{}, err
 	}
 	defer session.Close()
+	var attemptID string
 	return hideReceipt(ctx, session, sessionID, hideIO{
-		send:      desktop.QueuePreparedCommand,
-		capture:   func(ctx context.Context, window desktop.WindowIdentity, region image.Rectangle) (sessionFrames, error) { return desktop.CaptureFrames(ctx, window, region) },
+		send: func(ctx context.Context, window desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+			if window != session.target.Window {
+				return desktop.InputReceipt{}, errors.New("live.receiver_window_mismatch")
+			}
+			if err := guard(ctx); err != nil {
+				return desktop.InputReceipt{}, err
+			}
+			command, err := prepare(ctx)
+			if err != nil {
+				return desktop.InputReceipt{}, err
+			}
+			var receipt desktop.InputReceipt
+			receipt, attemptID, err = sendBootstrapReceiver(withReceiverBindings(ctx, session.bindings), root, session.target, session.region, command)
+			return receipt, err
+		},
+		confirm: func(ctx context.Context) error {
+			if attemptID == "" {
+				return errors.New("live.hide_attempt_missing")
+			}
+			return updateBootstrapReceiver(ctx, root, attemptID, func(attempt *BootstrapReceiverAttempt) error {
+				if attempt.Action != "hide" || (attempt.Phase != "commit_requested" && attempt.Phase != "accepted" && attempt.Phase != "dismissed") ||
+					(attempt.Receiver.Phase != "commit_requested" && attempt.Receiver.Phase != "accepted" && attempt.Receiver.Phase != "dismissed") {
+					return errors.New("live.hide_attempt_unconfirmed")
+				}
+				attempt.Phase = "confirmed"
+				return nil
+			})
+		},
+		mayHaveExecuted: func(ctx context.Context) bool { return bootstrapBusinessMayHaveExecuted(ctx, root, attemptID) },
+		attemptID:       func() string { return attemptID },
+		capture: func(ctx context.Context, window desktop.WindowIdentity, region image.Rectangle) (sessionFrames, error) {
+			return desktop.CaptureFrames(ctx, window, region)
+		},
 		readiness: receiptHideReadiness,
 		grace:     receiptHideGrace,
 		verify:    receiptHideVerify,
@@ -101,13 +137,24 @@ func hideReceipt(ctx context.Context, session *WindowSession, sessionID string, 
 			return session.reader.RequireFreshSignal()
 		})
 	result.MessagesQueued, result.SubmissionComplete = receipt.MessagesQueued, receipt.SubmissionComplete
-	if err != nil {
+	if native.attemptID != nil {
+		result.BootstrapAttemptID = native.attemptID()
+	}
+	if err != nil && (native.mayHaveExecuted == nil || !native.mayHaveExecuted(ctx)) {
 		return result, err
 	}
 	cleared, observed := verifyReceiptCleared(ctx, native, session, sent)
 	result.Cleared, result.ObservedAt = cleared, observed
 	if !cleared {
+		if result.BootstrapAttemptID != "" {
+			return result, &BootstrapPendingError{ID: result.BootstrapAttemptID, Cause: ErrReceiptHidePending}
+		}
 		return result, ErrReceiptHidePending
+	}
+	if native.confirm != nil {
+		if err := native.confirm(ctx); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }

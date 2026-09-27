@@ -16,6 +16,10 @@ import (
 // another reload. The host already owns verified report bytes; the exact queue
 // entry is retired and the game acknowledgement is retained as evidence.
 func (p *ProbeOperation) FinalizeAcknowledged(ctx context.Context) (journal.WorkRecord, error) {
+	return p.finalizeAcknowledged(ctx, p.receiverInput)
+}
+
+func (p *ProbeOperation) finalizeAcknowledged(ctx context.Context, send preparedInput) (journal.WorkRecord, error) {
 	if _, err := p.RetireQueue(ctx); err != nil {
 		return journal.WorkRecord{}, err
 	}
@@ -49,6 +53,11 @@ func (p *ProbeOperation) FinalizeAcknowledged(ctx context.Context) (journal.Work
 	}
 	if _, err := delivery.VerifyProbeRetired(ctx, delivery.AddonDirectory(p.session.target.Client.Directory), definition); err != nil {
 		return record, err
+	}
+	if record.Intent.Goal == "finished" {
+		if err := p.finalizeDisplay(ctx, send); err != nil {
+			return record, err
+		}
 	}
 	book := journal.OpenBook(p.metadata)
 	if err := book.AdvanceStage(ctx, journal.StageChange{OperationID: p.id, ExpectedGeneration: record.Generation, ExpectedStage: "acknowledged", Stage: "cleaned", Status: "completed", Observation: record.Observation}); err != nil {

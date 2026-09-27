@@ -30,7 +30,7 @@ Find where Blizzard defines an API, query the records behind a spell or item, ex
 
 | Workflow | Capabilities | Typical question |
 | --- | --- | --- |
-| **Source research** | Sync Blizzard UI source and supported addon repositories; index Lua/XML/TOC; precise or exploratory search; inspect symbols and lines; compare pinned revisions | Where is this API used, and what changed between clients? |
+| **Source research** | Pin Blizzard UI or addon Git revisions; search Lua/XML/TOC and text; inspect definitions; follow bounded references and context; compare versions. The package includes verified LuaLS for semantic requests; secret-value flow reports conditions and unknown edges | Where is this API used, and what changed between clients? |
 | **Addon validation** | Check the TOC/XML load closure, syntax and source-name references; run an explicit client matrix | Does this addon have missing load files or incompatible interface declarations? |
 | **DB2 & SQL** | Typed schemas and rows, field search, foreign-key selection, pagination, JSONL streams, read-only SQL and CSV export | Which records match this condition? |
 | **Game records** | Spell references, auras and summons; item models, geosets and textures; creature displays/models; encounters; housing decor | What data and assets are associated with this ID? |
@@ -62,7 +62,7 @@ Client identity comes from installation metadata and build evidence, not the fol
 PowerShell:
 
 ```powershell
-npm install --global lycheedev --ignore-scripts
+npm install --global lycheedev
 lycheedev version --format json
 lycheedev describe --format json
 ```
@@ -84,14 +84,18 @@ Load the addon in the client after installation. Open `/dev` to use the workbenc
 
 ### Research an API
 
+Initialize the workspace once before the first source request:
+
 ```powershell
+lycheedev init
 $source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
 $sourcePin = $source.result.id
-lycheedev source index --snapshot $sourcePin --format json
-lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json
+$matches = lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json | ConvertFrom-Json
+$symbol = $matches.result.results | Where-Object { $_.symbolId } | Select-Object -First 1
+lycheedev source context --snapshot $sourcePin --symbol-id $symbol.symbolId --format json
 ```
 
-The branch is resolved once; subsequent commands reuse the returned immutable pin. To investigate a historical release, supply its exact commit or full tag ref. Use `source inspect` for the original lines and `source diff --from <pin-a> --to <pin-b>` for revision comparisons.
+The branch is resolved once; subsequent commands reuse the returned immutable pin. Query and context prepare their needed source mapping. Choose a result by its path and scope before using its `symbolId`; `source refs` follows its calls and references. To investigate a historical release, supply its exact commit or full tag ref. Use `source inspect` for the original lines and `source diff --from <pin-a> --to <pin-b>` for revision comparisons.
 
 ### Query real game data
 
@@ -178,7 +182,7 @@ Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned i
 | Agent workflow | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm distribution | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | Contracts and verification | [Design](docs/toolkit/design.md) · [Status](docs/toolkit/implementation-status.md) · [Regression matrix](docs/toolkit/regression.md) |
-| Release | [Release contract](docs/toolkit/release-2.0.6.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| Release | [Release contract](docs/toolkit/release-2.5.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## License
 

@@ -18,13 +18,13 @@ local aboutPage = assert(W.GetPage("about"), "about page object was not built")
 assert(aboutPage.metaItems, "about metadata rows were not created")
 
 -- Version comes from TOC metadata with the release string as fallback.
-assert(aboutPage.metaItems.version.value:GetText() == "2.0.6",
+assert(aboutPage.metaItems.version.value:GetText() == "2.5.0",
     "about page did not read the addon version")
 assert(aboutPage.metaItems.command.value:GetText() == "/dev", "about open command changed")
 assert(aboutPage.metaItems.author.value:GetText() == "Follen", "about author changed")
 
 -- Supported clients get their own full-width row.
-assert(aboutPage.metaItems.clients.value:GetWidth() == 920,
+assert(aboutPage.metaItems.clients.value:GetWidth() == 750,
     "supported clients did not receive the full metadata width")
 assert(aboutPage.metaItems.clients.value.point[3] ~= aboutPage.metaItems.command.value.point[3],
     "supported clients did not receive a dedicated metadata row")

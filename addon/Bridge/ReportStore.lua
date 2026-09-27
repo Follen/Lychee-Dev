@@ -2,6 +2,7 @@ local ADDON_NAME, ns = ...
 
 local MAX_RECORDS, MAX_BYTES = 100, 16 * 1024 * 1024
 local lastAcknowledgement
+local reservation
 local function restricted(value)
     return issecretvalue and issecretvalue(value)
 end
@@ -17,9 +18,36 @@ local function requestKey(value)
 end
 
 ns.ReportStore = {
+    Reserve = function(requestId)
+        if not requestKey(requestId) then return nil,"report_invalid_request" end
+        local state,reason=ns.Persistence.Bridge()
+        if not state then return nil,reason end
+        if not plain(state.reports) then return nil,"report_invalid_store" end
+        if reservation and reservation.root==state and reservation.requestId~=requestId then
+            return nil,"report_reservation_busy"
+        end
+        local count,bytes=0,8192
+        for id,record in pairs(state.reports) do
+            count=count+1
+            if count>=MAX_RECORDS then return nil,"report_count_limit" end
+            if not requestKey(id) or id==requestId or not plain(record)
+                or restricted(record.body) or restricted(record.receipt)
+                or type(record.body)~="string" or type(record.receipt)~="string"
+                or #record.body==0 or #record.body>512*1024 or #record.receipt==0 or #record.receipt>4096 then
+                return nil,"report_invalid_store"
+            end
+            for field in pairs(record) do
+                if restricted(field) or (field~="receipt" and field~="body") then return nil,"report_invalid_store" end
+            end
+            bytes=bytes+#record.body+#record.receipt
+            if bytes>MAX_BYTES then return nil,"report_store_limit" end
+        end
+        reservation={root=state,requestId=requestId}
+        return true
+    end,
     Acknowledged = function(requestId, sequence)
         if not requestKey(requestId) then return nil, "report_invalid_request" end
-        local state = ns.Persistence.Current()
+        local state = ns.Persistence.Bridge()
         local session = ns.Session.Current()
         local ack = lastAcknowledgement
         if sequence ~= nil and (restricted(sequence) or type(sequence) ~= "number"
@@ -46,9 +74,9 @@ ns.ReportStore = {
         return ack.receipt
     end,
     Commit = function(requestId, code, value)
-        local state, failure = ns.Persistence.Current()
+        local state, failure = ns.Persistence.Bridge()
         if not state then return nil, failure end
-        if not ns.Startup.ready or not state.options or state.options.bridgeEnabled ~= true then
+        if not ns.Startup.ready or not ns.Persistence.BridgeEnabled() then
             return nil, "bridge_disabled"
         end
         if not requestKey(requestId) then return nil, "report_invalid_request" end
@@ -79,6 +107,9 @@ ns.ReportStore = {
         local receipt, encodeFailure = ns.CaptureWriter.EncodeSignal(signal, 4096)
         if not receipt then return nil, encodeFailure end
         local count, bytes = 0, #receipt + #body
+        if reservation and reservation.root==state and reservation.requestId~=requestId then
+            count,bytes=1,bytes+8192
+        end
         for key, record in pairs(state.reports) do
             count = count + 1
             if count >= MAX_RECORDS then return nil, "report_count_limit" end
@@ -99,11 +130,12 @@ ns.ReportStore = {
         -- No pruning or replacement of unacknowledged reports. One final write
         -- makes failures leave the previous store intact. Disk flush is separate.
         state.reports[requestId] = { receipt = receipt, body = body }
+        if reservation and reservation.root==state and reservation.requestId==requestId then reservation=nil end
         return receipt
     end,
     Read = function(requestId)
         if not requestKey(requestId) then return nil, "report_invalid_request" end
-        local state, failure = ns.Persistence.Current()
+        local state, failure = ns.Persistence.Bridge()
         if not state then return nil, failure end
         if not plain(state.reports) then return nil, "report_invalid_store" end
         local record = state.reports[requestId]
@@ -115,9 +147,9 @@ ns.ReportStore = {
         return record.receipt, record.body
     end,
     Acknowledge = function(reported)
-        local state, failure = ns.Persistence.Current()
+        local state, failure = ns.Persistence.Bridge()
         if not state then return nil, failure end
-        if not ns.Startup.ready or not state.options or state.options.bridgeEnabled ~= true then
+        if not ns.Startup.ready or not ns.Persistence.BridgeEnabled() then
             return nil, "bridge_disabled"
         end
         if not plain(reported) then return nil, "report_invalid_acknowledgement" end
@@ -163,6 +195,10 @@ ns.ReportStore = {
             or ns.CaptureWriter.DigestBytes(body) ~= bodyAdler32 then
             return nil, "report_acknowledgement_mismatch"
         end
+        if ns.ProbeRunner and ns.ProbeRunner.ResourcesReleased then
+            local released, reason = ns.ProbeRunner.ResourcesReleased(requestId)
+            if not released then return nil, reason end
+        end
         -- After a reload the private counter starts again. A validated original
         -- receipt provides a floor, never an arbitrary caller-supplied sequence.
         local identity, identityFailure = ns.Session.NextIdentity(reported.sequence)
@@ -172,6 +208,10 @@ ns.ReportStore = {
         signal.kind, signal.sequence, signal.inputReady = "acknowledged", identity.sequence, false
         local acknowledgement, signalFailure = ns.CaptureWriter.EncodeSignal(signal, 2048)
         if not acknowledgement then return nil, signalFailure end
+        if ns.Investigation and ns.Investigation.Tracked(requestId) then
+            local retained,reason=ns.Investigation.Mark(requestId,"acknowledged",acknowledgement)
+            if not retained then return nil,reason end
+        end
         -- Prepare the bounded optical receipt before deletion. The executor must
         -- have archived and verified the full original report before this call.
         -- This proves only in-memory cleanup, not a SavedVariables disk flush.

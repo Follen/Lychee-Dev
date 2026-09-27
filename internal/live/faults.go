@@ -60,11 +60,15 @@ type faultOperation struct {
 	metadata *vault.Metadata
 }
 
+func (p *faultOperation) receiverInput(ctx context.Context, window desktop.WindowIdentity, prepare func(context.Context) (string, error), guard func(context.Context) error) (desktop.InputReceipt, error) {
+	return receiverPreparedInput(p.session.target, p.session.region, sessionSignalIdentity(p.session.ready), p.recordReceiverProgress)(withReceiverBindings(ctx, p.session.bindings), window, prepare, guard)
+}
+
 func Bugs(ctx context.Context, root string, request BugsRequest) (Outcome, error) {
 	if err := request.Validate(); err != nil {
 		return Outcome{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, loadPhaseBudget+resultPersistenceBudget)
 	defer cancel()
 	session, snapshot, err := reconnectSession(ctx, root, request.Session, nativeIO())
 	if err != nil {
@@ -83,7 +87,7 @@ func Bugs(ctx context.Context, root string, request BugsRequest) (Outcome, error
 		return finishOutcome(ctx, root, record, err)
 	}
 	defer op.close()
-	record, err = op.execute(ctx, desktop.QueuePreparedCommand)
+	record, err = op.execute(ctx, op.receiverInput)
 	return finishOutcome(ctx, root, record, err)
 }
 
@@ -105,7 +109,7 @@ func (s *WindowSession) prepareFaults(ctx context.Context, root, snapshot string
 		Expected: bridge.SignalExpectation{Kind: "reported", Release: ready.Release, SessionNonce: ready.SessionNonce,
 			RequestID: "REQ-" + hex.EncodeToString(entropy[:16]), Character: ready.Character, Realm: ready.Realm,
 			Product: ready.Product, Build: ready.Build, AfterSequence: ready.Sequence},
-		Load: &ProbeLoadIntent{Installation: s.target.Client.Directory, Account: account, GUID: ready.GUID, ReloadNonce: hex.EncodeToString(entropy[16:])}}
+		Load: &ProbeLoadIntent{Installation: s.target.Client.Directory, Account: account, ReportScope: ready.ReportScope, GUID: ready.GUID, ReloadNonce: hex.EncodeToString(entropy[16:])}}
 	raw, _ := json.Marshal(input)
 	resource := windowResource(s.target)
 	digestRaw, _ := json.Marshal(struct {
@@ -457,7 +461,7 @@ func (p *faultOperation) observeAndArchive(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	installed, err := ReadInstalledReport(ctx, input.Load.Installation, input.Load.Account, nil, input.Expected)
+	installed, err := ReadInstalledReport(ctx, input.Load.Installation, input.Load.Account, nil, input.Expected, reportScope(input))
 	if err != nil {
 		return err
 	}
@@ -681,12 +685,16 @@ func resumeFaults(ctx context.Context, root, id string, region image.Rectangle, 
 		}
 	}
 	session := newWindowSession(bound.Target, region, ready, bridge.ObserveSignals(frames), frames, confirm)
+	session.bindings = bound.Record.Bindings
 	defer session.Close()
 	op, err := session.openFaultOperation(ctx, root, id)
 	if err != nil {
 		return record, err
 	}
 	defer op.close()
+	if send == nil {
+		send = op.receiverInput
+	}
 	return op.execute(ctx, send)
 }
 

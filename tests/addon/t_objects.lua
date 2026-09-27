@@ -159,6 +159,7 @@ local function NewRegion(name)
 
     setmetatable(region, {
         __index = function(target, key)
+            if type(key) ~= "string" or not key:match("^%u") then return nil end
             local noOp = function() end
             rawset(target, key, noOp)
             return noOp
@@ -363,6 +364,24 @@ ns.Workbench = {
         CONTENT_BOTTOM = 54,
     },
     RegisterPage = function(def) pageDefs[def.key] = def return def end,
+    GetSecondaryRoot = function()
+        if not workbenchCalls.secondaryRoot then
+            workbenchCalls.secondaryRoot = NewRegion("secondary")
+            workbenchCalls.secondaryRoot:Hide()
+        end
+        return workbenchCalls.secondaryRoot
+    end,
+    ShowSecondary = function(content)
+        workbenchCalls.secondaryRoot.content = content
+        workbenchCalls.secondaryRoot:Show()
+        content:Show()
+    end,
+    HideSecondary = function()
+        if workbenchCalls.secondaryRoot and workbenchCalls.secondaryRoot.content then
+            workbenchCalls.secondaryRoot.content:Hide()
+            workbenchCalls.secondaryRoot:Hide()
+        end
+    end,
     RegisterExportHook = function(hook) exportHooks[hook.key] = hook return hook end,
     RegisterShutdown = function() end,
     SaveToDisk = function(kind, title, content, metadata)
@@ -376,6 +395,7 @@ ns.Workbench = {
     Close = function() workbenchCalls.close = workbenchCalls.close + 1 end,
     IsShown = function() return true end,
 }
+LoadAddonFile("UI/Theme.lua", ns)
 LoadAddonFile("UI/Widgets.lua", ns)
 LoadAddonFile("UI/TreeView.lua", ns)
 LoadAddonFile("UI/Pages/Object.lua", ns)
@@ -449,7 +469,7 @@ assert(not objectPage.nodePopup.overlay:IsShown()
     and rawget(objectPage.nodePopup.textPanel, "serializationStream") == nil,
     "closing the node text popup did not release its serialization stream")
 
--- Search result rows: 38 px rows from a 16-row pool over a bounded result set.
+-- Search result rows: 44 px rows from a 16-row pool over a bounded result set.
 ns.ObjectInspector.InspectPath = function()
     local ok, wideInspection = ns.ObjectInspector.InspectValue(wideTable, "wide")
     return ok, wideInspection
@@ -459,8 +479,9 @@ ns.ObjectInspector.InspectPath = originalInspect
 objectPage.pathPanel.editBox:SetText("match")
 objectPage.searchButton:Click()
 assert(#objectPage.resultRows == 16, "object search result list did not virtualize 16 rows")
-assert(objectPage.resultRows[1]:GetHeight() == 38, "object search result rows were not 38 px")
-assert(objectPage.listPanel:GetWidth() == 420, "object search result list width changed")
+assert(objectPage.resultRows[1]:GetHeight() == 44, "object search result rows were not 44 px")
+assert(objectPage.listPanel:GetWidth() < ns.Workbench.Layout.WINDOW_WIDTH / 2,
+    "object list leaves too little room for the value tree")
 assert(objectPage.resultRows[1].name:GetText():find("match", 1, true),
     "object search result rows did not show their paths")
 

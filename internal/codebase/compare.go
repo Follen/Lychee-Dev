@@ -2,7 +2,6 @@ package codebase
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"slices"
 	"sort"
@@ -164,48 +163,39 @@ func (b *Browser) CompareTrees(ctx context.Context, pair SourcePair, query Chang
 	return result, nil
 }
 
-func indexedDocuments(ctx context.Context, db *sql.DB) (map[string]vault.BlobRef, error) {
-	rows, err := db.QueryContext(ctx, "SELECT path,sha256,bytes FROM documents ORDER BY path LIMIT 100001")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+func indexedDocuments(ctx context.Context, db *snapshotCache) (map[string]vault.BlobRef, error) {
 	result := map[string]vault.BlobRef{}
-	for rows.Next() {
-		var path string
-		var ref vault.BlobRef
-		if err := rows.Scan(&path, &ref.SHA256, &ref.Bytes); err != nil {
-			return nil, err
+	err := db.scan(ctx, func(r sourceRecord) error {
+		if r.Kind != "document" {
+			return nil
 		}
 		if len(result) >= 100000 {
-			return nil, errors.New("codebase.diff_document_budget")
+			return errors.New("codebase.diff_document_budget")
 		}
-		result[path] = ref
-	}
-	return result, rows.Err()
+		result[r.Path] = vault.BlobRef{SHA256: r.SHA256, Bytes: r.Bytes}
+		return nil
+	})
+	return result, err
 }
 
 type declarationKey struct{ name, category string }
 
-func indexedDeclarations(ctx context.Context, db *sql.DB) (map[declarationKey][]DeclarationSite, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name,category,path,line,end_line,signature FROM entries WHERE kind='declaration' ORDER BY name,category,path,line,end_line,signature LIMIT 500001")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+func indexedDeclarations(ctx context.Context, db *snapshotCache) (map[declarationKey][]DeclarationSite, error) {
 	result := map[declarationKey][]DeclarationSite{}
 	count := 0
-	for rows.Next() {
-		var key declarationKey
-		var site DeclarationSite
-		if err := rows.Scan(&key.name, &key.category, &site.Path, &site.Line, &site.EndLine, &site.Signature); err != nil {
-			return nil, err
+	err := db.scan(ctx, func(r sourceRecord) error {
+		if r.Kind != "symbol" || r.Symbol == nil || r.Symbol.Kind != "declaration" {
+			return nil
 		}
+		s := r.Symbol
+		key := declarationKey{name: s.Name, category: s.Category}
+		site := DeclarationSite{Path: s.Path, Line: s.Line, EndLine: s.EndLine, Signature: s.Signature}
 		count++
 		if count > 500000 {
-			return nil, errors.New("codebase.diff_declaration_budget")
+			return errors.New("codebase.diff_declaration_budget")
 		}
 		result[key] = append(result[key], site)
-	}
-	return result, rows.Err()
+		return nil
+	})
+	return result, err
 }

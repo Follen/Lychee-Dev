@@ -39,7 +39,42 @@ moved outside that region, select a suitable explicit region on a new connection
 `--capture-area window` explicitly requests the whole window and retains the
 4096-pixel-per-dimension budget; it is not an unlimited fallback for large displays.
 
-## Compose atomic actions
+## Complete an investigation
+
+Prefer one operation for an ordinary investigation:
+
+```text
+lycheedev live execute --session <session-id> --file <probe.lua> --request <stable-key> --budget-seconds <1-120> --format json
+```
+
+Use `--probe <immutable-PRB-revision>` instead of `--file` to reuse registered
+source. The CLI freezes code, target, account, report scope and budget, then
+loads, executes, verifies the report, acknowledges it and proves its display
+was cleared before releasing the window. Report bytes use character-scoped
+SavedVariables; unresolved peers that might share that file block writes.
+Different installations and verified different character partitions stay
+independent. Do not guess account or actor identity to bypass a conflict.
+
+Exit 0 means the full goal is complete. Exit 5 can mean a verified business
+failure with completed cleanup; read `business.state` and the report. Exit 6
+means pending work: keep the same operation, follow `nextAction`, and use
+`live resume <operation-id>`. A report may already be usable while cleanup is
+pending. Changing a file or budget under an existing request key is a conflict;
+resume the returned operation to use its original frozen source. Never issue a
+new request to repeat unknown execution. A successful complete operation needs
+no extra finish/hide call.
+
+Loading and report persistence can reload the client, so recreate required
+scene state inside the probe and finish sampling before reporting.
+Each command releases the receiver panel and keyboard focus before entering
+business code. While an asynchronous probe is running, the bridge leaves no
+waiting panel or handshake QR over the scene. Finish visual sampling before
+calling Finish/Fail: terminal receipts and subsequent cleanup input can be
+visible again. After execute completes, `display.state=cleared` confirms its
+receipt cleanup. Do not treat captures taken during command transport as the
+unobstructed scene.
+
+## Compose atomic actions when needed
 
 Each mutating action has one purpose and one stable idempotency key. Reuse the
 same `--request` only when retrying the same intended action; changing the probe,
@@ -53,13 +88,21 @@ lycheedev live probe put --name <name> --file <probe.lua> --format json
 
 Names are mutable handles; the returned `PRB-...` revision is immutable. Carry
 that revision in handoffs. Loading is a separate game action and does not run
-the probe:
+the probe. Choose an integer execution budget from the event wait, sample count,
+cleanup needs and expected client behavior. The supported range is 1..120 seconds;
+the CLI and addon reject out-of-range values instead of shortening them. This
+budget is stored with the immutable operation and is not renewed by resume:
 
 ```text
-lycheedev live probe load --session <session-id> --probe <name-or-PRB-revision> --request <stable-key> --format json
+lycheedev live probe load --session <session-id> --probe <name-or-PRB-revision> --request <stable-key> --budget-seconds <1-120> --format json
 ```
 
-The load result is an operation ID. Execute only that loaded operation. This
+The load result is an operation ID. Loading a new revision can reload the client
+and discard transient UI, timers and frame references. Prepare a reproducible
+scene after load, inside the probe or through already loaded capabilities. If
+the question requires the original transient scene and no existing loaded
+capability can observe it before reload, report that limit rather than claiming
+to have measured the original scene. Execute only that loaded operation. This
 command returns after report verification; continue through acknowledgement and
 final receipt dismissal in the same turn:
 
@@ -137,7 +180,47 @@ An unavailable !BugGrabber provider is valid evidence, not an empty error list.
 Preserve returned scope, ordering, requested/returned/available counts,
 `complete`, missing fields and provider version.
 
+## Design a discriminating probe
+
+Start from the question and two or more plausible explanations. Pin the exact
+client source commit and establish how it corresponds to the verified game build;
+also pin the target addon's revision and record whether it is known to match the
+loaded runtime. Inspect the relevant API definition, call sites, event order,
+preconditions and secret/protected boundaries in
+[source-research.md](source-research.md). A current branch or newest tag is not
+evidence for the running build. When exact source is unavailable, identify the
+gap and, within the live authorization, use a minimal capability observation
+before relying on the uncertain interface.
+
+Choose the smallest experiment that separates the hypotheses. The supported
+Lua probe can inspect state, collect event timing, exercise a target addon's own
+controller or callback where authorized, check object lifetime, sample bounded
+performance data, or verify a business invariant. Source and task determine the
+actions, fields, sample limit and assertions; the bridge does not impose a UI
+template. For an interactive behavior, distinguish calling a handler from real
+mouse or keyboard dispatch. A programmatic callback cannot prove hit testing,
+cursor routing or protected hardware input.
+
+Specify what must be true before each action, what output proves or refutes each
+hypothesis, and what remains untested. Rebuild scene state after load when needed.
+Finish observation and probe-owned cleanup before the CLI flushes the report to
+SavedVariables, because that flush can reload the client. All business results,
+logs, samples and assertions go in the bounded SV report; optical receipts only
+signal state and identity. An expected assertion failure should use a clear
+failure state instead of wrapping an exception as success. A verified report
+proves retrieval and integrity, not that its assertions passed.
+
+If evidence calls for a different experiment, finish or recover the old
+operation first, then create a new revision and request key. An uncertain
+accepted input or missing receipt is not grounds to rerun the same Lua. Keep
+deadline, user cancellation, unresolved execution, probe error, assertion
+failure and pending display cleanup distinct in the finding.
+
 ## Write bounded probes
+
+For deep secret-value or secure-taint diagnosis, use the hypothesis workflow
+below to choose what a probe should observe; the existing operation lifecycle
+still applies.
 
 Use Lua 5.1 and inspect only what answers the question. Bound collection sizes,
 tree depth, samples and output. Synchronous Lua cannot be preempted by the host;
@@ -151,21 +234,74 @@ assert(probe:Async(30)) -- integer seconds, 1..120
 local frame = CreateFrame("Frame")
 assert(probe:OnCleanup(function() frame:UnregisterAllEvents() end))
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-frame:SetScript("OnEvent", function()
+frame:SetScript("OnEvent", assert(probe:Callback(function()
   probe:Finish({ observed = true })
-end)
+end)))
 ```
 
 Use `probe:Fail("stable_reason")` for an expected failed result,
 `probe:Log(...)` for bounded diagnostic lines, and `probe:IsCancelled()` before
 expensive callback work. Async probes have a mandatory bounded timer, at most
 16 cleanup callbacks, 100 log entries and 32 KiB of logs. Completion is
-single-use; cleanup runs on completion, failure, timeout or session loss. Do
+single-use. Wrap every asynchronous entry with `probe:Callback` so late callbacks
+cannot enter user code after termination and exceptions become failed reports.
+Register resource cleanup before activating each timer/frame. Cleanup runs on
+completion, failure, timeout or session loss; cleanup failures remain pending
+and prevent a false successful acknowledgement. Do
 not create permanent hooks or mutate Blizzard-owned APIs.
+Choose the load budget to cover the probe's own async deadline and cleanup; a
+longer host wait cannot extend the declared execution budget.
 
 Combat lockdown and secret values are trust boundaries. Check them before
 comparison, formatting or branching. Record unavailable and truncated values
 explicitly instead of substituting defaults.
+
+## Test source hypotheses
+
+Use this workflow when runtime investigation is in the user's scope and source
+analysis leaves a question about actual execution. Carry the source commits,
+file locations, suspected value path and unresolved condition from
+[source-research.md](source-research.md#secret-values-and-secure-taint). Bind the
+observations to the verified session, client build and observed addon version;
+record whether the researched revision is known to match the loaded addon.
+An installed file or repository commit alone does not prove that match.
+
+Start with existing verified reports and, when useful, the bounded error snapshot
+described in [error-diagnosis.md](error-diagnosis.md). State the competing
+explanations and the observation that could distinguish them before writing a
+probe. For example, check whether the relevant value is marked secret at an
+observable boundary, or whether the prerequisite event/state occurred. A probe
+must answer that specific question; the live bridge does not automatically
+recover arbitrary locals or a complete historical taint chain.
+
+Use only supported, safe observations for the verified client. For secret
+values, report the secrecy marker or an explicit unavailable state, not the raw
+value. Do not compare, format, serialize or coerce the value to extract it, or
+re-execute a known forbidden operation just to reproduce its error. Do not add
+hooks to protected/Blizzard objects or replace their functions to observe flow.
+If an internal boundary cannot be observed safely, retain the gap and identify
+the additional diagnostic capability or reproduction context needed.
+
+Give each check a bounded observation window, sample/output budget and cleanup.
+Prefer event-driven observation when the question depends on an event. Complete
+the loaded operation, interpret and archive its verified report, then finish
+that exact operation before starting the next check. Within the existing task
+authorization, continue these steps without separate confirmation for each one.
+
+Feed the observation back into the suspected source path: identify which
+explanation it supports, contradicts or leaves open. Run another check only if
+it can resolve a remaining material distinction; do not repeat an unchanged
+probe after a timeout or absent event. A normal observation outside the failing
+conditions does not establish that the failing path is safe. If a repair and
+deployment are in scope, repeat the relevant bounded check against the verified
+updated runtime and retain both results.
+
+Deliver the supported path, runtime conditions and capture IDs together with
+any unresolved links. Distinguish a verified probe result from a demonstrated
+root cause and from a verified repair. Stop when the question is answered or
+the next step requires unavailable evidence, capability or user action; finish
+or recover every outstanding operation under the lifecycle above. An unresolved
+cause and completed display cleanup are separate outcomes.
 
 ## Recover without replay
 
@@ -177,6 +313,22 @@ lycheedev live cancel <operation-id> --format json
 
 Status is read-only. Resume uses the original target, request, revision and
 phase; it never changes target or replays a possibly submitted probe or reload.
+Before a session exists, an unresolved bootstrap input can return a durable
+`BTP-...` ID. `live status BTP-...` reads its recorded attempt. `live resume
+BTP-...` may repeat the input handshake under the same owner only when durable
+progress proves the business commit was never submitted; it preserves prior
+attempts and permits at most three across restarts. At or beyond the commit
+fence it only observes the matching receipt. Do not recreate this retry logic
+with manual keys or a fresh request. A persistence reload with proven zero
+native messages may likewise recover under the original operation; partial,
+unknown or contradictory input evidence never authorizes replay.
+Keep the selected window and installation fixed while recovering it. An
+unconfirmed attempt is not permission to start a fresh connect or reset.
+An unresolved fixed reload also keeps its original `OP-...`; resume observes
+its journaled input progress and runtime evidence without resending uncertain
+keys. An explicit user decision may abandon either a `BTP-...` bootstrap
+attempt or fixed reload `OP-...`, preserving unknown effects and releasing only
+host ownership. Neither abandonment is proof that the game action did not run.
 Atomic ACK has a narrower idempotent recovery path described below. Cancel is
 safe only before queue publication or game input. For a
 later unresolved async operation, resume observation; do not start a replacement

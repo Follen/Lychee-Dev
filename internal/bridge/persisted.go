@@ -13,11 +13,11 @@ import (
 // from the caller's expectation before it is compared with a receipt that was
 // read from the display, which the live reader already filled from its session
 // baseline. Both sides of that comparison are then complete signals.
-func ReadPersistedReport(reader io.Reader, code []byte, expected SignalExpectation) (VerifiedReport, error) {
+func ReadPersistedReport(reader io.Reader, code []byte, expected SignalExpectation, scope ...string) (VerifiedReport, error) {
 	if expected.RequestID == "" {
 		return VerifiedReport{}, errors.New("bridge.report_request_required")
 	}
-	state, err := ReadToolkitState(reader, SavedStateLimits())
+	state, err := ReadToolkitState(reader, SavedStateLimits(), scope...)
 	if err != nil {
 		return VerifiedReport{}, err
 	}
@@ -53,26 +53,26 @@ func ReadPersistedReport(reader io.Reader, code []byte, expected SignalExpectati
 // or freshness of either reader, authorize deleting a queue, or prove cleaned.
 // The live coordinator must bind the source and establish the post-ACK flush.
 // Other requests may change concurrently; their contents are not compared.
-func VerifyPersistedReportRemoval(before, after io.Reader, code []byte, expected SignalExpectation) (VerifiedReport, error) {
-	report, err := ReadPersistedReport(before, code, expected)
+func VerifyPersistedReportRemoval(before, after io.Reader, code []byte, expected SignalExpectation, scope ...string) (VerifiedReport, error) {
+	report, err := ReadPersistedReport(before, code, expected, scope...)
 	if err != nil {
 		return VerifiedReport{}, err
 	}
-	return verifyReportAbsent(report, after, expected.RequestID)
+	return verifyReportAbsent(report, after, expected.RequestID, scope...)
 }
 
 // VerifyArchivedReportRemoval uses original archived bytes, not a reconstructed
 // SavedVariables file. Source selection and post-ACK ordering belong to the host.
-func VerifyArchivedReportRemoval(receipt, body []byte, after io.Reader, code []byte, expected SignalExpectation) (VerifiedReport, error) {
+func VerifyArchivedReportRemoval(receipt, body []byte, after io.Reader, code []byte, expected SignalExpectation, scope ...string) (VerifiedReport, error) {
 	report, err := VerifyReport(receipt, body, code, expected)
 	if err != nil {
 		return VerifiedReport{}, err
 	}
-	return verifyReportAbsent(report, after, expected.RequestID)
+	return verifyReportAbsent(report, after, expected.RequestID, scope...)
 }
 
-func verifyReportAbsent(report VerifiedReport, after io.Reader, requestID string) (VerifiedReport, error) {
-	state, err := ReadToolkitState(after, SavedStateLimits())
+func verifyReportAbsent(report VerifiedReport, after io.Reader, requestID string, scope ...string) (VerifiedReport, error) {
+	state, err := ReadToolkitState(after, SavedStateLimits(), scope...)
 	if err != nil {
 		return VerifiedReport{}, err
 	}

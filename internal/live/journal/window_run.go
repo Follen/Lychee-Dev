@@ -56,6 +56,9 @@ func (r *WindowRun) Check(ctx context.Context) (WorkRecord, error) {
 	if record.Intent.Resource != owner.Resource {
 		return zero, errors.New("journal.window_resource_mismatch")
 	}
+	if owner.IntentSHA256 != "" && owner.IntentSHA256 != intentSHA256(record.Intent) {
+		return zero, errors.New("journal.window_intent_changed")
+	}
 	if record.Stage == "cleaned" || record.Status == "completed" || record.Status == "cancelled" || record.Status == "abandoned" {
 		return zero, ErrTransition
 	}
@@ -83,8 +86,7 @@ func (b *Book) AcquireWindowWork(ctx context.Context, addonParent, workspaceID, 
 			}
 		}
 	}()
-	marker := filepath.Join(scope, fmt.Sprintf("%x.json", sha256.Sum256([]byte(record.Intent.Resource))))
-	owner, err := readWindowOwner(marker, record.Intent.Resource)
+	owner, err := b.ensureWindowClaim(ctx, scope, workspaceID, record)
 	if err != nil {
 		return nil, err
 	}

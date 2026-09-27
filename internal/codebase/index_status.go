@@ -3,65 +3,60 @@ package codebase
 import (
 	"context"
 	"errors"
-	"path/filepath"
 
 	"github.com/follenfang/lycheedev/internal/selection"
 )
 
-// SnapshotStatus is the `index status` read model of one pinned snapshot. The
-// field names stay stable for callers; values describe this workspace's actual
-// storage (journalMode reports the real SQLite mode).
+// SnapshotStatus reports fixed source mapping readiness. Legacy database fields
+// are intentionally absent: a cache directory is not a database.
 type SnapshotStatus struct {
-	ActiveSnapshot  string `json:"activeSnapshot"`
-	ReadySnapshots  int    `json:"readySnapshots"`
-	SnapshotFiles   int    `json:"snapshotFiles"`
-	ASTFiles        int    `json:"astFiles"`
-	ParserSchema    string `json:"parserSchema"`
-	IndexSchema     string `json:"indexSchema"`
-	Database        string `json:"database"`
-	ContentDatabase string `json:"contentDatabase"`
-	JournalMode     string `json:"journalMode"`
-	Assets          int    `json:"assets"`
-	// Ready reports prepared-snapshot readiness for source list output, and
-	// Complete reports whether the index finished without syntax diagnostics.
-	Ready    bool `json:"ready"`
-	Complete bool `json:"complete"`
+	ActiveSnapshot string         `json:"activeSnapshot"`
+	ReadySnapshots int            `json:"readySnapshots"`
+	SnapshotFiles  int            `json:"snapshotFiles"`
+	ASTFiles       int            `json:"astFiles"`
+	ParserSchema   string         `json:"parserSchema"`
+	IndexSchema    string         `json:"indexSchema"`
+	Storage        string         `json:"storage"`
+	Assets         int            `json:"assets"`
+	Ready          bool           `json:"ready"`
+	Complete       bool           `json:"complete"`
+	Coverage       SourceCoverage `json:"coverage"`
 }
 
-// SnapshotStatus reports index readiness for one pinned source without
-// building anything. An absent index is a readiness answer, not an error.
 func (b *Browser) SnapshotStatus(ctx context.Context, pin selection.SourcePin) (SnapshotStatus, error) {
-	status := SnapshotStatus{
-		ActiveSnapshot:  pin.ExactCommit,
-		ParserSchema:    ParserRevision,
-		IndexSchema:     indexSchema,
-		Database:        b.indexPath(pin),
-		ContentDatabase: filepath.Join(b.store.Root(), "blobs"),
+	status := SnapshotStatus{ActiveSnapshot: pin.ExactCommit, ParserSchema: ParserRevision, IndexSchema: indexSchema, Storage: "file-cache"}
+	cache, summary, err := b.openIndex(ctx, pin)
+	if errors.Is(err, errIndexNotReady) {
+		return status, nil
 	}
-	db, summary, err := b.openIndex(ctx, pin)
 	if err != nil {
-		if errors.Is(err, errIndexNotReady) {
-			return status, nil
-		}
 		return status, err
 	}
-	defer db.Close()
 	status.Ready = true
 	status.ReadySnapshots = 1
-	status.SnapshotFiles = summary.Documents
+	status.SnapshotFiles = summary.Documents + summary.SkippedDocuments
 	status.Assets = summary.Assets
 	status.Complete = summary.Complete
-	status.IndexSchema = summary.Schema
-	status.Database = b.indexPathFor(summary.Schema, pin)
-	var failed int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT path) FROM diagnostics").Scan(&failed); err != nil {
+	status.Coverage = summary.Coverage()
+	failed := map[string]bool{}
+	analyzed := map[string]bool{}
+	err = cache.scan(ctx, func(r sourceRecord) error {
+		if r.Kind == "document" {
+			analyzed[r.Path] = true
+		}
+		if r.Kind == "diagnostic" {
+			failed[r.Path] = true
+		}
+		return nil
+	})
+	if err != nil {
 		return status, err
 	}
-	status.ASTFiles = summary.Documents - failed
-	var journal string
-	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
-		return status, err
+	status.ASTFiles = 0
+	for name := range analyzed {
+		if !failed[name] {
+			status.ASTFiles++
+		}
 	}
-	status.JournalMode = journal
 	return status, nil
 }

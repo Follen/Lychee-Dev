@@ -110,7 +110,7 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 	_, err = vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (bool, error) {
 		var commitErr error
 		capture, commitErr = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-			Reader: bytes.NewReader(raw), MaxBytes: 32 << 20, MediaType: "text/csv; charset=utf-8", Complete: true,
+			Reader: bytes.NewReader(raw), MaxBytes: 32 << 20, MediaType: "text/csv; charset=utf-8", Complete: reading.Result.Complete,
 			Provenance: evidence.Provenance{Kind: "data-query-csv", Locator: reading.Capture.ID, Snapshot: snapshot},
 		})
 		return commitErr == nil, commitErr
@@ -120,7 +120,7 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 	}
 	manifest := QueryCSVManifest{Schema: "lycheedev.query-csv.v1", Snapshot: snapshot, Output: dataDestination.path,
 		SHA256: hex.EncodeToString(digest[:]), Bytes: len(raw), Columns: append([]string(nil), columns...), Rows: len(reading.Result.Result.Rows),
-		QueryCapture: reading.Capture.ID, CSVCapture: capture.ID, Complete: true}
+		QueryCapture: reading.Capture.ID, CSVCapture: capture.ID, Complete: reading.Result.Complete}
 	manifestRaw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return QueryCSVExport{}, err

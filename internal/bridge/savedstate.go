@@ -26,12 +26,22 @@ type LiteralTable map[any]any
 
 // ReadToolkitState is the only game database entrypoint. A syntactically valid
 // legacy root still fails: fresh Toolkit state never imports or aliases it.
-func ReadToolkitState(reader io.Reader, limits DecodeLimits) (LiteralTable, error) {
+func ReadToolkitState(reader io.Reader, limits DecodeLimits, scope ...string) (LiteralTable, error) {
+	root := "LycheeToolkitDB"
+	if len(scope) > 1 {
+		return nil, errors.New("bridge.invalid_report_scope")
+	}
+	if len(scope) == 1 && scope[0] != "" {
+		if scope[0] != "character-v1" {
+			return nil, errors.New("bridge.invalid_report_scope")
+		}
+		root = "LycheeToolkitBridgeDB"
+	}
 	globals, err := DecodeSavedState(reader, limits)
 	if err != nil {
 		return nil, err
 	}
-	table, ok := globals["LycheeToolkitDB"].(LiteralTable)
+	table, ok := globals[root].(LiteralTable)
 	if !ok || len(globals) != 1 {
 		return nil, errors.New("bridge.invalid_database_root")
 	}

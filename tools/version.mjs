@@ -8,6 +8,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const versionedLuaFixtures = [
   'acknowledge', 'identity', 'loaded_ready', 'persistence', 'queue',
   'queue_ack', 'reentry', 'report', 'runtime_epoch',
+  'investigation', 'receiver', 'receiver_rollback',
 ].map(name => `tests/protocol/${name}.lua`);
 export const versionedSignalSamples = [
   'identity.actor_restricted', 'identity.no_actor', 'identity.ok',

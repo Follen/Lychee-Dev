@@ -22,7 +22,7 @@ local function hex(value, size)
 end
 local fields = { release = true, sessionNonce = true, reloadNonce = true, character = true,
     realm = true, guid = true, product = true, build = true, code = true,
-    codeSHA256 = true, codeAdler32 = true, codeBytes = true }
+    codeSHA256 = true, codeAdler32 = true, codeBytes = true, budgetSeconds = true, goal = true }
 local function validate()
     if not plain(definitions) or restricted(definitions.schema) or definitions.schema ~= "lycheedev.queue.v1"
         or not plain(definitions.entries) then return nil, "queue_invalid_format" end
@@ -42,6 +42,10 @@ local function validate()
         end
         if not hex(entry.sessionNonce, 32) or not hex(entry.reloadNonce, 32)
             or not hex(entry.codeSHA256, 64) or not hex(entry.codeAdler32, 8) then return nil, "queue_invalid_digest" end
+        if entry.budgetSeconds ~= nil and (restricted(entry.budgetSeconds) or
+            type(entry.budgetSeconds) ~= "number" or entry.budgetSeconds % 1 ~= 0 or
+            entry.budgetSeconds < 1 or entry.budgetSeconds > 120) then return nil, "queue_invalid_budget" end
+        if restricted(entry.goal) or entry.goal~=nil and entry.goal~="finished" then return nil,"queue_invalid_goal" end
         if restricted(entry.code) or type(entry.code) ~= "string" or #entry.code == 0 or #entry.code > 256 * 1024
             or string.byte(entry.code, 1) == 27 or string.find(entry.code, "%z")
             or restricted(entry.codeBytes) or entry.codeBytes ~= #entry.code
@@ -71,6 +75,11 @@ ns.ProbeQueue = {
     -- Registered entries mean a request-scoped operation still owns this
     -- window's queue and display. Unreadable definitions fail closed.
     Busy = function()
+        if ns.ProbeRunner.Busy() then return true end
+        if ns.Investigation then
+            local busy,reason=ns.Investigation.Busy()
+            if busy~=false then return busy,reason end
+        end
         if definitions == nil then return false end
         local valid, reason = validate()
         if not valid then return nil, reason end
@@ -124,9 +133,13 @@ ns.ProbeQueue = {
         local entry, reason = selectEntry(requestId)
         if not entry then return nil, reason end
         if acknowledged[requestId] then return nil, "queue_request_acknowledged" end
+        if entry.goal=="finished" then
+            local reserved,failure=ns.Investigation.Reserve(requestId,entry)
+            if not reserved then return nil,failure end
+        end
         -- SHA-256 is checked by the host. The game checks actual code bytes and
         -- Adler-32; neither a carried digest nor loading is execution permission.
-        return ns.ProbeRunner.Load(requestId, entry.code, entry.reloadNonce)
+        return ns.ProbeRunner.Load(requestId, entry.code, entry.reloadNonce, entry.budgetSeconds or 120, entry.goal)
     end,
     Acknowledge = function(requestId, sequence)
         local entry, reason = selectEntry(requestId)
@@ -151,7 +164,10 @@ ns.ProbeQueue = {
             codeBytes = entry.codeBytes, codeAdler32 = entry.codeAdler32,
             reportBytes = #body, reportAdler32 = ns.CaptureWriter.DigestBytes(body),
         })
-        if acknowledgement then acknowledged[requestId] = true end
+        if acknowledgement then
+            acknowledged[requestId] = true
+            if ns.AutomationView and ns.AutomationView.Changed then ns.AutomationView.Changed() end
+        end
         return acknowledgement, failure
     end,
     -- Host-side recovery for a stuck runtime whose queue blocks identity after
@@ -161,6 +177,7 @@ ns.ProbeQueue = {
     -- stale residue here by definition; the caller verified no disk owner.
     Reset = function(nonce)
         if not hex(nonce, 32) then return nil, "reset_invalid_nonce" end
+        if ns.ProbeRunner.Busy() then return nil,"probe_runtime_busy" end
         local valid, reason = validate()
         if not valid then return nil, reason end
         local actor, actorFailure = ns.Platform.ObserveActor()

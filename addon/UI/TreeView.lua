@@ -3,7 +3,7 @@ local ADDON_NAME, ns = ...
 -- Virtualized value-tree view: 22 px rows from a 32-row pool, expand/collapse,
 -- bounded "load more" rows, right-click context for exportable nodes and
 -- per-kind value colors.
-local TREE_ROW_HEIGHT = 22
+local TREE_ROW_HEIGHT = 28
 local TREE_ROW_POOL_SIZE = 32
 local VALUE_COLUMN_LEFT = 250
 local KEY_WIDTH_BASE = 218
@@ -35,7 +35,7 @@ function ns.TreeView.Create(parent, options)
     local colors = W.Colors
     local contentWidth = options.contentWidth or 500
 
-    local panel = W.CreatePanel(parent, colors.editor[1], colors.editor[2], colors.editor[3], 1)
+    local panel = W.CreateFieldPanel(parent)
     local scroll = W.CreateScrollArea(panel, 8, 8, 7, 8)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(contentWidth)
@@ -43,9 +43,10 @@ function ns.TreeView.Create(parent, options)
     scroll:SetScrollChild(content)
 
     local empty = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(empty, 11, ns.Theme.textDim)
     empty:SetPoint("TOP", 0, -24)
     empty:SetText(ns.L.TREE_EMPTY)
-    empty:SetTextColor(1, 1, 1, 0.32)
+    empty:SetTextColor(unpack(ns.Theme.textDim))
 
     local rows = {}
     local visibleNodes = {}
@@ -86,16 +87,19 @@ function ns.TreeView.Create(parent, options)
         row.hover = hover
 
         local toggle = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(toggle, 12, ns.Theme.text)
         toggle:SetJustifyH("CENTER")
         toggle:SetTextColor(colors.accent[1], colors.accent[2], colors.accent[3], 0.95)
         row.toggle = toggle
 
         local key = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(key, 12, ns.Theme.text)
         key:SetJustifyH("LEFT")
-        key:SetTextColor(0.91, 0.93, 0.95, 0.92)
+        key:SetTextColor(unpack(ns.Theme.text))
         row.key = key
 
         local value = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ns.Theme.SetFont(value, 12, ns.Theme.text)
         value:SetPoint("LEFT", VALUE_COLUMN_LEFT, 0)
         value:SetPoint("RIGHT", -8, 0)
         value:SetJustifyH("LEFT")
