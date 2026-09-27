@@ -68,7 +68,10 @@ Loading and report persistence can reload the client, so recreate required
 scene state inside the probe and finish sampling before reporting.
 Each command releases the receiver panel and keyboard focus before entering
 business code. While an asynchronous probe is running, the bridge leaves no
-waiting panel or handshake QR over the scene. Finish visual sampling before
+waiting panel or handshake QR over the scene. A small click-through bouncing
+Lychee with the running label can remain beside the receipt area until probe
+finalization. It does not block game input and is not proof of a verified report.
+Account for this indicator when choosing a visual sampling region. Finish visual sampling before
 calling Finish/Fail: terminal receipts and subsequent cleanup input can be
 visible again. After execute completes, `display.state=cleared` confirms its
 receipt cleanup. Do not treat captures taken during command transport as the

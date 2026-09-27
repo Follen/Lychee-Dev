@@ -3,7 +3,7 @@
 
 # Command reference
 
-85 implemented commands. Every command accepts `--format text|json|jsonl`;
+86 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -216,6 +216,11 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `target available` — read-only. List the releases the version manifests serve for one region: --region <region>; one bounded manifest fetch per supported product with per-product failures reported inline; --offline is refused because the listing is inherently current
   Flags: `--format text|json|jsonl`, `--region <us|eu|cn|kr|tw>`, `--offline`.
+
+## update
+
+- `update` — mutates. Update npm CLI and synchronize managed skills/addons; --plan inspects current targets without writes; --release applies an already installed release offline. Repeated --path/--installation scope targets and disable discovery. Filesystem completion does not activate a running game or Agent.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--file <targets.json> (explicit array; disables discovery)`, `--release <distribution-root>`, `--path <skill-directory> (repeatable)`, `--installation <client-directory> (repeatable)`, `--plan`.
 
 ## version
 

@@ -78,7 +78,14 @@ lycheedev addon install --release $release --installation $client
 lycheedev skill install --release $release --path $skill
 ```
 
-以上是首次安装命令。已有安装先用 `addon status` / `skill status` 检查；受管升级通过 `--output <恢复目录>` 保留旧文件，恢复目录需与目标同盘，且位于正在使用的 AddOns/skills 目录之外。被修改或未受管的安装需要明确处理，不能直接覆盖受管文件。
+后续用一个命令更新 CLI、随包 LuaLS、Skill 和受管游戏插件：
+
+```powershell
+lycheedev update --plan --format json
+lycheedev update
+```
+
+自定义目录或离线客户端用 `--path <Skill目录>` / `--installation <客户端目录>` 指定，均可重复；显式指定后关闭自动发现。更新器会记住目标、检查文件归属、恢复中断的替换，验证成功后清理旧文件；本地修改或未受管副本会报告冲突。恢复流程和原生发行包用法见 [更新说明](skills/lycheedev/references/installation.md)。文件更新后，游戏仍需 reload，已有 Agent 也需要新的上下文才能加载新版 Skill。
 
 安装后在客户端加载插件，用 `/dev` 打开工作台。磁盘安装成功不代表运行中的游戏已经加载新版。
 
@@ -182,7 +189,7 @@ Lua 测试需要 Lua 5.1；`node tests/tools/build-lua.mjs` 可构建固定版�
 | Agent 工作流 | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm 分发 | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | 合同与验证 | [设计](docs/toolkit/design.md) · [状态](docs/toolkit/implementation-status.md) · [回归矩阵](docs/toolkit/regression.md) |
-| 发行 | [发布合同](docs/toolkit/release-2.5.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| 发行 | [发布合同](docs/toolkit/release-2.5.1.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## 许可
 

@@ -1,6 +1,6 @@
 ---
 name: lycheedev
-description: Research WoW addon source and game data, export assets, validate addons, and investigate running clients with the Lychee Dev Toolkit. Use for any World of Warcraft investigation — addon/Lua/XML/TOC source questions, DB2/SQL/game records, CASC files and textures, hotfixes, or driving a running game client and recovering interrupted runs — even when the user just names a spell, item, addon or error without saying "toolkit".
+description: Research World of Warcraft addon source, APIs and game records, export assets, validate addons, and investigate running clients with the Lychee Dev Toolkit. Use for WoW technical investigations involving Lua/XML/TOC, DB2/SQL, CASC, Hotfixes, addon errors or live probes, including spell/item questions that need game-data evidence.
 ---
 
 # Lychee Dev
@@ -91,14 +91,6 @@ reload the client, so build a reproducible scene after load and finish sampling
 before the report flush. State when the original transient scene could not be
 observed through the available loaded capabilities.
 
-When reviewing wowdoc/wowdata migration coverage, use the repository parity
-ledger (`tests/parity/coverage.json` and `docs/toolkit/regression.md`). It is
-case-level offline evidence, not a replay of retired executables. Read the case
-status and note: `passed` is current automated assertion coverage,
-`fixture-backed`/`fixture-backed-partial` retain fixture limits, and
-`intentional-change` is a deliberate 2.0 contract. Never describe the 55-case
-ledger as proof of complete real CDN, Hotfix, DB2, or multi-client coverage.
-
 ## Respect the authorization boundary
 
 Only run live commands inside the user's granted authorization.
@@ -140,15 +132,17 @@ probe again. This toolkit does not import old tools' data or task registries.
 Purely local in-game inspection lives in the in-game `/dev` workbench and does
 not require a CLI connection.
 
-The receiver's default chords are Ctrl+Alt+] to wake, Ctrl+Alt+Shift+] to
-submit, and Ctrl+Alt+[ to close. A user may change them in the addon's Settings
-page or with its local `/dev receiver bind` command. On first contact with a
-custom wake chord, pass that exact value with `--wake-binding` to `live
-instances`, `live connect`, `live reset`, `live bind`, or sessionless `live reload
-fallback` as applicable; do not cycle through guessed
-chords. A fresh ready receipt supplies the effective wake, submit and close
-profile, which the CLI verifies and saves with the connection. See
-[live-startup.md](references/live-startup.md#custom-receiver-bindings).
+The receiver uses Ctrl+Alt+] to wake, Ctrl+Alt+Shift+] to submit, and
+Ctrl+Alt+[ to close. Settings displays these bindings without editing controls.
+The CLI owns their use; never send raw transport keys to work around a pending
+operation. For an existing custom binding, follow
+[live-startup.md](references/live-startup.md#existing-custom-receiver-bindings).
+
+The bouncing Lychee is an activity indicator, not acceptance or completion
+evidence. Receiving input temporarily blocks game keyboard/mouse input; probe
+execution releases that shield while retaining the running indicator. Do not
+hide it or interrupt the receiver just to make a transport screenshot cleaner.
+Use the operation report and final display proof to establish completion.
 
 ## Interpret the evidence
 

@@ -110,6 +110,8 @@ jobs:
         run: |
           node tools/skill-contract.mjs
           if ($LASTEXITCODE -ne 0) { throw 'skill contract failed' }
+          node tools/skill-commands.mjs --check
+          if ($LASTEXITCODE -ne 0) { throw 'generated skill reference is stale' }
 
   windows-process:
     runs-on: windows-2025

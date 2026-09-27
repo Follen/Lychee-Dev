@@ -50,6 +50,7 @@ export async function main(argv = process.argv.slice(2)) {
   await check('NODE', 'Distribution, launcher and regression runner tests', process.execPath, ['--test', '--test-reporter=tap', ...nodeFiles], (entry, text) => Object.assign(entry, parseTAP(text)));
   await check('VERSION', 'Release version consistency', process.execPath, ['tools/version.mjs', '--check']);
   await check('SKILL', 'Skill and CLI command contract consistency', process.execPath, ['tools/skill-contract.mjs']);
+  await check('SKILL-GENERATED', 'Generated command reference matches the current CLI', process.execPath, ['tools/skill-commands.mjs', '--check']);
   const after = sourceIdentity(report.output);
   report.checks.push({ id: 'SOURCE', title: 'Source unchanged during the run', state: after.treeSha256 === report.source.treeSha256 ? 'passed' : 'failed', after });
   const required = [...report.checks, ...report.cases.filter(c => c.kind === 'go' || c.id === 'LUALS')];

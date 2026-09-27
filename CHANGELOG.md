@@ -7,11 +7,47 @@ Detailed acceptance records and evidence live in
 [docs/toolkit/implementation-status.md](docs/toolkit/implementation-status.md);
 per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
-## [Unreleased] — 2.0.2 candidate
+## [2.5.1] — 2026-09-28
 
-Nothing here is published yet. 2.0.2 must not be claimed releasable before the
-static gates, Windows CI, release assembly and registry read-back in
-[release-2.0.2.md](docs/toolkit/release-2.0.2.md) are complete.
+### Added
+
+- `lycheedev update` updates the global npm CLI, bundled LuaLS, selected managed
+  Agent skills and in-game addons together. It supports explicit multi-client
+  targets, read-only planning and offline payload synchronization from a release.
+- Update preflight checks every target before replacement. Exact npm bytes and
+  target identities survive interruption; native delivery resumes incomplete
+  replacements and removes old managed files after verification. Recovery stays
+  on each target's drive, outside addon/skill discovery directories.
+- Isolated update regression uses real npm, a loopback registry, temporary
+  prefixes, two simulated clients and two CLI versions. It checks replacement,
+  obsolete-file removal, conflicts, concurrent ownership, retry, JSONL and
+  SavedVariables preservation without changing the user's installation.
+
+### Fixed
+
+- Skill guidance now matches read-only shortcut settings, bounded pre-commit
+  bootstrap recovery, connection input blocking and the probe activity indicator.
+- Skill command checks derive all command groups from the CLI contract and
+  validate packaged reference links. The generated command guide can be checked
+  for drift instead of silently regenerated.
+- Update results distinguish verified files from game reload and Agent context
+  activation, and retain structured recovery information on failure.
+
+## [2.5.0] — 2026-09-28
+
+- Rebuilt source research around pinned Git worktrees and bundled LuaLS, with
+  semantic references, context, validation and bounded value-flow evidence.
+- Added complete Hotfix paging, explicit key handling, coverage/provenance
+  reporting, effective record overlays and SQL query improvements.
+- Reworked Agent live execution around correlated input, immutable budgets,
+  durable ownership, verified reports and explicit display cleanup.
+- Refined the workbench controls and page layouts. A bouncing Lychee indicates
+  connecting/running state; input is blocked only during command reception.
+
+## Historical 2.0.2 candidate notes
+
+These notes preserve the earlier candidate's scope and observations; they are
+not the current release status. See its [historical contract](docs/toolkit/release-2.0.2.md).
 
 ### Added
 

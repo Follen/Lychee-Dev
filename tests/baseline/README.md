@@ -44,12 +44,18 @@ outside the minimum case catalog.
 | BASE-17 | Workbench pages, readable shared controls, layout, locale and disabled-cost fixtures |
 | BASE-18 | Evidence corruption detection and workspace isolation |
 | BASE-19–20 | SQL partial coverage, hotfix provenance, JSONL completion, aggregation and subqueries |
+| BASE-21 | Update all-target preflight, managed replacement, no-backup completion and interrupted recovery |
 | LUALS | Real LuaLS process: API references and definitions |
 
 The exact required test names live in [catalog.mjs](catalog.mjs). Removing or
 renaming a required test without updating this contract fails the baseline.
 Four-profile fixtures include Forever as an unverified compatibility path;
 they are not evidence of running any real client.
+
+The Node suite includes `tools/update-isolated.test.mjs`: real npm against a
+loopback registry, temporary prefixes and two simulated clients. On a host with
+different repository/temp drives it also exercises cross-volume layouts. It
+does not replace the user's installed CLI, Skill or game addon.
 
 ## Real-client baseline
 

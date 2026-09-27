@@ -49,6 +49,7 @@ type Envelope struct {
 }
 
 type Options struct {
+	updatePaths, updateInstallations     []string
 	semantic                             bool
 	staticOnly, sourceFlow               bool
 	scan                                 bool
@@ -172,6 +173,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		if err == nil {
 			switch route {
+			case "update":
+				response.Result, err, code = updateToolkit(ctx, opts)
 			case "project init":
 				if opts.product == "" {
 					err, code = errors.New("project init requires --product"), 2
@@ -1182,7 +1185,7 @@ func parseOptions(args []string) (Options, error) {
 		if !spec.value {
 			return opts, fmt.Errorf("unknown flag %s", key)
 		}
-		if seen[key] && key != "--param" {
+		if seen[key] && key != "--param" && !(route == "update" && (key == "--path" || key == "--installation")) {
 			return opts, fmt.Errorf("repeated flag %s", key)
 		}
 		seen[key] = true
@@ -1195,6 +1198,14 @@ func parseOptions(args []string) (Options, error) {
 		}
 		if value == "" {
 			return opts, fmt.Errorf("empty value for %s", key)
+		}
+		if route == "update" {
+			if key == "--path" {
+				opts.updatePaths = append(opts.updatePaths, value)
+			}
+			if key == "--installation" {
+				opts.updateInstallations = append(opts.updateInstallations, value)
+			}
 		}
 		if key == "--home" {
 			opts.home = value

@@ -27,7 +27,7 @@ passed。Retail 受管 addon 的首轮 53 文件安装与修复后 54 文件 `ma
 已有独立记录；修复后的强制 Lua 全量自动复验已通过，运行态身份连接后来已
 验证，但业务 stage/load/run/SV/finish 尚未完成验证。
 
-适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.5.0` / `v2.5.0` 发布合同：[release-2.5.0.md](release-2.5.0.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
+适用架构：[design.md](design.md)。实施依赖：[roadmap.md](roadmap.md)。Windows CI 和当前候选 `2.5.1` / `v2.5.1` 发布合同：[release-2.5.1.md](release-2.5.1.md)。本文件中阈值是验收政策，不是已经测得的性能或成功率。
 
 ## 1. 验证原则与结果状态
 

@@ -1,7 +1,7 @@
 interface:
   display_name: "Lychee Dev Toolkit"
   short_description: "Evidence-first WoW source, data, asset, and live workflows"
-  default_prompt: "Use $lycheedev to investigate this World of Warcraft question with pinned sources and complete evidence. For authorized live work, continue through report verification, acknowledgement and final QR dismissal; a visible QR is an intermediate state."
+  default_prompt: "Use $lycheedev to investigate this WoW technical question with pinned evidence and finish any authorized live operation through verified cleanup."
 
 policy:
   allow_implicit_invocation: true

@@ -145,7 +145,7 @@ function licenseGate(packageRoot) {
   if (!existsSync(license) || statSync(license).size === 0) {
     throw new Error(`license decision pending: ${license} is absent; the combined-work license decision belongs to the project owner (see THIRD_PARTY_NOTICES.md owner-decision section), and packaging refuses to proceed until the owner supplies LICENSE`);
   }
-  for (const name of ['README.md', 'THIRD_PARTY_NOTICES', 'package.json', 'bin/lycheedev.mjs']) {
+  for (const name of ['README.md', 'THIRD_PARTY_NOTICES', 'package.json', 'bin/lycheedev.mjs', 'bin/update.mjs']) {
     if (!existsSync(join(packageRoot, name))) throw new Error(`release.missing_package_file: ${name}`);
   }
 }
@@ -352,6 +352,7 @@ async function assembleCommand(argv) {
     copyFileSync(join(packageRoot, name), join(stage, name));
   }
   copyFileSync(join(packageRoot, 'bin/lycheedev.mjs'), join(stage, 'bin/lycheedev.mjs'));
+  copyFileSync(join(packageRoot, 'bin/update.mjs'), join(stage, 'bin/update.mjs'));
 
   const resources = [];
   stagePayload(stage, resources);
@@ -488,6 +489,7 @@ async function devPackageCommand(argv) {
   devPackage.lycheedevDevelopmentOnly={commit:id.commit,workspaceDirty:id.dirty};
   writeJson(join(stage,'package.json'),devPackage);
   copyFileSync(join(packageRoot,'bin/lycheedev.mjs'),join(stage,'bin/lycheedev.mjs'));
+  copyFileSync(join(packageRoot,'bin/update.mjs'),join(stage,'bin/update.mjs'));
   const resources=[];
   stagePayload(stage,resources);
   await stageLuaLS(stage,resources,{archivePath});
@@ -790,11 +792,11 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot, develop
   const violations = [];
   const byName = new Map(entries.map(entry => [entry.name, entry.bytes]));
   const allowed = name => name === 'package/package.json' || name === 'package/README.md' || name === 'package/LICENSE'
-    || name === 'package/THIRD_PARTY_NOTICES' || name === 'package/bin/lycheedev.mjs' || name === 'package/release.json'
+    || name === 'package/THIRD_PARTY_NOTICES' || name === 'package/bin/lycheedev.mjs' || name === 'package/bin/update.mjs' || name === 'package/release.json'
     || TARGETS.some(entry => `package/${entry.binary}` === name)
     || /^package\/payload\/(?:addon|skill|tool\/luals)\/[^/].*$/.test(name);
   const required = ['package/package.json', 'package/README.md', 'package/LICENSE', 'package/THIRD_PARTY_NOTICES',
-    'package/bin/lycheedev.mjs', 'package/release.json',
+    'package/bin/lycheedev.mjs', 'package/bin/update.mjs', 'package/release.json',
     ...TARGETS.map(entry => `package/${entry.binary}`),
     ...REQUIRED_RESOURCES.map(path => `package/payload/${path}`),
     ...['runtime.json', 'LICENSE', 'bin/lua-language-server.exe', 'bin/main.lua', 'main.lua'].map(path => `package/payload/tool/luals/${path}`)];

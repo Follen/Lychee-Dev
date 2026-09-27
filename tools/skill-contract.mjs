@@ -3,7 +3,7 @@
 // skills/lycheedev must resolve to an implemented command contract from
 // `lycheedev describe --format json`, with only accepted flags. A schema change
 // that leaves the skill behind fails here instead of shipping a stale skill.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -63,7 +63,7 @@ function commandPieces(text) {
   return pieces;
 }
 
-const topGroups = new Set(['project', 'data', 'live', 'skill', 'addon', 'evidence', 'source', 'target', 'asset', 'version', 'describe', 'init', 'doctor']);
+const topGroups = new Set([...contracts.keys()].map(path => path.split(' ')[0]));
 const violations = [];
 const references = [];
 
@@ -72,6 +72,9 @@ function checkInvocation(file, invocation) {
   if (tokens[0] === 'lycheedev') tokens.shift();
   else if (!topGroups.has(tokens[0])) return;
   if (!tokens.length || tokens[0] === '--help' || (tokens[0] && tokens[0].startsWith('--'))) return;
+  // A lone group name can be a component enum ("skill"/"addon"), not an
+  // invocation. Actual root commands such as update/version still get checked.
+  if (tokens.length === 1 && !contracts.has(tokens[0])) return;
   let path = tokens[0];
   let consumed = 1;
   // Prefer the longest matching command path (3-word rows like
@@ -107,7 +110,12 @@ function checkInvocation(file, invocation) {
 
 if (!statSync(skillRoot).isDirectory()) throw new Error(`skill-contract: missing skill root ${skillRoot}`);
 for (const file of markdownFiles(skillRoot)) {
-  for (const piece of commandPieces(readFileSync(file, 'utf8'))) {
+  const markdown = readFileSync(file, 'utf8');
+  for (const link of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+    const destination = link[1].split('#')[0];
+    if (destination && !/^[a-z][a-z0-9+.-]*:/i.test(destination) && !existsSync(resolve(dirname(file), destination))) violations.push(`${file}: missing packaged reference ${destination}`);
+  }
+  for (const piece of commandPieces(markdown)) {
     for (const invocation of piece.split(/(?<=\S);\s*(?=lycheedev\s)/)) checkInvocation(file, invocation.replace(/[.;,]$/, ''));
   }
 }

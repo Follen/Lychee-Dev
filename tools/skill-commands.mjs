@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const output = join(repository, 'skills', 'lycheedev', 'references', 'commands.md');
+const outputIndex = process.argv.indexOf('--output');
+const output = outputIndex >= 0 ? resolve(process.argv[outputIndex + 1]) : join(repository, 'skills', 'lycheedev', 'references', 'commands.md');
 const run = spawnSync('go', ['run', './cmd/lycheedev', 'describe', '--format=json'], {
   cwd: repository, encoding: 'utf8', shell: false, windowsHide: true, timeout: 300000,
 });
@@ -35,5 +36,10 @@ for (const group of [...groups.keys()].sort()) {
     if (command.flags?.length) lines.push(`  Flags: ${command.flags.map(flag => `\`${flag}\``).join(', ')}.`);
   }
 }
-writeFileSync(output, `${lines.join('\n')}\n`, 'utf8');
+const generated = `${lines.join('\n')}\n`;
+if (process.argv.includes('--check')) {
+  if (readFileSync(output, 'utf8').replaceAll('\r\n', '\n') !== generated) {
+    throw new Error('skill command reference is stale; run node tools/skill-commands.mjs');
+  }
+} else writeFileSync(output, generated, 'utf8');
 process.stdout.write(`${output}\n`);

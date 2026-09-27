@@ -190,6 +190,7 @@ function fixturePackage(version = '2.0.0') {
   files.set('package/package.json', Buffer.from(JSON.stringify(packageJson)));
   files.set('package/release.json', Buffer.from(JSON.stringify(releaseJson)));
   files.set('package/bin/lycheedev.mjs', Buffer.from('#!/usr/bin/env node\n'));
+  files.set('package/bin/update.mjs', Buffer.from('// updater\n'));
   files.set('package/README.md', Buffer.from('# lycheedev\n'));
   files.set('package/LICENSE', Buffer.from('license text\n'));
   files.set('package/THIRD_PARTY_NOTICES', Buffer.from('notices\n'));

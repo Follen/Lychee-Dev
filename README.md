@@ -78,7 +78,14 @@ lycheedev addon install --release $release --installation $client
 lycheedev skill install --release $release --path $skill
 ```
 
-These are first-install commands. For an existing installation, inspect `addon status` / `skill status` first. Managed upgrades use `--output <recovery-directory>` on the same drive, outside the live AddOns/skills directory. Modified or unmanaged copies require an explicit recovery decision; do not overlay files onto a managed installation.
+For later updates, use the same command for the CLI, bundled LuaLS, Skill and managed addons:
+
+```powershell
+lycheedev update --plan --format json
+lycheedev update
+```
+
+Use repeated `--path <skill-directory>` / `--installation <client-directory>` to select custom or offline targets; explicit targets disable automatic discovery. The updater remembers them, checks file ownership, resumes interrupted replacements and removes old managed files after verification. Edited or unmanaged copies are reported as conflicts. See the [update workflow](skills/lycheedev/references/installation.md) for recovery and native archives.
 
 Load the addon in the client after installation. Open `/dev` to use the workbench. A successful disk installation does not prove the running client has loaded that version.
 
@@ -182,7 +189,7 @@ Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned i
 | Agent workflow | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm distribution | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | Contracts and verification | [Design](docs/toolkit/design.md) · [Status](docs/toolkit/implementation-status.md) · [Regression matrix](docs/toolkit/regression.md) |
-| Release | [Release contract](docs/toolkit/release-2.5.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| Release | [Release contract](docs/toolkit/release-2.5.1.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## License
 

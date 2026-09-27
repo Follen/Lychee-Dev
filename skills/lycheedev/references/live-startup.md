@@ -17,7 +17,7 @@ whose identity could not be read.
 | `busy` | Preserve the owner's operation ID. Recover your own operation; do not steal another agent's window or reload it through desktop tools. For explicit user-authorized abandonment of an eligible probe, follow [live-investigation.md](live-investigation.md). Source/data work can continue. |
 | `identity_unreadable` | Inspect disk status and runtime evidence below. A timeout does not identify the cause. `capture: frame` does not prove the game is logged in or the addon loaded. |
 | `no_actor`, restricted identity, or not-ready input | Act on the returned reason. Login/character selection needs task authorization; combat or text focus must actually clear before retrying. |
-| A pending bootstrap attempt with `BTP-...` | Inspect `live status <id>`, then `live resume <id>` for read-only receipt recovery. Neither call sends the uncertain input again. Retain the selected window and installation. |
+| A pending bootstrap attempt with `BTP-...` | Inspect `live status <id>`, then `live resume <id>` on that ID. Status is read-only; resume may retry only when durable progress proves commit was not sent. At the commit fence or with uncertain input it only observes. Retain the selected window and installation. |
 
 Inspect disk state with:
 
@@ -41,16 +41,14 @@ abandon <BTP-id>` preserves the unknown result and releases host ownership
 without game input. It does not prove that identify, connect or reset had no
 effect. Do not use abandonment as an automatic retry step.
 
-## Custom receiver bindings
+## Existing custom receiver bindings
 
-The addon defaults to `ALT-CTRL-]` wake, `ALT-CTRL-SHIFT-]` submit and
-`ALT-CTRL-[` close. Its Settings page and local `/dev receiver bind
-<wake|submit|close> <chord>` configure its own runtime overrides;
-`/dev receiver reset` restores defaults. Allowed chords begin with `ALT-CTRL-`,
-may add `SHIFT-`, and end in `[`, `]`, or `F1`..`F12`. The close key must have
-a different terminal key from wake and submit because the focused receiver
-cannot reliably distinguish their physical modifiers. Conflict or ineffective
-bindings are rejected without overwriting the player's account bindings.
+The normal profile is `ALT-CTRL-]` wake, `ALT-CTRL-SHIFT-]` submit and
+`ALT-CTRL-[` close. Settings is read-only. Do not direct the user to edit bindings
+there or change them during ordinary connection recovery. Older saved overrides
+and the advanced local command can still exist; only handle them when supplied
+by the user or verified configuration. Conflicting or ineffective bindings are
+rejected without changing the player's account bindings.
 
 First contact cannot read a custom wake chord before waking the addon. If the
 user or verified configuration supplies it, pass the exact chord with
@@ -61,7 +59,7 @@ trigger, checks the effective profile in the fresh receipt, and saves the
 connection. It is a game input action even though it does not run business Lua.
 The CLI checks the effective three-chord profile in a fresh ready receipt and
 saves it with the session.
-Do not guess alternate chords after a timeout or infer that a Settings value
+Do not guess alternate chords after a timeout or infer that a stored value
 became effective without a ready receipt. A later configuration change requires
 fresh connection evidence before the CLI sends another command.
 
