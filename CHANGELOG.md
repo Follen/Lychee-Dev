@@ -7,7 +7,7 @@ Detailed acceptance records and evidence live in
 [docs/toolkit/implementation-status.md](docs/toolkit/implementation-status.md);
 per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
-## [2.5.2] — 2026-09-28
+## [3.0.0] — 2026-09-28
 
 ### Added
 
@@ -27,6 +27,8 @@ per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
 ### Fixed
 
+- Removing an edited managed addon with input slots reports an installation
+  conflict consistently and leaves the addon, slot pool and recovery paths intact.
 - Resume retains the original request after publication contention, runtime
   replacement or interrupted input. Proven process exit can retire ownership
   without falsely reporting unknown execution as successful.
@@ -42,7 +44,7 @@ per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
 - Recorded real-client coverage includes Retail shared-installation races,
   Classic, Titan and specified Forever build experiments; see the
-  [release contract](docs/toolkit/release-2.5.2.md) for exact evidence and limits.
+  [release contract](docs/toolkit/release-3.0.0.md) for exact evidence and limits.
 - Historical OP/BTP recovery remains available. Complete loss of the project
   journal is not transparent recovery, and successful tests do not imply zero
   errors or stable low latency.

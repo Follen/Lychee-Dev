@@ -54,7 +54,10 @@ func removeAddonAndSlots(ctx context.Context, parent, archive string) (Removal, 
 		if e != nil {
 			return Removal{}, e
 		}
-		if main.State != "managed" || main.Receipt == nil {
+		if main.State != "managed" {
+			return Removal{}, fmt.Errorf("%w: %s", ErrConflict, main.State)
+		}
+		if main.Receipt == nil {
 			return Removal{}, ErrInstallation
 		}
 		for _, path := range []string{archive, slotArchive} {

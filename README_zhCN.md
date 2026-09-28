@@ -191,7 +191,7 @@ Lua 测试需要 Lua 5.1；`node tests/tools/build-lua.mjs` 可构建固定版�
 | Agent 工作流 | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm 分发 | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | 合同与验证 | [设计](docs/toolkit/design.md) · [状态](docs/toolkit/implementation-status.md) · [回归矩阵](docs/toolkit/regression.md) |
-| 发行 | [发布合同](docs/toolkit/release-2.5.2.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| 发行 | [发布合同](docs/toolkit/release-3.0.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## 许可
 

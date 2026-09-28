@@ -107,6 +107,35 @@ func TestRemoveAddonIncludesSlotsAndResumesPartialMoves(t *testing.T) {
 	}
 }
 
+func TestRemoveAddonWithSlotsReportsModifiedMainAsConflict(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, "slot-runtime"), client, testkit.Version); err != nil {
+		t.Fatal(err)
+	}
+	main := delivery.AddonDirectory(client)
+	parent := filepath.Dir(main)
+	path := filepath.Join(main, "Core", "Runtime.lua")
+	if err := os.WriteFile(path, []byte("-- user edit\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "removed")
+	if _, err := delivery.RemoveAddon(ctx, client, archive); !errors.Is(err, delivery.ErrConflict) {
+		t.Fatalf("modified addon must remain an installation conflict: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "-- user edit\n" {
+		t.Fatalf("user edit changed: %q %v", got, err)
+	}
+	for _, target := range []string{archive, archive + ".slots", archive + ".removal.json"} {
+		if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("refused removal created %s: %v", target, err)
+		}
+	}
+	if _, err := delivery.InspectSlots(ctx, parent, testkit.Version); err != nil {
+		t.Fatal("refused removal changed slots:", err)
+	}
+}
+
 func TestRemoveAddonRefusesModifiedSlotBeforeMovingAnything(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.Client(t, "flavor")

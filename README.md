@@ -191,7 +191,7 @@ Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned i
 | Agent workflow | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm distribution | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | Contracts and verification | [Design](docs/toolkit/design.md) · [Status](docs/toolkit/implementation-status.md) · [Regression matrix](docs/toolkit/regression.md) |
-| Release | [Release contract](docs/toolkit/release-2.5.2.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| Release | [Release contract](docs/toolkit/release-3.0.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## License
 

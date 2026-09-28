@@ -1,14 +1,13 @@
-# Lychee Dev Toolkit 2.5.2 release contract
-
-Superseded before publication by the owner's **3.0.0** version decision.
-Tag `v2.5.2` retains the failed/cancelled candidate; npm 2.5.2 was not published.
-The package smoke found an incorrect error classification for modified-addon
-removal with slots. The fix and new regression are part of
-[3.0.0](release-3.0.0.md); this document remains historical evidence.
+# Lychee Dev Toolkit 3.0.0 release contract
 
 Date: 2026-09-28. The owner requested merging `codex/nonce-memory-transport`,
 publishing npm and updating the local installation. Published 2.5.1 is immutable;
-2.5.2 synchronizes the CLI, addon and npm package through `release/version.json`.
+3.0.0 synchronizes the CLI, addon and npm package through `release/version.json`.
+
+The owner explicitly selected major version 3.0.0 after the unpublished 2.5.2
+candidate. Its package smoke exposed modified-addon removal returning invalid
+input instead of an installation conflict. The error contract is restored and
+covered by a regression that also verifies no removal side effects.
 
 ## Scope
 
@@ -47,7 +46,7 @@ passing a rerun does not establish its root cause.
 ## Publication and installation
 
 Use the immutable Windows-amd64 pipeline from [2.5.0](release-2.5.0.md):
-clean tagged commit `v2.5.2`, required CI, single assembly and pack,
+clean tagged commit `v3.0.0`, required CI, single assembly and pack,
 corresponding-source rebuild comparison, isolated `--ignore-scripts` package
 smoke, sealed digests, OIDC publication without token fallback, registry
 integrity/provenance read-back, and GitHub Release assets. npm dist-tag is
