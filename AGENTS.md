@@ -17,7 +17,7 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-2.5.1.md` — Windows CI and release contract for the current candidate.
+4. `docs/toolkit/release-2.5.2.md` — Windows CI and release contract for the current candidate.
    `release-2.0.1.md` is retained as the immutable historical contract for the
    already-published release.
 
@@ -81,6 +81,13 @@ from acceptance. A client folder is a location, not an identity: read
   with a legal `end` frame and exit 0.
 
 ## Live (game) rules
+
+Native `CON-...` connections use the memory/64-slot architecture described in
+`docs/toolkit/live-input-architecture-2026-09-28.md` and the current
+`skills/lycheedev/references/live-investigation.md`. Those contracts govern
+native connection input, recovery, reload, disconnect and installation.
+The receiver/QR `OP-...` and `BTP-...` rules below remain historical recovery
+contracts; do not apply their keys, queue or ACK sequence to native connections.
 
 - The dedicated receiver is the machine input path, including first-contact
   identify/connect/reset. Its minimal wake entry is available when the addon

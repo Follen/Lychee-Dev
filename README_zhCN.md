@@ -37,7 +37,7 @@
 | **Hotfix** | 显式选择 Wago、本地 DBCache 或 Raidbots 输入；筛选、有界分页与结果归档 | 这个来源对指定 Build 和范围报告了什么变化？ |
 | **资源工具** | 社区 listfile 搜索；本地 CASC/CDN 检查；原始文件导出；BLP2 转 PNG/无损 WebP；有界 VP9 AVI 解复用 | 找到这个图标，并导出真实像素。 |
 | **游戏内工作台** | `/dev` 的 Run、诊断、对象检查、事件、函数追踪和导出工具 | 检查对象、观察事件，或调查插件错误。 |
-| **游戏自动化** | 识别客户端、加载有界 Lua 探针、验证报告、ACK 并清除回执；恢复中断操作 | 在指定角色上完成检查并带回结果。 |
+| **游戏自动化** | 识别客户端、执行有界 Lua 探针、验证并保存报告、自动收尾；恢复中断操作 | 在指定角色上完成检查并带回结果。 |
 | **证据与项目** | 固定项目引用、归档 capture、校验与打包；明确的缓存预算和清理 | 能否复现这个结论、检查原始依据？ |
 
 
@@ -137,7 +137,7 @@ lycheedev asset export --snapshot $dataPin --installation $client --file-id $ico
 - “在固定的正式服源码中找到这个 API 的定义和调用位置。”
 - “查询这个 Build 的法术记录，保留缺失字段，并导出结果。”
 - “找到这张贴图，导出 PNG，并附上来源身份。”
-- “在这个角色上执行有界探针，读完报告、ACK，再清掉二维码。”
+- “在这个角色上执行有界探针，保存已验证报告并完成收尾。”
 
 ### 发现、固定、执行、收口
 
@@ -146,25 +146,27 @@ lycheedev asset export --snapshot $dataPin --installation $client --file-id $ico
 3. 游戏输入必须处于授权范围内，并绑定选定窗口与角色。中断后保留 operation ID。
 4. 阅读结果、capture、warning 与完整性字段；完成已授权操作后再给最终答复。
 
-### 二维码是中间状态，不是完成条件
+### 请求落盘，自动收尾
+
+开发分支采用原生内存输出与 64 个按需加载输入槽位，需要配套的 CLI 和受管插件；npm 已发布版本可能仍使用此前的传输方式。已验证范围见[实施与实机记录](docs/toolkit/live-memory-slot-implementation-2026-09-28.md)。
 
 ```text
-连接 → 注册探针 → 加载 → 运行 → 读取已验证报告 → finish 自动收尾
-                    │                          │
-                    └──── 按 operation ID 恢复 ─┘
+连接 → execute → 验证并保存报告 → 释放结果 → disconnect
+          │                         ↑
+          └──── resume 同一连接 ─────┘
 ```
 
-`live run` 在报告验证后返回。**Agent 必须继续对同一 operation 调用 `live finish`**：CLI 完成 ACK、精确回收队列、清除回执并验证清屏。清屏失败仍保留可用报告，使用原 operation 重试收尾；成功后的重复调用只读证据，不再输入游戏。用户明确要求保留画面时使用原子命令 `live ack`。不要让用户扫码，也不要为正常收口反复索要确认。
+始终使用同一个 `--project` 目录并保留 `CON-...` 连接 ID。`live execute` 负责提交、读取、结果落盘和释放；稳定的 `--request` 键保证已完成请求的重试只读取证据，同一个键不能偷偷换脚本。中断后用 `live resume` 从 `.lycheedev/live` 继续。调查结束调用 `live disconnect`，释放该进程的独占连接。
 
 | 证据 | 可以说明什么 |
 | --- | --- |
-| 二维码出现、命令已发送、探针已加载 | 仅完成了中间步骤，不是调查结果 |
-| `report.state: verified` | 报告可用，但可能仍需收口 |
-| `cleanup: complete` | 已 ACK，并释放该操作的窗口所有权 |
-| `live finish` 返回 `display.state: cleared`、`complete: true` | 报告、ACK 和最终清屏均已验证 |
+| 按键已发送、荔枝跳动、reload 色块出现 | 活动提示，不能证明当前结果有效 |
+| `reportState: verified` | 报告已验证并保存，但可能仍需收尾 |
+| `cleanup: complete`、`complete: true` | 当前操作的报告与收尾均已完成 |
+| `live disconnect` 后连接关闭 | 游戏内所有权和宿主连接占用均已释放 |
 | 合法 JSONL `end` 帧且退出码为 0 | 数据流按所报告的范围完成 |
 
-遇到 pending 或不确定的输入结果，检查并恢复原 operation；不要新建替代探针、切换角色、盲目 reload 或自动 abandon。如果确实需要外部操作才能继续，明确报告阻塞原因、已验证结果和保留的 ID，作为**未完成交接**。详见 [live 编排](skills/lycheedev/references/live-investigation.md)。
+pending 保留原 nonce 和请求。明确标为 `--policy observation` 的只读探针可以在验证运行时变化后自动重试，同一个操作下保留新的 attempt；默认 `opaque` 不会重放可能已经执行的副作用。槽位不足时只在安全边界自动 reload，旧内存和地址缓存不能作为就绪证明。记录丢失或损坏会明确报告。详见 [live 编排](skills/lycheedev/references/live-investigation.md)。
 
 CLI 结果采用 `lycheedev.result.v1`。退出码区分参数错误（`2`）、能力限制（`3`）、无效输入（`4`）、外部失败（`5`）、待恢复（`6`）、取消（`7`）和内部错误（`8`）；即使成功，也必须查看范围和完整性。
 
@@ -189,7 +191,7 @@ Lua 测试需要 Lua 5.1；`node tests/tools/build-lua.mjs` 可构建固定版�
 | Agent 工作流 | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm 分发 | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | 合同与验证 | [设计](docs/toolkit/design.md) · [状态](docs/toolkit/implementation-status.md) · [回归矩阵](docs/toolkit/regression.md) |
-| 发行 | [发布合同](docs/toolkit/release-2.5.1.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| 发行 | [发布合同](docs/toolkit/release-2.5.2.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## 许可
 

@@ -3,8 +3,9 @@ local ADDON_NAME, ns = ...
 -- Visual constants from Design.md. Loading this table creates no UI objects.
 ns.Theme = {
     window = { .055, .055, .063 },
-    surfaceHover = { .090, .090, .090 },
-    surfaceSelected = { .085, .085, .085 },
+    surfaceHover = { .125, .123, .130 },
+    surfaceSelected = { .175, .170, .180 },
+    listSelected = { .135, .125, .140 },
     field = { .085, .085, .095 },
     fieldBorder = { .400, .400, .420 },
     sidebar = { .075, .073, .078 },

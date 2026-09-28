@@ -1,15 +1,16 @@
 local Env = ...
 local ns = Env.LoadWorkbench()
-local displayed, anchors
-ns.ReceiptView={AnchorCompanion=function(frame)
-    displayed=frame;anchors=(anchors or 0)+1;return true
-end}
+local displayed
+ns.ReceiptView={AnchorCompanion=function() error("activity must not depend on receipts") end}
 local state={options={}}
 ns.Persistence.Current=function() return state end
 Env.LoadAddon("Bridge/ActivityView.lua",ns)
 local view=ns.ActivityView
 assert(Env.framesCreated==0 and view.Current()==nil,"disabled activity allocated UI")
+local originalCreate=CreateFrame
+CreateFrame=function(...) local f=originalCreate(...);displayed=displayed or f;return f end
 view.Receiving(true)
+CreateFrame=originalCreate
 assert(view.Current()=="connecting" and displayed:IsShown())
 assert(displayed.label:GetText()==ns.L.ACTIVITY_CONNECTING)
 assert(displayed.mouseEnabled==false and not displayed:GetScript("OnKeyDown"),"activity took input authority")

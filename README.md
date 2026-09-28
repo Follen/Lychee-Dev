@@ -137,7 +137,7 @@ Examples of requests:
 - “Find the declaration and callers of this API in the pinned Retail source.”
 - “Query these spell records for this build; preserve missing fields and export the result.”
 - “Find this texture and export it as PNG with its source identity.”
-- “On this character, run a bounded probe, read the report, ACK it and clear the QR.”
+- “On this character, run a bounded probe, preserve the verified report and finish cleanup.”
 
 ### Discover, pin, execute, finish
 
@@ -146,25 +146,27 @@ Examples of requests:
 3. Keep live input within authorization and bind it to the selected window and character. Preserve operation IDs after interruption.
 4. Read the result, captures, warnings and completion fields. Finish the authorized operation before delivering the final answer.
 
-### A QR card is a checkpoint, not completion
+### Durable requests, automatic cleanup
+
+The development branch uses native memory output and 64 load-on-demand input slots. It requires the matching CLI and managed addon; the released npm version may still expose the preceding transport. See the [implementation and real-client results](docs/toolkit/live-memory-slot-implementation-2026-09-28.md) for verified coverage.
 
 ```text
-connect → put probe → load → run → read verified report → finish
-                         │                              │
-                         └──── recover by operation ID ─┘
+connect → execute → verify and save report → release → disconnect
+             │                                ↑
+             └──── resume the same connection ─┘
 ```
 
-`live run` returns after report verification. **The Agent must continue** with `live finish` for the same operation: the CLI acknowledges the report, retires its queue entry, clears the receipt and verifies the clear. A failed clear keeps the verified report usable; retry the same operation to finish cleanup. Successful finish retains evidence and repeated calls send no game input. Use atomic `live ack` when the user explicitly wants to retain the display. Do not ask the user to scan the card or approve routine cleanup.
+Use one `--project` directory and retain the `CON-...` connection ID. `live execute` owns submission, collection, durable result storage and release. A stable `--request` key makes completed retries read-only; changed code under the same key is rejected. `live resume` continues interrupted work from `.lycheedev/live`. Call `live disconnect` when the investigation ends to release the connection's exclusive ownership of the game process.
 
 | Evidence | What it establishes |
 | --- | --- |
-| A visible QR, a sent command, or a loaded probe | An intermediate step; not the investigation result |
-| `report.state: verified` | The report is usable; cleanup may still be pending |
-| `cleanup: complete` | The operation has been acknowledged and its ownership released |
-| `live finish`: `display.state: cleared`, `complete: true` | Report, ACK and final display cleanup are verified |
+| A sent key, bouncing Lychee, or reload color patch | Activity only; not proof of a current result |
+| `reportState: verified` | A validated report is saved locally; cleanup may still be pending |
+| `cleanup: complete`, `complete: true` | The operation's result and cleanup are complete |
+| A closed connection after `live disconnect` | Game ownership and the host connection claim are released |
 | JSONL with a legal `end` frame and exit 0 | The stream completed according to its reported scope |
 
-On pending or uncertain input, inspect/resume the original operation. Do not create a replacement probe, switch characters, blindly reload, or automatically abandon ownership. If progress requires an external action, report the exact blocker, verified findings and retained IDs as an **incomplete handoff**. See [live orchestration](skills/lycheedev/references/live-investigation.md).
+Pending work keeps the original nonce and request. Read-only probes explicitly marked `--policy observation` can restart after a verified runtime change, with a new attempt recorded under the same operation. The default `opaque` policy never repeats potentially executed effects. Slot capacity reloads happen at a safe boundary; stale memory and address hints cannot establish readiness. Missing or damaged evidence is reported explicitly. See [live orchestration](skills/lycheedev/references/live-investigation.md).
 
 CLI results use `lycheedev.result.v1`. Exit codes distinguish argument errors (`2`), capability limits (`3`), invalid input (`4`), external failure (`5`), pending (`6`), cancellation (`7`) and internal failure (`8`). Success still requires checking scope and completeness.
 
@@ -189,7 +191,7 @@ Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned i
 | Agent workflow | [`skills/lycheedev/`](skills/lycheedev/) |
 | npm distribution | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
 | Contracts and verification | [Design](docs/toolkit/design.md) · [Status](docs/toolkit/implementation-status.md) · [Regression matrix](docs/toolkit/regression.md) |
-| Release | [Release contract](docs/toolkit/release-2.5.1.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
+| Release | [Release contract](docs/toolkit/release-2.5.2.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
 
 ## License
 

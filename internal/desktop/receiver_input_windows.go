@@ -43,6 +43,7 @@ func (in *ReceiverInput) SetBindings(bindings ReceiverBindings) error {
 }
 
 func (in *ReceiverInput) Wake() error    { return in.native.ReceiverChord(in.bindings.WakeBinding) }
+func (in *ReceiverInput) Escape() error  { return in.native.Chord("escape") }
 func (in *ReceiverInput) Submit() error  { return in.native.ReceiverChord(in.bindings.SubmitBinding) }
 func (in *ReceiverInput) Dismiss() error { return in.native.ReceiverChord(in.bindings.CloseBinding) }
 
@@ -102,6 +103,15 @@ func (in *ReceiverInput) FixedReload(before func(step int) error) error {
 			return err
 		}
 	}
+	return in.reloadChat(step)
+}
+
+// ReadyReload is used only after the caller verifies fresh unblocked input.
+// It contains no Escape prefix. Submission still requires runtime verification.
+func (in *ReceiverInput) ReadyReload() error {
+	return in.reloadChat(func(_ int, send func() error) error { return send() })
+}
+func (in *ReceiverInput) reloadChat(step func(int, func() error) error) error {
 	if err := step(4, func() error { return in.native.Chord("enter") }); err != nil {
 		return err
 	}

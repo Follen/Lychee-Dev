@@ -5,6 +5,13 @@ local ADDON_NAME, ns = ...
 -- before it is compared, formatted, indexed or branched on; failures open to a
 -- harmless visible state instead of throwing.
 ns.Compat = {
+    LoadInputSlot = function(name)
+        if type(name)~="string" or not name:match("^Lychee Dev Slot %d%d$") then return nil,"slot_name_invalid" end
+        if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
+        local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
+        if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end
+        return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
+    end,
     ReceiverChord = function(key)
         if (issecretvalue and issecretvalue(key)) or type(key)~="string" then return nil end
         local number=string.match(key,"^F([1-9]%d?)$")

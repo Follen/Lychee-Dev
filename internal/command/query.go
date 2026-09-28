@@ -36,6 +36,9 @@ type QueryLocation struct {
 var errDoctorUnhealthy = errors.New("doctor.check_failed")
 
 func queryFault(err error) (int, string, bool) {
+	if exit, code, ok := channelFault(err); ok {
+		return exit, code, true
+	}
 	for _, entry := range []struct {
 		cause error
 		exit  int

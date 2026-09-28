@@ -55,8 +55,11 @@ func TestWindowReservationAcrossWorkspaces(t *testing.T) {
 			t.Fatalf("owner: %v", err)
 		}
 	}
-	if _, err := second.BeginWindowWork(ctx, parent, secondStore.Identity().WorkspaceID, windowIntent("window/1/2/4")); err != nil {
-		t.Fatal("different window blocked", err)
+	if _, err := second.BeginWindowWork(ctx, parent, secondStore.Identity().WorkspaceID, windowIntent("window/1/2/4")); !errors.Is(err, ErrBusy) {
+		t.Fatal("second HWND bypassed process ownership", err)
+	}
+	if _, err := second.BeginWindowWork(ctx, parent, secondStore.Identity().WorkspaceID, windowIntent("window/5/6/4")); err != nil {
+		t.Fatal("different process blocked", err)
 	}
 	// Querying local work does not need the shared admission lock.
 	if _, err := first.InspectWork(ctx, record.OperationID); err != nil {

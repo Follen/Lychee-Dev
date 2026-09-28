@@ -58,7 +58,7 @@ for _,scenario in ipairs({"disabled","login","world-first","loading-first","wake
             else
                 event(f,"LOADING_SCREEN_DISABLED"); assert(not f.shown); event(f,"PLAYER_ENTERING_WORLD",false,true)
             end
-            assert(f.shown and f.textures[2].color[1]==1 and f.textures[3].color[2]==1 and f.textures[4].color[3]==1)
+            assert(f.shown and #f.textures==2 and f.textures[2].color[1]==1,"expected one RGB patch and its black surround")
             advance(.5); assert(f.textures[2].color[2]==1)
             advance(1); assert(f.textures[2].color[3]==1)
             if scenario=="wake" then ns.StartupBeacon.Stop()

@@ -239,7 +239,6 @@ local function BuildTracePage(parent)
     end)
 
     function page.HandleActivate()
-        input.editBox:SetFocus()
         SyncTraceButton()
         RefreshList()
     end

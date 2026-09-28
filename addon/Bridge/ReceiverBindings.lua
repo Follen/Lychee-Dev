@@ -126,6 +126,7 @@ local function apply(profile)
     return copy(valid)
 end
 local function stored()
+    if ns.SlotRuntime then return copy(defaults) end
     local state, failure = ns.Persistence.Current()
     if not state then return nil, failure end
     local profile = state.options and state.options.receiverBindings
@@ -172,6 +173,7 @@ ns.ReceiverBindings = {
         return key == terminal(effective[action])
     end,
     ConfigureProfile = function(profile)
+        if ns.SlotRuntime then return nil,"receiver_bindings_fixed" end
         if ns.Receiver and ns.Receiver.IsActive and ns.Receiver.IsActive() then return nil,"receiver_active" end
         if not owner then return nil,"receiver_bindings_unavailable" end
         local state,failure=ns.Persistence.Current()
@@ -183,6 +185,7 @@ ns.ReceiverBindings = {
         return copy(applied)
     end,
     Configure = function(action, chord)
+        if ns.SlotRuntime then return nil,"receiver_bindings_fixed" end
         if action ~= "wake" and action ~= "submit" and action ~= "close" then return nil, "receiver_binding_action_invalid" end
         if ns.Receiver and type(ns.Receiver.IsActive) == "function" and ns.Receiver.IsActive() then
             return nil, "receiver_active"
@@ -222,6 +225,9 @@ ns.ReceiverBindings = {
         end
         if type(SetOverrideBindingClick) ~= "function" or type(CreateFrame) ~= "function" then
             return nil, "receiver_bindings_unavailable"
+        end
+        if ns.SlotRuntime then
+            defaults = {wake="ALT-CTRL-F12",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["}
         end
         handlers = callbacks
         owner = CreateFrame("Frame", nil, UIParent)

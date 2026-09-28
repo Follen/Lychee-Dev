@@ -155,6 +155,47 @@ func (b *Book) ensureWindowClaim(ctx context.Context, scope, workspaceID string,
 }
 
 func publishWindowOwner(ctx context.Context, scope string, owner WindowOwner) error {
+	// A process can expose more than one HWND. Admission belongs to the
+	// process creation identity, not just to one of its presentation windows.
+	parts := strings.Split(owner.Resource, "/")
+	if len(parts) == 4 {
+		entries, err := os.ReadDir(scope)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 1024 {
+			return errors.New("journal.window_owner_limit")
+		}
+		prefix := strings.Join(parts[:3], "/") + "/"
+		for _, entry := range entries {
+			if !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(scope, entry.Name())
+			if err := ordinaryOwnerPath(path, false); err != nil {
+				return err
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			b, readErr := io.ReadAll(io.LimitReader(file, 4097))
+			closeErr := file.Close()
+			if err = errors.Join(readErr, closeErr); err != nil {
+				return err
+			}
+			var existing WindowOwner
+			if len(b) > 4096 || json.Unmarshal(b, &existing) != nil {
+				return errors.New("journal.invalid_window_owner")
+			}
+			if _, err = readWindowOwner(path, existing.Resource); err != nil {
+				return err
+			}
+			if strings.HasPrefix(existing.Resource, prefix) && existing.Resource != owner.Resource {
+				return &WindowOccupied{Owner: existing, Foreign: existing.WorkspaceID != owner.WorkspaceID}
+			}
+		}
+	}
 	marker := filepath.Join(scope, fmt.Sprintf("%x.json", sha256.Sum256([]byte(owner.Resource))))
 	payload, err := json.Marshal(owner)
 	if err != nil {
@@ -319,6 +360,8 @@ func readWindowOwner(path, resource string) (WindowOwner, error) {
 		id = strings.TrimPrefix(id, "OP-")
 	} else if strings.HasPrefix(id, "BTP-") {
 		id = strings.TrimPrefix(id, "BTP-")
+	} else if strings.HasPrefix(id, "CON-") {
+		id = strings.TrimPrefix(id, "CON-")
 	}
 	if !bytes.Equal(data, canonical) || owner.Schema != "lycheedev.window-owner.v1" || owner.Resource != resource || len(owner.WorkspaceID) != 32 || len(id) != 32 || id == owner.OperationID {
 		return owner, errors.New("journal.invalid_window_owner")

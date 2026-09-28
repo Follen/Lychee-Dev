@@ -42,8 +42,8 @@ For any authorized live question, research the exact client build and target
 addon revision, form a hypothesis, then write the smallest bounded Lua probe that
 can distinguish it. Choose the APIs, events, actions and assertions from that
 source and the task; probes are not restricted to UI or fixed templates. Declare
-the execution budget when loading the immutable revision. The CLI owns receiver
-input, report persistence and recovery; the probe owns its observation bounds,
+the execution budget on the request. The CLI owns native input,
+report persistence and recovery; the probe owns its observation bounds,
 cleanup and honest assertion result. See [live-investigation.md](references/live-investigation.md#design-a-discriminating-probe).
 
 The implemented command surface is exactly what `describe --format json`
@@ -54,49 +54,43 @@ capability.
 
 ## Finish the authorized live task
 
-A visible QR card, successful input, connection, or loaded probe is an
-intermediate state. Keep working in the same turn. Prefer `live execute` with
-the saved session, a Lua file or immutable probe revision, a stable request key,
-and an explicit execution budget. It owns execution, verified report retrieval,
-ACK and display cleanup as one operation. Read its report and capture IDs;
-completion requires `complete: true`, `cleanup: complete` and
-`display.state: cleared`. A business failure still returns its report and needs
-the same cleanup. Never ask the user to approve each transport step or scan a QR.
-Respect an explicit request to pause or retain an unacknowledged report.
+Use the invoking project's directory consistently with `--project`. Native live
+records are stored in `.lycheedev/live`; keep them out of source control and
+retain the returned `CON-...` connection ID across turns. The CLI owns the 64
+input slots, nonce allocation, native memory reader, reload and crash recovery.
+Do not write slot files, manipulate journals, send raw keys or use wowdump.
 
-Use atomic `live probe load` / `live run` / `live finish` only for an explicitly
-staged investigation. `live run` stops at a verified report; continue with
-`live finish` in the same turn. Do not append another ACK, finish or hide to a
-successfully completed `live execute` operation.
+Prefer `live execute` with that connection, a Lua file or immutable probe revision,
+a stable request key, and explicit execution and host-wait budgets. Successful
+transport requires `complete: true`, `reportState: verified`, `cleanup: complete`;
+read `report.ok` separately to decide whether the probe itself passed. A connection
+or bouncing logo is intermediate progress. Native transport has no QR to scan and
+needs no extra ACK, finish or hide after completion.
 
-A connection-only task or standalone reload has no probe report to ACK. Verify
-its own completion/readiness fields and use `live hide` to dismiss the final
-receipt; do not invent a probe just to satisfy the probe lifecycle.
+On exit 6, inspect the reported stage/waiting reason and continue `live resume CON-...`
+in the same project within the task's host-wait budget. A missing client, foreign
+owner or unresolved execution outcome requires resolving that condition, not
+opening another connection. Repeating an execute
+request with identical code, budget and policy resumes its original work; changing
+those inputs under the same key is a conflict. Choose `--policy observation` only
+for probes safe to repeat after runtime loss. The default `opaque` policy retains
+unknown effects instead of replaying them. A pending report or cleanup obligation
+is not a reason to create another request. See [recovery](references/live-investigation.md#recover-without-replay).
 
-On interruption or exit 6, inspect/resume the same operation, follow its
-structured `nextAction`, and read
-[live-investigation.md](references/live-investigation.md#recover-without-replay).
-Use the returned state to choose the next action; never replace the probe,
-switch windows, abandon ownership, or repeat uncertain input to force success.
-A pending result calls for recovery or diagnosis, not an immediate final answer.
-If the remaining action is blocked by user input, missing capability, or an
-unchanged external condition with no safe progress, explain the specific blocker,
-retained operation/session IDs, verified findings and unfinished cleanup. Never
-present that handoff as a completed task.
-
-Treat accepted input, verified report, business assertions and cleared display
-as separate facts. A verified report can contain failed assertions; a pending
-display does not erase the report. New probe loading and report persistence can
-reload the client, so build a reproducible scene after load and finish sampling
-before the report flush. State when the original transient scene could not be
-observed through the available loaded capabilities.
+At the end of the investigation, `live disconnect CON-...` unbinds the quiescent
+runtime and releases its host ownership. Keep the connection only when the task
+requires continued use. Read-only source/data work can continue independently.
+If the selected process exited, disconnect that old CON from its original project;
+the CLI can prove the ended lifetime and retire ownership while preserving unknown
+results. See [process exit](references/live-startup.md#ownership-and-recovery).
+Old OP/BTP records remain historical evidence; do not mix their lifecycle with CON.
 
 ## Respect the authorization boundary
 
 Only run live commands inside the user's granted authorization.
 Use `live instances --passive` for window inventory without input or capture;
-it does not establish actor identity or readiness. Plain `live instances` sends one
-identity trigger to each matching, unoccupied running window. Scope discovery
+it does not establish actor identity or readiness. Use native connect for fresh
+actor binding. Scope discovery
 to the authorized installation/PID when supplied. A named character also limits
 mutation: retain its verified window binding and never fall back to a different
 online character. Under read-only or local-only
@@ -123,7 +117,7 @@ the project lock must not retarget an investigation already in progress.
 For live work, use a saved session to identify the target. The CLI must reconnect
 and verify current readiness before input; historical evidence alone cannot do
 that. When no session exists yet, `live connect` handles a known target directly;
-use `live instances` when candidate discovery is needed. The CLI completes
+use `live instances --passive` when window discovery is needed. The CLI completes
 identification, selection and connection mechanically: present the candidates (product/build, character,
 realm) and resolve only the ambiguity the CLI reports. A unique match needs no
 question; several identical candidates stay separate until the user chooses.
@@ -132,17 +126,9 @@ probe again. This toolkit does not import old tools' data or task registries.
 Purely local in-game inspection lives in the in-game `/dev` workbench and does
 not require a CLI connection.
 
-The receiver uses Ctrl+Alt+] to wake, Ctrl+Alt+Shift+] to submit, and
-Ctrl+Alt+[ to close. Settings displays these bindings without editing controls.
-The CLI owns their use; never send raw transport keys to work around a pending
-operation. For an existing custom binding, follow
-[live-startup.md](references/live-startup.md#existing-custom-receiver-bindings).
-
-The bouncing Lychee is an activity indicator, not acceptance or completion
-evidence. Receiving input temporarily blocks game keyboard/mouse input; probe
-execution releases that shield while retaining the running indicator. Do not
-hide it or interrupt the receiver just to make a transport screenshot cleaner.
-Use the operation report and final display proof to establish completion.
+Input recovery, short protection phases and activity indicators are handled by
+the CLI/addon; see [input and recovery](references/live-investigation.md#input-and-recovery)
+when focus, held keys or interrupted input explains a pending result.
 
 ## Interpret the evidence
 
@@ -156,7 +142,7 @@ the capture is no longer referenced. Keep is idempotent; remove is a destructive
 CAS operation that refuses external references and never deletes a blob shared by
 another capture. Do not use `cache prune` as a substitute for either decision.
 
-For a live result, distinguish `report.state`, report content and `cleanup`.
+For a native live result, distinguish `reportState`, report content and `cleanup`.
 A verified report remains useful when cleanup is pending; `complete: false` must
 not be described as full completion. A probe error and a transport failure are
 also different outcomes. Preserve the operation ID for recovery and the capture

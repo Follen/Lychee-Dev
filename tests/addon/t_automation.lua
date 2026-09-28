@@ -540,8 +540,8 @@ page.detailsButton:Click()
 assert(page.metadata:IsShown() and page.requestValue:GetText()=="req-long","details lost the full request identity")
 page.viewReportButton:Click()
 assert(not page.metadata:IsShown() and page.reportArea:IsShown(),"result tab did not replace details")
-assert(page.rows[1].meta:GetText() == "3000 | " .. L.AUTO_KIND_LUA,
-    "row meta does not render time and kind")
+assert(page.rows[1].meta:GetText() == "3000",
+    "row metadata must show the timestamp without repeating its title")
 assert(page.rows[1].status:GetText() == L.AUTO_STATUS_REPORTED,
     "row status does not render the bridge status label")
 
@@ -614,6 +614,17 @@ assert(viewB.GetRecord("req-long") ~= nil, "clear removed a record with a pendin
 
 print("automation page tests passed")
 
+-- Execution outcome and report acknowledgement must not share one label.
+for _,outcome in ipairs({"completed","failed"}) do
+    local id="req-outcome-"..outcome
+    viewB.Observe({requestId=id,kind="lua",status="acknowledged",probeStatus=outcome,observedAt=5500})
+    page:Refresh();page.SelectRecord(id)
+    assert(page.rows[1].status:GetText()==(outcome=="failed" and L.AUTO_STATUS_FAILED or L.AUTO_STATUS_SUCCEEDED),
+        "acknowledgement hid execution outcome")
+    assert(page.statusValue:GetText()==L.AUTO_STATUS_ACKNOWLEDGED,"report lifecycle detail was lost")
+    assert(not page.executeButton:IsEnabled(),"historical outcome permitted replay")
+end
+
 -- A visible running record refreshes from notifications, without a timer.
 viewB.Observe({ requestId="req-running", kind="lua", status="running", observedAt=6000 })
 viewB.Changed()
@@ -628,3 +639,7 @@ page:Show()
 page:Activate()
 assert(page.statusValue:GetText()==L.AUTO_STATUS_FINALIZING and not page.executeButton:IsEnabled(),
     "reactivated page missed current executor phase")
+nsB.SlotRuntime={}
+local nativePage=nsB.CreateAutomationPage(parent)
+assert(not nativePage.showNoticeButton and not nativePage.hideNoticeButton,
+    "memory transport exposed retired QR notice actions")

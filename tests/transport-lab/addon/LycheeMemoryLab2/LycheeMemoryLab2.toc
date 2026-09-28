@@ -1,0 +1,6 @@
+## Interface: 120100
+## Title: Lychee Memory Channel Lab 2
+## Notes: Standalone ticket lifecycle and memory-channel experiment
+## Version: 0.0.1
+
+Lab.lua

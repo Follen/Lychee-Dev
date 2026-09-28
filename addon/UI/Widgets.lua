@@ -60,7 +60,7 @@ end
 local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomInset, useNativeScrollFrame)
     local scroll = CreateFrame(useNativeScrollFrame and "ScrollFrame" or "Frame", nil, parent)
     scroll:SetPoint("TOPLEFT", leftInset, -topInset)
-    scroll:SetPoint("BOTTOMRIGHT", -(rightInset + 11), bottomInset)
+    scroll:SetPoint("BOTTOMRIGHT", -(rightInset + 16), bottomInset)
     scroll:SetClipsChildren(true)
     scroll:EnableMouseWheel(true)
     scroll.verticalOffset = 0
@@ -68,33 +68,29 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
 
     local scrollbar = CreateFrame("Slider", nil, parent)
     scrollbar:SetOrientation("VERTICAL")
-    scrollbar:SetPoint("TOPRIGHT", -rightInset, -topInset)
-    scrollbar:SetPoint("BOTTOMRIGHT", -rightInset, bottomInset)
-    scrollbar:SetWidth(7)
+    scrollbar:SetPoint("TOPRIGHT", -rightInset, -topInset - 2)
+    scrollbar:SetPoint("BOTTOMRIGHT", -rightInset, bottomInset + 2)
+    scrollbar:SetWidth(12)
     scrollbar:SetMinMaxValues(0, 0)
     scrollbar:SetValue(0)
     scrollbar:SetValueStep(1)
     scrollbar:SetObeyStepOnDrag(false)
-    scrollbar:SetHitRectInsets(-4, -4, 0, 0)
+    scrollbar:SetHitRectInsets(0, 0, 0, 0)
     scrollbar.syncing = false
 
-    local track = scrollbar:CreateTexture(nil, "BACKGROUND")
-    track:SetColorTexture(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.35)
-    track:SetPoint("TOP", 0, 0)
-    track:SetPoint("BOTTOM", 0, 0)
-    track:SetWidth(2)
-
+    -- Match Lychee's quiet, trackless red thumb with a wider drag target.
+    -- Keep native Slider input; no custom per-frame drag loop is needed.
     local thumb = scrollbar:CreateTexture(nil, "ARTWORK")
-    thumb:SetColorTexture(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.72)
-    thumb:SetSize(7, 32)
+    thumb:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
+    thumb:SetSize(3, 32)
     scrollbar:SetThumbTexture(thumb)
     scrollbar.thumb = thumb
 
     scrollbar:SetScript("OnEnter", function(self)
-        self.thumb:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 0.95)
+        self.thumb:SetColorTexture(Theme.accentHover[1], Theme.accentHover[2], Theme.accentHover[3], 1)
     end)
     scrollbar:SetScript("OnLeave", function(self)
-        self.thumb:SetColorTexture(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.72)
+        self.thumb:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
     end)
     scrollbar:SetScript("OnValueChanged", function(self, value)
         if not self.syncing then
@@ -188,7 +184,7 @@ local function CreateScrollArea(parent, leftInset, topInset, rightInset, bottomI
         if not (issecretvalue and issecretvalue(trackHeight))
             and trackHeight and trackHeight > 0 and viewHeight > 0 then
             local contentHeight = math.max(viewHeight, viewHeight + range)
-            scrollbar.thumb:SetHeight(math.max(28, math.floor(trackHeight * viewHeight / contentHeight + 0.5)))
+            scrollbar.thumb:SetHeight(math.min(trackHeight, 48, math.max(24, math.floor(trackHeight * viewHeight / contentHeight + 0.5))))
         end
         scrollbar:Show()
     end
@@ -351,14 +347,17 @@ local function ApplyButtonState(button, state)
     local selected = variant == "selected"
     local primary = variant == "primary" or variant == "danger"
     local field = variant == "field"
-    local background = field and Theme.field or primary and Theme.action or selected and Theme.surfaceSelected or Theme.surfaceHover
-    button.lycheeSurface:SetColor(background, (field or selected or primary or state == "hover" or state == "pressed") and 1 or 0)
+    local secondary = variant == "secondary"
+    local interacting = enabled and (state == "hover" or state == "pressed")
+    local background = field and Theme.field or selected and Theme.surfaceSelected
+        or interacting and Theme.surfaceSelected or Theme.action
+    button.lycheeSurface:SetColor(background, (field or selected or primary or secondary or interacting) and 1 or 0)
     local color = not enabled and Theme.disabled
-        or state == "hover" and Theme.accentHover
+        or interacting and (primary and Theme.accentHover or Theme.text)
         or variant == "danger" and Theme.danger
         or primary and Theme.accentHover
         or selected and Theme.text
-        or Theme.textMuted
+        or secondary and Theme.text or Theme.textMuted
     button.label:SetTextColor(color[1], color[2], color[3], 1)
 end
 
@@ -545,14 +544,18 @@ local function CreatePageHeading(parent, title, help)
     return label
 end
 
-local function CreateListRow(parent, height)
+local function CreateListRow(parent, height, quiet)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(height)
 
     local background = row:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints()
+    background:SetPoint("TOPLEFT", 0, -2)
+    background:SetPoint("BOTTOMRIGHT", 0, 2)
     background:SetColorTexture(0, 0, 0, 0)
     row.background = background
+    if quiet then
+        row.selectionSurface = Theme.CreateRoundedSurface(row, {0, 0, 0, 0}, {radius = 6, inset = 2})
+    end
 
     local accent = row:CreateTexture(nil, "ARTWORK")
     accent:SetColorTexture(ACCENT_R, ACCENT_G, ACCENT_B, 1)
@@ -560,6 +563,7 @@ local function CreateListRow(parent, height)
     accent:SetSize(2, 22)
     accent:Hide()
     row.accent = accent
+    if quiet then accent:SetPoint("LEFT", 4, 0);accent:SetHeight(18) end
 
     row.divider = row:CreateTexture(nil, "ARTWORK")
     row.divider:SetColorTexture(0, 0, 0, 0)
@@ -567,6 +571,12 @@ local function CreateListRow(parent, height)
 end
 
 local function SetListRowState(row, selected, hovered)
+    if row.selectionSurface then
+        row.background:SetColorTexture(0, 0, 0, 0)
+        row.selectionSurface:SetColor(selected and Theme.listSelected or hovered and Theme.surfaceHover or {0, 0, 0, 0})
+        row.accent:SetShown(selected == true)
+        return
+    end
     if selected then
         row.background:SetColorTexture(unpack(Theme.surfaceSelected))
         row.accent:Show()

@@ -64,9 +64,11 @@ func TestBootstrapAdmissionSerializesWorkspacesAndMaintenance(t *testing.T) {
 		t.Fatalf("abandon raced input: %v", err)
 	}
 	driver.Close()
-	// Another window in the same installation is independent.
+	// Another process in the same installation is independent. Multiple HWNDs
+	// in one process share a single logical connection.
 	other := target
 	other.Window.Handle++
+	other.Window.ProcessID++
 	parallel, err := BeginBootstrapReceiver(ctx, roots[second.index], other, "/dev connect")
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,46 @@ Detailed acceptance records and evidence live in
 [docs/toolkit/implementation-status.md](docs/toolkit/implementation-status.md);
 per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
+## [2.5.2] — 2026-09-28
+
+### Added
+
+- Native live connections use verified process-memory records and 64 managed
+  load-on-demand input slots. Project-local journals retain target identity,
+  requests, nonces and result evidence across interrupted CLI runs.
+- Current-process scans support eight workers, SIMD matching, coverage accounting
+  and optional address hints; invalid hints fall back to discovery and never
+  authorize a result without runtime and record validation.
+- Shared-installation coordination allows two game processes to use the same
+  slot pool while enforcing one connection owner per process. Short publication
+  locks, durable reservations and exact pre-input payload checks preserve
+  independent progress and prevent stale receipts from retiring new work.
+- Input readiness is observed from addon memory before sending keys or reload.
+  Ordinary probes leave input free; explicit protected phases retain their
+  execution budget and release protection on completion or error.
+
+### Fixed
+
+- Resume retains the original request after publication contention, runtime
+  replacement or interrupted input. Proven process exit can retire ownership
+  without falsely reporting unknown execution as successful.
+- Automation history persists in the workbench and distinguishes execution
+  success or failure from transport acknowledgement. Shared controls, report
+  areas and scrollbars are aligned; obsolete settings are removed.
+- The small bouncing Lychee distinguishes Agent execution from input protection;
+  the bounded reload beacon remains a visual hint, not execution evidence.
+- Skill workflows now describe native connections, slot rotation, recovery,
+  multi-instance selection and managed installation activation.
+
+### Verification and limits
+
+- Recorded real-client coverage includes Retail shared-installation races,
+  Classic, Titan and specified Forever build experiments; see the
+  [release contract](docs/toolkit/release-2.5.2.md) for exact evidence and limits.
+- Historical OP/BTP recovery remains available. Complete loss of the project
+  journal is not transparent recovery, and successful tests do not imply zero
+  errors or stable low latency.
+
 ## [2.5.1] — 2026-09-28
 
 ### Added

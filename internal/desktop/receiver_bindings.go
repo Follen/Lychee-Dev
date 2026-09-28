@@ -18,6 +18,12 @@ func DefaultReceiverBindings() ReceiverBindings {
 	return ReceiverBindings{WakeBinding: "ALT-CTRL-]", SubmitBinding: "ALT-CTRL-SHIFT-]", CloseBinding: "ALT-CTRL-["}
 }
 
+// SlotReceiverBindings uses a non-text wake key for the memory/slot transport.
+// Keep the legacy receiver profile separate for older optical runtimes.
+func SlotReceiverBindings() ReceiverBindings {
+	return ReceiverBindings{WakeBinding: "ALT-CTRL-F12", SubmitBinding: "ALT-CTRL-SHIFT-F12", CloseBinding: "ALT-CTRL-["}
+}
+
 func receiverBindingKey(chord string) (string, error) {
 	key := ""
 	switch {

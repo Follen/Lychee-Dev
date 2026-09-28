@@ -1,11 +1,9 @@
 local ADDON_NAME, ns = ...
 
--- View-model for the workbench Automation page. It is a bounded, session-only
--- observation list over the SAME game-side probe machinery the CLI drives
--- (ns.ProbeQueue / ns.ProbeRunner / ns.ReportStore). There is no second
--- executor and no task registry here: every status is derived from the bridge
--- records, and Execute routes through ProbeQueue.Load + ProbeRunner.Dispatch,
--- the exact functions the /dev bridge verbs call.
+-- Workbench view over legacy queue records and the current memory-slot
+-- history. Native history persists per character and is strictly read-only;
+-- manual Execute remains solely for legacy queue entries. Neither provider
+-- makes this page a second executor or a transport recovery journal.
 --
 -- Real status vocabulary (derived from the bridge surface):
 --   queued        lycheedev.queue.v1 entry registered, nothing loaded yet
@@ -147,6 +145,7 @@ local function DeriveStatus(requestId)
 end
 
 local function ApplyDerived(record)
+    if record.transport == "memory-slot" then return record end
     record.status, record.errorCode = nil, nil
     record.receipt, record.reportBody, record.hasReport = nil, nil, nil
     record.probeStatus, record.probeError = nil, nil
@@ -206,6 +205,21 @@ local function Observe(incoming)
 end
 
 local function Collect()
+    if ns.AutomationHistory then
+        local current = {}
+        for _,stored in ipairs(ns.AutomationHistory.List()) do
+            local incoming={transport="memory-slot",kind=KIND_LUA}
+            for key,value in pairs(stored) do incoming[key]=value end
+            current[incoming.requestId]=true
+            Observe(incoming)
+        end
+        for index=#records,1,-1 do
+            local record=records[index]
+            if record.transport=="memory-slot" and not current[record.requestId] then
+                recordIndex[record.requestId]=nil;table.remove(records,index)
+            end
+        end
+    end
     if not ns.ProbeQueue and not ns.ReportStore and not ns.Persistence then
         return 0
     end
@@ -300,6 +314,7 @@ local function Execute(target)
     if not record then
         return nil, "auto_execution_unknown"
     end
+    if record.transport=="memory-slot" then return nil,"auto_history_read_only" end
     if not ns.ProbeQueue or type(ns.ProbeQueue.Load) ~= "function"
         or not ns.ProbeRunner or type(ns.ProbeRunner.Dispatch) ~= "function" then
         return nil, "bridge_unavailable"
@@ -316,6 +331,7 @@ local function ShowNotice(target)
     if not record then
         return nil, "auto_execution_unknown"
     end
+    if record.transport=="memory-slot" then return nil,"auto_notice_unavailable" end
     local receipt = record.receipt
     if not receipt then
         receipt = ReportRead(record.requestId)
@@ -355,6 +371,9 @@ local function GetReportText(target)
     if type(body) ~= "string" then
         return nil, ns.L.AUTO_NO_REPORT
     end
+    if record.reportTruncated then
+        return body .. "\n... " .. string.format(ns.L.AUTO_REPORT_HISTORY_LIMIT, ns.AutomationHistory.REPORT_BYTES / 1024)
+    end
     if #body > REPORT_DISPLAY_BYTES then
         return body:sub(1, REPORT_DISPLAY_BYTES)
             .. "\n... " .. string.format(ns.L.AUTO_REPORT_DISPLAY_LIMIT, REPORT_DISPLAY_BYTES / 1024)
@@ -370,6 +389,7 @@ local function ClearRecords()
     for index = #records, 1, -1 do
         local record = records[index]
         if not IsProtected(record) and not IsPending(record) then
+            if record.transport=="memory-slot" then ns.AutomationHistory.Remove(record.requestId) end
             table.remove(records, index)
             recordIndex[record.requestId] = nil
             removed = removed + 1

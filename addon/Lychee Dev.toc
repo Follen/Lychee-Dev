@@ -1,6 +1,6 @@
 ## Interface: 120100, 50504, 38002, 16001
 ## Title: Lychee Dev
-## Version: 2.5.1
+## Version: 2.5.2
 ## SavedVariables: LycheeToolkitDB
 ## SavedVariablesPerCharacter: LycheeToolkitBridgeDB
 
@@ -22,6 +22,10 @@ Core\Persistence.lua
 Bridge\Session.lua
 Core\Controls.lua
 Bridge\CaptureWriter.lua
+Bridge\MemoryProtocol.lua
+Bridge\SlotProtocol.lua
+Bridge\InputProtection.lua
+Bridge\ProbeExecution.lua
 Bridge\InputProtocol.lua
 Bridge\MatrixSymbol.lua
 Bridge\ReceiptView.lua
@@ -30,6 +34,7 @@ Bridge\ReportStore.lua
 Bridge\Investigation.lua
 Bridge\ProbeRunner.lua
 Bridge\Definitions.lua
+Modules\AutomationHistory.lua
 Modules\AutomationView.lua
 Bridge\ProbeQueue.lua
 Bridge\Reentry.lua
@@ -37,6 +42,8 @@ Bridge\Identity.lua
 Bridge\ReceiverBindings.lua
 Bridge\StartupBeacon.lua
 Bridge\Receiver.lua
+Bridge\SlotRuntime.lua
+Bridge\InputState.lua
 # --- Event catalogs: all four load; Catalog.lua selects ns.Client's table ---
 Modules\Events\CatalogData_Mainline.lua
 Modules\Events\CatalogData_Mists.lua
@@ -55,7 +62,6 @@ UI\Widgets.lua
 UI\TreeView.lua
 UI\Export.lua
 UI\Window.lua
-UI\Pages\Settings.lua
 # --- Workbench pages: later page modules insert their load line here ---
 UI\Pages\About.lua
 UI\Pages\Run.lua

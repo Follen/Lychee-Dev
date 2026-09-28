@@ -63,6 +63,9 @@ type Options struct {
 	account                              string
 	probe, request, name                 string
 	budgetSeconds                        int
+	waitSeconds                          int
+	noCache                              bool
+	recoveryPolicy                       string
 	includeRemoved                       bool
 	pid                                  uint32
 	character, realm                     string
@@ -171,7 +174,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				response.Context["project"], response.Context["snapshot"] = project.Directory, project.Lock.Selection.ID
 			}
 		}
+		handledChannel := false
 		if err == nil {
+			handledChannel, code, err = runChannelCommand(ctx, route, argument, opts, &response)
+		}
+		if err == nil && !handledChannel {
 			switch route {
 			case "update":
 				response.Result, err, code = updateToolkit(ctx, opts)
@@ -627,7 +634,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				request := live.DiscoveryRequest{WakeBinding: opts.wakeBinding, Passive: opts.passive}
+				request := live.DiscoveryRequest{Passive: true}
 				if opts.installation != "" {
 					request.Roots = []string{opts.installation}
 				}
@@ -1028,6 +1035,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
+		if response.Context["transport"] == "memory-slot-v1" && code == 6 {
+			response.Error.Retryable = true
+		}
 		if response.OperationID != "" && len(opts.words) >= 2 && opts.words[0] == "live" {
 			if actual, ok := response.Context["stage"].(string); ok {
 				response.Error.Stage = actual
@@ -1131,6 +1141,8 @@ func parseOptions(args []string) (Options, error) {
 				opts.stdin = true
 			case "--passive":
 				opts.passive = true
+			case "--no-cache":
+				opts.noCache = true
 			case "--semantic":
 				opts.semantic = true
 			case "--static-only":
@@ -1346,6 +1358,17 @@ func parseOptions(args []string) (Options, error) {
 			opts.recordID, opts.recordIDSet = uint32(n), true
 		case "--installation":
 			opts.installation = value
+		case "--wait-seconds":
+			n, e := strconv.Atoi(value)
+			if e != nil || n < 1 || n > 600 {
+				return opts, errors.New("--wait-seconds must be between 1 and 600")
+			}
+			opts.waitSeconds = n
+		case "--policy":
+			if value != "observation" && value != "opaque" {
+				return opts, errors.New("--policy must be observation or opaque")
+			}
+			opts.recoveryPolicy = value
 		case "--key-file":
 			opts.keyFile = value
 		case "--file-id":

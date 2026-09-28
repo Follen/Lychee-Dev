@@ -1,5 +1,31 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-09-28 统一输入编排的独立验收见[编排记录](live-input-coordinator-acceptance-2026-09-28.md)。
+Classic / Forever 双在线的后续补测见[双实例记录](live-input-multiclient-2026-09-28.md)。
+同目录正式服双开使用 `tests/channel-live/shared-installation-baseline.mjs`，
+要求发布争用返回 pending、原 nonce 续跑、不同槽位不被战斗等待锁死、旧回执不退役
+新预约、同时容量换代及单边 reload 不改变另一进程。真实状态见[共享安装记录](live-input-shared-installation-2026-09-28.md)。
+新增回归门槛：退出的 PID/创建时间须有 OS 证明才能退役连接；权限/窗口错误不能冒充退出；
+退役须保留未知结果与原日志，精确清理自身槽位，重复 disconnect 和截断尾恢复均不重发输入。
+`reload-readiness-baseline.mjs` 验证正常 reload 与显式 fallback 共用内存就绪判断、就绪零 Esc、
+禁用缓存后的新 runtime 绑定，以及同请求重试不再次发键。它是显式目标的交互基准，不在 CI 操控游戏。
+
+2026-09-28 工作台八页及键盘焦点回归入口为 `tests/channel-live/workbench-visual.mjs`；
+共享按钮、运行历史容器、诊断色板、自动化行间隔与滑块统一，移除设置页与原生通道旧通知入口。
+实际正式服 WGC、全量 Lua/Go 测试及未测范围见[工作台审计](workbench-audit-2026-09-28.md)。
+`automation-history-baseline.mjs` 同时核验失败结果与 ACK 文案区分、滚动首尾和 reload 前后报告字节。
+
+`focus-baseline.mjs` 验证内存输入状态与 Ctrl+Alt+F12：自建单行/多行编辑框均需三次 Esc
+才释放焦点，完整收尾后检查精确次数与文字/光标不变。离线覆盖旧 runtime、owner/slot
+不匹配、过期/缺字段采样、禁用采样器，以及 Esc 前落盘和同槽位恢复。普通第三方键盘
+拦截器、未知 API 和其他客户端不因这两种实机输入框通过而自动视为通过。
+
+2026-09-28 Classic 50504 新增输入保护与自动化历史验收：普通探针不锁输入、显式保护按任务剩余预算释放、事件前提检查、任务成功/失败报告保留与 reload 后恢复。可重复入口为 `tests/channel-live/input-policy-baseline.mjs` 和 `tests/channel-live/automation-history-baseline.mjs`，实际结果及未测范围见 [Classic 记录](classic-input-history-2026-09-28.md)。
+
+2026-09-28 原生内存/64 槽位验收使用[新矩阵](live-memory-slot-tests.md)及[实测记录](live-memory-slot-implementation-2026-09-28.md)。可重复的公开 CLI 基准入口为 `tests/channel-live/public-baseline.mjs`，需要显式传入候选 CLI、独立项目目录、安装路径与 PID；不在 CI 自动操控游戏。下方旧二维码/队列的基准结果不能代替新传输的验收。
+
+双客户端并发与 reload 故障注入使用 `tests/channel-live/cross-client-baseline.mjs`；入口和目标文件格式见[运行说明](../../tests/channel-live/README.md)，Titan / Forever 的具体证据与范围见[本轮记录](live-memory-slot-clients-2026-09-28.md)。独立安装目录的并发不等于共享同一物理槽位池的验收。
+
 状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-24（本次修订新增 wowdoc/wowdata 逐业务 parity 台账说明；此前已新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
 当前执行证据见 [implementation-status.md](implementation-status.md)，不以本清单充当测试结果。
 2026-09-28 UI 与活动指示验收见 [本轮记录](ui-polish-2026-09-28.md)：新增接收阶段键鼠遮罩、执行阶段释放输入、活动提示持续到 Finish、只读快捷键、自动化真实运行状态和隐藏页退订断言。真实 Retail 结果有报告与 WGC 证据；其他客户端和人工输入矩阵不据此升级。

@@ -59,7 +59,6 @@ local exportHooks = {}
 local secondaryRoot
 local secondarySource
 local backButton
-local settingsPage
 local pageViewport, pageCanvas
 local pageOffsets = {}
 local UpdateRailVisibility
@@ -77,7 +76,6 @@ local function HideSecondary()
     if secondaryRoot.content then secondaryRoot.content:Hide() end
     secondarySource = nil
     backButton:Hide()
-    if windowFrame.settingsButton then windowFrame.settingsButton:SetActive(false) end
     for key, tab in pairs(windowFrame.pageTabs) do tab:SetActive(key == activeKey) end
     if pageViewport then pageViewport:Show() end
     if windowFrame.FitPageViewport then windowFrame.FitPageViewport() end
@@ -159,7 +157,6 @@ local function ActivatePage(key)
     end
     if built then Theme.Reveal(built.container) end
     for pageKey, tab in pairs(windowFrame.pageTabs) do tab:SetActive(pageKey == key) end
-    if windowFrame.settingsButton then windowFrame.settingsButton:SetActive(false) end
     if windowFrame.ScrollTabIntoView then windowFrame.ScrollTabIntoView(key) end
     UpdateRailVisibility()
 
@@ -182,8 +179,8 @@ local function CreateHistoryRail()
     local label = W.CreateSectionLabel(railRoot, ns.L.HISTORY)
     label:SetPoint("TOPLEFT", 3, 0)
 
-    local panel = W.CreatePanel(railRoot, colors.panel[1], colors.panel[2], colors.panel[3], 1)
-    panel:SetPoint("TOPLEFT", 0, -20)
+    local panel = W.CreatePanel(railRoot, colors.editor[1], colors.editor[2], colors.editor[3], 1)
+    panel:SetPoint("TOPLEFT", 0, Layout.CONTENT_TOP - Layout.HEADING_TOP)
     panel:SetPoint("BOTTOMLEFT", 0, 0)
     panel:SetWidth(HISTORY_WIDTH)
 
@@ -339,25 +336,7 @@ local function EnsureWindow()
     backButton:Hide()
     frame.backButton = backButton
 
-    local settingsButton = W.CreateNavTab(header, ns.L.SETTINGS)
-    settingsButton:SetSize(SIDEBAR_WIDTH - 20, 40)
-    settingsButton:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 10, 16)
-    local function ShowSettings()
-        if not settingsPage then
-            settingsPage=ns.SettingsPage.Create(secondaryRoot,function()
-                return frame:GetWidth()-SIDEBAR_WIDTH-22
-            end)
-        end
-        settingsPage.RefreshBindingFields()
-        settingsPage.FitContent()
-        ns.Workbench.ShowSecondary(settingsPage)
-        return true
-    end
-    settingsButton:SetScript("OnClick", ShowSettings)
-    frame.settingsButton = settingsButton
-    frame.ShowSettings = ShowSettings
-
-    local navScroll = W.CreateScrollArea(header, 10, 86, 10, 72)
+    local navScroll = W.CreateScrollArea(header, 10, 86, 10, 16)
     local navContent = CreateFrame("Frame", nil, navScroll)
     navContent:SetSize(SIDEBAR_WIDTH - 32, #pageOrder * 44)
     navScroll:SetScrollChild(navContent)
@@ -468,14 +447,6 @@ ns.Workbench = {
         return ActivatePage(key)
     end,
 
-    ShowSettings = function()
-        local shown, reason = ns.Workbench.Open()
-        if not shown then return false, reason end
-        return windowFrame.ShowSettings()
-    end,
-
-    GetSettingsPage = function() return settingsPage end,
-
     GetActivePage = function()
         return activeKey
     end,
@@ -494,9 +465,6 @@ ns.Workbench = {
         windowFrame.pageNext:Hide()
         if railRoot then railRoot:Hide() end
         for _, tab in pairs(windowFrame.pageTabs) do tab:SetActive(false) end
-        if windowFrame.settingsButton then
-            windowFrame.settingsButton:SetActive(content == settingsPage)
-        end
         backButton:Show()
         content:Show()
         secondaryRoot:Show()

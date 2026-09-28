@@ -419,7 +419,8 @@ Workbench.RegisterPage{
     build = BuildRunPage,
     activate = function(page)
         page.RefreshHistory()
-        page.inputPanel.editBox:SetFocus()
+        -- Opening a page is not a request to capture keyboard input. In
+        -- particular, an Agent showing results must still be able to finish.
     end,
     suspend = function(page)
         page.inputPanel.editBox:ClearFocus()

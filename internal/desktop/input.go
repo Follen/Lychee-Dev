@@ -15,6 +15,8 @@ type InputReceipt struct {
 	SubmissionComplete bool `json:"submissionComplete"`
 }
 
+var ErrKeyAlreadyHeld = errors.New("lab.key_already_held")
+
 const bootstrapIdentifyPrefix = "/dev bridge identify "
 const bootstrapConnectCommand = "/dev connect"
 const bootstrapResetPrefix = "/dev bridge reset "

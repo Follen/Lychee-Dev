@@ -100,9 +100,6 @@ local function BuildAboutPage(parent)
         hasGrabber and L.ABOUT_DEPENDENCY_DETAIL or L.BUGGRABBER_UNAVAILABLE,
         -358, hasGrabber)
 
-    CreateEnvironmentRow(page, L.ABOUT_SAFETY, L.ABOUT_SAFETY_STATUS,
-        L.ABOUT_SAFETY_TEXT, -423, false)
-
     local githubButton = CreateFrame("Button", nil, page)
     githubButton:SetSize(32, 32)
     githubButton:SetPoint("BOTTOMLEFT", 17, 17)

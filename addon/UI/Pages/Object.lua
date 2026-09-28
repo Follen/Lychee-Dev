@@ -625,7 +625,6 @@ local function BuildObjectPage(parent)
         if pickerActive then
             StopPicker(false)
         end
-        pathPanel.editBox:SetFocus()
     end
 
     function page.HandleShutdown()

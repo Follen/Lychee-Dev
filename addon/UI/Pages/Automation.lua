@@ -10,7 +10,9 @@ local L = ns.L
 local W = ns.Widgets
 local view = ns.AutomationView
 
-local ROW_HEIGHT = 64
+local ROW_HEIGHT = 60
+local ROW_GAP = 4
+local ROW_STRIDE = ROW_HEIGHT + ROW_GAP
 local LIST_WIDTH = 256
 local VISIBLE_ROWS = 8
 
@@ -26,6 +28,7 @@ local STATUS_LABELS = {
     acknowledged = "AUTO_STATUS_ACKNOWLEDGED",
     cleared = "AUTO_STATUS_CLEARED",
     unavailable = "AUTO_STATUS_UNAVAILABLE",
+    interrupted = "AUTO_STATUS_INTERRUPTED",
 }
 
 local KIND_LABELS = {
@@ -47,12 +50,20 @@ local function ShownText(value, fallback)
     return tostring(value)
 end
 
-local function GetStatusText(record)
+local function GetLifecycleText(record)
     if record.status == "unavailable" and record.errorCode then
         return ShownText(record.errorCode)
     end
     local key = STATUS_LABELS[record.status]
     return key and L[key] or ShownText(record.status, L.UNKNOWN)
+end
+
+local function GetStatusText(record)
+    if record.status == "reported" or record.status == "acknowledged" then
+        if record.probeStatus == "failed" then return L.AUTO_STATUS_FAILED end
+        if record.probeStatus == "completed" then return L.AUTO_STATUS_SUCCEEDED end
+    end
+    return GetLifecycleText(record)
 end
 
 local function GetKindLabel(kind)
@@ -131,11 +142,13 @@ function ns.CreateAutomationPage(parent)
         end, "secondary")
     clearButton:SetPoint("BOTTOMLEFT", 14, 14)
 
-    local hideNoticeButton = W.CreateButton(page, 118, L.AUTO_HIDE_NOTICE, "secondary")
-    hideNoticeButton:SetPoint("BOTTOMRIGHT", -14, 14)
-
-    local showNoticeButton = W.CreateButton(page, 128, L.AUTO_SHOW_NOTICE, "secondary")
-    showNoticeButton:SetPoint("RIGHT", hideNoticeButton, "LEFT", -8, 0)
+    local hideNoticeButton, showNoticeButton
+    if not ns.SlotRuntime then
+        hideNoticeButton = W.CreateButton(page, 118, L.AUTO_HIDE_NOTICE, "secondary")
+        hideNoticeButton:SetPoint("BOTTOMRIGHT", -14, 14)
+        showNoticeButton = W.CreateButton(page, 128, L.AUTO_SHOW_NOTICE, "secondary")
+        showNoticeButton:SetPoint("RIGHT", hideNoticeButton, "LEFT", -8, 0)
+    end
 
     local executeButton = W.CreateButton(page, 96, L.AUTO_EXECUTE, "primary")
     executeButton:SetPoint("TOPRIGHT", -14, -84)
@@ -147,7 +160,7 @@ function ns.CreateAutomationPage(parent)
 
     local listScroll = W.CreateScrollArea(listPanel, 8, 8, 7, 8)
     local listContent = CreateFrame("Frame", nil, listScroll)
-    listContent:SetWidth(LIST_WIDTH - 26)
+    listContent:SetWidth(LIST_WIDTH - 31)
     listContent:SetHeight(1)
     listScroll:SetScrollChild(listContent)
 
@@ -200,7 +213,7 @@ function ns.CreateAutomationPage(parent)
     end)
 
     local function StatusColor(record)
-        if record.status == "unavailable" or record.probeStatus == "failed" then
+        if record.status == "unavailable" or record.status == "interrupted" or record.probeStatus == "failed" then
             return ns.Theme.danger[1], ns.Theme.danger[2], ns.Theme.danger[3], 1
         elseif record.status == "reported" or record.probeStatus == "completed" then
             return ns.Theme.success[1], ns.Theme.success[2], ns.Theme.success[3], 1
@@ -235,14 +248,14 @@ function ns.CreateAutomationPage(parent)
         end
         requestValue:SetText(hasRecord and ShownText(record.requestId) or "")
         kindValue:SetText(hasRecord and GetKindLabel(record.kind) or "")
-        statusValue:SetText(hasRecord and GetStatusText(record) or "")
+        statusValue:SetText(hasRecord and GetLifecycleText(record) or "")
         codeValue:SetText(hasRecord and FormatCode(record) or "")
         timeValue:SetText(hasRecord and FormatRecorded(record) or "")
         errorValue:SetText(hasRecord
             and ShownText(record.actionError or record.probeError or record.errorCode, L.NOT_AVAILABLE) or "")
 
-        W.SetButtonEnabled(executeButton, hasRecord and (record.status == "queued" or record.status == "loaded"))
-        W.SetButtonEnabled(showNoticeButton, hasRecord and record.receipt ~= nil)
+        W.SetButtonEnabled(executeButton, hasRecord and record.transport~="memory-slot" and (record.status == "queued" or record.status == "loaded"))
+        if showNoticeButton then W.SetButtonEnabled(showNoticeButton, hasRecord and record.receipt ~= nil) end
         W.SetButtonEnabled(viewReportButton, hasRecord)
         W.SetButtonEnabled(detailsButton, hasRecord)
     end
@@ -268,14 +281,14 @@ function ns.CreateAutomationPage(parent)
             return row
         end
 
-        row = W.CreateListRow(listContent, ROW_HEIGHT)
+        row = W.CreateListRow(listContent, ROW_HEIGHT, true)
         row:SetPoint("TOPLEFT", 0, 0)
         row:SetPoint("TOPRIGHT", 0, 0)
         row.hovered = false
 
         local title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         ns.Theme.SetFont(title, 12, ns.Theme.text)
-        title:SetPoint("TOPLEFT", 12, -10)
+        title:SetPoint("TOPLEFT", 14, -11)
         title:SetPoint("TOPRIGHT", -100, -10)
         title:SetJustifyH("LEFT")
         title:SetWordWrap(false)
@@ -283,14 +296,14 @@ function ns.CreateAutomationPage(parent)
 
         local status = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         ns.Theme.SetFont(status, 11, ns.Theme.textDim)
-        status:SetPoint("TOPRIGHT", -10, -10)
+        status:SetPoint("TOPRIGHT", -12, -11)
         status:SetJustifyH("RIGHT")
         row.status = status
 
         local meta = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         ns.Theme.SetFont(meta, 11, ns.Theme.textDim)
-        meta:SetPoint("BOTTOMLEFT", 12, 9)
-        meta:SetPoint("BOTTOMRIGHT", -10, 9)
+        meta:SetPoint("BOTTOMLEFT", 14, 10)
+        meta:SetPoint("BOTTOMRIGHT", -12, 10)
         meta:SetJustifyH("LEFT")
         meta:SetWordWrap(false)
         meta:SetTextColor(unpack(ns.Theme.textDim))
@@ -327,7 +340,7 @@ function ns.CreateAutomationPage(parent)
         if Restricted(scrollOffset) then
             scrollOffset = 0
         end
-        local firstIndex = math.floor((scrollOffset or 0) / ROW_HEIGHT) + 1
+        local firstIndex = math.floor((scrollOffset or 0) / ROW_STRIDE) + 1
         local lastIndex = math.min(#order, firstIndex + VISIBLE_ROWS - 1)
         local poolIndex = 0
         for orderIndex = firstIndex, lastIndex do
@@ -336,17 +349,17 @@ function ns.CreateAutomationPage(parent)
             local row = rows[poolIndex] or AcquireRow(poolIndex)
             row.requestId = record.requestId
             row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 0, -((orderIndex - 1) * ROW_HEIGHT))
-            row:SetPoint("TOPRIGHT", 0, -((orderIndex - 1) * ROW_HEIGHT))
+            row:SetPoint("TOPLEFT", 0, -((orderIndex - 1) * ROW_STRIDE))
+            row:SetPoint("TOPRIGHT", 0, -((orderIndex - 1) * ROW_STRIDE))
             row.title:SetText(GetKindLabel(record.kind))
             row.status:SetText(GetStatusText(record))
             row.status:SetTextColor(StatusColor(record))
-            row.meta:SetText(FormatTime(record.observedAt) .. " | " .. GetKindLabel(record.kind))
+            row.meta:SetText(FormatTime(record.observedAt))
             ApplyRowState(row)
             row:Show()
         end
 
-        listContent:SetHeight(math.max(1, #order * ROW_HEIGHT))
+        listContent:SetHeight(math.max(1, #order * ROW_STRIDE - ROW_GAP))
         listScroll:UpdateScrollChildRect()
 
         -- Newest record first: when the selection is gone, fall back to the
@@ -356,8 +369,8 @@ function ns.CreateAutomationPage(parent)
         end
         if not selectedRequestId and order[1] then
             selectedRequestId = order[1]
-            ShowSelectedReport()
         end
+        if selectedRequestId then ShowSelectedReport() end
         for index = 1, #rows do
             ApplyRowState(rows[index])
         end
@@ -390,7 +403,7 @@ function ns.CreateAutomationPage(parent)
         Refresh()
     end)
 
-    showNoticeButton:SetScript("OnClick", function()
+    if showNoticeButton then showNoticeButton:SetScript("OnClick", function()
         if ns.Safety.IsCombatBlocked() then
             ns.Safety.PrintBlocked()
             return
@@ -398,12 +411,12 @@ function ns.CreateAutomationPage(parent)
         if selectedRequestId then
             view.ShowNotice(selectedRequestId)
         end
-    end)
+    end) end
 
     -- Hiding the notice is teardown and must stay available in every state.
-    hideNoticeButton:SetScript("OnClick", function()
+    if hideNoticeButton then hideNoticeButton:SetScript("OnClick", function()
         view.HideNotice()
-    end)
+    end) end
 
     viewReportButton:SetScript("OnClick", function()
         metadata:Hide();reportArea:Show()

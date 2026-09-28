@@ -86,8 +86,7 @@ for index = 1, #expectedOrder do
     assert(tab:GetWidth() >= tab.label:GetStringWidth() + 14,
         "page destination clips its label")
 end
-assert(window.settingsButton:GetParent() ~= window,
-    "settings should live in the navigation column")
+assert(not window.settingsButton, "removed settings entry returned")
 
 -- Pages build lazily on first activation.
 assert(probe.build == 0, "page was constructed before its first activation")

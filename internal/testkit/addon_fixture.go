@@ -41,12 +41,15 @@ func Release(t *testing.T, variant string) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string][]byte{
-		"skill/SKILL.md":       []byte("skill fixture\n"),
-		"addon/Core/Start.lua": []byte("local name, ns = ...\n"),
+		"skill/SKILL.md":            []byte("skill fixture\n"),
+		"addon/Core/Start.lua":      []byte("local name, ns = ...\n"),
 		"addon/Core/ClientGate.lua": []byte("local name, ns = ...\n"),
 	}
 	if variant == "queue" {
 		files["addon/Bridge/Definitions.lua"], _ = bridge.EncodeProbeQueue(nil)
+	}
+	if variant == "slot-runtime" {
+		files["addon/Bridge/SlotRuntime.lua"] = []byte("local name, ns = ...\n")
 	}
 	// One manifest declares every supported interface; ClientGate selects the
 	// product from the running build at load time.
@@ -57,6 +60,9 @@ func Release(t *testing.T, variant string) string {
 	toc := fmt.Sprintf("## Interface: %s\n## Version: %s\n## SavedVariables: LycheeToolkitDB\nCore\\ClientGate.lua\nCore\\Start.lua\n", strings.Join(interfaces, ", "), Version)
 	if variant == "queue" {
 		toc += "Bridge/Definitions.lua\n"
+	}
+	if variant == "slot-runtime" {
+		toc += "Bridge/SlotRuntime.lua\n"
 	}
 	if variant == "wrong-interface" {
 		toc = strings.Replace(toc, "120100", "99999", 1)

@@ -1,137 +1,69 @@
-# First contact and startup recovery
+# Native live startup and installation
 
-Read this when no usable session exists or the addon was just installed or
-updated. Use the installed CLI's help/describe contract for the exact recovery
-command surface.
+Use this reference for first installation, an upgraded addon, or contact without
+a usable CON connection. Disk installation and runtime activation are separate.
+The CLI owns the main addon and 64 LoadOnDemand slots; never overlay-copy files,
+edit slot payloads or import old queues/SavedVariables.
 
-## Interpret the actual failure
+1. Select the authorized installation and PID. Inspect `addon status`; the main
+   addon must be a clean managed installation matching the CLI, and all 64 slot
+   files must pass inspection. Use [installation](installation.md) for deployment.
+2. Use `live connect` with the invoking project's `--project` and exact target.
+   It discovers memory identity and binds with a new nonce. If the runtime is
+   absent, it records an activation and performs one fixed reload automatically.
+3. Preserve any returned CON ID, including activation-pending results. Use status
+   and resume in the same project; do not start another connection or resend keys.
 
-Read `context.candidates` as well as the top-level error. In the current CLI,
-`live.candidate_missing` means no eligible match, which can include a window
-whose identity could not be read.
-
-| Observation | Next useful step |
-| --- | --- |
-| Empty candidate list | Check current process and installation constraints. A path spelling mismatch is not proof that the game is offline. Reuse the installation spelling returned by discovery with older CLIs. |
-| Several eligible matches | Present product/build, character and realm; resolve the remaining ambiguity before mutation. |
-| `busy` | Preserve the owner's operation ID. Recover your own operation; do not steal another agent's window or reload it through desktop tools. For explicit user-authorized abandonment of an eligible probe, follow [live-investigation.md](live-investigation.md). Source/data work can continue. |
-| `identity_unreadable` | Inspect disk status and runtime evidence below. A timeout does not identify the cause. `capture: frame` does not prove the game is logged in or the addon loaded. |
-| `no_actor`, restricted identity, or not-ready input | Act on the returned reason. Login/character selection needs task authorization; combat or text focus must actually clear before retrying. |
-| A pending bootstrap attempt with `BTP-...` | Inspect `live status <id>`, then `live resume <id>` on that ID. Status is read-only; resume may retry only when durable progress proves commit was not sent. At the commit fence or with uncertain input it only observes. Retain the selected window and installation. |
-
-Inspect disk state with:
+After an intentional installation/update with no usable connection, explicit
+activation is also available:
 
 ```text
-lycheedev addon status --installation <client-directory> --format json
+lycheedev live reload fallback --project <project-directory> --installation <client> --pid <pid> --request <activation-key> --wait-seconds 120 --format json
 ```
 
-`managed` proves receipt/file integrity, not a loaded runtime. `absent` needs an
-installation within the task's scope; consult [installation.md](installation.md).
-Modified/unmanaged files require the documented delivery/recovery path, not an
-overlay copy. An update may also leave a running older release: compare actual
-runtime evidence rather than treating the on-disk release as already loaded.
+When the current addon advertises memory input telemetry, even this fallback
+command uses the ordinary coordinator: observe, send one Esc only for an editor
+blocker, observe again, then send Enter, /reload, Enter once ready. An already
+unblocked runtime needs no Esc. Missing/stale telemetry on a capable runtime
+stays pending; it never silently downgrades to blind input.
 
-First contact, identify, connect and reset can send input before a session
-exists. The CLI records those attempts before input and returns a durable
-`BTP-...` ID when acceptance is unresolved. Recover that ID before starting
-another attempt; queued keystrokes or a visible QR alone do not establish
-acceptance. An unknown result does not release another operation's ownership.
-If recovery cannot resolve it and the user explicitly decides to stop, `live
-abandon <BTP-id>` preserves the unknown result and releases host ownership
-without game input. It does not prove that identify, connect or reset had no
-effect. Do not use abandonment as an automatic retry step.
+First installation or an older runtime without that capability uses the fixed
+Esc x3, Enter, /reload, Enter fallback. Its intent is saved before
+the burst and its structured input outcome afterward. A lost outcome remains
+uncertain. Repeating the request resumes the same activation; only proven zero
+input permits another attempt. A single RGB square changes
+phase near the top-left for up to 45 seconds and stops on wake. Seeing it is a
+hint, not identity proof: a newly observed runtime and fresh bind must follow.
 
-## Existing custom receiver bindings
+If the game is at character selection, loading, in combat, explicitly disabled,
+or otherwise cannot accept the narrow input, preserve pending evidence and
+inspect that condition. An absent descriptor does not prove a build mismatch or
+that a reload executed. Client versions that cannot discover newly installed
+addon folders through reload may require a client restart; do not loop reloads
+or claim that disk files prove those folders are loaded. Keep the selected actor
+and installation fixed. A restart or character switch follows the user's scope.
 
-The normal profile is `ALT-CTRL-]` wake, `ALT-CTRL-SHIFT-]` submit and
-`ALT-CTRL-[` close. Settings is read-only. Do not direct the user to edit bindings
-there or change them during ordinary connection recovery. Older saved overrides
-and the advanced local command can still exist; only handle them when supplied
-by the user or verified configuration. Conflicting or ineffective bindings are
-rejected without changing the player's account bindings.
+## Ownership and recovery
 
-First contact cannot read a custom wake chord before waking the addon. If the
-user or verified configuration supplies it, pass the exact chord with
-`--wake-binding` to `live instances`, `live connect`, `live reset`, or `live
-bind` (with their other required target arguments). `live bind` is for an addon
-already connected through its local `/dev connect`: it sends an identity
-trigger, checks the effective profile in the fresh receipt, and saves the
-connection. It is a game input action even though it does not run business Lua.
-The CLI checks the effective three-chord profile in a fresh ready receipt and
-saves it with the session.
-Do not guess alternate chords after a timeout or infer that a stored value
-became effective without a ready receipt. A later configuration change requires
-fresh connection evidence before the CLI sends another command.
+A process has one logical owner across projects. CLI exit or elapsed time does
+not release it. A foreign claim is a conflict to resolve with the owning task,
+not an invitation to remove its ledger. The short driver lock is released by the
+OS after a crash; the durable CON claim and slot reservation remain for recovery.
 
-## Activate a runtime without a bridge session
+If the selected game process exited, use `live disconnect <CON>` from its owning
+project before upgrading that installation. The CLI checks PID plus creation
+time, journals the OS proof, and retires only that connection's reservations and
+claim without sending input. Access errors or missing windows do not prove exit.
+An unconfirmed operation remains `execution_unknown`, `reportState=unavailable`,
+`complete=false` even when `closed=true`; a candidate result is not promoted.
+Keep the old project journal and connect the new process separately. Never
+delete owner files to make an installation upgrade succeed.
 
-If identity cannot be read, do not call session-bound `live reload` with an
-invented or stale session or alternate connect/reload in a loop. First inspect
-the exact selected process, clean managed installation and available runtime
-evidence. Distinguish disabled, missing, load error and an older running release
-when observable; leave the cause unknown otherwise.
+Do not use legacy bind/reset/QR commands for a native CON connection. The fixed
+keys are part of the protocol; changing them in the UI or through an external
+macro would desynchronize the CLI. Slot allocation, publication, consumption,
+capacity reload and shared-installation coordination belong to the CLI.
 
-Chat showing `Lychee Dev: identity_busy` (visible in a screenshot) is the
-signature of a stuck in-game queue, not a missing addon. Before any UI
-maintenance, try the dedicated recovery once on the unowned window:
-
-```text
-lycheedev live reset --pid <pid> --installation <client> --snapshot <pin> --format json
-```
-
-It sends one fixed nonce-correlated trigger that tombstones the current
-character's unacknowledged queue entries and reconnects through the normal
-bootstrap. Disk-owned windows are refused. A pending result means no matching
-receipt was observed; the trigger may already have executed or displayed a
-receipt. Keep that outcome unknown and do not repeat it without new evidence.
-
-For installation activation or a bridge that cannot be reached, use the selected
-target's fixed CLI fallback when that action is authorized:
-
-```text
-lycheedev live reload fallback --installation <client-directory> --pid <pid> --request <stable-key> --format json
-```
-
-Pass `--session <prior-session>` when a valid prior session helps correlate the
-same window and actor. If the selected addon has a known custom wake chord,
-pass that exact `--wake-binding <chord>` to the sessionless fallback too; it
-must not guess alternate chords after reload. This command alone may send
-`Esc` three times, `Enter`,
-`/reload`, then `Enter`. The CLI records an `OP-...` attempt and each input step
-before sending, checks the exact process/window and clean managed addon, and
-verifies the new runtime afterward. Delivery of keys, a black frame or changed
-file time alone does not prove activation. Resume the returned operation ID to
-observe an unresolved attempt; it must not resend keys whose outcome is unknown.
-Do not use fallback to bypass another operation owner or repeat it with a new
-request key merely because a receipt is missing.
-If observation cannot resolve a fixed reload and the user explicitly decides
-to stop, `live abandon <OP-id>` preserves its input progress and unknown
-runtime result while releasing host ownership without game input. It does not
-establish that reload failed or undo any keys already delivered.
-
-If the addon is disabled in the game UI, reload alone cannot enable it. When
-the authorized task includes enabling it and a supported desktop tool is
-available, verify the selected process and ownership, make the observed UI
-change, then use the CLI for runtime and identity verification. A screenshot can
-guide UI maintenance; real-game acceptance uses WGC evidence. Do not infer from
-a successful UI click that the new addon version loaded.
-
-After an observed activation or other relevant state change, run one constrained
-`live connect` using the existing fixed snapshot. Only its fresh identity and
-ready evidence establish the session. A second failure without new evidence ends
-this attempt: retain the result and diagnose it rather than repeat input.
-
-If a required enable action cannot be performed, report that specific gap and
-retain the selected target and any attempt ID. Do not ask the user to type
-`/dev connect` as a routine bridge step.
-
-## Return to atomic live commands
-
-Once connected, use [live-investigation.md](live-investigation.md): standalone
-reload requires the returned session and a stable request key; an interrupted
-operation resumes by its original ID. A successful connection is not a probe,
-reload, upgrade or full regression pass. Continue the authorized task through
-report retrieval, acknowledgement and final receipt dismissal in the same turn.
-Only when genuinely blocked, hand off the selected installation, snapshot,
-session/operation IDs, actual disk/runtime observations and the next action;
-do not hand off an unverified cause as fact.
+When activation completes, continue the authorized investigation immediately via
+[live-investigation](live-investigation.md). Connection-only tasks do not need a
+fabricated probe; close their quiescent CON with `live disconnect` when done.

@@ -68,7 +68,7 @@ func TestHelpAndDescribeExposeTheImplementedContract(t *testing.T) {
 		t.Fatalf("resume help: code=%d response=%+v", code, resumeHelp)
 	}
 	resume := commandList(t, resultMap(t, resumeHelp))[0]
-	if got := stringList(t, resume["flags"]); len(got) != 2 || got[0] != "--home <root>" || got[1] != "--format text|json|jsonl" {
+	if got := stringList(t, resume["flags"]); len(got) != 5 || got[0] != "--home <root>" || got[1] != "--format text|json|jsonl" {
 		t.Fatalf("live resume flags = %#v", got)
 	}
 	if got := stringList(t, resume["arguments"]); len(got) != 1 || got[0] != "<operation-id>" {
@@ -86,9 +86,9 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 		t.Fatalf("live connect definition: %#v", commands)
 	}
 	got := stringList(t, commands[0]["flags"])
-	want := []string{"--home <root>", "--format text|json|jsonl", "--project <directory>",
+	want := []string{"--home <root>", "--format text|json|jsonl",
 		"--snapshot <pin>", "--character <name>", "--realm <realm>", "--pid <pid>",
-		"--installation <client>", "--session <session-id>", "--capture-area <window|x,y,width,height>", "--wake-binding <chord>"}
+		"--installation <client>", "--session <session-id>", "--project <directory>", "--wait-seconds <1-600> (default 120)", "--no-cache"}
 	if len(got) != len(want) {
 		t.Fatalf("live connect flags = %#v", got)
 	}
@@ -102,10 +102,10 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 		t.Fatalf("instances help: code=%d response=%+v", code, instancesHelp)
 	}
 	instances := commandList(t, resultMap(t, instancesHelp))
-	if len(instances) != 1 || instances[0]["path"] != "live instances" || instances[0]["mutates"] != true {
+	if len(instances) != 1 || instances[0]["path"] != "live instances" || instances[0]["mutates"] != false {
 		t.Fatalf("live instances definition: %#v", instances)
 	}
-	if got := stringList(t, instances[0]["flags"]); len(got) != 5 || got[2] != "--installation <client-or-game-root>" || got[3] != "--wake-binding <chord>" || got[4] != "--passive" {
+	if got := stringList(t, instances[0]["flags"]); len(got) != 4 || got[2] != "--installation <client-or-game-root>" || got[3] != "--passive" {
 		t.Fatalf("live instances flags = %#v", got)
 	}
 	described, code := invoke(t, "describe", "--format=json")
@@ -124,10 +124,10 @@ func TestConnectAndInstanceContractsComeFromTheSameTable(t *testing.T) {
 }
 
 func TestLiveConnectArgumentAdmission(t *testing.T) {
-	// These calls fail on the missing snapshot/session before any window is
-	// enumerated, so no game input can ever happen from contract tests.
+	// Invalid selectors must fail before enumeration. Bare connect is now a
+	// valid native discovery request and belongs exclusively in interactive QA.
 	for _, args := range [][]string{
-		{"live", "connect", "--format=json"},
+		{"live", "connect", "--wait-seconds", "0", "--format=json"},
 		{"live", "connect", "--snapshot", "PIN-missing", "--character", "bad\nname", "--format=json"},
 		{"live", "connect", "--snapshot", "PIN-missing", "--pid", "0", "--format=json"},
 		{"live", "connect", "--snapshot", "PIN-missing", "--capture-area", "1,2,3", "--format=json"},

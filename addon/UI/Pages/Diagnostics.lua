@@ -45,11 +45,9 @@ local function BuildDiagnosticsPage(parent)
     status:SetWidth(ERROR_LIST_WIDTH - 10)
     status:SetJustifyH("LEFT")
     local function SetStatus(text, errorState)
-        local r = errorState and accent[1] or 0.55
-        local g = errorState and accent[2] or 0.60
-        local b = errorState and accent[3] or 0.65
+        local color = errorState and ns.Theme.danger or ns.Theme.textMuted
         status:SetText(text or "")
-        status:SetTextColor(r, g, b, 0.92)
+        status:SetTextColor(color[1], color[2], color[3], 1)
     end
 
     local errorsView = CreateFrame("Frame", nil, page)

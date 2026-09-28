@@ -133,3 +133,15 @@ for _, scenario in ipairs({"login", "combat-login", "conflict"}) do
         assert(#frames == 4 and ns.ReceiverBindings.Current())
     end
 end
+-- Native slots ignore saved optical key profiles without rewriting user data.
+frames,overrides,player={},{},{}
+combat,failKey,ineffectiveKey=false,nil,nil
+IsLoggedIn=function()return true end
+ns.SlotRuntime={}
+local saved={wake="ALT-CTRL-F1",submit="ALT-CTRL-F2",close="ALT-CTRL-F3"}
+LycheeToolkitDB.options.receiverBindings=saved
+assert(loadfile(root.."/Bridge/ReceiverBindings.lua"))("Lychee Dev",ns)
+assert(ns.ReceiverBindings.Register({wake=function()end,submit=function()end,close=function()end}))
+assert(ns.ReceiverBindings.Current().wake=="ALT-CTRL-F12" and not overrides["ALT-CTRL-]"])
+assert(LycheeToolkitDB.options.receiverBindings==saved)
+assert(not ns.ReceiverBindings.Configure("wake","ALT-CTRL-F1"))

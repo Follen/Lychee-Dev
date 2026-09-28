@@ -12,7 +12,7 @@ ns.Platform = {
     -- A point-in-time observation, not permission to send input later. The
     -- caller must also own a current session and observe focus after slash
     -- dispatch unwinds. Missing or restricted APIs fail closed.
-    ObserveInputState = function()
+    ObserveInputState = function(allowFocusedInput)
         if type(IsLoggedIn) ~= "function" or type(InCombatLockdown) ~= "function"
             or type(GetCurrentKeyBoardFocus) ~= "function" then
             return nil, "input_observation_unavailable"
@@ -29,7 +29,9 @@ ns.Platform = {
         if combat then return false, "input_combat_lockdown" end
         local focusOK, focus = pcall(GetCurrentKeyBoardFocus)
         if not focusOK or restricted(focus) then return nil, "input_focus_unavailable" end
-        if focus ~= nil then return false, "input_keyboard_focus" end
+        -- The slot path sends a non-text key and neither clears nor edits this
+        -- object. Other input paths still require an empty keyboard focus.
+        if focus ~= nil and allowFocusedInput ~= true then return false, "input_keyboard_focus" end
         return true
     end,
     ObserveActor = function()

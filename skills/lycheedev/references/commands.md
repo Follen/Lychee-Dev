@@ -3,7 +3,7 @@
 
 # Command reference
 
-86 implemented commands. Every command accepts `--format text|json|jsonl`;
+87 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -118,8 +118,8 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 - `live probe put` — mutates. Register immutable bounded Lua source under a mutable name without touching the game: --name <name> --file <probe.lua>; returns a content-addressed revision
   Flags: `--home <root>`, `--format text|json|jsonl`, `--name <name>`, `--file <probe.lua>`.
-- `live execute` — mutates. Execute one complete investigation through verified report, ACK and cleared display; repeat the same request or resume its operation after interruption: --session <session-id> (--file <lua-file> | --probe <name-or-revision>) --request <idempotency-key> --budget-seconds <1-120> [--account <account>]
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--file <lua-file>`, `--session <session-id>`, `--probe <name-or-revision>`, `--request <idempotency-key>`, `--budget-seconds <1-120>`, `--account <account>`.
+- `live execute` — mutates. Execute a bounded probe through durable verified result and runtime release; native CON connections use project journals and stable request keys; --policy controls recovery after runtime loss
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--file <lua-file>`, `--session <session-id>`, `--probe <name-or-revision>`, `--request <idempotency-key>`, `--budget-seconds <1-120>`, `--account <account>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`, `--policy <opaque|observation> (default opaque)`.
 - `live probe load` — mutates. Load one immutable probe revision with a declared 1..120 second execution budget: --session <session-id> --probe <name-or-revision> --request <idempotency-key> --budget-seconds <1-120> [--account <account>]
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--probe <name-or-revision>`, `--request <idempotency-key>`, `--budget-seconds <1-120>`, `--account <account>`.
 - `live probe list` — read-only. List active probe names without game input; --include-removed shows tombstoned names
@@ -130,36 +130,38 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live run <operation-id>` — mutates. Execute one loaded operation and return its verified report with cleanup pending; acknowledge separately with live ack: live run <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live instances` — mutates. Discover supported installations and running game windows; --passive lists windows without game input, capture or actor claims; otherwise probes identity with the dedicated receiver
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`, `--wake-binding <chord>`, `--passive`.
-- `live connect` — mutates. Discover, identify and connect a game window automatically: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>] [--session <session-id> to revive] [--capture-area <window|x,y,width,height>]; a unique match connects without manual commands, ambiguity returns exit 2 with context.candidates; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--session <session-id>`, `--capture-area <window|x,y,width,height>`, `--wake-binding <chord>`.
+- `live instances` — read-only. List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`, `--passive`.
+- `live connect` — mutates. Discover and freshly bind a native memory/64-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--session <session-id>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live reset` — mutates. Unblock a stuck window whose in-game queue blocks identity after abandon or a lost receipt: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>]; sends one fixed nonce-correlated reset trigger per unowned matching window, expects its receipt, then reconnects; disk-owned windows are never touched; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--wake-binding <chord>`.
 - `live reload` — mutates. Perform one correlated UI reload on the selected client and verify the new runtime: --session <session-id> --request <idempotency-key>
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`.
-- `live reload fallback` — mutates. Activate a clean managed addon on one fixed client using Esc×3 Enter /reload Enter, then verify identity: --installation <client> --pid <pid> --request <idempotency-key> [--session <prior-session>] [--wake-binding <chord>]
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--request <idempotency-key>`, `--session <prior-session>`, `--wake-binding <chord>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
+- `live reload fallback` — mutates. Activate a clean managed addon and its 64 slots on an explicit installation/PID with a recorded reload using memory readiness when available (fixed bootstrap otherwise), then verify a new runtime and fresh connection; --request is idempotent
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--request <idempotency-key>`, `--session <prior-session>`, `--wake-binding <chord>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live ack <operation-id>` — mutates. Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live finish <operation-id>` — mutates. Acknowledge one verified operation and verify its receipt display is cleared; retry the same operation to finish pending display cleanup: live finish <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
-- `live bugs` — mutates. Capture 1-100 existing addon errors from the selected client as a verified report and stop before acknowledgement
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--count <1-100>`, `--account <account>`.
+- `live bugs` — mutates. Read 1-100 retained provider errors; native CON connections persist and release the bounded observation result automatically
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--count <1-100>`, `--account <account>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live hide` — mutates. Dismiss the displayed bridge receipt on the selected client after its evidence is archived: --session <session-id>; refuses windows owned by in-flight operations and verifies the clear from valid frames
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`.
 - `live bind` — mutates. Observe /dev connect in the selected game, verify effective receiver bindings with one read-only identity transaction, and save a connection: --snapshot <pin>; optional --wake-binding for a custom first-contact wake; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--installation <client>`, `--pid <pid>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--capture-area <window|x,y,width,height>`, `--wake-binding <chord>`.
 - `live status <operation-id>` — read-only. Read persisted work or a BTP bootstrap attempt without sending input: live status <operation-id>
-  Flags: `--home <root>`, `--format text|json|jsonl`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`.
 - `live resume <operation-id>` — mutates. Recover the exact operation or BTP bootstrap attempt; revalidate identity and never repeat unknown input
-  Flags: `--home <root>`, `--format text|json|jsonl`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live cancel <operation-id>` — mutates. Cancel only a prepared operation before queue publication or game input: live cancel <operation-id>; later stages require live resume for safe cleanup
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live abandon <operation-or-bootstrap-id>` — mutates. Explicitly stop unresolved probe, bugs, fixed reload, or bootstrap recovery; preserve evidence and unknown results, release host ownership without game input or claiming business completion
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live session <session-id>` — read-only. Verify a retained session and its evidence: live session <session-id>; does not reconnect or authorize input
-  Flags: `--home <root>`, `--format text|json|jsonl`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`.
+- `live disconnect <connection-id>` — mutates. Unbind a quiescent memory/slot connection and release its durable host ownership; repeat safely after interruption
+  Flags: `--format text|json|jsonl`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 
 ## project
 

@@ -25,6 +25,10 @@ for _,product in ipairs(products) do
     combat=false;focus={}
     ready,reason=ns.Platform.ObserveInputState()
     assert(ready==false and reason=="input_keyboard_focus")
+    assert(ns.Platform.ObserveInputState(true)==true,"non-text slot input incorrectly rejects an editor")
+    combat=true
+    assert(ns.Platform.ObserveInputState(true)==false,"focused slot mode bypassed combat")
+    combat=false
     focus=nil
     assert(ns.Platform.ObserveInputState()==true)
     for _,value in ipairs({secret,"unexpected",42,{}}) do
@@ -39,6 +43,7 @@ for _,product in ipairs(products) do
     focus=secret
     ready,reason=ns.Platform.ObserveInputState()
     assert(ready==nil and reason=="input_focus_unavailable")
+    assert(ns.Platform.ObserveInputState(true)==nil,"focused slot mode bypassed secret focus")
     GetCurrentKeyBoardFocus=function() error("fixture") end
     ready,reason=ns.Platform.ObserveInputState()
     assert(ready==nil and reason=="input_focus_unavailable")

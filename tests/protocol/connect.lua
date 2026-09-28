@@ -45,6 +45,8 @@ for _, profile in ipairs(profiles) do
         end
     end
     toc:close()
+    -- Legacy wire engine regression only; the production TOC selects SlotRuntime.
+    ns.SlotRuntime=nil
     assert(ns.Controls.Handle("connect") == nil and LycheeToolkitDB == nil)
     frames[1].scripts.OnEvent(frames[1], "ADDON_LOADED", "Lychee Dev")
     assert(ns.Startup.ready and #frames == 1 and next(callbacks) == nil)

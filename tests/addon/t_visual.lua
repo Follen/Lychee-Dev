@@ -46,36 +46,17 @@ assert(corners(frame.lycheeSurface) == 4 and corners(frame.sidebar.lycheeSurface
 assert(frame.sidebar.lycheeSurface.inset == 0, "sidebar inset left a strip at the window edge")
 assert(frame.pageViewport.point[1] == "BOTTOMRIGHT" and frame.pageViewport.point[3] == 0,
     "page viewport clips the page-owned footer")
-assert(frame.settingsButton and frame.settingsButton:GetWidth() >= 120
-    and frame.settingsButton.label:GetText() == ns.L.SETTINGS,
-    "settings action is not a readable text control")
+assert(not frame.settingsButton and not W.ShowSettings and not ns.SettingsPage,
+    "removed settings surface returned")
 assert(frame.navScroll and frame.pageTabs.runner.label.fontHeight == 14,
     "primary navigation did not use the readable type scale")
 assert(W.GetSecondaryRoot() and not W.GetSecondaryRoot():IsShown(),
     "secondary body started visible")
 
-assert(W.ShowSettings(), "workbench settings API did not open")
-assert(W.GetSecondaryRoot():IsShown(), "settings did not replace the body")
-assert(frame.settingsButton.active and not frame.pageTabs.runner.active,
-    "settings selection did not replace primary page selection")
-assert(W.GetSecondaryRoot().content.motionToggle:GetWidth() == 40,
-    "shared toggle width changed")
-local settings = W.GetSecondaryRoot().content
-assert(settings.bindings.close.button.label:GetText() == "Ctrl+Alt+[",
-    "settings did not show the effective close binding")
-assert(settings.bindings.close.button.keycaps[3].label:GetText() == "["
-    and not settings.bindings.close.button.label:IsShown(),
-    "shortcut recorder is not a keycap group")
-for _,action in ipairs({"wake","submit","close"}) do
-    local control=settings.bindings[action]
-    assert(not control.edit and not control.button:GetScript("OnClick"), "settings retained shortcut editing")
-end
-assert(not settings.saveBindings and not settings.resetBindings, "settings retained shortcut mutation actions")
-W.HideSecondary()
-assert(W.ShowSettings() and W.GetSettingsPage()==settings)
-assert(profile.close=="ALT-CTRL-[", "viewing settings changed the binding profile")
-W.GetSecondaryRoot().content.motionToggle:Click()
-assert(theme.reducedMotion == true, "reduced motion setting did not apply")
+local secondary=CreateFrame("Frame",nil,W.GetSecondaryRoot())
+assert(W.ShowSecondary(secondary))
+assert(W.GetSecondaryRoot():IsShown() and not frame.pageTabs.runner.active,
+    "secondary content did not replace the body")
 assert(W.HideSecondary() and not W.GetSecondaryRoot():IsShown(),
     "back did not restore the original page")
 assert(W.GetActivePage() == "runner" and frame.pageTabs.runner.active,
@@ -101,27 +82,20 @@ UIParent:SetSize(700, 600)
 assert(W.Open(), "workbench did not reopen at a smaller viewport")
 assert(frame:GetWidth() == 676 and frame:GetHeight() == 576,
     "workbench did not fit inside the viewport")
-assert(frame.navScroll.verticalRange > 0,
-    "short viewport did not allow sidebar navigation to scroll")
+assert(frame.navScroll.verticalRange >= 0,
+    "sidebar navigation has an invalid range")
 assert(frame.pagePrevious:IsShown() and frame.pageNext:IsShown(),
     "narrow pages had no horizontal access controls")
 assert(frame.pagePrevious.point[1] == "TOPRIGHT", "overflow controls occupy the page footer")
 frame.pageNext:Click()
 assert(frame.pageViewport:GetHorizontalScroll() > 0,
     "page body could not scroll horizontally")
-assert(W.ShowPage("about") and frame.navScroll:GetVerticalScroll() > 0,
-    "active destination was not brought into the navigation viewport")
-assert(W.ShowSettings())
-assert(settings.column:GetWidth() <= frame:GetWidth()-152 and settings.column:GetHeight() > 0,
-    "settings did not fit width and expose vertical overflow")
+assert(W.ShowPage("about"), "about destination is inaccessible")
 W.Close()
 UIParent:SetSize(500, 480)
 assert(W.Open())
 assert(frame:GetWidth() == 476 and frame:GetHeight() == 456)
-assert(W.ShowSettings())
-assert(settings.column:GetWidth() <= frame:GetWidth()-152 and settings.column:GetHeight() > settings.scroll:GetHeight(),
-    "settings did not switch to a compact scrollable layout")
-assert(settings.bindings.wake.button.label:GetText() == "Ctrl+Alt+]",
-    "viewport adaptation changed effective bindings")
+assert(W.ShowPage("runner") and W.ShowPage("about") and frame.navScroll:GetVerticalScroll()>0,
+    "small viewport did not scroll to the destination")
 W.Close()
 print("visual shell ok")

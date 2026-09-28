@@ -59,7 +59,9 @@ for _, profile in ipairs(profiles) do
                 assert(loadfile(root .. "/" .. line:gsub("\\", "/")))("Lychee Dev", ns)
             end
         end
-        toc:close()
+    toc:close()
+    -- Legacy wire engine regression only; the production TOC selects SlotRuntime.
+    ns.SlotRuntime=nil
         assert(LycheeToolkitDB == before, "database read/write before ADDON_LOADED")
         assert(not ns.Startup.ready and ns.Persistence.Current() == nil)
         assert((scenario == "command_conflict" or next(SlashCmdList) == nil) and SLASH_LYCHEETOOLKIT1 == nil)

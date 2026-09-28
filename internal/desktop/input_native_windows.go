@@ -218,7 +218,7 @@ func (in *nativeInput) chordKeys(keys []uint16) error {
 	for _, vk := range keys {
 		pressed, _, _ := userLibrary.NewProc("GetAsyncKeyState").Call(uintptr(vk))
 		if pressed&0x8000 != 0 {
-			return errors.New("lab.key_already_held")
+			return ErrKeyAlreadyHeld
 		}
 	}
 	alt := false

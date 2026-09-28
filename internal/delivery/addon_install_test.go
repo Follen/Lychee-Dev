@@ -34,6 +34,106 @@ func TestInstallAddonFirstInstallAndRetry(t *testing.T) {
 	}
 }
 
+func TestSlotUpgradeResumesAfterMainPublicationAndStatusIncludesPool(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, ""), client, testkit.Version); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "upgrade")
+	// Model interruption after the main transaction committed, before slots.
+	if _, err := delivery.UpgradeInstallation(ctx, testkit.Release(t, "slot-runtime"), delivery.AddonDirectory(client), archive, "addon", testkit.Version); err != nil {
+		t.Fatal(err)
+	}
+	status, err := delivery.InspectAddonDeployment(ctx, client)
+	if err != nil || status.Installation.State != "managed" || status.Slots == nil || status.Slots.State != "incomplete" {
+		t.Fatalf("%+v %v", status, err)
+	}
+	if _, err = delivery.UpgradeAddon(ctx, "", client, archive, testkit.Version, true); err != nil {
+		t.Fatal(err)
+	}
+	status, err = delivery.InspectAddonDeployment(ctx, client)
+	if err != nil || status.Slots.State != "managed" || status.Slots.Count != 64 {
+		t.Fatalf("%+v %v", status, err)
+	}
+	path := filepath.Join(client, "Interface", "AddOns", "Lychee Dev Slot 64", "Loader.lua")
+	if err = os.WriteFile(path, []byte("external drift"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	status, err = delivery.InspectAddonDeployment(ctx, client)
+	if err != nil || status.Slots.State != "incomplete" {
+		t.Fatalf("slot drift was hidden: %+v %v", status, err)
+	}
+}
+
+func TestRemoveAddonIncludesSlotsAndResumesPartialMoves(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, "slot-runtime"), client, testkit.Version); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(delivery.AddonDirectory(client))
+	archive := filepath.Join(t.TempDir(), "removed")
+	result, err := delivery.RemoveAddon(ctx, client, archive)
+	if err != nil || result.State != "archived" || result.SlotArchive != archive+".slots" {
+		t.Fatalf("%+v %v", result, err)
+	}
+	for i := 1; i <= 64; i++ {
+		if _, err := os.Stat(delivery.SlotDirectory(parent, i)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("slot remains", i, err)
+		}
+	}
+	// Recreate an interruption after the first 32 slot moves. The intent remains
+	// durable; retry must validate both sides and finish the exact same removal.
+	for i := 33; i <= 64; i++ {
+		if err := os.Rename(delivery.SlotDirectory(result.SlotArchive, i), delivery.SlotDirectory(parent, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Rename(filepath.Join(result.SlotArchive, ".lycheedev-slots.json"), filepath.Join(parent, ".lycheedev-slots.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(archive, delivery.AddonDirectory(client)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		resumed, err := delivery.RemoveAddon(ctx, client, archive)
+		if err != nil || resumed.State != "archived" || resumed.SlotArchive != result.SlotArchive {
+			t.Fatalf("retry %d: %+v %v", i, resumed, err)
+		}
+	}
+	if _, err := delivery.InspectSlots(ctx, result.SlotArchive, testkit.Version); err != nil {
+		t.Fatal("archived pool failed integrity", err)
+	}
+}
+
+func TestRemoveAddonRefusesModifiedSlotBeforeMovingAnything(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, "slot-runtime"), client, testkit.Version); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(delivery.AddonDirectory(client))
+	if err := os.WriteFile(filepath.Join(delivery.SlotDirectory(parent, 64), "Loader.lua"), []byte("external edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "removed")
+	if _, err := delivery.RemoveAddon(ctx, client, archive); err == nil {
+		t.Fatal("modified slot removed")
+	}
+	if _, err := os.Stat(delivery.AddonDirectory(client)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 64; i++ {
+		if _, err := os.Stat(delivery.SlotDirectory(parent, i)); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	if _, err := os.Stat(archive); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("archive unexpectedly created", err)
+	}
+}
+
 func TestInstallAddonResolvesActiveCatalogWhenClientFilesAreAbsent(t *testing.T) {
 	release := testkit.Release(t, "")
 	client := testkit.Client(t, "catalog")

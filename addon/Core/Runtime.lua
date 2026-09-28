@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-ns.Release = "2.5.1"
+ns.Release = "2.5.2"
 ns.Startup = { ready = false, reason = "addon_not_loaded" }
 -- Observability handle: mirrors the addon namespace for host-side /run
 -- introspection (startup state, identity, commandFailure) on every client.
@@ -42,10 +42,12 @@ local function start(trigger)
     started = true
     local registered, registrationFailure = ns.Controls.Register()
     if not registered then ns.Startup.commandFailure = registrationFailure end
-    local receiverRegistered, receiverFailure = ns.Receiver.Register()
+    local receiverRegistered, receiverFailure
+    if ns.SlotRuntime then receiverRegistered,receiverFailure=ns.SlotRuntime.Register()
+    else receiverRegistered,receiverFailure=ns.Receiver.Register() end
     if not receiverRegistered then ns.Startup.receiverFailure = receiverFailure end
     if ns.StartupBeacon then ns.StartupBeacon.Arm() end
-    if registered then
+    if registered and not ns.SlotRuntime then
         local resumed, resumeFailure = ns.Reentry.Start(loader)
         if not resumed then ns.Startup.resumeFailure = resumeFailure end
     end
@@ -59,7 +61,16 @@ loader:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name ~= ADDON_NAME then return end
     -- One-shot: the name-matched ADDON_LOADED owns startup, success or not;
     -- PLAYER_LOGIN is the fallback trigger when that event never matched.
-    self:UnregisterAllEvents()
-    self:SetScript("OnEvent", nil)
-    start(event)
+    if ns.SlotRuntime then
+        if start(event) then
+            -- Actor identity can be unavailable during ADDON_LOADED. The
+            -- existing one-shot loader owns the one PLAYER_LOGIN retry.
+            local ok=ns.SlotRuntime.Start()
+            if ok or event=="PLAYER_LOGIN" then self:UnregisterAllEvents();self:SetScript("OnEvent",nil) end
+        end
+    else
+        self:UnregisterAllEvents()
+        self:SetScript("OnEvent", nil)
+        start(event)
+    end
 end)

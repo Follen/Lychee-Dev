@@ -80,7 +80,7 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "project lock", Summary: "Save an existing fixed --snapshot <pin> in lycheedev.lock.json [--path <directory>]; replaces the previous known-format lock", Mutates: true}, flags: []flagSpec{{name: "--snapshot", display: "--snapshot <pin>", value: true}, {name: "--path", display: "--path <directory>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "project status", Summary: "Read project declaration and lock [--path <directory>]; no workspace or network required", Mutates: false}, flags: []flagSpec{{name: "--path", display: "--path <directory>", value: true}}},
 	{Definition: Definition{Path: "live probe put", Summary: "Register immutable bounded Lua source under a mutable name without touching the game: --name <name> --file <probe.lua>; returns a content-addressed revision", Mutates: true}, flags: []flagSpec{{name: "--name", display: "--name <name>", value: true}, {name: "--file", display: "--file <probe.lua>", value: true}}, allowsHome: true},
-	{Definition: Definition{Path: "live execute", Summary: "Execute one complete investigation through verified report, ACK and cleared display; repeat the same request or resume its operation after interruption: --session <session-id> (--file <lua-file> | --probe <name-or-revision>) --request <idempotency-key> --budget-seconds <1-120> [--account <account>]", Mutates: true}, flags: []flagSpec{{name: "--file", display: "--file <lua-file>", value: true}, {name: "--session", display: "--session <session-id>", value: true}, {name: "--probe", display: "--probe <name-or-revision>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--budget-seconds", display: "--budget-seconds <1-120>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
+	{Definition: Definition{Path: "live execute", Summary: "Execute a bounded probe through durable verified result and runtime release; native CON connections use project journals and stable request keys; --policy controls recovery after runtime loss", Mutates: true}, flags: []flagSpec{{name: "--file", display: "--file <lua-file>", value: true}, {name: "--session", display: "--session <session-id>", value: true}, {name: "--probe", display: "--probe <name-or-revision>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--budget-seconds", display: "--budget-seconds <1-120>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live probe load", Summary: "Load one immutable probe revision with a declared 1..120 second execution budget: --session <session-id> --probe <name-or-revision> --request <idempotency-key> --budget-seconds <1-120> [--account <account>]", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--probe", display: "--probe <name-or-revision>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--budget-seconds", display: "--budget-seconds <1-120>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live probe list", Summary: "List active probe names without game input; --include-removed shows tombstoned names", Mutates: false}, flags: []flagSpec{{name: "--include-removed", display: "--include-removed"}, {name: "--limit", display: "--limit <1-1000>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live probe show", Summary: "Read an exact probe by active name or immutable PRB revision: live probe show <name-or-revision>", Mutates: false}, positional: "<name-or-revision>", allowsHome: true},
@@ -172,16 +172,14 @@ var commandContracts = []commandContract{
 		{name: "--uncommitted", display: "--uncommitted"},
 		{name: "--dry-run", display: "--dry-run"},
 	}, allowsHome: true},
-	{Definition: Definition{Path: "live instances", Summary: "Discover supported installations and running game windows; --passive lists windows without game input, capture or actor claims; otherwise probes identity with the dedicated receiver", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}, {name: "--passive", display: "--passive"}}, allowsHome: true},
-	{Definition: Definition{Path: "live connect", Summary: "Discover, identify and connect a game window automatically: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>] [--session <session-id> to revive] [--capture-area <window|x,y,width,height>]; a unique match connects without manual commands, ambiguity returns exit 2 with context.candidates", Mutates: true}, flags: []flagSpec{
+	{Definition: Definition{Path: "live instances", Summary: "List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding", Mutates: false}, flags: []flagSpec{{name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--passive", display: "--passive"}}, allowsHome: true},
+	{Definition: Definition{Path: "live connect", Summary: "Discover and freshly bind a native memory/64-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work", Mutates: true}, flags: []flagSpec{
 		{name: "--snapshot", display: "--snapshot <pin>", value: true},
 		{name: "--character", display: "--character <name>", value: true},
 		{name: "--realm", display: "--realm <realm>", value: true},
 		{name: "--pid", display: "--pid <pid>", value: true},
 		{name: "--installation", display: "--installation <client>", value: true},
 		{name: "--session", display: "--session <session-id>", value: true},
-		{name: "--capture-area", display: "--capture-area <window|x,y,width,height>", value: true},
-		{name: "--wake-binding", display: "--wake-binding <chord>", value: true},
 	}, allowsHome: true},
 	{Definition: Definition{Path: "live reset", Summary: "Unblock a stuck window whose in-game queue blocks identity after abandon or a lost receipt: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>]; sends one fixed nonce-correlated reset trigger per unowned matching window, expects its receipt, then reconnects; disk-owned windows are never touched", Mutates: true}, flags: []flagSpec{
 		{name: "--snapshot", display: "--snapshot <pin>", value: true},
@@ -192,10 +190,10 @@ var commandContracts = []commandContract{
 		{name: "--wake-binding", display: "--wake-binding <chord>", value: true},
 	}, allowsHome: true},
 	{Definition: Definition{Path: "live reload", Summary: "Perform one correlated UI reload on the selected client and verify the new runtime: --session <session-id> --request <idempotency-key>", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}}, allowsHome: true},
-	{Definition: Definition{Path: "live reload fallback", Summary: "Activate a clean managed addon on one fixed client using Esc×3 Enter /reload Enter, then verify identity: --installation <client> --pid <pid> --request <idempotency-key> [--session <prior-session>] [--wake-binding <chord>]", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client>", value: true}, {name: "--pid", display: "--pid <pid>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--session", display: "--session <prior-session>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}}, allowsHome: true},
+	{Definition: Definition{Path: "live reload fallback", Summary: "Activate a clean managed addon and its 64 slots on an explicit installation/PID with a recorded reload using memory readiness when available (fixed bootstrap otherwise), then verify a new runtime and fresh connection; --request is idempotent", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client>", value: true}, {name: "--pid", display: "--pid <pid>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--session", display: "--session <prior-session>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live ack", Summary: "Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>", Mutates: true}, positional: "<operation-id>", allowsHome: true},
 	{Definition: Definition{Path: "live finish", Summary: "Acknowledge one verified operation and verify its receipt display is cleared; retry the same operation to finish pending display cleanup: live finish <operation-id>", Mutates: true}, positional: "<operation-id>", allowsHome: true},
-	{Definition: Definition{Path: "live bugs", Summary: "Capture 1-100 existing addon errors from the selected client as a verified report and stop before acknowledgement", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--count", display: "--count <1-100>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
+	{Definition: Definition{Path: "live bugs", Summary: "Read 1-100 retained provider errors; native CON connections persist and release the bounded observation result automatically", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--count", display: "--count <1-100>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live hide", Summary: "Dismiss the displayed bridge receipt on the selected client after its evidence is archived: --session <session-id>; refuses windows owned by in-flight operations and verifies the clear from valid frames", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live bind", Summary: "Observe /dev connect in the selected game, verify effective receiver bindings with one read-only identity transaction, and save a connection: --snapshot <pin>; optional --wake-binding for a custom first-contact wake", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client>", value: true}, {name: "--pid", display: "--pid <pid>", value: true}, {name: "--snapshot", display: "--snapshot <pin>", value: true}, {name: "--character", display: "--character <name>", value: true}, {name: "--realm", display: "--realm <realm>", value: true}, {name: "--capture-area", display: "--capture-area <window|x,y,width,height>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "target resolve", Summary: "Pin data identity from one named --target <name>, --installation <client>, remote --product <track>, or --file <selection.json>; named targets resolve their exact configured identity at command start", Mutates: true}, flags: []flagSpec{
@@ -229,6 +227,7 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "live cancel", Summary: "Cancel only a prepared operation before queue publication or game input: live cancel <operation-id>; later stages require live resume for safe cleanup", Mutates: true}, positional: "<operation-id>", allowsHome: true},
 	{Definition: Definition{Path: "live abandon", Summary: "Explicitly stop unresolved probe, bugs, fixed reload, or bootstrap recovery; preserve evidence and unknown results, release host ownership without game input or claiming business completion", Mutates: true}, positional: "<operation-or-bootstrap-id>", allowsHome: true},
 	{Definition: Definition{Path: "live session", Summary: "Verify a retained session and its evidence: live session <session-id>; does not reconnect or authorize input", Mutates: false}, positional: "<session-id>", allowsHome: true},
+	{Definition: Definition{Path: "live disconnect", Summary: "Unbind a quiescent memory/slot connection and release its durable host ownership; repeat safely after interruption", Mutates: true}, positional: "<connection-id>"},
 	{Definition: Definition{Path: "evidence show", Summary: "Read a capture manifest: evidence show <capture-id>", Mutates: false}, positional: "<capture-id>", allowsHome: true},
 	{Definition: Definition{Path: "evidence verify", Summary: "Verify manifest and original bytes: evidence verify <capture-id>", Mutates: false}, positional: "<capture-id>", allowsHome: true},
 	{Definition: Definition{Path: "evidence list", Summary: "List archived capture manifests in ID order with a bounded page", Mutates: false}, flags: []flagSpec{{name: "--limit", display: "--limit <n>", value: true}}, allowsHome: true},
@@ -271,6 +270,11 @@ func (c commandContract) publicDefinition() Definition {
 }
 
 func (c commandContract) flag(name string) (flagSpec, bool) {
+	for _, flag := range c.channelFlags() {
+		if flag.name == name {
+			return flag, true
+		}
+	}
 	if name == "--project" && c.projectSelection() {
 		return flagSpec{name: name, display: "--project <directory>", value: true}, true
 	}
@@ -300,12 +304,35 @@ func (c commandContract) acceptedFlagDisplays() []string {
 	for _, flag := range c.flags {
 		result = append(result, flag.display)
 	}
+	for _, flag := range c.channelFlags() {
+		result = append(result, flag.display)
+	}
 	return result
+}
+
+// These are part of the same contract table, shared by parser, describe and Skill.
+func (c commandContract) channelFlags() []flagSpec {
+	switch c.Path {
+	case "live connect", "live execute", "live disconnect", "live status", "live resume", "live session", "live reload", "live reload fallback", "live bugs":
+	default:
+		return nil
+	}
+	flags := []flagSpec{{name: "--project", display: "--project <directory>", value: true}}
+	if c.Path != "live status" && c.Path != "live session" {
+		flags = append(flags, flagSpec{name: "--wait-seconds", display: "--wait-seconds <1-600> (default 120)", value: true}, flagSpec{name: "--no-cache", display: "--no-cache"})
+	}
+	if c.Path == "live execute" {
+		flags = append(flags, flagSpec{name: "--policy", display: "--policy <opaque|observation> (default opaque)", value: true})
+	}
+	return flags
 }
 
 // Commands consuming a snapshot share project fallback; project lock itself
 // deliberately requires a newly selected, explicit snapshot.
 func (c commandContract) projectSelection() bool {
+	if c.Path == "live connect" {
+		return false
+	}
 	if strings.HasPrefix(c.Path, "project ") {
 		return false
 	}
@@ -376,6 +403,13 @@ func collectCommandWords(args []string) ([]string, error) {
 }
 
 func anyFlagSpec(name string) (flagSpec, bool) {
+	for _, contract := range commandContracts {
+		for _, flag := range contract.channelFlags() {
+			if flag.name == name {
+				return flag, true
+			}
+		}
+	}
 	if name == "--project" {
 		return flagSpec{name: name, display: "--project <directory>", value: true}, true
 	}

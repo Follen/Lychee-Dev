@@ -2,7 +2,7 @@ local _, ns = ...
 
 -- A short-lived visual hint, never an identity or execution permission. It is
 -- armed only for an opted-in bridge at startup and stops permanently on wake.
-local frame, blocks, expiry, pulse, untilTime
+local frame, block, expiry, pulse, untilTime
 local entered, loadingDone, phase, stopped
 local colors = {{1,0,0},{0,1,0},{0,0,1}}
 local function stop()
@@ -12,7 +12,7 @@ local function stop()
     if frame then frame:Hide(); frame:UnregisterAllEvents(); frame:SetScript("OnEvent",nil) end
 end
 local function paint()
-    for index=1,3 do blocks[index]:SetColorTexture(unpack(colors[(index+phase-1)%3+1])) end
+    block:SetColorTexture(unpack(colors[phase+1]))
 end
 local function tick()
     pulse=nil
@@ -37,16 +37,12 @@ ns.StartupBeacon = {
         frame:Hide(); frame:EnableMouse(false); frame:SetFrameStrata("TOOLTIP")
         local px=ns.Compat.GetPhysicalPixelSize()
         frame:SetPoint("TOPLEFT",UIParent,"TOPLEFT",4*px,-4*px)
-        frame:SetSize(32*px,12*px)
+        frame:SetSize(12*px,12*px)
         local background=frame:CreateTexture(nil,"BACKGROUND")
         background:SetAllPoints(frame); background:SetColorTexture(0,0,0,1)
-        blocks={}
-        for index=1,3 do
-            local block=frame:CreateTexture(nil,"ARTWORK")
-            block:SetSize(8*px,8*px)
-            block:SetPoint("TOPLEFT",(2+(index-1)*10)*px,-2*px)
-            blocks[index]=block
-        end
+        block=frame:CreateTexture(nil,"ARTWORK")
+        block:SetSize(8*px,8*px)
+        block:SetPoint("TOPLEFT",2*px,-2*px)
         stopped=false; untilTime=GetTime()+45
         expiry=C_Timer.NewTimer(45,stop)
         for _,event in ipairs({"PLAYER_ENTERING_WORLD","LOADING_SCREEN_DISABLED","LOADING_SCREEN_ENABLED",
@@ -54,7 +50,8 @@ ns.StartupBeacon = {
         frame:SetScript("OnEvent",function(_,event,initial,reloading)
             if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_REGEN_DISABLED" then stop(); return end
             if event=="PLAYER_ENTERING_WORLD" then
-                if (issecretvalue and (issecretvalue(initial) or issecretvalue(reloading))) or initial~=false or reloading~=true then stop(); return end
+                if issecretvalue and (issecretvalue(initial) or issecretvalue(reloading)) then stop(); return end
+                if initial~=false or reloading~=true then stop(); return end
                 entered=true
             elseif event=="LOADING_SCREEN_ENABLED" then
                 loadingDone=false; frame:Hide()

@@ -165,7 +165,7 @@ func TestWindowRunProcessExitAllowsOnlyRecordedRecovery(t *testing.T) {
 	if _, err := book.InspectWork(ctx, record.OperationID); err != nil {
 		t.Fatal("driver blocked read", err)
 	}
-	if _, err := book.BeginWindowWork(ctx, parent, store.Identity().WorkspaceID, windowIntent("window/1/2/4")); err != nil {
+	if _, err := book.BeginWindowWork(ctx, parent, store.Identity().WorkspaceID, windowIntent("window/5/6/4")); err != nil {
 		t.Fatal("driver blocked independent work", err)
 	}
 	if err := cmd.Process.Kill(); err != nil {

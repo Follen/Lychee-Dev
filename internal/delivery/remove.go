@@ -8,9 +8,10 @@ import (
 )
 
 type Removal struct {
-	State   string               `json:"state"`
-	Archive string               `json:"archive,omitempty"`
-	Receipt *InstallationReceipt `json:"receipt,omitempty"`
+	State       string               `json:"state"`
+	Archive     string               `json:"archive,omitempty"`
+	Receipt     *InstallationReceipt `json:"receipt,omitempty"`
+	SlotArchive string               `json:"slotArchive,omitempty"`
 }
 
 // RemoveInstallation moves an unchanged owned installation to an explicit

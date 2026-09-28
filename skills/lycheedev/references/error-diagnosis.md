@@ -7,19 +7,15 @@ another probe merely to recreate an error.
 For an authorized snapshot of errors already retained by the addon provider:
 
 ```text
-lycheedev live bugs --session <session-id> --request <stable-key> --count <1-100> --format json
+lycheedev live bugs --project <project-directory> --session <CON-id> --request <stable-key> --count <1-100> --wait-seconds 120 --format json
 ```
 
-This reports !BugGrabber provider storage newest-first. It does not claim to
-capture every addon error. `provider_unavailable`, partial fields, zero returned
-rows and incomplete coverage must remain distinct. After reading the verified
-report, call `live finish <operation-id>` to acknowledge and dismiss the final
-receipt. Check `display.state: cleared` and `complete: true`; a pending display
-retains the verified report and is recovered with finish on the same operation.
-Perform this within the
-authorized task without asking for a separate ACK confirmation. A QR or verified
-report with pending cleanup is not the end of this workflow.
-
+This reads !BugGrabber provider storage newest-first through a bounded native
+observation. It does not claim to capture every addon error. Provider unavailable,
+partial fields, zero rows and incomplete coverage remain distinct. Native bugs
+completes verified result persistence and release; inspect `report.ok` and the
+snapshot's own status, then require `complete: true` and `cleanup: complete`.
+Do not add legacy ACK/finish/hide commands. Resume the same CON on interruption.
 Use a question-specific probe only when the retained error snapshot cannot
 distinguish the hypotheses. Follow [live-investigation.md](live-investigation.md)
 and keep sampling, output and async lifetime bounded.

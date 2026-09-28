@@ -29,11 +29,32 @@ func UpgradeAddon(ctx context.Context, releaseDirectory, clientDirectory, archiv
 			return Upgrade{}, err
 		}
 		defer gate.Close()
-		return ResumeUpgrade(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
+		upgrade, err := ResumeUpgrade(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
+		if err == nil {
+			err = installReceiptSlots(ctx, parent, upgrade.Receipt)
+		}
+		return upgrade, err
 	}
 	return withAddonRelease(ctx, releaseDirectory, clientDirectory, version, func(prepared, target string) (Upgrade, error) {
 		return UpgradeInstallation(ctx, prepared, target, archive, "addon", version)
 	})
+}
+
+func receiptUsesSlots(receipt InstallationReceipt) bool {
+	for _, resource := range receipt.Resources {
+		if resource.Path == "addon/Bridge/SlotRuntime.lua" {
+			return true
+		}
+	}
+	return false
+}
+
+func installReceiptSlots(ctx context.Context, parent string, receipt InstallationReceipt) error {
+	if !receiptUsesSlots(receipt) {
+		return nil
+	}
+	_, err := installSlotPool(ctx, parent, receipt.Version)
+	return err
 }
 
 func RemoveAddon(ctx context.Context, clientDirectory, archive string) (Removal, error) {
@@ -46,7 +67,7 @@ func RemoveAddon(ctx context.Context, clientDirectory, archive string) (Removal,
 		return Removal{}, err
 	}
 	defer gate.Close()
-	return RemoveInstallation(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
+	return removeAddonAndSlots(ctx, parent, archive)
 }
 
 // AddonDirectory is the single layout rule for the managed addon in a client.
@@ -123,5 +144,16 @@ func withAddonRelease[T any](ctx context.Context, releaseDirectory, clientDirect
 		return receipt, err
 	}
 	defer func() { err = errors.Join(err, gate.Close()) }()
-	return publish(private, filepath.Join(parent, "Lychee Dev"))
+	receipt, err = publish(private, filepath.Join(parent, "Lychee Dev"))
+	if err != nil {
+		return receipt, err
+	}
+	// Older immutable release packages do not advertise the slot runtime.
+	for _, resource := range release.Resources {
+		if resource.Path == "addon/Bridge/SlotRuntime.lua" {
+			_, err = installSlotPool(ctx, parent, version)
+			break
+		}
+	}
+	return receipt, err
 }

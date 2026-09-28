@@ -1,5 +1,21 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-09-28 统一编排补充：[输入架构](live-input-architecture-2026-09-28.md)固定连接推进、输入事实和完成条件。
+native reload 共用内存就绪决策；支持该能力时显式 fallback 也不盲发 Esc×3。
+新日志的代码/结果使用内容引用，整个 `.lycheedev/live` 必须一同保留。实际验收见[本轮记录](live-input-coordinator-acceptance-2026-09-28.md)。
+进程退出收尾由 `live disconnect` 核验固定 PID/创建时间，保留未知结果后释放确切资源；
+不能把窗口消失视作退出，不能把资源退役视作 ACK。Classic/Forever 补测见[双实例记录](live-input-multiclient-2026-09-28.md)。
+
+同一安装目录的原生槽位采用两层隔离：短 OS 发布锁保护槽位校验、原子发布、发键前
+精确校验和回执退役；持久槽位预约保护发布到已验证回执之间的负载。等待内存、战斗、
+焦点或业务完成时不持有安装目录锁。争锁在调用预算内等待，预算耗尽返回 pending，
+沿原 CON/request/nonce 恢复；不能把占用误判为连接丢失。主插件/角色/连接归属校验
+与可变槽位池校验分开，后者在短锁内完成。恢复旧的已验证回执时，如物理槽位已被
+另一 nonce 复用，只收尾原日志，不能修改新预约。
+对应实际覆盖见[共享安装竞态记录](live-input-shared-installation-2026-09-28.md)。
+
+2026-09-28 分支修订：新 Live 的目标契约见[内存与槽位方案](live-memory-slot-plan.md)、[审计](live-memory-slot-audit.md)及[验收标准](live-memory-slot-tests.md)。当前公开 CON 连接采用项目 `.lycheedev/live`、原生内存与 64 槽位；本文后续 QR/OP/SV 段落保留为旧传输历史，不适用于新 CON 连接。默认身份描述符、短时 reload 色块，以及用户要求的内存输入状态采样器是明确列出的基础设施例外。输入状态每 100 ms 最多采样一次，显式关闭桥后移除 OnUpdate；不新增输入恢复色块。其余可选功能继续遵守禁用零开销。实际完成范围以[实施记录](live-memory-slot-implementation-2026-09-28.md)为准。
+
 状态：整体设计收敛后的实施基线。日期：2026-09-21。实际覆盖见 [implementation-status.md](implementation-status.md)。
 
 本文定义目标架构与契约。实际能力以命令目录和实施状态核对。配套文件：[回归测试方案](regression.md)、[实施路线与能力映射](roadmap.md)、[Windows CI 与 2.0.2 发布规范](release-2.0.2.md)。2.0.1 已发布；当前工作分支是 2.0.2 候选，尚未发行，验收状态以实施状态页为准。

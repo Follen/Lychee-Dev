@@ -79,6 +79,22 @@ ns.Controls = {
         end
         local state, failure = ns.Persistence.Current()
         if not state then return nil, failure end
+        if ns.SlotRuntime then
+            if command=="connect" or command=="bridge on" then
+                state.options.bridgeEnabled=true
+                return ns.SlotRuntime.Start()
+            elseif command=="disconnect" or command=="bridge off" then
+                state.options.bridgeEnabled=false
+                if ns.InputState then ns.InputState.Stop() end
+                ns.SlotRuntime.Close()
+                if ns.ActivityView then ns.ActivityView.Stop() end
+                return true
+            elseif command=="status" then
+                return {transport="memory-slot-v1",enabled=ns.Persistence.BridgeEnabled()}
+            else
+                return nil,"command_retired: use the memory-slot CLI"
+            end
+        end
         if command == "receiver reset" then
             local profile, reason = ns.ReceiverBindings.Reset()
             if not profile then return nil, reason end

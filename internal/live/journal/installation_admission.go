@@ -16,7 +16,17 @@ import (
 // BeginBootstrapWindow shares the same admission scope as operations and
 // maintenance. The callback commits the local bootstrap body before publication.
 func BeginBootstrapWindow(ctx context.Context, parent string, owner WindowOwner, persist func() error) (err error) {
-	if !strings.HasPrefix(owner.OperationID, "BTP-") || len(owner.OperationID) != 36 || len(owner.WorkspaceID) != 32 ||
+	return beginScopedWindow(ctx, parent, owner, persist, "BTP-")
+}
+
+// BeginConnectionWindow publishes a durable connection claim in the SAME
+// admission namespace used by existing operations and installation maintenance.
+func BeginConnectionWindow(ctx context.Context, parent string, owner WindowOwner, persist func() error) error {
+	return beginScopedWindow(ctx, parent, owner, persist, "CON-")
+}
+
+func beginScopedWindow(ctx context.Context, parent string, owner WindowOwner, persist func() error, prefix string) (err error) {
+	if !strings.HasPrefix(owner.OperationID, prefix) || len(owner.OperationID) != 36 || len(owner.WorkspaceID) != 32 ||
 		!strings.HasPrefix(owner.Resource, "window/") || len(owner.Resource) > 256 || len(owner.IntentSHA256) != 64 || persist == nil {
 		return errors.New("journal.invalid_bootstrap_claim")
 	}
@@ -77,7 +87,15 @@ func LockBootstrapWindow(ctx context.Context, parent string, want WindowOwner) (
 // RetireBootstrapWindow is called only after the local confirmed/abandoned
 // record is durable. It cannot release an operation or a foreign attempt.
 func RetireBootstrapWindow(ctx context.Context, parent string, want WindowOwner) (err error) {
-	if !strings.HasPrefix(want.OperationID, "BTP-") {
+	return retireScopedWindow(ctx, parent, want, "BTP-")
+}
+
+func RetireConnectionWindow(ctx context.Context, parent string, want WindowOwner) error {
+	return retireScopedWindow(ctx, parent, want, "CON-")
+}
+
+func retireScopedWindow(ctx context.Context, parent string, want WindowOwner, prefix string) (err error) {
+	if !strings.HasPrefix(want.OperationID, prefix) {
 		return ErrTransition
 	}
 	scope, gate, err := lockWindowScope(ctx, parent)

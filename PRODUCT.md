@@ -21,9 +21,9 @@ assets and live investigation, with fixed references and inspectable evidence.
 ## Operating Context
 
 The workbench has Run, Objects, Events, Trace, Diagnostics, Export Records,
-Automation and About pages. Settings controls reduced motion and dedicated
-receiver bindings. The small Agent command receiver is independent of the main
-workbench. Optical receipts remain at the top left of the game window.
+Automation and About pages. There is no Settings surface. The Agent uses native
+memory and fixed input slots independently of the workbench. A compact activity
+indicator remains at the top left; no QR receipt controls belong to this flow.
 
 ## Capabilities and Constraints
 
