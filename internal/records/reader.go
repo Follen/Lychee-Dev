@@ -26,6 +26,9 @@ type FileQuery struct {
 	CDN          bool
 	Offline      bool
 	FileDataID   uint32
+	// Empty retains strict ambiguity detection. Explicit values filter only
+	// the LOW_VIOLENCE bit; locale never implies a content-variant preference.
+	ContentVariant string
 	// MetadataBytes bounds each Encoding/Root payload, ContentBytes the file.
 	// Encoded and decoded sizes both count against their corresponding bound.
 	MetadataBytes int64
@@ -35,8 +38,9 @@ type FileQuery struct {
 }
 
 type FileReading struct {
-	DecodedCache *DecodedCacheStats `json:"decodedCache,omitempty"`
-	KeySource    *KeySource         `json:"keySource,omitempty"`
+	ContentVariant string             `json:"contentVariant,omitempty"`
+	DecodedCache   *DecodedCacheStats `json:"decodedCache,omitempty"`
+	KeySource      *KeySource         `json:"keySource,omitempty"`
 	// PartialContent is separate from full CKey-verified Content.
 	PartialContent     *vault.BlobRef          `json:"partialContent,omitempty"`
 	Missing            []container.MissingSpan `json:"missing,omitempty"`
@@ -65,6 +69,9 @@ func (r *Reader) ReadFile(ctx context.Context, pin selection.DataPin, q FileQuer
 func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuery, allowMissing bool) (FileReading, error) {
 	if err := ctx.Err(); err != nil {
 		return FileReading{}, err
+	}
+	if !validContentVariant(q.ContentVariant) {
+		return FileReading{}, ErrFileQuery
 	}
 	product, locale, err := selection.DataIdentity(pin)
 	if err != nil {
@@ -100,7 +107,7 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	if err != nil {
 		return FileReading{}, err
 	}
-	entry, err := chooseFile(entries, q.FileDataID, locale)
+	entry, err := chooseFile(entries, q.FileDataID, locale, q.ContentVariant)
 	if err != nil {
 		return FileReading{}, err
 	}
@@ -115,6 +122,7 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	}
 	result := FileReading{Pin: pin, CatalogSHA256: meta.CatalogSHA256, EncodingKey: meta.EncodingKey, Root: root, Entry: entry, PayloadEncodingKey: key, Content: content}
 	result.KeySource = keySource
+	result.ContentVariant = q.ContentVariant
 	result.DecodedCache = q.cacheStats
 	result.ContentVerified = len(missing) == 0
 	if len(missing) > 0 {
@@ -146,11 +154,24 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	return result, nil
 }
 
-func chooseFile(entries []RootRecord, id, locale uint32) (RootRecord, error) {
+func validContentVariant(variant string) bool {
+	return variant == "" || variant == "standard" || variant == "low-violence"
+}
+
+func chooseFile(entries []RootRecord, id, locale uint32, variant string) (RootRecord, error) {
+	if !validContentVariant(variant) {
+		return RootRecord{}, ErrFileQuery
+	}
 	var selected RootRecord
 	found := false
 	for _, entry := range entries {
 		if entry.FileDataID != id || entry.LocaleMask&locale == 0 {
+			continue
+		}
+		// CASC_CFLAG_LOW_VIOLENCE=0x80. This is an explicit bit filter, not
+		// emulation of a running client's overrideArchive or other preferences.
+		lowViolence := entry.ContentFlags&0x80 != 0
+		if variant == "standard" && lowViolence || variant == "low-violence" && !lowViolence {
 			continue
 		}
 		// Content variants are never silently ranked, even if their CKeys match.

@@ -55,6 +55,7 @@ type Options struct {
 	staticOnly, sourceFlow               bool
 	scan                                 bool
 	keyFile                              string
+	contentVariant                       string
 	project                              string
 	target                               string
 	latest                               bool
@@ -1394,6 +1395,11 @@ func parseOptions(args []string) (Options, error) {
 			opts.recoveryPolicy = value
 		case "--key-file":
 			opts.keyFile = value
+		case "--content-variant":
+			if value != "standard" && value != "low-violence" {
+				return opts, errors.New("--content-variant must be standard or low-violence")
+			}
+			opts.contentVariant = value
 		case "--file-id":
 			n, err := strconv.ParseUint(value, 10, 32)
 			if err != nil || n == 0 {
@@ -1701,7 +1707,7 @@ func boolCount(values ...bool) int {
 }
 
 func (opts Options) fileQuery() records.FileQuery {
-	return records.FileQuery{Installation: opts.installation, CDN: opts.cdn, Offline: opts.offline, FileDataID: opts.fileID, MetadataBytes: 512 << 20, ContentBytes: opts.maxBytes, KeyFile: opts.keyFile}
+	return records.FileQuery{Installation: opts.installation, CDN: opts.cdn, Offline: opts.offline, FileDataID: opts.fileID, ContentVariant: opts.contentVariant, MetadataBytes: 512 << 20, ContentBytes: opts.maxBytes, KeyFile: opts.keyFile}
 }
 
 func unsupportedRouteFlag(route, flag string) error {

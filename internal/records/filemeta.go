@@ -328,7 +328,7 @@ func InspectFileEncoding(ctx context.Context, root, snapshot string, request Fil
 		if err != nil {
 			return FileEncodingReading{}, err
 		}
-		entry, err := chooseFile(entries, request.FileDataID, locale)
+		entry, err := chooseFile(entries, request.FileDataID, locale, query.ContentVariant)
 		if err != nil {
 			return FileEncodingReading{}, err
 		}

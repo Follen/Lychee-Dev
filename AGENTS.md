@@ -17,7 +17,7 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-3.0.1.md` — Windows CI and release contract for the current candidate.
+4. `docs/toolkit/release-3.0.2.md` — Windows CI and release contract for the current candidate.
    `release-2.0.1.md` is retained as the immutable historical contract for the
    already-published release.
 
@@ -162,6 +162,12 @@ contracts; do not apply their keys, queue or ACK sequence to native connections.
 
 ## Release discipline
 
+- **Keep npm `latest` unchanged at `2.5.1` unless the owner explicitly requests
+  changing that tag.** Publish new versions (including 3.0.2) under `next`;
+  never move `latest` temporarily or promote a release automatically. Update
+  the version-bound `release/npm-channel.json` for each release and verify
+  both tags before and after publication. Keep the GitHub latest release
+  unchanged for this channel as well.
 - Version source is `release/version.json`; `node tools/version.mjs --write`
   syncs package, TOCs, addon runtime and Go buildinfo. `--check` gates CI.
 - Publishing requires: clean tree at the tagged commit, required CI jobs

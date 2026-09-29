@@ -69,6 +69,22 @@ may have succeeded if stdout was lost: inspect the explicit output and compare
 its hash before deciding to repeat or overwrite it. Do not use an archived manifest
 alone as proof that publication succeeded.
 
+### Content variants
+
+For `asset inspect` and `asset export`, omission of `--content-variant` retains
+strict selection: multiple matching Root entries are an ambiguity, even when
+their CKeys match. Locale alone does not select regional content or prove a
+running client's `overrideArchive` setting.
+
+Use `--content-variant standard` to require the Root LOW_VIOLENCE bit (`0x80`)
+to be clear, or `--content-variant low-violence` to require it to be set, when
+the task specifies that content. This is an exact filter, not client emulation:
+there is no fallback to the opposite variant and no ranking of other flags.
+Multiple survivors still fail; keep the fixed snapshot and locale. The output
+records `source.contentVariant` (export) or `contentVariant` (inspect), the
+selected Root entry/CKey and normal integrity evidence. Do not infer identical
+geometry from a shared file ID, or substitute a variant merely to avoid an error.
+
 ### Image conversion
 
 For BLP2 images, use the same export command with `--encoding png` or `webp`

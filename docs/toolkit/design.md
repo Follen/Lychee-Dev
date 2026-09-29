@@ -1,5 +1,8 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-09-29 工作区新增 [CASC 显式内容变体合同](content-variants-2026-09-29.md)：
+asset inspect/export 可明确筛选 LOW_VIOLENCE 位；默认严格拒绝歧义，完整性校验不变。
+
 2026-09-29 当前候选新增 [200 槽前向分配与迁移合同](live-slot-routing-2026-09-29.md)。
 旧 64 槽固定发布规则由该合同替代；历史实测保持原范围，本轮双实例实测单独记录。
 

@@ -23,6 +23,9 @@ type fileSource struct {
 // rejects launcher metadata that disagrees with it. No legacy workspace,
 // network fallback or locale fallback is consulted.
 func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.DataPin, q FileQuery) (fileSource, error) {
+	if !validContentVariant(q.ContentVariant) {
+		return fileSource{}, ErrFileQuery
+	}
 	product, _, err := selection.DataIdentity(pin)
 	if err != nil {
 		return fileSource{}, err

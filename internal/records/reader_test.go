@@ -24,7 +24,7 @@ func TestChooseFileSelectsOnlyAnExactFileAndLocale(t *testing.T) {
 		{FileDataID: 12, ContentKey: strings.Repeat("d", 32), LocaleMask: 0x10},
 	}
 
-	got, err := chooseFile(entries, want.FileDataID, want.LocaleMask)
+	got, err := chooseFile(entries, want.FileDataID, want.LocaleMask, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestChooseFileRejectsMissingExactFileOrLocale(t *testing.T) {
 		"missing locale": {11, 0x10},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := chooseFile(entries, idLocale[0], idLocale[1]); !errors.Is(err, ErrContentMissing) {
+			if _, err := chooseFile(entries, idLocale[0], idLocale[1], ""); !errors.Is(err, ErrContentMissing) {
 				t.Fatalf("error %v, want %v", err, ErrContentMissing)
 			}
 		})
@@ -57,7 +57,7 @@ func TestChooseFileRejectsDuplicateVariantsEvenWhenCKeysMatch(t *testing.T) {
 		{FileDataID: 11, ContentKey: strings.Repeat("a", 32), LocaleMask: 0x10, Group: 2},
 	}
 
-	if _, err := chooseFile(entries, 11, 0x10); !errors.Is(err, ErrFileAmbiguous) {
+	if _, err := chooseFile(entries, 11, 0x10, ""); !errors.Is(err, ErrFileAmbiguous) {
 		t.Fatalf("error %v, want %v", err, ErrFileAmbiguous)
 	}
 }
@@ -67,7 +67,7 @@ func TestChooseFileDoesNotFallBackToAnotherLocale(t *testing.T) {
 		{FileDataID: 11, ContentKey: strings.Repeat("a", 32), LocaleMask: 0x2},
 	}
 
-	if _, err := chooseFile(entries, 11, 0x10); !errors.Is(err, ErrContentMissing) {
+	if _, err := chooseFile(entries, 11, 0x10, ""); !errors.Is(err, ErrContentMissing) {
 		t.Fatalf("error %v, want %v", err, ErrContentMissing)
 	}
 }
@@ -86,6 +86,41 @@ func TestReaderRejectsInvalidBudgets(t *testing.T) {
 				t.Fatalf("error %v, want %v", err, ErrMetadataLimit)
 			}
 		})
+	}
+}
+
+func TestChooseFileContentVariantDoesNotRankOtherAmbiguity(t *testing.T) {
+	base := RootRecord{FileDataID: 11, ContentKey: strings.Repeat("a", 32), LocaleMask: 0x40, ContentFlags: 0x120c0000}
+	low := base
+	low.ContentFlags |= 0x80
+	low.ContentKey = strings.Repeat("b", 32)
+	for _, tc := range []struct {
+		name, variant string
+		entries       []RootRecord
+		want          error
+	}{
+		{"strict keeps both", "", []RootRecord{base, low}, ErrFileAmbiguous},
+		{"standard never falls back", "standard", []RootRecord{low}, ErrContentMissing},
+		{"low never falls back", "low-violence", []RootRecord{base}, ErrContentMissing},
+		{"duplicate ckey stays ambiguous", "standard", []RootRecord{base, base}, ErrFileAmbiguous},
+		{"unknown variant", "first", []RootRecord{base}, ErrFileQuery},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := chooseFile(tc.entries, 11, 0x40, tc.variant); !errors.Is(err, tc.want) {
+				t.Fatalf("%v, want %v", err, tc.want)
+			}
+		})
+	}
+	other := base
+	other.ContentFlags |= 0x20000000
+	if _, err := chooseFile([]RootRecord{base, other}, 11, 0x40, "standard"); !errors.Is(err, ErrFileAmbiguous) {
+		t.Fatal(err)
+	}
+	if _, err := chooseFile([]RootRecord{base, low}, 11, 0x2, "low-violence"); !errors.Is(err, ErrContentMissing) {
+		t.Fatal(err)
+	}
+	if _, err := OpenReader(nil).ReadFile(context.Background(), validReaderPin(), FileQuery{ContentVariant: "invalid"}); !errors.Is(err, ErrFileQuery) {
+		t.Fatalf("variant not validated before IO: %v", err)
 	}
 }
 

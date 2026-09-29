@@ -24,12 +24,35 @@ type FileObject struct {
 	Object  []byte
 }
 
+type FileVariant struct {
+	FileDataID   uint32
+	ContentFlags uint32
+	LocaleMask   uint32
+	FileObject
+}
+
 // CachedFiles creates an entirely synthetic, authenticated offline CDN root
 // holding several files at caller-chosen FileDataIDs. Callers exercise the
 // real configuration, Encoding, Root, BLTE and evidence code; no network
 // transport or application reader is replaced. Object identity follows the
 // same rules as CachedAsset, generalized to N files and N encoding pages.
 func CachedFiles(t testing.TB, workspace string, files map[uint32]FileObject) selection.PinnedSet {
+	t.Helper()
+	ids := make([]uint32, 0, len(files))
+	for id := range files {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	variants := make([]FileVariant, 0, len(ids))
+	for _, id := range ids {
+		variants = append(variants, FileVariant{FileDataID: id, LocaleMask: 0x40, FileObject: files[id]})
+	}
+	return CachedFileVariants(t, workspace, variants)
+}
+
+// CachedFileVariants preserves caller order and distinct content for the same
+// ID, exercising real Root selection and authenticated payload extraction.
+func CachedFileVariants(t testing.TB, workspace string, files []FileVariant) selection.PinnedSet {
 	t.Helper()
 	if len(files) == 0 {
 		t.Fatal("CachedFiles needs at least one file")
@@ -74,37 +97,29 @@ func CachedFiles(t testing.TB, workspace string, files map[uint32]FileObject) se
 	keyBytes := func(key string) []byte { raw, _ := hex.DecodeString(key); return raw }
 	frame := func(raw []byte) []byte { return append([]byte{'B', 'L', 'T', 'E', 0, 0, 0, 0, 'N'}, raw...) }
 
-	ids := make([]uint32, 0, len(files))
-	for id := range files {
-		if id == 0 {
+	for _, file := range files {
+		if file.FileDataID == 0 {
 			t.Fatal("FileDataID 0 is not addressable")
 		}
-		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	root := []byte("TSFM")
-	root = binary.LittleEndian.AppendUint32(root, uint32(len(ids)))
+	root = binary.LittleEndian.AppendUint32(root, uint32(len(files)))
 	root = binary.LittleEndian.AppendUint32(root, 0)
-	root = binary.LittleEndian.AppendUint32(root, uint32(len(ids)))
-	root = binary.LittleEndian.AppendUint32(root, 0x10000000)
-	root = binary.LittleEndian.AppendUint32(root, 0x40)
-	next := uint32(0)
-	for _, id := range ids {
-		delta := id - next
-		root = binary.LittleEndian.AppendUint32(root, delta)
-		next = id + 1
-	}
 	type entry = cachedEntry
 	entries := []entry{}
-	for _, id := range ids {
-		object := files[id].Object
+	for _, file := range files {
+		object := file.Object
 		if object == nil {
-			object = frame(files[id].Decoded)
+			object = frame(file.Decoded)
 		}
 		entries = append(entries, entry{
-			content: md5key(files[id].Decoded), encoding: objectKey(object),
-			decoded: len(files[id].Decoded), encoded: len(object),
+			content: md5key(file.Decoded), encoding: objectKey(object),
+			decoded: len(file.Decoded), encoded: len(object),
 		})
+		root = binary.LittleEndian.AppendUint32(root, 1)
+		root = binary.LittleEndian.AppendUint32(root, file.ContentFlags|0x10000000)
+		root = binary.LittleEndian.AppendUint32(root, file.LocaleMask)
+		root = binary.LittleEndian.AppendUint32(root, file.FileDataID)
 		root = append(root, keyBytes(entries[len(entries)-1].content)...)
 	}
 	rootKey := md5key(root)
@@ -189,10 +204,10 @@ func CachedFiles(t testing.TB, workspace string, files map[uint32]FileObject) se
 	save("remote-config/"+buildKey, blob(build))
 	save("remote-config/"+cdnKey, blob(cdn))
 	save("cdn-route/wow/cn", blob([]byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\ncn|fixture|fixture.invalid\n")))
-	for _, id := range ids {
-		object := files[id].Object
+	for _, file := range files {
+		object := file.Object
 		if object == nil {
-			object = frame(files[id].Decoded)
+			object = frame(file.Decoded)
 		}
 		cacheObject(t, save, blob, cdnKey, objectKey(object), object)
 	}
