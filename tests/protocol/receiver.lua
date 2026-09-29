@@ -1,6 +1,6 @@
 local root = assert(arg[1])
 local golden = assert(arg[2])
-local ns = {Release="3.0.0", Startup={ready=true, identity={product="retail",build="12.1.0.69933"}}}
+local ns = {Release="3.0.1", Startup={ready=true, identity={product="retail",build="12.1.0.69933"}}}
 ns.L = {RECEIVER_READY="Ready", RECEIVER_STAGED="Staged", RECEIVER_VERIFY="Verify",
     RECEIVER_ACCEPTED="Accepted", RECEIVER_REJECTED="Rejected",
     RECEIVER_CANCELLED="Cancelled", RECEIVER_TIMEOUT="Timeout",

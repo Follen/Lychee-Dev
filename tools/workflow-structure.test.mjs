@@ -15,6 +15,18 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const release = readFileSync(join(repository, '.github/workflows/toolkit-release.yml'), 'utf8');
 const ci = readFileSync(join(repository, '.github/workflows/toolkit-ci.yml'), 'utf8');
 
+test('version-bound next publication checks latest before and after without moving it', () => {
+  const before=release.indexOf('--phase before --view channel-before.json');
+  const publish=release.indexOf('npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz"');
+  const after=release.indexOf('--phase after --view channel-after.json');
+  assert.ok(before>0&&before<publish&&publish<after);
+  assert.match(release,/npm view lycheedev dist-tags --json > channel-before\.json/);
+  assert.match(release,/npm view lycheedev dist-tags --json > channel-after\.json/);
+  assert.doesNotMatch(release,/npm dist-tag (?:add|rm)/);
+  assert.match(release,/if \[ "\$PUBLISH_DIST_TAG" = next \]; then latest_args\+=\(--latest=false\); fi/);
+  assert.match(release,/gh release create "v\$PUBLISH_VERSION" "\$\{latest_args\[@\]\}"/);
+});
+
 function jobsOf(text) {
   const jobs = {};
   let current = null;

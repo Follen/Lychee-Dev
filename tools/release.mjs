@@ -13,7 +13,7 @@
 //                       manifest + SHA256SUMS after verification
 //   verify-sealed       recompute every sealed digest right before publish
 //   release-identity    strict tag <-> version source binding (REL-01/05/11)
-//   dist-tag            2.0.2-rc.N -> next, otherwise latest (REL-11)
+//   dist-tag            version-bound channel exception, then rc/final defaults
 //   registry-state      exists-matching / exists-conflicting / absent / unknown
 //                       (REL-09: unknown is never treated as absent)
 //   verify-platform-evidence   windows-amd64 run evidence completeness (REL-13)
@@ -61,8 +61,37 @@ export function policyFor(version) {
   };
 }
 
-/** REL-11: release candidates only enter `next`; everything else is `latest`. */
+/** Strict version-bound exception; future releases must review channel policy. */
+export function validateNpmChannel(value, version) {
+  const stable = /^\d+\.\d+\.\d+$/;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'distTag,preserveLatest,schema,version' ||
+      value.schema !== 'lycheedev.npm-channel.v1' || value.distTag !== 'next' ||
+      typeof value.version !== 'string' || typeof value.preserveLatest !== 'string' ||
+      !stable.test(value.version) || !stable.test(value.preserveLatest) ||
+      value.version === value.preserveLatest || (version !== undefined && value.version !== version)) {
+    throw new Error('release.invalid_npm_channel');
+  }
+  return value;
+}
+
+function npmChannel(version) {
+  return validateNpmChannel(JSON.parse(readFileSync(join(repository, 'release/npm-channel.json'), 'utf8')), version);
+}
+
+export function verifyNpmChannelTags(tags, channel, version, distTag, phase) {
+  validateNpmChannel(channel, version);
+  if (distTag !== channel.distTag || !['before', 'after'].includes(phase) ||
+      !tags || typeof tags !== 'object' || Array.isArray(tags) ||
+      tags.latest !== channel.preserveLatest || (phase === 'after' && tags[distTag] !== version)) {
+    throw new Error('release.npm_channel_mismatch');
+  }
+  return {ok:true, version, distTag, latest:tags.latest, phase};
+}
+
 export function distTagFor(version) {
+  const channel = npmChannel();
+  if (version === channel.version) return channel.distTag;
   if (/^\d+\.\d+\.\d+-rc\.\d+$/.test(version)) return 'next';
   if (/^\d+\.\d+\.\d+$/.test(version)) return 'latest';
   throw new Error(`release.invalid_version: ${version}`);
@@ -595,6 +624,7 @@ function releaseIdentityCommand(argv) {
   const version = parseTag(tag); // strict v<semver> incl. -rc.N (REL-01/11)
   const synchronized = synchronizeVersion(repository, false);
   if (synchronized.version !== version) throw new Error(`release.tag_version_mismatch: ${tag} vs source ${synchronized.version} (REL-01)`);
+  npmChannel(version); // A stale routing exception must never silently publish latest.
   const policy = policyFor(version);
   const pkg = JSON.parse(readFileSync(join(repository, 'packages/npm/lycheedev/package.json'), 'utf8'));
   if (pkg.private === true && !policy.privateMustBeTrue) throw new Error('release.private_package: a release package cannot be private (§5)');
@@ -941,6 +971,10 @@ const commands = {
   'verify-sealed': verifySealedCommand,
   'release-identity': releaseIdentityCommand,
   'dist-tag': argv => ({ tag: distTagFor(requiredOption(parseOptions(argv), '--version')) }),
+  'verify-npm-channel': argv => {
+    const o=parseOptions(argv), version=requiredOption(o,'--version');
+    return verifyNpmChannelTags(JSON.parse(readFileSync(requiredOption(o,'--view'),'utf8')), npmChannel(version), version, requiredOption(o,'--dist-tag'), requiredOption(o,'--phase'));
+  },
   'registry-state': registryStateCommand,
   'verify-platform-evidence': verifyPlatformEvidenceCommand,
   'platform-evidence': platformEvidenceCommand,

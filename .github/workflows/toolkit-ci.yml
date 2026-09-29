@@ -98,7 +98,9 @@ jobs:
           if-no-files-found: error
       - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
         run: |
-          go test -parallel=4 -count=1 -timeout=5m ./...
+          # The 200-slot installation suites verify more files. Bound concurrent
+          # packages while retaining each package's concurrency tests.
+          go test -p=2 -parallel=4 -count=1 -timeout=10m ./...
           if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
       - name: Native release-shape build
         run: |
@@ -292,7 +294,7 @@ jobs:
       # budget on hosted Windows; retain all tests with a bounded larger limit.
       # Independent lifecycle scenarios overlap disk waits; bound concurrency
       # so race instrumentation cannot flood the runner or starve readiness.
-      - run: go test -race -parallel=4 -count=1 -timeout=15m ./...
+      - run: go test -race -p=2 -parallel=4 -count=1 -timeout=15m ./...
 
   ci-required:
     # §2/§3: this aggregation always runs and rejects every non-success result;

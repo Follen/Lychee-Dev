@@ -10,11 +10,34 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs,
+  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags,
 } from './release.mjs';
 import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './luals.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('3.0.1 channel exception never moves latest and rejects stale policy',()=>{
+  const channel=JSON.parse(readFileSync(new URL('../release/npm-channel.json',import.meta.url),'utf8'));
+  assert.equal(distTagFor('3.0.1'),'next');
+  assert.equal(distTagFor('2.5.1'),'latest');
+  assert.equal(validateNpmChannel(channel,'3.0.1'),channel);
+  for(const bad of [null,[],{...channel,extra:true},{...channel,distTag:'latest'},
+    {...channel,preserveLatest:'3.0.1'},{...channel,version:'3.0.1-dev'},
+    {...channel,schema:'unknown'},{...channel,preserveLatest:251}]) {
+    assert.throws(()=>validateNpmChannel(bad,'3.0.1'),/invalid_npm_channel/);
+  }
+  assert.throws(()=>validateNpmChannel(channel,'3.0.2'),/invalid_npm_channel/);
+  assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:'3.0.0'},channel,'3.0.1','next','before').ok);
+  assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:'3.0.1'},channel,'3.0.1','next','after').ok);
+  for(const [tags,tag,phase] of [
+    [{latest:'3.0.1',next:'3.0.1'},'next','before'],
+    [{latest:'3.0.1',next:'3.0.1'},'next','after'],
+    [{latest:'2.5.1',next:'3.0.0'},'next','after'],
+    [{latest:'2.5.1',next:'3.0.1'},'latest','before'],
+    [{},'next','before'],[null,'next','before'],
+    [{latest:'2.5.1'},'next','invalid'],
+  ]) assert.throws(()=>verifyNpmChannelTags(tags,channel,'3.0.1',tag,phase),/npm_channel_mismatch/);
+});
 
 test('LuaLS Go identity matches the sole release manifest', () => {
   generateGoIdentity({ check: true });

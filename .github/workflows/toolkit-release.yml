@@ -499,12 +499,17 @@ jobs:
               echo "publish_needed=false" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::registry state $state blocks publish (REL-09)"; exit 1 ;;
           esac
+      - name: Verify protected npm channels before publication
+        run: |
+          set -e
+          npm view lycheedev dist-tags --json > channel-before.json
+          node tools/release.mjs verify-npm-channel --version "$PUBLISH_VERSION" --dist-tag "$PUBLISH_DIST_TAG" --phase before --view channel-before.json
       - name: Publish the sealed tarball via OIDC trusted publishing
         if: steps.registry.outputs.publish_needed == 'true'
         # No NPM_TOKEN / NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC
         # token for short-lived registry credentials; provenance is generated
-        # automatically for the public repository. Dist-tag is `latest`, or
-        # `next` for 2.0.1-rc.N candidates (REL-11).
+        # automatically for the public repository. The version-bound channel
+        # policy routes this release to next without ever moving latest.
         run: |
           set -e
           npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz" --access public --tag "$PUBLISH_DIST_TAG"
@@ -531,6 +536,11 @@ jobs:
             if (!r.ok) { console.error('::error::registry read-back violations: ' + r.violations.join('; ')); process.exit(1); }
             console.log('registry integrity verified; provenance: ' + JSON.stringify(r.attestations ?? null));
           "
+      - name: Verify protected npm channels after publication
+        run: |
+          set -e
+          npm view lycheedev dist-tags --json > channel-after.json
+          node tools/release.mjs verify-npm-channel --version "$PUBLISH_VERSION" --dist-tag "$PUBLISH_DIST_TAG" --phase after --view channel-after.json
       - name: Clean install re-verification from the registry
         run: |
           set -e
@@ -585,7 +595,9 @@ jobs:
               gh release upload "v$PUBLISH_VERSION" $(sed 's|^|assets/|' missing-assets.txt) --repo "$GITHUB_REPOSITORY"
             fi
           else
-            gh release create "v$PUBLISH_VERSION" \
+            latest_args=()
+            if [ "$PUBLISH_DIST_TAG" = next ]; then latest_args+=(--latest=false); fi
+            gh release create "v$PUBLISH_VERSION" "${latest_args[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --title "lycheedev $PUBLISH_VERSION" \
