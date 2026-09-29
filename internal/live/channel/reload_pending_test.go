@@ -38,7 +38,7 @@ func TestExplicitReloadCanRecoverUnconfirmedReport(t *testing.T) {
 	// Closing now uses the destruction-only fault cases in closing_reload_windows_test.go.
 	for _, policy := range []string{"opaque", "observation"} {
 		t.Run(policy+"/open", func(t *testing.T) {
-			old := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 4, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "3.0.0"}
+			old := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 4, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "3.0.0"}
 			current := old
 			current.Runtime = strings.Repeat("2", 32)
 			current.NextSlot = 1

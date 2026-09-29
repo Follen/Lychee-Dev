@@ -1,6 +1,7 @@
 local _, ns = ...
 
-local engine,receiving,inputLease,expectedSlot
+local engine,receiving,inputLease,expectedSlot,skipLoaded
+local LIMIT=ns.SlotProtocol.Count
 local zero=string.rep("0",32)
 local function releaseInput()
     receiving=false
@@ -38,10 +39,11 @@ local function start()
     state.memoryEpoch=epoch+1
     local runtime=string.format("%08x%08x%04x%04x%04x%04x",epoch+1,math.floor(clock),math.random(0,65535),math.random(0,65535),math.random(0,65535),math.random(0,65535))
     local available=0
-    for i=1,64 do
+    for i=1,LIMIT do
         local name=string.format("Lychee Dev Slot %02d",i)
         if ns.Compat.GetAddOnMetadata(name,"X-Lychee-Slot")==tostring(i)
-            and ns.Compat.GetAddOnMetadata(name,"Version")==ns.Release then available=available+1 end
+            and ns.Compat.GetAddOnMetadata(name,"Version")==ns.Release
+            and ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")=="memory-slot-v2" then available=available+1 end
     end
     ns.AutomationHistory.Begin(runtime,{character=actor.character,realm=actor.realm,guid=actor.guid,build=build.build,product=build.product})
     engine=ns.SlotProtocol.Create({runtime=runtime,build=build.build,product=build.product,release=ns.Release,inventory=available,
@@ -58,10 +60,11 @@ local function start()
     return true
 end
 local function inventory()
-    for i=1,64 do
+    for i=1,LIMIT do
         local name=string.format("Lychee Dev Slot %02d",i)
         if ns.Compat.GetAddOnMetadata(name,"X-Lychee-Slot")~=tostring(i)
-            or ns.Compat.GetAddOnMetadata(name,"Version")~=ns.Release then return nil,"slot_inventory_incomplete:"..i end
+            or ns.Compat.GetAddOnMetadata(name,"Version")~=ns.Release
+            or ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")~="memory-slot-v2" then return nil,"slot_inventory_incomplete:"..i end
     end
     return true
 end
@@ -74,11 +77,19 @@ local function wake()
     state.options.bridgeEnabled=true -- Explicit wake opts in; explicit off stays off.
     if ns.StartupBeacon then ns.StartupBeacon.Stop() end
     ok,reason=protectInput();if not ok then releaseInput();return nil,reason end
-    local index=engine.NextSlot();if index>64 then releaseInput();return nil,"slot_exhausted" end
-    expectedSlot=index
-    local loaded,failure=ns.Compat.LoadInputSlot(string.format("Lychee Dev Slot %02d",index))
-    expectedSlot=nil
-    if not loaded then releaseInput();return nil,failure end
+    -- One wake may traverse foreign/empty physical slots, but can process at
+    -- most one own-runtime envelope. A rejected own envelope is still a stop.
+    for attempt=1,LIMIT do
+        local index=engine.NextSlot()
+        if index>LIMIT then releaseInput();engine.Describe();return nil,"slot_exhausted" end
+        expectedSlot,skipLoaded=index,nil
+        local loaded,failure=ns.Compat.LoadInputSlot(string.format("Lychee Dev Slot %02d",index))
+        expectedSlot=nil
+        if not loaded then releaseInput();engine.Describe();return nil,failure end
+        if skipLoaded==nil then releaseInput();engine.Describe();return nil,"slot_loader_no_dispatch" end
+        if not skipLoaded then break end
+    end
+    if skipLoaded and engine.NextSlot()>LIMIT then releaseInput();engine.Describe();return nil,"slot_exhausted" end
     -- Control transactions have no long-lived keyboard ownership. A fresh
     -- wake protects each input burst; business entry already released it.
     releaseInput()
@@ -87,7 +98,7 @@ local function wake()
 end
 local function guardedWake()
     local ok,result,reason=pcall(wake)
-    expectedSlot=nil
+    expectedSlot,skipLoaded=nil,nil
     releaseInput()
     if ns.InputState then ns.InputState.Refresh() end
     if not ok then return nil,"slot_wake_failed" end
@@ -103,7 +114,9 @@ ns.SlotRuntime={
     IsActive=function()return ns.InputProtection.IsActive()end,
     Receive=function(index,envelope)
         if not engine or index~=expectedSlot then return nil,"slot_not_requested" end
-        return engine.Receive(index,envelope)
+        local record,value,skip=engine.Receive(index,envelope)
+        skipLoaded=skip==true
+        return record,value
     end,
     Snapshot=function()return engine and engine.Snapshot()end,
     Register=function()

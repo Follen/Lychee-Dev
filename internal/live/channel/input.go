@@ -165,7 +165,7 @@ func inputObservation(r memory.Record, e bridge.SlotEnvelope, after, now int64) 
 	}
 	// Reload consumes no slot. A lost receipt must not disable the control
 	// action merely because the game has already advanced its slot counter.
-	if s.Runtime != e.Runtime || s.GUID != e.GUID || s.Build != e.Build || (e.Action != "reload" && s.NextSlot != e.Index) || (s.Owner != e.Owner && !(e.Action == "bind" && s.Owner == "")) || (s.Owner != "" && s.Fence != e.Fence) {
+	if s.Runtime != e.Runtime || s.GUID != e.GUID || s.Build != e.Build || (e.Action != "reload" && s.NextSlot != slotStart(e)) || (s.Owner != e.Owner && !(e.Action == "bind" && s.Owner == "")) || (s.Owner != "" && s.Fence != e.Fence) {
 		return s, errors.New("live.channel_input_target_changed")
 	}
 	if !*s.InputBlocked && s.Reason != "" || *s.InputBlocked && s.Reason == "" {
@@ -195,4 +195,11 @@ func inputAfterLookup(records []memory.Record, e bridge.SlotEnvelope, after, now
 	}
 	s.Address = records[0].Address
 	return s, nil
+}
+
+func slotStart(e bridge.SlotEnvelope) int {
+	if e.StartSlot > 0 {
+		return e.StartSlot
+	}
+	return e.Index
 }

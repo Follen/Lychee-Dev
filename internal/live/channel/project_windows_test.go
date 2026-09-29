@@ -23,7 +23,7 @@ func projectFixture(t *testing.T) (*Project, *Driver, projectTarget, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 2, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 2, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New("", nil, i)
 	if err != nil {
 		t.Fatal(err)

@@ -21,9 +21,9 @@ for(const t of targets){
   consumers.add(`${w.processId}/${w.processStartedAt}`);
 }
 const poolPath=path.join(targets[0].installation,'Interface/AddOns/.lycheedev-slots.json');
-async function readPool(){return JSON.parse(await fs.readFile(poolPath,'utf8'));}
+async function readPool(){const pool=JSON.parse(await fs.readFile(poolPath,'utf8'));assert.equal(pool.files.length,200);return pool;}
 await fs.mkdir(out,{recursive:true});
-const report={schema:'lycheedev.shared-installation-baseline.v1',targets,steps:[],complete:false};
+const report={schema:'lycheedev.shared-installation-baseline.v1',targets,slotCount:200,steps:[],complete:false};
 await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report),{flag:'wx'});
 function launch(exe,args) {
   const child=spawn(exe,args,{shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});
@@ -98,7 +98,7 @@ async function fixture(t,key,async=false) {
 }
 try {
   const aligned=await pair(async t=>call(t,'align',['live','reload','--session',t.session,'--request','race-align']));
-  for(let i=0;i<2;i++){assert.equal(aligned[i].result.identity.guid,targets[i].guid);targets[i].initialRuntime=aligned[i].result.identity.runtime;}
+  for(let i=0;i<2;i++){assert.equal(aligned[i].result.identity.slots,200);assert.equal(aligned[i].result.identity.guid,targets[i].guid);targets[i].initialRuntime=aligned[i].result.identity.runtime;}
   const a=targets[0],b=targets[1];
   const held=launch(host,['-mode','hold-publication','-installation',a.installation,'-pid',String(a.pid),'-project',a.project,'-connection',a.session,'-timeout','6']);
   await new Promise((resolve,reject)=>{
@@ -114,10 +114,10 @@ try {
   const holder=await held.done;assert.equal(holder.code,0,holder.stderr);
   await fs.writeFile(path.join(out,'holder.json'),JSON.stringify(holder));
   await pair(async t=>{const e=await call(t,'wait-resumed',['live','resume',t.session]);verify(t,e,t.name+'-wait-resume');assert.equal(e.result.operation,waiting[targets.indexOf(t)].result.operation);});
-  // Repeated paired commands cross the 49-slot admission threshold in both
+  // Repeated paired commands cross the 185-slot admission threshold in both
   // runtimes; all returned payloads must belong to the selected actor/request.
   await pair(async t=>{
-    for(let i=0;i<13;i++){
+    for(let i=0;i<Math.floor((report.slotCount-16)/4)+1;i++){
       const key='paired-'+i,file=await fixture(t,key),e=await execute(t,key,file);
       verify(t,e,t.name+'-'+key);t.lastRuntime=e.result.identity.runtime;
     }

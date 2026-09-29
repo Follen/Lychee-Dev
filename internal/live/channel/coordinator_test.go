@@ -45,7 +45,7 @@ func (p *coordinatorPeer) Input(ctx context.Context, a InputAction) (InputOutcom
 func TestReloadUsesOneCoordinatorAndNeverReplaysLostOutcome(t *testing.T) {
 	for _, mode := range []string{"new", "lost", "submitted", "zero", "focused"} {
 		t.Run(mode, func(t *testing.T) {
-			old := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+			old := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 			current := old
 			current.Runtime = strings.Repeat("2", 32)
 			current.NextSlot = 1
@@ -97,7 +97,7 @@ func TestReloadUsesOneCoordinatorAndNeverReplaysLostOutcome(t *testing.T) {
 	}
 }
 func TestKnownInputOutcomeSurvivesCancellation(t *testing.T) {
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	p := &coordinatorPeer{log: filepath.Join(t.TempDir(), "connection.jsonl"), t: t, cancel: cancel}

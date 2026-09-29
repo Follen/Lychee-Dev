@@ -3,6 +3,7 @@ package delivery_test
 import (
 	"context"
 	"errors"
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/testkit"
 	"os"
@@ -53,7 +54,7 @@ func TestSlotUpgradeResumesAfterMainPublicationAndStatusIncludesPool(t *testing.
 		t.Fatal(err)
 	}
 	status, err = delivery.InspectAddonDeployment(ctx, client)
-	if err != nil || status.Slots.State != "managed" || status.Slots.Count != 64 {
+	if err != nil || status.Slots.State != "managed" || status.Slots.Count != bridge.SlotCount {
 		t.Fatalf("%+v %v", status, err)
 	}
 	path := filepath.Join(client, "Interface", "AddOns", "Lychee Dev Slot 64", "Loader.lua")
@@ -78,14 +79,14 @@ func TestRemoveAddonIncludesSlotsAndResumesPartialMoves(t *testing.T) {
 	if err != nil || result.State != "archived" || result.SlotArchive != archive+".slots" {
 		t.Fatalf("%+v %v", result, err)
 	}
-	for i := 1; i <= 64; i++ {
+	for i := 1; i <= bridge.SlotCount; i++ {
 		if _, err := os.Stat(delivery.SlotDirectory(parent, i)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatal("slot remains", i, err)
 		}
 	}
 	// Recreate an interruption after the first 32 slot moves. The intent remains
 	// durable; retry must validate both sides and finish the exact same removal.
-	for i := 33; i <= 64; i++ {
+	for i := 33; i <= bridge.SlotCount; i++ {
 		if err := os.Rename(delivery.SlotDirectory(result.SlotArchive, i), delivery.SlotDirectory(parent, i)); err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +154,7 @@ func TestRemoveAddonRefusesModifiedSlotBeforeMovingAnything(t *testing.T) {
 	if _, err := os.Stat(delivery.AddonDirectory(client)); err != nil {
 		t.Fatal(err)
 	}
-	for i := 1; i <= 64; i++ {
+	for i := 1; i <= bridge.SlotCount; i++ {
 		if _, err := os.Stat(delivery.SlotDirectory(parent, i)); err != nil {
 			t.Fatal(i, err)
 		}

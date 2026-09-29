@@ -95,6 +95,34 @@ func TestOperationReportLifecycleUsesArchivedEvidence(t *testing.T) {
 	}
 }
 
+// This lifecycle models a capture acquired when requested, rather than one
+// buffered before unrelated filesystem work. Keep the underlying single-use
+// frame and its explicit SystemTicks so replay/watermark assertions still apply.
+type bootstrapLifecycleCapture struct{ *sessionFixtureFrames }
+
+func (f bootstrapLifecycleCapture) Next(ctx context.Context) (*desktop.CapturedFrame, error) {
+	frame, err := f.sessionFixtureFrames.Next(ctx)
+	if err == nil {
+		frame.ObservedAt = time.Now()
+	}
+	return frame, err
+}
+
+func bootstrapLifecycleSession(t *testing.T, client string, input ReportIntent, sequence uint64) (*WindowSession, *sessionFixtureFrames) {
+	t.Helper()
+	e := input.Expected
+	ready := bridge.Signal{Schema: "lycheedev.signal.v1", Kind: "ready", Release: e.Release, SessionNonce: e.SessionNonce, Character: e.Character, Realm: e.Realm, GUID: input.Load.GUID, Product: e.Product, Build: e.Build, Sequence: sequence, InputReady: true, RuntimeEpoch: 1}
+	frames := &sessionFixtureFrames{ackFrames: ackFrames{frame: makeAckFrame(t, ready)}}
+	target := ClientWindow{Client: selection.ClientInstallation{Directory: client, Product: e.Product, FullBuild: e.Build}, Window: desktop.WindowIdentity{Handle: 1, ProcessID: 2, ProcessStartedAt: 3}}
+	e.Kind, e.RequestID, e.RequireInputReady, e.AfterSequence = "ready", "", true, 0
+	session, err := observeWindowSession(context.Background(), target, e, bootstrapLifecycleCapture{frames}, func(context.Context, ClientWindow) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
+	return session, frames
+}
+
 func testOperationFilePreparation(t *testing.T, persisted bool, ackMode string) {
 	t.Helper()
 	// This scenario creates its own installation and metadata database.
@@ -116,7 +144,11 @@ func testOperationFilePreparation(t *testing.T, persisted bool, ackMode string) 
 	loaded := signal
 	loaded.Kind, loaded.Sequence, loaded.ReloadNonce, loaded.InputReady = "loaded", 2, input.Load.ReloadNonce, true
 	loaded.ReportBytes, loaded.ReportAdler32 = 0, ""
-	session, frames := operationSessionFixtureAtSequence(t, client, input, sequence)
+	newSession := operationSessionFixtureAtSequence
+	if withBootstrap {
+		newSession = bootstrapLifecycleSession
+	}
+	session, frames := newSession(t, client, input, sequence)
 	operation, err := session.OpenOperation(ctx, root, record.OperationID)
 	if err != nil {
 		t.Fatal(err)

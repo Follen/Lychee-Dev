@@ -6,7 +6,7 @@ import (
 )
 
 func replacementFixture() (Identity, RuntimeReplacementProof) {
-	old := Identity{Schema: "lycheedev.slot.identity.v1", Runtime: strings.Repeat("f", 32), Slots: 64, NextSlot: 1, GUID: "old", Character: "old", Realm: "r", Build: "b", Product: "retail", Release: "3", InputState: "lycheedev.input.v1"}
+	old := Identity{Schema: "lycheedev.slot.identity.v1", Runtime: strings.Repeat("f", 32), Slots: 200, NextSlot: 1, GUID: "old", Character: "old", Realm: "r", Build: "b", Product: "retail", Release: "3", InputState: "lycheedev.input.v1"}
 	current := old
 	current.Runtime = strings.Repeat("1", 32)
 	current.GUID = "new"

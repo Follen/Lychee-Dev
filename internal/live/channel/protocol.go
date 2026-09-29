@@ -71,13 +71,13 @@ func tokenBytes(s string) ([16]byte, error) {
 	return b, nil
 }
 func (i Identity) Validate() error {
-	if i.Inventory != nil && (*i.Inventory < 0 || *i.Inventory > 64) {
+	if i.Inventory != nil && (*i.Inventory < 0 || *i.Inventory > i.Slots) {
 		return errors.New("live.channel_inventory_invalid")
 	}
 	if _, err := tokenBytes(i.Runtime); err != nil {
 		return err
 	}
-	if i.Slots != 64 || i.NextSlot < 1 || i.NextSlot > 65 || i.GUID == "" || i.Character == "" || i.Realm == "" || i.Build == "" || i.Product == "" || i.Release == "" {
+	if (i.Slots != 64 && i.Slots != bridge.SlotCount) || i.NextSlot < 1 || i.NextSlot > i.Slots+1 || i.GUID == "" || i.Character == "" || i.Realm == "" || i.Build == "" || i.Product == "" || i.Release == "" {
 		return errors.New("live.channel_identity_invalid")
 	}
 	return nil
@@ -90,7 +90,7 @@ func decodeReceipt(record memory.Record, e bridge.SlotEnvelope) (Receipt, error)
 	if err := r.Validate(); err != nil {
 		return r, err
 	}
-	if r.Schema != bridge.SlotSchema || r.Nonce != e.Nonce || r.Ticket != e.Ticket || r.Action != e.Action || r.Runtime != e.Runtime || r.GUID != e.GUID || r.Build != e.Build || r.NextSlot <= e.Index {
+	if r.Schema != e.Schema || r.Nonce != e.Nonce || r.Ticket != e.Ticket || r.Action != e.Action || r.Runtime != e.Runtime || r.GUID != e.GUID || r.Build != e.Build || r.NextSlot <= e.Index {
 		return r, errors.New("live.channel_receipt_mismatch")
 	}
 	if r.Owner != e.Owner || r.Fence != e.Fence {

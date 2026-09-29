@@ -113,6 +113,9 @@ func (p *slotPeer) Find(ctx context.Context, s memory.Selector, first bool) (mem
 		data = append(data, b...)
 		data = append(data, make([]byte, 31)...)
 	}
+	if len(data) == 0 {
+		return memory.LookupResult{}, nil
+	}
 	return memory.Find(ctx, recordSource{data}, s, nil, first)
 }
 func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
@@ -151,7 +154,7 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 			if !peer.out.Scan() || peer.out.Text() != "ready" {
 				t.Fatal("peer not ready")
 			}
-			identity := channel.Identity{Schema: "lycheedev.slot.identity.v1", Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "Player-1-123", Character: "Tester", Realm: "Realm", Build: "70000", Product: "retail", Release: "2.5.1"}
+			identity := channel.Identity{Schema: "lycheedev.slot.identity.v1", Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "Player-1-123", Character: "Tester", Realm: "Realm", Build: "70000", Product: "retail", Release: "2.5.1"}
 			path := filepath.Join(dir, "connections", "connection.jsonl")
 			d, err := channel.New(path, peer, identity)
 			if err != nil {
@@ -176,6 +179,12 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 				restart()
 				if fault == "reload_bind" {
 					err = d.RecoverBinding(ctx)
+					// v2 foreign loads are skipped without emitting a receipt for
+					// another runtime. Missing evidence cannot authorize replay.
+					if !errors.Is(err, channel.ErrPending) || peer.sends != 1 {
+						t.Fatal("foreign bootstrap was replayed", err)
+					}
+					return
 				} else {
 					err = d.Connect(ctx)
 				}

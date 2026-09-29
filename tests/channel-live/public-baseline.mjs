@@ -91,10 +91,13 @@ try {
   session=connected.session;
   report.session=session;
   assert.equal(connected.bound,true);
-  assert.equal(connected.identity.inventory,64);
+  assert.equal(connected.identity.slots,200);
+  assert.equal(connected.identity.inventory,200);
+  const capacityCommands=Math.floor((connected.identity.slots-16)/4)+1;
+  report.slotCount=connected.identity.slots;
   const runtimes=new Set([connected.identity.runtime]);
   let first;
-  for(let n=1;n<=13;n++) {
+  for(let n=1;n<=capacityCommands;n++) {
     const r=await execute(`normal-${n}`,'normal.lua');
     assert.equal(r.report.ok,true);
     assert.equal(r.report.result.marker,'native-slot-baseline');

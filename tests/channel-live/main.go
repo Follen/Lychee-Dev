@@ -219,6 +219,9 @@ func run() (resultErr error) {
 		}
 		return errors.New("reload patch not observed; input result remains unconfirmed")
 	}
+	if *mode == "stage-observation" {
+		return stageObservation(ctx, root, parent, resource, *connection, evidence, target, guardBase)
+	}
 	if *mode == "hold-publication" || *mode == "interrupt-observation" || *mode == "interrupt-opaque-fixture" || *mode == "release-editor" || *mode == "confirm-focus-fixture" {
 		projectAPI, e := channel.OpenProject(root)
 		if e != nil {

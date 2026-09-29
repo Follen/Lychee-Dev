@@ -82,7 +82,8 @@ from acceptance. A client folder is a location, not an identity: read
 
 ## Live (game) rules
 
-Native `CON-...` connections use the memory/64-slot architecture described in
+Native `CON-...` connections use the memory/200-slot architecture described in
+`docs/toolkit/live-slot-routing-2026-09-29.md` (current slot allocation and migration),
 `docs/toolkit/live-input-architecture-2026-09-28.md` and the current
 `skills/lycheedev/references/live-investigation.md`. Those contracts govern
 native connection input, recovery, reload, disconnect and installation.

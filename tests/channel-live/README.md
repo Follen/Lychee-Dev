@@ -58,8 +58,8 @@ node tests/channel-live/public-baseline.mjs .tmp/channel-live/lycheedev.exe .tmp
 
 The project must be dedicated to this run. `baseline.json` is created exclusively;
 the runner refuses to overwrite a prior run. It records each argv, exit status,
-duration and original result. Assertions cover cache-off connection, thirteen
-normal tasks and automatic slot rollover, history rotation and read-only old
+duration and original result. Assertions cover cache-off connection, 47
+normal tasks (46 per fresh runtime, then automatic rollover on task 47), history rotation and read-only old
 request replay, compile failure, cleanup failure with verified reload, diagnostic
 completeness and repeated disconnect. Failure retains the exact connection for
 resume; the runner does not abandon or reset it.
@@ -90,7 +90,7 @@ node tests/channel-live/cross-client-baseline.mjs .tmp/channel-live/lycheedev.ex
 
 `targets.json` contains exactly two objects with `name` (lowercase letters),
 absolute `installation`, and the currently observed integer `pid`. Both clients
-must already have the matching managed addon and 64-slot pool activated. The
+must already have the matching managed addon and 200-slot pool activated. The
 runner connects each, submits two async probes concurrently, and checks actor
 isolation and input release. It then checks cache-off large payloads, probe
 timeouts, interrupted observation continuation, and opaque interruption without
@@ -197,7 +197,7 @@ recovery obligation, not a passed case.
 
 The runner aligns runtimes with public reload, injects a six-second publication
 lease hold with no game input, checks one-second pending on both original
-requests, resumes them, executes thirteen paired actor-tagged requests through
+requests, resumes them, executes 47 paired actor-tagged requests through
 capacity reload, and reloads one process while the other's async probe finishes.
 It closes both connections only after all assertions pass. Failure retains the
 connections and reports for public recovery; never delete their journals or slot
@@ -214,5 +214,5 @@ owner or renew an exhausted request.
 After a complete run, `node tests/channel-live/shared-installation-audit.mjs <report.json>`
 reads the current and rotated journals, verifies the original prepare nonce and
 absence of repeated submitted/uncertain effects, confirms actual capacity reload
-intents, and checks all 64 slots have no pending reservation and no window claims
-remain. It writes a separate immutable `journal-audit.json`.
+intents, and checks all 200 slots have no pending reservation and no window claims
+remain. It writes a separate immutable `journal-audit.json`. The read-only audit also accepts historical 64-slot reports with 13 paired commands; new runners require 200 slots and 47 paired commands.

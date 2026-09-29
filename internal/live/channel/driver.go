@@ -142,6 +142,11 @@ func (d *Driver) begin(ctx context.Context, action, ticket string, configure fun
 	}
 	i := d.State.Identity
 	e := bridge.SlotEnvelope{Schema: bridge.SlotSchema, Index: i.NextSlot, Runtime: i.Runtime, Owner: d.State.Owner, Fence: 1, Nonce: nonce, Ticket: ticket, Action: action, GUID: i.GUID, Build: i.Build}
+	if i.Slots == 64 {
+		e.Schema = bridge.LegacySlotSchema
+	} else {
+		e.StartSlot = i.NextSlot
+	}
 	if configure != nil {
 		configure(&e)
 	}
@@ -175,8 +180,19 @@ func (d *Driver) advance(ctx context.Context) (*Receipt, error) {
 		d.Waiting = "closing_exchange_unconfirmed"
 		return d.receive(ctx, tx)
 	}
-	if tx.Phase == "intent" {
+	for tx.Phase == "intent" {
 		if err := d.Backend.Publish(ctx, tx.Envelope); err != nil {
+			var move *slotAvailable
+			if errors.As(err, &move) && tx.Envelope.Schema == bridge.SlotSchema && move.Index > tx.Envelope.Index && move.Index <= bridge.SlotCount && (d.State.Input == nil || d.State.Input.Exchange != tx.Envelope.Nonce) {
+				// Publish proved that this index belongs to another reservation,
+				// before any write. Persist the new destination before trying it;
+				// a crash or allocation race retains this nonce and route origin.
+				tx.Envelope.Index = move.Index
+				if err := d.Save(ctx, "slot_reallocated"); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			return nil, err
 		}
 		tx.Phase = "published"
@@ -336,7 +352,7 @@ func (d *Driver) Run(ctx context.Context) error {
 		case "complete", "cancelled":
 			return nil
 		case "prepared":
-			if d.State.Transaction == nil && d.State.Identity.NextSlot > 49 {
+			if d.State.Transaction == nil && d.State.Identity.NextSlot > d.State.Identity.Slots-15 {
 				return ErrReloadRequired
 			}
 			if d.State.Transaction == nil {

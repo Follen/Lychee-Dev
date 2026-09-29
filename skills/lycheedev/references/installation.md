@@ -91,9 +91,16 @@ or LuaLS on the target machine.
 Before updating a managed installation, finish current operations and disconnect
 your own native CON connections. The installer refuses unresolved host ownership;
 do not clear a foreign project's claim. Deploy through the managed installer,
-then activate the selected process using the startup workflow. All 64 slot files
+then activate the selected process using the startup workflow. All 200 slot-v2 files
 are part of the managed installation. An installed CLI or Skill does not update
 an already running client, and a disk-only result is not live readiness.
+Migration from the old 64-slot pool refuses unresolved reservations; recover
+them through their owning CON rather than deleting files. Existing 64-slot CONs can resume and clean up their original slots before
+migration; new connections require 200 slots. Old records retain their evidence
+and retirement value. With multiple
+instances, activate and verify each authorized PID after the shared installation
+is updated. If the runtime reports `restart_required` because newly installed
+slot folders are unavailable, retain that blocker and restart only within scope.
 If the authorized task includes using the running client, follow
 [live-startup.md](live-startup.md) after deployment. Activation precedes a
 bridge session when the addon is not running; do not require that session as

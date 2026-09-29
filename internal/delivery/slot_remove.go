@@ -8,11 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-// One durable intent owns all 65 moves. The source or archive of each member
+// One durable intent owns the main addon and all slot moves. The source or archive of each member
 // must still match that intent on resume; no recursive deletion or overwrite.
 type addonRemoval struct {
 	Schema  string               `json:"schema"`
@@ -78,7 +77,7 @@ func removeAddonAndSlots(ctx context.Context, parent, archive string) (Removal, 
 	} else if json.Unmarshal(b, &intent) != nil {
 		return Removal{}, ErrInstallation
 	}
-	if intent.Schema != "lycheedev.addon-removal.v1" || intent.Parent != parent || intent.Archive != archive || intent.Receipt == nil || intent.Pool.Schema != "lycheedev.slots.v1" || intent.Pool.State != "ready" || len(intent.Pool.Files) != bridge.SlotCount {
+	if intent.Schema != "lycheedev.addon-removal.v1" || intent.Parent != parent || intent.Archive != archive || intent.Receipt == nil || !validSlotPoolShape(intent.Pool) || intent.Pool.State != "ready" {
 		return Removal{}, ErrInstallation
 	}
 	if err = os.MkdirAll(slotArchive, 0700); err != nil {
@@ -93,7 +92,7 @@ func removeAddonAndSlots(ctx context.Context, parent, archive string) (Removal, 
 		if e != nil {
 			return Removal{}, e
 		}
-		if e = validateRemovalSlot(location, i+1, intent.Pool.Version, entry); e != nil {
+		if e = validateRemovalSlot(location, i+1, intent.Pool.Version, intent.Pool.Schema, entry); e != nil {
 			return Removal{}, e
 		}
 	}
@@ -123,7 +122,7 @@ func removeAddonAndSlots(ctx context.Context, parent, archive string) (Removal, 
 	if main.State != "managed" || string(want) != string(got) {
 		return Removal{}, ErrConflict
 	}
-	for i := 1; i <= bridge.SlotCount; i++ {
+	for i := 1; i <= len(intent.Pool.Files); i++ {
 		if err = moveRemovalMember(ctx, SlotDirectory(parent, i), SlotDirectory(slotArchive, i)); err != nil {
 			return Removal{}, err
 		}
@@ -154,7 +153,7 @@ func removalLocation(source, destination string) (string, bool, error) {
 	}
 	return destination, true, nil
 }
-func validateRemovalSlot(dir string, index int, version string, entry SlotFile) error {
+func validateRemovalSlot(dir string, index int, version, schema string, entry SlotFile) error {
 	if entry.PendingHash != "" || entry.Nonce != "" && !entry.Consumed && entry.RetiredRuntime == "" && !entry.RetiredProcess {
 		return ErrConflict
 	}
@@ -164,7 +163,7 @@ func validateRemovalSlot(dir string, index int, version string, entry SlotFile) 
 	if err := exactSlotFileCount(dir); err != nil {
 		return err
 	}
-	for name, want := range slotStatic(index, version) {
+	for name, want := range slotStaticForSchema(index, version, schema) {
 		got, err := readSlotFile(filepath.Join(dir, name), 16384)
 		if err != nil {
 			return err

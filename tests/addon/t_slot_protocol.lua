@@ -17,7 +17,7 @@ local engine=create(runtime)
 local serial=0
 local function message(action,ticket)
     serial=serial+1
-    return {schema="lycheedev.slot.v1",index=engine.NextSlot(),runtime=runtime,
+    return {schema="lycheedev.slot.v2",index=engine.NextSlot(),runtime=runtime,
         owner=string.rep("2",32),fence=1,nonce=string.format("%032x",serial),ticket=ticket or string.rep("3",32),
         action=action,guid=actor.guid,build="1.2.3.4"}
 end
@@ -42,7 +42,9 @@ assert(send(repeated).reason=="slot_operation_exists");assert(executions==1)
 assert(engine.Receive(commit.index,commit)==nil,"consumed slot reused")
 local other=message("bind");other.owner=string.rep("4",32);assert(send(other).reason=="slot_owner_busy")
 local stale=message("confirm");stale.fence=2;assert(send(stale).reason=="slot_owner_mismatch")
-local old=message("bind");old.runtime=string.rep("a",32);assert(send(old).reason=="slot_runtime_changed")
+local old=message("bind");old.runtime=string.rep("a",32)
+local foreignRecord,foreignReason,skip=engine.Receive(old.index,old)
+assert(not foreignRecord and foreignReason=="slot_skipped_foreign" and skip and not snapshot.receipts[old.nonce])
 local oldRecord=snapshot.receipts[proof.nonce]
 -- Repeated nonces cannot overwrite retained evidence, even in another slot.
 local duplicate=message("confirm");duplicate.nonce=commit.nonce
@@ -51,10 +53,32 @@ assert(send(message("unbind")).state=="unbound")
 assert(engine.Snapshot().owner==nil)
 -- New runtime rejects a full old handshake transcript without business effects.
 local replacement=create(string.rep("f",32))
-local _,rejection=replacement.Receive(binding.index,binding)
-assert(rejection.reason=="slot_runtime_changed")
+local record,rejection,skip=replacement.Receive(binding.index,binding)
+assert(not record and rejection=="slot_skipped_foreign" and skip)
 assert(executions==1)
 -- Invalid-but-loaded files consume all remaining positions without reuse.
-for i=engine.NextSlot(),64 do assert(engine.Receive(i,nil)==nil) end
-assert(engine.NextSlot()==65)
-assert(engine.Receive(65,{})==nil)
+for i=engine.NextSlot(),200 do assert(engine.Receive(i,nil)==nil) end
+assert(engine.NextSlot()==201)
+assert(engine.Receive(201,{})==nil)
+
+
+-- The 200-slot profile reserves control capacity and admits 46 complete jobs.
+engine=create(runtime)
+assert(send(message("bind")).state=="bound")
+for i=1,46 do
+    local ticket=string.format("%032x",10000+i)
+    local prepare=message("prepare",ticket)
+    prepare.code="return 1";prepare.budget=1;prepare.codeBytes=#prepare.code;prepare.codeChecksum=ns.MemoryProtocol.Checksum(prepare.code)
+    local prepared=send(prepare);assert(prepared.state=="prepared","operation capacity was not expanded")
+    local commit=message("commit",ticket);commit.preparedNonce=prepare.nonce;commit.challenge=prepared.challenge
+    assert(send(commit).state=="accepted")
+    local report=send(message("confirm",ticket));assert(report.state=="reported")
+    local release=message("release",ticket);release.reportBytes=report.reportBytes;release.reportChecksum=report.reportChecksum
+    assert(send(release).state=="released")
+end
+assert(engine.NextSlot()==186)
+assert(send(message("prepare",string.rep("e",32))).reason=="slot_capacity")
+-- A malformed foreign public header must stop rather than authorize skipping.
+local malformed=message("bind");malformed.runtime=string.rep("a",32);malformed.fence=0
+local record,reason,skip=engine.Receive(malformed.index,malformed)
+assert(not record and reason=="slot_envelope_invalid" and not skip)

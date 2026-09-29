@@ -11,12 +11,15 @@ import (
 // RetireSlotProcess requires an OS-proven ended PID/creation-time consumer and
 // the publication lease. It reconciles a torn publication, never a consumed ACK.
 func RetireSlotProcess(ctx context.Context, parent, version, consumer string, e bridge.SlotEnvelope) error {
-	if consumer == "" || e.Index < 1 || e.Index > 64 || e.Nonce == "" {
+	if consumer == "" || e.Index < 1 || e.Index > bridge.SlotCount || e.Nonce == "" {
 		return ErrInstallation
 	}
 	pool, err := InspectSlots(ctx, parent, version)
 	if err != nil {
 		return err
+	}
+	if e.Index > len(pool.Files) {
+		return ErrInstallation
 	}
 	slot := &pool.Files[e.Index-1]
 	if slot.Nonce != e.Nonce {
@@ -47,12 +50,15 @@ func RetireSlotProcess(ctx context.Context, parent, version, consumer string, e 
 // are compared for equality, not chronological ordering. This reconciles torn
 // publication without fabricating a consumed receipt or touching other claims.
 func RetireSlotRuntime(ctx context.Context, parent, version, consumer string, e bridge.SlotEnvelope, currentRuntime string) error {
-	if consumer == "" || e.Nonce == "" || currentRuntime == e.Runtime || len(currentRuntime) != 32 || e.Index < 1 || e.Index > 64 {
+	if consumer == "" || e.Nonce == "" || currentRuntime == e.Runtime || len(currentRuntime) != 32 || e.Index < 1 || e.Index > bridge.SlotCount {
 		return ErrInstallation
 	}
 	pool, err := InspectSlots(ctx, parent, version)
 	if err != nil {
 		return err
+	}
+	if e.Index > len(pool.Files) {
+		return ErrInstallation
 	}
 	slot := &pool.Files[e.Index-1]
 	if slot.Nonce != e.Nonce {

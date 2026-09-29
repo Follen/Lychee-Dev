@@ -198,7 +198,7 @@ func TestSignalLivenessLossDoesNotSuppressRuntimeDiscovery(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			peer := &signalRecoveryPeer{reason: reason, stop: cancel}
-			i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "3.0.0", InputState: bridge.InputSignalCapability}
+			i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "3.0.0", InputState: bridge.InputSignalCapability}
 			d, err := New(filepath.Join(t.TempDir(), "signal.jsonl"), peer, i)
 			if err != nil {
 				t.Fatal(err)

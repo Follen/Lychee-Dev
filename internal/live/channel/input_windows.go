@@ -129,6 +129,9 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 		if err := delivery.VerifySlotPublication(ctx, n.Parent, n.Version, n.Consumer, a.Envelope); err != nil {
 			return InputOutcome{Disposition: "not_sent", Reason: "slot_publication_changed"}, err
 		}
+		if err := delivery.VerifySlotRoute(ctx, n.Parent, a.Envelope); err != nil {
+			return InputOutcome{Disposition: "not_sent", Reason: "slot_route_changed"}, err
+		}
 	} else {
 		// Reload loads no slot payload. Validate the pool under its own lock,
 		// then release it before the physical burst or runtime readiness wait.

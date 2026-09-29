@@ -3,7 +3,8 @@ local _, ns = ...
 -- Pure bounded protocol engine. Host input, frames, file loading and async
 -- execution are adapters; there is only one owner and one active business job.
 local ZERO=string.rep("0",32)
-local LIMIT=64
+local LIMIT=200
+local MAX_OPERATIONS=math.floor((LIMIT-16)/4)
 local function plain(v)return not (issecretvalue and issecretvalue(v)) and type(v)=="table" and getmetatable(v)==nil end
 local function safe(v)return not (issecretvalue and issecretvalue(v))end
 
@@ -11,7 +12,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     assert(plain(adapter) and ns.MemoryProtocol.Token(adapter.runtime),"invalid slot adapter")
     local wire=ns.MemoryProtocol
     local owner,fence,active,pending
-    local sequence,count=0,0
+    local sequence,count,cursor=0,0,1
     local consumed,operations,receipts={},{},{}
     local descriptor
     local api={}
@@ -22,8 +23,8 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         end
     end
     local function nextSlot()
-        for i=1,LIMIT do if not consumed[i] then return i end end
-        return LIMIT+1
+        while cursor<=LIMIT and consumed[cursor] do cursor=cursor+1 end
+        return cursor
     end
     local function actor()
         local value=adapter.actor()
@@ -40,7 +41,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if sequence>=4294967295 then return nil,"slot_sequence_exhausted" end
         local a=actor();if not a then return nil,"slot_actor_unavailable" end
         sequence=sequence+1
-        local value={schema="lycheedev.slot.v1",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
+        local value={schema="lycheedev.slot.v2",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
             nonce=e.nonce,ticket=e.ticket or ZERO,action=e.action,state=state,sequence=sequence,
             nextSlot=nextSlot(),slots=LIMIT,character=a.character,realm=a.realm,guid=a.guid,
             build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState}
@@ -83,13 +84,19 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if type(index)~="number" or index%1~=0 or index<1 or index>LIMIT then return nil,"slot_index_invalid" end
         if consumed[index] then return nil,"slot_already_consumed" end
         consumed[index]=true -- Load-on-demand is consumed even by invalid data.
+        if e==nil then return nil,"slot_skipped_empty",true end
         if not plain(e) then return nil,"slot_envelope_invalid" end
         -- Never inspect or execute encoded business code before these checks.
         for _,key in ipairs({"schema","index","runtime","owner","fence","nonce","ticket","action","guid","build","challenge","preparedNonce","reportBytes","reportChecksum"}) do if not safe(e[key]) then return nil,"slot_secret_envelope" end end
-        if e.schema~="lycheedev.slot.v1" or e.index~=index or not wire.Token(e.nonce)
-            or not wire.Token(e.ticket) or not wire.Token(e.owner) then return nil,"slot_envelope_invalid" end
+        if e.schema~="lycheedev.slot.v2" or e.index~=index or not wire.Token(e.nonce)
+            or not wire.Token(e.ticket) or not wire.Token(e.owner) or not wire.Token(e.runtime) then return nil,"slot_envelope_invalid" end
+        if e.runtime~=adapter.runtime then
+            if type(e.guid)~="string" or type(e.build)~="string"
+                or type(e.fence)~="number" or e.fence<1 or e.fence%1~=0 or e.fence>9007199254740991
+                or (e.action~="bind" and e.action~="prepare" and e.action~="commit" and e.action~="confirm" and e.action~="release" and e.action~="unbind") then return nil,"slot_envelope_invalid" end
+            return nil,"slot_skipped_foreign",true
+        end
         if receipts[e.nonce] then return receipts[e.nonce],"slot_nonce_reused" end
-        if e.runtime~=adapter.runtime then return reject(e,"slot_runtime_changed") end
         local a=actor();if not a or a.guid~=e.guid or e.build~=adapter.build then return reject(e,"slot_target_changed") end
         if type(e.fence)~="number" or e.fence<1 or e.fence%1~=0 or e.fence>9007199254740991 then return reject(e,"slot_fence_invalid") end
         if e.action=="bind" then
@@ -103,7 +110,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if e.action=="prepare" then
             if active or pending then return reject(e,"slot_busy") end
             if operations[e.ticket] then return reject(e,"slot_operation_exists") end
-            if nextSlot()>LIMIT-3 or count>=12 then return reject(e,"slot_capacity") end
+            if nextSlot()>LIMIT-3 or count>=MAX_OPERATIONS then return reject(e,"slot_capacity") end
             if not safe(e.code) or type(e.code)~="string" or #e.code<1 or #e.code>262144 or e.code:byte(1)==27
                 or not safe(e.codeBytes) or e.codeBytes~=#e.code or not safe(e.codeChecksum) or e.codeChecksum~=wire.Checksum(e.code)
                 or not safe(e.budget) or type(e.budget)~="number" or e.budget%1~=0 or e.budget<1 or e.budget>120 then return reject(e,"slot_code_invalid") end

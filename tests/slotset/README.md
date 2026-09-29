@@ -1,6 +1,9 @@
 # Bounded shared-slot admission prototype
 
 This package contains **test-only Go and Lua prototypes**, not a shipping protocol or a CLI feature.
+The Lua adapter follows the current v2 single-envelope engine and transport metadata.
+The collection schema and frozen 64-slot Go model remain historical experiments;
+neither is the adopted 200-slot routing protocol.
 Run `go test ./tests/slotset -count=1 -v`. No game input, installed addon files,
 production connection journals, or production publisher are changed.
 
@@ -109,9 +112,9 @@ this Lua test) plus the six persistence fault subtests.
   each consume the prototype slot. A corrected file cannot retry that attempted
   index. The prototype loader records attempted before parsing and deliberately
   calls `Receive(index, nil)` on failure, which uses the real engine's existing
-  invalid-envelope consumption rule. This is an experimental mechanism, not a
+  nil-envelope consumption rule (`slot_skipped_empty`). This is an experimental mechanism, not a
   production receipt or permission to fabricate a successful bind.
-- The legacy single-envelope Receive rejects the collection schema, consumes
+- The current single-envelope Receive rejects the collection schema, consumes
   its engine slot, and executes no business code. This tests its callback
   rejection, not safe coexistence of old and new installed loaders.
 - The actual current SlotRuntime, with LoadInputSlot throwing on invalid Lua,

@@ -13,7 +13,9 @@ ns.Compat = {
         return value
     end,
     LoadInputSlot = function(name)
-        if type(name)~="string" or not name:match("^Lychee Dev Slot %d%d$") then return nil,"slot_name_invalid" end
+        if type(name)~="string" then return nil,"slot_name_invalid" end
+        local index=tonumber(name:match("^Lychee Dev Slot (%d+)$"))
+        if not index or index<1 or index>200 or name~=string.format("Lychee Dev Slot %02d",index) then return nil,"slot_name_invalid" end
         if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
         local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
         if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end

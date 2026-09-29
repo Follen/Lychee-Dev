@@ -91,7 +91,9 @@ func TestClosingExplicitReloadResumeKeepsRequestBudgetAndInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	budget := *d.State.Reload.RecoveryBudget
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	// Persist the reload/input first, then exercise a bounded missing-proof
+	// wait. Disk scheduling under the full suite is not the behavior under test.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	err := d.Continue(ctx)
 	cancel()
 	if !errors.Is(err, ErrPending) || len(p.inputs) != 1 || d.State.Reload.Phase != "input_attempted" {

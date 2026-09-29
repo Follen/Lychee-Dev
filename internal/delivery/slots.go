@@ -16,6 +16,11 @@ import (
 )
 
 const slotMarker = ".lycheedev-slots.json"
+const slotPoolSchema = "lycheedev.slots.v2"
+const legacySlotPoolSchema = "lycheedev.slots.v1"
+const slotPoolMigrationSchema = "lycheedev.slots.migration.v2"
+const slotPoolManifestLimit = 256 << 10
+
 const inertSlot = "LycheeDevSlotEnvelope = nil\n"
 
 var ErrSlotReserved = errors.New("delivery.slot_reserved")
@@ -43,9 +48,16 @@ func SlotDirectory(parent string, index int) string {
 }
 func slotDigest(b []byte) string { return fmt.Sprintf("%x", sha256.Sum256(b)) }
 func slotStatic(index int, version string) map[string][]byte {
+	return slotStaticForSchema(index, version, slotPoolSchema)
+}
+func slotStaticForSchema(index int, version, schema string) map[string][]byte {
+	transport := "memory-slot-v2"
+	if schema == legacySlotPoolSchema || schema == slotPoolMigrationSchema {
+		transport = "memory-slot-v1"
+	}
 	name := fmt.Sprintf("Lychee Dev Slot %02d", index)
 	return map[string][]byte{
-		name + ".toc": []byte(fmt.Sprintf("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot %02d\n## Version: %s\n## LoadOnDemand: 1\n## X-Lychee-Slot: %d\n## X-Lychee-Transport: memory-slot-v1\nPayload.lua\nLoader.lua\n", index, version, index)),
+		name + ".toc": []byte(fmt.Sprintf("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot %02d\n## Version: %s\n## LoadOnDemand: 1\n## X-Lychee-Slot: %d\n## X-Lychee-Transport: %s\nPayload.lua\nLoader.lua\n", index, version, index, transport)),
 		"Loader.lua":  []byte(fmt.Sprintf("local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.SlotRuntime then ns.SlotRuntime.Receive(%d, envelope) end\n", index)),
 	}
 }
@@ -75,7 +87,7 @@ func RepairSlotBootstrap(ctx context.Context, parent, version string) error {
 		if err = exactSlotFileCount(dir); err != nil {
 			return err
 		}
-		for name, want := range slotStatic(i+1, version) {
+		for name, want := range slotStaticForSchema(i+1, version, pool.Schema) {
 			path := filepath.Join(dir, name)
 			actual, e := readSlotFile(path, 16384)
 			if e != nil {
@@ -108,20 +120,24 @@ func RepairSlotBootstrap(ctx context.Context, parent, version string) error {
 }
 func readSlotPool(parent string) (SlotPool, error) {
 	var pool SlotPool
-	b, err := readSlotFile(filepath.Join(parent, slotMarker), 65536)
+	b, err := readSlotFile(filepath.Join(parent, slotMarker), slotPoolManifestLimit)
 	if err != nil {
 		return pool, err
 	}
-	if len(b) > 65536 {
+	if len(b) > slotPoolManifestLimit {
 		return pool, ErrInstallation
 	}
 	if err = json.Unmarshal(b, &pool); err != nil {
 		return pool, err
 	}
-	if pool.Schema != "lycheedev.slots.v1" || len(pool.Files) != bridge.SlotCount || pool.Version == "" {
+	if !validSlotPoolShape(pool) {
 		return pool, ErrInstallation
 	}
 	return pool, nil
+}
+
+func validSlotPoolShape(pool SlotPool) bool {
+	return pool.Version != "" && (pool.Schema == legacySlotPoolSchema && len(pool.Files) == 64 || pool.Schema == slotPoolSchema && len(pool.Files) == 200 || pool.Schema == slotPoolMigrationSchema && len(pool.Files) == 64 && pool.State == "upgrading" && pool.PendingVersion != "")
 }
 
 func readSlotFile(path string, limit int64) ([]byte, error) {
@@ -147,6 +163,9 @@ func saveSlotPool(ctx context.Context, parent string, pool SlotPool) error {
 	b, err := json.MarshalIndent(pool, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(b) > slotPoolManifestLimit {
+		return ErrInstallation
 	}
 	return vault.ReplaceFile(ctx, filepath.Join(parent, slotMarker), b)
 }
@@ -186,16 +205,18 @@ func installSlotPool(ctx context.Context, parent, version string) (SlotPool, err
 				return pool, fmt.Errorf("%w: unmanaged slot %d", ErrInstallation, i)
 			}
 		}
-		pool = SlotPool{Schema: "lycheedev.slots.v1", Version: version, State: "installing", Files: make([]SlotFile, bridge.SlotCount)}
+		pool = SlotPool{Schema: slotPoolSchema, Version: version, State: "installing", Files: make([]SlotFile, bridge.SlotCount)}
 		if err = saveSlotPool(ctx, parent, pool); err != nil {
 			return pool, err
 		}
 	} else if err != nil {
 		return pool, err
-	} else if pool.Version != version {
+	} else if pool.State == "upgrading" || pool.State == "ready" && (pool.Version != version || pool.Schema != slotPoolSchema) {
 		return upgradeSlotPool(ctx, parent, pool, version)
+	} else if pool.State != "ready" && pool.State != "installing" {
+		return pool, ErrInstallation
 	}
-	for i := 1; i <= bridge.SlotCount; i++ {
+	for i := 1; i <= len(pool.Files); i++ {
 		dir := SlotDirectory(parent, i)
 		if err = os.MkdirAll(dir, 0700); err != nil {
 			return pool, err
@@ -203,7 +224,7 @@ func installSlotPool(ctx context.Context, parent, version string) (SlotPool, err
 		if err = plainSlotDirectory(dir); err != nil {
 			return pool, err
 		}
-		for name, want := range slotStatic(i, version) {
+		for name, want := range slotStaticForSchema(i, pool.Version, pool.Schema) {
 			path := filepath.Join(dir, name)
 			actual, e := readSlotFile(path, 16384)
 			if e == nil {
@@ -241,7 +262,13 @@ func installSlotPool(ctx context.Context, parent, version string) (SlotPool, err
 		}
 	}
 	pool.State = "ready"
-	return pool, saveSlotPool(ctx, parent, pool)
+	if err = saveSlotPool(ctx, parent, pool); err != nil {
+		return pool, err
+	}
+	if pool.Schema != slotPoolSchema || pool.Version != version {
+		return upgradeSlotPool(ctx, parent, pool, version)
+	}
+	return pool, nil
 }
 
 // All old/new bytes are checked before a resumable per-file replacement. The
@@ -252,12 +279,21 @@ func upgradeSlotPool(ctx context.Context, parent string, pool SlotPool, version 
 			return pool, err
 		}
 		for _, entry := range pool.Files {
-			if entry.PendingHash != "" || (entry.Nonce != "" && !entry.Consumed && entry.RetiredRuntime == "" && !entry.RetiredProcess) {
+			if entry.PendingHash != "" || entry.Nonce != "" && !entry.Consumed && entry.RetiredRuntime == "" && !entry.RetiredProcess {
 				return pool, fmt.Errorf("%w: unresolved slot", ErrConflict)
+			}
+		}
+		// An extension can only adopt paths absent before this durable intent.
+		for i := len(pool.Files) + 1; i <= bridge.SlotCount; i++ {
+			if _, err := os.Lstat(SlotDirectory(parent, i)); !errors.Is(err, os.ErrNotExist) {
+				return pool, fmt.Errorf("%w: unmanaged slot %d", ErrInstallation, i)
 			}
 		}
 		pool.State = "upgrading"
 		pool.PendingVersion = version
+		if pool.Schema == legacySlotPoolSchema {
+			pool.Schema = slotPoolMigrationSchema
+		}
 		if err := saveSlotPool(ctx, parent, pool); err != nil {
 			return pool, err
 		}
@@ -265,40 +301,128 @@ func upgradeSlotPool(ctx context.Context, parent string, pool SlotPool, version 
 	if pool.State != "upgrading" || pool.PendingVersion != version {
 		return pool, ErrConflict
 	}
-	for i := 1; i <= bridge.SlotCount; i++ {
-		dir := SlotDirectory(parent, i)
-		if err := plainSlotDirectory(dir); err != nil {
-			return pool, err
-		}
-		old := slotStatic(i, pool.Version)
-		for name, want := range slotStatic(i, version) {
-			path := filepath.Join(dir, name)
-			actual, err := readSlotFile(path, 16384)
-			if err != nil {
-				return pool, err
-			}
-			if slotDigest(actual) != slotDigest(want) && slotDigest(actual) != slotDigest(old[name]) {
+	// An interrupted older version upgrade may still carry the legacy schema.
+	// Version the intent before any expansion so an old CLI cannot resume it as
+	// a 64-slot upgrade and discard the extension's ownership evidence.
+	if pool.Schema == legacySlotPoolSchema {
+		for i := 65; i <= bridge.SlotCount; i++ {
+			if _, err := os.Lstat(SlotDirectory(parent, i)); !errors.Is(err, os.ErrNotExist) {
 				return pool, ErrInstallation
 			}
-			if err = vault.ReplaceFile(ctx, path, want); err != nil {
-				return pool, err
-			}
 		}
-		path := filepath.Join(dir, "Payload.lua")
-		actual, err := readSlotFile(path, 2<<20)
-		if err != nil {
-			return pool, err
-		}
-		if slotDigest(actual) != pool.Files[i-1].PayloadHash && slotDigest(actual) != slotDigest([]byte(inertSlot)) {
-			return pool, ErrInstallation
-		}
-		if err = vault.ReplaceFile(ctx, path, []byte(inertSlot)); err != nil {
+		pool.Schema = slotPoolMigrationSchema
+		if err := saveSlotPool(ctx, parent, pool); err != nil {
 			return pool, err
 		}
 	}
+	for _, entry := range pool.Files {
+		if entry.PendingHash != "" || entry.Nonce != "" && !entry.Consumed && entry.RetiredRuntime == "" && !entry.RetiredProcess {
+			return pool, ErrConflict
+		}
+	}
+	type replacement struct {
+		path string
+		data []byte
+	}
+	var writes []replacement
+	var directories []string
+	// Validate every old, replaced and newly created file before modifying any.
+	// The original files stay in the versioned intent until the final commit.
+	for i := 1; i <= bridge.SlotCount; i++ {
+		if err := ctx.Err(); err != nil {
+			return pool, err
+		}
+		dir := SlotDirectory(parent, i)
+		existing := i <= len(pool.Files)
+		info, err := os.Lstat(dir)
+		absent := errors.Is(err, os.ErrNotExist)
+		if err != nil && (!absent || existing) {
+			return pool, err
+		}
+		if !absent {
+			if !info.IsDir() {
+				return pool, ErrInstallation
+			}
+			if err = plainSlotDirectory(dir); err != nil {
+				return pool, err
+			}
+		} else {
+			directories = append(directories, dir)
+		}
+		desired := slotStatic(i, version)
+		desired["Payload.lua"] = []byte(inertSlot)
+		previous := slotStaticForSchema(i, pool.Version, pool.Schema)
+		if !absent {
+			entries, e := os.ReadDir(dir)
+			if e != nil {
+				return pool, e
+			}
+			if existing && len(entries) != 3 {
+				return pool, ErrInstallation
+			}
+			for _, entry := range entries {
+				if _, known := desired[entry.Name()]; !known {
+					return pool, ErrInstallation
+				}
+			}
+		}
+		for name, want := range desired {
+			path := filepath.Join(dir, name)
+			limit := int64(16384)
+			if name == "Payload.lua" {
+				limit = 2 << 20
+			}
+			actual, e := readSlotFile(path, limit)
+			if errors.Is(e, os.ErrNotExist) && !existing {
+				writes = append(writes, replacement{path, want})
+				continue
+			}
+			if e != nil {
+				return pool, e
+			}
+			hash := slotDigest(actual)
+			if hash == slotDigest(want) {
+				continue
+			}
+			allowed := ""
+			if existing {
+				if name == "Payload.lua" {
+					allowed = pool.Files[i-1].PayloadHash
+				} else {
+					allowed = slotDigest(previous[name])
+				}
+			}
+			legacyTarget := ""
+			if existing && pool.Schema == slotPoolMigrationSchema && name != "Payload.lua" {
+				legacyTarget = slotDigest(slotStaticForSchema(i, version, legacySlotPoolSchema)[name])
+			}
+			if allowed == "" || hash != allowed && hash != legacyTarget {
+				return pool, ErrInstallation
+			}
+			writes = append(writes, replacement{path, want})
+		}
+	}
+	for _, dir := range directories {
+		if err := ctx.Err(); err != nil {
+			return pool, err
+		}
+		if err := os.Mkdir(dir, 0700); err != nil {
+			return pool, err
+		}
+		if err := plainSlotDirectory(dir); err != nil {
+			return pool, err
+		}
+	}
+	for _, write := range writes {
+		if err := vault.ReplaceFile(ctx, write.path, write.data); err != nil {
+			return pool, err
+		}
+	}
+	pool.Schema = slotPoolSchema
 	pool.Version = version
 	pool.PendingVersion = ""
 	pool.State = "ready"
+	pool.Files = make([]SlotFile, bridge.SlotCount)
 	for i := range pool.Files {
 		pool.Files[i] = SlotFile{PayloadHash: slotDigest([]byte(inertSlot))}
 	}
@@ -326,7 +450,7 @@ func InspectSlots(ctx context.Context, parent, version string) (SlotPool, error)
 		if err = exactSlotFileCount(dir); err != nil {
 			return pool, err
 		}
-		for name, want := range slotStatic(i+1, version) {
+		for name, want := range slotStaticForSchema(i+1, version, pool.Schema) {
 			actual, e := readSlotFile(filepath.Join(dir, name), 16384)
 			if e != nil {
 				return pool, e
@@ -347,6 +471,13 @@ func InspectSlots(ctx context.Context, parent, version string) (SlotPool, error)
 	return pool, nil
 }
 
+// Legacy pools remain usable only with the original fixed-slot envelope. A
+// caller recovering v1 must never reinterpret that installation as v2 routing.
+func slotEnvelopeMatchesPool(pool SlotPool, e bridge.SlotEnvelope) bool {
+	return pool.Schema == slotPoolSchema && e.Schema == bridge.SlotSchema ||
+		pool.Schema == legacySlotPoolSchema && e.Schema == bridge.LegacySlotSchema && e.StartSlot == 0 && e.Index <= 64
+}
+
 // PublishSlot requires the installation publication lease for this disk change.
 // Its durable per-slot reservation survives CLI death and protects the payload
 // between publication, input and verified receipt reconciliation.
@@ -355,7 +486,10 @@ func PublishSlot(ctx context.Context, parent, version, consumer string, envelope
 	if err != nil {
 		return err
 	}
-	if envelope.Index < 1 || envelope.Index > bridge.SlotCount || consumer == "" {
+	if !slotEnvelopeMatchesPool(pool, envelope) {
+		return ErrInstallation
+	}
+	if envelope.Index < 1 || envelope.Index > len(pool.Files) || consumer == "" {
 		return ErrInstallation
 	}
 	entry := &pool.Files[envelope.Index-1]
@@ -399,7 +533,10 @@ func VerifySlotPublication(ctx context.Context, parent, version, consumer string
 	if err != nil {
 		return err
 	}
-	if envelope.Index < 1 || envelope.Index > bridge.SlotCount || consumer == "" {
+	if !slotEnvelopeMatchesPool(pool, envelope) {
+		return ErrInstallation
+	}
+	if envelope.Index < 1 || envelope.Index > len(pool.Files) || consumer == "" {
 		return ErrInstallation
 	}
 	e := pool.Files[envelope.Index-1]
@@ -422,7 +559,7 @@ func ConfirmSlotConsumed(ctx context.Context, parent, version, consumer string, 
 	if err != nil {
 		return err
 	}
-	if index < 1 || index > bridge.SlotCount {
+	if index < 1 || index > len(pool.Files) {
 		return ErrInstallation
 	}
 	entry := &pool.Files[index-1]

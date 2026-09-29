@@ -195,6 +195,7 @@ func retirementWithRecovery(t *testing.T) (*Driver, *stopReconcilePeer, *retirem
 	tx.Envelope.Runtime = from.Runtime
 	tx.Envelope.Nonce = strings.Repeat("7", 32)
 	tx.Envelope.Index = 2
+	tx.Envelope.StartSlot = 2
 	d.State.Recovery = &RuntimeRecovery{From: from, Transaction: &tx, Phase: "binding"}
 	if err := d.Save(context.Background(), "two_retirements_fixture"); err != nil {
 		t.Fatal(err)

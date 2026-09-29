@@ -16,7 +16,7 @@ local function engine(runtime)
         execute=function()executed=executed+1;error("unexpected business execution")end})
 end
 local function member(runtime,owner)
-    return {schema="lycheedev.slot.v1",index=1,runtime=runtime,owner=owner or runtime,fence=1,
+    return {schema="lycheedev.slot.v2",index=1,runtime=runtime,owner=owner or runtime,fence=1,
         nonce=runtime,ticket=string.rep("0",32),action="bind",guid="Player-1-1",build="70000",
         code="error('must never run')"}
 end
@@ -52,14 +52,14 @@ local function loader(e,runtime)
         -- Receive, including decode failure. Existing SlotRuntime does not do it.
         if reason then
             local _,rejected=e.Receive(index,nil)
-            assert(rejected=="slot_envelope_invalid")
+            assert(rejected=="slot_skipped_empty")
             return nil,reason
         end
         return e.Receive(index,chosen)
     end
 end
 local function literal(runtime)
-    return string.format('{schema="lycheedev.slot.v1",index=1,runtime="%s",owner="%s",fence=1,nonce="%s",ticket="%s",action="bind",guid="Player-1-1",build="70000",code="error(123)"}',runtime,runtime,runtime,string.rep("0",32))
+    return string.format('{schema="lycheedev.slot.v2",index=1,runtime="%s",owner="%s",fence=1,nonce="%s",ticket="%s",action="bind",guid="Player-1-1",build="70000",code="error(123)"}',runtime,runtime,runtime,string.rep("0",32))
 end
 local sharedSource='return {schema="'..schema..'",members={'..literal(A)..','..literal(B)..'}}'
 local set=assert(parse(sharedSource))
@@ -84,11 +84,11 @@ for _,case in ipairs({
     assert(again=="already_attempted")
     print("PASS consumes before retry: "..reason)
 end
--- Current legacy Receive accepts only the single-envelope schema, never a set.
+-- Current production Receive accepts only the single-envelope schema, never a set.
 local legacy=engine(A)
 local _,reason=legacy.Receive(1,set)
 assert(reason=="slot_envelope_invalid" and legacy.NextSlot()==2 and not legacy.Snapshot().owner)
-print("PASS legacy rejects outer collection schema")
+print("PASS production single-envelope engine rejects outer collection schema")
 
 -- Exercise actual SlotRuntime wake/expectedSlot cleanup with a throwing parser.
 -- No WoW loader is present; this adapter reports attempted file evaluation only.
@@ -106,6 +106,7 @@ local loads=0
 ns.Compat={MonotonicSeconds=function()return 100 end,
     GetAddOnMetadata=function(name,key)
         if key=="Version" then return "test" end
+        if key=="X-Lychee-Transport" then return "memory-slot-v2" end
         return tostring(tonumber(name:match("(%d+)$")))
     end,
     LoadInputSlot=function()

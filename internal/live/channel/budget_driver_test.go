@@ -110,7 +110,9 @@ func TestDriverExpiredBusinessStillClosesUnpublishedWork(t *testing.T) {
 	if err := d.RequestClose(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := stopReconcileContinue(d); err != nil {
+	// The business deadline above uses the injected clock. Allow real journal
+	// flushes to finish under disk contention; this is not a 350ms latency test.
+	if err := stopReconcileContinueFor(d, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if !d.State.Closed || d.State.Operation.Stage != "cancelled" {

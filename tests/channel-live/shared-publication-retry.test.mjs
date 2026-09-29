@@ -1,11 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {publicationRetry,dependencyChanged} from './shared-publication-retry.mjs';
 
 const target={session:'CON-a',installation:'D:/Game'};
 const consumers=new Set(['1/10','2/20']);
 const pending=()=>({session:'CON-a',operationState:'prepared',continuation:{session:'CON-a',kind:'wait_external',remainingBudgetMs:1000,blocker:{kind:'slot_reservation',installation:'D:\\Game\\Interface\\AddOns',consumer:'2/20',runtime:'r',nonce:'n',slot:1}}});
-const pool=()=>({files:Array.from({length:64},()=>({consumer:'2/20',runtime:'r',nonce:'n',consumed:false}))});
+const pool=()=>({files:Array.from({length:200},()=>({consumer:'2/20',runtime:'r',nonce:'n',consumed:false}))});
+
+test('slot 200 remains bounded and requires its exact dependency to change',()=>{
+  const r=pending();r.continuation.blocker.slot=200;
+  const b=publicationRetry(r,target,consumers),p=pool();
+  assert.ok(b);
+  assert.equal(dependencyChanged(b,p,'old',true),false);
+  p.files[199].consumed=true;
+  assert.equal(dependencyChanged(b,p,'old',false),true);
+  assert.equal(dependencyChanged({kind:'publication_lock'},{files:p.files.slice(0,64)},'old',true),false);
+});
 
 test('only exact owned temporary publication blockers qualify',()=>{
   assert.ok(publicationRetry(pending(),target,consumers));
@@ -15,7 +30,7 @@ test('only exact owned temporary publication blockers qualify',()=>{
     r=>r.continuation.kind='needs_decision',r=>r.continuation.remainingBudgetMs=0,
     r=>delete r.continuation.remainingBudgetMs,r=>r.continuation.blocker.consumer='3/30',
     r=>r.continuation.blocker.kind='active_driver',r=>r.continuation.blocker.installation='D:/Other',
-    r=>r.continuation.blocker.slot=65,
+    r=>r.continuation.blocker.slot=201,
   ]){const r=pending();mutate(r);assert.equal(publicationRetry(r,target,consumers),null);}
 });
 
@@ -37,4 +52,29 @@ test('short lease requires observed installation or peer-call progress',()=>{
   p.files[0].consumed=true;
   assert.equal(dependencyChanged(b,p,before,false),true);
   assert.equal(dependencyChanged(b,{files:[]},before,true),false);
+});
+
+test('post-run audit keeps legacy 13-command evidence and accepts current 47-command evidence',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lychee-slot-audit-'));
+  try {
+    for(const slots of [64,200]) {
+      const dir=path.join(root,String(slots)),installation=path.join(dir,'game'),project=path.join(dir,'project');
+      const parent=path.join(installation,'Interface/AddOns'),logs=path.join(project,'.lycheedev/live/connections');
+      await fs.mkdir(logs,{recursive:true});
+      await fs.mkdir(path.join(parent,'.lycheedev-window-owners'),{recursive:true});
+      await fs.writeFile(path.join(parent,'.lycheedev-slots.json'),JSON.stringify({files:Array.from({length:slots},()=>({}))}));
+      const rows=[
+        {kind:'slot_intent',data:{identity:{slots},operation:{request:'wait-resume'},transaction:{envelope:{action:'prepare',nonce:'one'}}}},
+        {kind:'automatic_reload_intent',data:{reload:{request:'capacity-one'}}},
+        {kind:'closed',data:{closed:true}},
+      ];
+      await fs.writeFile(path.join(logs,'CON-a.jsonl'),rows.map(r=>JSON.stringify(r)).join('\n'));
+      const report={complete:true,targets:[{name:'a',session:'CON-a',project,installation}],steps:Array.from({length:Math.floor((slots-16)/4)+1},(_,i)=>({target:'a',name:`paired-${i}`,exitCode:0}))};
+      if(slots===200)report.slotCount=slots;
+      const file=path.join(dir,'report.json');await fs.writeFile(file,JSON.stringify(report));
+      const result=JSON.parse(execFileSync(process.execPath,[fileURLToPath(new URL('./shared-installation-audit.mjs',import.meta.url)),file],{encoding:'utf8'}));
+      assert.equal(result.complete,true);assert.equal(result.slotCount,slots);
+      assert.equal(result.targets[0].pairedCommands,slots===200?47:13);
+    }
+  } finally {await fs.rm(root,{recursive:true,force:true});}
 });

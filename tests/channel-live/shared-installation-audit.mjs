@@ -34,12 +34,16 @@ for(const t of report.targets){
   const capacity=new Set(rows.filter(r=>r.kind==='automatic_reload_intent'&&r.data.reload?.request?.startsWith('capacity-')).map(r=>r.data.reload.request));
   assert.ok(capacity.size>0,'no actual capacity reload intent');
   const commands=report.steps.filter(s=>s.target===t.name&&/^paired-\d+$/.test(s.name));
-  assert.equal(commands.length,13);assert.ok(commands.every(s=>s.exitCode===0));
+  const slots=report.slotCount??rows.find(r=>r.data?.identity?.slots)?.data.identity.slots;
+  assert.ok(slots===64||slots===200,'unsupported evidence slot count');
+  assert.equal(commands.length,Math.floor((slots-16)/4)+1);assert.ok(commands.every(s=>s.exitCode===0));
   audit.targets.push({name:t.name,closed:true,prepareNonces:[...prepareNonces],capacityReloads:capacity.size,submittedEffects:submitted.size,zeroSendAttempts:zero,pairedCommands:commands.length});
 }
 const parent=path.join(report.targets[0].installation,'Interface/AddOns');
 const pool=JSON.parse(await fs.readFile(path.join(parent,'.lycheedev-slots.json'),'utf8'));
-assert.equal(pool.files.length,64);
+assert.ok(pool.files.length===64||pool.files.length===200,'unsupported slot pool');
+if(report.slotCount!==undefined)assert.equal(pool.files.length,report.slotCount);
+audit.slotCount=pool.files.length;
 audit.pendingSlots=pool.files.filter(s=>s.pendingHash||(s.nonce&&!s.consumed&&!s.retiredRuntime&&!s.retiredProcess)).length;
 assert.equal(audit.pendingSlots,0);
 audit.claims=(await fs.readdir(path.join(parent,'.lycheedev-window-owners'))).filter(f=>f.endsWith('.json')).length;

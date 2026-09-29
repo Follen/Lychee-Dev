@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 )
@@ -347,7 +348,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 			if candidate.Runtime <= a.PriorRuntime || candidate.Owner != "" || candidate.Build != meta.Target.Client.FullBuild || candidate.Product != meta.Target.Client.Product {
 				continue
 			}
-			if candidate.Inventory != nil && *candidate.Inventory != 64 {
+			if candidate.Slots != bridge.SlotCount || candidate.Inventory != nil && *candidate.Inventory != candidate.Slots {
 				return r, errors.New("live.channel_client_restart_required")
 			}
 			d, e := New(p.log(id), n, candidate)

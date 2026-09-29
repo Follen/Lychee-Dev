@@ -201,11 +201,19 @@ func (n *Native) Publish(ctx context.Context, e bridge.SlotEnvelope) (err error)
 			return inspectErr
 		}
 		reserved := pool.Files[e.Index-1]
-		return &BlockedError{Blocker: Blocker{
+		blocked := &BlockedError{Blocker: Blocker{
 			Kind: "slot_reservation", Installation: n.Parent, Slot: e.Index,
 			Consumer: reserved.Consumer, Runtime: reserved.Runtime, Nonce: reserved.Nonce,
 			Condition: "exact_consumption_or_retirement_evidence",
 		}}
+		if e.Schema == bridge.SlotSchema {
+			if next := delivery.NextFreeSlot(pool, e.Index); next != 0 && (e.Action != "prepare" || next <= bridge.SlotCount-4) {
+				return &slotAvailable{Index: next, Blocked: blocked}
+			}
+			blocked.Blocker.Kind = "slot_pool_full"
+			blocked.Blocker.Condition = "forward_slot_available"
+		}
+		return blocked
 	}
 	return err
 }

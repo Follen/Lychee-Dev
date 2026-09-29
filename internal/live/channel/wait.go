@@ -181,7 +181,7 @@ func (d *Driver) next(ctx context.Context) error {
 		if op.Stage == "release_ready" && op.CleanupMethod == "reload_required" {
 			request = "cleanup-" + op.ID
 		}
-		if !closing && op.Stage == "prepared" && d.State.Identity.NextSlot > 49 {
+		if !closing && op.Stage == "prepared" && d.State.Identity.NextSlot > d.State.Identity.Slots-15 {
 			hash := sha256.Sum256([]byte(op.ID))
 			request = fmt.Sprintf("capacity-%x", hash[:16])
 		}

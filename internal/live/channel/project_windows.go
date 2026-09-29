@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/desktop"
@@ -330,7 +331,14 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 		return p.activateTarget(ctx, target, request, "connect-"+key, "", cache)
 	}
 	identity := candidates[0]
-	if identity.Inventory != nil && *identity.Inventory != 64 {
+	if identity.Slots != bridge.SlotCount {
+		key, e := token()
+		if e != nil {
+			return ProjectResult{}, e
+		}
+		return p.activateTarget(ctx, target, request, "connect-upgrade-"+key, "", cache)
+	}
+	if identity.Inventory != nil && *identity.Inventory != identity.Slots {
 		return ProjectResult{}, errors.New("live.channel_slot_inventory_incomplete")
 	}
 	if identity.Build != target.Client.FullBuild || identity.Product != target.Client.Product {

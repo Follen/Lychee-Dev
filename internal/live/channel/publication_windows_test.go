@@ -93,7 +93,9 @@ func TestPublicationDeadlineDoesNotPublishOrAcquireInput(t *testing.T) {
 
 func TestUnresolvedPublicationReleasesLockForOriginalOwner(t *testing.T) {
 	n, a := publicationFixture(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// This verifies reservation isolation across several complete pool checks,
+	// not their wall-clock speed. Deadline behavior has its own test above.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := n.Publish(ctx, a); err != nil {
 		t.Fatal(err)

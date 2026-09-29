@@ -18,7 +18,7 @@ func TestSlotPoolInstallPublicationAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pool.State != "ready" || len(pool.Files) != 64 {
+	if pool.State != "ready" || len(pool.Files) != bridge.SlotCount {
 		t.Fatalf("%+v", pool)
 	}
 	if _, err = InspectSlots(ctx, parent, "2.5.1"); err != nil {

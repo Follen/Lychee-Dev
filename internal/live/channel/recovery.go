@@ -23,7 +23,7 @@ func (d *Driver) RecoverRuntime(ctx context.Context, candidate Identity) error {
 	if d.State.RuntimeEnd != nil {
 		return runtimeRetirementPending()
 	}
-	if candidate.Inventory != nil && *candidate.Inventory != 64 {
+	if candidate.Inventory != nil && *candidate.Inventory != candidate.Slots {
 		return errors.New("live.channel_slot_inventory_incomplete")
 	}
 	if d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {

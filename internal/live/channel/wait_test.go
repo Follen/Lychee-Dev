@@ -50,7 +50,7 @@ func (b *pendingBackend) Find(context.Context, memory.Selector, bool) (memory.Lo
 
 func TestBoundedContinuationDoesNotRepeatUnknownInput(t *testing.T) {
 	b := &pendingBackend{}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "connection.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func (b *publicationBlockedBackend) RuntimeCandidate(context.Context, Identity) 
 }
 func TestPublicationWaitRetainsIntentWithoutInputOrRuntimeDiscovery(t *testing.T) {
 	b := &publicationBlockedBackend{}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "connection.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)

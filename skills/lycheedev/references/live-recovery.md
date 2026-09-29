@@ -139,13 +139,21 @@ within the authorized task; do not repeat indefinitely against an absent process
 foreign ownership or an unresolved opaque execution outcome.
 
 `waiting: shared_publication` is shared-file contention inside one installation,
-not proof of a lost connection. Inspect the concrete blocker in continuation:
-a short publication lease can clear when its active call ends, while a durable
-slot reservation needs its original owner's recovery. Keep the same CON/request
-and nonce; do not delete a reservation or repeatedly resume without a change.
-A combat or focus wait retains its reservation, not the installation's short
-publication lock. Shared-installation instances still share physical slot files; the current
-protocol does not promise progress past an unresolved reservation in their next slot.
+not proof of a lost connection. Legacy 64-slot CONs retain original-slot resume/cleanup; do not apply v2
+allocation to them. The 200-slot v2 allocator can skip another
+owner's reservations for a new exchange only before publication or input. The
+runtime skips empty/foreign slots and stops at the first envelope for itself;
+it does not skip its own pending work. Once published, submitted or uncertain,
+the original slot and nonce remain fixed. Agents neither choose slots nor move
+payloads; they continue the original CON/project/request serially.
+
+A short publication lease can clear when its active call ends. If all forward
+slots are occupied, continuation reports `blocker.kind: slot_pool_full` with
+`condition: forward_slot_available`. Wait for actual availability to change,
+usually through the owning connection's recovery; do not busy-loop resume,
+delete reservations or change request keys. Capacity reload belongs to the CLI
+and does not erase another instance's claim or prove unknown input never ran.
+A combat or focus wait retains its reservation, not the short publication lock.
 
 `complete` applies to the current command: a connected runtime does not complete
 a pending disconnect, and a previous report does not complete reload. UI activity

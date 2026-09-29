@@ -2,7 +2,7 @@
 
 Use this reference for first installation, an upgraded addon, or contact without
 a usable CON connection. Disk installation and runtime activation are separate.
-The CLI owns the main addon and 64 LoadOnDemand slots; never overlay-copy files,
+The CLI owns the main addon and 200 LoadOnDemand slots (slot-v2); never overlay-copy files,
 edit slot payloads or import old queues/SavedVariables.
 
 Use the shared installation candidates to select a verified client directory;
@@ -12,13 +12,21 @@ PID and later character binding. Resolve only remaining ambiguity, not a fresh
 choice on every retry. Local selection errors never authorize another installation.
 
 1. Select the authorized installation and PID. Inspect `addon status`; the main
-   addon must be a clean managed installation matching the CLI, and all 64 slot
+   addon must be a clean managed installation matching the CLI, and all 200 slot
    files must pass inspection. Use [installation](installation.md) for deployment.
 2. Use `live connect` with the invoking project's `--project` and exact target.
    It discovers memory identity and binds with a new nonce. If the runtime is
    absent, it records an activation and performs one fixed reload automatically.
 3. Preserve any returned CON ID, including activation-pending results. Use status
    and resume in the same project; do not start another connection or resend keys.
+
+A legacy 64-slot installation needs managed migration before new work. Existing 64-slot CONs may resume and clean up their original exchanges in
+the original slots; new connections require the 200-slot runtime. Retained old
+records also remain usable as read-only evidence and retirement proof. New connect can activate an old loaded runtime through a journaled
+reload after migration. Verify activation separately for every authorized PID,
+including same-build instances sharing one installation: 200 files on disk do
+not prove any running client loaded them. If the client cannot discover the full
+inventory, `restart_required` requires a scoped client restart; do not loop reloads.
 
 After an intentional installation/update with no usable connection, explicit
 activation is also available:

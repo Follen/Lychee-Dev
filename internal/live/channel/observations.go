@@ -25,6 +25,12 @@ type RecordReader interface {
 // adapters. Domain callers never receive addresses or partially decoded bodies.
 func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery) (Observation, error) {
 	e, i := q.Envelope, q.Identity
+	if e.Schema == "" {
+		e.Schema = bridge.SlotSchema
+		if i.Slots == 64 {
+			e.Schema = bridge.LegacySlotSchema
+		}
+	}
 	nonce, _ := tokenBytes(e.Nonce)
 	runtime, _ := tokenBytes(e.Runtime)
 	ticket, _ := tokenBytes(e.Ticket)
@@ -38,7 +44,7 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 	case "result":
 		selector.Accept = func(record memory.Record) bool {
 			var r Receipt
-			return json.Unmarshal(record.Payload, &r) == nil && r.Validate() == nil && r.Schema == bridge.SlotSchema && r.State == "reported" && r.Action == "prepare" && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Runtime == e.Runtime && r.Owner == e.Owner && r.Fence == e.Fence && r.GUID == e.GUID && r.Build == e.Build && r.Product == i.Product && r.Release == i.Release
+			return json.Unmarshal(record.Payload, &r) == nil && r.Validate() == nil && r.Schema == e.Schema && r.State == "reported" && r.Action == "prepare" && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Runtime == e.Runtime && r.Owner == e.Owner && r.Fence == e.Fence && r.GUID == e.GUID && r.Build == e.Build && r.Product == i.Product && r.Release == i.Release
 		}
 	case "bootstrap_changed":
 		first = false
@@ -49,7 +55,7 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 				return false
 			}
 			rt, _ := tokenBytes(r.Runtime)
-			return record.Header.Runtime == rt && r.Schema == bridge.SlotSchema && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Action == "bind" && r.State == "rejected" && r.Reason == "slot_runtime_changed" && r.Runtime != e.Runtime && r.GUID == e.GUID && r.Build == e.Build && r.Release == i.Release && r.NextSlot == e.Index+1 && r.Owner == ""
+			return record.Header.Runtime == rt && r.Schema == e.Schema && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Action == "bind" && r.State == "rejected" && r.Reason == "slot_runtime_changed" && r.Runtime != e.Runtime && r.GUID == e.GUID && r.Build == e.Build && r.Release == i.Release && r.NextSlot == e.Index+1 && r.Owner == ""
 		}
 	default:
 		return Observation{}, errors.New("live.channel_observation_invalid")

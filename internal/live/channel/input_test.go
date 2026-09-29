@@ -65,7 +65,7 @@ func (b *focusBackend) Input(ctx context.Context, a InputAction) (InputOutcome, 
 }
 func TestEscRecoveryPersistsBeforeWakeAndResumesOriginalSlot(t *testing.T) {
 	b := &focusBackend{blocked: true}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func (b *zeroInputBackend) Input(ctx context.Context, a InputAction) (InputOutco
 }
 func TestProvenZeroInputResumesSameSlot(t *testing.T) {
 	b := &zeroInputBackend{zero: true}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestProvenZeroInputResumesSameSlot(t *testing.T) {
 
 func TestMissingInputOutcomeNeverAuthorizesResend(t *testing.T) {
 	b := &pendingBackend{}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 64, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)

@@ -23,7 +23,7 @@ func (e *BlockedError) Error() string {
 
 func (e *BlockedError) Unwrap() error {
 	switch e.Blocker.Kind {
-	case "slot_reservation", "publication_lock":
+	case "slot_reservation", "slot_pool_full", "publication_lock":
 		return ErrPublicationPending
 	default:
 		return ErrPending
