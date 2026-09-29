@@ -19,6 +19,13 @@ var (
 	ErrRemoteObjectMissing = errors.New("records.remote_object_missing")
 )
 
+// Only availability failures may try another authenticated source. A caller
+// cancellation/deadline and malformed or corrupt data must stop immediately.
+func remoteAvailabilityFailure(err error) bool {
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+		(errors.Is(err, ErrRemoteHTTP) || errors.Is(err, ErrRemoteObjectMissing))
+}
+
 // fetchRemoteRange obtains exactly one requested byte range. The returned
 // objectBytes is the archive size advertised by Content-Range.
 func fetchRemoteRange(ctx context.Context, client *http.Client, locator string, offset, length, total int64) (raw []byte, objectBytes int64, err error) {

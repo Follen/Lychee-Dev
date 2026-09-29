@@ -11,6 +11,7 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
+	"github.com/follenfang/lycheedev/internal/records/archive"
 	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 )
@@ -35,6 +36,10 @@ func TestQueryStructuredErrors(t *testing.T) {
 	}{
 		{errors.Join(live.ErrAckReadinessPending, context.DeadlineExceeded), 6, "live.ack_readiness_pending"},
 		{records.ErrRemoteRange, 4, "records.remote_range"}, {records.ErrRemoteObjectMissing, 3, "records.remote_object_missing"},
+		{records.ErrObjectUnavailable, 3, "records.local_object_unavailable"},
+		{archive.ErrIndexIntegrity, 4, "archive.index_integrity"},
+		{archive.ErrIndexFormat, 4, "archive.invalid_index"},
+		{archive.ErrIndexLimit, 3, "archive.index_limit"},
 		{container.ErrKeyUnavailable, 3, "container.key_unavailable"},
 		{container.ErrUnsupported, 3, "container.unsupported_encoding"},
 		{container.ErrLimit, 3, "container.resource_limit"},

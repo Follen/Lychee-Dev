@@ -1,5 +1,32 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-09-29 安装选择：[本轮矩阵](installation-selection-2026-09-29.md) 覆盖总目录/
+子目录、产品约束、多候选、残留清单、元数据缺失/冲突、共享 Data、本地不转远程、
+原远程路径以及 live 按 PID 筛选。文件只读检查不冒充游戏连接验收。
+
+2026-09-29 source skill 分支场景：[SS-01…12](source-skill-scenarios.md) 覆盖精确版本、
+仓库 track/客户端环境、原文范围、关系覆盖、游标、值传播和 source→live 授权；
+程序合同与 Agent 决策分别验收。
+
+2026-09-29 data skill 分支场景：固定身份、同名消歧、无游标截断、缺钥空结果、
+有界重试及 Hotfix 续跑纳入 [DS-01…12](data-skill-scenarios.md)。CLI fixture
+通过不等于独立 Agent 行为通过，两者分别记录。
+
+2026-09-29 追加数据恢复门槛：复用发布槽位必须拒绝外来版本系列；版本列表
+截断可见；查询总预算贯穿准备、I/O 和恢复；CDN 地址只从相同产品/地区的
+cdns 清单刷新，最多一次且不修改快照；离线、损坏、取消不重试。编码副本
+恢复后仍校验实际内容，穷尽后保留来源和不确定性。实测及 DBCD 四表对照见
+[加固记录](data-hardening-2026-09-29.md)。
+
+2026-09-29 数据回归：全零 CASC preamble 必须以完整 BLTE EKey 验证；非零
+错误 preamble 和被篡改内容继续拒绝。Forever 的 CDN 入口及 build-uid 校验
+使用发布槽位，保留原 pin、build 和 locale；镜像 403/404 后可从已认证归档
+恢复，未找到时不得抹去不确定性。DBCD 的固定 Forever 对照及技能边界见
+[本轮记录](forever-data-recovery-2026-09-29.md)。
+发现回归必须检查实际 HTTP 请求的发布槽位，而非仅检查输出 locator。
+人手写与 Agent 生成命令共用相同校验，不依赖 skill 修补入口或跳过完整性。
+名称检索实测检查同名候选、truncated/partial 和固定快照，不能以首条命中冒充业务消歧。
+
 2026-09-28 统一输入编排的独立验收见[编排记录](live-input-coordinator-acceptance-2026-09-28.md)。
 Classic / Forever 双在线的后续补测见[双实例记录](live-input-multiclient-2026-09-28.md)。
 同目录正式服双开使用 `tests/channel-live/shared-installation-baseline.mjs`，

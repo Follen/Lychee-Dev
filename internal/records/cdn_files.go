@@ -21,15 +21,17 @@ import (
 )
 
 type cdnFiles struct {
-	ctx         context.Context
-	store       *vault.Store
-	metadata    *vault.Metadata
-	client      *http.Client
-	route       distributionRoute
-	config      ConfigDocument
-	offline     bool
-	requests    int
-	transferred int64
+	ctx                          context.Context
+	store                        *vault.Store
+	metadata                     *vault.Metadata
+	client                       *http.Client
+	route                        distributionRoute
+	config                       ConfigDocument
+	offline                      bool
+	requests                     int
+	transferred                  int64
+	catalogURL, routeKey, region string
+	routeRefreshed               bool
 }
 
 func prepareCDNFiles(ctx context.Context, store *vault.Store, pin selection.DataPin, offline bool) (*cdnFiles, BuildMetadata, error) {
@@ -51,47 +53,12 @@ func (c *cdnFiles) prepare(pin selection.DataPin) (BuildMetadata, error) {
 	if err != nil {
 		return BuildMetadata{}, err
 	}
-	// A target's catalogs are delivery hints, never permission to reselect its
-	// build. Explicit pins also work online without resolving latest versions.
-	var distribution []byte
-	doc, err := c.metadata.ReadDocument(c.ctx, "remote-catalog/"+product+"/"+pin.Region)
-	if err == nil {
-		var observed remoteObservation
-		if json.Unmarshal(doc.Value, &observed) != nil || observed.ProductCode != product || observed.Region != pin.Region {
-			return BuildMetadata{}, ErrRemoteIdentity
-		}
-		distribution, err = c.store.ReadBlob(c.ctx, observed.Distribution, 1<<20)
-	} else if errors.Is(err, vault.ErrMissingRecord) {
-		key := "cdn-route/" + product + "/" + pin.Region
-		cached, cacheErr := c.metadata.ReadDocument(c.ctx, key)
-		if cacheErr == nil {
-			var ref vault.BlobRef
-			if json.Unmarshal(cached.Value, &ref) != nil {
-				return BuildMetadata{}, ErrRemoteIdentity
-			}
-			distribution, err = c.store.ReadBlob(c.ctx, ref, 1<<20)
-		} else if !errors.Is(cacheErr, vault.ErrMissingRecord) {
-			return BuildMetadata{}, cacheErr
-		} else if c.offline {
-			return BuildMetadata{}, ErrRemoteUnavailable
-		} else {
-			distribution, err = fetchRemoteMetadata(c.ctx, c.client, remoteVersionBase(pin.Region)+product+"/cdns", 1<<20)
-			if err == nil {
-				if _, err = parseDistributionCatalog(distribution, pin.Region); err != nil {
-					return BuildMetadata{}, err
-				}
-				ref, publishErr := c.store.PublishBlob(c.ctx, vault.BlobInput{Reader: bytes.NewReader(distribution), MaxBytes: 1 << 20})
-				if publishErr != nil {
-					return BuildMetadata{}, publishErr
-				}
-				raw, _ := json.Marshal(ref)
-				err = c.metadata.CommitDocuments(c.ctx, vault.Mutation{Key: key, Value: raw})
-				if errors.Is(err, vault.ErrGeneration) {
-					err = nil
-				}
-			}
-		}
+	slot, err := selection.DataProductSlot(pin.Product)
+	if err != nil {
+		return BuildMetadata{}, err
 	}
+	c.catalogURL = remoteVersionBase(pin.Region) + slot + "/cdns"
+	distribution, err := c.distribution(product, pin.Region)
 	if err != nil {
 		return BuildMetadata{}, err
 	}
@@ -99,15 +66,28 @@ func (c *cdnFiles) prepare(pin selection.DataPin) (BuildMetadata, error) {
 	if err != nil {
 		return BuildMetadata{}, err
 	}
-	buildDoc, _, err := loadRemoteConfiguration(c.ctx, c.store, c.metadata, c.client, c.route, pin.BuildConfig, c.offline)
-	if err != nil {
-		return BuildMetadata{}, err
+	load := func() (BuildMetadata, error) {
+		buildDoc, _, err := loadRemoteConfiguration(c.ctx, c.store, c.metadata, c.client, c.route, pin.BuildConfig, c.offline)
+		if err != nil {
+			return BuildMetadata{}, err
+		}
+		c.config, _, err = loadRemoteConfiguration(c.ctx, c.store, c.metadata, c.client, c.route, pin.CDNConfig, c.offline)
+		if err != nil {
+			return BuildMetadata{}, err
+		}
+		return completeBuildMetadata(BuildMetadata{Installed: InstalledBuild{Product: slot, FullBuild: pin.FullBuild, BuildConfig: pin.BuildConfig, CDNConfig: pin.CDNConfig}, BuildDocument: buildDoc, CDNDocument: c.config})
 	}
-	c.config, _, err = loadRemoteConfiguration(c.ctx, c.store, c.metadata, c.client, c.route, pin.CDNConfig, c.offline)
-	if err != nil {
-		return BuildMetadata{}, err
+	meta, err := load()
+	if remoteAvailabilityFailure(err) {
+		refreshed, refreshErr := c.refreshRoute()
+		if refreshErr != nil {
+			return BuildMetadata{}, refreshErr
+		}
+		if refreshed {
+			return load()
+		}
 	}
-	return completeBuildMetadata(BuildMetadata{Installed: InstalledBuild{Product: product, FullBuild: pin.FullBuild, BuildConfig: pin.BuildConfig, CDNConfig: pin.CDNConfig}, BuildDocument: buildDoc, CDNDocument: c.config})
+	return meta, err
 }
 
 type cdnRange struct {
@@ -121,7 +101,8 @@ func (c *cdnFiles) rangeBytes(object string, offset, length, total int64) ([]byt
 	if err := c.ctx.Err(); err != nil {
 		return nil, 0, err
 	}
-	identity := fmt.Sprintf("%s/%s/%d/%d", c.route.Path, object, offset, length)
+	routePath := c.route.Path
+	identity := fmt.Sprintf("%s/%s/%d/%d", routePath, object, offset, length)
 	sum := sha256.Sum256([]byte(identity))
 	key := "cdn-range/" + hex.EncodeToString(sum[:])
 	lease, err := vault.AcquireLease(c.ctx, filepath.Join(c.store.Root(), "locks"), key)
@@ -144,39 +125,52 @@ func (c *cdnFiles) rangeBytes(object string, offset, length, total int64) ([]byt
 	if c.offline {
 		return nil, 0, ErrRemoteUnavailable
 	}
-	var last error = ErrRemoteObjectMissing
-	for _, host := range c.route.Hosts {
-		if c.requests >= 4096 || length > 1<<30-c.transferred {
-			return nil, 0, ErrMetadataLimit
-		}
-		c.requests++
-		c.transferred += length
-		locator := "https://" + host + "/" + c.route.Path + "/data/" + object[:2] + "/" + object[2:4] + "/" + object
-		raw, size, err := fetchRemoteRange(c.ctx, c.client, locator, offset, length, total)
-		if err != nil {
-			if c.ctx.Err() != nil {
-				return nil, 0, c.ctx.Err()
+	for {
+		var last error = ErrRemoteObjectMissing
+		for _, host := range c.route.Hosts {
+			if c.requests >= 4096 || length > 1<<30-c.transferred {
+				return nil, 0, ErrMetadataLimit
 			}
-			if !errors.Is(err, ErrRemoteHTTP) && !errors.Is(err, ErrRemoteObjectMissing) {
-				return nil, 0, fmt.Errorf("CDN object %s: %w", object, err)
+			c.requests++
+			c.transferred += length
+			locator := "https://" + host + "/" + c.route.Path + "/data/" + object[:2] + "/" + object[2:4] + "/" + object
+			raw, size, err := fetchRemoteRange(c.ctx, c.client, locator, offset, length, total)
+			if err != nil {
+				if c.ctx.Err() != nil {
+					return nil, 0, c.ctx.Err()
+				}
+				if !errors.Is(err, ErrRemoteHTTP) && !errors.Is(err, ErrRemoteObjectMissing) {
+					return nil, 0, fmt.Errorf("CDN object %s: %w", object, err)
+				}
+				// A failed mirror cannot turn an uncertain object into an absent one.
+				if !errors.Is(err, ErrRemoteObjectMissing) || errors.Is(last, ErrRemoteObjectMissing) {
+					last = err
+				}
+				continue
 			}
-			// A failed mirror cannot turn an uncertain object into an absent one.
-			if !errors.Is(err, ErrRemoteObjectMissing) || errors.Is(last, ErrRemoteObjectMissing) {
-				last = err
+			// A refreshed path has a different fragment namespace. Return these
+			// bytes to the verifier; subsequent reads acquire its own cache lease.
+			if c.route.Path != routePath {
+				return raw, size, nil
 			}
-			continue
+			ref, err := c.store.PublishBlob(c.ctx, vault.BlobInput{Reader: bytes.NewReader(raw), MaxBytes: length})
+			if err != nil {
+				return nil, 0, err
+			}
+			serialized, _ := json.Marshal(cdnRange{ObjectBytes: size, Blob: ref})
+			if err := c.metadata.CommitDocuments(c.ctx, vault.Mutation{Key: key, Value: serialized}); err != nil {
+				return nil, 0, err
+			}
+			return raw, size, nil
 		}
-		ref, err := c.store.PublishBlob(c.ctx, vault.BlobInput{Reader: bytes.NewReader(raw), MaxBytes: length})
-		if err != nil {
-			return nil, 0, err
+		refreshed, refreshErr := c.refreshRoute()
+		if refreshErr != nil {
+			return nil, 0, refreshErr
 		}
-		serialized, _ := json.Marshal(cdnRange{ObjectBytes: size, Blob: ref})
-		if err := c.metadata.CommitDocuments(c.ctx, vault.Mutation{Key: key, Value: serialized}); err != nil {
-			return nil, 0, err
+		if !refreshed {
+			return nil, 0, fmt.Errorf("CDN object %s: %w", object, last)
 		}
-		return raw, size, nil
 	}
-	return nil, 0, last
 }
 
 type cdnBytes struct {
@@ -314,8 +308,14 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 	if err == nil {
 		return cdnSpan{Object: key, Bytes: size}, nil
 	}
-	if !errors.Is(err, ErrRemoteObjectMissing) {
+	if !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrRemoteHTTP) {
 		return cdnSpan{}, err
+	}
+	// Failure to obtain a loose copy does not rule out an authenticated
+	// archive copy. Preserve uncertainty if no later lookup succeeds.
+	var unavailable error
+	if errors.Is(err, ErrRemoteHTTP) {
+		unavailable = err
 	}
 	archives := c.config.Fields["archives"]
 	if len(archives) > 8192 {
@@ -352,8 +352,11 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 		if err == nil {
 			return span, nil
 		}
-		if !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrContentMissing) {
+		if !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrContentMissing) && !errors.Is(err, ErrRemoteHTTP) {
 			return cdnSpan{}, err
+		}
+		if errors.Is(err, ErrRemoteHTTP) {
+			unavailable = err
 		}
 	}
 	// Published CN configurations have positional index-size hints that differ
@@ -364,9 +367,15 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 		if err == nil {
 			return span, nil
 		}
-		if !errors.Is(err, ErrContentMissing) {
+		if !errors.Is(err, ErrContentMissing) && !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrRemoteHTTP) {
 			return cdnSpan{}, err
 		}
+		if errors.Is(err, ErrRemoteHTTP) || errors.Is(err, ErrRemoteObjectMissing) && unavailable == nil {
+			unavailable = err
+		}
+	}
+	if unavailable != nil {
+		return cdnSpan{}, unavailable
 	}
 	return cdnSpan{}, ErrRemoteObjectMissing
 }

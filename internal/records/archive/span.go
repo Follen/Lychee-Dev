@@ -29,9 +29,15 @@ func OpenEncodedSpan(ctx context.Context, source io.ReaderAt, archiveSize int64,
 	}
 	// Local preambles may store only the same nine-byte key prefix as the index.
 	// Full identity is established below from BLTE, never from padded preambles.
-	for i := 0; i < 9; i++ {
-		if header[15-i] != key[i] {
-			return nil, fmt.Errorf("%w: archive preamble key", ErrIndexIntegrity)
+	// Some installed writers leave the entire local preamble zeroed. It is
+	// not an identity source in that layout: authenticate the full BLTE EKey
+	// below, and retain strict key checks for every nonzero preamble.
+	var zeroPreamble [30]byte
+	if !bytes.Equal(header[:30], zeroPreamble[:]) {
+		for i := 0; i < 9; i++ {
+			if header[15-i] != key[i] {
+				return nil, fmt.Errorf("%w: archive preamble key", ErrIndexIntegrity)
+			}
 		}
 	}
 	if !bytes.Equal(header[30:34], []byte("BLTE")) {

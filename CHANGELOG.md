@@ -7,6 +7,44 @@ Detailed acceptance records and evidence live in
 [docs/toolkit/implementation-status.md](docs/toolkit/implementation-status.md);
 per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
+## [Unreleased]
+
+### Fixed
+
+- Local target resolution accepts game roots and client directories with optional
+  product constraints. Shared installation discovery reports candidates and
+  identity conflicts, ignores catalog-only remnants, and never falls back to a
+  remote target. Addon selection and live path/PID filtering reuse the same reader.
+- Reused data slots reject foreign build series. Availability reports total rows
+  and truncation instead of silently shortening the version list.
+- CDN delivery routes refresh once from the selected version service on
+  availability failure, including configuration preparation; fixed keys and
+  offline behavior are preserved. Alternate content encodings can recover HTTP
+  failures; exhausted remote copies retain remote errors.
+- Static data commands have a shared total timeout (`--timeout-seconds`, default
+  300, range 1–3600), covering source preparation, recovery and query execution.
+- Forever CDN queries and target preparation use the configured publishing slot
+  for endpoint selection and build-uid validation, while preserving the exact pin.
+- Availability discovery requests the publishing slot it reports, so Forever
+  releases are discoverable through the actual HTTP request as well as its locator.
+- Local CASC reads accept fully zeroed preambles only with full BLTE EKey
+  authentication; nonzero mismatches and corrupt payloads remain errors.
+- CDN archive lookup continues after an unavailable loose mirror, retaining
+  uncertainty when no authenticated copy is found. Local missing objects and
+  archive integrity failures now have structured query errors.
+- Data investigation skill distinguishes transport, decoding and coverage
+  failures, shared installations, and workspace health from data readiness.
+  It documents product discovery and name-to-ID lookup without requiring callers
+  to recreate the CLI's product routing or archive validation.
+- Data skill now starts with a short decision flow and loads target, table,
+  Hotfix and recovery details on demand. Bounded retry and cursorless-search
+  handling are explicit; a CLI scenario covers duplicate-name discovery through
+  ordered SQL continuation to distinct related effects.
+- Source skill separates short declaration lookup from revision preparation,
+  relationships and value-flow analysis. Repository tracks and client API
+  environments stay distinct; CLI regression rejects cross-query/cross-command
+  cursor reuse, with scenario acceptance recorded separately from agent behavior.
+
 ## [3.0.0] — 2026-09-28
 
 ### Added

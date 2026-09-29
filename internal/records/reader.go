@@ -183,6 +183,7 @@ func (r *Reader) extractContentWithCoverage(ctx context.Context, q FileQuery, op
 	if record.DecodedBytes > limit {
 		return vault.BlobRef{}, "", ErrMetadataLimit
 	}
+	var unavailable error
 	for _, key := range record.EncodingKeys {
 		physical, err := index.FindEncoding(ctx, key)
 		if err != nil {
@@ -192,7 +193,10 @@ func (r *Reader) extractContentWithCoverage(ctx context.Context, q FileQuery, op
 			return vault.BlobRef{}, "", ErrMetadataLimit
 		}
 		object, err := open(ctx, key, physical.EncodedBytes)
-		if errors.Is(err, ErrObjectUnavailable) || errors.Is(err, ErrRemoteObjectMissing) {
+		if errors.Is(err, ErrObjectUnavailable) || remoteAvailabilityFailure(err) {
+			if unavailable == nil || errors.Is(err, ErrRemoteHTTP) {
+				unavailable = err
+			}
 			continue
 		}
 		if err != nil {
@@ -237,7 +241,10 @@ func (r *Reader) extractContentWithCoverage(ctx context.Context, q FileQuery, op
 		}
 		return ref, key, nil
 	}
-	return vault.BlobRef{}, "", ErrObjectUnavailable
+	if unavailable == nil {
+		unavailable = ErrObjectUnavailable
+	}
+	return vault.BlobRef{}, "", fmt.Errorf("%w: no available encoding for content %s", unavailable, ckey)
 }
 
 func readLimits(encoded, decoded int64) container.Limits {

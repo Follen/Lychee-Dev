@@ -107,6 +107,25 @@ func TestEncodedSpanIdentity(t *testing.T) {
 	}
 }
 
+func TestEncodedSpanZeroPreamble(t *testing.T) {
+	body := []byte("BLTE\x00\x00\x00\x00Noriginal")
+	key := md5.Sum(body)
+	data := append(make([]byte, 30), body...)
+	span := Span{Bytes: int64(len(data))}
+	if _, err := OpenEncodedSpan(context.Background(), bytes.NewReader(data), int64(len(data)), span, key, 4096); err != nil {
+		t.Fatalf("zero preamble with authenticated BLTE: %v", err)
+	}
+	data[len(data)-1] ^= 1
+	if _, err := OpenEncodedSpan(context.Background(), bytes.NewReader(data), int64(len(data)), span, key, 4096); !errors.Is(err, ErrIndexIntegrity) {
+		t.Fatalf("corrupt BLTE accepted: %v", err)
+	}
+	data[len(data)-1] ^= 1
+	data[0] = 1
+	if _, err := OpenEncodedSpan(context.Background(), bytes.NewReader(data), int64(len(data)), span, key, 4096); !errors.Is(err, ErrIndexIntegrity) {
+		t.Fatalf("nonzero mismatched preamble accepted: %v", err)
+	}
+}
+
 func TestIndexCollisionsAndOrdering(t *testing.T) {
 	key := [16]byte{5, 4, 3}
 	data := indexFixture(key)

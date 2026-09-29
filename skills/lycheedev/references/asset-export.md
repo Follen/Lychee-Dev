@@ -21,7 +21,7 @@ an encrypted chunk can require a network fetch of the pinned public key snapshot
 unless `--offline` or an explicit `--key-file` is used. The pin must carry
 canonical Toolkit product, explicit region/language, full build, both config
 keys and exact definition commit. Use the local target preparation described in
-[data-investigation.md](data-investigation.md); do not invent missing values
+[data-targets.md](data-targets.md); do not invent missing values
 to satisfy `target resolve --file`.
 
 For CDN content, replace `--installation <game-root>` with `--cdn`. This uses

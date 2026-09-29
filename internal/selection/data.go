@@ -1,12 +1,35 @@
 package selection
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+var ErrDataProductBuild = errors.New("selection.data_product_build_mismatch")
+
+// ValidateDataRelease guards reusable publishing slots using the verified
+// series. Stable product endpoints can advance independently of this baseline.
+func ValidateDataRelease(product, fullBuild string) error {
+	for _, baseline := range VerifiedClientBaselines() {
+		if baseline.Product == product {
+			if baseline.DataSlot != "" && (!build(fullBuild) || !strings.HasPrefix(fullBuild, baseline.BuildSeries+".")) {
+				return fmt.Errorf("%w: %s slot %s serves %s; verified series is %s", ErrDataProductBuild, product, baseline.DataSlot, fullBuild, baseline.BuildSeries)
+			}
+			return nil
+		}
+	}
+	return errors.New("selection.unsupported_data_product")
+}
 
 // DataIdentity validates an exact data pin and translates the toolkit product
 // into the installation's product code. Region remains an explicit provenance
 // choice; local archives do not independently attest where they were downloaded.
 func DataIdentity(pin DataPin) (product string, locale uint32, err error) {
 	if err = validatePins(SelectionSpec{Data: &pin}); err != nil {
+		return
+	}
+	if err = ValidateDataRelease(pin.Product, pin.FullBuild); err != nil {
 		return
 	}
 	product, err = DataProduct(pin.Product)

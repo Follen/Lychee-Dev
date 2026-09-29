@@ -101,6 +101,29 @@ func TestDiscoveredClientWindowInfersInstallationAndOptionalPID(t *testing.T) {
 	}
 }
 
+func TestDiscoveredClientWindowGameRootUsesPIDWithoutRetargeting(t *testing.T) {
+	game := t.TempDir()
+	var windows []desktop.WindowIdentity
+	for i, name := range []string{"first", "second"} {
+		client := filepath.Join(game, name)
+		if err := os.Mkdir(client, 0700); err != nil {
+			t.Fatal(err)
+		}
+		for file, text := range map[string]string{".flavor.info": "wow", "version.txt": "12.1.0.69875"} {
+			if err := os.WriteFile(filepath.Join(client, file), []byte(text), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		windows = append(windows, testGameWindow(t, client, uint32(201+i)))
+	}
+	_, err := selectDiscoveredClientWindow(context.Background(), game, 0, windows)
+	requireWindowCode(t, err, "live.window_ambiguous")
+	got, err := selectDiscoveredClientWindow(context.Background(), game, windows[1].ProcessID, windows)
+	if err != nil || got.Window != windows[1] {
+		t.Fatalf("root/PID selection: %+v %v", got, err)
+	}
+}
+
 func TestDiscoveredClientWindowAmbiguityDoesNotUseTitle(t *testing.T) {
 	directory := testkit.Client(t, "flavor")
 	first := testGameWindow(t, directory, 51)

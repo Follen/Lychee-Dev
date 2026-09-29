@@ -46,6 +46,8 @@ type ProductAvailability struct {
 	Locator     string       `json:"locator"`
 	Rows        []ReleaseRow `json:"rows"`
 	Rejected    int          `json:"rejected"`
+	TotalRows   int          `json:"totalRows"`
+	Truncated   bool         `json:"truncated"`
 	Error       string       `json:"error,omitempty"`
 }
 
@@ -106,7 +108,7 @@ func ListRemoteAvailability(ctx context.Context, options AvailabilityOptions) (A
 		}
 		locator := VersionsLocator(options.Region, slot)
 		entry := ProductAvailability{Product: baseline.Product, ProductCode: baseline.ProductCode, Locator: locator}
-		raw, err := fetch(ctx, options.Region, baseline.ProductCode)
+		raw, err := fetch(ctx, options.Region, slot)
 		if err != nil {
 			entry.Error = err.Error()
 			result.Products = append(result.Products, entry)
@@ -119,6 +121,18 @@ func ListRemoteAvailability(ctx context.Context, options AvailabilityOptions) (A
 			continue
 		}
 		entry.Rejected = rejected
+		verified := rows[:0]
+		for _, row := range rows {
+			if err := ValidateDataRelease(baseline.Product, row.FullBuild); err != nil {
+				entry.Rejected++
+				entry.Error = err.Error()
+				continue
+			}
+			verified = append(verified, row)
+		}
+		rows = verified
+		entry.TotalRows = len(rows)
+		entry.Truncated = len(rows) > maxRows
 		if len(rows) > maxRows {
 			rows = rows[:maxRows]
 		}

@@ -128,6 +128,9 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 		if err != nil {
 			return result, err
 		}
+		if err := selection.ValidateDataRelease(request.Product, release.FullBuild); err != nil {
+			return result, err
+		}
 		route, err := parseDistributionCatalog(distributionRaw, request.Region)
 		if err != nil {
 			return result, err
@@ -140,7 +143,7 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 		if err != nil {
 			return result, err
 		}
-		_, err = completeBuildMetadata(BuildMetadata{Installed: InstalledBuild{Product: product, FullBuild: release.FullBuild, BuildConfig: release.BuildConfig, CDNConfig: release.CDNConfig}, BuildDocument: buildDoc, CDNDocument: cdnDoc})
+		_, err = completeBuildMetadata(BuildMetadata{Installed: InstalledBuild{Product: slot, FullBuild: release.FullBuild, BuildConfig: release.BuildConfig, CDNConfig: release.CDNConfig}, BuildDocument: buildDoc, CDNDocument: cdnDoc})
 		if err != nil {
 			return result, err
 		}
@@ -219,7 +222,7 @@ func fetchRemoteMetadata(ctx context.Context, client *http.Client, locator strin
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d", ErrRemoteHTTP, response.StatusCode)
+		return nil, fmt.Errorf("%w: %s%s status %d", ErrRemoteHTTP, request.URL.Host, request.URL.EscapedPath(), response.StatusCode)
 	}
 	if response.ContentLength > limit {
 		return nil, ErrMetadataLimit

@@ -16,6 +16,9 @@ func TestDataIdentityCanonicalProducts(t *testing.T) {
 		t.Run(product, func(t *testing.T) {
 			pin := validDataIdentityPin()
 			pin.Product = product
+			if product == "forever" {
+				pin.FullBuild = "1.60.1.70009"
+			}
 			gotProduct, gotLocale, err := DataIdentity(pin)
 			if err != nil {
 				t.Fatal(err)

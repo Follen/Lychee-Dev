@@ -217,7 +217,7 @@ func TestAddonStatusUsesClientIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, code = invoke(t, "addon", "status", "--installation", client, "--format=json")
-	if code != 3 || result.Error.Code != "selection.client_identity" {
+	if code != 4 || result.Error.Code != "selection.installation_metadata_conflict" || result.Context["installationSelection"] == nil {
 		t.Fatalf("%+v %d", result, code)
 	}
 }

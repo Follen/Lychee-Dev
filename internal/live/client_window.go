@@ -40,13 +40,20 @@ func selectDiscoveredClientWindow(ctx context.Context, directory string, pid uin
 	if err := ctx.Err(); err != nil {
 		return ClientWindow{}, err
 	}
-	var selected selection.ClientInstallation
+	var selected []selection.ClientInstallation
 	if directory != "" {
-		var err error
-		selected, err = records.InspectClientInstallation(ctx, directory)
+		report, err := records.DiscoverClientInstallations(ctx, directory)
 		if err != nil {
 			return ClientWindow{}, err
 		}
+		if len(report.Candidates) == 0 {
+			kind := records.ErrInstallationMissing
+			if len(report.Issues) > 0 {
+				kind = records.ErrInstallationConflict
+			}
+			return ClientWindow{}, &records.InstallationSelectionError{Kind: kind, Discovery: report}
+		}
+		selected = report.Candidates
 	}
 	var result ClientWindow
 	for _, window := range candidates {
@@ -66,9 +73,15 @@ func selectDiscoveredClientWindow(ctx context.Context, directory string, pid uin
 		if err != nil {
 			return ClientWindow{}, err
 		}
-		client := selected
+		var client selection.ClientInstallation
 		if directory != "" {
-			if !strings.EqualFold(filepath.Dir(executable), client.Directory) {
+			for _, candidate := range selected {
+				if strings.EqualFold(filepath.Dir(executable), candidate.Directory) {
+					client = candidate
+					break
+				}
+			}
+			if client.Directory == "" {
 				if pid != 0 {
 					return ClientWindow{}, errors.New("live.window_installation_mismatch")
 				}

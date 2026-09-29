@@ -14,6 +14,8 @@ import (
 
 type LocalTargetRequest struct {
 	Installation string
+	Product      string
+	FullBuild    string
 	Region       string
 	Locale       string
 	Definitions  string
@@ -24,6 +26,12 @@ type LocalTargetRequest struct {
 func (r LocalTargetRequest) Validate() error {
 	if r.Installation == "" {
 		return errors.New("records.target_installation_required")
+	}
+	if r.Product != "" {
+		return (RemoteTargetRequest{Product: r.Product, Region: r.Region, Locale: r.Locale, FullBuild: r.FullBuild}).Validate()
+	}
+	if r.FullBuild != "" {
+		return errors.New("records.target_product_required_for_build")
 	}
 	_, err := selection.DataLocale(r.Region, r.Locale)
 	return err
@@ -45,9 +53,12 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 	}
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (LocalTarget, error) {
 		var result LocalTarget
-		client, err := InspectClientInstallation(ctx, request.Installation)
+		client, err := SelectClientInstallation(ctx, request.Installation, request.Product)
 		if err != nil {
 			return result, err
+		}
+		if request.FullBuild != "" && client.FullBuild != request.FullBuild {
+			return result, selection.ErrTargetBuildUnavailable
 		}
 		installation := filepath.Dir(client.Directory)
 		build, err := ResolveLocalBuild(ctx, installation, client.ProductCode, client.FullBuild)
@@ -74,7 +85,7 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 		}
 		// Downloads may outlive an installation update. Verify that the chosen
 		// client and exact CASC row still agree before publishing its identity.
-		current, err := InspectClientInstallation(ctx, request.Installation)
+		current, err := SelectClientInstallation(ctx, request.Installation, request.Product)
 		if err != nil {
 			return result, err
 		}

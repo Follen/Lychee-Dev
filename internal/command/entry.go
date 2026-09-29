@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const Version = buildinfo.Version
@@ -63,6 +64,7 @@ type Options struct {
 	account                              string
 	probe, request, name                 string
 	budgetSeconds                        int
+	dataTimeoutSeconds                   int
 	waitSeconds                          int
 	noCache                              bool
 	recoveryPolicy                       string
@@ -163,6 +165,16 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	} else {
 		contract, route, _ := findCommandContract(opts.words)
+		if contract.boundedDataQuery() {
+			seconds := opts.dataTimeoutSeconds
+			if seconds == 0 {
+				seconds = 300
+			}
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
+			defer cancel()
+			response.Context["timeoutSeconds"] = seconds
+		}
 		argument := ""
 		if contract.positional != "" && len(opts.words) > len(strings.Fields(route)) {
 			argument = opts.words[len(opts.words)-1]
@@ -788,11 +800,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					}
 				}
 			case "target resolve":
-				request := records.LocalTargetRequest{Installation: opts.installation, Region: opts.dataRegion, Locale: opts.locale, Definitions: opts.definitionRef, Parent: opts.from, Offline: opts.offline}
+				request := records.LocalTargetRequest{Installation: opts.installation, Product: opts.product, FullBuild: opts.fullBuild, Region: opts.dataRegion, Locale: opts.locale, Definitions: opts.definitionRef, Parent: opts.from, Offline: opts.offline}
 				remote := records.RemoteTargetRequest{Product: opts.product, Region: opts.dataRegion, Locale: opts.locale, FullBuild: opts.fullBuild, Definitions: opts.definitionRef, Parent: opts.from, Offline: opts.offline}
 				if opts.file == "" && opts.target == "" {
 					var validation error
-					if opts.product != "" {
+					if opts.product != "" && opts.installation == "" {
 						validation = remote.Validate()
 					} else {
 						validation = request.Validate()
@@ -816,7 +828,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					}
 				} else if opts.file != "" {
 					response.Result, err = selection.ResolveSelectionFile(ctx, root, opts.file)
-				} else if opts.product != "" {
+				} else if opts.product != "" && opts.installation == "" {
 					var target records.RemoteTarget
 					target, err = records.ResolveRemoteTarget(ctx, root, remote)
 					if err == nil {
@@ -1058,6 +1070,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		var choice *live.CandidateSelectionError
 		if errors.As(err, &choice) {
 			response.Context["candidates"] = append([]live.Candidate{}, choice.Candidates...)
+		}
+		var installationChoice *records.InstallationSelectionError
+		if errors.As(err, &installationChoice) {
+			response.Context["installationSelection"] = installationChoice.Discovery
+			response.Context["requestedProduct"] = installationChoice.Product
 		}
 		var notReady *live.InputNotReadyError
 		if errors.As(err, &notReady) {
@@ -1364,6 +1381,12 @@ func parseOptions(args []string) (Options, error) {
 				return opts, errors.New("--wait-seconds must be between 1 and 600")
 			}
 			opts.waitSeconds = n
+		case "--timeout-seconds":
+			n, e := strconv.Atoi(value)
+			if e != nil || n < 1 || n > 3600 {
+				return opts, errors.New("--timeout-seconds must be between 1 and 3600")
+			}
+			opts.dataTimeoutSeconds = n
 		case "--policy":
 			if value != "observation" && value != "opaque" {
 				return opts, errors.New("--policy must be observation or opaque")
@@ -1635,8 +1658,8 @@ func parseOptions(args []string) (Options, error) {
 			}
 		}
 	}
-	if route == "target resolve" && (seen["--product"] && seen["--installation"] || seen["--build"] && !seen["--product"]) {
-		return opts, errors.New("target resolve accepts either --installation or --product; --build requires --product")
+	if route == "target resolve" && seen["--build"] && !seen["--product"] {
+		return opts, errors.New("target resolve --build requires --product")
 	}
 	if route == "target add" && !opts.help && opts.remote == (opts.installation != "") {
 		return opts, errors.New("target add requires exactly one of --installation or --remote")

@@ -12,6 +12,10 @@ import (
 // InspectClientInstallation joins client identity with active CASC metadata.
 // Installation, live sessions and data preparation use the same observation.
 func InspectClientInstallation(ctx context.Context, directory string) (selection.ClientInstallation, error) {
+	return SelectClientInstallation(ctx, directory, "")
+}
+
+func inspectExactClient(ctx context.Context, directory string) (selection.ClientInstallation, error) {
 	directory, err := filepath.Abs(directory)
 	if err != nil {
 		return selection.ClientInstallation{}, err
@@ -30,7 +34,18 @@ func InspectClientInstallation(ctx context.Context, directory string) (selection
 			active = append(active, selection.ClientBuild{ProductCode: row.Product, FullBuild: row.FullBuild})
 		}
 	}
-	return selection.InspectClient(ctx, directory, active)
+	client, err := selection.InspectClient(ctx, directory, active)
+	if err != nil {
+		return client, err
+	}
+	// version.txt cannot override contradictory active launcher metadata.
+	slot, _ := selection.DataProductSlot(client.Product)
+	for _, row := range active {
+		if (row.ProductCode == client.ProductCode || row.ProductCode == slot) && row.FullBuild != client.FullBuild {
+			return client, ErrInstallationConflict
+		}
+	}
+	return client, nil
 }
 
 // A data reader accepts either a CASC root or the selected client directory.
@@ -43,6 +58,9 @@ func dataInstallationRoot(ctx context.Context, directory, product, fullBuild str
 	}
 	client, err := InspectClientInstallation(ctx, directory)
 	if err != nil {
+		if errors.Is(err, ErrInstallationConflict) {
+			return "", errors.Join(ErrPinnedBuildChanged, err)
+		}
 		return "", err
 	}
 	if client.ProductCode != product || client.FullBuild != fullBuild {

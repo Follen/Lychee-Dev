@@ -1,5 +1,38 @@
 # Toolkit 2.0 实施状态
 
+- 2026-09-29 安装选择修复（工作区，未发布）：总目录/客户端共用发现入口，
+  target resolve 支持 installation + product 本地筛选；候选、身份冲突和缺失
+  分别报告，live 按实际客户端路径/PID 消歧。本机 Titan 3.80.2.69874 总目录与
+  子目录离线解析得到同一 PIN，未写游戏或项目锁，详见
+  [安装选择验收](installation-selection-2026-09-29.md)。
+
+- 2026-09-29 source skill 分支精简（工作区，未发布）：76 行日常入口，版本准备、
+  关系追踪与秘密值分析按需展开；区分仓库 track 与客户端环境，明确游标作用域。
+  12 个场景作者走查及 CLI 跨查询/跨命令游标反例见
+  [source 场景验收](source-skill-scenarios.md)；独立 Agent 行为验收为 `not_run`。
+
+- 2026-09-29 data skill 分支重编排（工作区，未发布）：74 行决策入口，按需读取
+  目标、表查询、Hotfix 与恢复；明确无游标搜索的 SQL 续查及有界重试。
+  新增同名候选到关联效果的真实 CLI fixture 测试，12 个场景完成作者走查；
+  独立 Agent 行为验收仍为 `not_run`，详见[场景验收](data-skill-scenarios.md)。
+
+- 2026-09-29 数据恢复加固（工作区，未发布）：发布槽位校验实际版本系列；
+  CDN 从对应版本服务的 cdns 清单最多刷新一次，保留固定配置与离线边界；
+  编码副本可恢复网络失败且保持远程错误来源。静态查询统一总时间预算，
+  版本列表显式标记截断。四表、两 build 的 DBCD 对照一致，详见
+  [加固及对照记录](data-hardening-2026-09-29.md)。
+
+- 2026-09-29 Forever data 修复（工作区，未发布）：复现并修复全零 CASC 前导信息
+  被误判为损坏、CDN 使用安装身份而非发布槽位、build-uid 槽位校验及镜像失败
+  提前阻断归档查找。原 Forever US/enUS 1.60.1.70009 快照已从本地读出 Claw
+  的三条 SpellEffect；固定 DBCD 对照 42,365 个可读 ID 摘要、加密 ID 集合、
+  前 200 行及三条 Claw 全字段一致。缺钥分区仍明确 partial，enUS SpellName
+  本地缺文件；同 build/DBD/locale 的独立 US 远程快照已读出名称及效果，保留
+  不同 CDNConfig 的来源区别与原项目锁。修复 target available 展示正确地址却
+  请求错误产品的问题，实测发现 Forever 并按名称搜索 Claw。skill 同步修正
+  发现、名称到 ID 的编排及数据就绪判断；CLI 正确性不依赖调用者使用 skill。
+  详见[调查记录](forever-data-recovery-2026-09-29.md)。
+
 - 2026-09-28 `codex/nonce-memory-transport` 已接入原生内存读取、64 槽位、项目日志及公开 CLI/Skill。Retail 已实测正常/异步/报错/超时/大结果、同进程排他、执行中 reload 后只读任务续跑、13 个连续任务容量换代、语法错误报告及清理失败自动 reload 收尾；Titan 38002 与 Forever 16001 的各 20 次公开 CLI 基准也通过，详见[双客户端记录](live-memory-slot-clients-2026-09-28.md)。Classic **50504 / 5.5.4.69934** 已补完 20 次公开 CLI 基准、输入保护及自动化历史 reload 验证，详见 [Classic 记录](classic-input-history-2026-09-28.md)。约 11.06 GB 完整扫描：单路 63.803 秒，8 路 8.843 秒，均无缺口。**分支仍在实施，未达到发行验收**；完整历史记录丢失恢复及旧 QR 生产入口移除等仍有缺口；共享安装双进程的指定 build 竞态验证见当前状态。Forever 本轮结果属于指定 build 的实验验证。详见[实施与实机记录](live-memory-slot-implementation-2026-09-28.md)，不得将下方旧传输的历史记录当作新架构验收。
 
 日期：2026-09-28。2.5.0、2.5.1 已发布；当前版本源为 `release/version.json`，候选版本为 3.0.0。

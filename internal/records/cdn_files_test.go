@@ -21,8 +21,209 @@ import (
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
+
+func TestCDNRefreshDuringConfigurationPreparation(t *testing.T) {
+	f := newRemoteTargetFixture(t)
+	ctx := context.Background()
+	route, err := f.store.PublishBlob(ctx, vault.BlobInput{Reader: bytes.NewReader(f.transport.responses[f.cdnsURL].body), MaxBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(route)
+	if err = f.metadata.CommitDocuments(ctx, vault.Mutation{Key: "cdn-route/wow/cn", Value: raw}); err != nil {
+		t.Fatal(err)
+	}
+	b, d := f.transport.responses[f.buildURL].body, f.transport.responses[f.configURL].body
+	pin := selection.DataPin{Product: "retail", Region: "cn", Language: "zhCN", FullBuild: "12.1.0.69875", BuildConfig: md5TestKey(b), CDNConfig: md5TestKey(d), DefinitionCommit: definitionsTestCommit}
+	refreshes := 0
+	client := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		var body []byte
+		if r.URL.String() == f.cdnsURL {
+			refreshes++
+			body = []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\ncn|tpr/wow|new.example.test\n")
+		} else if r.URL.Host == "new.example.test" {
+			switch path.Base(r.URL.Path) {
+			case pin.BuildConfig:
+				body = b
+			case pin.CDNConfig:
+				body = d
+			}
+		}
+		status := 200
+		if body == nil {
+			status = 404
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	c := &cdnFiles{ctx: ctx, store: f.store, metadata: f.metadata, client: client}
+	meta, err := c.prepare(pin)
+	if err != nil || refreshes != 1 || meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
+		t.Fatalf("config recovery: %+v %v refreshes=%d", meta, err, refreshes)
+	}
+}
+
+func TestCDNDeadlineStopsRecovery(t *testing.T) {
+	calls := 0
+	files, _ := newCDNFilesTest(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		// Inject a transport deadline deterministically. A wall-clock deadline
+		// can expire during local cache preparation before any HTTP call under
+		// full-suite load; that valid path cannot assert exactly one attempt.
+		return nil, context.DeadlineExceeded
+	}), false, nil)
+	_, _, err := files.rangeBytes(strings.Repeat("a", 32), 0, 8, 8)
+	if !errors.Is(err, context.DeadlineExceeded) || calls != 1 {
+		t.Fatalf("deadline retried: %v calls=%d", err, calls)
+	}
+}
+
+func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
+	f := newRemoteTargetFixture(t)
+	build := []byte("root = " + strings.Repeat("1", 32) + "\nencoding = " + strings.Repeat("2", 32) + " " + strings.Repeat("3", 32) + "\nencoding-size = 123 456\nbuild-uid = wow_classic_beta\n")
+	buildKey := fmt.Sprintf("%x", md5.Sum(build))
+	cdn := f.transport.responses[f.configURL].body
+	cdnKey := fmt.Sprintf("%x", md5.Sum(cdn))
+	buildURL := "https://cdn.example.test/tpr/wow/config/" + buildKey[:2] + "/" + buildKey[2:4] + "/" + buildKey
+	catalogURL := remoteVersionBase("us") + "wow_classic_beta/cdns"
+	f.transport.responses = map[string]definitionResponse{
+		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
+		buildURL:   {status: 200, body: build}, f.configURL: {status: 200, body: cdn},
+	}
+	c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+	pin := selection.DataPin{Product: "forever", Region: "us", Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
+	meta, err := c.prepare(pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Installed.BuildConfig != buildKey || meta.Installed.FullBuild != pin.FullBuild {
+		t.Fatalf("changed pin: %+v", meta)
+	}
+	if got := f.transport.callURLs(); !equalStrings(got, []string{catalogURL, buildURL, f.configURL}) {
+		t.Fatal(got)
+	}
+	f.transport.responses = nil
+	c.offline = true
+	if _, err := c.prepare(pin); err != nil {
+		t.Fatalf("offline exact-pin reuse: %v", err)
+	}
+	// Fresh target resolution must validate the same distribution identity,
+	// while retaining the user-facing Forever product in its resulting pin.
+	f.transport.responses = map[string]definitionResponse{
+		remoteVersionBase("us") + "wow_classic_beta/versions": {status: 200, body: []byte(fmt.Sprintf("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\nus|%s|%s|70009|1.60.1.70009\n", buildKey, cdnKey))},
+		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
+	}
+	resolved, err := f.resolve(context.Background(), RemoteTargetRequest{Product: "forever", Region: "us", Locale: "enUS", FullBuild: pin.FullBuild, Definitions: definitionsTestCommit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Pin.Data.Product != "forever" || resolved.Pin.Data.BuildConfig != buildKey {
+		t.Fatal(resolved.Pin)
+	}
+}
+
+func TestCDNRefreshStaleRouteOnceWithoutRetargeting(t *testing.T) {
+	for _, scenario := range []string{"recovered", "path-changed", "still-missing", "offline", "bad-range"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newRemoteTargetFixture(t)
+			b := f.transport.responses[f.buildURL].body
+			d := f.transport.responses[f.configURL].body
+			pin := selection.DataPin{Product: "retail", Region: "cn", Language: "zhCN", FullBuild: "12.1.0.69875", BuildConfig: md5TestKey(b), CDNConfig: md5TestKey(d), DefinitionCommit: definitionsTestCommit}
+			c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+			if _, err := c.prepare(pin); err != nil {
+				t.Fatal(err)
+			}
+			encoded := headerlessBLTE([]byte("fixed bytes on a refreshed delivery host"))
+			key := md5TestKey(encoded)
+			base := &cdnTestTransport{objects: map[string][]byte{key: encoded}}
+			refreshes := 0
+			freshPath := "tpr/wow"
+			if scenario == "path-changed" {
+				freshPath = "new-route"
+			}
+			c.client = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() == f.cdnsURL {
+					refreshes++
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\ncn|" + freshPath + "|new.example.test\n")), Header: make(http.Header)}, nil
+				}
+				if r.URL.Host == "new.example.test" && (scenario == "recovered" || scenario == "path-changed") {
+					return base.RoundTrip(r)
+				}
+				status := 404
+				if scenario == "bad-range" {
+					status = 200
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("unavailable")), Header: make(http.Header)}, nil
+			})}
+			c.offline = scenario == "offline"
+			object, err := c.open(context.Background(), key, int64(len(encoded)))
+			if scenario == "recovered" || scenario == "path-changed" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer object.Close()
+				got, err := io.ReadAll(object)
+				if err != nil || !bytes.Equal(got, encoded) {
+					t.Fatalf("wrong content: %v", err)
+				}
+				fresh := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: c.client, offline: true}
+				meta, err := fresh.prepare(pin)
+				if err != nil || fresh.route.Hosts[0] != "new.example.test" || meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
+					t.Fatalf("refreshed route/pin not retained: %+v %v", meta, err)
+				}
+			} else if err == nil {
+				t.Fatal("unavailable bytes succeeded")
+			}
+			want := 1
+			if scenario == "offline" || scenario == "bad-range" {
+				want = 0
+			}
+			if refreshes != want {
+				t.Fatalf("refreshes=%d want=%d; error=%v", refreshes, want, err)
+			}
+		})
+	}
+}
+
+func TestCDNArchiveFallbackAfterUncertainLooseMirror(t *testing.T) {
+	for _, found := range []bool{true, false} {
+		t.Run(fmt.Sprint(found), func(t *testing.T) {
+			encoded := headerlessBLTE([]byte("archived despite unavailable loose mirror"))
+			ekey := md5TestKey(encoded)
+			indexedKey := ekey
+			if !found {
+				indexedKey = strings.Repeat("f", 32)
+			}
+			index, archiveKey := cdnIndexFixture(4, []string{indexedKey}, []uint32{uint32(len(encoded))}, []uint64{0})
+			base := &cdnTestTransport{objects: map[string][]byte{archiveKey: encoded, archiveKey + ".index": index}}
+			transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Host == "unavailable.example.test" {
+					return &http.Response{StatusCode: 403, Body: io.NopCloser(strings.NewReader("forbidden")), Header: make(http.Header), Request: r}, nil
+				}
+				return base.RoundTrip(r)
+			})
+			files, _ := newCDNFilesTest(t, transport, false, map[string][]string{"archives": {archiveKey}, "archive-group": {strings.Repeat("a", 32)}})
+			files.route.Hosts = []string{"unavailable.example.test", "cdn.example.test"}
+			object, err := files.open(context.Background(), ekey, int64(len(encoded)))
+			if !found {
+				if object != nil || !errors.Is(err, ErrRemoteHTTP) {
+					t.Fatalf("uncertainty erased: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer object.Close()
+			got, err := io.ReadAll(object)
+			if err != nil || !bytes.Equal(got, encoded) {
+				t.Fatalf("%x %v", got, err)
+			}
+		})
+	}
+}
 
 type cdnTestTransport struct {
 	mu      sync.Mutex

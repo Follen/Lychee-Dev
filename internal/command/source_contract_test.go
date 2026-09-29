@@ -166,6 +166,16 @@ func TestSourceResearchThroughCLI(t *testing.T) {
 		if secondCode != 0 || !secondPage.OK || resultMap(t, secondPage)["snapshotId"] != indexed.Snapshot.ID {
 			t.Fatalf("second query page: %+v (%d)", secondPage, secondCode)
 		}
+		// A valid cursor is still invalid for another question or command.
+		for _, changed := range [][]string{
+			{"source", "query", "GetRestrictedInfo", "--mode", "exploratory", "--topic", "api", "--limit", "1", "--cursor", cursor},
+			{"source", "refs", "--symbol-id", id, "--static-only", "--limit", "1", "--cursor", cursor},
+		} {
+			rejected, exit := invoke(t, append(changed, common...)...)
+			if exit != 2 || rejected.OK || rejected.Error.Code != "codebase.invalid_search_cursor" {
+				t.Fatalf("cross-scope cursor accepted: %v %+v (%d)", changed, rejected, exit)
+			}
+		}
 	} else {
 		t.Fatalf("fixture query did not offer cursor: %+v", firstPage)
 	}
