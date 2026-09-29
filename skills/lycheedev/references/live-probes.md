@@ -12,12 +12,15 @@ lycheedev live probe put --name <name> --file <probe.lua> --format json
 Names are mutable selectors; retain the returned immutable PRB revision. Use it
 with native execute. Old queue-oriented atomic commands belong to legacy records
 and are not the transport for CON connections.
+
 ## Design a discriminating probe
 
-Start from the question and two or more plausible explanations. Pin the exact
-client source commit and establish how it corresponds to the verified game build;
-also pin the target addon's revision and record whether it is known to match the
-loaded runtime. Inspect the relevant API definition, call sites, event order,
+For a simple state query, choose the needed fields and verify the APIs it uses;
+do not invent competing hypotheses or research unrelated code. For diagnosis,
+state the plausible explanations and the observation that separates them.
+Reuse matching source pins; establish how the relevant client source commit and
+target addon revision correspond to the verified runtime. Inspect the relevant
+API definition, call sites, event order,
 preconditions and secret/protected boundaries in
 [source-research.md](source-research.md). A current branch or newest tag is not
 evidence for the running build. When exact source is unavailable, identify the
@@ -48,10 +51,6 @@ deadline, user cancellation, unresolved execution, probe error, assertion
 failure and pending display cleanup distinct in the finding.
 
 ## Write bounded probes
-
-For deep secret-value or secure-taint diagnosis, use the hypothesis workflow
-below to choose what a probe should observe; the existing operation lifecycle
-still applies.
 
 Use Lua 5.1 and inspect only what answers the question. Bound collection sizes,
 tree depth, samples and output. Synchronous Lua cannot be preempted by the host;
@@ -123,21 +122,13 @@ explicitly instead of substituting defaults.
 
 ## Test source hypotheses
 
-Use this workflow when runtime investigation is in the user's scope and source
-analysis leaves a question about actual execution. Carry the source commits,
-file locations, suspected value path and unresolved condition from
-[source-research.md](source-research.md#secret-values-and-secure-taint). Bind the
-observations to the verified session, client build and observed addon version;
-record whether the researched revision is known to match the loaded addon.
-An installed file or repository commit alone does not prove that match.
-
-Start with existing verified reports and, when useful, the bounded error snapshot
-described in [error-diagnosis.md](error-diagnosis.md). State the competing
-explanations and the observation that could distinguish them before writing a
-probe. For example, check whether the relevant value is marked secret at an
-observable boundary, or whether the prerequisite event/state occurred. A probe
-must answer that specific question; the live bridge does not automatically
-recover arbitrary locals or a complete historical taint chain.
+Use this when authorized runtime work can distinguish an unresolved source
+hypothesis. Carry the exact source locations, value flow and uncertainty from
+[source value-flow analysis](source-value-flow.md); bind observations to the
+verified client, build and loaded addon revision. Installed files alone do not
+prove the loaded revision. Consult existing reports and [retained errors](error-diagnosis.md)
+before another probe. The bridge cannot recover arbitrary locals or a complete
+historical taint chain.
 
 Use only supported, safe observations for the verified client. For secret
 values, report the secrecy marker or an explicit unavailable state, not the raw

@@ -6,15 +6,14 @@ explains possible behavior, data supplies versioned records, and a live observat
 establishes what happened on the selected client. Carry exact source/data pins into
 the experiment; a data build selection does not select a game process.
 
-1. If a CON already exists, read its status and retained result first. For pending
-   work, use [recovery](live-recovery.md); do not create another connection or probe.
-2. Otherwise select the authorized target below. For installation or activation
-   without a usable CON, read [startup](live-startup.md).
-3. For new Lua, read [probe design and bounds](live-probes.md). For retained errors,
-   use [error diagnosis](error-diagnosis.md); for measurement interpretation, use
-   [performance investigations](runtime-investigations.md).
-4. Execute with a stable request, inspect the report and finish cleanup. Disconnect
-   when the authorized investigation is done; report unresolved evidence honestly.
+1. Existing CON: read status and retained results first. Resume unfinished work
+   through [recovery](live-recovery.md). If it is idle and still matches the
+   authorized target, reuse it for the next distinct task.
+2. New live task without a CON: select and connect below. Read [startup](live-startup.md)
+   only for installation, activation or contact without a usable runtime.
+3. Need new evidence: use [probe design](live-probes.md), [retained errors](error-diagnosis.md)
+   or [performance measurement](runtime-investigations.md) according to the question.
+4. Inspect the verified report, finish cleanup, and disconnect when done.
 
 The CLI owns native input, memory/optical observation, slot coordination and
 recovery. Agents do not send keys, decode colors or manipulate slot/claim files.
@@ -26,7 +25,8 @@ Use `live instances --passive` for window inventory without input. Connect direc
 when installation/PID are known; never choose a different character to bypass a
 busy or unavailable target. The selected process creation identity and actor remain
 fixed throughout recovery. One process has one logical connection and one active
-CLI driver; a foreign project's durable claim is not an expired timeout.
+CLI driver. Same-build instances still have separate PID/CON/request identities;
+shared installation files do not make them interchangeable. A foreign project's durable claim is not an expired timeout.
 
 If several candidates match and the task does not choose one, show their known
 product/build, character/realm and PID (unknown identity stays unknown), then ask
@@ -55,20 +55,11 @@ Use `--probe <immutable-PRB-revision>` instead of a file for registered source.
 `--budget-seconds` bounds the addon probe (1..120); `--wait-seconds` bounds this
 CLI invocation (1..600, default 120), including scans and recovery. A longer host
 wait does not extend probe execution. The CLI performs prepare/commit, strict
-HEAD/BODY association, fresh confirmation, durable result storage and release.
+result verification, durable storage and runtime release.
 
-Automatic recovery also has a durable absolute deadline: 600 seconds for each
-business request or explicit reload, and 120 seconds for initial binding or the
-first close request. First-install or explicit activation has a 600-second
-deadline carried into the subsequent bind. Time between calls counts. Resume and repeated close retain
-that deadline; a new request key is not a way to extend it. Close has its own
-bounded allowance even if business recovery is exhausted. Existing evidence can
-still be read after exhaustion. A detected backward clock change stops automatic
-work; an unseen clock change while the machine is offline cannot be detected.
-
-A CLI wait timeout or interruption ends the host call, not the game-side probe
-or its cleanup. For exhausted deadlines or older journals, read
-[recovery](live-recovery.md#durable-evidence-and-older-journals).
+Recovery has persistent deadlines; resume does not reset them. A CLI timeout
+ends the host call, not the Lua probe. Read [budget and evidence rules](live-recovery.md#durable-evidence-and-older-journals)
+when recovery is interrupted or exhausted.
 
 Choose `observation` only when repeating the whole probe after a confirmed new
 runtime is safe. Use the default `opaque` for state-changing or uncertain code.
@@ -85,14 +76,9 @@ it without executing again, including after later operations on that connection.
 A verified report with pending cleanup is usable evidence plus a recovery
 obligation. Keep it and follow [recovery](live-recovery.md), without rerunning Lua.
 
-Loading a slot does not require a reload for each probe. The CLI reserves control
-capacity and reloads at a quiescent boundary when needed. That reload can discard
-scene state: observation probes should reconstruct their own prerequisites, or
-state why the original transient scene cannot be reproduced. The input shield is
-released before business code. Ordinary queries, event listeners and async waits
-do not lock input: the click-through Lychee says `Agent 运行中` / `Agent running`.
-Only an actual input-protection phase says `Agent 接管中` / `Agent in control`.
-Neither label is proof of result retrieval.
+The CLI may reload at a quiescent capacity boundary, so probes must reconstruct
+scene prerequisites or declare them unreproducible. Ordinary probes do not lock
+input; activity labels do not prove acceptance or result retrieval.
 
 ```text
 lycheedev live disconnect <CON-id> --project <project-directory> --wait-seconds 120 --format json

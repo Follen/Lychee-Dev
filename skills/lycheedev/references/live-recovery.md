@@ -22,16 +22,10 @@ Do not replace a request, edit its files, clear ownership or repeat raw input to
 force progress. A cached hit never bypasses identity/checksum/fresh-confirmation
 validation. Incomplete scan coverage is not proof that no result exists.
 
-After user reload, a newly discovered descriptor is only a candidate. Continuing
-business on a replacement runtime requires a fresh nonce binding. Separately,
-disconnect can verify that another runtime actually generated a new sample in
-the same fixed process and retire the old CON without input or a new bind.
-Absent that evidence, preserve pending cleanup; a descriptor or old heap sample
-is not enough. Resume may attempt this cleanup when closing, when its durable
-budget is exhausted, or when persisted `runtimeEnd` evidence already exists;
-this does not renew the business budget. Follow the returned continuation rather
-than repeatedly retrying unchanged conditions. See
-[input-free retirement](live-startup.md#ownership-and-recovery) for actor changes.
+After user reload, a descriptor alone is only a candidate. Continuing business
+requires a fresh bind; closing the old CON instead uses [verified retirement](#ownership-and-runtime-retirement).
+Resume may attempt input-free cleanup when closing, after budget exhaustion or
+from saved `runtimeEnd`, without renewing business time.
 Repeatable observations can resume in a new attempt, bounded to three attempts.
 For opaque execution after a possible commit, `execution_unknown` remains unknown;
 inspect external postconditions using an authorized independent observation
@@ -68,8 +62,7 @@ reload input is never replayed, and an active reload/recovery cannot be replaced
 by a new request. Completion here means the CON is closed, not connected to the
 replacement runtime; it does not prove this CLI sent or caused a reload.
 Saved `runtimeEnd` evidence needs only input-free retirement.
-Completion proves destruction and retirement, not that this CLI sent or caused
-reload; the original input record remains the authority for what was sent.
+The original input record remains the authority for what was sent.
 
 Use this explicit recovery only when needed within the authorized task, after
 inspecting the concrete blocker; pending, contention or budget exhaustion alone
@@ -88,21 +81,35 @@ prepared exchange needs explicit reload, preserve its blocker and use the
 existing reload command only within the authorized scope. Closing is not proof
 that an already submitted opaque operation was cancelled or never ran.
 
-Where the older startup beacon is still used, its single RGB patch is only a
-reload observation hint; it is distinct from the hybrid input-condition signals. The new runtime and fresh
-bind are still required. The patch expires after 45 seconds or stops on wake.
-An interrupted reload resumes observation and does not blindly resend `/reload`.
+## Ownership and runtime retirement
+
+A PID has one durable owner across projects and one active host driver. CLI exit
+or elapsed time does not release the claim. Resolve foreign ownership with the
+owning task; a crash releases the OS driver lock, not durable reservations.
+
+Use the old CON's `live disconnect` in its owning project. The CLI can verify
+PID plus creation-time process exit, or verify another runtime actually wrote a
+new input sample in the same fixed process. Access errors, missing windows,
+descriptors, cached addresses and old heap samples prove neither case. Runtime
+replacement proof does not compare game time with the host clock. The CLI may
+relocate distant sample addresses once within its existing observation budget;
+this is not an Agent-directed scan or permission to extend the deadline.
+
+For runtime replacement, the CLI saves `runtimeEnd` before retiring only the
+old CON's exact reservations.
+Saved proof can finish interrupted retirement even after character selection.
+Without a new sample or saved proof, character selection stays pending. This path
+sends no input, binds no replacement, and does not change the old actor or replay
+its probe. Retain unresolved `execution_unknown` results even if `closed=true`.
+A new investigation on another actor needs a new CON for the authorized target;
+never automatically transfer the old request or probe.
 
 ## Input and recovery
 
-The coordinator owns every input attempt, records intent and rechecks before
-sending. A runtime advertising `lycheedev.input.hybrid.v1` uses three small
-signals (two data blocks and a heartbeat) for input-condition observation;
-identity, slot routing, receipts and results remain memory-backed. The CLI
-captures and decodes its fixed window and retains the required memory checks.
-Agents do not read colors, manage capture sessions or send keys themselves.
-The compatible `lycheedev.input.v1` runtime uses the original memory adapter;
-the CLI chooses from the verified runtime capability, not from a missing signal.
+The CLI journals input and selects the observation adapter from the verified
+runtime capability. Hybrid optical readiness keeps identity, routing and reports
+memory-backed; older input-v1 runtimes use memory observations. Missing signals
+do not permit blind fallback. Agents do not decode colors or manage capture.
 
 With an ordinary focused editor, the coordinator may send one Esc and observe
 again; Esc can close/cancel that UI. Combat, unknown observations, missing signals
@@ -120,15 +127,8 @@ test the conflict. A ready input observation does not prove the shortcut reaches
 the receiver. If input was already submitted or uncertain, retain the original
 CON and slot reservation and follow official CLI recovery; fixing the binding
 does not authorize replay of unknown input. Never delete the slot to unblock
-another instance. If the original process exits, let `live disconnect` verify
-that exit and retire its claims through the process-exit recovery path; a missing
-window or expired wait alone is not exit evidence.
-
-Connected reload uses the same readiness checks. It sends no Esc when input is
-already clear, and re-observes after each necessary Esc. The explicit installation
-fallback also uses the capability-selected path when the addon advertises supported
-input observations; see
-[startup](live-startup.md) for first-install and older-runtime limits.
+another instance; use [verified retirement](#ownership-and-runtime-retirement)
+when the original process or runtime has ended.
 
 Input evidence is distinct from execution: `not_sent` proves zero messages were
 queued; `submitted` proves only queue submission; `uncertain` (or an intent with
@@ -146,7 +146,6 @@ and nonce; do not delete a reservation or repeatedly resume without a change.
 A combat or focus wait retains its reservation, not the installation's short
 publication lock. Shared-installation instances still share physical slot files; the current
 protocol does not promise progress past an unresolved reservation in their next slot.
-Experimental same-slot envelope collections are not a shipped recovery option.
 
 `complete` applies to the current command: a connected runtime does not complete
 a pending disconnect, and a previous report does not complete reload. UI activity
@@ -158,8 +157,14 @@ and result files together. New journals reference exact code/result bytes by dig
 older inline snapshots remain readable. Missing or corrupt referenced content is
 a recovery error, never a reason to generate another request key.
 
-
 ## Durable evidence and older journals
+
+Durable deadlines are 600 seconds per business request or explicit reload,
+120 seconds for initial bind or first close, and 600 seconds for activation
+carried into its bind. Time between calls counts. Resume, repeated close and
+changing request keys do not extend a goal. Close retains its own allowance
+after business exhaustion; existing evidence remains readable. Detected clock
+rollback stops automatic work; an unseen offline clock change cannot be detected.
 
 Older channel-v1 journals receive one marked legacy budget window on their first
 drive, persisted before input; reading status does not migrate them. That window
