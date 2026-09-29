@@ -28,7 +28,13 @@ func (op *Operation) UnmarshalJSON(data []byte) error {
 
 func (s State) validate() error {
 	bad := errors.New("live.channel_journal_invalid")
+	if err := validateBudgets(s); err != nil {
+		return bad
+	}
 	if s.ProcessEnd != "" && s.ProcessEnd != "process_absent" && s.ProcessEnd != "process_exited" && s.ProcessEnd != "pid_reused" {
+		return bad
+	}
+	if s.RuntimeEnd != nil && retirementProofMatchesState(s, s.RuntimeEnd) != nil {
 		return bad
 	}
 	if in := s.Input; in != nil {
@@ -50,10 +56,10 @@ func (s State) validate() error {
 			return bad
 		}
 	}
-	if s.Schema != "lycheedev.channel.v1" || s.ID != "CON-"+s.Owner || s.Identity.Validate() != nil {
+	if (s.Schema != "lycheedev.channel.v1" && s.Schema != "lycheedev.channel.v2") || s.ID != "CON-"+s.Owner || s.Identity.Validate() != nil {
 		return bad
 	}
-	if s.Closed && (s.Bound || s.Transaction != nil || s.Operation != nil && s.Operation.Stage != "complete" && s.Operation.Stage != "execution_unknown") {
+	if s.Closed && (s.Bound || s.Transaction != nil || s.Operation != nil && s.Operation.Stage != "complete" && s.Operation.Stage != "execution_unknown" && s.Operation.Stage != "cancelled") {
 		return bad
 	}
 	if _, err := tokenBytes(s.Owner); err != nil {
@@ -90,7 +96,7 @@ func (s State) validate() error {
 		default:
 			return bad
 		}
-		if r.Phase != "complete" && (s.Closed || s.Operation != nil && s.Operation.Stage != "complete" && (s.Operation.Stage != "prepared" || s.Operation.PreparedNonce != "") && !(s.Operation.Stage == "release_ready" && s.Operation.CleanupMethod == "reload_required")) {
+		if r.Phase != "complete" && (s.Closed || !r.ReconcilePending && s.Operation != nil && s.Operation.Stage != "complete" && (s.Operation.Stage != "prepared" || s.Operation.PreparedNonce != "") && !(s.Operation.Stage == "release_ready" && s.Operation.CleanupMethod == "reload_required")) {
 			return bad
 		}
 	}
@@ -154,7 +160,7 @@ func (s State) validate() error {
 			return bad
 		}
 		switch op.Stage {
-		case "prepared", "execution_unknown":
+		case "prepared", "execution_unknown", "cancelled":
 		case "commit_ready", "running", "confirm_ready", "result_verified", "release_ready", "complete":
 			if _, err := tokenBytes(op.PreparedNonce); err != nil {
 				return bad

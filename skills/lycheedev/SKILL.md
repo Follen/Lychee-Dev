@@ -57,8 +57,9 @@ capability.
 Use the invoking project's directory consistently with `--project`. Native live
 records are stored in `.lycheedev/live`; keep them out of source control and
 retain the returned `CON-...` connection ID across turns. The CLI owns the 64
-input slots, nonce allocation, native memory reader, reload and crash recovery.
-Do not write slot files, manipulate journals, send raw keys or use wowdump.
+input slots, nonce allocation, memory and optical observations, reload and crash recovery.
+Do not write slot files, manipulate journals, interpret signal colors to send keys,
+or use wowdump. Input capability selection and readiness checks belong to the CLI.
 
 Prefer `live execute` with that connection, a Lua file or immutable probe revision,
 a stable request key, and explicit execution and host-wait budgets. Successful
@@ -67,15 +68,25 @@ read `report.ok` separately to decide whether the probe itself passed. A connect
 or bouncing logo is intermediate progress. Native transport has no QR to scan and
 needs no extra ACK, finish or hide after completion.
 
-On exit 6, inspect the reported stage/waiting reason and continue `live resume CON-...`
-in the same project within the task's host-wait budget. A missing client, foreign
-owner or unresolved execution outcome requires resolving that condition, not
-opening another connection. Repeating an execute
+On exit 6, use the returned continuation and concrete blocker. Continue
+`live resume CON-...` in the same project only when continuation permits it;
+keep one active mutating CLI call per fixed instance. Different instances, even
+of the same build or installation, retain separate fixed targets and CON/request
+lineages; parallel agents must not drive the same instance. If that call is still
+running, wait for it rather than starting another driver. External blockers
+require a changed condition; exhausted durable budgets do not renew on resume.
+A missing client, foreign owner or unresolved execution outcome requires resolving
+that condition, not opening another connection. Repeating an execute
 request with identical code, budget and policy resumes its original work; changing
 those inputs under the same key is a conflict. Choose `--policy observation` only
 for probes safe to repeat after runtime loss. The default `opaque` policy retains
 unknown effects instead of replaying them. A pending report or cleanup obligation
 is not a reason to create another request. See [recovery](references/live-investigation.md#recover-without-replay).
+
+A CLI timeout or interrupted wait does not cancel game-side execution. Closing
+stops new business input; if a prepared exchange requires explicit reload, follow
+that blocker within the authorized scope instead of completing its commit merely
+to disconnect. Source/data queries remain independent of a blocked live target.
 
 At the end of the investigation, `live disconnect CON-...` unbinds the quiescent
 runtime and releases its host ownership. Keep the connection only when the task

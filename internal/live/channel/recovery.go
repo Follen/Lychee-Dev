@@ -20,15 +20,32 @@ type RuntimeRecovery struct {
 // A descriptor merely selects a candidate. Fresh binding must finish before
 // treating the old runtime as gone or retrying an observation in a new attempt.
 func (d *Driver) RecoverRuntime(ctx context.Context, candidate Identity) error {
+	if d.State.RuntimeEnd != nil {
+		return runtimeRetirementPending()
+	}
 	if candidate.Inventory != nil && *candidate.Inventory != 64 {
 		return errors.New("live.channel_slot_inventory_incomplete")
 	}
 	if d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
+		i := d.State.Identity
+		if candidate.Validate() == nil && candidate.Runtime > i.Runtime && candidate.Owner == "" && candidate.GUID == i.GUID && candidate.Build == i.Build && candidate.Product == i.Product && candidate.Release == i.Release {
+			// Both the original exchange and the in-flight bind may still own
+			// disk reservations. Never overwrite either to chase a third runtime.
+			return &BlockedError{Blocker: Blocker{Kind: "runtime_changed_during_recovery", Runtime: candidate.Runtime, Condition: "original_process_end_or_protocol_recovery"}}
+		}
 		return d.finishRecovery(ctx)
 	}
 	old := d.State.Identity
 	if candidate.Validate() != nil || candidate.Runtime <= old.Runtime || candidate.Owner != "" || candidate.GUID != old.GUID || candidate.Build != old.Build || candidate.Product != old.Product || candidate.Release != old.Release {
 		return ErrPending
+	}
+	if r := d.State.Reload; r != nil && r.Phase != "complete" {
+		// Older capacity/cleanup reloads predate the explicit origin flag.
+		if op := d.State.Operation; !r.ReconcilePending && op != nil && (op.Stage == "prepared" && op.PreparedNonce == "" || op.Stage == "release_ready" && op.CleanupMethod == "reload_required") {
+			r.Automatic = true
+		}
+		r.Phase = "binding"
+		r.ReconcilePending = true
 	}
 	d.State.Recovery = &RuntimeRecovery{From: old, Transaction: d.State.Transaction, Phase: "binding"}
 	d.State.Transaction = nil
@@ -60,7 +77,7 @@ func (d *Driver) finishRecovery(ctx context.Context) error {
 		}
 	}
 	op := d.State.Operation
-	if op != nil && op.Stage != "complete" && op.Stage != "execution_unknown" {
+	if op != nil && op.Stage != "complete" && op.Stage != "execution_unknown" && op.Stage != "cancelled" {
 		// Once a commit intent exists its file may already be published, even
 		// if its own input was never attempted. A delayed prior key can consume
 		// that slot. Only absence of a commit transaction proves no commit yet.
@@ -77,7 +94,9 @@ func (d *Driver) finishRecovery(ctx context.Context) error {
 			}
 			op.Stage = "complete"
 			op.CleanupMethod = "runtime_destroyed"
-		} else if safe || op.Policy == "observation" {
+		} else if d.State.Closing && safe {
+			op.Stage = "cancelled"
+		} else if !d.State.Closing && (safe || op.Policy == "observation") {
 			if op.Attempt >= 3 {
 				return errors.New("live.channel_recovery_attempt_limit")
 			}
@@ -103,7 +122,7 @@ func (d *Driver) finishRecovery(ctx context.Context) error {
 	if err := d.Save(ctx, "runtime_recovery_reconciled"); err != nil {
 		return err
 	}
-	if op != nil && op.Stage == "execution_unknown" {
+	if op != nil && op.Stage == "execution_unknown" && !d.State.Closing {
 		return ErrExecutionUnknown
 	}
 	return nil

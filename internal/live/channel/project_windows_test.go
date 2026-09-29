@@ -50,6 +50,22 @@ func projectFixture(t *testing.T) (*Project, *Driver, projectTarget, string) {
 	return p, d, meta, parent
 }
 
+func TestRecoveryReloadCompletionSurvivesPendingDisconnect(t *testing.T) {
+	r := ProjectResult{Closed: true, Stage: "closed", OperationState: "execution_unknown", ReportState: "unavailable", Reload: &ReloadAttempt{Request: "recover", Phase: "complete", ReconcilePending: true}}
+	r.Continuation = Continuation{Kind: "needs_decision", RequestID: "original-business", Blocker: &Blocker{Kind: "receipt_pending"}}
+	got := presentReload(r, "recover")
+	if !got.Complete || !got.Closed || got.Stage != "closed" || got.ReportState != "unavailable" {
+		t.Fatalf("reload completion confused with unknown business result: %+v", got)
+	}
+	if got.Continuation.Kind != "completed" || got.Continuation.RequestID != "recover" || got.Continuation.Goal != "reload" || got.Continuation.Blocker != nil {
+		t.Fatal("reload continuation refers to the previous business request", got.Continuation)
+	}
+	r.Reload.Phase = "binding"
+	if presentReload(r, "recover").Complete {
+		t.Fatal("incomplete binding reported complete")
+	}
+}
+
 func TestClosedProjectRetiresClaimAfterCrashWithoutGame(t *testing.T) {
 	p, d, meta, parent := projectFixture(t)
 	d.State.Bound = false

@@ -71,7 +71,7 @@ func (p *slotPeer) Input(_ context.Context, a channel.InputAction) (channel.Inpu
 	}
 	return out, err
 }
-func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64) (channel.InputObservation, error) {
+func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (channel.InputObservation, error) {
 	blocked := false
 	return channel.InputObservation{Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
 }

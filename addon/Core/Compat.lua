@@ -5,6 +5,13 @@ local ADDON_NAME, ns = ...
 -- before it is compared, formatted, indexed or branched on; failures open to a
 -- harmless visible state instead of throwing.
 ns.Compat = {
+    -- Pinned PlayerScriptDocumentation declares this on Retail/Classic/Titan.
+    InWorld = function()
+        if type(IsPlayerInWorld)~="function" then return nil end
+        local ok,value=pcall(IsPlayerInWorld)
+        if not ok or (issecretvalue and issecretvalue(value)) or type(value)~="boolean" then return nil end
+        return value
+    end,
     LoadInputSlot = function(name)
         if type(name)~="string" or not name:match("^Lychee Dev Slot %d%d$") then return nil,"slot_name_invalid" end
         if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end

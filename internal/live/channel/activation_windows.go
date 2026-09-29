@@ -17,14 +17,15 @@ import (
 )
 
 type activation struct {
-	Outcome          *InputOutcome `json:"inputOutcome,omitempty"`
-	Schema           string        `json:"schema"`
-	Request          string        `json:"request"`
-	Selection        TargetRequest `json:"selection"`
-	Phase            string        `json:"phase"`
-	PriorRuntime     string        `json:"priorRuntime,omitempty"`
-	InputStep        int           `json:"inputStep"`
-	PatchTransitions int           `json:"patchTransitions"`
+	Budget           *DurableBudget `json:"budget,omitempty"`
+	Outcome          *InputOutcome  `json:"inputOutcome,omitempty"`
+	Schema           string         `json:"schema"`
+	Request          string         `json:"request"`
+	Selection        TargetRequest  `json:"selection"`
+	Phase            string         `json:"phase"`
+	PriorRuntime     string         `json:"priorRuntime,omitempty"`
+	InputStep        int            `json:"inputStep"`
+	PatchTransitions int            `json:"patchTransitions"`
 }
 
 func (p *Project) activationPath(id string) string {
@@ -85,7 +86,7 @@ func (p *Project) activateTarget(ctx context.Context, target live.ClientWindow, 
 	hash := sha256.Sum256([]byte(resource + "/" + id))
 	owner := journal.WindowOwner{Schema: "lycheedev.window-owner.v1", WorkspaceID: p.workspaceID(), Resource: resource, OperationID: id, IntentSHA256: fmt.Sprintf("%x", hash)}
 	meta := projectTarget{Schema: "lycheedev.channel-target.v1", Target: target, Owner: owner}
-	a := activation{Schema: "lycheedev.channel-activation.v1", Request: key, Selection: request, Phase: "prepared"}
+	a := activation{Schema: "lycheedev.channel-activation.v2", Request: key, Selection: request, Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
 	err = journal.BeginConnectionWindow(ctx, parent, owner, func() error {
 		if err := writeProjectJSON(ctx, p.path("connections", id+".target.json"), meta); err != nil {
 			return err
@@ -109,22 +110,92 @@ func (p *Project) activationStatus(id string) (ProjectResult, error) {
 	if err := readProjectJSON(p.activationPath(id), &a, 16384); err != nil {
 		return ProjectResult{}, err
 	}
-	if a.Schema != "lycheedev.channel-activation.v1" || ValidateRequest(a.Request) != nil || a.InputStep < 0 || a.InputStep > 6 {
-		return ProjectResult{}, errors.New("live.channel_activation_invalid")
+	if err := a.validate(); err != nil {
+		return ProjectResult{}, err
+	}
+	return p.presentActivation(id, a, time.Now()), nil
+}
+
+func (a activation) validate() error {
+	if a.Schema != "lycheedev.channel-activation.v1" && a.Schema != "lycheedev.channel-activation.v2" || ValidateRequest(a.Request) != nil || a.InputStep < 0 || a.InputStep > 6 || a.Schema == "lycheedev.channel-activation.v2" && a.Budget == nil || a.Budget.validate() != nil {
+		return errors.New("live.channel_activation_invalid")
 	}
 	if a.Outcome != nil && a.Outcome.validate() != nil {
-		return ProjectResult{}, errors.New("live.channel_activation_invalid")
+		return errors.New("live.channel_activation_invalid")
 	}
 	switch a.Phase {
 	case "prepared", "input_attempted", "runtime_selected":
 	default:
-		return ProjectResult{}, errors.New("live.channel_activation_invalid")
+		return errors.New("live.channel_activation_invalid")
 	}
-	return ProjectResult{Session: id, Stage: "activation_" + a.Phase, ReportState: "unavailable", Cleanup: "none", Journal: p.activationPath(id)}, nil
+	return nil
 }
 
-func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (ProjectResult, error) {
-	r, err := p.activationStatus(id)
+func (p *Project) presentActivation(id string, a activation, now time.Time) ProjectResult {
+	c := Continuation{Kind: "continue", Session: id, RequestID: a.Request, Goal: "activation"}
+	if a.Budget != nil {
+		// Projection only: status must not migrate or mutate the stored budget.
+		copy := *a.Budget
+		remaining, _, err := copy.Observe(now)
+		ms := remaining.Milliseconds()
+		c.RemainingBudgetMS = &ms
+		if err != nil {
+			c.Kind = "budget_exhausted"
+			kind := "budget_exhausted"
+			if errors.Is(err, ErrBudgetClockRollback) {
+				kind = "budget_clock_rollback"
+			}
+			c.Blocker = &Blocker{Kind: kind, Condition: "explicit_budget_decision"}
+		}
+	}
+	return ProjectResult{Session: id, Stage: "activation_" + a.Phase, ReportState: "unavailable", Cleanup: "none", Journal: p.activationPath(id), Continuation: c}
+}
+
+// Called only while holding the exact activation driver/owner lease. Reading
+// v1 remains compatible; its first drive grants one explicitly marked window.
+func (p *Project) observeActivationBudget(ctx context.Context, id string, a *activation, now time.Time) (time.Duration, error) {
+	if err := a.validate(); err != nil {
+		return 0, err
+	}
+	changed := a.Schema != "lycheedev.channel-activation.v2"
+	if a.Budget == nil {
+		a.Budget = NewDurableBudget(now, DefaultRecoveryBudget, true)
+		changed = true
+	}
+	a.Schema = "lycheedev.channel-activation.v2"
+	remaining, observed, budgetErr := a.Budget.Observe(now)
+	if changed || observed {
+		if err := writeProjectJSON(ctx, p.activationPath(id), a); err != nil {
+			return 0, err
+		}
+	}
+	return remaining, budgetErr
+}
+
+func (p *Project) finishActivationBudget(ctx context.Context, id string, a *activation) error {
+	flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	// Monotonic expiry remains final even when a wall-clock adjustment makes
+	// a subsequent Observe appear to have time left. A shorter caller timeout
+	// has a different cause and must not exhaust the durable activation goal.
+	if errors.Is(context.Cause(ctx), ErrBudgetExhausted) && !a.Budget.Exhausted {
+		a.Budget.Exhausted = true
+		if err := writeProjectJSON(flush, p.activationPath(id), a); err != nil {
+			return err
+		}
+	}
+	_, err := p.observeActivationBudget(flush, id, a, time.Now())
+	return err
+}
+
+func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (r ProjectResult, err error) {
+	// Ordering is intentional: diagnostic IO must neither consume the final
+	// authority-budget observation nor keep another driver out of the window.
+	var finalizeBudget, releaseDriver, closeDiagnostics func() error
+	defer func() {
+		err = errors.Join(err, finishActivationResources(finalizeBudget, releaseDriver, closeDiagnostics))
+	}()
+	r, err = p.activationStatus(id)
 	if err != nil {
 		return r, err
 	}
@@ -135,13 +206,19 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	parent := filepath.Join(meta.Target.Client.Directory, "Interface", "AddOns")
 	lease, err := journal.LockBootstrapWindow(ctx, parent, meta.Owner)
 	if err != nil {
+		if errors.Is(err, journal.ErrBusy) {
+			b := Blocker{Kind: "active_driver", Consumer: meta.Owner.OperationID, Installation: parent, Condition: "active_driver_released"}
+			r.Continuation.Kind, r.Continuation.Blocker = "wait_active_driver", &b
+			return r, errors.Join(err, &BlockedError{Blocker: b})
+		}
 		return r, err
 	}
-	defer func() {
+	releaseDriver = func() error {
 		if lease != nil {
-			_ = lease.Close()
+			return lease.Close()
 		}
-	}()
+		return nil
+	}
 	// A different driver may have finished activation before lease acquisition.
 	if d, e := Load(p.log(id), nil); e == nil {
 		// A crash may have persisted the selected runtime but not its bind.
@@ -159,6 +236,26 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if err = readProjectJSON(p.activationPath(id), &a, 16384); err != nil {
 		return r, err
 	}
+	remaining, err := p.observeActivationBudget(ctx, id, &a, time.Now())
+	r = p.presentActivation(id, a, time.Now())
+	if err != nil {
+		return r, err
+	}
+	bounded, cancelBudget := context.WithTimeoutCause(ctx, remaining, ErrBudgetExhausted)
+	ctx = bounded
+	// Persist expiration/rollback even if discovery or input used up the local
+	// context. Do not replace the ordinary driver's projection after handoff.
+	finalizeBudget = func() error {
+		defer cancelBudget()
+		if r.Continuation.Goal != "activation" {
+			return nil
+		}
+		budgetErr := p.finishActivationBudget(ctx, id, &a)
+		stage := r.Stage
+		r = p.presentActivation(id, a, time.Now())
+		r.Stage = stage
+		return budgetErr
+	}
 	if a.Phase == "runtime_selected" {
 		return r, ErrJournalMissing
 	}
@@ -166,7 +263,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if err != nil {
 		return r, err
 	}
-	defer n.Close()
+	closeDiagnostics = n.Close
 	guard := func(ctx context.Context) error {
 		if err := deploymentGuard(ctx, meta.Target); err != nil {
 			return err
@@ -191,7 +288,10 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 		if len(candidates) > 0 {
 			a.PriorRuntime = candidates[0].Runtime
 			candidate := candidates[0]
-			if candidate.InputState == "lycheedev.input.v1" {
+			if err := inputCapabilityError(candidate.InputState); err != nil {
+				return r, err
+			}
+			if observedInputCapability(candidate.InputState) {
 				if candidate.Owner != "" {
 					return r, errors.New("live.channel_ownership_changed")
 				}
@@ -204,8 +304,9 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 				}
 				d.State.ID = id
 				d.State.Owner = strings.TrimPrefix(id, "CON-")
+				d.State.ConnectBudget = a.Budget
 				d.ResultDir = p.path("results")
-				d.State.Reload = &ReloadAttempt{Request: a.Request, From: candidate.Runtime, Phase: "intent"}
+				d.State.Reload = &ReloadAttempt{Request: a.Request, From: candidate.Runtime, Phase: "intent", RecoveryBudget: a.Budget}
 				if e = d.Save(ctx, "activation_observed_reload"); e != nil {
 					return r, e
 				}
@@ -255,6 +356,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 			}
 			d.State.ID = id
 			d.State.Owner = strings.TrimPrefix(id, "CON-")
+			d.State.ConnectBudget = a.Budget
 			d.ResultDir = p.path("results")
 			if e = d.Save(ctx, "activation_runtime_selected"); e != nil {
 				return r, e
@@ -274,4 +376,16 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+// Each obligation runs even if a prior one fails. This is resource cleanup,
+// not an activation transition or an additional budget/scheduler.
+func finishActivationResources(finalizeBudget, releaseDriver, closeDiagnostics func() error) error {
+	var result error
+	for _, finish := range []func() error{finalizeBudget, releaseDriver, closeDiagnostics} {
+		if finish != nil {
+			result = errors.Join(result, finish())
+		}
+	}
+	return result
 }

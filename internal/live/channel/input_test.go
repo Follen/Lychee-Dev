@@ -48,9 +48,9 @@ type focusBackend struct {
 	before  int
 }
 
-func (b *focusBackend) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64) (InputObservation, error) {
+func (b *focusBackend) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64, capability string) (InputObservation, error) {
 	b.before++
-	s, _ := b.pendingBackend.ObserveInput(ctx, e, after)
+	s, _ := b.pendingBackend.ObserveInput(ctx, e, after, capability)
 	s.InputBlocked = &b.blocked
 	if b.blocked {
 		s.Reason = "input_keyboard_focus"

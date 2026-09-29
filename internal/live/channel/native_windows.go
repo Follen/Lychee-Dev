@@ -29,6 +29,23 @@ type Native struct {
 	Lookups                              []memory.LookupResult
 	TraceDir                             string
 	traceSequence                        int
+	traces                               []lookupTrace
+	hintsDirty                           bool
+	inputWait                            inputSampleWait
+	inputHintRuntime                     string
+	inputHintMillis                      int64
+	inputSignal                          *nativeInputSignal
+}
+
+const observationLimit = 256
+const diagnosticFlushBudget = 10 * time.Second
+
+type lookupTrace struct {
+	Nonce, Runtime, Ticket string
+	Kind                   bridge.MemoryKind
+	Matches                int
+	Lookup                 memory.LookupResult
+	sequence               int
 }
 
 func (n *Native) Observe(ctx context.Context, q ObservationQuery) (Observation, error) {
@@ -52,37 +69,82 @@ func (n *Native) Close() error {
 		err = n.Publication.Close()
 		n.Publication = nil
 	}
-	return errors.Join(err, n.Process.Close())
+	if n.Process != nil {
+		err = errors.Join(err, n.Process.Close())
+		n.Process = nil
+	}
+	if n.inputSignal != nil {
+		n.inputSignal.close()
+		n.inputSignal = nil
+	}
+	// Never retain an input/publication lease while writing diagnostics. This
+	// final bounded flush also runs after the command context was cancelled.
+	ctx, cancel := context.WithTimeout(context.Background(), diagnosticFlushBudget)
+	defer cancel()
+	err = errors.Join(err, n.flushTraces(ctx, writeProjectJSON))
+	if n.Hints != nil && n.hintsDirty {
+		_ = n.Hints.Save(ctx, n.CacheFile) // Disposable cache, one write per command.
+		n.hintsDirty = false
+	}
+	return err
 }
 func (n *Native) Find(ctx context.Context, s memory.Selector, first bool) (memory.LookupResult, error) {
-	if n.TraceDir != "" && n.traceSequence >= 256 {
+	return n.find(ctx, n.Process, s, first)
+}
+
+func (n *Native) find(ctx context.Context, source memory.Source, s memory.Selector, first bool) (memory.LookupResult, error) {
+	return n.findPath(ctx, source, s, first, false)
+}
+
+func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Selector, first, nearby bool) (memory.LookupResult, error) {
+	if n.TraceDir != "" && n.traceSequence >= observationLimit {
 		return memory.LookupResult{}, errors.New("live.channel_observation_budget")
 	}
-	found, err := memory.Find(ctx, n.Process, s, n.Hints, first)
+	var found memory.LookupResult
+	var err error
+	if nearby {
+		found, err = memory.FindNearby(ctx, source, s, n.Hints)
+	} else {
+		found, err = memory.Find(ctx, source, s, n.Hints, first)
+	}
+	n.hintsDirty = n.Hints != nil
 	// Coverage/latency persist in host evidence without duplicating large bodies.
 	evidence := found
 	evidence.Records = nil
-	if len(n.Lookups) < 256 {
+	if len(n.Lookups) < observationLimit {
 		n.Lookups = append(n.Lookups, evidence)
 	}
 	if n.TraceDir != "" {
 		n.traceSequence++
-		trace := struct {
-			Nonce, Runtime, Ticket string
-			Kind                   bridge.MemoryKind
-			Matches                int
-			Lookup                 memory.LookupResult
-		}{hex.EncodeToString(s.Nonce[:]), hex.EncodeToString(s.Runtime[:]), hex.EncodeToString(s.Ticket[:]), s.Kind, len(found.Records), evidence}
-		// Preserve coverage even when the caller's scan deadline just expired.
-		traceCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		traceErr := writeProjectJSON(traceCtx, filepath.Join(n.TraceDir, fmt.Sprintf("%03d.json", n.traceSequence)), trace)
-		cancel()
-		err = errors.Join(err, traceErr)
-	}
-	if n.Hints != nil {
-		_ = n.Hints.Save(ctx, n.CacheFile)
+		n.traces = append(n.traces, lookupTrace{hex.EncodeToString(s.Nonce[:]), hex.EncodeToString(s.Runtime[:]), hex.EncodeToString(s.Ticket[:]), s.Kind, len(found.Records), evidence, n.traceSequence})
 	}
 	return found, err
+}
+
+// Successful writes leave the pending buffer; a failed write and everything
+// after it remain retryable by Close. The total observation count never resets.
+func (n *Native) flushTraces(ctx context.Context, write func(context.Context, string, any) error) error {
+	completed := 0
+	defer func() {
+		for i := 0; i < completed; i++ {
+			n.traces[i] = lookupTrace{}
+		}
+		n.traces = n.traces[completed:]
+		if len(n.traces) == 0 {
+			n.traces = nil
+		}
+	}()
+	for _, trace := range n.traces {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(ErrTraceFlush, err)
+		}
+		file := filepath.Join(n.TraceDir, fmt.Sprintf("%03d.json", trace.sequence))
+		if err := write(ctx, file, trace); err != nil {
+			return fmt.Errorf("%w: %s: %w", ErrTraceFlush, file, err)
+		}
+		completed++
+	}
+	return nil
 }
 func (n *Native) lockPublication(ctx context.Context) error {
 	if n.Publication != nil {
@@ -94,7 +156,10 @@ func (n *Native) lockPublication(ctx context.Context) error {
 	lease, err := vault.AcquireLease(ctx, filepath.Join(n.Parent, ".lycheedev-slot-locks"), "publication")
 	if err != nil {
 		if ctx.Err() != nil {
-			return errors.Join(ErrPublicationPending, err)
+			return errors.Join(&BlockedError{Blocker: Blocker{
+				Kind: "publication_lock", Installation: n.Parent,
+				Condition: "publication_lease_released",
+			}}, err)
 		}
 		return err
 	}
@@ -129,7 +194,18 @@ func (n *Native) Publish(ctx context.Context, e bridge.SlotEnvelope) (err error)
 	if errors.Is(err, delivery.ErrSlotReserved) {
 		// The other CLI may have exited. Its durable reservation, not this OS
 		// lease, prevents overwrite. Release the lease so its owner can resume.
-		return ErrPublicationPending
+		// Read the exact reservation before releasing admission. Diagnostics
+		// must not accidentally describe a later owner's reused physical slot.
+		pool, inspectErr := delivery.InspectSlots(ctx, n.Parent, n.Version)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		reserved := pool.Files[e.Index-1]
+		return &BlockedError{Blocker: Blocker{
+			Kind: "slot_reservation", Installation: n.Parent, Slot: e.Index,
+			Consumer: reserved.Consumer, Runtime: reserved.Runtime, Nonce: reserved.Nonce,
+			Condition: "exact_consumption_or_retirement_evidence",
+		}}
 	}
 	return err
 }
@@ -137,7 +213,7 @@ func (n *Native) Publish(ctx context.Context, e bridge.SlotEnvelope) (err error)
 // RetryFirstBinding is deliberately limited to a pristine pool containing only
 // this non-business bind. Even an unexpected extra wake cannot load business
 // code. General input replay needs current-slot evidence and is not allowed.
-func (n *Native) RetryFirstBinding(ctx context.Context, e bridge.SlotEnvelope) (err error) {
+func (n *Native) RetryFirstBinding(ctx context.Context, e bridge.SlotEnvelope, capability string) (err error) {
 	if e.Action != "bind" || e.Index != 1 || e.Code != "" {
 		return errors.New("live.channel_bootstrap_retry_unsafe")
 	}
@@ -161,11 +237,15 @@ func (n *Native) RetryFirstBinding(ctx context.Context, e bridge.SlotEnvelope) (
 			return errors.New("live.channel_bootstrap_retry_unsafe")
 		}
 	}
-	s, err := n.ObserveInput(ctx, e, 0)
+	// No scan or capture wait while holding the shared publication lease.
+	if err = n.unlockPublication(); err != nil {
+		return err
+	}
+	s, err := n.ObserveInput(ctx, e, 0, capability)
 	if err != nil {
 		return err
 	}
-	_, err = n.Input(ctx, InputAction{Kind: "invoke", Envelope: e, Observation: &s})
+	_, err = n.Input(ctx, InputAction{Kind: "invoke", Envelope: e, Observation: &s, Capability: capability})
 	return err
 }
 func (n *Native) Consumed(ctx context.Context, e bridge.SlotEnvelope) (err error) {

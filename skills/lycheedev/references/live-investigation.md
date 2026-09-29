@@ -1,22 +1,24 @@
 # Live investigation
 
-Jump to [connect](#select-and-connect), [execute and close](#complete-an-investigation),
-[input recovery](#input-and-recovery), [probe design](#design-a-discriminating-probe),
-[bounded probes](#write-bounded-probes), [source hypotheses](#test-source-hypotheses),
-or [resume/reload](#recover-without-replay).
+Use live work to resolve a question about the running client that existing source,
+data or retained reports cannot answer. Keep those evidence types distinct: source
+explains possible behavior, data supplies versioned records, and a live observation
+establishes what happened on the selected client. Carry exact source/data pins into
+the experiment; a data build selection does not select a game process.
 
-For authorized running-client work, the CLI owns native memory reads, 64 input
-slots, process/actor identity, persistence and recovery. No wowdump or QR reader
-is needed. Use the same invoking-project directory for every call; `.lycheedev/live`
-holds connection journals, nonce/ticket lineage and exact result artifacts.
+1. If a CON already exists, read its status and retained result first. For pending
+   work, use [recovery](live-recovery.md); do not create another connection or probe.
+2. Otherwise select the authorized target below. For installation or activation
+   without a usable CON, read [startup](live-startup.md).
+3. For new Lua, read [probe design and bounds](live-probes.md). For retained errors,
+   use [error diagnosis](error-diagnosis.md); for measurement interpretation, use
+   [performance investigations](runtime-investigations.md).
+4. Execute with a stable request, inspect the report and finish cleanup. Disconnect
+   when the authorized investigation is done; report unresolved evidence honestly.
 
-The in-game Automation page retains the latest 100 native operation records per
-character, with up to 32 KiB of UTF-8 report preview each. Reload/logout saves
-them through SavedVariables; a client crash may lose unsaved previews. The
-project journal remains the durable evidence/recovery source. An empty or cleared
-UI history never authorizes replay. Old running/prepared display records become
-interrupted after runtime replacement; completed reports survive release and
-reload. Earlier operations that never wrote UI history are not backfilled.
+The CLI owns native input, memory/optical observation, slot coordination and
+recovery. Agents do not send keys, decode colors or manipulate slot/claim files.
+Keep the invoking project's `.lycheedev/live` evidence directory together.
 
 ## Select and connect
 
@@ -55,6 +57,19 @@ CLI invocation (1..600, default 120), including scans and recovery. A longer hos
 wait does not extend probe execution. The CLI performs prepare/commit, strict
 HEAD/BODY association, fresh confirmation, durable result storage and release.
 
+Automatic recovery also has a durable absolute deadline: 600 seconds for each
+business request or explicit reload, and 120 seconds for initial binding or the
+first close request. First-install or explicit activation has a 600-second
+deadline carried into the subsequent bind. Time between calls counts. Resume and repeated close retain
+that deadline; a new request key is not a way to extend it. Close has its own
+bounded allowance even if business recovery is exhausted. Existing evidence can
+still be read after exhaustion. A detected backward clock change stops automatic
+work; an unseen clock change while the machine is offline cannot be detected.
+
+A CLI wait timeout or interruption ends the host call, not the game-side probe
+or its cleanup. For exhausted deadlines or older journals, read
+[recovery](live-recovery.md#durable-evidence-and-older-journals).
+
 Choose `observation` only when repeating the whole probe after a confirmed new
 runtime is safe. Use the default `opaque` for state-changing or uncertain code.
 A retry keeps the logical operation/request and records a new attempt/ticket;
@@ -67,13 +82,8 @@ A native complete result needs no ACK/finish/hide command. Original result bytes
 remain in the project even after the game exits. Repeat the same request to read
 it without executing again, including after later operations on that connection.
 
-Cleanup callback failures retain the verified report and trigger a journaled
-reload; a fresh binding then records `cleanupMethod: runtime_destroyed`. The
-original `resourcesReleased: false` is preserved. It is distinct from a normal
-release acknowledgement. Journal segments rotate only at idle boundaries and
-remain linked under the connection's `.jsonl.history` directory; preserve these
-alongside the active log. A missing segment must not be worked around by issuing
-a new request key.
+A verified report with pending cleanup is usable evidence plus a recovery
+obligation. Keep it and follow [recovery](live-recovery.md), without rerunning Lua.
 
 Loading a slot does not require a reload for each probe. The CLI reserves control
 capacity and reloads at a quiescent boundary when needed. That reload can discard
@@ -89,255 +99,38 @@ lycheedev live disconnect <CON-id> --project <project-directory> --wait-seconds 
 ```
 
 Disconnect at the end of the authorized investigation unless continued use is
-needed. It verifies unbind before releasing host ownership, or uses OS proof that
-the exact process lifetime ended; see [process exit](live-startup.md#ownership-and-recovery).
+needed. It verifies unbind before releasing host ownership, or uses verified
+process-exit/runtime-replacement evidence for input-free retirement; see
+[ownership and recovery](live-startup.md#ownership-and-recovery).
 A repeated completed
 close repairs any interrupted host retirement without new game input.
 For interrupted opaque work, `closed: true` does not imply a known business
 outcome: preserve `operationState: execution_unknown`, `complete: false` and the
 missing report. Do not turn successful connection cleanup into task success.
 
-## Input and recovery
-
-The coordinator owns every input attempt. It observes current memory input
-state, journals the intended action, then rechecks before sending. With an ordinary
-focused editor it sends one Esc and observes again; Esc may close/cancel that UI.
-Combat, secret/unavailable observations and stale samples are not permission to
-send Esc. Held system keys wait for release. No foreground input or color-patch
-protocol is required. Native invocation uses fixed Ctrl+Alt+F12; agents never
-send it themselves or edit the slot files.
-
-Connected reload uses the same readiness checks. It sends no Esc when input is
-already clear, and re-observes after each necessary Esc. The explicit installation
-fallback also uses this path when the addon advertises telemetry; see
-[startup](live-startup.md) for first-install and older-runtime limits.
-
-Input evidence is distinct from execution: `not_sent` proves zero messages were
-queued; `submitted` proves only queue submission; `uncertain` (or an intent with
-no outcome) does not permit replay. These facts drive CLI recovery. Do not
-reinterpret them into manual retry instructions. Use the same CON/project and
-`live resume`; inspect `waiting` when present. Recheck after a changed condition
-within the authorized task; do not repeat indefinitely against an absent process,
-foreign ownership or an unresolved opaque execution outcome.
-
-`waiting: shared_publication` is bounded contention inside one installation,
-not a lost connection. Resume the same CON/request; keep its nonce and do not
-delete a slot reservation. Another driver may release its short lock normally,
-but an unresolved reservation needs its original owner's recovery. A combat or
-focus wait holds that slot only, not the installation's publication lock.
-
-`complete` applies to the current command. A connected runtime does not complete
-a pending disconnect, and a previous probe report does not complete reload.
-The bouncing Lychee shows activity only. Ordinary probes do not block input;
-short input protection says `Agent 接管中`, ordinary execution says `Agent 运行中`.
-Neither animation nor a reload hint proves an accepted request.
-
-The whole `.lycheedev/live` directory is the recovery unit. Keep connection logs,
-linked history segments, content-addressed `connections/artifacts`, target metadata
-and result files together. New journals reference exact code/result bytes by digest;
-older inline snapshots remain readable. Missing or corrupt referenced content is
-a recovery error, never a reason to generate another request key.
-
-## Register reusable source
-
-```text
-lycheedev live probe put --name <name> --file <probe.lua> --format json
-```
-
-Names are mutable selectors; retain the returned immutable PRB revision. Use it
-with native execute. Old queue-oriented atomic commands belong to legacy records
-and are not the transport for CON connections.
 ## Design a discriminating probe
 
-Start from the question and two or more plausible explanations. Pin the exact
-client source commit and establish how it corresponds to the verified game build;
-also pin the target addon's revision and record whether it is known to match the
-loaded runtime. Inspect the relevant API definition, call sites, event order,
-preconditions and secret/protected boundaries in
-[source-research.md](source-research.md). A current branch or newest tag is not
-evidence for the running build. When exact source is unavailable, identify the
-gap and, within the live authorization, use a minimal capability observation
-before relying on the uncertain interface.
-
-Choose the smallest experiment that separates the hypotheses. The supported
-Lua probe can inspect state, collect event timing, exercise a target addon's own
-controller or callback where authorized, check object lifetime, sample bounded
-performance data, or verify a business invariant. Source and task determine the
-actions, fields, sample limit and assertions; the bridge does not impose a UI
-template. For an interactive behavior, distinguish calling a handler from real
-mouse or keyboard dispatch. A programmatic callback cannot prove hit testing,
-cursor routing or protected hardware input.
-
-Specify what must be true before each action, what output proves or refutes each
-hypothesis, and what remains untested. Rebuild scene state after load when needed.
-Finish observation and probe-owned cleanup before reporting. Results, logs and
-assertions use a bounded memory report; the CLI verifies and durably saves its
-exact bytes before releasing runtime storage. An expected assertion failure should use a clear
-failure state instead of wrapping an exception as success. A verified report
-proves retrieval and integrity, not that its assertions passed.
-
-If evidence calls for a different experiment, finish or recover the old
-operation first, then create a new revision and request key. An uncertain
-accepted input or missing receipt is not grounds to rerun the same Lua. Keep
-deadline, user cancellation, unresolved execution, probe error, assertion
-failure and pending display cleanup distinct in the finding.
+Use [probe design](live-probes.md#design-a-discriminating-probe) before creating
+new Lua: pin the relevant source and define the observation that separates hypotheses.
 
 ## Write bounded probes
 
-For deep secret-value or secure-taint diagnosis, use the hypothesis workflow
-below to choose what a probe should observe; the existing operation lifecycle
-still applies.
-
-Use Lua 5.1 and inspect only what answers the question. Bound collection sizes,
-tree depth, samples and output. Synchronous Lua cannot be preempted by the host;
-never rely on a host timeout as the probe's only bound.
-
-For event- or callback-based work, the chunk receives one API as `...`:
-
-```lua
-local probe = ...
-assert(probe:Async(30)) -- integer seconds, 1..120
-local frame = CreateFrame("Frame")
-assert(probe:OnCleanup(function() frame:UnregisterAllEvents() end))
-frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-frame:SetScript("OnEvent", assert(probe:Callback(function()
-  probe:Finish({ observed = true })
-end)))
-```
-
-Use `probe:Fail("stable_reason")` for an expected failed result,
-`probe:Log(...)` for bounded diagnostic lines, and `probe:IsCancelled()` before
-expensive callback work. Async probes have a mandatory bounded timer, at most
-16 cleanup callbacks, 100 log entries and 32 KiB of logs. Completion is
-single-use. Wrap every asynchronous entry with `probe:Callback` so late callbacks
-cannot enter user code after termination and exceptions become failed reports.
-Register resource cleanup before activating each timer/frame. Cleanup runs on
-completion, failure or timeout; cleanup failures remain pending
-and prevent a false successful acknowledgement. Do
-not create permanent hooks or mutate Blizzard-owned APIs.
-Choose the load budget to cover the probe's own async deadline and cleanup; a
-longer host wait cannot extend the declared execution budget.
-
-### Scene prerequisites and optional input protection
-
-For scene-dependent probes, declare a small, side-effect-free predicate with
-`probe:Guard(check, events, reason)`. It must return the non-secret boolean `true`.
-The runtime checks it immediately, on the listed events, before each wrapped
-callback, and before successful completion. A false, unavailable, secret or
-throwing predicate fails the probe with the supplied reason. At most eight
-guards and eight distinct events are supported; no polling is added. Choose
-events that actually cover the target or UI changes relevant to the experiment.
-Preserve that failed report, then reconstruct the scene or propose a revised
-experiment according to the operation's observation/opaque policy. A scene
-failure is not permission to automatically replay an effect.
-
-Do not acquire input protection for ordinary data reads, listeners or waiting.
-Only an explicitly exclusive UI experiment should call
-`assert(probe:ProtectInput(seconds))`. It permits one protection phase per probe,
-with an Agent-chosen duration no longer than the remaining probe budget; there
-is no separate five-second cap. Use
-`probe:ReleaseInput()` immediately after the exclusive actions; the remainder
-of an async probe runs normally. Completion and errors release before user
-cleanup. The hard deadline, combat, leaving the world or Ctrl+Alt+[ release the
-shield and fail the active probe rather than silently continuing unprotected.
-Use `probe:IsInputProtected()` to observe this probe's lease. Late callbacks and
-old lease timers cannot resume a finished probe or release a newer lease.
-
-This is an in-game input shield, not an OS-wide lock, protection from disconnects,
-or a source of secure hardware-action authority. Keep checking scene prerequisites
-even while protected. Use bounded Lua: a blocked synchronous Lua callback cannot
-be preempted by a Lua timer. Slot loading protects only its short dispatch burst
-(two-second safety deadline) and releases before business entry. Fixed reload
-retains the host's serialized, bounded input transaction; it must work even when
-the addon is not loaded, so an in-game takeover indicator is not guaranteed for
-that fallback. Never hold a game shield while scanning memory or awaiting reload.
-
-Combat lockdown and secret values are trust boundaries. Check them before
-comparison, formatting or branching. Record unavailable and truncated values
-explicitly instead of substituting defaults.
+Use the [bounded API and cleanup rules](live-probes.md#write-bounded-probes).
+A host timeout cannot preempt synchronous Lua; ordinary observation needs no input shield.
 
 ## Test source hypotheses
 
-Use this workflow when runtime investigation is in the user's scope and source
-analysis leaves a question about actual execution. Carry the source commits,
-file locations, suspected value path and unresolved condition from
-[source-research.md](source-research.md#secret-values-and-secure-taint). Bind the
-observations to the verified session, client build and observed addon version;
-record whether the researched revision is known to match the loaded addon.
-An installed file or repository commit alone does not prove that match.
+Carry the unresolved source path into [live hypothesis testing](live-probes.md#test-source-hypotheses),
+then return the observed result to that path. Do not infer source correctness from
+an unrelated successful probe.
 
-Start with existing verified reports and, when useful, the bounded error snapshot
-described in [error-diagnosis.md](error-diagnosis.md). State the competing
-explanations and the observation that could distinguish them before writing a
-probe. For example, check whether the relevant value is marked secret at an
-observable boundary, or whether the prerequisite event/state occurred. A probe
-must answer that specific question; the live bridge does not automatically
-recover arbitrary locals or a complete historical taint chain.
+## Input and recovery
 
-Use only supported, safe observations for the verified client. For secret
-values, report the secrecy marker or an explicit unavailable state, not the raw
-value. Do not compare, format, serialize or coerce the value to extract it, or
-re-execute a known forbidden operation just to reproduce its error. Do not add
-hooks to protected/Blizzard objects or replace their functions to observe flow.
-If an internal boundary cannot be observed safely, retain the gap and identify
-the additional diagnostic capability or reproduction context needed.
-
-Give each check a bounded observation window, sample/output budget and cleanup.
-Prefer event-driven observation when the question depends on an event. Complete
-the loaded operation, interpret and archive its verified report, then finish
-that exact operation before starting the next check. Within the existing task
-authorization, continue these steps without separate confirmation for each one.
-
-Feed the observation back into the suspected source path: identify which
-explanation it supports, contradicts or leaves open. Run another check only if
-it can resolve a remaining material distinction; do not repeat an unchanged
-probe after a timeout or absent event. A normal observation outside the failing
-conditions does not establish that the failing path is safe. If a repair and
-deployment are in scope, repeat the relevant bounded check against the verified
-updated runtime and retain both results.
-
-Deliver the supported path, runtime conditions and capture IDs together with
-any unresolved links. Distinguish a verified probe result from a demonstrated
-root cause and from a verified repair. Stop when the question is answered or
-the next step requires unavailable evidence, capability or user action; finish
-or recover every outstanding operation under the lifecycle above. An unresolved
-cause and completed display cleanup are separate outcomes.
+For input blockers, same-installation contention or uncertain input, read
+[input recovery](live-recovery.md#input-and-recovery). One original CON/request
+continues serially; unknown input is never replay permission.
 
 ## Recover without replay
 
-```text
-lycheedev live status <CON-id> --project <project-directory> --format json
-lycheedev live resume <CON-id> --project <project-directory> --wait-seconds 120 --format json
-```
-
-Status reads persisted evidence. Resume acquires the same connection's driver
-lease, reconciles original nonces and continues within the caller's wait budget.
-Exit 6 retains usable results and unfinished cleanup; continue the same task.
-Do not replace a request, edit its files, clear ownership or repeat raw input to
-force progress. A cached hit never bypasses identity/checksum/fresh-confirmation
-validation. Incomplete scan coverage is not proof that no result exists.
-
-After user reload, a newly discovered descriptor is only a candidate. The CLI
-binds it with a fresh nonce before retiring the old runtime's reservations.
-Repeatable observations can resume in a new attempt, bounded to three attempts.
-For opaque execution after a possible commit, `execution_unknown` remains unknown;
-inspect external postconditions using an authorized independent observation
-instead of repeating the effect. A fresh runtime may prove old runtime resources
-are gone without proving that the old script never changed persistent state.
-
-A partial final journal write can be repaired under the owning driver lease only
-when the entire preceding chain validates; the original bytes are retained.
-Corrupt complete events, missing journals, foreign ownership, incompatible files
-or an unavailable client require diagnosis. Never recreate an empty ledger to
-turn uncertainty into a new operation. Report the exact blocker and retained IDs
-if no safe progress remains; do not label that handoff complete.
-
-For an intentional idle reload, use a stable request key:
-
-```text
-lycheedev live reload --project <project-directory> --session <CON-id> --request <reload-key> --wait-seconds 120 --format json
-```
-
-The single RGB patch is only a reload observation hint. The new runtime and fresh
-bind are still required. The patch expires after 45 seconds or stops on wake.
-An interrupted reload resumes observation and does not blindly resend `/reload`.
+Read [recovery](live-recovery.md#recover-without-replay) before resuming or reloading.
+Pending alone does not call for reload; unchanged blockers do not justify a retry loop.

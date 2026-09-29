@@ -1,5 +1,27 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-09-29 旧 runtime 的资源退役增加独立只读证据路径，不依赖新绑定或未过期的业务预算。
+同进程另一 runtime 实际生成的新内存记录须先核验并持久化，之后才精确释放旧预约与连接占用。
+这不授予业务输入、不切换角色、不提升未知报告；见[runtime 退役合同与验收](live-runtime-retirement-2026-09-29.md)。
+关闭中的显式 reload 使用独立控制期限，完成条件为旧 runtime 销毁后精确退役；
+不重新绑定、不恢复旧业务或关闭期限。仍未完成的旧 reload/recovery 不允许被新请求覆盖。
+换代观察在原 15 秒预算内允许一次远地址重新定位；初始 4 个快照窗口与追加 4 个窗口
+共享总 8 MiB 快照额度。重新找到的记录仅用于建立新快照，后续真实字节变化才构成证明。
+
+2026-09-29 三块混合输入已接入候选源码，能力为 `lycheedev.input.hybrid.v1`；
+光学门禁与内存身份/时间门禁同时成立才输入。一个 sampler/display 统一生命周期，
+禁用同时停止 StartupBeacon；时钟、清理、兼容及独立槽位原型边界见[实施记录](live-hybrid-implementation-2026-09-29.md)。
+下方较早“尚未实现”描述保留为设计阶段历史，最终实机验收以状态记录为准。
+
+2026-09-29 后续设计：[三色块、内存优化与代码清理方案](live-hybrid-architecture-2026-09-29.md)。
+用户固定布局为左上 `[红/绿/蓝/黑/白] [红/绿/蓝/黑/白] [心跳]`，仅传按键条件；身份、槽位和结果仍走内存。
+该页包含调用审计、共享槽位原型门槛和分批替换计划，尚未实现/部署；下文“不新增色块”及纯内存
+输入描述是当前候选及历史行为，不能当作新的目标方案。输入身份/时间校验不得随观测源替换删除。
+
+2026-09-29 候选主机改动：[实施记录](live-channel-implementation-2026-09-29.md)定义关闭停止新业务、
+持久目标预算、结构化 continuation 与 channel/activation v2 日志兼容。游戏仍使用 slot.v1，
+共享槽位集合仅为隔离原型，不能据此宣称同槽未知预约已不阻塞其他实例。
+
 2026-09-28 统一编排补充：[输入架构](live-input-architecture-2026-09-28.md)固定连接推进、输入事实和完成条件。
 native reload 共用内存就绪决策；支持该能力时显式 fallback 也不盲发 Esc×3。
 新日志的代码/结果使用内容引用，整个 `.lycheedev/live` 必须一同保留。实际验收见[本轮记录](live-input-coordinator-acceptance-2026-09-28.md)。
@@ -14,7 +36,7 @@ native reload 共用内存就绪决策；支持该能力时显式 fallback 也�
 另一 nonce 复用，只收尾原日志，不能修改新预约。
 对应实际覆盖见[共享安装竞态记录](live-input-shared-installation-2026-09-28.md)。
 
-2026-09-28 分支修订：新 Live 的目标契约见[内存与槽位方案](live-memory-slot-plan.md)、[审计](live-memory-slot-audit.md)及[验收标准](live-memory-slot-tests.md)。当前公开 CON 连接采用项目 `.lycheedev/live`、原生内存与 64 槽位；本文后续 QR/OP/SV 段落保留为旧传输历史，不适用于新 CON 连接。默认身份描述符、短时 reload 色块，以及用户要求的内存输入状态采样器是明确列出的基础设施例外。输入状态每 100 ms 最多采样一次，显式关闭桥后移除 OnUpdate；不新增输入恢复色块。其余可选功能继续遵守禁用零开销。实际完成范围以[实施记录](live-memory-slot-implementation-2026-09-28.md)为准。
+2026-09-28 分支修订：新 Live 的目标契约见[内存与槽位方案](live-memory-slot-plan.md)、[审计](live-memory-slot-audit.md)及[验收标准](live-memory-slot-tests.md)。当前公开 CON 连接采用项目 `.lycheedev/live`、原生内存与 64 槽位；本文后续 QR/OP/SV 段落保留为旧传输历史，不适用于新 CON 连接。默认身份描述符、短时 reload 色块，以及用户要求的内存输入状态采样器是明确列出的基础设施例外。2026-09-29 候选输入状态改为常驻 1s 周期采样，启动时立即采样，已知 wake/close 释放输入后立即 Refresh 且不重置周期；显式关闭桥后移除 OnUpdate，不新增输入恢复色块。OnUpdate 仍每帧调用，不能把编码次数下降解释为总 CPU 下降 90%。其余可选功能继续遵守禁用零开销。历史范围见[内存槽位实施记录](live-memory-slot-implementation-2026-09-28.md)，当前采样与主机优化范围见[1s 采样实施记录](input-cadence-implementation-2026-09-29.md)。
 
 状态：整体设计收敛后的实施基线。日期：2026-09-21。实际覆盖见 [implementation-status.md](implementation-status.md)。
 

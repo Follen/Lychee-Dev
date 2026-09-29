@@ -10,40 +10,111 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 	"golang.org/x/sys/windows"
+	"sync/atomic"
+	"time"
 )
 
 var inputUptime = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount64")
 
 func uptimeMillis() int64 { n, _, _ := inputUptime.Call(); return int64(n) }
 
-func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64) (InputObservation, error) {
+func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64, capability string) (InputObservation, error) {
+	if err := inputCapabilityError(capability); err != nil {
+		return InputObservation{}, err
+	}
 	if n.Guard == nil {
 		return InputObservation{}, errors.New("live.channel_guard_required")
 	}
 	if err := n.Guard(ctx); err != nil {
 		return InputObservation{}, err
 	}
+	lookup := func() (InputObservation, error) {
+		return n.observeInputFrom(ctx, n.Process, e, after, uptimeMillis, time.Now)
+	}
+	if capability != bridge.InputSignalCapability {
+		return lookup()
+	}
+	return observeHybridInput(func() (InputSignalEvidence, error) { return n.observeSignal(ctx, e.Runtime) }, lookup)
+}
+
+func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
 	runtime, _ := tokenBytes(e.Runtime)
 	selector := memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}
-	selector.Accept = func(r memory.Record) bool { _, err := inputObservation(r, e, after, uptimeMillis()); return err == nil }
-	found, err := n.Find(ctx, selector, true)
+	var stale atomic.Bool
+	accept := func(r memory.Record, recent bool) bool {
+		now := uptime()
+		s, err := inputObservation(r, e, after, now)
+		if errors.Is(err, errInputStateStale) {
+			stale.Store(true)
+			// A recent sample may stop discovery, but cannot authorize input.
+			// Never let the same retained record repeatedly hide newer records.
+			return recent && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis)
+		}
+		return err == nil
+	}
+	selector.Accept = func(r memory.Record) bool { return accept(r, false) }
+	key := inputSampleKey(e, after)
+	finish := func(records []memory.Record, recent bool) (InputObservation, error) {
+		now := uptime()
+		s, err := inputAfterLookup(records, e, after, now)
+		if err == nil {
+			n.inputWait.reset()
+			return s, nil
+		}
+		if recent && len(records) > 0 {
+			// inputAfterLookup intentionally discards stale results. Decode with
+			// the same validator again to retain only a bounded scheduling hint.
+			s, invalid := inputObservation(records[0], e, after, now)
+			if errors.Is(invalid, errInputStateStale) && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis) {
+				n.inputHintRuntime, n.inputHintMillis = e.Runtime, s.SampleMillis
+				return InputObservation{}, ErrInputObservationStale
+			}
+			return InputObservation{}, ErrPending
+		}
+		if errors.Is(err, ErrInputObservationStale) && !n.inputWait.stale(key, clock()) {
+			return InputObservation{}, ErrPending
+		}
+		return s, err
+	}
+	// Cache-off remains a complete scan path. No hidden address cache is
+	// introduced to make one cadence work only when hints are enabled.
+	if n.Hints != nil && len(n.Hints.Entries) > 0 {
+		found, err := n.findPath(ctx, source, selector, true, true)
+		if err != nil && !((errors.Is(err, context.DeadlineExceeded) || errors.Is(err, memory.ErrNearbyBudget)) && ctx.Err() == nil) {
+			return InputObservation{}, err
+		}
+		if len(found.Records) > 0 {
+			return finish(found.Records, false)
+		}
+		if stale.Load() && n.inputWait.stale(key, clock()) || n.inputWait.waiting(key, clock()) {
+			return InputObservation{}, ErrInputObservationStale
+		}
+	}
+	selector.Accept = func(r memory.Record) bool { return accept(r, true) }
+	found, err := n.findPath(ctx, source, selector, true, false)
 	if err != nil {
 		return InputObservation{}, err
 	}
-	if len(found.Records) == 0 {
-		return InputObservation{}, ErrPending
+	if len(found.Records) == 0 && stale.Load() && n.Hints != nil && n.inputWait.stale(key, clock()) {
+		return InputObservation{}, ErrInputObservationStale
 	}
-	s, err := inputObservation(found.Records[0], e, after, uptimeMillis())
-	if err != nil {
-		return InputObservation{}, ErrPending
-	}
-	s.Address = found.Records[0].Address
-	return s, nil
+	return finish(found.Records, true)
 }
 
 // Input performs one already-journaled effect. No loop, journal callback or
 // business transition lives here. The address is revalidated, never trusted.
 func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, err error) {
+	if err := inputCapabilityError(a.Capability); err != nil {
+		return InputOutcome{Disposition: "not_sent", Reason: "input_capability_unsupported"}, err
+	}
+	if a.Capability == bridge.InputSignalCapability {
+		if a.Observation == nil {
+			return InputOutcome{Disposition: "not_sent", Reason: "input_signal_unavailable", Retryable: true}, ErrPending
+		}
+		if err := n.recheckSignal(a.Envelope.Runtime, *a.Observation); err != nil {
+			return InputOutcome{Disposition: "not_sent", Reason: "input_signal_unavailable", Retryable: true}, err
+		}
+	}
 	if n.Guard == nil {
 		return InputOutcome{Disposition: "not_sent", Reason: "guard_missing"}, errors.New("live.channel_guard_required")
 	}
@@ -87,6 +158,12 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 		if readErr != nil || s.SampleMillis != a.Observation.SampleMillis {
 			return ErrPending
 		}
+		if a.Capability == bridge.InputSignalCapability {
+			s.Optical = a.Observation.Optical
+			if err := n.recheckSignal(a.Envelope.Runtime, s); err != nil {
+				return err
+			}
+		}
 		if a.Kind == "escape" {
 			if !*s.InputBlocked || s.Reason != "input_keyboard_focus" {
 				return ErrPending
@@ -110,6 +187,13 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 	}
 	if err != nil {
 		out.Reason = err.Error()
+		var signalErr *inputSignalPending
+		if errors.As(err, &signalErr) {
+			out.Reason = signalErr.reason
+		}
+	}
+	if out.Disposition != "not_sent" && n.inputSignal != nil {
+		n.inputSignal.afterInput()
 	}
 	return out, err
 }

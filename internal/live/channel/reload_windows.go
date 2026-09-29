@@ -31,19 +31,12 @@ func (p *Project) Reload(ctx context.Context, id, request string, cache bool) (P
 			return nil
 		}
 		if r := d.State.Reload; r != nil && r.Request == request {
-			return d.Continue(ctx)
+			return d.continueOrRetire(ctx, d.Backend.(*Native), false)
 		}
-		if !d.State.Bound || d.State.Transaction != nil || d.State.Operation != nil && d.State.Operation.Stage != "complete" || d.State.Reload != nil && d.State.Reload.Phase != "complete" {
-			return ErrPending
-		}
-		if err := d.checkpoint(ctx); err != nil {
+		if err := d.RequestReload(ctx, request); err != nil {
 			return err
 		}
-		d.State.Reload = &ReloadAttempt{Request: request, From: d.State.Identity.Runtime, Phase: "intent"}
-		if err := d.Save(ctx, "reload_intent"); err != nil {
-			return err
-		}
-		return d.Continue(ctx)
+		return d.continueOrRetire(ctx, d.Backend.(*Native), false)
 	})
 	if historic != nil {
 		result = present(&Driver{State: *historic, Log: p.log(id)})
@@ -59,8 +52,15 @@ func presentReload(r ProjectResult, request string) ProjectResult {
 	r.ReportState = "unavailable"
 	r.Cleanup = "none"
 	r.CleanupMethod = ""
-	r.Complete = r.Reload != nil && r.Reload.Request == request && r.Reload.Phase == "complete" && r.Bound
+	r.Complete = r.Reload != nil && r.Reload.Request == request && r.Reload.Phase == "complete" && (r.Bound || r.Closed)
+	r.Continuation.Goal = "reload"
+	r.Continuation.RequestID = request
 	if r.Complete {
+		r.Continuation.Kind = "completed"
+		r.Continuation.Blocker = nil
+		r.Continuation.RemainingBudgetMS = nil
+	}
+	if r.Complete && !r.Closed {
 		r.Stage = "connected"
 	}
 	return r

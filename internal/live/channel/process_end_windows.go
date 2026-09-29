@@ -74,15 +74,8 @@ func (p *Project) disconnectEnded(ctx context.Context, id string, meta projectTa
 	return p.retire(ctx, id, present(d))
 }
 
-func recoveryTransaction(r *RuntimeRecovery) *Transaction {
-	if r != nil {
-		return r.Transaction
-	}
-	return nil
-}
-
 func closeEndedState(s *State) {
-	if op := s.Operation; op != nil && op.Stage != "complete" {
+	if op := s.Operation; op != nil && op.Stage != "complete" && op.Stage != "cancelled" {
 		if op.Stage == "result_verified" || op.Stage == "release_ready" {
 			op.Stage = "complete"
 			op.CleanupMethod = "runtime_destroyed"

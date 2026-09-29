@@ -43,6 +43,7 @@ Bridge\ReceiverBindings.lua
 Bridge\StartupBeacon.lua
 Bridge\Receiver.lua
 Bridge\SlotRuntime.lua
+Bridge\InputSignal.lua
 Bridge\InputState.lua
 # --- Event catalogs: all four load; Catalog.lua selects ns.Client's table ---
 Modules\Events\CatalogData_Mainline.lua

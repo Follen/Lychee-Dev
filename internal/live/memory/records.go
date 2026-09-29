@@ -76,24 +76,58 @@ func ReadRecord(ctx context.Context, src Source, address uint64, selector Select
 // Lookup discovers candidates only. A matching envelope is not proof of the
 // predicate carried inside; the lifecycle validates fresh response semantics.
 func Lookup(ctx context.Context, src Source, selector Selector, opts Options, first bool) ([]Record, Coverage, error) {
+	return lookup(ctx, src, selector, opts, first, nil)
+}
+
+func lookup(ctx context.Context, src Source, selector Selector, opts Options, first bool, hints *Hints) ([]Record, Coverage, error) {
 	pattern := bridge.MemoryMagic
 	offset := uint64(0)
-	if selector.Nonce != ([16]byte{}) {
+	if hints == nil && selector.Nonce != ([16]byte{}) {
 		pattern = selector.Nonce[:]
 		offset = 8
 	}
 	var mu sync.Mutex
 	records := []Record{}
 	seen := map[uint64]bool{}
+	learned := 0
 	limit := opts.MaxHits
 	if limit == 0 {
 		limit = 4096
 	}
-	opts.Visit = func(hit Hit) bool {
+	// Learning validates complete small records already in the scan buffer.
+	// Hints never retain payloads or authorize BODY reads and are bounded at 64 entries.
+	opts.Visit = nil
+	opts.candidate = func(hit Hit, view []byte, base uint64) bool {
 		if hit.Address < offset {
 			return false
 		}
 		address := hit.Address - offset
+		if address >= base && address-base <= uint64(len(view)) && uint64(len(view))-(address-base) >= bridge.MemoryHeaderBytes {
+			header, err := bridge.DecodeMemoryHeader(view[address-base:])
+			if err != nil {
+				return false
+			}
+			if hints != nil && header.Kind != bridge.MemoryBody && header.Length <= 16<<10 && (selector.Runtime == ([16]byte{}) || selector.Runtime == header.Runtime) {
+				mu.Lock()
+				end := address - base + bridge.MemoryHeaderBytes + uint64(header.Length) + bridge.MemoryTrailerBytes
+				useful := learned < 64
+				if header.Kind == bridge.MemoryInputState {
+					useful = hints.inputHintUseful(address, header)
+				}
+				if useful && end <= uint64(len(view)) {
+					if _, _, err := bridge.DecodeMemoryRecord(view[address-base : end]); err == nil {
+						hints.learn(Record{Address: address, Header: header})
+						if header.Kind != bridge.MemoryInputState {
+							learned++
+						}
+					}
+				}
+				mu.Unlock()
+			}
+			if !selector.matches(header) {
+				return false
+			}
+		}
 		record, err := ReadRecord(ctx, src, address, selector)
 		if err != nil {
 			return false

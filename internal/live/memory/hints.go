@@ -1,11 +1,13 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -65,11 +67,67 @@ func (h *Hints) learn(r Record) {
 	}
 	next := []Hint{{r.Address, r.Header}}
 	for _, entry := range h.Entries {
-		if entry.Address != r.Address && len(next) < 64 {
+		if entry.Address != r.Address {
 			next = append(next, entry)
 		}
 	}
-	h.Entries = next
+	// Runtime order is only a scheduling preference. Input sequences are
+	// comparable within one runtime; retaining its newest eight locations
+	// prevents old telemetry copies from consuming every hint/window.
+	sort.SliceStable(next, func(i, j int) bool {
+		a, b := next[i].Header, next[j].Header
+		if a.Runtime != b.Runtime {
+			return bytes.Compare(a.Runtime[:], b.Runtime[:]) > 0
+		}
+		if a.Kind == bridge.MemoryInputState && b.Kind == bridge.MemoryInputState {
+			return a.Sequence > b.Sequence
+		}
+		// Reserve room for up to eight telemetry locations even when many
+		// immutable receipts from this runtime remain in the heap.
+		return a.Kind == bridge.MemoryInputState && b.Kind != bridge.MemoryInputState
+	})
+	counts := map[[16]byte]int{}
+	h.Entries = nil
+	for _, entry := range next {
+		if entry.Header.Kind == bridge.MemoryInputState {
+			if counts[entry.Header.Runtime] >= 8 {
+				continue
+			}
+			counts[entry.Header.Runtime]++
+		}
+		h.Entries = append(h.Entries, entry)
+		if len(h.Entries) == 64 {
+			break
+		}
+	}
+}
+
+// inputHintUseful prefilters scheduling candidates before validating their
+// complete bytes. Existing hints remain untrusted and every hit is reread.
+func (h *Hints) inputHintUseful(address uint64, header bridge.MemoryHeader) bool {
+	count := 0
+	minimum := ^uint32(0)
+	for _, entry := range h.Entries {
+		if entry.Address == address && entry.Header == header {
+			return false
+		}
+		if entry.Header.Kind == bridge.MemoryInputState && entry.Header.Runtime == header.Runtime {
+			count++
+			if entry.Header.Sequence < minimum {
+				minimum = entry.Header.Sequence
+			}
+		}
+	}
+	if count >= 8 && header.Sequence <= minimum {
+		return false
+	}
+	if len(h.Entries) >= 64 {
+		last := h.Entries[len(h.Entries)-1].Header.Runtime
+		if bytes.Compare(header.Runtime[:], last[:]) < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 type LookupResult struct {
@@ -91,31 +149,9 @@ func Find(ctx context.Context, src Source, selector Selector, hints *Hints, firs
 		if err := src.Verify(ctx); err != nil {
 			return out, err
 		}
-		observed, err := src.Regions(ctx)
-		if err != nil {
-			return out, err
-		}
-		ranges, excluded, err := eligible(observed)
-		if err != nil {
-			return out, err
-		}
-		var planned uint64
-		for _, r := range ranges {
-			planned += r.End - r.Start
-		}
 		for _, hint := range hints.Entries {
 			if time.Since(started) > 250*time.Millisecond {
 				break
-			}
-			eligibleAddress := false
-			for _, r := range ranges {
-				if hint.Address >= r.Start && hint.Address < r.End {
-					eligibleAddress = true
-					break
-				}
-			}
-			if !eligibleAddress {
-				continue
 			}
 			base := hint.Address &^ uint64((1<<20)-1)
 			opts.Priority = append(opts.Priority, Range{base, base + (1 << 20)})
@@ -128,14 +164,14 @@ func Find(ctx context.Context, src Source, selector Selector, hints *Hints, firs
 			if readErr != nil {
 				continue
 			}
-			if err = src.Verify(ctx); err != nil {
+			if err := src.Verify(ctx); err != nil {
 				return out, err
 			}
 			out.Path = "cache_hit"
 			out.Records = []Record{record}
 			out.HintMillis = time.Since(started).Milliseconds()
 			out.ElapsedMillis = out.HintMillis
-			out.Coverage = Coverage{PlannedBytes: planned, ScannedBytes: 0, Complete: false, Truncated: true, SkippedRegions: excluded, Gaps: []Gap{}, Workers: []Worker{}}
+			out.Coverage = Coverage{Complete: false, Truncated: true, Gaps: []Gap{}, Workers: []Worker{}}
 			hints.learn(record)
 			return out, nil
 		}
@@ -143,7 +179,7 @@ func Find(ctx context.Context, src Source, selector Selector, hints *Hints, firs
 		out.HintMillis = time.Since(started).Milliseconds()
 	}
 	var err error
-	out.Records, out.Coverage, err = Lookup(ctx, src, selector, opts, first)
+	out.Records, out.Coverage, err = lookup(ctx, src, selector, opts, first, hints)
 	for _, record := range out.Records {
 		hints.learn(record)
 	}

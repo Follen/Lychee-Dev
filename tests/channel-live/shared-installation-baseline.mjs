@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import assert from 'node:assert/strict';
+import {publicationRetry,dependencyChanged} from './shared-publication-retry.mjs';
+import {observeRunning} from './running-observation.mjs';
 
 // Explicit real-machine test. Reuses the two exact owned connections from an
 // earlier discovery report; never selects another online actor or edits state.
@@ -11,6 +13,15 @@ const {targets}=JSON.parse(await fs.readFile(sourceArg,'utf8'));
 assert.equal(targets.length,2);
 assert.equal(targets[0].installation,targets[1].installation);
 assert.notEqual(targets[0].pid,targets[1].pid);
+const consumers=new Set(),finished=new Map(targets.map(t=>[t.name,0]));
+for(const t of targets){
+  const metadata=JSON.parse(await fs.readFile(path.join(t.project,'.lycheedev/live/connections',t.session+'.target.json'),'utf8'));
+  const w=metadata.target.window;
+  assert.equal(w.processId,t.pid);assert.ok(w.processStartedAt);
+  consumers.add(`${w.processId}/${w.processStartedAt}`);
+}
+const poolPath=path.join(targets[0].installation,'Interface/AddOns/.lycheedev-slots.json');
+async function readPool(){return JSON.parse(await fs.readFile(poolPath,'utf8'));}
 await fs.mkdir(out,{recursive:true});
 const report={schema:'lycheedev.shared-installation-baseline.v1',targets,steps:[],complete:false};
 await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report),{flag:'wx'});
@@ -27,13 +38,43 @@ function launch(exe,args) {
   return {child,done};
 }
 async function call(t,name,args,expected=0,wait=120) {
-  const start=Date.now();
-  const result=await launch(cli,[...args,'--project',t.project,'--wait-seconds',String(wait),'--format','json']).done;
-  await fs.writeFile(path.join(out,`${t.name}-${name}.json`),result.stdout||JSON.stringify(result),{flag:'wx'});
-  const step={target:t.name,name,exitCode:result.code,elapsedMs:Date.now()-start};
-  report.steps.push(step);console.log(JSON.stringify(step));
-  assert.equal(result.code,expected,result.stdout.slice(0,1400)+result.stderr);
-  return JSON.parse(result.stdout);
+  const start=Date.now();let deadline=start+600000,argv=args,attempt=0,originalOperation;
+  for(;;){
+    assert.ok(Date.now()<deadline,'shared publication recovery deadline');
+    const beforePool=JSON.stringify(await readPool());
+    const peerVersions=new Map(finished);
+    const callStart=Date.now();
+    const boundedWait=Math.max(1,Math.min(wait,Math.floor((deadline-Date.now())/1000)));
+    const result=await launch(cli,[...argv,'--project',t.project,'--wait-seconds',String(boundedWait),'--format','json']).done;
+    finished.set(t.name,finished.get(t.name)+1);
+    const evidence=`${t.name}-${name}-attempt-${attempt++}`;
+    await fs.writeFile(path.join(out,evidence+'.json'),JSON.stringify({...result,argv}),{flag:'wx'});
+    const step={target:t.name,name:name+'-attempt-'+(attempt-1),exitCode:result.code,elapsedMs:Date.now()-callStart,evidence:evidence+'.json'};
+    report.steps.push(step);console.log(JSON.stringify(step));
+    const envelope=JSON.parse(result.stdout);
+    if(originalOperation)assert.equal(envelope.result?.operation,originalOperation,'resume changed operation');
+    originalOperation??=envelope.result?.operation;
+    if(result.code===expected){
+      await fs.writeFile(path.join(out,`${t.name}-${name}.json`),result.stdout,{flag:'wx'});
+      report.steps.push({target:t.name,name,exitCode:result.code,elapsedMs:Date.now()-start,attempts:attempt});
+      return envelope;
+    }
+    // Deliberate expected-6 tests remain strict; all non-publication failures
+    // stop. Never re-execute a request or drive the blocking owner's session.
+    const blocker=expected===0&&result.code===6?publicationRetry(envelope.result,t,consumers):null;
+    assert.ok(blocker,result.stdout.slice(0,1400)+result.stderr);
+    deadline=Math.min(deadline,Date.now()+envelope.result.continuation.remainingBudgetMs);
+    let changed=false;
+    while(Date.now()<deadline){
+      const pool=await readPool();
+      const peerFinished=targets.some(peer=>peer.name!==t.name&&finished.get(peer.name)>peerVersions.get(peer.name));
+      if(dependencyChanged(blocker,pool,beforePool,peerFinished)){changed=true;break;}
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+    assert.ok(changed,'shared publication dependency did not change within original budget');
+    report.steps.push({target:t.name,name:name+'-dependency-'+attempt,blocker,observedAt:new Date().toISOString()});
+    argv=['live','resume',t.session];
+  }
 }
 async function pair(fn) {
   const results=await Promise.allSettled(targets.map(fn));
@@ -82,8 +123,9 @@ try {
     }
     assert.notEqual(t.lastRuntime,t.initialRuntime,'automatic capacity reload was not exercised');
   });
-  const running=await execute(b,'peer-async',await fixture(b,'peer-async',true),18,6,55);
-  assert.equal(running.result.operationState,'running');
+  const running=await observeRunning(b,
+    await execute(b,'peer-async',await fixture(b,'peer-async',true),18,6,55),
+    (attempt,wait)=>call(b,`peer-async-running-${attempt}`,['live','resume',b.session],6,wait));
   const peerRuntime=running.result.identity.runtime;
   const [reloaded,finished]=await Promise.all([
     call(a,'peer-reload',['live','reload','--session',a.session,'--request','peer-isolation']),

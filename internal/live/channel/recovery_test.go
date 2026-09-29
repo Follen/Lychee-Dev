@@ -34,8 +34,8 @@ func (b *recoveryPeer) Input(context.Context, InputAction) (InputOutcome, error)
 	b.sends++
 	return InputOutcome{Disposition: "submitted", MessagesQueued: 1}, nil
 }
-func (b *recoveryPeer) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64) (InputObservation, error) {
-	return (&pendingBackend{}).ObserveInput(ctx, e, after)
+func (b *recoveryPeer) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64, capability string) (InputObservation, error) {
+	return (&pendingBackend{}).ObserveInput(ctx, e, after, capability)
 }
 func (b *recoveryPeer) RuntimeCandidate(context.Context, Identity) (*Identity, error) {
 	return &b.identity, nil

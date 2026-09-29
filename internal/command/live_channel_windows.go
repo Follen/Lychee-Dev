@@ -121,12 +121,5 @@ return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailab
 			response.Context["operation"] = result.Operation
 		}
 	}
-	if err != nil {
-		if errors.Is(err, channel.ErrPending) {
-			err = &channelCommandError{cause: err, code: "live.channel_pending", exit: 6}
-		} else {
-			err = classifyChannelError(err)
-		}
-	}
-	return true, 0, err
+	return true, 0, classifyChannelResultError(err)
 }

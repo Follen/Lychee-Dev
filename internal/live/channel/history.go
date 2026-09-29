@@ -17,7 +17,7 @@ func (d *Driver) checkpoint(ctx context.Context) error {
 	if d.State.Transaction != nil || d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
 		return ErrPending
 	}
-	if d.State.Operation != nil && d.State.Operation.Stage != "complete" && d.State.Operation.Stage != "execution_unknown" {
+	if d.State.Operation != nil && d.State.Operation.Stage != "complete" && d.State.Operation.Stage != "execution_unknown" && d.State.Operation.Stage != "cancelled" {
 		return ErrPending
 	}
 	info, err := os.Stat(d.Log)

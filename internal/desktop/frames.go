@@ -29,11 +29,18 @@ func WholeWindowCapture() image.Rectangle {
 	return image.Rectangle{Min: image.Pt(-1, -1), Max: image.Pt(-1, -1)}
 }
 
+// InputSignalCapture requests client-relative (0,0)-(6,2), resolved natively
+// against physical client and WGC frame bounds. It is not a screen rectangle.
+func InputSignalCapture() image.Rectangle { return image.Rect(-2, -2, -2, -2) }
+
 // ResolveCaptureArea bounds automatic receipt capture independently of monitor
 // resolution. Explicit regions retain their coordinates and fail if clipped.
 func ResolveCaptureArea(request image.Rectangle, extent image.Point) (image.Rectangle, error) {
 	if extent.X <= 0 || extent.Y <= 0 || extent.X > 16384 || extent.Y > 16384 {
 		return image.Rectangle{}, errors.New("desktop.invalid_capture_region")
+	}
+	if request == InputSignalCapture() {
+		return image.Rectangle{}, errors.New("desktop.capture_client_geometry_required")
 	}
 	if request == (image.Rectangle{}) {
 		return image.Rect(0, 0, min(extent.X, 1024), min(extent.Y, 1024)), nil
@@ -48,6 +55,16 @@ func ResolveCaptureArea(request image.Rectangle, extent image.Point) (image.Rect
 		return image.Rectangle{}, errors.New("desktop.capture_region_outside_window")
 	}
 	return request, nil
+}
+
+// resolveInputSignalArea accepts only a WGC extent matching measured physical
+// visible bounds. No DPI scaling or title-bar offset is guessed.
+func resolveInputSignalArea(extent image.Point, visible, client image.Rectangle) (image.Rectangle, error) {
+	if visible.Empty() || client.Dx() < 6 || client.Dy() < 2 || visible.Size() != extent || !client.In(visible) {
+		return image.Rectangle{}, errors.New("desktop.capture_client_geometry_mismatch")
+	}
+	origin := client.Min.Sub(visible.Min)
+	return ResolveCaptureArea(image.Rectangle{Min: origin, Max: origin.Add(image.Pt(6, 2))}, extent)
 }
 
 type CapturedFrame struct {

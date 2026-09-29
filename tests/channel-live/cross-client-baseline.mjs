@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import assert from 'node:assert/strict';
+import {observeRunning} from './running-observation.mjs';
+import {publicationRetry,dependencyChanged} from './shared-publication-retry.mjs';
 
 // Explicit real-client acceptance, never run by CI. Concurrent input below is
 // intentional: the production desktop mutex must serialize the two drivers.
@@ -24,7 +26,8 @@ const report={schema:'lycheedev.cross-client-baseline.v1',targets,complete:false
 if(previous)report.resumes=path.join(root,'report.json');
 const reportPath=path.join(root,previous?`report-${attempt}.json`:'report.json');
 await fs.writeFile(reportPath,JSON.stringify(report,null,2),{flag:'wx'});
-async function run(exe,argv,name,t,expected=0) {
+const finished=new Map(targets.map(t=>[t.name,0]));
+async function run(exe,argv,name,t,expected=0,inspectPending=false) {
   const start=Date.now();
   const value=await new Promise((resolve,reject)=>{
     const child=spawn(exe,argv,{shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});
@@ -36,16 +39,60 @@ async function run(exe,argv,name,t,expected=0) {
     child.on('error',e=>{clearTimeout(timer);reject(e);});
     child.on('close',code=>{clearTimeout(timer);resolve({code,out,err});});
   });
+  if(exe===cli)finished.set(t.name,finished.get(t.name)+1);
+  await fs.writeFile(path.join(t.project,(attempt?attempt+'-':'')+name+'.process.json'),JSON.stringify({...value,argv}),{flag:'wx'});
   await fs.writeFile(path.join(t.project,(attempt?attempt+'-':'')+name+'.json'),value.out||JSON.stringify({exitCode:value.code,stderr:value.err}));
   report.steps.push({target:t.name,name,exitCode:value.code,elapsedMs:Date.now()-start,argv});
   // Per-step immutable files are primary evidence; the final report is written
   // after both concurrent children settle, avoiding concurrent manifest writes.
   console.log(JSON.stringify(report.steps.at(-1)));
-  assert.equal(value.code,expected,`${t.name}/${name}: ${value.err} ${value.out.slice(0,1000)}`);
-  return exe===cli?JSON.parse(value.out.replace(/^\uFEFF/,'')):null;
+  if(!inspectPending)assert.equal(value.code,expected,`${t.name}/${name}: ${value.err} ${value.out.slice(0,1000)}`);
+  const envelope=exe===cli?JSON.parse(value.out.replace(/^\uFEFF/,'')):null;
+  return inspectPending?{envelope,code:value.code}:envelope;
 }
 async function call(t,name,args,expected=0,wait=120) {
-  return run(cli,[...args,'--project',t.project,'--wait-seconds',String(wait),'--format','json'],name,t,expected);
+  const format=argv=>[...argv,'--project',t.project,'--wait-seconds',String(wait),'--format','json'];
+  // Explicit failure probes must still return precisely their expected code;
+  // initial connect has no established CON to resume through this runner.
+  if(expected!==0||!t.session)return run(cli,format(args),name,t,expected);
+  const sameInstallation=targets.filter(peer=>path.resolve(peer.installation).toLowerCase()===path.resolve(t.installation).toLowerCase());
+  const consumers=new Set();
+  for(const peer of sameInstallation){
+    if(!peer.session)continue;
+    const metadata=JSON.parse(await fs.readFile(path.join(peer.project,'.lycheedev/live/connections',peer.session+'.target.json'),'utf8'));
+    const w=metadata.target.window;assert.equal(w.processId,peer.pid);assert.ok(w.processStartedAt);
+    consumers.add(`${w.processId}/${w.processStartedAt}`);
+  }
+  const poolPath=path.join(t.installation,'Interface/AddOns/.lycheedev-slots.json');
+  const readPool=async()=>JSON.parse(await fs.readFile(poolPath,'utf8'));
+  const started=performance.now();let deadline=started+600000,argv=args,sequence=0,operation;
+  for(;;){
+    assert.ok(performance.now()<deadline,'publication continuation deadline');
+    const beforePool=JSON.stringify(await readPool()),peerVersions=new Map(finished);
+    const boundedWait=Math.max(1,Math.min(wait,Math.floor((deadline-performance.now())/1000)));
+    const full=[...argv,'--project',t.project,'--wait-seconds',String(boundedWait),'--format','json'];
+    const {envelope,code}=await run(cli,full,`${name}-attempt-${sequence++}`,t,0,true);
+    if(operation)assert.equal(envelope.result?.operation,operation,'continuation changed original operation');
+    operation??=envelope.result?.operation;
+    if(code===0){
+      await fs.writeFile(path.join(t.project,(attempt?attempt+'-':'')+name+'.json'),JSON.stringify(envelope),{flag:'wx'});
+      report.steps.push({target:t.name,name,exitCode:code,elapsedMs:performance.now()-started,attempts:sequence,argv:args});
+      return envelope;
+    }
+    const blocker=code===6?publicationRetry(envelope.result,t,consumers):null;
+    assert.ok(blocker,`${t.name}/${name}: ${JSON.stringify(envelope).slice(0,1400)}`);
+    deadline=Math.min(deadline,performance.now()+envelope.result.continuation.remainingBudgetMs);
+    let changed=false;
+    while(performance.now()<deadline){
+      const pool=await readPool();
+      const peerFinished=sameInstallation.some(peer=>peer.name!==t.name&&finished.get(peer.name)>peerVersions.get(peer.name));
+      if(dependencyChanged(blocker,pool,beforePool,peerFinished)){changed=true;break;}
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+    assert.ok(changed,'publication owner made no progress before original budget expired');
+    report.steps.push({target:t.name,name:`${name}-dependency-${sequence}`,blocker,observedAt:new Date().toISOString()});
+    argv=['live','resume',t.session];
+  }
 }
 async function execute(t,key,fixture,budget,policy='observation',expected=0,wait=120,extra=[]) {
   return call(t,key,['live','execute','--session',t.session,'--request',key,'--file',path.resolve('tests/channel-live/fixtures',fixture),'--budget-seconds',String(budget),'--policy',policy,...extra],expected,wait);
@@ -62,12 +109,7 @@ async function interrupt(t,opaque) {
   await run(host,['-mode',opaque?'interrupt-opaque-fixture':'interrupt-observation','-installation',t.installation,'-pid',String(t.pid),'-project',t.project,'-connection',t.session,'-reload-hint=false','-timeout','30'],opaque?'opaque-reload':'observation-reload',t);
 }
 async function awaitRunning(t,e,name) {
-  for(let attempt=0;e.result.operationState!=='running'&&attempt<8;attempt++) {
-    assert.equal(e.result.complete,false,'probe ended before interruption');
-    e=await call(t,`${name}-wait-${attempt}`,['live','resume',t.session],6,5);
-  }
-  assert.equal(e.result.operationState,'running');
-  return e;
+  return observeRunning(t,e,(attempt,wait)=>call(t,`${name}-wait-${attempt}`,['live','resume',t.session],6,wait));
 }
 try {
   for(const t of targets) {

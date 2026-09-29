@@ -107,7 +107,7 @@ func decodeReceipt(record memory.Record, e bridge.SlotEnvelope) (Receipt, error)
 type Backend interface {
 	Observe(context.Context, ObservationQuery) (Observation, error)
 	Publish(context.Context, bridge.SlotEnvelope) error
-	ObserveInput(context.Context, bridge.SlotEnvelope, int64) (InputObservation, error)
+	ObserveInput(context.Context, bridge.SlotEnvelope, int64, string) (InputObservation, error)
 	Input(context.Context, InputAction) (InputOutcome, error)
 	RuntimeCandidate(context.Context, Identity) (*Identity, error)
 	Supersede(context.Context, bridge.SlotEnvelope, Identity) error

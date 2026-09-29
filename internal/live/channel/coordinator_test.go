@@ -18,8 +18,8 @@ type coordinatorPeer struct {
 	blocked int
 }
 
-func (p *coordinatorPeer) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64) (InputObservation, error) {
-	s, err := p.recoveryPeer.ObserveInput(ctx, e, after)
+func (p *coordinatorPeer) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64, capability string) (InputObservation, error) {
+	s, err := p.recoveryPeer.ObserveInput(ctx, e, after, capability)
 	blocked := p.blocked > 0
 	s.InputBlocked = &blocked
 	if blocked {

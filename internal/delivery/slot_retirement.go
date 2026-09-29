@@ -40,11 +40,14 @@ func RetireSlotProcess(ctx context.Context, parent, version, consumer string, e 
 	return saveSlotPool(ctx, parent, pool)
 }
 
-// RetireSlotRuntime is called under publication admission only after a fresh
-// bind proves a different runtime in the same process. It never fabricates a
-// consumed receipt. Reservations of other processes/transactions are untouched.
+// RetireSlotRuntime requires the publication lease and caller-verified evidence:
+// either a fresh bind or a durably recorded proof of a different live runtime
+// in the same PID/creation-time consumer under the single-current-Lua-runtime
+// contract. Merely discovering a descriptor is insufficient. Runtime tokens
+// are compared for equality, not chronological ordering. This reconciles torn
+// publication without fabricating a consumed receipt or touching other claims.
 func RetireSlotRuntime(ctx context.Context, parent, version, consumer string, e bridge.SlotEnvelope, currentRuntime string) error {
-	if currentRuntime == e.Runtime || len(currentRuntime) != 32 || e.Index < 1 || e.Index > 64 {
+	if consumer == "" || e.Nonce == "" || currentRuntime == e.Runtime || len(currentRuntime) != 32 || e.Index < 1 || e.Index > 64 {
 		return ErrInstallation
 	}
 	pool, err := InspectSlots(ctx, parent, version)
@@ -55,7 +58,7 @@ func RetireSlotRuntime(ctx context.Context, parent, version, consumer string, e 
 	if slot.Nonce != e.Nonce {
 		return nil
 	}
-	if slot.Consumer != consumer || slot.Runtime != e.Runtime || slot.PendingHash != "" {
+	if slot.Consumer != consumer || slot.Runtime != e.Runtime {
 		return errors.New("delivery.slot_retirement_conflict")
 	}
 	if slot.Consumed {
@@ -64,6 +67,14 @@ func RetireSlotRuntime(ctx context.Context, parent, version, consumer string, e 
 	if slot.RetiredRuntime != "" && slot.RetiredRuntime != currentRuntime {
 		return errors.New("delivery.slot_retirement_conflict")
 	}
-	slot.RetiredRuntime = currentRuntime
+	b, err := readSlotFile(filepath.Join(SlotDirectory(parent, e.Index), "Payload.lua"), 2<<20)
+	if err != nil {
+		return err
+	}
+	hash := slotDigest(b)
+	if hash != slot.PayloadHash && hash != slot.PendingHash {
+		return ErrInstallation
+	}
+	slot.PayloadHash, slot.PendingHash, slot.RetiredRuntime = hash, "", currentRuntime
 	return saveSlotPool(ctx, parent, pool)
 }

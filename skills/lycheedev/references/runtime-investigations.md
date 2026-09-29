@@ -44,6 +44,18 @@ with sample count and timer resolution. Offline replay timings cannot establish
 game startup latency. If the hang occurs during input before execution, examine
 the input path rather than attributing it to the probe's business logic.
 
+For native transport measurements, separate optical waiting, memory discovery,
+point reads, input dispatch, probe execution, result retrieval and diagnostic
+flush. A small capture ROI reduces copied/decoded pixels; it does not mean WGC's
+whole-window capture cost is equally small. Keep cache setting, window state,
+foreground/background FPS, loaded capability and candidate binary fixed when
+comparing runs. Preserve scan coverage and counts where the CLI records them;
+report transport completion, `report.ok` and cleanup separately. A failed probe
+assertion is not successful performance validation merely because transport
+retrieved it. Results from the old memory-only path do not validate the hybrid
+path or a different candidate. Same-build instances are separate measurements,
+not interchangeable targets.
+
 ## Preserve live ownership and bound the experiment
 
 Prefer a private replay instance for registry/index experiments. Check that it
@@ -61,7 +73,7 @@ Use existing counters or bounded traversal before scanning all globals/frames.
 For each scenario record its preconditions, live/replay/dependency status,
 duration/work/output bounds, correctness invariant and cleanup checks. Use the
 current probe API (`probe:Async`, `probe:OnCleanup`, `probe:Finish` or
-`probe:Fail`) described in the live reference for callback-based work. Bound each
+`probe:Fail`) described in [bounded probes](live-probes.md#write-bounded-probes) for callback-based work. Bound each
 batch as well as the whole run, invalidate late callbacks and stop owned work
 before publishing. A deadline cannot preempt a long synchronous native call.
 Keep measurement separate from report construction and invariant checks.
@@ -78,8 +90,10 @@ size; do not substitute an enormous manual paste when CLI delivery is available.
 Read the verified report and retain its operation/capture IDs. Distinguish live,
 replay, missing dependency, failed, timeout and not-tested scenarios. Keep failed
 rounds and raw deltas, not only the fastest result. Describe attribution limits,
-observer cost and any incomplete restoration. Complete the normal ACK and
-receipt cleanup even when the probe produced a verified diagnostic error.
+observer cost and any incomplete restoration. Let native execute/resume finish
+its verified report and runtime release even when the probe produced a diagnostic
+error; native CON work has no extra ACK or finish step. Follow [recovery](live-recovery.md)
+when cleanup remains pending, preserving the usable report.
 
 A memory-reduction proposal must also account for retained roots, companion
 packages, restoration latency and business equivalence; moving cost elsewhere

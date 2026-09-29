@@ -81,6 +81,9 @@ type Options struct {
 	// Returning true ends a verified lookup, never a full audit. The callback,
 	// not an anchor match, owns record validation.
 	Visit func(Hit) bool
+	// candidate is the record lookup's internal buffer prefilter. The view is
+	// valid only during this call; final acceptance always uses fresh ReadRecord.
+	candidate func(Hit, []byte, uint64) bool
 }
 
 type job struct {
@@ -220,6 +223,12 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	var stopped atomic.Bool
+	stop := make(chan struct{})
+	stopScan := func() {
+		if stopped.CompareAndSwap(false, true) {
+			close(stop)
+		}
+	}
 	// One fresh map for bounded page salvage. Disappeared ranges remain gaps
 	// in the original coverage plan; new mappings do not rewrite that plan.
 	var repairOnce sync.Once
@@ -248,7 +257,15 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 					continue
 				}
 				data := buffer[:int(j.readEnd-j.Start)]
-				spans := readSpan(ctx, src, j.Start, data, &stats, refresh)
+				salvageStopped := false
+				spans := readSpan(ctx, src, j.Start, data, &stats, refresh, func() bool {
+					if stopped.Load() {
+						salvageStopped = true
+						return true
+					}
+					return false
+				})
+				gap := func(r Range) { addScanGap(&stats, r, ctx, salvageStopped) }
 				var owned []Range
 				for _, span := range spans {
 					end := span.End
@@ -279,7 +296,7 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 							}
 							stats.Candidates++
 							hit := Hit{address, pattern}
-							if opts.Visit == nil {
+							if opts.Visit == nil && opts.candidate == nil {
 								mu.Lock()
 								if !seen[hit] {
 									if len(result.Hits) < opts.MaxHits {
@@ -291,8 +308,8 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 								}
 								mu.Unlock()
 							}
-							if opts.Visit != nil && opts.Visit(hit) {
-								stopped.Store(true)
+							if (opts.candidate != nil && opts.candidate(hit, view, span.Start)) || (opts.Visit != nil && opts.Visit(hit)) {
+								stopScan()
 								stats.Truncated = true
 								break
 							}
@@ -303,12 +320,12 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 				cursor := j.Start
 				for _, span := range owned {
 					if span.Start > cursor {
-						addGap(&stats, Range{cursor, span.Start}, ctx)
+						gap(Range{cursor, span.Start})
 					}
 					cursor = span.End
 				}
 				if cursor < j.End {
-					addGap(&stats, Range{cursor, j.End}, ctx)
+					gap(Range{cursor, j.End})
 				}
 				// Missing overlap bytes can hide a crossing anchor even when all
 				// owned bytes were read. Preserve that uncertainty explicitly.
@@ -318,25 +335,36 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 						continue
 					}
 					if span.Start > cursor {
-						addGap(&stats, Range{cursor, span.Start}, ctx)
+						gap(Range{cursor, span.Start})
 					}
 					cursor = span.End
 				}
 				if cursor < j.readEnd {
-					addGap(&stats, Range{cursor, j.readEnd}, ctx)
+					gap(Range{cursor, j.readEnd})
 				}
 			}
 			stats.Complete = stats.PlannedBytes == stats.ScannedBytes && !stats.Truncated && len(stats.Gaps) == 0
 			result.Coverage.Workers[w] = stats
 		}(w)
 	}
+dispatch:
 	for _, j := range jobs {
-		queue <- j
+		if stopped.Load() || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-stop:
+			break dispatch
+		case <-ctx.Done():
+			break dispatch
+		case queue <- j:
+		}
 	}
 	close(queue)
 	wg.Wait()
 	result.Coverage.SkippedRegions = skipped
 	result.Coverage.StoppedEarly = stopped.Load()
+	result.Coverage.Truncated = stopped.Load() || ctx.Err() != nil
 	result.Coverage.Gaps = []Gap{}
 	for _, w := range result.Coverage.Workers {
 		result.Coverage.ScannedBytes += w.ScannedBytes
@@ -352,9 +380,15 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 	return result, ctx.Err()
 }
 
-func addGap(w *Worker, r Range, ctx context.Context) {
+func addGap(w *Worker, r Range, ctx context.Context) { addScanGap(w, r, ctx, false) }
+
+func addScanGap(w *Worker, r Range, ctx context.Context, stopped bool) {
 	w.Complete = false
 	reason := "unreadable"
+	if stopped {
+		reason = "stopped_early"
+		w.Truncated = true
+	}
 	if ctx.Err() != nil {
 		reason = "cancelled"
 		w.Truncated = true
@@ -366,8 +400,8 @@ func addGap(w *Worker, r Range, ctx context.Context) {
 	}
 }
 
-func readSpan(ctx context.Context, src Source, start uint64, b []byte, w *Worker, refresh func() []Range) []Range {
-	if ctx.Err() != nil {
+func readSpan(ctx context.Context, src Source, start uint64, b []byte, w *Worker, refresh func() []Range, stopped func() bool) []Range {
+	if ctx.Err() != nil || stopped() {
 		return nil
 	}
 	w.ReadCalls++
@@ -382,8 +416,11 @@ func readSpan(ctx context.Context, src Source, start uint64, b []byte, w *Worker
 	if n > 0 {
 		spans = append(spans, Range{start, start + uint64(n)})
 	}
+	if stopped() || ctx.Err() != nil {
+		return spans
+	}
 	current := refresh()
-	for at := n; at < len(b) && ctx.Err() == nil; {
+	for at := n; at < len(b) && ctx.Err() == nil && !stopped(); {
 		end := at + 4096 - int((start+uint64(at))%4096)
 		if end > len(b) {
 			end = len(b)

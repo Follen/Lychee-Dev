@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/adler32"
 	"path/filepath"
+	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/journal"
@@ -22,50 +23,60 @@ type Transaction struct {
 	InputObservation *InputObservation   `json:"inputObservation,omitempty"`
 }
 type Operation struct {
-	CleanupMethod  string    `json:"cleanupMethod,omitempty"`
-	Attempt        int       `json:"attempt,omitempty"`
-	Request        string    `json:"request,omitempty"`
-	Origin         *Identity `json:"origin,omitempty"`
-	ID             string    `json:"id"`
-	Ticket         string    `json:"ticket"`
-	Code           string    `json:"code"`
-	Budget         int       `json:"budget"`
-	Policy         string    `json:"policy"`
-	Stage          string    `json:"stage"`
-	PreparedNonce  string    `json:"preparedNonce,omitempty"`
-	Challenge      string    `json:"challenge,omitempty"`
-	ReportBytes    uint32    `json:"reportBytes,omitempty"`
-	ReportChecksum uint32    `json:"reportChecksum,omitempty"`
+	RecoveryBudget *DurableBudget `json:"recoveryBudget,omitempty"`
+	CleanupMethod  string         `json:"cleanupMethod,omitempty"`
+	Attempt        int            `json:"attempt,omitempty"`
+	Request        string         `json:"request,omitempty"`
+	Origin         *Identity      `json:"origin,omitempty"`
+	ID             string         `json:"id"`
+	Ticket         string         `json:"ticket"`
+	Code           string         `json:"code"`
+	Budget         int            `json:"budget"`
+	Policy         string         `json:"policy"`
+	Stage          string         `json:"stage"`
+	PreparedNonce  string         `json:"preparedNonce,omitempty"`
+	Challenge      string         `json:"challenge,omitempty"`
+	ReportBytes    uint32         `json:"reportBytes,omitempty"`
+	ReportChecksum uint32         `json:"reportChecksum,omitempty"`
 	// Keep original payload bytes across JSON persistence: RawMessage is
 	// compacted/HTML-escaped by encoding/json and can change length/checksum.
 	Result []byte `json:"resultBytes,omitempty"`
 }
 type State struct {
-	ProcessEnd  string            `json:"processEnd,omitempty"`
-	Artifacts   map[string]string `json:"artifacts,omitempty"`
-	Archive     string            `json:"archive,omitempty"`
-	Schema      string            `json:"schema"`
-	ID          string            `json:"id"`
-	Owner       string            `json:"owner"`
-	Identity    Identity          `json:"identity"`
-	Bound       bool              `json:"bound"`
-	Closed      bool              `json:"closed,omitempty"`
-	Transaction *Transaction      `json:"transaction,omitempty"`
-	Operation   *Operation        `json:"operation,omitempty"`
-	Reload      *ReloadAttempt    `json:"reload,omitempty"`
-	Recovery    *RuntimeRecovery  `json:"recovery,omitempty"`
-	Input       *InputAttempt     `json:"input,omitempty"`
-	Closing     bool              `json:"closing,omitempty"`
+	ProgressVersion uint64                   `json:"progressVersion,omitempty"`
+	Blocker         *Blocker                 `json:"blocker,omitempty"`
+	ConnectBudget   *DurableBudget           `json:"connectBudget,omitempty"`
+	CloseBudget     *DurableBudget           `json:"closeBudget,omitempty"`
+	ProcessEnd      string                   `json:"processEnd,omitempty"`
+	RuntimeEnd      *RuntimeReplacementProof `json:"runtimeEnd,omitempty"`
+	Artifacts       map[string]string        `json:"artifacts,omitempty"`
+	Archive         string                   `json:"archive,omitempty"`
+	Schema          string                   `json:"schema"`
+	ID              string                   `json:"id"`
+	Owner           string                   `json:"owner"`
+	Identity        Identity                 `json:"identity"`
+	Bound           bool                     `json:"bound"`
+	Closed          bool                     `json:"closed,omitempty"`
+	Transaction     *Transaction             `json:"transaction,omitempty"`
+	Operation       *Operation               `json:"operation,omitempty"`
+	Reload          *ReloadAttempt           `json:"reload,omitempty"`
+	Recovery        *RuntimeRecovery         `json:"recovery,omitempty"`
+	Input           *InputAttempt            `json:"input,omitempty"`
+	Closing         bool                     `json:"closing,omitempty"`
 }
 
 type ReloadAttempt struct {
-	Request          string `json:"request"`
-	From             string `json:"from"`
-	Phase            string `json:"phase"`
-	InputStep        int    `json:"inputStep"`
-	PatchTransitions int    `json:"patchTransitions"`
+	Automatic        bool           `json:"automatic,omitempty"`
+	RecoveryBudget   *DurableBudget `json:"recoveryBudget,omitempty"`
+	ReconcilePending bool           `json:"reconcilePending,omitempty"`
+	Request          string         `json:"request"`
+	From             string         `json:"from"`
+	Phase            string         `json:"phase"`
+	InputStep        int            `json:"inputStep"`
+	PatchTransitions int            `json:"patchTransitions"`
 }
 type Driver struct {
+	Now       func() time.Time
 	State     State
 	Backend   Backend
 	Log       string
@@ -99,9 +110,15 @@ func New(path string, backend Backend, identity Identity) (*Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Driver{State: State{Schema: "lycheedev.channel.v1", ID: "CON-" + id, Owner: id, Identity: identity}, Backend: backend, Log: path, ResultDir: filepath.Join(filepath.Dir(filepath.Dir(path)), "results")}, nil
+	return &Driver{State: State{Schema: "lycheedev.channel.v2", ID: "CON-" + id, Owner: id, Identity: identity, ConnectBudget: NewDurableBudget(time.Now(), DefaultConnectBudget, false)}, Backend: backend, Log: path, ResultDir: filepath.Join(filepath.Dir(filepath.Dir(path)), "results")}, nil
 }
 func (d *Driver) Save(ctx context.Context, kind string) error {
+	if d.State.Schema == "lycheedev.channel.v1" {
+		d.State.Schema = "lycheedev.channel.v2"
+	}
+	if kind != "budget_observed" && kind != "budget_migrated" && kind != "blocker_observed" {
+		d.State.ProgressVersion++
+	}
 	if err := d.State.validate(); err != nil {
 		return err
 	}
@@ -113,6 +130,9 @@ func (d *Driver) Save(ctx context.Context, kind string) error {
 }
 
 func (d *Driver) begin(ctx context.Context, action, ticket string, configure func(*bridge.SlotEnvelope)) error {
+	if d.State.RuntimeEnd != nil {
+		return runtimeRetirementPending()
+	}
 	if d.State.Transaction != nil {
 		return errors.New("live.channel_transaction_pending")
 	}
@@ -135,6 +155,9 @@ func (d *Driver) begin(ctx context.Context, action, ticket string, configure fun
 // advance records intent before every file/input side effect. Once input was
 // attempted, replay is forbidden: retry only reads the original nonce.
 func (d *Driver) advance(ctx context.Context) (*Receipt, error) {
+	if d.State.RuntimeEnd != nil {
+		return nil, runtimeRetirementPending()
+	}
 	tx := d.State.Transaction
 	if tx == nil {
 		return nil, errors.New("live.channel_transaction_missing")
@@ -144,6 +167,13 @@ func (d *Driver) advance(ctx context.Context) (*Receipt, error) {
 			return tx.Receipt, &RejectedError{Reason: tx.Receipt.Reason}
 		}
 		return tx.Receipt, nil
+	}
+	recoveryBinding := d.State.Recovery != nil && d.State.Recovery.Phase != "complete" || d.State.Reload != nil && d.State.Reload.Phase == "binding"
+	if d.State.Closing && (tx.Envelope.Action == "prepare" || tx.Envelope.Action == "commit" || tx.Envelope.Action == "bind" && !recoveryBinding) {
+		// A durable intent may already have reached disk before the host
+		// crashed. Closing observes it; it never publishes or wakes business.
+		d.Waiting = "closing_exchange_unconfirmed"
+		return d.receive(ctx, tx)
 	}
 	if tx.Phase == "intent" {
 		if err := d.Backend.Publish(ctx, tx.Envelope); err != nil {
@@ -159,6 +189,10 @@ func (d *Driver) advance(ctx context.Context) (*Receipt, error) {
 			return nil, err
 		}
 	}
+	return d.receive(ctx, tx)
+}
+
+func (d *Driver) receive(ctx context.Context, tx *Transaction) (*Receipt, error) {
 	observation, err := d.Backend.Observe(ctx, ObservationQuery{Kind: "receipt", Envelope: tx.Envelope, Identity: d.State.Identity})
 	r := observation.Receipt
 	var rejection *RejectedError
@@ -213,6 +247,9 @@ func (d *Driver) Connect(ctx context.Context) error {
 // bootstrap nonce. It only selects a new candidate; a NEW binding challenge
 // must still succeed before this connection can execute business code.
 func (d *Driver) RecoverBinding(ctx context.Context) error {
+	if d.State.RuntimeEnd != nil {
+		return runtimeRetirementPending()
+	}
 	tx := d.State.Transaction
 	if d.State.Bound || d.State.Operation != nil || tx == nil || tx.Envelope.Action != "bind" {
 		return errors.New("live.channel_bootstrap_recovery_unsafe")
@@ -231,6 +268,9 @@ func (d *Driver) RecoverBinding(ctx context.Context) error {
 	if err = d.finishTransaction(ctx); err != nil {
 		return err
 	}
+	if d.State.Closing {
+		return nil
+	}
 	return d.Connect(ctx)
 }
 func (d *Driver) PrepareOperation(ctx context.Context, code string, budget int, policy string) error {
@@ -238,6 +278,12 @@ func (d *Driver) PrepareOperation(ctx context.Context, code string, budget int, 
 }
 
 func (d *Driver) PrepareRequest(ctx context.Context, request, code string, budget int, policy string) error {
+	if d.State.RuntimeEnd != nil {
+		return runtimeRetirementPending()
+	}
+	if d.State.Closing || d.State.Closed {
+		return errors.New("live.channel_stopping")
+	}
 	if !d.State.Bound || d.State.Transaction != nil {
 		return errors.New("live.channel_not_idle")
 	}
@@ -259,7 +305,7 @@ func (d *Driver) PrepareRequest(ctx context.Context, request, code string, budge
 		return err
 	}
 	origin := d.State.Identity
-	d.State.Operation = &Operation{ID: "LMO-" + id, Ticket: ticket, Request: request, Origin: &origin, Attempt: 1, Code: code, Budget: budget, Policy: policy, Stage: "prepared"}
+	d.State.Operation = &Operation{ID: "LMO-" + id, Ticket: ticket, Request: request, Origin: &origin, Attempt: 1, Code: code, Budget: budget, Policy: policy, Stage: "prepared", RecoveryBudget: NewDurableBudget(d.now(), DefaultRecoveryBudget, false)}
 	return d.Save(ctx, "operation_created")
 }
 
@@ -274,10 +320,20 @@ func (d *Driver) Run(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if d.State.Closing {
+			if op.Stage == "prepared" && d.State.Transaction == nil {
+				op.Stage = "cancelled"
+				return d.Save(ctx, "operation_cancelled_before_publication")
+			}
+			if op.Stage == "commit_ready" && d.State.Transaction == nil {
+				d.Waiting = "prepared_operation_requires_reload"
+				return ErrPending
+			}
+		}
 		switch op.Stage {
 		case "execution_unknown":
 			return ErrExecutionUnknown
-		case "complete":
+		case "complete", "cancelled":
 			return nil
 		case "prepared":
 			if d.State.Transaction == nil && d.State.Identity.NextSlot > 49 {
@@ -413,7 +469,7 @@ func (d *Driver) Disconnect(ctx context.Context) error {
 	if !d.State.Bound {
 		return nil
 	}
-	if d.State.Operation != nil && d.State.Operation.Stage != "complete" && d.State.Operation.Stage != "execution_unknown" {
+	if d.State.Operation != nil && d.State.Operation.Stage != "complete" && d.State.Operation.Stage != "execution_unknown" && d.State.Operation.Stage != "cancelled" {
 		return ErrPending
 	}
 	if d.State.Transaction == nil {

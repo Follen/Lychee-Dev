@@ -64,6 +64,13 @@ request replay, compile failure, cleanup failure with verified reload, diagnosti
 completeness and repeated disconnect. Failure retains the exact connection for
 resume; the runner does not abandon or reset it.
 
+After resolving the recorded dependency, append `--resume` with the same project,
+installation and PID to continue an incomplete public baseline. It validates the
+original CON and reads completed request keys without executing them again.
+Exhausted budgets, closed connections and unresolved external blockers stop the
+runner. Resumed reports and attachments receive unique names; the original
+failure remains intact.
+
 For controlled interruption, `interrupt-observation` requires a running observation
 and the exact owning project/target. `interrupt-opaque-fixture` additionally
 requires the checked-in read-only `async_reload.lua` bytes under opaque policy;
@@ -196,6 +203,13 @@ It closes both connections only after all assertions pass. Failure retains the
 connections and reports for public recovery; never delete their journals or slot
 reservations. The `hold-publication` host mode checks exact target and owner,
 holds only the OS publication lease, and changes no payload or connection log.
+
+The shared-installation and cross-client runners recognize temporary publication
+contention from structured continuation data. They wait for the exact reservation
+to change, or for evidence of short-lock progress, before resuming the same CON
+within the original budget. Every attempt is retained. Explicit pending and
+unknown-outcome assertions remain strict; these runners cannot clear a foreign
+owner or renew an exhausted request.
 
 After a complete run, `node tests/channel-live/shared-installation-audit.mjs <report.json>`
 reads the current and rotated journals, verifies the original prepare nonce and

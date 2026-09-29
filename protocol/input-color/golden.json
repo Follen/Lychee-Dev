@@ -1,0 +1,1 @@
+{"capability":"lycheedev.input.hybrid.v1","cellPixels":2,"width":6,"height":2,"lowMax":31,"highMin":224,"alphaMin":250,"heartbeat":["black","white"],"states":[{"state":"ready","colors":["green","white"]},{"state":"input_keyboard_focus","colors":["red","blue"]},{"state":"input_combat_lockdown","colors":["blue","red"]},{"state":"unknown","colors":["white","black"]}]}

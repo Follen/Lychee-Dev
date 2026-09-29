@@ -45,7 +45,7 @@ local function start()
     end
     ns.AutomationHistory.Begin(runtime,{character=actor.character,realm=actor.realm,guid=actor.guid,build=build.build,product=build.product})
     engine=ns.SlotProtocol.Create({runtime=runtime,build=build.build,product=build.product,release=ns.Release,inventory=available,
-        inputState=ns.InputState and "lycheedev.input.v1" or nil,
+        inputState=ns.InputState and "lycheedev.input.hybrid.v1" or nil,
         actor=function()
             local current=ns.Platform.ObserveActor()
             if current and current.guid==actor.guid then return current end
@@ -89,11 +89,17 @@ local function guardedWake()
     local ok,result,reason=pcall(wake)
     expectedSlot=nil
     releaseInput()
+    if ns.InputState then ns.InputState.Refresh() end
     if not ok then return nil,"slot_wake_failed" end
     return result,reason
 end
+local function close()
+    releaseInput()
+    ns.InputProtection.Cancel()
+    if ns.InputState then ns.InputState.Refresh() end
+end
 ns.SlotRuntime={
-    Start=start,Wake=guardedWake,Close=function()releaseInput();ns.InputProtection.Cancel()end,
+    Start=start,Wake=guardedWake,Close=close,
     IsActive=function()return ns.InputProtection.IsActive()end,
     Receive=function(index,envelope)
         if not engine or index~=expectedSlot then return nil,"slot_not_requested" end
@@ -101,6 +107,6 @@ ns.SlotRuntime={
     end,
     Snapshot=function()return engine and engine.Snapshot()end,
     Register=function()
-        return ns.ReceiverBindings.Register({wake=guardedWake,submit=guardedWake,close=function()releaseInput();ns.InputProtection.Cancel()end})
+        return ns.ReceiverBindings.Register({wake=guardedWake,submit=guardedWake,close=close})
     end,
 }

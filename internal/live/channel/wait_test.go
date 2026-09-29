@@ -29,7 +29,7 @@ func (b *pendingBackend) Input(context.Context, InputAction) (InputOutcome, erro
 	b.sends++
 	return InputOutcome{Disposition: "submitted", MessagesQueued: 1}, nil
 }
-func (b *pendingBackend) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64) (InputObservation, error) {
+func (b *pendingBackend) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (InputObservation, error) {
 	ready := false
 	return InputObservation{Schema: "lycheedev.input.v1", Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready}, nil
 }

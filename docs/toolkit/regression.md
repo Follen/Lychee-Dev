@@ -1,5 +1,43 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-09-29 [runtime 独立退役](live-runtime-retirement-2026-09-29.md)新增：不同 runtime
+的新内存写入证明、旧字节/短读/跨界/冲突拒绝、失败读取预算、双事务精确收尾、持久化故障恢复、
+旧业务禁止复活及报告语义。原 Retail 双实例现场已通过，其他客户端不继承实机结论。
+追加关闭回归：可选观察的纯超时回到正常关闭，取消/混合故障/已保存证明不回退；
+Closing 显式 reload 独立预算、原关闭预算不变、无重绑、原输入不重放、intent 崩溃窗口、
+外部已换代时无需发送、同请求完成复用，以及未决自动 reload/recovery 不被覆盖。
+远地址重定位追加：255 MiB 外持续生产、原窗口历史高序号不遮挡、重定位历史记录不授权、
+新区域旧 runtime/未知身份/坏校验和拒绝、取消与原截止时间不续期、两批短读计入总快照预算。
+
+2026-09-29 [三块实施记录](live-hybrid-implementation-2026-09-29.md)新增实际门禁回归：冻结心跳不续活，
+失效后旧帧/坏色帧前回放不重建资格，光学阻塞不扫输入内存，内存失败不可被绿灯覆盖，
+runtime 发现出口、capture 收尾及短时未来帧只等待不放行；真实 ReceiverBindings 注册冲突、
+被抢占及恢复驱动 InputState 的 RED/GREEN 测试已补齐。真实矩阵与离线结果分别记账。
+
+2026-09-29 待实施的[三色块混合输入方案 §9](live-hybrid-architecture-2026-09-29.md#9-实施顺序与验收门槛)
+新增旧帧/假活跃、漏边沿、双实例错配、DPI/HDR、低 FPS、关闭期残留、动作前内存身份门禁及
+共享槽位容量矩阵。全部为计划，不能继承下文旧输入通道的通过结果。
+
+2026-09-29 常驻 1s 采样与前三项主机优化候选的离线定向检查、实机 `in_progress` 和待验矩阵见
+[采样实施记录](input-cadence-implementation-2026-09-29.md)。须覆盖周期内即时刷新不推迟下一周期、
+附近搜索预算、旧样本不续期、1500ms 调度线索与高水位、缓存 runtime/Sequence 排序、
+错误目标拒绝、缓存关闭、诊断收尾失败与 driver 释放顺序；
+此前实机结果不能代替此候选的首连、reload、多实例与延迟复验。
+
+2026-09-29 Retail 同安装双实例的 14 组实机功能套件、分阶段构建身份、重放审计及
+延迟/未测边界见[正式服验收](live-retail-dual-acceptance-2026-09-29.md)。正常竞态通过不代表
+未知预约可独立恢复；最终离线结论以冻结 baseline 的 SOURCE 和完整报告为准。
+
+2026-09-29 主机整改验收新增：close 在 prepare/commit 各持久边界均不发新业务；取消未发布
+操作不触发容量 reload；pending 初绑/reload 可发现换代；reload 不依赖旧 nextSlot；
+重复 resume/close 不刷新预算；v1 只读不迁移、首次驱动迁移 v2；预算耗尽和回退落盘；
+完成落盘后崩溃不显示旧 blocker；二次换代保留全部未决证据；slot 预约与短锁等待可区分。
+执行结果与原型未准入项见[实施记录](live-channel-implementation-2026-09-29.md)。
+
+2026-09-29 待回执显式 reload 必须覆盖 confirm_ready、opaque/observation、closing/open、
+绑定后退役故障及原日志续跑。不得重发未知输入、丢失候选报告或在 closing 中重跑业务。
+reload 完成、连接关闭、业务结果未知必须分别呈现。执行记录见[本轮恢复](live-channel-recovery-2026-09-29.md)。
+
 2026-09-28 统一输入编排的独立验收见[编排记录](live-input-coordinator-acceptance-2026-09-28.md)。
 Classic / Forever 双在线的后续补测见[双实例记录](live-input-multiclient-2026-09-28.md)。
 同目录正式服双开使用 `tests/channel-live/shared-installation-baseline.mjs`，

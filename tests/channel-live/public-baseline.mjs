@@ -5,18 +5,34 @@ import assert from 'node:assert/strict';
 
 // Explicit target only. This is an interactive acceptance runner, never a unit
 // test or an npm hook. A failed run retains its connection for manual/resume work.
-const [cliArg, projectArg, installation, pid] = process.argv.slice(2);
+const [cliArg, projectArg, installation, pid, resumeArg] = process.argv.slice(2);
 if (!cliArg || !projectArg || !installation || !/^\d+$/.test(pid ?? '')) {
-  throw new Error('usage: public-baseline.mjs <cli.exe> <new-project> <installation> <pid>');
+  throw new Error('usage: public-baseline.mjs <cli.exe> <project> <installation> <pid> [--resume]');
 }
+assert.ok(!resumeArg || resumeArg==='--resume','only --resume is accepted');
 const cli=path.resolve(cliArg), project=path.resolve(projectArg);
 await fs.mkdir(project,{recursive:true});
-const reportPath=path.join(project,'baseline.json');
+const originalReportPath=path.join(project,'baseline.json');
+const readJSON=async file=>JSON.parse((await fs.readFile(file,'utf8')).replace(/^\uFEFF/,''));
+const previous=resumeArg?await readJSON(originalReportPath):null;
+const originalConnection=previous?await readJSON(path.join(project,'connect.json')):null;
+const attempt=previous?`resumed-${Date.now()}-${process.pid}`:'';
+if(previous){
+  assert.equal(previous.complete,false,'a passed baseline does not need resuming');
+  assert.equal(path.resolve(previous.project),project);
+  assert.equal(path.resolve(previous.installation).toLowerCase(),path.resolve(installation).toLowerCase());
+  assert.equal(previous.pid,Number(pid),'resume must retain the original PID');
+  assert.ok(originalConnection.result?.bound,'resume requires the original successful connection');
+  assert.match(originalConnection.result.session,/^CON-[0-9a-f]{32}$/);
+  if(previous.session)assert.equal(previous.session,originalConnection.result.session);
+}
+const reportPath=previous?path.join(project,`baseline-${attempt}.json`):originalReportPath;
 const report={schema:'lycheedev.native-live-baseline.v1',project,installation,pid:Number(pid),complete:false,steps:[]};
+if(previous){report.resumes=originalReportPath;report.previousFailure=previous.failure;report.session=originalConnection.result.session;}
 await fs.writeFile(reportPath,JSON.stringify(report,null,2),{flag:'wx'});
-let session;
+let session=report.session;
 async function call(name,args) {
-  const argv=[...args,'--project',project,'--wait-seconds','120','--format','json'];
+  const argv=[...args,'--project',project,...(args[1]==='status'?[]:['--wait-seconds','120']),'--format','json'];
   const started=Date.now();
   const result=await new Promise((resolve,reject)=>{
     const child=spawn(cli,argv,{windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
@@ -28,7 +44,7 @@ async function call(name,args) {
     child.on('error',e=>{clearTimeout(timer);reject(e);});
     child.on('close',code=>{clearTimeout(timer);resolve({code,stdout,stderr});});
   });
-  await fs.writeFile(path.join(project,name+'.json'),result.stdout);
+  await fs.writeFile(path.join(project,(attempt?attempt+'-':'')+name+'.json'),result.stdout,{flag:'wx'});
   const envelope=JSON.parse(result.stdout.replace(/^\uFEFF/,''));
   report.steps.push({name,argv,exitCode:result.code,elapsedMs:Date.now()-started,session:envelope.result?.session,operation:envelope.result?.operation,complete:envelope.result?.complete,cleanup:envelope.result?.cleanup,error:envelope.error});
   await fs.writeFile(reportPath,JSON.stringify(report,null,2)+'\n');
@@ -48,7 +64,30 @@ async function execute(key,fixture,name=key) {
   return result;
 }
 try {
-  const connected=await call('connect',['live','connect','--installation',installation,'--pid',pid,'--no-cache']);
+  let connected;
+  if(previous){
+    connected=originalConnection.result;
+    const status=await call('resume-status',['live','status',session]);
+    assert.equal(status.session,session);
+    assert.equal(status.closed,false,'closed connections cannot resume this baseline');
+    assert.equal(status.bound,true,'recover the original binding before resuming the baseline');
+    assert.equal(status.identity.guid,connected.identity.guid);
+    assert.equal(status.identity.build,connected.identity.build);
+    assert.equal(status.identity.product,connected.identity.product);
+    assert.ok(!['budget_exhausted','wait_active_driver','needs_decision'].includes(status.continuation?.kind),
+      'resolve the original continuation before resuming the baseline');
+    assert.ok(status.continuation?.remainingBudgetMs==null || status.continuation.remainingBudgetMs>0,
+      'the original goal budget is exhausted');
+    assert.ok(!['execution_unknown','cancelled'].includes(status.operationState),'unfinished business outcome cannot be replayed');
+    if(!status.complete){
+      assert.notEqual(status.continuation?.kind,'wait_external','resolve the recorded external blocker first');
+      const recovered=await call('resume-original',['live','resume',session]);
+      assert.equal(recovered.complete,true,'original goal must complete before further baseline work');
+      assert.equal(recovered.session,session);
+    }
+  }else{
+    connected=await call('connect',['live','connect','--installation',installation,'--pid',pid,'--no-cache']);
+  }
   session=connected.session;
   report.session=session;
   assert.equal(connected.bound,true);

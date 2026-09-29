@@ -34,25 +34,27 @@ type TargetRequest struct {
 // ProjectResult is presentation, not a second persisted state machine. Raw
 // evidence remains in the connection log and immutable result-byte artifacts.
 type ProjectResult struct {
-	ProcessEnd     string          `json:"processEnd,omitempty"`
-	Input          *InputAttempt   `json:"input,omitempty"`
-	Waiting        string          `json:"waiting,omitempty"`
-	Session        string          `json:"session"`
-	Operation      string          `json:"operation,omitempty"`
-	OperationState string          `json:"operationState,omitempty"`
-	Scans          string          `json:"scans,omitempty"`
-	Identity       Identity        `json:"identity"`
-	Bound          bool            `json:"bound"`
-	Closed         bool            `json:"closed"`
-	Stage          string          `json:"stage"`
-	Complete       bool            `json:"complete"`
-	ReportState    string          `json:"reportState"`
-	Cleanup        string          `json:"cleanup"`
-	CleanupMethod  string          `json:"cleanupMethod,omitempty"`
-	Report         json.RawMessage `json:"report,omitempty"`
-	Journal        string          `json:"journal"`
-	Reload         *ReloadAttempt  `json:"reload,omitempty"`
-	ReportOrigin   *Identity       `json:"reportOrigin,omitempty"`
+	Continuation   Continuation             `json:"continuation"`
+	ProcessEnd     string                   `json:"processEnd,omitempty"`
+	RuntimeEnd     *RuntimeReplacementProof `json:"runtimeEnd,omitempty"`
+	Input          *InputAttempt            `json:"input,omitempty"`
+	Waiting        string                   `json:"waiting,omitempty"`
+	Session        string                   `json:"session"`
+	Operation      string                   `json:"operation,omitempty"`
+	OperationState string                   `json:"operationState,omitempty"`
+	Scans          string                   `json:"scans,omitempty"`
+	Identity       Identity                 `json:"identity"`
+	Bound          bool                     `json:"bound"`
+	Closed         bool                     `json:"closed"`
+	Stage          string                   `json:"stage"`
+	Complete       bool                     `json:"complete"`
+	ReportState    string                   `json:"reportState"`
+	Cleanup        string                   `json:"cleanup"`
+	CleanupMethod  string                   `json:"cleanupMethod,omitempty"`
+	Report         json.RawMessage          `json:"report,omitempty"`
+	Journal        string                   `json:"journal"`
+	Reload         *ReloadAttempt           `json:"reload,omitempty"`
+	ReportOrigin   *Identity                `json:"reportOrigin,omitempty"`
 }
 
 type projectTarget struct {
@@ -153,8 +155,10 @@ func present(d *Driver) ProjectResult {
 	r := ProjectResult{Session: s.ID, Identity: s.Identity, Bound: s.Bound, Closed: s.Closed, Stage: "connecting", Complete: s.Bound || s.Closed, ReportState: "unavailable", Cleanup: "none", Journal: d.Log}
 	r.Reload = s.Reload
 	r.ProcessEnd = s.ProcessEnd
+	r.RuntimeEnd = s.RuntimeEnd
 	r.Input = s.Input
 	r.Waiting = d.Waiting
+	r.Continuation = d.continuation()
 	if native, ok := d.Backend.(*Native); ok {
 		r.Scans = native.TraceDir
 	}
@@ -178,6 +182,10 @@ func present(d *Driver) ProjectResult {
 		}
 		if op.Stage == "complete" {
 			r.Cleanup = "complete"
+		}
+		if op.Stage == "cancelled" {
+			r.Cleanup = "complete"
+			r.CleanupMethod = "not_executed"
 		}
 		if op.Stage == "execution_unknown" {
 			r.Cleanup = "runtime_lost"
@@ -264,7 +272,7 @@ func claimGuard(target live.ClientWindow, parent string, owner journal.WindowOwn
 	}
 }
 
-func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool) (ProjectResult, error) {
+func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool) (result ProjectResult, err error) {
 	if _, ok := ctx.Deadline(); !ok {
 		return ProjectResult{}, errors.New("live.channel_deadline_required")
 	}
@@ -306,7 +314,7 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	if err != nil {
 		return ProjectResult{}, err
 	}
-	defer native.Close()
+	defer func() { err = errors.Join(err, native.Close()) }()
 	candidates, coverage, err := native.Discover(ctx, request.Character, request.Realm)
 	if err != nil {
 		return ProjectResult{}, err
@@ -350,13 +358,13 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	if err != nil {
 		return present(d), err
 	}
-	defer lease.Close()
+	defer func() { err = errors.Join(err, lease.Close()) }()
 	native.Guard = claimGuard(target, native.Parent, owner)
 	err = d.Continue(ctx)
 	return present(d), err
 }
 
-func (p *Project) drive(ctx context.Context, id string, cache bool, action func(*Driver) error) (ProjectResult, error) {
+func (p *Project) drive(ctx context.Context, id string, cache bool, action func(*Driver) error) (result ProjectResult, err error) {
 	meta, err := p.metadata(id)
 	if err != nil {
 		return ProjectResult{}, err
@@ -372,14 +380,21 @@ func (p *Project) drive(ctx context.Context, id string, cache bool, action func(
 	if err != nil {
 		return present(d), err
 	}
-	defer native.Close()
+	defer func() { err = errors.Join(err, native.Close()) }()
 	lease, err := journal.LockBootstrapWindow(ctx, native.Parent, meta.Owner)
 	if err != nil {
+		if errors.Is(err, journal.ErrBusy) {
+			b := Blocker{Kind: "active_driver", Consumer: meta.Owner.OperationID, Installation: native.Parent, Condition: "active_driver_released"}
+			r := present(d)
+			r.Continuation.Kind = "wait_active_driver"
+			r.Continuation.Blocker = &b
+			return r, errors.Join(ErrPending, err)
+		}
 		return present(d), err
 	}
 	defer func() {
 		if lease != nil {
-			_ = lease.Close()
+			err = errors.Join(err, lease.Close())
 		}
 	}()
 	// State read before admission may belong to another driver's in-flight turn.
@@ -424,8 +439,11 @@ func (p *Project) Resume(ctx context.Context, id string, cache bool) (ProjectRes
 		}
 		return state, err
 	}
+	if d.State.RuntimeEnd != nil || d.State.Closing {
+		return p.drive(ctx, id, cache, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
+	}
 	if d.State.Reload != nil && d.State.Reload.Phase != "complete" {
-		return p.drive(ctx, id, cache, func(d *Driver) error { return d.Continue(ctx) })
+		return p.drive(ctx, id, cache, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
 	}
 	if d.State.Transaction == nil && state.Operation != "" && state.Complete {
 		return state, nil
@@ -433,7 +451,7 @@ func (p *Project) Resume(ctx context.Context, id string, cache bool) (ProjectRes
 	if d.State.Transaction != nil && d.State.Transaction.Envelope.Action == "unbind" {
 		return p.Disconnect(ctx, id, cache)
 	}
-	return p.drive(ctx, id, cache, func(d *Driver) error { return d.Continue(ctx) })
+	return p.drive(ctx, id, cache, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
 }
 func (p *Project) Execute(ctx context.Context, id, request, code string, budget int, policy string, cache bool) (ProjectResult, error) {
 	if err := p.recoverTail(ctx, id); err != nil {
@@ -540,10 +558,9 @@ func (p *Project) Disconnect(ctx context.Context, id string, cache bool) (Projec
 		return p.disconnectEnded(ctx, id, meta)
 	}
 	return p.drive(ctx, id, cache, func(d *Driver) error {
-		d.State.Closing = true
-		if err := d.Save(ctx, "disconnect_intent"); err != nil {
+		if err := d.RequestClose(ctx); err != nil {
 			return err
 		}
-		return d.Continue(ctx)
+		return d.continueOrRetire(ctx, d.Backend.(*Native), true)
 	})
 }

@@ -46,6 +46,8 @@ export async function main(argv = process.argv.slice(2)) {
   const nodeFiles = [
     ...readdirSync(join(repository, 'tools')).filter(f => f.endsWith('.test.mjs')).map(f => `tools/${f}`),
     ...readdirSync(join(repository, 'packages/npm/lycheedev/test')).filter(f => f.endsWith('.test.mjs')).map(f => `packages/npm/lycheedev/test/${f}`),
+    // Pure runner-policy tests only; real-client entrypoints are never invoked.
+    ...readdirSync(join(repository, 'tests/channel-live')).filter(f => f.endsWith('.test.mjs')).map(f => `tests/channel-live/${f}`),
   ].sort();
   await check('NODE', 'Distribution, launcher and regression runner tests', process.execPath, ['--test', '--test-reporter=tap', ...nodeFiles], (entry, text) => Object.assign(entry, parseTAP(text)));
   await check('VERSION', 'Release version consistency', process.execPath, ['tools/version.mjs', '--check']);

@@ -37,7 +37,7 @@ func save(ctx context.Context, path string, value any) error {
 	}
 	return vault.ReplaceFile(ctx, path, b)
 }
-func run() error {
+func run() (resultErr error) {
 	mode := flag.String("mode", "discover", "discover, capture, install, reload, connect, run, resume, disconnect")
 	client := flag.String("installation", "", "explicit installation")
 	pid := flag.Uint("pid", 0, "exact process id")
@@ -121,6 +121,45 @@ func run() error {
 	}
 	if *mode == "capture" {
 		return capture("frame")
+	}
+	if *mode == "input-signal" {
+		stream, err := desktop.CaptureFramesWithStartupTimeout(ctx, target.Window, desktop.InputSignalCapture(), 2*time.Second)
+		if err != nil {
+			return err
+		}
+		defer stream.Close()
+		type sample struct {
+			Ticks  int64              `json:"ticks"`
+			AgeMS  int64              `json:"ageMs"`
+			Signal bridge.InputSignal `json:"signal"`
+			Error  string             `json:"error,omitempty"`
+		}
+		var samples []sample
+		for len(samples) < 40 {
+			frame, err := stream.Next(ctx)
+			if err != nil {
+				return err
+			}
+			now, err := desktop.CaptureSystemTicks()
+			if err != nil {
+				return err
+			}
+			age, err := desktop.FrameAge(frame, now)
+			if err != nil {
+				return err
+			}
+			signal, decodeErr := bridge.DecodeInputSignal(frame.NRGBA)
+			s := sample{Ticks: frame.SystemTicks, AgeMS: age.Milliseconds(), Signal: signal}
+			if decodeErr != nil {
+				s.Error = decodeErr.Error()
+			}
+			samples = append(samples, s)
+		}
+		return save(ctx, filepath.Join(evidence, "input-signal.json"), struct {
+			Window  desktop.WindowIdentity `json:"window"`
+			Area    any                    `json:"area"`
+			Samples []sample               `json:"samples"`
+		}{target.Window, stream.CaptureArea(), samples})
 	}
 	reload := func() error {
 		if err = guardBase(ctx); err != nil {
@@ -325,7 +364,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer native.Close()
+	defer func() { resultErr = errors.Join(resultErr, native.Close()) }()
 	defer func() { _ = save(context.Background(), filepath.Join(evidence, "scans.json"), native.Lookups) }()
 	if *mode == "scan-benchmark" {
 		for _, workers := range []int{1, 8} {
@@ -474,7 +513,7 @@ func run() error {
 			err = reload()
 		}
 		if *mode == "retry-bootstrap" {
-			err = native.RetryFirstBinding(ctx, d.State.Transaction.Envelope)
+			err = native.RetryFirstBinding(ctx, d.State.Transaction.Envelope, d.State.Identity.InputState)
 		}
 		if *mode == "recover-bootstrap" {
 			err = d.RecoverBinding(ctx)

@@ -15,13 +15,13 @@ observation. It does not claim to capture every addon error. Provider unavailabl
 partial fields, zero rows and incomplete coverage remain distinct. Native bugs
 completes verified result persistence and release; inspect `report.ok` and the
 snapshot's own status, then require `complete: true` and `cleanup: complete`.
-Do not add legacy ACK/finish/hide commands. Resume the same CON on interruption.
+Do not add legacy ACK/finish/hide commands. Use [recovery](live-recovery.md) on interruption, retaining the same CON.
 Use a question-specific probe only when the retained error snapshot cannot
 distinguish the hypotheses. Follow [live-investigation.md](live-investigation.md)
 and keep sampling, output and async lifetime bounded.
 
 For secret-value or secure-taint errors, connect the relevant fixed source path
-to [live hypothesis testing](live-investigation.md#test-source-hypotheses).
+to [live hypothesis testing](live-probes.md#test-source-hypotheses).
 Use runtime observations to distinguish the remaining source hypotheses, then
 return to those locations to explain the result; an error snapshot alone need
 not end an authorized deep investigation.
