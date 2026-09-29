@@ -51,6 +51,20 @@ func TestTargetResolveFromClientReturnsReusablePinAndEvidence(t *testing.T) {
 		t.Fatal(result, code)
 	}
 	pin := resultMap(t, result)
+	for _, directory := range []string{game, client} {
+		selected, exit := invoke(t, "target", "resolve", "--installation", directory, "--product", "retail", "--region", "cn", "--locale", "zhCN", "--definitions", strings.Repeat("d", 40), "--offline", "--home", workspace, "--format=json")
+		if exit != 0 || resultMap(t, selected)["id"] != pin["id"] {
+			t.Fatalf("local product constraint: %+v %d", selected, exit)
+		}
+	}
+	mismatch, mismatchExit := invoke(t, "target", "resolve", "--installation", game, "--product", "titan", "--region", "cn", "--locale", "zhCN", "--offline", "--home", workspace, "--format=json")
+	if mismatchExit != 2 || mismatch.Error.Code != "selection.installation_product_mismatch" || mismatch.Context["installationSelection"] == nil {
+		t.Fatalf("local mismatch became remote/opaque: %+v %d", mismatch, mismatchExit)
+	}
+	missing, missingExit := invoke(t, "target", "resolve", "--installation", filepath.Join(game, "missing"), "--product", "titan", "--region", "cn", "--locale", "zhCN", "--offline", "--home", workspace, "--format=json")
+	if missingExit != 3 || missing.Error.Code != "selection.installation_missing" {
+		t.Fatalf("missing local became remote: %+v %d", missing, missingExit)
+	}
 	data := pin["data"].(map[string]any)
 	if data["product"] != "retail" || data["fullBuild"] != "12.1.0.69875" || data["buildConfig"] != keys[0] || result.Context["snapshot"] != pin["id"] || result.Context["installation"] != testkit.CanonicalPath(t, game) || len(result.Captures) != 1 {
 		t.Fatal(result)

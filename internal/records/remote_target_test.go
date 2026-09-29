@@ -44,6 +44,18 @@ func (f remoteTargetFixture) resolve(ctx context.Context, request RemoteTargetRe
 	return resolveRemoteTarget(ctx, f.store.Root(), request, f.defs.client)
 }
 
+func TestRemoteTargetRejectsReusedSlotBeforeConfigDownload(t *testing.T) {
+	f := newRemoteTargetFixture(t)
+	versions := f.transport.responses[f.versionsURL]
+	f.transport.responses[remoteVersionBase("cn")+"wow_classic_beta/versions"] = versions
+	f.transport.responses[remoteVersionBase("cn")+"wow_classic_beta/cdns"] = f.transport.responses[f.cdnsURL]
+	f.request.Product = "forever"
+	got, err := f.resolve(context.Background(), f.request)
+	if !errors.Is(err, selection.ErrDataProductBuild) || got.Pin.ID != "" || len(f.transport.callURLs()) != 2 {
+		t.Fatalf("foreign release accepted: %+v %v calls=%v", got, err, f.transport.callURLs())
+	}
+}
+
 func TestRemoteTargetFixedOnlineOfflineEvidence(t *testing.T) {
 	f := newRemoteTargetFixture(t)
 	ctx := context.Background()
@@ -273,5 +285,15 @@ func TestRemoteResponseReadFailureClosesBody(t *testing.T) {
 	})}
 	if _, err := fetchRemoteMetadata(context.Background(), client, "https://example.test/metadata", 1<<20); !errors.Is(err, ErrRemoteHTTP) || !errors.Is(err, io.ErrUnexpectedEOF) || !body.closed {
 		t.Fatal(err, body.closed)
+	}
+}
+
+func TestRemoteMetadataHTTPErrorIdentifiesEndpointWithoutSecrets(t *testing.T) {
+	client := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("missing")), Header: make(http.Header), Request: r}, nil
+	})}
+	_, err := fetchRemoteMetadata(context.Background(), client, "https://user:secret@example.test/wow_forever/cdns?token=secret", 1024)
+	if !errors.Is(err, ErrRemoteHTTP) || !strings.Contains(err.Error(), "example.test/wow_forever/cdns") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("missing or unsafe endpoint diagnostic: %v", err)
 	}
 }

@@ -5,6 +5,12 @@ a usable CON connection. Disk installation and runtime activation are separate.
 The CLI owns the main addon and 64 LoadOnDemand slots; never overlay-copy files,
 edit slot payloads or import old queues/SavedVariables.
 
+Use the shared installation candidates to select a verified client directory;
+directory names alone do not establish product identity. A game root may contain
+several clients, and a client may have several processes: retain the selected path,
+PID and later character binding. Resolve only remaining ambiguity, not a fresh
+choice on every retry. Local selection errors never authorize another installation.
+
 1. Select the authorized installation and PID. Inspect `addon status`; the main
    addon must be a clean managed installation matching the CLI, and all 64 slot
    files must pass inspection. Use [installation](installation.md) for deployment.

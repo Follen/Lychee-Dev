@@ -30,8 +30,22 @@ func run() error {
 	dbd := flag.String("dbd", "", "explicit pinned DBD fixture")
 	build := flag.String("build", "", "full build")
 	skip := flag.String("skip", "", "unavailable partition indices from evidence")
+	sample := flag.String("ids", "", "up to 200 explicit row IDs instead of the first 200 rows")
 	output := flag.String("output", "", "output JSON")
 	flag.Parse()
+	wanted := make(map[uint32]bool)
+	if *sample != "" {
+		for _, part := range strings.Split(*sample, ",") {
+			id, err := strconv.ParseUint(part, 10, 32)
+			if err != nil {
+				return err
+			}
+			wanted[uint32(id)] = true
+		}
+		if len(wanted) > 200 {
+			return fmt.Errorf("at most 200 sampled IDs")
+		}
+	}
 	raw, err := os.ReadFile(*db2)
 	if err != nil {
 		return err
@@ -72,13 +86,17 @@ func run() error {
 	rows := []map[string]any{}
 	err = view.ScanWithIDs(ctx, 4<<20, 1<<20, func(id uint32, row map[string]any) error {
 		fmt.Fprintln(digest, id)
-		if len(rows) < 200 {
+		if *sample == "" && len(rows) < 200 || wanted[id] {
 			rows = append(rows, row)
+			delete(wanted, id)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	if len(wanted) != 0 {
+		return fmt.Errorf("requested sampled IDs unavailable: %v", wanted)
 	}
 	encrypted := map[string][]uint32{}
 	for _, p := range layout.Partitions {

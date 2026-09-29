@@ -22,6 +22,10 @@ to arbitrary input. This adapter does not decrypt BLTE or establish missing-key
 provenance; that belongs to the production reader's capture chain. It consumes
 the already decoded (possibly explicitly partial) DB2 fixture.
 
+To compare specific records, pass a fifth comma-separated ID argument to the
+oracle and the same `-ids` list to the Go reader (at most 200). Both reject
+unavailable requested IDs; full readable-ID and encrypted-ID checks still run.
+
 Each adapter outputs the readable row count, SHA-256 of sorted readable IDs
 (decimal plus newline), encrypted-ID sets and first 200 readable rows. Lychee
 scans/decodes all readable rows. The comparator compares exact JSON numbers and

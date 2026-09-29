@@ -175,4 +175,3 @@ release acknowledgement. Journal segments rotate only at idle boundaries and
 remain linked under the connection's `.jsonl.history` directory; preserve these
 alongside the active log. A missing segment must not be worked around by issuing
 a new request key.
-

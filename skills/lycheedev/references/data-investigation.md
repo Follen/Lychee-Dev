@@ -1,322 +1,76 @@
 # Data investigation
 
-Use this workflow for static game tables, read-only SQL, semantic records,
-independent change records, and reproducible data comparisons.
+Use this branch for static game records, SQL, Hotfixes and their preparation
+failures. Follow the decisions below; open only the reference needed now.
+The CLI owns product routing, archive recovery and verification.
 
-## Fix the data identity
+## 1. Choose the evidence
 
-Prepare a local target from the selected client directory; do not construct
-CASC keys or a DataPin by hand:
+| Requested answer | Next step |
+| --- | --- |
+| Names, IDs, static coefficients or related records | Static lookup below; details in [data-tables.md](data-tables.md) |
+| Changed records or retained Hotfix pushes | [data-hotfix.md](data-hotfix.md) |
+| Values after applying a specified cache | Explicit `effective` query in [data-query-recipes.md](data-query-recipes.md) |
+| Actual server behavior or measured coefficients | Establish the static baseline, then [live-investigation.md](live-investigation.md) when live work is authorized |
 
-```text
-lycheedev target resolve --installation <client-directory> --region cn --locale zhCN --format json
-```
+Static rows, client Hotfixes and server measurements are distinct evidence.
+Do not silently substitute one for another or open a game for a static-only task.
 
-When a named target has already been configured, resolve that fixed
-configuration with `lycheedev target resolve --target <name> --format json`.
-Use `lycheedev target show <name>` to inspect the named configuration, or
-`lycheedev target show <PIN-id>` to inspect a resolved selection. Showing a
-target reads it; it does not resolve or refresh it. Use `target add` to create
-or explicitly replace a named configuration.
+## 2. Fix the identity once
 
-Region and locale are explicit choices; use those requested for the task.
-The CLI reads product/build/config identities from the installation and resolves
-WoWDBDefs `refs/heads/master` once to an exact commit. Use `--definitions` for a
-specific 40-hex commit or full branch/tag ref. `--offline` resolves a symbolic
-ref only from its existing workspace record; an explicit commit needs no
-network. Table definitions are prepared on first query, not by target resolve.
+Use an explicit snapshot first, otherwise the invoking project's matching data
+pin. Inspect it with `target show <pin>`; use `project status` if project context
+is unclear. Check product, full build, region, locale and definitions against the
+request. A conflicting project pin must not silently answer a different product:
+use a matching explicit pin when the requested scope is clear; ask only for a
+remaining identity choice. Do not overwrite the project lock for an investigation.
 
-The result is a fixed pin ID. Carry it between calls and agents. `--from <pin>`
-adds data to a source-only pin without modifying the parent; if it already has
-data, the existing definition commit is retained by default and conflicting
-fixed identities fail. Do not resolve a fixed target again as latest.
+No matching pin? Read [data-targets.md](data-targets.md). `target list` lists saved
+names, not supported products. Use canonical `forever`; the CLI determines its
+publishing slot. Folder names and conversation language do not establish identity.
+Choose the requested local installation or CDN source, then retain that source
+and pin throughout the query. Different delivery configurations require separate,
+labeled pins; they are not interchangeable evidence.
+For local resolution, constrain the game root/client path with the requested
+product; use returned candidates only when selection remains ambiguous.
 
-The target evidence records the observed client/catalog and archived config
-bytes. It does not prove that every table or locale is present, or that the
-game is running. `target resolve --file` remains available for already-resolved
-identities, but cannot be mixed with preparation flags.
+## 3. Query the smallest useful scope
 
-For a remote product, use the same resolver without an installation path:
+- Verified ID: prefer the domain command that owns the needed relationship;
+  otherwise inspect table schema and query the ID or foreign key.
+- Business name only: inspect the relevant name table schema, search its actual
+  localized field with an explicit limit, then resolve candidates by relationships
+  and class/rank/context. Do not pick the first matching name or ask the user to
+  supply a table/ID the toolkit can discover. If evidence leaves multiple valid
+  interpretations, present the remaining choices.
+- Multiple tables, filtering or calculation: inspect the schemas and use SQL
+  with named parameters. Read [data-tables.md](data-tables.md) for mechanics and
+  [data-query-recipes.md](data-query-recipes.md) for parameter/overlay examples.
 
-```text
-lycheedev target resolve --product retail --region cn --locale zhCN --format json
-```
+Use installed `describe --format json` or help for exact commands and flags.
+If the installed CLI lacks a documented capability, report that version mismatch;
+do not claim source-only changes are installed or invent a replacement flag.
 
-It records the selected region's advertised build, verified build/CDN configs,
-and exact definition commit. `--build <full-build>` constrains that observation;
-it does not search historical builds or fall back to a neighboring one. Online
-failures do not silently reuse old catalogs. `--offline` requires a previously
-recorded catalog pair and configurations in this workspace; preserve the returned
-`context.observedAt` and do not call an offline observation the current server
-state. An exact `--definitions` commit alone does not supply remote catalogs.
+## 4. Decide whether the evidence answers the question
 
-Remote target preparation does not download game archives or prove content
-availability. DB2/SQL/asset queries accept either `--installation <directory>`
-or `--cdn` against the same pin; do not combine them. In target resolution,
-`--installation`, `--product`, and `--file` are alternative
-selection modes, not overrides of each other.
+Read structured errors and coverage, not just exit status. Retain the snapshot,
+source, record IDs, filters and capture IDs with the conclusion.
 
-## Implemented DB2 reading
+| Result | Decision |
+| --- | --- |
+| Complete for the requested scope | Answer within that scope; SQL LIMIT and a single record do not prove whole-table coverage |
+| More pages/truncated | Use a returned cursor with unchanged pin/source/filters; search without a cursor needs the bounded alternative below |
+| Missing keys/partitions or partial result | Use readable evidence with the limitation; empty partial results cannot establish absence |
+| Failure/deadline | [data-recovery.md](data-recovery.md); correct the cause or stop the affected branch after bounded retry |
 
-For a known table and record ID in an explicitly selected local installation:
+For JSONL, require a legal end frame and exit 0, then inspect coverage separately.
+`db2 search` and `foreign-key` have no cursor: narrow to the requested scope,
+increase the limit within documented bounds, or use ordered SQL pagination.
+Do not invent `--after-id` for those verbs. With SQL, retain a stable unique order
+and filters across pages; use the last ID as a parameter for keyset continuation.
+For Hotfix continuation, retain the archived source/checkpoint rather than reread
+a mutable cache. A healthy workspace or successful target resolution does not
+prove that the requested content is available.
 
-```text
-lycheedev data db2 --snapshot <pin> --installation <game-root> --table <name> --id <id> --format json
-```
-
-For the same query from CDN, replace the installation selector with `--cdn`.
-Add `--offline` to prohibit all network access and reuse only this workspace's
-verified configuration, fragment and definition caches. Missing cache data fails;
-the command does not fall back to a local installation or change the pin.
-The initial archive lookup can be slow when the provider lacks a group index.
-
-`game-root` contains `.build.info` and `Data/`; the same selected client directory
-used in target resolution is also accepted and checked against the pin. The command selects the DB2
-FileDataID from the pinned WoWDBDefs manifest, verifies the table hash in the
-actual file, and binds its exact layout hash to the definition. It returns
-`row`, `schema`, `layoutHash`, raw-source blob references and a JSON capture.
-The capture is complete for that one requested record, not for the whole table.
-Record ID zero is allowed. A missing record is an error, not an empty full-table
-query. Field verification/foreign-key metadata in `schema` is retained evidence,
-not proof that every inferred DBD field meaning is correct.
-
-Omit `--id` to read a bounded page (default 50, maximum 200 rows):
-
-```text
-lycheedev data db2 --snapshot <pin> --installation <game-root> --table <name> --limit 50 --format json
-lycheedev data db2 --snapshot <same-pin> --installation <same-root> --table <same-name> --limit 50 --after-id <page.next> --offline --format json
-```
-
-Pages use ascending logical IDs, including copies. Omitted `--after-id` includes
-ID zero; an explicit cursor excludes that ID. Continue only when `page.more`
-is true, carrying `page.next` with the same snapshot and table. `--id` cannot
-be combined with `--limit` or `--after-id`. Empty pages are valid. Preserve
-each page's capture and cursor; a suffix ending at the last record is still not
-the whole table. Captures mark full-table completion only when a first page
-contains all rows. `truncated` denotes more rows after this page; false does
-not imply that earlier rows were included.
-
-On a cache miss, the command reads only manifest/DBD files at the DataPin's
-exact definition commit from WoWDBDefs; it does not fetch a newer branch. Local
-mode never fetches CDN game data. Add `--offline` to prohibit downloads; missing or corrupt
-cached definitions fail explicitly. Cache bytes are rehashed before use. No
-game input or game installation writes occur. Hotfix records are not overlaid.
-
-The file limit is `--max-bytes` (default 128 MiB, maximum 512 MiB, applied to
-both encoded and decoded file sizes). Parser budgets additionally bound metadata
-to 64 MiB, indexed physical/copy rows to one million, columns/partitions to 4096,
-and decoded row text to 1 MiB. A page's serialized row array is capped at 8 MiB;
-any row failure or budget overflow returns no partial page. Page selection uses
-bounded extra memory, but each CLI invocation currently reopens the table and
-checks its selected source. Encrypted BLTE chunks use a pinned public TACT key
-snapshot, fetched only when needed and cached with a verified digest. Offline
-uses only cached keys. Supply `--key-file <WoW.txt|keys.json>` to use an explicit
-text or JSON key set instead; private keys stay in request memory.
-
-DB2 reads keep readable encrypted/non-encrypted sections when other sections
-lack keys. Inspect `complete`, `partial`, `unavailablePartitions` (direct DB2)
-or `tables[].unavailablePartitions` (schema/domain results). File provenance
-separates `partialContent` plus missing chunk ranges from full CKey-verified
-`content`; placeholder bytes never become decoded fields. A schema's `rowCount`
-is the readable logical count, not the total number of records in a partial table.
-Report missing keys and row coverage with the answer. Do not describe a partial
-search, empty result, SQL aggregate or CSV as a full-build answer. Changing from
-installation to CDN does not supply a missing key. Raw asset exports still
-require the complete verified file.
-
-## Implemented static SQL
-
-For parameterized lookups, flags, explicit Hotfix overlays and query diagnostics,
-read [data-query-recipes.md](data-query-recipes.md). The `meta` catalog exposes
-pinned enum/flag definitions; `effective` requires explicitly selected raw cache
-captures in the query JSON. Unqualified and `static` tables retain static values.
-
-For a complete local Hotfix investigation, prefer the CLI-owned bounded scan:
-
-```text
-lycheedev data hotfix --source dbcache --scan --snapshot <pin> --from <raw-cache-capture> --table SpellMisc --limit 200 --max-pages 100 --format json
-```
-
-The result contains cumulative matched/returned/decoded/no-payload counts and
-page capture IDs. If `result.complete` is false, continue with `--cursor` set to
-the returned `resume` capture, the returned snapshot, the same raw cache and the
-same table/filters/limit. Read page captures for records; do not treat the summary
-as their decoded contents. A completed scan covers only that selected cache.
-It does not imply an effective overlay or full server coverage. Resume checkpoints
-are saved after each successful page; a completed checkpoint can be reread.
-If a scan fails after saving pages, its error response retains the last saved
-scan result and `resume`. Report the failure and that checkpoint together;
-resume after addressing the cause instead of restarting from the mutable file.
-
-Supply SQL as text, from a `.sql` or `.json` file, or from stdin. Exactly one
-input mode is accepted. For JSON requests, use a UTF-8 file (at most 1 MiB):
-
-```json
-{"sql":"SELECT ID, Filename FROM ChrClasses WHERE ID=:id","parameters":{"id":1}}
-```
-
-```text
-lycheedev data sql --snapshot <pin> --installation <game-root> --file <query.json> --format json
-lycheedev data sql --snapshot <pin> --cdn --sql 'SELECT ID FROM ChrClasses WHERE ID=:id' --param id=1 --format json
-lycheedev data sql --snapshot <pin> --installation <game-root> --stdin --encoding csv --output <new-file.csv> --format json
-```
-
-Repeat `--param <name=scalar>` for named SQL parameters; values must be scalar
-JSON values. JSON request parameters must exactly match SQL parameters, and
-integer tokens retain 64-bit precision. Duplicate or unknown request fields
-fail. `--encoding csv` requires `--output <file>` and writes a CSV export with
-its capture/manifest. Use SQL LIMIT/OFFSET, not CLI `--limit`. `--offline` and
-`--max-bytes` have the same cache and per-file meanings as DB2 reading. Replace
-`--installation` with `--cdn` for explicitly selected remote content.
-
-Unqualified tables and qualified `static.Table` read pinned static values;
-`static.Table` also bypasses CTE names. A Hotfix overlay is used only when the
-query document explicitly names raw cache captures and queries `effective.Table`
-as described in [data-query-recipes.md](data-query-recipes.md). There is no
-implicit overlay or source fallback. Query output contains `query`,
-`result` (ordered `columns` and positional `rows`, or `plan` for EXPLAIN), and
-`sources` with each prepared table's provenance. Verify the returned capture
-with `evidence verify <capture-id>`. Complete means the requested query result,
-including any SQL LIMIT, not an unrestricted whole-table export. Missing-key
-sections propagate `complete: false` and `partial: true` to SQL; source tables
-retain missing ranges/partitions. CSV captures and manifests also retain
-`complete: false`. JSONL end frames report partial coverage explicitly; a legal
-end frame and exit 0 alone do not prove all encrypted sections were readable.
-
-Supported paths include joins, grouping, ordinary CTEs, UNION ALL, correlated
-expression subqueries (also in GROUP BY and aggregate inputs), and
-one-seed/one-member recursive CTEs. Complex recursive forms still fail explicitly.
-DB2 array fields become quoted scalar column names such as `"Field[0]"`.
-Text functions require text; conversions and integer overflow fail explicitly.
-EXPLAIN binds sources without scanning rows; it may still prepare table
-bytes and definitions. EXPLAIN ANALYZE executes and reports scan counts/work/
-charged bytes; charged bytes are not process peak memory.
-
-Budgets: at most 32 physical tables, 512 MiB cumulative raw table content,
-10 million execution work units, 64 MiB execution accounting and 16 MiB JSON
-evidence. Budget failures yield no partial query result. Narrow the query when
-appropriate to the request; do not change the pinned build or imply full
-coverage from a narrower successful query.
-
-SQL errors use `error.stage: query` with `query.invalid_syntax` or
-`query.unresolved_binding` (exit 2), `query.unsupported_expression` or
-`query.budget_exceeded` (exit 3), and type/range/cardinality faults (exit 4).
-Syntax faults include `error.location` with byte offset and line/column.
-Correct the request or report the limitation; repeating an unchanged query
-does not resolve these failures. Source/cache/I/O faults retain their own codes.
-
-Domain commands are implemented for spells (`data spell info`, `data spell auras`,
-`data spell summons`), items (`data item get`, `data item models`,
-`data item geosets`, `data item textures`), creatures (`data creature display`,
-`data creature model`), journal encounters (`data encounter get`), and house
-decor (`data decor list`, `data decor get`). Prefer the domain command when it owns
-the relationship needed to answer the question; use SQL/DB2 for other supported
-tables. A static table result is not a substitute for requested Hotfix data.
-Preserve source, table/record, locale, filters, row counts and capture hashes.
-
-## Local Hotfix records
-
-Use `data hotfix` with an explicit `--source` for independent records, not for
-an effective static table. Local caches use `--source dbcache`:
-
-```text
-lycheedev data hotfix --source dbcache --snapshot <data-pin> --dbcache <DBCache.bin> --limit 50 --format json
-```
-
-The command archives the original bytes, checks the cache build number against
-the data pin, and returns a derived `snapshot` containing the cache digest and
-capture time. Keep `source.id`, that snapshot, and each result capture. It does
-not search old tool directories, read SavedVariables, contact a provider, or
-change static DB2 queries. Product, locale and region are selected context;
-the file alone does not authenticate them. A record's numeric `region`, when
-present in its format, is preserved separately.
-
-For named fields, add `--table <name>` and optionally `--record <record-id>`:
-
-```text
-lycheedev data hotfix --source dbcache --snapshot <data-pin> --dbcache <DBCache.bin> --table ItemSparse --record <id> --format json
-```
-
-The command uses the data pin's exact WoWDBDefs commit and build. It returns
-`sources`, the selected `definition`, and each valid payload's `fields` alongside
-`payloadHex`. `--offline` prohibits definition downloads. Missing or ambiguous
-build definitions, colliding table hashes, invalid UTF-8, trailing/truncated
-payload and inline ID mismatch fail; no neighboring build is substituted.
-Schema metadata uses lowerCamelCase; record field names preserve DBD spelling.
-
-For raw inspection without definitions, omit `--table` and optionally filter
-with `--table-hash <eight hex digits>`. The two selectors cannot be combined.
-Obtain hashes from verified metadata, not a guessed table name. Matching
-physical records remain independent, including repeated IDs, negative pushes,
-unknown statuses and empty payloads. Named-table entries use `decodeState`:
-`decoded`, `no_payload`, or `not_valid`; only `decoded` has fields. An empty
-or invalidated record is not a decoded row of zero values.
-
-Use `--latest` when the question asks for the largest push batch within the
-selected table/record filters. `page.selectedPush` is chosen before pagination;
-all records in that batch remain, including ties, repeats and invalidations.
-It is neither one latest row per ID nor the last physical entry. Omit it when
-the investigation requires all retained pushes.
-
-If `page.truncated` is true, continue the immutable source with the returned
-`page.nextIndex` and the same filters:
-
-```text
-lycheedev data hotfix --source dbcache --snapshot <derived-pin> --from <source.id> --after-index <page.nextIndex> --limit 50 --format json
-```
-
-`--after-index` cannot read a live file: it requires the archived source so a
-client cache update cannot shift pagination. Physical order is not push order.
-`page.matched` counts all matching records (or the whole selected latest batch),
-not only this page. Preserve `--latest` and all table/ID filters when continuing.
-An ending suffix is not a complete whole-query result. Even `page.complete`
-only describes the selected local-cache query, never all server Hotfixes.
-
-Default input budget is 128 MiB (maximum 512 MiB), with 1–200 returned records
-and at most 8 MiB of raw payload per page. Decoded fields have an 8 MiB JSON
-page budget; each record allows 1 MiB of text and 65,536 field elements. Corrupt tails invalidate the query
-even when the first page would otherwise fit. Version/build/identity errors
-must not be worked around by silently changing the selected build or cache.
-Wago is supported for remote Hotfix records using explicit product, build,
-region and locale context; `--offline` uses its verified cached pages only.
-Raidbots is supported as a separate source for a supplied `DBCache.bin` less
-than 30 days old. Keep provider and coverage explicit: neither source is an
-effective static table overlay, and an incomplete result cannot establish
-absence outside its reported coverage.
-
-Treat Wago text search as candidate acceleration only. Establish a fact from
-the returned physical records after applying the exact product, full build,
-region, locale, table/hash, record, push and status filters relevant to the
-question. A zero-candidate page is not proof of absence unless the returned
-coverage is complete for that exact scope. Raidbots never acts as an implicit
-Wago fallback.
-
-## Schema and change boundaries
-
-Never map a semantic word such as “name”, “model”, or “description” to a field
-by guess. Inspect the resolved schema or use a domain command that owns that
-relationship, then select the returned fields. Use named query parameters for
-user values rather than string interpolation.
-
-Hotfix/change records have separate semantics from static DB2 data. Do not use
-a static query to imply a change record, or silently merge a change into a
-static result. Preserve provider, build, filters, page/coverage, raw status,
-ordering, and whether the result is complete. A zero candidate page or an empty
-success is not by itself proof of absence when coverage is incomplete.
-
-For schema, cache or preparation errors, investigate the cause while retaining
-the same explicit identity. Never switch product, region, build or locale just
-to make a query return rows.
-
-If Wago returns zero candidates while `coverage.complete=false`, the result is
-unresolved rather than absence. Continue with the returned `nextCursor` or page
-continuation using the same product, build, region, locale, table, record,
-status and push identity. If `--search` was the only narrowing filter, remove
-that filter for a wider query while keeping the identity and provider fixed.
-If the budget is exhausted or coverage remains incomplete, report the result as
-inconclusive and preserve the coverage metadata; only a complete scan of the
-exact scope can support saying that no record was found.
-
-Product aliases and region/locale availability belong to the CLI resolver.
-Carry the canonical values it returns; do not infer a product from the install
-folder, a CDN slot, or an old tool's alias table.
+Finish with the finding, fixed provenance and unresolved scope. Static evidence
+can be a completed baseline while server-side fitting remains unverified.

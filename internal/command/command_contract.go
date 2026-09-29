@@ -196,10 +196,10 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "live bugs", Summary: "Read 1-100 retained provider errors; native CON connections persist and release the bounded observation result automatically", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--count", display: "--count <1-100>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live hide", Summary: "Dismiss the displayed bridge receipt on the selected client after its evidence is archived: --session <session-id>; refuses windows owned by in-flight operations and verifies the clear from valid frames", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live bind", Summary: "Observe /dev connect in the selected game, verify effective receiver bindings with one read-only identity transaction, and save a connection: --snapshot <pin>; optional --wake-binding for a custom first-contact wake", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client>", value: true}, {name: "--pid", display: "--pid <pid>", value: true}, {name: "--snapshot", display: "--snapshot <pin>", value: true}, {name: "--character", display: "--character <name>", value: true}, {name: "--realm", display: "--realm <realm>", value: true}, {name: "--capture-area", display: "--capture-area <window|x,y,width,height>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}}, allowsHome: true},
-	{Definition: Definition{Path: "target resolve", Summary: "Pin data identity from one named --target <name>, --installation <client>, remote --product <track>, or --file <selection.json>; named targets resolve their exact configured identity at command start", Mutates: true}, flags: []flagSpec{
+	{Definition: Definition{Path: "target resolve", Summary: "Pin data identity from --target <name>, --installation <game-root-or-client> optionally constrained by --product <track>, remote --product <track> without installation, or --file <selection.json>; local selection never falls back to remote; named targets resolve their exact configured identity at command start", Mutates: true}, flags: []flagSpec{
 		{name: "--file", display: "--file <selection.json>", value: true},
 		{name: "--target", display: "--target <name>", value: true},
-		{name: "--installation", display: "--installation <client-directory>", value: true},
+		{name: "--installation", display: "--installation <game-root-or-client>", value: true},
 		{name: "--product", display: "--product <retail|classic|titan|forever>", value: true},
 		{name: "--build", display: "--build <full-build>", value: true},
 		{name: "--definitions", display: "--definitions <commit-or-full-ref>", value: true},
@@ -270,7 +270,7 @@ func (c commandContract) publicDefinition() Definition {
 }
 
 func (c commandContract) flag(name string) (flagSpec, bool) {
-	for _, flag := range c.channelFlags() {
+	for _, flag := range c.sharedFlags() {
 		if flag.name == name {
 			return flag, true
 		}
@@ -304,14 +304,17 @@ func (c commandContract) acceptedFlagDisplays() []string {
 	for _, flag := range c.flags {
 		result = append(result, flag.display)
 	}
-	for _, flag := range c.channelFlags() {
+	for _, flag := range c.sharedFlags() {
 		result = append(result, flag.display)
 	}
 	return result
 }
 
 // These are part of the same contract table, shared by parser, describe and Skill.
-func (c commandContract) channelFlags() []flagSpec {
+func (c commandContract) sharedFlags() []flagSpec {
+	if c.boundedDataQuery() {
+		return []flagSpec{{name: "--timeout-seconds", display: "--timeout-seconds <1-3600> (default 300; entire query)", value: true}}
+	}
 	switch c.Path {
 	case "live connect", "live execute", "live disconnect", "live status", "live resume", "live session", "live reload", "live reload fallback", "live bugs":
 	default:
@@ -325,6 +328,10 @@ func (c commandContract) channelFlags() []flagSpec {
 		flags = append(flags, flagSpec{name: "--policy", display: "--policy <opaque|observation> (default opaque)", value: true})
 	}
 	return flags
+}
+
+func (c commandContract) boundedDataQuery() bool {
+	return strings.HasPrefix(c.Path, "data ") && c.Path != "data hotfix"
 }
 
 // Commands consuming a snapshot share project fallback; project lock itself
@@ -404,7 +411,7 @@ func collectCommandWords(args []string) ([]string, error) {
 
 func anyFlagSpec(name string) (flagSpec, bool) {
 	for _, contract := range commandContracts {
-		for _, flag := range contract.channelFlags() {
+		for _, flag := range contract.sharedFlags() {
 			if flag.name == name {
 				return flag, true
 			}

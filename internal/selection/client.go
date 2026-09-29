@@ -34,7 +34,6 @@ var flavorWord = regexp.MustCompile(`\bwow[a-z0-9_]*\b`)
 // unknown flavors still fail closed instead of falling back.
 var reusableSlots = map[string]bool{"wow_classic_beta": true}
 
-
 // InspectClient resolves only one explicitly selected client. Product evidence
 // outranks version evidence, then a known folder is the last fallback. A reused
 // test slot is never treated as Forever without a matching build and identity.
@@ -70,6 +69,7 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		product, source, flavorName = matches[0], name, name
 		break
 	}
+	result.ProductCode = product // Preserve observed flavor even on identity failure.
 	// A flavor may name a reusable manifest slot (wow_classic_beta currently
 	// carries Forever) instead of a baseline product. That is slot evidence,
 	// never a product: the build series below resolves the product. Unknown
@@ -133,7 +133,14 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		}
 	}
 	if selected == nil {
+		if result.ProductCode == "" {
+			result.ProductCode = product
+		}
 		return result, fmt.Errorf("%w: unsupported product %q", ErrClientIdentity, product)
+	}
+	result.Product = selected.Product
+	if result.ProductCode == "" {
+		result.ProductCode = product
 	}
 	if version == "" {
 		for _, candidate := range active {

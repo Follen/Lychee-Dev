@@ -64,6 +64,13 @@ task includes it, using the verified selected client below.
 
 ## Install, remove and activate
 
+Installation selection accepts a game root or an explicit client directory. Reuse
+the returned verified client path for subsequent writes. A unique valid match needs
+no question; resolve multiple candidates before deployment. Conflicting metadata
+must be reported, never overwritten by a folder name or user-supplied product.
+Use `context.installationSelection` to inspect candidates/issues. Do not copy the
+target resolver's product flag onto addon/update commands that do not expose it.
+
 Before a write, inspect the target's ownership, product/build identity, and
 file integrity. An unmanaged, modified, ambiguous, or conflicting target is a
 reportable stop condition; do not overwrite it, delete it, forge ownership, or

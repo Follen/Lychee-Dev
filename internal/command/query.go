@@ -11,6 +11,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/luals"
 	"github.com/follenfang/lycheedev/internal/records"
+	"github.com/follenfang/lycheedev/internal/records/archive"
 	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/records/schema"
@@ -71,6 +72,11 @@ func queryFault(err error) (int, string, bool) {
 		{live.ErrUpgradeInstallation, 3, "live.upgrade_requires_current_managed_addon"},
 		{live.ErrUpgradeChanged, 3, "live.upgrade_installation_changed"},
 		{selection.ErrTargetMissing, 3, "selection.target_missing"},
+		{records.ErrInstallationMissing, 3, "selection.installation_missing"},
+		{records.ErrInstallationAmbiguous, 2, "selection.installation_ambiguous"},
+		{records.ErrInstallationProduct, 2, "selection.installation_product_mismatch"},
+		{records.ErrInstallationConflict, 4, "selection.installation_metadata_conflict"},
+		{selection.ErrDataProductBuild, 4, "selection.data_product_build_mismatch"},
 		{selection.ErrTargetExists, 3, "selection.target_exists"},
 		{selection.ErrTargetAmbiguous, 2, "selection.target_ambiguous"},
 		{selection.ErrTargetInUse, 3, "selection.target_in_use"},
@@ -102,6 +108,10 @@ func queryFault(err error) (int, string, bool) {
 		{selection.ErrProjectConflict, 4, "selection.project_conflict"},
 		{records.ErrRemoteRange, 4, "records.remote_range"},
 		{records.ErrRemoteObjectMissing, 3, "records.remote_object_missing"},
+		{records.ErrObjectUnavailable, 3, "records.local_object_unavailable"},
+		{archive.ErrIndexIntegrity, 4, "archive.index_integrity"},
+		{archive.ErrIndexFormat, 4, "archive.invalid_index"},
+		{archive.ErrIndexLimit, 3, "archive.index_limit"},
 		{records.ErrRemoteUnavailable, 3, "records.remote_unavailable_offline"},
 		{records.ErrRemoteIdentity, 4, "records.remote_identity"},
 		{records.ErrRemoteHTTP, 5, "records.remote_http"},

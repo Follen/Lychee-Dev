@@ -9,6 +9,10 @@ Use `lycheedev` for the requested investigation. The CLI owns resource preparati
 game transport, persistence and recovery; this skill chooses useful evidence,
 designs bounded probes and interprets results.
 
+The same CLI contract serves humans, scripts and agents. This skill is guidance,
+not an execution prerequisite: do not recreate product routing, archive recovery
+or integrity checks outside the CLI.
+
 Invoke `lycheedev` directly when it is on PATH; otherwise forward through
 `node <skill-directory>/scripts/lycheedev.mjs`, which only locates the installed
 CLI. [references/commands.md](references/commands.md) is the generated list of
@@ -19,8 +23,11 @@ implemented commands with accepted flags.
 Read only the relevant reference:
 
 - API, Lua, XML, TOC, source differences or secret-value/secure-taint source analysis:
-  [source-research.md](references/source-research.md).
-- DB2, SQL and game records: [data-investigation.md](references/data-investigation.md).
+  start with [source-research.md](references/source-research.md); revision preparation,
+  relationships and value-flow details are loaded only when needed.
+- DB2, SQL, game records and Hotfixes: start with the short
+  [data decision flow](references/data-investigation.md); it routes target preparation,
+  table queries, Hotfix continuation and failure recovery separately.
 - Files, icons, textures or media: [asset-export.md](references/asset-export.md).
 - Addon load closure and compatibility: [addon-validation.md](references/addon-validation.md).
 - Running-game investigation or recovery: [live-investigation.md](references/live-investigation.md).
@@ -28,7 +35,7 @@ Read only the relevant reference:
 - Memory, CPU, stutter or repeated-operation measurements: also read
   [runtime-investigations.md](references/runtime-investigations.md) for measurement
   scope, observer cost and safe isolation.
-- Existing errors: [error-diagnosis.md](references/error-diagnosis.md).
+- In-game addon errors: [error-diagnosis.md](references/error-diagnosis.md).
 - Requested installation or removal: [installation.md](references/installation.md).
 
 For deep secret-value or secure-taint investigation, combine source research

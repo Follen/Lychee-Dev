@@ -167,4 +167,3 @@ root cause and from a verified repair. Stop when the question is answered or
 the next step requires unavailable evidence, capability or user action; finish
 or recover every outstanding operation under the lifecycle above. An unresolved
 cause and completed display cleanup are separate outcomes.
-

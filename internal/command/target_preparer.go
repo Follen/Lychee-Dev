@@ -17,17 +17,8 @@ type recordsTargetPreparer struct{}
 func (recordsTargetPreparer) PrepareTarget(ctx context.Context, workspace string, config selection.TargetConfig, options selection.PrepareOptions) (selection.PinnedSet, error) {
 	switch config.Source {
 	case selection.TargetSourceInstallation:
-		if config.FullBuild != "" {
-			client, err := records.InspectClientInstallation(ctx, config.Installation)
-			if err != nil {
-				return selection.PinnedSet{}, err
-			}
-			if client.FullBuild != config.FullBuild {
-				return selection.PinnedSet{}, fmt.Errorf("%w: installed %s, requested %s", selection.ErrTargetBuildUnavailable, client.FullBuild, config.FullBuild)
-			}
-		}
 		reading, err := records.ResolveLocalTarget(ctx, workspace, records.LocalTargetRequest{Installation: config.Installation,
-			Region: config.Region, Locale: config.Locale, Definitions: options.Definitions, Parent: options.Parent, Offline: options.Offline})
+			Product: config.Product, FullBuild: config.FullBuild, Region: config.Region, Locale: config.Locale, Definitions: options.Definitions, Parent: options.Parent, Offline: options.Offline})
 		return reading.Pin, err
 	case selection.TargetSourceRemote:
 		reading, err := records.ResolveRemoteTarget(ctx, workspace, records.RemoteTargetRequest{Product: config.Product,
