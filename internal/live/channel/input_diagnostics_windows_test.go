@@ -5,9 +5,13 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/follenfang/lycheedev/internal/bridge"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 func inputDiagnosticJSON(t *testing.T, n *Native) map[string]any {
@@ -25,6 +29,77 @@ func inputDiagnosticJSON(t *testing.T, n *Native) map[string]any {
 		t.Fatal("missing bounded input predicate diagnostics")
 	}
 	return diag
+}
+
+func TestInputTimingSamplesAreBoundedAndDoNotRetainAbsoluteClocks(t *testing.T) {
+	n := &Native{}
+	n.memorySession()
+	for i := 0; i < inputTimingLimit+2; i++ {
+		var c inputPredicateCollector
+		state := InputObservation{SampleMillis: 900000 + int64(i)}
+		c.candidate(state, nil, bridge.SlotEnvelope{}, 0, state.SampleMillis+100)
+		payload, _ := json.Marshal(state)
+		c.positive([]memory.Record{{Payload: payload}}, &memory.InputLookupTiming{AcceptedAtOffsetMillis: 17, DrainMillis: 23}, state.SampleMillis+123, nil, false)
+		n.recordInputPredicates(&c)
+	}
+	for i := 0; i < 30; i++ {
+		n.recordInputPredicates(&inputPredicateCollector{})
+	}
+	metrics := n.observationMetrics()
+	if len(metrics.InputTimings.Samples) != inputTimingLimit || !metrics.InputTimings.Truncated {
+		t.Fatal("timing samples exceeded cap or hid truncation", metrics.InputTimings)
+	}
+	data, _ := json.Marshal(metrics.InputTimings)
+	var raw map[string]any
+	_ = json.Unmarshal(data, &raw)
+	for _, entry := range raw["samples"].([]any) {
+		sample := entry.(map[string]any)
+		if len(sample) != 5 || sample["outcome"] != "fresh" {
+			t.Fatal("timing retained unbounded metadata", sample)
+		}
+		for _, field := range []string{"acceptedAtOffsetMillis", "drainMillis", "acceptedSampleAgeMillis", "finishSampleAgeMillis"} {
+			value, ok := sample[field].(float64)
+			if !ok || value < 0 || value > 123 {
+				t.Fatal("timing retained an absolute clock or raw value", sample)
+			}
+		}
+	}
+}
+
+func TestInputTimingFreshStampEvictionAndMissingRecordUseNullAges(t *testing.T) {
+	var c inputPredicateCollector
+	for i := 0; i < 9; i++ {
+		c.candidate(InputObservation{SampleMillis: int64(i)}, nil, bridge.SlotEnvelope{}, 0, int64(i)+100)
+	}
+	payload, _ := json.Marshal(InputObservation{SampleMillis: 0})
+	for _, records := range [][]memory.Record{{{Payload: payload}}, nil} {
+		c.positive(records, &memory.InputLookupTiming{AcceptedAtOffsetMillis: 1, DrainMillis: 2}, 1000, errors.New("fixture.Verify"), true)
+		if c.freshCount != 8 || !c.haveTiming || c.timing.AcceptedSampleAgeMillis != nil || c.timing.FinishSampleAgeMillis != nil || c.timing.Outcome != "lookup_error" {
+			t.Fatal("evicted/missing stamp invented an age", c.timing)
+		}
+	}
+}
+
+func TestInputRefreshDiagnosticCountersAccumulateWithoutRawErrors(t *testing.T) {
+	n := &Native{}
+	n.memorySession()
+	for i := 0; i < 2; i++ {
+		var c inputPredicateCollector
+		c.refreshAttempt()
+		c.refreshHit(false)
+		c.refreshHit(true)
+		c.edgeWait(nil)
+		c.edgeWait(context.DeadlineExceeded)
+		c.edgeWait(errors.New("fixture.raw_error_must_not_survive"))
+		n.recordInputPredicates(&c)
+	}
+	d := n.observationMetrics().InputRefresh
+	if d.Attempts != 2 || d.ImmediateHit != 2 || d.AfterEdgeHit != 2 || d.EdgeWaitSucceeded != 2 || d.EdgeWaitExpired != 2 || d.EdgeWaitOther != 2 {
+		t.Fatal("refresh counter scope reset or mixed outcomes", d)
+	}
+	if len(n.observationMetrics().InputTimings.Samples) != 0 {
+		t.Fatal("no-hit observations crowded positive timing samples")
+	}
 }
 
 func TestInputDiagnosticsClassifyWithoutChangingAcceptance(t *testing.T) {
@@ -115,5 +190,38 @@ func TestInputDiagnosticsSeparateAcceptanceFromDrainExpiry(t *testing.T) {
 	}
 	if n.observationMetrics().Total.Validated != 1 {
 		t.Fatal("accepted candidate disappeared from memory accounting")
+	}
+}
+
+func TestInputTimingDiagnosticSeparatesAcceptedAndFinishedSampleAge(t *testing.T) {
+	n, source, e, _ := cadenceFixture(t)
+	n.Hints = nil
+	var calls atomic.Int32
+	uptime := func() int64 {
+		if calls.Add(1) == 1 {
+			return 1100
+		}
+		return 1800
+	}
+	_, _ = n.observeInputFrom(context.Background(), source, e, 0, uptime, time.Now)
+	data, _ := json.Marshal(n.observationMetrics())
+	var metrics map[string]any
+	_ = json.Unmarshal(data, &metrics)
+	timings, ok := metrics["inputTimings"].(map[string]any)
+	if !ok {
+		t.Fatal("missing bounded INPUT observation timing", string(data))
+	}
+	samples := timings["samples"].([]any)
+	if len(samples) != 1 || timings["truncated"] != false {
+		t.Fatal(timings)
+	}
+	sample := samples[0].(map[string]any)
+	if sample["acceptedSampleAgeMillis"] != float64(100) || sample["finishSampleAgeMillis"] != float64(800) || sample["outcome"] != "stale" {
+		t.Fatal("accepted sample age and drain expiry conflated", sample)
+	}
+	for _, key := range []string{"acceptedAtOffsetMillis", "drainMillis"} {
+		if _, ok := sample[key].(float64); !ok {
+			t.Fatal("missing relative lookup clock", key, sample)
+		}
 	}
 }

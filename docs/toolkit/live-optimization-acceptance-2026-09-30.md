@@ -276,3 +276,116 @@ gaps 不得被修复为 full coverage、每次调用仍全扫、共享预算/取
 强制 Lua 5.1 全量 Go（42 packages）、build/vet、98 Node 测试、真实 LuaLS、版本、
 Skill、生成参考、BASE-01–21 与 SOURCE 稳定性均通过，含最后 Verify 拒绝和局部超时计数
 修正。offline 的 LIVE/REAL not_run 不继承其他实机报告；本段仅在 SOURCE 检查后追加。
+
+## 冻结补查候选仍失败，原连接已收尾
+
+clean 私有候选 `8c8dd9b` 的 CLI SHA256 为
+`fe14d5c065cb6f2d543eb7b306e6398ccbfa29b9a62511c7e15c81d4055f0a5b`，
+安装与 runtime 均匹配该 commit；push/PR CI 已通过。生产 runner 的证据为
+`.tmp/retail-live-input-refresh-final-20260930/optimization.json`，仍为 blocked：
+
+| 检查 | 状态 | 观测 |
+| --- | --- | --- |
+| cache-off 连接 | passed | 41.698s；58.667 GiB |
+| 5 条带 hints 普通请求 | passed | 25.455、21.711、12.474、13.109、9.077s |
+| cache-off 普通请求 1 | passed | 71.762s；107.950 GiB；verified / cleanup complete |
+| cache-off 普通请求 2 | pending | 120.129s；162.539 GiB；commit_ready，业务 commit 尚未发送 |
+
+第二条有 9 次输入全扫、6 次扫描后邻域补查，邻域全部未命中；最终调用截止截断。
+输入 predicate 共 3257 次，其中 fresh 2、stale 430（均因年龄）、旧槽位 2822、
+非法时钟 3；没有结构或 CRC 拒绝。最后合法样本在 predicate 时年龄 782ms。
+这些计数支持发布与扫描时序仍有缺口，但没有保留具体种子位置，不能据此断言
+实机新字符串一定移出某个邻域。
+
+保留原 CON / operation / budget，以默认 hints 完成该 operation 的恢复。随后同连接
+通过大结果（55.758s，完整文本断言）、历史只读重试（0.062s，原 operation/report 与
+journal 字节不变）、reload（34.760s，已验证 runtime 换代）、换代后请求（18.167s）、
+正常断开（2.066s）及重复断开（0.026s，journal 不变）。
+`functional-continuation.json` 为 passed；原 blocked 报告没有重写，恢复不算 cache-off
+通过。尚未完成的其余 cache-off 请求及 cache-off 大结果保持 not_run。
+
+后续实际 Source RED 已复现：扫描访问旧样本后发布邻域新记录，在完整遍历收尾前
+新记录移到另一邻域，原扫描后补查丢失它。正在将补查前移到完整扫描的 CRC 合法
+predicate 拒绝处；地址只供调度，成功仍须原 selector 重读与最后进程 Verify。
+局部未命中继续同一完整遍历，共享预算、取消和多 worker 排空回归完成后再实机复验。
+
+## 扫描中补查：离线通过，实机仍待修复
+
+实际 Source 发布移动 RED 与并发排空 RED（首个结果之后额外排空 751.5ms）均修复转
+GREEN。扫描提前结束只取消候选的局部补查，原扫描读取及最终进程 Verify 保留外层
+context；等待/取得共享额度时均响应取消。回调只返回地址，独立严格重读完成后才释放
+同一 scope，miss 继续原遍历。全部补查共享 1s 活跃预算、8MiB、4096 reads 与四次
+scope，每次最多 250ms；WGC 只以既有 reader 的容量 1 通知等待新合法边沿。
+定向 channel/memory 为 1.077s/1.239s，race 三次为 4.202s/3.766s，build/vet 通过。
+记录在 `.tmp/input-traversal-refresh-20260930/`；没有把这些测试当作全量离线基线。
+
+私有 dirty CLI SHA256 为
+`9779f7a09186b81b0bec310bb7796a73031de218828dc139f2fdec9febdd49e4`，
+受管 addon 字节仍为 clean `8c8dd9b`。隔离包安装与 version/describe 通过。
+固定同一进程/actor 的 `.tmp/retail-live-input-traversal-refresh-smoke-20260930/smoke.json`
+仍 blocked：cache-off 连接 22.370s 直接通过，普通请求 120.130s 停在 confirm_ready；
+commit 已 accepted，有 report_candidate，但当时未完成权威报告确认和清理。
+该请求的四次输入正向 lookup 各包含邻域校验与独立重读，合计 fresh predicate 8，
+对应 finishFresh 3、finishStale 1；不能误解为八个结果全部过期。另有七次完整身份发现
+累计 48.718s，输入全扫十次累计 45.729s。扫描中补查实际奏效但不足以完成限时验收。
+
+原 operation 用默认 hints 在 16.879s 完成 verified / cleanup complete，无重放业务。
+同一连接正常断开 32.456s，重复断开 0.028s 且 journal 不变，受管 200 槽 pending 为零。
+`cleanup-continuation.json` 为 passed；大结果未运行，原 blocked 报告保留。
+接下来单独诊断 cache-off 身份发现调度，尚未宣称修复完成或延迟稳定。
+
+## 固定诊断识别光学阻塞
+
+后续只增加诊断的私有 dirty CLI SHA256 为
+`6e261b3941198e5e7a61c972668c74d2d6b500bc08e7d01a883fe7a486390672`。
+定向测试、三次 race、build/vet 通过，未改接受条件、I/O、停止规则或截止。
+诊断分为固定 pre/post 光学分类、补查结果计数及最多 16 条正向 INPUT 相对时间记录；
+未知年龄为 null，截断明确可见，不写地址、载荷、角色或绝对 sample 时刻。
+`acceptedAtOffsetMillis` 是 scope 的首次早停时刻，`acceptedSampleAgeMillis` 是返回
+样本同时间戳的最后一次合格检查年龄；并发时二者不一定属于同一 worker/检查，不能
+把它们精确拼成首次接受事件或据差值精确归因排空。`immediateHit` / `afterEdgeHit`
+只是局部候选命中，后续独立重读与最后 Verify 仍可能拒绝。
+
+`.tmp/retail-live-input-timing-diagnostics-20260930/smoke.json` 保持 blocked：
+cache-off 连接直接通过（22.923s）；其中一个样本最后合格检查为 490ms，返回时
+522ms 而被拒绝，同 scope 记录收尾 34ms。普通请求直接通过（41.921s，verified /
+cleanup complete），四次 memory finish 均 fresh，post 光学检查均通过；pre 为
+13 次，其中 accepted 5、unavailable 5、waiting 3。该请求仍有 20.420s 完整身份扫描。
+
+cache-off 大结果 120.157s 停在 confirm_ready。四次 memory finish 均 fresh，返回
+年龄分别为 318、490、147、365ms；post 四次只有两次通过，其余两次 unavailable。
+pre 52 次为 accepted 11、unavailable 17、waiting 24。八次完整身份扫描 47.772s，
+输入全扫 11 次 54.895s。首次明确记录了鲜内存结果被随后光学门禁拒绝；不能将所有
+waiting/unavailable 都归因于同一机制。
+
+原大结果 operation 用默认 hints 恢复到 verified / cleanup complete，完整文本断言
+通过；同连接 33.062s 正常断开，重复断开 0.027s 且 journal 不变，200 槽 pending 为零。
+实际 Source + 既有异步 reader 另复现：post 检查使合法帧过期并清掉比较历史，随后
+1500ms 内的新鲜翻转帧仍 waiting。正在窄修单纯观察过期的处理；真实 invalid/reset
+继续清历史，帧 500ms、edge 1500ms 与 after 屏障保留。新行为完整实机复验待完成。
+
+## 光学比较历史修复的开发 smoke
+
+窄修明确改变单纯帧过期后的处理：仍返回 unavailable 并清 EdgeTicks，仅保留最多
+1500ms 内的合法 decoded heartbeat 比较历史。下一张新鲜翻转帧建立自己的新 edge；
+同 heartbeat 不得复活旧资格。真实 invalid/nil/reset、未来/重放、过长 gap 仍清历史，
+frame 500ms、edge 1500ms、after+100ms 与高水位限制保留。原 expiry 测试断言已明确
+修订；实际 Source + 异步 reader RED/GREEN、否定测试与重复 race 均通过，build/vet 通过。
+此机制可复现，但不能将所有实机 unavailable/waiting 都归为该机制。
+
+私有 dirty CLI SHA256 为
+`8fe4f1971d073533ccb99d3c9b9729717d620f98e462c38e71d92f8dc35b3f1d`，
+受管 addon 字节仍为 clean `8c8dd9b`。
+`.tmp/retail-live-input-signal-expiry-smoke-20260930/smoke.json` 为 passed：
+cache-off 连接 23.350s，普通请求 114.713s，大结果 90.220s（完整文本断言），断开
+29.187s，均在原固定 120s 调用内完成，无恢复或重放，报告/cleanup 完整。
+普通请求的 post 光学八次均通过，但仍有四次可靠零发送后的重试，六次完整身份扫描
+43.979s；大结果另有重试。因此这次 smoke 不能证明延迟稳定或全候选验收完成。
+全量冻结离线基线与 clean 候选五次 warm / 五次 cache-off 的完整 runner 单独验证。
+
+冻结离线基线 `.tmp/baseline-offline-live-traversal-signal-20260930/report.json` 已通过
+（2026-09-30 12:02:39–12:08:01 UTC）。源码树 SHA256 为
+`e124caec441b9718e2cc16073911b4c4b710ecca629f4fd2ebf1946ba176eea1`；
+SOURCE 稳定性、build 1.905s、vet 1.014s、强制 Lua 5.1 的全量 Go 测试 301.661s
+（2731 个测试通过）、98 个 Node 测试 17.048s、版本/skill/生成命令合同均通过。
+此后仅追加本段验证记录；clean 候选完整实机 runner 尚待运行。

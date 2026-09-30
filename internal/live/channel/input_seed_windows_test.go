@@ -5,10 +5,12 @@ package channel
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
@@ -17,19 +19,88 @@ import (
 type publishAfterScanSource struct {
 	*cadenceSource
 	verifies       atomic.Int32
+	localVerifies  atomic.Int32
 	publish        func()
 	gap            bool
 	localRead      func(context.Context) error
 	localFinalWait bool
 }
 
-func (s *publishAfterScanSource) Verify(ctx context.Context) error {
-	count := s.verifies.Add(1)
-	if count == 2 && s.publish != nil {
-		s.publish()
+type relocatingInputSource struct {
+	*cadenceSource
+	mu           sync.RWMutex
+	bulk         atomic.Int32
+	fullVerifies atomic.Int32
+	published    atomic.Bool
+	bulkDone     chan struct{}
+	publish      func(int)
+}
+
+func (s *relocatingInputSource) Read(ctx context.Context, address uint64, b []byte) (int, error) {
+	s.mu.RLock()
+	n, err := s.cadenceSource.Read(ctx, address, b)
+	s.mu.RUnlock()
+	if len(b) >= 1<<20 && s.bulk.Add(1) == 2 {
+		close(s.bulkDone)
 	}
-	if count == 5 && s.localFinalWait {
-		<-ctx.Done()
+	if address == 512<<10 && len(b) > bridge.MemoryHeaderBytes && len(b) < 64<<10 && s.published.CompareAndSwap(false, true) {
+		<-s.bulkDone
+		s.mu.Lock()
+		s.publish((512 << 10) + 4096)
+		s.mu.Unlock()
+	}
+	return n, err
+}
+func (s *relocatingInputSource) Verify(ctx context.Context) error {
+	if _, local := ctx.Deadline(); !local && s.fullVerifies.Add(1) == 2 {
+		s.mu.Lock()
+		clear(s.data[(512<<10)+4096 : (512<<10)+8192])
+		s.publish((1536 << 10) + 4096)
+		s.mu.Unlock()
+	}
+	return ctx.Err()
+}
+
+func TestCacheOffRefreshesBeforeFreshPublicationRelocatesDuringRemainingScan(t *testing.T) {
+	n, base, e, write := cadenceFixture(t)
+	n.Hints = nil
+	source := &relocatingInputSource{cadenceSource: base, bulkDone: make(chan struct{}), publish: func(address int) { write(address, 1500, nil) }}
+	sample, err := n.observeInputFrom(context.Background(), source, e, 0, func() int64 { return 1600 }, time.Now)
+	if err != nil || sample.SampleMillis != 1500 || sample.Address != (512<<10)+4096 {
+		t.Fatalf("opportunistic fresh record was lost before postscan seed refresh: %+v err=%v", sample, err)
+	}
+	if n.Hints != nil || base.regions.Load() != 1 || len(n.Lookups) != 1 || !n.Lookups[0].Coverage.StoppedEarly || n.Lookups[0].Coverage.Complete {
+		t.Fatal("positive refresh lost original traversal or became a hidden cache", n.Lookups)
+	}
+	refresh := n.observationMetrics().InputRefresh
+	if refresh.Attempts != 1 || refresh.ImmediateHit != 1 || refresh.AfterEdgeHit != 0 || refresh.EdgeWaitSucceeded != 0 || refresh.EdgeWaitExpired != 0 || refresh.EdgeWaitOther != 0 {
+		t.Fatal("refresh counters changed immediate-positive behavior", refresh)
+	}
+}
+
+func TestCacheOffImmediateFreshRefreshPrecedesWaitingForCaptureEdge(t *testing.T) {
+	n, base, e, write := cadenceFixture(t)
+	n.Hints = nil
+	signal, _ := edgeSignalFixture(t)
+	signal.runtime = e.Runtime
+	n.inputSignal = signal
+	source := &relocatingInputSource{cadenceSource: base, bulkDone: make(chan struct{}), publish: func(address int) { write(address, 1500, nil) }}
+	started := time.Now()
+	sample, err := n.observeInputFrom(context.Background(), source, e, 0, func() int64 { return 1600 }, time.Now)
+	if err != nil || sample.SampleMillis != 1500 || time.Since(started) >= 200*time.Millisecond {
+		t.Fatal("already fresh neighbor waited for a nonexistent next capture edge", sample, err, time.Since(started))
+	}
+}
+
+func (s *publishAfterScanSource) Verify(ctx context.Context) error {
+	if _, local := ctx.Deadline(); local {
+		if s.localVerifies.Add(1)%3 == 0 && s.localFinalWait {
+			<-ctx.Done()
+		}
+	} else {
+		if s.verifies.Add(1) == 2 && s.publish != nil {
+			s.publish()
+		}
 	}
 	return ctx.Err()
 }
@@ -49,7 +120,7 @@ func TestCacheOffRefreshRequiresSuccessfulFinalProcessVerify(t *testing.T) {
 }
 
 func (s *publishAfterScanSource) Read(ctx context.Context, address uint64, b []byte) (int, error) {
-	if s.localRead != nil && s.verifies.Load() >= 3 {
+	if _, local := ctx.Deadline(); s.localRead != nil && local {
 		if err := s.localRead(ctx); err != nil {
 			return 0, err
 		}

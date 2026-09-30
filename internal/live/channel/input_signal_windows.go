@@ -24,6 +24,7 @@ type nativeInputSignal struct {
 	stream  inputFrameSource
 	cancel  context.CancelFunc
 	done    chan struct{}
+	arrival chan struct{}
 	mu      sync.Mutex
 	tracker inputSignalTracker
 	err     error
@@ -31,9 +32,10 @@ type nativeInputSignal struct {
 
 func newNativeInputSignal(parent context.Context, runtime string, stream inputFrameSource) *nativeInputSignal {
 	ctx, cancel := context.WithCancel(parent)
-	s := &nativeInputSignal{runtime: runtime, stream: stream, cancel: cancel, done: make(chan struct{})}
+	s := &nativeInputSignal{runtime: runtime, stream: stream, cancel: cancel, done: make(chan struct{}), arrival: make(chan struct{}, 1)}
 	go func() {
 		defer close(s.done)
+		defer s.notifyArrival()
 		for {
 			frame, err := stream.Next(ctx)
 			if err != nil {
@@ -41,12 +43,14 @@ func newNativeInputSignal(parent context.Context, runtime string, stream inputFr
 				s.tracker.invalidate()
 				s.err = err
 				s.mu.Unlock()
+				s.notifyArrival()
 				return
 			}
 			if frame == nil {
 				s.mu.Lock()
 				s.tracker.invalidate()
 				s.mu.Unlock()
+				s.notifyArrival()
 				continue
 			}
 			signal, decodeErr := bridge.DecodeInputSignal(frame.NRGBA)
@@ -58,9 +62,63 @@ func newNativeInputSignal(parent context.Context, runtime string, stream inputFr
 				s.tracker.accept(signal, frame.SystemTicks, now)
 			}
 			s.mu.Unlock()
+			s.notifyArrival()
 		}
 	}()
 	return s
+}
+
+func (s *nativeInputSignal) notifyArrival() {
+	select {
+	case s.arrival <- struct{}{}:
+	default:
+	}
+}
+
+// waitForNewEdge is a scheduling signal only. The caller owns its deadline;
+// capture events coalesce into one notification and never block the reader.
+// A previous edge cannot complete this wait or authorize memory/input work.
+func (s *nativeInputSignal) waitForNewEdge(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	baseline, streamErr := s.tracker.current.EdgeTicks, s.err
+	s.mu.Unlock()
+	if streamErr != nil {
+		return errors.Join(&inputSignalPending{"input_signal_unavailable"}, streamErr)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.arrival:
+		case <-s.done:
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		observation, err := s.evidence()
+		if err == nil && observation.EdgeTicks > baseline {
+			return nil
+		}
+		s.mu.Lock()
+		streamErr = s.err
+		s.mu.Unlock()
+		if streamErr != nil {
+			return errors.Join(&inputSignalPending{"input_signal_unavailable"}, streamErr)
+		}
+	}
+}
+
+func (n *Native) waitForInputPublication(ctx context.Context, runtime string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if n.inputSignal == nil || n.inputSignal.runtime != runtime {
+		return &inputSignalPending{"input_signal_unavailable"}
+	}
+	return n.inputSignal.waitForNewEdge(ctx)
 }
 
 func (s *nativeInputSignal) close() {

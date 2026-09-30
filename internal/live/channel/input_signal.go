@@ -62,8 +62,20 @@ func (t *inputSignalTracker) accept(signal bridge.InputSignal, ticks, now int64)
 
 func (t *inputSignalTracker) evidence(now int64) (InputSignalEvidence, error) {
 	s := t.current
-	if !t.have || now < s.FrameTicks || now-s.FrameTicks > signalFrameMaxAge {
+	if !t.have || now < s.FrameTicks {
 		t.invalidate()
+		return InputSignalEvidence{}, &inputSignalPending{"input_signal_unavailable"}
+	}
+	if now-s.FrameTicks > signalFrameMaxAge {
+		// An observed expiry denies this frame and its previous edge. Retain
+		// only bounded decoded heartbeat comparison history so a subsequent
+		// fresh flip can establish a new edge. Actual invalid frames and stream
+		// resets still invalidate; a same-heartbeat frame cannot revive input.
+		if now-s.FrameTicks > signalEdgeMaxAge {
+			t.invalidate()
+		} else {
+			t.current.EdgeTicks = 0
+		}
 		return InputSignalEvidence{}, &inputSignalPending{"input_signal_unavailable"}
 	}
 	if s.EdgeTicks == 0 || now < s.EdgeTicks || now-s.EdgeTicks > signalEdgeMaxAge || s.EdgeTicks < t.after {
@@ -107,9 +119,20 @@ func inputCapabilityError(capability string) error {
 }
 
 func observeHybridInput(signal func() (InputSignalEvidence, error), lookup func() (InputObservation, error)) (InputObservation, error) {
+	return observeHybridInputWithObserver(signal, lookup, nil)
+}
+
+func observeHybridInputWithObserver(signal func() (InputSignalEvidence, error), lookup func() (InputObservation, error), observer func(post bool, err error)) (InputObservation, error) {
+	record := func(post bool, err error) {
+		if observer != nil {
+			observer(post, err)
+		}
+	}
 	if _, err := signal(); err != nil {
+		record(false, err)
 		return InputObservation{}, err
 	}
+	record(false, nil)
 	s, err := lookup()
 	if err != nil {
 		return InputObservation{}, err
@@ -118,11 +141,15 @@ func observeHybridInput(signal func() (InputSignalEvidence, error), lookup func(
 	// newly returned memory evidence.
 	optical, err := signal()
 	if err != nil {
+		record(true, err)
 		return InputObservation{}, err
 	}
 	if !inputSignalAgrees(optical, s) {
-		return InputObservation{}, &inputSignalPending{"input_signal_changed"}
+		err := &inputSignalPending{"input_signal_changed"}
+		record(true, err)
+		return InputObservation{}, err
 	}
+	record(true, nil)
 	s.Optical = &optical
 	return s, nil
 }

@@ -35,6 +35,7 @@ type Native struct {
 	inputHintRuntime                     string
 	inputHintMillis                      int64
 	inputSignal                          *nativeInputSignal
+	inputOptical                         nativeInputOpticalCollector
 	observation                          *nativeObservation
 }
 

@@ -12,11 +12,16 @@ import (
 type Selector struct {
 	// Accept filters bounded decoded candidates before an early lookup return.
 	// In particular, a retained prepared HEAD must not hide its reported HEAD.
-	Accept  func(Record) bool
-	Nonce   [16]byte
-	Runtime [16]byte
-	Ticket  [16]byte
-	Kind    bridge.MemoryKind
+	Accept func(Record) bool
+	// RefreshRejected may schedule bounded INPUT reads after a CRC-valid
+	// predicate rejection. Its returned address is untrusted and independently
+	// read with this selector. A miss resumes the original scan traversal.
+	RefreshRejected func(context.Context, Source, Record) (uint64, error)
+	RefreshBudget   *InputRefreshBudget
+	Nonce           [16]byte
+	Runtime         [16]byte
+	Ticket          [16]byte
+	Kind            bridge.MemoryKind
 	// Body reads require the length/checksum obtained from a verified HEAD.
 	BodyLength     uint32
 	BodyChecksum   uint32
@@ -42,6 +47,17 @@ func (s Selector) matches(h bridge.MemoryHeader) bool {
 // ReadRecord gates allocation behind fixed-header identity checks. The second
 // read includes that header and must match, preventing header/body torn reads.
 func ReadRecord(ctx context.Context, src Source, address uint64, selector Selector) (record Record, err error) {
+	record, err = readRecord(ctx, src, address, selector)
+	if err != nil {
+		return Record{}, err
+	}
+	return record, nil
+}
+
+var errPredicateMismatch = errors.New("memory.predicate_mismatch")
+
+// Only lookup sees a rejected record, after immutable-header and CRC checks.
+func readRecord(ctx context.Context, src Source, address uint64, selector Selector) (record Record, err error) {
 	src, session := measured(src, nil)
 	if !session.candidate(false) {
 		return Record{}, ErrBudget
@@ -92,7 +108,7 @@ func ReadRecord(ctx context.Context, src Source, address uint64, selector Select
 	record = Record{address, h, append([]byte(nil), payload...)}
 	if selector.Accept != nil && !selector.Accept(record) {
 		session.update(func(st *Stats) { st.PredicateRejected++ })
-		return Record{}, errors.New("memory.predicate_mismatch")
+		return record, errPredicateMismatch
 	}
 	return record, nil
 }
@@ -114,6 +130,13 @@ func lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 	var mu sync.Mutex
 	records := []Record{}
 	seen := map[uint64]bool{}
+	var refreshErr error
+	var inputTiming *InputLookupTiming
+	if selector.Kind == bridge.MemoryInputState && first {
+		opts.acceptanceObserver = func(offset, drain int64) {
+			inputTiming = &InputLookupTiming{AcceptedAtOffsetMillis: offset, DrainMillis: drain}
+		}
+	}
 	limit := opts.MaxHits
 	if limit == 0 {
 		limit = 4096
@@ -143,7 +166,7 @@ func lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 			session.update(func(st *Stats) { st.Learned++ })
 		}
 	}
-	opts.candidate = func(hit Hit, view []byte, base uint64) bool {
+	opts.candidate = func(refreshCtx context.Context, hit Hit, view []byte, base uint64) bool {
 		if hit.Address < offset {
 			return false
 		}
@@ -159,7 +182,32 @@ func lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 				return false
 			}
 		}
-		record, err := ReadRecord(ctx, src, address, selector)
+		record, err := readRecord(ctx, src, address, selector)
+		if errors.Is(err, errPredicateMismatch) && selector.RefreshRejected != nil && selector.RefreshBudget != nil && inputRefreshEligible(selector) {
+			bounded := selector.RefreshBudget.Source(src)
+			refreshed, localErr := selector.RefreshRejected(refreshCtx, bounded, record)
+			if localErr == nil && refreshed != 0 {
+				refreshCtx, scopeErr := inputRefreshContext(bounded)
+				if scopeErr == nil {
+					record, scopeErr = ReadRecord(refreshCtx, bounded, refreshed, selector)
+					scopeErr = errors.Join(scopeErr, refreshCtx.Err())
+					if scopeErr == nil {
+						address, err = record.Address, nil
+					}
+				}
+				// A changed/unavailable returned record is another miss. Only
+				// shared quota/ownership failures escape the original traversal.
+				if errors.Is(scopeErr, ErrBudget) || errors.Is(scopeErr, ErrSessionOwnership) {
+					localErr = scopeErr
+				}
+			}
+			EndInputRefresh(bounded)
+			if localErr != nil && !errors.Is(localErr, ErrNearbyBudget) && !errors.Is(localErr, context.DeadlineExceeded) && !errors.Is(localErr, context.Canceled) && !errors.Is(localErr, errPredicateMismatch) {
+				mu.Lock()
+				refreshErr = errors.Join(refreshErr, localErr)
+				mu.Unlock()
+			}
+		}
 		if err != nil {
 			return false
 		}
@@ -175,5 +223,14 @@ func lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 		return first
 	}
 	result, err := Scan(ctx, src, [][]byte{pattern}, opts)
+	result.Coverage.InputTiming = inputTiming
+	if refreshErr != nil {
+		return nil, result.Coverage, errors.Join(err, refreshErr)
+	}
 	return records, result.Coverage, err
+}
+
+func inputRefreshEligible(s Selector) bool {
+	zero := [16]byte{}
+	return s.Kind == bridge.MemoryInputState && s.Accept != nil && !s.BodyAuthorized && s.Runtime != zero && s.Nonce == s.Runtime && s.Ticket == zero
 }

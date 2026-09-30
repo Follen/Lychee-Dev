@@ -52,8 +52,10 @@ func TestSignalInvalidationRequiresNewEdgeAndNoOldFrame(t *testing.T) {
 		t.Fatal("stale captured frame authorized", err)
 	}
 	signalFeed(&gate, "ready", false, 4100)
-	if _, err := gate.evidence(signalTicks(4100)); !errors.Is(err, ErrPending) {
-		t.Fatal("first resumed frame authorized", err)
+	// A pure expiry observation clears eligibility but retains the bounded
+	// decoded heartbeat comparison. This fresh flip establishes a NEW edge.
+	if observed, err := gate.evidence(signalTicks(4100)); err != nil || observed.EdgeTicks != signalTicks(4100) {
+		t.Fatal("fresh flip after expiry did not establish its own edge", observed, err)
 	}
 }
 
@@ -94,6 +96,84 @@ func TestSignalPostInputBarrierCannotReuseEarlierEdge(t *testing.T) {
 	signalFeed(&gate, "ready", true, 3000)
 	if _, err := gate.evidence(signalTicks(3000)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSignalExpiryRetainsComparisonButNotEligibility(t *testing.T) {
+	var gate inputSignalTracker
+	signalFeed(&gate, "ready", false, 1000)
+	signalFeed(&gate, "ready", true, 2000)
+	for _, now := range []int64{2501, 2700} {
+		if _, err := gate.evidence(signalTicks(now)); !errors.Is(err, ErrPending) || !gate.have || gate.current.EdgeTicks != 0 || gate.current.FrameTicks != signalTicks(2000) || gate.highwater != signalTicks(2000) {
+			t.Fatal("expiry retained old eligibility or renewed comparison history", now, gate, err)
+		}
+	}
+	for _, now := range []int64{2800, 3000} {
+		signalFeed(&gate, "ready", true, now)
+		if _, err := gate.evidence(signalTicks(now)); !errors.Is(err, ErrPending) || gate.current.EdgeTicks != 0 {
+			t.Fatal("fresh same-heartbeat frame revived expired eligibility", now, err)
+		}
+	}
+	signalFeed(&gate, "ready", false, 3100)
+	if observed, err := gate.evidence(signalTicks(3100)); err != nil || observed.EdgeTicks != signalTicks(3100) {
+		t.Fatal("fresh flip failed to establish a new edge", observed, err)
+	}
+}
+
+func TestSignalExpiryActualInvalidationsStillRequireNewComparison(t *testing.T) {
+	for _, kind := range []string{"reset", "missing_after_clock", "future", "replay", "received_stale", "future_evidence_clock", "expired_comparison", "long_frame_gap"} {
+		t.Run(kind, func(t *testing.T) {
+			var gate inputSignalTracker
+			signalFeed(&gate, "ready", false, 1000)
+			signalFeed(&gate, "ready", true, 2000)
+			if _, err := gate.evidence(signalTicks(2501)); !errors.Is(err, ErrPending) {
+				t.Fatal("expired frame was eligible", err)
+			}
+			next := int64(3000)
+			switch kind {
+			case "reset":
+				gate.invalidate() // Actual nil/decode failure/stream reset.
+			case "missing_after_clock":
+				gate.afterInput(0)
+			case "future":
+				gate.accept(bridge.InputSignal{State: "ready", Heartbeat: false}, signalTicks(3001), signalTicks(3000))
+			case "replay":
+				gate.accept(bridge.InputSignal{State: "ready", Heartbeat: false}, signalTicks(2000), signalTicks(3000))
+			case "received_stale":
+				gate.accept(bridge.InputSignal{State: "ready", Heartbeat: false}, signalTicks(2001), signalTicks(3000))
+			case "future_evidence_clock":
+				_, _ = gate.evidence(signalTicks(1999))
+			case "expired_comparison":
+				_, _ = gate.evidence(signalTicks(3501))
+				next = 4000
+			case "long_frame_gap":
+				next = 4000
+			}
+			signalFeed(&gate, "ready", false, next)
+			if _, err := gate.evidence(signalTicks(next)); !errors.Is(err, ErrPending) || gate.current.EdgeTicks != 0 {
+				t.Fatal("invalidated comparison or long gap authorized first frame", kind, err)
+			}
+			signalFeed(&gate, "ready", true, next+1000)
+			if observed, err := gate.evidence(signalTicks(next + 1000)); err != nil || observed.EdgeTicks != signalTicks(next+1000) {
+				t.Fatal("fresh subsequent flip did not rebuild eligibility", kind, observed, err)
+			}
+		})
+	}
+}
+
+func TestSignalExpiryDoesNotResetPostInputBarrier(t *testing.T) {
+	var gate inputSignalTracker
+	signalFeed(&gate, "ready", false, 1000)
+	signalFeed(&gate, "ready", true, 2000)
+	gate.afterInput(signalTicks(2510))
+	_, _ = gate.evidence(signalTicks(2501))
+	signalFeed(&gate, "ready", false, 2550)
+	if _, err := gate.evidence(signalTicks(2550)); !errors.Is(err, ErrPending) || gate.after != signalTicks(2610) {
+		t.Fatal("expired observation removed after-input barrier", err)
+	}
+	signalFeed(&gate, "ready", true, 2650)
+	if observed, err := gate.evidence(signalTicks(2650)); err != nil || observed.EdgeTicks != signalTicks(2650) {
+		t.Fatal("fresh post-barrier edge was rejected", observed, err)
 	}
 }
 

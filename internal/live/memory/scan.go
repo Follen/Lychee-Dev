@@ -51,17 +51,25 @@ type Hit struct {
 }
 
 type Coverage struct {
-	Stats          Stats    `json:"stats"`
-	StoppedEarly   bool     `json:"stoppedEarly"`
-	Reenumerated   bool     `json:"reenumerated"`
-	PlannedBytes   uint64   `json:"plannedBytes"`
-	ScannedBytes   uint64   `json:"scannedBytes"`
-	Complete       bool     `json:"complete"`
-	Truncated      bool     `json:"truncated"`
-	SkippedRegions int      `json:"skippedRegions"`
-	Gaps           []Gap    `json:"gaps"`
-	Workers        []Worker `json:"workers"`
-	ElapsedMillis  int64    `json:"elapsedMillis"`
+	InputTiming    *InputLookupTiming `json:"inputTiming,omitempty"`
+	Stats          Stats              `json:"stats"`
+	StoppedEarly   bool               `json:"stoppedEarly"`
+	Reenumerated   bool               `json:"reenumerated"`
+	PlannedBytes   uint64             `json:"plannedBytes"`
+	ScannedBytes   uint64             `json:"scannedBytes"`
+	Complete       bool               `json:"complete"`
+	Truncated      bool               `json:"truncated"`
+	SkippedRegions int                `json:"skippedRegions"`
+	Gaps           []Gap              `json:"gaps"`
+	Workers        []Worker           `json:"workers"`
+	ElapsedMillis  int64              `json:"elapsedMillis"`
+}
+
+// InputLookupTiming reports relative lookup time only. Drain includes worker
+// completion and the original final Verify, including its error paths.
+type InputLookupTiming struct {
+	AcceptedAtOffsetMillis int64 `json:"acceptedAtOffsetMillis"`
+	DrainMillis            int64 `json:"drainMillis"`
 }
 
 type Result struct {
@@ -85,7 +93,9 @@ type Options struct {
 	Visit func(Hit) bool
 	// candidate is the record lookup's internal buffer prefilter. The view is
 	// valid only during this call; final acceptance always uses fresh ReadRecord.
-	candidate func(Hit, []byte, uint64) bool
+	candidate func(context.Context, Hit, []byte, uint64) bool
+	// acceptanceObserver is diagnostic only; lookup enables it for INPUT.
+	acceptanceObserver func(int64, int64)
 	// learn consumes a separate bounded magic search in copied scan buffers.
 	learn           func(Hit, []byte, uint64)
 	learningPattern []byte
@@ -152,6 +162,13 @@ func eligible(regions []Region) ([]Range, int, error) {
 // It never claims that the observed region set is an atomic heap snapshot.
 func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (result Result, err error) {
 	started := time.Now()
+	var acceptedOffset atomic.Int64
+	acceptedOffset.Store(-1)
+	defer func() {
+		if offset := acceptedOffset.Load(); offset >= 0 && opts.acceptanceObserver != nil {
+			opts.acceptanceObserver(offset, time.Since(started).Milliseconds()-offset)
+		}
+	}()
 	src, session := measured(src, opts.Session)
 	before := session.Stats()
 	defer func() { result.Coverage.Stats = session.Stats().Delta(before) }()
@@ -231,8 +248,21 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (res
 	var wg sync.WaitGroup
 	var stopped atomic.Bool
 	stop := make(chan struct{})
+	// Only opportunistic candidate work observes this local stop. Original
+	// scan reads and final process verification retain the caller context.
+	candidateCtx, cancelCandidates := context.WithCancel(ctx)
+	defer cancelCandidates()
+	parent := ctx
+	if ancestor, ok := ctx.Value(localScopeKey{}).(context.Context); ok {
+		parent = ancestor
+	}
+	candidateCtx = localContext(candidateCtx, parent)
 	stopScan := func() {
 		if stopped.CompareAndSwap(false, true) {
+			if opts.acceptanceObserver != nil {
+				acceptedOffset.Store(time.Since(started).Milliseconds())
+			}
+			cancelCandidates()
 			close(stop)
 		}
 	}
@@ -352,7 +382,7 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (res
 								}
 								mu.Unlock()
 							}
-							if (opts.candidate != nil && opts.candidate(hit, view, span.Start)) || (opts.Visit != nil && opts.Visit(hit)) {
+							if (opts.candidate != nil && opts.candidate(candidateCtx, hit, view, span.Start)) || (opts.Visit != nil && opts.Visit(hit)) {
 								stopScan()
 								stats.Truncated = true
 								break

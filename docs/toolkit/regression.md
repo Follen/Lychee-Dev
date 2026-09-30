@@ -19,7 +19,14 @@ reload 后请求通过；关闭 hints 的两项在 confirm_ready 超时，整体
 扫描结束时更旧；未修改输入门槛。随后大结果、只读重试、reload、换代后普通请求、
 断开及重复断开通过。同次扫描后有界补查新增两个真实 Source RED/GREEN、语义 predicate
 必需、种子资格/10s 调度寿命、局部最后 Verify 超时拒绝、不保留地址及不续期预算回归。
-修复版普通 cache-off、大结果 cache-off 与 cache-off 断开直接通过；完整 runner 复验待完成。
+开发 smoke 的普通 cache-off、大结果 cache-off 与 cache-off 断开直接通过；但冻结
+`8c8dd9b` 的完整 runner 第二条 cache-off 在 commit_ready 超时，报告仍 blocked。
+原 operation 已恢复，其余同连接 warm 功能及正常/重复断开通过；扫描过程中补查的
+后续修复与完整候选复验单独记账，不能将 smoke 或恢复计作五条 cache-off 通过。
+扫描中补查/取消与诊断定向及 race 通过；光学修复明确区分观察到合法帧过期与真实
+invalid/reset：旧帧与旧 edge 均不授权，只允许新鲜翻转帧用短期比较历史建立新 edge。
+异步 Source RED/GREEN、同 heartbeat/未来/重放/缺块/gap/after 否定测试通过。
+该开发版 cache-off 普通/大结果/断开直接通过，但完整 clean 候选五轮复验仍待完成。
 详见组合记录；这些 agent 自动实测不代替完整客户端矩阵或 owner 人工验收。
 
 2026-09-29 [CASC 内容变体](content-variants-2026-09-29.md)新增：默认歧义、显式双变体、

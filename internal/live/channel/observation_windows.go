@@ -5,6 +5,7 @@ package channel
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -27,7 +28,36 @@ type ObservationMetrics struct {
 	Total           memory.Stats              `json:"total"`
 	Stages          []ObservationStage        `json:"stages"`
 	InputPredicates InputPredicateDiagnostics `json:"inputPredicates"`
+	InputTimings    InputTimingDiagnostics    `json:"inputTimings"`
+	InputRefresh    InputRefreshDiagnostics   `json:"inputRefresh"`
+	InputOptical    InputOpticalDiagnostics   `json:"inputOptical"`
 }
+
+type InputTimingSample struct {
+	AcceptedAtOffsetMillis  *int64 `json:"acceptedAtOffsetMillis"`
+	DrainMillis             *int64 `json:"drainMillis"`
+	AcceptedSampleAgeMillis *int64 `json:"acceptedSampleAgeMillis"`
+	FinishSampleAgeMillis   *int64 `json:"finishSampleAgeMillis"`
+	Outcome                 string `json:"outcome"`
+}
+
+type InputTimingDiagnostics struct {
+	Samples   []InputTimingSample `json:"samples"`
+	Truncated bool                `json:"truncated"`
+}
+
+type InputRefreshDiagnostics struct {
+	Attempts          uint64 `json:"attempts"`
+	ImmediateHit      uint64 `json:"immediateHit"`
+	EdgeWaitSucceeded uint64 `json:"edgeWaitSucceeded"`
+	EdgeWaitExpired   uint64 `json:"edgeWaitExpired"`
+	EdgeWaitOther     uint64 `json:"edgeWaitOther"`
+	AfterEdgeHit      uint64 `json:"afterEdgeHit"`
+}
+
+const inputTimingLimit = 16
+
+type inputFreshStamp struct{ sample, age int64 }
 
 // Counts cover this invocation. Ages summarize its latest input observation,
 // using the same uptime clock as the validator; nil means no qualified sample.
@@ -59,6 +89,12 @@ type inputPredicateCollector struct {
 	diagnostics InputPredicateDiagnostics
 	newest      int64
 	haveSample  bool
+	freshStamps [8]inputFreshStamp
+	freshCount  int
+	freshNext   int
+	timing      InputTimingSample
+	haveTiming  bool
+	refresh     InputRefreshDiagnostics
 }
 
 func (c *inputPredicateCollector) candidate(s InputObservation, err error, e bridge.SlotEnvelope, after, now int64) {
@@ -69,6 +105,21 @@ func (c *inputPredicateCollector) candidate(s InputObservation, err error, e bri
 	switch {
 	case err == nil:
 		d.Fresh++
+		found := false
+		for i := 0; i < c.freshCount; i++ {
+			if c.freshStamps[i].sample == s.SampleMillis {
+				c.freshStamps[i].age = now - s.SampleMillis
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.freshStamps[c.freshNext] = inputFreshStamp{s.SampleMillis, now - s.SampleMillis}
+			c.freshNext = (c.freshNext + 1) % len(c.freshStamps)
+			if c.freshCount < len(c.freshStamps) {
+				c.freshCount++
+			}
+		}
 	case errors.Is(err, errInputStateStale):
 		d.Stale++
 		if s.SampleMillis < now-500 {
@@ -114,6 +165,62 @@ func (c *inputPredicateCollector) candidate(s InputObservation, err error, e bri
 	}
 }
 
+// Only positive lookup observations occupy the bounded timing samples. The
+// last eight qualified fresh stamps exist only inside this invocation call;
+// serialized evidence contains relative ages, never absolute sample clocks.
+func (c *inputPredicateCollector) positive(records []memory.Record, timing *memory.InputLookupTiming, now int64, err error, lookupError bool) {
+	if len(records) == 0 && timing == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sample := InputTimingSample{Outcome: "rejected"}
+	if lookupError {
+		sample.Outcome = "lookup_error"
+	} else if err == nil {
+		sample.Outcome = "fresh"
+	} else if errors.Is(err, ErrInputObservationStale) {
+		sample.Outcome = "stale"
+	}
+	if timing != nil {
+		offset, drain := timing.AcceptedAtOffsetMillis, timing.DrainMillis
+		sample.AcceptedAtOffsetMillis, sample.DrainMillis = &offset, &drain
+	}
+	var state InputObservation
+	if len(records) > 0 && json.Unmarshal(records[0].Payload, &state) == nil {
+		for i := 0; i < c.freshCount; i++ {
+			if c.freshStamps[i].sample == state.SampleMillis {
+				age, finish := c.freshStamps[i].age, now-state.SampleMillis
+				sample.AcceptedSampleAgeMillis, sample.FinishSampleAgeMillis = &age, &finish
+				break
+			}
+		}
+	}
+	c.timing, c.haveTiming = sample, true
+}
+
+func (c *inputPredicateCollector) refreshAttempt() { c.mu.Lock(); c.refresh.Attempts++; c.mu.Unlock() }
+func (c *inputPredicateCollector) refreshHit(afterEdge bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if afterEdge {
+		c.refresh.AfterEdgeHit++
+	} else {
+		c.refresh.ImmediateHit++
+	}
+}
+func (c *inputPredicateCollector) edgeWait(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err == nil {
+		c.refresh.EdgeWaitSucceeded++
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		c.refresh.EdgeWaitExpired++
+	} else {
+		c.refresh.EdgeWaitOther++
+	}
+}
+
 func (c *inputPredicateCollector) scanEnd(now int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -137,6 +244,7 @@ func (c *inputPredicateCollector) finish(err error) {
 func (n *Native) recordInputPredicates(c *inputPredicateCollector) {
 	c.mu.Lock()
 	delta := c.diagnostics
+	timing, haveTiming, refresh := c.timing, c.haveTiming, c.refresh
 	c.mu.Unlock()
 	o := n.observation
 	o.inputMu.Lock()
@@ -159,6 +267,19 @@ func (n *Native) recordInputPredicates(c *inputPredicateCollector) {
 	d.StructInvalid += delta.StructInvalid
 	d.FinishFresh += delta.FinishFresh
 	d.FinishStale += delta.FinishStale
+	if haveTiming {
+		if len(o.inputTimings.Samples) < inputTimingLimit {
+			o.inputTimings.Samples = append(o.inputTimings.Samples, timing)
+		} else {
+			o.inputTimings.Truncated = true
+		}
+	}
+	o.inputRefresh.Attempts += refresh.Attempts
+	o.inputRefresh.ImmediateHit += refresh.ImmediateHit
+	o.inputRefresh.EdgeWaitSucceeded += refresh.EdgeWaitSucceeded
+	o.inputRefresh.EdgeWaitExpired += refresh.EdgeWaitExpired
+	o.inputRefresh.EdgeWaitOther += refresh.EdgeWaitOther
+	o.inputRefresh.AfterEdgeHit += refresh.AfterEdgeHit
 	// A deferred cadence tick performs no predicate work and must not erase the
 	// last actual lookup's bounded age summary.
 	if delta.PredicateCalls > 0 {
@@ -179,6 +300,8 @@ type ObservationStage struct {
 type nativeObservation struct {
 	inputMu         sync.Mutex
 	inputPredicates InputPredicateDiagnostics
+	inputTimings    InputTimingDiagnostics
+	inputRefresh    InputRefreshDiagnostics
 	session         *memory.Session
 	pid             uint32
 	created         uint64
@@ -353,7 +476,10 @@ func (n *Native) observationMetrics() *ObservationMetrics {
 	metrics := &ObservationMetrics{Scope: "invocation", PID: o.pid, ProcessCreated: o.created, Runtime: o.runtime, Lookups: o.lookups, StageTruncated: o.stageTruncated, Total: total, Stages: stages}
 	o.inputMu.Lock()
 	metrics.InputPredicates = o.inputPredicates
+	metrics.InputTimings = InputTimingDiagnostics{Samples: append([]InputTimingSample{}, o.inputTimings.Samples...), Truncated: o.inputTimings.Truncated}
+	metrics.InputRefresh = o.inputRefresh
 	o.inputMu.Unlock()
+	metrics.InputOptical = n.inputOptical.Snapshot()
 	if !o.deadline.IsZero() {
 		metrics.DeadlineMS = o.deadline.UnixMilli()
 	}

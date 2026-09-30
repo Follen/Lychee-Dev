@@ -38,8 +38,8 @@ func FindNearbySeeded(ctx context.Context, src Source, selector Selector, seeds 
 }
 
 // FindNearbyInputSeeded refreshes small INPUT records near call-local positions
-// observed during a completed traversal of full discovery, which may retain
-// unrelated unreadable gaps. It never learns, retains hints or repairs gaps.
+// obtained from CRC-valid INPUT candidates within this call's discovery,
+// during or after traversal. It never learns, retains hints or repairs gaps.
 // Positions schedule reads only; exact matching and Accept remain mandatory.
 func FindNearbyInputSeeded(ctx context.Context, src Source, selector Selector, seeds []Hint, session *Session) (LookupResult, error) {
 	zero := [16]byte{}
@@ -80,7 +80,11 @@ func findNearby(ctx context.Context, src Source, selector Selector, hints *Hints
 	defer cancel()
 	readCtx, stop := context.WithCancel(bounded)
 	defer stop()
-	readCtx = localContext(readCtx, ctx)
+	parent := ctx
+	if ancestor, ok := ctx.Value(localScopeKey{}).(context.Context); ok {
+		parent = ancestor
+	}
+	readCtx = localContext(readCtx, parent)
 	// A native final Verify may return only after the local deadline. Observe
 	// that expiry before our own cancellation defers, including this path in
 	// the shared diagnostic delta without marking successful lookups stopped.
@@ -209,5 +213,10 @@ func (s *nearbySource) Read(ctx context.Context, address uint64, b []byte) (int,
 	}
 	s.reads++
 	s.bytes += uint64(len(b))
-	return s.Source.Read(ctx, address, b)
+	n, err := s.Source.Read(ctx, address, b)
+	if errors.Is(err, ErrNearbyBudget) {
+		s.exhausted = true
+		s.cancel()
+	}
+	return n, err
 }

@@ -65,7 +65,7 @@ func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after 
 	if capability != bridge.InputSignalCapability {
 		return lookup()
 	}
-	return observeHybridInput(func() (InputSignalEvidence, error) { return n.observeSignal(ctx, e.Runtime) }, lookup)
+	return observeHybridInputWithObserver(func() (InputSignalEvidence, error) { return n.observeSignal(ctx, e.Runtime) }, lookup, n.inputOptical.Observe)
 }
 
 func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
@@ -117,11 +117,63 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 		return err == nil
 	}
 	selector.Accept = func(r memory.Record) bool { return accept(r, false) }
-	finish := func(records []memory.Record, recent bool) (InputObservation, error) {
+	var refreshBudget memory.InputRefreshBudget
+	if n.Hints == nil {
+		selector.RefreshBudget = &refreshBudget
+		selector.RefreshRejected = func(scanCtx context.Context, bounded memory.Source, rejected memory.Record) (uint64, error) {
+			now := uptime()
+			s, invalid := inputObservation(rejected, e, after, now)
+			if !errors.Is(invalid, errInputStateStale) || s.SampleMillis < now-inputRecentHintMillis || s.SampleMillis > now {
+				return 0, nil
+			}
+			refreshCtx, beginErr := memory.BeginInputRefresh(scanCtx, bounded, rejected.Address, false)
+			if beginErr != nil {
+				return 0, beginErr
+			}
+			diagnostics.refreshAttempt()
+			localSelector := selector
+			localSelector.RefreshRejected, localSelector.RefreshBudget = nil, nil
+			seed := memory.Hint{Address: rejected.Address, Header: rejected.Header}
+			search := func() (uint64, error) {
+				local, localErr := memory.FindNearbyInputSeeded(refreshCtx, bounded, localSelector, []memory.Hint{seed}, n.memorySession())
+				if localErr != nil {
+					if localLookupMiss(scanCtx, localErr) {
+						return 0, nil
+					}
+					return 0, localErr
+				}
+				if len(local.Records) > 0 {
+					return local.Records[0].Address, nil
+				}
+				return 0, nil
+			}
+			// First read an already fresh publication. Only a miss may await one
+			// capture edge within this same scope; no timer or renewed deadline.
+			address, localErr := search()
+			if address != 0 {
+				diagnostics.refreshHit(false)
+			}
+			if address != 0 || localErr != nil || n.inputSignal == nil || refreshCtx.Err() != nil {
+				return address, localErr
+			}
+			waitErr := n.waitForInputPublication(refreshCtx, e.Runtime)
+			diagnostics.edgeWait(waitErr)
+			if waitErr != nil {
+				return 0, nil
+			}
+			address, localErr = search()
+			if address != 0 {
+				diagnostics.refreshHit(true)
+			}
+			return address, localErr
+		}
+	}
+	finish := func(records []memory.Record, recent bool, timing *memory.InputLookupTiming) (InputObservation, error) {
 		now := uptime()
 		diagnostics.scanEnd(now)
 		s, err := inputAfterLookup(records, e, after, now)
 		diagnostics.finish(err)
+		diagnostics.positive(records, timing, now, err, false)
 		if err == nil {
 			n.inputWait.reset()
 			return s, nil
@@ -149,10 +201,11 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	if n.Hints != nil && len(n.Hints.Entries) > 0 {
 		found, err := n.findPath(ctx, source, selector, true, true)
 		if err != nil && !localLookupMiss(ctx, err) {
+			diagnostics.positive(found.Records, found.Coverage.InputTiming, uptime(), err, true)
 			return InputObservation{}, err
 		}
 		if len(found.Records) > 0 {
-			return finish(found.Records, false)
+			return finish(found.Records, false, found.Coverage.InputTiming)
 		}
 		if stale.Load() && n.inputWait.stale(key, clock()) || n.inputWait.waiting(key, clock()) {
 			return InputObservation{}, ErrInputObservationStale
@@ -161,6 +214,7 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	selector.Accept = func(r memory.Record) bool { return accept(r, true) }
 	found, err := n.findPath(ctx, source, selector, true, false)
 	if err != nil {
+		diagnostics.positive(found.Records, found.Coverage.InputTiming, uptime(), err, true)
 		return InputObservation{}, err
 	}
 	if n.Hints == nil && len(found.Records) == 0 {
@@ -168,20 +222,32 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 		// retained under --no-cache. Recheck age after scanner drain/verification.
 		tick, now := recentStaleMillis.Load(), uptime()
 		diagnostics.scanEnd(now)
-		if seed, eligible := refreshSeed.current(now); !found.Coverage.Truncated && eligible {
+		if seed, eligible := refreshSeed.current(now); !found.Coverage.Truncated && eligible && refreshBudget.Available() {
 			if n.observation.lookups >= observationLimit {
 				return InputObservation{}, errors.New("live.channel_observation_budget")
 			}
 			// A completed scan traversal may retain unrelated unreadable gaps.
 			// This new positive observation has bounded partial scope; it repairs
 			// no gaps and establishes no process-wide absence or hidden cache.
-			local, localErr := memory.FindNearbyInputSeeded(ctx, source, selector, []memory.Hint{seed}, n.memorySession())
-			n.recordLookup(selector, local)
-			if localErr != nil && !localLookupMiss(ctx, localErr) {
-				return InputObservation{}, localErr
+			bounded := refreshBudget.Source(n.memorySource(source))
+			refreshCtx, beginErr := memory.BeginInputRefresh(ctx, bounded, seed.Address, true)
+			if beginErr != nil && !localLookupMiss(ctx, beginErr) {
+				return InputObservation{}, beginErr
 			}
-			if localErr == nil && len(local.Records) > 0 {
-				return finish(local.Records, true)
+			if beginErr == nil {
+				diagnostics.refreshAttempt()
+				localSelector := selector
+				localSelector.RefreshRejected, localSelector.RefreshBudget = nil, nil
+				local, localErr := memory.FindNearbyInputSeeded(refreshCtx, bounded, localSelector, []memory.Hint{seed}, n.memorySession())
+				memory.EndInputRefresh(bounded)
+				n.recordLookup(selector, local)
+				if localErr != nil && !localLookupMiss(ctx, localErr) {
+					diagnostics.positive(local.Records, local.Coverage.InputTiming, uptime(), localErr, true)
+					return InputObservation{}, localErr
+				}
+				if localErr == nil && len(local.Records) > 0 {
+					return finish(local.Records, true, local.Coverage.InputTiming)
+				}
 			}
 		}
 		if tick >= 0 && tick <= now+100 && tick >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || tick > n.inputHintMillis) {
@@ -194,7 +260,7 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	if len(found.Records) == 0 && stale.Load() && n.Hints != nil && n.inputWait.stale(key, clock()) {
 		return InputObservation{}, ErrInputObservationStale
 	}
-	return finish(found.Records, true)
+	return finish(found.Records, true, found.Coverage.InputTiming)
 }
 
 // Input performs one already-journaled effect. No loop, journal callback or
