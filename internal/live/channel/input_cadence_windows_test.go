@@ -155,8 +155,8 @@ func TestCadenceRecentHintCannotHideFreshRecordOrRenewWhenStopped(t *testing.T) 
 	observe := func(tick int64) (InputObservation, error) {
 		return n.observeInputFrom(context.Background(), source, e, 0, func() int64 { return tick }, time.Now)
 	}
-	if _, err := observe(2100); !errors.Is(err, ErrInputObservationStale) {
-		t.Fatal(err)
+	if s, err := observe(2100); err != nil || s.SampleMillis != 2000 {
+		t.Fatalf("stale prefix hid already published fresh sample: %+v %v", s, err)
 	}
 	s, err := observe(2100)
 	if err != nil || s.SampleMillis != 2000 {

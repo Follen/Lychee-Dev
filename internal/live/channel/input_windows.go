@@ -39,22 +39,46 @@ func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after 
 
 func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
 	n.observationRuntime(e.Runtime)
+	ctx, cancel := n.observationContext(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return InputObservation{}, err
+	}
+	if err := n.memorySession().Err(); err != nil {
+		return InputObservation{}, err
+	}
+	key := inputSampleKey(e, after)
+	// Cache-off has no retained address to observe cheaply. A completed scan
+	// that found only recent stale samples may defer another discovery within
+	// one fixed grace interval; the next observation still scans the process.
+	if n.Hints == nil && n.inputWait.waiting(key, clock()) {
+		return InputObservation{}, ErrInputObservationStale
+	}
 	runtime, _ := tokenBytes(e.Runtime)
 	selector := memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}
 	var stale atomic.Bool
+	var recentStaleMillis atomic.Int64
+	recentStaleMillis.Store(-1)
 	accept := func(r memory.Record, recent bool) bool {
 		now := uptime()
 		s, err := inputObservation(r, e, after, now)
 		if errors.Is(err, errInputStateStale) {
 			stale.Store(true)
-			// A recent sample may stop discovery, but cannot authorize input.
-			// Never let the same retained record repeatedly hide newer records.
-			return recent && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis)
+			if s.SampleMillis >= now-inputRecentHintMillis {
+				for previous := recentStaleMillis.Load(); s.SampleMillis > previous; previous = recentStaleMillis.Load() {
+					if recentStaleMillis.CompareAndSwap(previous, s.SampleMillis) {
+						break
+					}
+				}
+			}
+			// Cached discovery may stop at a recent sample for cheap local
+			// cadence observation. Cache-off must continue past stale prefixes
+			// so an already published fresh sample is not hidden behind them.
+			return recent && n.Hints != nil && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis)
 		}
 		return err == nil
 	}
 	selector.Accept = func(r memory.Record) bool { return accept(r, false) }
-	key := inputSampleKey(e, after)
 	finish := func(records []memory.Record, recent bool) (InputObservation, error) {
 		now := uptime()
 		s, err := inputAfterLookup(records, e, after, now)
@@ -68,6 +92,9 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 			s, invalid := inputObservation(records[0], e, after, now)
 			if errors.Is(invalid, errInputStateStale) && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis) {
 				n.inputHintRuntime, n.inputHintMillis = e.Runtime, s.SampleMillis
+				if n.Hints == nil && !n.inputWait.stale(key, clock()) {
+					return InputObservation{}, ErrPending
+				}
 				return InputObservation{}, ErrInputObservationStale
 			}
 			return InputObservation{}, ErrPending
@@ -95,6 +122,17 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	found, err := n.findPath(ctx, source, selector, true, false)
 	if err != nil {
 		return InputObservation{}, err
+	}
+	if n.Hints == nil && len(found.Records) == 0 {
+		// Only time metadata survives this call; no old address or payload is
+		// retained under --no-cache. Recheck age after scanner drain/verification.
+		tick, now := recentStaleMillis.Load(), uptime()
+		if tick >= 0 && tick <= now+100 && tick >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || tick > n.inputHintMillis) {
+			n.inputHintRuntime, n.inputHintMillis = e.Runtime, tick
+			if n.inputWait.stale(key, clock()) {
+				return InputObservation{}, ErrInputObservationStale
+			}
+		}
 	}
 	if len(found.Records) == 0 && stale.Load() && n.Hints != nil && n.inputWait.stale(key, clock()) {
 		return InputObservation{}, ErrInputObservationStale

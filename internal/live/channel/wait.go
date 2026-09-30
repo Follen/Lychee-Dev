@@ -98,34 +98,45 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		// while waiting for an editor, combat or a physically held modifier.
 		knownBlock := knownInputBlocker(d.Waiting)
 		if !d.closingExplicitReload() && (!knownBlock || d.State.Closing && d.Waiting != "input_observation_stale") && ctx.Err() == nil && !time.Now().Before(nextDiscovery) {
-			discoveryStarted := time.Now()
-			if tx := d.State.Transaction; !d.State.Bound && d.State.Operation == nil && tx != nil && tx.Envelope.Action == "bind" && tx.Phase == "input_attempted" {
-				if recoverErr := d.RecoverBinding(ctx); recoverErr == nil {
-					nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
-					continue
-				} else if !errors.Is(recoverErr, ErrPending) {
-					return recoverErr
-				}
+			// A pending report is not evidence of runtime loss. A cheap,
+			// freshly validated current-runtime fact can defer discovery; it
+			// authorizes neither input nor retirement of any old exchange.
+			current, currentErr := d.currentRuntime(ctx)
+			if currentErr != nil {
+				return currentErr
 			}
-			candidate, observeErr := d.Backend.RuntimeCandidate(ctx, d.State.Identity)
-			nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
-			if observeErr != nil {
-				return observeErr
-			}
-			if candidate != nil {
-				if err = d.RecoverRuntime(ctx, *candidate); err == nil {
-					continue
+			if current {
+				nextDiscovery = time.Now().Add(time.Second)
+			} else {
+				discoveryStarted := time.Now()
+				if tx := d.State.Transaction; !d.State.Bound && d.State.Operation == nil && tx != nil && tx.Envelope.Action == "bind" && tx.Phase == "input_attempted" {
+					if recoverErr := d.RecoverBinding(ctx); recoverErr == nil {
+						nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
+						continue
+					} else if !errors.Is(recoverErr, ErrPending) {
+						return recoverErr
+					}
 				}
-				if errors.As(err, &blocked) {
-					return err
+				candidate, observeErr := d.Backend.RuntimeCandidate(ctx, d.State.Identity)
+				nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
+				if observeErr != nil {
+					return observeErr
 				}
-				if errors.Is(err, ErrExecutionUnknown) && d.State.Reload != nil && d.State.Reload.Phase == "binding" {
-					// The control goal may complete while the original business
-					// outcome remains unknown. Project them independently.
-					continue
-				}
-				if !errors.Is(err, ErrPending) {
-					return err
+				if candidate != nil {
+					if err = d.RecoverRuntime(ctx, *candidate); err == nil {
+						continue
+					}
+					if errors.As(err, &blocked) {
+						return err
+					}
+					if errors.Is(err, ErrExecutionUnknown) && d.State.Reload != nil && d.State.Reload.Phase == "binding" {
+						// The control goal may complete while the original business
+						// outcome remains unknown. Project them independently.
+						continue
+					}
+					if !errors.Is(err, ErrPending) {
+						return err
+					}
 				}
 			}
 		}
@@ -140,6 +151,18 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		case <-timer.C:
 		}
 	}
+}
+
+func (d *Driver) currentRuntime(ctx context.Context) (bool, error) {
+	if !d.State.Bound || d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
+		return false, nil
+	}
+	if observer, ok := d.Backend.(interface {
+		CurrentRuntime(context.Context, Identity) (bool, error)
+	}); ok {
+		return observer.CurrentRuntime(ctx, d.State.Identity)
+	}
+	return false, nil
 }
 
 // Missing optical liveness is not evidence that the old runtime still exists.

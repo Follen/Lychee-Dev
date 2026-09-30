@@ -37,6 +37,13 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 	if err := source.Verify(ctx); err != nil {
 		return nil, err
 	}
+	current, err := n.currentRuntimeFrom(ctx, source, old, uptimeMillis)
+	if err != nil {
+		return nil, err
+	}
+	if current {
+		return nil, nil
+	}
 	candidates, _, err := n.Discover(ctx, "", "")
 	if err != nil {
 		return nil, err
@@ -82,6 +89,75 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 		return nil, err
 	}
 	return p, nil
+}
+
+// CurrentRuntime is a scheduling fact only. A bounded exact current input
+// record avoids rediscovering the whole process while an async result or normal
+// close is pending. No-cache and unavailable facts preserve full discovery.
+func (n *Native) CurrentRuntime(ctx context.Context, identity Identity) (bool, error) {
+	if n.Hints == nil || len(n.Hints.Entries) == 0 {
+		return false, ctx.Err()
+	}
+	if n.Guard == nil || n.Process == nil {
+		return false, errors.New("live.channel_guard_required")
+	}
+	if n.Process.PID != n.Target.ProcessID || n.Process.Created != n.Target.ProcessStartedAt || !strings.EqualFold(n.Process.Image, n.Target.Executable) {
+		return false, errors.New("live.channel_runtime_replacement_target_changed")
+	}
+	if err := n.Guard(ctx); err != nil {
+		return false, err
+	}
+	record, err := n.currentRuntimeLookup(ctx, n.Process, identity, uptimeMillis)
+	if err != nil || record == nil {
+		return false, err
+	}
+	if err := n.Guard(ctx); err != nil {
+		return false, err
+	}
+	return currentRuntimeRecord(*record, identity, uptimeMillis()), nil
+}
+
+func (n *Native) currentRuntimeFrom(ctx context.Context, source memory.Source, identity Identity, uptime func() int64) (bool, error) {
+	record, err := n.currentRuntimeLookup(ctx, source, identity, uptime)
+	if err != nil || record == nil {
+		return false, err
+	}
+	return currentRuntimeRecord(*record, identity, uptime()), nil
+}
+
+func (n *Native) currentRuntimeLookup(ctx context.Context, source memory.Source, identity Identity, uptime func() int64) (*memory.Record, error) {
+	if n.Hints == nil || len(n.Hints.Entries) == 0 || !observedInputCapability(identity.InputState) {
+		return nil, ctx.Err()
+	}
+	runtime, err := tokenBytes(identity.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	selector := memory.Selector{Kind: bridge.MemoryInputState, Runtime: runtime, Nonce: runtime, Accept: func(record memory.Record) bool { return currentRuntimeRecord(record, identity, uptime()) }}
+	found, err := n.findPath(ctx, source, selector, true, true)
+	if err != nil {
+		if localLookupMiss(ctx, err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(found.Records) == 0 {
+		return nil, nil
+	}
+	// Lookup verifies the process after an accepted fresh reread. Recheck the
+	// 500ms boundary at this return as well; scan time cannot renew old samples.
+	return &found.Records[0], nil
+}
+
+func currentRuntimeRecord(record memory.Record, identity Identity, now int64) bool {
+	observation, valid := replacementRecord(record)
+	if !valid || observation.Runtime != identity.Runtime || observation.GUID != identity.GUID || observation.Build != identity.Build || observation.Owner != identity.Owner || observation.Fence != identity.Fence {
+		return false
+	}
+	// The accepted input may have advanced a slot while its exact receipt is
+	// still pending. This affects scheduling only; action input still validates
+	// its exact immutable startSlot immediately before keys.
+	return observation.NextSlot >= identity.NextSlot && observation.NextSlot <= identity.Slots+1 && observation.SampleMillis >= now-500 && observation.SampleMillis <= now+100
 }
 func replacementRecord(r memory.Record) (InputObservation, bool) {
 	var o InputObservation

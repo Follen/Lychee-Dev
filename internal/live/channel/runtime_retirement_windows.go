@@ -108,6 +108,17 @@ func (d *Driver) continueOrRetire(ctx context.Context, n *Native, closing bool) 
 }
 
 func (d *Driver) continueOrRetireWith(ctx context.Context, backend runtimeRetirementBackend, target desktop.WindowIdentity, closing bool) error {
+	// Establish the invocation scope before the optional thirty-second probe.
+	// A fresh Native otherwise mistakes that nested deadline for the global
+	// observation deadline and keeps it when ordinary close continues. Existing
+	// deadlines/credit remain intact; Continue still applies the durable goal cap.
+	if observer, ok := backend.(interface {
+		beginObservation(context.Context, Identity) error
+	}); ok {
+		if err := observer.beginObservation(ctx, d.State.Identity); err != nil {
+			return err
+		}
+	}
 	if d.closingExplicitReload() && d.State.RuntimeEnd == nil {
 		// Inspect this control's budget, not a blocker retained from an older goal.
 		available := true
