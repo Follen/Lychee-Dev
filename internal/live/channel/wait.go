@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/follenfang/lycheedev/internal/bridge"
 )
 
 var errProgress = errors.New("live.channel_progress")
@@ -21,6 +23,27 @@ func discoveryCooldown(elapsed time.Duration) time.Duration {
 		return 30 * time.Second
 	}
 	return elapsed
+}
+
+// A fresh optical frame without a usable heartbeat edge gets one observation
+// window per exchange in this invocation. This is scheduling only: no address,
+// sample or input authority is retained, and no durable deadline is renewed.
+type inputSignalWaitGrace struct {
+	runtime, nonce string
+	until          time.Time
+}
+
+func (g *inputSignalWaitGrace) deferDiscovery(d *Driver, now time.Time) bool {
+	tx := d.State.Transaction
+	if d.Waiting != "input_signal_waiting" || !d.State.Bound || d.State.Identity.InputState != bridge.InputSignalCapability || tx == nil || tx.Phase != "published" || tx.Envelope.Runtime != d.State.Identity.Runtime ||
+		d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
+		return false
+	}
+	if g.runtime != tx.Envelope.Runtime || g.nonce != tx.Envelope.Nonce {
+		g.runtime, g.nonce = tx.Envelope.Runtime, tx.Envelope.Nonce
+		g.until = now.Add(2 * time.Second)
+	}
+	return now.Before(g.until)
 }
 
 // Continue is the only connected scheduler. Every public intent and automatic
@@ -71,6 +94,7 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		}
 	}
 	var nextDiscovery time.Time
+	var signalGrace inputSignalWaitGrace
 	for {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(ErrPending, err)
@@ -97,7 +121,8 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		// A known input blocker is not runtime loss. Avoid a full discovery loop
 		// while waiting for an editor, combat or a physically held modifier.
 		knownBlock := knownInputBlocker(d.Waiting)
-		if !d.closingExplicitReload() && (!knownBlock || d.State.Closing && d.Waiting != "input_observation_stale") && ctx.Err() == nil && !time.Now().Before(nextDiscovery) {
+		opticalGrace := signalGrace.deferDiscovery(d, time.Now())
+		if !opticalGrace && !d.closingExplicitReload() && (!knownBlock || d.State.Closing && d.Waiting != "input_observation_stale") && ctx.Err() == nil && !time.Now().Before(nextDiscovery) {
 			// A pending report is not evidence of runtime loss. A cheap,
 			// freshly validated current-runtime fact can defer discovery; it
 			// authorizes neither input nor retirement of any old exchange.

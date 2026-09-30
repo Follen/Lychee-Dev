@@ -7,6 +7,13 @@
 Retail 12.1.0.69933 首轮已执行：带 hints 的普通/大结果、历史只读重试、reload 与
 reload 后请求通过；关闭 hints 的两项在 confirm_ready 超时，整体为 blocked。
 两条原 operation 恢复后验证结果和 cleanup；关闭经恢复释放，受管原版已恢复。
+后续 blocker 修复新增真实 Source/Driver 回归：cache-off 旧样本前缀不得隐藏新样本、
+样本在扫描结束时过期不得授权、时间元数据等待不可续期、取消与共享预算必须生效；
+新鲜当前 runtime 可延后完整发现，过期/关闭缓存/活动 reload 仍回退；
+可选 30 秒关闭检查不得污染外层截止；光学 waiting 有一次固定 2 秒机会且到期必回退。
+最新冻结全量离线基线通过。第二轮 5 条普通及 3 条 cache-off 请求直接通过；
+第 4 条已有 verified 结果、cleanup pending，恢复后 WGC 确认客户端掉线。
+当前原连接与槽位保留，等待重新登录后清理及其余实测；不沿用第一轮的已恢复状态。
 详见组合记录；这些 agent 自动实测不代替完整客户端矩阵或 owner 人工验收。
 
 2026-09-29 [CASC 内容变体](content-variants-2026-09-29.md)新增：默认歧义、显式双变体、

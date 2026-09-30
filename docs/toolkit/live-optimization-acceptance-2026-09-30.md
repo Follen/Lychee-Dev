@@ -122,3 +122,63 @@ Skill 合同与生成命令参考均通过；BASE-01–BASE-21 全部通过。
 汇总另外验证固定进程/actor，以及已记录各阶段计数之和等于 invocation total。
 重登、战斗、多实例、其他客户端、物理 IME、主观观感和全矩阵仍为 **not_run**。
 本轮未修改发行版本/渠道，未合并或发布，PR 继续保持 draft。
+
+## Blocker 修复与第二轮实测
+
+`1c32e94ac92b41e903329863947a60622507335e` 修复了三个由失败测试确认的问题：
+
+- 关闭 hints 的完整输入扫描不再被较旧的前缀样本提前终止；已发布的新样本可被找到。
+  只有近期旧样本时采用不可续期的 2 秒调度等待，只保存时间元数据，不保存地址或载荷。
+- 已绑定、无活动 reload/recovery 时，合法且新鲜的当前 runtime 记录可延后完整身份发现。
+  这是调度事实，不授权输入或退役；没有 hints、记录过期或不匹配仍走完整回退。
+- 断开前先建立外层 observation 范围，可选 30 秒退役检查不再污染整个 120 秒调用截止。
+  已有截止、共享读取额度与持久关闭预算不会重置。
+
+该提交的冻结 offline baseline 全部通过，目录为
+`.tmp/baseline-offline-live-blocker-fix-20260930/`，SOURCE tree SHA256 为
+`ca49440cce5ac2132f55792bdc54a69bfa878bdf349ba3ed67024608a1ce8709`。
+完整 channel race 通过；push/PR CI runs `36691872424`、`36691876747` 均成功。
+clean-commit 私有开发包通过资源审计、隔离 offline `--ignore-scripts` 安装及 version/describe smoke，
+包 SHA256 `5b0b0c5cefd64bcd08863d0d990de546f338e095fda73a3383d2b7325d92a0f5`；
+CLI SHA256 `515439cdc9314bd4b8e77604095ceac089dc7cb01eb0ae0abf87d414c6ed4b1a`。
+
+受管部署、显式激活、同一进程/角色验证通过，激活连接在 20.782 秒正常断开。
+生产 runner 的 `.tmp/retail-live-blocker-fix-20260930/` 保留以下第二轮数据：
+
+| 检查 | 状态 | 观测 |
+| --- | --- | --- |
+| 关闭 hints 的连接 | passed | 31.123s；52.078 GiB |
+| 5 条带 hints 普通请求 | passed | 71.680、41.160、25.799、19.888、20.094s；均 verified / cleanup complete |
+| 关闭 hints 普通请求 1–3 | passed | 61.162、79.476、64.715s；均直接完成，无 resume |
+| 关闭 hints 普通请求 4 | pending cleanup | 120.116s；118.739 GiB；业务报告已 verified，release_ready 清理等待 |
+| 原请求关闭 hints resume | pending cleanup | 原 operation 未变；仍保留 verified 报告，不重执行探针 |
+| 其余请求、大结果及最终断开 | not_run | 保留原 CON，等待恢复后继续 |
+
+恢复尝试后，使用 `internal/desktop` WGC 只读采样确认客户端停在掉线界面，
+错误码为 `WOW51900323`。连续输入 ROI 为黑色且不符合信号码，不能授权任何输入。
+该证据证明采样时已不在游戏中；没有逐帧证据确定掉线发生在哪次 lookup，
+也不能把掉线归因于候选代码、扫描或光学 tracker。
+原 CON、operation、已验证业务报告、发布槽与 journal 保留，尚未宣称清理或原版恢复完成。
+
+第二轮首个带 hints 调用的 67 次 lookup 累计记录 53.647 秒：4 次未知 runtime 身份发现
+占 22.836 秒 / 38.766 GiB，11 次输入状态广域搜索占 21.251 秒 / 52.850 GiB，
+receipt/BODY/confirmation 的 6 次广域搜索占 9.523 秒 / 24.345 GiB。
+其余约 18.033 秒没有独立阶段计时。局部 predicate 拒绝原因未记录，
+不能断言是合法的 500ms cadence gap；首个 warm 名称也不代表地址 hints 已预热。
+
+后续独立调度修复给予同一已绑定、正常 published exchange 的首次 `input_signal_waiting`
+一次固定 2 秒观察窗口，重复等待不续期，到期仍完整发现；不适用于未知/缺失信号、
+未绑定、活动 reload/recovery 或 uncertain 输入。真实 Driver 红测证明旧调度在第二次观察前
+进入昂贵发现；修复后第二次新鲜观察完成一次 journaled 输入。持续等待仍按时回退，
+不改变持久预算、500ms 门槛或输入权限。该调度问题独立成立，不作为本次掉线的原因。
+
+包含该调度修复的最终冻结 offline baseline 于 09:07:28–09:14:24 UTC 全部通过，
+原始目录为 `.tmp/baseline-offline-live-signal-grace-20260930/`；SOURCE tree SHA256 为
+`163ae69de9d5d9c37a73351f3fe46b76e1413ccf5644b8feb05139dc2ae54c9e`。
+强制 Lua 5.1 全量 Go、build/vet、98 个 Node 测试、真实 LuaLS、版本/Skill/生成参考与
+SOURCE 稳定性检查全部通过。该修复尚未部署或复验；本验收摘要在 SOURCE 检查后追加。
+
+原第四条 operation 的持久恢复预算现已到期，状态为 `budget_exhausted`，
+但原业务报告仍为 `verified`、cleanup 为 `pending`，不是业务失败。
+后续需同一角色重新登录后取得正向 runtime 换代证明，再退役原发布槽并完成清理；
+不重启旧 operation 预算，不重执行探针，不伪造 closed 或恢复状态。
