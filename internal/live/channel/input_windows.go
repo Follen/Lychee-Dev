@@ -30,6 +30,85 @@ type inputRefreshSeed struct {
 	have   bool
 }
 
+// These positions only order one additional full traversal in this observation.
+// They never authorize a read, restrict its scope, or survive the call.
+type inputPrioritySeed struct {
+	rangeHint memory.Range
+	sample    int64
+}
+
+type inputPrioritySeeds struct {
+	mu      sync.Mutex
+	entries [8]inputPrioritySeed
+	count   int
+}
+
+func (s *inputPrioritySeeds) candidate(r memory.Record, sample, now int64) {
+	if sample < now-inputRecentHintMillis || sample > now {
+		return
+	}
+	if _, valid := replacementRecord(r); !valid {
+		return
+	}
+	const radius, window = uint64(4 << 20), uint64(8 << 20)
+	start := uint64(0)
+	if r.Address > radius {
+		start = (r.Address - radius) &^ uint64((1<<20)-1)
+	}
+	if start > ^uint64(0)-window {
+		start = (^uint64(0) - window) &^ uint64((1<<20)-1)
+	}
+	position := memory.Range{Start: start, End: start + window}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	oldest := 0
+	for i := 0; i < s.count; i++ {
+		if s.entries[i].rangeHint == position {
+			if sample > s.entries[i].sample {
+				s.entries[i].sample = sample
+			}
+			return
+		}
+		if s.entries[i].sample < s.entries[oldest].sample {
+			oldest = i
+		}
+	}
+	if s.count < len(s.entries) {
+		s.entries[s.count] = inputPrioritySeed{position, sample}
+		s.count++
+	} else if sample > s.entries[oldest].sample {
+		s.entries[oldest] = inputPrioritySeed{position, sample}
+	}
+}
+
+func (s *inputPrioritySeeds) ranges(now int64) []memory.Range {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ranges []memory.Range
+	for i := 0; i < s.count; i++ {
+		seed := s.entries[i]
+		if seed.sample <= now && now-seed.sample <= inputSeedMaxAgeMillis {
+			ranges = append(ranges, seed.rangeHint)
+		}
+	}
+	return ranges
+}
+
+func (n *Native) findInputPriority(ctx context.Context, source memory.Source, selector memory.Selector, priority []memory.Range) (found memory.LookupResult, err error) {
+	if n.observation.lookups >= observationLimit {
+		return found, errors.New("live.channel_observation_budget")
+	}
+	started, before := time.Now(), n.memorySession().Stats()
+	selector.RefreshRejected, selector.RefreshBudget = nil, nil
+	found.Path = "full_scan"
+	found.Fallback = "call_local_input_priority_retry"
+	found.Records, found.Coverage, err = memory.Lookup(ctx, n.memorySource(source), selector, memory.Options{Priority: priority, Session: n.memorySession()}, true)
+	found.ElapsedMillis = time.Since(started).Milliseconds()
+	found.Stats = n.memorySession().Stats().Delta(before)
+	n.recordLookup(selector, found)
+	return found, err
+}
+
 func (s *inputRefreshSeed) candidate(r memory.Record, sample, now int64) {
 	if sample < now-inputRecentHintMillis || sample > now {
 		return
@@ -93,6 +172,7 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	var recentStaleMillis atomic.Int64
 	recentStaleMillis.Store(-1)
 	var refreshSeed inputRefreshSeed
+	var prioritySeeds inputPrioritySeeds
 	accept := func(r memory.Record, recent bool) bool {
 		now := uptime()
 		s, err := inputObservation(r, e, after, now)
@@ -100,6 +180,7 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 		if errors.Is(err, errInputStateStale) {
 			if n.Hints == nil {
 				refreshSeed.candidate(r, s.SampleMillis, now)
+				prioritySeeds.candidate(r, s.SampleMillis, now)
 			}
 			stale.Store(true)
 			if s.SampleMillis >= now-inputRecentHintMillis {
@@ -248,6 +329,23 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 				if localErr == nil && len(local.Records) > 0 {
 					return finish(local.Records, true, local.Coverage.InputTiming)
 				}
+			}
+		}
+		// A fresh publication may have moved outside the 1MiB refresh after
+		// its region was visited. Re-enumerate and order one whole-process
+		// lookup with call-local positions. All ranges remain in the plan and
+		// the existing physical session, deadline and lookup cap pay for it.
+		if !found.Coverage.Truncated && ctx.Err() == nil && n.memorySession().Err() == nil {
+			if priority := prioritySeeds.ranges(uptime()); len(priority) > 0 {
+				retry, retryErr := n.findInputPriority(ctx, source, selector, priority)
+				if retryErr != nil {
+					diagnostics.positive(retry.Records, retry.Coverage.InputTiming, uptime(), retryErr, true)
+					return InputObservation{}, retryErr
+				}
+				if len(retry.Records) > 0 {
+					return finish(retry.Records, false, retry.Coverage.InputTiming)
+				}
+				now = uptime()
 			}
 		}
 		if tick >= 0 && tick <= now+100 && tick >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || tick > n.inputHintMillis) {

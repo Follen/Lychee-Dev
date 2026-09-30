@@ -125,6 +125,13 @@ CapturedFrame.ObservedAt 也只是主机观察时间。二值心跳会重复，�
 才能建立新的 edge；同 heartbeat 新帧不能复用已清除的 edge。超过 1500ms、未来/
 重放帧、真实缺块/解码无效、stream 或 capture reset 均清空比较历史。此修订改变旧测试
 中“单纯过期后首张翻转帧仍 waiting”的断言，不是放宽旧帧输入授权或帧年龄上限。
+同一已绑定 runtime 的 published exchange 在 invocation 内，仅对 waiting / unavailable
+共享一次固定 2s 的身份发现调度窗口；原因切换不重启窗口，到期恢复原发现出口。
+窗口不保存地址、样本或输入授权，不适用于活动 reload/recovery、未绑定、失配 runtime
+或非 published 事务。它只复用已有 Continue 调度，仍要求每次采样及发键前严格门禁。
+主机 evidence 的 QPC 时钟读取与 tracker 快照须处于同一 mu 内：既有异步 reader 不能
+在读时钟与快照之间接受更新帧，使旧 now 把合法帧误判 future。此顺序只防止读取竞态，
+真正未来帧、重放、clock 错误、500ms 过期及输入后屏障继续拒绝，不新增时钟读或采集。
 帧年龄初始候选上限 500ms、观察到边沿的活跃窗口 1500ms；这两个参数只限制光学证据，
 不是 Lua 样本年龄证明，必须通过低 FPS/丢帧/暂停测试再冻结。
 锁前取得的帧若仍符合本动作证据条件可以复用；不强制每次锁内等一张新帧，避免低 FPS 永远追不上。

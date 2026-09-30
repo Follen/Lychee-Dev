@@ -25,8 +25,21 @@
 扫描过程中补查、并发排空取消与固定诊断已通过定向/race 检查，诊断另识别 post
 光学 unavailable。单纯帧过期不再丢掉短期比较历史，但仍清旧 edge 资格并拒绝旧帧。
 该新修复的开发 smoke 中普通 cache-off、大结果与断开均直接完成；普通请求仍达
-114.713s，不能宣称稳定提速。完整新冻结离线基线及固定 clean 候选实机复验尚未完成；
-不合并不同候选的样本为全通过。
+114.713s，不能宣称稳定提速。`d149bf6` 的全量冻结离线基线与 push/PR CI 已通过，
+clean 候选仍 blocked：五条 warm 与首条 cache-off 通过，第二条在 release_ready
+超时，报告 verified / cleanup pending。原 operation 用 hints 恢复到 cleanup complete，
+正常及只读重复断开完成，200 槽 pending 为零。其余本轮项目不拼接先前 smoke。
+下一轮窄修扩展既有一次 2s 光学调度窗口到 unavailable，交替原因不续期；
+该窗口与随后 QPC/帧快照同锁的修复均通过 Source/Driver、完整 channel 与 race 检查，
+但各自开发 smoke 仍超时，原操作已恢复并正常/只读重复断开，200 槽 pending 为零。
+单次 Observe 内的合法位置优先完整重扫已通过 Source/预算/取消/race 检查，
+开发 smoke 仍在 release_ready 超时，报告 verified / cleanup pending；原 operation
+4.058s 恢复完成，正常及只读重复断开完成，200 槽 pending 为零。下一轮窄修
+仅延长昂贵 RuntimeCandidate 完成后的有界冷却，成功绑定恢复维持原间隔；
+真实 Driver/race 检查通过，开发复验中普通 cache-off 100.332s 直接完成，大结果仍在
+confirm_ready 超时、报告 unavailable。其原 operation 已按准确回执恢复且完整文本
+验证通过，连接正常及只读重复关闭，200 槽 pending 为零。保留 1s 采样、原局部补查
+额度与所有输入条件；后续区分 memory fresh 后 post 光学不可用的具体原因。
 端到端提速未证明；其余客户端、重登验收/战斗等矩阵仍为 `not_run`。
 不是已发布 3.0.2 的新能力声明，也不代表首轮或人工验收全部通过。
 

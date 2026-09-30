@@ -25,9 +25,23 @@ func discoveryCooldown(elapsed time.Duration) time.Duration {
 	return elapsed
 }
 
-// A fresh optical frame without a usable heartbeat edge gets one observation
-// window per exchange in this invocation. This is scheduling only: no address,
-// sample or input authority is retained, and no durable deadline is renewed.
+// An expensive runtime search gets several comparable protocol turns before
+// another search. This changes scheduling only; it grants no runtime or input
+// fact and leaves successful binding recovery on its original cooldown.
+func runtimeDiscoveryCooldown(elapsed time.Duration) time.Duration {
+	if elapsed < time.Second {
+		return time.Second
+	}
+	if elapsed >= 10*time.Second {
+		return 30 * time.Second
+	}
+	return 3 * elapsed
+}
+
+// Temporarily unavailable optical evidence or a frame without a usable edge
+// gets one shared observation window per exchange in this invocation. This is
+// scheduling only: no address, sample or input authority is retained, and no
+// durable deadline is renewed when the pending optical reason changes.
 type inputSignalWaitGrace struct {
 	runtime, nonce string
 	until          time.Time
@@ -35,7 +49,7 @@ type inputSignalWaitGrace struct {
 
 func (g *inputSignalWaitGrace) deferDiscovery(d *Driver, now time.Time) bool {
 	tx := d.State.Transaction
-	if d.Waiting != "input_signal_waiting" || !d.State.Bound || d.State.Identity.InputState != bridge.InputSignalCapability || tx == nil || tx.Phase != "published" || tx.Envelope.Runtime != d.State.Identity.Runtime ||
+	if (d.Waiting != "input_signal_waiting" && d.Waiting != "input_signal_unavailable") || !d.State.Bound || d.State.Identity.InputState != bridge.InputSignalCapability || tx == nil || tx.Phase != "published" || tx.Envelope.Runtime != d.State.Identity.Runtime ||
 		d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
 		return false
 	}
@@ -142,8 +156,9 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 						return recoverErr
 					}
 				}
+				candidateStarted := time.Now()
 				candidate, observeErr := d.Backend.RuntimeCandidate(ctx, d.State.Identity)
-				nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
+				nextDiscovery = time.Now().Add(runtimeDiscoveryCooldown(time.Since(candidateStarted)))
 				if observeErr != nil {
 					return observeErr
 				}

@@ -3,6 +3,9 @@
 2026-09-30 [native live 优化](live-optimization-acceptance-2026-09-30.md)新增：
 精确 nonce 与独立学习额度、共享读取/候选预算、局部未命中完整 fallback、
 授权 BODY 及返回前 HEAD 重验、调用内计费/阶段截断、Lua/Go 原字节等价与 fresh sequence。
+昂贵 RuntimeCandidate 的完成后冷却新增真实 Driver 调度回归：有限缺失后就绪可推进
+到 journaled submitted 与关闭回执；持续缺失到期仍发现且零发送，取消及关闭显式
+reload 不等待冷却，原目标期限不续期；1s/30s 上下界与 RecoverBinding 原间隔保留。
 自动首轮入口的 pending/未知输入停止规则在 CI 测试；真实游戏入口不在 CI 执行。
 Retail 12.1.0.69933 首轮已执行：带 hints 的普通/大结果、历史只读重试、reload 与
 reload 后请求通过；关闭 hints 的两项在 confirm_ready 超时，整体为 blocked。
@@ -11,6 +14,8 @@ reload 后请求通过；关闭 hints 的两项在 confirm_ready 超时，整体
 样本在扫描结束时过期不得授权、时间元数据等待不可续期、取消与共享预算必须生效；
 新鲜当前 runtime 可延后完整发现，过期/关闭缓存/活动 reload 仍回退；
 可选 30 秒关闭检查不得污染外层截止；光学 waiting 有一次固定 2 秒机会且到期必回退。
+后续窄修把 unavailable 纳入同一 exchange 的该窗口，原因交替不可续期；
+真实 Driver 对临时不可用到恢复、持久不可用到期发现、reload/recovery/失配退出分别验证。
 最新冻结全量离线基线通过。第二轮 5 条普通及 3 条 cache-off 请求直接通过；
 第 4 条已有 verified 结果、cleanup pending，恢复后 WGC 确认客户端掉线。
 重新登录确认旧进程结束后，原连接以 process_absent 证据关闭，原版恢复另行验证完成。
@@ -26,7 +31,14 @@ reload 后请求通过；关闭 hints 的两项在 confirm_ready 超时，整体
 扫描中补查/取消与诊断定向及 race 通过；光学修复明确区分观察到合法帧过期与真实
 invalid/reset：旧帧与旧 edge 均不授权，只允许新鲜翻转帧用短期比较历史建立新 edge。
 异步 Source RED/GREEN、同 heartbeat/未来/重放/缺块/gap/after 否定测试通过。
-该开发版 cache-off 普通/大结果/断开直接通过，但完整 clean 候选五轮复验仍待完成。
+该开发版 cache-off 普通/大结果/断开直接通过；`d149bf6` 全量离线及 push/PR CI 通过，
+clean 完整 runner 仍在第二条 cache-off release_ready 超时，报告 verified，原操作恢复
+及正常/重复断开完成，200 槽 pending 为零。后续光学调度修复单独复验，不合并候选样本。
+光学 evidence 同锁读取 QPC 的异步 reader / cache-off Source RED 连续 10 次复现，
+修后重复 20 次通过；真正未来/重放/clock 错误/501ms 过期/after 门禁保持。
+仍未通过的 smoke 与恢复保留。新增调用内优先完整重扫覆盖首遍已访问后跨 3MiB 发布、
+未优先 suffix、严格 seed/新记录、取消/物理信用、跨 Observe 不留位置及计费一致性；
+1s 采样、64MiB 排序优势、500ms 和原局部补查额度不改，完整实机结果单独验证。
 详见组合记录；这些 agent 自动实测不代替完整客户端矩阵或 owner 人工验收。
 
 2026-09-29 [CASC 内容变体](content-variants-2026-09-29.md)新增：默认歧义、显式双变体、

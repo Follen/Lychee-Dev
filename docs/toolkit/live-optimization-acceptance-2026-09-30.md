@@ -389,3 +389,131 @@ cache-off 连接 23.350s，普通请求 114.713s，大结果 90.220s（完整文
 SOURCE 稳定性、build 1.905s、vet 1.014s、强制 Lua 5.1 的全量 Go 测试 301.661s
 （2731 个测试通过）、98 个 Node 测试 17.048s、版本/skill/生成命令合同均通过。
 此后仅追加本段验证记录；clean 候选完整实机 runner 尚待运行。
+
+## clean d149bf6：释放阶段仍受扫描调度阻塞
+
+`d149bf674c7d198bf75f81b79c47c2dda315772d` 已通过 push / PR CI。
+clean 私有包 CLI SHA256 为
+`4a2501d4d6e8ce8732e8ca61a4c3809b2deefaaa0e4c50a5405f973ff7f16d10`，
+归档 SHA256 为 `265e4657c538c9f7b9c400fec5a37036a44ec5610598ff6e84e5f130afdcc79a`；
+隔离安装、version/describe、受管更新与同进程/actor 激活均通过。
+`.tmp/retail-live-input-traversal-refresh-final-20260930/optimization.json` 保持 blocked：
+cache-off 连接 49.711s，五次 warm 为 49.516/8.681/14.884/20.051/8.878s；
+cache-off 第一项 43.816s，第二项 120.159s 停在 release_ready。
+第二项报告已经 verified，cleanup 当时 pending；不能将该报告说成业务失败。
+原 operation 默认 hints 恢复 30.749s 后 verified / cleanup complete，同连接断开
+29.249s，重复断开 0.025s 且 journal 不变，受管 200 槽 pending 为零。
+其余 cache-off、大结果、reload 保持本次 not_run，不拼接先前 smoke。
+
+该项四个 memory finish 全 fresh，年龄 493/69/147/397ms，post 光学四次均通过。
+第一 prepare 正样本最终 reliable not_sent，outcome 时年龄 587ms，但该时刻包含
+前置操作完成时间，不能精确分摊每段耗时；submitted 的 outcome 年龄同样包含键消息
+burst，超过 500ms 不能据此推断输入门禁失效。该原调用 release 尚无 input_intent。
+七次身份全扫累计 43.590s，输入全扫九次 47.952s，其中五次未命中各约 7s。
+光学 pre 为 accepted 9、unavailable 15、waiting 15。现有 published exchange 的
+一次 2s 光学调度窗口只覆盖 waiting；unavailable 会立即进入身份发现。下一轮窄修
+仅扩展同一窗口到 unavailable，交替原因不续期，不新增地址/样本缓存或输入授权。
+
+## unavailable 共用调度窗口的开发复验
+
+真实 Driver 的 unavailable → waiting → ready RED/GREEN 通过：原代码第一次 unavailable
+进入发现并被 fixture 取消；修后约 0.55s 经三次观察、零发现、一次 journaled submitted
+关闭。持续 unavailable / 混合状态到期仍发现、不发键；原因交替不续期，各限制条件
+双状态验证。build/vet、channel 全包 112.780s、定向 race 三次 17.002s 均通过。
+这仅修正调度，不修改任何 INPUT 或光学接受门槛。
+
+私有 dirty CLI SHA256 为
+`10854391feb9afa357bb81d66d30e0f17c72c676feb4fdea8b74cb8d699165f9`；
+`.tmp/retail-live-input-signal-unavailable-grace-smoke-20260930/smoke.json` 仍 blocked。
+cache-off 连接 37.180s，普通请求 118.277s 直接 verified / cleanup complete；
+大结果 120.154s 停在 prepared，原调用未获得报告，不能算业务已执行。
+原大结果 operation 用 hints 恢复 20.120s，完整文本断言与 verified / cleanup complete
+通过；同连接正常断开 48.818s，重复断开 0.036s 且 journal 不变，200 槽 pending 为零。
+普通请求仍有输入全扫九次 53.617s、身份全扫五次 35.272s；大结果分别为九次 57.809s、
+七次 50.397s。大结果唯一 fresh memory finish 年龄 366ms，随后 post unavailable。
+调度修复不足以完成整体验收，尚未作为已完成提交。
+
+读取路径另识别待复现竞态：evidence 在取 mu 前读时钟，既有 reader 可在二者之间
+接受更新帧；旧 now 可能把合法新帧误判 future。下一轮先锁住真实异步 reader RED，
+仅调整时钟与锁的顺序，不放宽 frame/edge/after 条件；不能在实机证据前归因所有失败。
+
+## 时钟与帧快照同锁的修复及实机边界
+
+实际异步 reader 与 cache-off Source 的 post gate 稳定复现 RED（10/10）：锁外读时钟
+后 reader 接受更晚的合法帧，旧 now 错判 future / unavailable。将同一次 QPC 读移到
+tracker mu 内后重复 20 次 GREEN；clock 错误、真正未来/重放、501ms 过期、after 屏障
+仍拒绝。build/vet、全 channel 116.681s、光学定向 race 三次 21.564s 通过。
+没有增加生产读时钟、采集线程或 timer，也没有修改帧年龄/edge/输入接受条件。
+
+私有 dirty CLI SHA256 为
+`9053222ba577dce49a1f1081a93f32211c1fe6f502a509352082adcfbf748909`；
+`.tmp/retail-live-input-signal-clock-order-smoke-20260930/smoke.json` 仍 blocked。
+cache-off 连接 54.850s；普通请求 120.154s 停在 confirm_ready，原报告 unavailable。
+两次 fresh memory finish 年龄 389/92ms，post 两次均 accepted；输入全扫九次 57.432s、
+身份全扫六次 44.226s，刷新 fourteen attempts 均无局部命中，nearby 四次实际读取
+4.60MB / 229 reads。该修复不等于已解决全部扫描未命中或实机超时。
+原 operation 用 hints 恢复 12.090s 到 verified / cleanup complete；正常断开 16.155s，
+重复断开 0.026s 且 journal 不变，200 槽 pending 为零。大结果本轮 not_run。
+
+现有原生 hints 的同 runtime 相邻 sequence 对，14 对中 7 对位置在旧 1MiB 邻域外，
+距离约 3MiB–4.46GiB；这些是已验证的历史提示位置，不是失败补查的实时发布链证据。
+不可据此归因所有 afterEdgeHit=0 或猜定迁移方向。1s 采样周期保留，既有 1MiB 局部
+窗口与总 1s / 8MiB / 4096 reads / 四 scope / 250ms 限制保留。
+下一步先复现首遍已读取后发布位置移出邻域的真实 Source RED，再尝试单次 Observe
+内的一次完整优先重扫。它使用原 Source/physical session/lookup/deadline，优先位置
+只排序 fresh Regions 的完整工作队列，不排除剩余范围、不继承缺失结论或输入授权。
+最坏额外一遍完整扫描会增加 I/O，必须实测且不能提高 256GiB 调用物理预算。
+
+## 调用内优先完整重扫：新鲜命中改善，完整请求仍超时
+
+Source RED/GREEN、独立范围完整遍历、严格种子/记录否定、跨 Observe 冷扫描、
+物理额度/lookup/取消与首遍 gaps 保留测试通过；build/vet 通过，定向 channel
+1.847s、三次 race 5.518s、memory 相关测试 0.670s。此时尚未跑新冻结全量基线。
+重扫只排序本次 fresh Regions 全队列，代价全部记入原调用；没有持久地址提示。
+
+私有 dirty CLI SHA256 为
+`af97d763dd7462f46a2cc33a2ee2ab88d16ff08d9f359b882d1d72f31a9794e4`，
+归档 SHA256 为 `e91b91a310fd75ba39640b91af1275dfe5dc6f29bffd99b2db4405a2d1b5b7e9`。
+`.tmp/retail-live-input-priority-rescan-smoke-20260930/smoke.json` 保持 blocked：
+cache-off 连接 39.564s，普通请求 120.120s 停在 release_ready，报告 verified、
+cleanup pending。七次 memory finish 均 fresh；输入扫描累计 60.091s，身份全扫
+五次累计 36.239s。新扫描中出现 65ms、565ms 的早期接受，但不能据此宣称稳定提速。
+原 operation 用默认 hints 4.058s 恢复到 verified / cleanup complete，正常断开
+28.911s，重复断开 0.024s 且 journal 不变；clean managed 200 槽 pending 为零。
+大结果本轮 not_run，不能拼接先前 smoke。
+
+下一轮只改昂贵 RuntimeCandidate 的完成后冷却：不足 1s 仍为 1s，其余耗时
+乘三且封顶 30s；第一次发现立即可用，成功 RecoverBinding 的原间隔保持。
+这是调用内调度，不保留身份/输入授权，不改变 120s、物理预算及任何新鲜度门禁。
+实际换代发现延迟还包含下一次协议观察与发现本身，不能承诺严格最多 30s。
+
+真实 Driver 先运行 RED：旧冷却令第二次昂贵发现耗尽 5.01s 调用，observations=3、
+discoveries=2、inputs=0；修后 3.26s 完成准确 unbind 回执，observations=4、discovery=1，
+仅一次 journaled submitted。持续缺失约 4.33s 后再次发现且零输入；取消、关闭显式
+reload、原目标期限及上下界检查通过。另一个 RED 验证失败绑定恢复的 1.05s 成本
+不得混入短 RuntimeCandidate 的倍率，修后该候选按自身约 25ms 成本仅冷却约 1s。
+成功 RecoverBinding 原间隔仍保留，乘法在 10s 前封顶以防 duration 溢出。
+build/vet 与定向现有恢复测试 13.243s、race 三次 41.138s、diff check 均通过。
+本轮 SOURCE 全量冻结基线与 clean 完整 Retail runner 待运行，不能沿用 d149bf6 报告。
+
+私有 dirty CLI SHA256 为
+`2b1102a46f6dea97a6d1becc99093835f128fea59fa3ce2f9166623ea5aa21f8`，
+归档 SHA256 为 `862d46fa5884f620d5c8a7976aaa336fcc8aa77ae735efedf7c73997772b6873`。
+`.tmp/retail-live-input-discovery-scheduling-smoke-20260930/smoke.json` 仍 blocked：
+cache-off 连接 24.715s，普通请求 100.332s 直接 verified / cleanup complete；
+大结果 120.128s 停在 confirm_ready，报告当时 unavailable，不能称为已验证业务成功。
+大结果八次 memory finish 均 fresh，但 post 光学仅三次 accepted、五次 unavailable；
+INPUT 全扫十五次累计 73.637s，身份全扫三次累计 21.534s。普通请求 post 四次
+accepted、一次 unavailable。身份发现成本下降仍不足以完成本轮请求；单轮数字不构成
+旧新匹配性能比较。后续先区分帧过期、解码/历史丢失与采集路径延迟，不能猜定原因。
+原大结果 operation 用 hints 13.231s 恢复到 verified / cleanup complete，完整文本
+断言通过；正常断开 31.923s，重复断开 0.028s 且 journal 不变，200 槽 pending 为零。
+
+本批冻结全量离线基线
+`.tmp/baseline-offline-input-discovery-scheduling-20260930/report.json` passed，
+2026-09-30 13:25:36–13:31:05 UTC；源码树 SHA256 为
+`b607df3c3d75ab98d422124f302f131a8bc4bae340725d698f79e8d0145f9a54`。
+SOURCE 稳定性、build 1.935s、vet 1.050s、强制 Lua 5.1 全量 Go 307.253s
+（2785 个测试通过、35 个 package 通过）、98 个 Node 测试 17.188s、版本/skill/
+生成命令合同均通过。仅随后追加此验证事实；实机 blocked 及恢复状态保持原记录。
+下一轮仅增加有界 reader/tracker 诊断，再针对实测具体原因修复；本批不代表完整验收。

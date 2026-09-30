@@ -128,9 +128,15 @@ func (s *nativeInputSignal) close() {
 }
 
 func (s *nativeInputSignal) evidence() (InputSignalEvidence, error) {
-	now, err := desktop.CaptureSystemTicks()
+	return s.evidenceWithClock(desktop.CaptureSystemTicks)
+}
+
+func (s *nativeInputSignal) evidenceWithClock(clock func() (int64, error)) (InputSignalEvidence, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Sample the clock with the tracked frame. A reader accepting a newer frame
+	// between clock sampling and this lock would otherwise make it appear future.
+	now, err := clock()
 	if err != nil {
 		s.tracker.invalidate()
 		return InputSignalEvidence{}, errors.Join(ErrPending, err)
