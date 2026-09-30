@@ -52,7 +52,7 @@ type Envelope struct {
 type Options struct {
 	updatePaths, updateInstallations     []string
 	semantic                             bool
-	staticOnly, sourceFlow               bool
+	staticOnly, sourceFlow, sessionReuse bool
 	scan                                 bool
 	keyFile                              string
 	contentVariant                       string
@@ -149,6 +149,9 @@ type uint32Set struct {
 
 // Execute returns the process exit code. It never exits the embedding process.
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "--internal-luals-broker" {
+		return SourceBrokerMain(ctx, args)
+	}
 	opts, parseErr := parseOptions(args)
 	response := Envelope{Schema: "lycheedev.result.v1", Context: map[string]any{}, Captures: []any{}, Warnings: []string{}}
 	var err error
@@ -665,11 +668,15 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "source refs", "source context":
 				code, err = runSourceResearch(ctx, route, opts, &response)
+			case "source session status", "source session close":
+				code, err = runSourceSession(ctx, route, opts, &response)
 			case "source prune":
 				var root string
 				root, err = workspaceRoot(opts.home)
 				if err == nil {
-					response.Result, err = codebase.PruneSourceWorktrees(ctx, root, opts.targetBytes)
+					if err = retireSourceBrokerIfPresent(ctx, root); err == nil {
+						response.Result, err = codebase.PruneSourceWorktrees(ctx, root, opts.targetBytes)
+					}
 				}
 			case "source validate":
 				if opts.release != "" && !opts.semantic {
@@ -1163,6 +1170,8 @@ func parseOptions(args []string) (Options, error) {
 				opts.noCache = true
 			case "--semantic":
 				opts.semantic = true
+			case "--session-reuse":
+				opts.sessionReuse = true
 			case "--static-only":
 				opts.staticOnly = true
 			case "--flow":

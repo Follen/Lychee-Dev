@@ -15,9 +15,10 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-// v2 requires the LuaLS workspace-readiness barrier before synthetic API
-// definition queries. v1 could persist an empty, prematurely complete result.
-const semanticCacheSchema = "lycheedev.source-semantic.v2"
+// v3 binds the verified release manifest and effective configuration as well
+// as runtime/source/environment. v2 introduced the workspace-readiness barrier;
+// v1 could persist an empty, prematurely complete result.
+const semanticCacheSchema = "lycheedev.source-semantic.v3"
 const maxSemanticCacheBytes = 4 << 20
 
 type semanticCacheRecord struct {
@@ -31,7 +32,7 @@ func (b *Browser) cachedSemantic(ctx context.Context, pin selection.SourcePin, r
 	if runtime == nil || symbol.ID == "" {
 		return compute()
 	}
-	parts, err := json.Marshal([]string{semanticCacheSchema, pin.Repository, pin.Product, pin.ExactCommit, recordsHash, env.Identity.Repository, env.Identity.Commit, env.InputSHA256, env.DefinitionsSHA256, runtime.Identity.Version, runtime.Identity.SHA256, symbol.ID, direction})
+	parts, err := json.Marshal([]string{semanticCacheSchema, pin.Repository, pin.Product, pin.ExactCommit, recordsHash, env.Identity.Repository, env.Identity.Commit, env.InputSHA256, env.DefinitionsSHA256, runtime.Identity.Version, runtime.Identity.SHA256, runtime.ContextIdentity(), symbol.ID, direction})
 	if err != nil {
 		return compute()
 	}

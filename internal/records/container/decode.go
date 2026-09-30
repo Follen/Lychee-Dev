@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 var (
@@ -26,6 +28,7 @@ var (
 // and each nested frame or encrypted envelope as one additional level.
 // Hard ceilings prevent accidental unbounded allocations from caller configuration.
 type Limits struct {
+	Query        *resource.Budget
 	EncodedBytes int64
 	DecodedBytes int64
 	ChunkBytes   int64
@@ -146,49 +149,67 @@ func (d *decoder) expand(dst io.Writer, src io.Reader, depth int, allowance int6
 		if err := d.ctx.Err(); err != nil {
 			return written, err
 		}
-		var raw []byte
-		var err error
-		if header == 0 {
-			raw, err = d.collect(src, d.limits.ChunkBytes)
-		} else {
-			raw = make([]byte, int(part.encoded))
-			err = exact(src, raw)
-		}
-		if err != nil {
-			return written, err
-		}
-		if part.digest != ([md5.Size]byte{}) && md5.Sum(raw) != part.digest {
-			return written, fmt.Errorf("%w: chunk %d checksum", ErrIntegrity, index)
-		}
 		budget := min(d.limits.ChunkBytes, allowance-written)
-		decoded, err := d.unpack(raw, depth, budget, index)
-		if err != nil {
-			return written, fmt.Errorf("chunk %d: %w", index, err)
-		}
-		if header != 0 && int64(len(decoded)) != int64(part.decoded) {
-			return written, fmt.Errorf("%w: chunk %d decoded length", ErrIntegrity, index)
-		}
-		if index == len(parts)-1 {
-			if err := exhausted(src); err != nil {
-				return written, err
-			}
-		}
-		if err := d.ctx.Err(); err != nil {
-			return written, err
-		}
-		n, err := dst.Write(decoded)
-		if n < 0 || n > len(decoded) {
-			return written, fmt.Errorf("%w: invalid destination write count", ErrMalformed)
-		}
-		written += int64(n)
+		n, err := d.writePart(dst, src, part, header, depth, budget, index, index == len(parts)-1)
+		written += n
 		if err != nil {
 			return written, err
-		}
-		if n != len(decoded) {
-			return written, io.ErrShortWrite
 		}
 	}
 	return written, nil
+}
+
+func (d *decoder) writePart(dst io.Writer, src io.Reader, part segment, header uint64, depth int, allowance int64, index int, last bool) (int64, error) {
+	encoded := int64(part.encoded)
+	decoded := allowance
+	if header == 0 {
+		encoded = min(d.limits.ChunkBytes, d.limits.EncodedBytes)
+		decoded = allowance
+	}
+	// io.ReadAll and bytes.Buffer grow geometrically. Reserve conservatively for
+	// raw/decoded capacity and retain it through the destination write. Nested
+	// frames reserve their own live buffers before allocating them.
+	release, err := d.limits.Query.ReserveScratch(2*encoded + 2*decoded + 1024)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	var raw []byte
+	if header == 0 {
+		raw, err = d.collect(src, d.limits.ChunkBytes)
+	} else {
+		raw = make([]byte, int(part.encoded))
+		err = exact(src, raw)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if part.digest != ([md5.Size]byte{}) && md5.Sum(raw) != part.digest {
+		return 0, fmt.Errorf("%w: chunk %d checksum", ErrIntegrity, index)
+	}
+	out, err := d.unpack(raw, depth, allowance, index)
+	if err != nil {
+		return 0, fmt.Errorf("chunk %d: %w", index, err)
+	}
+	if header != 0 && int64(len(out)) != int64(part.decoded) {
+		return 0, fmt.Errorf("%w: chunk %d decoded length", ErrIntegrity, index)
+	}
+	if last {
+		if err := exhausted(src); err != nil {
+			return 0, err
+		}
+	}
+	if err := d.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := dst.Write(out)
+	if n < 0 || n > len(out) {
+		return 0, fmt.Errorf("%w: invalid destination write count", ErrMalformed)
+	}
+	if err == nil && n != len(out) {
+		err = io.ErrShortWrite
+	}
+	return int64(n), err
 }
 
 func (d *decoder) collect(src io.Reader, limit int64) ([]byte, error) {
@@ -216,6 +237,13 @@ func (d *decoder) unpack(raw []byte, depth int, allowance int64, index int) ([]b
 		}
 		return raw[1:], nil
 	case 'Z':
+		// zlib owns a history window and Huffman tables in addition to the
+		// caller's raw/output buffers. Reserve before constructing the reader.
+		release, err := d.limits.Query.ReserveScratch(128 << 10)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 		compressed := bytes.NewReader(raw[1:])
 		stream, err := zlib.NewReader(compressed)
 		if err != nil {
@@ -241,6 +269,11 @@ func (d *decoder) unpack(raw []byte, depth int, allowance int64, index int) ([]b
 		}
 		return result.Bytes(), nil
 	case 'E':
+		release, err := d.limits.Query.ReserveScratch(int64(len(raw)))
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 		decoded, err := d.unlock(raw[1:], index)
 		if err != nil {
 			return nil, err

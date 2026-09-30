@@ -1,5 +1,15 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-09-30 [D 阶段研究合同](phase-d-publication-luals-session-2026-09-30.md) 约束后续
+addon 发布优化与可选跨 CLI LuaLS 会话：保留输入新鲜度，先做等价编码复用；语义会话
+固定上下文、托管租约、共享预算、有界取消与回收。跨 CLI LuaLS 已在当前开发分支实现，
+addon 发布端尚未实施；现行 live 协议、零成本例外和已发布能力不变，开发验收不替代发行验收。
+
+2026-09-30 非 live 开发分支按 [Data 读取合同](data-reader-optimization-2026-09-30.md)、
+[查询资源准入](data-budget-implementation-2026-09-30.md) 与
+[Source 实施记录](source-optimization-implementation-2026-09-30.md) 收敛查询拥有的认证会话与有界缓存。
+新 CLI 请求重新认证可变来源；逻辑资源计费不等于 RSS 硬上限。
+
 2026-09-29 工作区新增 [CASC 显式内容变体合同](content-variants-2026-09-29.md)：
 asset inspect/export 可明确筛选 LOW_VIOLENCE 位；默认严格拒绝歧义，完整性校验不变。
 

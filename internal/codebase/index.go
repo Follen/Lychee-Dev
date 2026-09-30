@@ -75,6 +75,10 @@ type cacheManifest struct {
 	RecordBytes   int64        `json:"recordBytes"`
 	FixtureRoot   string       `json:"fixtureRoot,omitempty"`
 	FixtureDigest string       `json:"fixtureDigest,omitempty"`
+	DerivedSchema string       `json:"derivedSchema,omitempty"`
+	DerivedHash   string       `json:"derivedHash,omitempty"`
+	DerivedBytes  int64        `json:"derivedBytes,omitempty"`
+	DerivedState  string       `json:"derivedState,omitempty"`
 }
 
 type factEnvelope struct {
@@ -87,19 +91,55 @@ type factEnvelope struct {
 }
 
 const maxFactCacheBytes = 32 << 20
+const maxDocumentMemoFiles = 256
 
 type snapshotCache struct {
-	b         *Browser
-	pin       selection.SourcePin
-	dir       string
-	manifest  cacheManifest
-	pathsOnce sync.Once
-	documents map[string]sourceRecord
-	assets    map[string]sourceRecord
-	pathsErr  error
+	b              *Browser
+	pin            selection.SourcePin
+	dir            string
+	manifest       cacheManifest
+	pathsOnce      sync.Once
+	documents      map[string]sourceRecord
+	assets         map[string]sourceRecord
+	pathsErr       error
+	records        *os.File
+	offsets        []recordOffset
+	derivedRebuilt bool
+	shared         bool
+	memo           map[string][]byte
+	memoBytes      int
+	batch          *documentBatch
+	work           sourceQueryWork
 }
 
-func (c *snapshotCache) Close() error { return nil }
+type sourceQueryWork struct {
+	VerificationPasses int
+	VerifiedBytes      int64
+	MetadataVisits     int
+	DecodedRecords     int
+	RecordReadBytes    int64
+	DocumentReads      int
+	GitBatchStarts     int
+}
+
+func (c *snapshotCache) Close() error {
+	if c.shared {
+		return nil
+	}
+	return c.closeResources()
+}
+func (c *snapshotCache) closeResources() error {
+	if c.batch != nil {
+		c.batch.close()
+		c.batch = nil
+	}
+	if c.records != nil {
+		err := c.records.Close()
+		c.records = nil
+		return err
+	}
+	return nil
+}
 
 func (b *Browser) indexPath(pin selection.SourcePin) string {
 	key := sha256.Sum256([]byte(indexSchema + "\x00" + pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + pin.ParserRevision))
@@ -154,10 +194,10 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 	}
 	defer lease.Close()
 	if existing, summary, err := b.openIndex(ctx, pin); err == nil {
+		defer existing.Close()
 		if fixtureRoot != "" && existing.manifest.FixtureDigest != fixtureDigest {
 			return IndexSummary{}, errors.New("codebase.fixture_changed: frozen source path has different bytes")
 		}
-		existing.Close()
 		return summary, nil
 	} else if !errors.Is(err, errIndexNotReady) {
 		return IndexSummary{}, err
@@ -197,6 +237,10 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 	}
 	hash := sha256.New()
 	w := bufio.NewWriterSize(io.MultiWriter(f, hash), 64<<10)
+	offsets := []recordOffset{}
+	var recordPosition int64
+	var offsetBytes int
+	derivedOverflow := false
 	write := func(r sourceRecord) error {
 		data, err := json.Marshal(r)
 		if err != nil {
@@ -211,6 +255,21 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 		if _, err := w.Write(data); err != nil {
 			return err
 		}
+		if !derivedOverflow {
+			entry := offsetRecord(r, data, recordPosition)
+			encoded, err := json.Marshal(entry)
+			if err != nil {
+				return err
+			}
+			if len(offsets) >= maxDerivedRecords || offsetBytes+len(encoded)+1 > maxDerivedBytes-1024 {
+				offsets = nil
+				derivedOverflow = true
+			} else {
+				offsets = append(offsets, entry)
+				offsetBytes += len(encoded) + 1
+			}
+		}
+		recordPosition += int64(len(data) + 1)
 		return w.WriteByte('\n')
 	}
 	summary := IndexSummary{Schema: indexSchema, Storage: "file-cache", Repository: pin.Repository, Product: pin.Product, Commit: pin.ExactCommit, Parser: pin.ParserRevision, Complete: true}
@@ -325,6 +384,28 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 	}
 	summary.Complete = summary.Diagnostics == 0
 	manifest := cacheManifest{Summary: summary, RecordsHash: hex.EncodeToString(hash.Sum(nil)), RecordBytes: info.Size(), FixtureRoot: fixtureRoot, FixtureDigest: fixtureDigest}
+	if !derivedOverflow {
+		derivedRaw, err := json.Marshal(derivedIndex{Schema: derivedSchema, RecordsHash: manifest.RecordsHash, Entries: offsets})
+		if err != nil {
+			return IndexSummary{}, err
+		}
+		if len(derivedRaw) <= maxDerivedBytes {
+			if err := reserve(int64(len(derivedRaw))); err != nil {
+				return IndexSummary{}, err
+			}
+			if err := os.WriteFile(filepath.Join(stage, "offsets.json"), derivedRaw, 0644); err != nil {
+				return IndexSummary{}, err
+			}
+			sum := sha256.Sum256(derivedRaw)
+			manifest.DerivedSchema = derivedSchema
+			manifest.DerivedHash = hex.EncodeToString(sum[:])
+			manifest.DerivedBytes = int64(len(derivedRaw))
+		} else {
+			manifest.DerivedState = "budget"
+		}
+	} else {
+		manifest.DerivedState = "budget"
+	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		return IndexSummary{}, err
@@ -425,6 +506,18 @@ var errIndexNotReady = errors.New("codebase.index_not_ready: run source index wi
 
 func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*snapshotCache, IndexSummary, error) {
 	dir := b.indexPath(pin)
+	session, _ := ctx.Value(sourceQueryKey{}).(*sourceQuerySession)
+	key := b.store.Root() + "\x00" + dir
+	if session != nil {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		if c := session.caches[key]; c != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, IndexSummary{}, err
+			}
+			return c, c.manifest.Summary, nil
+		}
+	}
 	f, err := os.Open(filepath.Join(dir, "manifest.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, IndexSummary{}, errIndexNotReady
@@ -451,61 +544,72 @@ func (b *Browser) openIndex(ctx context.Context, pin selection.SourcePin) (*snap
 	if err := cache.verify(ctx); err != nil {
 		return nil, IndexSummary{}, err
 	}
+	if err := cache.loadDerived(ctx); err != nil {
+		cache.closeResources()
+		return nil, IndexSummary{}, err
+	}
+	if session != nil && len(session.caches) < 4 {
+		cache.shared = true
+		session.caches[key] = cache
+	}
 	return cache, m.Summary, nil
 }
 func (c *snapshotCache) verify(ctx context.Context) error {
+	c.work.VerificationPasses++
 	f, err := os.Open(filepath.Join(c.dir, "records.jsonl"))
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	success := false
+	defer func() {
+		if !success {
+			f.Close()
+		}
+	}()
 	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
 	if info.Size() != c.manifest.RecordBytes {
-		return errors.New("codebase.index_content_mismatch")
+		return fmt.Errorf("%w: codebase.index_content_mismatch", ErrSourceIntegrity)
+	}
+	if c.manifest.DerivedHash == "" && c.manifest.DerivedState == "" {
+		c.records = f
+		if err := c.rebuildOffsets(ctx); err != nil {
+			c.records = nil
+			return err
+		}
+		c.work.VerifiedBytes += info.Size()
+		success = true
+		return nil
 	}
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.CopyBuffer(h, &contextReader{ctx: ctx, reader: f}, make([]byte, 64<<10)); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if hex.EncodeToString(h.Sum(nil)) != c.manifest.RecordsHash {
-		return errors.New("codebase.index_content_mismatch")
+		return fmt.Errorf("%w: codebase.index_content_mismatch", ErrSourceIntegrity)
 	}
+	c.work.VerifiedBytes += info.Size()
+	c.records = f
+	success = true
 	return nil
 }
 func (c *snapshotCache) scan(ctx context.Context, visit func(sourceRecord) error) error {
-	f, err := os.Open(filepath.Join(c.dir, "records.jsonl"))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	s := bufio.NewScanner(f)
-	s.Buffer(make([]byte, 64<<10), 1<<20)
-	for s.Scan() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		var r sourceRecord
-		if err := json.Unmarshal(s.Bytes(), &r); err != nil {
-			return fmt.Errorf("codebase.index_record_invalid: %w", err)
-		}
-		if err := visit(r); err != nil {
-			return err
-		}
-	}
-	return s.Err()
+	return c.scanSelected(ctx, func(recordOffset) bool { return true }, visit)
 }
 
 func (c *snapshotCache) loadPaths(ctx context.Context) error {
 	c.pathsOnce.Do(func() {
 		c.documents = map[string]sourceRecord{}
 		c.assets = map[string]sourceRecord{}
-		c.pathsErr = c.scan(ctx, func(r sourceRecord) error {
+		c.pathsErr = c.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "document" || e.Kind == "asset" }, func(r sourceRecord) error {
+			if (r.Kind == "document" || r.Kind == "asset") && len(c.documents)+len(c.assets) >= maxSourceNodes {
+				return ErrSourceBudget
+			}
 			switch r.Kind {
 			case "document":
 				c.documents[r.Path] = r
@@ -522,7 +626,24 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 	if !sourcePath(name) {
 		return nil, "", errors.New("codebase.invalid_span")
 	}
-	if err := c.loadPaths(ctx); err != nil {
+	if c.offsets != nil {
+		if c.documents == nil {
+			c.documents = map[string]sourceRecord{}
+		}
+		if _, ok := c.documents[name]; !ok {
+			if err := c.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "document" && e.Path == name }, func(r sourceRecord) error {
+				if r.Kind == "document" && r.Path == name {
+					if len(c.documents) >= maxSourceNodes {
+						return ErrSourceBudget
+					}
+					c.documents[name] = r
+				}
+				return nil
+			}); err != nil {
+				return nil, "", err
+			}
+		}
+	} else if err := c.loadPaths(ctx); err != nil {
 		return nil, "", err
 	}
 	found, ok := c.documents[name]
@@ -532,7 +653,15 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 	if found.Bytes < 0 || found.Bytes > maxSourceBytes {
 		return nil, "", errors.New("codebase.source_byte_limit")
 	}
+	memoKey := found.Object + "\x00" + found.SHA256
+	if data, ok := c.memo[memoKey]; ok {
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
+		return data, found.SHA256, nil
+	}
 	var data []byte
+	c.work.DocumentReads++
 	var err error
 	if c.manifest.FixtureRoot != "" {
 		full := filepath.Join(c.manifest.FixtureRoot, filepath.FromSlash(name))
@@ -556,7 +685,13 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 		if !objectID(found.Object) {
 			return nil, "", errors.New("codebase.index_record_invalid")
 		}
-		data, err = gitBytes(ctx, c.b.mirror(c.pin.Repository), int(found.Bytes)+1, "cat-file", "blob", found.Object)
+		if c.batch == nil {
+			c.work.GitBatchStarts++
+			c.batch, err = newDocumentBatch(ctx, c.b, c.pin)
+		}
+		if err == nil {
+			data, err = c.batch.read(found.Object, found.Bytes)
+		}
 		if err != nil {
 			return nil, "", err
 		}
@@ -565,6 +700,17 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 	digest := hex.EncodeToString(sum[:])
 	if int64(len(data)) != found.Bytes || digest != found.SHA256 || !utf8.Valid(data) {
 		return nil, "", errors.New("codebase.source_content_mismatch")
+	}
+	if len(data) <= 64<<20 {
+		if c.memo == nil {
+			c.memo = map[string][]byte{}
+		}
+		if c.memoBytes+len(data) > 64<<20 || len(c.memo) >= maxDocumentMemoFiles {
+			clear(c.memo)
+			c.memoBytes = 0
+		}
+		c.memo[memoKey] = data
+		c.memoBytes += len(data)
 	}
 	return data, digest, nil
 }
@@ -594,6 +740,9 @@ func stableSymbolID(pin selection.SourcePin, s SymbolMatch) string {
 	return "SYM-" + hex.EncodeToString(h[:16])
 }
 func (b *Browser) FindSymbols(ctx context.Context, pin selection.SourcePin, term string, limit int) (SymbolMatches, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	result := SymbolMatches{Matches: []SymbolMatch{}}
 	if term == "" || len(term) > 512 || limit < 1 || limit > 200 {
 		return result, errors.New("codebase.invalid_symbol_query")
@@ -602,9 +751,10 @@ func (b *Browser) FindSymbols(ctx context.Context, pin selection.SourcePin, term
 	if err != nil {
 		return result, err
 	}
+	defer cache.Close()
 	result.Index = summary
 	var matches []SymbolMatch
-	err = cache.scan(ctx, func(r sourceRecord) error {
+	err = cache.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "symbol" && (e.Name == term || e.Target == term) }, func(r sourceRecord) error {
 		if r.Kind == "symbol" && r.Symbol != nil && (r.Symbol.Name == term || r.Symbol.Target == term) {
 			matches = append(matches, *r.Symbol)
 		}

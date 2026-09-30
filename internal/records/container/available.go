@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 // MissingSpan is an authenticated chunk's unavailable decoded extent. Zeros
@@ -26,22 +28,45 @@ func (r *Ranges) WriteAvailable(ctx context.Context, dst io.Writer) ([]MissingSp
 		if size == 0 {
 			return nil, ErrMalformed
 		}
-		data, err := r.ReadSpan(ctx, offset, size)
-		if err != nil {
-			var key *MissingKeyError
-			if !errors.As(err, &key) {
-				return nil, err
-			}
-			missing = append(missing, MissingSpan{Chunk: i, Offset: offset, Bytes: size, KeyID: fmt.Sprintf("%016x", key.ID)})
-			data = make([]byte, int(size))
-		}
-		n, err := dst.Write(data)
+		gap, err := r.writeAvailablePart(ctx, dst, i, offset, size)
 		if err != nil {
 			return nil, err
 		}
-		if n != len(data) {
-			return nil, io.ErrShortWrite
+		if gap != nil {
+			if err := r.limits.Query.Charge(resource.Cost{RetainedBytes: 128, MetadataBytes: 128}); err != nil {
+				return nil, err
+			}
+			missing = append(missing, *gap)
 		}
 	}
 	return missing, ctx.Err()
+}
+
+func (r *Ranges) writeAvailablePart(ctx context.Context, dst io.Writer, i int, offset, size int64) (*MissingSpan, error) {
+	if size > r.limits.ChunkBytes {
+		return nil, ErrLimit
+	}
+	release, err := r.limits.Query.ReserveScratch(size)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	var gap *MissingSpan
+	data, err := r.ReadSpan(ctx, offset, size)
+	if err != nil {
+		var key *MissingKeyError
+		if !errors.As(err, &key) {
+			return nil, err
+		}
+		gap = &MissingSpan{Chunk: i, Offset: offset, Bytes: size, KeyID: fmt.Sprintf("%016x", key.ID)}
+		data = make([]byte, int(size))
+	}
+	n, err := dst.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	if n != len(data) {
+		return nil, io.ErrShortWrite
+	}
+	return gap, ctx.Err()
 }

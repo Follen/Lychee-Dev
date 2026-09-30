@@ -26,7 +26,16 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := gitCommand(ctx, c.b.mirror(c.pin.Repository), "grep", "-n", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--")
+	args := []string{"grep", "-n", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--"}
+	// Apply the same topic restriction before Git's bounded output is filled.
+	// icase matches bodyTopicPath for uppercase source extensions as well.
+	switch topic {
+	case "lua", "xml", "toc":
+		args = append(args, ":(glob,icase)**/*."+topic)
+	case "api":
+		args = append(args, ":(glob,icase)**/Blizzard_APIDocumentationGenerated/**")
+	}
+	cmd := gitCommand(ctx, c.b.mirror(c.pin.Repository), args...)
 	out := &boundedOutput{limit: 4 << 20, cancel: cancel}
 	log := &boundedOutput{limit: 32 << 10, cancel: cancel}
 	cmd.Stdout, cmd.Stderr = out, log
@@ -77,7 +86,7 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 func (c *snapshotCache) fixtureBodyCandidates(ctx context.Context, text, topic string, limit int) ([]searchCandidate, bool, error) {
 	rows := []searchCandidate{}
 	cut := false
-	err := c.scan(ctx, func(r sourceRecord) error {
+	err := c.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "document" && bodyTopicPath(topic, e.Path) }, func(r sourceRecord) error {
 		if r.Kind != "document" || !bodyTopicPath(topic, r.Path) {
 			return nil
 		}

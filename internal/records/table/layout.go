@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 var (
@@ -16,6 +18,7 @@ var (
 )
 
 type Budget struct {
+	Query         *resource.Budget
 	FileBytes     int64
 	MetadataBytes int64
 	Rows          uint32
@@ -92,7 +95,7 @@ func Inspect(ctx context.Context, source io.ReaderAt, size int64, budget Budget)
 	if budget.FileBytes <= 0 || budget.FileBytes > 1<<40 || size > budget.FileBytes || budget.MetadataBytes <= 0 || budget.MetadataBytes > 64<<20 || budget.Rows == 0 || budget.Columns == 0 || budget.Columns > 65536 || budget.Partitions == 0 || budget.Partitions > 65536 {
 		return out, ErrLimit
 	}
-	r := metadataReader{ctx: ctx, source: source, size: size, budget: budget.MetadataBytes}
+	r := metadataReader{ctx: ctx, source: source, size: size, budget: budget.MetadataBytes, query: budget.Query}
 	magic, err := r.take(4)
 	if err != nil {
 		return Layout{}, err
@@ -140,6 +143,10 @@ func Inspect(ctx context.Context, source io.ReaderAt, size int64, budget Budget)
 	}
 	if storageBytes%24 != 0 || storageBytes/24 > totalColumns {
 		return Layout{}, ErrFormat
+	}
+	// Bound Go metadata structures before their backing arrays are allocated.
+	if err := budget.Query.Charge(resource.Cost{RetainedBytes: int64(partitionCount)*128 + int64(totalColumns)*16 + int64(storageBytes)*2, MetadataBytes: int64(partitionCount)*128 + int64(totalColumns)*16 + int64(storageBytes)*2, DecodeWork: int64(partitionCount) + int64(totalColumns)}); err != nil {
+		return Layout{}, err
 	}
 	out.Partitions = make([]Partition, 0, partitionCount)
 	var partitionRows uint64
@@ -245,6 +252,9 @@ func Inspect(ctx context.Context, source io.ReaderAt, size int64, budget Budget)
 			if err != nil {
 				return Layout{}, err
 			}
+			if err := budget.Query.Charge(resource.Cost{RetainedBytes: int64(count) * 64, MetadataBytes: int64(count) * 64}); err != nil {
+				return Layout{}, err
+			}
 			partition.EncryptedIDs = make([]uint32, count)
 			seen := make(map[uint32]bool, count)
 			for j := range partition.EncryptedIDs {
@@ -298,6 +308,7 @@ func Inspect(ctx context.Context, source io.ReaderAt, size int64, budget Budget)
 }
 
 type metadataReader struct {
+	query                *resource.Budget
 	ctx                  context.Context
 	source               io.ReaderAt
 	size, budget, offset int64
@@ -319,6 +330,9 @@ func (r *metadataReader) skip(n int64) error {
 func (r *metadataReader) take(n int64) ([]byte, error) {
 	start := r.offset
 	if err := r.skip(n); err != nil {
+		return nil, err
+	}
+	if err := r.query.Charge(resource.Cost{RetainedBytes: n, MetadataBytes: n, DecodeWork: (n + 65535) / 65536}); err != nil {
 		return nil, err
 	}
 	b := make([]byte, int(n))

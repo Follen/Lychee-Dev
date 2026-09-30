@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -21,10 +22,13 @@ var ErrDefinitionUnavailable = errors.New("records.definition_unavailable_offlin
 var ErrDefinitionIdentity = errors.New("records.definition_identity")
 
 type Definitions struct {
+	budget   *resource.Budget
 	store    *vault.Store
 	metadata *vault.Metadata
 	client   *http.Client
 }
+
+func (d *Definitions) WithBudget(b *resource.Budget) *Definitions { d.budget = b; return d }
 
 func OpenDefinitions(store *vault.Store, metadata *vault.Metadata) *Definitions {
 	return &Definitions{store: store, metadata: metadata, client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
@@ -94,6 +98,12 @@ func (d *Definitions) load(ctx context.Context, url string, offline bool, valida
 		if json.Unmarshal(doc.Value, &object) != nil || object.URL != url {
 			return vault.BlobRef{}, ErrDefinitionIdentity
 		}
+		if object.Blob.Bytes < 0 || object.Blob.Bytes > 4<<20 {
+			return vault.BlobRef{}, ErrMetadataLimit
+		}
+		if err := d.budget.Charge(resource.Cost{RetainedBytes: object.Blob.Bytes * 4, MetadataBytes: object.Blob.Bytes * 4, DecodeWork: (object.Blob.Bytes + 65535) / 65536}); err != nil {
+			return vault.BlobRef{}, err
+		}
 		raw, err := d.store.ReadBlob(ctx, object.Blob, 4<<20)
 		if err != nil {
 			return vault.BlobRef{}, err
@@ -114,6 +124,9 @@ func (d *Definitions) load(ctx context.Context, url string, offline bool, valida
 	if err != nil {
 		return vault.BlobRef{}, err
 	}
+	if err := d.budget.Charge(resource.Cost{NetworkRequests: 1}); err != nil {
+		return vault.BlobRef{}, err
+	}
 	response, err := d.client.Do(request)
 	if err != nil {
 		return vault.BlobRef{}, err
@@ -122,12 +135,24 @@ func (d *Definitions) load(ctx context.Context, url string, offline bool, valida
 	if response.StatusCode != http.StatusOK {
 		return vault.BlobRef{}, fmt.Errorf("records.definition_http: %d", response.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, (4<<20)+1))
+	// The bounded read buffer is reserved before allocation, even when HTTP
+	// omits Content-Length. Parsing is reserved separately before validation.
+	if err := d.budget.Charge(resource.Cost{RetainedBytes: 8 << 20, MetadataBytes: 8 << 20}); err != nil {
+		return vault.BlobRef{}, err
+	}
+	body := io.Reader(response.Body)
+	if d.budget != nil {
+		body = &definitionBudgetReader{source: response.Body, budget: d.budget}
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, (4<<20)+1))
 	if err != nil {
 		return vault.BlobRef{}, err
 	}
 	if len(raw) > 4<<20 {
 		return vault.BlobRef{}, ErrMetadataLimit
+	}
+	if err := d.budget.Charge(resource.Cost{RetainedBytes: int64(len(raw)) * 3, MetadataBytes: int64(len(raw)) * 3, DecodeWork: (int64(len(raw)) + 65535) / 65536}); err != nil {
+		return vault.BlobRef{}, err
 	}
 	if err := validate(raw); err != nil {
 		return vault.BlobRef{}, err
@@ -152,4 +177,21 @@ func (d *Definitions) load(ctx context.Context, url string, offline bool, valida
 		return other, nil
 	}
 	return ref, err
+}
+
+type definitionBudgetReader struct {
+	source io.Reader
+	budget *resource.Budget
+}
+
+func (r *definitionBudgetReader) Read(p []byte) (int, error) {
+	remaining := r.budget.RemainingNetworkBytes()
+	if int64(len(p)) > remaining+1 {
+		p = p[:remaining+1]
+	}
+	n, err := r.source.Read(p)
+	if charge := r.budget.Charge(resource.Cost{NetworkBytes: int64(n)}); charge != nil {
+		return n, charge
+	}
+	return n, err
 }

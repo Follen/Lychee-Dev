@@ -7,6 +7,7 @@ import (
 	"math"
 	"unicode/utf8"
 
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 )
 
@@ -17,9 +18,21 @@ type View struct {
 	selected   map[string]bool
 }
 
+// ReserveMetadata includes adapter-owned maps/slices in the prepared view's
+// query budget. Adapters call this before allocating their own structures.
+func (v *View) ReserveMetadata(bytes int64) error {
+	if v == nil || v.records == nil {
+		return ErrFormat
+	}
+	return v.records.budget.Charge(resource.Cost{RetainedBytes: bytes, MetadataBytes: bytes})
+}
+
 // WithProjection reduces materialized fields while retaining validation of all
 // fields and sparse padding. It never turns a corrupt unused field into success.
 func (v *View) WithProjection(names []string) (*View, error) {
+	if err := v.ReserveMetadata(int64(len(names)) * 128); err != nil {
+		return nil, err
+	}
 	selected := map[string]bool{}
 	for _, name := range names {
 		found := false
@@ -48,6 +61,9 @@ func (r *Records) Bind(ctx context.Context, doc *schema.Document, build string) 
 	}
 	definition, err := doc.Select(ctx, build, fmt.Sprintf("%08X", r.columns.layout.LayoutHash))
 	if err != nil {
+		return nil, err
+	}
+	if err := r.budget.Charge(resource.Cost{RetainedBytes: int64(len(definition.Fields)) * 192, MetadataBytes: int64(len(definition.Fields)) * 192}); err != nil {
 		return nil, err
 	}
 	view := &View{records: r, definition: definition}
@@ -122,6 +138,13 @@ func (v *View) Row(ctx context.Context, id uint32, textBytes int) (map[string]an
 	}
 	if textBytes <= 0 || textBytes > 1<<20 {
 		return nil, ErrLimit
+	}
+	var work int64 = 1
+	for _, f := range v.definition.Fields {
+		work += int64(f.Elements)
+	}
+	if err := v.records.budget.Charge(resource.Cost{DecodeWork: work}); err != nil {
+		return nil, err
 	}
 	row, err := v.records.Lookup(ctx, id)
 	if err != nil {

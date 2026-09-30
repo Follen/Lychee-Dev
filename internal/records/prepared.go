@@ -2,6 +2,7 @@ package records
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -12,9 +13,37 @@ import (
 	"github.com/follenfang/lycheedev/internal/selection"
 )
 
+type preparedSessionTable struct {
+	view    *table.View
+	reading TableReading
+}
+
 // PrepareTable authenticates once and returns an immutable in-memory table
 // plus its provenance. Repeated scans do not reopen CASC or resolve definitions.
 func (r *Reader) PrepareTable(ctx context.Context, pin selection.DataPin, q FileQuery, bundle DefinitionBundle) (*table.View, TableReading, error) {
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		return nil, TableReading{}, err
+	}
+	key := string(encoded)
+	if r.session != nil {
+		if cached, ok := r.session.views[key]; ok {
+			if err := r.session.prepare(ctx, r, pin, q); err != nil {
+				return nil, TableReading{}, err
+			}
+			content := cached.reading.File.Content
+			if cached.reading.File.PartialContent != nil {
+				content = *cached.reading.File.PartialContent
+			}
+			if q.FileDataID != bundle.Identity.DB2FileDataID || content.Bytes > q.ContentBytes {
+				return nil, TableReading{}, ErrMetadataLimit
+			}
+			return cached.view, cached.reading, nil
+		}
+		if len(r.session.views) >= 32 {
+			return nil, TableReading{}, table.ErrLimit
+		}
+	}
 	var prepared *table.View
 	reading, err := r.withTableView(ctx, pin, q, bundle, func(view *table.View, reading TableReading) (TableReading, error) {
 		prepared = view
@@ -22,6 +51,9 @@ func (r *Reader) PrepareTable(ctx context.Context, pin selection.DataPin, q File
 	})
 	if err != nil {
 		return nil, TableReading{}, err
+	}
+	if r.session != nil {
+		r.session.views[key] = preparedSessionTable{prepared, reading}
 	}
 	return prepared, reading, nil
 }
@@ -39,6 +71,22 @@ func TableSource(view *table.View, indexBytes int64) (relational.Source, error) 
 	var cells []cell
 	var columns []string
 	identity := ""
+	var count uint64
+	for _, field := range view.Definition().Fields {
+		if field.Array {
+			count += uint64(field.Elements)
+		} else {
+			count++
+		}
+		if count > 4096 {
+			return relational.Source{}, table.ErrLimit
+		}
+	}
+	if err := view.ReserveMetadata(int64(count) * 128); err != nil {
+		return relational.Source{}, err
+	}
+	cells = make([]cell, 0, int(count))
+	columns = make([]string, 0, int(count))
 	for _, field := range view.Definition().Fields {
 		if field.Identity {
 			identity = field.Name

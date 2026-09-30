@@ -68,45 +68,9 @@ func InspectCache(ctx context.Context, raw []byte, filter CacheFilter) (CachePag
 	if filter.Limit < 1 || filter.Limit > 200 || len(raw) > 512<<20 {
 		return CachePage{}, ErrCacheLimit
 	}
-	if len(raw) < 12 || string(raw[:4]) != "XFTH" {
-		return CachePage{}, ErrCacheFormat
-	}
-	u32 := binary.LittleEndian.Uint32
-	version, build := u32(raw[4:8]), u32(raw[8:12])
-	if version < 1 || version > 9 {
-		return CachePage{}, ErrCacheVersion
-	}
-	if build == 0 || build > 0x7fffffff || filter.Build != build {
-		return CachePage{}, ErrCacheBuild
-	}
-	start := 12
-	if version >= 5 {
-		start = 44
-	}
-	if len(raw) < start {
-		return CachePage{}, ErrCacheFormat
-	}
-	layout := version
-	if version == 8 && len(raw) > start {
-		// Both layouts were shipped under version 8. Check complete framing, not
-		// just the next magic (which can also occur inside a payload).
-		a := walkCache(ctx, raw, start, 8, nil)
-		b := walkCache(ctx, raw, start, 7, nil)
-		if err := ctx.Err(); err != nil {
-			return CachePage{}, err
-		}
-		if errors.Is(a, ErrCacheLimit) || errors.Is(b, ErrCacheLimit) {
-			return CachePage{}, ErrCacheLimit
-		}
-		if a == nil && b == nil {
-			return CachePage{}, fmt.Errorf("%w: ambiguous version 8 layout", ErrCacheFormat)
-		}
-		if a != nil && b != nil {
-			return CachePage{}, ErrCacheFormat
-		}
-		if a != nil {
-			layout = 7
-		}
+	version, layout, start, err := cacheLayout(ctx, raw, filter.Build)
+	if err != nil {
+		return CachePage{}, err
 	}
 	if filter.Region != nil && layout < 9 {
 		return CachePage{}, fmt.Errorf("%w: record layout %d carries no region", ErrHotfixFilter, layout)
@@ -135,17 +99,15 @@ func InspectCache(ctx context.Context, raw []byte, filter CacheFilter) (CachePag
 		page.SelectedPush = &latestPush
 	}
 	payloadBytes := 0
-	err := walkCache(ctx, raw, start, layout, func(entry CacheEntry) error {
+	err = walkCache(ctx, raw, start, layout, func(entry CacheEntry) error {
 		if !filter.Latest {
 			page.Scanned++
 		}
 		if !cacheEntryMatches(filter, entry) {
 			return nil
 		}
-		if filter.Latest {
-			if entry.Push != latestPush {
-				return nil
-			}
+		if filter.Latest && entry.Push != latestPush {
+			return nil
 		}
 		page.Matched++
 		if filter.AfterIndex != nil && entry.Index <= *filter.AfterIndex {
@@ -172,6 +134,52 @@ func InspectCache(ctx context.Context, raw []byte, filter CacheFilter) (CachePag
 	}
 	page.Complete = filter.AfterIndex == nil && !page.Truncated
 	return page, nil
+}
+
+// Shared framing selection never materializes payload hex. Effective queries
+// build one capture directory rather than abusing a paged physical query.
+func cacheLayout(ctx context.Context, raw []byte, expectedBuild uint32) (version, layout uint32, start int, err error) {
+	if len(raw) < 12 || string(raw[:4]) != "XFTH" {
+		return 0, 0, 0, ErrCacheFormat
+	}
+	u32 := binary.LittleEndian.Uint32
+	version, build := u32(raw[4:8]), u32(raw[8:12])
+	if version < 1 || version > 9 {
+		return 0, 0, 0, ErrCacheVersion
+	}
+	if build == 0 || build > 0x7fffffff || expectedBuild != build {
+		return 0, 0, 0, ErrCacheBuild
+	}
+	start = 12
+	if version >= 5 {
+		start = 44
+	}
+	if len(raw) < start {
+		return 0, 0, 0, ErrCacheFormat
+	}
+	layout = version
+	if version == 8 && len(raw) > start {
+		// Both layouts were shipped under version 8. Check complete framing, not
+		// just the next magic (which can also occur inside a payload).
+		a := walkCache(ctx, raw, start, 8, nil)
+		b := walkCache(ctx, raw, start, 7, nil)
+		if err := ctx.Err(); err != nil {
+			return 0, 0, 0, err
+		}
+		if errors.Is(a, ErrCacheLimit) || errors.Is(b, ErrCacheLimit) {
+			return 0, 0, 0, ErrCacheLimit
+		}
+		if a == nil && b == nil {
+			return 0, 0, 0, fmt.Errorf("%w: ambiguous version 8 layout", ErrCacheFormat)
+		}
+		if a != nil && b != nil {
+			return 0, 0, 0, ErrCacheFormat
+		}
+		if a != nil {
+			layout = 7
+		}
+	}
+	return version, layout, start, nil
 }
 
 // cacheEntryMatches applies the shared physical filters. A nil filter field

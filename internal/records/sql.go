@@ -9,6 +9,7 @@ import (
 	"errors"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/records/relational"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"strings"
@@ -21,6 +22,7 @@ type DataQuery struct {
 	Parameters map[string]any `json:"parameters,omitempty"`
 }
 type QueryResult struct {
+	Resources        resource.Usage    `json:"resources"`
 	EffectiveSources []EffectiveTable  `json:"effectiveSources,omitempty"`
 	Timings          QueryTimings      `json:"timings"`
 	SemanticSources  []SemanticBundle  `json:"semanticSources,omitempty"`
@@ -94,8 +96,25 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		if _, _, err := selection.DataIdentity(*pin.Data); err != nil {
 			return QueryReading{}, err
 		}
-		definitions := OpenDefinitions(store, metadata)
-		reader := OpenReader(store)
+		files = ensureQueryBudget(files)
+		admission, err := store.AcquireDataResources(ctx, vault.DataOrdinary)
+		if err != nil {
+			return QueryReading{}, err
+		}
+		defer admission.Close()
+		files.admitted = true
+		// Reserve the executor's independently enforced memory limit inside
+		// the whole-query retained budget before any source is prepared.
+		if err := files.budget.Charge(resource.Cost{RetainedBytes: 64 << 20}); err != nil {
+			return QueryReading{}, err
+		}
+		definitions := OpenDefinitions(store, metadata).WithBudget(files.budget)
+		reader, err := OpenReader(store).NewSession(ctx, *pin.Data, files)
+		if err != nil {
+			return QueryReading{}, err
+		}
+		defer reader.Close()
+		files = reader.Query()
 		reading := QueryResult{Query: request, Sources: []TableReading{}, Complete: true}
 		remaining := int64(512 << 20)
 		resolve := func(ctx context.Context, use relational.TableUse) (relational.Source, error) {
@@ -141,7 +160,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			}
 			if effective {
 				var overlay EffectiveTable
-				source, overlay, err = effectiveSource(ctx, store, metadata, *pin.Data, source, view.Definition(), bundle, request.Hotfix)
+				source, overlay, err = reader.EffectiveSource(ctx, store, metadata, *pin.Data, source, view.Definition(), bundle, request.Hotfix)
 				if err != nil {
 					return relational.Source{}, err
 				}
@@ -156,6 +175,10 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		if err != nil {
 			return QueryReading{}, err
 		}
+		if err := reader.CheckSource(ctx); err != nil {
+			return QueryReading{}, err
+		}
+		reading.Resources = files.budget.Snapshot()
 		raw, err := json.Marshal(reading)
 		if err != nil {
 			return QueryReading{}, err

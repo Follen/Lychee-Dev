@@ -40,6 +40,7 @@ The complete set of third-party Go modules compiled into the shipped
 
 | Module | Version | License | Used for |
 | --- | --- | --- | --- |
+| github.com/Microsoft/go-winio | v0.6.2 | MIT | Windows named pipe transport for the opt-in LuaLS broker |
 | github.com/HugoSmits86/nativewebp | v1.3.0 | MIT | lossless WebP encode/decode in `internal/records/image_export.go` |
 | github.com/makiuchi-d/gozxing | v0.1.1 | MIT + Apache-2.0 (upstream ZXing core) | QR decode/encode in `internal/desktop/symbols.go` and tests |
 | github.com/yuin/gopher-lua | v1.1.1 | MIT | Lua 5.1 parse/AST in `internal/codebase/{lua,descriptors}.go` |

@@ -18,6 +18,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/records/container"
 	"github.com/follenfang/lycheedev/internal/records/relational"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/records/table"
 	"github.com/follenfang/lycheedev/internal/selection"
@@ -115,6 +116,7 @@ type TableProvenance struct {
 // every table it read, every relation it derived, and whether the answer is
 // complete, truncated or partially covered.
 type DataContext struct {
+	Resources        resource.Usage    `json:"resources"`
 	Snapshot         string            `json:"snapshot"`
 	Pin              selection.DataPin `json:"pin"`
 	Source           string            `json:"source"`
@@ -189,10 +191,16 @@ func openNavigator(ctx context.Context, store *vault.Store, metadata *vault.Meta
 	if _, _, err := selection.DataIdentity(*pin.Data); err != nil {
 		return nil, err
 	}
+	query = ensureQueryBudget(query)
+	reader, err := OpenReader(store).NewSession(ctx, *pin.Data, query)
+	if err != nil {
+		return nil, err
+	}
+	query = reader.Query()
 	return &navigator{
 		store: store, metadata: metadata,
-		definitions: OpenDefinitions(store, metadata),
-		reader:      OpenReader(store),
+		definitions: OpenDefinitions(store, metadata).WithBudget(query.budget),
+		reader:      reader,
 		pin:         *pin.Data, snapshot: snapshot, query: query,
 		opened: map[string]*preparedTable{},
 	}, nil
@@ -214,6 +222,10 @@ func (n *navigator) open(ctx context.Context, name string) (*preparedTable, erro
 	}
 	query := n.query
 	query.FileDataID = bundle.Identity.DB2FileDataID
+	query.ContentBytes = min(query.ContentBytes, query.budget.RemainingRetained())
+	if query.ContentBytes <= 0 {
+		return nil, ErrQueryResourceBudget
+	}
 	view, reading, err := n.reader.PrepareTable(ctx, n.pin, query, bundle)
 	if err != nil {
 		return nil, err
@@ -295,7 +307,8 @@ func (n *navigator) resultContext() DataContext {
 	}
 	partial := append([]string(nil), n.partial...)
 	return DataContext{
-		Snapshot: n.snapshot, Pin: n.pin, Source: n.source,
+		Resources: n.query.budget.Snapshot(),
+		Snapshot:  n.snapshot, Pin: n.pin, Source: n.source,
 		Tables: tables, Relations: relations,
 		Complete:  !n.truncated && len(partial) == 0,
 		Truncated: n.truncated, TruncationReason: reason,
@@ -325,6 +338,9 @@ func (n *navigator) walkRows(ctx context.Context, t *preparedTable, limit int, m
 			return errWalkStop
 		}
 		collected++
+		if err := n.query.budget.Charge(resource.Cost{RetainedBytes: retainedRowEstimate(row)}); err != nil {
+			return err
+		}
 		return keep(id, row)
 	})
 	if err != nil && !errors.Is(err, errWalkStop) {
@@ -351,6 +367,9 @@ func (n *navigator) rowByID(ctx context.Context, t *preparedTable, id uint32) (m
 	if err != nil {
 		return nil, false, err
 	}
+	if err := n.query.budget.Charge(resource.Cost{RetainedBytes: retainedRowEstimate(row)}); err != nil {
+		return nil, false, err
+	}
 	return row, true, nil
 }
 
@@ -375,6 +394,9 @@ func (n *navigator) rowsByField(ctx context.Context, t *preparedTable, field str
 
 // commitCapture archives one result as evidence with its fixed locator.
 func (n *navigator) commitCapture(ctx context.Context, kind, locator string, result any, complete, truncated bool) (evidence.CaptureRef, error) {
+	if err := n.reader.CheckSource(ctx); err != nil {
+		return evidence.CaptureRef{}, err
+	}
 	raw, err := marshalBounded(result, captureBytes)
 	if err != nil {
 		return evidence.CaptureRef{}, err

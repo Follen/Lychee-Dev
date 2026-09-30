@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 // Columns compiles immutable per-column auxiliary storage. Values are raw bits;
@@ -25,6 +27,9 @@ type columnProgram struct {
 func OpenColumns(ctx context.Context, source io.ReaderAt, size int64, budget Budget) (*Columns, error) {
 	layout, err := Inspect(ctx, source, size, budget)
 	if err != nil {
+		return nil, err
+	}
+	if err := budget.Query.Charge(resource.Cost{RetainedBytes: int64(len(layout.Fields)) * 96, MetadataBytes: int64(len(layout.Fields)) * 96}); err != nil {
 		return nil, err
 	}
 	result := &Columns{layout: layout, programs: make([]columnProgram, len(layout.Fields))}
@@ -48,6 +53,15 @@ func OpenColumns(ctx context.Context, source io.ReaderAt, size int64, budget Bud
 			}
 			result.programs[i] = program
 			continue
+		}
+		// Common maps are deliberately estimated above payload bytes: Go map
+		// buckets and entries cost substantially more than eight-byte pairs.
+		allocation := int64(s.ExtraBytes) * 2
+		if s.Codec == 2 {
+			allocation = int64(s.ExtraBytes) * 9
+		}
+		if err := budget.Query.Charge(resource.Cost{RetainedBytes: allocation, MetadataBytes: allocation, DecodeWork: int64(s.ExtraBytes) / 4}); err != nil {
+			return nil, err
 		}
 		raw := make([]byte, int(s.ExtraBytes))
 		n, err := source.ReadAt(raw, offset)

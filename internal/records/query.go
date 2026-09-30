@@ -7,9 +7,11 @@ import (
 	"fmt"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/records/table"
 	"github.com/follenfang/lycheedev/internal/selection"
+	"github.com/follenfang/lycheedev/internal/vault"
 )
 
 type TableReading struct {
@@ -71,17 +73,48 @@ func (r *Reader) readSelection(ctx context.Context, pin selection.DataPin, q Fil
 }
 
 func (r *Reader) withTableView(ctx context.Context, pin selection.DataPin, q FileQuery, bundle DefinitionBundle, consume func(*table.View, TableReading) (TableReading, error)) (TableReading, error) {
+	if r != nil && r.session != nil {
+		if err := r.session.validate(pin, q); err != nil {
+			return TableReading{}, err
+		}
+		q.budget = r.session.query.budget
+	}
+	q = ensureQueryBudget(q)
 	if err := ctx.Err(); err != nil {
 		return TableReading{}, err
 	}
 	if _, _, err := selection.DataIdentity(pin); err != nil {
 		return TableReading{}, err
 	}
-	if r.store == nil || bundle.Commit != pin.DefinitionCommit {
+	if r == nil || r.store == nil || bundle.Commit != pin.DefinitionCommit {
 		return TableReading{}, ErrDefinitionIdentity
 	}
 	if bundle.Identity.DB2FileDataID == 0 {
 		return TableReading{}, ErrContentMissing
+	}
+	if !q.admitted {
+		admission, err := r.store.AcquireDataResources(ctx, vault.DataOrdinary)
+		if err != nil {
+			return TableReading{}, err
+		}
+		defer admission.Close()
+		q.admitted = true
+	}
+	if r.session == nil {
+		owned, err := r.NewSession(ctx, pin, q)
+		if err != nil {
+			return TableReading{}, err
+		}
+		defer owned.Close()
+		result, err := owned.withTableView(ctx, pin, owned.Query(), bundle, consume)
+		if err == nil {
+			err = owned.CheckSource(ctx)
+		}
+		return result, err
+	}
+	metadataSize := bundle.Manifest.Bytes + bundle.Definition.Bytes
+	if err := q.budget.Charge(resource.Cost{RetainedBytes: metadataSize * 4, MetadataBytes: metadataSize * 4}); err != nil {
+		return TableReading{}, err
 	}
 	rawManifest, err := r.store.ReadBlob(ctx, bundle.Manifest, 4<<20)
 	if err != nil {
@@ -114,11 +147,11 @@ func (r *Reader) withTableView(ctx context.Context, pin selection.DataPin, q Fil
 	if file.PartialContent != nil {
 		content = *file.PartialContent
 	}
-	raw, err := r.store.ReadBlob(ctx, content, q.ContentBytes)
+	raw, err := r.readVerifiedBlob(ctx, content, q.ContentBytes)
 	if err != nil {
 		return TableReading{}, err
 	}
-	budget := table.Budget{FileBytes: q.ContentBytes, MetadataBytes: 64 << 20, Rows: 1000000, Columns: 4096, Partitions: 4096}
+	budget := table.Budget{Query: q.budget, FileBytes: q.ContentBytes, MetadataBytes: 64 << 20, Rows: 1000000, Columns: 4096, Partitions: 4096}
 	source := availableReader{ReaderAt: bytes.NewReader(raw), missing: file.Missing}
 	layout, err := table.Inspect(ctx, source, int64(len(raw)), budget)
 	if err != nil {

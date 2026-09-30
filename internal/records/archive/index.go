@@ -7,10 +7,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 )
 
 var (
@@ -34,6 +36,10 @@ type Span struct {
 // The caller selects an explicit index generation/bucket; no old-cache discovery
 // or nondeterministic first-match selection occurs here. Other layouts fail.
 func FindIndexSpans(ctx context.Context, source io.Reader, size int64, key [16]byte, bucket byte) ([]Span, error) {
+	return scanIndex(ctx, source, size, key, bucket, false)
+}
+
+func scanIndex(ctx context.Context, source io.Reader, size int64, key [16]byte, bucket byte, validateOnly bool) ([]Span, error) {
 	if source == nil || size < 40 || bucket > 15 {
 		return nil, ErrIndexFormat
 	}
@@ -94,7 +100,7 @@ func FindIndexSpans(ctx context.Context, source io.Reader, size int64, key [16]b
 		copy(previous[:], entry[:9])
 		primary, secondary = guardSum(entry[:], primary, secondary)
 		alternate, _ = guardSum(entry[:], alternate, 0)
-		if !bytes.Equal(entry[:9], key[:9]) {
+		if validateOnly || !bytes.Equal(entry[:9], key[:9]) {
 			continue
 		}
 		location := uint64(entry[9])<<32 | uint64(binary.BigEndian.Uint32(entry[10:14]))
@@ -118,5 +124,72 @@ func FindIndexSpans(ctx context.Context, source io.Reader, size int64, key [16]b
 	}
 	return result, nil
 }
+
+// Index owns a compact immutable copy of one fully authenticated local index.
+// It retains the on-disk 18-byte entries, avoiding one Go map entry per key.
+// All guards and sorted order are checked before any binary lookup is possible.
+type Index struct {
+	raw         []byte
+	segmentBits byte
+	length      int
+}
+
+func OpenIndex(ctx context.Context, source io.Reader, size int64, bucket byte) (*Index, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if source == nil || size < 40 || bucket > 15 {
+		return nil, ErrIndexFormat
+	}
+	if size > 64<<20 {
+		return nil, ErrIndexLimit
+	}
+	raw := make([]byte, int(size))
+	for offset := 0; offset < len(raw); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		end := min(offset+64<<10, len(raw))
+		if _, err := io.ReadFull(source, raw[offset:end]); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, ErrIndexFormat
+			}
+			return nil, err
+		}
+		offset = end
+	}
+	if _, err := scanIndex(ctx, bytes.NewReader(raw), size, [16]byte{}, bucket, true); err != nil {
+		return nil, err
+	}
+	return &Index{raw: raw, segmentBits: raw[15], length: int(binary.LittleEndian.Uint32(raw[32:36])) / 18}, nil
+}
+
+func (i *Index) Find(ctx context.Context, key [16]byte) ([]Span, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	at := sort.Search(i.length, func(n int) bool { return bytes.Compare(i.raw[40+n*18:49+n*18], key[:9]) >= 0 })
+	result := make([]Span, 0)
+	for ; at < i.length; at++ {
+		e := i.raw[40+at*18 : 58+at*18]
+		if !bytes.Equal(e[:9], key[:9]) {
+			break
+		}
+		location := uint64(e[9])<<32 | uint64(binary.BigEndian.Uint32(e[10:14]))
+		archive := location >> i.segmentBits
+		offset := location & ((uint64(1) << i.segmentBits) - 1)
+		stored := uint64(binary.LittleEndian.Uint32(e[14:]))
+		if archive > 4095 || stored < 38 || stored > (uint64(1)<<i.segmentBits)-offset {
+			return nil, ErrIndexFormat
+		}
+		if len(result) == 64 {
+			return nil, ErrIndexLimit
+		}
+		result = append(result, Span{Archive: uint16(archive), Offset: int64(offset), Bytes: int64(stored)})
+	}
+	return result, nil
+}
+
+func (i *Index) SHA256() [sha256.Size]byte { return sha256.Sum256(i.raw) }
 
 func (s Span) Filename() string { return fmt.Sprintf("data.%03d", s.Archive) }

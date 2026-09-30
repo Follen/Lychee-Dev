@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -13,10 +14,13 @@ import (
 // CDN distribution. It owns its network/metadata handles and closes them with
 // done; content extraction and evidence stay with the shared reader chain.
 type fileSource struct {
-	meta BuildMetadata
-	root string // resolved installation root; empty for CDN sources
-	open func(context.Context, string, int64) (encodedObject, error)
-	done func()
+	meta     BuildMetadata
+	root     string // resolved installation root; empty for CDN sources
+	open     func(context.Context, string, int64) (encodedObject, error)
+	done     func()
+	check    func(context.Context) error
+	verify   func(context.Context) error
+	setStats func(*DecodedCacheStats)
 }
 
 // prepareFileSource resolves the selected source against the immutable pin and
@@ -35,11 +39,13 @@ func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.Da
 	}
 	src := fileSource{done: func() {}}
 	if q.CDN {
-		remote, meta, err := prepareCDNFiles(ctx, store, pin, q.Offline)
+		remote, meta, err := prepareCDNFiles(ctx, store, pin, q.Offline, q.budget)
 		if err != nil {
 			return fileSource{}, err
 		}
 		src.meta, src.open = meta, remote.open
+		remote.stats = q.cacheStats
+		src.setStats = func(stats *DecodedCacheStats) { remote.stats = stats }
 		src.done = func() { _ = remote.metadata.Close() }
 	} else {
 		installation, err := dataInstallationRoot(ctx, q.Installation, product, pin.FullBuild)
@@ -50,10 +56,18 @@ func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.Da
 		if err != nil {
 			return fileSource{}, err
 		}
-		src.meta, src.root = meta, installation
-		src.open = func(ctx context.Context, key string, size int64) (encodedObject, error) {
-			return OpenLocalObject(ctx, installation, key, size)
+		if meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
+			return fileSource{}, ErrPinnedBuildChanged
 		}
+		if meta.EncodingBytes > q.MetadataBytes || meta.ContentBytes > q.MetadataBytes {
+			return fileSource{}, ErrMetadataLimit
+		}
+		local, err := openLocalSession(ctx, installation, q.budget)
+		if err != nil {
+			return fileSource{}, err
+		}
+		src.meta, src.root = meta, installation
+		src.open, src.check, src.verify, src.done = local.open, local.check, local.verify, local.close
 	}
 	if src.meta.Installed.BuildConfig != pin.BuildConfig || src.meta.Installed.CDNConfig != pin.CDNConfig {
 		src.done()
@@ -69,11 +83,14 @@ func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.Da
 // encodingIndex authenticates and opens the CKey page directory of the
 // source's Encoding file. The returned function releases the encoded object.
 func (s fileSource) encodingIndex(ctx context.Context, q FileQuery) (*EncodingIndex, func(), error) {
+	if err := q.budget.Charge(resource.Cost{MetadataBytes: s.meta.ContentBytes, RetainedBytes: s.meta.ContentBytes}); err != nil {
+		return nil, nil, err
+	}
 	encoded, err := s.open(ctx, s.meta.EncodingKey, s.meta.EncodingBytes)
 	if err != nil {
 		return nil, nil, err
 	}
-	ranges, err := container.OpenRanges(ctx, encoded, s.meta.EncodingBytes, readLimits(s.meta.EncodingBytes, s.meta.ContentBytes), q.Keys)
+	ranges, err := container.OpenRanges(ctx, encoded, s.meta.EncodingBytes, readLimits(s.meta.EncodingBytes, s.meta.ContentBytes, q.budget), q.Keys)
 	if err != nil {
 		_ = encoded.Close()
 		return nil, nil, err
@@ -87,5 +104,6 @@ func (s fileSource) encodingIndex(ctx context.Context, q FileQuery) (*EncodingIn
 		_ = encoded.Close()
 		return nil, nil, err
 	}
+	index.enableSessionCache()
 	return index, func() { _ = encoded.Close() }, nil
 }
