@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -16,15 +17,154 @@ import (
 // This is invocation accounting. Resume opens a new Native and a new physical
 // budget; its authoritative durable goal deadline is never extended here.
 type ObservationMetrics struct {
-	Scope          string             `json:"scope"`
-	PID            uint32             `json:"pid"`
-	ProcessCreated uint64             `json:"processCreated,string"`
-	Runtime        string             `json:"runtime,omitempty"`
-	DeadlineMS     int64              `json:"deadlineMS,omitempty"`
-	Lookups        int                `json:"lookups"`
-	StageTruncated bool               `json:"stageTruncated"`
-	Total          memory.Stats       `json:"total"`
-	Stages         []ObservationStage `json:"stages"`
+	Scope           string                    `json:"scope"`
+	PID             uint32                    `json:"pid"`
+	ProcessCreated  uint64                    `json:"processCreated,string"`
+	Runtime         string                    `json:"runtime,omitempty"`
+	DeadlineMS      int64                     `json:"deadlineMS,omitempty"`
+	Lookups         int                       `json:"lookups"`
+	StageTruncated  bool                      `json:"stageTruncated"`
+	Total           memory.Stats              `json:"total"`
+	Stages          []ObservationStage        `json:"stages"`
+	InputPredicates InputPredicateDiagnostics `json:"inputPredicates"`
+}
+
+// Counts cover this invocation. Ages summarize its latest input observation,
+// using the same uptime clock as the validator; nil means no qualified sample.
+// No payload, actor, address or absolute sample time is retained here.
+type InputPredicateDiagnostics struct {
+	Observations           uint64 `json:"observations"`
+	PredicateCalls         uint64 `json:"predicateCalls"`
+	Fresh                  uint64 `json:"fresh"`
+	Stale                  uint64 `json:"stale"`
+	StaleAge               uint64 `json:"staleAge"`
+	StaleAfterInput        uint64 `json:"staleAfterInput"`
+	TargetChanged          uint64 `json:"targetChanged"`
+	RuntimeMismatch        uint64 `json:"runtimeMismatch"`
+	OwnerMismatch          uint64 `json:"ownerMismatch"`
+	FenceMismatch          uint64 `json:"fenceMismatch"`
+	SlotMismatch           uint64 `json:"slotMismatch"`
+	ActorMismatch          uint64 `json:"actorMismatch"`
+	BuildMismatch          uint64 `json:"buildMismatch"`
+	ClockInvalid           uint64 `json:"clockInvalid"`
+	StructInvalid          uint64 `json:"structInvalid"`
+	FinishFresh            uint64 `json:"finishFresh"`
+	FinishStale            uint64 `json:"finishStale"`
+	NewestSampleAgeMillis  *int64 `json:"newestSampleAgeMillis"`
+	ScanEndSampleAgeMillis *int64 `json:"scanEndSampleAgeMillis"`
+}
+
+type inputPredicateCollector struct {
+	mu          sync.Mutex
+	diagnostics InputPredicateDiagnostics
+	newest      int64
+	haveSample  bool
+}
+
+func (c *inputPredicateCollector) candidate(s InputObservation, err error, e bridge.SlotEnvelope, after, now int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	d := &c.diagnostics
+	d.PredicateCalls++
+	switch {
+	case err == nil:
+		d.Fresh++
+	case errors.Is(err, errInputStateStale):
+		d.Stale++
+		if s.SampleMillis < now-500 {
+			d.StaleAge++
+		}
+		if s.SampleMillis < after+100 {
+			d.StaleAfterInput++
+		}
+	case err.Error() == "live.channel_input_target_changed":
+		d.TargetChanged++
+		if s.Runtime != e.Runtime {
+			d.RuntimeMismatch++
+		}
+		if s.Owner != e.Owner && !(e.Action == "bind" && s.Owner == "") {
+			d.OwnerMismatch++
+		}
+		if s.Owner != "" && s.Fence != e.Fence {
+			d.FenceMismatch++
+		}
+		if e.Action != "reload" && s.NextSlot != slotStart(e) {
+			d.SlotMismatch++
+		}
+		if s.GUID != e.GUID {
+			d.ActorMismatch++
+		}
+		if s.Build != e.Build {
+			d.BuildMismatch++
+		}
+		return
+	case err.Error() == "live.channel_input_clock_invalid":
+		d.ClockInvalid++
+		return
+	default:
+		d.StructInvalid++
+		return
+	}
+	// Both success and stale reach this point only after format, identity and
+	// clock validation. Target/clock/structure failures never contribute ages.
+	if !c.haveSample || s.SampleMillis > c.newest {
+		c.newest, c.haveSample = s.SampleMillis, true
+		age := now - s.SampleMillis
+		d.NewestSampleAgeMillis = &age
+	}
+}
+
+func (c *inputPredicateCollector) scanEnd(now int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.haveSample {
+		age := now - c.newest
+		c.diagnostics.ScanEndSampleAgeMillis = &age
+	}
+}
+
+func (c *inputPredicateCollector) finish(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err == nil {
+		c.diagnostics.FinishFresh++
+	}
+	if errors.Is(err, ErrInputObservationStale) {
+		c.diagnostics.FinishStale++
+	}
+}
+
+func (n *Native) recordInputPredicates(c *inputPredicateCollector) {
+	c.mu.Lock()
+	delta := c.diagnostics
+	c.mu.Unlock()
+	o := n.observation
+	o.inputMu.Lock()
+	defer o.inputMu.Unlock()
+	d := &o.inputPredicates
+	d.Observations++
+	d.PredicateCalls += delta.PredicateCalls
+	d.Fresh += delta.Fresh
+	d.Stale += delta.Stale
+	d.StaleAge += delta.StaleAge
+	d.StaleAfterInput += delta.StaleAfterInput
+	d.TargetChanged += delta.TargetChanged
+	d.RuntimeMismatch += delta.RuntimeMismatch
+	d.OwnerMismatch += delta.OwnerMismatch
+	d.FenceMismatch += delta.FenceMismatch
+	d.SlotMismatch += delta.SlotMismatch
+	d.ActorMismatch += delta.ActorMismatch
+	d.BuildMismatch += delta.BuildMismatch
+	d.ClockInvalid += delta.ClockInvalid
+	d.StructInvalid += delta.StructInvalid
+	d.FinishFresh += delta.FinishFresh
+	d.FinishStale += delta.FinishStale
+	// A deferred cadence tick performs no predicate work and must not erase the
+	// last actual lookup's bounded age summary.
+	if delta.PredicateCalls > 0 {
+		d.NewestSampleAgeMillis = delta.NewestSampleAgeMillis
+		d.ScanEndSampleAgeMillis = delta.ScanEndSampleAgeMillis
+	}
 }
 
 type ObservationStage struct {
@@ -37,15 +177,17 @@ type ObservationStage struct {
 }
 
 type nativeObservation struct {
-	session        *memory.Session
-	pid            uint32
-	created        uint64
-	image          string
-	runtime        string
-	deadline       time.Time
-	lookups        int
-	stages         []ObservationStage
-	stageTruncated bool
+	inputMu         sync.Mutex
+	inputPredicates InputPredicateDiagnostics
+	session         *memory.Session
+	pid             uint32
+	created         uint64
+	image           string
+	runtime         string
+	deadline        time.Time
+	lookups         int
+	stages          []ObservationStage
+	stageTruncated  bool
 }
 
 const observationStageLimit = 32
@@ -209,6 +351,9 @@ func (n *Native) observationMetrics() *ObservationMetrics {
 	}
 	stages = append(stages, ObservationStage{Path: residual, Stats: total.Delta(lookupStats)})
 	metrics := &ObservationMetrics{Scope: "invocation", PID: o.pid, ProcessCreated: o.created, Runtime: o.runtime, Lookups: o.lookups, StageTruncated: o.stageTruncated, Total: total, Stages: stages}
+	o.inputMu.Lock()
+	metrics.InputPredicates = o.inputPredicates
+	o.inputMu.Unlock()
 	if !o.deadline.IsZero() {
 		metrics.DeadlineMS = o.deadline.UnixMilli()
 	}

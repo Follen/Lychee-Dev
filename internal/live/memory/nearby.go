@@ -37,6 +37,27 @@ func FindNearbySeeded(ctx context.Context, src Source, selector Selector, seeds 
 	return findNearby(ctx, src, selector, nil, seeds, session, false)
 }
 
+// FindNearbyInputSeeded refreshes small INPUT records near call-local positions
+// observed during a completed traversal of full discovery, which may retain
+// unrelated unreadable gaps. It never learns, retains hints or repairs gaps.
+// Positions schedule reads only; exact matching and Accept remain mandatory.
+func FindNearbyInputSeeded(ctx context.Context, src Source, selector Selector, seeds []Hint, session *Session) (LookupResult, error) {
+	zero := [16]byte{}
+	if selector.Kind != bridge.MemoryInputState || selector.Accept == nil || selector.BodyAuthorized || selector.Runtime == zero || selector.Nonce != selector.Runtime || selector.Ticket != zero {
+		return LookupResult{Path: "nearby_scan", Fallback: "nearby_ineligible", Coverage: Coverage{Truncated: true}}, nil
+	}
+	eligible := make([]Hint, 0, min(len(seeds), 64))
+	for i, seed := range seeds {
+		if i >= 64 {
+			break
+		}
+		if selector.matches(seed.Header) {
+			eligible = append(eligible, seed)
+		}
+	}
+	return findNearby(ctx, src, selector, nil, eligible, session, false)
+}
+
 func findNearby(ctx context.Context, src Source, selector Selector, hints *Hints, seeds []Hint, session *Session, exact bool) (out LookupResult, err error) {
 	src, session = measured(src, session)
 	before := session.Stats()
@@ -60,6 +81,14 @@ func findNearby(ctx context.Context, src Source, selector Selector, hints *Hints
 	readCtx, stop := context.WithCancel(bounded)
 	defer stop()
 	readCtx = localContext(readCtx, ctx)
+	// A native final Verify may return only after the local deadline. Observe
+	// that expiry before our own cancellation defers, including this path in
+	// the shared diagnostic delta without marking successful lookups stopped.
+	defer func() {
+		if readCtx.Err() != nil {
+			_ = session.cancelled(readCtx)
+		}
+	}()
 	local := &nearbySource{Source: src, cancel: stop}
 	if err = src.Verify(readCtx); err != nil {
 		return out, err

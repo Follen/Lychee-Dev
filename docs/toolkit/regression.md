@@ -13,7 +13,13 @@ reload 后请求通过；关闭 hints 的两项在 confirm_ready 超时，整体
 可选 30 秒关闭检查不得污染外层截止；光学 waiting 有一次固定 2 秒机会且到期必回退。
 最新冻结全量离线基线通过。第二轮 5 条普通及 3 条 cache-off 请求直接通过；
 第 4 条已有 verified 结果、cleanup pending，恢复后 WGC 确认客户端掉线。
-当前原连接与槽位保留，等待重新登录后清理及其余实测；不沿用第一轮的已恢复状态。
+重新登录确认旧进程结束后，原连接以 process_absent 证据关闭，原版恢复另行验证完成。
+第三轮 `3a20899` 的 5 条普通请求与首条 cache-off 请求直接通过；次条准备等待超时，
+保留原 operation 并用 hints 完成恢复。计数诊断确认最新合法样本在 callback 已过期，
+扫描结束时更旧；未修改输入门槛。随后大结果、只读重试、reload、换代后普通请求、
+断开及重复断开通过。同次扫描后有界补查新增两个真实 Source RED/GREEN、语义 predicate
+必需、种子资格/10s 调度寿命、局部最后 Verify 超时拒绝、不保留地址及不续期预算回归。
+修复版普通 cache-off、大结果 cache-off 与 cache-off 断开直接通过；完整 runner 复验待完成。
 详见组合记录；这些 agent 自动实测不代替完整客户端矩阵或 owner 人工验收。
 
 2026-09-29 [CASC 内容变体](content-variants-2026-09-29.md)新增：默认歧义、显式双变体、

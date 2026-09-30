@@ -10,11 +10,42 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 	"golang.org/x/sys/windows"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 var inputUptime = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount64")
+
+// A seed can age through the full scan, but schedules at most one local refresh.
+// Ten seconds bounds that position's lifetime while covering the measured 5–6s
+// full discoveries plus a sample initially at most 1.5s old. Input still needs
+// an independently read sample within the unchanged 500ms authorization window.
+const inputSeedMaxAgeMillis int64 = 10000
+
+type inputRefreshSeed struct {
+	mu     sync.Mutex
+	hint   memory.Hint
+	millis int64
+	have   bool
+}
+
+func (s *inputRefreshSeed) candidate(r memory.Record, sample, now int64) {
+	if sample < now-inputRecentHintMillis || sample > now {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.have || sample > s.millis {
+		s.hint, s.millis, s.have = memory.Hint{Address: r.Address, Header: r.Header}, sample, true
+	}
+}
+
+func (s *inputRefreshSeed) current(now int64) (memory.Hint, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hint, s.have && s.millis <= now && now-s.millis <= inputSeedMaxAgeMillis
+}
 
 func uptimeMillis() int64 { n, _, _ := inputUptime.Call(); return int64(n) }
 
@@ -39,6 +70,8 @@ func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after 
 
 func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
 	n.observationRuntime(e.Runtime)
+	var diagnostics inputPredicateCollector
+	defer n.recordInputPredicates(&diagnostics)
 	ctx, cancel := n.observationContext(ctx)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -59,10 +92,15 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	var stale atomic.Bool
 	var recentStaleMillis atomic.Int64
 	recentStaleMillis.Store(-1)
+	var refreshSeed inputRefreshSeed
 	accept := func(r memory.Record, recent bool) bool {
 		now := uptime()
 		s, err := inputObservation(r, e, after, now)
+		diagnostics.candidate(s, err, e, after, now)
 		if errors.Is(err, errInputStateStale) {
+			if n.Hints == nil {
+				refreshSeed.candidate(r, s.SampleMillis, now)
+			}
 			stale.Store(true)
 			if s.SampleMillis >= now-inputRecentHintMillis {
 				for previous := recentStaleMillis.Load(); s.SampleMillis > previous; previous = recentStaleMillis.Load() {
@@ -81,7 +119,9 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	selector.Accept = func(r memory.Record) bool { return accept(r, false) }
 	finish := func(records []memory.Record, recent bool) (InputObservation, error) {
 		now := uptime()
+		diagnostics.scanEnd(now)
 		s, err := inputAfterLookup(records, e, after, now)
+		diagnostics.finish(err)
 		if err == nil {
 			n.inputWait.reset()
 			return s, nil
@@ -127,6 +167,23 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 		// Only time metadata survives this call; no old address or payload is
 		// retained under --no-cache. Recheck age after scanner drain/verification.
 		tick, now := recentStaleMillis.Load(), uptime()
+		diagnostics.scanEnd(now)
+		if seed, eligible := refreshSeed.current(now); !found.Coverage.Truncated && eligible {
+			if n.observation.lookups >= observationLimit {
+				return InputObservation{}, errors.New("live.channel_observation_budget")
+			}
+			// A completed scan traversal may retain unrelated unreadable gaps.
+			// This new positive observation has bounded partial scope; it repairs
+			// no gaps and establishes no process-wide absence or hidden cache.
+			local, localErr := memory.FindNearbyInputSeeded(ctx, source, selector, []memory.Hint{seed}, n.memorySession())
+			n.recordLookup(selector, local)
+			if localErr != nil && !localLookupMiss(ctx, localErr) {
+				return InputObservation{}, localErr
+			}
+			if localErr == nil && len(local.Records) > 0 {
+				return finish(local.Records, true)
+			}
+		}
 		if tick >= 0 && tick <= now+100 && tick >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || tick > n.inputHintMillis) {
 			n.inputHintRuntime, n.inputHintMillis = e.Runtime, tick
 			if n.inputWait.stale(key, clock()) {

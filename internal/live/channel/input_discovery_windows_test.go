@@ -117,7 +117,18 @@ func TestCacheOffStaleOnlyDefersDiscoveryWithoutRetainingAddress(t *testing.T) {
 	if _, err = observe(context.Background()); !errors.Is(err, ErrPending) || errors.Is(err, ErrInputObservationStale) || source.regions.Load() != 2 || n.inputWait.deadline != deadline {
 		t.Fatalf("new expired record renewed grace: %v regions=%d", err, source.regions.Load())
 	}
-	if len(n.Lookups) != 2 || !n.Lookups[1].Coverage.Complete {
+	var fullScans int
+	for _, lookup := range n.Lookups {
+		if lookup.Path == "full_scan" {
+			fullScans++
+			if !lookup.Coverage.Complete {
+				t.Fatal("stale-only full scan lost its coverage")
+			}
+		} else if lookup.Coverage.Complete {
+			t.Fatal("call-local refresh claimed full coverage")
+		}
+	}
+	if fullScans != 2 {
 		t.Fatal("stale-only full fallback lost its coverage")
 	}
 	write((512<<10)+4096, 3500, nil)

@@ -182,3 +182,97 @@ SOURCE 稳定性检查全部通过。该修复尚未部署或复验；本验收�
 但原业务报告仍为 `verified`、cleanup 为 `pending`，不是业务失败。
 后续需同一角色重新登录后取得正向 runtime 换代证明，再退役原发布槽并完成清理；
 不重启旧 operation 预算，不重执行探针，不伪造 closed 或恢复状态。
+
+## 重新登录后的恢复与第三轮
+
+用户重新登录后，passive inventory 确认旧进程已结束，新 Retail 进程在同一安装。
+旧原 CON 依据 `process_absent` 正向证据在 0.131s 关闭，保留原 verified 业务报告，
+cleanup complete。随后受管恢复 `8e4dab0`、fallback 激活、同一 actor fresh bind 和
+关闭均通过，200 槽 pending 为零；原始记录为
+`.tmp/retail-restoration-blocker-fix-20260930/restoration.json`。
+这是后续明确的恢复证据，不改变此前掉线时的 pending 事实。
+
+`3a20899` 的 push/PR CI `36694957137`、`36694970917` 均通过。
+其 clean-commit 私有开发包、archive 审计、隔离 offline `--ignore-scripts` 安装与 smoke
+通过；包 SHA256 `d978ef5bcc51e64650b8d92d8113ae60320184155546053b08bbc72666d23fd8`，
+CLI SHA256 `5a096ef42caca1bf80dcc21b75b9a8cfddfd5e9aa62f21ea8c0a0477f90c08f9`。
+受管安装、激活、同一角色证明与激活连接关闭通过，随后生产 runner 得到：
+
+| 检查 | 状态 | 观测 |
+| --- | --- | --- |
+| cache-off 连接 | passed | 20.777s；32.471 GiB |
+| 5 条带 hints 普通请求 | passed | 64.378、28.808、10.107、26.953、36.930s |
+| cache-off 普通请求 1 | passed | 82.137s；138.172 GiB；直接 verified / cleanup complete |
+| cache-off 普通请求 2 | pending | 120.096s；176.791 GiB；prepared，尚未发送业务输入 |
+| 第二条原 operation 用 hints resume | passed recovery | 24.391s；31.796 GiB；同一 operation verified / cleanup complete |
+
+该轮 `.tmp/retail-live-signal-grace-20260930/optimization.json` 保持 blocked，
+恢复不是 cache-off 通过。十次输入全扫均未接受输入样本；其中三次完整覆盖且无 gaps，
+其余可见短读/不可读 gaps，只有最后一次达到调用截止而截断。不能再用重复截断前缀
+解释所有失败，也没有保留每次完整的 eligible-region 列表来证明具体地址被排除。
+
+为进一步定位，只增加固定计数的私有开发诊断包以 dirty workspace 明确标记，
+CLI SHA256 `cf135dc7944492cf2b70c4960edd3f9db5318ddb7d397c0ee22a490052646943`。
+addon 字节未变，仍为 clean managed `3a20899`。新只读 cache-off 请求的报告已
+verified，release_ready 清理在 120s pending；输入 predicate 计数为：
+8867 次、fresh 6、stale 1380（均超过 500ms，其中 25 次也未超过 after+100）、
+target changed 7478（全部为旧槽位；其他目标字段匹配）、clock invalid 3。
+最后一次合法样本在 predicate 时年龄 854ms，扫描结束时为 5682ms。
+输入全扫阶段共有 11 次、47.241s；没有 integrity 或结构拒绝。
+这些计数不保存原地址、角色、载荷或绝对 sampleMillis，也不改匹配或输入结果。
+
+该诊断原 operation 用 hints 在 13.110s 恢复，业务和 cleanup 均 complete。
+随后同一连接继续通过带 hints 的大结果（11.964s，完整文本断言）、历史只读请求
+（0.109s，原 operation/report 相同且 journal 字节不变）、显式 reload（31.762s，
+已验证 runtime 换代）、换代后普通请求（5.723s）、正常断开（6.119s）及重复断开
+（0.029s，journal 不变）。`functional-continuation.json` 为 passed；该记录也不代替
+其余 cache-off 样本或 cache-off 大结果。
+
+诊断支持一个具体调度缺口：扫描经过合法样本所在位置时样本已过输入新鲜期，
+扫描继续耗时数秒，期间新建的不可变字符串可能落在已经访问过的位置。
+已为 cache-off 增加仅同次调用、扫描遍历结束后的一次有界邻域补查，并用真实 Source
+失败测试验证发布时序。旧样本只提供读调度，新结果仍必须满足完整校验和、当前目标、
+500ms、after+100 与发送前复核；不会把旧地址缓存跨调用或延长原恢复预算。
+
+只保留本次扫描中一条最新合法种子：读取时年龄不超过 1500ms，扫描结束时读调度
+寿命不超过 10s。整轮遍历完成但有不可读 gaps 时可以补查，原 gaps / incomplete
+coverage 原样保留；调用截止、取消或预算截断不能据此补查。局部仍为 partial，固定
+250ms / 8MiB / 4096 reads，使用原 Session，不学习 hints、不保存跨调用地址。
+局部读到鲜样本后若最后进程 Verify 超时，必须拒绝样本；实际局部超时计入 LocalStopped，
+成功返回时不能因自己的收尾 cancel 被错误标记为停止。
+
+真实 Source 的发布时序与最后 Verify 超时两个 RED 均已复现，随后修复转 GREEN。
+新增反例覆盖旧/未来/错角色/槽位/owner/fence/runtime/build/结构、种子 10s 失效、
+gaps 不得被修复为 full coverage、每次调用仍全扫、共享预算/取消/局部截止与未启用学习。
+完整 affected channel/memory tests 为 108.810s / 0.678s，race 为 120.775s / 4.269s；
+末次 Verify 修正另有最新定向 race（2.574s / 2.271s）和 build/vet。
+原始 RED 与定向检查记录在 `.tmp/input-seed-refresh-20260930/`。
+源码已冻结；包含最新改动的正式全量离线基线和实机复测单独记账，尚未由上述定向检查替代。
+
+## 有界补查实机 smoke
+
+最新冻结修复以明确标记 dirty workspace 的私有开发包实测，addon 字节仍为受管
+`3a20899`，CLI SHA256 为
+`a533b9445585e328ca6192ca20a00f8b175aa0c4c44a8183c40727e01eafedd0`。
+固定新进程创建身份与同一 actor，所有命令保持关闭 hints，原始记录为
+`.tmp/retail-live-input-refresh-smoke-20260930/smoke.json`，状态 passed：
+
+| 检查 | 状态 | 观测 |
+| --- | --- | --- |
+| cache-off 连接 | passed | 42.568s；fresh bind，输入样本年龄 215ms |
+| cache-off 普通请求 | passed | 46.944s；81.880 GiB；verified / cleanup complete |
+| cache-off 大结果 | passed | 77.996s；126.556 GiB；完整文本断言、verified / cleanup complete |
+| cache-off 断开 | passed | 45.155s；closed / cleanup complete，无恢复或换预算 |
+
+普通请求有 5 次输入 full_scan 和 2 次 partial nearby_scan，补查累计 1,977,389 返回字节，
+其中一个新记录通过完整门禁。大结果的 3 次局部查找未命中，仍通过原完整 fallback
+得到 4 次合法输入观察，未将 local miss 改写为成功。两次 execute 的 learningBytes 均为零。
+这证明新增路径实际被触达并完成原业务/清理，但单次 smoke 不能证明延迟稳定或整个
+五次 warm/五次 cache-off 的最终冻结候选 runner 已通过；后者单独复验。
+
+最新完整冻结 offline baseline 于 10:44:55–10:50:29 UTC 全部通过，目录为
+`.tmp/baseline-offline-live-input-refresh-20260930/`；SOURCE tree SHA256 为
+`c5215e7e374c775d745608ca71fe90ed1269980b2642abeb32944a4dfca3eef5`。
+强制 Lua 5.1 全量 Go（42 packages）、build/vet、98 Node 测试、真实 LuaLS、版本、
+Skill、生成参考、BASE-01–21 与 SOURCE 稳定性均通过，含最后 Verify 拒绝和局部超时计数
+修正。offline 的 LIVE/REAL not_run 不继承其他实机报告；本段仅在 SOURCE 检查后追加。
