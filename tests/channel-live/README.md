@@ -50,6 +50,49 @@ Do not edit these files to force a passing state.
 
 ## Public CLI baseline
 
+### Automatic optimization first round
+
+Once a matching clean managed candidate is installed, the owner only needs to
+log one accepted client into a safe, noncombat character. The agent can run:
+
+```powershell
+node tests/channel-live/optimization-baseline.mjs --cli '<candidate.exe>' --project '<new-evidence-project>'
+```
+
+The runner uses passive discovery and selects only one unoccupied, supported
+process. If more than one client is open, supply both `--installation <client>`
+and `--pid <pid>`; it never selects a replacement target. Process creation time
+is preserved as an exact decimal string. Candidate deployment and rollback use
+managed delivery outside this runner; it refuses modified/incomplete/pending
+addon files and never overlay-copies them.
+
+The fixed first round contains cache-off connect, five normal requests with
+hints and five without, a large HEAD/BODY result on each path, an exact historical
+request readback, explicit reload with verified runtime replacement, a normal
+request after reload, disconnect and read-only repeated disconnect. It uses only
+checked-in read-only probes, copies/hashes them, checks actor identity after each
+command, and verifies business results independently of transport completion.
+All input, reconnect and cleanup decisions belong to the public CLI.
+
+Every CLI command has a saved intent before launch, raw output and outcome.
+`optimization.json` includes CLI/probe digests, installation receipt, process/actor,
+durations and additive `observation` metrics. It requires actual RPM and mapping
+queries plus real read bytes; unavailable counters never become synthetic zeroes.
+Metrics are **invocation-scoped**, not durable operation totals across resume.
+Nearby misses/timeouts are diagnostic and may precede a successful full fallback.
+Warm/cache-off labels describe scheduling paths, not OS/network coldness or a
+measured speedup. The collected samples are not an RSS or p95 claim.
+
+The evidence directory must be new. Pending, cancellation, malformed output or
+unexpected results stop the runner and preserve the original CON/project/request.
+It never sends a second uncertain request, auto-abandons or disconnects uncertain
+work in a `finally` block. Recover using the original public status/resume flow
+before any new run; do not restart this runner with a new project to escape a
+blocker. Exit 0 means only this first-round scope passed; exit 2 is incomplete.
+Re-login, combat, dual instances, other clients, physical IME and subjective
+experience remain separate `not_run` entries. CI imports only the runner's fault
+tests and never executes this real-client entrypoint.
+
 After installing and activating a matching managed candidate, run from the repo:
 
 ```powershell

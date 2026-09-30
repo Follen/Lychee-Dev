@@ -21,9 +21,29 @@ var ErrNearbyBudget = errors.New("memory.nearby_budget")
 // previous addresses. It never enumerates process regions or falls back to a
 // whole-process scan. All results and misses have partial coverage.
 func FindNearby(ctx context.Context, src Source, selector Selector, hints *Hints) (out LookupResult, err error) {
+	return FindNearbyWithSession(ctx, src, selector, hints, nil)
+}
+
+func FindNearbyWithSession(ctx context.Context, src Source, selector Selector, hints *Hints, session *Session) (LookupResult, error) {
+	return findNearby(ctx, src, selector, hints, nil, session, true)
+}
+
+// FindNearbySeeded uses untrusted addresses supplied after HEAD authorization.
+// Seeds only schedule reads; the exact authorized BODY selector remains the gate.
+func FindNearbySeeded(ctx context.Context, src Source, selector Selector, seeds []Hint, session *Session) (LookupResult, error) {
+	if selector.Kind != bridge.MemoryBody || !selector.BodyAuthorized || selector.Runtime == ([16]byte{}) || selector.Nonce == ([16]byte{}) || selector.Ticket == ([16]byte{}) {
+		return LookupResult{Path: "nearby_scan", Fallback: "nearby_ineligible", Coverage: Coverage{Truncated: true}}, nil
+	}
+	return findNearby(ctx, src, selector, nil, seeds, session, false)
+}
+
+func findNearby(ctx context.Context, src Source, selector Selector, hints *Hints, seeds []Hint, session *Session, exact bool) (out LookupResult, err error) {
+	src, session = measured(src, session)
+	before := session.Stats()
 	started := time.Now()
 	out = LookupResult{Path: "nearby_scan", Coverage: Coverage{Truncated: true, Gaps: []Gap{}, Workers: []Worker{}}}
 	defer func() {
+		out.Stats = session.Stats().Delta(before)
 		out.Coverage.Complete = false
 		out.Coverage.Truncated = true
 		out.ElapsedMillis = time.Since(started).Milliseconds()
@@ -31,7 +51,7 @@ func FindNearby(ctx context.Context, src Source, selector Selector, hints *Hints
 	if err = ctx.Err(); err != nil {
 		return out, err
 	}
-	if hints == nil || selector.Runtime == ([16]byte{}) || selector.Kind == bridge.MemoryBody || selector.BodyAuthorized {
+	if seeds == nil && (hints == nil || selector.Runtime == ([16]byte{}) || selector.Kind == bridge.MemoryBody || selector.BodyAuthorized) {
 		out.Fallback = "nearby_ineligible"
 		return out, nil
 	}
@@ -39,6 +59,7 @@ func FindNearby(ctx context.Context, src Source, selector Selector, hints *Hints
 	defer cancel()
 	readCtx, stop := context.WithCancel(bounded)
 	defer stop()
+	readCtx = localContext(readCtx, ctx)
 	local := &nearbySource{Source: src, cancel: stop}
 	if err = src.Verify(readCtx); err != nil {
 		return out, err
@@ -50,14 +71,20 @@ func FindNearby(ctx context.Context, src Source, selector Selector, hints *Hints
 	}()
 	windows := map[uint64]bool{}
 	// Even caller-constructed hints obey the persisted collection limit.
-	for i, hint := range hints.Entries {
+	entries := seeds
+	if entries == nil {
+		entries = hints.entries()
+	}
+	for i, hint := range entries {
 		if i >= 64 {
 			break
 		}
 		if readCtx.Err() != nil {
 			return out, readCtx.Err()
 		}
-		if !selector.matches(hint.Header) || hint.Header.Kind == bridge.MemoryBody {
+		// Scheduling is deliberately weaker than final record matching. New
+		// nonce/ticket records can move beside this runtime's previous records.
+		if hint.Header.Runtime != selector.Runtime || hint.Header.Kind == bridge.MemoryBody || (seeds == nil && selector.Kind != 0 && hint.Header.Kind != selector.Kind) {
 			continue
 		}
 		start := uint64(0)
@@ -69,6 +96,9 @@ func FindNearby(ctx context.Context, src Source, selector Selector, hints *Hints
 		}
 		if len(windows) < 8 {
 			windows[start] = true
+		}
+		if !exact || !selector.matches(hint.Header) {
+			continue
 		}
 		record, readErr := ReadRecord(readCtx, local, hint.Address, selector)
 		if readErr != nil {
@@ -126,6 +156,8 @@ type nearbySource struct {
 	exhausted bool
 	cancel    context.CancelFunc
 }
+
+func (s *nearbySource) memorySession() *Session { return sourceSession(s.Source) }
 
 func (s *nearbySource) Regions(ctx context.Context) ([]Region, error) {
 	if err := ctx.Err(); err != nil {

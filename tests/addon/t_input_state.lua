@@ -44,7 +44,22 @@ for i=1,3 do
     local before=ns.InputState.Snapshot()
     now=103+i;created[1]:GetScript("OnUpdate")(created[1],1)
     assert(ns.InputState.Snapshot() and ns.InputState.Snapshot()~=before,"enabled idle sampling stopped")
+    assert(ns.InputState.Snapshot():find('"sampleMillis":'..(now*1000),1,true),"ready sample reused an old clock")
 end
+local function sequence(record)
+    local a,b,c,d=record:byte(61,64);return a+b*256+c*65536+d*16777216
+end
+local before=ns.InputState.Snapshot()
+ns.InputState.Refresh()
+assert(sequence(ns.InputState.Snapshot())==sequence(before)+1,"unchanged payload skipped fresh framing")
+assert(ns.InputState.Snapshot():sub(85,-41)==before:sub(85,-41),"same observation unexpectedly changed JSON")
+local event=created[1]:GetScript("OnEvent")
+event(created[1],"PLAYER_LEAVING_WORLD");assert(not ns.InputState.Snapshot())
+ns.InputState.Refresh();assert(not ns.InputState.Snapshot(),"leaving world revived authority")
+now=108;event(created[1],"PLAYER_ENTERING_WORLD");assert(ns.InputState.Snapshot())
+event(created[1],"LOADING_SCREEN_ENABLED");assert(not ns.InputState.Snapshot())
+ns.InputState.Refresh();assert(not ns.InputState.Snapshot(),"loading screen revived authority")
+now=109;event(created[1],"LOADING_SCREEN_DISABLED");assert(ns.InputState.Snapshot())
 ns.InputState.Stop();assert(not ns.InputState.Snapshot() and not created[1]:GetScript("OnUpdate"))
 ns.InputState.Refresh();assert(not ns.InputState.Snapshot() and not created[1]:GetScript("OnUpdate"),"refresh revived stopped sampler")
 ns.InputState.Start(provider);assert(#created==1 and ns.InputState.Snapshot())

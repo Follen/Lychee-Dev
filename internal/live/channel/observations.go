@@ -21,6 +21,12 @@ type RecordReader interface {
 	Find(context.Context, memory.Selector, bool) (memory.LookupResult, error)
 }
 
+// The native reader can schedule an authorized BODY near this verified HEAD.
+// Other adapters retain the same full lookup validator and protocol surface.
+type authorizedBodyReader interface {
+	findAuthorizedBody(context.Context, memory.Record, memory.Selector, memory.Selector) (memory.LookupResult, error)
+}
+
 // ObserveRecords is the transport's shared validator for native and simulated
 // adapters. Domain callers never receive addresses or partially decoded bodies.
 func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery) (Observation, error) {
@@ -94,7 +100,13 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 	if r.ReportBytes == 0 || r.ReportBytes > bridge.MemoryMaxPayload {
 		return Observation{}, errors.New("live.channel_report_length")
 	}
-	body, err := reader.Find(ctx, memory.Selector{Nonce: nonce, Runtime: runtime, Ticket: ticket, Kind: bridge.MemoryBody, BodyAuthorized: true, BodyLength: r.ReportBytes, BodyChecksum: r.ReportChecksum}, true)
+	bodySelector := memory.Selector{Nonce: nonce, Runtime: runtime, Ticket: ticket, Kind: bridge.MemoryBody, BodyAuthorized: true, BodyLength: r.ReportBytes, BodyChecksum: r.ReportChecksum}
+	var body memory.LookupResult
+	if native, ok := reader.(authorizedBodyReader); ok {
+		body, err = native.findAuthorizedBody(ctx, found.Records[0], selector, bodySelector)
+	} else {
+		body, err = reader.Find(ctx, bodySelector, true)
+	}
 	if err != nil {
 		return Observation{}, err
 	}

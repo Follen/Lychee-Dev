@@ -14,7 +14,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     local owner,fence,active,pending
     local sequence,count,cursor=0,0,1
     local consumed,operations,receipts={},{},{}
-    local descriptor
+    local descriptor,identity,identityText,identitySequence
     local api={}
     local function observe(op)
         if adapter.observe then
@@ -54,11 +54,31 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     end
     function api.Describe()
         local a=actor();if not a then return nil,"slot_actor_unavailable" end
-        local text=encode({schema="lycheedev.slot.identity.v1",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
+        local value={schema="lycheedev.slot.identity.v1",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
             nextSlot=nextSlot(),slots=LIMIT,character=a.character,realm=a.realm,guid=a.guid,
-            build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState},16384)
-        if not text then return nil,"slot_identity_encoding" end
+            build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState}
+        -- Observe the actor and every current field before considering reuse.
+        -- Only primitive, already encoded values can match: mutable tables or
+        -- secret values always go through the original fail-closed encoder.
+        local same,cacheable=identity~=nil,true
+        for key,child in pairs(value) do
+            if not safe(child) or (type(child)~="string" and type(child)~="number" and type(child)~="boolean") then
+                cacheable=false;same=false
+            elseif not identity or child~=identity[key] then same=false end
+        end
+        if same then
+            for key in pairs(identity) do if value[key]==nil then same=false;break end end
+        end
+        local text=identityText
+        if not same then
+            text=encode(value,16384)
+            if not text then return nil,"slot_identity_encoding" end
+        elseif descriptor and sequence==identitySequence then
+            return descriptor
+        end
         descriptor=wire.Encode(ZERO,adapter.runtime,ZERO,1,1,sequence,text)
+        if descriptor and cacheable then identity,identityText,identitySequence=value,text,sequence
+        else identity,identityText,identitySequence=nil,nil,nil end
         return descriptor
     end
     local function finish(op,ok,value,metadata)

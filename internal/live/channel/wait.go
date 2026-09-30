@@ -49,6 +49,13 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 	}
 	defer cancel()
 	ctx = bounded
+	if observer, ok := d.Backend.(interface {
+		beginObservation(context.Context, Identity) error
+	}); ok {
+		if err := observer.beginObservation(ctx, d.State.Identity); err != nil {
+			return err
+		}
+	}
 	// Long discovery belongs to the invocation boundary, never between input
 	// samples. A later resume can still observe replacement before any input.
 	if d.closingExplicitReload() && d.State.Reload.Phase == "intent" {

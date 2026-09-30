@@ -51,6 +51,7 @@ type Hit struct {
 }
 
 type Coverage struct {
+	Stats          Stats    `json:"stats"`
 	StoppedEarly   bool     `json:"stoppedEarly"`
 	Reenumerated   bool     `json:"reenumerated"`
 	PlannedBytes   uint64   `json:"plannedBytes"`
@@ -69,6 +70,7 @@ type Result struct {
 }
 
 type Options struct {
+	Session    *Session
 	Workers    int
 	ChunkBytes int
 	MaxBytes   uint64
@@ -84,6 +86,9 @@ type Options struct {
 	// candidate is the record lookup's internal buffer prefilter. The view is
 	// valid only during this call; final acceptance always uses fresh ReadRecord.
 	candidate func(Hit, []byte, uint64) bool
+	// learn consumes a separate bounded magic search in copied scan buffers.
+	learn           func(Hit, []byte, uint64)
+	learningPattern []byte
 }
 
 type job struct {
@@ -145,10 +150,12 @@ func eligible(regions []Region) ([]Range, int, error) {
 // Scan always enumerates the current process. Short reads are salvaged once at
 // page granularity; any remaining hole is retained, including on cancellation.
 // It never claims that the observed region set is an atomic heap snapshot.
-func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Result, error) {
+func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (result Result, err error) {
 	started := time.Now()
-	result := Result{}
-	opts, err := normalized(opts)
+	src, session := measured(src, opts.Session)
+	before := session.Stats()
+	defer func() { result.Coverage.Stats = session.Stats().Delta(before) }()
+	opts, err = normalized(opts)
 	if err != nil {
 		return result, err
 	}
@@ -252,7 +259,7 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 			buffer := make([]byte, opts.ChunkBytes+maxPattern-1)
 			for j := range queue {
 				stats.PlannedBytes += j.End - j.Start
-				if stopped.Load() {
+				if stopped.Load() || session.Err() != nil {
 					stats.Truncated = true
 					continue
 				}
@@ -265,7 +272,17 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 					}
 					return false
 				})
-				gap := func(r Range) { addScanGap(&stats, r, ctx, salvageStopped) }
+				gap := func(r Range) {
+					if session.Err() != nil && ctx.Err() == nil {
+						stats.Truncated = true
+						stats.Complete = false
+						if len(stats.Gaps) < 4096 {
+							stats.Gaps = append(stats.Gaps, Gap{r, "budget_exhausted"})
+						}
+						return
+					}
+					addScanGap(&stats, r, ctx, salvageStopped)
+				}
 				var owned []Range
 				for _, span := range spans {
 					end := span.End
@@ -277,11 +294,34 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 						stats.ScannedBytes += end - span.Start
 					}
 					view := data[span.Start-j.Start : span.End-j.Start]
+					// Incidental learning has its own quota; exhausting it must never
+					// truncate business coverage or broaden the business anchor.
+					if opts.learn != nil && !session.Stats().LearningExhausted {
+						for offset := 0; offset+len(opts.learningPattern) <= len(view); {
+							if ctx.Err() != nil || stopped.Load() {
+								break
+							}
+							at, allowed := session.learningIndex(view[offset:], opts.learningPattern, opts.Index)
+							if !allowed {
+								break
+							}
+							if at < 0 {
+								break
+							}
+							offset += at
+							address := span.Start + uint64(offset)
+							if address >= j.End || !session.candidate(true) {
+								break
+							}
+							opts.learn(Hit{Address: address}, view, span.Start)
+							offset++
+						}
+					}
 					// Protocol types share one magic; additional independently
 					// requested anchors reuse this same streaming read buffer.
 					for pattern, p := range patterns {
 						for offset := 0; offset+len(p) <= len(view); {
-							if stats.Truncated || stopped.Load() || ctx.Err() != nil {
+							if stats.Truncated || stopped.Load() || ctx.Err() != nil || session.Err() != nil {
 								stats.Truncated = true
 								break
 							}
@@ -295,6 +335,10 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 								break
 							}
 							stats.Candidates++
+							if !session.candidate(false) {
+								stats.Truncated = true
+								break
+							}
 							hit := Hit{address, pattern}
 							if opts.Visit == nil && opts.candidate == nil {
 								mu.Lock()
@@ -349,7 +393,7 @@ func Scan(ctx context.Context, src Source, patterns [][]byte, opts Options) (Res
 	}
 dispatch:
 	for _, j := range jobs {
-		if stopped.Load() || ctx.Err() != nil {
+		if stopped.Load() || ctx.Err() != nil || session.Err() != nil {
 			break
 		}
 		select {
@@ -364,7 +408,7 @@ dispatch:
 	wg.Wait()
 	result.Coverage.SkippedRegions = skipped
 	result.Coverage.StoppedEarly = stopped.Load()
-	result.Coverage.Truncated = stopped.Load() || ctx.Err() != nil
+	result.Coverage.Truncated = stopped.Load() || ctx.Err() != nil || session.Err() != nil
 	result.Coverage.Gaps = []Gap{}
 	for _, w := range result.Coverage.Workers {
 		result.Coverage.ScannedBytes += w.ScannedBytes
@@ -375,6 +419,9 @@ dispatch:
 	result.Coverage.ElapsedMillis = time.Since(started).Milliseconds()
 	sort.Slice(result.Hits, func(i, j int) bool { return result.Hits[i].Address < result.Hits[j].Address })
 	if err = src.Verify(ctx); err != nil {
+		return result, err
+	}
+	if err = session.Err(); err != nil {
 		return result, err
 	}
 	return result, ctx.Err()
@@ -401,7 +448,8 @@ func addScanGap(w *Worker, r Range, ctx context.Context, stopped bool) {
 }
 
 func readSpan(ctx context.Context, src Source, start uint64, b []byte, w *Worker, refresh func() []Range, stopped func() bool) []Range {
-	if ctx.Err() != nil || stopped() {
+	budgetStopped := func() bool { session := sourceSession(src); return session != nil && session.Err() != nil }
+	if ctx.Err() != nil || stopped() || budgetStopped() {
 		return nil
 	}
 	w.ReadCalls++
@@ -416,11 +464,11 @@ func readSpan(ctx context.Context, src Source, start uint64, b []byte, w *Worker
 	if n > 0 {
 		spans = append(spans, Range{start, start + uint64(n)})
 	}
-	if stopped() || ctx.Err() != nil {
+	if stopped() || ctx.Err() != nil || budgetStopped() {
 		return spans
 	}
 	current := refresh()
-	for at := n; at < len(b) && ctx.Err() == nil && !stopped(); {
+	for at := n; at < len(b) && ctx.Err() == nil && !stopped() && !budgetStopped(); {
 		end := at + 4096 - int((start+uint64(at))%4096)
 		if end > len(b) {
 			end = len(b)

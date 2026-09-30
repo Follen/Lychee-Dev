@@ -28,10 +28,13 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	ctx, stopObservation := n.observationContext(ctx)
+	defer stopObservation()
+	source := n.memorySource(n.Process)
 	if err := n.Guard(ctx); err != nil {
 		return nil, err
 	}
-	if err := n.Process.Verify(ctx); err != nil {
+	if err := source.Verify(ctx); err != nil {
 		return nil, err
 	}
 	candidates, _, err := n.Discover(ctx, "", "")
@@ -44,7 +47,7 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 			if h.Header.Kind != bridge.MemoryInputState {
 				continue
 			}
-			r, e := memory.ReadRecord(ctx, n.Process, h.Address, memory.Selector{Kind: bridge.MemoryInputState})
+			r, e := memory.ReadRecord(ctx, source, h.Address, memory.Selector{Kind: bridge.MemoryInputState})
 			if e == nil {
 				if _, ok := replacementRecord(r); ok {
 					seeds = append(seeds, r)
@@ -59,7 +62,7 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 		}
 		seeds = found.Records
 	}
-	p, err := observeReplacementBytes(ctx, old, candidates, n.Target.ProcessID, n.Target.ProcessStartedAt, n.Process, seeds, func(ctx context.Context) error {
+	p, err := observeReplacementBytes(ctx, old, candidates, n.Target.ProcessID, n.Target.ProcessStartedAt, source, seeds, func(ctx context.Context) error {
 		timer := time.NewTimer(1100 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -72,7 +75,7 @@ func (n *Native) ObserveRuntimeReplacement(ctx context.Context, old Identity) (*
 	if err != nil {
 		return nil, err
 	}
-	if err = n.Process.Verify(ctx); err != nil {
+	if err = source.Verify(ctx); err != nil {
 		return nil, err
 	}
 	if err = n.Guard(ctx); err != nil {
@@ -157,6 +160,9 @@ func replacementSnapshots(ctx context.Context, source memory.Source, seeds []mem
 			attempted[window] = true // Failed and short reads consume the same byte budget.
 			buf := make([]byte, int(end-start))
 			n, e := source.Read(ctx, start, buf)
+			if errors.Is(e, memory.ErrBudget) {
+				return nil, e
+			}
 			if e == nil && n == len(buf) {
 				spans = append(spans, replacementSpan{start, buf})
 			}
@@ -232,6 +238,9 @@ func observeReplacementBytes(ctx context.Context, old Identity, candidates []Ide
 			}
 			buf := make([]byte, len(span.before))
 			n, e := source.Read(ctx, span.address, buf)
+			if errors.Is(e, memory.ErrBudget) {
+				return pending(e)
+			}
 			if e != nil || n != len(buf) {
 				continue
 			}
@@ -280,6 +289,9 @@ func observeReplacementBytes(ctx context.Context, old Identity, candidates []Ide
 					return nil, nil
 				}
 				fresh, e := memory.ReadRecord(ctx, source, record.Address, memory.Selector{Kind: bridge.MemoryInputState})
+				if errors.Is(e, memory.ErrBudget) {
+					return pending(e)
+				}
 				if e != nil || fresh.Header != header || !bytes.Equal(fresh.Payload, payload) {
 					continue
 				}

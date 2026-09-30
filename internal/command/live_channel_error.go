@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/follenfang/lycheedev/internal/live/channel"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 type channelCommandError struct {
@@ -29,6 +30,12 @@ func classifyChannelResultError(err error) error {
 	if errors.Is(err, context.Canceled) {
 		return &channelCommandError{cause: err, code: "live.channel_wait_cancelled", exit: 7}
 	}
+	if errors.Is(err, memory.ErrBudget) {
+		return &channelCommandError{cause: err, code: "live.channel_memory_budget", exit: 3}
+	}
+	if errors.Is(err, memory.ErrSessionOwnership) {
+		return &channelCommandError{cause: err, code: "live.channel_memory_session_ownership", exit: 4}
+	}
 	if errors.Is(err, channel.ErrPending) {
 		return &channelCommandError{cause: err, code: "live.channel_pending", exit: 6}
 	}
@@ -48,7 +55,7 @@ func classifyChannelError(err error) error {
 		exit = 2
 	case "live.channel_execution_unknown", "live.channel_recovery_attempt_limit":
 		exit = 5
-	case "live.channel_activation_required", "live.channel_closed", "live.channel_not_idle", "live.channel_clean_current_addon_required", "live.channel_slot_installation_required", "live.channel_ownership_changed", "live.channel_reload_required", "live.channel_client_restart_required", "live.channel_input_capability_unsupported":
+	case "live.channel_activation_required", "live.channel_closed", "live.channel_not_idle", "live.channel_clean_current_addon_required", "live.channel_slot_installation_required", "live.channel_ownership_changed", "live.channel_reload_required", "live.channel_client_restart_required", "live.channel_input_capability_unsupported", "live.channel_observation_budget":
 		exit = 3
 	}
 	return &channelCommandError{cause: err, code: code, exit: exit}

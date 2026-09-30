@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -19,6 +20,7 @@ type Hint struct {
 	Header  bridge.MemoryHeader `json:"header"`
 }
 type Hints struct {
+	mu      sync.Mutex
 	Schema  string `json:"schema"`
 	Scope   string `json:"scope"`
 	Entries []Hint `json:"entries"`
@@ -45,6 +47,9 @@ func LoadHints(path, scope string) *Hints {
 		if entry.Address > ^uint64(0)-(bridge.MemoryMaxPayload+120) {
 			return empty
 		}
+		if entry.Header.Kind == bridge.MemoryBody {
+			return empty
+		}
 	}
 	return &h
 }
@@ -52,7 +57,19 @@ func (h *Hints) Save(ctx context.Context, path string) error {
 	if h == nil {
 		return nil
 	}
+	h.mu.Lock()
+	if len(h.Entries) > 64 {
+		h.mu.Unlock()
+		return errors.New("memory.hints_limit")
+	}
+	for _, entry := range h.Entries {
+		if entry.Header.Kind == bridge.MemoryBody {
+			h.mu.Unlock()
+			return errors.New("memory.hints_body")
+		}
+	}
 	b, err := json.Marshal(h)
+	h.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -62,12 +79,20 @@ func (h *Hints) Save(ctx context.Context, path string) error {
 	return vault.ReplaceFile(ctx, path, b)
 }
 func (h *Hints) learn(r Record) {
-	if h == nil {
+	if h == nil || r.Header.Kind == bridge.MemoryBody {
 		return
 	}
-	next := []Hint{{r.Address, r.Header}}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.Entries) > 64 {
+		h.Entries = append([]Hint(nil), h.Entries[:64]...)
+	}
+	// One bounded scratch collection avoids repeated growth while retaining
+	// the independent destination used during filtering after the stable sort.
+	next := make([]Hint, 1, len(h.Entries)+1)
+	next[0] = Hint{r.Address, r.Header}
 	for _, entry := range h.Entries {
-		if entry.Address != r.Address {
+		if entry.Address != r.Address && entry.Header.Kind != bridge.MemoryBody {
 			next = append(next, entry)
 		}
 	}
@@ -87,7 +112,7 @@ func (h *Hints) learn(r Record) {
 		return a.Kind == bridge.MemoryInputState && b.Kind != bridge.MemoryInputState
 	})
 	counts := map[[16]byte]int{}
-	h.Entries = nil
+	h.Entries = h.Entries[:0]
 	for _, entry := range next {
 		if entry.Header.Kind == bridge.MemoryInputState {
 			if counts[entry.Header.Runtime] >= 8 {
@@ -105,6 +130,8 @@ func (h *Hints) learn(r Record) {
 // inputHintUseful prefilters scheduling candidates before validating their
 // complete bytes. Existing hints remain untrusted and every hit is reread.
 func (h *Hints) inputHintUseful(address uint64, header bridge.MemoryHeader) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	count := 0
 	minimum := ^uint32(0)
 	for _, entry := range h.Entries {
@@ -131,6 +158,7 @@ func (h *Hints) inputHintUseful(address uint64, header bridge.MemoryHeader) bool
 }
 
 type LookupResult struct {
+	Stats         Stats    `json:"stats"`
 	Records       []Record `json:"records"`
 	Coverage      Coverage `json:"coverage"`
 	Path          string   `json:"path"`
@@ -142,15 +170,45 @@ type LookupResult struct {
 // Find uses the same validator for point reads and scanning. A nil hints value
 // is the complete cache-off path. First=false is full audit and never shortcuts.
 func Find(ctx context.Context, src Source, selector Selector, hints *Hints, first bool) (LookupResult, error) {
+	return FindWithSession(ctx, src, selector, hints, first, nil)
+}
+
+func (h *Hints) entries() []Hint {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := len(h.Entries)
+	if n > 64 {
+		n = 64
+	}
+	entries := make([]Hint, 0, n)
+	for _, entry := range h.Entries[:n] {
+		if entry.Header.Kind != bridge.MemoryBody {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+func FindWithSession(ctx context.Context, src Source, selector Selector, hints *Hints, first bool, session *Session) (out LookupResult, err error) {
+	src, session = measured(src, session)
+	before := session.Stats()
+	defer func() { out.Stats = session.Stats().Delta(before) }()
 	started := time.Now()
-	out := LookupResult{Path: "full_scan"}
+	out = LookupResult{Path: "full_scan"}
 	opts := Options{}
-	if hints != nil && len(hints.Entries) > 0 {
+	entries := hints.entries()
+	if len(entries) > 0 {
+		bounded, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer cancel()
+		hintCtx := localContext(bounded, ctx)
 		if err := src.Verify(ctx); err != nil {
 			return out, err
 		}
-		for _, hint := range hints.Entries {
-			if time.Since(started) > 250*time.Millisecond {
+		for _, hint := range entries {
+			if hintCtx.Err() != nil {
 				break
 			}
 			base := hint.Address &^ uint64((1<<20)-1)
@@ -160,7 +218,7 @@ func Find(ctx context.Context, src Source, selector Selector, hints *Hints, firs
 			if !first || selector.Runtime == ([16]byte{}) || !selector.matches(hint.Header) {
 				continue
 			}
-			record, readErr := ReadRecord(ctx, src, hint.Address, selector)
+			record, readErr := ReadRecord(hintCtx, src, hint.Address, selector)
 			if readErr != nil {
 				continue
 			}
@@ -178,7 +236,19 @@ func Find(ctx context.Context, src Source, selector Selector, hints *Hints, firs
 		out.Fallback = "hint_miss_or_invalid"
 		out.HintMillis = time.Since(started).Milliseconds()
 	}
-	var err error
+	if first && len(entries) > 0 && selector.Runtime != ([16]byte{}) && selector.Kind != bridge.MemoryBody && !selector.BodyAuthorized {
+		local, localErr := findNearby(ctx, src, selector, hints, nil, session, false)
+		if len(local.Records) > 0 {
+			return local, localErr
+		}
+		if ctx.Err() != nil || session.Err() != nil {
+			return local, errors.Join(ctx.Err(), session.Err())
+		}
+		if localErr != nil && !errors.Is(localErr, ErrNearbyBudget) && !errors.Is(localErr, context.DeadlineExceeded) {
+			return local, localErr
+		}
+		out.Fallback = local.Fallback
+	}
 	out.Records, out.Coverage, err = lookup(ctx, src, selector, opts, first, hints)
 	for _, record := range out.Records {
 		hints.learn(record)

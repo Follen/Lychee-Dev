@@ -41,33 +41,57 @@ func (s Selector) matches(h bridge.MemoryHeader) bool {
 
 // ReadRecord gates allocation behind fixed-header identity checks. The second
 // read includes that header and must match, preventing header/body torn reads.
-func ReadRecord(ctx context.Context, src Source, address uint64, selector Selector) (Record, error) {
+func ReadRecord(ctx context.Context, src Source, address uint64, selector Selector) (record Record, err error) {
+	src, session := measured(src, nil)
+	if !session.candidate(false) {
+		return Record{}, ErrBudget
+	}
+	defer func() {
+		session.update(func(st *Stats) {
+			if err == nil {
+				st.Validated++
+			} else {
+				st.Rejected++
+			}
+		})
+	}()
 	head := make([]byte, bridge.MemoryHeaderBytes)
 	n, err := src.Read(ctx, address, head)
 	if err != nil || n != len(head) {
+		if errors.Is(err, ErrBudget) || errors.Is(err, ErrSessionOwnership) || ctx.Err() != nil {
+			return Record{}, errors.Join(err, ctx.Err())
+		}
 		return Record{}, errors.New("memory.header_unavailable")
 	}
 	h, err := bridge.DecodeMemoryHeader(head)
 	if err != nil {
+		session.update(func(st *Stats) { st.HeaderRejected++ })
 		return Record{}, err
 	}
 	if !selector.matches(h) {
+		session.update(func(st *Stats) { st.HeaderRejected++ })
 		return Record{}, errors.New("memory.record_mismatch")
 	}
 	data := make([]byte, bridge.MemoryHeaderBytes+int(h.Length)+bridge.MemoryTrailerBytes)
 	n, err = src.Read(ctx, address, data)
 	if err != nil || n != len(data) {
+		if errors.Is(err, ErrBudget) || errors.Is(err, ErrSessionOwnership) || ctx.Err() != nil {
+			return Record{}, errors.Join(err, ctx.Err())
+		}
 		return Record{}, errors.New("memory.body_unavailable")
 	}
 	if !bytes.Equal(head, data[:len(head)]) {
+		session.update(func(st *Stats) { st.IntegrityRejected++ })
 		return Record{}, errors.New("memory.record_changed")
 	}
 	h, payload, err := bridge.DecodeMemoryRecord(data)
 	if err != nil {
+		session.update(func(st *Stats) { st.IntegrityRejected++ })
 		return Record{}, err
 	}
-	record := Record{address, h, append([]byte(nil), payload...)}
+	record = Record{address, h, append([]byte(nil), payload...)}
 	if selector.Accept != nil && !selector.Accept(record) {
+		session.update(func(st *Stats) { st.PredicateRejected++ })
 		return Record{}, errors.New("memory.predicate_mismatch")
 	}
 	return record, nil
@@ -80,16 +104,16 @@ func Lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 }
 
 func lookup(ctx context.Context, src Source, selector Selector, opts Options, first bool, hints *Hints) ([]Record, Coverage, error) {
+	src, session := measured(src, opts.Session)
 	pattern := bridge.MemoryMagic
 	offset := uint64(0)
-	if hints == nil && selector.Nonce != ([16]byte{}) {
+	if selector.Nonce != ([16]byte{}) {
 		pattern = selector.Nonce[:]
 		offset = 8
 	}
 	var mu sync.Mutex
 	records := []Record{}
 	seen := map[uint64]bool{}
-	learned := 0
 	limit := opts.MaxHits
 	if limit == 0 {
 		limit = 4096
@@ -97,6 +121,28 @@ func lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 	// Learning validates complete small records already in the scan buffer.
 	// Hints never retain payloads or authorize BODY reads and are bounded at 64 entries.
 	opts.Visit = nil
+	if hints != nil {
+		opts.learningPattern = bridge.MemoryMagic
+		opts.learn = func(hit Hit, view []byte, base uint64) {
+			at := hit.Address - base
+			if at > uint64(len(view)) || uint64(len(view))-at < bridge.MemoryHeaderBytes {
+				return
+			}
+			header, err := bridge.DecodeMemoryHeader(view[at:])
+			if err != nil || header.Kind == bridge.MemoryBody || header.Length > 16<<10 || (selector.Runtime != ([16]byte{}) && selector.Runtime != header.Runtime) {
+				return
+			}
+			end := at + bridge.MemoryHeaderBytes + uint64(header.Length) + bridge.MemoryTrailerBytes
+			if end > uint64(len(view)) || (header.Kind == bridge.MemoryInputState && !hints.inputHintUseful(hit.Address, header)) {
+				return
+			}
+			if _, _, err := bridge.DecodeMemoryRecord(view[at:end]); err != nil {
+				return
+			}
+			hints.learn(Record{Address: hit.Address, Header: header})
+			session.update(func(st *Stats) { st.Learned++ })
+		}
+	}
 	opts.candidate = func(hit Hit, view []byte, base uint64) bool {
 		if hit.Address < offset {
 			return false
@@ -105,26 +151,11 @@ func lookup(ctx context.Context, src Source, selector Selector, opts Options, fi
 		if address >= base && address-base <= uint64(len(view)) && uint64(len(view))-(address-base) >= bridge.MemoryHeaderBytes {
 			header, err := bridge.DecodeMemoryHeader(view[address-base:])
 			if err != nil {
+				session.update(func(st *Stats) { st.HeaderRejected++ })
 				return false
 			}
-			if hints != nil && header.Kind != bridge.MemoryBody && header.Length <= 16<<10 && (selector.Runtime == ([16]byte{}) || selector.Runtime == header.Runtime) {
-				mu.Lock()
-				end := address - base + bridge.MemoryHeaderBytes + uint64(header.Length) + bridge.MemoryTrailerBytes
-				useful := learned < 64
-				if header.Kind == bridge.MemoryInputState {
-					useful = hints.inputHintUseful(address, header)
-				}
-				if useful && end <= uint64(len(view)) {
-					if _, _, err := bridge.DecodeMemoryRecord(view[address-base : end]); err == nil {
-						hints.learn(Record{Address: address, Header: header})
-						if header.Kind != bridge.MemoryInputState {
-							learned++
-						}
-					}
-				}
-				mu.Unlock()
-			}
 			if !selector.matches(header) {
+				session.update(func(st *Stats) { st.HeaderRejected++ })
 				return false
 			}
 		}

@@ -35,6 +35,7 @@ type TargetRequest struct {
 // ProjectResult is presentation, not a second persisted state machine. Raw
 // evidence remains in the connection log and immutable result-byte artifacts.
 type ProjectResult struct {
+	Observation    *ObservationMetrics      `json:"observation,omitempty"`
 	Continuation   Continuation             `json:"continuation"`
 	ProcessEnd     string                   `json:"processEnd,omitempty"`
 	RuntimeEnd     *RuntimeReplacementProof `json:"runtimeEnd,omitempty"`
@@ -162,6 +163,7 @@ func present(d *Driver) ProjectResult {
 	r.Continuation = d.continuation()
 	if native, ok := d.Backend.(*Native); ok {
 		r.Scans = native.TraceDir
+		r.Observation = native.observationMetrics()
 	}
 	if s.Bound {
 		r.Stage = "connected"

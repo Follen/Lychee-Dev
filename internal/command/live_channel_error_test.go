@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/live/channel"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 func TestChannelTraceFlushFailureHasPriority(t *testing.T) {
@@ -36,6 +37,12 @@ func TestChannelResultWithoutFlushFailureKeepsClassification(t *testing.T) {
 		code string
 	}{
 		{channel.ErrPending, 6, "live.channel_pending"},
+		{memory.ErrBudget, 3, "live.channel_memory_budget"},
+		{memory.ErrSessionOwnership, 4, "live.channel_memory_session_ownership"},
+		{errors.Join(channel.ErrPending, memory.ErrBudget), 3, "live.channel_memory_budget"},
+		{errors.Join(memory.ErrBudget, channel.ErrPending), 3, "live.channel_memory_budget"},
+		{errors.Join(memory.ErrBudget, context.Canceled), 7, "live.channel_wait_cancelled"},
+		{errors.New("live.channel_observation_budget"), 3, "live.channel_observation_budget"},
 		{context.Canceled, 7, "live.channel_wait_cancelled"},
 		{errors.New("live.channel_execution_unknown"), 5, "live.channel_execution_unknown"},
 		{errors.New("live.channel_input_capability_unsupported"), 3, "live.channel_input_capability_unsupported"},

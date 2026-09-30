@@ -2,12 +2,36 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 )
+
+func TestGeneralHintsRejectPersistedAndConstructedBody(t *testing.T) {
+	hints := LoadHints("missing", "scope")
+	hints.Entries = []Hint{{Address: 128, Header: bridge.MemoryHeader{Kind: bridge.MemoryBody}}}
+	path := filepath.Join(t.TempDir(), "hints.json")
+	if err := hints.Save(context.Background(), path); err == nil {
+		t.Fatal("persisted general BODY hint")
+	}
+	b, err := json.Marshal(hints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if len(LoadHints(path, "scope").Entries) != 0 || len(hints.entries()) != 0 {
+		t.Fatal("loaded/scheduled general BODY hint")
+	}
+	hints.learn(Record{Address: 256, Header: bridge.MemoryHeader{Kind: bridge.MemoryReceipt}})
+	if len(hints.Entries) != 1 || hints.Entries[0].Header.Kind == bridge.MemoryBody {
+		t.Fatal("merge retained constructed BODY hint")
+	}
+}
 
 func TestHintsAreOptionalAndCannotResurrectOldRecord(t *testing.T) {
 	s := source(1 << 20)

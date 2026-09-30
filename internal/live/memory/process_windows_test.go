@@ -105,9 +105,13 @@ func TestNativeChildScanCacheOffAndStaleProcessIdentity(t *testing.T) {
 	}
 	defer process.Close()
 	selector := Selector{Nonce: child.Header.Nonce, Runtime: child.Header.Runtime, Ticket: child.Header.Ticket, Kind: bridge.MemoryReceipt}
-	point, err := ReadRecord(ctx, process, child.Address, selector)
+	session := NewSession(Budget{})
+	point, err := ReadRecord(ctx, session.Source(process), child.Address, selector)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if st := session.Stats(); st.RPMCalls != 2 || st.ReadCalls != 2 || st.MappingQueries < 2 || st.ActualBytes != st.RequestedBytes {
+		t.Fatalf("native point metrics=%+v", st)
 	}
 	found, err := Find(ctx, process, selector, nil, false)
 	if err != nil {

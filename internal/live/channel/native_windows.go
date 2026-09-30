@@ -35,6 +35,7 @@ type Native struct {
 	inputHintRuntime                     string
 	inputHintMillis                      int64
 	inputSignal                          *nativeInputSignal
+	observation                          *nativeObservation
 }
 
 const observationLimit = 256
@@ -45,6 +46,7 @@ type lookupTrace struct {
 	Kind                   bridge.MemoryKind
 	Matches                int
 	Lookup                 memory.LookupResult
+	Session                *ObservationMetrics `json:"session,omitempty"`
 	sequence               int
 }
 
@@ -93,20 +95,34 @@ func (n *Native) Find(ctx context.Context, s memory.Selector, first bool) (memor
 }
 
 func (n *Native) find(ctx context.Context, source memory.Source, s memory.Selector, first bool) (memory.LookupResult, error) {
+	if first && n.Hints != nil && len(n.Hints.Entries) > 0 && s.Runtime != ([16]byte{}) && s.Kind != bridge.MemoryBody && s.Kind != bridge.MemoryInputState && !s.BodyAuthorized {
+		found, err := n.findPath(ctx, source, s, first, true)
+		if err != nil && !localLookupMiss(ctx, err) || len(found.Records) > 0 {
+			return found, err
+		}
+	}
 	return n.findPath(ctx, source, s, first, false)
 }
 
 func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Selector, first, nearby bool) (memory.LookupResult, error) {
-	if n.TraceDir != "" && n.traceSequence >= observationLimit {
+	ctx, cancel := n.observationContext(ctx)
+	defer cancel()
+	if n.observation.lookups >= observationLimit {
 		return memory.LookupResult{}, errors.New("live.channel_observation_budget")
 	}
 	var found memory.LookupResult
 	var err error
 	if nearby {
-		found, err = memory.FindNearby(ctx, source, s, n.Hints)
+		found, err = memory.FindNearbyWithSession(ctx, source, s, n.Hints, n.memorySession())
 	} else {
-		found, err = memory.Find(ctx, source, s, n.Hints, first)
+		found, err = memory.FindWithSession(ctx, source, s, n.Hints, first, n.memorySession())
 	}
+	n.recordLookup(s, found)
+	return found, err
+}
+
+func (n *Native) recordLookup(s memory.Selector, found memory.LookupResult) {
+	n.recordObservationStage(s, found)
 	n.hintsDirty = n.Hints != nil
 	// Coverage/latency persist in host evidence without duplicating large bodies.
 	evidence := found
@@ -116,9 +132,8 @@ func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Se
 	}
 	if n.TraceDir != "" {
 		n.traceSequence++
-		n.traces = append(n.traces, lookupTrace{hex.EncodeToString(s.Nonce[:]), hex.EncodeToString(s.Runtime[:]), hex.EncodeToString(s.Ticket[:]), s.Kind, len(found.Records), evidence, n.traceSequence})
+		n.traces = append(n.traces, lookupTrace{Nonce: hex.EncodeToString(s.Nonce[:]), Runtime: hex.EncodeToString(s.Runtime[:]), Ticket: hex.EncodeToString(s.Ticket[:]), Kind: s.Kind, Matches: len(found.Records), Lookup: evidence, sequence: n.traceSequence})
 	}
-	return found, err
 }
 
 // Successful writes leave the pending buffer; a failed write and everything
@@ -139,6 +154,7 @@ func (n *Native) flushTraces(ctx context.Context, write func(context.Context, st
 			return errors.Join(ErrTraceFlush, err)
 		}
 		file := filepath.Join(n.TraceDir, fmt.Sprintf("%03d.json", trace.sequence))
+		trace.Session = n.observationMetrics()
 		if err := write(ctx, file, trace); err != nil {
 			return fmt.Errorf("%w: %s: %w", ErrTraceFlush, file, err)
 		}

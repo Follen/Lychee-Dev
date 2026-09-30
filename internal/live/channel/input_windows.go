@@ -38,6 +38,7 @@ func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after 
 }
 
 func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
+	n.observationRuntime(e.Runtime)
 	runtime, _ := tokenBytes(e.Runtime)
 	selector := memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}
 	var stale atomic.Bool
@@ -80,7 +81,7 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 	// introduced to make one cadence work only when hints are enabled.
 	if n.Hints != nil && len(n.Hints.Entries) > 0 {
 		found, err := n.findPath(ctx, source, selector, true, true)
-		if err != nil && !((errors.Is(err, context.DeadlineExceeded) || errors.Is(err, memory.ErrNearbyBudget)) && ctx.Err() == nil) {
+		if err != nil && !localLookupMiss(ctx, err) {
 			return InputObservation{}, err
 		}
 		if len(found.Records) > 0 {
@@ -104,6 +105,8 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 // Input performs one already-journaled effect. No loop, journal callback or
 // business transition lives here. The address is revalidated, never trusted.
 func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, err error) {
+	ctx, stopObservation := n.observationContext(ctx)
+	defer stopObservation()
 	if err := inputCapabilityError(a.Capability); err != nil {
 		return InputOutcome{Disposition: "not_sent", Reason: "input_capability_unsupported"}, err
 	}
@@ -153,8 +156,11 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return ErrPending
 		}
 		runtime, _ := tokenBytes(a.Envelope.Runtime)
-		r, readErr := memory.ReadRecord(ctx, n.Process, a.Observation.Address, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState})
+		r, readErr := memory.ReadRecord(ctx, n.memorySource(n.Process), a.Observation.Address, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState})
 		if readErr != nil {
+			if errors.Is(readErr, memory.ErrBudget) || ctx.Err() != nil {
+				return readErr
+			}
 			return ErrPending
 		}
 		s, readErr := inputObservation(r, a.Envelope, 0, uptimeMillis())

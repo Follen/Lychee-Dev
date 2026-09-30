@@ -1,5 +1,10 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-09-30 [native live 优化](live-optimization-acceptance-2026-09-30.md)新增：
+精确 nonce 与独立学习额度、共享读取/候选预算、局部未命中完整 fallback、
+授权 BODY 及返回前 HEAD 重验、调用内计费/阶段截断、Lua/Go 原字节等价与 fresh sequence。
+自动首轮入口的 pending/未知输入停止规则在 CI 测试；真实游戏入口不在 CI 执行。
+
 2026-09-29 [CASC 内容变体](content-variants-2026-09-29.md)新增：默认歧义、显式双变体、
 Root 顺序无关、缺失不回退、其他 flag/重复 CKey 仍歧义、非法值及完整性失败不覆盖输出。
 153 个真实模型的 306 份静态导出不代替实机或碰撞几何验收。

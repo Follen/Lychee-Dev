@@ -1,5 +1,9 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-09-30 工作分支增加[native live 优化与自动首轮验收](live-optimization-acceptance-2026-09-30.md)：
+精确 nonce/有界邻域、调用内共享物理读取预算、授权 HEAD/BODY 调度与原格式发布编码复用。
+新增统计明确为 invocation scope；不更新 journal 的持久期限，真实客户端收益尚未测量。
+
 2026-09-29 工作区新增 [CASC 显式内容变体合同](content-variants-2026-09-29.md)：
 asset inspect/export 可明确筛选 LOW_VIOLENCE 位；默认严格拒绝歧义，完整性校验不变。
 

@@ -73,12 +73,18 @@ func readable(protect uint32) bool {
 	return false
 }
 func (p *Process) Regions(ctx context.Context) ([]Region, error) {
+	return p.regionsMeasured(ctx, nil)
+}
+func (p *Process) regionsMeasured(ctx context.Context, session *Session) ([]Region, error) {
 	var out []Region
 	for address, count := uintptr(0), 0; count < 100000; count++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		var info windows.MemoryBasicInformation
+		if session != nil {
+			session.update(func(st *Stats) { st.MappingQueries++ })
+		}
 		err := windows.VirtualQueryEx(p.handle, address, &info, unsafe.Sizeof(info))
 		if err != nil {
 			if errors.Is(err, windows.ERROR_INVALID_PARAMETER) && address > 0 {
@@ -96,6 +102,9 @@ func (p *Process) Regions(ctx context.Context) ([]Region, error) {
 	return nil, errors.New("memory.region_limit")
 }
 func (p *Process) Read(ctx context.Context, address uint64, b []byte) (int, error) {
+	return p.readMeasured(ctx, address, b, nil)
+}
+func (p *Process) readMeasured(ctx context.Context, address uint64, b []byte, session *Session) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -109,6 +118,9 @@ func (p *Process) Read(ctx context.Context, address uint64, b []byte) (int, erro
 	// adjacent mapping spanned by a record. No module or guard-page fallback.
 	for at, end := address, address+uint64(len(b)); at < end; {
 		var info windows.MemoryBasicInformation
+		if session != nil {
+			session.update(func(st *Stats) { st.MappingQueries++ })
+		}
 		if err := windows.VirtualQueryEx(p.handle, uintptr(at), &info, unsafe.Sizeof(info)); err != nil {
 			return 0, err
 		}
@@ -119,6 +131,9 @@ func (p *Process) Read(ctx context.Context, address uint64, b []byte) (int, erro
 		at = next
 	}
 	var n uintptr
+	if session != nil {
+		session.update(func(st *Stats) { st.RPMCalls++ })
+	}
 	err := windows.ReadProcessMemory(p.handle, uintptr(address), &b[0], uintptr(len(b)), &n)
 	return int(n), err
 }
