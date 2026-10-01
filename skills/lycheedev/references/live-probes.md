@@ -13,6 +13,19 @@ Names are mutable selectors; retain the returned immutable PRB revision. Use it
 with native execute. Old queue-oriented atomic commands belong to legacy records
 and are not the transport for CON connections.
 
+```text
+lycheedev live execute --project <project-directory> --session <CON-id> --probe <PRB-revision> --request <stable-key> --budget-seconds 35 --policy observation --wait-seconds 120 --format json
+```
+
+Choose `observation` only when the whole Lua chunk, including setup and cleanup,
+can safely run again after runtime loss. The CLI may start a new attempt on that
+same request after verified runtime recovery, up to three attempts; it does not
+resume the Lua stack. Reconstruct transient scene state in each attempt. A script
+that saves settings, performs a business action or changes persistent state is
+`opaque` (the default) unless its complete effects are demonstrably repeatable.
+Neither policy permits manually replaying uncertain input or extending the
+original durable deadline. Registering a probe stores source; it does not execute it.
+
 ## Design a discriminating probe
 
 For a simple state query, choose the needed fields and verify the APIs it uses;
@@ -62,7 +75,10 @@ For event- or callback-based work, the chunk receives one API as `...`:
 local probe = ...
 assert(probe:Async(30)) -- integer seconds, 1..120
 local frame = CreateFrame("Frame")
-assert(probe:OnCleanup(function() frame:UnregisterAllEvents() end))
+assert(probe:OnCleanup(function()
+  frame:UnregisterAllEvents()
+  frame:SetScript("OnEvent", nil)
+end))
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:SetScript("OnEvent", assert(probe:Callback(function()
   probe:Finish({ observed = true })
@@ -71,15 +87,21 @@ end)))
 
 Use `probe:Fail("stable_reason")` for an expected failed result,
 `probe:Log(...)` for bounded diagnostic lines, and `probe:IsCancelled()` before
-expensive callback work. Async probes have a mandatory bounded timer, at most
+expensive callback work. The example observes a future combat-exit event; it
+does not establish that the character was in combat beforehand. Add verified
+preconditions or choose the event that actually distinguishes the question.
+Async probes have a mandatory bounded timer, at most 16 wrapped callbacks,
 16 cleanup callbacks, 100 log entries and 32 KiB of logs. Completion is
 single-use. Wrap every asynchronous entry with `probe:Callback` so late callbacks
 cannot enter user code after termination and exceptions become failed reports.
-Register resource cleanup before activating each timer/frame. Cleanup runs on
-completion, failure or timeout; cleanup failures remain pending
-and prevent a false successful acknowledgement. Do
+Register resource cleanup before activating each timer/frame. Cancel owned timers,
+unregister events and detach scripts; hiding a frame alone leaves its callbacks
+and captured values attached. Cleanup runs in reverse registration order on
+completion, failure or timeout. Native execution preserves any verified report
+when cleanup throws, then uses journaled reload/recovery to prove runtime
+destruction; pending recovery remains a separate obligation. Do
 not create permanent hooks or mutate Blizzard-owned APIs.
-Choose the load budget to cover the probe's own async deadline and cleanup; a
+Choose the execute budget to cover the probe's own async deadline and cleanup; a
 longer host wait cannot extend the declared execution budget.
 
 ### Scene prerequisites and optional input protection
@@ -139,9 +161,12 @@ If an internal boundary cannot be observed safely, retain the gap and identify
 the additional diagnostic capability or reproduction context needed.
 
 Give each check a bounded observation window, sample/output budget and cleanup.
-Prefer event-driven observation when the question depends on an event. Complete
-the loaded operation, interpret and archive its verified report, then finish
-that exact operation before starting the next check. Within the existing task
+Prefer event-driven observation when the question depends on an event. Let native
+execute/resume persist the exact verified report and complete its runtime release
+before starting the next check; native CON work needs no legacy ACK or finish
+command. Interpret the business outcome as well as transport and cleanup:
+`reportState: verified` proves retrieval/integrity, `report.ok` states probe
+success, and `cleanup`/`cleanupMethod` states resource closure. Within the existing task
 authorization, continue these steps without separate confirmation for each one.
 
 Feed the observation back into the suspected source path: identify which

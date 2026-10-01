@@ -80,7 +80,11 @@ to 64 MiB, indexed physical/copy rows to one million, columns/partitions to 4096
 and decoded row text to 1 MiB. A page's serialized row array is capped at 8 MiB;
 any row failure or budget overflow returns no partial page. Page selection uses
 bounded extra memory, but each CLI invocation currently reopens the table and
-checks its selected source. Encrypted BLTE chunks use a pinned public TACT key
+checks its selected source. Within one query, the CLI reuses verified table
+views and storage metadata under the same fixed source; separate invocations
+revalidate cached bytes and source identity. Do not build an agent-side decoded
+table cache or bypass verification to make pagination faster.
+Encrypted BLTE chunks use a pinned public TACT key
 snapshot, fetched only when needed and cached with a verified digest. Offline
 uses only cached keys. Supply `--key-file <WoW.txt|keys.json>` to use an explicit
 text or JSON key set instead; private keys stay in request memory.
@@ -97,6 +101,12 @@ installation to CDN does not supply a missing key. Raw asset exports still
 require the complete verified file.
 
 ## Implemented static SQL
+
+Prefer a single bounded SQL query for a relationship that needs several tables;
+its CLI-owned session shares preparation without changing pin or source. Avoid
+issuing many simultaneous queries to force parallel downloads. Heavy queries
+share workspace admission (at most two ordinary queries; one when download
+workers is configured to 1), and waiting can consume the command's deadline.
 
 For parameterized lookups, flags, explicit Hotfix overlays and query diagnostics,
 read [data-query-recipes.md](data-query-recipes.md). The `meta` catalog exposes
@@ -152,6 +162,16 @@ Budgets: at most 32 physical tables, 512 MiB cumulative raw table content,
 evidence. Budget failures yield no partial query result. Narrow the query when
 appropriate to the request; do not change the pinned build or imply full
 coverage from a narrower successful query.
+
+These SQL limits sit alongside shared query-resource limits across preparation
+and reading: 512 MiB retained/scratch reservation, 128 MiB metadata, 100 million
+decode/work units, 4,096 network requests and 1 GiB response-body bytes.
+Failed candidates consume work/network budget; a new table does not reset it.
+`records.query_resource_budget` (exit 3) identifies this shared limit, distinct
+from `query.budget_exceeded` in the SQL executor or `command.deadline`.
+The returned resource counts are logical charges, not wire bytes, peak heap or
+RSS. `--max-bytes` is a per-file bound, not a knob for raising these shared limits;
+narrowing output alone may not reduce source preparation costs.
 
 SQL errors use `error.stage: query` with `query.invalid_syntax` or
 `query.unresolved_binding` (exit 2), `query.unsupported_expression` or

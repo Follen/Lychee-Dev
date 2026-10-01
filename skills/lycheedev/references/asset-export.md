@@ -5,6 +5,12 @@ exporting raw files, decoding images, or demuxing supported media.
 
 ## Locate before writing
 
+Start with a verified FileDataID from the relevant domain relationship when
+one exists. Use a listfile only when a name needs discovery. Inspect when
+identity or encoding is uncertain; an explicit export already verifies and
+archives its source, so a separate inspect is optional for a known file.
+Export only the requested artifact, keeping its manifest and captures.
+
 ### Raw inspection and export
 
 The current native CLI can archive a complete CASC file into the new
@@ -46,6 +52,12 @@ unavailable, so do not describe a partial read as a complete export.
 `--max-bytes` bounds both encoded and decoded selected-file sizes (default
 128 MiB, maximum 512 MiB); Encoding/Root each have a 512 MiB bound. A completed
 raw capture does not prove DB2 semantics, image conversion, export or demux.
+
+Reading uses CLI-owned source verification, candidate recovery and resource
+admission. A cache hit still verifies bytes and the fixed source; do not bypass
+those checks or retry another host yourself. `--max-bytes` bounds the file,
+not the shared query resource budget. The static `data` timeout flag is not an
+asset flag; consult the installed contract before adapting a data command.
 
 Use `asset export` when the user requests an actual raw file:
 
@@ -124,7 +136,7 @@ Find named files in a pinned target with a supported listfile:
 ```text
 lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --query <text> --limit 50 --format json
 lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --extension blp --limit 50 --format json
-lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --name 'Interface/Icons/*' --format json
+lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --name '<exact-listed-path>' --format json
 lycheedev asset search --snapshot <pin> --listfile <community-csv|wowexport-text|wowexport-binary> --file-id <id> --format json
 ```
 
@@ -135,7 +147,14 @@ pages. `--max-bytes` bounds total listfile input (default 256 MiB, maximum
 failure is not a negative file lookup. The command reuses a verified cached
 listfile when available. Search
 results identify candidates; inspect or export a selected file ID before
-interpreting its contents.
+interpreting its contents. `--query` is a case-insensitive substring;
+`--name` is an exact normalized name, with marked `.mdl`/`.mdx` to `.m2`
+alias resolution, not a glob. Names and IDs can have multiple mappings.
+The listfile is a separately captured community listing, not a complete
+inventory authenticated against the selected build. A missing name does not
+prove that CASC lacks the file. Search and extension results have no continuation
+cursor: narrow the substring or raise `--limit` within 1–200 when sufficient;
+do not invent pagination or claim a truncated listing is exhaustive.
 
 Demux a supported VP9 AVI from a local file or pinned CASC source:
 
@@ -145,8 +164,22 @@ lycheedev asset demux --path <local-file> --output <existing-directory> --max-fr
 
 For CASC input, supply `--snapshot <pin> --file-id <id>` and exactly one of
 `--installation <client-or-game-root>` or `--cdn`. Frame, byte and partial
-output bounds are explicit; retain the returned completion and truncation
-state. Do not treat partial output as a complete media export.
+output bounds are explicit. This demux extracts VP9 frame payloads and timing;
+it does not produce decoded image frames or a playable transcoded video.
+The output directory must already exist outside the managed Toolkit workspace;
+use a dedicated task directory so an interrupted artifact set is easy to inspect.
+Existing output files are refused unless `--overwrite` is explicitly in scope.
+`--allow-partial` permits bounded output at frame-count or cumulative byte limits;
+it does not excuse corrupt or truncated AVI input or an oversized frame. Retain
+`complete`, `truncated` and the reason.
+
+Frames publish before `demux-manifest.json`, which is the artifact set's
+completion record. A failure can leave some published frames; archive capture
+creation alone does not prove external publication. If stdout is lost or a run
+is interrupted, compare output files with the manifest's names, sizes and hashes
+before rerunning. Preserve useful evidence and use a fresh output directory
+when replacement was not requested. A successfully published partial manifest
+still describes partial media, not a complete export.
 
 Confirm the resolved file data ID or path, size, encoding, content hash, build,
 and locale where applicable before interpreting the artifact. Metadata is not

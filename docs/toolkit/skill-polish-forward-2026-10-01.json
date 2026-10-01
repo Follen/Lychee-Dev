@@ -1,0 +1,1276 @@
+{
+  "schema": "lycheedev.skill-forward-review.v1",
+  "date": "2026-10-01",
+  "baseCommit": "a9b82a8877132addb1a86d77934086341306e994",
+  "skillPayloadSHA256": "1a32ffd4b0d9e946832d2682efb1a2b5f0a79bae4533825f8bcc9d36564c9ee1",
+  "scope": "Independent offline agent decisions from normalized synthetic requests/artifacts. IDs, paths and digests are placeholders; proposed commands were not executed. This is not real-client acceptance or a measured latency improvement.",
+  "agents": {
+    "model": "gpt-6.1-sol",
+    "implementationAgents": 3,
+    "independentEvaluationAgents": 4,
+    "isolation": "fresh forks; evaluation had no diffs/history/expected outcomes; only assigned skill and minimum fixtures, temporary output writes permitted"
+  },
+  "reviewCriteria": [
+    "Select relevant evidence and preserve explicit scope/pins",
+    "Keep pending identity/request/input uncertainty and durable ownership",
+    "Distinguish coverage, business outcome, transport and cleanup",
+    "Use supported command/flag paths without silently upgrading or widening scope"
+  ],
+  "structure": {
+    "files": 21,
+    "relativeLinks": 70,
+    "failures": [],
+    "proposedCLICommands": 69,
+    "skillPayloadSHA256": "1a32ffd4b0d9e946832d2682efb1a2b5f0a79bae4533825f8bcc9d36564c9ee1"
+  },
+  "commandReview": {
+    "proposedCLICommands": 69,
+    "implementedContracts": 89,
+    "commandOrFlagViolations": 0,
+    "limitation": "Contract validation does not execute command values or prove provider/runtime results."
+  },
+  "offlineBaseline": {
+    "state": "passed",
+    "startedAt": "2026-10-01T08:34:37.463Z",
+    "finishedAt": "2026-10-01T08:40:02.940Z",
+    "sourceTreeSHA256": "f40dcb43c1f1c4c06bda2108603b6f7a1d6b8fea31108183b339e27e3657fefb",
+    "checks": [
+      {
+        "id": "BUILD",
+        "state": "passed"
+      },
+      {
+        "id": "VET",
+        "state": "passed"
+      },
+      {
+        "id": "GO",
+        "state": "passed",
+        "tests": 2998,
+        "packages": 43,
+        "skipped": [
+          "github.com/follenfang/lycheedev/internal/codebase/environment:TestBuildPinnedUnitDocs",
+          "github.com/follenfang/lycheedev/internal/codebase/flow:TestExtractPinnedUnitDocumentationWhenAvailable/retail",
+          "github.com/follenfang/lycheedev/internal/codebase/flow:TestExtractPinnedUnitDocumentationWhenAvailable/forever",
+          "github.com/follenfang/lycheedev/internal/codebase:TestRealBrokerAcrossCLIProcesses",
+          "github.com/follenfang/lycheedev/internal/live/journal:TestAdmissionCrashHelper",
+          "github.com/follenfang/lycheedev/internal/live/memory:TestLuaMailboxRootRecipeOriginalRuntimeDump",
+          "github.com/follenfang/lycheedev/internal/live/memory:TestLuaMailboxRootRecipeCapturedRuntimeHeader",
+          "github.com/follenfang/lycheedev/internal/live/memory:TestNativeModuleProtectionChild",
+          "github.com/follenfang/lycheedev/internal/live/memory:TestNativeModuleMappedChild",
+          "github.com/follenfang/lycheedev/internal/luals:TestRealRuntimeGeneratedEnvironment",
+          "github.com/follenfang/lycheedev/internal/luals:TestRealRuntimeFullRetailAPIReferences",
+          "github.com/follenfang/lycheedev/internal/records/archive:TestInstalledIndexReadOnly",
+          "github.com/follenfang/lycheedev/internal/live/memory:TestNativeMemoryChild",
+          "github.com/follenfang/lycheedev/internal/records/navigatetest:TestCascLibRawFixtureOracle",
+          "github.com/follenfang/lycheedev/internal/records/schema:TestPinnedPublishedDefinitions",
+          "github.com/follenfang/lycheedev/internal/delivery:TestPayloadRejectsLinks",
+          "github.com/follenfang/lycheedev/internal/delivery:TestInstallationWorker",
+          "github.com/follenfang/lycheedev/tests/nonce-lab:TestLuaFixture",
+          "github.com/follenfang/lycheedev/internal/codebase:TestSourceCapacityRejectsLinks",
+          "github.com/follenfang/lycheedev/internal/desktop:TestCaptureItemForExplicitProcess",
+          "github.com/follenfang/lycheedev/internal/desktop:TestCaptureFramesForExplicitProcess",
+          "github.com/follenfang/lycheedev/internal/desktop:TestBackgroundInputDuringWGCCaptureOwnWindow",
+          "github.com/follenfang/lycheedev/internal/command:TestInstalledAssetCommand",
+          "github.com/follenfang/lycheedev/internal/desktop:TestWGCQRCodeOwnWindow",
+          "github.com/follenfang/lycheedev/internal/desktop:TestWGCLifetimeBetweenSessions",
+          "github.com/follenfang/lycheedev/internal/codebase:TestInspectAddonRejectsSymlinkEscape",
+          "github.com/follenfang/lycheedev/internal/live/journal:TestWindowOwnerProcessHelper",
+          "github.com/follenfang/lycheedev/internal/command:TestNativeBindingWindowHelper",
+          "github.com/follenfang/lycheedev/internal/command:TestLiveBindNativeCLI/0,0,600,600",
+          "github.com/follenfang/lycheedev/internal/command:TestLiveBindNativeCLI/window",
+          "github.com/follenfang/lycheedev/internal/live/journal:TestWindowRunProcessHelper",
+          "github.com/follenfang/lycheedev/internal/records:TestOpenExportDestinationCanonicalizesParentSymlink",
+          "github.com/follenfang/lycheedev/internal/records:TestOpenExportDestinationRefusesDirectoryAndSymlinkTargets",
+          "github.com/follenfang/lycheedev/internal/records:TestImageExportRealSample",
+          "github.com/follenfang/lycheedev/internal/records:TestInstallationDiscoveryDoesNotFollowForeignClient",
+          "github.com/follenfang/lycheedev/internal/live:TestDiscoveredClientWindowUsesCanonicalInstallationIdentity",
+          "github.com/follenfang/lycheedev/internal/live:TestClientWindowLiveReadOnly",
+          "github.com/follenfang/lycheedev/internal/records:TestInstalledBuildMetadata",
+          "github.com/follenfang/lycheedev/internal/command:TestPackagedSourceSemanticCLIWhenAvailable",
+          "github.com/follenfang/lycheedev/internal/delivery:TestUpgradeWorker"
+        ]
+      },
+      {
+        "id": "NODE",
+        "state": "passed",
+        "tests": 98,
+        "skipped": 0
+      },
+      {
+        "id": "VERSION",
+        "state": "passed"
+      },
+      {
+        "id": "SKILL",
+        "state": "passed"
+      },
+      {
+        "id": "SKILL-GENERATED",
+        "state": "passed"
+      },
+      {
+        "id": "SOURCE",
+        "state": "passed"
+      }
+    ],
+    "realLuaLS": "passed",
+    "limitations": "Interactive game/capture acceptance, optional external fixtures and explicitly listed skips remain separate. These evidence documents were added after the baseline; the skill payload was unchanged."
+  },
+  "evaluations": [
+    {
+      "mode": "source",
+      "cases": [
+        {
+          "input": {
+            "id": "S1",
+            "request": "项目默认用 Retail 的旧 pin，不过这次我给了 PIN-API-B。只看这个新 pin，告诉我这条 API 声明有什么限制，先别碰游戏。",
+            "artifacts": {
+              "projectLock": {
+                "source": "PIN-API-A"
+              },
+              "explicitSnapshot": "PIN-API-B",
+              "sourceQuery": {
+                "snapshot": "PIN-API-B",
+                "repository": "wow-ui-source",
+                "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "hits": [
+                  {
+                    "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/ExampleDocumentation.lua",
+                    "symbolId": "SYM-B-17",
+                    "excerpt": "SecretArguments = \"AllowedWhenUntainted\""
+                  }
+                ],
+                "coverage": {
+                  "complete": true
+                }
+              }
+            }
+          },
+          "outcome": {
+            "id": "S1",
+            "referencesConsulted": [
+              "SKILL.md",
+              "references/source-research.md",
+              "references/source-value-flow.md",
+              "references/commands.md"
+            ],
+            "response": "这次按显式 PIN-API-B 分析。wow-ui-source 的固定提交 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb，在 Interface/AddOns/Blizzard_APIDocumentationGenerated/ExampleDocumentation.lua 的 SYM-B-17 声明了 SecretArguments = \"AllowedWhenUntainted\"：secret 参数的许可带有调用上下文未被污染这一条件。这个标记本身不能证明某次调用处于允许的 taint 状态，也不能证明这条 API 的全部限制已经列全。当前摘录仅支持这一条限制；下一步读取同一 pin 的原始声明和相邻条件，仍只做源码调查。项目默认 PIN-API-A 不参与本次结论。",
+            "proposedCommands": [
+              "lycheedev describe --format json",
+              "lycheedev target show PIN-API-B --format json",
+              "lycheedev source inspect --snapshot PIN-API-B --path Interface/AddOns/Blizzard_APIDocumentationGenerated/ExampleDocumentation.lua --line 1 --count 80 --format json"
+            ],
+            "knownOutcome": "Explicit query used PIN-API-B and its complete search coverage returned the raw AllowedWhenUntainted declaration marker at the supplied path and commit.",
+            "unresolvedOutcome": "The excerpt lacks full declaration, original line and capture; inspect a bounded range, then the relevant original range if SYM-B-17 is outside it. Other constraints and actual caller taint are not established. No runtime work is authorized.",
+            "neededUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "S2",
+            "request": "我这个第三方插件在 Classic 下的调用关系到底在哪里？我有固定源码，后面还要连续看几个函数。",
+            "artifacts": {
+              "addonPin": {
+                "id": "PIN-ADDON",
+                "repository": "my-addon",
+                "ref": "refs/tags/v4.2",
+                "commit": "cccccccccccccccccccccccccccccccccccccccc"
+              },
+              "apiPin": {
+                "id": "PIN-CLASSIC",
+                "repository": "wow-ui-source",
+                "product": "classic",
+                "commit": "dddddddddddddddddddddddddddddddddddddddd"
+              },
+              "home": "D:/Research/toolkit",
+              "queries": [
+                {
+                  "symbolId": "SYM-1",
+                  "semanticCache": "miss"
+                },
+                {
+                  "symbolId": "SYM-2",
+                  "semanticCache": "miss"
+                }
+              ],
+              "sessionStatus": {
+                "state": "absent"
+              },
+              "runtime": {
+                "bundledLuaLS": "available"
+              }
+            }
+          },
+          "outcome": {
+            "id": "S2",
+            "referencesConsulted": [
+              "SKILL.md",
+              "references/source-research.md",
+              "references/source-relations.md",
+              "references/commands.md"
+            ],
+            "response": "调用关系应从第三方插件的 PIN-ADDON 查，Classic API 上下文单独使用 PIN-CLASSIC。源码是 my-addon 的 refs/tags/v4.2，固定提交 cccccccccccccccccccccccccccccccccccccccc；环境是 wow-ui-source/classic 的 dddddddddddddddddddddddddddddddddddddddd。现有证据只有两个 semantic cache miss，没有返回调用位置，所以还不能指出 callers 或 callees 在哪里。后续连续查看同一组固定源码和环境，适合显式启用 --session-reuse；当前 session absent 且 bundled LuaLS available，首次需要语义分析的 refs/context 请求可启动受 CLI 管理的 worker。读取结果时保留关系确认状态、原始位置、environmentManifest 和 coverage。",
+            "proposedCommands": [
+              "lycheedev describe --format json",
+              "lycheedev source refs --home D:/Research/toolkit --snapshot PIN-ADDON --symbol-id SYM-1 --environment PIN-CLASSIC --direction both --session-reuse --limit 50 --format json",
+              "lycheedev source refs --home D:/Research/toolkit --snapshot PIN-ADDON --symbol-id SYM-2 --environment PIN-CLASSIC --direction both --session-reuse --limit 50 --format json"
+            ],
+            "knownOutcome": "Separate addon and Classic environment pins and exact commits are supplied. Both selected queries missed semantic cache; session is absent and bundled LuaLS is available.",
+            "unresolvedOutcome": "No relationship results or source locations are supplied. Session reuse is appropriate but no worker has been started or measured; missing dependency, dynamic binding and partial semantic edges must remain explicit if returned.",
+            "neededUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "S3",
+            "request": "这页 callers 我看完了，现在想改成 callees，深一点，接着查吧。",
+            "artifacts": {
+              "command": "source refs",
+              "snapshot": "PIN-ADDON",
+              "symbolId": "SYM-3",
+              "direction": "callers",
+              "depth": 1,
+              "nextCursor": "CURSOR-A",
+              "coverage": {
+                "partialReasons": [
+                  "dynamic binding unresolved"
+                ]
+              }
+            }
+          },
+          "outcome": {
+            "id": "S3",
+            "referencesConsulted": [
+              "SKILL.md",
+              "references/source-research.md",
+              "references/source-relations.md",
+              "references/commands.md"
+            ],
+            "response": "改查 SYM-3 的 callees 时，从 PIN-ADDON 发起新的 outgoing 查询；CURSOR-A 属于先前 callers 的分页，不能带入新方向。要向下多看一层，再读取 depth 2 的 bounded context，并按返回的目标 symbol ID 继续 outgoing refs。生成的命令表中 source refs 没有 --depth，深度选项属于 source context。此前的 dynamic binding unresolved 仍是缺口，换方向或增加深度不会自动消除它。",
+            "proposedCommands": [
+              "lycheedev describe --format json",
+              "lycheedev source refs --snapshot PIN-ADDON --symbol-id SYM-3 --direction outgoing --limit 50 --format json",
+              "lycheedev source context --snapshot PIN-ADDON --symbol-id SYM-3 --depth 2 --limit 50 --max-lines 120 --format json"
+            ],
+            "knownOutcome": "The prior callers page has CURSOR-A and an unresolved dynamic binding edge.",
+            "unresolvedOutcome": "New outgoing edges and deeper excerpts have not been returned. The artifact records depth 1 on source refs even though the generated contract lists no refs depth flag; installed help must settle availability. If the original investigation has a separately retained environment/home or budgets, preserve them on the new calls; none is supplied here. Continue deeper relations only through returned symbol IDs, and keep each command's fresh cursor within its own scope.",
+            "neededUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "S4",
+            "request": "是不是这些结果已经可以说插件全客户端兼容，而且没有 secret 问题了？",
+            "artifacts": {
+              "single": {
+                "staticValid": true,
+                "load": {
+                  "loadValid": true
+                },
+                "complete": false,
+                "semantic": {
+                  "diagnostics": []
+                }
+              },
+              "matrix": {
+                "targets": [
+                  {
+                    "id": "retail",
+                    "resolvedCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "valid": true,
+                    "unresolved": [
+                      "dynamic XML include"
+                    ],
+                    "coverage": {
+                      "complete": false
+                    }
+                  },
+                  {
+                    "id": "classic",
+                    "resolvedCommit": "dddddddddddddddddddddddddddddddddddddddd",
+                    "valid": true,
+                    "unresolved": [],
+                    "coverage": {
+                      "complete": true
+                    }
+                  }
+                ],
+                "summary": {
+                  "valid": true
+                }
+              },
+              "flow": {
+                "coverage": {
+                  "state": "bounded_complete"
+                },
+                "boundaries": [
+                  "event handler payload routing unsupported"
+                ],
+                "findings": []
+              }
+            }
+          },
+          "outcome": {
+            "id": "S4",
+            "referencesConsulted": [
+              "SKILL.md",
+              "references/addon-validation.md",
+              "references/source-value-flow.md"
+            ],
+            "response": "还不能说全客户端兼容，也不能说没有 secret 问题。单目标结果说明所列静态检查和加载闭包检查没有发现错误，LuaLS diagnostics 为空，但 complete=false，且没有实机证据。矩阵只覆盖 Retail 和 Classic 两个固定提交；Retail 仍有 dynamic XML include 和 incomplete coverage，Classic 的已检查覆盖完整，summary.valid=true 不会消除 Retail 的缺口。flow 的 bounded_complete 只针对选定闭包和已建模操作；event handler payload routing unsupported 尚未覆盖，所以 findings 为空只能说该范围内没有发现，不能作为 secret 安全证明。下一步需要确定具体事件入口、值和消费操作，直接核查缺失的 payload 路由；还要补齐 Retail 的动态 XML 加载依据。若要证明实际加载、战斗或 taint 行为，需要对应客户端的实机证据。",
+            "proposedCommands": [],
+            "knownOutcome": "Reported checks found no error in their respective scopes. Matrix contains two targets, one with incomplete dynamic XML coverage. Flow contains no findings within a bounded modeled closure.",
+            "unresolvedOutcome": "Other clients are absent, Retail load closure has an unknown edge, single validation remains incomplete, event payload routing is unsupported, and runtime secret/taint and loading behavior are untested. Larger flow depth cannot resolve an unsupported routing edge.",
+            "neededUserInput": [
+              "For an additional investigation, identify the specific event/value/consuming operation and relevant addon XML location, or supply their captures. These inputs are absent from the artifacts; no concrete scoped command can be instantiated yet."
+            ]
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "S5",
+            "request": "我要先知道实际 TOC 能不能加载。semantic 这一步失败了，你继续处理。",
+            "artifacts": {
+              "validationInput": {
+                "path": "D:/Project/MyAddon",
+                "toc": "MyAddon_Classic.toc",
+                "snapshot": "PIN-ADDON",
+                "environment": "PIN-CLASSIC",
+                "semantic": true,
+                "release": "D:/VerifiedRelease"
+              },
+              "failure": {
+                "code": "semantic_runtime_missing",
+                "exitCode": 3
+              },
+              "files": {
+                "MyAddon_Classic.toc": "Core.lua\nUI.xml",
+                "Core.lua": "local addon = ...",
+                "UI.xml": "<Ui><Script file=\"UI.lua\"/></Ui>",
+                "UI.lua": "local frame = CreateFrame(\"Frame\")"
+              }
+            }
+          },
+          "outcome": {
+            "id": "S5",
+            "referencesConsulted": [
+              "SKILL.md",
+              "references/addon-validation.md",
+              "references/commands.md"
+            ],
+            "response": "semantic_runtime_missing 是语义工具能力缺口，尚不能判断 TOC 无法加载。先对同一 D:/Project/MyAddon、本来的 MyAddon_Classic.toc 和 PIN-ADDON 重跑普通静态验证，移除 --semantic、--environment 和 --release，把原来的语义失败单独保留。给出的文件顺序是 Core.lua、UI.xml，再由 UI.xml 引入 UI.lua；这些摘录看起来引用齐全，但不能代替对实际本地字节、XML、Lua 语法和有序闭包的验证。下一份结果的 load.loadValid 能回答静态加载闭包是否有效；游戏是否确实加载成功仍需实机观察，暂时未验证。",
+            "proposedCommands": [
+              "lycheedev describe --format json",
+              "lycheedev source validate --path D:/Project/MyAddon --toc MyAddon_Classic.toc --snapshot PIN-ADDON --format json"
+            ],
+            "knownOutcome": "Semantic validation failed with semantic_runtime_missing and exit 3. Supplied TOC refers to Core.lua and UI.xml; UI.xml refers to UI.lua, whose excerpt creates a Frame.",
+            "unresolvedOutcome": "Ordinary static validation has not executed; actual local bytes, full closure, interfaceStatus, unresolved and notChecked are not verified. A successful static load result would not itself establish in-game loading. Semantic validation remains unavailable until the verified bundled runtime capability is restored; no upgrade or pin change is proposed.",
+            "neededUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        }
+      ]
+    },
+    {
+      "mode": "live",
+      "cases": [
+        {
+          "input": {
+            "id": "L1",
+            "request": "正式服已进入角色。就盯着 D:/Game/World of Warcraft/_retail_/Wow.exe，随便当前角色都行，剩下你自动完成一次只读验证。隔壁假的 wow.exe 不要碰。",
+            "artifacts": {
+              "instances": [
+                {
+                  "pid": 448,
+                  "creation": "T1",
+                  "exe": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+                  "product": "retail",
+                  "actor": "known-current",
+                  "runtime": "older-loaded-addon"
+                },
+                {
+                  "pid": 700,
+                  "creation": "T2",
+                  "exe": "D:/Analysis/wow.exe",
+                  "product": "unknown"
+                }
+              ],
+              "addonStatus": {
+                "installation": "retail-install-1",
+                "state": "clean",
+                "cliRelease": "3.1.0",
+                "slotCount": 200
+              },
+              "retainedConnection": null
+            }
+          },
+          "outcome": {
+            "id": "L1",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/live-investigation.md",
+              "references/live-startup.md",
+              "references/live-probes.md",
+              "references/commands.md"
+            ],
+            "response": "目标已经唯一确定：正式服真实路径的 PID 448 / T1，当前角色在授权范围内。磁盘插件是干净的 3.1.0、含 200 槽，但进程仍加载旧版，不能把安装状态当作运行验证。下一步由 live connect 在这个 PID 上完成必要激活和新绑定，然后做一次不改变游戏状态的有界探针并关闭连接。本离线练习没有执行这些命令，所以目前只确定目标和激活需要，不能声称实机验证成功。",
+            "proposedCommands": [
+              {
+                "command": "lycheedev describe --format json",
+                "condition": "先核对实际安装 CLI 的能力"
+              },
+              {
+                "command": "lycheedev project status --path \"D:/Code/wow/addons/Lychee Dev\" --format json",
+                "condition": "核对调用项目上下文，不修改锁"
+              },
+              {
+                "command": "lycheedev addon status --installation \"D:/Game/World of Warcraft/_retail_\" --format json",
+                "condition": "重新检查目标安装、版本匹配和完整槽库存"
+              },
+              {
+                "command": "lycheedev live connect --project \"D:/Code/wow/addons/Lychee Dev\" --installation \"D:/Game/World of Warcraft/_retail_\" --pid 448 --wait-seconds 120 --format json",
+                "condition": "仍匹配真实路径和创建身份 T1；允许 CLI 必要激活。保留返回 CON；pending 则按 continuation 恢复，不另开连接"
+              },
+              {
+                "command": "lycheedev live execute --project \"D:/Code/wow/addons/Lychee Dev\" --session <returned-CON> --file <readonly-smoke.lua> --request readonly-smoke-1 --budget-seconds 5 --wait-seconds 120 --policy observation --format json",
+                "condition": "新绑定完成；拟议探针源码为 local probe = ...; probe:Finish({kind = 'readonly-smoke', reached = true})。仅证明只读探针能到达并返回，不验证其他插件功能"
+              },
+              {
+                "command": "lycheedev live disconnect <returned-CON> --project \"D:/Code/wow/addons/Lychee Dev\" --wait-seconds 120 --format json",
+                "condition": "探针结果及清理已完成，或需要安全结束该调查；pending 按同 CON 的 continuation 处理"
+              }
+            ],
+            "established": [
+              "真实目标 PID 448 / T1 与假进程 PID 700 不同",
+              "旧加载版本需要与磁盘版本分开处理",
+              "当前角色范围已授权"
+            ],
+            "outcome": "unresolved",
+            "limitations": [
+              "没有执行连接、激活、探针或清理",
+              "此最小验证只回答运行通路是否可用"
+            ],
+            "requiredUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "L2",
+            "request": "发空格的脚本已暂停，继续。",
+            "artifacts": {
+              "project": "D:/Research/live",
+              "session": "CON-original",
+              "request": "REQ-original",
+              "input": {
+                "outcome": "submitted",
+                "messagesQueued": 6
+              },
+              "operation": {
+                "stage": "confirm_ready",
+                "policy": "opaque"
+              },
+              "continuation": {
+                "kind": "wait_active_driver",
+                "blocker": {
+                  "kind": "active_driver"
+                },
+                "remainingBudgetMs": 90000
+              },
+              "driver": {
+                "state": "running"
+              }
+            }
+          },
+          "outcome": {
+            "id": "L2",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/live-recovery.md",
+              "references/commands.md"
+            ],
+            "response": "暂停空格脚本消除了一个外部输入来源，但 CON-original 的宿主驱动仍在运行。原 REQ-original 已提交 6 条消息，不能当成没发过或重发；confirm_ready 也不能代替 continuation。当前应等原宿主调用返回，再读取原连接状态。剩余 90 秒属于原期限，等待期间也会消耗。离线材料尚无驱动结束后的结果，因此这次继续仍未完成。",
+            "proposedCommands": [
+              {
+                "command": "lycheedev live status CON-original --project \"D:/Research/live\" --format json",
+                "condition": "等待原宿主调用完成后读取状态；运行中的原调用由原宿主等待机制观察"
+              },
+              {
+                "command": "lycheedev live resume CON-original --project \"D:/Research/live\" --wait-seconds 60 --format json",
+                "condition": "仅在原驱动结束且新的 continuation 允许 continue 时；不与现驱动竞争，不更新 REQ-original 或期限"
+              }
+            ],
+            "established": [
+              "submitted 仅证明队列提交",
+              "存在 active_driver，当前不能启动竞争恢复",
+              "opaque 结果仍未确认"
+            ],
+            "outcome": "unresolved",
+            "limitations": [
+              "未取得原宿主调用的终态",
+              "暂停用户脚本不释放 CLI 驱动租约"
+            ],
+            "requiredUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "L3",
+            "request": "我把游戏重开了，重新进了另一个角色，继续原来的只读验证。",
+            "artifacts": {
+              "scope": "same real executable, any current character",
+              "project": "D:/Research/live",
+              "session": "CON-old",
+              "request": "REQ-old",
+              "oldProcess": {
+                "pid": 448,
+                "creation": "T1",
+                "state": "exited"
+              },
+              "newProcess": {
+                "pid": 860,
+                "creation": "T3",
+                "exe": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+                "actor": "NewActor"
+              },
+              "oldOperation": {
+                "policy": "opaque",
+                "stage": "execution_unknown",
+                "reportState": "unavailable"
+              },
+              "oldConnection": {
+                "closed": false
+              }
+            }
+          },
+          "outcome": {
+            "id": "L3",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/live-recovery.md",
+              "references/live-investigation.md",
+              "references/live-probes.md",
+              "references/commands.md"
+            ],
+            "response": "原进程 448 / T1 已退出，新进程是 860 / T3、角色 NewActor。先让原项目的 CLI 用进程退出证据退休 CON-old 的准确资源；REQ-old 的 opaque execution_unknown 仍需保留，关闭连接不会证明旧脚本没执行。你原先允许真实路径的任意当前角色，因此可以在安全关闭旧连接后给 860 新绑定并做新的只读验证，不需要再选角色，也不能把旧请求迁到新进程。原探针的具体代码未出现在这些材料中，新实验前要读取原项目保留的精确代码和目标，确认整个新探针可重复。",
+            "proposedCommands": [
+              {
+                "command": "lycheedev live status CON-old --project \"D:/Research/live\" --format json",
+                "condition": "保留 REQ-old 的输入与结果记录"
+              },
+              {
+                "command": "lycheedev live disconnect CON-old --project \"D:/Research/live\" --wait-seconds 120 --format json",
+                "condition": "依 PID 加创建身份退出证明进行无输入退休，保留 execution_unknown"
+              },
+              {
+                "command": "lycheedev live instances --installation \"D:/Game/World of Warcraft/_retail_\" --passive --format json",
+                "condition": "确认替代进程 860 / T3 仍对应授权真实路径"
+              },
+              {
+                "command": "lycheedev live connect --project \"D:/Research/live\" --installation \"D:/Game/World of Warcraft/_retail_\" --pid 860 --wait-seconds 120 --format json",
+                "condition": "CON-old 已安全退休；保留新 CON 和实际返回角色"
+              },
+              {
+                "command": "lycheedev live execute --project \"D:/Research/live\" --session <new-CON> --file <reviewed-readonly-probe.lua> --request readonly-newactor-1 --budget-seconds 30 --wait-seconds 120 --policy observation --format json",
+                "condition": "从原保留证据确定目标并审阅新探针全部效果可重复；这是独立新实验，不恢复或重放 REQ-old"
+              },
+              {
+                "command": "lycheedev live disconnect <new-CON> --project \"D:/Research/live\" --wait-seconds 120 --format json",
+                "condition": "新实验结果与清理完成；若 pending 则按对应 continuation 恢复"
+              }
+            ],
+            "established": [
+              "新进程需要新绑定",
+              "任意当前角色范围涵盖 NewActor",
+              "关闭旧连接与确认旧 opaque 业务结果不同"
+            ],
+            "outcome": "unresolved",
+            "limitations": [
+              "旧业务结果仍 unavailable",
+              "尚未验证旧资源退休和新探针结果",
+              "未提供精确原探针代码，不能直接拼装其重跑"
+            ],
+            "requiredUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "L4",
+            "request": "这次探针是不是失败了，能不能重跑一次？",
+            "artifacts": {
+              "project": "D:/Research/live",
+              "session": "CON-probe",
+              "request": "REQ-check",
+              "reportState": "verified",
+              "report": {
+                "ok": false,
+                "error": "assertion: expected callback not observed",
+                "coverage": {
+                  "scene": "combat"
+                }
+              },
+              "complete": false,
+              "cleanup": "pending",
+              "resourcesReleased": false,
+              "runtimeEnd": {
+                "kind": "process_exited",
+                "fixedCreation": "T1"
+              },
+              "continuation": {
+                "kind": "continue",
+                "goal": "close",
+                "blocker": {
+                  "kind": "runtime_retirement_pending",
+                  "condition": "precise_resource_retirement"
+                }
+              }
+            }
+          },
+          "outcome": {
+            "id": "L4",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/live-investigation.md",
+              "references/live-recovery.md",
+              "references/live-probes.md",
+              "references/commands.md"
+            ],
+            "response": "探针的业务检查确实失败：已验证的 REQ-check 报告是 ok=false，战斗场景里没有观察到预期回调。这是有效失败报告，尚不能单凭它判定根因。清理仍 pending；原进程已退出且已有 runtimeEnd，应先按 close continuation 做准确资源退休，不需要再发 reload。重跑要在原连接安全关闭后另建新实验，先找出未观测回调的原因、确认新客户端和战斗前提，不能用原已完成请求触发重执行。本练习尚未执行退休或重跑。",
+            "proposedCommands": [
+              {
+                "command": "lycheedev live resume CON-probe --project \"D:/Research/live\" --wait-seconds 120 --format json",
+                "condition": "执行已报告的 continue / close，使用保存 runtimeEnd 无输入退休；保留原 resourcesReleased=false"
+              },
+              {
+                "command": "lycheedev live status CON-probe --project \"D:/Research/live\" --format json",
+                "condition": "确认 close 和资源退休结果并读取保留报告"
+              },
+              {
+                "command": "lycheedev live instances --passive --format json",
+                "condition": "原连接退休后发现当前候选；原目标范围没有在材料中给出，不能自动选任意新进程"
+              },
+              {
+                "command": "lycheedev live connect --project \"D:/Research/live\" --installation <authorized-client> --pid <verified-current-pid> --wait-seconds 120 --format json",
+                "condition": "确认原任务授权的目标、读取精确旧探针及回调前提，避免盲目重复同一失败窗口"
+              },
+              {
+                "command": "lycheedev live execute --project \"D:/Research/live\" --session <new-CON> --file <discriminating-callback-probe.lua> --request callback-check-2 --budget-seconds 35 --wait-seconds 120 --policy observation --format json",
+                "condition": "新实验整段可安全重复，有已验证战斗 guard、事件覆盖、30 秒观察和资源清理；未出现具体 API 事实前不编造探针"
+              },
+              {
+                "command": "lycheedev live disconnect <new-CON> --project \"D:/Research/live\" --wait-seconds 120 --format json",
+                "condition": "新的实验及清理完成"
+              }
+            ],
+            "established": [
+              "业务失败已由 verified report 建立",
+              "清理未完成且原资源释放失败字段必须保留",
+              "已有进程退出 runtimeEnd，可用输入无关退休"
+            ],
+            "outcome": "unresolved",
+            "limitations": [
+              "根因未确定",
+              "尚无替代进程身份、原探针具体 API、重跑场景证据"
+            ],
+            "requiredUserInput": [
+              "若被动枚举和原项目目标记录仍不能唯一选定新实例，需选择目标；若战斗场景无法由授权探针重建，需提供该场景。先完成无需用户操作的旧连接退休与证据读取。"
+            ]
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "L5",
+            "request": "登录了啊，为什么没找到数据？你把它搞通，别一直让我操作。",
+            "artifacts": {
+              "project": "D:/Research/live",
+              "session": "CON-root",
+              "input": {
+                "outcome": "not_sent",
+                "messagesQueued": 0
+              },
+              "failure": {
+                "code": "native_root_unsupported",
+                "reason": "bounded module code coverage has unreadable gap"
+              },
+              "runtime": {
+                "descriptor": "unverified"
+              },
+              "source": {
+                "pin": "PIN-CLIENT",
+                "available": true
+              }
+            }
+          },
+          "outcome": {
+            "id": "L5",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/live-investigation.md",
+              "references/live-recovery.md",
+              "references/source-research.md",
+              "references/commands.md"
+            ],
+            "response": "这次没找到数据的已知原因是 native_root_unsupported：对模块代码的有界读取覆盖存在不可读缺口，运行描述符还没验证。已登录不能补足这个内存路径；输入记录明确 not_sent / 0 条，所以不能说探针执行后返回空数据。先保留 CON-root 的错误和覆盖证据，用原 PIN-CLIENT 继续可以完成的静态研究；若无支持的读取覆盖修复能力，实机分支仍阻塞。当前没有材料证明任何条件已经改变，重复 resume、reload、no-cache 或扫描地址都不能据此解决。本离线练习也不能声称搞通。",
+            "proposedCommands": [
+              {
+                "command": "lycheedev live status CON-root --project \"D:/Research/live\" --format json",
+                "condition": "取得准确 retained failure、读缺口、目标身份及 continuation；只读不重发输入"
+              },
+              {
+                "command": "lycheedev target show PIN-CLIENT --format json",
+                "condition": "确定可用静态 source 的仓库、commit 与客户端环境"
+              },
+              {
+                "command": "lycheedev source query <original-investigation-term> --snapshot PIN-CLIENT --mode precise --topic api --limit 50 --format json",
+                "condition": "从原调查上下文取真实术语；用静态分支回答能够回答的部分，不能将 source 命中当运行结果"
+              },
+              {
+                "command": "lycheedev live disconnect CON-root --project \"D:/Research/live\" --wait-seconds 120 --format json",
+                "condition": "停止这条不可推进的实机分支时由 CLI 尝试安全关闭；若缺少关闭证据则保留 pending 和整套恢复记录"
+              }
+            ],
+            "established": [
+              "不是已执行后无数据，而是根读取未支持",
+              "not_sent 证明零排队消息",
+              "静态 PIN-CLIENT 仍可调查"
+            ],
+            "outcome": "unresolved",
+            "limitations": [
+              "无法验证 runtime descriptor",
+              "未提供原数据/API问题术语",
+              "需要支持的模块代码读取覆盖或工具能力修复，不是再次登录即可解决",
+              "退出成功及清理状态均未验证"
+            ],
+            "requiredUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "L6",
+            "request": "两个同 build 的客户端都在线，接着把它们测完。",
+            "artifacts": {
+              "projectA": "D:/Research/A",
+              "sessionA": "CON-A",
+              "pidA": 448,
+              "projectB": "D:/Research/B",
+              "sessionB": "CON-B",
+              "pidB": 860,
+              "installation": "shared-retail",
+              "buildHash": "same-build-hash",
+              "pendingA": {
+                "request": "REQ-A",
+                "slot": 37,
+                "input": "uncertain"
+              },
+              "pendingB": {
+                "request": "REQ-B",
+                "continuation": {
+                  "kind": "wait_external",
+                  "blocker": {
+                    "kind": "shared_publication",
+                    "condition": "publication_dependency_changed"
+                  }
+                }
+              }
+            }
+          },
+          "outcome": {
+            "id": "L6",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/live-recovery.md",
+              "references/live-investigation.md",
+              "references/live-startup.md",
+              "references/commands.md"
+            ],
+            "response": "两台客户端都在授权范围内，但同 build、同安装并不合并身份。A 保持 D:/Research/A、CON-A、REQ-A、PID 448；B 保持 D:/Research/B、CON-B、REQ-B、PID 860。A 的槽 37 输入 uncertain，必须由原连接恢复，不能搬槽或重发。B 当前在等共享文件发布依赖变化，应等该条件变化后再恢复，不能因为等待就重载或更换请求。先读取两个原状态，串行推进当前可恢复的拥有者；完成各自报告、清理及关闭才算测完。材料尚无终态，本练习未实际推进。",
+            "proposedCommands": [
+              {
+                "command": "lycheedev live status CON-A --project \"D:/Research/A\" --format json",
+                "condition": "查 A 的真实 continuation、活跃驱动与原期限；uncertain 不能直接决定重发"
+              },
+              {
+                "command": "lycheedev live status CON-B --project \"D:/Research/B\" --format json",
+                "condition": "确认 B 的 publication_dependency_changed 及期限"
+              },
+              {
+                "command": "lycheedev live resume CON-A --project \"D:/Research/A\" --wait-seconds 120 --format json",
+                "condition": "A 状态允许 continue 且没有活跃驱动；保持槽 37、原 nonce 和 REQ-A，若 wait_external 则先按其实际条件处理"
+              },
+              {
+                "command": "lycheedev live resume CON-B --project \"D:/Research/B\" --wait-seconds 120 --format json",
+                "condition": "共享发布依赖确实改变且 B 无活跃驱动，才串行恢复原 REQ-B；不用变化未发生的忙重试"
+              },
+              {
+                "command": "lycheedev live disconnect CON-A --project \"D:/Research/A\" --wait-seconds 120 --format json",
+                "condition": "A 调查结束并按结果处理资源生命周期"
+              },
+              {
+                "command": "lycheedev live disconnect CON-B --project \"D:/Research/B\" --wait-seconds 120 --format json",
+                "condition": "B 调查结束并按结果处理资源生命周期"
+              }
+            ],
+            "established": [
+              "两实例身份和项目不可交换",
+              "已 uncertain 的 A 槽和 nonce 必须固定",
+              "B 的 shared_publication 是命名外部依赖而非连接丢失证明"
+            ],
+            "outcome": "unresolved",
+            "limitations": [
+              "A continuation 和当前活跃调用信息缺失",
+              "B 依赖变化尚未证明",
+              "同 build 不能证明两个运行实例均已激活新槽库存或拥有结果"
+            ],
+            "requiredUserInput": []
+          },
+          "review": "accepted_with_stated_limits"
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "cases": [
+        {
+          "input": {
+            "id": "D1",
+            "request": "给我找这两个同名技能的正确 ID 和系数，项目默认 pin 旧了，用我给的 PIN-NEW；暂时只查数据。",
+            "artifacts": {
+              "projectDefault": "PIN-OLD",
+              "explicitSnapshot": "PIN-NEW",
+              "search": {
+                "rows": [
+                  {
+                    "ID": 11,
+                    "Name": "同名技能",
+                    "Rank": 1
+                  },
+                  {
+                    "ID": 12,
+                    "Name": "同名技能",
+                    "Rank": 2
+                  }
+                ],
+                "coverage": {
+                  "complete": false
+                },
+                "hasMore": true
+              },
+              "schema": {
+                "SpellName": {
+                  "columns": [
+                    "ID",
+                    "Name_lang"
+                  ]
+                },
+                "SpellEffect": {
+                  "columns": [
+                    "ID",
+                    "SpellID",
+                    "EffectIndex",
+                    "Coefficient"
+                  ]
+                }
+              }
+            }
+          },
+          "outcome": {
+            "id": "D1",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/data-investigation.md",
+              "references/data-tables.md",
+              "references/data-query-recipes.md",
+              "references/commands.md"
+            ],
+            "response": "这次以你指定的 PIN-NEW 为准，不改项目锁。已有结果只确认了两个候选：ID 11（标为 Rank 1）和 ID 12（标为 Rank 2）；搜索覆盖不完整，还不能说它们就是全部正确匹配，也没有系数数据。下一步先确认 PIN-NEW 的产品、完整 build、地区、语言和数据来源，再分别查两个候选的技能关系与 SpellEffect.Coefficient，按 EffectIndex 展示静态系数。SpellName 的实际名称字段是 Name_lang；Rank 标签需要关系证据核实。若关系检查后仍有同名分支，再请你选择对应职业或等级。这里只查静态数据，不进行实机测量。",
+            "proposedCommands": [
+              "lycheedev target show PIN-NEW --format json",
+              "lycheedev data db2 search SpellName --snapshot PIN-NEW <same-source-selector> --field Name_lang --query '同名技能' --limit 200 --format json",
+              "lycheedev data spell info --snapshot PIN-NEW <same-source-selector> --spell-id 11 --format json",
+              "lycheedev data spell info --snapshot PIN-NEW <same-source-selector> --spell-id 12 --format json",
+              "lycheedev data db2 foreign-key SpellEffect --snapshot PIN-NEW <same-source-selector> --field SpellID --value 11 --limit 50 --format json",
+              "lycheedev data db2 foreign-key SpellEffect --snapshot PIN-NEW <same-source-selector> --field SpellID --value 12 --limit 50 --format json"
+            ],
+            "commandConditions": "same-source-selector 为确认后的 --installation <selected-root> 或 --cdn，保持同一来源。search 没有 cursor；hasMore 不授权 --after-id。增大有界搜索仍不足时，使用相同过滤条件的 ORDER BY ID SQL keyset 分页，保留每页捕获与缺失分区信息。",
+            "knownOutcome": "PIN-NEW 优先；候选 ID 为 11、12；已有 schema 支持 SpellEffect.SpellID、EffectIndex、Coefficient。",
+            "unresolvedOutcome": "候选的业务身份、搜索完整性、各 effect 的系数及来源身份尚未验证。静态系数不证明服务器测得系数。",
+            "requiredUserInput": "当前先用工具发现身份和关系，无需用户提供 ID 或 schema；仅在仍有多种有效职业/等级解释时请求对应业务选择。",
+            "execution": "仅依据提供的 artifacts 推演；以上命令均未执行。"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "D2",
+            "request": "数据库里查不到，是不是这版本已经没有这个东西了？用 offline，别联网。",
+            "artifacts": {
+              "snapshot": "PIN-LOCAL",
+              "source": "local-casc",
+              "query": {
+                "rows": [],
+                "coverage": {
+                  "complete": false,
+                  "reasons": [
+                    "encrypted partition",
+                    "missing prepared cache"
+                  ]
+                }
+              },
+              "mode": "offline"
+            }
+          },
+          "outcome": {
+            "id": "D2",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/data-investigation.md",
+              "references/data-tables.md",
+              "references/data-recovery.md",
+              "references/commands.md"
+            ],
+            "response": "不能据此断定这个版本已经没有它。PIN-LOCAL 的 local-casc 查询返回了空行，但覆盖不完整，明确缺少加密分区和已准备缓存；这只能说明当前可读范围没有找到。继续保持 offline，先定位原查询的表、过滤条件、缺失缓存和键，再检查同一 pin 下可读的相关数值表。如果离线缓存或键仍缺失，这部分就保留为未知，不改 build、不联网补齐。",
+            "proposedCommands": [
+              "lycheedev target show PIN-LOCAL --format json",
+              "lycheedev data db2 schema <original-table> --snapshot PIN-LOCAL --installation <same-selected-root> --offline --format json",
+              "lycheedev data db2 --snapshot PIN-LOCAL --installation <same-selected-root> --table <original-table> --id <verified-record-id> --offline --format json"
+            ],
+            "commandConditions": "先从原查询记录恢复 table、filters、capture 和 installation；无已验证 ID 时沿用原有名称搜索，不能凭空填 ID。仅在已有可用离线 key 文件时增加 --key-file <existing-key-file>；缺失准备缓存时不重复无改变的失败查询，也不移除 --offline。",
+            "knownOutcome": "已查询可读范围为空；coverage.complete=false；加密分区及准备缓存限制均存在。",
+            "unresolvedOutcome": "目标在完整版本中是否存在；缺失分区内容；原查询的具体表与记录范围。",
+            "requiredUserInput": "先恢复原查询上下文；若确实没有保留，需要目标名称或原查询记录。若继续被离线材料缺失阻断，需可用的离线缓存或对应键文件；无需要求用户允许联网。",
+            "execution": "没有联网、重试或执行 CLI。"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "D3",
+            "request": "上次 Hotfix 还没扫完，继续，然后告诉我哪些现在生效。",
+            "artifacts": {
+              "source": {
+                "original": "D:/Game/Cache/DBCache.bin",
+                "archivedCapture": "CAP-HF",
+                "sourceId": "fixed-hf-source",
+                "originalFileChanged": true
+              },
+              "checkpoint": {
+                "id": "SCAN-HF",
+                "sourceId": "fixed-hf-source",
+                "table": "SpellEffect",
+                "afterIndex": 87,
+                "limit": 100,
+                "latest": true
+              },
+              "savedPages": [
+                "CAP-PAGE-1"
+              ],
+              "basePin": "PIN-BASE"
+            }
+          },
+          "outcome": {
+            "id": "D3",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/data-investigation.md",
+              "references/data-hotfix.md",
+              "references/data-query-recipes.md",
+              "references/data-tables.md",
+              "references/commands.md"
+            ],
+            "response": "继续从 SCAN-HF 检查点读取 fixed-hf-source 的归档 CAP-HF，保留 SpellEffect、limit 100 和 latest；原始 DBCache.bin 已变化，不能重新读它来接续。检查点的 afterIndex 87 不是扫描 cursor。扫完得到的是该缓存中所选最大 push 批次的记录，不是每个 ID 的最后生效值。要回答哪些在这份缓存叠加后生效，还需以 PIN-BASE 为基础，将原始缓存 CAP-HF 明确放入 SQL hotfix 数组查询 effective.SpellEffect，检查有效成员、删除和来源。这个结论仅适用于该归档缓存，不能证明当前服务器或运行客户端已生效。",
+            "proposedCommands": [
+              "lycheedev evidence show SCAN-HF --format json",
+              "lycheedev evidence show CAP-HF --format json",
+              "lycheedev data hotfix --source dbcache --scan --snapshot <checkpoint-derived-snapshot> --from CAP-HF --table SpellEffect --latest --limit 100 --max-pages 100 --cursor SCAN-HF --format json",
+              "lycheedev evidence show CAP-PAGE-1 --format json",
+              "lycheedev data db2 schema SpellEffect --snapshot PIN-BASE <base-source-selector> --format json",
+              "lycheedev data sql --snapshot PIN-BASE <base-source-selector> --file <effective-query.json> --format json"
+            ],
+            "commandConditions": "使用检查点返回的派生 snapshot，核对归档 source.id=fixed-hf-source，保留已保存及新返回的页面 capture。若仍不完整，用新返回的 resume capture 继续；不换成 --after-index 87。CAP-HF 必须经 manifest 确认为匹配 PIN-BASE 的原始缓存捕获，不能以 SCAN-HF 或页面捕获替代。base-source-selector 从 PIN-BASE 的原选定来源恢复。",
+            "proposedQueryDocument": {
+              "sql": "SELECT e.* FROM effective.SpellEffect e WHERE e.__hotfix_source IS NOT NULL ORDER BY e.ID LIMIT 100",
+              "hotfix": [
+                "CAP-HF"
+              ]
+            },
+            "followupQuery": "按返回 schema 与扫描页面确认变更 ID。effective 直接查询可包含新增成员；对删除候选，以命名 id 参数查 static.SpellEffect s LEFT JOIN effective.SpellEffect e ON s.ID=e.ID，投影 s.ID、e.ID 及 e.__hotfix_source/__hotfix_push/__hotfix_index，避免把 NULL 字段误判为删除。effective 列表继续时增加 e.ID > :after 并保持同一 CAP-HF、基础 pin、来源及过滤，直到必要范围覆盖完整。",
+            "knownOutcome": "有原始归档 CAP-HF、检查点 SCAN-HF、既有页面 CAP-PAGE-1；原文件变化不会修改归档续扫对象。",
+            "unresolvedOutcome": "扫描尚未完成；页面实际内容、派生 snapshot、有效成员/删除、schema 与 overlay 状态策略尚未读取。latest 批次不能独立代表有效叠加状态；未知 status 等 overlay 错误需明确保留。",
+            "requiredUserInput": "不需重新授权续扫；若用户的‘现在生效’专指服务器或当前客户端，需另行明确该范围，归档离线证据无法完成它。",
+            "execution": "仅提出保存检查点的续扫和显式 overlay 查询；未执行。"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "D4",
+            "request": "Wago 给的是空结果。那这职业这个版本应该没有这条改动了？",
+            "artifacts": {
+              "provider": "wago",
+              "query": "class change",
+              "scope": {
+                "build": "B1",
+                "locale": "zhCN"
+              },
+              "rows": [],
+              "coverage": {
+                "complete": false
+              },
+              "nextCursor": "REMOTE-C2"
+            }
+          },
+          "outcome": {
+            "id": "D4",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/data-investigation.md",
+              "references/data-hotfix.md",
+              "references/commands.md"
+            ],
+            "response": "目前不能说这个职业在该版本没有这条改动。Wago 的空候选结果覆盖不完整，并仍有 REMOTE-C2；文本搜索只是找候选。应在同一 provider、产品、完整 build、地区、zhCN、表、记录、push 和 status 范围内接续；若原来仅靠 class change 文本收窄，则另开去掉文本过滤的有界查询，核实物理记录。即使 Wago 完整范围没有记录，也只能说明该 provider 未找到相应记录，不能直接证明整个版本或服务器没有改动。",
+            "proposedCommands": [
+              "lycheedev data hotfix --source wago --product <original-product> --build <original-full-build> --region <original-region> --locale zhCN <unchanged-structured-filters> --search 'class change' --cursor REMOTE-C2 --limit 100 --max-pages 10 --max-requests 20 --max-bytes 16777216 --format json",
+              "lycheedev data hotfix --source wago --product <same-product> --build <same-full-build> --region <same-region> --locale zhCN <same-structured-filters> --limit 100 --max-pages 10 --max-requests 20 --max-bytes 16777216 --format json"
+            ],
+            "commandConditions": "两步是条件性的：先接续原查询；只有文本过滤妨碍核实范围时另开无 --search 的查询，且不能把旧 cursor 带到新过滤。B1 是提供的范围标识，不能凭空当成 CLI 要求的完整 build 字符串。先恢复原请求的 product、full build、region 和结构过滤；不要套用本地 --from <capture> 或切换 Raidbots。离线演练不执行 provider 请求。",
+            "knownOutcome": "Wago 返回空候选；coverage.complete=false；有 REMOTE-C2。",
+            "unresolvedOutcome": "下一页记录、精确产品/完整 build/地区/职业相关表和记录身份、provider 精确范围完整性、版本实际改动。",
+            "requiredUserInput": "优先恢复原查询上下文；仅在缺失且工具不能唯一解析时询问实际产品/地区或职业及具体改动。预算耗尽则保留 inconclusive，而非请求换版本。",
+            "execution": "未接触 Wago 或任何网络来源。"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "D5",
+            "request": "导出 Interface/Icons 下面的图标。我刚才导出一张没看到输出，你看看别重复覆盖；要 PNG。",
+            "artifacts": {
+              "snapshot": "PIN-ASSET",
+              "previousExport": {
+                "destination": "D:/Exports/icon.png",
+                "stdoutLost": true,
+                "fileExists": true,
+                "capture": "CAP-EXPORT",
+                "registeredDigest": "sha256-expected"
+              },
+              "pathCandidates": [
+                {
+                  "path": "Interface/Icons/icon.blp",
+                  "flags": 0,
+                  "contentKey": "C1"
+                },
+                {
+                  "path": "Interface/Icons/icon.blp",
+                  "flags": "LOW_VIOLENCE",
+                  "contentKey": "C1"
+                }
+              ],
+              "listPage": {
+                "nextCursor": "ASSET-C2",
+                "complete": false
+              }
+            }
+          },
+          "outcome": {
+            "id": "D5",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/asset-export.md",
+              "references/commands.md"
+            ],
+            "response": "D:/Exports/icon.png 已存在，先核对 CAP-EXPORT 的 manifest、编码和该文件的 SHA-256。文件存在与 stdout 丢失都不能独立证明导出成功；若文件与 manifest 的输出大小/hash 一致且编码为 PNG，就复用已有文件，避免重导。扩展名 .png 也不证明转换过。两个 icon.blp Root 候选虽共享 C1，standard 与 low-violence 仍是不同选择，需要明确要哪一种。Interface/Icons 列表不完整，而且 asset search 没有 cursor，不能使用 ASSET-C2 接续或声称已列出全部图标；应使用已固定 listfile 缩小子范围或提高有界 limit，确认实际 FileDataID 后逐个输出 PNG 到新文件。",
+            "proposedCommands": [
+              "lycheedev evidence show CAP-EXPORT --format json",
+              "lycheedev evidence verify CAP-EXPORT --format json",
+              "Get-Item -LiteralPath 'D:/Exports/icon.png' | Select-Object FullName,Length",
+              "Get-FileHash -LiteralPath 'D:/Exports/icon.png' -Algorithm SHA256",
+              "lycheedev target show PIN-ASSET --format json",
+              "lycheedev asset search --snapshot PIN-ASSET --listfile <same-listfile-kind> --query 'Interface/Icons/' --limit 200 --format json",
+              "lycheedev asset search --snapshot PIN-ASSET --listfile <same-listfile-kind> --name 'Interface/Icons/icon.blp' --format json",
+              "lycheedev asset export --snapshot PIN-ASSET <same-source-selector> --file-id <resolved-id> --content-variant <chosen-standard-or-low-violence> --encoding png --output 'D:/Exports/<new-unique-name>.png' --format json"
+            ],
+            "commandConditions": "evidence verify 仅验证归档 bytes，外部文件需独立比对 manifest 输出 hash/长度。sha256-expected 是提供的符号占位，不是实际可核对 digest。导出使用 --encoding png、不使用 --overwrite，输出父目录必须已存在且在受管工作区外。路径查询从固定 listfile 取 ID，不直接把路径当 --file-id。超过 200 的集合需进一步拆分可识别名称范围，仍保留 community listfile 并非该 build 全部 CASC 资产库存的限制。",
+            "knownOutcome": "既有文件存在；有捕获 CAP-EXPORT；存在 standard/low-violence Root 歧义；列表未完整。",
+            "unresolvedOutcome": "外部文件实际 hash、manifest 编码和发布成功、确切 FileDataID、所选内容变体、目录内全部图标覆盖。",
+            "requiredUserInput": "需选择 standard 或 low-violence；若目录范围过大无法用有界列表覆盖，需给定更小图标范围或接受仅导出可确认的列出集合。既有文件 hash 一致则无需选择覆盖。",
+            "execution": "未读取导出文件、执行哈希、搜索、导出或覆盖；仅拟定核验步骤。"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "D6",
+            "request": "就用当前安装的工具看几个调用关系，快一点就行。",
+            "artifacts": {
+              "installedCLI": {
+                "version": "3.0.2",
+                "sourceRefsFlags": [
+                  "--snapshot",
+                  "--symbol-id",
+                  "--static-only",
+                  "--environment",
+                  "--format"
+                ],
+                "supportsSessionReuse": false
+              },
+              "sourceSkillVersion": "3.1.0",
+              "distributionTags": {
+                "latest": "2.5.1",
+                "next": "3.0.2"
+              },
+              "fixedSource": "PIN-ADDON",
+              "fixedEnvironment": "PIN-CLASSIC"
+            }
+          },
+          "outcome": {
+            "id": "D6",
+            "consultedReferences": [
+              "SKILL.md",
+              "references/source-research.md",
+              "references/source-relations.md",
+              "references/commands.md"
+            ],
+            "response": "可以沿用当前 3.0.2，固定源码 PIN-ADDON 和 Classic 环境 PIN-CLASSIC。源码技能 3.1.0 里的 session-reuse 不是这台已安装 CLI 的能力，不能使用它，也无需为查调用关系升级或调整 npm tag。你偏重速度，可以先做 static-only 的结构关系查询，并把静态候选与确认语义关系区分开；动态调用或未解析边保留未知。当前还没有具体函数或入口名称，给出这些名称后才能选出 symbolId 和回答实际调用关系。",
+            "proposedCommands": [
+              "lycheedev describe --format json",
+              "lycheedev target show PIN-ADDON --format json",
+              "lycheedev target show PIN-CLASSIC --format json",
+              "lycheedev source query <requested-function-or-entry> --snapshot PIN-ADDON --mode precise --topic lua --limit 50 --format json",
+              "lycheedev source refs --snapshot PIN-ADDON --symbol-id <returned-symbolId> --environment PIN-CLASSIC --static-only --format json"
+            ],
+            "commandConditions": "source query 可用参数先以 installed describe 核实。refs 严格只用 artifacts 列出的已安装 flags，不从新版 reference 添加 --session-reuse、--direction、--limit 或 --cursor。同名命中按原位置/作用域区分；static-only 的不完整或动态未知边不能用于断言没有调用。若结构结果不能回答所需调用，使用同一固定身份、去掉 --static-only 的受支持 one-shot refs，不需要 session 命令。",
+            "knownOutcome": "安装 3.0.2 不支持 session reuse；固定 source/environment 已给定；latest=2.5.1、next=3.0.2 不需变化。",
+            "unresolvedOutcome": "待查函数/入口及 symbolId；实际调用关系、semantic coverage 与未解析边。",
+            "requiredUserInput": "需要实际要查的几个函数或入口名称；无需用户提供 symbolId。若已在前文给出则直接复用。",
+            "execution": "没有执行 CLI、安装、升级、进程操作或修改 distribution tag。"
+          },
+          "review": "accepted_with_stated_limits"
+        }
+      ]
+    },
+    {
+      "mode": "selection",
+      "cases": [
+        {
+          "input": {
+            "id": "R1",
+            "request": "魔兽插件一直报 secret value 错，帮我看这个堆栈和实际调用。"
+          },
+          "outcome": {
+            "id": "R1",
+            "selectLycheedev": true,
+            "reason": "请求调查 WoW 插件 secret value 报错、堆栈及实际调用，直接属于描述中的插件报错、源码/API 与实机行为调查。",
+            "likelyMode": "addon debugging and API/live behavior investigation"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R2",
+            "request": "查一下我本地正式服这个技能 ID 的 DB2 系数和 Hotfix 覆盖。"
+          },
+          "outcome": {
+            "id": "R2",
+            "selectLycheedev": true,
+            "reason": "请求本地正式服技能 ID 的 DB2 系数及 Hotfix 覆盖，直接属于描述中的 DB2/SQL/Hotfix 数据调查。",
+            "likelyMode": "local build game-data query"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R3",
+            "request": "从这个 WoW build 导出图标，给我 PNG。"
+          },
+          "outcome": {
+            "id": "R3",
+            "selectLycheedev": true,
+            "reason": "请求从 WoW build 导出图标 PNG，属于描述中的 WoW 资产调查与导出用途。",
+            "likelyMode": "asset export"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R4",
+            "request": "已登录，继续。",
+            "retainedContext": {
+              "goal": "Lychee native live verification",
+              "project": "D:/Research/live",
+              "connection": "CON-original",
+              "state": "pending"
+            }
+          },
+          "outcome": {
+            "id": "R4",
+            "selectLycheedev": true,
+            "reason": "虽然当前请求简短，保留上下文明确是待完成的 Lychee native live verification，登录后继续应接续已有实机验证和连接状态。",
+            "likelyMode": "resume pending native live verification"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R5",
+            "request": "魔兽这个团本今晚怎么打？给我配队建议。"
+          },
+          "outcome": {
+            "id": "R5",
+            "selectLycheedev": false,
+            "reason": "请求团本打法及配队建议，属于描述明确区分出去的一般游戏玩法。",
+            "alternativeCapabilityCategory": "current WoW gameplay and raid strategy research"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R6",
+            "request": "用 IDA 找当前 Wow.exe 的 Lua VM 地址和 RVA，把内存定位路径存成配方。"
+          },
+          "outcome": {
+            "id": "R6",
+            "selectLycheedev": false,
+            "reason": "请求 IDA 定位进程 Lua VM 地址、RVA 并保存内存定位配方，属于描述明确区分出去的原始进程地址/偏移发现。",
+            "alternativeCapabilityCategory": "process memory investigation and static reverse engineering"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R7",
+            "request": "Chrome 扩展的 JavaScript 报 TypeError，帮我修。"
+          },
+          "outcome": {
+            "id": "R7",
+            "selectLycheedev": false,
+            "reason": "请求修复 Chrome 扩展 JavaScript TypeError，与描述限定的 WoW 插件及 Toolkit 调查无关。",
+            "alternativeCapabilityCategory": "browser extension debugging"
+          },
+          "review": "accepted_with_stated_limits"
+        },
+        {
+          "input": {
+            "id": "R8",
+            "request": "把 Lychee Dev 工具和我选的插件目录更新到指定发行版本。"
+          },
+          "outcome": {
+            "id": "R8",
+            "selectLycheedev": true,
+            "reason": "明确请求更新 Lychee Dev 工具及选定插件目录到发行版本，符合描述中的 Toolkit 安装/更新。",
+            "likelyMode": "toolkit and selected addon installation/update"
+          },
+          "review": "accepted_with_stated_limits"
+        }
+      ]
+    }
+  ]
+}

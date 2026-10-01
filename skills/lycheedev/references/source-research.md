@@ -52,6 +52,8 @@ dynamic edge cannot establish absence. A query's relation list is only a preview
 use `source refs` if callers matter. Continue `nextCursor` only while another page
 can change the answer, preserving the command's snapshot, query and budgets.
 Query, refs and context cursors are not interchangeable.
+Changing the term, symbol, environment or budgets begins a new investigation
+without the previous cursor; keep its captures separate from the earlier pages.
 
 `source inspect --path` archives the whole file but returns a bounded excerpt.
 Report its path, first/last/total lines, exact commit, full-file hash and capture;
@@ -67,6 +69,9 @@ For preparation failures, use the bounded recovery in
 [source-preparation.md](source-preparation.md#recover-without-changing-the-revision).
 Finish with the source-supported answer and unresolved conditions. Static source
 does not prove that a client loaded it or behaved that way in combat or another build.
+Identify what is established, what could change the answer, and the smallest
+next check for that uncertainty. Keep the pin, original locations and captures
+with the conclusion so a later data/live step can reuse the evidence.
 
 ## Secret values and secure taint
 
@@ -94,7 +99,7 @@ starting it, and `lycheedev source session close --home <workspace>` to release
 it before explicit source reclamation. Add the same `--release <release-root>`
 when the investigation uses a separately verified release. The broker also exits
 after 60 seconds idle, ten minutes lifetime, or 256 semantic RPC batches.
-`--static-only` cannot be combined with `--session-reuse`.
+`--static-only` cannot be combined with `--session-reuse` or `--release`.
 
 Reuse remains opt-in. These bounds do not claim measured full-source RSS or
 latency; retain the result's coverage and partial reasons. Session failure does

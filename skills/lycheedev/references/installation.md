@@ -1,14 +1,18 @@
 # Installation tasks
 
-Read this reference only when the user explicitly asks to install, update, or
-remove Lychee Dev. First inspect the installed CLI's top-level and relevant
+Read this for a requested installation/update/removal, or managed addon deployment
+needed to complete an already authorized live task. That live authorization covers
+the selected client's necessary deployment and activation; it does not imply a
+global npm CLI update, updates to other clients or changing the selected release.
+First inspect the installed CLI's top-level and relevant
 subcommand `--help`; use only the commands and flags it exposes. If `describe`
 is available, use it to confirm the supported capability. Do not substitute a
 legacy installer or claim a planned release command exists.
 
 ## Update the installed toolkit
 
-For npm installations with `update` in their installed command contract:
+For an authorized npm update to the `latest` channel, with `update` in the
+installed command contract:
 
 ```text
 lycheedev update --plan --format json
@@ -36,7 +40,16 @@ objects with `component` (`skill` or `addon`) and absolute `path`. It cannot be
 combined with the path selectors. An empty array intentionally updates only the
 npm CLI and bundled tools; it never discovers or deploys other targets.
 
-The npm launcher fetches one exact latest package into isolation, verifies it,
+The npm launcher fetches `lycheedev@latest` into isolation and pins the exact
+resolved package. This command has no version/channel selector: do not use it to
+refresh a selected `next`, exact-version or development candidate. Keep that
+selection and use its matching installed release root for payload deployment;
+if CLI replacement is requested, use the explicitly chosen package/version through
+the supported distribution route. Do not move registry tags to make an updater
+select a candidate. Keep the owner's existing registry-channel policy separate
+from installation; an update task is not a release-promotion request.
+
+The launcher verifies the pinned package,
 checks all targets, replaces the CLI (including its bundled LuaLS), then applies
 that release's addon and Skill through native delivery. No running native process
 holds the old executable during npm replacement. Successful replacement removes
@@ -53,8 +66,9 @@ lycheedev update --release <distribution-root> --path <parent/lycheedev> --insta
 ```
 
 This verifies and applies that CLI version's payload; it does not self-replace
-the native executable or fetch npm. Older CLIs without `update` must first be
-upgraded using npm, then use the newly installed command. Do not call an
+the native executable or fetch npm. Older CLIs without `update` need a supported
+CLI upgrade only when an upgrade is in scope; select the requested release before
+using its command. Do not call an
 unimplemented update command merely because the Skill documents it.
 
 `result.complete` confirms files and receipts. `activation: reload_required`
@@ -89,15 +103,20 @@ installation uses the lightweight TOC/XML/Lua checker and does not require Git
 or LuaLS on the target machine.
 
 Before updating a managed installation, finish current operations and disconnect
-your own native CON connections. The installer refuses unresolved host ownership;
-do not clear a foreign project's claim. Deploy through the managed installer,
-then activate the selected process using the startup workflow. All 200 slot-v2 files
-are part of the managed installation. An installed CLI or Skill does not update
-an already running client, and a disk-only result is not live readiness.
-Migration from the old 64-slot pool refuses unresolved reservations; recover
-them through their owning CON rather than deleting files. Existing 64-slot CONs can resume and clean up their original slots before
-migration; new connections require 200 slots. Old records retain their evidence
-and retirement value. With multiple
+your own compatible native CON connections. The installer refuses unresolved
+ownership; do not clear a foreign project's claim. Deploy through the managed
+installer, then activate the selected process using the startup workflow. Native
+3.1 uses the named Mailbox, slot-v3 and 200 LoadOnDemand slot addons; all managed
+files and receipts must match the selected CLI release. An installed CLI or Skill
+does not update an already running client, and a disk-only result is not live
+readiness.
+
+An inert older managed installation can be replaced using its installation
+receipt. This is filesystem migration, not protocol compatibility: the 3.1 driver
+rejects old wire, native identities and channel-v1 journals, including 64-slot
+connections. Preserve those records and unresolved reservations for recovery with
+their matching older CLI in the owning task. Do not ask the new driver to resume
+them, rewrite their schema or delete their claims to permit installation. With multiple
 instances, activate and verify each authorized PID after the shared installation
 is updated. If the runtime reports `restart_required` because newly installed
 slot folders are unavailable, retain that blocker and restart only within scope.

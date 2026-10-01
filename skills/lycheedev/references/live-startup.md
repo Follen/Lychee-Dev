@@ -9,14 +9,14 @@ edit slot payloads or import old queues/SavedVariables.
 Use the shared installation candidates to select a verified client directory;
 directory names alone do not establish product identity. A game root may contain
 several clients, and a client may have several processes: retain the selected path,
-PID and later character binding. Resolve only remaining ambiguity, not a fresh
+PID, process creation identity and later character binding. Resolve only remaining ambiguity, not a fresh
 choice on every retry. Local selection errors never authorize another installation.
 
 1. Select the authorized installation and PID. Inspect `addon status`; the main
    addon must be a clean managed installation matching the CLI, and all 200 slot
    files must pass inspection. Use [installation](installation.md) for deployment.
 2. Use `live connect` with the invoking project's `--project` and exact target.
-   It discovers memory identity and binds with a new nonce. If the runtime is
+   It resolves the verified Mailbox identity and binds with a new nonce. If the runtime is
    absent, it records an activation and performs one fixed reload automatically.
 3. Preserve any returned CON ID, including activation-pending results. Use status
    and resume in the same project; do not start another connection or resend keys.
@@ -50,8 +50,11 @@ or otherwise cannot accept the narrow input, preserve pending evidence and
 inspect that condition. An absent descriptor does not prove a build mismatch or
 that a reload executed. Client versions that cannot discover newly installed
 addon folders through reload may require a client restart; do not loop reloads
-or claim that disk files prove those folders are loaded. Keep the selected actor
-and installation fixed. A restart or character switch follows the user's scope.
+or claim that disk files prove those folders are loaded. Keep pending activation
+bound to its selected process; a restart ends that process rather than transferring
+its unknown input. Retire the old CON using process/runtime proof, then bind the
+replacement under the user's scope. An already authorized current-character task
+does not require another character choice; a specifically named actor stays fixed.
 
 ## Ownership and recovery
 
