@@ -10,7 +10,7 @@ import (
 )
 
 func TestResultPersistenceKeepsExactWhitespaceAndHTMLBytes(t *testing.T) {
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 9, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 9, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "connections", "c.jsonl"), nil, i)
 	if err != nil {
 		t.Fatal(err)
@@ -31,11 +31,12 @@ func TestResultPersistenceKeepsExactWhitespaceAndHTMLBytes(t *testing.T) {
 	}
 }
 
-// Pre-release journals used RawMessage; accept their original bytes only when
-// the normal state validator can still prove the declared digest and length.
-func TestLegacyResultBytes(t *testing.T) {
-	var op Operation
-	if err := json.Unmarshal([]byte(`{"result":{"ok":true}}`), &op); err != nil || string(op.Result) != `{"ok":true}` {
-		t.Fatalf("%s %v", op.Result, err)
+// The old result field is rejected, never imported into the current journal.
+func TestLegacyResultBytesRejected(t *testing.T) {
+	for _, old := range []string{`{"result":{"ok":true}}`, `{"result":null}`, `{"resultBytes":"e30=","result":{"ok":true}}`} {
+		var op Operation
+		if err := json.Unmarshal([]byte(old), &op); err == nil {
+			t.Fatal("old result field accepted")
+		}
 	}
 }

@@ -1,0 +1,161 @@
+{
+  "schema": "lycheedev.research.asset-digests.v1",
+  "scope": "Immutable Classic 70032 evidence bundle; excludes this digest manifest",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2991,
+      "sha256": "c892b6c99b19f23f53b5e005b99173aab06d36c768b23a5fd47acab56d02c722"
+    },
+    {
+      "path": "acceptance-actor-independent.json",
+      "bytes": 2682,
+      "sha256": "0c7c24698ac2d2b216a7b83dd3fc617c274945ea38d091b80c0286cdeae89afd"
+    },
+    {
+      "path": "acceptance-after-reload-no-cache.json",
+      "bytes": 2919,
+      "sha256": "2c18ec3cbc55f07e6ad1f93680bd688a9f228e67c7ad65be035342178c02bc92"
+    },
+    {
+      "path": "acceptance-disconnect-readonly-retry.json",
+      "bytes": 2748,
+      "sha256": "f824d466d1d90bc71951f2affc7d44e3b53f2b9e831e888abe922ba7d4f591a7"
+    },
+    {
+      "path": "acceptance-disconnect.json",
+      "bytes": 2914,
+      "sha256": "61c7fa37c9a81c8abf5dd7e65b138ed92bbf4ff4b6a2a8354c26202b6720f3fc"
+    },
+    {
+      "path": "acceptance-large-no-cache.json",
+      "bytes": 92716,
+      "sha256": "db99dcb462669f464b550108a2c02231f206466f9e269d974b7456ef6d2c2a30"
+    },
+    {
+      "path": "acceptance-large.json",
+      "bytes": 92707,
+      "sha256": "4ccea49b79e9db084901f7900fc7dd2606ab20da29003e61d5ffd74ca42ed83c"
+    },
+    {
+      "path": "acceptance-normal-no-cache.json",
+      "bytes": 2652,
+      "sha256": "dfc09aab537d02f048de2d861efcf74c6a491437a3ef0c1aab126bb335b6fed8"
+    },
+    {
+      "path": "acceptance-normal-readonly-retry.json",
+      "bytes": 2486,
+      "sha256": "62215e53d41d5d7291edb3253db048f1c50298fba747180dba0113253ba4e110"
+    },
+    {
+      "path": "acceptance-normal.json",
+      "bytes": 2641,
+      "sha256": "119c39358eed526dcd0f611e5f34339b301ae23012c8663d01846f9698653091"
+    },
+    {
+      "path": "acceptance-reload-readonly-retry.json",
+      "bytes": 2051,
+      "sha256": "c67c525b616ce5ec5fe4204afe83d3e76293fce9f825ab0cf41026e4bc5c60ab"
+    },
+    {
+      "path": "acceptance-reload.json",
+      "bytes": 2217,
+      "sha256": "94bb9fee1d0254cb0db84c0c50418190a33fc74de307cf786cea7c5561b888c0"
+    },
+    {
+      "path": "acceptance-report.json",
+      "bytes": 10345,
+      "sha256": "d8661e74b9eee1a33d3f9dd54e716258a1c63e307175b64bb0f3d836c3e61ee0"
+    },
+    {
+      "path": "anchor-relocate-report.json",
+      "bytes": 2053,
+      "sha256": "739b33f08453c2450afd649a201ebf244f5bc817a443eabd259218819222fa17"
+    },
+    {
+      "path": "capability-confirm-read.json",
+      "bytes": 1783,
+      "sha256": "ff3ac097c9e5531dc3b2089d7ffe6a1ea2b1a7052c96329bd8f56e1b0bb24fc6"
+    },
+    {
+      "path": "capability-save-report.json",
+      "bytes": 14775,
+      "sha256": "054e4fc60ae7e524b3515b82f043850453d8a9ff0f46da01eca80593d9873d9b"
+    },
+    {
+      "path": "connect.json",
+      "bytes": 1355,
+      "sha256": "931fa24a95af69c003f09bb86e7205da62d39f4c6be2ae046523abe5b7330c4f"
+    },
+    {
+      "path": "final-status.json",
+      "bytes": 2749,
+      "sha256": "19c0a9e518d33c715c5ba18d7ece5f1129ca76cb4987b0fa6d8b73d18bb646e8"
+    },
+    {
+      "path": "go-root-trace.json",
+      "bytes": 992,
+      "sha256": "9ef9ce788d47ba67bc323ea7d2a67e3495e95da65360feaa8ed67290ece8028f"
+    },
+    {
+      "path": "library-save-report.json",
+      "bytes": 493,
+      "sha256": "23b1e6e003f14b99993db3bccec552b4ecba0bb9662a7254496966acdc7e2f2f"
+    },
+    {
+      "path": "profile-lint-report.json",
+      "bytes": 1156,
+      "sha256": "55ac7dab39860bb3a422a65fe9aa5e8e77176a634317c13302db6bb23b546631"
+    },
+    {
+      "path": "recipe-confirm-read.json",
+      "bytes": 1004,
+      "sha256": "ca20e15c5d8741b1884a8ae534602da9632db9d63d5bfbbc44fa64edaa0c51fc"
+    },
+    {
+      "path": "resume-activation.json",
+      "bytes": 1908,
+      "sha256": "c28ef8d25e99c6445ed172912b7e7088f589e47db2d2ad0198de722787f0e4e9"
+    },
+    {
+      "path": "root-confirmed-query.json",
+      "bytes": 18866,
+      "sha256": "f29f8456e88d1861564f1d27d0801af90189ee5ec38f4b42c0d49e0c2451ca3f"
+    },
+    {
+      "path": "root-live-query.json",
+      "bytes": 17078,
+      "sha256": "f5847ecfd668db5ffc236f58457270fbf7abd6a35304e45be4913fc658564b95"
+    },
+    {
+      "path": "root.anchor.json",
+      "bytes": 1214,
+      "sha256": "1b1ef234c82f88d5c547a5f411cd68f88c8961adc3acad67fa16790fbf489de4"
+    },
+    {
+      "path": "root.binding.json",
+      "bytes": 1557,
+      "sha256": "20ebfdbef51eda52cfcafdaf9ea26c7ec64ad6eb9182f43c702864ec8638a4c5"
+    },
+    {
+      "path": "root.profile.json",
+      "bytes": 11691,
+      "sha256": "3c7cf9920b59e62c8ab62ab296c47df50a73c8666010d38d2712650e0269d6db"
+    },
+    {
+      "path": "runtime-text.manifest.json",
+      "bytes": 1263,
+      "sha256": "035492f46ad321db2a91485323cf82937f095235e1e8d620949d5dcb5ce2d8f5"
+    },
+    {
+      "path": "source-recipe-classic-confirm-read.json",
+      "bytes": 1036,
+      "sha256": "f1722b853b77b133898889c8b197887ce4b0668d5ea701a326a570406df62b7e"
+    },
+    {
+      "path": "wowdump-describe.json",
+      "bytes": 173265,
+      "sha256": "7c5dd0a71be8f20922aa3d913119ef3a0a3451b1f89a5ea88b3e3f12facba666"
+    }
+  ]
+}

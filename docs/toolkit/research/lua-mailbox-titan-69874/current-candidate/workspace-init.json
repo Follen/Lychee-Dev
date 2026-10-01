@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "command": "workspace.init",
+  "root": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace",
+  "reused": false,
+  "created": [
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\notes",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\profiles",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\scripts",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\sessions",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\artifacts\\ida",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\README.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\step.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\todo.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\findings.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\evidence.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\pitfalls.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\corrections.json"
+  ],
+  "identityAssurance": "live_executable_hash",
+  "workspace": {
+    "schema": "wowdump.workspace.v1",
+    "buildKey": "titan@3.80.2.69874",
+    "product": "titan",
+    "version": "3.80.2.69874",
+    "executablePath": "D:\\Game\\World of Warcraft\\_classic_titan_\\WowClassic.exe",
+    "executableSha256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+    "preferredImageBase": "0x140000000",
+    "moduleSize": 122912768,
+    "createdAt": "2026-10-01T06:45:17.378Z",
+    "updatedAt": "2026-10-01T06:45:17.378Z"
+  }
+}

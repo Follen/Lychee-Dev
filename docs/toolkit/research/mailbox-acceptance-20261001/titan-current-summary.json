@@ -1,0 +1,209 @@
+{
+  "schema": "lycheedev.mailbox.titan-final-acceptance.v1",
+  "state": "passed",
+  "candidate": {
+    "sha256": "9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8",
+    "sourceFrozen": true
+  },
+  "target": {
+    "pid": 43756,
+    "creation": "134353096910506547",
+    "executablePath": "D:/Game/World of Warcraft/_classic_titan_/WowClassic.exe",
+    "executableSHA256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+    "build": "3.80.2.69874",
+    "interface": 38002,
+    "product": "titan",
+    "character": "Qingtianjiuz",
+    "realm": "时光I",
+    "guid": "Player-6379-01045F6F",
+    "versionTxt": "absent; flavor and executable version verified"
+  },
+  "installation": {
+    "before": "clean managed 3.0.2",
+    "after": "clean managed 3.1.0 / 200 slots / pending0",
+    "activation": {
+      "kind": "connect automatic first-contact reload",
+      "phase": "runtime_selected",
+      "outcome": {
+        "disposition": "submitted",
+        "messagesQueued": 17,
+        "atMillis": 74499359
+      }
+    },
+    "coreExplicitReloads": [
+      {
+        "name": "connect",
+        "runtime": "0000000c000123079d4bb6622d72b941",
+        "reload": null
+      },
+      {
+        "name": "activate-current-bytes",
+        "runtime": "0000000d000123905b875c8a6433cb58",
+        "reload": {
+          "recoveryBudget": {
+            "startedAtMs": 1790836724685,
+            "deadlineMs": 1790837324685,
+            "lastObservedMs": 1790836724688
+          },
+          "reconcilePending": true,
+          "request": "activate-wake-candidate",
+          "from": "0000000c000123079d4bb6622d72b941",
+          "phase": "complete",
+          "inputStep": 0,
+          "patchTransitions": 0
+        }
+      },
+      {
+        "name": "reload",
+        "runtime": "0000000e000123bb76bfb0870f3c536d",
+        "reload": {
+          "recoveryBudget": {
+            "startedAtMs": 1790836767764,
+            "deadlineMs": 1790837367764,
+            "lastObservedMs": 1790836767770
+          },
+          "reconcilePending": true,
+          "request": "mailbox-reload",
+          "from": "0000000d000123905b875c8a6433cb58",
+          "phase": "complete",
+          "inputStep": 0,
+          "patchTransitions": 0
+        }
+      },
+      {
+        "name": "after-reload-no-cache",
+        "runtime": "0000000e000123bb76bfb0870f3c536d",
+        "reload": {
+          "recoveryBudget": {
+            "startedAtMs": 1790836767764,
+            "deadlineMs": 1790837367764,
+            "lastObservedMs": 1790836767770
+          },
+          "reconcilePending": true,
+          "request": "mailbox-reload",
+          "from": "0000000d000123905b875c8a6433cb58",
+          "phase": "complete",
+          "inputStep": 0,
+          "patchTransitions": 0
+        }
+      }
+    ]
+  },
+  "core": {
+    "passed": 13,
+    "directExit0": 13,
+    "report": "core-13/report.json"
+  },
+  "pressure": {
+    "passed": 54,
+    "directExit0": 54,
+    "ordinaryRequests": 47,
+    "rollovers": [
+      {
+        "firstOrdinaryRequest": 1,
+        "runtime": "0000000e000123bb76bfb0870f3c536d"
+      },
+      {
+        "firstOrdinaryRequest": 46,
+        "runtime": "0000000f000125f58ed63d47fafe85d8"
+      }
+    ],
+    "report": "pressure/baseline.json",
+    "resumes": 0
+  },
+  "cleanup": [
+    {
+      "label": "core",
+      "op": "status",
+      "session": "CON-bd25d8024661489309266528d6bc8023",
+      "exitCode": 0,
+      "closed": true,
+      "raw": "core-final-status.json"
+    },
+    {
+      "label": "core",
+      "op": "disconnect",
+      "session": "CON-bd25d8024661489309266528d6bc8023",
+      "exitCode": 0,
+      "closed": true,
+      "raw": "core-final-disconnect.json"
+    },
+    {
+      "label": "core",
+      "op": "status",
+      "session": "CON-bd25d8024661489309266528d6bc8023",
+      "exitCode": 0,
+      "closed": true,
+      "raw": "core-final-status-after.json"
+    },
+    {
+      "label": "core",
+      "session": "CON-bd25d8024661489309266528d6bc8023",
+      "journalSHA256": "66ed1f98c9839761215d414f8c89edfd61747689cf9991b533d8613da4ca2214",
+      "readonlyJournalUnchanged": true
+    },
+    {
+      "label": "pressure",
+      "op": "status",
+      "session": "CON-9108c86a801af51807c3a031a123846f",
+      "exitCode": 0,
+      "closed": true,
+      "raw": "pressure-final-status.json"
+    },
+    {
+      "label": "pressure",
+      "op": "disconnect",
+      "session": "CON-9108c86a801af51807c3a031a123846f",
+      "exitCode": 0,
+      "closed": true,
+      "raw": "pressure-final-disconnect.json"
+    },
+    {
+      "label": "pressure",
+      "op": "status",
+      "session": "CON-9108c86a801af51807c3a031a123846f",
+      "exitCode": 0,
+      "closed": true,
+      "raw": "pressure-final-status-after.json"
+    },
+    {
+      "label": "pressure",
+      "session": "CON-9108c86a801af51807c3a031a123846f",
+      "journalSHA256": "f387e772cc44b06c9691433b685c5ab5f44ecb4f6524c831e5c79742707650f9",
+      "readonlyJournalUnchanged": true
+    }
+  ],
+  "root": {
+    "rootRVA": "0x6daca78",
+    "anchorRVA": "0x639be4",
+    "productionMethod": "recipe_unique_text",
+    "patternBytes": 58,
+    "textBytes": 54450220,
+    "textGaps": 0,
+    "textSHA256": "de21fbc9c3143ee16de6b4b9402ebc9c61a0485e5246576164626c22bf9f6a01"
+  },
+  "independentRead": {
+    "epochs": 8,
+    "matched": 8,
+    "mismatched": 0,
+    "readerProbeAuthorization": false,
+    "rootQuery": "passed",
+    "registeredQuery": "passed",
+    "recipeReadConfirmation": "confirmed",
+    "capabilityReadConfirmation": "confirmed",
+    "semantics": "not_confirmed",
+    "reuse": "not_confirmed",
+    "restart": "not_run",
+    "futureABI": "not_supported_by_this_evidence"
+  },
+  "offline": {
+    "tests": 32,
+    "state": "passed"
+  },
+  "evidenceBoundary": "Only fixed Titan process43756. No other client input or source edits. Full dump is non-atomic with no read gaps; current path consistency guards were rechecked. Recipe/profile immutability and read confirmations do not authorize business input.",
+  "assets": {
+    "recipeSHA256": "b2e2409e55200fa6e596bb880f8ffb18179e9a747509605bea0d6388cd889f20",
+    "profileSHA256": "98e5bc40a701845af2552e13545d0800d7fd2bc86ae07b8d80e03b5e00a9ef7d",
+    "readerSHA256": "17b015bbd57dab503ba67913b32a584e05d2f39e1eadf77e6ec4e0456cf09960"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "lycheedev.mailbox.go-research-binding.v1",
+  "id": "classic-lua-mailbox-v1-70032",
+  "recipeID": "classic-lua-state-root-rip-v1-70032",
+  "profile": "root.profile.json",
+  "productionReader": "internal/live/memory/lua_mailbox.go",
+  "buildKey": "classic@5.5.4.70032",
+  "moduleName": "WowClassic.exe",
+  "executableSHA256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+  "rootRVA": "0x701dda8",
+  "anchorRVA": "0x62dc34",
+  "release": "3.1.0",
+  "wireMagic": "LYCMEM06",
+  "mailboxSchema": "lycheedev.mailbox.v1",
+  "identitySchema": "lycheedev.slot.identity.v2",
+  "inputSchema": "lycheedev.input.v2",
+  "rootBinding": {
+    "rootRva": 117562792,
+    "anchorRva": 6478900,
+    "executableSHA256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+    "method": "recipe_unique_text",
+    "evidence": {
+      "recipeId": "retail-lua-state-root-rip-v1",
+      "patternBytes": 58,
+      "anchorSHA256": "50b9920287e4cc8712f8c74d8a6dd1e42fede452ee774009b858c6cdcd97ef16",
+      "headerBytes": 296,
+      "scannedBytes": 56605244,
+      "moduleReadBytes": 56605910,
+      "readCalls": 71,
+      "stableRootGuard": true
+    }
+  },
+  "validation": {
+    "rootRead": "wowdump_confirmed_read",
+    "productionMailboxCurrentProcess": "verified",
+    "sameProcessReload": "verified",
+    "rootSemantics": "not_confirmed",
+    "completeReaderCrossProcessReuse": "not_checked",
+    "javascriptReader": "not_created"
+  },
+  "note": "Evidence binding only; not a JavaScript reader contract or execution authority"
+}

@@ -1,0 +1,515 @@
+{
+  "ok": true,
+  "schema": "wowdump.observation.v1",
+  "status": "ok",
+  "startedAt": "2026-10-01T06:46:25.896Z",
+  "finishedAt": "2026-10-01T06:46:25.900Z",
+  "elapsedMs": 2.2597000000000094,
+  "identity": {
+    "pid": 43756,
+    "processInstance": "43756:134353096910506547",
+    "executableSha256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+    "module": {
+      "name": "WowClassic.exe",
+      "base": "0x7ff666550000",
+      "size": 122912768,
+      "path": "D:\\Game\\World of Warcraft\\_classic_titan_\\WowClassic.exe"
+    },
+    "buildKey": "titan@3.80.2.69874"
+  },
+  "atomic": false,
+  "mode": "live",
+  "profile": {
+    "schema": "wowdump.profile.v1",
+    "id": "titan-lua-mailbox-root-v1-69874",
+    "buildKey": "titan@3.80.2.69874",
+    "executableSha256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+    "readerStatus": "candidate",
+    "confidence": "candidate",
+    "module": {
+      "name": "WowClassic.exe"
+    },
+    "fields": {
+      "luaState": {
+        "anchoredBy": "titan-lua-state-root-rip-v1-69874",
+        "root": {
+          "rva": "0x6daca78"
+        },
+        "type": "pointer",
+        "guards": [
+          {
+            "kind": "inModule"
+          },
+          {
+            "kind": "stable",
+            "size": 8
+          }
+        ]
+      },
+      "threadTag": {
+        "anchoredBy": "titan-lua-state-root-rip-v1-69874",
+        "root": {
+          "rva": "0x6daca78",
+          "dereference": true
+        },
+        "pointerChain": [
+          {
+            "offset": "0x10",
+            "dereference": false
+          }
+        ],
+        "type": "u8",
+        "guards": [
+          {
+            "kind": "notNull"
+          },
+          {
+            "kind": "stable",
+            "size": 1
+          }
+        ]
+      },
+      "globalsValue": {
+        "anchoredBy": "titan-lua-state-root-rip-v1-69874",
+        "root": {
+          "rva": "0x6daca78",
+          "dereference": true
+        },
+        "pointerChain": [
+          {
+            "offset": "0x90",
+            "dereference": false
+          }
+        ],
+        "layout": {
+          "ref": "TValue"
+        },
+        "guards": [
+          {
+            "kind": "notNull"
+          },
+          {
+            "kind": "stable",
+            "size": 10
+          }
+        ]
+      }
+    },
+    "types": {
+      "TValue": {
+        "kind": "struct",
+        "size": 24,
+        "fields": {
+          "pointer": {
+            "offset": "0x0",
+            "type": "pointer"
+          },
+          "tag": {
+            "offset": "0x8",
+            "type": "u8"
+          },
+          "secret": {
+            "offset": "0x9",
+            "type": "u8"
+          }
+        }
+      },
+      "Table": {
+        "kind": "struct",
+        "size": 72,
+        "fields": {
+          "tag": {
+            "offset": "0x10",
+            "type": "u8"
+          },
+          "logNodes": {
+            "offset": "0x13",
+            "type": "u8"
+          },
+          "nodes": {
+            "offset": "0x28",
+            "type": "pointer"
+          }
+        }
+      },
+      "Node": {
+        "kind": "struct",
+        "size": 56,
+        "fields": {
+          "value": {
+            "offset": "0x0",
+            "type": "pointer"
+          },
+          "valueTag": {
+            "offset": "0x8",
+            "type": "u8"
+          },
+          "valueSecret": {
+            "offset": "0x9",
+            "type": "u8"
+          },
+          "key": {
+            "offset": "0x18",
+            "type": "pointer"
+          },
+          "keyTag": {
+            "offset": "0x20",
+            "type": "u8"
+          },
+          "keySecret": {
+            "offset": "0x21",
+            "type": "u8"
+          },
+          "next": {
+            "offset": "0x30",
+            "type": "pointer"
+          }
+        }
+      },
+      "TString": {
+        "kind": "struct",
+        "size": 32,
+        "fields": {
+          "tag": {
+            "offset": "0x10",
+            "type": "u8"
+          },
+          "hash": {
+            "offset": "0x14",
+            "type": "u32"
+          },
+          "length": {
+            "offset": "0x18",
+            "type": "u64"
+          }
+        }
+      }
+    },
+    "bindings": [
+      {
+        "path": "/fields/luaState/root/rva",
+        "kind": "rva",
+        "recipe": "titan-lua-state-root-rip-v1-69874"
+      },
+      {
+        "path": "/fields/threadTag/root/rva",
+        "kind": "rva",
+        "recipe": "titan-lua-state-root-rip-v1-69874"
+      },
+      {
+        "path": "/fields/globalsValue/root/rva",
+        "kind": "rva",
+        "recipe": "titan-lua-state-root-rip-v1-69874"
+      }
+    ],
+    "invariants": [
+      {
+        "path": "/fields/luaState/guards/1/size",
+        "value": 8,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/fields/threadTag/pointerChain/0/offset",
+        "value": "0x10",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/fields/threadTag/guards/1/size",
+        "value": 1,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/fields/globalsValue/pointerChain/0/offset",
+        "value": "0x90",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/fields/globalsValue/guards/1/size",
+        "value": 10,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TValue/size",
+        "value": 24,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TValue/fields/pointer/offset",
+        "value": "0x0",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TValue/fields/tag/offset",
+        "value": "0x8",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TValue/fields/secret/offset",
+        "value": "0x9",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Table/size",
+        "value": 72,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Table/fields/tag/offset",
+        "value": "0x10",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Table/fields/logNodes/offset",
+        "value": "0x13",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Table/fields/nodes/offset",
+        "value": "0x28",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/size",
+        "value": 56,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/value/offset",
+        "value": "0x0",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/valueTag/offset",
+        "value": "0x8",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/valueSecret/offset",
+        "value": "0x9",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/key/offset",
+        "value": "0x18",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/keyTag/offset",
+        "value": "0x20",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/keySecret/offset",
+        "value": "0x21",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/Node/fields/next/offset",
+        "value": "0x30",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TString/size",
+        "value": 32,
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TString/fields/tag/offset",
+        "value": "0x10",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TString/fields/hash/offset",
+        "value": "0x14",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      },
+      {
+        "path": "/types/TString/fields/length/offset",
+        "value": "0x18",
+        "reason": "Titan 69874 current-process candidate layout: standard Go public-Mailbox traversal and exact HEAD/BODY protocol acceptance succeeded. Independent root query and complete reader must verify these fields. Revalidate on every build; no unbound layout or future ABI claim."
+      }
+    ],
+    "layoutAssumptions": {
+      "threadTag": 8,
+      "tableTag": 5,
+      "stringTag": 4,
+      "secretClear": 0,
+      "globalsTValueOffset": "0x90",
+      "stringDataOffset": "0x20",
+      "hashAlgorithm": "Lua 5.1 uint32 backwards sampled bytes",
+      "validation": "not_checked",
+      "migrationRule": "Revalidate all offsets, sizes, tags, secret semantics and hash algorithm on each target build. Root relocation alone never establishes layout compatibility."
+    },
+    "publicPath": [
+      "_G",
+      "LycheeDevInternal",
+      "Mailbox"
+    ],
+    "validation": {
+      "read": "not_checked",
+      "semantics": "not_checked",
+      "reuse": "not_checked"
+    },
+    "evidence": [
+      {
+        "source": "Unique full runtime .text recipe plus current-process public-Mailbox protocol acceptance. Root-only profile; complete reader is a separate bounded probe.",
+        "semanticVerified": false,
+        "restartVerified": false
+      }
+    ]
+  },
+  "selectedFields": [
+    "luaState",
+    "threadTag",
+    "globalsValue"
+  ],
+  "module": {
+    "name": "WowClassic.exe",
+    "path": "D:\\Game\\World of Warcraft\\_classic_titan_\\WowClassic.exe",
+    "base": "0x7ff666550000",
+    "size": 122912768
+  },
+  "profileId": "titan-lua-mailbox-root-v1-69874",
+  "profileSha256": "3a1b12d6f2163de4b750ec49ad5d6cd63d4bc71fcbdc72a57b42f154ef807055",
+  "readerStatus": "candidate",
+  "parameters": {},
+  "parametersSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "consistency": {
+    "atomic": false,
+    "fields": {
+      "luaState": {
+        "status": "checked",
+        "checks": [
+          "stable_bytes"
+        ]
+      },
+      "threadTag": {
+        "status": "checked",
+        "checks": [
+          "stable_bytes",
+          "pointer_sources"
+        ]
+      },
+      "globalsValue": {
+        "status": "checked",
+        "checks": [
+          "stable_bytes",
+          "pointer_sources"
+        ]
+      }
+    }
+  },
+  "fields": {
+    "luaState": "0x2394a3260a0",
+    "threadTag": 8,
+    "globalsValue": {
+      "pointer": "0x2394a3320b0",
+      "tag": 5,
+      "secret": 0
+    }
+  },
+  "reads": [
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    },
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    },
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    },
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    },
+    {
+      "address": "0x2394a3260b0",
+      "size": 1,
+      "bytesRead": 1,
+      "complete": true,
+      "dataHex": "08"
+    },
+    {
+      "address": "0x2394a3260b0",
+      "size": 1,
+      "bytesRead": 1,
+      "complete": true,
+      "dataHex": "08"
+    },
+    {
+      "address": "0x2394a3260b0",
+      "size": 1,
+      "bytesRead": 1,
+      "complete": true,
+      "dataHex": "08"
+    },
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    },
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    },
+    {
+      "address": "0x2394a326130",
+      "size": 10,
+      "bytesRead": 10,
+      "complete": true,
+      "dataHex": "b020334a390200000500"
+    },
+    {
+      "address": "0x2394a326130",
+      "size": 24,
+      "bytesRead": 24,
+      "complete": true,
+      "dataHex": "b020334a390200000500000004f001000000000000000000"
+    },
+    {
+      "address": "0x2394a326130",
+      "size": 10,
+      "bytesRead": 10,
+      "complete": true,
+      "dataHex": "b020334a390200000500"
+    },
+    {
+      "address": "0x7ff66d2fca78",
+      "size": 8,
+      "bytesRead": 8,
+      "complete": true,
+      "dataHex": "a060324a39020000"
+    }
+  ],
+  "validation": {
+    "read": "passed",
+    "semantics": "not_checked",
+    "reuse": "not_checked"
+  },
+  "command": "query",
+  "source": {
+    "kind": "profile",
+    "file": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\docs\\toolkit\\research\\lua-mailbox-titan-69874\\root.profile.json"
+  },
+  "out": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\root-query.json"
+}

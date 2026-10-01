@@ -1,0 +1,40 @@
+{
+  "schema": "wowdump.runtime-dump.v4",
+  "engine": "native-memory",
+  "buildKey": "classic@5.5.4.70032",
+  "executableSha256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+  "pid": 50368,
+  "processInstance": "50368:134352957691792733",
+  "module": {
+    "name": "WowClassic.exe",
+    "path": "D:\\Game\\World of Warcraft\\_classic_\\WowClassic.exe",
+    "base": "0x7ff717b90000",
+    "size": 125550592
+  },
+  "moduleBase": "0x7ff717b90000",
+  "preferredImageBase": "0x140000000",
+  "moduleSize": 125550592,
+  "startedAt": "2026-10-01T02:46:12.499Z",
+  "generatedAt": "2026-10-01T02:46:13.053Z",
+  "atomic": false,
+  "complete": true,
+  "zeroFilledGaps": true,
+  "sections": [
+    {
+      "name": ".text",
+      "rva": "0x1000",
+      "virtualSize": 56605244,
+      "rawSize": 56605696,
+      "characteristics": "0x60000020",
+      "protection": "rx",
+      "runtimeAddress": "0x7ff717b91000",
+      "file": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\classic-text-dump\\.text.bin",
+      "bytes": 56605244,
+      "readSize": 56605244,
+      "shortRead": false,
+      "gaps": [],
+      "sha256": "603f45a5d310629028a8b2ad58aa7f89477cd0a3dad5a0bc261332123ae31238"
+    }
+  ],
+  "totalBytes": 56605244
+}

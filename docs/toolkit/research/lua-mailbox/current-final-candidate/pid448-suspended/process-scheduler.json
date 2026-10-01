@@ -1,0 +1,15 @@
+{
+  "pid": 448,
+  "image": "D:\\Game\\World of Warcraft\\_retail_\\Wow.exe",
+  "sampleIntervalMs": 1000,
+  "cpuDeltaMs": 0.0,
+  "responding": false,
+  "threads": [
+    {
+      "state": "Suspended",
+      "count": 108
+    }
+  ],
+  "gameInput": false,
+  "classification": "OS scheduler observation only; no causal determination"
+}

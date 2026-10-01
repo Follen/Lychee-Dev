@@ -1055,7 +1055,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
-		if response.Context["transport"] == "memory-slot-v1" && code == 6 {
+		if response.Context["transport"] == "memory-slot-v3" && code == 6 {
 			response.Error.Retryable = true
 		}
 		if response.OperationID != "" && len(opts.words) >= 2 && opts.words[0] == "live" {

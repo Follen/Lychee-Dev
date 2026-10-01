@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/adler32"
 	"testing"
 )
 
@@ -31,5 +33,32 @@ func TestMemoryRecordIntegrityAndBounds(t *testing.T) {
 	}
 	if _, err = EncodeMemoryRecord(h, make([]byte, MemoryMaxPayload+1)); err == nil {
 		t.Fatal("oversized accepted")
+	}
+}
+
+func TestMemoryRecordRejectsOldWireVersions(t *testing.T) {
+	wire, err := EncodeMemoryRecord(MemoryHeader{Kind: MemoryIdentity, State: 1}, []byte("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(wire[:8]) != "LYCMEM06" || string(wire[82:90]) != "LYCEND06" {
+		t.Fatal("wrong current version")
+	}
+	for _, version := range []string{"04", "05"} {
+		t.Run("header"+version, func(t *testing.T) {
+			old := append([]byte(nil), wire...)
+			copy(old[:8], "LYCMEM"+version)
+			binary.LittleEndian.PutUint32(old[76:80], adler32.Checksum(old[:76]))
+			if _, _, err := DecodeMemoryRecord(old); err == nil {
+				t.Fatal("valid-checksum old header accepted")
+			}
+		})
+		t.Run("trailer"+version, func(t *testing.T) {
+			old := append([]byte(nil), wire...)
+			copy(old[82:90], "LYCEND"+version)
+			if _, _, err := DecodeMemoryRecord(old); err == nil {
+				t.Fatal("old trailer accepted")
+			}
+		})
 	}
 }

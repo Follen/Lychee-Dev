@@ -1,0 +1,37 @@
+{
+  "schema": "wowdump.anchor.v1",
+  "id": "retail-lua-state-root-rip-v1",
+  "source": {
+    "buildKey": "retail@12.1.0.69933",
+    "executableSha256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+    "section": ".text",
+    "sectionSha256": "4fa9cbb1a90fa114d26f64a8e2e14e66852a5c71450ede69cdfd079c23348f75",
+    "rva": "0x6749b4",
+    "value": "0x79c0c18"
+  },
+  "pattern": "48 8b 3d ?? ?? ?? ?? 48 8b 1d ?? ?? ?? ?? 48 8b cf 44 8b 05 ?? ?? ?? ?? 48 8b d3 e8 ?? ?? ?? ?? 8b 05 ?? ?? ?? ?? 83 c0 01 89 05 ?? ?? ?? ?? 74 ?? 83 3d ?? ?? ?? ?? 00 75 ??",
+  "instructionCodes": [
+    286,
+    286,
+    286,
+    285,
+    286,
+    693,
+    285,
+    248,
+    281,
+    173,
+    269,
+    176
+  ],
+  "resolve": {
+    "kind": "rip",
+    "instruction": 0
+  },
+  "evidence": "Immutable derivative of retail-lua-state-root-69933: the RunScript-referenced wrapper passes the module root as the state argument; the IDA resolver implements LUA_GLOBALSINDEX=-10002 at state+0x90. Original evidence included hashed addon release and six checksummed input records. Those observations predate the public Mailbox protocol and do not verify this candidate, reload/restart reuse or another build.",
+  "validation": {
+    "read": "not_checked",
+    "semantics": "not_checked",
+    "reuse": "not_checked"
+  }
+}

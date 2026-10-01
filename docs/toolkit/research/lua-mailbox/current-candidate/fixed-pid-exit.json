@@ -1,0 +1,8 @@
+{
+  "pid": 34732,
+  "expectedCreation": "134352920362860468",
+  "status": "absent",
+  "checkedUtc": "2026-10-01T04:41:32.5629643Z",
+  "selection": "Get-Process -Id 34732 only",
+  "newTargetSelected": false
+}

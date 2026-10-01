@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/memory"
+	"hash/adler32"
 )
 
 type ObservationQuery struct {
@@ -14,8 +15,9 @@ type ObservationQuery struct {
 	Identity Identity
 }
 type Observation struct {
-	Receipt Receipt
-	Payload []byte
+	Receipt         Receipt
+	Payload         []byte
+	InputDiagnostic *InputDiagnostic
 }
 type RecordReader interface {
 	Find(context.Context, memory.Selector, bool) (memory.LookupResult, error)
@@ -27,9 +29,6 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 	e, i := q.Envelope, q.Identity
 	if e.Schema == "" {
 		e.Schema = bridge.SlotSchema
-		if i.Slots == 64 {
-			e.Schema = bridge.LegacySlotSchema
-		}
 	}
 	nonce, _ := tokenBytes(e.Nonce)
 	runtime, _ := tokenBytes(e.Runtime)
@@ -43,19 +42,18 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 		}
 	case "result":
 		selector.Accept = func(record memory.Record) bool {
-			var r Receipt
-			return json.Unmarshal(record.Payload, &r) == nil && r.Validate() == nil && r.Schema == e.Schema && r.State == "reported" && r.Action == "prepare" && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Runtime == e.Runtime && r.Owner == e.Owner && r.Fence == e.Fence && r.GUID == e.GUID && r.Build == e.Build && r.Product == i.Product && r.Release == i.Release
+			r, err := decodePublicationReceipt(record)
+			return err == nil && r.Schema == e.Schema && r.State == "reported" && r.Action == "prepare" && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Runtime == e.Runtime && r.Owner == e.Owner && r.Fence == e.Fence && r.GUID == e.GUID && r.Build == e.Build && r.Product == i.Product && r.Release == i.Release
 		}
 	case "bootstrap_changed":
 		first = false
 		selector.Runtime = [16]byte{}
 		selector.Accept = func(record memory.Record) bool {
-			var r Receipt
-			if json.Unmarshal(record.Payload, &r) != nil || r.Validate() != nil {
+			r, err := decodePublicationReceipt(record)
+			if err != nil {
 				return false
 			}
-			rt, _ := tokenBytes(r.Runtime)
-			return record.Header.Runtime == rt && r.Schema == e.Schema && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Action == "bind" && r.State == "rejected" && r.Reason == "slot_runtime_changed" && r.Runtime != e.Runtime && r.GUID == e.GUID && r.Build == e.Build && r.Release == i.Release && r.NextSlot == e.Index+1 && r.Owner == ""
+			return r.Schema == e.Schema && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Action == "bind" && r.State == "rejected" && r.Reason == "slot_runtime_changed" && r.Runtime != e.Runtime && r.GUID == e.GUID && r.Build == e.Build && r.Release == i.Release && r.NextSlot == e.Index+1 && r.Owner == ""
 		}
 	default:
 		return Observation{}, errors.New("live.channel_observation_invalid")
@@ -79,13 +77,17 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 		}
 		return Observation{Receipt: r}, err
 	}
-	if err = json.Unmarshal(found.Records[0].Payload, &r); err != nil {
+	// Simulated adapters share the same gate; do not rely on them applying Accept.
+	if selector.Accept == nil || !selector.Accept(found.Records[0]) {
+		return Observation{}, errors.New("live.channel_receipt_mismatch")
+	}
+	if r, err = decodePublicationReceipt(found.Records[0]); err != nil {
 		return Observation{}, err
 	}
 	if q.Kind == "bootstrap_changed" {
 		for _, record := range found.Records[1:] {
-			var other Receipt
-			if json.Unmarshal(record.Payload, &other) != nil || other.Runtime != r.Runtime {
+			other, decodeErr := decodePublicationReceipt(record)
+			if decodeErr != nil || !selector.Accept(record) || other.Runtime != r.Runtime {
 				return Observation{}, errors.New("live.channel_runtime_ambiguous")
 			}
 		}
@@ -101,8 +103,15 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 	if len(body.Records) == 0 {
 		return Observation{}, ErrPending
 	}
-	if !json.Valid(body.Records[0].Payload) {
+	// ReadRecord qualifies BODY before allocation. Repeat the returned-record
+	// contract here for adapters, without assuming HEAD and BODY sequences equal.
+	record := body.Records[0]
+	h := record.Header
+	if h.Kind != bridge.MemoryBody || h.State != 3 || h.Sequence == 0 || nonce == [16]byte{} || runtime == [16]byte{} || ticket == [16]byte{} || h.Nonce != nonce || h.Runtime != runtime || h.Ticket != ticket || h.Length != r.ReportBytes || h.Checksum != r.ReportChecksum || len(record.Payload) != int(r.ReportBytes) || adler32.Checksum(record.Payload) != r.ReportChecksum {
+		return Observation{}, errors.New("live.channel_report_record_invalid")
+	}
+	if !json.Valid(record.Payload) {
 		return Observation{}, errors.New("live.channel_report_json")
 	}
-	return Observation{Receipt: r, Payload: body.Records[0].Payload}, nil
+	return Observation{Receipt: r, Payload: record.Payload}, nil
 }

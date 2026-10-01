@@ -1,0 +1,47 @@
+Usage: wowdump analyze anchor [options]
+
+Capture an instruction, content or runtime-find anchor for future build
+relocation
+
+Options:
+  --manifest <files...>       complete v4 dump manifests (matching build and
+                              hash; required for instruction/content anchors)
+  --id <name>                 stable field/function name
+  --rva <hex>                 known instruction boundary in the source build
+  --targets <file>            JSON array of anchor targets sharing one image;
+                              partial batches exit nonzero
+  --text <text>               text alternative to --rva: capture from a string
+                              reference
+  --encoding <encoding>       utf8 (default) or utf16le (with --text)
+  --section <name>            restrict text search to one section
+  --xref-section <name>       executable section for the text reference scan
+  --register <name>           destination register of the preceding
+                              implementation-address LEA (default r8; with
+                              --text)
+  --instructions <count>      pattern window length in instructions (default 12)
+  --resolve <kind>            match (default), rip, branch, displacement or
+                              immediate
+  --at <index>                zero-based instruction to extract (default 0)
+  --disambiguation <mode>     opt in to recorded-value ranking with value
+  --find-needle <hex|text>    runtime-find mode: byte pattern (hex pairs, or
+                              text with --find-encoding)
+  --find-encoding <encoding>  hex (default), utf8 or utf16le for --find-needle
+  --find-signature <hex>      structure signature that must appear in the hit
+                              context
+  --find-zero-padded          strings are NUL-terminated and zero-padded up to
+                              the next field offset
+  --find-max-hits <count>     search hit cap recorded in the recipe (default:
+                              "2000")
+  --find-context <bytes>      context bytes each side recorded in the recipe
+                              (default: "128")
+  --layout <spec>             field=offset pairs, e.g. name=0,surname=0x31
+  --build <buildKey>          source build key (find-recipe mode)
+  --exe-sha256 <hex>          source executable SHA-256 (find-recipe mode)
+  --evidence <text>           source chain, meaning and validation conditions
+  --out <file>                write the raw recipe without overwriting existing
+                              evidence
+  --out-dir <dir>             write one raw <id>.anchor.json per target (batch
+                              mode)
+  --force                     explicitly overwrite the --out / --out-dir anchor
+                              outputs
+  -h, --help                  display help for command

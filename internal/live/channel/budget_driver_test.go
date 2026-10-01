@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/adler32"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -125,8 +126,8 @@ func TestDriverExpiredBusinessStillClosesUnpublishedWork(t *testing.T) {
 	}
 }
 
-func TestDriverLegacyReadDoesNotMigrateButFirstDriveDoes(t *testing.T) {
-	d, peer, now := budgetDriverFixture(t)
+func TestDriverLegacyJournalRejectedWithoutMigration(t *testing.T) {
+	d, peer, _ := budgetDriverFixture(t)
 	if err := d.PrepareRequest(context.Background(), "legacy-budget", "return 1", 5, "opaque"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,26 +140,19 @@ func TestDriverLegacyReadDoesNotMigrateButFirstDriveDoes(t *testing.T) {
 	if err := journal.AppendMemoryEvent(context.Background(), d.Log, "legacy_fixture", json.RawMessage(data)); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := Load(d.Log, peer)
+	before, err := os.ReadFile(d.Log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State.Schema != "lycheedev.channel.v1" || loaded.State.Operation.RecoveryBudget != nil {
-		t.Fatal("reading silently migrated legacy goal")
+	if _, err := Load(d.Log, peer); err == nil {
+		t.Fatal("legacy native journal resumed")
 	}
-	loaded.Now = func() time.Time { return *now }
-	if err := budgetDriverContinue(loaded); !errors.Is(err, ErrPending) {
-		t.Fatal(err)
+	after, err := os.ReadFile(d.Log)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("legacy journal changed", err)
 	}
-	again, err := Load(d.Log, peer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again.State.Schema != "lycheedev.channel.v2" || again.State.Operation.RecoveryBudget == nil || !again.State.Operation.RecoveryBudget.Legacy {
-		t.Fatal("first drive did not persist legacy window")
-	}
-	if again.State.Operation.RecoveryBudget.DeadlineMS != now.Add(DefaultRecoveryBudget).UnixMilli() {
-		t.Fatal("incorrect migration deadline")
+	if len(peer.inputs) != 0 || len(peer.publications) != 0 {
+		t.Fatal("legacy protocol produced side effects")
 	}
 }
 

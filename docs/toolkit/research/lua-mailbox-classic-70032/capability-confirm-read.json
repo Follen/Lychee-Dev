@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "file": "C:\\Users\\follen\\.wowdump\\capability-validation\\classic@5.5.4.70032\\classic-lua-mailbox-root-v1-70032\\7ddbe92aeb9ca1ee3de3d16e5e8877ab19bdceb2d827ec5195d7fc363cac3d5f.json",
+  "confirmation": {
+    "schema": "wowdump.capability-confirmation.v1",
+    "capabilitySha256": "6c27735246ef51e8012b09b66a368fd4bd34382487c0e0034cf9ae165add2bc3",
+    "profileSha256": "4777e7182af344d61d356d42999aa9f9ac217489479438d615b302223a1558a2",
+    "id": "classic-lua-mailbox-root-v1-70032",
+    "buildKey": "classic@5.5.4.70032",
+    "executableSha256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+    "recipes": [
+      {
+        "id": "classic-lua-state-root-rip-v1-70032",
+        "buildKey": "classic@5.5.4.70032",
+        "sha256": "1b1ef234c82f88d5c547a5f411cd68f88c8961adc3acad67fa16790fbf489de4"
+      }
+    ],
+    "level": "read",
+    "evidence": [
+      {
+        "file": "capability-evidence\\f5847ecfd668db5ffc236f58457270fbf7abd6a35304e45be4913fc658564b95.json",
+        "sha256": "f5847ecfd668db5ffc236f58457270fbf7abd6a35304e45be4913fc658564b95"
+      }
+    ],
+    "basis": null,
+    "reason": "exact profile byte replay and identity checks passed",
+    "semanticAssessment": "not_checked",
+    "atomic": false,
+    "scope": [
+      {
+        "processInstance": "50368:134352957691792733",
+        "parametersSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "fields": [
+          "luaState",
+          "threadTag",
+          "globalsValue"
+        ],
+        "observedAt": "2026-10-01T02:47:09.356Z"
+      }
+    ],
+    "recordedAt": "2026-10-01T02:47:47.868Z",
+    "sha256": "7ddbe92aeb9ca1ee3de3d16e5e8877ab19bdceb2d827ec5195d7fc363cac3d5f"
+  }
+}

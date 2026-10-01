@@ -51,7 +51,7 @@ func TestRouteChecksActualForeignAndEmptyBytes(t *testing.T) {
 	}{
 		{"empty", []byte(inertSlot), true}, {"foreign", foreign, true},
 		{"same_runtime", []byte(strings.ReplaceAll(string(foreign), strings.Repeat("1", 32), e.Runtime)), false},
-		{"legacy", []byte(strings.ReplaceAll(string(foreign), bridge.SlotSchema, bridge.LegacySlotSchema)), false},
+		{"legacy", []byte(strings.ReplaceAll(string(foreign), bridge.SlotSchema, "lycheedev.slot.v1")), false},
 		{"wrong_slot", []byte(strings.ReplaceAll(string(foreign), "index = 1,", "index = 7,")), false},
 		{"unknown_action", []byte(strings.ReplaceAll(string(foreign), "\"bind\"", "\"other\"")), false},
 	} {

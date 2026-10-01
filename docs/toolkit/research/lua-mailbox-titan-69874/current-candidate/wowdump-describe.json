@@ -1,0 +1,4809 @@
+{
+  "ok": true,
+  "schema": "wowdump.capabilities.v1",
+  "command": "describe",
+  "version": "1.0.0",
+  "executable": "C:\\Users\\follen\\AppData\\Roaming\\npm\\node_modules\\wowdump\\dist\\cli.js",
+  "cli": {
+    "command": "wowdump",
+    "description": "World of Warcraft memory reading tool: read process memory and versioned section files, read-only (no broker, no elevation)",
+    "arguments": [],
+    "options": [
+      {
+        "flags": "-V, --version",
+        "name": "version",
+        "description": "output the version number",
+        "required": false,
+        "valueRequired": false,
+        "valueOptional": false,
+        "variadic": false,
+        "negated": false,
+        "default": null,
+        "choices": null
+      },
+      {
+        "flags": "--no-elevate",
+        "name": "elevate",
+        "description": "never relaunch through UAC when a target needs higher integrity",
+        "required": false,
+        "valueRequired": false,
+        "valueOptional": false,
+        "variadic": false,
+        "negated": true,
+        "default": null,
+        "choices": null
+      }
+    ],
+    "commands": [
+      {
+        "command": "wowdump describe",
+        "description": "Describe this CLI's actual commands and public script primitives without contacting a target",
+        "arguments": [],
+        "options": [
+          {
+            "flags": "--command <path>",
+            "name": "command",
+            "description": "restrict the command tree, e.g. \"memory find\"",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": []
+      },
+      {
+        "command": "wowdump doctor",
+        "description": "Check runtime and installed skill compatibility; does not attach to processes or probe MCP servers",
+        "arguments": [],
+        "options": [
+          {
+            "flags": "--skill-home <dir>",
+            "name": "skillHome",
+            "description": "parent of the installed wowdump skill directory",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": []
+      },
+      {
+        "command": "wowdump targets",
+        "description": "Discover running WoW targets, identity hashes, modules and the workspace each one maps to",
+        "arguments": [],
+        "options": [
+          {
+            "flags": "--pid <pid>",
+            "name": "pid",
+            "description": "select one process ID",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--analyze-root <dir>",
+            "name": "analyzeRoot",
+            "description": "root directory that holds Analyze/<product>/<version>",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": []
+      },
+      {
+        "command": "wowdump target",
+        "description": "Show the read-only engine state, the resolved workspace and the current privilege",
+        "arguments": [],
+        "options": [
+          {
+            "flags": "--workspace <dir>",
+            "name": "workspace",
+            "description": "workspace directory",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--pid <pid>",
+            "name": "pid",
+            "description": "target process ID",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": []
+      },
+      {
+        "command": "wowdump workspace",
+        "description": "Create, inspect and migrate an analysis workspace",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump workspace init",
+            "description": "Create Analyze/<product>/<version>/ with the standard落盘 skeleton",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "discover identity from a running process",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "bind offline identity from verified complete dump manifests",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "build key such as retail@12.1.0.69587",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--executable-sha256 <hash>",
+                "name": "executableSha256",
+                "description": "bind a known offline executable SHA-256; a caller declaration, checked against PID/manifest identity when supplied",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--path <dir>",
+                "name": "path",
+                "description": "explicit workspace directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--analyze-root <dir>",
+                "name": "analyzeRoot",
+                "description": "root directory that holds Analyze/<product>/<version>",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump workspace status",
+            "description": "Show workspace identity, counts and missing落盘 files",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--path <dir>",
+                "name": "path",
+                "description": "explicit workspace directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump workspace adopt",
+            "description": "Copy profiles and identity out of a legacy ~/.wowdump/<buildKey> directory",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--from <dir>",
+                "name": "from",
+                "description": "legacy build directory",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--path <dir>",
+                "name": "path",
+                "description": "explicit workspace directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--analyze-root <dir>",
+                "name": "analyzeRoot",
+                "description": "root directory that holds Analyze/<product>/<version>",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump profiles",
+        "description": "List workspace profiles or describe one",
+        "arguments": [
+          {
+            "name": "id-or-file",
+            "description": "profile ID or absolute JSON file",
+            "required": false,
+            "variadic": false,
+            "default": null
+          }
+        ],
+        "options": [
+          {
+            "flags": "--workspace <dir>",
+            "name": "workspace",
+            "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": [
+          {
+            "command": "wowdump profiles lint",
+            "description": "Validate a profile and explain resolved layouts, inputs and migration bindings without a process",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--profile <file>",
+                "name": "profile",
+                "description": "profile JSON",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--types <files...>",
+                "name": "types",
+                "description": "versioned type bundles to embed",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "new profile for compile, report for lint",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump profiles compile",
+            "description": "Embed build-matched type bundles in a portable profile",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--profile <file>",
+                "name": "profile",
+                "description": "profile JSON",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--types <files...>",
+                "name": "types",
+                "description": "versioned type bundles to embed",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "new profile for compile, report for lint",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump profiles replay",
+            "description": "Replay profile query/observe bytes through the same reader without a live process",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--input <file>",
+                "name": "input",
+                "description": "query JSON or observation JSONL",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--profile <file>",
+                "name": "profile",
+                "description": "supply the exact profile for older recordings without an embedded snapshot",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "save replay report",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump profiles test",
+            "description": "Test a profile against a bounded memory fixture and explicit expected result",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--profile <file>",
+                "name": "profile",
+                "description": "profile JSON",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--fixture <file>",
+                "name": "fixture",
+                "description": "wowdump.profile-fixture.v1 JSON",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "save test report",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump investigations",
+        "description": "Durable candidates, tool handoff, verification and recovery inside a workspace",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump investigations start",
+            "description": "Start a build-bound investigation without replacing an existing task",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--question <text>",
+                "name": "question",
+                "description": "concrete investigation question",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations status",
+            "description": "Audit stored history and return a bounded recovery summary",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": false,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--offset <count>",
+                "name": "offset",
+                "description": "candidate offset",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0",
+                "choices": null
+              },
+              {
+                "flags": "--limit <count>",
+                "name": "limit",
+                "description": "candidate page size (1..1000)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "100",
+                "choices": null
+              },
+              {
+                "flags": "--candidate <id>",
+                "name": "candidate",
+                "description": "filter one candidate or legacy alias",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--status <state>",
+                "name": "status",
+                "description": "filter candidate state",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--event-offset <count>",
+                "name": "eventOffset",
+                "description": "event offset",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0",
+                "choices": null
+              },
+              {
+                "flags": "--event-limit <count>",
+                "name": "eventLimit",
+                "description": "event page size",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "100",
+                "choices": null
+              },
+              {
+                "flags": "--event-type <type>",
+                "name": "eventType",
+                "description": "filter event type",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--request-offset <count>",
+                "name": "requestOffset",
+                "description": "request offset",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0",
+                "choices": null
+              },
+              {
+                "flags": "--request-limit <count>",
+                "name": "requestLimit",
+                "description": "request page size",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "100",
+                "choices": null
+              },
+              {
+                "flags": "--request-status <state>",
+                "name": "requestStatus",
+                "description": "filter request state",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--attachment-offset <count>",
+                "name": "attachmentOffset",
+                "description": "attachment offset",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0",
+                "choices": null
+              },
+              {
+                "flags": "--attachment-limit <count>",
+                "name": "attachmentLimit",
+                "description": "attachment page size",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "100",
+                "choices": null
+              },
+              {
+                "flags": "--source-offset <count>",
+                "name": "sourceOffset",
+                "description": "source offset",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0",
+                "choices": null
+              },
+              {
+                "flags": "--source-limit <count>",
+                "name": "sourceLimit",
+                "description": "source page size",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "100",
+                "choices": null
+              },
+              {
+                "flags": "--all",
+                "name": "all",
+                "description": "explicitly export the full history and candidate projection",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "save this status without overwriting evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations request",
+            "description": "Save an external analysis request for the host MCP; does not execute it",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--tool <name>",
+                "name": "tool",
+                "description": "ida or ce",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--operation <name>",
+                "name": "operation",
+                "description": "MCP operation to request",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--args <file>",
+                "name": "args",
+                "description": "JSON arguments, including scan/job identity when resuming an external operation",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--context <file>",
+                "name": "context",
+                "description": "fixed address space, image base or process identity known when preparing the request",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--retry-of <requestId>",
+                "name": "retryOf",
+                "description": "explicit prior request being retried after inspecting its external status",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--reason <text>",
+                "name": "reason",
+                "description": "host status check and reason for explicitly retrying a failed, lost or abandoned request",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "also export the request for the host agent",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations request-state",
+            "description": "Record known host execution state without executing or resubmitting a tool",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--request <requestId>",
+                "name": "request",
+                "description": "immutable request id",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--state <state>",
+                "name": "state",
+                "description": "observed external request state",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": [
+                  "running",
+                  "partial",
+                  "imported",
+                  "failed",
+                  "unknown",
+                  "abandoned"
+                ]
+              },
+              {
+                "flags": "--host-operation <id>",
+                "name": "hostOperation",
+                "description": "external job or scan identifier",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--reason <text>",
+                "name": "reason",
+                "description": "observed status or reason for failure/abandonment",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations import",
+            "description": "Preserve raw native/IDA/CE output and associate it with an optional request",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--input <file>",
+                "name": "input",
+                "description": "raw structured output, or - for stdin JSON",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--context <file>",
+                "name": "context",
+                "description": "missing provenance/address context; known identity is inherited from the request",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--request <requestId>",
+                "name": "request",
+                "description": "request that produced this response",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--complete",
+                "name": "complete",
+                "description": "host confirms this response finishes the request; does not assert complete search coverage",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--format <name>",
+                "name": "format",
+                "description": "normalized, ida.find_bytes, ida.get_bytes, ida.lookup_funcs, ce.aob, ce.scan_results, ce.read_memory, native.find, native.scan",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations select",
+            "description": "Select or reject candidates with an append-only rationale",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--candidate <ids...>",
+                "name": "candidate",
+                "description": "candidate ids",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--reason <text>",
+                "name": "reason",
+                "description": "selection/rejection rationale",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--scope <scope>",
+                "name": "scope",
+                "description": "apply to this observation, or persist the decision for the position across new observations",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "observation",
+                "choices": [
+                  "observation",
+                  "position"
+                ]
+              },
+              {
+                "flags": "--reject",
+                "name": "reject",
+                "description": "reject these candidates",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations verify",
+            "description": "Resume bounded native reads of pending candidates; reject stale process addresses",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "live target process",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--candidate <ids...>",
+                "name": "candidate",
+                "description": "only these candidates",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--refresh",
+                "name": "refresh",
+                "description": "recheck candidates already attempted in this process instance",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--time-budget-ms <ms>",
+                "name": "timeBudgetMs",
+                "description": "overall wall-clock budget",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "30000",
+                "choices": null
+              },
+              {
+                "flags": "--result-limit <count>",
+                "name": "resultLimit",
+                "description": "maximum results returned in stdout (1..10000); all completed reads stay in the investigation",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "100",
+                "choices": null
+              },
+              {
+                "flags": "--read-budget <bytes>",
+                "name": "readBudget",
+                "description": "shared verification budget",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "67108864",
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations attach",
+            "description": "Preserve an identity-matched profile, observation or static analysis evidence",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--input <file>",
+                "name": "input",
+                "description": "JSON evidence, or - for stdin",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--kind <kind>",
+                "name": "kind",
+                "description": "profile, observation or analysis",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump investigations complete",
+            "description": "Complete with a confirmed capability, analysis report or bounded negative",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--capability <name>",
+                "name": "capability",
+                "description": "saved capability with current read confirmation",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--outcome <file>",
+                "name": "outcome",
+                "description": "analysis_report or bounded_negative JSON, or - for stdin",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump recipes",
+        "description": "Inspect, store and confirm machine-level anchor recipes",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump recipes list",
+            "description": "List stored recipes and their confirmation state",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "restrict to one build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump recipes show",
+            "description": "Print one stored recipe with its confirmation history",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "recipe id",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-build <buildKey>",
+                "name": "recipeBuild",
+                "description": "build the recipe was captured in",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump recipes save",
+            "description": "Copy captured recipes into the library without overwriting",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe <files...>",
+                "name": "recipe",
+                "description": "recipe JSON files to store",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-list <file>",
+                "name": "recipeList",
+                "description": "JSON file listing recipe paths (resolved relative to the list file; BOM allowed)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-dir <dir>",
+                "name": "recipeDir",
+                "description": "shallow directory of *.anchor.json files (sorted, deduplicated)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump recipes confirm",
+            "description": "Record that a recipe produced a trusted answer, with its evidence copied in",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe <id-or-file>",
+                "name": "recipe",
+                "description": "recipe id in the library, or a recipe file to store first",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "the build the confirmation is about",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--evidence <file>",
+                "name": "evidence",
+                "description": "the report that justifies it (a file, not a directory)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--level <level>",
+                "name": "level",
+                "description": "confirmation level: read, semantics, reuse",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-build <buildKey>",
+                "name": "recipeBuild",
+                "description": "build the recipe was captured in (needed when an id exists twice)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--note <text>",
+                "name": "note",
+                "description": "short note describing what was checked",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--large",
+                "name": "large",
+                "description": "accept evidence above the report size limit",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump recipes negative",
+            "description": "Record a bounded negative: what was searched, over what range, and found absent",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "the build the search covered",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--target <name>",
+                "name": "target",
+                "description": "what was being looked for",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--scope <text>",
+                "name": "scope",
+                "description": "the range, pattern and method actually covered",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--evidence <file>",
+                "name": "evidence",
+                "description": "report backing the negative",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--large",
+                "name": "large",
+                "description": "accept evidence above the report size limit",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump recipes path",
+            "description": "Print the resolved recipe library layout",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump recipes rebuild",
+            "description": "Rebuild library.json from the recipe, confirmation and negative directories",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "recipe library root (defaults to C:\\Users\\follen\\.wowdump)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump capabilities",
+        "description": "Save and discover named, immutable profile snapshots with pinned recipe bindings",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump capabilities search",
+            "description": "Find definitions by name, description, field or parameter and inspect evidence gaps",
+            "arguments": [
+              {
+                "name": "text",
+                "description": "",
+                "required": false,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "restrict to one build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--field <names...>",
+                "name": "field",
+                "description": "require these exposed fields",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--param <names...>",
+                "name": "param",
+                "description": "require these parameter names",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--validation <level>",
+                "name": "validation",
+                "description": "require a current confirmation; query still checks parameter and field coverage",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": [
+                  "read",
+                  "semantics",
+                  "reuse"
+                ]
+              },
+              {
+                "flags": "--offset <count>",
+                "name": "offset",
+                "description": "matching result offset",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0",
+                "choices": null
+              },
+              {
+                "flags": "--limit <count>",
+                "name": "limit",
+                "description": "page size (1..200)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "20",
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "shared recipe/capability library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump capabilities save",
+            "description": "Save a portable profile and its recipe hashes; this does not promote its validation level",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--profile <id-or-file>",
+                "name": "profile",
+                "description": "workspace profile id or JSON file",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--field <name...>",
+                "name": "field",
+                "description": "fields this named capability exposes",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--description <text>",
+                "name": "description",
+                "description": "what this capability measures",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-build <buildKey>",
+                "name": "recipeBuild",
+                "description": "source build for anchoredBy recipes when ids exist in multiple builds",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "shared recipe/capability library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump capabilities list",
+            "description": "List saved capabilities, builds and damaged definitions",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "restrict to one build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "shared recipe/capability library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump capabilities show",
+            "description": "Inspect a capability and verify its profile and recipe bindings",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "select one build when an id exists in several builds",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "shared recipe/capability library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump capabilities status",
+            "description": "Build support matrix and live validity of linked confirmations",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": false,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "restrict to one build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump capabilities confirm",
+            "description": "Bind replay-checked evidence to this exact profile, layouts and recipes",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "capability build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--level <level>",
+                "name": "level",
+                "description": "read, semantics or reuse",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--evidence <files...>",
+                "name": "evidence",
+                "description": "successful query JSON or observation JSONL",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--basis <file>",
+                "name": "basis",
+                "description": "independent semantic evidence; required for semantics/reuse",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--reason <text>",
+                "name": "reason",
+                "description": "verified meaning and scope; semantic judgments are caller attestations",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump capabilities revoke",
+            "description": "Append a correction that invalidates a previous confirmation",
+            "arguments": [
+              {
+                "name": "id",
+                "description": "",
+                "required": true,
+                "variadic": false,
+                "default": null
+              }
+            ],
+            "options": [
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "capability build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--home <dir>",
+                "name": "home",
+                "description": "library root",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--confirmation <sha256>",
+                "name": "confirmation",
+                "description": "confirmation hash from capabilities status",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--reason <text>",
+                "name": "reason",
+                "description": "why the evidence no longer supports the capability",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump query",
+        "description": "Read a named capability or profile with target identity, guards, time and evidence",
+        "arguments": [
+          {
+            "name": "id",
+            "description": "saved capability id (automatically matched to the live executable hash)",
+            "required": false,
+            "variadic": false,
+            "default": null
+          }
+        ],
+        "options": [
+          {
+            "flags": "--workspace <dir>",
+            "name": "workspace",
+            "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--pid <pid>",
+            "name": "pid",
+            "description": "target process ID",
+            "required": true,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--profile <id-or-file>",
+            "name": "profile",
+            "description": "read an existing profile without saving a capability",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--field <name...>",
+            "name": "field",
+            "description": "select exposed fields",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": true,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--param <name=value...>",
+            "name": "param",
+            "description": "bind typed profile parameters; repeatable",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": true,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--build <buildKey>",
+            "name": "build",
+            "description": "expected build",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--home <dir>",
+            "name": "home",
+            "description": "shared recipe/capability library root",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--require-validation <level>",
+            "name": "requireValidation",
+            "description": "require current named-capability evidence covering these parameters and fields",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": [
+              "read",
+              "semantics",
+              "reuse"
+            ]
+          },
+          {
+            "flags": "--read-budget <bytes>",
+            "name": "readBudget",
+            "description": "total read budget for the whole run",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": "67108864",
+            "choices": null
+          },
+          {
+            "flags": "--verify",
+            "name": "verify",
+            "description": "allow a candidate profile and collect read evidence; semantics remain unchecked",
+            "required": false,
+            "valueRequired": false,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--duration-ms <ms>",
+            "name": "durationMs",
+            "description": "wall-clock budget for this read",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": "5000",
+            "choices": null
+          },
+          {
+            "flags": "--out <file>",
+            "name": "out",
+            "description": "save this observation as JSON without overwriting",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": []
+      },
+      {
+        "command": "wowdump observe",
+        "description": "Observe profile fields and changes with a shared budget; no reader script required",
+        "arguments": [
+          {
+            "name": "id",
+            "description": "saved capability id (automatically matched to the live executable hash)",
+            "required": false,
+            "variadic": false,
+            "default": null
+          }
+        ],
+        "options": [
+          {
+            "flags": "--workspace <dir>",
+            "name": "workspace",
+            "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--pid <pid>",
+            "name": "pid",
+            "description": "target process ID",
+            "required": true,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--profile <id-or-file>",
+            "name": "profile",
+            "description": "read an existing profile without saving a capability",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--field <name...>",
+            "name": "field",
+            "description": "select exposed fields",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": true,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--param <name=value...>",
+            "name": "param",
+            "description": "bind typed profile parameters; repeatable",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": true,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--build <buildKey>",
+            "name": "build",
+            "description": "expected build",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--home <dir>",
+            "name": "home",
+            "description": "shared recipe/capability library root",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--require-validation <level>",
+            "name": "requireValidation",
+            "description": "require current named-capability evidence covering these parameters and fields",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": [
+              "read",
+              "semantics",
+              "reuse"
+            ]
+          },
+          {
+            "flags": "--read-budget <bytes>",
+            "name": "readBudget",
+            "description": "total read budget for the whole run",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": "67108864",
+            "choices": null
+          },
+          {
+            "flags": "--verify",
+            "name": "verify",
+            "description": "allow a candidate profile and collect read evidence; semantics remain unchecked",
+            "required": false,
+            "valueRequired": false,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--count <count>",
+            "name": "count",
+            "description": "maximum samples (1..10000); count or seconds is required",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--seconds <seconds>",
+            "name": "seconds",
+            "description": "maximum duration (1..3600); count or seconds is required",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          },
+          {
+            "flags": "--interval-ms <ms>",
+            "name": "intervalMs",
+            "description": "requested interval (10..60000 ms)",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": "1000",
+            "choices": null
+          },
+          {
+            "flags": "--out <file>",
+            "name": "out",
+            "description": "save all observations and byte traces as JSONL without overwriting",
+            "required": false,
+            "valueRequired": true,
+            "valueOptional": false,
+            "variadic": false,
+            "negated": false,
+            "default": null,
+            "choices": null
+          }
+        ],
+        "commands": []
+      },
+      {
+        "command": "wowdump memory",
+        "description": "Bounded, read-only native memory access",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump memory read",
+            "description": "Read profile fields or one explicit address",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "expected build key",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--profile <id>",
+                "name": "profile",
+                "description": "profile ID or file",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--field <name...>",
+                "name": "field",
+                "description": "field names",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--param <name=value...>",
+                "name": "param",
+                "description": "bind typed profile parameters; repeatable",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--address <hex>",
+                "name": "address",
+                "description": "explicit address",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--size <bytes>",
+                "name": "size",
+                "description": "byte count for --address",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "also write the JSON result to this file",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump memory regions",
+            "description": "Enumerate committed regions through VirtualQueryEx",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--start <hex>",
+                "name": "start",
+                "description": "query start address",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "0x10000",
+                "choices": null
+              },
+              {
+                "flags": "--end <hex>",
+                "name": "end",
+                "description": "query end address",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-regions <count>",
+                "name": "maxRegions",
+                "description": "maximum returned regions",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "4096",
+                "choices": null
+              },
+              {
+                "flags": "--include-free",
+                "name": "includeFree",
+                "description": "include free and reserved regions",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "also write the JSON result to this file",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump memory find",
+            "description": "Search committed memory for a byte pattern or text, with context",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--needle <hex>",
+                "name": "needle",
+                "description": "hex byte pattern to search (e.g. \"41 75 74 6f\")",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--text <str>",
+                "name": "text",
+                "description": "utf-8 text to search",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--utf16",
+                "name": "utf16",
+                "description": "encode --text as utf-16le instead of utf-8",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--from <hex>",
+                "name": "from",
+                "description": "lower bound (defaults to all committed memory)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--to <hex>",
+                "name": "to",
+                "description": "upper bound",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-hits <count>",
+                "name": "maxHits",
+                "description": "stop after this many hits",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "200",
+                "choices": null
+              },
+              {
+                "flags": "--context <bytes>",
+                "name": "context",
+                "description": "context bytes captured after each hit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "64",
+                "choices": null
+              },
+              {
+                "flags": "--read-budget <bytes>",
+                "name": "readBudget",
+                "description": "refuse ranges over this many bytes",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--investigation <id>",
+                "name": "investigation",
+                "description": "save this capture and its candidates directly into an existing investigation",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "also write the JSON result to this file",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--confirm",
+                "name": "confirm",
+                "description": "confirm the bounded search (required without explicit --from/--to)",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump memory exec",
+            "description": "Run one workspace script against the live process (temporary reader)",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--script <file>",
+                "name": "script",
+                "description": "ESM script exporting default async function (ctx)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "JSONL recording of reads and emitted records",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--read-budget <bytes>",
+                "name": "readBudget",
+                "description": "maximum bytes the script may read",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--duration-ms <ms>",
+                "name": "durationMs",
+                "description": "wall-clock budget for the script",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-emit <count>",
+                "name": "maxEmit",
+                "description": "maximum emitted records",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--allow-unsafe-script",
+                "name": "allowUnsafeScript",
+                "description": "skip the static guard (requires review)",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump memory sample",
+            "description": "Run a workspace script on a fixed interval and record every read to JSONL",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--script <file>",
+                "name": "script",
+                "description": "ESM script exporting default async function (ctx)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--interval-ms <ms>",
+                "name": "intervalMs",
+                "description": "sampling interval",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--seconds <seconds>",
+                "name": "seconds",
+                "description": "sampling duration",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "JSONL recording (required for replay)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--read-budget <bytes>",
+                "name": "readBudget",
+                "description": "maximum bytes the sampling run may read",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--duration-ms <ms>",
+                "name": "durationMs",
+                "description": "wall-clock budget",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-emit <count>",
+                "name": "maxEmit",
+                "description": "maximum emitted records per run",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--allow-unsafe-script",
+                "name": "allowUnsafeScript",
+                "description": "skip the static guard (requires review)",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump memory scan",
+            "description": "Scan a bounded address range for a value (skips unreadable spans)",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--from <hex>",
+                "name": "from",
+                "description": "range start",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--to <hex>",
+                "name": "to",
+                "description": "range end",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--value <number>",
+                "name": "value",
+                "description": "value to find",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--type <type>",
+                "name": "type",
+                "description": "u8, u16, u32, u64, i32, f32 or f64",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "u32",
+                "choices": null
+              },
+              {
+                "flags": "--alignment <bytes>",
+                "name": "alignment",
+                "description": "scan step",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "1",
+                "choices": null
+              },
+              {
+                "flags": "--max-hits <count>",
+                "name": "maxHits",
+                "description": "hit limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "16",
+                "choices": null
+              },
+              {
+                "flags": "--investigation <id>",
+                "name": "investigation",
+                "description": "save this capture and its candidates directly into an existing investigation",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "also write the JSON result to this file",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--confirm",
+                "name": "confirm",
+                "description": "confirm the bounded scan",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump analyze",
+        "description": "Dump sections, verify profiles, replay recordings and disassemble",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump analyze search",
+            "description": "Find literal strings or masked byte patterns in verified dump sections",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--text <text>",
+                "name": "text",
+                "description": "literal string",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--encoding <encoding>",
+                "name": "encoding",
+                "description": "utf8 or utf16le",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "utf8",
+                "choices": null
+              },
+              {
+                "flags": "--pattern <bytes>",
+                "name": "pattern",
+                "description": "hex bytes and ?? wildcards, separated by spaces",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--section <name>",
+                "name": "section",
+                "description": "restrict to one section",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-hits <count>",
+                "name": "maxHits",
+                "description": "result limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "32",
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze inspect",
+            "description": "Map an RVA to bytes, decoded operands and optional .pdata function ownership",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--rva <hex>",
+                "name": "rva",
+                "description": "known instruction boundary or data RVA",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--size <bytes>",
+                "name": "size",
+                "description": "byte window",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "128",
+                "choices": null
+              },
+              {
+                "flags": "--max-instructions <count>",
+                "name": "maxInstructions",
+                "description": "decode limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "16",
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze xrefs",
+            "description": "Find rel32/RIP references; distinguish .pdata boundaries from raw candidates",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--to-rva <targets...>",
+                "name": "toRva",
+                "description": "target function, string or global RVAs",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--section <name>",
+                "name": "section",
+                "description": "executable section",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-hits <count>",
+                "name": "maxHits",
+                "description": "result limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "64",
+                "choices": null
+              },
+              {
+                "flags": "--max-bytes <bytes>",
+                "name": "maxBytes",
+                "description": "maximum source bytes examined",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "134217728",
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze anchor",
+            "description": "Capture an instruction, content or runtime-find anchor for future build relocation",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required for instruction/content anchors)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--id <name>",
+                "name": "id",
+                "description": "stable field/function name",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--rva <hex>",
+                "name": "rva",
+                "description": "known instruction boundary in the source build",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--targets <file>",
+                "name": "targets",
+                "description": "JSON array of anchor targets sharing one image; partial batches exit nonzero",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--text <text>",
+                "name": "text",
+                "description": "text alternative to --rva: capture from a string reference",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--encoding <encoding>",
+                "name": "encoding",
+                "description": "utf8 (default) or utf16le (with --text)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--section <name>",
+                "name": "section",
+                "description": "restrict text search to one section",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--xref-section <name>",
+                "name": "xrefSection",
+                "description": "executable section for the text reference scan",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--register <name>",
+                "name": "register",
+                "description": "destination register of the preceding implementation-address LEA (default r8; with --text)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--instructions <count>",
+                "name": "instructions",
+                "description": "pattern window length in instructions (default 12)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--resolve <kind>",
+                "name": "resolve",
+                "description": "match (default), rip, branch, displacement or immediate",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--at <index>",
+                "name": "at",
+                "description": "zero-based instruction to extract (default 0)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--disambiguation <mode>",
+                "name": "disambiguation",
+                "description": "opt in to recorded-value ranking with value",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--find-needle <hex|text>",
+                "name": "findNeedle",
+                "description": "runtime-find mode: byte pattern (hex pairs, or text with --find-encoding)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--find-encoding <encoding>",
+                "name": "findEncoding",
+                "description": "hex (default), utf8 or utf16le for --find-needle",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--find-signature <hex>",
+                "name": "findSignature",
+                "description": "structure signature that must appear in the hit context",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--find-zero-padded",
+                "name": "findZeroPadded",
+                "description": "strings are NUL-terminated and zero-padded up to the next field offset",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--find-max-hits <count>",
+                "name": "findMaxHits",
+                "description": "search hit cap recorded in the recipe",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "2000",
+                "choices": null
+              },
+              {
+                "flags": "--find-context <bytes>",
+                "name": "findContext",
+                "description": "context bytes each side recorded in the recipe",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "128",
+                "choices": null
+              },
+              {
+                "flags": "--layout <spec>",
+                "name": "layout",
+                "description": "field=offset pairs, e.g. name=0,surname=0x31",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "source build key (find-recipe mode)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--exe-sha256 <hex>",
+                "name": "exeSha256",
+                "description": "source executable SHA-256 (find-recipe mode)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--evidence <text>",
+                "name": "evidence",
+                "description": "source chain, meaning and validation conditions",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write the raw recipe without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out-dir <dir>",
+                "name": "outDir",
+                "description": "write one raw <id>.anchor.json per target (batch mode)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--force",
+                "name": "force",
+                "description": "explicitly overwrite the --out / --out-dir anchor outputs",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze relocate",
+            "description": "Resolve saved anchors in another build; report candidates, ambiguity and misses",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe <files...>",
+                "name": "recipe",
+                "description": "one or more saved anchor JSON files",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-list <file>",
+                "name": "recipeList",
+                "description": "JSON file listing recipe paths (resolved relative to the list file; BOM allowed)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-dir <dir>",
+                "name": "recipeDir",
+                "description": "shallow directory of *.anchor.json files (sorted, deduplicated)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "resolve runtime-find recipes against this live process",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--confirm",
+                "name": "confirm",
+                "description": "confirm the live full-memory search that find recipes perform",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze retarget",
+            "description": "Move module globals to a newer build and report whether independent sites agree",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--target-manifest <file>",
+                "name": "targetManifest",
+                "description": "the new build's complete v4 dump manifest",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--to-rva <targets...>",
+                "name": "toRva",
+                "description": "old-build global RVAs to relocate",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--anchors-per-target <count>",
+                "name": "anchorsPerTarget",
+                "description": "anchored windows to capture per target (2 must survive and agree)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "4",
+                "choices": null
+              },
+              {
+                "flags": "--max-sites <count>",
+                "name": "maxSites",
+                "description": "candidate sites examined per target, best first",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "12",
+                "choices": null
+              },
+              {
+                "flags": "--max-window <count>",
+                "name": "maxWindow",
+                "description": "longest instruction window attempted",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "12",
+                "choices": null
+              },
+              {
+                "flags": "--min-window <count>",
+                "name": "minWindow",
+                "description": "shortest instruction window attempted",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "2",
+                "choices": null
+              },
+              {
+                "flags": "--id-prefix <name>",
+                "name": "idPrefix",
+                "description": "prefix for the generated anchor ids",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "retarget",
+                "choices": null
+              },
+              {
+                "flags": "--max-hits <count>",
+                "name": "maxHits",
+                "description": "reference-site limit for the source scan",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "10000",
+                "choices": null
+              },
+              {
+                "flags": "--anchor-dir <dir>",
+                "name": "anchorDir",
+                "description": "also persist every captured recipe here (refuses to overwrite)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze migrate",
+            "description": "Migrate roots and explicitly bound layout offsets/sizes; report every unresolved layout value",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe <files...>",
+                "name": "recipe",
+                "description": "one or more saved anchor JSON files",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-list <file>",
+                "name": "recipeList",
+                "description": "JSON file listing recipe paths (resolved relative to the list file; BOM allowed)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--recipe-dir <dir>",
+                "name": "recipeDir",
+                "description": "shallow directory of *.anchor.json files (sorted, deduplicated)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--profile <file>",
+                "name": "profile",
+                "description": "the profile to migrate (read only; never rewritten)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out-profile <file>",
+                "name": "outProfile",
+                "description": "write the migrated candidate profile here (refuses to overwrite)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze dump",
+            "description": "Write bounded PE sections of the verified target into the workspace session",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "expected build key",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--sections <names...>",
+                "name": "sections",
+                "description": "sections to dump",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": [
+                  ".text",
+                  ".rdata",
+                  ".pdata"
+                ],
+                "choices": null
+              },
+              {
+                "flags": "--session <slug>",
+                "name": "session",
+                "description": "session directory slug",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "dump",
+                "choices": null
+              },
+              {
+                "flags": "--out-dir <path>",
+                "name": "outDir",
+                "description": "explicit output directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--max-section-bytes <bytes>",
+                "name": "maxSectionBytes",
+                "description": "per-section limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "134217728",
+                "choices": null
+              },
+              {
+                "flags": "--max-total-bytes <bytes>",
+                "name": "maxTotalBytes",
+                "description": "total limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "268435456",
+                "choices": null
+              },
+              {
+                "flags": "--duration-ms <ms>",
+                "name": "durationMs",
+                "description": "dump deadline",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "30000",
+                "choices": null
+              },
+              {
+                "flags": "--chunk-bytes <bytes>",
+                "name": "chunkBytes",
+                "description": "native read block size",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "65536",
+                "choices": null
+              },
+              {
+                "flags": "--confirm",
+                "name": "confirm",
+                "description": "confirm the bounded dump",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze verify",
+            "description": "Read a candidate or reader_ready profile and record the result in a session",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory (defaults to the nearest Analyze/<product>/<version>)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--pid <pid>",
+                "name": "pid",
+                "description": "target process ID",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--build <buildKey>",
+                "name": "build",
+                "description": "expected build key",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--profile <file>",
+                "name": "profile",
+                "description": "profile file (defaults to the workspace's only profile)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--field <name...>",
+                "name": "field",
+                "description": "restrict to these fields",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--param <name=value...>",
+                "name": "param",
+                "description": "bind typed profile parameters; repeatable",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--session <slug>",
+                "name": "session",
+                "description": "session directory slug",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "verify",
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "explicit result file",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze replay",
+            "description": "Re-run a script against a JSONL recording with zero process contact",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--script <file>",
+                "name": "script",
+                "description": "ESM script exporting default async function (ctx)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--input <file>",
+                "name": "input",
+                "description": "JSONL recording produced by memory exec/sample",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "JSONL recording of the replay itself",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--read-budget <bytes>",
+                "name": "readBudget",
+                "description": "maximum bytes the replay may read",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--duration-ms <ms>",
+                "name": "durationMs",
+                "description": "wall-clock budget",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--allow-unsafe-script",
+                "name": "allowUnsafeScript",
+                "description": "skip the static guard (requires review)",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze selftest",
+            "description": "Run a script against a synthetic fixture; the exit code is the verdict",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--script <file>",
+                "name": "script",
+                "description": "ESM script exporting default async function (ctx)",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--fixture <file>",
+                "name": "fixture",
+                "description": "fixture JSON with module, memory and expect",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--allow-unsafe-script",
+                "name": "allowUnsafeScript",
+                "description": "skip the static guard (requires review)",
+                "required": false,
+                "valueRequired": false,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          },
+          {
+            "command": "wowdump analyze disassemble",
+            "description": "Decode a verified manifest RVA, or an explicit raw file offset (64-bit)",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--manifest <files...>",
+                "name": "manifest",
+                "description": "complete v4 dump manifests (matching build and hash; required except relocate with find recipes)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": true,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--out <file>",
+                "name": "out",
+                "description": "write result without overwriting existing evidence",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--file <path>",
+                "name": "file",
+                "description": "raw section binary (alternative to --manifest)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--rva <hex>",
+                "name": "rva",
+                "description": "RVA of the first decoded byte",
+                "required": true,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--offset <bytes>",
+                "name": "offset",
+                "description": "raw file offset; incompatible with --manifest",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--size <bytes>",
+                "name": "size",
+                "description": "maximum bytes",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "4096",
+                "choices": null
+              },
+              {
+                "flags": "--max-instructions <count>",
+                "name": "maxInstructions",
+                "description": "instruction limit",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": "256",
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump database",
+        "description": "Show the workspace-scoped static database state",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump database status",
+            "description": "Show database path, status and identity",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--workspace <dir>",
+                "name": "workspace",
+                "description": "workspace directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              },
+              {
+                "flags": "--path <dir>",
+                "name": "path",
+                "description": "workspace directory",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "command": "wowdump skill",
+        "description": "Install the bundled agent skill",
+        "arguments": [],
+        "options": [],
+        "commands": [
+          {
+            "command": "wowdump skill install",
+            "description": "Copy the bundled skill next to the agent skills, with backups",
+            "arguments": [],
+            "options": [
+              {
+                "flags": "--target <dir>",
+                "name": "target",
+                "description": "skill home directory (defaults to ~/.agents/skills)",
+                "required": false,
+                "valueRequired": true,
+                "valueOptional": false,
+                "variadic": false,
+                "negated": false,
+                "default": null,
+                "choices": null
+              }
+            ],
+            "commands": []
+          }
+        ]
+      }
+    ]
+  },
+  "profile": {
+    "schema": "wowdump.profile.v1",
+    "parameterTypes": [
+      "u8",
+      "i8",
+      "u16",
+      "i16",
+      "u32",
+      "i32",
+      "u64",
+      "i64",
+      "bytes"
+    ],
+    "layouts": {
+      "bundleSchema": "wowdump.types.v1",
+      "reference": "layout.ref",
+      "compile": "profiles compile",
+      "identity": "exact build and executable hash"
+    },
+    "drivers": {
+      "live": "query/observe",
+      "fixture": "profiles test",
+      "replay": "profiles replay"
+    },
+    "migration": {
+      "bindings": "JSON Pointer to rva/offset/size, backed by recipes",
+      "invariants": "explicit value and reason; revalidation required"
+    },
+    "parameterBinding": {
+      "option": "--param name=value",
+      "location": "lookup.key.param",
+      "integerEncoding": "little_endian",
+      "bytesEncoding": "hex_in_memory_order",
+      "maxKeyBytes": 64
+    },
+    "consistency": {
+      "lookup": "identity and pointer sources rechecked after the field read",
+      "stableGuard": "1..64 bytes at a signed offset from the resolved field address",
+      "atomic": false
+    }
+  },
+  "script": {
+    "schema": "wowdump.script.v1",
+    "primitives": [
+      "module",
+      "read",
+      "readExact",
+      "scalar",
+      "u8",
+      "u16",
+      "u32",
+      "u64",
+      "i32",
+      "i64",
+      "f32",
+      "f64",
+      "pointer",
+      "deref",
+      "chain",
+      "inModule",
+      "walkList",
+      "lookup",
+      "scan",
+      "find",
+      "regions",
+      "emit",
+      "assert",
+      "indeterminate",
+      "log",
+      "now",
+      "sleep",
+      "summary"
+    ],
+    "requiresExport": true,
+    "drivers": {
+      "live": "Windows process memory",
+      "replay": "recorded observations only; omitted bulk bytes cannot be rescanned",
+      "fixture": "synthetic bytes; regions require recorded observations"
+    }
+  },
+  "externalTools": {
+    "discovery": "host MCP tool inventory",
+    "status": "not_checked",
+    "tools": [
+      "IDA",
+      "CE"
+    ],
+    "importFormats": [
+      "normalized",
+      "ida.find_bytes",
+      "ida.get_bytes",
+      "ida.lookup_funcs",
+      "ce.aob",
+      "ce.scan_results",
+      "ce.read_memory",
+      "native.find",
+      "native.scan"
+    ],
+    "workflow": "investigations start/request/import/verify/status/complete"
+  },
+  "validation": {
+    "levels": [
+      "read",
+      "semantics",
+      "reuse"
+    ],
+    "binding": "capability, profile, recipes and copied evidence hashes",
+    "semantics": "caller-attested independent basis",
+    "command": "capabilities status"
+  }
+}

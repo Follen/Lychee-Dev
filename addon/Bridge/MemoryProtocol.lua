@@ -24,8 +24,8 @@ ns.MemoryProtocol = {
             or type(sequence)~="number" or sequence<0 or sequence>=4294967296 or sequence%1~=0 then
             return nil,"memory_record_invalid"
         end
-        local header="LYCMEM05"..raw(nonce)..raw(runtime)..raw(ticket)
+        local header="LYCMEM06"..raw(nonce)..raw(runtime)..raw(ticket)
             ..string.char(kind,state,0,0)..u32(sequence)..u32(#payload)..u32(checksum(payload))..u32(80)
-        return header..u32(checksum(header))..payload.."LYCEND05"..raw(nonce)..raw(runtime)
+        return header..u32(checksum(header))..payload.."LYCEND06"..raw(nonce)..raw(runtime)
     end,
 }

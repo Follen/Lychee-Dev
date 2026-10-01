@@ -1,0 +1,19 @@
+{
+  "schema": "wowdump.runtime-dump.v4",
+  "complete": true,
+  "buildKey": "fixture@lua-mailbox-migration",
+  "executableSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "synthetic": true,
+  "sections": [
+    {
+      "name": ".text",
+      "rva": "0x1000",
+      "bytes": 4096,
+      "readSize": 4096,
+      "file": "migration-text.fixture.bin",
+      "sha256": "eedd567e9c42f8253d35537efedfe5aee0d1f63b4dac552c0c6e5b4428919f14",
+      "protection": "rx",
+      "gaps": []
+    }
+  ]
+}

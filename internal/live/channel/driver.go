@@ -142,11 +142,7 @@ func (d *Driver) begin(ctx context.Context, action, ticket string, configure fun
 	}
 	i := d.State.Identity
 	e := bridge.SlotEnvelope{Schema: bridge.SlotSchema, Index: i.NextSlot, Runtime: i.Runtime, Owner: d.State.Owner, Fence: 1, Nonce: nonce, Ticket: ticket, Action: action, GUID: i.GUID, Build: i.Build}
-	if i.Slots == 64 {
-		e.Schema = bridge.LegacySlotSchema
-	} else {
-		e.StartSlot = i.NextSlot
-	}
+	e.StartSlot = i.NextSlot
 	if configure != nil {
 		configure(&e)
 	}
@@ -213,6 +209,11 @@ func (d *Driver) receive(ctx context.Context, tx *Transaction) (*Receipt, error)
 	r := observation.Receipt
 	var rejection *RejectedError
 	if err != nil && !errors.As(err, &rejection) {
+		if errors.Is(err, ErrPending) {
+			if diagnosticErr := d.recordInputDiagnostic(ctx, tx, observation.InputDiagnostic); diagnosticErr != nil {
+				return nil, errors.Join(err, diagnosticErr)
+			}
+		}
 		return nil, err
 	}
 	// Persist receipt before releasing the shared disk slot reservation.
@@ -235,6 +236,7 @@ func (d *Driver) finishTransaction(ctx context.Context) error {
 		return err
 	}
 	d.State.Identity = tx.Receipt.Identity
+	d.State.Identity.Schema = IdentitySchema
 	d.State.Transaction = nil
 	return d.Save(ctx, "slot_consumed")
 }

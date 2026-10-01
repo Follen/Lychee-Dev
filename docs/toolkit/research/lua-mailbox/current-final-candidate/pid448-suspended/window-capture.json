@@ -1,0 +1,16 @@
+{
+  "captureEnd": "context deadline exceeded",
+  "cloaked": 0,
+  "cloakedHRESULT": 0,
+  "creation": 134353034288690796,
+  "durationCapMs": 4000,
+  "foreground": false,
+  "frameCount": 0,
+  "frames": [],
+  "gameInput": false,
+  "maxFrames": 120,
+  "minimized": false,
+  "pid": 448,
+  "uniquePixelHashes": 0,
+  "visible": true
+}

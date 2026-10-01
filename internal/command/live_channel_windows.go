@@ -113,7 +113,7 @@ return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailab
 	case "live reload":
 		result, err = project.Reload(ctx, opts.session, opts.request, !opts.noCache)
 	}
-	response.Context["project"], response.Context["transport"] = project.Root, "memory-slot-v1"
+	response.Context["project"], response.Context["transport"] = project.Root, "memory-slot-v3"
 	if result.Session != "" {
 		response.Result, response.OperationID = result, result.Session
 		response.Context["session"], response.Context["stage"] = result.Session, result.Stage

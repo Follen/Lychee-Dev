@@ -1,5 +1,7 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-10-01 Native CON 当前实现合同为 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md)：200 槽、wire06、slot.v3、identity.v2、input.v2、公开 Mailbox 定点读取；无旧原生协议兼容或扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
+
 2026-09-30 [D 阶段研究合同](phase-d-publication-luals-session-2026-09-30.md) 约束后续
 addon 发布优化与可选跨 CLI LuaLS 会话：保留输入新鲜度，先做等价编码复用；语义会话
 固定上下文、托管租约、共享预算、有界取消与回收。跨 CLI LuaLS 已在当前开发分支实现，

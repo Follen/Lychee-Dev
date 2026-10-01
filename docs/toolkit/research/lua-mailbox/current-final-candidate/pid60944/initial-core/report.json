@@ -1,0 +1,78 @@
+{
+  "schema": "lycheedev.mailbox.acceptance.v1",
+  "startedAt": "2026-10-01T05:47:06.682Z",
+  "cli": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-candidate-current\\dev-npm-stage\\native\\windows-amd64\\lycheedev.exe",
+  "project": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid60944-project",
+  "pid": 60944,
+  "installation": "D:/Game/World of Warcraft/_retail_",
+  "character": "荔枝小月亮",
+  "realm": "燃烧之刃",
+  "guid": "Player-829-03DAABDF",
+  "complete": false,
+  "steps": [
+    {
+      "name": "connect",
+      "args": [
+        "live",
+        "connect",
+        "--installation",
+        "D:/Game/World of Warcraft/_retail_",
+        "--pid",
+        "60944",
+        "--character",
+        "荔枝小月亮",
+        "--realm",
+        "燃烧之刃",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid60944-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 0,
+      "elapsedMs": 1608,
+      "session": "CON-f7cfd8cf8cf44e02c07eac6af8febd15",
+      "complete": true,
+      "cleanup": "none",
+      "error": null
+    },
+    {
+      "name": "activate-current-bytes",
+      "args": [
+        "live",
+        "reload",
+        "--session",
+        "CON-f7cfd8cf8cf44e02c07eac6af8febd15",
+        "--request",
+        "activate-wake-candidate",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid60944-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 3,
+      "elapsedMs": 3395,
+      "session": "CON-f7cfd8cf8cf44e02c07eac6af8febd15",
+      "complete": false,
+      "cleanup": "none",
+      "error": {
+        "code": "live.channel_mailbox_unavailable",
+        "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read\nmemory.ineligible_read",
+        "stage": "reload_input_attempted",
+        "retryable": false,
+        "resumeOperationId": "CON-f7cfd8cf8cf44e02c07eac6af8febd15"
+      }
+    }
+  ],
+  "session": "CON-f7cfd8cf8cf44e02c07eac6af8febd15",
+  "failure": {
+    "message": "activate-current-bytes: {\"code\":\"live.channel_mailbox_unavailable\",\"message\":\"live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read\\nmemory.ineligible_read\",\"stage\":\"reload_input_attempted\",\"retryable\":false,\"resumeOperationId\":\"CON-f7cfd8cf8cf44e02c07eac6af8febd15\"} \n\n3 !== 0\n",
+    "session": "CON-f7cfd8cf8cf44e02c07eac6af8febd15"
+  },
+  "finishedAt": "2026-10-01T05:47:11.689Z"
+}

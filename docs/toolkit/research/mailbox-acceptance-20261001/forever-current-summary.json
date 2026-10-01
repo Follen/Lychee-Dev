@@ -1,0 +1,82 @@
+{
+  "schema": "lycheedev.forever.current-live-acceptance.v1",
+  "candidateSHA256": "9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8",
+  "pid": 10376,
+  "creation": "134352957565325600",
+  "exe": "D:/Game/World of Warcraft/_classic_beta_/WowB.exe",
+  "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "core": {
+    "complete": true,
+    "checks": 12,
+    "failed": [],
+    "session": "CON-039af23c4067d76eab1e0bd847394dd8",
+    "report": ".tmp/mailbox-live/forever-acceptance/current/core/report.json"
+  },
+  "pressure": {
+    "complete": true,
+    "uniqueNormalRequests": 47,
+    "calls": 54,
+    "failed": [],
+    "session": "CON-05fd4f99d8f5d03589de337f192b67fc",
+    "report": ".tmp/mailbox-live/forever-pressure-current/baseline.json",
+    "capacityReload": "verified",
+    "historicalRetryJournal": "unchanged",
+    "historyRotation": "verified",
+    "compileError": "verified",
+    "cleanupError": "runtime_destroyed_then_reload_verified",
+    "bugs": "verified"
+  },
+  "root": {
+    "anchorRva": "0x75a69d",
+    "rootRva": "0x7b780b8",
+    "anchorSHA256": "f04a6ad4b769b3e1dc12e72dee586d58d3c87f17097c66a60244a3da5f1de46c",
+    "queriesBeforeAfterCoreAfterPressure": "passed",
+    "independentPublicPath": "passed",
+    "exactByteReplay": "passed",
+    "readLibraryConfirmations": "added",
+    "crossProcessReuse": "not_checked",
+    "wholeTextUniqueness": "not_claimed"
+  },
+  "identity": {
+    "build": "1.60.1.70124",
+    "character": "Aotu",
+    "fence": 0,
+    "guid": "Player-4618-01188FA2",
+    "inputState": "lycheedev.input.hybrid.v1",
+    "inventory": 200,
+    "nextSlot": 7,
+    "owner": "",
+    "product": "forever",
+    "realm": "Aotu",
+    "release": "3.1.0",
+    "runtime": "0000001e000104e8453b04ccfd49fe3d",
+    "schema": "lycheedev.slot.identity.v2",
+    "slots": 200
+  },
+  "cleanup": {
+    "activation": {
+      "session": "CON-2116b05fd563bbe7cc625dfe9f4ddc5d",
+      "closed": true
+    },
+    "core": {
+      "session": "CON-039af23c4067d76eab1e0bd847394dd8",
+      "closed": true
+    },
+    "pressure": {
+      "session": "CON-05fd4f99d8f5d03589de337f192b67fc",
+      "closed": true
+    },
+    "owed": false
+  },
+  "observedShortReadCount": 0,
+  "recoveryCalls": 0,
+  "geometryMisreportObservation": "not reproduced in this full final-candidate run; does not establish universal future absence",
+  "installation": {
+    "main": "managed",
+    "slots": {
+      "state": "managed",
+      "count": 200,
+      "pending": 0
+    }
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "ok": true,
+  "schema": "wowdump.profile-fixture-result.v1",
+  "mode": "fixture",
+  "profileSha256": "72e17463f4f5ff067d825e29a3f4aa57a303ba7d0885fb97d0f83cecea11afaa",
+  "fixtureSha256": "da537de902504e3294d6c3671368db36038e81312a761500f0af9a2535dc73cc",
+  "expected": {
+    "fields": {
+      "luaState": "0x20000ae40",
+      "threadTag": 8,
+      "globalsValue": {
+        "pointer": "0x20000adf0",
+        "tag": 5,
+        "secret": 0
+      }
+    }
+  },
+  "actual": {
+    "fields": {
+      "luaState": "0x20000ae40",
+      "threadTag": 8,
+      "globalsValue": {
+        "pointer": "0x20000adf0",
+        "tag": 5,
+        "secret": 0
+      }
+    }
+  },
+  "result": {
+    "ok": true,
+    "command": "profile.verify",
+    "pid": 0,
+    "buildKey": "classicbeta@1.60.1.70124",
+    "profileId": "forever-lua-mailbox-root-runscript-v1-70124",
+    "module": {
+      "name": "WowB.exe",
+      "base": "0x140000000",
+      "size": 150994944
+    },
+    "fields": {
+      "luaState": "0x20000ae40",
+      "threadTag": 8,
+      "globalsValue": {
+        "pointer": "0x20000adf0",
+        "tag": 5,
+        "secret": 0
+      }
+    },
+    "parameters": {},
+    "consistency": {
+      "atomic": false,
+      "fields": {
+        "luaState": {
+          "status": "checked",
+          "checks": [
+            "stable_bytes"
+          ]
+        },
+        "threadTag": {
+          "status": "checked",
+          "checks": [
+            "stable_bytes",
+            "pointer_sources"
+          ]
+        },
+        "globalsValue": {
+          "status": "checked",
+          "checks": [
+            "stable_bytes",
+            "pointer_sources"
+          ]
+        }
+      }
+    },
+    "reads": [
+      {
+        "field": "luaState",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      },
+      {
+        "field": "luaState",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      },
+      {
+        "field": "luaState",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      },
+      {
+        "field": "threadTag",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      },
+      {
+        "field": "threadTag",
+        "address": "0x20000ae50",
+        "size": 1,
+        "bytesRead": 1,
+        "dataHex": "08",
+        "complete": true
+      },
+      {
+        "field": "threadTag",
+        "address": "0x20000ae50",
+        "size": 1,
+        "bytesRead": 1,
+        "dataHex": "08",
+        "complete": true
+      },
+      {
+        "field": "threadTag",
+        "address": "0x20000ae50",
+        "size": 1,
+        "bytesRead": 1,
+        "dataHex": "08",
+        "complete": true
+      },
+      {
+        "field": "threadTag",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      },
+      {
+        "field": "globalsValue",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      },
+      {
+        "field": "globalsValue",
+        "address": "0x20000aed0",
+        "size": 10,
+        "bytesRead": 10,
+        "dataHex": "f0ad0000020000000500",
+        "complete": true
+      },
+      {
+        "field": "globalsValue",
+        "address": "0x20000aed0",
+        "size": 24,
+        "bytesRead": 24,
+        "dataHex": "f0ad00000200000005000000000000000000000000000000",
+        "complete": true
+      },
+      {
+        "field": "globalsValue",
+        "address": "0x20000aed0",
+        "size": 10,
+        "bytesRead": 10,
+        "dataHex": "f0ad0000020000000500",
+        "complete": true
+      },
+      {
+        "field": "globalsValue",
+        "address": "0x147b780b8",
+        "size": 8,
+        "bytesRead": 8,
+        "dataHex": "40ae000002000000",
+        "complete": true
+      }
+    ],
+    "validation": {
+      "read": "passed",
+      "fieldSemantics": "not_checked",
+      "rootSemantics": "not_checked",
+      "crossProcess": "not_checked"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "command": "memory.read",
+  "identityAssurance": "pid_only",
+  "pid": 10376,
+  "handle": "0x2f8",
+  "address": "0x7ff7f793a69d",
+  "requestedSize": 49,
+  "bytesRead": 49,
+  "complete": true,
+  "startedAt": 1790825716131,
+  "finishedAt": 1790825716131,
+  "dataHex": "488b1d14da4107488bcbe82447fb03488bcb4c8b38e81947fb03498bd7488bcb448b4008e81a74fb03488bcbe80247fb03"
+}

@@ -44,7 +44,7 @@ func TestSlotCycleRecoverySkipsUnknownSlotOne(t *testing.T) {
 			n, reserved := publicationFixture(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
-			old := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: n.Version}
+			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: n.Version}
 			if foreign {
 				old.NextSlot = 5
 			}
@@ -108,7 +108,7 @@ func TestSlotCycleRecoveryFreeSlotOneControl(t *testing.T) {
 	n, _ := publicationFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	old := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: n.Version}
+	old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: n.Version}
 	current := old
 	current.Runtime, current.NextSlot = strings.Repeat("8", 32), 1
 	peer := &slotCyclePeer{recoveryPeer: recoveryPeer{identity: current}, native: n}

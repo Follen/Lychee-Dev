@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "command": "recipes.save",
+  "home": "C:\\Users\\follen\\.wowdump",
+  "stored": [
+    {
+      "id": "classic-lua-state-root-rip-v1-70032",
+      "buildKey": "classic@5.5.4.70032",
+      "file": "C:\\Users\\follen\\.wowdump\\recipes\\classic@5.5.4.70032\\classic-lua-state-root-rip-v1-70032.anchor.json",
+      "sha256": "1b1ef234c82f88d5c547a5f411cd68f88c8961adc3acad67fa16790fbf489de4",
+      "status": "created"
+    }
+  ],
+  "failed": [],
+  "damaged": []
+}

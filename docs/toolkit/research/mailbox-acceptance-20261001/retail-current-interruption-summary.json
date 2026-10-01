@@ -1,0 +1,37 @@
+{
+  "schema": "lycheedev.mailbox.current-candidate-acceptance.v1",
+  "recordedAt": "2026-10-01T04:43:40.801Z",
+  "client": "retail",
+  "build": "12.1.0.69933",
+  "cliSHA256": "9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8",
+  "pid": 34732,
+  "creation": "134352920362860468",
+  "image": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+  "executableSHA256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+  "session": "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+  "acceptance": {
+    "state": "blocked",
+    "core": "not_run",
+    "capacity47": "not_run",
+    "reason": "Activation input uncertain under external held-key interference; original process subsequently exited. No same-path replacement process exists at exact-path check."
+  },
+  "recovery": {
+    "state": "closed",
+    "method": "process_exited",
+    "publicCommand": "live disconnect",
+    "inputFree": true,
+    "oldReloadDisposition": "uncertain",
+    "oldReloadMessagesQueued": 9,
+    "originalRuntime": "000000190001017ed9a31892c07a556f",
+    "observedDifferentRuntime": "0000001a0001050d505341dec3d8119f",
+    "runtimeReplacementProofEstablished": false,
+    "finalJournalSequence": 20,
+    "finalJournalKind": "process_end_closed",
+    "finalJournalSHA256": "2153c543f1cad2538e9ddbb40bb4b80a3ab5d7c8aa1ce4f21d9cc0e5dc06db81"
+  },
+  "library": {
+    "newConfirm": "not_run",
+    "reason": "Blocked acceptance is append-only evidence, not a new semantic validation or promotion of previous read confirmation."
+  },
+  "authorization": false
+}

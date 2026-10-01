@@ -1,0 +1,16 @@
+node:internal/fs/promises:640
+  return new FileHandle(await PromisePrototypeThen(
+                        ^
+
+Error: ENOENT: no such file or directory, open 'D:\Code\wow\addons\Lychee Dev\.worktrees\live-mailbox\.tmp\mailbox-live\titan-current-20261001\core-13\connect.json'
+    at async open (node:internal/fs/promises:640:25)
+    at async Object.readFile (node:internal/fs/promises:1290:14)
+    at async read (file:///D:/Code/wow/addons/Lychee%20Dev/.worktrees/live-mailbox/.tmp/mailbox-live/titan-current-20261001/finalize.mjs:9:33)
+    at async file:///D:/Code/wow/addons/Lychee%20Dev/.worktrees/live-mailbox/.tmp/mailbox-live/titan-current-20261001/finalize.mjs:28:121 {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\core-13\\connect.json'
+}
+
+Node.js v24.18.1

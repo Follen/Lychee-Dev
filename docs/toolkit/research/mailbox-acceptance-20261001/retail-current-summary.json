@@ -1,0 +1,111 @@
+{
+  "schema": "lycheedev.mailbox.current-candidate-acceptance.v2",
+  "recordedAt": "2026-10-01T06:00:05.407Z",
+  "client": "retail",
+  "build": "12.1.0.69933",
+  "cliSHA256": "9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8",
+  "pid": 60944,
+  "creation": "134353066099007409",
+  "image": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+  "executableSHA256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+  "actor": {
+    "character": "荔枝小月亮",
+    "realm": "燃烧之刃",
+    "guid": "Player-829-03DAABDF"
+  },
+  "newIndependentProcessAndCON": true,
+  "core": {
+    "state": "passed",
+    "steps": 13,
+    "elapsedMs": 49096,
+    "session": "CON-f7cfd8cf8cf44e02c07eac6af8febd15",
+    "initialConnectEvidenceReused": true,
+    "initialActivationTransientErrorPreserved": true,
+    "activationRecoveredWithoutInputReplay": true,
+    "readonlyRetry": {
+      "journalSHA256": "71b11e51052558fd78b6323b26611fb48b0f05babe64b1a05a79d6286adc3aa9",
+      "unchanged": true
+    },
+    "reloadReadonlyRetry": {
+      "journalSHA256": "a3d6c402c26cdb2d88e6ae9a14a793458db252c86b5e676133a2ed079f8a6303",
+      "unchanged": true
+    },
+    "disconnectReadonlyRetry": {
+      "journalSHA256": "a1b07af30473dac2c6b4423d94b95607178c9236fc383ca64120e83bb1dbd643",
+      "unchanged": true
+    }
+  },
+  "pressure": {
+    "state": "passed",
+    "steps": 54,
+    "normalRequests": 47,
+    "elapsedMs": 306710,
+    "session": "CON-ba87711a9a9cb76c3385b18c4f3e87a3",
+    "runtimeTransitions": [
+      {
+        "request": "normal-46",
+        "from": "0000001800011812051da16869fe9d4e",
+        "to": "000000190001194cf81b28aa71e36764"
+      }
+    ],
+    "allStepsExitZero": true,
+    "readonlyDisconnect": {
+      "unchanged": true,
+      "journalSHA256": "74fe9c24d57d51269a04127dac44b56f09c29c71b4cc236a7bb661f65739183d",
+      "closed": true,
+      "inputAdded": false
+    }
+  },
+  "allConnections": [
+    {
+      "name": "original34732",
+      "session": "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+      "closed": true,
+      "processEnd": "process_exited"
+    },
+    {
+      "name": "suspended448",
+      "session": "CON-da201076541bff284bf253447c205a0f",
+      "closed": true,
+      "processEnd": "process_absent"
+    },
+    {
+      "name": "core60944",
+      "session": "CON-f7cfd8cf8cf44e02c07eac6af8febd15",
+      "closed": true,
+      "processEnd": null
+    },
+    {
+      "name": "pressure60944",
+      "session": "CON-ba87711a9a9cb76c3385b18c4f3e87a3",
+      "closed": true,
+      "processEnd": null
+    }
+  ],
+  "root": {
+    "profileRead": "passed",
+    "confirmedLibraryRead": "passed",
+    "sameBuildNewProcessCompletePublicReader": "passed",
+    "publicReaderEpochs": 8,
+    "replayMatched": 8,
+    "replayMismatched": 0,
+    "formalReuse": "not_promoted",
+    "semantics": "not_promoted",
+    "futureABI": "not_claimed",
+    "authorization": false
+  },
+  "historicalFailuresRetained": {
+    "originalHeldKeyReload": "current-candidate/",
+    "suspendedProcess": "current-final-candidate/pid448-suspended/",
+    "newProcessActivation": "initial-core/",
+    "hostRecoveryAssertion": "host-recovery-assert/"
+  },
+  "immutableAssets": {
+    "root.anchor.json": "11d48aa512fd890df85066f30b4ffd1a086d30c1b75dcab0eb59ad033d4ceb0e",
+    "root.profile.json": "1afe07213bb3979384c5939062df458ea9f26ef5d1b3e98a8cff5fa382f56406",
+    "root.binding.json": "9de453aa9033c125a542dc011853ce09fa5e5fd61386250a1f533a3e1bb8dc34",
+    "reader.mjs": "9c5019b092293d31de5830ef5883bbf91a843dac6715c6b1f7fa41f7b51cf036"
+  },
+  "immutableLibraryRecipeSHA256": "11d48aa512fd890df85066f30b4ffd1a086d30c1b75dcab0eb59ad033d4ceb0e",
+  "sourceChanges": false
+}

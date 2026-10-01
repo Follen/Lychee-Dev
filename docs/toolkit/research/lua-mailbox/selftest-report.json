@@ -1,0 +1,196 @@
+{
+  "schema": "lycheedev.mailbox.offline-validation.v1",
+  "binding": {
+    "bundleID": "retail-lua-mailbox-v1-69933",
+    "recipeID": "retail-lua-state-root-rip-v1",
+    "buildKey": "retail@12.1.0.69933",
+    "executableSHA256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+    "rootRVA": "0x79c0c18",
+    "release": "3.1.0"
+  },
+  "mode": "synthetic",
+  "liveValidation": "not_checked",
+  "state": "passed",
+  "regression": {
+    "before": "Actual Lua SlotProtocol.Describe fresh identity reproduced MAILBOX_UNAVAILABLE: record_identity",
+    "after": "Production Lua identity accepted with zero nonce/ticket and sequence zero; invalid identity nonce and zero/exhausted input sequence rejected",
+    "producerSources": [
+      {
+        "path": "addon/Bridge/CaptureWriter.lua",
+        "sha256": "a8a0f0e7e6d6c2e654e92d47a21e987bfab7a3e3d5892ff856c9d417a66a9d95"
+      },
+      {
+        "path": "addon/Bridge/MemoryProtocol.lua",
+        "sha256": "6901ecb5d03183ab28e9b122f85796ea90dd783e40764b113e43683840009ff3"
+      },
+      {
+        "path": "addon/Bridge/SlotProtocol.lua",
+        "sha256": "db149ea90b451f386f720d464d019def80e95f2e0a66c5f24e75a3391be646a7"
+      }
+    ],
+    "identityWireSHA256": "fceb78e75dc2988bdb52cdbade4e7133b3ea880c8c10acf666ffbccc3bb8b4b7",
+    "identityHeaderHex": "4c59434d454d3036000000000000000000000000000000001111111111111111111111111111111100000000000000000000000000000000010100000000000037010000816055b250000000b00521de"
+  },
+  "tests": [
+    {
+      "name": "current named public publications; no scan primitives",
+      "state": "passed",
+      "elapsedMillis": 5
+    },
+    {
+      "name": "ASLR and root/heap relocation; old bytes retained",
+      "state": "passed",
+      "elapsedMillis": 2
+    },
+    {
+      "name": "same table new publication; valid old bytes cannot win",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "real hash collision follows chain and key bytes",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "identity wrong nonce with valid checksums",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "input sequence zero with valid checksums",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "input exhausted sequence with valid checksums",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "secret value",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "secret key",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "globals secret",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong state tag",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong table tag",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "table count bound",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "TString length bound",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "old wire magic",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "CRC payload mismatch",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong input version",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong identity version",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong identity build",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong runtime publication",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "wrong release",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "short IO fails; no partial record",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "cancelled IO and driver budget errors propagate without output",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "root changed during path guard rejects",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "current value pointer changed during path guard rejects",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "key bytes and structural guards changed reject",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "collision cycle rejects without full scan",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "512 calls and 1MiB budget checked before IO",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "valid 61-node collision path exhausts guard budget at physical call 512",
+      "state": "passed",
+      "elapsedMillis": 16
+    },
+    {
+      "name": "mismatched build binding fails before reads",
+      "state": "passed",
+      "elapsedMillis": 0
+    },
+    {
+      "name": "profile every layout numeric value explicitly covered",
+      "state": "passed",
+      "elapsedMillis": 1
+    },
+    {
+      "name": "synthetic complete module manifest for actual RIP migration",
+      "state": "passed",
+      "elapsedMillis": 2
+    }
+  ]
+}

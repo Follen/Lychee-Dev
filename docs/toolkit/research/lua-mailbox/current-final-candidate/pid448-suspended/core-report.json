@@ -1,0 +1,54 @@
+{
+  "schema": "lycheedev.mailbox.acceptance.v1",
+  "startedAt": "2026-10-01T04:45:24.372Z",
+  "cli": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-candidate-current\\dev-npm-stage\\native\\windows-amd64\\lycheedev.exe",
+  "project": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid448-project",
+  "pid": 448,
+  "installation": "D:/Game/World of Warcraft/_retail_",
+  "character": "暗夜荔枝",
+  "realm": "罗宁",
+  "guid": "Player-729-06AA5F07",
+  "complete": false,
+  "steps": [
+    {
+      "name": "connect",
+      "args": [
+        "live",
+        "connect",
+        "--installation",
+        "D:/Game/World of Warcraft/_retail_",
+        "--pid",
+        "448",
+        "--character",
+        "暗夜荔枝",
+        "--realm",
+        "罗宁",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid448-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 6,
+      "elapsedMs": 120402,
+      "session": "CON-da201076541bff284bf253447c205a0f",
+      "complete": false,
+      "cleanup": "none",
+      "error": {
+        "code": "live.channel_pending",
+        "message": "live.channel_pending\nlive.channel_pending\ncontext deadline exceeded",
+        "stage": "connecting",
+        "retryable": false,
+        "resumeOperationId": "CON-da201076541bff284bf253447c205a0f"
+      }
+    }
+  ],
+  "session": "CON-da201076541bff284bf253447c205a0f",
+  "failure": {
+    "message": "connect: {\"code\":\"live.channel_pending\",\"message\":\"live.channel_pending\\nlive.channel_pending\\ncontext deadline exceeded\",\"stage\":\"connecting\",\"retryable\":false,\"resumeOperationId\":\"CON-da201076541bff284bf253447c205a0f\"} \n\n6 !== 0\n",
+    "session": "CON-da201076541bff284bf253447c205a0f"
+  },
+  "finishedAt": "2026-10-01T04:47:24.777Z"
+}

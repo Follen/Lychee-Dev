@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "command": "workspace.init",
+  "root": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research",
+  "reused": false,
+  "created": [
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\notes",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\profiles",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\scripts",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\artifacts\\ida",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\README.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\step.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\todo.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\findings.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\evidence.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\pitfalls.md",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\corrections.json"
+  ],
+  "identityAssurance": "live_executable_hash",
+  "workspace": {
+    "schema": "wowdump.workspace.v1",
+    "buildKey": "classicbeta@1.60.1.70124",
+    "product": "classicbeta",
+    "version": "1.60.1.70124",
+    "executablePath": "D:\\Game\\World of Warcraft\\_classic_beta_\\WowB.exe",
+    "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+    "preferredImageBase": "0x140000000",
+    "moduleSize": 140742656,
+    "createdAt": "2026-10-01T02:53:00.193Z",
+    "updatedAt": "2026-10-01T02:53:00.193Z"
+  }
+}

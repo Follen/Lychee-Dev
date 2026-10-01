@@ -26,7 +26,7 @@ func TestSlotSkipForeignReservationPreservesOwnerAndResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	i := Identity{Runtime: strings.Repeat("8", 32), NextSlot: 1, Slots: bridge.SlotCount, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: a.Version}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("8", 32), NextSlot: 1, Slots: bridge.SlotCount, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: a.Version}
 	b := &Native{Parent: a.Parent, Version: a.Version, Consumer: "2/2", Guard: a.Guard}
 	p := &slotCyclePeer{recoveryPeer: recoveryPeer{identity: i}, native: b}
 	d, err := New(filepath.Join(t.TempDir(), "connections", "skip.jsonl"), p, i)

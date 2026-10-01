@@ -1,0 +1,1 @@
+{"ok":false,"error":{"code":"CLI_FAILED","message":"workspace for titan@3.80.2.69874 does not exist; run \"wowdump workspace init --build titan@3.80.2.69874\""}}

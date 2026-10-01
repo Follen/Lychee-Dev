@@ -1,0 +1,12 @@
+{
+  "candidateAnchorRva": 0,
+  "candidateRootRva": 0,
+  "complete": false,
+  "diskPatternMatches": 0,
+  "diskTextBytes": 76776448,
+  "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "moduleBase": 140702979588096,
+  "moduleSize": 140742656,
+  "pid": 10376,
+  "runtimeAnchorMatches": false
+}

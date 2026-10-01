@@ -54,7 +54,7 @@ test('short lease requires observed installation or peer-call progress',()=>{
   assert.equal(dependencyChanged(b,{files:[]},before,true),false);
 });
 
-test('post-run audit keeps legacy 13-command evidence and accepts current 47-command evidence',async()=>{
+test('post-run audit rejects old 64-slot evidence and accepts current 200-slot evidence',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'lychee-slot-audit-'));
   try {
     for(const slots of [64,200]) {
@@ -62,7 +62,7 @@ test('post-run audit keeps legacy 13-command evidence and accepts current 47-com
       const parent=path.join(installation,'Interface/AddOns'),logs=path.join(project,'.lycheedev/live/connections');
       await fs.mkdir(logs,{recursive:true});
       await fs.mkdir(path.join(parent,'.lycheedev-window-owners'),{recursive:true});
-      await fs.writeFile(path.join(parent,'.lycheedev-slots.json'),JSON.stringify({files:Array.from({length:slots},()=>({}))}));
+      await fs.writeFile(path.join(parent,'.lycheedev-slots.json'),JSON.stringify({schema:slots===200?'lycheedev.slots.v3':'lycheedev.slots.v1',files:Array.from({length:slots},()=>({}))}));
       const rows=[
         {kind:'slot_intent',data:{identity:{slots},operation:{request:'wait-resume'},transaction:{envelope:{action:'prepare',nonce:'one'}}}},
         {kind:'automatic_reload_intent',data:{reload:{request:'capacity-one'}}},
@@ -72,9 +72,11 @@ test('post-run audit keeps legacy 13-command evidence and accepts current 47-com
       const report={complete:true,targets:[{name:'a',session:'CON-a',project,installation}],steps:Array.from({length:Math.floor((slots-16)/4)+1},(_,i)=>({target:'a',name:`paired-${i}`,exitCode:0}))};
       if(slots===200)report.slotCount=slots;
       const file=path.join(dir,'report.json');await fs.writeFile(file,JSON.stringify(report));
-      const result=JSON.parse(execFileSync(process.execPath,[fileURLToPath(new URL('./shared-installation-audit.mjs',import.meta.url)),file],{encoding:'utf8'}));
+      const audit=fileURLToPath(new URL('./shared-installation-audit.mjs',import.meta.url));
+      if(slots===64){assert.throws(()=>execFileSync(process.execPath,[audit,file],{encoding:'utf8',stdio:'pipe'}));continue;}
+      const result=JSON.parse(execFileSync(process.execPath,[audit,file],{encoding:'utf8'}));
       assert.equal(result.complete,true);assert.equal(result.slotCount,slots);
-      assert.equal(result.targets[0].pairedCommands,slots===200?47:13);
+      assert.equal(result.targets[0].pairedCommands,47);
     }
   } finally {await fs.rm(root,{recursive:true,force:true});}
 });

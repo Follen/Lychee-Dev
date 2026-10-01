@@ -1,0 +1,12 @@
+Usage: wowdump recipes show [options] <id>
+
+Print one stored recipe with its confirmation history
+
+Arguments:
+  id                         recipe id
+
+Options:
+  --home <dir>               recipe library root (defaults to
+                             C:\Users\follen\.wowdump)
+  --recipe-build <buildKey>  build the recipe was captured in
+  -h, --help                 display help for command

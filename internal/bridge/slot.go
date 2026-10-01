@@ -7,8 +7,7 @@ import (
 )
 
 const SlotCount = 200
-const SlotSchema = "lycheedev.slot.v2"
-const LegacySlotSchema = "lycheedev.slot.v1"
+const SlotSchema = "lycheedev.slot.v3"
 
 type SlotEnvelope struct {
 	Schema         string `json:"schema"`
@@ -52,7 +51,7 @@ func luaString(s string) string {
 // SlotPayload is generated data, never top-level user code. Decimal escapes
 // round-trip every byte under Lua 5.1, including Unicode and delimiter attacks.
 func SlotPayload(e SlotEnvelope) ([]byte, error) {
-	if (e.Schema != SlotSchema && e.Schema != LegacySlotSchema) || e.Index < 1 || e.Index > SlotCount || (e.Schema == LegacySlotSchema && (e.Index > 64 || e.StartSlot != 0)) || e.StartSlot < 0 || e.StartSlot > e.Index || len(e.Code) > 262144 || e.Fence < 1 || e.Fence > 9007199254740991 {
+	if e.Schema != SlotSchema || e.Index < 1 || e.Index > SlotCount || e.StartSlot < 0 || e.StartSlot > e.Index || len(e.Code) > 262144 || e.Fence < 1 || e.Fence > 9007199254740991 {
 		return nil, fmt.Errorf("bridge.invalid_slot_envelope")
 	}
 	for _, token := range []string{e.Runtime, e.Owner, e.Nonce, e.Ticket} {

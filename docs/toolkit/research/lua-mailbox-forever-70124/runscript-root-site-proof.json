@@ -1,0 +1,142 @@
+{
+  "schema": "forever.lua-root.code-site-proof.v1",
+  "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "sourceComplete": false,
+  "rootRVA": "0x7b780b8",
+  "siteRVA": "0x75a69d",
+  "codeBytes": 49,
+  "codeSHA256": "f04a6ad4b769b3e1dc12e72dee586d58d3c87f17097c66a60244a3da5f1de46c",
+  "codeHex": "488b1d14da4107488bcbe82447fb03488bcb4c8b38e81947fb03498bd7488bcb448b4008e81a74fb03488bcbe80247fb03",
+  "decoded": [
+    {
+      "rva": "0x75a69d",
+      "length": 7,
+      "bytes": "488b1d14da4107",
+      "text": "mov rbx,[7B780B8h]",
+      "code": 286,
+      "maskOffsets": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "memoryRva": "0x7b780b8"
+    },
+    {
+      "rva": "0x75a6a4",
+      "length": 3,
+      "bytes": "488bcb",
+      "text": "mov rcx,rbx",
+      "code": 286,
+      "maskOffsets": []
+    },
+    {
+      "rva": "0x75a6a7",
+      "length": 5,
+      "bytes": "e82447fb03",
+      "text": "call 000000000470EDD0h",
+      "code": 693,
+      "maskOffsets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "branchRva": "0x470edd0"
+    },
+    {
+      "rva": "0x75a6ac",
+      "length": 3,
+      "bytes": "488bcb",
+      "text": "mov rcx,rbx",
+      "code": 286,
+      "maskOffsets": []
+    },
+    {
+      "rva": "0x75a6af",
+      "length": 3,
+      "bytes": "4c8b38",
+      "text": "mov r15,[rax]",
+      "code": 286,
+      "maskOffsets": []
+    },
+    {
+      "rva": "0x75a6b2",
+      "length": 5,
+      "bytes": "e81947fb03",
+      "text": "call 000000000470EDD0h",
+      "code": 693,
+      "maskOffsets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "branchRva": "0x470edd0"
+    },
+    {
+      "rva": "0x75a6b7",
+      "length": 3,
+      "bytes": "498bd7",
+      "text": "mov rdx,r15",
+      "code": 286,
+      "maskOffsets": []
+    },
+    {
+      "rva": "0x75a6ba",
+      "length": 3,
+      "bytes": "488bcb",
+      "text": "mov rcx,rbx",
+      "code": 286,
+      "maskOffsets": []
+    },
+    {
+      "rva": "0x75a6bd",
+      "length": 4,
+      "bytes": "448b4008",
+      "text": "mov r8d,[rax+8]",
+      "code": 285,
+      "maskOffsets": [
+        3
+      ],
+      "fieldDisplacement": "0x8"
+    },
+    {
+      "rva": "0x75a6c1",
+      "length": 5,
+      "bytes": "e81a74fb03",
+      "text": "call 0000000004711AE0h",
+      "code": 693,
+      "maskOffsets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "branchRva": "0x4711ae0"
+    },
+    {
+      "rva": "0x75a6c6",
+      "length": 3,
+      "bytes": "488bcb",
+      "text": "mov rcx,rbx",
+      "code": 286,
+      "maskOffsets": []
+    },
+    {
+      "rva": "0x75a6c9",
+      "length": 5,
+      "bytes": "e80247fb03",
+      "text": "call 000000000470EDD0h",
+      "code": 693,
+      "maskOffsets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "branchRva": "0x470edd0"
+    }
+  ],
+  "uniquenessScope": "Only observed readable contiguous span .text-readable-181; full .text has gaps. Exact-build site guard, never general unique .text migration."
+}

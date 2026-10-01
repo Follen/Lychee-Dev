@@ -1,0 +1,21 @@
+{
+  "authoritativeUniqueRoot": false,
+  "candidates": [],
+  "coverageComplete": false,
+  "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "moduleBase": 140702979588096,
+  "moduleSize": 140742656,
+  "pid": 10376,
+  "readBytes": 23392256,
+  "readCalls": 2177,
+  "rejectedSegments": [
+    {
+      "bytes": 4096,
+      "error": "memory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=changed_region_end address=0x7ff7fadaf000 module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7fadaf000,0x7ff7fadb0000) region=[0x7ff7fadaf000,0x7ff7fadb0000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7fadaf000,0x7ff7fadb3000) size=0x4000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20}",
+      "rva": 62713856
+    }
+  ],
+  "runtimeTextEndRva": 76780540,
+  "runtimeTextStartRva": 4096,
+  "unreadableRegions": 2179
+}

@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "titan-lua-state-root-rip-v1-69874",
+    "recipeBuildKey": "titan@3.80.2.69874",
+    "recipeSha256": "b2e2409e55200fa6e596bb880f8ffb18179e9a747509605bea0d6388cd889f20",
+    "level": "read",
+    "validatedAgainst": "titan@3.80.2.69874",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\library-query-retry.json",
+      "copy": "evidence/titan@3.80.2.69874/titan-lua-state-root-rip-v1-69874-8b044e882fc0.json",
+      "sha256": "8b044e882fc0b77972fc994736f42dcc938283aa86c1261c8f914b08bc41d2d9",
+      "bytes": 19237
+    },
+    "note": "Current fixed Titan process; hashed full .text anchor RIP resolution matches production unique-template root; named root fields and complete public-reader/replay successful. Read only, no semantics/reuse.",
+    "recordedAt": "2026-10-01T06:47:54.549Z"
+  }
+}

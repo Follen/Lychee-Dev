@@ -1,0 +1,58 @@
+{
+  "runtimeEndPresent": false,
+  "pid": 34732,
+  "project": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\current-retail-project",
+  "messagesQueued": 9,
+  "lastSequence": 20,
+  "resumeSeconds": 0.1293367,
+  "connection": "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+  "closed": true,
+  "error": {
+    "code": "live.channel_pending",
+    "message": "live.channel_pending\nlive.channel_budget_exhausted",
+    "stage": "reload_input_attempted",
+    "retryable": false,
+    "resumeOperationId": "CON-2eda9cdcf05088ce5c1358e2c22ee994"
+  },
+  "newJournalSHA256": "2153C543F1CAD2538E9DDBB40BB4B80A3AB5D7C8AA1CE4F21D9CC0E5DC06DB81",
+  "runtime": "000000190001017ed9a31892c07a556f",
+  "oldJournalSHA256": "FEB0070A8EB23574A0CD1A2171EB5DAE9FB9DDB3B38F583CF93CB0AA8013D2B9",
+  "budgetExhausted": true,
+  "inputDisposition": "uncertain",
+  "creation": "134352920362860468",
+  "lastKind": "process_end_closed",
+  "reason": "Expired reload goal makes Continue stop at budgetContext before any action; continueOrRetire permits only positively witnessed runtime retirement beforehand",
+  "recordedUtc": "2026-10-01T04:41:32.5430649Z",
+  "resumeExit": 6,
+  "image": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+  "reloadPhase": "input_attempted",
+  "gameInputAllowed": false,
+  "executableSHA256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+  "currentNamedInputRuntime": "0000001a0001050d505341dec3d8119f",
+  "replacementProofEstablished": false,
+  "conclusion": "Original exact process exited. Public same-CON disconnect closed it using OS process lifetime evidence only (process_exited); status confirms closed=true, bound=false. Original uncertain queued9 input remains preserved in append-only journal; runtime replacement was not inferred from absence and no new game input was sent. Current candidate Retail core/stress on original process were not run. Exact same-path restart query is separately reported and does not select or connect a replacement.",
+  "fixedPIDExited": true,
+  "attempts": [
+    {
+      "file": "resume-existing-expired-reload.json",
+      "exit": 6,
+      "seconds": 0.1293367,
+      "currentNamedInputRuntime": "0000001a0001050d505341dec3d8119f"
+    },
+    {
+      "file": "resume-existing-expired-reload-2.json",
+      "exit": 6,
+      "seconds": 0.1436168,
+      "currentNamedInputRuntime": "0000001a0001050d505341dec3d8119f"
+    },
+    {
+      "file": "resume-existing-expired-reload-3.json",
+      "exit": 5,
+      "seconds": 0.0619337,
+      "error": "A device attached to the system is not functioning."
+    }
+  ],
+  "processEnd": "process_exited",
+  "disconnectSeconds": 0.0389486,
+  "disconnectExit": 0
+}

@@ -1,0 +1,32 @@
+package main
+import("crypto/sha256";"debug/pe";"encoding/hex";"encoding/json";"fmt";"io";"os";"path/filepath")
+type Report struct {ManifestFile string `json:"manifestFile"`}
+type Manifest struct {Complete bool `json:"complete"`; ExecutableSha256 string `json:"executableSha256"`;Sections []struct{Name string `json:"name"`;File string `json:"file"`;Bytes uint64 `json:"bytes"`;Sha256 string `json:"sha256"`;Gaps json.RawMessage `json:"gaps"`} `json:"sections"`}
+func main(){if err:=run();err!=nil{panic(err)}}
+func run()error{
+ source:=`D:\Game\World of Warcraft\_classic_beta_\WowB.exe`
+ output:=`.tmp/mailbox-live/forever-root-research/Forever-runtime-partial.exe`
+ in,err:=os.Open(source);if err!=nil{return err};defer in.Close()
+ exe,err:=pe.NewFile(in);if err!=nil{return err};defer exe.Close()
+ out,err:=os.OpenFile(output,os.O_CREATE|os.O_EXCL|os.O_RDWR,0600);if err!=nil{return err};defer out.Close()
+ if _,err=io.Copy(out,in);err!=nil{return err}
+ provenance:=map[string]any{"sourceExecutable":source,"derivedOutput":output,"sourceSHA256":"3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f","purpose":"partial-runtime IDA research only; missing text pages zero-filled, no root authority","overlays":[]any{}}
+ overlays:=[]any{}
+ for _,reportName:=range []string{"data-dump-report.json","partial-code-dump-report.json"}{
+  reportBytes,err:=os.ReadFile(filepath.Join("docs/toolkit/research/lua-mailbox-forever-70124",reportName));if err!=nil{return err}
+  var report Report;if err=json.Unmarshal(reportBytes,&report);err!=nil{return err}
+  manifestBytes,err:=os.ReadFile(report.ManifestFile);if err!=nil{return err}
+  var manifest Manifest;if err=json.Unmarshal(manifestBytes,&manifest);err!=nil{return err}
+  if manifest.ExecutableSha256!=provenance["sourceSHA256"]{return fmt.Errorf("manifest source mismatch")}
+  for _,s:=range manifest.Sections{
+   section:=exe.Section(s.Name);if section==nil{return fmt.Errorf("missing %s",s.Name)}
+   data,err:=os.ReadFile(s.File);if err!=nil{return err};sum:=sha256.Sum256(data)
+   if uint64(len(data))!=s.Bytes||hex.EncodeToString(sum[:])!=s.Sha256||uint64(len(data))>uint64(section.Size){return fmt.Errorf("section mismatch %s",s.Name)}
+   if _,err=out.WriteAt(data,int64(section.Offset));err!=nil{return err}
+   overlays=append(overlays,map[string]any{"manifest":report.ManifestFile,"section":s.Name,"rva":section.VirtualAddress,"diskRawOffset":section.Offset,"bytes":len(data),"complete":manifest.Complete,"gaps":s.Gaps,"sha256":s.Sha256})
+  }
+ }
+ if _,err=out.Seek(0,0);err!=nil{return err};hash:=sha256.New();if _,err=io.Copy(hash,out);err!=nil{return err};provenance["derivedSHA256"]=hex.EncodeToString(hash.Sum(nil));provenance["overlays"]=overlays
+ evidence,err:=json.MarshalIndent(provenance,"","  ");if err!=nil{return err}
+ return os.WriteFile("docs/toolkit/research/lua-mailbox-forever-70124/runtime-overlay-provenance.json",evidence,0600)
+}

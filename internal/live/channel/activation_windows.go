@@ -87,7 +87,7 @@ func (p *Project) activateTarget(ctx context.Context, target live.ClientWindow, 
 	hash := sha256.Sum256([]byte(resource + "/" + id))
 	owner := journal.WindowOwner{Schema: "lycheedev.window-owner.v1", WorkspaceID: p.workspaceID(), Resource: resource, OperationID: id, IntentSHA256: fmt.Sprintf("%x", hash)}
 	meta := projectTarget{Schema: "lycheedev.channel-target.v1", Target: target, Owner: owner}
-	a := activation{Schema: "lycheedev.channel-activation.v2", Request: key, Selection: request, Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: key, Selection: request, Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
 	err = journal.BeginConnectionWindow(ctx, parent, owner, func() error {
 		if err := writeProjectJSON(ctx, p.path("connections", id+".target.json"), meta); err != nil {
 			return err
@@ -118,7 +118,7 @@ func (p *Project) activationStatus(id string) (ProjectResult, error) {
 }
 
 func (a activation) validate() error {
-	if a.Schema != "lycheedev.channel-activation.v1" && a.Schema != "lycheedev.channel-activation.v2" || ValidateRequest(a.Request) != nil || a.InputStep < 0 || a.InputStep > 6 || a.Schema == "lycheedev.channel-activation.v2" && a.Budget == nil || a.Budget.validate() != nil {
+	if a.Schema != "lycheedev.channel-activation.v3" || ValidateRequest(a.Request) != nil || a.InputStep < 0 || a.InputStep > 6 || a.Budget == nil || a.Budget.validate() != nil {
 		return errors.New("live.channel_activation_invalid")
 	}
 	if a.Outcome != nil && a.Outcome.validate() != nil {
@@ -158,14 +158,8 @@ func (p *Project) observeActivationBudget(ctx context.Context, id string, a *act
 	if err := a.validate(); err != nil {
 		return 0, err
 	}
-	changed := a.Schema != "lycheedev.channel-activation.v2"
-	if a.Budget == nil {
-		a.Budget = NewDurableBudget(now, DefaultRecoveryBudget, true)
-		changed = true
-	}
-	a.Schema = "lycheedev.channel-activation.v2"
 	remaining, observed, budgetErr := a.Budget.Observe(now)
-	if changed || observed {
+	if observed {
 		if err := writeProjectJSON(ctx, p.activationPath(id), a); err != nil {
 			return 0, err
 		}
@@ -260,7 +254,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if a.Phase == "runtime_selected" {
 		return r, ErrJournalMissing
 	}
-	n, err := p.native(meta.Target, cache)
+	n, err := p.native(ctx, meta.Target, cache)
 	if err != nil {
 		return r, err
 	}

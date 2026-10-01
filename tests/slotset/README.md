@@ -1,7 +1,7 @@
 # Bounded shared-slot admission prototype
 
 This package contains **test-only Go and Lua prototypes**, not a shipping protocol or a CLI feature.
-The Lua adapter follows the current v2 single-envelope engine and transport metadata.
+The Lua adapter follows the current v3 single-envelope engine and transport metadata.
 The collection schema and frozen 64-slot Go model remain historical experiments;
 neither is the adopted 200-slot routing protocol.
 Run `go test ./tests/slotset -count=1 -v`. No game input, installed addon files,

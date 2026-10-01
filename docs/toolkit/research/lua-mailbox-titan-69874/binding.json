@@ -1,0 +1,18 @@
+{
+  "schema": "lycheedev.mailbox.research-binding.v1",
+  "bundleID": "titan-lua-mailbox-v1-69874",
+  "recipeID": "titan-lua-state-root-rip-v1-69874",
+  "productionRecipeID": "retail-lua-state-root-rip-v1",
+  "buildKey": "titan@3.80.2.69874",
+  "executableSHA256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+  "module": "WowClassic.exe",
+  "rootRVA": "0x6daca78",
+  "anchorRVA": "0x639be4",
+  "release": "3.1.0",
+  "process": {
+    "pid": 43756,
+    "creation": "134353096910506547"
+  },
+  "scope": "current-process read; no semantics/restart/future ABI promotion",
+  "readerProbeAuthorization": false
+}

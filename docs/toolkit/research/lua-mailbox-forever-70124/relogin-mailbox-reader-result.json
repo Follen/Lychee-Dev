@@ -1,0 +1,68 @@
+{
+  "command": "memory.exec",
+  "ok": true,
+  "script": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\scripts\\relogin-mailbox-reader.mjs",
+  "driver": "live",
+  "pid": 10376,
+  "emitted": [
+    {
+      "schema": "lycheedev.mailbox.probe.v1",
+      "state": "observed",
+      "binding": {
+        "bundleID": "forever-lua-mailbox-research-candidate-70124",
+        "recipeID": "forever-runscript-state-hypothesis-70124",
+        "buildKey": "classicbeta@1.60.1.70124",
+        "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+        "rootRVA": "0x7b780b8",
+        "release": "3.1.0",
+        "executableHashCheck": "external_workspace_required"
+      },
+      "identity": {
+        "build": "1.60.1.70124",
+        "character": "Aotu",
+        "fence": 0,
+        "guid": "Player-4618-01188FA2",
+        "inputState": "lycheedev.input.hybrid.v1",
+        "inventory": 200,
+        "nextSlot": 1,
+        "owner": "",
+        "product": "forever",
+        "realm": "Aotu",
+        "release": "3.1.0",
+        "runtime": "000000120000f466d3eaf98b739909ad",
+        "schema": "lycheedev.slot.identity.v2",
+        "slots": 200
+      },
+      "input": {
+        "build": "1.60.1.70124",
+        "character": "Aotu",
+        "fence": 0,
+        "guid": "Player-4618-01188FA2",
+        "inputBlocked": false,
+        "nextSlot": 1,
+        "owner": "",
+        "realm": "Aotu",
+        "reason": "",
+        "runtime": "000000120000f466d3eaf98b739909ad",
+        "sampleMillis": 63313535,
+        "schema": "lycheedev.input.v2"
+      },
+      "identitySequence": 0,
+      "inputSequence": 742,
+      "authorization": false,
+      "reads": 135,
+      "bytes": 3148
+    }
+  ],
+  "emittedTruncated": false,
+  "summary": {
+    "reads": 135,
+    "bytes": 3148,
+    "emits": 1,
+    "indeterminate": 0,
+    "elapsedMs": 7,
+    "emitted": 1,
+    "logs": []
+  },
+  "out": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-acceptance\\relogin-round\\mailbox-reader.jsonl"
+}

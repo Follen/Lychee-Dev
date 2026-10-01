@@ -2,7 +2,6 @@ package channel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -15,10 +14,9 @@ import (
 func TestInputPostLookupExpiryIsNarrow(t *testing.T) {
 	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 1, GUID: "g", Build: "b"}
 	blocked := false
-	s := InputObservation{Schema: "lycheedev.input.v1", Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 1, GUID: e.GUID, Build: e.Build, SampleMillis: 1000, InputBlocked: &blocked}
+	s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 1, GUID: e.GUID, Build: e.Build, SampleMillis: 1000, InputBlocked: &blocked}
 	encode := func(s InputObservation) memory.Record {
-		b, _ := json.Marshal(s)
-		return memory.Record{Address: 123, Header: bridge.MemoryHeader{Kind: bridge.MemoryInputState}, Payload: b}
+		return inputTestRecord(t, s)
 	}
 	r := encode(s)
 	if _, err := inputObservation(r, e, 0, 1100); err != nil {

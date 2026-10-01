@@ -11,8 +11,8 @@ const MemoryHeaderBytes = 80
 const MemoryTrailerBytes = 40
 const MemoryMaxPayload = 512 << 10
 
-var MemoryMagic = []byte("LYCMEM05")
-var memoryTrailer = []byte("LYCEND05")
+var MemoryMagic = []byte("LYCMEM06")
+var memoryTrailer = []byte("LYCEND06")
 
 type MemoryKind byte
 

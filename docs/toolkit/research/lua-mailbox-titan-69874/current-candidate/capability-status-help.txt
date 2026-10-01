@@ -1,0 +1,8 @@
+Usage: wowdump capabilities status [options] [id]
+
+Build support matrix and live validity of linked confirmations
+
+Options:
+  --build <buildKey>  restrict to one build
+  --home <dir>        library root
+  -h, --help          display help for command

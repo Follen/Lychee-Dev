@@ -1,0 +1,75 @@
+{
+  "command": "analyze.selftest",
+  "ok": true,
+  "script": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\scripts\\relogin-mailbox-reader.mjs",
+  "driver": "fixture",
+  "pid": null,
+  "emitted": [
+    {
+      "schema": "lycheedev.mailbox.probe.v1",
+      "state": "observed",
+      "binding": {
+        "bundleID": "forever-lua-mailbox-research-candidate-70124",
+        "recipeID": "forever-runscript-state-hypothesis-70124",
+        "buildKey": "classicbeta@1.60.1.70124",
+        "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+        "rootRVA": "0x7b780b8",
+        "release": "3.1.0",
+        "executableHashCheck": "external_workspace_required"
+      },
+      "identity": {
+        "schema": "lycheedev.slot.identity.v2",
+        "runtime": "11111111111111111111111111111111",
+        "owner": "",
+        "fence": 0,
+        "nextSlot": 1,
+        "slots": 200,
+        "inventory": 0,
+        "inputState": "lycheedev.input-signal.v1",
+        "character": "Fixture",
+        "realm": "Synthetic",
+        "guid": "synthetic-guid",
+        "build": "1.60.1.70124",
+        "product": "forever",
+        "release": "3.1.0"
+      },
+      "input": {
+        "schema": "lycheedev.input.v2",
+        "runtime": "11111111111111111111111111111111",
+        "owner": "",
+        "fence": 0,
+        "nextSlot": 1,
+        "guid": "synthetic-guid",
+        "build": "1.60.1.70124",
+        "sampleMillis": 1001,
+        "inputBlocked": false,
+        "reason": ""
+      },
+      "identitySequence": 0,
+      "inputSequence": 1,
+      "authorization": false,
+      "reads": 119,
+      "bytes": 2840
+    }
+  ],
+  "emittedTruncated": false,
+  "summary": {
+    "reads": 119,
+    "bytes": 2840,
+    "emits": 1,
+    "indeterminate": 0,
+    "elapsedMs": 3,
+    "emitted": 1,
+    "logs": []
+  },
+  "checks": [
+    {
+      "name": "script completed",
+      "ok": true
+    },
+    {
+      "name": "emitted records match fixture expectation",
+      "ok": true
+    }
+  ]
+}

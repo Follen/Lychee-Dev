@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "schema": "wowdump.profile-fixture-result.v1",
+  "mode": "fixture",
+  "profileSha256": "376708bfb79e7efc6b4edef66fc9a8d134b713ece52b9ac598f4f77a4e731909",
+  "fixtureSha256": "d5019e3041677b4eb1760295a775c53d1f24e62afe4c4ba331cf743c1cc5a449",
+  "expected": {
+    "error": {
+      "code": "EXECUTABLE_MISMATCH"
+    }
+  },
+  "actual": {
+    "error": {
+      "code": "EXECUTABLE_MISMATCH"
+    }
+  },
+  "result": {
+    "error": {
+      "code": "EXECUTABLE_MISMATCH",
+      "message": "profile executable hash does not match the target build"
+    }
+  }
+}

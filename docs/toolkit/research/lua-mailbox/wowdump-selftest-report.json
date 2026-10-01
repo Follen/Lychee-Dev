@@ -1,0 +1,75 @@
+{
+  "command": "analyze.selftest",
+  "ok": true,
+  "script": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\docs\\toolkit\\research\\lua-mailbox\\reader.mjs",
+  "driver": "fixture",
+  "pid": null,
+  "emitted": [
+    {
+      "schema": "lycheedev.mailbox.probe.v1",
+      "state": "observed",
+      "binding": {
+        "bundleID": "retail-lua-mailbox-v1-69933",
+        "recipeID": "retail-lua-state-root-rip-v1",
+        "buildKey": "retail@12.1.0.69933",
+        "executableSHA256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+        "rootRVA": "0x79c0c18",
+        "release": "3.1.0",
+        "executableHashCheck": "external_workspace_required"
+      },
+      "identity": {
+        "build": "12.1.0.69933",
+        "character": "Fixture",
+        "fence": 0,
+        "guid": "synthetic-guid",
+        "inputState": "lycheedev.input-signal.v1",
+        "inventory": 0,
+        "nextSlot": 1,
+        "owner": "",
+        "product": "retail",
+        "realm": "Synthetic",
+        "release": "3.1.0",
+        "runtime": "11111111111111111111111111111111",
+        "schema": "lycheedev.slot.identity.v2",
+        "slots": 200
+      },
+      "input": {
+        "schema": "lycheedev.input.v2",
+        "runtime": "11111111111111111111111111111111",
+        "owner": "",
+        "fence": 0,
+        "nextSlot": 1,
+        "guid": "synthetic-guid",
+        "build": "12.1.0.69933",
+        "sampleMillis": 1001,
+        "inputBlocked": false,
+        "reason": ""
+      },
+      "identitySequence": 0,
+      "inputSequence": 1,
+      "authorization": false,
+      "reads": 119,
+      "bytes": 2839
+    }
+  ],
+  "emittedTruncated": false,
+  "summary": {
+    "reads": 119,
+    "bytes": 2839,
+    "emits": 1,
+    "indeterminate": 0,
+    "elapsedMs": 2,
+    "emitted": 1,
+    "logs": []
+  },
+  "checks": [
+    {
+      "name": "script completed",
+      "ok": true
+    },
+    {
+      "name": "emitted records match fixture expectation",
+      "ok": true
+    }
+  ]
+}

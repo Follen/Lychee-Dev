@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "forever-lua-state-root-runscript-rip-v1-70124",
+    "recipeBuildKey": "classicbeta@1.60.1.70124",
+    "recipeSha256": "a2edc327ae09fe490c7e354948bedb1d1bea8ae2d27070aaa563aa3371a5f9b8",
+    "level": "read",
+    "validatedAgainst": "classicbeta@1.60.1.70124",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\docs\\toolkit\\research\\lua-mailbox-forever-70124\\root-runscript-live-query.json",
+      "copy": "evidence/classicbeta@1.60.1.70124/forever-lua-state-root-runscript-rip-v1-70124-bbee580b5dd7.json",
+      "sha256": "bbee580b5dd765e18d6bca52720b1cf10af269d63ad52605af87a9cf719adb7d",
+      "bytes": 9282
+    },
+    "note": "Actual49-byte source-site raw reread plus typed thread8/globals5secret0; complete named publicMailbox matched and replayed; no input authorization/cross-process/reload claim.",
+    "recordedAt": "2026-10-01T03:36:51.280Z"
+  }
+}

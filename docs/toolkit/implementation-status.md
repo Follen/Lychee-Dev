@@ -1,5 +1,8 @@
 # Toolkit 2.0 实施状态
 
+2026-10-01 开发候选 **3.1.0** 已切换完整 Native Mailbox 协议，拒绝旧 wire 和连接身份，不再扫描私有 heap 或回退；身份、challenge、commit 与结果校验保留。正式服、Classic、Titan、Forever 的真实 Lua 根与 RVA 已分别保存 wowdump 配方。最终候选包含两种根模板、私有状态脱离公开 Snapshot、按实际请求区间验证模块映射和原始错误原因保留。完整离线 baseline 已 passed（2,888 个命名 Go 测试、94 个 Node 测试、mandatory Lua 5.1、真实 LuaLS）；环境专属/helper/manual skips 保留原记录，源码提交的 Windows CI 全通过。四服最终核心及各 47 次请求/容量换代/异常清理均完成，验收连接全部关闭。Classic 5.5.4.70032、Titan 3.80.2.69874 与 Forever 1.60.1.70124 首次全通过；正式服 12.1.0.69933 的最终核心在激活后一次读拒绝后沿原 CON 恢复，压力 54 步首次全通过。Titan 由现有跨 build 配方完整扫描 runtime .text 唯一导出 Lua 根 0x6daca78，无源码修改；完整 reader 的 8 次回放全部匹配。正式服此前外部空格脚本干扰、进程挂起及退出的原始记录保留；旧 CON 均安全关闭，未重发 uncertain 输入或迁移旧操作。未发布，npm latest 保持 2.5.1。见 [验收记录](live-mailbox-acceptance-2026-10-01.md)、[新协议合同](live-mailbox-protocol-2026-10-01.md) 与 [3.1.0 候选](release-3.1.0.md)。
+
+
 2026-09-29 当前发布候选为 **3.0.2**，包含 CASC 内容变体选择；npm `next` 更新到该版本，
 `latest` 保持 **2.5.1**。本轮以 [3.0.2 发布合同](release-3.0.2.md) 为准，
 下方 3.0.1 发布准备及其他记录保留历史范围。

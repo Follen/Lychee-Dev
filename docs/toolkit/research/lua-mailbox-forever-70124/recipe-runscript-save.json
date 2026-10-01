@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "command": "recipes.save",
+  "home": "C:\\Users\\follen\\.wowdump",
+  "stored": [
+    {
+      "id": "forever-lua-state-root-runscript-rip-v1-70124",
+      "buildKey": "classicbeta@1.60.1.70124",
+      "file": "C:\\Users\\follen\\.wowdump\\recipes\\classicbeta@1.60.1.70124\\forever-lua-state-root-runscript-rip-v1-70124.anchor.json",
+      "sha256": "a2edc327ae09fe490c7e354948bedb1d1bea8ae2d27070aaa563aa3371a5f9b8",
+      "status": "created"
+    }
+  ],
+  "failed": [],
+  "damaged": []
+}

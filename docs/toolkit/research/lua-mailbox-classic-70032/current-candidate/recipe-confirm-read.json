@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "classic-lua-state-root-rip-v1-70032",
+    "recipeBuildKey": "classic@5.5.4.70032",
+    "recipeSha256": "1b1ef234c82f88d5c547a5f411cd68f88c8961adc3acad67fa16790fbf489de4",
+    "level": "read",
+    "validatedAgainst": "classic@5.5.4.70032",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\current-classic-library-evidence.json",
+      "copy": "evidence/classic@5.5.4.70032/classic-lua-state-root-rip-v1-70032-c2810fd6479f.json",
+      "sha256": "c2810fd6479f21e120208faf1788d796e3077955f795b499c220b52c6372b318",
+      "bytes": 641478
+    },
+    "note": "Final actual-location candidate; independent root profile read and complete production public Mailbox core13/capacity54/47 requests all zero exit codes; both CON verified closed. Same process only; full-reader cross-process reuse not_checked.",
+    "recordedAt": "2026-10-01T04:34:06.811Z"
+  }
+}

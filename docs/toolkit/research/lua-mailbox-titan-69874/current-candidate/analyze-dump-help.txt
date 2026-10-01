@@ -1,0 +1,19 @@
+Usage: wowdump analyze dump [options]
+
+Write bounded PE sections of the verified target into the workspace session
+
+Options:
+  --workspace <dir>            workspace directory (defaults to the nearest
+                               Analyze/<product>/<version>)
+  --pid <pid>                  target process ID
+  --build <buildKey>           expected build key
+  --sections <names...>        sections to dump (default:
+                               [".text",".rdata",".pdata"])
+  --session <slug>             session directory slug (default: "dump")
+  --out-dir <path>             explicit output directory
+  --max-section-bytes <bytes>  per-section limit (default: "134217728")
+  --max-total-bytes <bytes>    total limit (default: "268435456")
+  --duration-ms <ms>           dump deadline (default: "30000")
+  --chunk-bytes <bytes>        native read block size (default: "65536")
+  --confirm                    confirm the bounded dump
+  -h, --help                   display help for command

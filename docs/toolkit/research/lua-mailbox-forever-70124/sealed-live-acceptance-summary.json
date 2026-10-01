@@ -1,0 +1,349 @@
+{
+  "schema": "lycheedev.forever.sealed-live-acceptance.v1",
+  "candidateSHA256": "3ebce6f071af6a35053d37639a86d511b57e23561b9e4e6f227d9e8177e229fc",
+  "pid": 10376,
+  "processCreation": "134352957565325600",
+  "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "identity": {
+    "build": "1.60.1.70124",
+    "character": "Aotu",
+    "fence": 0,
+    "guid": "Player-4618-01188FA2",
+    "inputState": "lycheedev.input.hybrid.v1",
+    "inventory": 200,
+    "nextSlot": 7,
+    "owner": "",
+    "product": "forever",
+    "realm": "Aotu",
+    "release": "3.1.0",
+    "runtime": "000000160000fc57e4ee7a80db5e8e3d",
+    "schema": "lycheedev.slot.identity.v2",
+    "slots": 200
+  },
+  "core": {
+    "complete": true,
+    "semanticChecks": 12,
+    "initialFailures": [
+      {
+        "name": "connect",
+        "args": [
+          "live",
+          "connect",
+          "--installation",
+          "D:/Game/World of Warcraft/_classic_beta_",
+          "--pid",
+          "10376",
+          "--character",
+          "Aotu",
+          "--realm",
+          "Aotu",
+          "--no-cache",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-project",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 1900,
+        "session": "CON-7e8cff11955a075d218011a77aef5d99",
+        "complete": false,
+        "cleanup": "none",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "connecting",
+          "retryable": false,
+          "resumeOperationId": "CON-7e8cff11955a075d218011a77aef5d99"
+        }
+      },
+      {
+        "name": "after-reload-no-cache",
+        "args": [
+          "live",
+          "execute",
+          "--session",
+          "CON-7e8cff11955a075d218011a77aef5d99",
+          "--request",
+          "after-reload-no-cache",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--no-cache",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-project",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 3435,
+        "session": "CON-7e8cff11955a075d218011a77aef5d99",
+        "operation": "LMO-1c7d7956d6a389a67cc667d3eaffc569",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "confirm_ready",
+          "retryable": false,
+          "resumeOperationId": "CON-7e8cff11955a075d218011a77aef5d99"
+        }
+      }
+    ],
+    "report": ".tmp/mailbox-live/forever-acceptance/sealed/core/report.json"
+  },
+  "pressure": {
+    "complete": true,
+    "uniqueNormalRequests": 47,
+    "originalFailure": {
+      "message": "normal-20:  {\"code\":\"command.failed\",\"message\":\"memory.mailbox_unavailable: short_read\",\"stage\":\"commit_ready\",\"retryable\":false,\"resumeOperationId\":\"CON-b12a1708ca09a92c5798f362a47a8631\"}\n\n5 !== 0\n",
+      "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+      "resume": "live resume CON-b12a1708ca09a92c5798f362a47a8631 --project D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed"
+    },
+    "initialFailureReport": ".tmp/mailbox-live/forever-pressure-sealed/baseline.json",
+    "resumeReport": ".tmp/mailbox-live/forever-pressure-sealed/baseline-resumed-1790826511313-51120.json",
+    "additionalFailures": [
+      {
+        "name": "normal-35",
+        "argv": [
+          "live",
+          "execute",
+          "--session",
+          "CON-b12a1708ca09a92c5798f362a47a8631",
+          "--request",
+          "normal-35",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 1196,
+        "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+        "operation": "LMO-fb341f968115f7b07246735f9c67f09f",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "prepared",
+          "retryable": false,
+          "resumeOperationId": "CON-b12a1708ca09a92c5798f362a47a8631"
+        }
+      },
+      {
+        "name": "normal-35-continuation-1",
+        "argv": [
+          "live",
+          "resume",
+          "CON-b12a1708ca09a92c5798f362a47a8631",
+          "--no-cache",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 1454,
+        "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+        "operation": "LMO-fb341f968115f7b07246735f9c67f09f",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "prepared",
+          "retryable": false,
+          "resumeOperationId": "CON-b12a1708ca09a92c5798f362a47a8631"
+        }
+      },
+      {
+        "name": "normal-39",
+        "argv": [
+          "live",
+          "execute",
+          "--session",
+          "CON-b12a1708ca09a92c5798f362a47a8631",
+          "--request",
+          "normal-39",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 3901,
+        "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+        "operation": "LMO-57ddbfadeadbe07b4ee2177657edd53c",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "confirm_ready",
+          "retryable": false,
+          "resumeOperationId": "CON-b12a1708ca09a92c5798f362a47a8631"
+        }
+      },
+      {
+        "name": "normal-45",
+        "argv": [
+          "live",
+          "execute",
+          "--session",
+          "CON-b12a1708ca09a92c5798f362a47a8631",
+          "--request",
+          "normal-45",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 2955,
+        "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+        "operation": "LMO-68b94f8bfd308adc09ffccc40dab792e",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "commit_ready",
+          "retryable": false,
+          "resumeOperationId": "CON-b12a1708ca09a92c5798f362a47a8631"
+        }
+      },
+      {
+        "name": "normal-46",
+        "argv": [
+          "live",
+          "execute",
+          "--session",
+          "CON-b12a1708ca09a92c5798f362a47a8631",
+          "--request",
+          "normal-46",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 3434,
+        "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+        "operation": "LMO-63268653cb578b7e2a7b00b482f022c0",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "reload_input_attempted",
+          "retryable": false,
+          "resumeOperationId": "CON-b12a1708ca09a92c5798f362a47a8631"
+        }
+      },
+      {
+        "name": "bugs",
+        "argv": [
+          "live",
+          "bugs",
+          "--session",
+          "CON-b12a1708ca09a92c5798f362a47a8631",
+          "--request",
+          "bugs",
+          "--count",
+          "20",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-sealed",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 6186,
+        "session": "CON-b12a1708ca09a92c5798f362a47a8631",
+        "operation": "LMO-5097697177ef2352ac57bdb4b50ce4e7",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+          "stage": "release_ready",
+          "retryable": false,
+          "resumeOperationId": "CON-b12a1708ca09a92c5798f362a47a8631"
+        }
+      }
+    ],
+    "manualRecovery": ".tmp/mailbox-live/forever-pressure-sealed/normal-20-manual-resume.json",
+    "capacityReload": "verified",
+    "historicalRetryJournal": "unchanged",
+    "compileError": "verified",
+    "cleanupError": "runtime_destroyed_verified",
+    "bugs": "verified"
+  },
+  "cleanup": {
+    "activationClosed": true,
+    "coreClosed": true,
+    "pressureClosed": true,
+    "obligation": "none"
+  },
+  "root": {
+    "anchorRva": "0x75a69d",
+    "rootRva": "0x7b780b8",
+    "moduleReadBytes": 706,
+    "moduleReadCalls": 18,
+    "headerBytes": 296,
+    "rootReadAfterReload": "passed",
+    "independentFullPublicPath": "passed",
+    "byteReplay": "passed",
+    "wholeTextUniqueness": "not_claimed",
+    "crossProcessReuse": "not_checked"
+  },
+  "shortReadCause": "not_recorded; separate bounded diagnostic pending",
+  "managedAddon": "managed",
+  "managedSlots": {
+    "state": "managed",
+    "count": 200,
+    "pending": 0
+  }
+}

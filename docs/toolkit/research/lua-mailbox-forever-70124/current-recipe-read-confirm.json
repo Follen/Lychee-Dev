@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "forever-lua-state-root-runscript-rip-v1-70124",
+    "recipeBuildKey": "classicbeta@1.60.1.70124",
+    "recipeSha256": "a2edc327ae09fe490c7e354948bedb1d1bea8ae2d27070aaa563aa3371a5f9b8",
+    "level": "read",
+    "validatedAgainst": "classicbeta@1.60.1.70124",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-acceptance\\current\\root-after-pressure-query.json",
+      "copy": "evidence/classicbeta@1.60.1.70124/forever-lua-state-root-runscript-rip-v1-70124-d159b06c05cf.json",
+      "sha256": "d159b06c05cfc994c8422a3d49092cb67d44df772abb1921e0a49f48a0b74b8f",
+      "bytes": 16086
+    },
+    "note": "Current candidate actual-address guarded reads; post capacity/cleanup reload typed root, same PID only",
+    "recordedAt": "2026-10-01T04:29:18.090Z"
+  }
+}

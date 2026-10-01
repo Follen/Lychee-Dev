@@ -1,0 +1,37 @@
+{
+  "schema": "wowdump.anchor.v1",
+  "id": "forever-lua-state-root-runscript-rip-v1-70124",
+  "source": {
+    "buildKey": "classicbeta@1.60.1.70124",
+    "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+    "section": ".text-readable-181",
+    "sectionSha256": "1902225f13254f143265f3257bc1656f7a779627bc25fb3371c25c98fb80b325",
+    "rva": "0x75a69d",
+    "value": "0x7b780b8"
+  },
+  "pattern": "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ?? 48 8b cb 4c 8b 38 e8 ?? ?? ?? ?? 49 8b d7 48 8b cb 44 8b 40 08 e8 ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ??",
+  "instructionCodes": [
+    286,
+    286,
+    693,
+    286,
+    286,
+    693,
+    286,
+    286,
+    285,
+    693,
+    286,
+    693
+  ],
+  "resolve": {
+    "kind": "rip",
+    "instruction": 0
+  },
+  "evidence": "Exact Forever executable SHA256 3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f: actual RunScript string xref/call chain -> 49-byte state-load site RVA0x75a69d -> Lua state slot0x7b780b8, Lua GetTop stride24 and LUA_GLOBALSINDEX(-10002) resolution+0x90 independently decoded. Source section is an explicitly bounded readable span; complete parent text coverage is false with1849gaps and global uniqueness is not asserted. Raw49 bytes independently reread unchanged; threadtag8/globalsTValue table5 secret0 and complete named publicMailbox identity/input path with before/after locating guards were independently verified and replayed. Same-process reload, independent API actor and cross-process reuse remain unverified at registration.",
+  "validation": {
+    "read": "not_checked",
+    "semantics": "not_checked",
+    "reuse": "not_checked"
+  }
+}

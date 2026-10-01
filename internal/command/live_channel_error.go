@@ -48,7 +48,7 @@ func classifyChannelError(err error) error {
 		exit = 2
 	case "live.channel_execution_unknown", "live.channel_recovery_attempt_limit":
 		exit = 5
-	case "live.channel_activation_required", "live.channel_closed", "live.channel_not_idle", "live.channel_clean_current_addon_required", "live.channel_slot_installation_required", "live.channel_ownership_changed", "live.channel_reload_required", "live.channel_client_restart_required", "live.channel_input_capability_unsupported":
+	case "live.channel_activation_required", "live.channel_closed", "live.channel_not_idle", "live.channel_clean_current_addon_required", "live.channel_slot_installation_required", "live.channel_ownership_changed", "live.channel_reload_required", "live.channel_client_restart_required", "live.channel_input_capability_unsupported", "live.channel_mailbox_build_unsupported", "live.channel_mailbox_required", "live.channel_mailbox_unavailable":
 		exit = 3
 	}
 	return &channelCommandError{cause: err, code: code, exit: exit}

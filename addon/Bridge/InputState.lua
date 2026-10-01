@@ -2,7 +2,7 @@ local _, ns = ...
 
 -- Owner-approved native transport telemetry. One sampler/display, no input
 -- hooks or focus mutation. Explicit bridge-off removes all recurring work.
-local frame, provider, record, last, sequence, lastTick
+local frame, provider, record, last, sequence, lastTick,mailbox
 local loading,leaving,refreshing,heartbeat
 local zero=string.rep("0",32)
 local function nativeBindingsReady()
@@ -15,7 +15,7 @@ local function nativeBindingsReady()
     end
     return profile.wake=="ALT-CTRL-F12" and profile.submit=="ALT-CTRL-SHIFT-F12" and profile.close=="ALT-CTRL-["
 end
-local function hide()record=nil;ns.InputSignal.Hide() end
+local function hide()record=nil;if mailbox then rawset(mailbox,"input",nil) end;ns.InputSignal.Hide() end
 local function sample()
     if loading or leaving or ns.Compat.InWorld()~=true then hide();return end
     local identity=provider and provider()
@@ -29,10 +29,13 @@ local function sample()
     if ready~=true and (type(reason)~="string" or reason=="") then reason="input_observation_unavailable" end
     sequence=sequence+1
     if sequence>=4294967295 then ns.InputState.Stop();return end
-    identity.schema="lycheedev.input.v1"
+    identity.schema="lycheedev.input.v2"
     identity.sampleMillis=math.floor(tick*1000)
     identity.inputBlocked=ready~=true
     identity.reason=reason or ""
+    -- Always obtain a detached private snapshot; public mailbox values never
+    -- drive the attempt sequence or any input/receipt authorization.
+    if ns.SlotRuntime and ns.SlotRuntime.InputDiagnostic then identity.inputAttempt=ns.SlotRuntime.InputDiagnostic() end
     local text=ns.CaptureWriter.Encode(identity,2048)
     if not text then hide();return end
     record=ns.MemoryProtocol.Encode(identity.runtime,identity.runtime,zero,5,1,sequence,text)
@@ -41,6 +44,7 @@ local function sample()
     local nextHeartbeat=not heartbeat
     if not ns.InputSignal.Render(state,nextHeartbeat) then hide();return end
     heartbeat=nextHeartbeat
+    if mailbox then rawset(mailbox,"input",record) end
 end
 local function refresh()
     if refreshing or not provider or not frame or not frame:GetScript("OnUpdate") then return end
@@ -50,7 +54,12 @@ local function refresh()
     if not ok then hide() end
 end
 ns.InputState={
-    Start=function(observe)
+    Start=function(observe,publication)
+        if mailbox~=publication then
+            if mailbox then rawset(mailbox,"input",nil) end
+            mailbox=publication
+            if mailbox then rawset(mailbox,"input",nil) end
+        end
         provider=observe
         if frame and frame:GetScript("OnUpdate") then return true end
         sequence,last=sequence or 0,0
@@ -86,6 +95,7 @@ ns.InputState={
         end
         provider,record,lastTick=nil,nil,nil
         hide()
+        mailbox=nil
         if frame then frame:Hide() end
         if ns.StartupBeacon then ns.StartupBeacon.Stop() end
     end,

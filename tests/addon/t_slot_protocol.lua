@@ -6,8 +6,11 @@ end
 local executions,released=0,false
 local runtime=string.rep("1",32)
 local actor={character="测试角色",realm="测试服",guid="Player-1-1"}
+local mailbox
 local function create(run)
+    mailbox={schema="lycheedev.mailbox.v1",runtime=run,release="test"}
     return ns.SlotProtocol.Create({runtime=run,build="1.2.3.4",product=client,release="test",
+        mailbox=mailbox,
         actor=function()return actor end,encode=ns.CaptureWriter.Encode,
         compile=function(code)return loadstring(code)end,
         releaseInput=function()released=true end,
@@ -17,7 +20,7 @@ local engine=create(runtime)
 local serial=0
 local function message(action,ticket)
     serial=serial+1
-    return {schema="lycheedev.slot.v2",index=engine.NextSlot(),runtime=runtime,
+    return {schema="lycheedev.slot.v3",index=engine.NextSlot(),runtime=runtime,
         owner=string.rep("2",32),fence=1,nonce=string.format("%032x",serial),ticket=ticket or string.rep("3",32),
         action=action,guid=actor.guid,build="1.2.3.4"}
 end
@@ -36,7 +39,7 @@ assert(send(commit).state=="accepted");assert(executions==1)
 local proof=send(message("confirm"));assert(proof.state=="reported" and proof.reportBytes>0)
 local snapshot=engine.Snapshot();assert(snapshot.operations[prepare.ticket].body)
 local release=message("release");release.reportBytes=proof.reportBytes;release.reportChecksum=proof.reportChecksum
-assert(send(release).state=="released");assert(snapshot.operations[prepare.ticket].body==nil)
+assert(send(release).state=="released");assert(engine.Snapshot().operations[prepare.ticket].body==nil and snapshot.operations[prepare.ticket].body)
 local repeated=message("prepare");repeated.code=prepare.code;repeated.budget=10;repeated.codeBytes=9;repeated.codeChecksum=0
 assert(send(repeated).reason=="slot_operation_exists");assert(executions==1)
 assert(engine.Receive(commit.index,commit)==nil,"consumed slot reused")
@@ -75,6 +78,7 @@ for i=1,46 do
     local report=send(message("confirm",ticket));assert(report.state=="reported")
     local release=message("release",ticket);release.reportBytes=report.reportBytes;release.reportChecksum=report.reportChecksum
     assert(send(release).state=="released")
+    assert(mailbox.bodies[ticket]==nil)
 end
 assert(engine.NextSlot()==186)
 assert(send(message("prepare",string.rep("e",32))).reason=="slot_capacity")
@@ -82,3 +86,8 @@ assert(send(message("prepare",string.rep("e",32))).reason=="slot_capacity")
 local malformed=message("bind");malformed.runtime=string.rep("a",32);malformed.fence=0
 local record,reason,skip=engine.Receive(malformed.index,malformed)
 assert(not record and reason=="slot_envelope_invalid" and not skip)
+local retained=0
+for nonce,record in pairs(mailbox.receipts)do
+    retained=retained+1;assert(engine.Snapshot().receipts[nonce]==record)
+end
+assert(retained<=200 and next(mailbox.bodies)==nil,"mailbox exceeded existing retention")

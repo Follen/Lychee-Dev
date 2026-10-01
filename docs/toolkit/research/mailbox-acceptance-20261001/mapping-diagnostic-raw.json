@@ -1,0 +1,247 @@
+{
+  "budget": {
+    "contextSeconds": 45,
+    "lookups": 24,
+    "perLookupBytes": 1048576,
+    "perLookupCalls": 512,
+    "readCalls": 13000,
+    "requestedBytes": 26214400
+  },
+  "calls": 2182,
+  "creation": "134352957565325600",
+  "failures": [
+    {
+      "Lookup": 9,
+      "Surface": "module",
+      "address": "140702987298461",
+      "Size": 49,
+      "N": 0,
+      "Cause": "memory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=changed_region_end address=0x7ff7f793a69d module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7f7935000,0x7ff7f794b000) region=[0x7ff7f7935000,0x7ff7f794b000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7f7935000,0x7ff7f7944000) size=0xf000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20}"
+    },
+    {
+      "Lookup": 10,
+      "Surface": "module",
+      "address": "140702987298461",
+      "Size": 49,
+      "N": 0,
+      "Cause": "memory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=changed_region_end address=0x7ff7f793a69d module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7f7935000,0x7ff7f794b000) region=[0x7ff7f7935000,0x7ff7f794b000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7f7935000,0x7ff7f7944000) size=0xf000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20}"
+    },
+    {
+      "Lookup": 11,
+      "Surface": "module",
+      "address": "140702987298461",
+      "Size": 49,
+      "N": 0,
+      "Cause": "memory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=changed_region_end address=0x7ff7f793a69d module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7f7935000,0x7ff7f794b000) region=[0x7ff7f7935000,0x7ff7f794b000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7f7935000,0x7ff7f7944000) size=0xf000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20}"
+    },
+    {
+      "Lookup": 12,
+      "Surface": "module",
+      "address": "140702987298461",
+      "Size": 49,
+      "N": 0,
+      "Cause": "memory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=changed_region_end address=0x7ff7f793a69d module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7f7935000,0x7ff7f794b000) region=[0x7ff7f7935000,0x7ff7f794b000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7f7935000,0x7ff7f7944000) size=0xf000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20}"
+    }
+  ],
+  "gameInput": false,
+  "pid": 10376,
+  "regionsCalls": 0,
+  "requestedBytes": 50092,
+  "samples": [
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 0
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 1
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 0,
+      "Error": "memory.mailbox_unavailable: short_read",
+      "Calls": 1,
+      "Bytes": 49,
+      "Millis": 0
+    },
+    {
+      "Kind": "input",
+      "Matches": 0,
+      "Error": "memory.mailbox_unavailable: short_read",
+      "Calls": 1,
+      "Bytes": 49,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 0,
+      "Error": "memory.mailbox_unavailable: short_read",
+      "Calls": 1,
+      "Bytes": 49,
+      "Millis": 0
+    },
+    {
+      "Kind": "input",
+      "Matches": 0,
+      "Error": "memory.mailbox_unavailable: short_read",
+      "Calls": 1,
+      "Bytes": 49,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 1
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    },
+    {
+      "Kind": "identity",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2405,
+      "Millis": 1
+    },
+    {
+      "Kind": "input",
+      "Matches": 1,
+      "Error": "",
+      "Calls": 108,
+      "Bytes": 2514,
+      "Millis": 0
+    }
+  ],
+  "seconds": 33.0816758,
+  "sourceUnchanged": true,
+  "terminal": ""
+}

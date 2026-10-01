@@ -1,0 +1,16 @@
+[
+  {
+    "kind": 1,
+    "matches": 1,
+    "path": "lua_mailbox",
+    "complete": true,
+    "bytes": 2431
+  },
+  {
+    "kind": 5,
+    "matches": 1,
+    "path": "lua_mailbox",
+    "complete": true,
+    "bytes": 2370
+  }
+]

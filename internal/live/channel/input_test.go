@@ -1,9 +1,11 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,16 +14,94 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
+func inputTestRecord(t *testing.T, s InputObservation) memory.Record {
+	t.Helper()
+	runtime, err := tokenBytes(s.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := bridge.EncodeMemoryRecord(bridge.MemoryHeader{Kind: bridge.MemoryInputState, State: 1, Sequence: 1, Runtime: runtime, Nonce: runtime}, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, payload, err := bridge.DecodeMemoryRecord(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return memory.Record{Address: 123, Header: header, Payload: payload}
+}
+
+func TestInputObservationRejectsMalformedPublicationHeader(t *testing.T) {
+	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 3, GUID: "g", Build: "b"}
+	blocked := false
+	s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: 1200, InputBlocked: &blocked}
+	base := inputTestRecord(t, s)
+	other, _ := tokenBytes(strings.Repeat("2", 32))
+	for _, tc := range []struct {
+		name string
+		edit func(*bridge.MemoryHeader)
+	}{
+		{"other-kind", func(h *bridge.MemoryHeader) { h.Kind = bridge.MemoryReceipt }},
+		{"other-state", func(h *bridge.MemoryHeader) { h.State = 2 }},
+		{"zero-sequence", func(h *bridge.MemoryHeader) { h.Sequence = 0 }},
+		{"exhausted-sequence", func(h *bridge.MemoryHeader) { h.Sequence = ^uint32(0) }},
+		{"nonzero-ticket", func(h *bridge.MemoryHeader) { h.Ticket = other }},
+		{"other-runtime", func(h *bridge.MemoryHeader) { h.Runtime = other }},
+		{"other-nonce", func(h *bridge.MemoryHeader) { h.Nonce = other }},
+		{"zero-nonce", func(h *bridge.MemoryHeader) { h.Nonce = [16]byte{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			header := base.Header
+			tc.edit(&header)
+			// Encode/decode establishes checksum-valid malformed publication,
+			// rather than relying on corrupt bytes rejected by the wire decoder.
+			wire, err := bridge.EncodeMemoryRecord(header, base.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, payload, err := bridge.DecodeMemoryRecord(wire)
+			if err != nil {
+				t.Fatal("malformed qualification should still be legal wire", err)
+			}
+			if _, err := inputObservation(memory.Record{Header: header, Payload: payload}, e, 1000, 1250); err == nil {
+				t.Fatal("checksum-valid malformed INPUT authorized")
+			}
+		})
+	}
+	for _, length := range []int{2048, 2049} {
+		t.Run(fmt.Sprintf("payload-%d", length), func(t *testing.T) {
+			payload := append(bytes.Clone(base.Payload), bytes.Repeat([]byte{' '}, length-len(base.Payload))...)
+			wire, err := bridge.EncodeMemoryRecord(base.Header, payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, payload, err := bridge.DecodeMemoryRecord(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = inputObservation(memory.Record{Header: header, Payload: payload}, e, 1000, 1250)
+			if (err == nil) != (length == 2048) {
+				t.Fatalf("payload length=%d error=%v", length, err)
+			}
+		})
+	}
+}
+
 func TestInputObservationRejectsStaleAndOtherTargets(t *testing.T) {
 	blocked := false
 	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 3, GUID: "g", Build: "b"}
-	base := InputObservation{Schema: "lycheedev.input.v1", Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 3, GUID: "g", Build: "b", SampleMillis: 1200, InputBlocked: &blocked}
+	base := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 3, GUID: "g", Build: "b", SampleMillis: 1200, InputBlocked: &blocked}
 	for _, tc := range []struct {
 		name  string
 		edit  func(*InputObservation)
 		valid bool
 	}{
 		{"fresh", func(*InputObservation) {}, true},
+		{"old-schema", func(s *InputObservation) { s.Schema = "lycheedev.input.v1" }, false},
 		{"before-input", func(s *InputObservation) { s.SampleMillis = 1000 }, false},
 		{"clock-ahead", func(s *InputObservation) { s.SampleMillis = 99999 }, false},
 		{"old-runtime", func(s *InputObservation) { s.Runtime = strings.Repeat("2", 32) }, false},
@@ -33,8 +113,7 @@ func TestInputObservationRejectsStaleAndOtherTargets(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := base
 			tc.edit(&s)
-			b, _ := json.Marshal(s)
-			_, err := inputObservation(memory.Record{Header: bridge.MemoryHeader{Kind: bridge.MemoryInputState}, Payload: b}, e, 1000, 1250)
+			_, err := inputObservation(inputTestRecord(t, s), e, 1000, 1250)
 			if (err == nil) != tc.valid {
 				t.Fatal(err)
 			}
@@ -65,7 +144,7 @@ func (b *focusBackend) Input(ctx context.Context, a InputAction) (InputOutcome, 
 }
 func TestEscRecoveryPersistsBeforeWakeAndResumesOriginalSlot(t *testing.T) {
 	b := &focusBackend{blocked: true}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +189,7 @@ func (b *zeroInputBackend) Input(ctx context.Context, a InputAction) (InputOutco
 }
 func TestProvenZeroInputResumesSameSlot(t *testing.T) {
 	b := &zeroInputBackend{zero: true}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +221,7 @@ func TestProvenZeroInputResumesSameSlot(t *testing.T) {
 
 func TestMissingInputOutcomeNeverAuthorizesResend(t *testing.T) {
 	b := &pendingBackend{}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)

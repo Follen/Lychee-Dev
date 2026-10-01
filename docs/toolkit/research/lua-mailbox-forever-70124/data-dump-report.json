@@ -1,0 +1,26 @@
+{
+  "command": "analyze.dump",
+  "sessionDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-data-9d3e2936",
+  "ok": true,
+  "kind": "dump",
+  "manifestFile": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-data-9d3e2936\\dump\\manifest.json",
+  "outputDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-data-9d3e2936\\dump",
+  "complete": true,
+  "totalBytes": 19057316,
+  "sections": [
+    {
+      "name": ".rdata",
+      "bytes": 15404372,
+      "readSize": 15404372,
+      "sha256": "8367b94600ab8622b804e058bcd670ecbeae0dbe57f936ff519c27e7857a64b2",
+      "shortRead": false
+    },
+    {
+      "name": ".pdata",
+      "bytes": 3652944,
+      "readSize": 3652944,
+      "sha256": "e60e3f51d363d48936820197ec777b7398ba9b53c5ab859498a467059d1554ce",
+      "shortRead": false
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "schema": "lycheedev.classic.sealed-live-acceptance.v1",
+  "candidateSHA256": "3ebce6f071af6a35053d37639a86d511b57e23561b9e4e6f227d9e8177e229fc",
+  "target": {
+    "pid": 50368,
+    "build": "5.5.4.70032",
+    "executableSHA256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+    "guid": "Player-4778-073BD91C"
+  },
+  "initialActivation": {
+    "passed": false,
+    "code": "live.channel_observation_budget",
+    "stage": "activation_waiting_runtime",
+    "originalInputRetained": true,
+    "recoveredByOriginalResume": true
+  },
+  "core": {
+    "complete": true,
+    "steps": 12,
+    "session": "CON-518d3178a70bb522b18ad2320efe24b5",
+    "closed": true,
+    "cleanup": "complete",
+    "inputAttempt": {
+      "schema": "lycheedev.input-attempt.v1",
+      "runtime": "000000190000faad4cb9f021917fc287",
+      "attemptSeq": 4,
+      "slot": 4,
+      "stage": "received",
+      "reason": "",
+      "received": true,
+      "sampleMillis": 64188662
+    }
+  },
+  "capacity": {
+    "complete": true,
+    "steps": 54,
+    "normalRequests": 47,
+    "session": "CON-d8246f26caff3366535543f2e0a05b08",
+    "closed": true,
+    "cleanup": "complete",
+    "readonlyDisconnect": {
+      "beforeSHA256": "5C692953D894FDF381BE0DDE78D4CC462AEC43CBA5A35830A40FE449259DCFC6",
+      "afterSHA256": "5C692953D894FDF381BE0DDE78D4CC462AEC43CBA5A35830A40FE449259DCFC6",
+      "unchanged": true
+    }
+  },
+  "fixedAssets": [
+    [
+      "root.anchor.json",
+      "1b1ef234c82f88d5c547a5f411cd68f88c8961adc3acad67fa16790fbf489de4"
+    ],
+    [
+      "root.profile.json",
+      "3c7cf9920b59e62c8ab62ab296c47df50a73c8666010d38d2712650e0269d6db"
+    ],
+    [
+      "root.binding.json",
+      "20ebfdbef51eda52cfcafdaf9ea26c7ec64ad6eb9182f43c702864ec8638a4c5"
+    ]
+  ]
+}

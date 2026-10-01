@@ -1,0 +1,27 @@
+{
+  "schema": "lycheedev.mailbox.target-blocker.v1",
+  "recordedUtc": "2026-10-01T04:52:50.4393072Z",
+  "pid": 448,
+  "creation": "134353034288690796",
+  "image": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+  "executableSHA256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+  "cliSHA256": "9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8",
+  "session": "CON-da201076541bff284bf253447c205a0f",
+  "core": "blocked",
+  "capacity47": "not_run",
+  "physicalInputCount": 0,
+  "inputAttempt": null,
+  "facts": [
+    "connect120.402s waiting for optical edge; no input attempted",
+    "INPUT8 observations in2s had same sequence51 andsampleMillis67819300",
+    "WGC initialized successfully;4s bounded capture0frames",
+    "IsIconic=false;visible=true;DWMcloaked=0;foreground=false",
+    "All108OSthreads Suspended;1sCPUdelta0ms;Respondingfalse",
+    "StartupBeacon.Stop does not stop InputState sampler",
+    "Public disconnect retained original CON Closing;short_read plusmemory.ineligible_read"
+  ],
+  "cause": "Entire process is suspended. Origin of suspension unknown; no cross-process selection or inference.",
+  "requiredNext": "Resume exact original process through its owner, then inspect original CON cleanup. Do not reissue bind/extend durable connect deadline.",
+  "gameInput": false,
+  "sourceEdited": false
+}

@@ -1,5 +1,13 @@
 # Live investigation
 
+Native 3.1.0 requires matching wire06 / slot.v3 / identity.v2 / input.v2 and a clean 200-slot installation. It reads the public Lua Mailbox by names through a build-bound root; old native wire and connection state are rejected. The researched source is Retail 12.1.0.69933. Other executable hashes derive a candidate root from a unique runtime-code recipe and must pass the complete current-publication checks; ambiguity, gaps or layout changes fail closed, with no copied RVA or heap scan fallback. Identity, challenge, owner/fence, fresh input and exact HEAD/BODY validation remain mandatory.
+
+An optional `inputAttempt` / journal `afterDiagnostic` records a bounded private
+callback counter and stage/reason. It explains observed input processing; it is
+not a receipt, execution proof or permission to resend. No new counter does not
+prove that a key was never delivered. Retain the original CON/request and use
+the CLI recovery path when a submitted exchange has no qualified receipt.
+
 Use live work to resolve a question about the running client that existing source,
 data or retained reports cannot answer. Keep those evidence types distinct: source
 explains possible behavior, data supplies versioned records, and a live observation
@@ -41,8 +49,7 @@ lycheedev live connect --project <project-directory> --installation <client> --p
 Retain `result.session` (CON), identity, project and journal path. An optional
 `--snapshot` constrains the exact data build; source/data pinning is independent of
 connection storage. A fresh bind, not a cached address or an actor descriptor,
-authorizes work. `--no-cache` disables disposable address hints; invalid hints
-already fall back to a fresh scan. Read [startup](live-startup.md) when activation
+authorizes work. `--no-cache` follows the same named Mailbox path; no address hints or heap scan fallback participate. Read [startup](live-startup.md) when activation
 is pending or an installation was just updated.
 
 ## Complete an investigation

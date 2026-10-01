@@ -1,0 +1,67 @@
+func TestForeverDiskAnchorResearch(t *testing.T) {
+ if os.Getenv("LYCHEE_FOREVER_RESEARCH") != "1" { t.Skip("explicit read-only live research") }
+ ctx := context.Background()
+ p, err := Open(10376, 134352957565325600, `D:\Game\World of Warcraft\_classic_beta_\WowB.exe`)
+ if err != nil { t.Fatal(err) }; defer p.Close()
+ module, err := p.MainModule(ctx); if err != nil { t.Fatal(err) }
+ file, err := os.Open(p.Image); if err != nil { t.Fatal(err) }; defer file.Close()
+ h := sha256.New(); if _, err := io.Copy(h, file); err != nil { t.Fatal(err) }
+ if hex.EncodeToString(h.Sum(nil)) != module.ExecutableSHA256 { t.Fatal("disk changed") }
+ exe, err := pe.NewFile(file); if err != nil { t.Fatal(err) }; defer exe.Close()
+ section := exe.Section(".text"); if section == nil || section.Size > luaRootTextBudget { t.Fatal("missing/oversized text") }
+ text, err := section.Data(); if err != nil { t.Fatal(err) }
+ pattern, mask := luaRootPattern()
+ matches := 0; var anchor, root uint64; var runtimeCode []byte; var runtimeErr error
+ for i := 0; i+len(pattern) <= len(text); i++ {
+  if text[i] != pattern[0] || !luaRootMatches(text[i:i+len(pattern)], pattern, mask) { continue }
+  matches++; anchor=uint64(section.VirtualAddress)+uint64(i)
+  root, err=luaRootTarget(anchor,text[i:i+len(pattern)],module.Size,module.LuaImageLayout().proof.sections)
+  if err != nil { t.Fatal(err) }
+  runtimeCode=make([]byte,len(pattern))
+  _,runtimeErr=p.ReadModule(ctx,module,module.Base+anchor,runtimeCode)
+ }
+ result:=map[string]any{"pid":10376,"executableSHA256":module.ExecutableSHA256,"moduleBase":module.Base,"moduleSize":module.Size,"diskTextBytes":len(text),"diskPatternMatches":matches,"candidateAnchorRva":anchor,"candidateRootRva":root,"runtimeAnchorMatches":runtimeErr==nil&&luaRootMatches(runtimeCode,pattern,mask),"complete":false}
+ if runtimeErr!=nil { result["runtimeReadError"]=runtimeErr.Error() }
+ data, _:=json.MarshalIndent(result,"","  ")
+ if err := os.WriteFile("../../../docs/toolkit/research/lua-mailbox-forever-70124/disk-anchor-research.json",data,0600);err!=nil{t.Fatal(err)}
+ t.Log(string(data))
+}
+
+
+func TestForeverReadableAnchorResearch(t *testing.T) {
+ if os.Getenv("LYCHEE_FOREVER_RESEARCH") != "1" { t.Skip("explicit read-only live research") }
+ ctx:=context.Background()
+ p,err:=Open(10376,134352957565325600,`D:\Game\World of Warcraft\_classic_beta_\WowB.exe`);if err!=nil{t.Fatal(err)};defer p.Close()
+ module,err:=p.MainModule(ctx);if err!=nil{t.Fatal(err)}
+ text:=module.LuaImageLayout().proof.text
+ pattern,mask:=luaRootPattern()
+ var tail []byte; var priorEnd,readBytes,calls,gaps uint64
+ candidates:=[]map[string]any{}; rejected:=[]map[string]any{}
+ for _,segment:=range module.proof.segments {
+  at,end:=segment.start,segment.end
+  if at<module.Base+text.start{at=module.Base+text.start};if end>module.Base+text.end{end=module.Base+text.end};if at>=end{continue}
+  if !segment.eligible {gaps++;tail=nil;priorEnd=0;continue}
+  for at<end {
+   n:=end-at;if n>luaRootReadChunk{n=luaRootReadChunk}
+   chunk:=make([]byte,int(n));count,readErr:=p.ReadModule(ctx,module,at,chunk);calls++
+   if readErr!=nil||count!=len(chunk){rejected=append(rejected,map[string]any{"rva":at-module.Base,"bytes":n,"error":fmt.Sprint(readErr)});gaps++;tail=nil;priorEnd=0;break}
+   readBytes+=uint64(count)
+   if priorEnd!=at {tail=nil}
+   combined:=append(append([]byte(nil),tail...),chunk...)
+   for i:=0;i+len(pattern)<=len(combined);i++{
+    if combined[i]!=pattern[0]||!luaRootMatches(combined[i:i+len(pattern)],pattern,mask){continue}
+    anchor:=at-module.Base-uint64(len(tail))+uint64(i)
+    root,targetErr:=luaRootTarget(anchor,combined[i:i+len(pattern)],module.Size,module.LuaImageLayout().proof.sections)
+    candidate:=map[string]any{"anchorRva":anchor,"rootRva":root,"codeHex":hex.EncodeToString(combined[i:i+len(pattern)])}
+    if targetErr!=nil{candidate["targetError"]=targetErr.Error()}
+    candidates=append(candidates,candidate)
+   }
+   keep:=len(pattern)-1;if keep>len(combined){keep=len(combined)};tail=append(tail[:0],combined[len(combined)-keep:]...)
+   at+=n;priorEnd=at
+  }
+ }
+ result:=map[string]any{"pid":10376,"executableSHA256":module.ExecutableSHA256,"moduleBase":module.Base,"moduleSize":module.Size,"runtimeTextStartRva":text.start,"runtimeTextEndRva":text.end,"readBytes":readBytes,"readCalls":calls,"unreadableRegions":gaps,"candidates":candidates,"coverageComplete":gaps==0,"authoritativeUniqueRoot":false,"rejectedSegments":rejected}
+ data,_:=json.MarshalIndent(result,"","  ");if err:=os.WriteFile("../../../docs/toolkit/research/lua-mailbox-forever-70124/readable-anchor-research.json",data,0600);err!=nil{t.Fatal(err)};t.Log(string(data))
+}
+
+
