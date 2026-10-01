@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "command": "recipes.save",
+  "home": "C:\\Users\\follen\\.wowdump",
+  "stored": [
+    {
+      "id": "titan-lua-state-root-rip-v1-69874",
+      "buildKey": "titan@3.80.2.69874",
+      "file": "C:\\Users\\follen\\.wowdump\\recipes\\titan@3.80.2.69874\\titan-lua-state-root-rip-v1-69874.anchor.json",
+      "sha256": "b2e2409e55200fa6e596bb880f8ffb18179e9a747509605bea0d6388cd889f20",
+      "status": "created"
+    }
+  ],
+  "failed": [],
+  "damaged": []
+}

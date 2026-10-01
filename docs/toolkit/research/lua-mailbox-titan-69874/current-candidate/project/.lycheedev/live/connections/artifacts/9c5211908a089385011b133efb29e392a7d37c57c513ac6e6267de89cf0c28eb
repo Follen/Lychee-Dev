@@ -1,0 +1,8 @@
+local name, realm = UnitFullName("player")
+return {
+    marker = "mailbox-actor",
+    guid = UnitGUID("player"),
+    character = name,
+    realm = realm or GetRealmName(),
+    interface = select(4, GetBuildInfo()),
+}

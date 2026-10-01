@@ -1,0 +1,37 @@
+{
+  "schema": "wowdump.anchor.v1",
+  "id": "titan-lua-state-root-rip-v1-69874",
+  "source": {
+    "buildKey": "titan@3.80.2.69874",
+    "executableSha256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+    "section": ".text",
+    "sectionSha256": "de21fbc9c3143ee16de6b4b9402ebc9c61a0485e5246576164626c22bf9f6a01",
+    "rva": "0x639be4",
+    "value": "0x6daca78"
+  },
+  "pattern": "48 8b 3d ?? ?? ?? ?? 48 8b 1d ?? ?? ?? ?? 48 8b cf 44 8b 05 ?? ?? ?? ?? 48 8b d3 e8 ?? ?? ?? ?? 8b 05 ?? ?? ?? ?? 83 c0 01 89 05 ?? ?? ?? ?? 74 ?? 83 3d ?? ?? ?? ?? 00 75 ??",
+  "instructionCodes": [
+    286,
+    286,
+    286,
+    285,
+    286,
+    693,
+    285,
+    248,
+    281,
+    173,
+    269,
+    176
+  ],
+  "resolve": {
+    "kind": "rip",
+    "instruction": 0
+  },
+  "evidence": "Titan 3.80.2.69874 complete runtime .text capture; standard production OpenLuaMailbox independently found one global unique 58-byte template at this anchor and validated the current named public Mailbox root 0x6daca78. Current-process read only; semantics/restart/future ABI not verified.",
+  "validation": {
+    "read": "not_checked",
+    "semantics": "not_checked",
+    "reuse": "not_checked"
+  }
+}

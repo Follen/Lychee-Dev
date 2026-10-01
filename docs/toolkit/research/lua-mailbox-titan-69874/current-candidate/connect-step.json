@@ -1,0 +1,27 @@
+{
+  "name": "connect",
+  "args": [
+    "live",
+    "connect",
+    "--installation",
+    "D:/Game/World of Warcraft/_classic_titan_",
+    "--pid",
+    "43756",
+    "--project",
+    "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\project",
+    "--wait-seconds",
+    "120",
+    "--no-cache",
+    "--format",
+    "json"
+  ],
+  "exitCode": 0,
+  "elapsedMs": null,
+  "elapsedState": "not_recorded",
+  "session": "CON-bd25d8024661489309266528d6bc8023",
+  "complete": true,
+  "cleanup": "none",
+  "error": null,
+  "reusedEvidence": true,
+  "source": ".tmp/mailbox-live/titan-current-20261001/connect.json"
+}

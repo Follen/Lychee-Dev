@@ -57,8 +57,22 @@ research evidence and documentation only; this snapshot is not a fabricated
 CI result for a later commit.
 
 The development candidate is untagged and unpublished. These results do not
-certify Titan, first clean installation, unattended relogin/fault-injected
+certify first clean installation, unattended relogin/fault-injected
 restart behavior or a future Lua ABI. Same-build Retail relaunch between
 independently bound sessions was exercised in the final run.
 See [the acceptance record](../../live-mailbox-acceptance-2026-10-01.md) for
 candidate hashes, process identities, recovery limitations and later results.
+
+The appended Titan current reports use the same frozen candidate on
+`43756:134353096910506547`, Qingtianjiuz / 时光I. All 13 core checks and
+54 pressure steps (47 ordinary requests) passed directly, with runtime rollover
+at ordinary request 46 and both connections closed. Its independently derived
+root, registered read confirmation, complete reader replay (8 matches / 0
+mismatches), 32 synthetic cases and original setup errors are sealed in
+`lua-mailbox-titan-69874`. The summary's raw report names are relative to that
+bundle's `current-candidate/` directory. No production source changed.
+
+`three-client-evidence-commit-ci.json` records all 12 successful Windows checks
+for `fb18b4b9c023e670779b3491c51f3cd226ccedf7`, before this Titan evidence update.
+It does not claim CI for the later commit. `asset-digests-before-titan.json`
+retains the original 45-file aggregate seal as an immutable checkpoint.

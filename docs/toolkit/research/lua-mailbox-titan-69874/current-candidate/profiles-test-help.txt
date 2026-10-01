@@ -1,0 +1,9 @@
+Usage: wowdump profiles test [options]
+
+Test a profile against a bounded memory fixture and explicit expected result
+
+Options:
+  --profile <file>  profile JSON
+  --fixture <file>  wowdump.profile-fixture.v1 JSON
+  --out <file>      save test report
+  -h, --help        display help for command

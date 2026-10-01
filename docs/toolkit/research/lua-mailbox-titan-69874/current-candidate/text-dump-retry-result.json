@@ -1,0 +1,19 @@
+{
+  "command": "analyze.dump",
+  "sessionDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\workspace\\sessions\\20261001-dump-7b47ef02",
+  "ok": true,
+  "kind": "dump",
+  "manifestFile": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\text-dump\\manifest.json",
+  "outputDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\titan-current-20261001\\text-dump",
+  "complete": true,
+  "totalBytes": 54450220,
+  "sections": [
+    {
+      "name": ".text",
+      "bytes": 54450220,
+      "readSize": 54450220,
+      "sha256": "de21fbc9c3143ee16de6b4b9402ebc9c61a0485e5246576164626c22bf9f6a01",
+      "shortRead": false
+    }
+  ]
+}

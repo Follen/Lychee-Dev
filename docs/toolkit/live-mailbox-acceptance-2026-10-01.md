@@ -2,8 +2,8 @@
 
 This is a local development candidate, not a published release. The source and
 managed addon advance together to the new protocol; npm latest stays 2.5.1.
-The final frozen candidate completed Retail, Classic and Forever live suites.
-Classic and Forever passed without continuation recovery; Retail activation
+The final frozen candidate completed Retail, Classic, Titan and Forever live suites.
+Classic, Titan and Forever passed without continuation recovery; Retail activation
 used an exact-CON continuation after a transient post-input read refusal. Offline
 baseline verification is recorded separately below. Results describe their
 actual candidate and do not inherit earlier memory-scanner acceptance.
@@ -15,6 +15,7 @@ actual candidate and do not inherit earlier memory-scanner acceptance.
 | Retail | 12.1.0.69933 / 120100 | `d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd` | Known hash, guarded anchor `0x6749b4`, root `0x79c0c18` |
 | Classic | 5.5.4.70032 / 50504 | `5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f` | Unique runtime text recipe, anchor `0x62dc34`, root `0x701dda8` |
 | Forever | 1.60.1.70124 / 16001 | `3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f` | New independent 49-byte RunScript site `0x75a69d`, root `0x7b780b8`; exact original code guard, no full-text uniqueness claim |
+| Titan | 3.80.2.69874 / 38002 | `f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9` | Unique complete runtime text recipe, anchor `0x639be4`, root `0x6daca78` |
 
 The initial Retail process instance was `34732:134352920362860468`; its selected actor was
 暗夜荔枝 / 罗宁, `Player-729-06AA5F07`. A preceding read-only sample on
@@ -378,8 +379,10 @@ to the exact real Retail executable path found no replacement process.
 At that checkpoint, final Retail core/pressure acceptance was incomplete and
 required a fresh login. Closed process cleanup does not turn the interrupted
 activation into a successful test. Later independent successful acceptance is
-recorded below. Titan, a first clean installation, unattended relogin/fault-injected
-restart coverage and future Lua ABI reuse remain unverified. No release was published.
+recorded below. Titan was still unverified at that checkpoint; its subsequent
+round is recorded separately below. A first clean installation, unattended
+relogin/fault-injected restart coverage and future Lua ABI reuse remain
+unverified. No release was published.
 
 On a later login, exact-path selection fixed the real Retail process to PID
 448, native creation `134353034288690796`, with the same executable hash.
@@ -453,3 +456,49 @@ so Go does not mistake evidence for a standalone package. The original seal and
 an archive-format explanation are appended, bringing the delivered count to 187.
 The sealed capture log is explicitly included despite the ordinary `*.log`
 ignore rule. Staged Git blobs are checked against every delivered asset digest.
+
+## Final Titan acceptance
+
+After the owner logged into Titan, the same frozen development CLI was bound
+to the unique real client `D:/Game/World of Warcraft/_classic_titan_/WowClassic.exe`,
+process `43756:134353096910506547`. Its `.flavor.info` identifies
+`wow_classic_titan`; `version.txt` is absent, so the executable and live identity
+establish build 3.80.2.69874 / interface 38002. The actor is Qingtianjiuz / 时光I,
+`Player-6379-01045F6F`. No other client or similarly named executable was used.
+
+The existing clean managed 3.0.2 addon was upgraded from the exact frozen
+development package. Standard connect journaled and completed activation;
+the loaded runtime reports release 3.1.0, identity-v2 and 200 slots. This is
+upgrade acceptance, not first clean installation. Core testing then performed
+a separate explicit reload on its original connection.
+
+Titan's executable hash was unknown to the candidate. Its existing resolver
+covered the complete runtime `.text` across both root templates and found one
+58-byte match at `0x639be4`, deriving root `0x6daca78`. Production initialization
+scanned 54,450,220 bytes in 69 module reads and validated the stable root guard.
+An independent complete text capture had no gaps and derived the same anchor
+and root. This verifies the existing cross-build mechanism on this exact Titan
+build without copying another client's RVA or changing production source.
+
+All 13 core checks and all 54 pressure steps, including 47 ordinary requests,
+passed with exit 0 on their first invocation. Ordinary and large cache-off
+requests, exact-journal read-only retries, reload, capacity runtime replacement,
+retained history, expected compile/cleanup failures, bugs and disconnect were
+verified. Core `CON-bd25d8024661489309266528d6bc8023` and pressure
+`CON-9108c86a801af51807c3a031a123846f` ended closed with complete cleanup.
+No continuation recovery or uncertain-input replay was required.
+
+The new immutable `titan-lua-state-root-rip-v1-69874` recipe and bound root
+profile were saved to wowdump with successful library query and read
+confirmation. The complete named public reader replayed eight observations
+with eight exact matches and zero mismatches. Its 32 synthetic negative/relocation
+checks and the wowdump fixture selftest passed separately from live acceptance.
+Formal semantics, cross-process reuse and a future Lua ABI remain unconfirmed.
+The [Titan summary and sealed evidence](research/lua-mailbox-titan-69874/summary.json)
+retain the actual bytes and process/build/candidate scopes. The earlier Titan
+`not_run` checkpoints remain historical facts.
+
+The Titan bundle seals 1,242 files / 8,729,542 bytes, with seal SHA-256
+`376161f98608f94095b4ca2826240425a4789bd203f5c41ea316a45cff19f685`.
+Its archived `.lycheedev` evidence is explicitly included despite the normal
+ignore rule, and staged Git blobs are verified against every seal entry.

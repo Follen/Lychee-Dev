@@ -12,7 +12,8 @@ sealed package, isolated install, registry read-back and OIDC release gates.
 CLI, addon, slot metadata, validators and fixtures advance together to 3.1.0.
 Install a matching managed development package; do not overlay-copy source.
 The root recipes come from independently researched Retail and Forever builds;
-Classic's root was derived and verified using the complete Retail template.
+Classic and Titan roots were derived and verified using the complete runtime
+text pass across both templates, with a unique match of the Retail template.
 Known executable hashes bind exact captured anchors and RVAs. Other executable
 hashes must derive a unique candidate across both templates in the complete
 readable runtime text, then verify the Lua and named Mailbox path. Partial scans

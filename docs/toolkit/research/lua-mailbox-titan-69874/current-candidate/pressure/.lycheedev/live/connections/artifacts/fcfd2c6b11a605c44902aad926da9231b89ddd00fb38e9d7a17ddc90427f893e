@@ -1,0 +1,2 @@
+local snapshot, reason = LycheeDevInternal.Diagnostics.SnapshotRecentErrors(20, "provider_storage")
+return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailable",complete=snapshot and snapshot.complete==true or false,snapshot=snapshot,error=reason}

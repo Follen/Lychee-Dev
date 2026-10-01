@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "file": "C:\\Users\\follen\\.wowdump\\capability-validation\\titan@3.80.2.69874\\titan-lua-mailbox-root-v1-69874\\ddfeb0d5cfc591e8cbb84d438061bd37ab34ac59807c3a5bf114d52e9833a504.json",
+  "confirmation": {
+    "schema": "wowdump.capability-confirmation.v1",
+    "capabilitySha256": "a2cf288faec7259f19eaa9f26e90ca9371bf7ac6ddc5139eca1e5106e2ffc948",
+    "profileSha256": "3a1b12d6f2163de4b750ec49ad5d6cd63d4bc71fcbdc72a57b42f154ef807055",
+    "id": "titan-lua-mailbox-root-v1-69874",
+    "buildKey": "titan@3.80.2.69874",
+    "executableSha256": "f07b6fc909d0b405dd44a7d3e35efa21e749cc2ca321e9472dcf0b36c77c88c9",
+    "recipes": [
+      {
+        "id": "titan-lua-state-root-rip-v1-69874",
+        "buildKey": "titan@3.80.2.69874",
+        "sha256": "b2e2409e55200fa6e596bb880f8ffb18179e9a747509605bea0d6388cd889f20"
+      }
+    ],
+    "level": "read",
+    "evidence": [
+      {
+        "file": "capability-evidence\\8b044e882fc0b77972fc994736f42dcc938283aa86c1261c8f914b08bc41d2d9.json",
+        "sha256": "8b044e882fc0b77972fc994736f42dcc938283aa86c1261c8f914b08bc41d2d9"
+      }
+    ],
+    "basis": null,
+    "reason": "Exact named root fields read successfully in fixed Titan process43756; independent complete public-reader 8 epochs replayed8/0. No semantic or restart/future ABI confirmation.",
+    "semanticAssessment": "not_checked",
+    "atomic": false,
+    "scope": [
+      {
+        "processInstance": "43756:134353096910506547",
+        "parametersSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "fields": [
+          "luaState",
+          "threadTag",
+          "globalsValue"
+        ],
+        "observedAt": "2026-10-01T06:47:54.160Z"
+      }
+    ],
+    "recordedAt": "2026-10-01T06:47:54.366Z",
+    "sha256": "ddfeb0d5cfc591e8cbb84d438061bd37ab34ac59807c3a5bf114d52e9833a504"
+  }
+}

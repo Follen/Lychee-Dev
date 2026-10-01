@@ -1,0 +1,43 @@
+Usage: wowdump [options] [command]
+
+World of Warcraft memory reading tool: read process memory and versioned section
+files, read-only (no broker, no elevation)
+
+Options:
+  -V, --version                    output the version number
+  --no-elevate                     never relaunch through UAC when a target
+                                   needs higher integrity
+  -h, --help                       display help for command
+
+Commands:
+  describe [options]               Describe this CLI's actual commands and
+                                   public script primitives without contacting a
+                                   target
+  doctor [options]                 Check runtime and installed skill
+                                   compatibility; does not attach to processes
+                                   or probe MCP servers
+  targets [options]                Discover running WoW targets, identity
+                                   hashes, modules and the workspace each one
+                                   maps to
+  target [options]                 Show the read-only engine state, the resolved
+                                   workspace and the current privilege
+  workspace                        Create, inspect and migrate an analysis
+                                   workspace
+  profiles [options] [id-or-file]  List workspace profiles or describe one
+  investigations                   Durable candidates, tool handoff,
+                                   verification and recovery inside a workspace
+  recipes                          Inspect, store and confirm machine-level
+                                   anchor recipes
+  capabilities                     Save and discover named, immutable profile
+                                   snapshots with pinned recipe bindings
+  query [options] [id]             Read a named capability or profile with
+                                   target identity, guards, time and evidence
+  observe [options] [id]           Observe profile fields and changes with a
+                                   shared budget; no reader script required
+  memory                           Bounded, read-only native memory access
+  analyze                          Dump sections, verify profiles, replay
+                                   recordings and disassemble
+  database                         Show the workspace-scoped static database
+                                   state
+  skill                            Install the bundled agent skill
+  help [command]                   display help for command
