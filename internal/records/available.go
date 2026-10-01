@@ -6,12 +6,13 @@ import (
 	"io"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/table"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-func (r *Reader) extractAvailable(ctx context.Context, source io.ReaderAt, encoded, decoded int64, keys container.KeyLookup) (vault.BlobRef, []container.MissingSpan, error) {
-	ranges, err := container.OpenRanges(ctx, source, encoded, readLimits(encoded, max(1, decoded)), keys)
+func (r *Reader) extractAvailable(ctx context.Context, source io.ReaderAt, encoded, decoded int64, keys container.KeyLookup, budgets ...*resource.Budget) (vault.BlobRef, []container.MissingSpan, error) {
+	ranges, err := container.OpenRanges(ctx, source, encoded, readLimits(encoded, max(1, decoded), budgets...), keys)
 	if err != nil {
 		return vault.BlobRef{}, nil, err
 	}

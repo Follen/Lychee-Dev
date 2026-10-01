@@ -7,9 +7,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 type RootLimits struct {
+	Query   *resource.Budget
 	Bytes   int64
 	Records uint64
 	Groups  int
@@ -34,13 +37,17 @@ type RootRecord struct {
 // state, and never returns partial matches on failure. The caller must verify
 // the source content key; structural validity alone does not authenticate it.
 func LookupRoot(ctx context.Context, source io.ReaderAt, size int64, ids []uint32, limits RootLimits) ([]RootRecord, error) {
+	return lookupRoot(ctx, source, size, ids, limits, nil)
+}
+
+func lookupRoot(ctx context.Context, source io.ReaderAt, size int64, ids []uint32, limits RootLimits, collect *rootIndex) ([]RootRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if source == nil || size < 4 {
 		return nil, ErrMetadataFormat
 	}
-	if limits.Bytes <= 0 || limits.Bytes > 1<<40 || size > limits.Bytes || limits.Records == 0 || limits.Records > 1<<32 || limits.Groups <= 0 || limits.Groups > 1<<20 || limits.Matches <= 0 || limits.Matches > 1<<20 || len(ids) == 0 || len(ids) > 4096 {
+	if limits.Bytes <= 0 || limits.Bytes > 1<<40 || size > limits.Bytes || limits.Records == 0 || limits.Records > 1<<32 || limits.Groups <= 0 || limits.Groups > 1<<20 || limits.Matches <= 0 || limits.Matches > 1<<20 || collect == nil && len(ids) == 0 || len(ids) > 4096 {
 		return nil, ErrMetadataLimit
 	}
 	wanted := make(map[uint32]bool, len(ids))
@@ -101,6 +108,9 @@ func LookupRoot(ctx context.Context, source io.ReaderAt, size int64, ids []uint3
 		if scanned > limits.Records {
 			return nil, ErrMetadataLimit
 		}
+		if err := limits.Query.Charge(resource.Cost{DecodeWork: int64(count) + 1}); err != nil {
+			return nil, err
+		}
 		pos += int64(flagsBytes)
 		keyStride := int64(16)
 		hasName := classic || !(allowNameless && content&0x10000000 != 0)
@@ -116,6 +126,14 @@ func LookupRoot(ctx context.Context, source io.ReaderAt, size int64, ids []uint3
 		}
 		keysStart := pos + int64(count)*4
 		namesStart := keysStart + int64(count)*keyStride
+		var collected rootGroup
+		if collect != nil {
+			allocation := int64(count)*4 + 256
+			if err := limits.Query.Charge(resource.Cost{RetainedBytes: allocation, MetadataBytes: allocation}); err != nil {
+				return nil, err
+			}
+			collected = rootGroup{ids: make([]uint32, int(count)), keysStart: keysStart, namesStart: namesStart, keyStride: keyStride, hasName: hasName, content: content, locale: locale, group: group}
+		}
 		var next uint64
 		for base := uint32(0); base < count; {
 			batch := min(uint32(len(deltas)/4), count-base)
@@ -128,6 +146,10 @@ func LookupRoot(ctx context.Context, source io.ReaderAt, size int64, ids []uint3
 					return nil, ErrMetadataFormat
 				}
 				next = id + 1
+				if collect != nil {
+					collected.ids[int(base+i)] = uint32(id)
+					continue
+				}
 				if !wanted[uint32(id)] {
 					continue
 				}
@@ -151,6 +173,9 @@ func LookupRoot(ctx context.Context, source io.ReaderAt, size int64, ids []uint3
 				result = append(result, record)
 			}
 			base += batch
+		}
+		if collect != nil {
+			collect.groups = append(collect.groups, collected)
 		}
 		pos += int64(count) * recordBytes
 	}

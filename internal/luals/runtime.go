@@ -6,6 +6,8 @@ package luals
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,8 +57,9 @@ func Pinned() Identity {
 }
 
 type Runtime struct {
-	directory string
-	Identity  Identity
+	directory       string
+	contextIdentity string
+	Identity        Identity
 }
 
 // Open verifies the complete release inventory before trusting a private
@@ -96,7 +99,18 @@ func Open(ctx context.Context, releaseRoot string, verifyRelease func(context.Co
 			return nil, fmt.Errorf("%w: missing runtime file %s", ErrUnavailable, name)
 		}
 	}
-	return &Runtime{directory: dir, Identity: Pinned()}, nil
+	manifest, err := os.Open(filepath.Join(releaseRoot, "release.json"))
+	if err != nil {
+		return nil, fmt.Errorf("%w: release manifest", ErrUnavailable)
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(manifest, (1<<20)+1))
+	manifest.Close()
+	if readErr != nil || len(raw) > 1<<20 {
+		return nil, ErrBudget
+	}
+	config, _ := ConfigurationIdentity()
+	digest := sha256.Sum256(append(raw, config...))
+	return &Runtime{directory: dir, Identity: Pinned(), contextIdentity: hex.EncodeToString(digest[:])}, nil
 }
 
 type Position struct {
@@ -323,3 +337,14 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 func (w *cappedWriter) String() string { w.mu.Lock(); defer w.mu.Unlock(); return w.buffer.String() }
+
+// ConfigurationIdentity describes the effective configuration independently of
+// the owned temporary library path, whose definitions digest belongs in the
+// composition identity. It cannot be overridden by a source .luarc.
+func ConfigurationIdentity() ([]byte, error) { return configuration("@verified-generated-definitions") }
+
+// ReleaseRoot exposes the verified release location to composition; it is not
+// accepted as an executable path by the broker protocol.
+func (r *Runtime) ReleaseRoot() string { return filepath.Dir(filepath.Dir(filepath.Dir(r.directory))) }
+
+func (r *Runtime) ContextIdentity() string { return r.contextIdentity }

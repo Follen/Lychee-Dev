@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/records/relational"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"regexp"
@@ -24,14 +25,20 @@ type semanticMapping struct{ field, kind, name, conditionField, conditionValue s
 var metadataName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var semanticFieldPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?$`)
 
-func parseSemanticMappings(raw []byte, table string) ([]semanticMapping, error) {
+func parseSemanticMappings(raw []byte, table string, budgets ...*resource.Budget) ([]semanticMapping, error) {
 	if len(raw) > 4<<20 || !utf8.Valid(raw) {
 		return nil, ErrDefinitionIdentity
 	}
+	budget := semanticParseBudget(budgets)
+	if err := budget.Charge(resource.Cost{RetainedBytes: int64(len(raw)), MetadataBytes: int64(len(raw))}); err != nil {
+		return nil, err
+	}
 	result := []semanticMapping{}
-	for _, line := range strings.Split(string(raw), "\n") {
+	for remaining := string(raw); remaining != ""; {
+		line, tail, _ := strings.Cut(remaining, "\n")
+		remaining = tail
 		code, _, _ := strings.Cut(line, "//")
-		parts := strings.Fields(code)
+		parts := semanticFields(code, 5)
 		if len(parts) < 2 {
 			continue
 		}
@@ -56,20 +63,29 @@ func parseSemanticMappings(raw []byte, table string) ([]semanticMapping, error) 
 			m.conditionField = ct + "::" + cf
 			m.conditionValue = value
 		}
-		result = append(result, m)
-		if len(result) > 4096 {
+		if len(result) >= 4096 {
 			return nil, ErrMetadataLimit
 		}
+		if err := budget.Charge(resource.Cost{RetainedBytes: 256, MetadataBytes: 256, DecodeWork: 1}); err != nil {
+			return nil, err
+		}
+		result = append(result, m)
 	}
 	return result, nil
 }
 
-func parseSemanticValues(ctx context.Context, raw []byte, build string) ([][]any, error) {
+func parseSemanticValues(ctx context.Context, raw []byte, build string, budgets ...*resource.Budget) ([][]any, error) {
 	if len(raw) > 4<<20 || !utf8.Valid(raw) {
 		return nil, ErrDefinitionIdentity
 	}
+	budget := semanticParseBudget(budgets)
+	if err := budget.Charge(resource.Cost{RetainedBytes: int64(len(raw)), MetadataBytes: int64(len(raw))}); err != nil {
+		return nil, err
+	}
 	rows := [][]any{}
-	for _, line := range strings.Split(string(raw), "\n") {
+	for remaining := string(raw); remaining != ""; {
+		line, tail, _ := strings.Cut(remaining, "\n")
+		remaining = tail
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -92,7 +108,7 @@ func parseSemanticValues(ctx context.Context, raw []byte, build string) ([][]any
 			}
 			code = strings.TrimSpace(rest)
 		}
-		parts := strings.Fields(code)
+		parts := semanticFields(code, 3)
 		if len(parts) < 1 || len(parts) > 2 {
 			return nil, ErrDefinitionIdentity
 		}
@@ -120,12 +136,35 @@ func parseSemanticValues(ctx context.Context, raw []byte, build string) ([][]any
 		if len(parts) == 2 {
 			name = parts[1]
 		}
-		rows = append(rows, []any{value, name, strings.TrimSpace(comment)})
-		if len(rows) > 100000 {
+		if len(rows) >= 100000 {
 			return nil, ErrMetadataLimit
 		}
+		if err := budget.Charge(resource.Cost{RetainedBytes: 160, MetadataBytes: 160, DecodeWork: 1}); err != nil {
+			return nil, err
+		}
+		rows = append(rows, []any{value, name, strings.TrimSpace(comment)})
 	}
 	return rows, nil
+}
+
+func semanticParseBudget(budgets []*resource.Budget) *resource.Budget {
+	if len(budgets) == 0 {
+		return nil
+	}
+	return budgets[0]
+}
+
+// Only the bounded number of fields needed to reject invalid syntax is kept.
+// A malformed large line cannot allocate one string slot per token.
+func semanticFields(code string, maximum int) []string {
+	parts := make([]string, 0, maximum)
+	for field := range strings.FieldsSeq(code) {
+		parts = append(parts, field)
+		if len(parts) == maximum {
+			break
+		}
+	}
+	return parts
 }
 
 // SemanticSource supplies pinned enum/flags metadata as meta.TableName SQL
@@ -140,7 +179,11 @@ func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table s
 	base := "https://raw.githubusercontent.com/wowdev/WoWDBDefs/" + commit + "/meta/"
 	bundle := SemanticBundle{Table: table, Commit: commit, Build: build, Definitions: map[string]vault.BlobRef{}}
 	var mappings []semanticMapping
-	bundle.Mapping, err = d.load(ctx, base+"mapping.dbdm", offline, func(raw []byte) error { var err error; mappings, err = parseSemanticMappings(raw, table); return err })
+	bundle.Mapping, err = d.load(ctx, base+"mapping.dbdm", offline, func(raw []byte) error {
+		var err error
+		mappings, err = parseSemanticMappings(raw, table, d.budget)
+		return err
+	})
 	if err != nil {
 		return relational.Source{}, bundle, err
 	}
@@ -157,7 +200,11 @@ func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table s
 			if len(cache) >= 128 {
 				return relational.Source{}, bundle, ErrMetadataLimit
 			}
-			ref, err := d.load(ctx, base+path, offline, func(raw []byte) error { var err error; values, err = parseSemanticValues(ctx, raw, build); return err })
+			ref, err := d.load(ctx, base+path, offline, func(raw []byte) error {
+				var err error
+				values, err = parseSemanticValues(ctx, raw, build, d.budget)
+				return err
+			})
 			if err != nil {
 				return relational.Source{}, bundle, fmt.Errorf("metadata %s: %w", path, err)
 			}
@@ -169,6 +216,9 @@ func (d *Definitions) SemanticSource(ctx context.Context, commit, build, table s
 			cache[path] = values
 		}
 		for _, value := range values {
+			if err := d.budget.Charge(resource.Cost{RetainedBytes: 256, MetadataBytes: 256, DecodeWork: 1}); err != nil {
+				return relational.Source{}, bundle, err
+			}
 			all = append(all, []any{m.field, m.kind, m.name, value[0], value[1], value[2], m.conditionField, m.conditionValue})
 			if len(all) > 100000 {
 				return relational.Source{}, bundle, ErrMetadataLimit

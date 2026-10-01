@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 var ErrRecordMissing = errors.New("table.record_not_found")
@@ -18,6 +20,7 @@ type Records struct {
 	size      int64
 	columns   *Columns
 	locations map[uint32]recordLocation
+	budget    *resource.Budget
 }
 type recordLocation struct {
 	origin      uint32
@@ -63,7 +66,20 @@ func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, b
 	if layout.Stride > 1<<20 {
 		return nil, ErrLimit
 	}
-	out := &Records{source: source, size: size, columns: columns, locations: make(map[uint32]recordLocation)}
+	var copiesCount int64
+	for _, p := range layout.Partitions {
+		copiesCount += int64(p.Copies)
+	}
+	if int64(layout.Rows)+copiesCount > int64(budget.Rows) {
+		return nil, ErrLimit
+	}
+	// Reserve identity map, copies, sparse indexes and chain scratch space
+	// before insertion. This is a conservative query charge, not exact RSS.
+	allocation := (int64(layout.Rows)+copiesCount)*192 + int64(layout.Stride)
+	if err := budget.Query.Charge(resource.Cost{RetainedBytes: allocation, MetadataBytes: allocation, DecodeWork: int64(layout.Rows) + copiesCount}); err != nil {
+		return nil, err
+	}
+	out := &Records{source: source, size: size, columns: columns, budget: budget.Query, locations: make(map[uint32]recordLocation)}
 	copies := make(map[uint32]uint32)
 	var auxiliary int64 = layout.MetadataEnd
 	for pi, p := range layout.Partitions {
@@ -89,6 +105,9 @@ func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, b
 			return nil, ErrLimit
 		}
 		auxiliary += auxBytes
+		if err := budget.Query.Charge(resource.Cost{RetainedBytes: auxBytes, MetadataBytes: auxBytes, DecodeWork: auxBytes / 4}); err != nil {
+			return nil, err
+		}
 		position := int64(p.Offset) + int64(p.Rows)*int64(layout.Stride) + int64(p.StringBytes)
 		if sparse {
 			position = int64(p.SparseOffset)

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 // Ranges owns an immutable chunk directory, not the source or a decoded cache.
@@ -56,6 +58,11 @@ func OpenRanges(ctx context.Context, source io.ReaderAt, encodedSize int64, limi
 	if headerSize > 12+int64(limits.Chunks)*24 {
 		return nil, ErrLimit
 	}
+	releaseHeader, err := limits.Query.ReserveScratch(headerSize)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseHeader()
 	header := make([]byte, int(headerSize))
 	copy(header, prefix[:])
 	if err := at(ctx, source, header[8:], 8); err != nil {
@@ -64,6 +71,9 @@ func OpenRanges(ctx context.Context, source io.ReaderAt, encodedSize int64, limi
 	d := decoder{ctx: ctx, limits: limits}
 	parts, _, err := d.layout(bytes.NewReader(header), limits.DecodedBytes, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := limits.Query.Charge(resource.Cost{RetainedBytes: int64(len(parts)+1) * 16, MetadataBytes: int64(len(parts)+1) * 16}); err != nil {
 		return nil, err
 	}
 	r := &Ranges{source: source, limits: limits, keys: keys, parts: parts, encodedOffsets: make([]int64, len(parts)+1), decodedOffsets: make([]int64, len(parts)+1)}
@@ -109,6 +119,11 @@ func (r *Ranges) ReadCheckedSpan(ctx context.Context, offset, length int64, expe
 			if uint64(r.parts[first].encoded) != uint64(r.parts[first].decoded)+1 {
 				return nil, ErrIntegrity
 			}
+			release, err := r.limits.Query.ReserveScratch(length)
+			if err != nil {
+				return nil, err
+			}
+			defer release()
 			result = make([]byte, int(length))
 			if err := at(ctx, r.source, result, r.encodedOffsets[first]+1+offset-r.decodedOffsets[first]); err != nil {
 				return nil, err
@@ -146,6 +161,11 @@ func (r *Ranges) ReadSpan(ctx context.Context, offset, length int64) ([]byte, er
 	if length > r.limits.ChunkBytes {
 		return nil, ErrLimit
 	}
+	release, err := r.limits.Query.ReserveScratch(length)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	output := make([]byte, int(length))
 	if length == 0 {
 		return output, nil
@@ -164,27 +184,40 @@ func (r *Ranges) ReadSpan(ctx context.Context, offset, length int64) ([]byte, er
 		if int64(part.encoded) > r.limits.ChunkBytes || int64(part.decoded) > r.limits.ChunkBytes {
 			return nil, ErrLimit
 		}
-		raw := make([]byte, int(part.encoded))
-		if err := at(ctx, r.source, raw, r.encodedOffsets[i]); err != nil {
+		if err := r.copyPart(ctx, &d, output, offset, end, i); err != nil {
 			return nil, err
 		}
-		if md5.Sum(raw) != part.digest {
-			return nil, fmt.Errorf("%w: chunk %d checksum", ErrIntegrity, i)
-		}
-		decoded, err := d.unpack(raw, 1, r.limits.ChunkBytes, i)
-		if err != nil {
-			return nil, fmt.Errorf("chunk %d: %w", i, err)
-		}
-		if int64(len(decoded)) != int64(part.decoded) {
-			return nil, fmt.Errorf("%w: chunk %d decoded length", ErrIntegrity, i)
-		}
-		start, stop := max(offset, r.decodedOffsets[i]), min(end, r.decodedOffsets[i+1])
-		copy(output[start-offset:stop-offset], decoded[start-r.decodedOffsets[i]:stop-r.decodedOffsets[i]])
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return output, nil
+}
+
+func (r *Ranges) copyPart(ctx context.Context, d *decoder, output []byte, offset, end int64, i int) error {
+	part := r.parts[i]
+	release, err := r.limits.Query.ReserveScratch(2*int64(part.encoded) + 2*r.limits.ChunkBytes + 1024)
+	if err != nil {
+		return err
+	}
+	defer release()
+	raw := make([]byte, int(part.encoded))
+	if err := at(ctx, r.source, raw, r.encodedOffsets[i]); err != nil {
+		return err
+	}
+	if md5.Sum(raw) != part.digest {
+		return fmt.Errorf("%w: chunk %d checksum", ErrIntegrity, i)
+	}
+	decoded, err := d.unpack(raw, 1, r.limits.ChunkBytes, i)
+	if err != nil {
+		return fmt.Errorf("chunk %d: %w", i, err)
+	}
+	if int64(len(decoded)) != int64(part.decoded) {
+		return fmt.Errorf("%w: chunk %d decoded length", ErrIntegrity, i)
+	}
+	start, stop := max(offset, r.decodedOffsets[i]), min(end, r.decodedOffsets[i+1])
+	copy(output[start-offset:stop-offset], decoded[start-r.decodedOffsets[i]:stop-r.decodedOffsets[i]])
+	return nil
 }
 
 func at(ctx context.Context, source io.ReaderAt, output []byte, offset int64) error {

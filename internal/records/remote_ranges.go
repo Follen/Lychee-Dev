@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 const remoteRangeMaxBytes int64 = 64 << 20
@@ -23,6 +25,7 @@ var (
 // cancellation/deadline and malformed or corrupt data must stop immediately.
 func remoteAvailabilityFailure(err error) bool {
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+		!errors.Is(err, resource.ErrBudget) && !errors.Is(err, ErrMetadataLimit) &&
 		(errors.Is(err, ErrRemoteHTTP) || errors.Is(err, ErrRemoteObjectMissing))
 }
 

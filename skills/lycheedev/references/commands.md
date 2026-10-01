@@ -3,7 +3,7 @@
 
 # Command reference
 
-87 implemented commands. Every command accepts `--format text|json|jsonl`;
+89 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -194,9 +194,13 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 - `source query <term>` — mutates. Prepare and search the exact pinned source mapping by topic and evidence tier with bounded, resumable pages; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--mode precise|exploratory`, `--topic <api|lua|xml|toc|asset>`, `--limit <1-200>`, `--cursor <token>`.
 - `source refs` — mutates. Find bounded relations for one pinned symbol ID (or an unambiguous symbol name); retain relation state, coverage and next cursor; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--symbol-id <id>`, `--symbol <name>`, `--direction <incoming|outgoing|both>`, `--limit <1-200>`, `--cursor <token>`, `--environment <client-pin>`, `--static-only`, `--release <release-root>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--symbol-id <id>`, `--symbol <name>`, `--direction <incoming|outgoing|both>`, `--limit <1-200>`, `--cursor <token>`, `--environment <client-pin>`, `--session-reuse`, `--static-only`, `--release <release-root>`.
 - `source context` — mutates. Read bounded source context for one pinned symbol ID (or an unambiguous name), with direct relations and load evidence; --flow requests bounded secret-value analysis; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--symbol-id <id>`, `--symbol <name>`, `--limit <1-200>`, `--max-bytes <1-1048576>`, `--max-lines <1-2000>`, `--depth <0-4>`, `--cursor <token>`, `--environment <client-pin>`, `--flow`, `--static-only`, `--release <release-root>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--symbol-id <id>`, `--symbol <name>`, `--limit <1-200>`, `--max-bytes <1-1048576>`, `--max-lines <1-2000>`, `--depth <0-4>`, `--cursor <token>`, `--environment <client-pin>`, `--flow`, `--session-reuse`, `--static-only`, `--release <release-root>`.
+- `source session status` — read-only. Inspect the opt-in LuaLS broker for this home without starting it
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--release <release-root>`.
+- `source session close` — mutates. Retire the verified opt-in LuaLS broker and release its worktree lease
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--release <release-root>`.
 - `source diff` — mutates. Compare --from <pin-id> --to <pin-id> [--limit <n> per change category]
   Flags: `--home <root>`, `--format text|json|jsonl`, `--from <pin-id>`, `--to <pin-id>`, `--limit <n>`.
 - `source prune` — mutates. Explicitly reclaim only unused source worktrees toward --target-bytes <n>; fixed Git pins, facts and captures remain

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/evidence"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -41,7 +42,14 @@ func inspectData(ctx context.Context, root, snapshot, name string, query FileQue
 		if _, _, err := selection.DataIdentity(*pin.Data); err != nil {
 			return RecordReading{}, err
 		}
-		bundle, err := OpenDefinitions(s, m).Prepare(ctx, pin.Data.DefinitionCommit, name, query.Offline)
+		query = ensureQueryBudget(query)
+		admission, err := s.AcquireDataResources(ctx, vault.DataOrdinary)
+		if err != nil {
+			return RecordReading{}, err
+		}
+		defer admission.Close()
+		query.admitted = true
+		bundle, err := OpenDefinitions(s, m).WithBudget(query.budget).Prepare(ctx, pin.Data.DefinitionCommit, name, query.Offline)
 		if err != nil {
 			return RecordReading{}, err
 		}
@@ -90,8 +98,18 @@ func captureAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, snapsh
 	if pin.Data == nil {
 		return AssetReading{}, nil, errors.New("records.data_pin_required")
 	}
+	query = ensureQueryBudget(query)
+	admission, err := s.AcquireDataResources(ctx, vault.DataOrdinary)
+	if err != nil {
+		return AssetReading{}, nil, err
+	}
+	defer admission.Close()
+	query.admitted = true
 	reading, err := OpenReader(s).ReadFile(ctx, *pin.Data, query)
 	if err != nil {
+		return AssetReading{}, nil, err
+	}
+	if err := query.budget.Charge(resource.Cost{RetainedBytes: reading.Content.Bytes}); err != nil {
 		return AssetReading{}, nil, err
 	}
 	raw, err := s.ReadBlob(ctx, reading.Content, query.ContentBytes)

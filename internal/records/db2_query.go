@@ -525,10 +525,18 @@ func stableErrorCode(err error) string {
 // freshly resolved snapshot identity.
 func withNavigator[T any](ctx context.Context, root, snapshot string, query FileQuery, run func(*navigator) (Reading[T], error)) (Reading[T], error) {
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (Reading[T], error) {
+		query = ensureQueryBudget(query)
+		admission, err := store.AcquireDataResources(ctx, vault.DataOrdinary)
+		if err != nil {
+			return Reading[T]{}, err
+		}
+		defer admission.Close()
+		query.admitted = true
 		nav, err := openNavigator(ctx, store, metadata, snapshot, query)
 		if err != nil {
 			return Reading[T]{}, err
 		}
+		defer nav.reader.Close()
 		return run(nav)
 	})
 }

@@ -271,7 +271,7 @@ func loadRemoteConfiguration(ctx context.Context, store *vault.Store, metadata *
 			if ctx.Err() != nil {
 				return ConfigDocument{}, vault.BlobRef{}, ctx.Err()
 			}
-			if !errors.Is(err, ErrRemoteHTTP) {
+			if !remoteAvailabilityFailure(err) {
 				return ConfigDocument{}, vault.BlobRef{}, err
 			}
 			last = err

@@ -71,6 +71,9 @@ type searchCandidate struct {
 }
 
 func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.SourcePin, query SearchQuery) (SearchResponse, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	response := SearchResponse{SourceID: pin.Repository, Product: pin.Product, RequestedRef: pin.RequestedRef, MatchedTag: nil, ResolvedCommit: pin.ExactCommit, SnapshotID: snapshotID, Results: []Match{}}
 	text := strings.TrimSpace(query.Text)
 	if text == "" || len(text) > 512 {
@@ -108,23 +111,46 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 	if err != nil {
 		return response, err
 	}
+	defer cache.Close()
 	response.Coverage = summary.Coverage()
 	broad := query.Mode == SearchModeExploratory
 	var exact, prefix, full, assets []searchCandidate
 	candidateCut := false
 	var relations []Relation
-	documents := map[string]sourceRecord{}
-	assetRows := map[string]sourceRecord{}
+
 	normalized := normalizeAssetPath(text)
 	tokens := strings.Fields(strings.ToLower(text))
-	err = cache.scan(ctx, func(r sourceRecord) error {
-		if r.Kind == "document" {
-			documents[r.Path] = r
-			return nil
+	err = cache.scanSelected(ctx, func(e recordOffset) bool {
+		if topic == "asset" {
+			return e.Kind == "asset" && strings.Contains(normalizeAssetPath(e.Path), normalized)
 		}
-		if r.Kind == "asset" {
-			assetRows[r.Path] = r
+		if e.Kind != "symbol" {
+			return false
 		}
+		if e.SymbolKind == "relationship" {
+			return e.Name == text || e.Target == text || broad && (strings.Contains(strings.ToLower(e.Name), strings.ToLower(text)) || strings.Contains(strings.ToLower(e.Target), strings.ToLower(text)))
+		}
+		if e.SymbolKind != "declaration" && e.SymbolKind != "header" {
+			return false
+		}
+		if topic == "api" && !strings.HasPrefix(e.Category, "api-") {
+			return false
+		}
+		if (topic == "lua" || topic == "xml" || topic == "toc") && !strings.HasSuffix(strings.ToLower(e.Path), "."+topic) {
+			return false
+		}
+		if e.Name == text || e.Target == text || strings.HasSuffix(e.Name, "."+text) || strings.HasPrefix(e.Name, text) || strings.Contains(e.Name, "."+text) {
+			return true
+		}
+		lower := strings.ToLower(e.Name + " " + e.Target + " " + e.Signature)
+		count := 0
+		for _, token := range tokens {
+			if strings.Contains(lower, token) {
+				count++
+			}
+		}
+		return len(tokens) > 0 && (broad && count > 0 || !broad && count == len(tokens))
+	}, func(r sourceRecord) error {
 		if r.Kind == "asset" && topic == "asset" && r.Asset != nil && strings.Contains(normalizeAssetPath(r.Path), normalized) {
 			rank := 70
 			if normalizeAssetPath(r.Path) == normalized {
@@ -198,9 +224,6 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 	if err != nil {
 		return response, err
 	}
-	cache.documents = documents
-	cache.assets = assetRows
-	cache.pathsOnce.Do(func() {})
 	var candidates []searchCandidate
 	if topic == "asset" {
 		candidates = assets

@@ -50,6 +50,27 @@ func OpenLocalObject(ctx context.Context, root, encodingKey string, encodedBytes
 	if err != nil {
 		return nil, err
 	}
+	return openLocalObject(ctx, dir, files, encodingKey, encodedBytes, func(index localDirectory, key [16]byte) ([]archive.Span, error) {
+		f, err := dir.Open(filepath.Join("Data", "data", index.name))
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		stat, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		if !stat.Mode().IsRegular() {
+			return nil, ErrMetadataFormat
+		}
+		return archive.FindIndexSpans(ctx, f, stat.Size(), key, index.bucket)
+	})
+}
+
+func openLocalObject(ctx context.Context, dir *os.Root, files []localDirectory, encodingKey string, encodedBytes int64, find func(localDirectory, [16]byte) ([]archive.Span, error)) (*LocalObject, error) {
+	if !metadataKey(encodingKey) || encodedBytes < 8 || encodedBytes > 1<<40 {
+		return nil, ErrMetadataFormat
+	}
 	decoded, _ := hex.DecodeString(encodingKey)
 	var key [16]byte
 	copy(key[:], decoded)
@@ -58,21 +79,7 @@ func OpenLocalObject(ctx context.Context, root, encodingKey string, encodedBytes
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		f, err := dir.Open(filepath.Join("Data", "data", index.name))
-		if err != nil {
-			return nil, err
-		}
-		stat, err := f.Stat()
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
-		if !stat.Mode().IsRegular() {
-			f.Close()
-			return nil, ErrMetadataFormat
-		}
-		spans, err := archive.FindIndexSpans(ctx, f, stat.Size(), key, index.bucket)
-		f.Close()
+		spans, err := find(index, key)
 		if err != nil {
 			return nil, fmt.Errorf("index %s: %w", index.name, err)
 		}

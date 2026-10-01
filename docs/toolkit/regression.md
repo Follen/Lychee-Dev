@@ -2,6 +2,21 @@
 
 2026-10-01 [Mailbox 新协议](live-mailbox-protocol-2026-10-01.md)要求：旧 wire/schema/state 拒绝；公开镜像和 Snapshot/原 envelope 变更不能授权；按名字读取、进程/build 绑定、路径 guard、BODY exact HEAD 授权；输入前重读当前字段；reload 两次鲜活发布证明；关闭 hints 不改变读取路径。模块映射校验查询实际请求位置并遍历原 issued/current/request 交集；未授权旧 hole、属性变化和缺口拒绝，原始读错误不被 short_read 掩盖。正式服、Classic、Titan、Forever 最终核心及各 54 步压力链已完成；Titan 实机验证未知 hash 的完整 runtime .text 唯一定位与 8 次完整 reader 回放。最终离线及各客户端实机结果见 [Mailbox 验收记录](live-mailbox-acceptance-2026-10-01.md)，不沿用旧扫描路径或先前候选验收。
 
+2026-09-30 非 live 查询优化的新增回归合同：
+
+| 范围 | 必须保持的行为与证据 |
+| --- | --- |
+| Data 读取 | cached/uncached lazy HTTP 失败可尝试下一个 EKey；损坏、预算、取消与 close 失败不得被可用性回退覆盖 |
+| 查询会话 | 固定来源/provider binding；新请求重新验证；Root 所有布局、locale、variant/name hash 与顺序扫描等价；同大小 index/blob 改写拒绝 |
+| 资源 | 跨表累计、分配前预留、嵌套临时缓冲同时计费、失败/取消释放；Windows event 等待、取消竞态与 holder 死亡释放 |
+| Source | offset/完整扫描、分页和方向等价；同请求一次验证/同文件读取；坏 sidecar、外部改写、容量与取消边界 |
+| LuaLS | 128+2 批处理保持完整 outgoing；默认不启动 broker；opt-in 跨 CLI 相同 worker，cache hit 不增 batch，prune 释放 lease；配置变化与 active cancellation 退役 |
+| R8 | local/offline CDN 二十个冷热准备链完成；固定 CascLib N/Z 摘要与 checksum 拒绝对照；真实 storage/RSS 不继承 fixture 通过 |
+
+细节、测试与未测边界见 [Data 读取](data-reader-optimization-2026-09-30.md)、
+[资源预算](data-budget-implementation-2026-09-30.md)、[R8](data-regression-implementation-2026-09-30.md)、
+[Source](source-optimization-implementation-2026-09-30.md) 和 [LuaLS](luals-session-implementation-2026-09-30.md)。
+全量离线 baseline 仍必须包含强制 Lua 5.1；这些改动不替代 live/互动桌面的独立验收。
 
 2026-09-29 [CASC 内容变体](content-variants-2026-09-29.md)新增：默认歧义、显式双变体、
 Root 顺序无关、缺失不回退、其他 flag/重复 CKey 仍歧义、非法值及完整性失败不覆盖输出。

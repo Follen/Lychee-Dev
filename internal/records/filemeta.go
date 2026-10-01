@@ -14,6 +14,7 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/records/archive"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -80,6 +81,17 @@ func InspectFileExistence(ctx context.Context, root, snapshot string, request Fi
 	if byID == byName {
 		return FileExistenceReading{}, ErrFileQuery
 	}
+	request.File = ensureQueryBudget(request.File)
+	store, err := vault.OpenStore(root)
+	if err != nil {
+		return FileExistenceReading{}, err
+	}
+	admission, err := store.AcquireDataResources(ctx, vault.DataOrdinary)
+	if err != nil {
+		return FileExistenceReading{}, err
+	}
+	defer admission.Close()
+	request.File.admitted = true
 	reading, err := PrepareListfile(ctx, root, request.Listfile)
 	if err != nil {
 		return FileExistenceReading{}, err
@@ -228,6 +240,15 @@ func requestSourceLabel(query *FileQuery) string {
 // lookupRootEntries projects Root records for explicit IDs without extracting
 // any file content. "Not in Root" is reported to the caller as an empty list.
 func lookupRootEntries(ctx context.Context, s *vault.Store, pin selection.DataPin, query FileQuery, ids []uint32) ([]RootRecord, error) {
+	query = ensureQueryBudget(query)
+	if !query.admitted {
+		admission, err := s.AcquireDataResources(ctx, vault.DataOrdinary)
+		if err != nil {
+			return nil, err
+		}
+		defer admission.Close()
+		query.admitted = true
+	}
 	reader := OpenReader(s)
 	src, err := prepareFileSource(ctx, s, pin, query)
 	if err != nil {
@@ -243,11 +264,23 @@ func lookupRootEntries(ctx context.Context, s *vault.Store, pin selection.DataPi
 	if err != nil {
 		return nil, err
 	}
+	if err := query.budget.Charge(resource.Cost{RetainedBytes: root.Bytes, MetadataBytes: root.Bytes}); err != nil {
+		return nil, err
+	}
 	raw, err := s.ReadBlob(ctx, root, query.MetadataBytes)
 	if err != nil {
 		return nil, err
 	}
-	return LookupRoot(ctx, bytes.NewReader(raw), int64(len(raw)), ids, RootLimits{Bytes: query.MetadataBytes, Records: 10000000, Groups: 65536, Matches: 4096})
+	entries, err := LookupRoot(ctx, bytes.NewReader(raw), int64(len(raw)), ids, RootLimits{Bytes: query.MetadataBytes, Records: 10000000, Groups: 65536, Matches: 4096})
+	if err != nil {
+		return nil, err
+	}
+	if src.verify != nil {
+		if err := src.verify(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return entries, nil
 }
 
 // ArchiveLocation is one local archive extent for an encoding key. It reports
@@ -303,7 +336,13 @@ func InspectFileEncoding(ctx context.Context, root, snapshot string, request Fil
 		if err != nil {
 			return FileEncodingReading{}, err
 		}
-		query := request.File
+		query := ensureQueryBudget(request.File)
+		admission, err := s.AcquireDataResources(ctx, vault.DataOrdinary)
+		if err != nil {
+			return FileEncodingReading{}, err
+		}
+		defer admission.Close()
+		query.admitted = true
 		query.FileDataID = request.FileDataID
 		reader := OpenReader(s)
 		src, err := prepareFileSource(ctx, s, pin, query)
@@ -318,6 +357,9 @@ func InspectFileEncoding(ctx context.Context, root, snapshot string, request Fil
 		defer closeIndex()
 		rootBlob, _, err := reader.extractContent(ctx, query, src.open, index, src.meta.RootContentKey, query.MetadataBytes)
 		if err != nil {
+			return FileEncodingReading{}, err
+		}
+		if err := query.budget.Charge(resource.Cost{RetainedBytes: rootBlob.Bytes, MetadataBytes: rootBlob.Bytes}); err != nil {
 			return FileEncodingReading{}, err
 		}
 		raw, err := s.ReadBlob(ctx, rootBlob, query.MetadataBytes)
@@ -356,6 +398,11 @@ func InspectFileEncoding(ctx context.Context, root, snapshot string, request Fil
 					return FileEncodingReading{}, err
 				}
 				result.Archives = append(result.Archives, locations...)
+			}
+		}
+		if src.verify != nil {
+			if err := src.verify(ctx); err != nil {
+				return FileEncodingReading{}, err
 			}
 		}
 		rawResult, err := json.Marshal(result)

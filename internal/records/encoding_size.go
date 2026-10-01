@@ -35,7 +35,7 @@ func (e *EncodingIndex) FindEncoding(ctx context.Context, encodingKey string) (E
 		return EncodedRecord{}, ErrEncodingMissing
 	}
 	start := e.pagesStart + int64(e.pageCount)*e.pageSize
-	directory, err := e.source.ReadSpan(ctx, start, int64(e.encodedPageCount)*32)
+	directory, err := e.physicalDirectory(ctx, start)
 	if err != nil {
 		return EncodedRecord{}, err
 	}
@@ -58,7 +58,7 @@ func (e *EncodingIndex) FindEncoding(ctx context.Context, encodingKey string) (E
 		return EncodedRecord{}, ErrEncodingMissing
 	}
 	expected := [md5.Size]byte(directory[page*32+16 : (page+1)*32])
-	raw, err := e.source.ReadCheckedSpan(ctx, start+int64(e.encodedPageCount)*32+int64(page)*e.encodedPageSize, e.encodedPageSize, expected)
+	raw, err := e.checkedPage(ctx, start+int64(e.encodedPageCount)*32+int64(page)*e.encodedPageSize, e.encodedPageSize, expected)
 	if err != nil {
 		return EncodedRecord{}, err
 	}
@@ -103,6 +103,23 @@ func (e *EncodingIndex) FindEncoding(ctx context.Context, encodingKey string) (E
 		return EncodedRecord{}, ErrEncodingMissing
 	}
 	return result, nil
+}
+
+func (e *EncodingIndex) physicalDirectory(ctx context.Context, start int64) ([]byte, error) {
+	if e.cache == nil {
+		return e.source.ReadSpan(ctx, start, int64(e.encodedPageCount)*32)
+	}
+	c := e.cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.directory != nil {
+		return c.directory, nil
+	}
+	raw, err := e.source.ReadSpan(ctx, start, int64(e.encodedPageCount)*32)
+	if err == nil {
+		c.directory = raw
+	}
+	return raw, err
 }
 
 func allZero(raw []byte) bool {

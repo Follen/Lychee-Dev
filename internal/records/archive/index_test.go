@@ -83,6 +83,43 @@ func TestIndexVerification(t *testing.T) {
 	}
 }
 
+func TestCompactIndexMatchesGuardedScanAndRejectsCorruption(t *testing.T) {
+	key := [16]byte{1, 2, 3}
+	raw := indexFixture(key)
+	ctx := context.Background()
+	index, err := OpenIndex(ctx, bytes.NewReader(raw), int64(len(raw)), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range [][16]byte{key, {1, 2, 4}, {}} {
+		want, err := FindIndexSpans(ctx, bytes.NewReader(raw), int64(len(raw)), candidate, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := index.Find(ctx, candidate)
+		if err != nil || len(got) != len(want) {
+			t.Fatal(got, want, err)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatal(got, want)
+			}
+		}
+	}
+	for _, position := range []int{4, 57} {
+		broken := bytes.Clone(raw)
+		broken[position] ^= 1
+		if _, err := OpenIndex(ctx, bytes.NewReader(broken), int64(len(broken)), 0); !errors.Is(err, ErrIndexIntegrity) {
+			t.Fatal(err)
+		}
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := index.Find(canceled, key); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
 func TestEncodedSpanIdentity(t *testing.T) {
 	body := []byte("BLTE\x00\x00\x00\x00Noriginal")
 	key := md5.Sum(body)

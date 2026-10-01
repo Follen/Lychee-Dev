@@ -6,6 +6,7 @@ toolchain go1.27.1
 
 require (
 	github.com/HugoSmits86/nativewebp v1.3.0
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/yuin/gopher-lua v1.1.1
 	golang.org/x/image v0.24.0

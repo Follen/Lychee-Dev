@@ -5,6 +5,8 @@ package container
 import (
 	"encoding/binary"
 	"io"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 func (d *decoder) layout(src io.Reader, allowance int64, boundedChunks bool) ([]segment, uint64, error) {
@@ -29,6 +31,9 @@ func (d *decoder) layout(src io.Reader, allowance int64, boundedChunks bool) ([]
 		if count > d.limits.Chunks-d.chunks {
 			return nil, 0, ErrLimit
 		}
+		if err := d.limits.Query.Charge(resource.Cost{RetainedBytes: int64(count) * 32, MetadataBytes: int64(count) * 32, DecodeWork: int64(count)}); err != nil {
+			return nil, 0, err
+		}
 		parts = make([]segment, count)
 		var total int64
 		for i := range parts {
@@ -48,6 +53,9 @@ func (d *decoder) layout(src io.Reader, allowance int64, boundedChunks bool) ([]
 			}
 		}
 	} else {
+		if err := d.limits.Query.Charge(resource.Cost{RetainedBytes: 32, MetadataBytes: 32, DecodeWork: 1}); err != nil {
+			return nil, 0, err
+		}
 		parts = make([]segment, 1)
 	}
 	return parts, header, nil

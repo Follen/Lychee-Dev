@@ -74,3 +74,28 @@ Read [source-value-flow.md](source-value-flow.md) for versioned rules, value ide
 guards and unknown edges. If live investigation is already authorized, carry the
 remaining hypothesis into [live investigation](live-investigation.md#test-source-hypotheses).
 Source-only work does not authorize game input.
+
+
+## Optional LuaLS session reuse
+
+`source refs` and `source context` keep one-shot semantic execution as the
+default behavior. Add `--session-reuse` only when several semantic cache misses
+will investigate the same fixed source/environment. Complete result-cache hits,
+static-only queries and ordinary source searches do not start a broker.
+
+The optional broker retains one verified worktree lease and one guarded LuaLS
+worker for that home. Identity changes rebuild the worker; an active cancelled
+or timed-out query retires it. Requests keep the original deadline while queued,
+initializing and querying. A busy or incompatible owner fails closed; do not
+kill a PID or override its lease to recover.
+
+Use `lycheedev source session status --home <workspace>` to inspect without
+starting it, and `lycheedev source session close --home <workspace>` to release
+it before explicit source reclamation. Add the same `--release <release-root>`
+when the investigation uses a separately verified release. The broker also exits
+after 60 seconds idle, ten minutes lifetime, or 256 semantic RPC batches.
+`--static-only` cannot be combined with `--session-reuse`.
+
+Reuse remains opt-in. These bounds do not claim measured full-source RSS or
+latency; retain the result's coverage and partial reasons. Session failure does
+not establish absence of references or calls.

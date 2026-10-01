@@ -25,6 +25,8 @@ type TargetQuery struct {
 const inspectTargetLimit = 25
 
 func (b *Browser) InspectTarget(ctx context.Context, snapshotID string, pin selection.SourcePin, query TargetQuery) (SearchResponse, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
 	symbol, target := strings.TrimSpace(query.Symbol), strings.TrimSpace(query.Path)
 	response := SearchResponse{SourceID: pin.Repository, Product: pin.Product, RequestedRef: pin.RequestedRef, ResolvedCommit: pin.ExactCommit, SnapshotID: snapshotID, Results: []Match{}}
 	if symbol == "" && target == "" {
@@ -55,6 +57,7 @@ func (b *Browser) inspectPath(ctx context.Context, snapshotID string, pin select
 	if err != nil {
 		return response, err
 	}
+	defer cache.Close()
 	var files, assets []sourceRecord
 	documents := map[string]sourceRecord{}
 	assetRows := map[string]sourceRecord{}
@@ -169,6 +172,7 @@ func (b *Browser) exactIndexedPath(ctx context.Context, pin selection.SourcePin,
 	if err != nil {
 		return "", err
 	}
+	defer cache.Close()
 	found := ""
 	err = cache.scan(ctx, func(r sourceRecord) error {
 		if (r.Kind == "document" || r.Kind == "asset") && r.Path == symbol {

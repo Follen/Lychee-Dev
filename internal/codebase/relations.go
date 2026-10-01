@@ -18,9 +18,10 @@ import (
 )
 
 type ResearchOptions struct {
-	Semantic            *luals.Runtime `json:"-"`
-	EnvironmentSnapshot string         `json:"environmentSnapshot,omitempty"`
-	Flow                bool           `json:"flow,omitempty"`
+	Semantic            *luals.Runtime   `json:"-"`
+	Analyze             SemanticAnalyzer `json:"-"`
+	EnvironmentSnapshot string           `json:"environmentSnapshot,omitempty"`
+	Flow                bool             `json:"flow,omitempty"`
 }
 type RelationQuery struct {
 	SymbolID  string `json:"symbolId,omitempty"`
@@ -76,6 +77,9 @@ type SourceRelations struct {
 }
 
 func RelateSource(ctx context.Context, root, snapshot string, query RelationQuery, options ...ResearchOptions) (SourceRelations, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	var reading SourceRelations
 	pin, err := pinnedSource(ctx, root, snapshot)
 	if err != nil {
@@ -132,6 +136,9 @@ func researchCursor(pin selection.SourcePin, identity, cursor string) (int, stri
 }
 
 func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.SourcePin, query RelationQuery, opt ResearchOptions) (RelationResult, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	result := RelationResult{Repository: pin.Repository, Product: pin.Product, Commit: pin.ExactCommit, Snapshot: snapshot, Candidates: []SymbolMatch{}, Relations: []ResearchRelation{}, Coverage: ResearchCoverage{State: "partial", Structural: "complete", Semantic: "unavailable", Environment: "unspecified", Reasons: []string{}}}
 	if (query.SymbolID == "") == (query.Symbol == "") {
 		return result, ErrInvalidSymbol
@@ -178,8 +185,11 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 	if err != nil {
 		return result, err
 	}
+	defer cache.Close()
 	var declarations []SymbolMatch
-	err = cache.scan(ctx, func(r sourceRecord) error {
+	err = cache.scanSelected(ctx, func(e recordOffset) bool {
+		return e.Kind == "symbol" && e.SymbolKind == "declaration" && (query.SymbolID != "" && e.ID == query.SymbolID || query.Symbol != "" && e.Name == query.Symbol)
+	}, func(r sourceRecord) error {
 		result.Coverage.ScannedFacts++
 		if r.Kind != "symbol" || r.Symbol == nil {
 			return nil
@@ -213,7 +223,9 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 	}
 	var edges []SymbolMatch
 	edgeCut := false
-	err = cache.scan(ctx, func(r sourceRecord) error {
+	err = cache.scanSelected(ctx, func(e recordOffset) bool {
+		return e.Kind == "symbol" && e.SymbolKind == "relationship" && (direction != "outgoing" && e.Target == name || direction != "incoming" && e.Name == name)
+	}, func(r sourceRecord) error {
 		if r.Kind != "symbol" || r.Symbol == nil || r.Symbol.Kind != "relationship" {
 			return nil
 		}
@@ -257,31 +269,18 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 	if result.Symbol == nil && len(result.Relations) == 0 {
 		result.Coverage.Reasons = append(result.Coverage.Reasons, "no declaration or structural relation in indexed coverage")
 	}
-	if opt.Semantic != nil && result.Symbol != nil && direction != "outgoing" {
-		semantic, reason := b.cachedSemantic(ctx, pin, cache.manifest.RecordsHash, env.Manifest, opt.Semantic, *result.Symbol, "incoming", func() ([]ResearchRelation, string) {
-			return b.semanticReferences(ctx, cache, pin, *result.Symbol, opt.Semantic, env.Definitions, env.Mappings)
+	if opt.Semantic != nil && result.Symbol != nil {
+		semantic, reason := b.cachedSemantic(ctx, pin, cache.manifest.RecordsHash, env.Manifest, opt.Semantic, *result.Symbol, direction, func() ([]ResearchRelation, string) {
+			return b.semanticRelations(ctx, cache, pin, *result.Symbol, edges, opt.Semantic, env.Definitions, env.Mappings, env.Manifest, direction, opt.Analyze)
 		})
+		result.Coverage.Semantic = "complete"
 		if reason != "" {
-			result.Coverage.Reasons = append(result.Coverage.Reasons, reason)
 			result.Coverage.Semantic = "partial"
-		} else {
-			result.Coverage.Semantic = "complete"
+			result.Coverage.Reasons = append(result.Coverage.Reasons, reason)
 		}
 		result.Relations = append(result.Relations, semantic...)
 	} else if opt.Semantic == nil {
 		result.Coverage.Reasons = append(result.Coverage.Reasons, "verified LuaLS runtime unavailable or static-only requested")
-	}
-	if opt.Semantic != nil && result.Symbol != nil && direction != "incoming" {
-		outgoing, reason := b.cachedSemantic(ctx, pin, cache.manifest.RecordsHash, env.Manifest, opt.Semantic, *result.Symbol, "outgoing", func() ([]ResearchRelation, string) {
-			return b.semanticOutgoing(ctx, cache, pin, *result.Symbol, edges, opt.Semantic, env.Definitions, env.Mappings, env.Manifest)
-		})
-		if reason != "" {
-			result.Coverage.Semantic = "partial"
-			result.Coverage.Reasons = append(result.Coverage.Reasons, reason)
-		} else if result.Coverage.Semantic != "partial" {
-			result.Coverage.Semantic = "complete"
-		}
-		result.Relations = append(result.Relations, outgoing...)
 	}
 	if result.Coverage.Environment == "missing-client-pin" {
 		result.Coverage.Reasons = append(result.Coverage.Reasons, "third-party source has no selected client API environment")
@@ -333,7 +332,69 @@ func sortResearchRelations(rows []ResearchRelation) {
 	})
 }
 
-func (b *Browser) semanticReferences(ctx context.Context, cache *snapshotCache, pin selection.SourcePin, symbol SymbolMatch, runtime *luals.Runtime, definitions []byte, mappings []environment.DefinitionMapping) ([]ResearchRelation, string) {
+func (b *Browser) semanticRelations(ctx context.Context, cache *snapshotCache, pin selection.SourcePin, symbol SymbolMatch, edges []SymbolMatch, runtime *luals.Runtime, definitions []byte, mappings []environment.DefinitionMapping, manifest environment.Manifest, direction string, analyzer SemanticAnalyzer) ([]ResearchRelation, string) {
+	queries := []luals.Query{}
+	reasons := []string{}
+	incomingCount := 0
+	if direction != "outgoing" {
+		incoming, reason := semanticReferenceQueries(ctx, cache, symbol, mappings)
+		if reason != "" {
+			reasons = append(reasons, reason)
+		} else {
+			queries = append(queries, incoming...)
+			incomingCount = len(incoming)
+		}
+	}
+	var sites []SymbolMatch
+	uncertain := false
+	if direction != "incoming" {
+		outgoing, outSites, cut := semanticOutgoingQueries(ctx, cache, symbol, edges, 128)
+		queries = append(queries, outgoing...)
+		sites = outSites
+		uncertain = cut
+	}
+	if len(queries) == 0 {
+		if uncertain {
+			reasons = append(reasons, "outgoing call locations could not be uniquely positioned")
+		}
+		return nil, strings.Join(reasons, "; ")
+	}
+	var analysis luals.Analysis
+	var err error
+	if analyzer != nil {
+		analysis, err = analyzer(ctx, pin, cache.manifest.RecordsHash, manifest, queries)
+	} else {
+		lease, leaseErr := b.AcquireWorktree(ctx, pin)
+		if leaseErr != nil {
+			return nil, "fixed worktree unavailable: " + leaseErr.Error()
+		}
+		defer lease.Close()
+		analysis, err = runtime.AnalyzeWorkspaceBatches(ctx, lease.Path(), definitions, luals.SplitQueries(queries))
+	}
+	if err != nil {
+		return nil, "LuaLS relation batch failed: " + err.Error()
+	}
+	rows := []ResearchRelation{}
+	if incomingCount > 0 {
+		part := projectedSemanticAnalysis(analysis, analysis.Results[:min(incomingCount, len(analysis.Results))])
+		found, reason := projectReferences(part, pin, symbol)
+		rows = append(rows, found...)
+		if reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}
+	if direction != "incoming" && (len(sites) > 0 || uncertain) {
+		part := projectedSemanticAnalysis(analysis, analysis.Results[min(incomingCount, len(analysis.Results)):])
+		found, reason := projectOutgoing(ctx, cache, pin, symbol, sites, uncertain, part, mappings, manifest)
+		rows = append(rows, found...)
+		if reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}
+	return rows, strings.Join(reasons, "; ")
+}
+
+func semanticReferenceQueries(ctx context.Context, cache *snapshotCache, symbol SymbolMatch, mappings []environment.DefinitionMapping) ([]luals.Query, string) {
 	queryPath := symbol.Path
 	var position luals.Position
 	if strings.HasPrefix(symbol.Category, "api-") {
@@ -358,15 +419,10 @@ func (b *Browser) semanticReferences(ctx context.Context, cache *snapshotCache, 
 			return nil, err.Error()
 		}
 	}
-	lease, err := b.AcquireWorktree(ctx, pin)
-	if err != nil {
-		return nil, "fixed worktree unavailable: " + err.Error()
-	}
-	defer lease.Close()
-	analysis, err := runtime.AnalyzeWorkspace(ctx, lease.Path(), definitions, []luals.Query{{Kind: luals.References, Path: queryPath, Position: position}, {Kind: luals.Hover, Path: queryPath, Position: position}})
-	if err != nil {
-		return nil, "LuaLS relation request failed: " + err.Error()
-	}
+	return []luals.Query{{Kind: luals.References, Path: queryPath, Position: position}, {Kind: luals.Hover, Path: queryPath, Position: position}}, ""
+}
+
+func projectReferences(analysis luals.Analysis, pin selection.SourcePin, symbol SymbolMatch) ([]ResearchRelation, string) {
 	rows := []ResearchRelation{}
 	for _, answer := range analysis.Results {
 		if answer.Query.Kind != luals.References {
@@ -392,7 +448,7 @@ func (b *Browser) semanticReferences(ctx context.Context, cache *snapshotCache, 
 	return rows, ""
 }
 
-func (b *Browser) semanticOutgoing(ctx context.Context, cache *snapshotCache, pin selection.SourcePin, symbol SymbolMatch, edges []SymbolMatch, runtime *luals.Runtime, definitions []byte, mappings []environment.DefinitionMapping, manifest environment.Manifest) ([]ResearchRelation, string) {
+func semanticOutgoingQueries(ctx context.Context, cache *snapshotCache, symbol SymbolMatch, edges []SymbolMatch, budget int) ([]luals.Query, []SymbolMatch, bool) {
 	queries := []luals.Query{}
 	sites := []SymbolMatch{}
 	uncertain := false
@@ -400,7 +456,7 @@ func (b *Browser) semanticOutgoing(ctx context.Context, cache *snapshotCache, pi
 		if edge.Name != symbol.Name || edge.Category != "call" || edge.Path != symbol.Path || edge.Line < symbol.Line || edge.Line > symbol.EndLine {
 			continue
 		}
-		if len(queries) >= 128 {
+		if len(queries) >= budget {
 			uncertain = true
 			break
 		}
@@ -412,23 +468,23 @@ func (b *Browser) semanticOutgoing(ctx context.Context, cache *snapshotCache, pi
 		queries = append(queries, luals.Query{Kind: luals.Definition, Path: edge.Path, Position: position})
 		sites = append(sites, edge)
 	}
-	if len(queries) == 0 {
-		if uncertain {
-			return nil, "outgoing call locations could not be uniquely positioned"
-		}
-		return nil, ""
-	}
-	lease, err := b.AcquireWorktree(ctx, pin)
-	if err != nil {
-		return nil, "fixed worktree unavailable: " + err.Error()
-	}
-	defer lease.Close()
-	analysis, err := runtime.AnalyzeWorkspace(ctx, lease.Path(), definitions, queries)
-	if err != nil {
-		return nil, "LuaLS outgoing definitions failed: " + err.Error()
-	}
+	return queries, sites, uncertain
+}
+
+func projectOutgoing(ctx context.Context, cache *snapshotCache, pin selection.SourcePin, symbol SymbolMatch, sites []SymbolMatch, uncertain bool, analysis luals.Analysis, mappings []environment.DefinitionMapping, manifest environment.Manifest) ([]ResearchRelation, string) {
 	lookup := map[string][]SymbolMatch{}
-	err = cache.scan(ctx, func(r sourceRecord) error {
+	targets := map[string]bool{}
+	for _, answer := range analysis.Results {
+		if answer.State == "complete" && len(answer.Locations) == 1 {
+			loc := answer.Locations[0]
+			if loc.Path != luals.DefinitionPath {
+				targets[loc.Path+"\x00"+strconv.Itoa(loc.Range.Start.Line+1)] = true
+			}
+		}
+	}
+	err := cache.scanSelected(ctx, func(e recordOffset) bool {
+		return e.Kind == "symbol" && e.SymbolKind == "declaration" && targets[e.Path+"\x00"+strconv.Itoa(e.Line)]
+	}, func(r sourceRecord) error {
 		if r.Kind == "symbol" && r.Symbol != nil && r.Symbol.Kind == "declaration" {
 			s := *r.Symbol
 			key := s.Path + "\x00" + strconv.Itoa(s.Line)
@@ -512,4 +568,21 @@ func symbolPosition(ctx context.Context, cache *snapshotCache, s SymbolMatch) (l
 		utf16Column += utf16.RuneLen(r)
 	}
 	return luals.Position{Line: s.Line - 1, Character: utf16Column}, nil
+}
+
+// Completeness is projected per direction: a truncated references answer must
+// not turn otherwise complete outgoing definitions into an unsupported claim.
+func projectedSemanticAnalysis(analysis luals.Analysis, results []luals.QueryResult) luals.Analysis {
+	analysis.Results = results
+	analysis.State = "complete"
+	if analysis.Coverage.ExcludedFiles > 0 {
+		analysis.State = "partial"
+	}
+	for _, result := range results {
+		if result.State != "complete" {
+			analysis.State = "partial"
+			break
+		}
+	}
+	return analysis
 }
