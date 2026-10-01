@@ -4,8 +4,8 @@
   "files": [
     {
       "file": "README.md",
-      "bytes": 3140,
-      "sha256": "02d8f01d4e7a0132326a64156c1337852b31aeeab7dfda302d438a81d22ea65c"
+      "bytes": 4240,
+      "sha256": "ad025f5eee06c63d25f070b9d73accc8d43fde7546fb431a8df40da5c4bd4aa7"
     },
     {
       "file": "classic-capacity.json",
@@ -138,6 +138,26 @@
       "sha256": "28ab300e712734cecbd7d1bc90aa34f56bcf4e5bfe9038b5ecb3868191a45591"
     },
     {
+      "file": "retail-current-capacity.json",
+      "bytes": 47534,
+      "sha256": "6bc84d024cf50be87cc850e9daa55615fd8cd0d73ac2709de40c7453bb29a011"
+    },
+    {
+      "file": "retail-current-core-first.json",
+      "bytes": 2791,
+      "sha256": "0cc0ab9bc3061aa2f661bfa8fbbb5e29304f63164b5ba039623b3e6a009044b0"
+    },
+    {
+      "file": "retail-current-core-host-recovery-failure.json",
+      "bytes": 2237,
+      "sha256": "c502bcc1d2543176645f9d04c967a20f1df3862c40060eda662e21638a1f5abd"
+    },
+    {
+      "file": "retail-current-core.json",
+      "bytes": 11558,
+      "sha256": "660d7fc8474fd9bec0c3097a76a6287a92a3a21cbbfab34f10d5bb2ed9f9e042"
+    },
+    {
       "file": "retail-current-interrupted-activation.json",
       "bytes": 2678,
       "sha256": "2f47beab19c46ce1b7e7485719b9a4498208eb89306297a7581b82712c32a269"
@@ -163,6 +183,26 @@
       "sha256": "afbdb1577cf4720793f55a7811436040c88a7a3ebb3645b67d8562d032d322b7"
     },
     {
+      "file": "retail-current-research-seal.json",
+      "bytes": 1239,
+      "sha256": "f0feca8887e133b551f03e0a3fcb073d7b1c074792268e9a6652df5e43d7b04d"
+    },
+    {
+      "file": "retail-current-summary.json",
+      "bytes": 3672,
+      "sha256": "e67c167a329848d3dfac05390a50927fe5a75b78953579b8b9cd166420e9344e"
+    },
+    {
+      "file": "retail-current-suspended-final-status.json",
+      "bytes": 1210,
+      "sha256": "108b338fa4e79963c7ccd91a6c14c3f7fe3c339a26641c3ae99f2da020084fcd"
+    },
+    {
+      "file": "retail-current-suspended-process-end.json",
+      "bytes": 1210,
+      "sha256": "108b338fa4e79963c7ccd91a6c14c3f7fe3c339a26641c3ae99f2da020084fcd"
+    },
+    {
       "file": "retail-sealed-capacity.json",
       "bytes": 47001,
       "sha256": "c0428eaec31a49d089967c8c3974d4090e5196d2bcc29c94439a2ca0f08f1f81"
@@ -181,6 +221,11 @@
       "file": "retail-span-core.json",
       "bytes": 11177,
       "sha256": "b05380e3fd9d5acd41cb4a8547f090de28dd1cc9d84fa8155ce5b2a47e55d81e"
+    },
+    {
+      "file": "source-commit-ci.json",
+      "bytes": 3711,
+      "sha256": "474f484663a642bf1c32c092b03e5060aa43e196e4a5c3c80d170e09c5442675"
     }
   ]
 }

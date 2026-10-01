@@ -1,0 +1,33 @@
+{
+  "schema": "lycheedev.mailbox.final-seal-validation.v1",
+  "recordedAt": "2026-10-01T06:02:13.934Z",
+  "coreSteps": 13,
+  "pressureSteps": 54,
+  "normalRequests": 47,
+  "allConnectionsClosed": true,
+  "allJSONChecksPassed": true,
+  "completeReaderSameBuildNewProcess": "passed",
+  "readerReplay": {
+    "matched": 8,
+    "mismatched": 0
+  },
+  "formalReuse": "not_promoted",
+  "semantics": "not_promoted",
+  "futureABI": "not_claimed",
+  "files": 185,
+  "bytes": 8083506,
+  "sealSHA256": "b7b6a651327c8f76c34277efcd893a377232d7f7d37f9d2e5bd0c6a68a30088e",
+  "verified": true,
+  "immutableAssets": {
+    "root.anchor.json": "11d48aa512fd890df85066f30b4ffd1a086d30c1b75dcab0eb59ad033d4ceb0e",
+    "root.profile.json": "1afe07213bb3979384c5939062df458ea9f26ef5d1b3e98a8cff5fa382f56406",
+    "root.binding.json": "9de453aa9033c125a542dc011853ce09fa5e5fd61386250a1f533a3e1bb8dc34",
+    "reader.mjs": "9c5019b092293d31de5830ef5883bbf91a843dac6715c6b1f7fa41f7b51cf036"
+  },
+  "libraryCopy": {
+    "file": "C:/Users/follen/.wowdump/evidence/retail@12.1.0.69933/retail-lua-state-root-rip-v1-ff62c87fea56.json",
+    "sha256": "ff62c87fea56a6b8f6ad5ca87b8c630f8a0cb2c5f4e36d19759383e8e3605dd1",
+    "bytes": 1625730
+  },
+  "sourceEdited": false
+}

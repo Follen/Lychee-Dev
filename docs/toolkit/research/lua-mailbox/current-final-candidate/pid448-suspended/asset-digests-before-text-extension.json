@@ -118,16 +118,6 @@
       "sha256": "8682ee15ae58c0a21d0af0fa3f08f9f785075c20e78bfb84be0e899f1e461f79"
     },
     {
-      "file": "current-final-candidate/pid448-suspended/archive-format.json",
-      "bytes": 591,
-      "sha256": "eee59df37ddc08c9495e370e4811c7207e30b3f7c441dede3811d7af3675d76c"
-    },
-    {
-      "file": "current-final-candidate/pid448-suspended/asset-digests-before-text-extension.json",
-      "bytes": 36748,
-      "sha256": "b7b6a651327c8f76c34277efcd893a377232d7f7d37f9d2e5bd0c6a68a30088e"
-    },
-    {
       "file": "current-final-candidate/pid448-suspended/blocker-summary.json",
       "bytes": 1384,
       "sha256": "3cd107d083c4965c7448d8268db0e09a4b8f721352d8fae49d654e754c85c7ca"
@@ -208,7 +198,7 @@
       "sha256": "233491f43703c237c82acf9ec32d555403523856bf580d937fa61f3528104cc2"
     },
     {
-      "file": "current-final-candidate/pid448-suspended/window_capture_test.go.txt",
+      "file": "current-final-candidate/pid448-suspended/window_capture_test.go",
       "bytes": 1937,
       "sha256": "93f3974d5305c7f8e075207a2dccfefee8012d48af79928b50511f7376eae76e"
     },

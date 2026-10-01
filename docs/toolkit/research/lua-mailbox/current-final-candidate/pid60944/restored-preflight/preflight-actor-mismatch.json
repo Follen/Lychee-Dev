@@ -1,0 +1,20 @@
+{
+  "schema": "lycheedev.mailbox.target-preflight.v1",
+  "pid": 60944,
+  "creation": "134353066099007409",
+  "image": "D:/Game/World of Warcraft/_retail_/Wow.exe",
+  "sha256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd",
+  "oldCON": "CON-da201076541bff284bf253447c205a0f",
+  "oldCONClosed": true,
+  "oldProcessEnd": "process_absent",
+  "expectedGUID": "Player-729-06AA5F07",
+  "observedCharacter": "荔枝小月亮",
+  "observedRealm": "燃烧之刃",
+  "observedGUID": "Player-829-03DAABDF",
+  "inputSequenceAdvancing": true,
+  "core": "blocked",
+  "capacity47": "not_run",
+  "gameInput": false,
+  "newCON": false,
+  "reason": "Actor does not match authorized fixed original actor"
+}

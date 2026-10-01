@@ -41,7 +41,24 @@ is retained separately: 9 uncertain queued messages, followed by the owner's
 identification of an external script sending spaces. It is not silently replaced
 by a later success. `asset-digests.json` seals these raw reports and README.
 
+The final Retail core and capacity reports use the same frozen candidate on
+independently bound process `60944:134353066099007409`, 荔枝小月亮 / 燃烧之刃,
+after the old process-ended connections were closed. All 13 logical core checks
+completed after exact-CON activation continuation; the first post-input read
+failure and a temporary host recovery-runner assertion are retained separately.
+No submitted activation input was replayed. All 54 pressure calls, including 47
+ordinary requests, exited 0 without pressure recovery. Execute, reload and
+disconnect retries kept exact journals. Final connection/status and independent
+root/public-reader/replay evidence are also retained in the Retail bundle.
+
+`source-commit-ci.json` records all 12 successful Windows checks for source
+commit `072061388c9b4a3c17b3b6a527cdedc72cc6f1e5`. Later additions append
+research evidence and documentation only; this snapshot is not a fabricated
+CI result for a later commit.
+
 The development candidate is untagged and unpublished. These results do not
-certify Titan, first clean installation, process restart or a future Lua ABI.
+certify Titan, first clean installation, unattended relogin/fault-injected
+restart behavior or a future Lua ABI. Same-build Retail relaunch between
+independently bound sessions was exercised in the final run.
 See [the acceptance record](../../live-mailbox-acceptance-2026-10-01.md) for
 candidate hashes, process identities, recovery limitations and later results.

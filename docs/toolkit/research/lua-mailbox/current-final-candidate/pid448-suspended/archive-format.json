@@ -1,0 +1,9 @@
+{
+  "schema": "lycheedev.research.archive-format.v1",
+  "originalFile": "current-final-candidate/pid448-suspended/window_capture_test.go",
+  "archivedFile": "current-final-candidate/pid448-suspended/window_capture_test.go.txt",
+  "sha256": "93f3974d5305c7f8e075207a2dccfefee8012d48af79928b50511f7376eae76e",
+  "bytesUnchanged": true,
+  "reason": "This is overlay diagnostic source, not a standalone repository Go package; the text suffix prevents archive data from entering build/test discovery.",
+  "previousSealSHA256": "b7b6a651327c8f76c34277efcd893a377232d7f7d37f9d2e5bd0c6a68a30088e"
+}

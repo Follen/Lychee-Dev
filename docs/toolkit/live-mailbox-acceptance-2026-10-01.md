@@ -2,8 +2,9 @@
 
 This is a local development candidate, not a published release. The source and
 managed addon advance together to the new protocol; npm latest stays 2.5.1.
-The rebuilt candidate completed Retail, Classic and Forever live suites, with
-explicit continuation recovery where required. Offline
+The final frozen candidate completed Retail, Classic and Forever live suites.
+Classic and Forever passed without continuation recovery; Retail activation
+used an exact-CON continuation after a transient post-input read refusal. Offline
 baseline verification is recorded separately below. Results describe their
 actual candidate and do not inherit earlier memory-scanner acceptance.
 
@@ -15,12 +16,15 @@ actual candidate and do not inherit earlier memory-scanner acceptance.
 | Classic | 5.5.4.70032 / 50504 | `5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f` | Unique runtime text recipe, anchor `0x62dc34`, root `0x701dda8` |
 | Forever | 1.60.1.70124 / 16001 | `3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f` | New independent 49-byte RunScript site `0x75a69d`, root `0x7b780b8`; exact original code guard, no full-text uniqueness claim |
 
-Retail process instance is `34732:134352920362860468`; final selected actor is
+The initial Retail process instance was `34732:134352920362860468`; its selected actor was
 暗夜荔枝 / 罗宁, `Player-729-06AA5F07`. A preceding read-only sample on
 荔枝小月亮 / 燃烧之刃 had no connection or submitted input. The user changed
 characters before connection; the new VM root and actor were independently
 verified before continuing. This is same-process relocation, not cross-process
 reuse of the complete Mailbox reader.
+
+Later real-process instances and actors are recorded per acceptance round below;
+the initial instance is not the target of every final-candidate test.
 
 Classic process instance is `50368:134352957691792733`, 次年雪 / 祈福,
 `Player-4778-073BD91C`. Its unique text pass covered 56,605,244 bytes and used
@@ -352,11 +356,12 @@ client evidence below does not rewrite those offline entries.
 | --- | --- | --- |
 | Classic | Core 13 steps and capacity 54 steps including 47 ordinary requests; all first invocations exit 0, no recovery | `CON-663500f910df2fc23c0bbe6b424b9555`, `CON-dd51b69cd9f2e4041aabd0b6796fd39b` |
 | Forever | Activation, core 12 steps and capacity 54 steps including 47 ordinary requests; all first invocations exit 0, no short reads or recovery | `CON-2116b05fd563bbe7cc625dfe9f4ddc5d`, `CON-039af23c4067d76eab1e0bd847394dd8`, `CON-05fd4f99d8f5d03589de337f192b67fc` |
+| Retail | Core 13 steps completed after exact-CON activation continuation; final capacity 54 steps including 47 ordinary requests all exit 0, no pressure recovery | `CON-f7cfd8cf8cf44e02c07eac6af8febd15`, `CON-ba87711a9a9cb76c3385b18c4f3e87a3` |
 
 These final counts come from complete JSON reports, including examination of
 every nonzero exit code, rather than truncated progress output. Root queries,
 public named Mailbox reads and captured-byte replay independently passed for
-Forever after the pressure run. Both clients finished with complete cleanup.
+Forever after the pressure run. All three clients finished with complete cleanup.
 
 Retail's final-candidate activation was interrupted by `lab.key_already_held`:
 9 messages had already been queued, so the original reload input remained
@@ -370,7 +375,81 @@ replacement proof before the original PID exited. Public disconnect then
 closed `CON-2eda9cdcf05088ce5c1358e2c22ee994` with `processEnd=process_exited`,
 without input; status confirmed it unbound and closed. An OS query restricted
 to the exact real Retail executable path found no replacement process.
-Final Retail core/pressure acceptance remains incomplete, requiring a fresh
-login. Closed process cleanup does not turn the interrupted activation into a
-successful test. Titan, a first clean installation, process restart
-and future Lua ABI reuse remain unverified. No release was published.
+At that checkpoint, final Retail core/pressure acceptance was incomplete and
+required a fresh login. Closed process cleanup does not turn the interrupted
+activation into a successful test. Later independent successful acceptance is
+recorded below. Titan, a first clean installation, unattended relogin/fault-injected
+restart coverage and future Lua ABI reuse remain unverified. No release was published.
+
+On a later login, exact-path selection fixed the real Retail process to PID
+448, native creation `134353034288690796`, with the same executable hash.
+The initial runner's missing host project directory returned exit 2 before
+any session or input; that report is retained. The corrected runner created
+`CON-da201076541bff284bf253447c205a0f`, whose connect waited for an optical edge
+and exhausted its original budget without attempting physical input.
+
+Independent root and public Mailbox reads passed, but eight INPUT observations
+had identical sequence 51 and sampleMillis 67819300. Bounded WGC initialized
+and captured zero frames in four seconds. The OS reported the exact window
+visible, not minimized or cloaked, and all 108 process threads suspended,
+with zero CPU advancement in one second. This establishes process suspension;
+it does not identify which tool or actor suspended it. StartupBeacon.Stop
+does not stop the independent InputState sampler, so its 45-second lifetime
+cannot explain this observation. Public disconnect retained a Closing intent
+under ineligible/short reads; the original connection and deadlines remained
+preserved. The owner paused this work, then reported the game online again;
+recovery and further final acceptance use that original connection first.
+
+On resumption, PID 448 had exited. Public disconnect closed the original
+pending CON with `process_absent`, preserving its no-input history. The unique
+exact-path replacement was PID 60944, native creation `134353066099007409`,
+with the same Retail executable hash. Its INPUT publications progressed at
+one-second intervals. The current actor was 荔枝小月亮 / 燃烧之刃,
+`Player-829-03DAABDF`; the owner's existing arbitrary-character authorization
+allowed a new independent connection after all previous connections were closed.
+No old operation or identity was transferred to that character.
+
+The fresh connection `CON-f7cfd8cf8cf44e02c07eac6af8febd15` connected in
+1.608 seconds. Activation reload first encountered `memory.ineligible_read`
+after its input had been submitted. Exact-CON resume verified the new runtime
+without resending that input. One temporary host recovery runner compared its
+current read-back runtime with itself and failed an assertion; the original
+connect/runtime evidence was then used correctly. Its same-project connect and
+same-request reload read-backs did not create another connection or issue
+another reload. The failure reports and reuse provenance remain preserved.
+
+All 13 logical core checks completed, including independent actor API matching,
+normal/large payload, cache-off, byte-identical execute/reload/disconnect retries,
+and post-reload execution. The final independent pressure connection
+`CON-ba87711a9a9cb76c3385b18c4f3e87a3` completed all 54 calls with exit 0,
+including 47 ordinary requests, capacity runtime rollover at normal-46 with
+normal-47 continuing on the new runtime, retained-history
+retry/rotation, verified compile error, cleanup error with runtime destruction,
+bugs and disconnect. This final pressure run required no continuation recovery.
+Both final connections are closed. Retail's core result includes activation
+recovery, rather than an all-first-invocation-success claim.
+
+The original immutable Retail recipe/profile/binding/complete JavaScript reader
+was then queried in the new same-build process. Root profile and confirmed
+library reads passed; eight complete public-reader observations replayed with
+eight matches and zero mismatches. A new `read` confirmation with its copied
+evidence was appended to wowdump, leaving the recipe SHA-256 unchanged.
+The initial report-copy size refusal is retained; only the explicit large-report
+confirmation counted as successful. This verifies complete-reader reuse in a
+second process of this exact Retail build, without promoting formal semantics,
+formal reuse or future ABI support.
+
+The [final Retail summary](research/lua-mailbox/current-final-candidate/pid60944/summary.json)
+and raw reports are sealed in the Retail research bundle alongside all previous
+failures. Final bundle seals verified 187 Retail, 188 Classic and 89 Forever
+assets. The source commit `072061388c9b4a3c17b3b6a527cdedc72cc6f1e5` passed
+all 12 Windows CI checks across push and PR runs, including required aggregation.
+The follow-up changes append documentation/evidence only; no production source
+changed during final live verification and no release was published.
+
+The original 185-asset Retail seal is retained as a checkpoint. An overlay-only
+diagnostic Go source is archived with a `.go.txt` suffix, preserving every byte,
+so Go does not mistake evidence for a standalone package. The original seal and
+an archive-format explanation are appended, bringing the delivered count to 187.
+The sealed capture log is explicitly included despite the ordinary `*.log`
+ignore rule. Staged Git blobs are checked against every delivered asset digest.

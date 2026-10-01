@@ -1,0 +1,49 @@
+{
+  "schema": "lycheedev.mailbox.acceptance.v1",
+  "startedAt": "2026-10-01T04:45:04.722Z",
+  "cli": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-candidate-current\\dev-npm-stage\\native\\windows-amd64\\lycheedev.exe",
+  "project": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid448-project",
+  "pid": 448,
+  "installation": "D:/Game/World of Warcraft/_retail_",
+  "character": "暗夜荔枝",
+  "realm": "罗宁",
+  "guid": "Player-729-06AA5F07",
+  "complete": false,
+  "steps": [
+    {
+      "name": "connect",
+      "args": [
+        "live",
+        "connect",
+        "--installation",
+        "D:/Game/World of Warcraft/_retail_",
+        "--pid",
+        "448",
+        "--character",
+        "暗夜荔枝",
+        "--realm",
+        "罗宁",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid448-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 2,
+      "elapsedMs": 40,
+      "error": {
+        "code": "command.invalid_arguments",
+        "message": "GetFileAttributesEx D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid448-project: The system cannot find the file specified.",
+        "stage": "dispatch",
+        "retryable": false,
+        "resumeOperationId": ""
+      }
+    }
+  ],
+  "failure": {
+    "message": "connect: {\"code\":\"command.invalid_arguments\",\"message\":\"GetFileAttributesEx D:\\\\Code\\\\wow\\\\addons\\\\Lychee Dev\\\\.worktrees\\\\live-mailbox\\\\.tmp\\\\mailbox-live\\\\final-current-retail-pid448-project: The system cannot find the file specified.\",\"stage\":\"dispatch\",\"retryable\":false,\"resumeOperationId\":\"\"} \n\n2 !== 0\n"
+  },
+  "finishedAt": "2026-10-01T04:45:04.765Z"
+}

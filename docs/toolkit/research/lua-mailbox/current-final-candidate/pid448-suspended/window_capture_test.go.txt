@@ -1,0 +1,20 @@
+//go:build windows && amd64
+package desktop
+import("context";"testing";"time";"encoding/json";"crypto/sha256";"encoding/hex";"os";"unsafe";"golang.org/x/sys/windows")
+func TestRetail448ReadonlyWindowCapture(t *testing.T){
+ target:=WindowIdentity{Handle:38410532,ProcessID:448,ProcessStartedAt:134353034288690796,Executable:`D:\Game\World of Warcraft\_retail_\Wow.exe`,Class:"waApplication Window"}
+ ctx,cancel:=context.WithTimeout(context.Background(),4*time.Second);defer cancel()
+ out:=map[string]any{"pid":target.ProcessID,"creation":target.ProcessStartedAt,"durationCapMs":4000,"maxFrames":120,"gameInput":false}
+ if err:=ConfirmWindow(ctx,target);err!=nil{out["identityError"]=err.Error()}else{
+  iconic,_,_:=userLibrary.NewProc("IsIconic").Call(uintptr(target.Handle));visible,_,_:=windowVisible.Call(uintptr(target.Handle));fg,_,_:=userLibrary.NewProc("GetForegroundWindow").Call();var cloaked uint32
+  hr,_,_:=windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmGetWindowAttribute").Call(uintptr(target.Handle),14,uintptr(unsafe.Pointer(&cloaked)),4)
+  out["minimized"]=iconic!=0;out["visible"]=visible!=0;out["foreground"]=fg==uintptr(target.Handle);out["cloaked"]=cloaked;out["cloakedHRESULT"]=hr
+  stream,err:=CaptureFramesWithStartupTimeout(ctx,target,InputSignalCapture(),2*time.Second)
+  if err!=nil{out["captureError"]=err.Error()}else{
+   rows:=[]map[string]any{};unique:=map[string]bool{}
+   for len(rows)<120{f,e:=stream.Next(ctx);if e!=nil{out["captureEnd"]=e.Error();break};h:=sha256.Sum256(f.Pix);key:=hex.EncodeToString(h[:]);unique[key]=true;rows=append(rows,map[string]any{"ticks":f.SystemTicks,"width":f.Bounds().Dx(),"height":f.Bounds().Dy(),"sha256":key})}
+   stream.Close();out["frames"]=rows;out["frameCount"]=len(rows);out["uniquePixelHashes"]=len(unique)
+  }
+ }
+ b,_:=json.MarshalIndent(out,"","  ");if err:=os.WriteFile(os.Getenv("RETAIL_CAPTURE_REPORT"),b,0600);err!=nil{t.Fatal(err)};t.Log(string(b))
+}

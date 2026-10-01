@@ -1,0 +1,13 @@
+{
+  "schema": "lycheedev.mailbox.library-copy-verification.v1",
+  "level": "read",
+  "recipeSHA256": "11d48aa512fd890df85066f30b4ffd1a086d30c1b75dcab0eb59ad033d4ceb0e",
+  "immutableRecipeUnchanged": true,
+  "copy": "C:/Users/follen/.wowdump/evidence/retail@12.1.0.69933/retail-lua-state-root-rip-v1-ff62c87fea56.json",
+  "bytes": 1625730,
+  "sha256": "ff62c87fea56a6b8f6ad5ca87b8c630f8a0cb2c5f4e36d19759383e8e3605dd1",
+  "verified": true,
+  "formalReuse": "not_promoted",
+  "semantics": "not_promoted",
+  "futureABI": "not_claimed"
+}

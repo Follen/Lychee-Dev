@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "retail-lua-state-root-rip-v1",
+    "recipeBuildKey": "retail@12.1.0.69933",
+    "recipeSha256": "11d48aa512fd890df85066f30b4ffd1a086d30c1b75dcab0eb59ad033d4ceb0e",
+    "level": "read",
+    "validatedAgainst": "retail@12.1.0.69933",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\final-current-retail-pid60944-read-evidence\\library-evidence.json",
+      "copy": "evidence/retail@12.1.0.69933/retail-lua-state-root-rip-v1-ff62c87fea56.json",
+      "sha256": "ff62c87fea56a6b8f6ad5ca87b8c630f8a0cb2c5f4e36d19759383e8e3605dd1",
+      "bytes": 1625730
+    },
+    "note": "Current CLI9b484 Retail native core13 and capacity54/47 passed on new exact process60944:134353066099007409 and fixed actorPlayer-829-03DAABDF. Independent root/library query and complete public Mailbox reader8epochs replay8matched0mismatched passed. Full sealed report1625730bytes; read level only; no formal reuse/semantics promotion or future ABI claim; immutable recipe unchanged.",
+    "recordedAt": "2026-10-01T06:01:08.205Z"
+  }
+}
