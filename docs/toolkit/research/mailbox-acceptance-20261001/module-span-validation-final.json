@@ -1,0 +1,82 @@
+{
+  "proof": "requested piece must be covered by both original issued eligible span and current exact-origin mapping; state/protect/type/allocation unchanged; current expansion cannot fill old holes; nil-error short read carries io.ErrUnexpectedEOF; root/heap/record typed causes retained",
+  "recordedUtc": "2026-10-01T04:04:26.8804632Z",
+  "checks": [
+    {
+      "name": "build",
+      "exit": 0,
+      "seconds": 1.45,
+      "command": "go build ./..."
+    },
+    {
+      "name": "vet",
+      "exit": 0,
+      "seconds": 0.801,
+      "command": "go vet ./..."
+    },
+    {
+      "name": "memory",
+      "exit": 0,
+      "seconds": 1.339,
+      "command": "go test ./internal/live/memory -count=1"
+    },
+    {
+      "name": "channel-affected",
+      "exit": 0,
+      "seconds": 1.834,
+      "command": "go test ./internal/live/channel -run ^(TestNativeMailbox|TestMailbox|TestInputObservation|TestInputPostLookup|TestObserveRecordsBody|TestReceiptAttemptProbe) -count=1"
+    },
+    {
+      "name": "race3",
+      "exit": 0,
+      "seconds": 18.437,
+      "command": "go test -race ./internal/live/memory ./internal/live/channel -run ^(Test(MainModule|Module|LuaMailboxPreservesReadCauses|LuaMailboxProcessAndMidRecordCancellationReject|LuaMailboxPredicatesAndCancellationDoNotAuthorize|NativeMailbox|Mailbox|InputObservation|InputPostLookup|ObserveRecordsBody|ReceiptAttemptProbe)) -count=3"
+    },
+    {
+      "exit": 0,
+      "seconds": 1.869,
+      "command": "go build ./...",
+      "name": "final-build"
+    },
+    {
+      "exit": 0,
+      "seconds": 1.147,
+      "command": "go vet ./...",
+      "name": "final-vet"
+    },
+    {
+      "exit": 0,
+      "seconds": 1.616,
+      "command": "go test ./internal/live/memory -run ^(TestLuaMailbox.*(Read|Cancel|Budget)|TestModuleRequestedSpanIntersection|TestModuleMappedInteriorQuery)$ -count=1 -v",
+      "name": "final-targeted"
+    },
+    {
+      "exit": 0,
+      "name": "final-targeted-all",
+      "command": "go test ./internal/live/memory -run ^(TestLuaMailbox.*(Read|Cancel|Budget).*|TestModuleRequestedSpanIntersection|TestModuleMappedInteriorQuery)$ -count=1 -v",
+      "seconds": 0.665
+    }
+  ],
+  "realHelper": "three-page anonymous mapped child far-page NOACCESS split; middle49 bytes verifier before, RPM, verifier after pass; splitting inside request denied; restore run expansion cannot fill previously captured hole",
+  "red": "remote shrink/expand falsely rejected; readable protection change incorrectly accepted; root/heap/record original IO causes erased; record pre-IO budget cause RED via temporary old-helper overlay (actual production unchanged), GREEN original Source zero reads",
+  "sources": [
+    {
+      "sha256": "e92c74d494773e0b52a3873b6a931cfff6db7827e7effe1ff4febeaa4996c90b",
+      "path": "internal/live/memory/module_windows.go"
+    },
+    {
+      "sha256": "17a25838d44eee2528c469e61bba241b1bdcfc13ba22fe72368bf3623a39078f",
+      "path": "internal/live/memory/module_windows_test.go"
+    },
+    {
+      "sha256": "5134baaa9456c4c4be565b0d3637082bb094a9328f072ab0d1951deeebb49770",
+      "path": "internal/live/memory/lua_mailbox.go"
+    },
+    {
+      "sha256": "edb03630e4182b1f94ce05aa5229060108e5e6221ca3c55fe05b15c107682db6",
+      "path": "internal/live/memory/lua_mailbox_test.go"
+    }
+  ],
+  "frozen": true,
+  "worktree": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox"
+}

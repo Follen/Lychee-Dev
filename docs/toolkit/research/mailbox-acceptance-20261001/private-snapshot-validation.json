@@ -1,0 +1,52 @@
+{
+  "recordedUtc": "2026-10-01T03:37:30.1728492Z",
+  "red": "four profile functional negative: public mutation authorized commit",
+  "sources": [
+    {
+      "sha256": "3485e5f6a1953e5dcb14d6a00b98ed033ebd5ecfab1660965fad21075f04830a",
+      "path": "addon/Bridge/SlotProtocol.lua"
+    },
+    {
+      "sha256": "855b3b3c01e87c029bab2d3ee157b6e9346702c2259e8668fd81211ed7f85997",
+      "path": "tests/addon/t_mailbox.lua"
+    },
+    {
+      "sha256": "18789f2bd75ab05f2af3acd2b8ebe121333036d41caf7d5def43ca9d72812f6b",
+      "path": "tests/addon/t_slot_protocol.lua"
+    },
+    {
+      "sha256": "8e39d510e46b31b5b8d1803195c5afc92d4d0ba53587927deb76ff74700d5c1e",
+      "path": "tests/addon/t_slot_runtime.lua"
+    }
+  ],
+  "frozen": true,
+  "checks": [
+    {
+      "seconds": 1.472,
+      "command": "go build ./...",
+      "exit": 0,
+      "name": "build"
+    },
+    {
+      "seconds": 0.871,
+      "command": "go vet ./...",
+      "exit": 0,
+      "name": "vet"
+    },
+    {
+      "seconds": 1.224,
+      "command": "go test ./tests/addon -run TestWorkbenchLuaSuites/(t_mailbox|t_slot_protocol|t_slot_runtime|t_input_attempt|t_input_state|t_input_signal).lua -count=1 -v",
+      "exit": 0,
+      "name": "mandatory-lua-affected"
+    },
+    {
+      "seconds": 4.151,
+      "command": "go test ./tests/protocol -run ^(TestSlotDriverLuaRecoveryWithoutBusinessReplay|TestMemoryRecordLuaParity)$ -count=1 -v",
+      "exit": 0,
+      "name": "mandatory-lua-protocol"
+    }
+  ],
+  "proof": "snapshot challenge/function/envelope + receipts/consumed/owner are detached; original prepare envelope mutation cannot alter pending nonce/challenge/budget/code; original valid commit executes original function once",
+  "bounds": "fixed envelope and operation fact fields; private max46 operations +200 receipts/consumed, immutable strings shared; no function/code/callback/unknown fields in Snapshot",
+  "worktree": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox"
+}

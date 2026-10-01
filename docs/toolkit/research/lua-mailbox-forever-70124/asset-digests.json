@@ -1,0 +1,450 @@
+{
+  "schema": "lycheedev.research.assets.v1",
+  "assets": [
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/README.md",
+      "bytes": 13990,
+      "sha256": "8fcde582bf70fbe9cb8eb6259b20b97f9b859eddf770f76c0bbee18900585b8a"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/capability-runscript-read-confirm.json",
+      "bytes": 1796,
+      "sha256": "610efb5bdad0647edd76f3fe8b77a6a3ffda8f6002a51a8644bc88d21d6b0fa8"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/capability-runscript-save.json",
+      "bytes": 7333,
+      "sha256": "4c15b7204b311a23abb2933520d0ca8d65a83d84d6f78ae7ba95defb33fd6c12"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/capability-runscript-verified-query.json",
+      "bytes": 11739,
+      "sha256": "9591ac9810f3816c5278e243f25972ba89e6801b2c6aaaa01d0e4c7287417a9d"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/connect-mapping-limit.json",
+      "bytes": 387,
+      "sha256": "829d75127529f2714e3badc820efed6806499088c170953e2a8e46409f1fa5c8"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/connect-protected-text.json",
+      "bytes": 820,
+      "sha256": "ded7bbe34b6985495e070af7d89762b161a90621afe5316f9c589dbba4be66d7"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/context-runtime-string-find.json",
+      "bytes": 1880,
+      "sha256": "7c20190a74254ebfbff49ef8d1f7ffe8559343c9ee8e206a95843876fa7ed6d2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-activation-disconnect.json",
+      "bytes": 2423,
+      "sha256": "b19ea8b660a0e140d52cef57311ad9a02e2c5f5f9082b3ace18e588f1102d9f6"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-activation-reload.json",
+      "bytes": 2203,
+      "sha256": "d20cb3c9666e98df238eab9c220f44b7fde6b591da669ebc1702d4eed134bf8f"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-addon-status.json",
+      "bytes": 8971,
+      "sha256": "1faa2047ba868e7b3d6c787034547df1dc048206f256fab5c6e0ca50b611137e"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-capability-read-confirm.json",
+      "bytes": 3014,
+      "sha256": "7875b161fdf3114c53a7e28345658cf82beaae5d94f547ed867807d902594d14"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-core-disconnect-retry.json",
+      "bytes": 2948,
+      "sha256": "b3d96bb7ab36942631a37dfc90f4b89b41f0d2d2e8c2ce50ee7fdd5ecca604d1"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-core-report.json",
+      "bytes": 10649,
+      "sha256": "88a3618f8281d05fda9afcfe1d9a3a75a93e78b4d439a7c543e3caeba4ec6415"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-live-acceptance-summary.json",
+      "bytes": 2518,
+      "sha256": "d8ebb322eae3d022883e450a27a7a2f20e420332caaf7e4143f0cab506a4db3f"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-pressure-disconnect-retry.json",
+      "bytes": 11436,
+      "sha256": "6eef9895a1483fd1a5d5c78fffe3df3b0a77c37b1d87f96b70a91a6eaaa67042"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-pressure-report.json",
+      "bytes": 46757,
+      "sha256": "eaf8c4f10b613aa950c16286b54c5ba3419443c7448e4e62bb197ad8a5362139"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-reader-after-core-replay.json",
+      "bytes": 2466,
+      "sha256": "1ea9c543fa199b6853edac5f26dfcefc79ffcf36bacb0ec607e7a397b1121c0d"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-reader-after-core-result.json",
+      "bytes": 2445,
+      "sha256": "646228b633975dc0c1cf7df28f8636db7c3600d6ded56d334d55912de99fb1f2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-reader-after-pressure-replay.json",
+      "bytes": 2470,
+      "sha256": "38009a71913bd53fd288d089c0af86f9a46abff289ef05a82fe1315da2fd70aa"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-reader-after-pressure-result.json",
+      "bytes": 2449,
+      "sha256": "818ab087a39082c5ba07f9a52f2ef40c896197255b8080912277e272561bbab1"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-reader-before-core-reload-replay.json",
+      "bytes": 2543,
+      "sha256": "22aa412f1f8a68b040c024d32255e138f217d53eed16e5f18c03d6fa012059c8"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-reader-before-core-reload-result.json",
+      "bytes": 2522,
+      "sha256": "bad22962e890a758265a17972df55fa21aceb9e88e02611e7d1643884c64f8ff"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-recipe-read-confirm.json",
+      "bytes": 980,
+      "sha256": "6095149c9b064cfeb352ed0dd50d1d253ccc42adc2df53d7d39ffa68f27bec49"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-root-after-core-query.json",
+      "bytes": 16087,
+      "sha256": "f408175b580d1af21709148daa91f1fd297c97bc577cf23048b5d8f86d6ed32e"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-root-after-pressure-query.json",
+      "bytes": 16086,
+      "sha256": "d159b06c05cfc994c8422a3d49092cb67d44df772abb1921e0a49f48a0b74b8f"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/current-root-before-core-query.json",
+      "bytes": 16086,
+      "sha256": "ed88523122f0b1f1aba74844b3c4a407ab3933acce98485b224e5d984454d5cc"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/data-dump-report.json",
+      "bytes": 1075,
+      "sha256": "82f2c302d4a81a8d1a7036364ef788827157c8763e7375a71bf6e903787dfda8"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/disk-anchor-research.json",
+      "bytes": 330,
+      "sha256": "f6d147e9468480817b24ed57aea54df02efc793320c5e65a527cb18d3cefb177"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/final-acceptance-summary.json",
+      "bytes": 1409,
+      "sha256": "4433a5f6ffbd8f457e1d779a34455a5d64c6ce3a984837388d33c604828e1f06"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/final-addon-status.json",
+      "bytes": 8971,
+      "sha256": "4e9222639fa3e2014e4e14d2f9c1b8f23030d18fb4a97128d3d9075afa6a7e65"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/final-connect-unsupported.json",
+      "bytes": 821,
+      "sha256": "d8e3e9e115babbc16924727602cb752ee3fece70b0ea5b1cc4080b99023445a7"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/final-passive-inventory.json",
+      "bytes": 2377,
+      "sha256": "8db290059b766122e77bd856236565cc9cae9e0b3c436f8770dede7d61d41a5a"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/getbuildinfo-actual-data-pointer-find.json",
+      "bytes": 1409,
+      "sha256": "4afa7c8c074e2aa807dc48a513726e6eaf4111f77762ee4730b137af4675f477"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/getbuildinfo-actual-rdata-pointer-find.json",
+      "bytes": 1401,
+      "sha256": "c4050bf807071355aff2ec9e88eff35b6c94323ce29cd1706390b881ca57ae37"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/getbuildinfo-mutable-registration-find.json",
+      "bytes": 1409,
+      "sha256": "245fd116a592a3ce555bf81807a7213a7212f232f022a042db3a4b10949ac158"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/getbuildinfo-registration-find.json",
+      "bytes": 1401,
+      "sha256": "f99f31e1b7582ba2f5a93f254b1f175408cf4224902ad0dffa5a536597656cb0"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/getbuildinfo-runtime-string-find.json",
+      "bytes": 1766,
+      "sha256": "a119afc6bd5aadf08d7772b44ea1ed724527283f379cca1c8236a736e90c647c"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/ida-research-status.json",
+      "bytes": 9443,
+      "sha256": "3fd3f94aaa854fad161f600a6e39f1fed3e6ca4cc4b19b37d2e517296add6096"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/make-ida-overlay.go.txt",
+      "bytes": 2918,
+      "sha256": "00bf3f25ba7ba2684396ed4ee1eb25b70e314d85561dd9da71a2459f970584f2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/module-mapping-summary.json",
+      "bytes": 675,
+      "sha256": "d0f6c2c5051ed8c287280ab23b09fe4452160ede5eb55a28cf45f379b6bd5cac"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/module-mappings.json",
+      "bytes": 762141,
+      "sha256": "256847b2dbe55280308f664ca06ba0ca3f0c1920b15077aa54e67a728229b8d6"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/mutable-data-dump-report.json",
+      "bytes": 894,
+      "sha256": "58c8f63c6f232afc38580b5bcba1ffc2e47ff941377b5635aec27be8abee56d2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/partial-code-dump-report.json",
+      "bytes": 1000,
+      "sha256": "ab23d8c3843f4f1f912379bdee11782729b55909f06a477005e7c7f25a10a030"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/profile-runscript-lint.json",
+      "bytes": 1232,
+      "sha256": "d5edaeb7824f4cd6aee91b3e4673e07ad7ec5fd5649fdb218519a2b5e0abf4ac"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/profile-runscript-test.json",
+      "bytes": 4321,
+      "sha256": "002635653a2e9df534e49a6c6ff95da7ad27383dc5f7032da930f255042fe2f2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/readable-anchor-research.json",
+      "bytes": 949,
+      "sha256": "f4445b36b5bc3841547e5a5ca9e4a8e3fc4b6c5c843ef430849102a15fb2dfab"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/recipe-runscript-read-confirm.json",
+      "bytes": 1054,
+      "sha256": "786bc3607b4e3118591fc85ff6ec9cbfe069a71719d8924b3ddc733e7875019b"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/recipe-runscript-save.json",
+      "bytes": 523,
+      "sha256": "9bd5a79378cc22eee7c3e83ef10f6a0f6a2e052930f413e9d86d964d194c705c"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/relogin-mailbox-reader-replay.json",
+      "bytes": 2030,
+      "sha256": "8642899a3336ad15ab9791da520cb717b50497767b23293c890c7347199fcf3e"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/relogin-mailbox-reader-result.json",
+      "bytes": 2166,
+      "sha256": "2b136cb4052879ed97e34774d53c1614f58d5316acdee92727018a8727b4385d"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/relogin-mailbox-reader-selftest.json",
+      "bytes": 2136,
+      "sha256": "3c259043e6ffef2082725be0c42cb2e7e04f65629aabfa9300f6d1b43bc52fc6"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/relogin-mailbox-reader.jsonl",
+      "bytes": 26398,
+      "sha256": "cc0f278bf1d9428eee7bb8527ddc902ea943144442bf96ba640bde8252e92ba4"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/research-helper.go.txt",
+      "bytes": 4682,
+      "sha256": "13144d744e39ae5a32da914f138f5a0893f8e34845864d4149af60253d187d12"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/root-runscript-live-query.json",
+      "bytes": 9282,
+      "sha256": "bbee580b5dd765e18d6bca52720b1cf10af269d63ad52605af87a9cf719adb7d"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/root-runscript.anchor.json",
+      "bytes": 1698,
+      "sha256": "a2edc327ae09fe490c7e354948bedb1d1bea8ae2d27070aaa563aa3371a5f9b8"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/root-runscript.profile.json",
+      "bytes": 5005,
+      "sha256": "2c85b30a93ab8b4f0da884f928a02e4bf8cc051c7b67071d8c41ce15432a4db9"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runscript-anchor-raw-read.json",
+      "bytes": 386,
+      "sha256": "56d9e9b62efc234d5e4e8b35369c4560a4dad586011061bdf32356337a29ce17"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runscript-public-reader.mjs",
+      "bytes": 9640,
+      "sha256": "8c78e50ab60fba0e1b11def3f6662f2d75ea9c811379ccaf25b3ba53b1388320"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runscript-root-site-proof.json",
+      "bytes": 3017,
+      "sha256": "cf4e435148e354595a95d44334e4ddee9b73dcaa29a8b3f57d079bdc5f484738"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runscript-runtime-string-find.json",
+      "bytes": 2096,
+      "sha256": "b7d3bd91079a929467a57b8b2bd7490673bb7d8a06b0bd386853bdd65cd582b2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runtime-code-partial.manifest.json",
+      "bytes": 211090,
+      "sha256": "5cc3d81ca99b90cfa5e7e55512623764955fa57fbc210b9d8a7629ce676e2f89"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runtime-data.manifest.json",
+      "bytes": 1894,
+      "sha256": "2b5d23e222b17d6af377a7b92d6f931e065a3b9633f489f703b39b2752f38925"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/runtime-overlay-provenance.json",
+      "bytes": 211527,
+      "sha256": "817e025c1eecaf8f507f52c70e9847b12b9e48882d45515511d26a149c2db050"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-activation-disconnect-resume.json",
+      "bytes": 2398,
+      "sha256": "de75ddc221706863979f59c999d5f4955ef8a90b31721b56c9c518a092757f19"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-activation-reload.json",
+      "bytes": 2474,
+      "sha256": "483945d39458a9cd89d06685fdeca8b33ef86ad88bd97b30f4acb43b875a0002"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-activation-resume-2.json",
+      "bytes": 2178,
+      "sha256": "e819bff5ceeaf2f9cff0a6f9c9a0a0f5d9d3957ca1b326c6d4ac9212f405cb41"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-addon-status.json",
+      "bytes": 8971,
+      "sha256": "1faa2047ba868e7b3d6c787034547df1dc048206f256fab5c6e0ca50b611137e"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-core-disconnect-retry.json",
+      "bytes": 2932,
+      "sha256": "bce607103d1c6330ae20f04187a1759b4b0d89fc0af4b1926ac72c98dbf77208"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-core-report.json",
+      "bytes": 12323,
+      "sha256": "e37f06ae990477c4a2789dfc2fd6474facee891e88f41f8aea2cedfb937dd9ec"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-live-acceptance-summary.json",
+      "bytes": 11844,
+      "sha256": "f1636495faed9820e02def0dcf034099643b744996e0346da6e48ef6326168e6"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-pressure-first-report.json",
+      "bytes": 20187,
+      "sha256": "39e38e3d094fd951f22bdc9dce3ca65249a21b48672496d1d9ed914c8573962f"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-pressure-normal20-first.json",
+      "bytes": 3005,
+      "sha256": "c73b2f21ffd978b05dc4c55c9f77daaaa5ab3a67cf072dda7e7019318ad557fb"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-pressure-normal20-resume.json",
+      "bytes": 2858,
+      "sha256": "1b3f6278c1da4dea371361f76679a1e2bf6ef11cb2b3bd60114f955fe1412d67"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-pressure-resumed-1790826511313-51120-disconnect-retry.json",
+      "bytes": 11433,
+      "sha256": "61663eeb319246de64fd9c00aae83f013d8b05220964eacc54c988cbecc8f112"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-pressure-resumed-1790826511313-51120-disconnect.json",
+      "bytes": 11607,
+      "sha256": "88ab8f25b501ff3112b2d62dde41bbfe1b08e3150100198aebf5a5e84c27485c"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-pressure-resumed-report.json",
+      "bytes": 52688,
+      "sha256": "098d3a2050d20782fb2724192b1d395c592f9a5b9b5d9bc9b2424d7358ebe48b"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-reader-after-core-replay.json",
+      "bytes": 2465,
+      "sha256": "aedcc98b23d652261c2fa6f94e19ddca650a7c74fe2bbdda79f038c32412e5ca"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-reader-after-core-result.json",
+      "bytes": 2445,
+      "sha256": "d3bb4e3eb4fa513893c74000da4684c9ae0d42ce411976559d15bfa244743667"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-reader-after-pressure-replay.json",
+      "bytes": 2469,
+      "sha256": "d9756e8a6e49b60cf6c47b555db486e98ba953565c07a64b4b2284b73b4e7de5"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-reader-after-pressure-result.json",
+      "bytes": 2448,
+      "sha256": "8ab53dcf1296f7cac93fecd8b0b8528050fff09fe45297ed6ade160748488ad3"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-root-after-core-query.json",
+      "bytes": 11739,
+      "sha256": "051a0a79888dd88ddff1477e46cc0d28fd5adf9b89579ce55d6bb921809786a8"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-root-after-pressure-query.json",
+      "bytes": 11738,
+      "sha256": "fcdf0054c0e77f13a7c412369cb3f33e992d3e0779dda7bcd9efa242854cef65"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/sealed-short-read-evidence.json",
+      "bytes": 9192,
+      "sha256": "8ccc83c8b0bd6768f09ad17fe065b78f82b56f0f1e00b0eb287feab1ceba6c8c"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/span-acceptance-summary.json",
+      "bytes": 4986,
+      "sha256": "a9f5550bba56e0daaaf9242c1605cea2db6233d5eaa2c436a9972cac488ccbbc"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/span-pressure-baseline.json",
+      "bytes": 49340,
+      "sha256": "96e0fc61a9acc610f3640c0a7a0b33b04791fe8cc2de6ceaae7a62bbb9ae6e9c"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/span-pressure-normal-41.json",
+      "bytes": 3611,
+      "sha256": "7e3f4aec1c5521ca180f3821c1d91ad5414b7cd36527e6bfda886bb26f3470f7"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/span-pressure-normal-8.json",
+      "bytes": 3430,
+      "sha256": "48f507df48eff9c017eec0781af38f2fac9705006af2339b6d92b5fac29e8ad2"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/workspace-init.json",
+      "bytes": 2235,
+      "sha256": "cc5db44e5f5cb6f37d15906c428c8b1de858bb15def5ba84c5214896e53b9262"
+    },
+    {
+      "path": "docs/toolkit/research/lua-mailbox-forever-70124/wowdump-describe.json",
+      "bytes": 173265,
+      "sha256": "7c5dd0a71be8f20922aa3d913119ef3a0a3451b1f89a5ea88b3e3f12facba666"
+    }
+  ]
+}

@@ -2,7 +2,8 @@
 
 Use this reference for first installation, an upgraded addon, or contact without
 a usable CON connection. Disk installation and runtime activation are separate.
-The CLI owns the main addon and 200 LoadOnDemand slots (slot-v2); never overlay-copy files,
+Native 3.1.0 uses the public Mailbox with wire06, slot-v3, identity-v2 and
+input-v2. The CLI owns the main addon and 200 LoadOnDemand slots; never overlay-copy files,
 edit slot payloads or import old queues/SavedVariables.
 
 Use the shared installation candidates to select a verified client directory;
@@ -20,10 +21,12 @@ choice on every retry. Local selection errors never authorize another installati
 3. Preserve any returned CON ID, including activation-pending results. Use status
    and resume in the same project; do not start another connection or resend keys.
 
-A legacy 64-slot installation needs managed migration before new work. Existing 64-slot CONs may resume and clean up their original exchanges in
-the original slots; new connections require the 200-slot runtime. Retained old
-records also remain usable as read-only evidence and retirement proof. New connect can activate an old loaded runtime through a journaled
-reload after migration. Verify activation separately for every authorized PID,
+A clean inactive older managed slot installation can be replaced before new
+work. Incompatible pending reservations or older connection identities are
+rejected, with their evidence preserved; the new driver does not resume old
+wire exchanges or use old records as current-runtime proof. New connect can
+activate an older loaded addon through journaled reload after a clean managed
+installation. Verify activation separately for every authorized PID,
 including same-build instances sharing one installation: 200 files on disk do
 not prove any running client loaded them. If the client cannot discover the full
 inventory, `restart_required` requires a scoped client restart; do not loop reloads.

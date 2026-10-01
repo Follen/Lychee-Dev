@@ -34,7 +34,9 @@ func (s Selector) matches(h bridge.MemoryHeader) bool {
 		return false
 	}
 	if h.Kind == bridge.MemoryBody {
-		return s.BodyAuthorized && h.Length == s.BodyLength && h.Checksum == s.BodyChecksum && s.Nonce != zero && s.Runtime != zero && s.Ticket != zero
+		// BODY sequence is the operation's prepare sequence, not its later HEAD
+		// sequence. Static qualification must precede payload allocation.
+		return h.State == 3 && h.Sequence != 0 && h.Length <= bridge.MemoryMaxPayload && s.BodyAuthorized && h.Length == s.BodyLength && h.Checksum == s.BodyChecksum && s.Nonce != zero && s.Runtime != zero && s.Ticket != zero
 	}
 	return h.Length <= 16<<10
 }

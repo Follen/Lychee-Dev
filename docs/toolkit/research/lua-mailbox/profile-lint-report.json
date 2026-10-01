@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "command": "profiles.lint",
+  "profileSha256": "376708bfb79e7efc6b4edef66fc9a8d134b713ece52b9ac598f4f77a4e731909",
+  "layouts": {
+    "TValue": {
+      "size": 24,
+      "sha256": "517377f0d9cae28a5f0b45df8c5d20dbceb0f725483fba9f608aba90b9ab52f7"
+    },
+    "Table": {
+      "size": 72,
+      "sha256": "8f496452bf356effb42c1a9229010f2cb3c06161e9763e65bf41f8c2279a953e"
+    },
+    "Node": {
+      "size": 56,
+      "sha256": "37e2c6270ad5148b4766342bc155aef726dad27f9bcc9c832f9cadb1c1228c75"
+    },
+    "TString": {
+      "size": 32,
+      "sha256": "a0ff29eeedbfc90607e6f6b69dfb52f6f6d746c643c0f43c056c28a7bed3b623"
+    }
+  },
+  "parameters": {},
+  "fields": [
+    "luaState",
+    "threadTag",
+    "globalsValue"
+  ],
+  "bindings": [
+    {
+      "path": "/fields/luaState/root/rva",
+      "kind": "rva",
+      "recipe": "retail-lua-state-root-rip-v1"
+    },
+    {
+      "path": "/fields/threadTag/root/rva",
+      "kind": "rva",
+      "recipe": "retail-lua-state-root-rip-v1"
+    },
+    {
+      "path": "/fields/globalsValue/root/rva",
+      "kind": "rva",
+      "recipe": "retail-lua-state-root-rip-v1"
+    }
+  ]
+}

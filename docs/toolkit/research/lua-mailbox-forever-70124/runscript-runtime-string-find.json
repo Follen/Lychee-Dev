@@ -1,0 +1,64 @@
+{
+  "ok": true,
+  "command": "memory.find",
+  "pid": 10376,
+  "needle": "52 75 6e 53 63 72 69 70 74",
+  "hits": [
+    {
+      "address": "0x7ff7fc119de0",
+      "contextHex": "000000000000000055736167653a206c6f63616c20636f7079203d20736563757265636f7079285b76616c75652c206f7074696f6e735d29000000000000000052756e5363726970740000000000000055736167653a2052756e53637269707428746578742900004765745363726970744275636b65745468726f74746c654c696d69747300000055"
+    },
+    {
+      "address": "0x7ff7fc119df7",
+      "contextHex": "7079203d20736563757265636f7079285b76616c75652c206f7074696f6e735d29000000000000000052756e5363726970740000000000000055736167653a2052756e53637269707428746578742900004765745363726970744275636b65745468726f74746c654c696d69747300000055736167653a206c6f63616c20666f7262696464656e5461"
+    }
+  ],
+  "hitCount": 2,
+  "truncated": false,
+  "complete": true,
+  "stopReason": "completed",
+  "regionsPlanned": 1,
+  "regionsTruncated": false,
+  "regionsScanned": 1,
+  "bytesScanned": 15404372,
+  "skippedRanges": [],
+  "skippedBytes": 0,
+  "skippedRangeCount": 0,
+  "nextAddress": "0x7ff7fc9cad54",
+  "identity": {
+    "buildKey": "classicbeta@1.60.1.70124",
+    "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+    "processInstance": "10376:134352957565325600",
+    "module": {
+      "name": "WowB.exe",
+      "base": "0x7ff7f71e0000",
+      "size": 140742656,
+      "path": "D:\\Game\\World of Warcraft\\_classic_beta_\\WowB.exe"
+    }
+  },
+  "startedAt": "2026-10-01T02:57:15.656Z",
+  "finishedAt": "2026-10-01T02:57:15.936Z",
+  "addressSpace": "va",
+  "source": {
+    "tool": "native",
+    "operation": "find",
+    "version": "1.0.0"
+  },
+  "coverage": {
+    "requested": {
+      "from": "0x7ff7fbb1a000",
+      "to": "0x7ff7fc9cad54"
+    },
+    "complete": true,
+    "stopReason": "completed",
+    "truncated": false,
+    "regionsTruncated": false,
+    "regionsPlanned": 1,
+    "regionsScanned": 1,
+    "bytesScanned": 15404372,
+    "skippedBytes": 0,
+    "skippedRangeCount": 0,
+    "skippedRanges": [],
+    "nextAddress": "0x7ff7fc9cad54"
+  }
+}

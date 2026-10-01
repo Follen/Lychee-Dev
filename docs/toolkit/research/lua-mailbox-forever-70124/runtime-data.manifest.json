@@ -1,0 +1,55 @@
+{
+  "schema": "wowdump.runtime-dump.v4",
+  "engine": "native-memory",
+  "buildKey": "classicbeta@1.60.1.70124",
+  "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "pid": 10376,
+  "processInstance": "10376:134352957565325600",
+  "module": {
+    "name": "WowB.exe",
+    "path": "D:\\Game\\World of Warcraft\\_classic_beta_\\WowB.exe",
+    "base": "0x7ff7f71e0000",
+    "size": 140742656
+  },
+  "moduleBase": "0x7ff7f71e0000",
+  "preferredImageBase": "0x140000000",
+  "moduleSize": 140742656,
+  "startedAt": "2026-10-01T02:53:08.994Z",
+  "generatedAt": "2026-10-01T02:53:09.240Z",
+  "atomic": false,
+  "complete": true,
+  "zeroFilledGaps": true,
+  "sections": [
+    {
+      "name": ".rdata",
+      "rva": "0x493a000",
+      "virtualSize": 15404372,
+      "rawSize": 15404544,
+      "characteristics": "0x40000040",
+      "protection": "r",
+      "runtimeAddress": "0x7ff7fbb1a000",
+      "file": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-data-9d3e2936\\dump\\.rdata.bin",
+      "bytes": 15404372,
+      "readSize": 15404372,
+      "shortRead": false,
+      "gaps": [],
+      "sha256": "8367b94600ab8622b804e058bcd670ecbeae0dbe57f936ff519c27e7857a64b2"
+    },
+    {
+      "name": ".pdata",
+      "rva": "0x8204000",
+      "virtualSize": 3652944,
+      "rawSize": 3653120,
+      "characteristics": "0x40000040",
+      "protection": "r",
+      "runtimeAddress": "0x7ff7ff3e4000",
+      "file": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-data-9d3e2936\\dump\\.pdata.bin",
+      "bytes": 3652944,
+      "readSize": 3652944,
+      "shortRead": false,
+      "gaps": [],
+      "sha256": "e60e3f51d363d48936820197ec777b7398ba9b53c5ab859498a467059d1554ce"
+    }
+  ],
+  "totalBytes": 19057316
+}

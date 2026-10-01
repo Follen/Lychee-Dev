@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/journal"
@@ -23,7 +24,7 @@ func projectFixture(t *testing.T) (*Project, *Driver, projectTarget, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 2, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 2, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New("", nil, i)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +188,7 @@ func TestActivationStatusHasNoInventedRuntimeAndRejectsInvalidPhase(t *testing.T
 	if err := os.Remove(d.Log); err != nil {
 		t.Fatal(err)
 	}
-	a := activation{Schema: "lycheedev.channel-activation.v1", Request: "install", Phase: "input_attempted", InputStep: 6}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: "install", Phase: "input_attempted", InputStep: 6, Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
 	if err := writeProjectJSON(ctx, p.activationPath(d.State.ID), a); err != nil {
 		t.Fatal(err)
 	}

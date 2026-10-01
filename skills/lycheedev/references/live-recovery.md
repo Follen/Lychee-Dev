@@ -139,8 +139,10 @@ within the authorized task; do not repeat indefinitely against an absent process
 foreign ownership or an unresolved opaque execution outcome.
 
 `waiting: shared_publication` is shared-file contention inside one installation,
-not proof of a lost connection. Legacy 64-slot CONs retain original-slot resume/cleanup; do not apply v2
-allocation to them. The 200-slot v2 allocator can skip another
+not proof of a lost connection. Native 3.1.0 requires the new Mailbox wire,
+identity and 200-slot pool; it rejects older native connection identities.
+Retain incompatible evidence for its matching older CLI rather than applying
+the new driver to it. The current 200-slot allocator can skip another
 owner's reservations for a new exchange only before publication or input. The
 runtime skips empty/foreign slots and stops at the first envelope for itself;
 it does not skip its own pending work. Once published, submitted or uncertain,
@@ -178,8 +180,10 @@ Older channel-v1 journals receive one marked legacy budget window on their first
 drive, persisted before input; reading status does not migrate them. That window
 starts at migration because prior elapsed time is unavailable. A CLI wait timeout
 or interruption ends the host call, not the game-side probe or its cleanup.
-New writes use channel-v2 (activation-v2 for activation); older CLIs cannot drive
-those journals. A cancelled host wait uses exit 7; it does not confirm Lua cancellation.
+New writes use channel-v2 with the current native identity, and activation-v3;
+older CLIs cannot drive those journals. The budget-envelope migration does not
+accept an older native wire, identity or slot pool. A cancelled host wait uses
+exit 7; it does not confirm Lua cancellation.
 
 Cleanup callback failures retain the verified report and trigger a journaled
 reload; a fresh binding then records `cleanupMethod: runtime_destroyed`. The

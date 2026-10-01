@@ -1,0 +1,591 @@
+{
+  "schema": "lycheedev.baseline.v1",
+  "mode": "offline",
+  "output": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span",
+  "startedAt": "2026-10-01T04:06:47.990Z",
+  "source": {
+    "commit": "8e4dab0455c8bee512c73912c26b31bc9605f6c2",
+    "dirty": true,
+    "treeSha256": "7e9f56151910e8d69731e833a7379459dd407b46db491baa46ad38885d1d2a4b",
+    "version": "3.1.0"
+  },
+  "state": "passed",
+  "checks": [
+    {
+      "id": "BUILD",
+      "title": "Build all packages",
+      "state": "passed",
+      "run": {
+        "command": "go",
+        "args": [
+          "build",
+          "./..."
+        ],
+        "startedAt": "2026-10-01T04:06:48.248Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 1724,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\BUILD.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\BUILD.stderr"
+      }
+    },
+    {
+      "id": "VET",
+      "title": "Vet all packages",
+      "state": "passed",
+      "run": {
+        "command": "go",
+        "args": [
+          "vet",
+          "./..."
+        ],
+        "startedAt": "2026-10-01T04:06:49.975Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 1013,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\VET.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\VET.stderr"
+      }
+    },
+    {
+      "id": "GO",
+      "title": "All Go tests and mandatory Lua 5.1 suites",
+      "state": "passed",
+      "run": {
+        "command": "go",
+        "args": [
+          "test",
+          "-json",
+          "-parallel=4",
+          "-count=1",
+          "-timeout=10m",
+          "./..."
+        ],
+        "startedAt": "2026-10-01T04:06:50.992Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 306444,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\GO.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\GO.stderr"
+      },
+      "tests": 2879,
+      "packages": 42,
+      "skipped": [
+        "github.com/follenfang/lycheedev/internal/codebase/environment:TestBuildPinnedUnitDocs",
+        "github.com/follenfang/lycheedev/internal/codebase/flow:TestExtractPinnedUnitDocumentationWhenAvailable/retail",
+        "github.com/follenfang/lycheedev/internal/codebase/flow:TestExtractPinnedUnitDocumentationWhenAvailable/forever",
+        "github.com/follenfang/lycheedev/internal/luals:TestRealRuntimeGeneratedEnvironment",
+        "github.com/follenfang/lycheedev/internal/luals:TestRealRuntimeFullRetailAPIReferences",
+        "github.com/follenfang/lycheedev/internal/live/journal:TestAdmissionCrashHelper",
+        "github.com/follenfang/lycheedev/internal/records/archive:TestInstalledIndexReadOnly",
+        "github.com/follenfang/lycheedev/internal/records/schema:TestPinnedPublishedDefinitions",
+        "github.com/follenfang/lycheedev/internal/live/memory:TestNativeModuleProtectionChild",
+        "github.com/follenfang/lycheedev/internal/live/memory:TestNativeModuleMappedChild",
+        "github.com/follenfang/lycheedev/tests/nonce-lab:TestLuaFixture",
+        "github.com/follenfang/lycheedev/internal/live/memory:TestNativeMemoryChild",
+        "github.com/follenfang/lycheedev/internal/delivery:TestPayloadRejectsLinks",
+        "github.com/follenfang/lycheedev/internal/delivery:TestInstallationWorker",
+        "github.com/follenfang/lycheedev/internal/codebase:TestSourceCapacityRejectsLinks",
+        "github.com/follenfang/lycheedev/internal/desktop:TestCaptureItemForExplicitProcess",
+        "github.com/follenfang/lycheedev/internal/desktop:TestCaptureFramesForExplicitProcess",
+        "github.com/follenfang/lycheedev/internal/desktop:TestBackgroundInputDuringWGCCaptureOwnWindow",
+        "github.com/follenfang/lycheedev/internal/desktop:TestWGCQRCodeOwnWindow",
+        "github.com/follenfang/lycheedev/internal/command:TestInstalledAssetCommand",
+        "github.com/follenfang/lycheedev/internal/desktop:TestWGCLifetimeBetweenSessions",
+        "github.com/follenfang/lycheedev/internal/codebase:TestInspectAddonRejectsSymlinkEscape",
+        "github.com/follenfang/lycheedev/internal/live/journal:TestWindowOwnerProcessHelper",
+        "github.com/follenfang/lycheedev/internal/live/journal:TestWindowRunProcessHelper",
+        "github.com/follenfang/lycheedev/internal/command:TestNativeBindingWindowHelper",
+        "github.com/follenfang/lycheedev/internal/command:TestLiveBindNativeCLI/0,0,600,600",
+        "github.com/follenfang/lycheedev/internal/command:TestLiveBindNativeCLI/window",
+        "github.com/follenfang/lycheedev/internal/records:TestOpenExportDestinationCanonicalizesParentSymlink",
+        "github.com/follenfang/lycheedev/internal/records:TestOpenExportDestinationRefusesDirectoryAndSymlinkTargets",
+        "github.com/follenfang/lycheedev/internal/records:TestImageExportRealSample",
+        "github.com/follenfang/lycheedev/internal/records:TestInstallationDiscoveryDoesNotFollowForeignClient",
+        "github.com/follenfang/lycheedev/internal/records:TestInstalledBuildMetadata",
+        "github.com/follenfang/lycheedev/internal/live:TestDiscoveredClientWindowUsesCanonicalInstallationIdentity",
+        "github.com/follenfang/lycheedev/internal/live:TestClientWindowLiveReadOnly",
+        "github.com/follenfang/lycheedev/internal/command:TestPackagedSourceSemanticCLIWhenAvailable",
+        "github.com/follenfang/lycheedev/internal/delivery:TestUpgradeWorker"
+      ],
+      "failed": []
+    },
+    {
+      "id": "NODE",
+      "title": "Distribution, launcher and regression runner tests",
+      "state": "passed",
+      "run": {
+        "command": "D:\\opt\\NodeJs\\node.exe",
+        "args": [
+          "--test",
+          "--test-reporter=tap",
+          "packages/npm/lycheedev/test/launcher.test.mjs",
+          "tests/channel-live/running-observation.test.mjs",
+          "tests/channel-live/shared-publication-retry.test.mjs",
+          "tests/channel-live/slot-skip-evidence.test.mjs",
+          "tools/addon-package.test.mjs",
+          "tools/baseline.test.mjs",
+          "tools/release.test.mjs",
+          "tools/skill-contract.test.mjs",
+          "tools/skill-launcher.test.mjs",
+          "tools/tar.test.mjs",
+          "tools/update-isolated.test.mjs",
+          "tools/version.test.mjs",
+          "tools/workflow-structure.test.mjs"
+        ],
+        "startedAt": "2026-10-01T04:11:57.466Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 18692,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\NODE.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\NODE.stderr"
+      },
+      "tests": 94,
+      "pass": 94,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    {
+      "id": "VERSION",
+      "title": "Release version consistency",
+      "state": "passed",
+      "run": {
+        "command": "D:\\opt\\NodeJs\\node.exe",
+        "args": [
+          "tools/version.mjs",
+          "--check"
+        ],
+        "startedAt": "2026-10-01T04:12:16.163Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 51,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\VERSION.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\VERSION.stderr"
+      }
+    },
+    {
+      "id": "SKILL",
+      "title": "Skill and CLI command contract consistency",
+      "state": "passed",
+      "run": {
+        "command": "D:\\opt\\NodeJs\\node.exe",
+        "args": [
+          "tools/skill-contract.mjs"
+        ],
+        "startedAt": "2026-10-01T04:12:16.217Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 410,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\SKILL.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\SKILL.stderr"
+      }
+    },
+    {
+      "id": "SKILL-GENERATED",
+      "title": "Generated command reference matches the current CLI",
+      "state": "passed",
+      "run": {
+        "command": "D:\\opt\\NodeJs\\node.exe",
+        "args": [
+          "tools/skill-commands.mjs",
+          "--check"
+        ],
+        "startedAt": "2026-10-01T04:12:16.631Z",
+        "timeout": 1200000,
+        "code": 0,
+        "signal": null,
+        "error": null,
+        "milliseconds": 410,
+        "stdout": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\SKILL-GENERATED.stdout",
+        "stderr": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-baseline-span\\SKILL-GENERATED.stderr"
+      }
+    },
+    {
+      "id": "SOURCE",
+      "title": "Source unchanged during the run",
+      "state": "passed",
+      "after": {
+        "commit": "8e4dab0455c8bee512c73912c26b31bc9605f6c2",
+        "dirty": true,
+        "treeSha256": "7e9f56151910e8d69731e833a7379459dd407b46db491baa46ad38885d1d2a4b",
+        "version": "3.1.0"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "BASE-01",
+      "title": "Command admission and passive discovery",
+      "kind": "go",
+      "package": "internal/command",
+      "tests": [
+        "TestLiveCommandFlagAdmissionComesFromItsContract",
+        "TestPassiveDiscoveryParsesWithoutDowngradingToActive",
+        "TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-02",
+      "title": "Pinned targets and concurrent selection",
+      "kind": "go",
+      "package": "internal/selection",
+      "tests": [
+        "TestPinsAreStableDerivedAndIsolated",
+        "TestConcurrentResolutionsDoNotLeakPins"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-03",
+      "title": "Source checkout isolation and dirty detection",
+      "kind": "go",
+      "package": "internal/codebase",
+      "tests": [
+        "TestWorktreeExactReuseAndDirtyDetection",
+        "TestWorktreeConcurrentSameCommit",
+        "TestPruneSourceWorktreesKeepsActiveLeaseAndPins"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-04",
+      "title": "Source semantic environment and cache identity",
+      "kind": "go",
+      "package": "internal/codebase",
+      "tests": [
+        "TestSemanticDefinitionsReuseFixedEnvironment",
+        "TestSemanticCacheBindsRuntimeEnvironmentAndSource"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-05",
+      "title": "Hotfix pagination and missing-key integrity",
+      "kind": "go",
+      "package": "internal/records",
+      "tests": [
+        "TestWagoHotfixMultiPageWithIdentityKeys",
+        "TestMissingBytesCannotBecomeZeroValues",
+        "TestKeySourcesAreExplicitBoundedAndOffline"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-06",
+      "title": "Asset evidence and failed export preservation",
+      "kind": "go",
+      "package": "internal/records",
+      "tests": [
+        "TestExportAssetEvidenceAndFailurePreservation"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-07",
+      "title": "Clean managed install and upgrade",
+      "kind": "go",
+      "package": "internal/delivery",
+      "tests": [
+        "TestInstallAddonFirstInstallAndRetry",
+        "TestInstallAddonRefusesModifiedManagedInstallation",
+        "TestUpgradeAddonResumeAndRemovePreserveOwnedState"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-08",
+      "title": "Receiver correlation, partial construction and focus release",
+      "kind": "go",
+      "package": "tests/protocol",
+      "tests": [
+        "TestLuaReceiverCorrelationAndInputFaults",
+        "TestLuaReceiverRollsBackPartialUI",
+        "TestLuaReceiverBindings"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-09",
+      "title": "Physical commit and fixed reload intent before input",
+      "kind": "go",
+      "package": "internal/desktop",
+      "tests": [
+        "TestReceiverCommitEndsWithOneEnterAndStopsBeforeItOnGuardFailure",
+        "TestFixedReloadRecordsBeforeEveryStep"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-10",
+      "title": "Reload beacon bounded lifetime and fresh rotation",
+      "kind": "go",
+      "package": "tests/protocol",
+      "tests": [
+        "TestLuaStartupBeacon"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-11",
+      "title": "Beacon evidence and bounded wake",
+      "kind": "go",
+      "package": "internal/live",
+      "tests": [
+        "TestStartupBeaconRequiresFreshRotation",
+        "TestReceiverWakeSurvivesLoadingWithoutResendingBusiness",
+        "TestReceiverWakeBoundAndFailure"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-12",
+      "title": "Async resources, unobstructed execution and character storage",
+      "kind": "go",
+      "package": "tests/protocol",
+      "tests": [
+        "TestFourClientProbeExecution",
+        "TestInvestigationOwnsResourcesThroughFinalization",
+        "TestCharacterBridgeStorageDoesNotImportAccountExecution"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-13",
+      "title": "Verified report, ACK, display proof and immutable budget",
+      "kind": "go",
+      "package": "internal/live",
+      "tests": [
+        "TestCompleteInvestigationKeepsOwnerUntilDisplayProof",
+        "TestExecutionBudgetIsFrozenAcrossResume"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-14",
+      "title": "Unknown input and recovery without replay",
+      "kind": "go",
+      "package": "internal/live",
+      "tests": [
+        "TestExecuteCompletesLifecycle",
+        "TestExecuteReconcilesSubmittedInputWithoutReplay",
+        "TestBootstrapUnknownInputRequiresExplicitAbandon",
+        "TestBootstrapRestageNeverCrossesCommitFence",
+        "TestFlushRequiresNewReadinessAndDoesNotReplay",
+        "TestNextActionDoesNotLoopOnTerminalReportFailure"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-15",
+      "title": "Multiple workspaces, windows and character writers",
+      "kind": "go",
+      "package": "internal/live",
+      "tests": [
+        "TestBootstrapAdmissionSerializesWorkspacesAndMaintenance",
+        "TestReportWritersDistinguishProcessesAndCharacterPartitions",
+        "TestPassiveDiscoveryNeverCapturesOrTypes"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-16",
+      "title": "Process crash and durable window ownership",
+      "kind": "go",
+      "package": "internal/live/journal",
+      "tests": [
+        "TestWindowAdmissionCrashRecovery",
+        "TestWindowRunOwnershipAndTerminalRelease"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-17",
+      "title": "Workbench pages, settings, disabled cost and locale fixtures",
+      "kind": "go",
+      "package": "tests/addon",
+      "tests": [
+        "TestWorkbenchLuaSuites",
+        "TestUnifiedTOCContract"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-18",
+      "title": "Evidence integrity and isolated workspaces",
+      "kind": "go",
+      "package": "internal/vault",
+      "tests": [
+        "TestBlobRoundTripAndCorruption",
+        "TestTwoHomesWithUnicodeAndSpacePathsAreIsolated"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-19",
+      "title": "SQL partial coverage, effective hotfix provenance and JSONL completion",
+      "kind": "go",
+      "package": "internal/records/navigatetest",
+      "tests": [
+        "TestSQLIdentityLookupPreservesPartialCoverage",
+        "TestExplicitEffectiveSQLKeepsBaseAndProvenance",
+        "TestStreamEmitsTypedFrameContract",
+        "TestStreamErrorFrameEndsStreamWithoutEnd"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-20",
+      "title": "SQL aggregation and subquery semantics",
+      "kind": "go",
+      "package": "internal/records/relational",
+      "tests": [
+        "TestGroupSubqueries",
+        "TestAggregateInputSubqueries",
+        "TestSubqueryCardinality"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "BASE-21",
+      "title": "Update preflight, replacement and interrupted recovery",
+      "kind": "go",
+      "package": "internal/delivery",
+      "tests": [
+        "TestUpdateManagedPlanReplaceRepeat",
+        "TestUpdatePreflightsAllBeforeFirstMutation",
+        "TestUpdateRecoversOldMovedCheckpoint",
+        "TestUpdateRecoversInterruptedOldFileDeletion",
+        "TestUpdateRejectsChangedAndContainedTargets"
+      ],
+      "state": "passed",
+      "findings": []
+    },
+    {
+      "id": "LIVE-01",
+      "title": "Synchronous result through complete cleanup",
+      "file": "sync.lua",
+      "budget": 10,
+      "state": "not_run"
+    },
+    {
+      "id": "LIVE-02",
+      "title": "Same request and completed resume reuse the exact evidence",
+      "state": "not_run"
+    },
+    {
+      "id": "LIVE-03",
+      "title": "Expected business failure still finishes cleanup",
+      "file": "failure.lua",
+      "budget": 10,
+      "expectedFailure": true,
+      "state": "not_run"
+    },
+    {
+      "id": "LIVE-04",
+      "title": "55-second async execution, nine pages and no transport overlay",
+      "file": "workbench.lua",
+      "budget": 60,
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-01",
+      "title": "WGC visual review: font, rounded corners, navigation, settings and receiver",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-02",
+      "title": "Chinese/English, small viewport and UI scaling",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-03",
+      "title": "Fixed shortcuts, receiving input shield, IME, chat and focus release",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-04",
+      "title": "Reload RGB rotation, wake disappearance and 45-second expiry",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-05",
+      "title": "First installation, upgrade, relogin and combat transitions",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-06",
+      "title": "Two live windows, characters, workspaces and client builds",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-07",
+      "title": "Classic 50504 production execution and finish",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-08",
+      "title": "Titan 38002 production execution and finish",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "REAL-09",
+      "title": "Long-running and adversarial schedule acceptance",
+      "kind": "manual",
+      "state": "not_run"
+    },
+    {
+      "id": "LUALS",
+      "title": "Real LuaLS LSP integration",
+      "package": "internal/codebase",
+      "tests": [
+        "TestRealLuaLSMapsAPIReferencesAndDefinitions"
+      ],
+      "state": "passed",
+      "findings": []
+    }
+  ],
+  "finishedAt": "2026-10-01T04:12:17.270Z"
+}

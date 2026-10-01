@@ -13,7 +13,8 @@ assert(Env.framesCreated==count,"disabled signal allocated frame")
 ns.InputState.Refresh();assert(Env.framesCreated==count)
 local identity={runtime=string.rep("1",32),owner="",fence=0,nextSlot=1,guid="g",build="b"}
 local function provider()if not identity then return nil end;local copy={};for k,v in pairs(identity)do copy[k]=v end;return copy end
-ns.InputState.Start(provider)
+local mailbox={}
+ns.InputState.Start(provider,mailbox)
 local frame=ns.InputSignal.Frame()
 assert(Env.framesCreated==count+1 and #frame.children==3,"signal not one frame and three textures")
 assert(not frame:GetScript("OnKeyDown") and frame.mouseEnabled==false)
@@ -22,13 +23,14 @@ local function color(block,r,g,b)
     local c=block.colorTexture
     assert(block:IsShown() and c[1]==r and c[2]==g and c[3]==b and c[4]==1,"wrong code color")
 end
-local function hidden()for _,b in ipairs(blocks)do assert(not b:IsShown(),"stale color retained")end;assert(not ns.InputState.Snapshot())end
+local function hidden()for _,b in ipairs(blocks)do assert(not b:IsShown(),"stale color retained")end;assert(not ns.InputState.Snapshot() and mailbox.input==nil)end
 color(blocks[1],0,1,0);color(blocks[2],1,1,1)
 assert(frame.width==6 and frame.height==2 and blocks[1].width==2 and blocks[1].height==2)
 local hb=blocks[3].colorTexture[1]
 ns.InputState.Refresh()
 assert(blocks[3].colorTexture[1]~=hb,"same-frame refresh did not commit heartbeat")
 assert(ns.InputState.Snapshot():find('"sampleMillis":100000',1,true),"optical refresh changed memory clock")
+assert(mailbox.input==ns.InputState.Snapshot())
 ready,reason=false,"input_keyboard_focus";ns.InputState.Refresh();color(blocks[1],1,0,0);color(blocks[2],0,0,1)
 ready,reason=false,"input_combat_lockdown";ns.InputState.Refresh();color(blocks[1],0,0,1);color(blocks[2],1,0,0)
 ready,reason=Env.MakeSecret(),Env.MakeSecret();ns.InputState.Refresh();color(blocks[1],1,1,1);color(blocks[2],0,0,0)
@@ -58,7 +60,7 @@ local lateUpdate=frame:GetScript("OnUpdate")
 ns.InputState.Stop();hidden()
 assert(stops==1 and not frame:GetScript("OnUpdate") and not frame:GetScript("OnEvent") and not frame.registeredEvent)
 lateUpdate(frame,1);event(frame,"PLAYER_ENTERING_WORLD");ns.InputState.Refresh();hidden()
-ns.InputState.Start(provider);assert(Env.framesCreated==count+1);ns.InputState.Stop()
+ns.InputState.Start(provider,mailbox);assert(Env.framesCreated==count+1 and mailbox.input==ns.InputState.Snapshot());ns.InputState.Stop();hidden()
 -- The shared Go/Lua fixture fixes the legal pairs; one changed block cannot
 -- turn one legal pair into another because both positions are unique.
 local f=assert(io.open("../../protocol/input-color/golden.json","rb"));local fixture=f:read("*a");f:close()

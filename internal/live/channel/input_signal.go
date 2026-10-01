@@ -25,7 +25,7 @@ func (e *inputSignalPending) Error() string { return "live.channel_" + e.reason 
 func (e *inputSignalPending) Unwrap() error { return ErrPending }
 
 func observedInputCapability(capability string) bool {
-	return capability == "lycheedev.input.v1" || capability == bridge.InputSignalCapability
+	return capability == InputSchema || capability == bridge.InputSignalCapability
 }
 
 type inputSignalTracker struct {

@@ -1,0 +1,213 @@
+{
+  "ok": true,
+  "command": "analyze.migrate",
+  "source": {
+    "buildKey": "retail@12.1.0.69933",
+    "executableSha256": "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd"
+  },
+  "target": {
+    "buildKey": "fixture@lua-mailbox-migration",
+    "executableSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "patched": [
+    {
+      "field": "luaState",
+      "recipe": "retail-lua-state-root-rip-v1",
+      "oldRva": "0x79c0c18",
+      "newRva": "0x4000",
+      "recipeStatus": "candidate"
+    },
+    {
+      "field": "threadTag",
+      "recipe": "retail-lua-state-root-rip-v1",
+      "oldRva": "0x79c0c18",
+      "newRva": "0x4000",
+      "recipeStatus": "candidate"
+    },
+    {
+      "field": "globalsValue",
+      "recipe": "retail-lua-state-root-rip-v1",
+      "oldRva": "0x79c0c18",
+      "newRva": "0x4000",
+      "recipeStatus": "candidate"
+    }
+  ],
+  "unresolved": [],
+  "bindingsPatched": [
+    {
+      "path": "/fields/luaState/root/rva",
+      "recipe": "retail-lua-state-root-rip-v1",
+      "kind": "rva",
+      "oldValue": "0x4000",
+      "newValue": "0x4000"
+    },
+    {
+      "path": "/fields/threadTag/root/rva",
+      "recipe": "retail-lua-state-root-rip-v1",
+      "kind": "rva",
+      "oldValue": "0x4000",
+      "newValue": "0x4000"
+    },
+    {
+      "path": "/fields/globalsValue/root/rva",
+      "recipe": "retail-lua-state-root-rip-v1",
+      "kind": "rva",
+      "oldValue": "0x4000",
+      "newValue": "0x4000"
+    }
+  ],
+  "assumptions": [
+    {
+      "path": "/fields/luaState/guards/1/size",
+      "value": 8,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/fields/threadTag/pointerChain/0/offset",
+      "value": "0x10",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/fields/threadTag/guards/1/size",
+      "value": 1,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/fields/globalsValue/pointerChain/0/offset",
+      "value": "0x90",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/fields/globalsValue/guards/1/size",
+      "value": 10,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TValue/size",
+      "value": 24,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TValue/fields/pointer/offset",
+      "value": "0x0",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TValue/fields/tag/offset",
+      "value": "0x8",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TValue/fields/secret/offset",
+      "value": "0x9",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Table/size",
+      "value": 72,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Table/fields/tag/offset",
+      "value": "0x10",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Table/fields/logNodes/offset",
+      "value": "0x13",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Table/fields/nodes/offset",
+      "value": "0x28",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/size",
+      "value": 56,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/value/offset",
+      "value": "0x0",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/valueTag/offset",
+      "value": "0x8",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/valueSecret/offset",
+      "value": "0x9",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/key/offset",
+      "value": "0x18",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/keyTag/offset",
+      "value": "0x20",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/keySecret/offset",
+      "value": "0x21",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/Node/fields/next/offset",
+      "value": "0x30",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TString/size",
+      "value": 32,
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TString/fields/tag/offset",
+      "value": "0x10",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TString/fields/hash/offset",
+      "value": "0x14",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    },
+    {
+      "path": "/types/TString/fields/length/offset",
+      "value": "0x18",
+      "reason": "Recorded 69933 Lua layout or declared root guard span; revalidate on every target build before reader use.",
+      "validation": "not_checked"
+    }
+  ],
+  "scope": "roots plus explicit JSON Pointer bindings for RVA/offset/size; unbound layout values are unresolved, invariants remain assumptions; output always needs live and semantic verification",
+  "outProfile": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\docs\\toolkit\\research\\lua-mailbox\\root.migrated.fixture.json"
+}

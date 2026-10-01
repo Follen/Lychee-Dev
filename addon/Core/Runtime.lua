@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-ns.Release = "3.0.2"
+ns.Release = "3.1.0"
 ns.Startup = { ready = false, reason = "addon_not_loaded" }
 -- Observability handle: mirrors the addon namespace for host-side /run
 -- introspection (startup state, identity, commandFailure) on every client.

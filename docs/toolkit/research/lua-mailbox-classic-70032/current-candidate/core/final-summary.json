@@ -1,0 +1,24 @@
+{
+  "complete": true,
+  "stressNonzero": 0,
+  "candidateSHA256": "9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8",
+  "coreSteps": 13,
+  "coreNonzero": 0,
+  "connections": [
+    {
+      "session": "CON-dd51b69cd9f2e4041aabd0b6796fd39b",
+      "closed": true,
+      "complete": true,
+      "cleanup": "complete"
+    },
+    {
+      "session": "CON-663500f910df2fc23c0bbe6b424b9555",
+      "closed": true,
+      "complete": true,
+      "cleanup": "complete"
+    }
+  ],
+  "readonlyJournalSHA256": "8F706FF67E7593E4908632791D948FD1DD48463014E42A7F7B39505500D37A77",
+  "stressSteps": 54,
+  "firstActivationPassed": true
+}

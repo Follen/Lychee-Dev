@@ -12,47 +12,36 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/journal"
 )
 
-func TestActivationBudgetLegacyReadAndDrive(t *testing.T) {
-	p, d, meta, parent := projectFixture(t)
-	a := activation{Schema: "lycheedev.channel-activation.v1", Request: "activation", Phase: "prepared"}
-	ctx := context.Background()
-	if err := writeProjectJSON(ctx, p.activationPath(d.State.ID), a); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := os.ReadFile(p.activationPath(d.State.ID))
-	r, err := p.activationStatus(d.State.ID)
-	if err != nil || r.Continuation.RemainingBudgetMS != nil {
-		t.Fatal("read migrated legacy budget", r, err)
-	}
-	after, _ := os.ReadFile(p.activationPath(d.State.ID))
-	if string(before) != string(after) {
-		t.Fatal("status wrote activation")
-	}
-	lease, err := journal.LockBootstrapWindow(ctx, parent, meta.Owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lease.Close()
-	now := time.Now()
-	remaining, err := p.observeActivationBudget(ctx, d.State.ID, &a, now)
-	if err != nil || remaining != DefaultRecoveryBudget || !a.Budget.Legacy || a.Schema != "lycheedev.channel-activation.v2" {
-		t.Fatal(a, remaining, err)
-	}
-	deadline := a.Budget.DeadlineMS
-	var resumed activation
-	if err := readProjectJSON(p.activationPath(d.State.ID), &resumed, 16384); err != nil {
-		t.Fatal(err)
-	}
-	remaining, err = p.observeActivationBudget(ctx, d.State.ID, &resumed, now.Add(time.Minute))
-	if err != nil || resumed.Budget.DeadlineMS != deadline || remaining != DefaultRecoveryBudget-time.Minute {
-		t.Fatal("resume renewed budget", remaining, err)
-	}
-	_, err = p.observeActivationBudget(ctx, d.State.ID, &resumed, now.Add(DefaultRecoveryBudget))
-	if !errors.Is(err, ErrBudgetExhausted) {
-		t.Fatal(err)
-	}
-	if err := readProjectJSON(p.activationPath(d.State.ID), &resumed, 16384); err != nil || !resumed.Budget.Exhausted {
-		t.Fatal("exhaustion not durable", err)
+func TestActivationRejectsPriorGenerationsWithoutMigration(t *testing.T) {
+	for _, schema := range []string{"lycheedev.channel-activation.v1", "lycheedev.channel-activation.v2"} {
+		t.Run(schema, func(t *testing.T) {
+			p, d, _, _ := projectFixture(t)
+			a := activation{Schema: schema, Request: "activation", Phase: "prepared"}
+			if schema == "lycheedev.channel-activation.v2" {
+				a.Budget = NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)
+			}
+			ctx := context.Background()
+			if err := writeProjectJSON(ctx, p.activationPath(d.State.ID), a); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(p.activationPath(d.State.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.activationStatus(d.State.ID); err == nil {
+				t.Fatal("prior activation accepted by status")
+			}
+			if _, err := p.resumeActivation(ctx, d.State.ID, false); err == nil {
+				t.Fatal("prior activation resumed")
+			}
+			after, err := os.ReadFile(p.activationPath(d.State.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("prior activation was migrated or mutated")
+			}
+		})
 	}
 }
 
@@ -61,7 +50,7 @@ func TestActivationExpiredResumeStopsBeforeNative(t *testing.T) {
 	if err := os.Remove(p.log(d.State.ID)); err != nil {
 		t.Fatal(err)
 	}
-	a := activation{Schema: "lycheedev.channel-activation.v2", Request: "activation", Phase: "input_attempted", Budget: NewDurableBudget(time.Now().Add(-time.Hour), DefaultRecoveryBudget, false)}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "input_attempted", Budget: NewDurableBudget(time.Now().Add(-time.Hour), DefaultRecoveryBudget, false)}
 	if err := writeProjectJSON(context.Background(), p.activationPath(d.State.ID), a); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +65,7 @@ func TestActivationExpiredResumeStopsBeforeNative(t *testing.T) {
 
 func TestActivationActiveDriverHasStructuredContinuation(t *testing.T) {
 	p, d, meta, parent := projectFixture(t)
-	a := activation{Schema: "lycheedev.channel-activation.v2", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
 	ctx := context.Background()
 	if err := writeProjectJSON(ctx, p.activationPath(d.State.ID), a); err != nil {
 		t.Fatal(err)
@@ -101,7 +90,7 @@ func TestActivationActiveDriverHasStructuredContinuation(t *testing.T) {
 func TestActivationClockRollbackProjectionAndPersistence(t *testing.T) {
 	p, d, meta, parent := projectFixture(t)
 	now := time.Now()
-	a := activation{Schema: "lycheedev.channel-activation.v2", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(now, DefaultRecoveryBudget, false)}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(now, DefaultRecoveryBudget, false)}
 	r := p.presentActivation(d.State.ID, a, now.Add(-time.Second))
 	if r.Continuation.Kind != "budget_exhausted" || a.Budget.Exhausted {
 		t.Fatal("projection changed budget", r)
@@ -117,9 +106,10 @@ func TestActivationClockRollbackProjectionAndPersistence(t *testing.T) {
 	}
 	a.Budget = nil
 	if a.validate() == nil {
-		t.Fatal("v2 missing budget accepted")
+		t.Fatal("v3 missing budget accepted")
 	}
-	a.Schema = "lycheedev.channel-activation.v3"
+	a.Schema = "lycheedev.channel-activation.v4"
+	a.Budget = NewDurableBudget(now, DefaultRecoveryBudget, false)
 	if a.validate() == nil {
 		t.Fatal("unknown schema accepted")
 	}
@@ -134,7 +124,7 @@ func TestActivationMonotonicExpiryCannotRevive(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer lease.Close()
-			a := activation{Schema: "lycheedev.channel-activation.v2", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
+			a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)}
 			if err := writeProjectJSON(context.Background(), p.activationPath(d.State.ID), a); err != nil {
 				t.Fatal(err)
 			}

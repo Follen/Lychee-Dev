@@ -19,7 +19,7 @@ ns.StartupBeacon={Stop=function()end}
 C_Timer.NewTimer=function(_,callback)return {Cancel=function()end}end
 ns.Compat.GetAddOnMetadata=function(name,key)
     if key=="Version" then return ns.Release end
-    if key=="X-Lychee-Transport" then return "memory-slot-v2" end
+    if key=="X-Lychee-Transport" then return "memory-slot-v3" end
     return tostring(tonumber(name:match("(%d+)$")))
 end
 Env.LoadAddon("Modules/AutomationHistory.lua",ns)
@@ -29,11 +29,15 @@ end
 local frames=Env.framesCreated
 assert(ns.SlotRuntime.Start())
 assert(Env.framesCreated==frames,"passive identity created a frame")
+assert(ns.Mailbox==nil,"disabled runtime published a mailbox")
 local ok,reason=ns.SlotRuntime.Wake()
 assert(not ok and reason=="slot_disabled" and Env.framesCreated==frames)
 state.options.bridgeEnabled=true
 ready=false
 assert(not ns.SlotRuntime.Wake() and Env.framesCreated==frames+1)
+local mailbox=assert(ns.Mailbox)
+assert(mailbox.schema=="lycheedev.mailbox.v1" and mailbox.release==ns.Release)
+assert(mailbox.identity==ns.SlotRuntime.Snapshot().descriptor and mailbox.input==ns.InputState.Snapshot())
 assert(ns.InputState.Snapshot():find('"inputBlocked":true',1,true))
 local rejected=ns.InputState.Snapshot()
 ready=true
@@ -46,7 +50,7 @@ assert(not ns.SlotRuntime.IsActive(),"exception retained input")
 assert(ns.InputState.Snapshot()~=rejected and ns.InputState.Snapshot():find('"inputBlocked":false',1,true),"failed wake did not refresh after release")
 local descriptor=ns.SlotRuntime.Snapshot().descriptor
 local runtime=descriptor:sub(25,40):gsub(".",function(c)return string.format("%02x",c:byte())end)
-local e={schema="lycheedev.slot.v2",index=1,runtime=runtime,owner=string.rep("2",32),fence=1,
+local e={schema="lycheedev.slot.v3",index=1,runtime=runtime,owner=string.rep("2",32),fence=1,
     nonce=string.rep("3",32),ticket=string.rep("4",32),action="bind",guid="Player-1-1",build="70000"}
 assert(not ns.SlotRuntime.Receive(1,e),"failed load left a receive capability armed")
 ns.Compat.LoadInputSlot=function()
@@ -56,6 +60,7 @@ ns.Compat.LoadInputSlot=function()
     return true
 end
 assert(ns.SlotRuntime.Wake())
+assert(ns.Mailbox==mailbox and mailbox.receipts[e.nonce]==ns.SlotRuntime.Snapshot().receipts[e.nonce])
 assert(not ns.SlotRuntime.IsActive(),"control receipt retained input")
 assert(ns.InputState.Snapshot():find('"nextSlot":2',1,true) and ns.InputState.Snapshot():find('"owner":"'..e.owner..'"',1,true),"bind did not immediately refresh identity")
 assert(not ns.SlotRuntime.Receive(2,e),"standalone slot load was accepted")
@@ -77,6 +82,8 @@ dispatch("prepare",2)
 local op=ns.SlotRuntime.Snapshot().operations[e.ticket]
 e.preparedNonce=e.nonce;e.challenge=op.challenge
 dispatch("commit",3)
+op=ns.SlotRuntime.Snapshot().operations[e.ticket]
+assert(mailbox.bodies[e.ticket]==op.body and type(mailbox.bodies[e.ticket])=="string")
 ns.AutomationView.Collect()
 assert(ns.AutomationView.GetCount()==1,"memory probe missing from Automation history")
 local history=ns.AutomationView.GetRecord("MEM-"..e.ticket)
@@ -84,6 +91,7 @@ assert(history.status=="reported" and history.reportBody:find('"answer":42',1,tr
 local body=history.reportBody
 e.reportBytes=op.bytes;e.reportChecksum=op.checksum
 dispatch("release",4)
+assert(mailbox.bodies[e.ticket]==nil)
 ns.AutomationView.Collect()
 assert(history.status=="acknowledged" and history.reportBody==body,"release removed history")
 dispatch("unbind",5)
@@ -91,7 +99,7 @@ assert(ns.InputState.Snapshot():find('"owner":""',1,true),"unbind sample retaine
 -- One wake traverses only empty/foreign slots and stops at the first own envelope.
 local loads={}
 local function envelope(index,action,run)
-    return {schema="lycheedev.slot.v2",index=index,runtime=run or runtime,owner=e.owner,fence=1,
+    return {schema="lycheedev.slot.v3",index=index,runtime=run or runtime,owner=e.owner,fence=1,
         nonce=string.format("%032x",index+1000),ticket=string.rep("0",32),action=action or "bind",guid=e.guid,build=e.build}
 end
 ns.Compat.LoadInputSlot=function(name)
@@ -151,8 +159,21 @@ ready=false
 ns.SlotRuntime.Close()
 assert(ns.InputState.Snapshot():find('"inputBlocked":true',1,true),"close did not refresh")
 ns.InputState.Stop()
+assert(mailbox.input==nil,"bridge stop retained public input")
 state.options.bridgeEnabled=false
 ns.SlotRuntime.Close();assert(not ns.InputState.Snapshot(),"close revived stopped sampler")
+assert(mailbox.input==nil and ns.Mailbox==mailbox)
+-- Reloading the engine fixture must clear an old public table before startup,
+-- then create a new table/runtime only when the bridge is actually enabled.
+Env.LoadAddon("Bridge/SlotRuntime.lua",ns)
+assert(ns.SlotRuntime.Start() and ns.Mailbox==nil)
+state.options.bridgeEnabled=true
+assert(ns.SlotRuntime.Start())
+assert(ns.Mailbox~=mailbox and ns.Mailbox.runtime~=mailbox.runtime)
+assert(ns.Mailbox.identity==ns.SlotRuntime.Snapshot().descriptor and ns.Mailbox.input==ns.InputState.Snapshot())
+assert(next(ns.Mailbox.receipts)==nil and next(ns.Mailbox.bodies)==nil)
+ns.InputState.Stop()
+state.options.bridgeEnabled=false
 assert(not ns.SlotRuntime.Wake() and not ns.InputState.Snapshot(),"disabled wake revived sampler")
 print("slot runtime input and disabled-state invariants ok")
 

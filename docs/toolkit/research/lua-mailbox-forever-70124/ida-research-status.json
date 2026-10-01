@@ -1,0 +1,220 @@
+{
+  "originalDatabase": "9102c0fa",
+  "derivedInput": ".tmp/mailbox-live/forever-root-research/Forever-runtime-partial.exe",
+  "openError": "MCP tool call timeout after 300s; worker analysis unconfirmed",
+  "strings": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"n\":29,\"matches\":[{\"addr\":\"0x144dd8508\",\"string\":\"ASSERTSAFE((lua_gettop(&L) == stackDepth), ...)\"},{\"addr\":\"0x144dda3f8\",\"string\":\"ASSERTSAFE((lua_gettop(L) >= stackTop), ...)\"},{\"addr\":\"0x144dda690\",\"string\":\"ASSERTSAFE((lua_gettop(L) == stackBase), ...)\"},{\"addr\":\"0x144ddc2d0\",\"string\":\"ASSERTSAFE((lua_gettop(&L) == (stackTop + 1)), ...)\"},{\"addr\":\"0x144ddc530\",\"string\":\"ASSERTSAFE((lua_gettop(&L) == (valueIndex - 1)), ...)\"},{\"addr\":\"0x144e18e50\",\"string\":\"unitGUID\"},{\"addr\":\"0x144e48d10\",\"string\":\"ASSERT(m_expectedStackSize == lua_gettop(m_luaState))\"},{\"addr\":\"0x144e7e390\",\"string\":\"GetBuildInfo\"},{\"addr\":\"0x144eae0f0\",\"string\":\"GetModelUnitGUID\"},{\"addr\":\"0x144eae150\",\"string\":\"Usage: local guid = self:GetModelUnitGUID()\"},{\"addr\":\"0x144ec2fd0\",\"string\":\"Usage: C_Item.DropItemOnUnit(unitGUID)\"},{\"addr\":\"0x144edda90\",\"string\":\"Usage: local result = CheckInteractDistance(unitGUID, distIndex)\"},{\"addr\":\"0x144f05600\",\"string\":\"Usage: C_UIWidgetManager.SetProcessingUnitGuid([unit])\"},{\"addr\":\"0x144f05638\",\"string\":\"SetProcessingUnitGuid\"},{\"addr\":\"0x144f0aa20\",\"string\":\"Usage: local className, classFilename, classID = UnitClassFromGUID(unitGUID)\"},{\"addr\":\"0x144f0af40\",\"string\":\"Usage: local result = UnitGUID(unit)\"},{\"addr\":\"0x144f0af68\",\"string\":\"UnitGUID\"},{\"addr\":\"0x144f0bdc8\",\"string\":\"Usage: local unitName, unitServer = UnitNameFromGUID(unitGUID)\"},{\"addr\":\"0x144f0c060\",\"string\":\"Usage: local percentHealth = UnitPercentHealthFromGUID(unitGUID)\"},{\"addr\":\"0x144f0cc68\",\"string\":\"Usage: local unitToken = UnitTokenFromGUID(unitGUID)\"},{\"addr\":\"0x144ffe540\",\"string\":\"const char *__cdecl WowGetRawTypeName<struct blz::rb_node<struct blz::pair<int const ,struct `public: static int __cdecl CCharacterServices::Script_GetUpgradeDistributions(struct lua_State *)'::`2'::DistObjData> >>(void)\"},{\"addr\":\"0x145026f90\",\"string\":\"ASSERT(IS_UNIT_GUID(unitGUID))\"},{\"addr\":\"0x145044f10\",\"string\":\"ASSERT(lua_gettop(FrameScript_GetContext()) == 0)\"},{\"addr\":\"0x1450490f8\",\"string\":\"nullptr lua_State pointer '%s'\"},{\"addr\":\"0x145049190\",\"string\":\"Unclosed lua_State stack '%s'\"},{\"addr\":\"0x145049310\",\"string\":\"ASSERT(lua_gettop(state) == 2)\"},{\"addr\":\"0x14504b650\",\"string\":\"ASSERT(state && (lua_gettop(state) == 0))\"},{\"addr\":\"0x1450ef9c8\",\"string\":\"ASSERTSAFE((lua_gettop(L) == base + 1), ...)\"},{\"addr\":\"0x1450efad8\",\"string\":\"ASSERTSAFE((lua_gettop(L) == base), ...)\"}],\"cursor\":{\"done\":true}}"
+      }
+    ],
+    "structuredContent": {
+      "n": 29,
+      "matches": [
+        {
+          "addr": "0x144dd8508",
+          "string": "ASSERTSAFE((lua_gettop(&L) == stackDepth), ...)"
+        },
+        {
+          "addr": "0x144dda3f8",
+          "string": "ASSERTSAFE((lua_gettop(L) >= stackTop), ...)"
+        },
+        {
+          "addr": "0x144dda690",
+          "string": "ASSERTSAFE((lua_gettop(L) == stackBase), ...)"
+        },
+        {
+          "addr": "0x144ddc2d0",
+          "string": "ASSERTSAFE((lua_gettop(&L) == (stackTop + 1)), ...)"
+        },
+        {
+          "addr": "0x144ddc530",
+          "string": "ASSERTSAFE((lua_gettop(&L) == (valueIndex - 1)), ...)"
+        },
+        {
+          "addr": "0x144e18e50",
+          "string": "unitGUID"
+        },
+        {
+          "addr": "0x144e48d10",
+          "string": "ASSERT(m_expectedStackSize == lua_gettop(m_luaState))"
+        },
+        {
+          "addr": "0x144e7e390",
+          "string": "GetBuildInfo"
+        },
+        {
+          "addr": "0x144eae0f0",
+          "string": "GetModelUnitGUID"
+        },
+        {
+          "addr": "0x144eae150",
+          "string": "Usage: local guid = self:GetModelUnitGUID()"
+        },
+        {
+          "addr": "0x144ec2fd0",
+          "string": "Usage: C_Item.DropItemOnUnit(unitGUID)"
+        },
+        {
+          "addr": "0x144edda90",
+          "string": "Usage: local result = CheckInteractDistance(unitGUID, distIndex)"
+        },
+        {
+          "addr": "0x144f05600",
+          "string": "Usage: C_UIWidgetManager.SetProcessingUnitGuid([unit])"
+        },
+        {
+          "addr": "0x144f05638",
+          "string": "SetProcessingUnitGuid"
+        },
+        {
+          "addr": "0x144f0aa20",
+          "string": "Usage: local className, classFilename, classID = UnitClassFromGUID(unitGUID)"
+        },
+        {
+          "addr": "0x144f0af40",
+          "string": "Usage: local result = UnitGUID(unit)"
+        },
+        {
+          "addr": "0x144f0af68",
+          "string": "UnitGUID"
+        },
+        {
+          "addr": "0x144f0bdc8",
+          "string": "Usage: local unitName, unitServer = UnitNameFromGUID(unitGUID)"
+        },
+        {
+          "addr": "0x144f0c060",
+          "string": "Usage: local percentHealth = UnitPercentHealthFromGUID(unitGUID)"
+        },
+        {
+          "addr": "0x144f0cc68",
+          "string": "Usage: local unitToken = UnitTokenFromGUID(unitGUID)"
+        },
+        {
+          "addr": "0x144ffe540",
+          "string": "const char *__cdecl WowGetRawTypeName<struct blz::rb_node<struct blz::pair<int const ,struct `public: static int __cdecl CCharacterServices::Script_GetUpgradeDistributions(struct lua_State *)'::`2'::DistObjData> >>(void)"
+        },
+        {
+          "addr": "0x145026f90",
+          "string": "ASSERT(IS_UNIT_GUID(unitGUID))"
+        },
+        {
+          "addr": "0x145044f10",
+          "string": "ASSERT(lua_gettop(FrameScript_GetContext()) == 0)"
+        },
+        {
+          "addr": "0x1450490f8",
+          "string": "nullptr lua_State pointer '%s'"
+        },
+        {
+          "addr": "0x145049190",
+          "string": "Unclosed lua_State stack '%s'"
+        },
+        {
+          "addr": "0x145049310",
+          "string": "ASSERT(lua_gettop(state) == 2)"
+        },
+        {
+          "addr": "0x14504b650",
+          "string": "ASSERT(state && (lua_gettop(state) == 0))"
+        },
+        {
+          "addr": "0x1450ef9c8",
+          "string": "ASSERTSAFE((lua_gettop(L) == base + 1), ...)"
+        },
+        {
+          "addr": "0x1450efad8",
+          "string": "ASSERTSAFE((lua_gettop(L) == base), ...)"
+        }
+      ],
+      "cursor": {
+        "done": true
+      }
+    },
+    "isError": false
+  },
+  "xrefs": {
+    "content": [
+      {
+        "type": "text",
+        "text": "[{\"addr\":\"0x145044f10\",\"xrefs\":[{\"addr\":\"0x145045500\",\"type\":\"data\",\"fn\":null}],\"more\":false,\"xref_count\":1},{\"addr\":\"0x144e7e390\",\"xrefs\":[],\"more\":false,\"xref_count\":0,\"message\":\"No cross-references to this address\"},{\"addr\":\"0x1450490f8\",\"xrefs\":[],\"more\":false,\"xref_count\":0,\"message\":\"No cross-references to this address\"},{\"addr\":\"0x14504b650\",\"xrefs\":[{\"addr\":\"0x14504bac0\",\"type\":\"data\",\"fn\":null}],\"more\":false,\"xref_count\":1}]"
+      }
+    ],
+    "structuredContent": {
+      "result": [
+        {
+          "addr": "0x145044f10",
+          "xrefs": [
+            {
+              "addr": "0x145045500",
+              "type": "data",
+              "fn": null
+            }
+          ],
+          "more": false,
+          "xref_count": 1
+        },
+        {
+          "addr": "0x144e7e390",
+          "xrefs": [],
+          "more": false,
+          "xref_count": 0,
+          "message": "No cross-references to this address"
+        },
+        {
+          "addr": "0x1450490f8",
+          "xrefs": [],
+          "more": false,
+          "xref_count": 0,
+          "message": "No cross-references to this address"
+        },
+        {
+          "addr": "0x14504b650",
+          "xrefs": [
+            {
+              "addr": "0x14504bac0",
+              "type": "data",
+              "fn": null
+            }
+          ],
+          "more": false,
+          "xref_count": 1
+        }
+      ]
+    },
+    "isError": false
+  },
+  "ptr": {
+    "content": [
+      {
+        "type": "text",
+        "text": "[{\"pattern\":\"90 E3 E7 44 01 00 00 00\",\"matches\":[],\"n\":0,\"cursor\":{\"done\":true}},{\"pattern\":\"68 AF F0 44 01 00 00 00\",\"matches\":[],\"n\":0,\"cursor\":{\"done\":true}}]"
+      }
+    ],
+    "structuredContent": {
+      "result": [
+        {
+          "pattern": "90 E3 E7 44 01 00 00 00",
+          "matches": [],
+          "n": 0,
+          "cursor": {
+            "done": true
+          }
+        },
+        {
+          "pattern": "68 AF F0 44 01 00 00 00",
+          "matches": [],
+          "n": 0,
+          "cursor": {
+            "done": true
+          }
+        }
+      ]
+    },
+    "isError": false
+  },
+  "inventoryRecovery": "The one bounded retry also timed out after 300s. No further tool retries or process termination were performed.",
+  "semanticRootState": "unverified; original and partial-runtime research databases retained"
+}

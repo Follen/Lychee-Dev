@@ -40,6 +40,7 @@ func (p *stopReconcilePeer) Observe(_ context.Context, q ObservationQuery) (Obse
 		return Observation{}, ErrPending
 	}
 	i := p.current
+	i.Schema = bridge.SlotSchema
 	i.Owner = e.Owner
 	i.Fence = e.Fence
 	i.NextSlot = e.Index + 1
@@ -60,7 +61,8 @@ func (p *stopReconcilePeer) ObserveInput(ctx context.Context, e bridge.SlotEnvel
 	s.NextSlot = p.advancedSlot
 	s.SampleMillis = 1000
 	b, _ := json.Marshal(s)
-	return inputObservation(memory.Record{Header: bridge.MemoryHeader{Kind: bridge.MemoryInputState}, Payload: b}, e, after, 1000)
+	runtime, _ := tokenBytes(s.Runtime)
+	return inputObservation(memory.Record{Header: bridge.MemoryHeader{Kind: bridge.MemoryInputState, State: 1, Sequence: 1, Runtime: runtime, Nonce: runtime}, Payload: b}, e, after, 1000)
 }
 func (p *stopReconcilePeer) RuntimeCandidate(_ context.Context, from Identity) (*Identity, error) {
 	p.discoveries++
@@ -74,7 +76,7 @@ func (*stopReconcilePeer) Consumed(context.Context, bridge.SlotEnvelope) error {
 
 func stopReconcileFixture(t *testing.T) (*Driver, *stopReconcilePeer) {
 	t.Helper()
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 4, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: "3.0.0"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 4, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: "3.0.0"}
 	p := &stopReconcilePeer{current: i}
 	d, err := New(filepath.Join(t.TempDir(), "connections", "test.jsonl"), p, i)
 	if err != nil {
@@ -246,6 +248,7 @@ func TestStopPersistedBusinessExchangeCrashBoundaries(t *testing.T) {
 					if action == "commit" {
 						state = "accepted"
 					}
+					i.Schema = bridge.SlotSchema
 					tx.Receipt = &Receipt{Identity: i, Nonce: tx.Envelope.Nonce, Ticket: op.Ticket, Action: action, State: state, Challenge: strings.Repeat("4", 32)}
 				}
 				if err := d.RequestClose(context.Background()); err != nil {

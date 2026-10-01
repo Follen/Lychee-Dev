@@ -244,13 +244,13 @@ func deploymentGuard(ctx context.Context, target live.ClientWindow) error {
 	}
 	return nil
 }
-func (p *Project) native(target live.ClientWindow, cache bool) (*Native, error) {
+func (p *Project) native(ctx context.Context, target live.ClientWindow, cache bool) (*Native, error) {
 	key := fmt.Sprintf("%d-%d.json", target.Window.ProcessID, target.Window.ProcessStartedAt)
 	id, err := token()
 	if err != nil {
 		return nil, err
 	}
-	n, err := OpenNative(target.Window, filepath.Join(target.Client.Directory, "Interface", "AddOns"), buildinfo.Version, p.path("cache", key), cache)
+	n, err := OpenNative(ctx, target.Window, filepath.Join(target.Client.Directory, "Interface", "AddOns"), buildinfo.Version, p.path("cache", key), cache)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	if err = deploymentGuard(ctx, target); err != nil {
 		return ProjectResult{}, err
 	}
-	native, err := p.native(target, cache)
+	native, err := p.native(ctx, target, cache)
 	if err != nil {
 		return ProjectResult{}, err
 	}
@@ -384,7 +384,7 @@ func (p *Project) drive(ctx context.Context, id string, cache bool, action func(
 	if d.State.Closed {
 		return present(d), ErrClosed
 	}
-	native, err := p.native(meta.Target, cache)
+	native, err := p.native(ctx, meta.Target, cache)
 	if err != nil {
 		return present(d), err
 	}

@@ -1,0 +1,120 @@
+{
+  "schema": "lycheedev.forever.span-acceptance.v1",
+  "candidateSHA256": "afade381894940c84a5583899c52e973ef2503914c1785218b7f668a5c0711c6",
+  "pid": 10376,
+  "creation": "134352957565325600",
+  "core": {
+    "complete": true,
+    "checks": 12,
+    "allFirstCallsPassed": true,
+    "session": "CON-b31dd109add5d78fcffa0d340fd110d6"
+  },
+  "pressure": {
+    "complete": true,
+    "uniqueNormalRequests": 47,
+    "session": "CON-5a213b7d710ce7904e1463a51c5e5dc0",
+    "failures": [
+      {
+        "name": "normal-8",
+        "argv": [
+          "live",
+          "execute",
+          "--session",
+          "CON-5a213b7d710ce7904e1463a51c5e5dc0",
+          "--request",
+          "normal-8",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-span",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 1373,
+        "session": "CON-5a213b7d710ce7904e1463a51c5e5dc0",
+        "operation": "LMO-27a97eadc21b796eb86faad66711fab9",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read\nmemory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=current_geometry address=0x7ff7f793a69d module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7f7935000,0x7ff7f794b000) region=[0x7ff7f7935000,0x7ff7f794b000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7f7935000,0x7ff7f7936000) size=0x1000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x1}",
+          "stage": "prepared",
+          "retryable": false,
+          "resumeOperationId": "CON-5a213b7d710ce7904e1463a51c5e5dc0"
+        }
+      },
+      {
+        "name": "normal-41",
+        "argv": [
+          "live",
+          "execute",
+          "--session",
+          "CON-5a213b7d710ce7904e1463a51c5e5dc0",
+          "--request",
+          "normal-41",
+          "--file",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\tests\\channel-live\\fixtures\\normal.lua",
+          "--budget-seconds",
+          "5",
+          "--policy",
+          "observation",
+          "--project",
+          "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-pressure-span",
+          "--wait-seconds",
+          "120",
+          "--format",
+          "json"
+        ],
+        "exitCode": 3,
+        "elapsedMs": 5348,
+        "session": "CON-5a213b7d710ce7904e1463a51c5e5dc0",
+        "operation": "LMO-b94d9be300ef2111733bfd2486f7cd66",
+        "complete": false,
+        "cleanup": "pending",
+        "error": {
+          "code": "live.channel_mailbox_unavailable",
+          "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read\nmemory.module_mapping_check stage=before_read: memory.ineligible_module_read reason=current_geometry address=0x7ff7f793a69d module=[0x7ff7f71e0000,0x7ff7ff819000) issued={span=[0x7ff7f7936000,0x7ff7f7952000) region=[0x7ff7f7936000,0x7ff7f7952000) type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20 eligible=true} current={region=[0x7ff7f7936000,0x7ff7f7939000) size=0x3000 type=0x40000 allocation=0x7ff7f71e0000 state=0x1000 protect=0x20}",
+          "stage": "release_ready",
+          "retryable": false,
+          "resumeOperationId": "CON-5a213b7d710ce7904e1463a51c5e5dc0"
+        }
+      }
+    ]
+  },
+  "rootQueriesAfterReload": "passed",
+  "publicReaderAndByteReplayBeforeAfterCoreAndAfterPressure": "passed",
+  "library": "read-level confirmations added; semantics/reuse levels not promoted",
+  "finalIdentity": {
+    "build": "1.60.1.70124",
+    "character": "Aotu",
+    "fence": 0,
+    "guid": "Player-4618-01188FA2",
+    "inputState": "lycheedev.input.hybrid.v1",
+    "inventory": 200,
+    "nextSlot": 7,
+    "owner": "",
+    "product": "forever",
+    "realm": "Aotu",
+    "release": "3.1.0",
+    "runtime": "0000001a00010158aa92b7c7838c3cbd",
+    "schema": "lycheedev.slot.identity.v2",
+    "slots": 200
+  },
+  "cleanup": {
+    "activationClosed": true,
+    "coreClosed": true,
+    "pressureClosed": true,
+    "owed": false
+  },
+  "geometryMisreportExcluded": false,
+  "geometryMisreportEvidence": ".tmp/mailbox-live/forever-pressure-span/normal-41.json",
+  "causeScope": "this failure only: before_read current_geometry at anchor, query issued.regionStart returned earlier split region not covering actual requested at; all attributes preserved in captured current region; future fix required",
+  "crossProcessReuse": "not_checked"
+}

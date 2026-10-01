@@ -1,0 +1,78 @@
+{
+  "command": "analyze.replay",
+  "ok": true,
+  "script": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\scripts\\relogin-mailbox-reader.mjs",
+  "driver": "replay",
+  "pid": 10376,
+  "emitted": [
+    {
+      "schema": "lycheedev.mailbox.probe.v1",
+      "state": "observed",
+      "binding": {
+        "bundleID": "forever-lua-mailbox-research-candidate-70124",
+        "recipeID": "forever-runscript-state-hypothesis-70124",
+        "buildKey": "classicbeta@1.60.1.70124",
+        "executableSHA256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+        "rootRVA": "0x7b780b8",
+        "release": "3.1.0",
+        "executableHashCheck": "external_workspace_required"
+      },
+      "identity": {
+        "build": "1.60.1.70124",
+        "character": "Aotu",
+        "fence": 1,
+        "guid": "Player-4618-01188FA2",
+        "inputState": "lycheedev.input.hybrid.v1",
+        "inventory": 200,
+        "nextSlot": 20,
+        "owner": "039af23c4067d76eab1e0bd847394dd8",
+        "product": "forever",
+        "realm": "Aotu",
+        "release": "3.1.0",
+        "runtime": "0000001b00010377765e7dc91e6bb38e",
+        "schema": "lycheedev.slot.identity.v2",
+        "slots": 200
+      },
+      "input": {
+        "build": "1.60.1.70124",
+        "character": "Aotu",
+        "fence": 1,
+        "guid": "Player-4618-01188FA2",
+        "inputAttempt": {
+          "attemptSeq": 19,
+          "reason": "",
+          "received": true,
+          "runtime": "0000001b00010377765e7dc91e6bb38e",
+          "schema": "lycheedev.input-attempt.v1",
+          "slot": 19,
+          "stage": "received"
+        },
+        "inputBlocked": false,
+        "nextSlot": 20,
+        "owner": "039af23c4067d76eab1e0bd847394dd8",
+        "realm": "Aotu",
+        "reason": "",
+        "runtime": "0000001b00010377765e7dc91e6bb38e",
+        "sampleMillis": 66471062,
+        "schema": "lycheedev.input.v2"
+      },
+      "identitySequence": 23,
+      "inputSequence": 69,
+      "authorization": false,
+      "reads": 135,
+      "bytes": 3387
+    }
+  ],
+  "emittedTruncated": false,
+  "summary": {
+    "epochs": 1,
+    "matched": 1,
+    "mismatched": 0,
+    "reads": 135
+  },
+  "epochs": 1,
+  "matched": 1,
+  "mismatched": 0,
+  "diffs": [],
+  "out": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-acceptance\\current\\reader-before-core-reload-replay.jsonl"
+}

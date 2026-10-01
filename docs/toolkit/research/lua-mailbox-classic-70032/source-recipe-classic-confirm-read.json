@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "retail-lua-state-root-rip-v1",
+    "recipeBuildKey": "retail@12.1.0.69933",
+    "recipeSha256": "11d48aa512fd890df85066f30b4ffd1a086d30c1b75dcab0eb59ad033d4ceb0e",
+    "level": "read",
+    "validatedAgainst": "classic@5.5.4.70032",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\classic-library-evidence.json",
+      "copy": "evidence/classic@5.5.4.70032/retail-lua-state-root-rip-v1-106a3baf269a.json",
+      "sha256": "106a3baf269afb2b9c0a99db541f4b318923544acfa080d609b1ff91b775b966",
+      "bytes": 532796
+    },
+    "note": "Same unique58pattern migrates to Classic anchor0x62dc34/root0x701dda8, never reused old numeric RVA; production Go strict current publication and exact bytes passed; independent root query passed; no cross-process complete-reader claim.",
+    "recordedAt": "2026-10-01T02:47:48.592Z"
+  }
+}

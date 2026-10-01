@@ -1,0 +1,72 @@
+{
+  "ok": true,
+  "file": "C:\\Users\\follen\\.wowdump\\capability-validation\\classicbeta@1.60.1.70124\\forever-lua-mailbox-root-v1\\cd028198bee201ebca187939cc9f1871b9a7bc7a27eedcb40f5f8bbcaba11c5e.json",
+  "confirmation": {
+    "schema": "wowdump.capability-confirmation.v1",
+    "capabilitySha256": "359f6acde5d19efa72375809a18acdf65d6fc1d1d23a927c5034d8c126c6851c",
+    "profileSha256": "72e17463f4f5ff067d825e29a3f4aa57a303ba7d0885fb97d0f83cecea11afaa",
+    "id": "forever-lua-mailbox-root-v1",
+    "buildKey": "classicbeta@1.60.1.70124",
+    "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+    "recipes": [
+      {
+        "id": "forever-lua-state-root-runscript-rip-v1-70124",
+        "buildKey": "classicbeta@1.60.1.70124",
+        "sha256": "a2edc327ae09fe490c7e354948bedb1d1bea8ae2d27070aaa563aa3371a5f9b8"
+      }
+    ],
+    "level": "read",
+    "evidence": [
+      {
+        "file": "capability-evidence\\ed88523122f0b1f1aba74844b3c4a407ab3933acce98485b224e5d984454d5cc.json",
+        "sha256": "ed88523122f0b1f1aba74844b3c4a407ab3933acce98485b224e5d984454d5cc"
+      },
+      {
+        "file": "capability-evidence\\f408175b580d1af21709148daa91f1fd297c97bc577cf23048b5d8f86d6ed32e.json",
+        "sha256": "f408175b580d1af21709148daa91f1fd297c97bc577cf23048b5d8f86d6ed32e"
+      },
+      {
+        "file": "capability-evidence\\d159b06c05cfc994c8422a3d49092cb67d44df772abb1921e0a49f48a0b74b8f.json",
+        "sha256": "d159b06c05cfc994c8422a3d49092cb67d44df772abb1921e0a49f48a0b74b8f"
+      }
+    ],
+    "basis": null,
+    "reason": "Read verified before and after same-process activation/core/capacity/cleanup reloads. Independent API actor/full path/byte replay verified separately; cross-process reuse not checked",
+    "semanticAssessment": "not_checked",
+    "atomic": false,
+    "scope": [
+      {
+        "processInstance": "10376:134352957565325600",
+        "parametersSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "fields": [
+          "luaState",
+          "threadTag",
+          "globalsValue"
+        ],
+        "observedAt": "2026-10-01T04:22:42.025Z"
+      },
+      {
+        "processInstance": "10376:134352957565325600",
+        "parametersSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "fields": [
+          "luaState",
+          "threadTag",
+          "globalsValue"
+        ],
+        "observedAt": "2026-10-01T04:23:21.127Z"
+      },
+      {
+        "processInstance": "10376:134352957565325600",
+        "parametersSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "fields": [
+          "luaState",
+          "threadTag",
+          "globalsValue"
+        ],
+        "observedAt": "2026-10-01T04:29:17.413Z"
+      }
+    ],
+    "recordedAt": "2026-10-01T04:29:18.328Z",
+    "sha256": "cd028198bee201ebca187939cc9f1871b9a7bc7a27eedcb40f5f8bbcaba11c5e"
+  }
+}

@@ -1,5 +1,8 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-10-01 Native CON 当前实现合同为 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md)：200 槽、wire06、slot.v3、identity.v2、input.v2、公开 Mailbox 定点读取；无旧原生协议兼容或扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
+
+
 2026-09-29 工作区新增 [CASC 显式内容变体合同](content-variants-2026-09-29.md)：
 asset inspect/export 可明确筛选 LOW_VIOLENCE 位；默认严格拒绝歧义，完整性校验不变。
 

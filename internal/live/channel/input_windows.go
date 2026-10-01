@@ -76,8 +76,8 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 		}
 		return s, err
 	}
-	// Cache-off remains a complete scan path. No hidden address cache is
-	// introduced to make one cadence work only when hints are enabled.
+	// A native mailbox read always resolves the current publication. The hints
+	// branch below is retained only for synthetic scanner test adapters.
 	if n.Hints != nil && len(n.Hints.Entries) > 0 {
 		found, err := n.findPath(ctx, source, selector, true, true)
 		if err != nil && !((errors.Is(err, context.DeadlineExceeded) || errors.Is(err, memory.ErrNearbyBudget)) && ctx.Err() == nil) {
@@ -153,10 +153,20 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return ErrPending
 		}
 		runtime, _ := tokenBytes(a.Envelope.Runtime)
-		r, readErr := memory.ReadRecord(ctx, n.Process, a.Observation.Address, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState})
+		if n.Mailbox == nil {
+			return errors.New("live.channel_mailbox_required")
+		}
+		current, readErr := n.Mailbox.Lookup(ctx, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState})
 		if readErr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return readErr
+		}
+		if len(current.Records) != 1 || current.Records[0].Address != a.Observation.Address {
 			return ErrPending
 		}
+		r := current.Records[0]
 		s, readErr := inputObservation(r, a.Envelope, 0, uptimeMillis())
 		if readErr != nil || s.SampleMillis != a.Observation.SampleMillis {
 			return ErrPending

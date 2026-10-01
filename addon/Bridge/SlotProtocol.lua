@@ -7,6 +7,17 @@ local LIMIT=200
 local MAX_OPERATIONS=math.floor((LIMIT-16)/4)
 local function plain(v)return not (issecretvalue and issecretvalue(v)) and type(v)=="table" and getmetatable(v)==nil end
 local function safe(v)return not (issecretvalue and issecretvalue(v))end
+local envelopeFields={"schema","index","runtime","owner","fence","nonce","ticket","action","guid","build",
+    "challenge","preparedNonce","reportBytes","reportChecksum","codeBytes","codeChecksum","budget"}
+local function copyEnvelope(e,withCode)
+    local copy={}
+    for _,key in ipairs(envelopeFields) do
+        local value=e[key]
+        if safe(value) and (type(value)=="string" or type(value)=="number" or type(value)=="boolean") then copy[key]=value end
+    end
+    if withCode then copy.code=e.code end
+    return copy
+end
 
 ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     assert(plain(adapter) and ns.MemoryProtocol.Token(adapter.runtime),"invalid slot adapter")
@@ -15,7 +26,19 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     local sequence,count,cursor=0,0,1
     local consumed,operations,receipts={},{},{}
     local descriptor
+    -- Passive copies only. Public maps must never alias protocol state: callers
+    -- may inspect or overwrite them without changing nonce/owner decisions.
+    local mailbox,mailboxReceipts,mailboxBodies
     local api={}
+    function api.AttachMailbox(publication)
+        assert(plain(publication) and publication.schema=="lycheedev.mailbox.v1"
+            and publication.runtime==adapter.runtime and publication.release==adapter.release,"invalid slot mailbox")
+        mailbox,mailboxReceipts,mailboxBodies=publication,{},{}
+        rawset(mailbox,"receipts",mailboxReceipts);rawset(mailbox,"bodies",mailboxBodies)
+        rawset(mailbox,"identity",descriptor)
+        for nonce,record in pairs(receipts) do rawset(mailboxReceipts,nonce,record) end
+        for ticket,op in pairs(operations) do if op.body then rawset(mailboxBodies,ticket,op.body) end end
+    end
     local function observe(op)
         if adapter.observe then
             local ok,result,reason=pcall(adapter.observe,op)
@@ -41,7 +64,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if sequence>=4294967295 then return nil,"slot_sequence_exhausted" end
         local a=actor();if not a then return nil,"slot_actor_unavailable" end
         sequence=sequence+1
-        local value={schema="lycheedev.slot.v2",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
+        local value={schema="lycheedev.slot.v3",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
             nonce=e.nonce,ticket=e.ticket or ZERO,action=e.action,state=state,sequence=sequence,
             nextSlot=nextSlot(),slots=LIMIT,character=a.character,realm=a.realm,guid=a.guid,
             build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState}
@@ -50,15 +73,17 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         local record;record,reason=wire.Encode(e.nonce,adapter.runtime,e.ticket or ZERO,kind or 2,1,sequence,text)
         if not record then return nil,reason end
         receipts[e.nonce]=record
+        if mailboxReceipts then rawset(mailboxReceipts,e.nonce,record) end
         return record,value
     end
     function api.Describe()
         local a=actor();if not a then return nil,"slot_actor_unavailable" end
-        local text=encode({schema="lycheedev.slot.identity.v1",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
+        local text=encode({schema="lycheedev.slot.identity.v2",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
             nextSlot=nextSlot(),slots=LIMIT,character=a.character,realm=a.realm,guid=a.guid,
             build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState},16384)
         if not text then return nil,"slot_identity_encoding" end
         descriptor=wire.Encode(ZERO,adapter.runtime,ZERO,1,1,sequence,text)
+        if mailbox then rawset(mailbox,"identity",descriptor) end
         return descriptor
     end
     local function finish(op,ok,value,metadata)
@@ -70,6 +95,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         -- Store body and outcome before constructing its public response.
         op.payload=text;op.bytes=#text;op.checksum=wire.Checksum(text)
         op.body=assert(wire.Encode(op.envelope.nonce,adapter.runtime,op.envelope.ticket,3,3,op.sequence,text))
+        if mailboxBodies then rawset(mailboxBodies,op.envelope.ticket,op.body) end
         op.state="reported";op.ok=ok
         observe(op)
         local record,value=publish(op.envelope,"reported",{reportBytes=op.bytes,reportChecksum=op.checksum,challenge=op.challenge})
@@ -88,7 +114,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if not plain(e) then return nil,"slot_envelope_invalid" end
         -- Never inspect or execute encoded business code before these checks.
         for _,key in ipairs({"schema","index","runtime","owner","fence","nonce","ticket","action","guid","build","challenge","preparedNonce","reportBytes","reportChecksum"}) do if not safe(e[key]) then return nil,"slot_secret_envelope" end end
-        if e.schema~="lycheedev.slot.v2" or e.index~=index or not wire.Token(e.nonce)
+        if e.schema~="lycheedev.slot.v3" or e.index~=index or not wire.Token(e.nonce)
             or not wire.Token(e.ticket) or not wire.Token(e.owner) or not wire.Token(e.runtime) then return nil,"slot_envelope_invalid" end
         if e.runtime~=adapter.runtime then
             if type(e.guid)~="string" or type(e.build)~="string"
@@ -114,6 +140,9 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
             if not safe(e.code) or type(e.code)~="string" or #e.code<1 or #e.code>262144 or e.code:byte(1)==27
                 or not safe(e.codeBytes) or e.codeBytes~=#e.code or not safe(e.codeChecksum) or e.codeChecksum~=wire.Checksum(e.code)
                 or not safe(e.budget) or type(e.budget)~="number" or e.budget%1~=0 or e.budget<1 or e.budget>120 then return reject(e,"slot_code_invalid") end
+            -- The loading addon owns e. Retain only checked immutable values,
+            -- never its mutable table or unknown fields, before adapter calls.
+            e=copyEnvelope(e,true)
             local fn,reason=adapter.compile(e.code)
             local challenge=adapter.runtime:sub(1,24)..string.format("%08x",sequence+1)
             if not fn then
@@ -148,6 +177,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
                 or e.reportBytes~=op.bytes or e.reportChecksum~=op.checksum then return reject(e,"slot_release_mismatch") end
             if op.resourcesReleased==false then return reject(e,"slot_resources_pending") end
             op.payload=nil;op.body=nil;op.fn=nil;op.state="released"
+            if mailboxBodies then rawset(mailboxBodies,e.ticket,nil) end
             -- Retain identity/digest tombstone; never re-admit its ticket.
             op.envelope.code=nil
             observe(op)
@@ -167,6 +197,20 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         return {runtime=adapter.runtime,owner=owner or "",fence=fence or 0,nextSlot=nextSlot(),
             guid=a.guid,build=adapter.build,character=a.character,realm=a.realm}
     end
-    function api.Snapshot()return {descriptor=descriptor,receipts=receipts,operations=operations,owner=owner,fence=fence,consumed=consumed}end
+    function api.Snapshot()
+        -- At most 200 receipts/consumed bits and 46 operation fact objects.
+        -- Immutable strings may be shared; execution functions, callbacks,
+        -- code and writable private tables never leave the engine.
+        local result={descriptor=descriptor,receipts={},operations={},owner=owner,fence=fence,consumed={}}
+        for nonce,record in pairs(receipts) do result.receipts[nonce]=record end
+        for i=1,LIMIT do if consumed[i] then result.consumed[i]=true end end
+        for ticket,op in pairs(operations) do
+            result.operations[ticket]={envelope=copyEnvelope(op.envelope,false),challenge=op.challenge,
+                sequence=op.sequence,state=op.state,body=op.body,bytes=op.bytes,checksum=op.checksum,
+                ok=op.ok,resourcesReleased=op.resourcesReleased}
+        end
+        return result
+    end
+    if adapter.mailbox then api.AttachMailbox(adapter.mailbox) end
     return api
 end }

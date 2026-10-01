@@ -1,0 +1,48 @@
+{
+  "schema": "lycheedev.mailbox.acceptance.v1",
+  "startedAt": "2026-10-01T03:42:12.682Z",
+  "cli": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-candidate-sealed\\dev-npm-stage\\native\\windows-amd64\\lycheedev.exe",
+  "project": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\sealed-classic-project",
+  "pid": 50368,
+  "installation": "D:/Game/World of Warcraft/_classic_",
+  "executableSHA256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+  "complete": false,
+  "steps": [
+    {
+      "name": "connect",
+      "args": [
+        "live",
+        "connect",
+        "--installation",
+        "D:/Game/World of Warcraft/_classic_",
+        "--pid",
+        "50368",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\sealed-classic-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 4,
+      "elapsedMs": 67948,
+      "session": "CON-518d3178a70bb522b18ad2320efe24b5",
+      "complete": false,
+      "cleanup": "none",
+      "error": {
+        "code": "live.channel_observation_budget",
+        "message": "live.channel_observation_budget",
+        "stage": "activation_waiting_runtime",
+        "retryable": false,
+        "resumeOperationId": "CON-518d3178a70bb522b18ad2320efe24b5"
+      }
+    }
+  ],
+  "session": "CON-518d3178a70bb522b18ad2320efe24b5",
+  "failure": {
+    "message": "connect: {\"code\":\"live.channel_observation_budget\",\"message\":\"live.channel_observation_budget\",\"stage\":\"activation_waiting_runtime\",\"retryable\":false,\"resumeOperationId\":\"CON-518d3178a70bb522b18ad2320efe24b5\"} \n\n4 !== 0\n",
+    "session": "CON-518d3178a70bb522b18ad2320efe24b5"
+  },
+  "finishedAt": "2026-10-01T03:43:20.633Z"
+}

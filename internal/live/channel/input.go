@@ -17,18 +17,19 @@ var errInputStateStale = errors.New("live.channel_input_state_stale")
 var ErrInputObservationStale = errors.Join(ErrPending, errors.New("live.channel_input_observation_stale"))
 
 type InputObservation struct {
-	Schema       string               `json:"schema"`
-	Runtime      string               `json:"runtime"`
-	Owner        string               `json:"owner"`
-	Fence        uint64               `json:"fence"`
-	NextSlot     int                  `json:"nextSlot"`
-	GUID         string               `json:"guid"`
-	Build        string               `json:"build"`
-	SampleMillis int64                `json:"sampleMillis"`
-	InputBlocked *bool                `json:"inputBlocked"`
-	Reason       string               `json:"reason"`
-	Address      uint64               `json:"-"`
-	Optical      *InputSignalEvidence `json:"optical,omitempty"`
+	Schema          string               `json:"schema"`
+	Runtime         string               `json:"runtime"`
+	Owner           string               `json:"owner"`
+	Fence           uint64               `json:"fence"`
+	NextSlot        int                  `json:"nextSlot"`
+	GUID            string               `json:"guid"`
+	Build           string               `json:"build"`
+	SampleMillis    int64                `json:"sampleMillis"`
+	InputBlocked    *bool                `json:"inputBlocked"`
+	Reason          string               `json:"reason"`
+	Address         uint64               `json:"-"`
+	Optical         *InputSignalEvidence `json:"optical,omitempty"`
+	InputDiagnostic *InputDiagnostic     `json:"inputAttempt,omitempty"`
 }
 
 type InputAction struct {
@@ -45,12 +46,13 @@ type InputOutcome struct {
 	Retryable      bool   `json:"retryable,omitempty"`
 }
 type InputAttempt struct {
-	ID          string            `json:"id"`
-	Exchange    string            `json:"exchange"`
-	Runtime     string            `json:"runtime"`
-	Kind        string            `json:"kind"`
-	Observation *InputObservation `json:"observation,omitempty"`
-	Outcome     *InputOutcome     `json:"outcome,omitempty"`
+	ID              string            `json:"id"`
+	Exchange        string            `json:"exchange"`
+	Runtime         string            `json:"runtime"`
+	Kind            string            `json:"kind"`
+	Observation     *InputObservation `json:"observation,omitempty"`
+	Outcome         *InputOutcome     `json:"outcome,omitempty"`
+	AfterDiagnostic *InputDiagnostic  `json:"afterDiagnostic,omitempty"`
 }
 
 // perform is the sole journal boundary for connected physical input. An intent
@@ -160,7 +162,12 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 // verification. A missing/stale sample cannot authorize any key, including Esc.
 func inputObservation(r memory.Record, e bridge.SlotEnvelope, after, now int64) (InputObservation, error) {
 	var s InputObservation
-	if r.Header.Kind != bridge.MemoryInputState || json.Unmarshal(r.Payload, &s) != nil || s.Schema != "lycheedev.input.v1" || s.InputBlocked == nil {
+	h := r.Header
+	if len(r.Payload) > 2048 || h.Kind != bridge.MemoryInputState || h.State != 1 || h.Sequence == 0 || h.Sequence == ^uint32(0) || h.Ticket != [16]byte{} || json.Unmarshal(r.Payload, &s) != nil || s.Schema != InputSchema || s.InputBlocked == nil {
+		return s, errors.New("live.channel_input_state_invalid")
+	}
+	runtime, err := tokenBytes(s.Runtime)
+	if err != nil || runtime == [16]byte{} || h.Runtime != runtime || h.Nonce != runtime {
 		return s, errors.New("live.channel_input_state_invalid")
 	}
 	// Reload consumes no slot. A lost receipt must not disable the control

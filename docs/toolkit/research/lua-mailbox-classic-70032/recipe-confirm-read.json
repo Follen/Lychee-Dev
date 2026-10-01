@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "recipes.confirm",
+  "record": {
+    "schema": "wowdump.recipe-confirmation.v1",
+    "recipeId": "classic-lua-state-root-rip-v1-70032",
+    "recipeBuildKey": "classic@5.5.4.70032",
+    "recipeSha256": "1b1ef234c82f88d5c547a5f411cd68f88c8961adc3acad67fa16790fbf489de4",
+    "level": "read",
+    "validatedAgainst": "classic@5.5.4.70032",
+    "evidence": {
+      "source": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\classic-library-evidence.json",
+      "copy": "evidence/classic@5.5.4.70032/classic-lua-state-root-rip-v1-70032-106a3baf269a.json",
+      "sha256": "106a3baf269afb2b9c0a99db541f4b318923544acfa080d609b1ff91b775b966",
+      "bytes": 532796
+    },
+    "note": "Exact hash/complete runtime-text anchor; independent root-profile query/read confirmation; production Go public Mailbox exact HEAD/BODY and actor acceptance. Cross-process reuse not_checked.",
+    "recordedAt": "2026-10-01T02:47:48.380Z"
+  }
+}

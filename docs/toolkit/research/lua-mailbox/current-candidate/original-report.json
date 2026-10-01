@@ -1,0 +1,78 @@
+{
+  "schema": "lycheedev.mailbox.acceptance.v1",
+  "startedAt": "2026-10-01T04:21:42.936Z",
+  "cli": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-candidate-current\\dev-npm-stage\\native\\windows-amd64\\lycheedev.exe",
+  "project": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\current-retail-project",
+  "pid": 34732,
+  "installation": "D:/Game/World of Warcraft/_retail_",
+  "character": "暗夜荔枝",
+  "realm": "罗宁",
+  "guid": "Player-729-06AA5F07",
+  "complete": false,
+  "steps": [
+    {
+      "name": "connect",
+      "args": [
+        "live",
+        "connect",
+        "--installation",
+        "D:/Game/World of Warcraft/_retail_",
+        "--pid",
+        "34732",
+        "--character",
+        "暗夜荔枝",
+        "--realm",
+        "罗宁",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\current-retail-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 0,
+      "elapsedMs": 1470,
+      "session": "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+      "complete": true,
+      "cleanup": "none",
+      "error": null
+    },
+    {
+      "name": "activate-current-bytes",
+      "args": [
+        "live",
+        "reload",
+        "--session",
+        "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+        "--request",
+        "activate-wake-candidate",
+        "--no-cache",
+        "--project",
+        "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\current-retail-project",
+        "--wait-seconds",
+        "120",
+        "--format",
+        "json"
+      ],
+      "exitCode": 5,
+      "elapsedMs": 2066,
+      "session": "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+      "complete": false,
+      "cleanup": "none",
+      "error": {
+        "code": "command.failed",
+        "message": "lab.key_already_held",
+        "stage": "reload_intent",
+        "retryable": false,
+        "resumeOperationId": "CON-2eda9cdcf05088ce5c1358e2c22ee994"
+      }
+    }
+  ],
+  "session": "CON-2eda9cdcf05088ce5c1358e2c22ee994",
+  "failure": {
+    "message": "activate-current-bytes: {\"code\":\"command.failed\",\"message\":\"lab.key_already_held\",\"stage\":\"reload_intent\",\"retryable\":false,\"resumeOperationId\":\"CON-2eda9cdcf05088ce5c1358e2c22ee994\"} \n\n5 !== 0\n",
+    "session": "CON-2eda9cdcf05088ce5c1358e2c22ee994"
+  },
+  "finishedAt": "2026-10-01T04:21:46.475Z"
+}

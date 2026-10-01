@@ -31,7 +31,7 @@ func (b *pendingBackend) Input(context.Context, InputAction) (InputOutcome, erro
 }
 func (b *pendingBackend) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (InputObservation, error) {
 	ready := false
-	return InputObservation{Schema: "lycheedev.input.v1", Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready}, nil
+	return InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready}, nil
 }
 func (*pendingBackend) RuntimeCandidate(context.Context, Identity) (*Identity, error) {
 	return nil, nil
@@ -50,7 +50,7 @@ func (b *pendingBackend) Find(context.Context, memory.Selector, bool) (memory.Lo
 
 func TestBoundedContinuationDoesNotRepeatUnknownInput(t *testing.T) {
 	b := &pendingBackend{}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "connection.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func (b *publicationBlockedBackend) RuntimeCandidate(context.Context, Identity) 
 }
 func TestPublicationWaitRetainsIntentWithoutInputOrRuntimeDiscovery(t *testing.T) {
 	b := &publicationBlockedBackend{}
-	i := Identity{Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "connection.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)

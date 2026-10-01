@@ -1,0 +1,214 @@
+{
+  "schema": "wowdump.profile.v1",
+  "id": "forever-lua-mailbox-root-runscript-v1-70124",
+  "buildKey": "classicbeta@1.60.1.70124",
+  "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+  "readerStatus": "candidate",
+  "confidence": "candidate",
+  "module": {
+    "name": "WowB.exe"
+  },
+  "fields": {
+    "luaState": {
+      "root": {
+        "rva": "0x7b780b8"
+      },
+      "type": "pointer",
+      "guards": [
+        {
+          "kind": "inModule"
+        },
+        {
+          "kind": "stable",
+          "size": 8
+        }
+      ],
+      "anchoredBy": "forever-lua-state-root-runscript-rip-v1-70124"
+    },
+    "threadTag": {
+      "root": {
+        "rva": "0x7b780b8",
+        "dereference": true
+      },
+      "pointerChain": [
+        {
+          "offset": "0x10",
+          "dereference": false
+        }
+      ],
+      "type": "u8",
+      "guards": [
+        {
+          "kind": "notNull"
+        },
+        {
+          "kind": "stable",
+          "size": 1
+        }
+      ],
+      "anchoredBy": "forever-lua-state-root-runscript-rip-v1-70124"
+    },
+    "globalsValue": {
+      "root": {
+        "rva": "0x7b780b8",
+        "dereference": true
+      },
+      "pointerChain": [
+        {
+          "offset": "0x90",
+          "dereference": false
+        }
+      ],
+      "layout": {
+        "ref": "TValue"
+      },
+      "guards": [
+        {
+          "kind": "notNull"
+        },
+        {
+          "kind": "stable",
+          "size": 10
+        }
+      ],
+      "anchoredBy": "forever-lua-state-root-runscript-rip-v1-70124"
+    }
+  },
+  "types": {
+    "TValue": {
+      "kind": "struct",
+      "size": 24,
+      "fields": {
+        "pointer": {
+          "offset": "0x0",
+          "type": "pointer"
+        },
+        "tag": {
+          "offset": "0x8",
+          "type": "u8"
+        },
+        "secret": {
+          "offset": "0x9",
+          "type": "u8"
+        }
+      }
+    },
+    "Table": {
+      "kind": "struct",
+      "size": 72,
+      "fields": {
+        "tag": {
+          "offset": "0x10",
+          "type": "u8"
+        },
+        "logNodes": {
+          "offset": "0x13",
+          "type": "u8"
+        },
+        "nodes": {
+          "offset": "0x28",
+          "type": "pointer"
+        }
+      }
+    },
+    "Node": {
+      "kind": "struct",
+      "size": 56,
+      "fields": {
+        "value": {
+          "offset": "0x0",
+          "type": "pointer"
+        },
+        "valueTag": {
+          "offset": "0x8",
+          "type": "u8"
+        },
+        "valueSecret": {
+          "offset": "0x9",
+          "type": "u8"
+        },
+        "key": {
+          "offset": "0x18",
+          "type": "pointer"
+        },
+        "keyTag": {
+          "offset": "0x20",
+          "type": "u8"
+        },
+        "keySecret": {
+          "offset": "0x21",
+          "type": "u8"
+        },
+        "next": {
+          "offset": "0x30",
+          "type": "pointer"
+        }
+      }
+    },
+    "TString": {
+      "kind": "struct",
+      "size": 32,
+      "fields": {
+        "tag": {
+          "offset": "0x10",
+          "type": "u8"
+        },
+        "hash": {
+          "offset": "0x14",
+          "type": "u32"
+        },
+        "length": {
+          "offset": "0x18",
+          "type": "u64"
+        }
+      }
+    }
+  },
+  "bindings": [
+    {
+      "path": "/fields/luaState/root/rva",
+      "kind": "rva",
+      "recipe": "forever-lua-state-root-runscript-rip-v1-70124"
+    },
+    {
+      "path": "/fields/threadTag/root/rva",
+      "kind": "rva",
+      "recipe": "forever-lua-state-root-runscript-rip-v1-70124"
+    },
+    {
+      "path": "/fields/globalsValue/root/rva",
+      "kind": "rva",
+      "recipe": "forever-lua-state-root-runscript-rip-v1-70124"
+    }
+  ],
+  "invariants": [],
+  "layoutAssumptions": {
+    "threadTag": 8,
+    "tableTag": 5,
+    "stringTag": 4,
+    "secretClear": 0,
+    "globalsTValueOffset": "0x90",
+    "stringDataOffset": "0x20",
+    "hashAlgorithm": "Lua 5.1 uint32 backwards sampled bytes",
+    "validation": "not_checked",
+    "migrationRule": "Revalidate all offsets, sizes, tags, secret semantics and hash algorithm on each target build. Root relocation alone never establishes layout compatibility."
+  },
+  "publicPath": [
+    "_G",
+    "LycheeDevInternal",
+    "Mailbox"
+  ],
+  "validation": {
+    "read": "not_checked",
+    "semantics": "not_checked",
+    "reuse": "not_checked"
+  },
+  "evidence": [
+    {
+      "source": "actual RunScript call chain and Lua pseudo-index code + independent wowdump typed-state/root and complete named publicMailbox read/replay",
+      "semanticVerified": false,
+      "restartVerified": false,
+      "dataBuildLabel": "wowdump classicbeta@1.60.1.70124 is lycheedev forever@1.60.1.70124, exact executable/PID identity unchanged"
+    }
+  ]
+}

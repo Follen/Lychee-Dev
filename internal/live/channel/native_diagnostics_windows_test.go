@@ -163,7 +163,7 @@ func TestActivationFinalizesAuthorityAndReleasesDriverBeforeDiagnostics(t *testi
 		t.Fatal(err)
 	}
 	defer lease.Close()
-	a := activation{Schema: "lycheedev.channel-activation.v2", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(time.Now().Add(-time.Second), DefaultRecoveryBudget, false)}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "prepared", Budget: NewDurableBudget(time.Now().Add(-time.Second), DefaultRecoveryBudget, false)}
 	if err := writeProjectJSON(context.Background(), p.activationPath(d.State.ID), a); err != nil {
 		t.Fatal(err)
 	}

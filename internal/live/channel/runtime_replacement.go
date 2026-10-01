@@ -8,15 +8,17 @@ import (
 	"strings"
 )
 
-const RuntimeReplacementProofSchema = "lycheedev.runtime-replacement.bytes.v1"
+const RuntimeReplacementProofSchema = "lycheedev.runtime-replacement.mailbox.v1"
 
 type RuntimeReplacementWitness struct {
-	Address      uint64           `json:"address,string"`
-	Length       uint32           `json:"length"`
-	BeforeSHA256 string           `json:"beforeSHA256"`
-	AfterSHA256  string           `json:"afterSHA256"`
-	Sequence     uint32           `json:"sequence"`
-	Observation  InputObservation `json:"observation"`
+	First         InputObservation `json:"first"`
+	FirstSequence uint32           `json:"firstSequence"`
+	Address       uint64           `json:"address,string"`
+	Length        uint32           `json:"length"`
+	BeforeSHA256  string           `json:"beforeSHA256"`
+	AfterSHA256   string           `json:"afterSHA256"`
+	Sequence      uint32           `json:"sequence"`
+	Observation   InputObservation `json:"observation"`
 }
 type RuntimeReplacementProof struct {
 	Schema           string                    `json:"schema"`
@@ -26,10 +28,10 @@ type RuntimeReplacementProof struct {
 	Witness          RuntimeReplacementWitness `json:"witness"`
 }
 
-// Validate checks the persisted shape of a trusted Native observation. Digests
-// are audit evidence, not an independently verifiable external authorization.
-// Authority assumes a single trusted producer, immutable nonmoving Lua strings,
-// and no copying/revival of historical complete input records at new addresses.
+// Validate checks the persisted shape of two fresh observations resolved from
+// the current public mailbox field in the same fixed process. Native verifies
+// clock freshness and process identity during both reads. Address and digests
+// are diagnostic evidence; historical record locations do not prove authority.
 func (p RuntimeReplacementProof) Validate(old Identity) error {
 	bad := errors.New("live.channel_runtime_replacement_invalid")
 	if p.Schema != RuntimeReplacementProofSchema || old.Validate() != nil || p.Current.Validate() != nil || p.ProcessID == 0 || p.ProcessStartedAt == 0 || p.Current.Runtime == old.Runtime || p.Current.Runtime == strings.Repeat("0", 32) || !observedInputCapability(p.Current.InputState) || p.Current.Build != old.Build || p.Current.Product != old.Product || p.Current.Release != old.Release {
@@ -38,7 +40,7 @@ func (p RuntimeReplacementProof) Validate(old Identity) error {
 	w := p.Witness
 	o := w.Observation
 	overhead := uint32(bridge.MemoryHeaderBytes + bridge.MemoryTrailerBytes)
-	if w.Address == 0 || w.Length <= overhead || w.Length > overhead+2048 || w.Address > ^uint64(0)-uint64(w.Length) || w.Sequence == 0 || w.Sequence == ^uint32(0) {
+	if w.Address == 0 || w.Length <= overhead || w.Length > overhead+2048 || w.Address > ^uint64(0)-uint64(w.Length) || w.FirstSequence == 0 || w.FirstSequence == ^uint32(0) || w.Sequence <= w.FirstSequence || w.Sequence == ^uint32(0) {
 		return bad
 	}
 	for _, digest := range []string{w.BeforeSHA256, w.AfterSHA256} {
@@ -50,12 +52,17 @@ func (p RuntimeReplacementProof) Validate(old Identity) error {
 	if w.BeforeSHA256 == w.AfterSHA256 {
 		return bad
 	}
-	if o.Schema != "lycheedev.input.v1" || o.Runtime != p.Current.Runtime || o.Owner != p.Current.Owner || o.Fence != p.Current.Fence || o.GUID != p.Current.GUID || o.Build != p.Current.Build || o.NextSlot != p.Current.NextSlot || !validReplacementObservation(o) {
+	if o.SampleMillis <= w.First.SampleMillis {
 		return bad
 	}
-	payload, err := json.Marshal(o)
-	if err != nil || len(payload) > 2048 {
-		return bad
+	for _, observed := range []InputObservation{w.First, o} {
+		if observed.Schema != InputSchema || observed.Runtime != p.Current.Runtime || observed.Owner != p.Current.Owner || observed.Fence != p.Current.Fence || observed.GUID != p.Current.GUID || observed.Build != p.Current.Build || observed.NextSlot != p.Current.NextSlot || !validReplacementObservation(observed) {
+			return bad
+		}
+		payload, err := json.Marshal(observed)
+		if err != nil || len(payload) > 2048 {
+			return bad
+		}
 	}
 	return nil
 }

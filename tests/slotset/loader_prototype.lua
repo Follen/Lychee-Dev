@@ -16,7 +16,7 @@ local function engine(runtime)
         execute=function()executed=executed+1;error("unexpected business execution")end})
 end
 local function member(runtime,owner)
-    return {schema="lycheedev.slot.v2",index=1,runtime=runtime,owner=owner or runtime,fence=1,
+    return {schema="lycheedev.slot.v3",index=1,runtime=runtime,owner=owner or runtime,fence=1,
         nonce=runtime,ticket=string.rep("0",32),action="bind",guid="Player-1-1",build="70000",
         code="error('must never run')"}
 end
@@ -59,7 +59,7 @@ local function loader(e,runtime)
     end
 end
 local function literal(runtime)
-    return string.format('{schema="lycheedev.slot.v2",index=1,runtime="%s",owner="%s",fence=1,nonce="%s",ticket="%s",action="bind",guid="Player-1-1",build="70000",code="error(123)"}',runtime,runtime,runtime,string.rep("0",32))
+    return string.format('{schema="lycheedev.slot.v3",index=1,runtime="%s",owner="%s",fence=1,nonce="%s",ticket="%s",action="bind",guid="Player-1-1",build="70000",code="error(123)"}',runtime,runtime,runtime,string.rep("0",32))
 end
 local sharedSource='return {schema="'..schema..'",members={'..literal(A)..','..literal(B)..'}}'
 local set=assert(parse(sharedSource))
@@ -106,7 +106,7 @@ local loads=0
 ns.Compat={MonotonicSeconds=function()return 100 end,
     GetAddOnMetadata=function(name,key)
         if key=="Version" then return "test" end
-        if key=="X-Lychee-Transport" then return "memory-slot-v2" end
+        if key=="X-Lychee-Transport" then return "memory-slot-v3" end
         return tostring(tonumber(name:match("(%d+)$")))
     end,
     LoadInputSlot=function()

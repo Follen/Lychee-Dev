@@ -10,7 +10,7 @@ import (
 
 func TestBodyRequiresExactHeadAuthorization(t *testing.T) {
 	s := source(8192)
-	h := bridge.MemoryHeader{Kind: bridge.MemoryBody, State: 3}
+	h := bridge.MemoryHeader{Kind: bridge.MemoryBody, State: 3, Sequence: 7}
 	copy(h.Nonce[:], "current-nonce")
 	copy(h.Runtime[:], "current-runtime")
 	copy(h.Ticket[:], "current-ticket")
@@ -56,5 +56,36 @@ func TestLookupStreamsPastRejectedOldTelemetry(t *testing.T) {
 	r, c, err := Lookup(context.Background(), s, selector, Options{MaxHits: 2, Workers: 1, ChunkBytes: 256}, false)
 	if err != nil || len(r) != 2 || c.Complete || !c.Truncated {
 		t.Fatalf("accepted result cap was lost: %v %+v %v", r, c, err)
+	}
+}
+
+func TestBodyStaticHeaderRejectedBeforePayloadRead(t *testing.T) {
+	base := bridge.MemoryHeader{Kind: bridge.MemoryBody, State: 3, Sequence: 7, Nonce: [16]byte{1}, Runtime: [16]byte{2}, Ticket: [16]byte{3}}
+	for _, tc := range []struct {
+		name  string
+		edit  func(*bridge.MemoryHeader)
+		valid bool
+	}{
+		{"reported-body", func(*bridge.MemoryHeader) {}, true},
+		{"last-sequence", func(h *bridge.MemoryHeader) { h.Sequence = ^uint32(0) }, true},
+		{"wrong-state", func(h *bridge.MemoryHeader) { h.State = 1 }, false},
+		{"zero-sequence", func(h *bridge.MemoryHeader) { h.Sequence = 0 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := source(8192)
+			h := base
+			tc.edit(&h)
+			payload := []byte(`{"ok":true}`)
+			wire, err := bridge.EncodeMemoryRecord(h, payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			copy(s.data[64:], wire)
+			selector := Selector{Kind: bridge.MemoryBody, Nonce: h.Nonce, Runtime: h.Runtime, Ticket: h.Ticket, BodyAuthorized: true, BodyLength: uint32(len(payload)), BodyChecksum: adler32.Checksum(payload)}
+			_, err = ReadRecord(context.Background(), s, 64, selector)
+			if (err == nil) != tc.valid || !tc.valid && s.calls != 1 {
+				t.Fatalf("valid=%t reads=%d err=%v", tc.valid, s.calls, err)
+			}
+		})
 	}
 }

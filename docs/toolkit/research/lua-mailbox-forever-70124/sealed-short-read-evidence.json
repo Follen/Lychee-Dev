@@ -1,0 +1,262 @@
+{
+  "schema": "lycheedev.mailbox.short-read-evidence.v1",
+  "productionTraceLimitation": "lua_mailbox.go:103 collapses Source.Read error and short count to short_read; no address/error persisted",
+  "evidence": [
+    {
+      "file": ".tmp/mailbox-live/forever-acceptance/sealed/activation-reload.json",
+      "code": "live.channel_mailbox_unavailable",
+      "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+      "phase": "reload_input_attempted",
+      "session": "CON-3c1c3bf9b8cc2977ab603ebd5bdbcb9d",
+      "runtime": "000000120000f466d3eaf98b739909ad",
+      "input": {
+        "id": "4e471cc4287b80fee8e5b4c6c287a063",
+        "exchange": "reload:forever-sealed-activation",
+        "runtime": "000000120000f466d3eaf98b739909ad",
+        "kind": "reload",
+        "observation": {
+          "schema": "lycheedev.input.v2",
+          "runtime": "000000120000f466d3eaf98b739909ad",
+          "owner": "",
+          "fence": 0,
+          "nextSlot": 1,
+          "guid": "Player-4618-01188FA2",
+          "build": "1.60.1.70124",
+          "sampleMillis": 64105634,
+          "inputBlocked": false,
+          "reason": "",
+          "optical": {
+            "state": "ready",
+            "heartbeat": false,
+            "frameTicks": 641058551221,
+            "edgeTicks": 641058551221
+          }
+        },
+        "outcome": {
+          "disposition": "submitted",
+          "messagesQueued": 11,
+          "atMillis": 64106515
+        }
+      },
+      "trace": {
+        "address": "not_recorded",
+        "bytes": "not_recorded",
+        "readOrigin": "not_recorded",
+        "tag": "not_recorded",
+        "underlyingError": "discarded by luaAccess.read"
+      },
+      "recovery": "exact original CON live resume; no replacement connect"
+    },
+    {
+      "file": ".tmp/mailbox-live/forever-acceptance/sealed/activation-resume.json",
+      "code": "live.channel_mailbox_unavailable",
+      "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+      "phase": "reload_binding",
+      "session": "CON-3c1c3bf9b8cc2977ab603ebd5bdbcb9d",
+      "runtime": "000000130000fa6d16519fc2f6435cf7",
+      "input": {
+        "id": "8a21a3949a5087e5179713b288a74edd",
+        "exchange": "c7a12291ee2a6d7389f7f552bf2c0884",
+        "runtime": "000000130000fa6d16519fc2f6435cf7",
+        "kind": "invoke",
+        "observation": {
+          "schema": "lycheedev.input.v2",
+          "runtime": "000000130000fa6d16519fc2f6435cf7",
+          "owner": "",
+          "fence": 0,
+          "nextSlot": 1,
+          "guid": "Player-4618-01188FA2",
+          "build": "1.60.1.70124",
+          "sampleMillis": 64145105,
+          "inputBlocked": false,
+          "reason": "",
+          "optical": {
+            "state": "ready",
+            "heartbeat": false,
+            "frameTicks": 641453207873,
+            "edgeTicks": 641453207873
+          }
+        },
+        "outcome": {
+          "disposition": "submitted",
+          "messagesQueued": 6,
+          "atMillis": 64145593
+        }
+      },
+      "trace": {
+        "address": "not_recorded",
+        "bytes": "not_recorded",
+        "readOrigin": "not_recorded",
+        "tag": "not_recorded",
+        "underlyingError": "discarded by luaAccess.read"
+      },
+      "recovery": "exact original CON live resume; no replacement connect"
+    },
+    {
+      "file": ".tmp/mailbox-live/forever-acceptance/sealed/activation-disconnect.json",
+      "code": "live.channel_mailbox_unavailable",
+      "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+      "phase": "closing",
+      "session": "CON-3c1c3bf9b8cc2977ab603ebd5bdbcb9d",
+      "runtime": "000000130000fa6d16519fc2f6435cf7",
+      "input": {
+        "id": "3e8b17752d2b3d8a68fa1f4417987455",
+        "exchange": "4e75e346761c110e2c42f142e302d384",
+        "runtime": "000000130000fa6d16519fc2f6435cf7",
+        "kind": "invoke",
+        "observation": {
+          "schema": "lycheedev.input.v2",
+          "runtime": "000000130000fa6d16519fc2f6435cf7",
+          "owner": "3c1c3bf9b8cc2977ab603ebd5bdbcb9d",
+          "fence": 1,
+          "nextSlot": 2,
+          "guid": "Player-4618-01188FA2",
+          "build": "1.60.1.70124",
+          "sampleMillis": 64169105,
+          "inputBlocked": false,
+          "reason": "",
+          "optical": {
+            "state": "ready",
+            "heartbeat": true,
+            "frameTicks": 641694113330,
+            "edgeTicks": 641692029912
+          },
+          "inputAttempt": {
+            "schema": "lycheedev.input-attempt.v1",
+            "runtime": "000000130000fa6d16519fc2f6435cf7",
+            "attemptSeq": 1,
+            "slot": 1,
+            "stage": "received",
+            "reason": "",
+            "received": true,
+            "sampleMillis": 64169105
+          }
+        },
+        "outcome": {
+          "disposition": "submitted",
+          "messagesQueued": 6,
+          "atMillis": 64169656
+        }
+      },
+      "trace": {
+        "address": "not_recorded",
+        "bytes": "not_recorded",
+        "readOrigin": "not_recorded",
+        "tag": "not_recorded",
+        "underlyingError": "discarded by luaAccess.read"
+      },
+      "recovery": "exact original CON live resume; no replacement connect"
+    },
+    {
+      "file": ".tmp/mailbox-live/forever-acceptance/sealed/core/connect.json",
+      "code": "live.channel_mailbox_unavailable",
+      "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+      "phase": "connecting",
+      "session": "CON-7e8cff11955a075d218011a77aef5d99",
+      "runtime": "000000130000fa6d16519fc2f6435cf7",
+      "input": {
+        "id": "1f39391e645c112f172a09bbc436434a",
+        "exchange": "bb3778c9f011077f4999927a16713394",
+        "runtime": "000000130000fa6d16519fc2f6435cf7",
+        "kind": "invoke",
+        "observation": {
+          "schema": "lycheedev.input.v2",
+          "runtime": "000000130000fa6d16519fc2f6435cf7",
+          "owner": "",
+          "fence": 0,
+          "nextSlot": 3,
+          "guid": "Player-4618-01188FA2",
+          "build": "1.60.1.70124",
+          "sampleMillis": 64214105,
+          "inputBlocked": false,
+          "reason": "",
+          "optical": {
+            "state": "ready",
+            "heartbeat": true,
+            "frameTicks": 642141965071,
+            "edgeTicks": 642141965071
+          },
+          "inputAttempt": {
+            "schema": "lycheedev.input-attempt.v1",
+            "runtime": "000000130000fa6d16519fc2f6435cf7",
+            "attemptSeq": 2,
+            "slot": 2,
+            "stage": "received",
+            "reason": "",
+            "received": true,
+            "sampleMillis": 64214105
+          }
+        },
+        "outcome": {
+          "disposition": "submitted",
+          "messagesQueued": 6,
+          "atMillis": 64214500
+        }
+      },
+      "trace": {
+        "address": "not_recorded",
+        "bytes": "not_recorded",
+        "readOrigin": "not_recorded",
+        "tag": "not_recorded",
+        "underlyingError": "discarded by luaAccess.read"
+      },
+      "recovery": "exact original CON live resume; no replacement connect"
+    },
+    {
+      "file": ".tmp/mailbox-live/forever-acceptance/sealed/core/after-reload-no-cache.json",
+      "code": "live.channel_mailbox_unavailable",
+      "message": "live.channel_mailbox_unavailable: memory.mailbox_unavailable: short_read",
+      "phase": "confirm_ready",
+      "session": "CON-7e8cff11955a075d218011a77aef5d99",
+      "operation": "LMO-1c7d7956d6a389a67cc667d3eaffc569",
+      "runtime": "000000140000faf7639dd428563e445f",
+      "input": {
+        "id": "c45fd303ee8fd02904cbb9cd918e7d47",
+        "exchange": "6c69bd2917450265aeb0c77ac732ded4",
+        "runtime": "000000140000faf7639dd428563e445f",
+        "kind": "invoke",
+        "observation": {
+          "schema": "lycheedev.input.v2",
+          "runtime": "000000140000faf7639dd428563e445f",
+          "owner": "7e8cff11955a075d218011a77aef5d99",
+          "fence": 1,
+          "nextSlot": 3,
+          "guid": "Player-4618-01188FA2",
+          "build": "1.60.1.70124",
+          "sampleMillis": 64252494,
+          "inputBlocked": false,
+          "reason": "",
+          "optical": {
+            "state": "ready",
+            "heartbeat": true,
+            "frameTicks": 642526621739,
+            "edgeTicks": 642526621739
+          },
+          "inputAttempt": {
+            "schema": "lycheedev.input-attempt.v1",
+            "runtime": "000000140000faf7639dd428563e445f",
+            "attemptSeq": 2,
+            "slot": 2,
+            "stage": "received",
+            "reason": "",
+            "received": true,
+            "sampleMillis": 64252494
+          }
+        },
+        "outcome": {
+          "disposition": "submitted",
+          "messagesQueued": 6,
+          "atMillis": 64252937
+        }
+      },
+      "trace": {
+        "address": "not_recorded",
+        "bytes": "not_recorded",
+        "readOrigin": "not_recorded",
+        "tag": "not_recorded",
+        "underlyingError": "discarded by luaAccess.read"
+      },
+      "recovery": "exact original CON live resume; no replacement connect"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "command": "analyze.dump",
+  "sessionDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-partial-code-64489679",
+  "ok": false,
+  "kind": "dump",
+  "manifestFile": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-partial-code-64489679\\dump\\manifest.json",
+  "outputDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-partial-code-64489679\\dump",
+  "complete": false,
+  "totalBytes": 76776444,
+  "sections": [
+    {
+      "name": ".text",
+      "bytes": 76776444,
+      "readSize": 20381696,
+      "sha256": "1bc3c06fdd2ddc5c389251387a725ca44f51b1844a8669360b0c01b1a9335546",
+      "shortRead": true
+    }
+  ],
+  "error": {
+    "code": "DUMP_INCOMPLETE",
+    "message": "manifest records unreadable ranges"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "command": "memory.find",
+  "pid": 10376,
+  "needle": "50 87 0e fc f7 7f 00 00",
+  "hits": [],
+  "hitCount": 0,
+  "truncated": false,
+  "complete": true,
+  "stopReason": "completed",
+  "regionsPlanned": 1,
+  "regionsTruncated": false,
+  "regionsScanned": 1,
+  "bytesScanned": 15404372,
+  "skippedRanges": [],
+  "skippedBytes": 0,
+  "skippedRangeCount": 0,
+  "nextAddress": "0x7ff7fc9cad54",
+  "identity": {
+    "buildKey": "classicbeta@1.60.1.70124",
+    "executableSha256": "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f",
+    "processInstance": "10376:134352957565325600",
+    "module": {
+      "name": "WowB.exe",
+      "base": "0x7ff7f71e0000",
+      "size": 140742656,
+      "path": "D:\\Game\\World of Warcraft\\_classic_beta_\\WowB.exe"
+    }
+  },
+  "startedAt": "2026-10-01T02:54:33.832Z",
+  "finishedAt": "2026-10-01T02:54:34.115Z",
+  "addressSpace": "va",
+  "source": {
+    "tool": "native",
+    "operation": "find",
+    "version": "1.0.0"
+  },
+  "coverage": {
+    "requested": {
+      "from": "0x7ff7fbb1a000",
+      "to": "0x7ff7fc9cad54"
+    },
+    "complete": true,
+    "stopReason": "completed",
+    "truncated": false,
+    "regionsTruncated": false,
+    "regionsPlanned": 1,
+    "regionsScanned": 1,
+    "bytesScanned": 15404372,
+    "skippedBytes": 0,
+    "skippedRangeCount": 0,
+    "skippedRanges": [],
+    "nextAddress": "0x7ff7fc9cad54"
+  }
+}

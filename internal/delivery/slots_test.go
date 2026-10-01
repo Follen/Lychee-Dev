@@ -144,7 +144,7 @@ func TestRuntimeRetirementNeverClaimsConsumptionOrTouchesAnotherProcess(t *testi
 func TestSlotPoolIncompleteInstallAndPendingPublication(t *testing.T) {
 	ctx := context.Background()
 	parent := t.TempDir()
-	pool := SlotPool{Schema: "lycheedev.slots.v1", Version: "2.5.1", State: "installing", Files: make([]SlotFile, 64)}
+	pool := SlotPool{Schema: slotPoolSchema, Version: "2.5.1", State: "installing", Files: make([]SlotFile, bridge.SlotCount)}
 	if err := saveSlotPool(ctx, parent, pool); err != nil {
 		t.Fatal(err)
 	}

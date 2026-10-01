@@ -1,0 +1,19 @@
+{
+  "command": "analyze.dump",
+  "sessionDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-mutable-data-bd1a32a7",
+  "ok": true,
+  "kind": "dump",
+  "manifestFile": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-mutable-data-bd1a32a7\\dump\\manifest.json",
+  "outputDirectory": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\.tmp\\mailbox-live\\forever-root-research\\sessions\\20261001-root-mutable-data-bd1a32a7\\dump",
+  "complete": true,
+  "totalBytes": 44140001,
+  "sections": [
+    {
+      "name": ".data",
+      "bytes": 44140001,
+      "readSize": 44140001,
+      "sha256": "84f82dcb7a85e9ac3223e606422144944368eb82d9a8fc7ca9ded3274d98f00b",
+      "shortRead": false
+    }
+  ]
+}

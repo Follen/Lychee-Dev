@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "command": "analyze.relocate",
+  "target": {
+    "buildKey": "classic@5.5.4.70032",
+    "executableSha256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f"
+  },
+  "results": [
+    {
+      "candidates": [
+        {
+          "matchRva": "0x62dc34",
+          "value": "0x701dda8",
+          "functionRva": null
+        }
+      ],
+      "truncated": false,
+      "missingSection": false,
+      "examinedHits": 1,
+      "id": "classic-lua-state-root-rip-v1-70032",
+      "recipe": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\live-mailbox\\docs\\toolkit\\research\\lua-mailbox-classic-70032\\root.anchor.json",
+      "status": "candidate",
+      "oldValue": "0x701dda8",
+      "source": {
+        "buildKey": "classic@5.5.4.70032",
+        "executableSha256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f",
+        "section": ".text",
+        "sectionSha256": "603f45a5d310629028a8b2ad58aa7f89477cd0a3dad5a0bc261332123ae31238",
+        "rva": "0x62dc34",
+        "value": "0x701dda8"
+      },
+      "target": {
+        "buildKey": "classic@5.5.4.70032",
+        "executableSha256": "5cb9bcb453c006eb2ff37b8342b582ec4ea7fca323b6d66e6c12fefcb3df463f"
+      },
+      "resolve": {
+        "kind": "rip",
+        "instruction": 0
+      },
+      "preferredCandidate": null,
+      "selectionReason": "unique_structural_match",
+      "evidence": "Classic 5.5.4.70032 exact executable/runtime-text; Go unique58pattern derived new rootRVA 0x701dda8 and validated current public Mailbox identity/input/HEAD/BODY plus independent actor probe and 81920-byte payload, no old RVA reuse. Same-process reload observed; full reader cross-process reuse not_checked.",
+      "validation": {
+        "read": "not_checked",
+        "semantics": "not_checked",
+        "reuse": "not_checked"
+      },
+      "next": "inspect the new instructions; verify object/layout identity and behavior before creating a reader_ready profile"
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "candidates": 1,
+    "unresolved": 0
+  }
+}

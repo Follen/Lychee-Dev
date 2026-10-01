@@ -1,12 +1,10 @@
 package channel
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
-	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 func TestSkippedSlotInputRequiresExactFreshOrigin(t *testing.T) {
@@ -26,12 +24,8 @@ func TestSkippedSlotInputRequiresExactFreshOrigin(t *testing.T) {
 		{"before-previous-input", 2, 1050, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := InputObservation{Schema: "lycheedev.input.v1", Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: tc.next, GUID: e.GUID, Build: e.Build, SampleMillis: tc.sample, InputBlocked: &blocked}
-			payload, err := json.Marshal(s)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = inputObservation(memory.Record{Header: bridge.MemoryHeader{Kind: bridge.MemoryInputState}, Payload: payload}, e, 1000, 1250)
+			s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: tc.next, GUID: e.GUID, Build: e.Build, SampleMillis: tc.sample, InputBlocked: &blocked}
+			_, err := inputObservation(inputTestRecord(t, s), e, 1000, 1250)
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%v error=%v", tc.valid, err)
 			}

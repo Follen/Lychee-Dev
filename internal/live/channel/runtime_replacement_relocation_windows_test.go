@@ -4,6 +4,8 @@ package channel
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -34,138 +36,110 @@ func relocationRecord(t *testing.T, address uint64, o InputObservation, sequence
 	return memory.Record{Address: address, Header: header, Payload: payload}, raw
 }
 
-func TestReplacementRelocationDoesNotAuthorizeHistoricalOrInvalidWrites(t *testing.T) {
-	for _, mode := range []string{"historical", "unknown", "old", "checksum"} {
-		t.Run(mode, func(t *testing.T) {
-			old, fixture := replacementFixture()
-			const far = uint64(200 << 20)
-			local, distant := make([]byte, 8192), make([]byte, 8192)
-			source := &replacementSource{regions: []memory.Region{
-				{Range: memory.Range{Start: 0, End: 8192}, Private: true, Committed: true, Readable: true},
-				{Range: memory.Range{Start: far, End: far + 8192}, Private: true, Committed: true, Readable: true},
-			}}
-			source.read = func(address uint64, b []byte) (int, error) {
-				data := local
-				if address >= far {
-					address -= far
-					data = distant
-				}
-				if address > uint64(len(data)) || uint64(len(b)) > uint64(len(data))-address {
-					return 0, errors.New("outside region")
-				}
-				return copy(b, data[address:]), nil
+// Reachability is supplied by each current Mailbox read. Old immutable strings
+// can remain in any heap range without making address stability a requirement.
+func TestMailboxReplacementFollowsPublicationAcrossAddressChanges(t *testing.T) {
+	old, fixture := replacementFixture()
+	initial, latest := fixture.Witness.Observation, fixture.Witness.Observation
+	initial.SampleMillis, latest.SampleMillis = 10000, 11100
+	before, beforeWire := relocationRecord(t, 128, initial, 1)
+	const far = uint64(255 << 20)
+	after, afterWire := relocationRecord(t, far+128, latest, 2)
+	retainedHistory := append([]byte(nil), beforeWire...)
+	now, reads, pauses := int64(10000), 0, 0
+	proof, err := observeMailboxReplacement(context.Background(), old, 1, 2,
+		func(context.Context) (Identity, memory.Record, error) {
+			reads++
+			if reads == 1 {
+				return fixture.Current, before, nil
 			}
-			seed, raw := relocationRecord(t, 128, fixture.Witness.Observation, 1)
-			copy(local[128:], raw)
-			newer, raw := relocationRecord(t, far+128, fixture.Witness.Observation, 2)
-			copy(distant[128:], raw)
-			calls, rounds := 0, 0
-			proof, err := observeReplacementBytes(context.Background(), old, []Identity{fixture.Current}, 1, 2, source, []memory.Record{seed}, func(context.Context) error {
-				rounds++
-				if rounds == 3 && mode != "historical" {
-					observation := fixture.Witness.Observation
-					if mode == "old" {
-						observation.Runtime = old.Runtime
-					}
-					if mode == "unknown" {
-						observation.GUID = "unrecognized-character"
-					}
-					_, bytes := relocationRecord(t, far+2048, observation, 3)
-					if mode == "checksum" {
-						bytes[bridge.MemoryHeaderBytes] ^= 1
-					}
-					copy(distant[2048:], bytes)
-				}
-				return nil
-			}, func(_ context.Context, selector memory.Selector, first bool) (memory.LookupResult, error) {
-				calls++
-				if !first || selector.Accept == nil || selector.Accept(seed) || !selector.Accept(newer) {
-					t.Fatal("relocation selector lost bounded preference")
-				}
-				return memory.LookupResult{Records: []memory.Record{newer}}, nil
-			})
-			if err != nil || proof != nil || calls != 1 {
-				t.Fatalf("invalid relocated proof: %v %v calls=%d", proof, err, calls)
-			}
-			if (mode == "old" || mode == "unknown") && rounds != 3 {
-				t.Fatal("fresh conflicting identity did not stop", rounds)
-			}
-			if (mode == "historical" || mode == "checksum") && rounds != 14 {
-				t.Fatal("round budget changed", rounds)
-			}
-		})
+			return fixture.Current, after, nil
+		},
+		func(context.Context) error { pauses++; now += 1100; return nil }, func() int64 { return now })
+	if err != nil || proof == nil || proof.Validate(old) != nil || proof.Witness.Address != after.Address || reads != 2 || pauses != 1 {
+		t.Fatal(proof, err, reads, pauses)
+	}
+	a, z := sha256.Sum256(retainedHistory), sha256.Sum256(afterWire)
+	if proof.Witness.BeforeSHA256 != hex.EncodeToString(a[:]) || proof.Witness.AfterSHA256 != hex.EncodeToString(z[:]) || proof.Witness.Length != uint32(len(afterWire)) {
+		t.Fatal("proof did not bind the two current records", proof.Witness)
 	}
 }
 
-func TestReplacementRelocationSharesDeadlineAndCancellation(t *testing.T) {
-	for _, mode := range []string{"deadline", "cancel"} {
+func TestMailboxReplacementSharesCallerDeadlineAndCancellation(t *testing.T) {
+	for _, mode := range []string{"cancel_before_read", "cancel_wait", "deadline_wait", "cancel_latest", "cancel_before_return"} {
 		t.Run(mode, func(t *testing.T) {
 			old, fixture := replacementFixture()
-			source := &replacementSource{data: make([]byte, 8192), regions: []memory.Region{{Range: memory.Range{Start: 0, End: 8192}, Private: true, Committed: true, Readable: true}}}
-			seed, raw := relocationRecord(t, 128, fixture.Witness.Observation, 1)
-			copy(source.data[128:], raw)
-			duration := 30 * time.Second
-			if mode == "deadline" {
-				duration = 100 * time.Millisecond
+			observation := fixture.Witness.Observation
+			observation.SampleMillis = 10000
+			before, _ := relocationRecord(t, 128, observation, 1)
+			observation.SampleMillis = 11100
+			after, _ := relocationRecord(t, 2048, observation, 2)
+			duration := time.Minute
+			if mode == "deadline_wait" {
+				duration = 10 * time.Millisecond
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), duration)
 			defer cancel()
-			var observedDeadline time.Time
-			calls := 0
-			proof, err := observeReplacementBytes(ctx, old, []Identity{fixture.Current}, 1, 2, source, []memory.Record{seed}, func(c context.Context) error {
-				deadline, ok := c.Deadline()
-				if !ok {
-					t.Fatal("no observation deadline")
-				}
-				if observedDeadline.IsZero() {
-					observedDeadline = deadline
-				} else if deadline != observedDeadline {
-					t.Fatal("observation renewed deadline")
-				}
-				return c.Err()
-			}, func(c context.Context, _ memory.Selector, _ bool) (memory.LookupResult, error) {
-				calls++
-				deadline, ok := c.Deadline()
-				if !ok || deadline != observedDeadline {
-					t.Fatal("relocation has separate deadline")
-				}
-				if mode == "cancel" {
-					cancel()
-				}
-				<-c.Done()
-				return memory.LookupResult{}, c.Err()
-			})
-			want := context.DeadlineExceeded
-			if mode == "cancel" {
-				want = context.Canceled
+			if mode == "cancel_before_read" {
+				cancel()
 			}
-			if proof != nil || !errors.Is(err, want) || calls != 1 {
-				t.Fatal("relocation ignored parent termination", proof, err, calls)
+			deadline, _ := ctx.Deadline()
+			now, reads, pauses := int64(10000), 0, 0
+			assertContext := func(c context.Context) {
+				if got, ok := c.Deadline(); !ok || got != deadline {
+					t.Fatal("caller deadline replaced", got, deadline)
+				}
+			}
+			proof, err := observeMailboxReplacement(ctx, old, 1, 2,
+				func(c context.Context) (Identity, memory.Record, error) {
+					assertContext(c)
+					reads++
+					if reads == 1 {
+						return fixture.Current, before, c.Err()
+					}
+					if mode == "cancel_latest" {
+						cancel()
+						return Identity{}, memory.Record{}, c.Err()
+					}
+					if mode == "cancel_before_return" {
+						cancel()
+					}
+					return fixture.Current, after, nil
+				}, func(c context.Context) error {
+					assertContext(c)
+					pauses++
+					if mode == "cancel_wait" {
+						cancel()
+					}
+					if mode == "cancel_wait" || mode == "deadline_wait" {
+						<-c.Done()
+						return c.Err()
+					}
+					now += 1100
+					return nil
+				}, func() int64 { return now })
+			want := context.Canceled
+			if mode == "deadline_wait" {
+				want = context.DeadlineExceeded
+			}
+			if proof != nil || !errors.Is(err, want) {
+				t.Fatal("termination ignored", proof, err)
+			}
+			if mode == "cancel_wait" || mode == "deadline_wait" {
+				if !errors.Is(err, ErrPending) {
+					t.Fatal("wait did not stay pending", err)
+				}
+			}
+			wantReads, wantPauses := 2, 1
+			if mode == "cancel_before_read" {
+				wantReads, wantPauses = 1, 0
+			}
+			if mode == "cancel_wait" || mode == "deadline_wait" {
+				wantReads = 1
+			}
+			if reads != wantReads || pauses != wantPauses {
+				t.Fatal(reads, pauses)
 			}
 		})
-	}
-}
-
-func TestReplacementRelocationSnapshotBudgetIncludesShortReads(t *testing.T) {
-	old, fixture := replacementFixture()
-	source := &replacementSource{regions: []memory.Region{{Range: memory.Range{Start: 0, End: 16 << 20}, Private: true, Committed: true, Readable: true}}}
-	var initial, relocated []memory.Record
-	for i := 0; i < 8; i++ {
-		record, _ := relocationRecord(t, uint64(i<<20)+128, fixture.Witness.Observation, 1)
-		initial = append(initial, record)
-		record, _ = relocationRecord(t, uint64((i+8)<<20)+128, fixture.Witness.Observation, 2)
-		relocated = append(relocated, record)
-	}
-	calls, requested, discoveries := 0, 0, 0
-	source.read = func(_ uint64, b []byte) (int, error) { calls++; requested += len(b); return len(b) - 1, nil }
-	proof, err := observeReplacementBytes(context.Background(), old, []Identity{fixture.Current}, 1, 2, source, initial, func(context.Context) error { t.Fatal("no successful baseline to observe"); return nil }, func(_ context.Context, selector memory.Selector, _ bool) (memory.LookupResult, error) {
-		discoveries++
-		if !selector.Accept(relocated[0]) {
-			t.Fatal("new location rejected")
-		}
-		return memory.LookupResult{Records: relocated}, nil
-	})
-	if err != nil || proof != nil || discoveries != 1 || calls != 8 || requested != 8<<20 {
-		t.Fatalf("snapshot budget: proof=%v err=%v discovery=%d reads=%d bytes=%d", proof, err, discoveries, calls, requested)
 	}
 }

@@ -1,0 +1,41 @@
+{
+  "baseHex": "0x7FF7F71E0000",
+  "size": 140742656,
+  "count": 4955,
+  "covered": true,
+  "minBytes": 4096.0,
+  "maxBytes": 27377664.0,
+  "unalignedRvas": 0,
+  "unalignedSizes": 0,
+  "types": [
+    {
+      "type": "262144",
+      "count": 4955
+    }
+  ],
+  "states": [
+    {
+      "state": "4096",
+      "count": 4955
+    }
+  ],
+  "allocations": [
+    0
+  ],
+  "first": {
+    "rva": 0,
+    "bytes": 4096,
+    "state": 4096,
+    "protect": 2,
+    "type": 262144,
+    "allocationRva": 0
+  },
+  "last": {
+    "rva": 136331264,
+    "bytes": 4411392,
+    "state": 4096,
+    "protect": 2,
+    "type": 262144,
+    "allocationRva": 0
+  }
+}

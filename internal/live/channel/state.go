@@ -20,8 +20,8 @@ func (op *Operation) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*op = Operation(value.plain)
-	if op.Result == nil && len(value.Legacy) > 0 {
-		op.Result = append([]byte(nil), value.Legacy...)
+	if len(value.Legacy) > 0 {
+		return errors.New("live.channel_operation_schema_invalid")
 	}
 	return nil
 }
@@ -50,13 +50,19 @@ func (s State) validate() error {
 		if in.Exchange == "" || in.Outcome != nil && in.Outcome.validate() != nil {
 			return bad
 		}
+		if in.AfterDiagnostic != nil && (!in.AfterDiagnostic.valid() || in.AfterDiagnostic.Runtime != in.Runtime) {
+			return bad
+		}
+		if in.Observation != nil && in.Observation.InputDiagnostic != nil && (!in.Observation.InputDiagnostic.valid() || in.Observation.InputDiagnostic.Runtime != in.Observation.Runtime) {
+			return bad
+		}
 	}
 	if s.Archive != "" {
 		if b, err := hex.DecodeString(s.Archive); err != nil || len(b) != 32 {
 			return bad
 		}
 	}
-	if (s.Schema != "lycheedev.channel.v1" && s.Schema != "lycheedev.channel.v2") || s.ID != "CON-"+s.Owner || s.Identity.Validate() != nil {
+	if s.Schema != "lycheedev.channel.v2" || s.ID != "CON-"+s.Owner || s.Identity.Validate() != nil {
 		return bad
 	}
 	if s.Closed && (s.Bound || s.Transaction != nil || s.Operation != nil && s.Operation.Stage != "complete" && s.Operation.Stage != "execution_unknown" && s.Operation.Stage != "cancelled") {
@@ -117,7 +123,7 @@ func (s State) validate() error {
 				return bad
 			}
 		case "received":
-			if tx.Receipt == nil || tx.Receipt.Nonce != e.Nonce || tx.Receipt.Ticket != e.Ticket || tx.Receipt.Action != e.Action {
+			if tx.Receipt == nil || tx.Receipt.Validate() != nil || tx.Receipt.Schema != e.Schema || tx.Receipt.Nonce != e.Nonce || tx.Receipt.Ticket != e.Ticket || tx.Receipt.Action != e.Action {
 				return bad
 			}
 		default:

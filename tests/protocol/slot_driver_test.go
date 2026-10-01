@@ -154,7 +154,7 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 			if !peer.out.Scan() || peer.out.Text() != "ready" {
 				t.Fatal("peer not ready")
 			}
-			identity := channel.Identity{Schema: "lycheedev.slot.identity.v1", Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "Player-1-123", Character: "Tester", Realm: "Realm", Build: "70000", Product: "retail", Release: "2.5.1"}
+			identity := channel.Identity{Schema: channel.IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "Player-1-123", Character: "Tester", Realm: "Realm", Build: "70000", Product: "retail", Release: "2.5.1"}
 			path := filepath.Join(dir, "connections", "connection.jsonl")
 			d, err := channel.New(path, peer, identity)
 			if err != nil {

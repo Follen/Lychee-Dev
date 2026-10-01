@@ -5,7 +5,6 @@ package channel
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -24,6 +23,7 @@ type Native struct {
 	Parent, Version, Consumer, CacheFile string
 	Guard                                func(context.Context) error
 	Process                              *memory.Process
+	Mailbox                              *memory.MailboxReader
 	Hints                                *memory.Hints
 	Publication                          *vault.Lease
 	Lookups                              []memory.LookupResult
@@ -35,6 +35,7 @@ type Native struct {
 	inputHintRuntime                     string
 	inputHintMillis                      int64
 	inputSignal                          *nativeInputSignal
+	inputAttemptProbe                    receiptAttemptProbe
 }
 
 const observationLimit = 256
@@ -45,22 +46,41 @@ type lookupTrace struct {
 	Kind                   bridge.MemoryKind
 	Matches                int
 	Lookup                 memory.LookupResult
+	RootBinding            *memory.LuaRootBinding `json:"rootBinding,omitempty"`
 	sequence               int
 }
 
 func (n *Native) Observe(ctx context.Context, q ObservationQuery) (Observation, error) {
-	return ObserveRecords(ctx, n, q)
+	observation, err := ObserveRecords(ctx, n, q)
+	if n.Mailbox == nil {
+		return observation, err
+	}
+	return n.inputAttemptProbe.observe(ctx, n, q, observation, err, uptimeMillis())
 }
 
-func OpenNative(target desktop.WindowIdentity, parent, version, cacheFile string, cache bool) (*Native, error) {
+func OpenNative(ctx context.Context, target desktop.WindowIdentity, parent, version, cacheFile string, cache bool) (*Native, error) {
 	process, err := memory.Open(target.ProcessID, target.ProcessStartedAt, target.Executable)
 	if err != nil {
 		return nil, err
 	}
 	n := &Native{Target: target, Parent: parent, Version: version, Process: process, CacheFile: cacheFile, Consumer: fmt.Sprintf("%d/%d", target.ProcessID, target.ProcessStartedAt)}
-	if cache {
-		n.Hints = memory.LoadHints(cacheFile, fmt.Sprintf("%s/%s/%s/memory5", n.Consumer, target.Executable, version))
+	module, err := process.MainModule(ctx)
+	if err != nil {
+		_ = process.Close()
+		return nil, err
 	}
+	n.Mailbox, err = memory.OpenLuaMailbox(ctx, process, module.Base, module.Size, module.ExecutableSHA256, version, module.LuaImageLayout(), func(ctx context.Context, address uint64, b []byte) (int, error) {
+		return process.ReadModule(ctx, module, address, b)
+	})
+	if err != nil {
+		_ = process.Close()
+		if errors.Is(err, memory.ErrLuaMailboxRootUnsupported) {
+			return nil, fmt.Errorf("live.channel_mailbox_build_unsupported: %w", err)
+		}
+		return nil, err
+	}
+	// Address hints do not participate in this protocol. Every read resolves
+	// the current public field through the build-bound root, including cache-off.
 	return n, nil
 }
 func (n *Native) Close() error {
@@ -102,7 +122,14 @@ func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Se
 	}
 	var found memory.LookupResult
 	var err error
-	if nearby {
+	if n.Mailbox != nil {
+		found, err = n.Mailbox.Lookup(ctx, s)
+		if errors.Is(err, memory.ErrMailboxUnavailable) {
+			err = fmt.Errorf("live.channel_mailbox_unavailable: %w", err)
+		}
+	} else if n.Process != nil {
+		return memory.LookupResult{}, errors.New("live.channel_mailbox_required")
+	} else if nearby {
 		found, err = memory.FindNearby(ctx, source, s, n.Hints)
 	} else {
 		found, err = memory.Find(ctx, source, s, n.Hints, first)
@@ -116,7 +143,12 @@ func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Se
 	}
 	if n.TraceDir != "" {
 		n.traceSequence++
-		n.traces = append(n.traces, lookupTrace{hex.EncodeToString(s.Nonce[:]), hex.EncodeToString(s.Runtime[:]), hex.EncodeToString(s.Ticket[:]), s.Kind, len(found.Records), evidence, n.traceSequence})
+		trace := lookupTrace{Nonce: hex.EncodeToString(s.Nonce[:]), Runtime: hex.EncodeToString(s.Runtime[:]), Ticket: hex.EncodeToString(s.Ticket[:]), Kind: s.Kind, Matches: len(found.Records), Lookup: evidence, sequence: n.traceSequence}
+		if n.Mailbox != nil {
+			binding := n.Mailbox.Binding()
+			trace.RootBinding = &binding
+		}
+		n.traces = append(n.traces, trace)
 	}
 	return found, err
 }
@@ -284,7 +316,7 @@ func (n *Native) Supersede(ctx context.Context, e bridge.SlotEnvelope, current I
 }
 
 // Discover returns untrusted candidates only. Bind's fresh nonce proves the
-// selected runtime. A scan is never authority to execute a business script.
+// selected runtime. A public descriptor never authorizes a business script.
 func (n *Native) Discover(ctx context.Context, character, realm string) ([]Identity, memory.Coverage, error) {
 	found, err := n.Find(ctx, memory.Selector{Kind: bridge.MemoryIdentity}, false)
 	if err != nil {
@@ -293,12 +325,11 @@ func (n *Native) Discover(ctx context.Context, character, realm string) ([]Ident
 	identities := []Identity{}
 	seen := map[string]bool{}
 	for _, record := range found.Records {
-		var i Identity
-		if json.Unmarshal(record.Payload, &i) != nil || i.Schema != "lycheedev.slot.identity.v1" || i.Validate() != nil || i.Release != n.Version {
+		i, decodeErr := decodeIdentityRecord(record, n.Version)
+		if decodeErr != nil {
 			continue
 		}
-		runtime, _ := tokenBytes(i.Runtime)
-		if runtime != record.Header.Runtime || (character != "" && i.Character != character) || (realm != "" && i.Realm != realm) {
+		if (character != "" && i.Character != character) || (realm != "" && i.Realm != realm) {
 			continue
 		}
 		key := fmt.Sprintf("%s/%d", i.Runtime, i.NextSlot)

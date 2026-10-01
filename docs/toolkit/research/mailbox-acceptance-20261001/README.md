@@ -1,0 +1,47 @@
+# Mailbox acceptance evidence, 2026-10-01
+
+These are byte-for-byte copies of structured acceptance reports, not new runs.
+Retail and Classic core and capacity reports use development CLI SHA-256
+`707e47cedb4219932dd001c98b7278d40c3bae5fdb30e42deea551df30a33929`.
+All four connections finished closed with complete cleanup. Each capacity run
+contains 47 ordinary requests plus runtime replacement, retained-history retry,
+expected business/cleanup errors, bugs and disconnect checks.
+
+`offline-before-forever-template.json` is the complete passed baseline before
+adding the independently researched Forever root template. Its manual entries
+are deliberately `not_run`: the offline runner does not perform the separately
+recorded real-client checks. Absolute log/project paths identify the original
+local evidence; the reports themselves remain available in this repository.
+
+The `*-sealed-*` reports and `offline-sealed.json` belong to the second candidate,
+SHA-256 `3ebce6f071af6a35053d37639a86d511b57e23561b9e4e6f227d9e8177e229fc`.
+This adds the independently saved Forever RunScript recipe and detached private
+protocol state. Classic activation and Forever short-read failures were recovered
+through their original connections; first failure reports remain alongside the
+resumed reports. They are not all-first-invocation success claims.
+
+`mapping-diagnostic-raw.json` and `mapping-diagnostic-summary.json` record one
+bounded production-reader observation without game input: four refusals occurred
+before the first module anchor read because an unrelated VirtualQuery run end
+changed, while the requested 49 bytes remained covered with identical attributes.
+They cannot retroactively identify the cause of every earlier error.
+`module-span-validation-final.json` preserves the subsequent correction's actual
+RED/GREEN, Windows mapped helper, affected tests and race evidence. It changes
+the proof to the intersection of requested, issued and current eligible spans,
+retaining strict origins/attributes and denying old holes; no retry was added.
+
+`*-current-*` reports and `offline-current.json` use final development CLI
+SHA-256 `9b4846015f9a22d64994b494be8c0412eace70c0fbdd24344239283bc125f7a8`.
+The final full offline baseline passed, with 2,888 named Go tests in 42 packages,
+94 Node tests and explicit environmental/manual/helper skips. Classic core 13
+and Forever core 12 passed; each pressure report has all 54 calls, including 47
+ordinary requests, with no nonzero exit codes or recovery. Final summaries
+record their closed connections. The initial Retail current activation failure
+is retained separately: 9 uncertain queued messages, followed by the owner's
+identification of an external script sending spaces. It is not silently replaced
+by a later success. `asset-digests.json` seals these raw reports and README.
+
+The development candidate is untagged and unpublished. These results do not
+certify Titan, first clean installation, process restart or a future Lua ABI.
+See [the acceptance record](../../live-mailbox-acceptance-2026-10-01.md) for
+candidate hashes, process identities, recovery limitations and later results.
