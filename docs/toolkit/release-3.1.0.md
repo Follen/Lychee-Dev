@@ -15,6 +15,18 @@ tree. No npm 3.1.0 tarball was published. Include the scoped long-path export fi
 in the final 3.1.0 source before retrying publication; preserve the failed attempt.
 Published package bytes and their final source tag remain immutable.
 
+The second attempt passed index export and the vendored binary rebuild comparison,
+then stopped before publication because raw investigation journals exceeded the
+source archive's path fields. These journals are evidence, not product source.
+Keep them in repository history for traceability, but exclude
+`docs/toolkit/research/` from corresponding-source publication through the committed
+`export-ignore` policy. The independent index export follows the same policy.
+Keep product source, build scripts, tests, skills, licenses and acceptance summaries;
+verify the archived source still rebuilds offline and matches the index build.
+Rehearse complete assembly locally from a clean committed tree before retrying
+the official release pipeline. No research files are deleted or imported into
+the npm runtime payload.
+
 CLI, addon, slot metadata, validators and fixtures advance together to 3.1.0.
 Install a matching managed development package; do not overlay-copy source.
 The root recipes come from independently researched Retail and Forever builds;
