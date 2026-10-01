@@ -4,6 +4,31 @@
 `latest` 保持 **2.5.1**。本轮以 [3.0.2 发布合同](release-3.0.2.md) 为准，
 下方 3.0.1 发布准备及其他记录保留历史范围。
 
+- 2026-09-30 非 live 查询优化分支全量离线 baseline **passed**：43 Go packages、强制 Lua 5.1、
+  真实 LuaLS/跨 CLI 会话与固定 CascLib 解码对照、98 项 Node 测试及版本/Skill/SOURCE 门禁。
+  可选环境与真实性能边界继续分开记账，详见 [总验收记录](nonlive-optimization-acceptance-2026-09-30.md)。
+  当前为开发分支，未合并或发布；live 扫描及 addon 发布端优化未改动。
+
+- 2026-09-30 data 代码审计已记录在[审计与 CascLib 对照](data-code-audit-2026-09-30.md)。
+  确认两处读取错误/编码恢复缺口，资源预算、查询复用与 Hotfix 引用问题另列。
+  原始复现探针及基线强制 Lua 5.1 全量测试通过。当前非 live 开发分支已实现 R1–R8，
+  恢复与认证边界见 [Data 读取实施](data-reader-optimization-2026-09-30.md)，
+  [资源准入](data-budget-implementation-2026-09-30.md) 与
+  [回归/对照](data-regression-implementation-2026-09-30.md)。未发布，真实 RSS 与完整 storage oracle 保持 not_run。
+
+- 2026-09-30 source 与 native live 优化调查已记录在
+  [深度优化审计](source-live-optimization-audit-2026-09-30.md)。隔离探针确认同文件
+  搜索重复读取，以及 hints 开启时已知 nonce 扫描的候选放大；建议、复现方法和
+  真实客户端 `not_run` 边界一并保留。当前分支已实现 S1–S5，见
+  [Source 实施记录](source-optimization-implementation-2026-09-30.md)；live 内存扫描及 addon 发布端未改动。
+
+- 2026-09-30 [D 阶段研究合同](phase-d-publication-luals-session-2026-09-30.md) 已补齐
+  L6 发布端与跨请求 LuaLS 的具体决策。独立 Lua 发布探针及真实 LuaLS 小工作区复用通过；
+  同批取消的无界响应等待失败已保留，2s 有界退役/重建原型通过。当前非 live 分支实现
+  显式启用的 Windows LuaLS broker，固定上下文、OS 托管与有界退役合同继续有效；
+  真实跨 CLI 与取消验证见 [LuaLS 实施记录](luals-session-implementation-2026-09-30.md)。
+  未执行真实游戏/完整源码性能验收；开发合同不改变 3.0.2 已发布能力。
+
 - 2026-09-29 CASC 内容变体修复（工作区，未发布）：新增明确的 standard / low-violence
   选择；默认及筛选后真正歧义仍拒绝。Forever 固定 PIN 的 153 个模型、306 份导出
   均通过 CKey/哈希校验；实际客户端 overrideArchive 未验证。导航侧另行比对碰撞：

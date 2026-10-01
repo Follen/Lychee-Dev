@@ -69,7 +69,9 @@ func TestSnapshotStatusReportsPreparedReadiness(t *testing.T) {
 
 func containsLegacyDatabaseField(raw []byte) bool {
 	var data map[string]any
-	if json.Unmarshal(raw, &data) != nil { return true }
+	if json.Unmarshal(raw, &data) != nil {
+		return true
+	}
 	_, database := data["database"]
 	_, journal := data["journalMode"]
 	return database || journal

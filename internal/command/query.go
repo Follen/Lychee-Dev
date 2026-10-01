@@ -114,6 +114,7 @@ func queryFault(err error) (int, string, bool) {
 		{archive.ErrIndexLimit, 3, "archive.index_limit"},
 		{records.ErrRemoteUnavailable, 3, "records.remote_unavailable_offline"},
 		{records.ErrRemoteIdentity, 4, "records.remote_identity"},
+		{records.ErrQueryResourceBudget, 3, "records.query_resource_budget"},
 		{records.ErrRemoteHTTP, 5, "records.remote_http"},
 		{records.ErrListfileLimit, 3, "records.listfile_limit"},
 		{records.ErrListfileFormat, 4, "records.listfile_format"},

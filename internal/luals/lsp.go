@@ -9,10 +9,10 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -83,204 +83,30 @@ func (r *Runtime) Analyze(ctx context.Context, files map[string][]byte, definiti
 // caller holds its lease and verifies its source identity; no source file is
 // written here. Query locations are mapped back to workspace-relative paths.
 func (r *Runtime) AnalyzeWorkspace(ctx context.Context, workspaceRoot string, definitions []byte, queries []Query) (Analysis, error) {
+	bounded, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	ctx = bounded
 	result := Analysis{Runtime: r.Identity, State: "partial", PositionEncoding: "utf-16", Results: []QueryResult{}}
 	if len(queries) > 128 || len(definitions) > MaxDefinitionsBytes {
 		return result, ErrBudget
 	}
-	if err := ctx.Err(); err != nil {
-		return result, err
-	}
-	workspace, err := filepath.Abs(workspaceRoot)
-	if err != nil {
-		return result, err
-	}
-	info, err := os.Stat(workspace)
-	if err != nil || !info.IsDir() {
-		return result, fmt.Errorf("%w: workspace unavailable", ErrUnavailable)
-	}
-	result.Coverage, err = workspaceCoverage(workspace)
-	if err != nil {
-		return result, err
-	}
-	for _, q := range queries {
-		if !filepath.IsLocal(q.Path) || !strings.EqualFold(filepath.Ext(q.Path), ".lua") || q.Position.Line < 0 || q.Position.Character < 0 || q.Position.Line > 1000000 || q.Position.Character > 1000000 {
-			return result, fmt.Errorf("%w: query path or position", ErrBudget)
-		}
-		if q.Kind != Definition && q.Kind != References && q.Kind != Hover {
-			return result, fmt.Errorf("%w: query kind", ErrUnsupported)
-		}
-	}
 	if len(queries) == 0 {
-		result.State = "complete"
-		return result, nil
-	}
-	dir, err := os.MkdirTemp("", "lycheedev-luals-lsp-")
-	if err != nil {
-		return result, err
-	}
-	defer os.RemoveAll(dir)
-	library := filepath.Join(dir, "definitions")
-	for _, p := range []string{library, filepath.Join(dir, "log"), filepath.Join(dir, "meta")} {
-		if err = os.MkdirAll(p, 0700); err != nil {
+		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-	}
-	if err = os.WriteFile(filepath.Join(library, "api.d.lua"), definitions, 0600); err != nil {
+		coverage, err := workspaceCoverage(workspaceRoot)
+		result.Coverage = coverage
+		if err == nil {
+			result.State = "complete"
+		}
 		return result, err
 	}
-	result.Config, err = configuration(library)
+	session, err := r.OpenWorkspaceSession(ctx, workspaceRoot, definitions)
 	if err != nil {
 		return result, err
 	}
-	config := filepath.Join(dir, "config.json")
-	if err = os.WriteFile(config, result.Config, 0600); err != nil {
-		return result, err
-	}
-	bounded, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	command := exec.CommandContext(bounded, filepath.Join(r.directory, "bin", "lua-language-server.exe"),
-		"--configpath="+config, "--logpath="+filepath.Join(dir, "log"), "--metapath="+filepath.Join(dir, "meta"), "--quiet")
-	command.Dir = dir
-	command.WaitDelay = 2 * time.Second
-	hideProcess(command)
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		return result, err
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return result, err
-	}
-	var stderr cappedWriter
-	command.Stderr = &stderr
-	closeJob, err := startGuarded(command)
-	if err != nil {
-		return result, fmt.Errorf("%w: %v", ErrFailed, err)
-	}
-	defer func() { closeJob(); _ = stdin.Close(); _ = command.Wait() }()
-	go func() { <-bounded.Done(); closeJob(); _ = stdin.Close() }()
-	client := newLSPClient(bounded, stdin, stdout)
-	rootURI := fileURI(workspace)
-	var init struct {
-		Capabilities struct {
-			DefinitionProvider json.RawMessage `json:"definitionProvider"`
-			ReferencesProvider json.RawMessage `json:"referencesProvider"`
-			HoverProvider      json.RawMessage `json:"hoverProvider"`
-			PositionEncoding   string          `json:"positionEncoding"`
-		} `json:"capabilities"`
-	}
-	initParams := map[string]any{
-		"processId": os.Getpid(), "rootUri": rootURI, "rootPath": workspace,
-		"workspaceFolders": []map[string]string{{"uri": rootURI, "name": filepath.Base(workspace)}},
-		"capabilities": map[string]any{
-			"general":      map[string]any{"positionEncodings": []string{"utf-16"}},
-			"workspace":    map[string]any{"configuration": false, "workspaceFolders": true},
-			"textDocument": map[string]any{"definition": map[string]any{"linkSupport": false}, "references": map[string]any{}, "hover": map[string]any{"contentFormat": []string{"markdown", "plaintext"}}},
-		},
-	}
-	if err = client.request("initialize", initParams, &init); err != nil {
-		return result, clientError(err, stderr.String(), bounded, ctx)
-	}
-	if init.Capabilities.PositionEncoding != "" && init.Capabilities.PositionEncoding != "utf-16" {
-		return result, fmt.Errorf("%w: unsupported position encoding %q", ErrUnsupported, init.Capabilities.PositionEncoding)
-	}
-	result.Capabilities = Capabilities{
-		Definition: providerEnabled(init.Capabilities.DefinitionProvider),
-		References: providerEnabled(init.Capabilities.ReferencesProvider),
-		Hover:      providerEnabled(init.Capabilities.HoverProvider),
-	}
-	if err = client.notify("initialized", map[string]any{}); err != nil {
-		return result, clientError(err, stderr.String(), bounded, ctx)
-	}
-	opened := map[string]bool{}
-	// LuaLS waits for the scope of each queried URI, not every workspace.
-	// The generated API declaration lives in an external library and can map
-	// to the fallback scope while the source worktree is still preloading.
-	// A request against a worktree URI is an event-driven preload barrier:
-	// LuaLS's definition provider awaits that scope before replying. The
-	// worktree preload also loads the configured generated API library.
-	if result.Coverage.probePath != "" {
-		probeData, readErr := readQueryFile(workspace, result.Coverage.probePath)
-		if readErr != nil {
-			return result, fmt.Errorf("%w: workspace preload probe unavailable: %v", ErrFailed, readErr)
-		}
-		probeURI := fileURI(filepath.Join(workspace, result.Coverage.probePath))
-		if err = client.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": probeURI, "languageId": "lua", "version": 1, "text": string(probeData)}}); err != nil {
-			return result, clientError(err, stderr.String(), bounded, ctx)
-		}
-		opened[probeURI] = true
-		var barrier json.RawMessage
-		if err = client.request("textDocument/definition", map[string]any{"textDocument": map[string]string{"uri": probeURI}, "position": Position{}}, &barrier); err != nil {
-			return result, clientError(err, stderr.String(), bounded, ctx)
-		}
-	}
-	for _, q := range queries {
-		entry := QueryResult{Query: q, State: "incomplete", Locations: []Location{}}
-		supported := q.Kind == Definition && result.Capabilities.Definition || q.Kind == References && result.Capabilities.References || q.Kind == Hover && result.Capabilities.Hover
-		if !supported {
-			entry.State = "unsupported"
-			entry.Reason = "server did not advertise capability"
-			result.Results = append(result.Results, entry)
-			continue
-		}
-		path := filepath.Join(workspace, q.Path)
-		var data []byte
-		var readErr error
-		if q.Path == DefinitionPath {
-			path = filepath.Join(library, "api.d.lua")
-			data = definitions
-		} else {
-			data, readErr = readQueryFile(workspace, q.Path)
-		}
-		if readErr != nil {
-			entry.Reason = "query file unavailable or exceeds file budget"
-			result.Results = append(result.Results, entry)
-			continue
-		}
-		uri := fileURI(path)
-		if !opened[uri] {
-			if err = client.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "lua", "version": 1, "text": string(data)}}); err != nil {
-				return result, clientError(err, stderr.String(), bounded, ctx)
-			}
-			opened[uri] = true
-		}
-		params := map[string]any{"textDocument": map[string]string{"uri": uri}, "position": q.Position}
-		method := "textDocument/" + string(q.Kind)
-		if q.Kind == References {
-			params["context"] = map[string]bool{"includeDeclaration": true}
-		}
-		var raw json.RawMessage
-		if err = client.request(method, params, &raw); err != nil {
-			return result, clientError(err, stderr.String(), bounded, ctx)
-		}
-		if q.Kind == Hover {
-			entry.Hover, entry.Truncated, err = decodeHover(raw)
-		} else {
-			entry.Locations, entry.Truncated, err = decodeLocations(raw, workspace, library)
-		}
-		if err != nil {
-			return result, fmt.Errorf("%w: %v", ErrFailed, err)
-		}
-		entry.State = "complete"
-		if entry.Truncated {
-			entry.State = "incomplete"
-			entry.Reason = "semantic result exceeded output budget"
-		}
-		result.Results = append(result.Results, entry)
-	}
-	result.State = "complete"
-	if result.Coverage.ExcludedFiles > 0 {
-		result.State = "partial"
-	}
-	for _, entry := range result.Results {
-		if entry.State != "complete" {
-			result.State = "partial"
-			break
-		}
-	}
-	_ = client.request("shutdown", nil, nil)
-	_ = client.notify("exit", nil)
-	return result, nil
+	defer session.Close()
+	return session.Analyze(ctx, queries)
 }
 
 func clientError(err error, stderr string, bounded, parent context.Context) error {
@@ -441,49 +267,118 @@ type rpcEvent struct {
 	err     error
 }
 type lspClient struct {
-	ctx    context.Context
-	input  io.Writer
-	events chan rpcEvent
-	nextID int
-	bytes  int
+	ctx           context.Context
+	input         io.Writer
+	writeMu       sync.Mutex
+	mu            sync.Mutex
+	pending       map[int]chan rpcEvent
+	nextID        int
+	batchBytes    int
+	lifetimeBytes int
+	terminal      error
+	done          chan struct{}
 }
 
+// The pump keeps consuming notifications and answering supported server
+// requests even between batches. Payloads are discarded, never queued for an
+// idle caller. Every inbound and outbound byte has a session-wide bound.
 func newLSPClient(ctx context.Context, input io.Writer, output io.Reader) *lspClient {
-	c := &lspClient{ctx: ctx, input: input, events: make(chan rpcEvent, 1)}
+	c := &lspClient{ctx: ctx, input: input, pending: make(map[int]chan rpcEvent), done: make(chan struct{})}
 	go func() {
+		defer close(c.done)
 		reader := bufio.NewReader(output)
 		for {
 			body, err := readFrame(reader)
 			if err != nil {
-				select {
-				case c.events <- rpcEvent{err: err}:
-				case <-ctx.Done():
-				}
+				c.fail(err)
+				return
+			}
+			if err = c.account(len(body)); err != nil {
+				c.fail(err)
 				return
 			}
 			var msg rpcMessage
-			if err = json.Unmarshal(body, &msg); err != nil {
-				select {
-				case c.events <- rpcEvent{err: err}:
-				case <-ctx.Done():
+			if err = json.Unmarshal(body, &msg); err != nil || msg.JSONRPC != "2.0" {
+				c.fail(fmt.Errorf("invalid RPC message: %v", err))
+				return
+			}
+			if msg.Method != "" {
+				if len(msg.ID) > 0 {
+					var response any
+					switch msg.Method {
+					case "workspace/configuration":
+						response = []any{}
+					case "window/workDoneProgress/create", "client/registerCapability", "client/unregisterCapability":
+						response = nil
+					default:
+						c.fail(fmt.Errorf("unexpected server request %q", msg.Method))
+						return
+					}
+					if err = c.send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": response}); err != nil {
+						c.fail(err)
+						return
+					}
 				}
+				continue
+			}
+			var id int
+			if err = json.Unmarshal(msg.ID, &id); err != nil {
+				c.fail(fmt.Errorf("invalid response id %s", msg.ID))
 				return
 			}
-			select {
-			case c.events <- rpcEvent{message: msg}:
-			case <-ctx.Done():
+			c.mu.Lock()
+			ch := c.pending[id]
+			delete(c.pending, id)
+			c.mu.Unlock()
+			if ch == nil {
+				c.fail(fmt.Errorf("unexpected response id %s", msg.ID))
 				return
 			}
+			ch <- rpcEvent{message: msg}
 		}
 	}()
 	return c
 }
-
+func (c *lspClient) account(n int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.batchBytes += n
+	c.lifetimeBytes += n
+	if c.batchBytes > 32<<20 || c.lifetimeBytes > 256<<20 {
+		return ErrBudget
+	}
+	return nil
+}
+func (c *lspClient) beginBatch() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.terminal != nil {
+		return c.terminal
+	}
+	c.batchBytes = 0
+	return nil
+}
+func (c *lspClient) fail(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.terminal != nil {
+		return
+	}
+	c.terminal = err
+	for id, ch := range c.pending {
+		ch <- rpcEvent{err: err}
+		delete(c.pending, id)
+	}
+}
 func readFrame(reader *bufio.Reader) ([]byte, error) {
 	length := -1
 	headerBytes := 0
 	for {
-		line, err := reader.ReadString('\n')
+		lineBytes, err := reader.ReadSlice('\n')
+		line := string(lineBytes)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			return nil, ErrBudget
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -518,6 +413,11 @@ func (c *lspClient) send(value any) error {
 	if len(body) > MaxReportBytes {
 		return ErrBudget
 	}
+	if err = c.account(len(body)); err != nil {
+		return err
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	_, err = c.input.Write(append([]byte(fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))), body...))
 	return err
 }
@@ -525,55 +425,41 @@ func (c *lspClient) notify(method string, params any) error {
 	return c.send(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 }
 func (c *lspClient) request(method string, params any, result any) error {
-	c.nextID++
-	id := c.nextID
-	if err := c.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+	return c.requestContext(c.ctx, method, params, result)
+}
+func (c *lspClient) requestContext(ctx context.Context, method string, params any, result any) error {
+	c.mu.Lock()
+	if c.terminal != nil {
+		err := c.terminal
+		c.mu.Unlock()
 		return err
 	}
-	for {
-		select {
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		case event := <-c.events:
-			if event.err != nil {
-				return event.err
-			}
-			c.bytes += len(event.message.Params) + len(event.message.Result)
-			if c.bytes > 32<<20 {
-				return ErrBudget
-			}
-			msg := event.message
-			if msg.Method != "" {
-				if len(msg.ID) > 0 {
-					var response any
-					switch msg.Method {
-					case "workspace/configuration":
-						response = []any{}
-					case "window/workDoneProgress/create", "client/registerCapability", "client/unregisterCapability":
-						response = nil
-					default:
-						return fmt.Errorf("unexpected server request %q", msg.Method)
-					}
-					if err := c.send(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID), "result": response}); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			var got int
-			if err := json.Unmarshal(msg.ID, &got); err != nil || got != id {
-				return fmt.Errorf("unexpected response id %s", msg.ID)
-			}
-			if msg.Error != nil {
-				return fmt.Errorf("server error %d: %s", msg.Error.Code, msg.Error.Message)
-			}
-			if result != nil {
-				if err := json.Unmarshal(msg.Result, result); err != nil {
-					return err
-				}
-			}
-			return nil
+	c.nextID++
+	id := c.nextID
+	ch := make(chan rpcEvent, 1)
+	c.pending[id] = ch
+	c.mu.Unlock()
+	if err := c.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+		c.fail(err)
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err() // the owner must retire the worker, never drain indefinitely
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	case event := <-ch:
+		if event.err != nil {
+			return event.err
 		}
+		msg := event.message
+		if msg.Error != nil {
+			return fmt.Errorf("server error %d: %s", msg.Error.Code, msg.Error.Message)
+		}
+		if result != nil {
+			return json.Unmarshal(msg.Result, result)
+		}
+		return nil
 	}
 }
 

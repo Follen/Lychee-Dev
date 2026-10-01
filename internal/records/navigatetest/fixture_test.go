@@ -60,7 +60,7 @@ type fixtureTable struct {
 }
 
 type fixture struct {
-	t         *testing.T
+	t         testing.TB
 	workspace string
 	pin       selection.PinnedSet
 	fileIDs   map[string]uint32
@@ -70,7 +70,7 @@ func fixtureQuery() records.FileQuery {
 	return records.FileQuery{CDN: true, Offline: true, MetadataBytes: 8 << 20, ContentBytes: 32 << 20}
 }
 
-func buildTable(t *testing.T, spec fixtureTable) (wdc []byte, dbd string) {
+func buildTable(t testing.TB, spec fixtureTable) (wdc []byte, dbd string) {
 	t.Helper()
 	elements := func(col fixtureColumn) int {
 		if col.elements > 0 {
@@ -257,7 +257,7 @@ func identityIndex(spec fixtureTable) int {
 	return 0
 }
 
-func cellID(t *testing.T, cell any) uint32 {
+func cellID(t testing.TB, cell any) uint32 {
 	t.Helper()
 	value := cellInt(t, cell)
 	if value < 0 {
@@ -266,7 +266,7 @@ func cellID(t *testing.T, cell any) uint32 {
 	return uint32(value)
 }
 
-func cellInt(t *testing.T, cell any) int64 {
+func cellInt(t testing.TB, cell any) int64 {
 	t.Helper()
 	switch value := cell.(type) {
 	case int64:
@@ -282,7 +282,7 @@ func cellInt(t *testing.T, cell any) int64 {
 	return 0
 }
 
-func intCells(t *testing.T, cell any, elements, rowIndex int, name string) []int64 {
+func intCells(t testing.TB, cell any, elements, rowIndex int, name string) []int64 {
 	t.Helper()
 	switch value := cell.(type) {
 	case []int64:
@@ -298,7 +298,7 @@ func intCells(t *testing.T, cell any, elements, rowIndex int, name string) []int
 	}
 }
 
-func floatCells(t *testing.T, cell any, elements, rowIndex int, name string) []float32 {
+func floatCells(t testing.TB, cell any, elements, rowIndex int, name string) []float32 {
 	t.Helper()
 	switch value := cell.(type) {
 	case []float32:
@@ -332,7 +332,7 @@ func putBits(buffer *bytes.Buffer, value uint64, bits int, signed bool) {
 }
 
 // buildDBD emits a strict DBD document whose variant binds by layout hash.
-func buildDBD(t *testing.T, spec fixtureTable, layoutHash uint32) string {
+func buildDBD(t testing.TB, spec fixtureTable, layoutHash uint32) string {
 	t.Helper()
 	var columns, fields strings.Builder
 	for _, col := range spec.columns {
@@ -385,7 +385,7 @@ func buildDBD(t *testing.T, spec fixtureTable, layoutHash uint32) string {
 
 // newFixture stores every table in one synthetic offline CDN root and seeds
 // the pinned definitions so preparation needs no network.
-func newFixture(t *testing.T, tables []fixtureTable) *fixture {
+func newFixture(t testing.TB, tables []fixtureTable) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	workspace := filepath.Join(t.TempDir(), "workspace")
@@ -429,7 +429,7 @@ func newFixture(t *testing.T, tables []fixtureTable) *fixture {
 
 // seedDefinitions pre-publishes the manifest and DBD documents exactly the way
 // records.Definitions caches them, so Prepare works offline.
-func seedDefinitions(t *testing.T, workspace, commit, manifest string, dbds map[string]string) {
+func seedDefinitions(t testing.TB, workspace, commit, manifest string, dbds map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	store, err := vault.OpenStore(workspace)

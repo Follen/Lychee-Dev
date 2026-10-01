@@ -63,6 +63,9 @@ type SourceContext struct {
 }
 
 func ContextSource(ctx context.Context, root, snapshot string, query ContextQuery, options ...ResearchOptions) (SourceContext, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	var reading SourceContext
 	pin, err := pinnedSource(ctx, root, snapshot)
 	if err != nil {
@@ -93,6 +96,9 @@ func ContextSource(ctx context.Context, root, snapshot string, query ContextQuer
 }
 
 func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.SourcePin, query ContextQuery, opt ResearchOptions) (ContextResult, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	result := ContextResult{Repository: pin.Repository, Product: pin.Product, Commit: pin.ExactCommit, Snapshot: snapshot, Snippets: []ContextSnippet{}, Relations: []ResearchRelation{}, LoadEvidence: []ResearchRelation{}, Candidates: []SymbolMatch{}}
 	if query.Depth < 0 || query.Depth > 4 {
 		return result, errors.New("codebase.invalid_context_depth")
@@ -144,6 +150,7 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 	if err != nil {
 		return result, err
 	}
+	defer cache.Close()
 	type site struct {
 		path        string
 		first, last int
@@ -186,7 +193,9 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 		}
 		if len(calleeNames) > 0 {
 			candidates := map[string][]SymbolMatch{}
-			err = cache.scan(ctx, func(r sourceRecord) error {
+			err = cache.scanSelected(ctx, func(e recordOffset) bool {
+				return e.Kind == "symbol" && e.SymbolKind == "declaration" && calleeNames[e.Name]
+			}, func(r sourceRecord) error {
 				if r.Kind != "symbol" || r.Symbol == nil || r.Symbol.Kind != "declaration" || !calleeNames[r.Symbol.Name] {
 					return nil
 				}
@@ -219,7 +228,9 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 		loadTarget = result.Symbol.Path
 	}
 	if loadTarget != "" {
-		err = cache.scan(ctx, func(r sourceRecord) error {
+		err = cache.scanSelected(ctx, func(e recordOffset) bool {
+			return e.Kind == "symbol" && e.SymbolKind == "load" && loadedPath(e.Path, e.Target) == loadTarget
+		}, func(r sourceRecord) error {
 			if r.Kind != "symbol" || r.Symbol == nil || r.Symbol.Kind != "load" {
 				return nil
 			}
@@ -245,7 +256,9 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 		visited := map[string]bool{}
 		for depth := 2; depth <= query.Depth && len(frontier) > 0; depth++ {
 			next := map[string]bool{}
-			err = cache.scan(ctx, func(r sourceRecord) error {
+			err = cache.scanSelected(ctx, func(e recordOffset) bool {
+				return e.Kind == "symbol" && e.SymbolKind == "relationship" && (frontier[e.Name] || frontier[e.Target])
+			}, func(r sourceRecord) error {
 				if r.Kind != "symbol" || r.Symbol == nil || r.Symbol.Kind != "relationship" {
 					return nil
 				}

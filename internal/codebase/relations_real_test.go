@@ -55,6 +55,11 @@ func TestRealLuaLSMapsAPIReferencesAndDefinitions(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
+	// This fixture supplies the verified payload through its callback; retain a
+	// fixed synthetic manifest for the release/config cache identity.
+	if err := os.WriteFile(filepath.Join(release, "release.json"), []byte(`{"schema":"lycheedev.release.v1","version":"fixture","commit":"fixed"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	runtime, err := luals.Open(ctx, release, func(context.Context, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)

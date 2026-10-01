@@ -13,9 +13,11 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -32,14 +34,20 @@ type cdnFiles struct {
 	transferred                  int64
 	catalogURL, routeKey, region string
 	routeRefreshed               bool
+	budget                       *resource.Budget
+	stats                        *DecodedCacheStats
 }
 
-func prepareCDNFiles(ctx context.Context, store *vault.Store, pin selection.DataPin, offline bool) (*cdnFiles, BuildMetadata, error) {
+func prepareCDNFiles(ctx context.Context, store *vault.Store, pin selection.DataPin, offline bool, budgets ...*resource.Budget) (*cdnFiles, BuildMetadata, error) {
 	m, err := store.OpenMetadata(ctx)
 	if err != nil {
 		return nil, BuildMetadata{}, err
 	}
 	c := &cdnFiles{ctx: ctx, store: store, metadata: m, client: &http.Client{Timeout: 30 * time.Second}, offline: offline}
+	if len(budgets) > 0 {
+		c.budget = budgets[0]
+	}
+	c.client.Transport = newBudgetTransport(c.client.Transport, c.budget)
 	meta, err := c.prepare(pin)
 	if err != nil {
 		m.Close()
@@ -98,6 +106,9 @@ type cdnRange struct {
 // Cached fragments are original HTTP bytes, not proof of complete content.
 // Parsers verify EKey/chunk/page identities and final decoded content CKeys.
 func (c *cdnFiles) rangeBytes(object string, offset, length, total int64) ([]byte, int64, error) {
+	if c.stats != nil {
+		c.stats.FragmentLoads++
+	}
 	if err := c.ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -139,7 +150,7 @@ func (c *cdnFiles) rangeBytes(object string, offset, length, total int64) ([]byt
 				if c.ctx.Err() != nil {
 					return nil, 0, c.ctx.Err()
 				}
-				if !errors.Is(err, ErrRemoteHTTP) && !errors.Is(err, ErrRemoteObjectMissing) {
+				if !remoteAvailabilityFailure(err) {
 					return nil, 0, fmt.Errorf("CDN object %s: %w", object, err)
 				}
 				// A failed mirror cannot turn an uncertain object into an absent one.
@@ -174,10 +185,13 @@ func (c *cdnFiles) rangeBytes(object string, offset, length, total int64) ([]byt
 }
 
 type cdnBytes struct {
-	files  *cdnFiles
-	object string
-	size   int64
-	sparse bool
+	files       *cdnFiles
+	object      string
+	size        int64
+	sparse      bool
+	mu          sync.Mutex
+	block       []byte
+	blockOffset int64
 }
 
 func (c *cdnFiles) source(object string, size int64, sparse bool) (*cdnBytes, error) {
@@ -192,6 +206,11 @@ func (c *cdnFiles) source(object string, size int64, sparse bool) (*cdnBytes, er
 }
 
 func (s *cdnBytes) ReadAt(p []byte, offset int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.files.ctx.Err(); err != nil {
+		return 0, err
+	}
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -219,9 +238,17 @@ func (s *cdnBytes) ReadAt(p []byte, offset int64) (int, error) {
 		at := offset + int64(n)
 		base := at / chunk * chunk
 		length := min(chunk, s.size-base)
-		raw, _, err := s.files.rangeBytes(s.object, base, length, s.size)
-		if err != nil {
-			return n, err
+		raw := s.block
+		if raw != nil && s.blockOffset == base && s.files.stats != nil {
+			s.files.stats.BlockCacheHits++
+		}
+		if raw == nil || s.blockOffset != base {
+			var err error
+			raw, _, err = s.files.rangeBytes(s.object, base, length, s.size)
+			if err != nil {
+				return n, err
+			}
+			s.block, s.blockOffset = raw, base
 		}
 		copied := copy(p[n:int(want)], raw[at-base:])
 		n += copied
@@ -308,7 +335,7 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 	if err == nil {
 		return cdnSpan{Object: key, Bytes: size}, nil
 	}
-	if !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrRemoteHTTP) {
+	if !remoteAvailabilityFailure(err) {
 		return cdnSpan{}, err
 	}
 	// Failure to obtain a loose copy does not rule out an authenticated
@@ -352,7 +379,7 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 		if err == nil {
 			return span, nil
 		}
-		if !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrContentMissing) && !errors.Is(err, ErrRemoteHTTP) {
+		if terminalCDNLookupError(err) {
 			return cdnSpan{}, err
 		}
 		if errors.Is(err, ErrRemoteHTTP) {
@@ -367,7 +394,7 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 		if err == nil {
 			return span, nil
 		}
-		if !errors.Is(err, ErrContentMissing) && !errors.Is(err, ErrRemoteObjectMissing) && !errors.Is(err, ErrRemoteHTTP) {
+		if terminalCDNLookupError(err) {
 			return cdnSpan{}, err
 		}
 		if errors.Is(err, ErrRemoteHTTP) || errors.Is(err, ErrRemoteObjectMissing) && unavailable == nil {
@@ -378,4 +405,13 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 		return cdnSpan{}, unavailable
 	}
 	return cdnSpan{}, ErrRemoteObjectMissing
+}
+
+func terminalCDNLookupError(err error) bool {
+	// Joined availability failures cannot override cancellation or a spent
+	// query budget. A validated index's missing key may still try another index.
+	if errors.Is(err, resource.ErrBudget) || errors.Is(err, ErrMetadataLimit) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return !errors.Is(err, ErrContentMissing) && !remoteAvailabilityFailure(err)
 }

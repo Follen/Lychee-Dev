@@ -15,8 +15,16 @@ import (
 )
 
 type DecodedCacheStats struct {
-	Hits        int   `json:"hits"`
-	ReusedBytes int64 `json:"reusedBytes"`
+	Hits               int   `json:"hits"`
+	ReusedBytes        int64 `json:"reusedBytes"`
+	ContentHashCalls   int64 `json:"contentHashCalls"`
+	ContentHashBytes   int64 `json:"contentHashBytes"`
+	ContentDecodeCalls int64 `json:"contentDecodeCalls"`
+	ExtractedBytes     int64 `json:"extractedBytes"`
+	BlobReads          int64 `json:"blobReads"`
+	BlobReadBytes      int64 `json:"blobReadBytes"`
+	FragmentLoads      int64 `json:"fragmentLoads"`
+	BlockCacheHits     int64 `json:"blockCacheHits"`
 }
 type decodedCacheEntry struct {
 	ContentKey string        `json:"contentKey"`
@@ -35,17 +43,23 @@ func decodedCacheKey(ctx context.Context, q FileQuery, source io.ReaderAt, size 
 	hash := sha256.New()
 	fmt.Fprintf(hash, "decoded-v1\x00%s\x00%s\x00%s\x00", ckey, q.keySource.Kind, q.keySource.SHA256)
 	buffer := make([]byte, 64<<10)
+	if q.cacheStats != nil {
+		q.cacheStats.ContentHashCalls++
+	}
 	for offset := int64(0); offset < size; {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
 		n := min(int64(len(buffer)), size-offset)
 		read, err := source.ReadAt(buffer[:n], offset)
-		if int64(read) != n {
-			return "", io.ErrUnexpectedEOF
+		if q.cacheStats != nil {
+			q.cacheStats.ContentHashBytes += int64(read)
 		}
 		if err != nil && err != io.EOF {
 			return "", err
+		}
+		if int64(read) != n {
+			return "", io.ErrUnexpectedEOF
 		}
 		hash.Write(buffer[:read])
 		offset += int64(read)
@@ -83,7 +97,7 @@ func (r *Reader) readDecodedCache(ctx context.Context, q FileQuery, key, ckey st
 			return vault.BlobRef{}, false, lookupErr
 		}
 	}
-	raw, err := r.store.ReadBlob(ctx, cached.Blob, max(1, size))
+	raw, err := r.readVerifiedBlob(ctx, cached.Blob, max(1, size))
 	if errors.Is(err, os.ErrNotExist) {
 		return vault.BlobRef{}, false, nil
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/records/relational"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/records/schema"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -30,69 +31,56 @@ type effectiveEntry struct {
 	raw     []byte
 }
 
+func (r *Reader) EffectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Metadata, pin selection.DataPin, base relational.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (relational.Source, EffectiveTable, error) {
+	if r.session != nil {
+		if r.session.closed || pin != r.session.pin || store != r.store {
+			return relational.Source{}, EffectiveTable{}, ErrCacheIdentity
+		}
+		if r.session.hotfix == nil {
+			r.session.hotfix = newHotfixSnapshots(store, metadata, pin, r.session.query.budget)
+		}
+		return effectiveSourceWithSnapshots(ctx, r.session.hotfix, base, definition, bundle, captures)
+	}
+	return effectiveSource(ctx, store, metadata, pin, base, definition, bundle, captures)
+}
+
 func effectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Metadata, pin selection.DataPin, base relational.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (relational.Source, EffectiveTable, error) {
+	return effectiveSourceWithSnapshots(ctx, newHotfixSnapshots(store, metadata, pin, nil), base, definition, bundle, captures)
+}
+
+func effectiveSourceWithSnapshots(ctx context.Context, snapshots *hotfixSnapshots, base relational.Source, definition schema.Definition, bundle DefinitionBundle, captures []string) (relational.Source, EffectiveTable, error) {
 	report := EffectiveTable{Table: bundle.Identity.Name, Policy: "push-ascending/capture-order/physical-index; valid-payload replaces; invalid deletes; cached-key exception"}
 	if len(captures) == 0 || len(captures) > 16 {
 		return relational.Source{}, report, fmt.Errorf("%w: effective catalog requires hotfix capture IDs in query JSON", ErrCacheIdentity)
 	}
-	parts := strings.Split(pin.FullBuild, ".")
-	build, err := strconv.ParseUint(parts[len(parts)-1], 10, 32)
-	if err != nil {
-		return relational.Source{}, report, ErrCacheBuild
-	}
 	var entries []effectiveEntry
-	var bytesTotal int64
 	seenCaptures := map[string]bool{}
-	archive := evidence.OpenArchive(store, metadata)
 	for ordinal, id := range captures {
 		if seenCaptures[id] {
 			return relational.Source{}, report, ErrCacheIdentity
 		}
 		seenCaptures[id] = true
-		source, raw, err := archive.FetchCapture(ctx, id, 128<<20)
+		snapshot, err := snapshots.load(ctx, id)
 		if err != nil {
 			return relational.Source{}, report, err
 		}
-		if source.Provenance.Kind != "hotfix-cache" || !source.Complete || source.Truncated {
-			return relational.Source{}, report, ErrCacheIdentity
-		}
-		origin, err := selection.OpenPinner(metadata).ReadPinnedSet(ctx, source.Provenance.Snapshot)
-		if err != nil {
-			return relational.Source{}, report, err
-		}
-		if origin.Data == nil || *origin.Data != pin || source.Provenance.DataBuild != pin.FullBuild {
-			return relational.Source{}, report, ErrCacheIdentity
-		}
-		bytesTotal += int64(len(raw))
-		if bytesTotal > 128<<20 {
+		selected := snapshot.tables[bundle.Identity.Hash]
+		if len(selected) > 100000-len(entries) {
 			return relational.Source{}, report, ErrCacheLimit
 		}
-		filter := CacheFilter{Build: uint32(build), TableHash: &bundle.Identity.Hash, Limit: 200}
-		page, err := InspectCache(ctx, raw, filter)
-		if err != nil {
+		if err := snapshots.budget.Charge(resource.Cost{RetainedBytes: int64(len(selected)) * 384, MetadataBytes: int64(len(selected)) * 384, DecodeWork: int64(len(selected))}); err != nil {
 			return relational.Source{}, report, err
 		}
-		start := 12
-		if page.Version >= 5 {
-			start = 44
+		for _, entry := range selected {
+			if err := ctx.Err(); err != nil {
+				return relational.Source{}, report, err
+			}
+			if snapshot.layout >= 7 && entry.Status > 4 {
+				return relational.Source{}, report, fmt.Errorf("%w: unsupported effective status %d", ErrCacheFormat, entry.Status)
+			}
+			entries = append(entries, effectiveEntry{CacheEntry: entry, capture: ordinal, layout: snapshot.layout, source: id, raw: snapshot.raw})
 		}
-		err = walkCache(ctx, raw, start, page.RecordLayout, func(entry CacheEntry) error {
-			if entry.TableHash != bundle.Identity.Hash {
-				return nil
-			}
-			if page.RecordLayout >= 7 && entry.Status > 4 {
-				return fmt.Errorf("%w: unsupported effective status %d", ErrCacheFormat, entry.Status)
-			}
-			entries = append(entries, effectiveEntry{CacheEntry: entry, capture: ordinal, layout: page.RecordLayout, source: id, raw: raw})
-			if len(entries) > 100000 {
-				return ErrCacheLimit
-			}
-			return nil
-		})
-		if err != nil {
-			return relational.Source{}, report, err
-		}
-		report.Captures = append(report.Captures, source)
+		report.Captures = append(report.Captures, snapshot.source)
 	}
 	valid := func(e effectiveEntry) bool {
 		return e.PayloadBytes > 0 && (e.layout >= 7 && e.Status == 1 || e.layout < 7 && e.Status != 0)
@@ -144,9 +132,15 @@ func effectiveSource(ctx context.Context, store *vault.Store, metadata *vault.Me
 		}
 		if !valid(e) {
 			if shouldDelete {
-				patches[e.RecordID] = replacement{entry: e}
+				if err := snapshots.budget.Charge(resource.Cost{RetainedBytes: 384, MetadataBytes: 384}); err != nil {
+					return relational.Source{}, report, err
+				}
+				patches[e.RecordID] = replacement{entry: effectiveEntry{CacheEntry: e.CacheEntry, source: e.source}}
 			}
 			continue
+		}
+		if err := snapshots.budget.Charge(resource.Cost{RetainedBytes: int64(e.PayloadBytes)*4 + int64(len(base.Columns))*64 + 384, MetadataBytes: int64(len(base.Columns))*64 + 384, DecodeWork: int64(len(base.Columns)) + 1}); err != nil {
+			return relational.Source{}, report, err
 		}
 		fields, err := DecodeHotfixFields(ctx, e.raw[int(e.PayloadOffset):int(e.PayloadOffset)+e.PayloadBytes], e.RecordID, definition)
 		if err != nil {

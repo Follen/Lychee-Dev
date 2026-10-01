@@ -5,11 +5,13 @@ import (
 	"os/exec"
 )
 
-func startGuarded(command *exec.Cmd) (func(), error) {
+func startGuarded(command *exec.Cmd) (func(), error) { return startGuardedPolicy(command, false) }
+func startGuardedPolicy(command *exec.Cmd, broker bool) (func(), error) {
+	prepareGuarded(command)
 	if err := command.Start(); err != nil {
 		return nil, err
 	}
-	closeJob, err := guardProcess(command)
+	closeJob, err := guardProcessPolicy(command, broker)
 	if err != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()

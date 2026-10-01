@@ -44,6 +44,9 @@ func captureSourceJSON(ctx context.Context, root string, value any, complete, tr
 // QuerySource runs one documented search-mode query against the fixed
 // snapshot and archives the exact result as evidence.
 func QuerySource(ctx context.Context, root, snapshot string, query SearchQuery) (SourceQueryReading, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	var result SourceQueryReading
 	pin, err := pinnedSource(ctx, root, snapshot)
 	if err != nil {
@@ -73,6 +76,9 @@ type TargetReading struct {
 
 // InspectSourceTarget inspects one symbol or path of the fixed snapshot.
 func InspectSourceTarget(ctx context.Context, root, snapshot string, query TargetQuery) (TargetReading, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	var result TargetReading
 	pin, err := pinnedSource(ctx, root, snapshot)
 	if err != nil {
@@ -107,6 +113,9 @@ type SourceValidation struct {
 // ValidateSourceTOC runs the TOC-closure validation mode against the fixed
 // snapshot. There is no latest fallback: evidence is exactly the pinned commit.
 func ValidateSourceTOC(ctx context.Context, root, snapshot string, input AddonInput) (SourceValidation, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	var result SourceValidation
 	pin, err := pinnedSource(ctx, root, snapshot)
 	if err != nil {
@@ -139,6 +148,9 @@ type MatrixValidation struct {
 // own pinned index and merges diagnostics while keeping per-target identity.
 // With a nil resolver, refs are prepared through the repository catalog.
 func ValidateSourceMatrix(ctx context.Context, root, matrixFile string, resolve TargetResolver, options ...ValidationOptions) (MatrixValidation, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
+
 	config, addonRoot, err := ReadMatrixConfig(matrixFile)
 	if err != nil {
 		return MatrixValidation{}, err

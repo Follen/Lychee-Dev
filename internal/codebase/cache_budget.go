@@ -19,6 +19,13 @@ import (
 const sourceDerivedBudget int64 = 4 << 30
 const maxSourceNodes = 500000
 
+type sourceWalkMetricsKey struct{}
+type sourceWalkMetrics struct {
+	Walks int
+	Nodes int
+	Bytes int64
+}
+
 var sourceCacheKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type sourceCapacityLease struct {
@@ -39,20 +46,43 @@ func (l *sourceCapacityLease) Grow(ctx context.Context, additionalBytes int64) e
 	if additionalBytes < 0 {
 		return fmt.Errorf("%w: negative source reservation", ErrSourceBudget)
 	}
-	used, err := sourcePathBytes(ctx, filepath.Join(l.browser.store.Root(), "source", "v1"))
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	materialized := used - l.baselineUsed
-	if materialized < 0 {
-		materialized = 0
+	if additionalBytes > l.budget || l.reserved > l.budget-additionalBytes {
+		return ErrSourceBudget
 	}
-	outstanding := l.reserved - materialized
-	if outstanding < 0 {
-		outstanding = 0
-	}
-	if err := l.browser.ensureSourceCapacityLockedBudget(ctx, outstanding+additionalBytes, l.protectedPath, l.budget); err != nil {
-		return err
+	// The lease excludes every cooperating source writer. All materialized
+	// and not-yet-written bytes are covered by cumulative grants, so their
+	// conservative upper bound needs no second namespace walk per chunk.
+	projected := l.baselineUsed + l.reserved + additionalBytes
+	if projected > l.budget {
+		candidates, err := l.browser.reclaimableSourceCaches(ctx, l.protectedPath)
+		if err != nil {
+			return err
+		}
+		for _, candidate := range candidates {
+			if projected <= l.budget {
+				break
+			}
+			lease, err := vault.TryAcquireLease(ctx, filepath.Join(l.browser.store.Root(), "locks"), candidate.lock)
+			if errors.Is(err, vault.ErrLeaseBusy) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			freed, err := reclaimSourceCache(ctx, candidate)
+			lease.Close()
+			if err != nil {
+				return err
+			}
+			l.baselineUsed = max(int64(0), l.baselineUsed-freed)
+			projected = l.baselineUsed + l.reserved + additionalBytes
+		}
+		if projected > l.budget {
+			return fmt.Errorf("%w: source/v1 requires %d bytes, budget %d", ErrSourceBudget, projected, l.budget)
+		}
 	}
 	l.reserved += additionalBytes
 	return nil
@@ -71,11 +101,7 @@ func (b *Browser) reserveSourceCapacityBudget(ctx context.Context, additionalByt
 	if err != nil {
 		return nil, err
 	}
-	if err := b.ensureSourceCapacityLockedBudget(ctx, additionalBytes, protectedPath, budget); err != nil {
-		lease.Close()
-		return nil, err
-	}
-	used, err := sourcePathBytes(ctx, filepath.Join(b.store.Root(), "source", "v1"))
+	used, err := b.sourceCapacityLockedBudget(ctx, additionalBytes, protectedPath, budget)
 	if err != nil {
 		lease.Close()
 		return nil, err
@@ -90,55 +116,64 @@ func (b *Browser) ensureSourceCapacityLocked(ctx context.Context, additionalByte
 }
 
 func (b *Browser) ensureSourceCapacityLockedBudget(ctx context.Context, additionalBytes int64, protectedPath string, budget int64) error {
+	_, err := b.sourceCapacityLockedBudget(ctx, additionalBytes, protectedPath, budget)
+	return err
+}
+
+func (b *Browser) sourceCapacityLockedBudget(ctx context.Context, additionalBytes int64, protectedPath string, budget int64) (int64, error) {
 	if budget < 0 || budget > sourceDerivedBudget || additionalBytes < 0 || additionalBytes > budget {
-		return fmt.Errorf("%w: invalid source reservation", ErrSourceBudget)
+		return 0, fmt.Errorf("%w: invalid source reservation", ErrSourceBudget)
 	}
 	root := filepath.Join(b.store.Root(), "source", "v1")
 	if protectedPath != "" {
 		rel, err := filepath.Rel(root, protectedPath)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("%w: invalid protected source path", ErrSourceIntegrity)
+			return 0, fmt.Errorf("%w: invalid protected source path", ErrSourceIntegrity)
 		}
 	}
 	used, err := sourcePathBytes(ctx, root)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if used+additionalBytes <= budget {
-		return nil
+		return used, nil
 	}
 	candidates, err := b.reclaimableSourceCaches(ctx, protectedPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		if used+additionalBytes <= budget {
-			return nil
+			return used, nil
 		}
 		lease, err := vault.TryAcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), candidate.lock)
 		if errors.Is(err, vault.ErrLeaseBusy) {
 			continue
 		}
 		if err != nil {
-			return err
+			return 0, err
 		}
 		freed, removeErr := reclaimSourceCache(ctx, candidate)
 		lease.Close()
 		if removeErr != nil {
-			return removeErr
+			return 0, removeErr
 		}
 		used -= freed
 	}
 	if used+additionalBytes > budget {
-		return fmt.Errorf("%w: source/v1 requires %d bytes, budget %d", ErrSourceBudget, used+additionalBytes, budget)
+		return 0, fmt.Errorf("%w: source/v1 requires %d bytes, budget %d", ErrSourceBudget, used+additionalBytes, budget)
 	}
-	return nil
+	return used, nil
 }
 
 func sourcePathBytes(ctx context.Context, root string) (int64, error) {
+	metrics, _ := ctx.Value(sourceWalkMetricsKey{}).(*sourceWalkMetrics)
+	if metrics != nil {
+		metrics.Walks++
+	}
 	var total int64
 	nodes := 0
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -149,6 +184,9 @@ func sourcePathBytes(ctx context.Context, root string) (int64, error) {
 			return err
 		}
 		nodes++
+		if metrics != nil {
+			metrics.Nodes++
+		}
 		if nodes > maxSourceNodes {
 			return fmt.Errorf("%w: source/v1 node budget", ErrSourceBudget)
 		}
@@ -166,6 +204,9 @@ func sourcePathBytes(ctx context.Context, root string) (int64, error) {
 			return err
 		}
 		total += info.Size()
+		if metrics != nil {
+			metrics.Bytes += info.Size()
+		}
 		return nil
 	})
 	if errors.Is(err, os.ErrNotExist) {

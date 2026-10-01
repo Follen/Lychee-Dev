@@ -29,6 +29,8 @@ type environmentCacheManifest struct {
 const maxEnvironmentFactsBytes = 64 << 20
 
 func (b *Browser) researchEnvironment(ctx context.Context, source selection.SourcePin, snapshot string) (environment.Result, string, error) {
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
 	pin := source
 	if source.Repository != "wow-ui-source" {
 		if snapshot == "" {
@@ -50,6 +52,7 @@ func (b *Browser) researchEnvironment(ctx context.Context, source selection.Sour
 	if err != nil {
 		return environment.Result{}, "unavailable", err
 	}
+	defer cache.Close()
 	identity := environment.Identity{Repository: pin.Repository, Commit: pin.ExactCommit, Client: pin.Product, GeneratorVersion: environment.GeneratorVersion, DependencyCommits: map[string]string{}}
 	keyHash := sha256.Sum256([]byte(pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + cache.manifest.RecordsHash + "\x00" + environment.GeneratorVersion))
 	dir := filepath.Join(b.store.Root(), "source", "v1", "environments", hex.EncodeToString(keyHash[:]))
@@ -65,7 +68,9 @@ func (b *Browser) researchEnvironment(ctx context.Context, source selection.Sour
 	wanted := []treeFile{}
 	records := map[string]sourceRecord{}
 	count, total := 0, 0
-	err = cache.scan(ctx, func(r sourceRecord) error {
+	err = cache.scanSelected(ctx, func(e recordOffset) bool {
+		return e.Kind == "document" && strings.Contains(strings.ToLower(e.Path), "/blizzard_apidocumentationgenerated/") && strings.HasSuffix(strings.ToLower(e.Path), ".lua")
+	}, func(r sourceRecord) error {
 		if r.Kind != "document" || !strings.Contains(strings.ToLower(r.Path), "/blizzard_apidocumentationgenerated/") || !strings.HasSuffix(strings.ToLower(r.Path), ".lua") {
 			return nil
 		}

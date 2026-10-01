@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"sort"
+	"sync"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
 )
@@ -27,6 +28,49 @@ type EncodingIndex struct {
 	pageCount        int
 	encodedPageSize  int64
 	encodedPageCount int
+	cache            *encodingReadCache
+}
+
+type encodingReadCache struct {
+	mu        sync.Mutex
+	directory []byte
+	pages     map[int64][]byte
+	bytes     int64
+}
+
+// Cache only within an authenticated query-owned source lifetime. The public
+// parser remains uncached so independent callers revalidate mutable inputs.
+func (e *EncodingIndex) enableSessionCache() {
+	e.cache = &encodingReadCache{pages: make(map[int64][]byte)}
+}
+
+func (e *EncodingIndex) checkedPage(ctx context.Context, offset, length int64, expected [md5.Size]byte) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if e.cache == nil {
+		return e.source.ReadCheckedSpan(ctx, offset, length, expected)
+	}
+	c := e.cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if raw, ok := c.pages[offset]; ok {
+		return raw, nil
+	}
+	raw, err := e.source.ReadCheckedSpan(ctx, offset, length, expected)
+	if err != nil {
+		return nil, err
+	}
+	const capacity int64 = 8 << 20
+	if length <= capacity {
+		if length > capacity-c.bytes {
+			clear(c.pages)
+			c.bytes = 0
+		}
+		c.pages[offset] = raw
+		c.bytes += length
+	}
+	return raw, nil
 }
 
 type EncodingRecord struct {
@@ -105,7 +149,7 @@ func (e *EncodingIndex) FindContent(ctx context.Context, contentKey string) (Enc
 	}
 	var expected [md5.Size]byte
 	copy(expected[:], e.directory[page*32+16:(page+1)*32])
-	raw, err := e.source.ReadCheckedSpan(ctx, e.pagesStart+int64(page)*e.pageSize, e.pageSize, expected)
+	raw, err := e.checkedPage(ctx, e.pagesStart+int64(page)*e.pageSize, e.pageSize, expected)
 	if err != nil {
 		return EncodingRecord{}, err
 	}

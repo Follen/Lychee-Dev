@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/luals"
@@ -15,8 +16,10 @@ func runSourceResearch(ctx context.Context, route string, opts Options, response
 	if opts.snapshot == "" || (opts.symbolID == "") == (opts.symbol == "") {
 		return 2, errors.New("source refs/context require --snapshot and exactly one of --symbol-id or --symbol")
 	}
-	if opts.staticOnly && opts.release != "" {
-		return 2, errors.New("--static-only cannot be combined with --release")
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if opts.staticOnly && (opts.release != "" || opts.sessionReuse) {
+		return 2, errors.New("--static-only cannot be combined with --release or --session-reuse")
 	}
 	root, err := workspaceRoot(opts.home)
 	if err != nil {
@@ -32,6 +35,9 @@ func runSourceResearch(ctx context.Context, route string, opts Options, response
 			response.Warnings = append(response.Warnings, "Verified LuaLS runtime unavailable; semantic coverage is incomplete: "+err.Error())
 			options.Semantic = nil
 		}
+	}
+	if opts.sessionReuse && options.Semantic != nil {
+		options.Analyze = sourceBrokerAnalyzer(root, options.Semantic.ReleaseRoot(), opts.environmentSnapshot)
 	}
 	response.Context["snapshot"] = opts.snapshot
 	switch route {

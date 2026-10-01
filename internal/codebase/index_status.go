@@ -32,6 +32,7 @@ func (b *Browser) SnapshotStatus(ctx context.Context, pin selection.SourcePin) (
 	if err != nil {
 		return status, err
 	}
+	defer cache.Close()
 	status.Ready = true
 	status.ReadySnapshots = 1
 	status.SnapshotFiles = summary.Documents + summary.SkippedDocuments
@@ -40,7 +41,7 @@ func (b *Browser) SnapshotStatus(ctx context.Context, pin selection.SourcePin) (
 	status.Coverage = summary.Coverage()
 	failed := map[string]bool{}
 	analyzed := map[string]bool{}
-	err = cache.scan(ctx, func(r sourceRecord) error {
+	err = cache.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "document" || e.Kind == "diagnostic" }, func(r sourceRecord) error {
 		if r.Kind == "document" {
 			analyzed[r.Path] = true
 		}
