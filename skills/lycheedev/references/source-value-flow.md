@@ -22,6 +22,20 @@ only for a concrete value/operation question. Interpret returned steps,
 conditions, rule identity and unknown boundaries; do not claim a proven
 propagation path when the result has only static candidates or incomplete coverage.
 
+Select the Lua declaration containing the reported path, not merely the generated
+API declaration. For third-party code, a bounded entry is:
+
+```text
+lycheedev source context --snapshot <addon-pin> --symbol-id <lua-symbol-id> --environment <client-pin> --flow --depth 1 --limit 50 --max-lines 120 --format json
+```
+
+`flow.coverage.state=bounded_complete` applies only to the selected closure and
+modeled operations. Read `flow.boundaries` and the outer coverage reasons as well
+as findings. Event payload metadata is retained, but handler registration and
+payload routing are outside the current flow scope; inspect that missing link
+directly or carry it into a bounded live hypothesis. A larger depth cannot resolve
+an unsupported edge.
+
 Trace the relevant value through assignments, table fields and function arguments
 or returns, preserving each step's original location. Confirm symbol identity and
 loading context before crossing files. A guard applies only to the checked value
@@ -39,6 +53,11 @@ into [the live hypothesis workflow](live-investigation.md#test-source-hypotheses
 Continue with existing error evidence and a bounded check that distinguishes the
 remaining explanations; do not stop at an unresolved static path when live can
 answer the next question. Feed observed conditions back into the source analysis.
+
+Keep proposed checks within the same trust boundary: observing a value does not
+authorize writing protected frames or Blizzard tables, replacing secure handlers,
+or extracting a secret through coercion. Combat state and permitted argument
+conditions belong to the hypothesis, not assumptions used to make it pass.
 
 Finish with the supported path and restriction, a minimal correction when
 justified, and any conditions still requiring verification. Distinguish observed

@@ -12,7 +12,7 @@ func replacementFixture() (Identity, RuntimeReplacementProof) {
 	current.GUID = "new"
 	current.Character = "new"
 	blocked := true
-	o := InputObservation{Schema: InputSchema, Runtime: current.Runtime, GUID: "new", Build: "b", NextSlot: 1, InputBlocked: &blocked, Reason: "input_binding_unavailable", SampleMillis: 1200}
+	o := InputObservation{Schema: InputSchema, Bindings: &InputBindings{}, Runtime: current.Runtime, GUID: "new", Build: "b", NextSlot: 1, InputBlocked: &blocked, Reason: "input_binding_unavailable", SampleMillis: 1200}
 	first := o
 	first.SampleMillis = 1100
 	return old, RuntimeReplacementProof{Schema: RuntimeReplacementProofSchema, ProcessID: 1, ProcessStartedAt: 2, Current: current, Witness: RuntimeReplacementWitness{Address: 128, Length: 512, BeforeSHA256: strings.Repeat("1", 64), AfterSHA256: strings.Repeat("2", 64), First: first, FirstSequence: 1, Sequence: 2, Observation: o}}
@@ -23,6 +23,21 @@ func TestRuntimeReplacementProofRejectsUnsafeEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*RuntimeReplacementProof){
+		"first_bindings_absent":  func(p *RuntimeReplacementProof) { p.Witness.First.Bindings = nil },
+		"latest_bindings_absent": func(p *RuntimeReplacementProof) { p.Witness.Observation.Bindings = nil },
+		"partial_bindings": func(p *RuntimeReplacementProof) {
+			p.Witness.Observation.Bindings = &InputBindings{Wake: "ALT-CTRL-F11"}
+		},
+		"mixed_bindings": func(p *RuntimeReplacementProof) {
+			p.Witness.Observation.Bindings = &InputBindings{Wake: "ALT-CTRL-F11", Submit: "ALT-CTRL-SHIFT-F12", Close: "ALT-CTRL-["}
+		},
+		"old_input_schema":      func(p *RuntimeReplacementProof) { p.Witness.Observation.Schema = "lycheedev.input.v2" },
+		"old_hybrid_capability": func(p *RuntimeReplacementProof) { p.Current.InputState = "lycheedev.input.hybrid.v1" },
+		"empty_unblocked": func(p *RuntimeReplacementProof) {
+			ready := false
+			p.Witness.Observation.InputBlocked = &ready
+			p.Witness.Observation.Reason = ""
+		},
 		"first_schema":   func(p *RuntimeReplacementProof) { p.Witness.First.Schema = "lycheedev.input.v1" },
 		"first_identity": func(p *RuntimeReplacementProof) { p.Witness.First.Runtime = old.Runtime },
 		"same_sample":    func(p *RuntimeReplacementProof) { p.Witness.First.SampleMillis = p.Witness.Observation.SampleMillis },

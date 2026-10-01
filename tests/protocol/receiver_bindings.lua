@@ -1,14 +1,16 @@
 local root = assert(arg[1])
 local ns = { Startup = { ready = true } }
 local frames, overrides, player = {}, {}, {}
-local combat, active, failKey, ineffectiveKey = false, false, nil, nil
+local higherPriority = {}
+local combat, active, failKey, ineffectiveKey, ineffectiveAction = false, false, nil, nil, nil
 UIParent = {}
 LycheeToolkitDB = { schema = 1, options = {} }
 ns.Persistence = { Current = function() return LycheeToolkitDB end }
 ns.Receiver = { IsActive = function() return active end }
 InCombatLockdown = function() return combat end
 GetBindingAction = function(chord, checkOverride)
-    if checkOverride and overrides[chord] and chord == ineffectiveKey then return "CLICK OtherAddon:LeftButton" end
+    if checkOverride and higherPriority[chord] then return higherPriority[chord] end
+    if checkOverride and overrides[chord] and chord == ineffectiveKey then return ineffectiveAction or "CLICK OtherAddon:LeftButton" end
     if checkOverride and overrides[chord] then return "CLICK " .. overrides[chord] .. ":LeftButton" end
     return player[chord] or ""
 end
@@ -145,3 +147,111 @@ assert(ns.ReceiverBindings.Register({wake=function()end,submit=function()end,clo
 assert(ns.ReceiverBindings.Current().wake=="ALT-CTRL-F12" and not overrides["ALT-CTRL-]"])
 assert(LycheeToolkitDB.options.receiverBindings==saved)
 assert(not ns.ReceiverBindings.Configure("wake","ALT-CTRL-F1"))
+
+-- Each bootstrap tries only the two complete native profiles. A failed lookup
+-- never falls back, and lookalike CLICK text is another owner's binding.
+local originalPrint=print
+for _,scenario in ipairs({"wake","submit","ineffective","both","close","api","lookalike","suffix","wrong_action","wrong_mouse","installed_lookalike","installed_suffix","installed_action","installed_mouse","login","combat_login"}) do
+    frames,overrides,player={},{},{}
+    combat,active,failKey,ineffectiveKey,ineffectiveAction=false,false,nil,nil,nil
+    local blocked=scenario=="submit" and "ALT-CTRL-SHIFT-F12" or "ALT-CTRL-F12"
+    local foreign="TOGGLELYCHEE"
+    if scenario=="lookalike" or scenario=="installed_lookalike" then foreign="CLICK OtherLycheeDevReceiverWake:LeftButton"
+    elseif scenario=="suffix" or scenario=="installed_suffix" then foreign="CLICK LycheeDevReceiverWakeExtra:LeftButton"
+    elseif scenario=="wrong_action" or scenario=="installed_action" then foreign="CLICK LycheeDevReceiverSubmit:LeftButton"
+    elseif scenario=="wrong_mouse" or scenario=="installed_mouse" then foreign="CLICK LycheeDevReceiverWake:RightButton" end
+    local installed=scenario:find("installed_",1,true)==1
+    local deferred=scenario=="login" or scenario=="combat_login"
+    local loggedIn=not deferred
+    IsLoggedIn=function()return loggedIn end
+    if scenario=="ineffective" or installed then ineffectiveKey="ALT-CTRL-F12";ineffectiveAction=installed and foreign or nil
+    elseif scenario=="api" then failKey="ALT-CTRL-F12"
+    elseif scenario=="close" then player["ALT-CTRL-["]=foreign
+    else player[blocked]=foreign end
+    if scenario=="both" then player["ALT-CTRL-F11"]="FALLBACK_PLAYER_ACTION" end
+    local notices={}
+    print=function(text)notices[#notices+1]=text end
+    assert(loadfile(root.."/Bridge/ReceiverBindings.lua"))("Lychee Dev",ns)
+    local callbacks={wake=function()end,submit=function()end,close=function()end}
+    local ok,reason=ns.ReceiverBindings.Register(callbacks)
+    if deferred then
+        assert(ok and #frames==1 and frames[1].events.PLAYER_LOGIN and #notices==0,"deferred bootstrap bound early")
+        assert(not ns.ReceiverBindings.Register(callbacks) and #frames==1 and frames[1].events.PLAYER_LOGIN,
+            "pending repeated registration claimed effective bindings or changed event")
+        loggedIn=true;combat=scenario=="combat_login"
+        frames[1].OnEvent(frames[1],"PLAYER_LOGIN")
+        if combat then
+            assert(#frames==1 and frames[1].events.PLAYER_REGEN_ENABLED and #notices==0)
+            combat=false;frames[1].OnEvent(frames[1],"PLAYER_REGEN_ENABLED")
+        end
+        ok,reason=ns.ReceiverBindings.Register(callbacks)
+    end
+    local fails=scenario=="both" or scenario=="close" or scenario=="api"
+    assert((ok~=nil)==not fails,"unexpected bounded profile selection: "..scenario)
+    if fails then
+        assert(ns.ReceiverBindings.Current()==nil and next(overrides)==nil,"occupied profile granted readiness")
+        assert(not ns.ReceiverBindings.Register(callbacks),"failed bootstrap repeated registration claimed success")
+    else
+        local profile=assert(ns.ReceiverBindings.Current())
+        assert(profile.wake=="ALT-CTRL-F11" and profile.submit=="ALT-CTRL-SHIFT-F11" and profile.close=="ALT-CTRL-[")
+        assert(ns.ReceiverBindings.Register(callbacks),"effective fallback repeated registration failed")
+        assert(notices[1]:find("F12",1,true) and notices[1]:find("F11",1,true),"fallback warning omitted profiles")
+        if installed then assert(notices[1]:find(foreign,1,true),"ineffective lookup warning hid actual action") end
+        if scenario~="ineffective" and not installed then
+            assert(player[blocked]==foreign and notices[1]:find(foreign,1,true),"foreign binding changed or warning hid actual action")
+        end
+        for _,spoof in ipairs({"CLICK OtherLycheeDevReceiverWake:LeftButton","CLICK LycheeDevReceiverWakeExtra:LeftButton",
+            "CLICK LycheeDevReceiverSubmit:LeftButton","CLICK LycheeDevReceiverWake:RightButton"}) do
+            ineffectiveKey,ineffectiveAction="ALT-CTRL-F11",spoof
+            assert(ns.ReceiverBindings.Current()==nil,"lookalike current binding advertised ready")
+            local before=overrides["ALT-CTRL-F11"]
+            assert(not ns.ReceiverBindings.Register(callbacks) and overrides["ALT-CTRL-F11"]==before,
+                "ineffective repeated registration changed overrides")
+        end
+        ineffectiveKey,ineffectiveAction=nil,nil
+    end
+    assert(#notices==(scenario=="api" and 0 or 1),"bootstrap warning repeated or generic failure selected fallback")
+    assert(#frames<=4,"fallback allocated a second binding foundation")
+    for _,frame in ipairs(frames) do assert(next(frame.events)==nil and not frame.OnUpdate,"fallback added idle work") end
+    assert(LycheeToolkitDB.options.receiverBindings==saved,"native fallback changed saved profile")
+    print=originalPrint
+end
+print("native receiver profiles: bounded fallback, truthful registration and exact action ownership")
+
+-- A runtime can start with primary keys and meet its first conflict later.
+-- Explicit reset must warn on selecting fallback while preserving the foreign
+-- override and unrelated account bindings; subsequent resets stay quiet.
+frames,overrides,player,higherPriority={},{},{},{}
+combat,active,failKey,ineffectiveKey,ineffectiveAction=false,false,nil,nil,nil
+IsLoggedIn=function()return true end
+ns.Receiver=nil
+ns.SlotRuntime={IsActive=function()return active end}
+player["ALT-CTRL-F1"]="SAVED_PLAYER_ACTION"
+local notices={}
+print=function(text)notices[#notices+1]=text end
+assert(loadfile(root.."/Bridge/ReceiverBindings.lua"))("Lychee Dev",ns)
+local callbacks={wake=function()end,submit=function()end,close=function()end}
+assert(ns.ReceiverBindings.Register(callbacks))
+assert(ns.ReceiverBindings.Current().wake=="ALT-CTRL-F12" and #notices==0,"primary startup warned without conflict")
+local foreignAction="CLICK FixtureForeignWake:LeftButton"
+higherPriority["ALT-CTRL-F12"]=foreignAction
+assert(ns.ReceiverBindings.Current()==nil,"later foreign takeover advertised readiness")
+local ownOverrides=overrides
+combat=true
+local ok,reason=ns.ReceiverBindings.Reset()
+assert(ok==nil and reason=="receiver_combat" and overrides==ownOverrides and #notices==0)
+combat=false;active=true
+ok,reason=ns.ReceiverBindings.Reset()
+assert(ok==nil and reason=="receiver_active" and overrides==ownOverrides and #notices==0)
+active=false
+assert(ns.ReceiverBindings.Reset())
+assert(ns.ReceiverBindings.Current().wake=="ALT-CTRL-F11","late conflict reset did not select fallback")
+assert(#notices==1 and notices[1]:find(foreignAction,1,true)
+    and notices[1]:find("F12",1,true) and notices[1]:find("F11",1,true),"first late conflict reset did not warn")
+assert(higherPriority["ALT-CTRL-F12"]==foreignAction and player["ALT-CTRL-F1"]=="SAVED_PLAYER_ACTION",
+    "late conflict reset changed foreign or account bindings")
+assert(ns.ReceiverBindings.Reset() and #notices==1,"repeated fallback reset spammed warning")
+assert(LycheeToolkitDB.options.receiverBindings==saved and #frames==4,"late reset changed saved profile or frame budget")
+for _,frame in ipairs(frames) do assert(next(frame.events)==nil and not frame.OnUpdate,"late reset added idle work") end
+print=originalPrint
+print("native reset: first late conflict warns once and preserves other bindings")

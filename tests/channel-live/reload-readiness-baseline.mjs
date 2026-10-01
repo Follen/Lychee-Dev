@@ -54,7 +54,7 @@ async function observedReload(session,key){
 try{
   const c=resumeSession?JSON.parse((await fs.readFile(path.join(project,'connect.json'),'utf8')).replace(/^\uFEFF/,'')).result:await call('connect',['live','connect','--installation',installation,'--pid',pid]);
   if(resumeSession)assert.equal(c.session,resumeSession);
-  assert.equal(c.identity.inputState,'lycheedev.input.hybrid.v1');
+  assert.equal(c.identity.inputState,'lycheedev.input.hybrid.v2');
   const r=await call(resumeSession?'reload-readonly-resume':'reload-no-cache',['live','reload','--session',c.session,'--request','ready-reload','--no-cache']);
   assert.notEqual(r.identity.runtime,c.identity.runtime);
   report.connected=await observedReload(c.session,'ready-reload');

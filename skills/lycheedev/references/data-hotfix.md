@@ -73,6 +73,15 @@ than 30 days old. Keep provider and coverage explicit: neither source is an
 effective static table overlay, and an incomplete result cannot establish
 absence outside its reported coverage.
 
+Remote sources require explicit `--product`, `--build`, `--region` and
+`--locale` even when a parent `--snapshot` is supplied. Wago selects a table by
+`--table`; it cannot filter by `--table-hash` because provider rows carry names.
+Its bounded walk uses `--max-pages`, `--max-requests` and `--max-bytes`; these
+are provider-fetch limits, not static-query timeouts. Read returned coverage
+and budget state before deciding whether another page can settle the question.
+For Wago, `--from`/`--to` are time bounds, whereas local `--from` is a raw cache
+capture. Never reuse a local continuation command for a remote source.
+
 Treat Wago text search as candidate acceleration only. Establish a fact from
 the returned physical records after applying the exact product, full build,
 region, locale, table/hash, record, push and status filters relevant to the
@@ -99,6 +108,10 @@ If a scan fails after saving pages, its error response retains the last saved
 scan result and `resume`. Report the failure and that checkpoint together;
 resume after addressing the cause instead of restarting from the mutable file.
 
+Do not replace `--cursor` with a last-record index when resuming a scan: the
+checkpoint carries cumulative counts and page captures. Ordinary local paging
+uses `--after-index`; local scanning and remote paging use their own cursor
+types, which are not interchangeable.
 
 ## Incomplete remote searches
 

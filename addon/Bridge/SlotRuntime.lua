@@ -81,7 +81,7 @@ local function start()
     end
     ns.AutomationHistory.Begin(runtime,{character=actor.character,realm=actor.realm,guid=actor.guid,build=build.build,product=build.product})
     engine=ns.SlotProtocol.Create({runtime=runtime,build=build.build,product=build.product,release=ns.Release,inventory=available,
-        inputState=ns.InputState and "lycheedev.input.hybrid.v1" or nil,
+        inputState=ns.InputState and "lycheedev.input.hybrid.v2" or nil,
         actor=function()
             local current=ns.Platform.ObserveActor()
             if current and current.guid==actor.guid then return current end

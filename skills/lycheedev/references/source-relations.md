@@ -29,12 +29,21 @@ Forever. `--static-only` deliberately limits evidence to structural analysis.
 Missing runtime/environment can leave usable source evidence with semantic
 coverage partial. Neither static inference nor LuaLS types prove runtime behavior.
 
+Inspect `environmentManifest` and coverage to confirm which client definitions
+were actually used. When the research source itself is `wow-ui-source`, that
+pin supplies its own environment; `--environment` supplies the separate client
+pin for third-party source, rather than retargeting a Blizzard source pin.
+
 ## Continue only the required scope
 
 Query results contain a bounded relation preview. Use refs, not repeated query
 pages, to investigate its edges. Each command owns its own `nextCursor`; retain
 snapshot, symbol/query, environment, analysis options and budgets on continuation.
 An ending page does not erase missing earlier pages or unresolved dynamic edges.
+To change direction, depth, flow mode or excerpt budgets, start without the old
+cursor. Add `--session-reuse` only for repeated semantic work as described in
+[source-research.md](source-research.md#optional-luals-session-reuse); it does not
+make a cursor portable or strengthen a relation's evidence state.
 
 For context, `--max-lines`, `--max-bytes`, `--limit` and `--depth` bound different
 parts of the result; inspect its truncation and continuation metadata. Follow a
@@ -49,3 +58,8 @@ unresolved when source cannot determine it.
 For a concrete value/operation question, use
 [source-value-flow.md](source-value-flow.md); ordinary relation traversal alone
 does not establish a secret-value propagation path.
+
+For a relation crossing repositories, use its target repository, commit and
+original location to obtain the matching fixed source before following it.
+An environment declaration or same-named symbol is not evidence that an addon
+dependency was loaded. Leave missing dependency and runtime binding edges open.

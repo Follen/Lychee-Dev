@@ -5,7 +5,7 @@ import (
 	"image"
 )
 
-const InputSignalCapability = "lycheedev.input.hybrid.v1"
+const InputSignalCapability = "lycheedev.input.hybrid.v2"
 
 type InputSignal struct {
 	State     string

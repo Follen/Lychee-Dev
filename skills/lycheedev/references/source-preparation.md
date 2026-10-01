@@ -11,6 +11,9 @@ repository. A source track is not proof of installation compatibility.
 
 Initialize a new Toolkit home with `lycheedev init` before syncing; an empty
 directory alone is not a workspace. Reuse an initialized `--home` when available.
+Use that same home for preparation and subsequent pin reads; a pin ID does not
+select a different workspace. Pass `--home <workspace>` when working outside its
+normal discovery context.
 
 ```text
 lycheedev source list --format json
@@ -44,7 +47,7 @@ when the operation needs them; raw file inspection reads fixed Git content direc
 | Integrity failure | Preserve evidence and diagnose changed/corrupt bytes; do not bypass verification or delete caches blindly |
 | Syntax diagnostics / partial map | Inspect readable original files and retain the gaps; unparsed does not mean absent |
 | Missing LuaLS or client environment | Continue original-source research with partial semantic coverage; see [source-relations.md](source-relations.md) |
-| Invalid cursor | Check command, snapshot, symbol/query, environment and budgets against its originating result; do not mix pages from a changed scope |
+| Invalid cursor | Restore the originating command and scope to continue, or start without a cursor for the changed scope; do not merge those page sets |
 | Resource budget | Narrow to the part needed by the question; retain omitted scope, not a claim of complete investigation |
 
 Allow at most one unchanged retry for a transient failure within the task budget.

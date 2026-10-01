@@ -5,15 +5,17 @@ local _, ns = ...
 local frame, provider, record, last, sequence, lastTick,mailbox
 local loading,leaving,refreshing,heartbeat
 local zero=string.rep("0",32)
-local function nativeBindingsReady()
-    if not ns.SlotRuntime then return true end
-    if not ns.ReceiverBindings or type(ns.ReceiverBindings.Current)~="function" then return false end
+local function nativeBindings()
+    if not ns.ReceiverBindings or type(ns.ReceiverBindings.Current)~="function" then return nil end
     local ok,profile=pcall(ns.ReceiverBindings.Current)
-    if not ok or (issecretvalue and issecretvalue(profile)) or type(profile)~="table" then return false end
+    if not ok or (issecretvalue and issecretvalue(profile)) or type(profile)~="table" then return nil end
     for _,key in ipairs({"wake","submit","close"}) do
-        if issecretvalue and issecretvalue(profile[key]) then return false end
+        if issecretvalue and issecretvalue(profile[key]) then return nil end
     end
-    return profile.wake=="ALT-CTRL-F12" and profile.submit=="ALT-CTRL-SHIFT-F12" and profile.close=="ALT-CTRL-["
+    if profile.close~="ALT-CTRL-[" or not
+        ((profile.wake=="ALT-CTRL-F12" and profile.submit=="ALT-CTRL-SHIFT-F12")
+        or (profile.wake=="ALT-CTRL-F11" and profile.submit=="ALT-CTRL-SHIFT-F11")) then return nil end
+    return {wake=profile.wake,submit=profile.submit,close=profile.close}
 end
 local function hide()record=nil;if mailbox then rawset(mailbox,"input",nil) end;ns.InputSignal.Hide() end
 local function sample()
@@ -25,11 +27,13 @@ local function sample()
     lastTick=tick
     local ready,reason=ns.Platform.ObserveInputState()
     if issecretvalue and (issecretvalue(ready) or issecretvalue(reason)) then ready,reason=nil,"input_observation_unavailable" end
-    if not nativeBindingsReady() then ready,reason=false,"input_binding_unavailable" end
+    local bindings=nativeBindings()
+    if not bindings then ready,reason=false,"input_binding_unavailable" end
     if ready~=true and (type(reason)~="string" or reason=="") then reason="input_observation_unavailable" end
     sequence=sequence+1
     if sequence>=4294967295 then ns.InputState.Stop();return end
-    identity.schema="lycheedev.input.v2"
+    identity.schema="lycheedev.input.v3"
+    identity.bindings=bindings or {wake="",submit="",close=""}
     identity.sampleMillis=math.floor(tick*1000)
     identity.inputBlocked=ready~=true
     identity.reason=reason or ""

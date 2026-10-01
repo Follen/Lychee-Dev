@@ -1,5 +1,10 @@
 # Native Mailbox 3.1.0 acceptance
 
+The four-client results below use INPUT v2 / hybrid v1. The subsequent
+INPUT v3 / hybrid v2 binding-profile revision has its own Retail dual-instance
+[acceptance record](live-input-fallback-acceptance-2026-10-01.md); these historical
+results do not establish other-client acceptance of the revised input protocol.
+
 This is a local development candidate, not a published release. The source and
 managed addon advance together to the new protocol; npm latest stays 2.5.1.
 The final frozen candidate completed Retail, Classic, Titan and Forever live suites.

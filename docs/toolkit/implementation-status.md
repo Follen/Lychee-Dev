@@ -1,5 +1,20 @@
 # Toolkit 2.0 实施状态
 
+2026-10-01 同 build 双实例补测发现账户的 `ALT-CTRL-F12 TOGGLELYCHEE` 与 Live 唤醒键冲突。
+修订候选采用 INPUT v3/hybrid v2：注册时精确核验自己的 CLICK 按钮，主键冲突明确报警并尝试
+F11 备用完整 profile，CLI 复核当前发布的实际 profile 后才发键。重复注册和 native 显式 reset
+的恢复缺口同时修复。此轮新 profile 的实机与离线结果单独记账；下面四服已通过的记录属于修订前
+INPUT v2/hybrid v1，不提升为新协议验收。原 A CON 已由同进程新 runtime 的两份递增样本无输入退役；
+预留槽位与窗口 owner 均为零。新候选已完成正式服同安装双实例实机验收：真实 prepare 槽位竞争、
+各 47 轮与各一次容量换代、异步/reload 隔离、81920 字节 no-cache 结果、只读重试和闭合审计均完成。
+压力测试保留三次首次失败及原请求恢复，不标记为首次全绿；其中 Access denied 的根因尚未确定。
+最终 warning delta 单独实测 F11 实键、中文 WGC 警告、恢复 F12；A 激活后的一次读取拒绝也沿原 CON 恢复。
+全部连接关闭，pendingSlots=0、claims=0。当前协议只新增正式服实机证明，其他客户端不继承旧协议结果。
+最终 Windows 离线 baseline passed：43 Go packages、3018 个命名结果（40 项显式 skip，无失败）、
+mandatory Lua 5.1、真实 LuaLS、98 项 Node 测试及版本/Skill/SOURCE 门禁。
+详见 [INPUT v3/F11 验收](live-input-fallback-acceptance-2026-10-01.md) 与
+[全 Skill 打磨记录](skill-polish-2026-10-01.md)。
+
 2026-10-01 开发候选 **3.1.0** 已切换完整 Native Mailbox 协议，拒绝旧 wire 和连接身份，不再扫描私有 heap 或回退；身份、challenge、commit 与结果校验保留。正式服、Classic、Titan、Forever 的真实 Lua 根与 RVA 已分别保存 wowdump 配方。最终候选包含两种根模板、私有状态脱离公开 Snapshot、按实际请求区间验证模块映射和原始错误原因保留。完整离线 baseline 已 passed（2,888 个命名 Go 测试、94 个 Node 测试、mandatory Lua 5.1、真实 LuaLS）；环境专属/helper/manual skips 保留原记录，源码提交的 Windows CI 全通过。四服最终核心及各 47 次请求/容量换代/异常清理均完成，验收连接全部关闭。Classic 5.5.4.70032、Titan 3.80.2.69874 与 Forever 1.60.1.70124 首次全通过；正式服 12.1.0.69933 的最终核心在激活后一次读拒绝后沿原 CON 恢复，压力 54 步首次全通过。Titan 由现有跨 build 配方完整扫描 runtime .text 唯一导出 Lua 根 0x6daca78，无源码修改；完整 reader 的 8 次回放全部匹配。正式服此前外部空格脚本干扰、进程挂起及退出的原始记录保留；旧 CON 均安全关闭，未重发 uncertain 输入或迁移旧操作。未发布，npm latest 保持 2.5.1。见 [验收记录](live-mailbox-acceptance-2026-10-01.md)、[新协议合同](live-mailbox-protocol-2026-10-01.md) 与 [3.1.0 候选](release-3.1.0.md)。
 
 

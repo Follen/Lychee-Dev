@@ -36,6 +36,11 @@ product; use returned candidates only when selection remains ambiguous.
 
 ## 3. Query the smallest useful scope
 
+Decide what would settle the requested claim before expanding the query. One
+verified record or relationship can answer an ID-specific question; a negative
+claim needs complete readable coverage of its exact filters. Prepare only the
+tables needed for that claim, rather than exporting a whole build as a precaution.
+
 - Verified ID: prefer the domain command that owns the needed relationship;
   otherwise inspect table schema and query the ID or foreign key.
 - Business name only: inspect the relevant name table schema, search its actual
@@ -64,6 +69,10 @@ source, record IDs, filters and capture IDs with the conclusion.
 | Failure/deadline | [data-recovery.md](data-recovery.md); correct the cause or stop the affected branch after bounded retry |
 
 For JSONL, require a legal end frame and exit 0, then inspect coverage separately.
+Keep query completion, source readability and output truncation separate: a
+complete bounded query can still use a partial table or intentionally return
+only its SQL LIMIT. Retain the captures needed to reproduce the finding, not
+just a successful exit code.
 `db2 search` and `foreign-key` have no cursor: narrow to the requested scope,
 increase the limit within documented bounds, or use ordered SQL pagination.
 Do not invent `--after-id` for those verbs. With SQL, retain a stable unique order

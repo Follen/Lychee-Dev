@@ -42,7 +42,7 @@ func cadenceFixture(t *testing.T) (*Native, *cadenceSource, bridge.SlotEnvelope,
 	source := &cadenceSource{data: make([]byte, 2<<20)}
 	write := func(address int, tick int64, alter func(*InputObservation)) {
 		blocked := false
-		s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: tick, InputBlocked: &blocked}
+		s := InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: tick, InputBlocked: &blocked}
 		if alter != nil {
 			alter(&s)
 		}

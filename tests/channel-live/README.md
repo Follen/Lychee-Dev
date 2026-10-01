@@ -149,7 +149,19 @@ top; it does not claim a physical mouse-drag test.
 node tests/channel-live/focus-baseline.mjs .tmp/channel-live/lycheedev.exe <new-project> <installation> <pid>
 ```
 
-The matching native candidate uses Ctrl+Alt+F12 with memory input preflight.
+The matching native candidate publishes its effective Ctrl+Alt+F12 or fallback
+Ctrl+Alt+F11 profile in INPUT v3, with hybrid v2 memory/optical preflight.
+The sender verifies the complete profile again before input; it does not guess
+a key or alter a player's conflicting binding. Both unavailable profiles stay blocked.
+`fixtures/binding_fallback.lua` is an opt-in probe for an already bound, noncombat
+client. It installs one temporary fixture-owned override on the primary wake
+key, invokes guarded native reset, and verifies the effective F11 profile. Probe
+cleanup removes only that temporary override and button handler; account keys
+are unchanged. The receiver keeps F11 so the next ordinary actor-tagged request
+can prove that the host actually sends the fallback key. Retain that request's
+INPUT/intent and exact receipt, then use guarded native reset to restore the
+available private profile. This runtime reset test does not by itself prove
+startup fallback; startup warnings and all-unavailable cases have separate Lua tests.
 Connected reload and telemetry-capable explicit fallback use the same preflight.
 `node tests/channel-live/reload-readiness-baseline.mjs <cli> <new-project> <installation> <pid>`
 verifies no Escape when ready, cache-disabled reload, fresh runtime binding and

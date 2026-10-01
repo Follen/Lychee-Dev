@@ -38,7 +38,7 @@ func inputTestRecord(t *testing.T, s InputObservation) memory.Record {
 func TestInputObservationRejectsMalformedPublicationHeader(t *testing.T) {
 	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 3, GUID: "g", Build: "b"}
 	blocked := false
-	s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: 1200, InputBlocked: &blocked}
+	s := InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: 1200, InputBlocked: &blocked}
 	base := inputTestRecord(t, s)
 	other, _ := tokenBytes(strings.Repeat("2", 32))
 	for _, tc := range []struct {
@@ -94,7 +94,7 @@ func TestInputObservationRejectsMalformedPublicationHeader(t *testing.T) {
 func TestInputObservationRejectsStaleAndOtherTargets(t *testing.T) {
 	blocked := false
 	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 3, GUID: "g", Build: "b"}
-	base := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 3, GUID: "g", Build: "b", SampleMillis: 1200, InputBlocked: &blocked}
+	base := InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 3, GUID: "g", Build: "b", SampleMillis: 1200, InputBlocked: &blocked}
 	for _, tc := range []struct {
 		name  string
 		edit  func(*InputObservation)

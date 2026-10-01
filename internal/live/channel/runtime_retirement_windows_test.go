@@ -78,7 +78,7 @@ func retirementFixture(t *testing.T) (*Driver, *stopReconcilePeer, *retirementPe
 	current.GUID, current.Character = "new-guid", "new-character"
 	current.Owner, current.Fence, current.NextSlot = "", 0, 1
 	blocked := true
-	observation := InputObservation{Schema: InputSchema, Runtime: current.Runtime, GUID: current.GUID, Build: current.Build, NextSlot: 1, InputBlocked: &blocked, Reason: "input_binding_unavailable"}
+	observation := InputObservation{Schema: InputSchema, Bindings: &InputBindings{}, Runtime: current.Runtime, GUID: current.GUID, Build: current.Build, NextSlot: 1, InputBlocked: &blocked, Reason: "input_binding_unavailable"}
 	observation.SampleMillis = 1200
 	first := observation
 	first.SampleMillis = 1100

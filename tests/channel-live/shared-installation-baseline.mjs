@@ -98,7 +98,7 @@ async function fixture(t,key,async=false) {
 }
 try {
   const aligned=await pair(async t=>call(t,'align',['live','reload','--session',t.session,'--request','race-align']));
-  for(let i=0;i<2;i++){assert.equal(aligned[i].result.identity.slots,200);assert.equal(aligned[i].result.identity.guid,targets[i].guid);targets[i].initialRuntime=aligned[i].result.identity.runtime;}
+  for(let i=0;i<2;i++){assert.equal(aligned[i].result.identity.inventory,200);assert.equal(aligned[i].result.identity.guid,targets[i].guid);targets[i].initialRuntime=aligned[i].result.identity.runtime;}
   const a=targets[0],b=targets[1];
   const held=launch(host,['-mode','hold-publication','-installation',a.installation,'-pid',String(a.pid),'-project',a.project,'-connection',a.session,'-timeout','6']);
   await new Promise((resolve,reject)=>{
@@ -131,9 +131,9 @@ try {
     call(a,'peer-reload',['live','reload','--session',a.session,'--request','peer-isolation']),
     call(b,'peer-finish',['live','resume',b.session])
   ]);
-  assert.equal(reloaded.result.identity.guid,a.guid);verify(b,finished,b.name+'-peer-async');
+  assert.equal(reloaded.result.identity.guid,a.guid);assert.notEqual(reloaded.result.identity.runtime,a.lastRuntime,'selected process did not reload');verify(b,finished,b.name+'-peer-async');
   assert.equal(finished.result.identity.runtime,peerRuntime,'peer reload leaked across processes');
-  await pair(async t=>{const e=await call(t,'disconnect',['live','disconnect',t.session]);assert.equal(e.result.closed,true);});
+  await pair(async t=>{const e=await call(t,'disconnect',['live','disconnect',t.session]);assert.equal(e.result.closed,true);assert.equal(e.result.complete,true);assert.equal(e.result.cleanup,'complete');});
   report.complete=true;
 }catch(error){report.failure={message:error.message};process.exitCode=1;}
 finally{await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({complete:report.complete,failure:report.failure}));}

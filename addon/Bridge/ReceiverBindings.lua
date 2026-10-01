@@ -3,8 +3,11 @@ local _, ns = ...
 -- These are runtime override bindings. Only our SavedVariables option is
 -- written; the player's account key bindings are never saved or replaced.
 local defaults = { wake = "ALT-CTRL-]", submit = "ALT-CTRL-SHIFT-]", close = "ALT-CTRL-[" }
+local nativePrimary = { wake = "ALT-CTRL-F12", submit = "ALT-CTRL-SHIFT-F12", close = "ALT-CTRL-[" }
+local nativeFallback = { wake = "ALT-CTRL-F11", submit = "ALT-CTRL-SHIFT-F11", close = "ALT-CTRL-[" }
 local actions = { "wake", "submit", "close" }
 local owner, buttons, handlers, effective
+local nativeWarningPrinted = false
 local function restricted(value) return issecretvalue and issecretvalue(value) end
 local function copy(profile)
     return { wake = profile.wake, submit = profile.submit, close = profile.close }
@@ -46,8 +49,12 @@ local function noncombat()
     if combat then return nil, "receiver_combat" end
     return true
 end
-local function ownAction(value)
-    return type(value) == "string" and string.find(value, "LycheeDevReceiver", 1, true) ~= nil
+local function bindingAction(action)
+    return "CLICK LycheeDevReceiver" .. string.upper(string.sub(action, 1, 1)) .. string.sub(action, 2) .. ":LeftButton"
+end
+local function bindingDetail(value)
+    if restricted(value) or type(value) ~= "string" then return nil end
+    return string.sub(value, 1, 128):gsub("[%z\1-\31\127]", "?")
 end
 local function conflict(profile)
     if type(GetBindingAction) ~= "function" then return nil, "receiver_bindings_unavailable" end
@@ -58,8 +65,8 @@ local function conflict(profile)
             if not ok or restricted(bound) or (bound ~= nil and type(bound) ~= "string") then
                 return nil, "receiver_bindings_unavailable"
             end
-            if bound and bound ~= "" and bound ~= "NONE" and not ownAction(bound) then
-                return nil, "receiver_binding_conflict:" .. action .. ":" .. chord
+            if bound and bound ~= "" and bound ~= "NONE" and bound ~= bindingAction(action) then
+                return nil, "receiver_binding_conflict:" .. action .. ":" .. chord, bindingDetail(bound)
             end
         end
     end
@@ -96,9 +103,9 @@ local function install(profile)
     for _, action in ipairs(actions) do
         local ok, resolved = pcall(GetBindingAction, profile[action], true)
         if not ok or restricted(resolved) or type(resolved) ~= "string"
-            or not string.find(resolved, buttons[action]:GetName(), 1, true) then
+            or resolved ~= bindingAction(action) then
             clear()
-            return nil, "receiver_binding_ineffective:" .. action .. ":" .. profile[action]
+            return nil, "receiver_binding_ineffective:" .. action .. ":" .. profile[action], bindingDetail(resolved)
         end
     end
     return true
@@ -106,13 +113,13 @@ end
 local function apply(profile)
     local valid, failure = validate(profile)
     if not valid then return nil, failure end
-    local ready
+    local ready, detail
     ready, failure = noncombat()
     if not ready then return nil, failure end
-    ready, failure = conflict(valid)
-    if not ready then return nil, failure end
+    ready, failure, detail = conflict(valid)
+    if not ready then return nil, failure, detail end
     local prior = effective and copy(effective)
-    ready, failure = install(valid)
+    ready, failure, detail = install(valid)
     if not ready then
         if prior then
             local restored = install(prior)
@@ -120,10 +127,59 @@ local function apply(profile)
         else
             effective = nil
         end
-        return nil, failure
+        return nil, failure, detail
     end
     effective = valid
     return copy(valid)
+end
+local function nativeConflict(reason)
+    for _, action in ipairs(actions) do
+        local suffix = action .. ":" .. nativePrimary[action]
+        if reason == "receiver_binding_conflict:" .. suffix
+            or reason == "receiver_binding_ineffective:" .. suffix then return true end
+    end
+    return false
+end
+local function displayChord(chord)
+    return chord:gsub("ALT%-CTRL%-SHIFT%-", "Ctrl+Alt+Shift+"):gsub("ALT%-CTRL%-", "Ctrl+Alt+")
+end
+local function nativeFailureText(reason, profile)
+    local locale = ns.L or {}
+    for _, action in ipairs(actions) do
+        local suffix = action .. ":" .. profile[action]
+        local label = locale["NATIVE_RECEIVER_BINDING_" .. string.upper(action)] or action
+        if reason == "receiver_binding_conflict:" .. suffix then
+            return string.format(locale.NATIVE_RECEIVER_BINDING_CONFLICT or "%s shortcut %s is occupied", label, displayChord(profile[action]))
+        elseif reason == "receiver_binding_ineffective:" .. suffix then
+            return string.format(locale.NATIVE_RECEIVER_BINDING_INEFFECTIVE or "%s shortcut %s is ineffective", label, displayChord(profile[action]))
+        end
+    end
+    return tostring(reason)
+end
+local function applyNative(warn)
+    local profile, failure, detail = apply(nativePrimary)
+    if profile or not nativeConflict(failure) then return profile, failure end
+    local primaryFailure, primaryDetail = failure, detail
+    profile, failure, detail = apply(nativeFallback)
+    if warn and not nativeWarningPrinted then
+        nativeWarningPrinted = true
+        local locale = ns.L or {}
+        local unknown = locale.NOT_AVAILABLE or "unavailable"
+        local text
+        if profile then
+            text = string.format(locale.NATIVE_RECEIVER_BINDING_FALLBACK
+                or "%s (binding action: %s). Selected fallback shortcuts: wake %s, submit %s, close %s.",
+                nativeFailureText(primaryFailure, nativePrimary), primaryDetail or unknown,
+                displayChord(profile.wake), displayChord(profile.submit), displayChord(profile.close))
+        else
+            text = string.format(locale.NATIVE_RECEIVER_BINDING_BLOCKED
+                or "Primary and fallback shortcuts are unavailable; input is blocked. Primary: %s (binding action: %s); fallback: %s (binding action: %s). Existing bindings were preserved.",
+                nativeFailureText(primaryFailure, nativePrimary), primaryDetail or unknown,
+                nativeFailureText(failure, nativeFallback), detail or unknown)
+        end
+        print("|cffd83b4eLychee Dev:|r " .. text)
+    end
+    return profile, failure
 end
 local function stored()
     if ns.SlotRuntime then return copy(defaults) end
@@ -140,7 +196,7 @@ local function current()
         local ok, resolved = pcall(GetBindingAction, effective[action], true)
         if not ok or restricted(resolved) or type(resolved) ~= "string"
             or not buttons or not buttons[action]
-            or not string.find(resolved, buttons[action]:GetName(), 1, true) then
+            or resolved ~= bindingAction(action) then
             return nil, "receiver_binding_ineffective:" .. action .. ":" .. effective[action]
         end
     end
@@ -152,7 +208,10 @@ local function defer(event)
         self:UnregisterAllEvents(); self:SetScript("OnEvent", nil)
         local profile, failure = stored()
         local ready
-        if profile then ready, failure = apply(profile) end
+        if profile then
+            if ns.SlotRuntime then ready, failure = applyNative(true)
+            else ready, failure = apply(profile) end
+        end
         if not ready and failure == "receiver_combat" then defer("PLAYER_REGEN_ENABLED")
         elseif not ready then ns.Startup.receiverFailure = failure end
     end)
@@ -203,10 +262,16 @@ ns.ReceiverBindings = {
         return copy(applied)
     end,
     Reset = function()
+        if ns.SlotRuntime and ns.SlotRuntime.IsActive and ns.SlotRuntime.IsActive() then
+            return nil, "receiver_active"
+        end
         if ns.Receiver and type(ns.Receiver.IsActive) == "function" and ns.Receiver.IsActive() then
             return nil, "receiver_active"
         end
         if not owner then return nil, "receiver_bindings_unavailable" end
+        -- Native keys are fixed; explicit recovery reapplies only our runtime
+        -- overrides and preserves the saved legacy profile.
+        if ns.SlotRuntime then return applyNative(true) end
         local state, failure = ns.Persistence.Current()
         if not state then return nil, failure end
         local applied
@@ -217,7 +282,10 @@ ns.ReceiverBindings = {
         return copy(applied)
     end,
     Register = function(callbacks)
-        if owner then return true end
+        if owner then
+            local profile, failure = current()
+            return profile and true or nil, failure
+        end
         if not ns.Startup.ready then return nil, "addon_not_ready" end
         if type(callbacks) ~= "table" or type(callbacks.wake) ~= "function"
             or type(callbacks.submit) ~= "function" or type(callbacks.close) ~= "function" then
@@ -227,7 +295,7 @@ ns.ReceiverBindings = {
             return nil, "receiver_bindings_unavailable"
         end
         if ns.SlotRuntime then
-            defaults = {wake="ALT-CTRL-F12",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["}
+            defaults = copy(nativePrimary)
         end
         handlers = callbacks
         owner = CreateFrame("Frame", nil, UIParent)
@@ -240,7 +308,8 @@ ns.ReceiverBindings = {
         local profile, failure = stored()
         if not profile then return nil, failure end
         local ready
-        ready, failure = apply(profile)
+        if ns.SlotRuntime then ready, failure = applyNative(true)
+        else ready, failure = apply(profile) end
         if not ready and failure == "receiver_combat" then return defer("PLAYER_REGEN_ENABLED") end
         return ready and true or nil, failure
     end,

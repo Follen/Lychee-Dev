@@ -17,6 +17,7 @@ var errInputStateStale = errors.New("live.channel_input_state_stale")
 var ErrInputObservationStale = errors.Join(ErrPending, errors.New("live.channel_input_observation_stale"))
 
 type InputObservation struct {
+	Bindings        *InputBindings       `json:"bindings"`
 	Schema          string               `json:"schema"`
 	Runtime         string               `json:"runtime"`
 	Owner           string               `json:"owner"`
@@ -125,7 +126,7 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 		}
 		return err
 	}
-	if s.InputBlocked == nil {
+	if s.InputBlocked == nil || !s.validBindings() {
 		d.Waiting = "input_observation_unavailable"
 		return ErrPending
 	}
@@ -163,7 +164,7 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 func inputObservation(r memory.Record, e bridge.SlotEnvelope, after, now int64) (InputObservation, error) {
 	var s InputObservation
 	h := r.Header
-	if len(r.Payload) > 2048 || h.Kind != bridge.MemoryInputState || h.State != 1 || h.Sequence == 0 || h.Sequence == ^uint32(0) || h.Ticket != [16]byte{} || json.Unmarshal(r.Payload, &s) != nil || s.Schema != InputSchema || s.InputBlocked == nil {
+	if len(r.Payload) > 2048 || h.Kind != bridge.MemoryInputState || h.State != 1 || h.Sequence == 0 || h.Sequence == ^uint32(0) || h.Ticket != [16]byte{} || json.Unmarshal(r.Payload, &s) != nil || s.Schema != InputSchema || s.InputBlocked == nil || !s.validBindings() {
 		return s, errors.New("live.channel_input_state_invalid")
 	}
 	runtime, err := tokenBytes(s.Runtime)

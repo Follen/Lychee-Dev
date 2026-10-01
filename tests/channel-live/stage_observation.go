@@ -55,7 +55,7 @@ func stageObservation(ctx context.Context, root, parent, resource, connection, e
 		return err
 	}
 	defer lease.Close()
-	native, err := channel.OpenNative(target.Window, parent, buildinfo.Version, filepath.Join(base, "cache", "hints.json"), true)
+	native, err := channel.OpenNative(ctx, target.Window, parent, buildinfo.Version, filepath.Join(base, "cache", "hints.json"), true)
 	if err != nil {
 		return err
 	}

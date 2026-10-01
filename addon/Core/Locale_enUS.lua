@@ -399,6 +399,13 @@ local english = {
     RECEIVER_BINDING_RESET = "Restore default shortcuts",
     RECEIVER_BINDING_APPLIED = "Shortcuts updated",
     RECEIVER_BINDING_CONFLICT = "Shortcut conflict. Choose another combination.",
+    NATIVE_RECEIVER_BINDING_WAKE = "Wake",
+    NATIVE_RECEIVER_BINDING_SUBMIT = "Submit",
+    NATIVE_RECEIVER_BINDING_CLOSE = "Close",
+    NATIVE_RECEIVER_BINDING_CONFLICT = "%s shortcut %s is occupied",
+    NATIVE_RECEIVER_BINDING_INEFFECTIVE = "%s shortcut %s is ineffective",
+    NATIVE_RECEIVER_BINDING_FALLBACK = "%s (binding action: %s). Selected fallback shortcuts: wake %s, submit %s, close %s.",
+    NATIVE_RECEIVER_BINDING_BLOCKED = "Primary and fallback shortcuts are unavailable; input is blocked. Primary: %s (binding action: %s); fallback: %s (binding action: %s). Existing bindings were preserved.",
     RECEIVER_BINDING_UNAVAILABLE = "Could not update shortcut. Check input and retry.",
     -- LOCALE:END
 }

@@ -14,7 +14,7 @@ import (
 func TestInputPostLookupExpiryIsNarrow(t *testing.T) {
 	e := bridge.SlotEnvelope{Runtime: strings.Repeat("1", 32), Owner: "owner", Fence: 1, Index: 1, GUID: "g", Build: "b"}
 	blocked := false
-	s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 1, GUID: e.GUID, Build: e.Build, SampleMillis: 1000, InputBlocked: &blocked}
+	s := InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: 1, GUID: e.GUID, Build: e.Build, SampleMillis: 1000, InputBlocked: &blocked}
 	encode := func(s InputObservation) memory.Record {
 		return inputTestRecord(t, s)
 	}

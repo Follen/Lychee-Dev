@@ -2,6 +2,10 @@
 
 Read when no matching fixed data pin exists, or when comparing local and remote delivery identities.
 
+Resolution fixes identity; the first requested query establishes whether the
+selected source can supply useful content. Do not perform a full archive
+preparation or refresh a matching pin just to answer a narrow lookup.
+
 Start from the requested product and business entity, not a guessed archive path.
 Reuse the invoking project's fixed data pin when it matches the requested scope.
 `target list` lists saved named targets, not supported products or available data;

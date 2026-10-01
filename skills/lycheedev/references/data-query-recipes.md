@@ -15,6 +15,12 @@ An exact ID equality can use the shared DB2 identity index. Missing-key tables
 remain partial even when the query returns one row or no rows. Use direct DB2
 lookup when the distinction between an encrypted ID and absence is the question.
 
+For a bounded listing, use `ORDER BY ID LIMIT 50`; continue with
+`WHERE ID > :after ORDER BY ID LIMIT 50` and the last returned ID. Keep the pin,
+source and other filters fixed. For joins with repeated IDs, order and continue
+on a unique tuple from the actual result; using ID alone can skip tied rows.
+An aggregate over missing-key tables describes only the readable subset.
+
 ## Discover a flag and query it
 
 First find its pinned definition:
@@ -57,6 +63,19 @@ policy and capture identities; overlaid rows also carry `__hotfix_source`,
 The derived query capture is reproducible local-cache evidence, not proof of
 complete server or running-client state. Base missing-key coverage remains
 partial conservatively, even if a Hotfix supplies a particular missing row.
+
+The example starts from static membership: it exposes a deletion as a missing
+effective join row, but cannot find an ID added only by Hotfix. Query
+`effective.TableName` directly when effective membership is the question, and
+compare against static separately when additions matter. A NULL field alone
+does not distinguish a deleted row from a surviving row with that NULL value;
+include the joined row ID and provenance needed for that distinction.
+
+The query accepts 1–16 raw cache captures with at most 128 MiB combined raw
+content. Their shared snapshots are verified and scanned once per query;
+page/scan captures and remote provider summaries cannot replace the raw bytes.
+Reordering captures changes tie resolution, so retain their ordered IDs with
+the query document and result capture.
 
 ## Diagnose expensive or invalid queries
 

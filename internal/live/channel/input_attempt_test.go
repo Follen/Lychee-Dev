@@ -15,7 +15,7 @@ import (
 func attemptInputFixture(t *testing.T, next int, raw json.RawMessage) (memory.Record, bridge.SlotEnvelope) {
 	t.Helper()
 	blocked := false
-	s := InputObservation{Schema: InputSchema, Runtime: strings.Repeat("1", 32), Owner: strings.Repeat("2", 32), Fence: 1, NextSlot: next, GUID: "g", Build: "b", SampleMillis: 1200, InputBlocked: &blocked}
+	s := InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: strings.Repeat("1", 32), Owner: strings.Repeat("2", 32), Fence: 1, NextSlot: next, GUID: "g", Build: "b", SampleMillis: 1200, InputBlocked: &blocked}
 	r := inputTestRecord(t, s)
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(r.Payload, &fields); err != nil {

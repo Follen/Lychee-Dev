@@ -67,7 +67,7 @@ func (p RuntimeReplacementProof) Validate(old Identity) error {
 	return nil
 }
 func validReplacementObservation(o InputObservation) bool {
-	if o.SampleMillis < 0 || o.SampleMillis > 1<<53-1 || o.NextSlot < 1 || o.NextSlot > bridge.SlotCount+1 || o.GUID == "" || o.Build == "" || o.InputBlocked == nil || !*o.InputBlocked && o.Reason != "" || *o.InputBlocked && o.Reason == "" {
+	if o.SampleMillis < 0 || o.SampleMillis > 1<<53-1 || o.NextSlot < 1 || o.NextSlot > bridge.SlotCount+1 || o.GUID == "" || o.Build == "" || o.InputBlocked == nil || !o.validBindings() || !*o.InputBlocked && o.Reason != "" || *o.InputBlocked && o.Reason == "" {
 		return false
 	}
 	if o.Owner == "" {

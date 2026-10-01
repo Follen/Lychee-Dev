@@ -14,13 +14,26 @@ lycheedev live resume <CON-id> --project <project-directory> --wait-seconds 120 
 Status reads persisted evidence. Resume acquires the same connection's driver
 lease, reconciles original nonces and continues within both the caller's wait
 limit and the original durable deadline. Exit 6 retains usable results and
-unfinished cleanup. Follow continuation: continue the same request serially,
-wait for its existing call, resolve the reported external condition, or report
-the exhausted budget/required decision. Do not infer a recovery action from an
+unfinished cleanup. Choose from the returned `continuation`, including its
+goal, blocker condition and remaining budget:
+
+| Kind | Next action |
+| --- | --- |
+| `continue` | Continue the original CON serially within its budget; reconcile the receipt or focus condition |
+| `wait_active_driver` | Wait for the existing host call; do not start a competing resume |
+| `wait_external` | Resolve or wait for the named dependency to change, then resume |
+| `needs_decision` | Inspect the concrete outcome/blocker and choose an action covered by the task's scope |
+| `budget_exhausted` | Retain results and consider permitted cleanup/recovery; do not renew business time |
+| `completed` | Read this command's terminal outcome; check whether the overall investigation is done |
+
+`needs_decision` is not an automatic permission prompt. Necessary recovery can
+already be authorized; an unresolved opaque effect may instead require an
+independent observation or a truthful handoff. Do not infer recovery from an
 internal stage alone. Keep each instance's project, CON and request separate.
 Do not replace a request, edit its files, clear ownership or repeat raw input to
 force progress. A cached hit never bypasses identity/checksum/fresh-confirmation
-validation. Incomplete scan coverage is not proof that no result exists.
+validation. A missing or partial Mailbox observation is not proof that input
+was never executed or that no result exists.
 
 After user reload, a descriptor alone is only a candidate. Continuing business
 requires a fresh bind; closing the old CON instead uses [verified retirement](#ownership-and-runtime-retirement).
@@ -70,7 +83,9 @@ does not call for reload. Without replacement proof, retain pending cleanup and
 wait for the reported condition to change. The separate input-free retirement
 path may close the old CON without any reload input. An unconfirmed opaque report
 remains unavailable/execution_unknown; successful reload or close does not verify
-it. New work on a changed actor requires its own authorized target and new CON.
+it. New work on a changed actor requires a fresh CON within the task's target
+scope. An existing arbitrary-character scope can cover it after safe retirement;
+the old operation is never transferred.
 
 `journal.resource_busy: active window driver` means another host CLI still holds
 the execution lease. A game UI frame does not own that lease. Wait for the active
@@ -90,10 +105,11 @@ owning task; a crash releases the OS driver lock, not durable reservations.
 Use the old CON's `live disconnect` in its owning project. The CLI can verify
 PID plus creation-time process exit, or verify another runtime actually wrote a
 new input sample in the same fixed process. Access errors, missing windows,
-descriptors, cached addresses and old heap samples prove neither case. Runtime
-replacement proof does not compare game time with the host clock. The CLI may
-relocate distant sample addresses once within its existing observation budget;
-this is not an Agent-directed scan or permission to extend the deadline.
+descriptors or cached samples prove neither case. Replacement requires fresh,
+increasing input samples from the new runtime in that same process. The CLI
+revalidates the build-bound root and named Mailbox path within its budget;
+it does not relocate samples by scanning the heap. Game time is not compared
+with the host clock to establish replacement.
 
 For runtime replacement, the CLI saves `runtimeEnd` before retiring only the
 old CON's exact reservations.
@@ -107,9 +123,10 @@ never automatically transfer the old request or probe.
 ## Input and recovery
 
 The CLI journals input and selects the observation adapter from the verified
-runtime capability. Hybrid optical readiness keeps identity, routing and reports
-memory-backed; older input-v1 runtimes use memory observations. Missing signals
-do not permit blind fallback. Agents do not decode colors or manage capture.
+current runtime capability. Hybrid optical readiness keeps identity, routing
+and reports Mailbox-backed. Unsupported native wire/input versions are rejected;
+they are not a memory-only fallback. Missing signals do not permit blind input.
+Agents do not decode colors, manage capture or locate memory addresses.
 
 With an ordinary focused editor, the coordinator may send one Esc and observe
 again; Esc can close/cancel that UI. Combat, unknown observations, missing signals
@@ -130,6 +147,22 @@ does not authorize replay of unknown input. Never delete the slot to unblock
 another instance; use [verified retirement](#ownership-and-runtime-retirement)
 when the original process or runtime has ended.
 
+After the owner resolves the actual key conflict, the native addon supports
+manual `/dev receiver reset` to reselect its fixed primary/backup profiles. It refuses combat,
+active receiver input and remaining conflicts; it does not change account keys
+or saved custom profiles. This command repairs bindings only, not the CON or
+pending exchange. If the CLI cannot send input, ask the owner for this specific
+repair instead of sending raw keys. A reload retires the old runtime; close its
+original CON through verified retirement before a new investigation.
+
+Native INPUT v3 publishes the actually effective F12 or F11 profile, paired with
+hybrid v2. Primary conflicts produce a warning and try the backup without
+changing the player's bindings. The CLI verifies this profile before sending;
+agents must not choose a chord from the warning, mix profiles or substitute a
+key themselves. If both profiles conflict, resolve that specific conflict with
+the owner; ready colors alone do not authorize input. A fixed-F12 older runtime
+is not compatible with this profile contract.
+
 Input evidence is distinct from execution: `not_sent` proves zero messages were
 queued; `submitted` proves only queue submission; `uncertain` (or an intent with
 no outcome) does not permit replay. These facts drive CLI recovery. Do not
@@ -137,6 +170,11 @@ reinterpret them into manual retry instructions. Use the same CON/project and
 `live resume`; inspect `waiting` when present. Recheck after a changed condition
 within the authorized task; do not repeat indefinitely against an absent process,
 foreign ownership or an unresolved opaque execution outcome.
+
+Optional input-attempt diagnostics are not execution receipts. Missing counters
+do not prove that a key was never delivered; unchanged counters do not authorize
+replay. Diagnose unsupported roots/layouts or read gaps from retained evidence;
+do not fix them by copying an RVA, scanning memory or looping reloads.
 
 `waiting: shared_publication` is shared-file contention inside one installation,
 not proof of a lost connection. Native 3.1.0 requires the new Mailbox wire,
@@ -164,7 +202,7 @@ and reload hints are not execution or result proof.
 The whole `.lycheedev/live` directory is the recovery unit. Keep connection logs,
 linked history segments, content-addressed `connections/artifacts`, target metadata
 and result files together. New journals reference exact code/result bytes by digest;
-older inline snapshots remain readable. Missing or corrupt referenced content is
+compatible inline snapshots remain readable. Missing or corrupt referenced content is
 a recovery error, never a reason to generate another request key.
 
 ## Durable evidence and older journals
@@ -176,14 +214,13 @@ changing request keys do not extend a goal. Close retains its own allowance
 after business exhaustion; existing evidence remains readable. Detected clock
 rollback stops automatic work; an unseen offline clock change cannot be detected.
 
-Older channel-v1 journals receive one marked legacy budget window on their first
-drive, persisted before input; reading status does not migrate them. That window
-starts at migration because prior elapsed time is unavailable. A CLI wait timeout
-or interruption ends the host call, not the game-side probe or its cleanup.
-New writes use channel-v2 with the current native identity, and activation-v3;
-older CLIs cannot drive those journals. The budget-envelope migration does not
-accept an older native wire, identity or slot pool. A cancelled host wait uses
-exit 7; it does not confirm Lua cancellation.
+Current native writes use channel-v2 and activation-v3 with the current Mailbox
+identity. Older native wire/identity journals are rejected before driving or
+budget migration; preserve them for diagnosis with their matching release.
+An older artifact serialization within a compatible connection is a different
+case and does not establish old-wire compatibility. A CLI wait timeout or
+interruption ends the host call, not the game-side probe or its cleanup.
+A cancelled host wait uses exit 7; it does not confirm Lua cancellation.
 
 Cleanup callback failures retain the verified report and trigger a journaled
 reload; a fresh binding then records `cleanupMethod: runtime_destroyed`. The

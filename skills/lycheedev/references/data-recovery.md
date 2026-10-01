@@ -43,6 +43,15 @@ a failure in one layer does not establish failure in another.
   preparation cost justifies it, make one deliberate budget extension with
   `--timeout-seconds <1-3600>` within the task budget. A second deadline stops that
   branch; do not keep raising budgets. Hotfix uses its own scan/request bounds.
+- Shared resource budget (`records.query_resource_budget`): inspect the failing
+  dimension and narrow the required tables, relationships or source work.
+  Increasing `--timeout-seconds` or a per-file byte limit does not increase this
+  budget. SQL `query.budget_exceeded` is a separate executor limit; use EXPLAIN
+  or a more selective query when it can preserve the requested claim.
+- Workspace admission: heavy data reads wait for CLI-owned slots, with a
+  30-second admission bound as well as the caller's deadline. Let competing
+  work finish and make one bounded retry when appropriate. Do not remove lease
+  files, kill another task or create another workspace to evade the bound.
 - Transient I/O: the CLI already owns mirrors and route refresh. Allow at most
   one unchanged retry within the task budget; repeated failure stops that branch
   until its cause changes. Never script a second CDN-routing layer or bypass

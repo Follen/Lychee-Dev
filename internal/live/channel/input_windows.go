@@ -142,7 +142,18 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return InputOutcome{Disposition: "not_sent", Reason: "slot_pool_invalid"}, err
 		}
 	}
-	receipt, err := desktop.WithReceiverInputProfile(ctx, n.Target, desktop.SlotReceiverBindings(), n.Guard, func(in *desktop.ReceiverInput) error {
+	bindings := desktop.SlotReceiverBindings()
+	if a.Kind != "reload_fallback" {
+		if a.Observation == nil {
+			return InputOutcome{Disposition: "not_sent", Reason: "input_observation_unavailable", Retryable: true}, ErrPending
+		}
+		var profileErr error
+		bindings, profileErr = a.Observation.receiverProfile()
+		if profileErr != nil {
+			return InputOutcome{Disposition: "not_sent", Reason: "input_bindings_invalid"}, profileErr
+		}
+	}
+	receipt, err := desktop.WithReceiverInputProfile(ctx, n.Target, bindings, n.Guard, func(in *desktop.ReceiverInput) error {
 		if a.Kind == "reload_fallback" {
 			return in.FixedReload(func(int) error { return nil })
 		}
@@ -168,7 +179,7 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 		}
 		r := current.Records[0]
 		s, readErr := inputObservation(r, a.Envelope, 0, uptimeMillis())
-		if readErr != nil || s.SampleMillis != a.Observation.SampleMillis {
+		if readErr != nil || s.SampleMillis != a.Observation.SampleMillis || !sameInputProfile(s, *a.Observation) {
 			return ErrPending
 		}
 		if a.Capability == bridge.InputSignalCapability {

@@ -44,17 +44,36 @@ with sample count and timer resolution. Offline replay timings cannot establish
 game startup latency. If the hang occurs during input before execution, examine
 the input path rather than attributing it to the probe's business logic.
 
-For native transport measurements, separate optical waiting, memory discovery,
-point reads, input dispatch, probe execution, result retrieval and diagnostic
-flush. A small capture ROI reduces copied/decoded pixels; it does not mean WGC's
+For current native Mailbox transport measurements, separate process/module
+initialization, guarded Lua-root resolution, named-field reads, optical readiness
+and waiting, input dispatch, probe execution, result retrieval and diagnostic
+flush. The host follows the selected module's root to current Lua globals and
+`LycheeDevInternal.Mailbox`; it does not search private heap regions for records.
+Known executable hashes verify their runtime code anchor; other hashes require
+complete bounded runtime-text matching of the supported recipes. Root resolution
+may therefore differ substantially between builds. Do not describe module-text
+coverage as heap coverage, or a successful named-field lookup as whole-client
+memory coverage. A missing field, changed layout or unreadable guard fails closed
+without a scanner fallback. Do not bypass that failure with guessed RVAs.
+
+A small capture ROI reduces copied/decoded pixels; it does not mean WGC's
 whole-window capture cost is equally small. Keep cache setting, window state,
 foreground/background FPS, loaded capability and candidate binary fixed when
-comparing runs. Preserve scan coverage and counts where the CLI records them;
+comparing runs. Preserve module coverage, read counts/bytes and named-lookup
+completion where recorded. `--no-cache` still resolves the current Lua table path;
+no retained heap address or hint participates in the current reader. Keep initial
+root resolution separate from subsequent receipt/body lookups, and keep a
+completed historical request's input-free read-back separate from fresh execution;
 report transport completion, `report.ok` and cleanup separately. A failed probe
 assertion is not successful performance validation merely because transport
 retrieved it. Results from the old memory-only path do not validate the hybrid
 path or a different candidate. Same-build instances are separate measurements,
 not interchangeable targets.
+
+Compare only evidence sealed for the matching candidate and target. Fast named
+reads do not imply low end-to-end latency when readiness or receipts dominate.
+Receipt absence after submitted input neither proves non-delivery nor authorizes
+replay; use [recovery](live-recovery.md) rather than adding another timing attempt.
 
 ## Preserve live ownership and bound the experiment
 

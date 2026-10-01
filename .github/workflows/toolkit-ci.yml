@@ -107,6 +107,11 @@ jobs:
           $env:CGO_ENABLED = '0'
           go build -buildvcs=true ./cmd/lycheedev
           if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
+      - name: Compile interactive contention workbench (no game execution)
+        run: |
+          $labExecutable = Join-Path $env:RUNNER_TEMP 'lycheedev-channel-lab.exe'
+          go build -tags lycheedev_channel_lab -o $labExecutable ./tests/channel-live
+          if ($LASTEXITCODE -ne 0) { throw 'channel lab build failed' }
       - run: go run ./cmd/lycheedev describe --format json
       - name: Skill / command-reference consistency (schema vs documented commands)
         run: |
