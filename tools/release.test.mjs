@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags, exportSourceIndex,
 } from './release.mjs';
+import { readTarGz } from './tar.mjs';
 import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './luals.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -123,6 +124,77 @@ test('source index export preserves all LF blobs beyond Windows MAX_PATH without
   walk(destination);
   assert.deepEqual(exported.sort(), [...blobs.keys()].sort(), 'index export omitted or added files');
   for (const [name, blob] of blobs) assert.deepEqual(readFileSync(join(destination, ...name.split('/'))), blob, name);
+  assert.deepEqual(readFileSync(join(repo, '.git', 'config')), configBefore);
+  assert.equal(git(['config', '--local', '--get', 'core.longpaths']).trim(), 'false');
+  assert.equal(git(['config', '--local', '--get', 'core.autocrlf']).trim(), 'true');
+});
+
+test('source index export matches git archive attributes and keeps research evidence only in Git', t => {
+  const root = mkdtempSync(join(tmpdir(), 'lycheedev-source-boundary-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  const git = (args, binary = false) => {
+    const result = spawnSync('git', ['-c', 'core.longpaths=true', ...args], { cwd: repo, encoding: binary ? undefined : 'utf8' });
+    assert.equal(result.status, 0, result.stderr?.toString());
+    return result.stdout;
+  };
+  git(['init', '--quiet']);
+  git(['config', 'core.longpaths', 'false']);
+  git(['config', 'core.autocrlf', 'true']);
+  const journal = 'docs/toolkit/research/lua-mailbox-titan-69874/current-candidate/pressure/.lycheedev/live/connections/CON-9108c86a801af51807c3a031a123846f.jsonl.history/1a9906078a5cdc7f768a7e1bf737150e72534c57402b942cd9087282711dfe68.jsonl';
+  const directoryOnlyEvidence = 'directory-only/nested/evidence.json';
+  const evidence = Buffer.from('original raw journal\r\nretained in Git\r\n');
+  const files = new Map([
+    ['.gitattributes', Buffer.concat([readFileSync(new URL('../.gitattributes', import.meta.url)),
+      Buffer.from('\ndirectory-only export-ignore\ndirectory-only/nested/evidence.json -export-ignore\n')])],
+    ['cmd/lycheedev/main.go', Buffer.from('package main\n// product source\n')],
+    ['addon/Lychee Dev.toc', Buffer.from('## Title: Lychee Dev\n')],
+    ['skills/lycheedev/SKILL.md', Buffer.from('# Lychee Dev\n')],
+    ['skills/lycheedev/references/说明 文档.md', Buffer.from('中文 product reference\n')],
+    ['LICENSE', Buffer.from('project license\n')],
+    ['THIRD_PARTY_NOTICES.md', Buffer.from('source notices\n')],
+    ['packages/npm/lycheedev/LICENSE', Buffer.from('package license\n')],
+    ['packages/npm/lycheedev/THIRD_PARTY_NOTICES', Buffer.from('package notices\n')],
+    ['docs/toolkit/release-3.1.0.md', Buffer.from('release acceptance summary\n')],
+    [journal, evidence],
+    [directoryOnlyEvidence, Buffer.from('directory-pruned investigation\n')],
+  ]);
+  for (const [name, bytes] of files) {
+    const file = join(repo, ...name.split('/'));
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, bytes);
+  }
+  git(['add', '.']);
+  git(['-c', 'user.name=Source boundary fixture', '-c', 'user.email=fixture@example.invalid',
+    '-c', 'commit.gpgSign=false', 'commit', '--quiet', '-m', 'product source and retained investigation']);
+  assert.deepEqual(git(['show', `HEAD:${journal}`], true), evidence, 'research evidence was removed from Git');
+  const archive = readTarGz(git(['archive', '--format=tar.gz', 'HEAD'], true));
+  assert.equal(archive.has(journal), false, 'project attributes shipped raw evidence');
+  assert.equal(archive.has(directoryOnlyEvidence), false, 'directory export-ignore did not prune descendants');
+  for (const name of files.keys()) if (name !== journal && name !== directoryOnlyEvidence) assert.ok(archive.has(name), `product source missing: ${name}`);
+  const configBefore = readFileSync(join(repo, '.git', 'config'));
+  // The comparison side must use indexed attributes and bytes, even if the
+  // working tree contains opposite attributes, altered code and an extra file.
+  writeFileSync(join(repo, '.gitattributes'), '*.go export-ignore\n');
+  writeFileSync(join(repo, 'cmd/lycheedev/main.go'), 'uncommitted code must not enter source export');
+  writeFileSync(join(repo, 'untracked.txt'), 'not indexed');
+  const destination = join(root, 'index-tree');
+  mkdirSync(destination);
+  exportSourceIndex(destination, repo);
+  const exported = new Map();
+  const walk = (path, prefix = '') => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const name = prefix + entry.name;
+      if (entry.isDirectory()) walk(join(path, entry.name), name + '/');
+      else exported.set(name, readFileSync(join(path, entry.name)));
+    }
+  };
+  walk(destination);
+  assert.deepEqual([...exported.keys()].sort(), [...archive.keys()].sort(), 'comparison export and git archive source sets differ');
+  for (const [name, bytes] of archive) assert.deepEqual(exported.get(name), bytes, name);
+  assert.deepEqual(exported.get('skills/lycheedev/references/说明 文档.md'), Buffer.from('中文 product reference\n'));
+  assert.deepEqual(git(['show', `HEAD:${journal}`], true), evidence);
   assert.deepEqual(readFileSync(join(repo, '.git', 'config')), configBefore);
   assert.equal(git(['config', '--local', '--get', 'core.longpaths']).trim(), 'false');
   assert.equal(git(['config', '--local', '--get', 'core.autocrlf']).trim(), 'true');

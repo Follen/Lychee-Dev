@@ -1,4 +1,6 @@
 * text=auto eol=lf
 addon/Bridge/Definitions.lua text eol=lf
 # Research seals cover the original bytes, including captured JSON line endings.
-docs/toolkit/research/** -text whitespace=cr-at-eol,-blank-at-eof
+# Raw investigation evidence stays in Git, outside release source archives.
+docs/toolkit/research export-ignore
+docs/toolkit/research/** -text export-ignore whitespace=cr-at-eol,-blank-at-eof

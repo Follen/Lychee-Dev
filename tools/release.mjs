@@ -245,11 +245,41 @@ export function verifyBinaryIdentity(stage, { commit, dirty, version }) {
   return report;
 }
 
-// Export every indexed blob with release line-ending filters, without changing
-// the source repository's configuration. Windows runner temp prefixes can push
-// otherwise valid tracked paths beyond MAX_PATH.
+// Match git archive's export-ignore boundary using indexed attributes and blobs.
+// No working-tree enumeration or configuration writes participate in the export.
+// Windows runner prefixes can still push legitimate source paths beyond MAX_PATH.
 export function exportSourceIndex(destination, sourceRepository = repository) {
-  runOk('git', ['-c', 'core.longpaths=true', '-c', 'core.autocrlf=false', 'checkout-index', '-a', '-f', `--prefix=${destination}/`], { cwd: sourceRepository });
+  const options = { cwd: sourceRepository };
+  const indexed = runOk('git', ['-c', 'core.longpaths=true', 'ls-files', '-z'], options);
+  const paths = indexed === '' ? [] : indexed.slice(0, -1).split('\0');
+  // git archive prunes an ignored directory before considering its children.
+  // Query indexed ancestors too; a child unset cannot revive a pruned subtree.
+  const candidates = new Set(paths);
+  for (const path of paths) {
+    for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/', slash - 1)) {
+      candidates.add(path.slice(0, slash));
+    }
+  }
+  const queried = [...candidates];
+  const attributes = runOk('git', ['-c', 'core.longpaths=true', 'check-attr', '--cached', '-z', '--stdin', 'export-ignore'],
+    { ...options, input: queried.length ? queried.join('\0') + '\0' : '' });
+  const fields = attributes === '' ? [] : attributes.slice(0, -1).split('\0');
+  if (fields.length !== queried.length * 3) throw new Error('release.source_export_attributes_invalid');
+  const ignored = new Set();
+  for (const [index, path] of queried.entries()) {
+    const offset = index * 3;
+    if (fields[offset] !== path || fields[offset + 1] !== 'export-ignore') throw new Error('release.source_export_attributes_invalid');
+    if (fields[offset + 2] === 'set') ignored.add(path);
+  }
+  const retained = paths.filter(path => {
+    if (ignored.has(path)) return false;
+    for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/', slash - 1)) {
+      if (ignored.has(path.slice(0, slash))) return false;
+    }
+    return true;
+  });
+  runOk('git', ['-c', 'core.longpaths=true', '-c', 'core.autocrlf=false', 'checkout-index', '-f', '-z', '--stdin', `--prefix=${destination}/`],
+    { ...options, input: retained.length ? retained.join('\0') + '\0' : '' });
 }
 
 /**
