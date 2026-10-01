@@ -245,6 +245,13 @@ export function verifyBinaryIdentity(stage, { commit, dirty, version }) {
   return report;
 }
 
+// Export every indexed blob with release line-ending filters, without changing
+// the source repository's configuration. Windows runner temp prefixes can push
+// otherwise valid tracked paths beyond MAX_PATH.
+export function exportSourceIndex(destination, sourceRepository = repository) {
+  runOk('git', ['-c', 'core.longpaths=true', '-c', 'core.autocrlf=false', 'checkout-index', '-a', '-f', `--prefix=${destination}/`], { cwd: sourceRepository });
+}
+
 /**
  * Licensing closure (implementation-status.md): `git archive` of the exact
  * commit + `go mod vendor` output + go.mod/go.sum + notices, provably buildable
@@ -318,7 +325,7 @@ async function buildCorrespondingSourceArchive({
     // ID. Worktree-vs-index drift stays the identity() clean-tree gate's job.
     const indexTree = join(scratch, 'index-tree');
     mkdirSync(indexTree);
-    runOk('git', ['-c', 'core.autocrlf=false', 'checkout-index', '-a', '-f', `--prefix=${indexTree}/`], { cwd: repository });
+    exportSourceIndex(indexTree);
     const indexBuild = join(scratch, 'build-from-index');
     runOk(goBinary, ['mod', 'vendor'], { cwd: indexTree });
     runOk(goBinary, ['build', '-trimpath', '-buildvcs=false', '-o', indexBuild, buildPackage], { cwd: indexTree, env: buildEnv });

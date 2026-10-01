@@ -5,12 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags,
+  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags, exportSourceIndex,
 } from './release.mjs';
 import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './luals.mjs';
 
@@ -77,6 +77,55 @@ test('release source inputs accept the committed flat addon manifest and reject 
   const result = verifySourceInputs();
   assert.ok(result.requiredPaths.includes('addon/Lychee Dev.toc'));
   assert.throws(() => verifySourceInputs('HEAD', ['addon/nonexistent-release-input.toc']), /release.source_archive_incomplete/);
+});
+
+test('source index export preserves all LF blobs beyond Windows MAX_PATH without changing Git configuration', { skip: process.platform !== 'win32' }, t => {
+  const root = mkdtempSync(join(tmpdir(), 'lycheedev-export-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  const git = args => {
+    const result = spawnSync('git', ['-c', 'core.longpaths=true', ...args], { cwd: repo, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  git(['init', '--quiet']);
+  git(['config', 'core.longpaths', 'false']);
+  git(['config', 'core.autocrlf', 'true']);
+  const longName = `research/${'journal-'.repeat(10)}/${'history-'.repeat(8)}/snapshot.jsonl`;
+  const blobs = new Map([
+    ['short.txt', Buffer.from('short\nsecond\n')],
+    [longName, Buffer.from('retained journal\n中文 evidence\n')],
+  ]);
+  for (const [name, blob] of blobs) {
+    const file = join(repo, ...name.split('/'));
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, blob.toString('utf8').replaceAll('\n', '\r\n'));
+  }
+  git(['add', '.']);
+  for (const [name, blob] of blobs) assert.deepEqual(Buffer.from(git(['show', `:${name}`])), blob);
+  const configBefore = readFileSync(join(repo, '.git', 'config'));
+  const destination = join(root, 'export-' + 'x'.repeat(110), 'index-tree');
+  mkdirSync(destination, { recursive: true });
+  assert.ok(join(destination, ...longName.split('/')).length > 260);
+  const failed = spawnSync('git', ['-c', 'core.longpaths=false', '-c', 'core.autocrlf=false', 'checkout-index', '-a', '-f', `--prefix=${destination}/`], { cwd: repo, encoding: 'utf8' });
+  assert.notEqual(failed.status, 0, 'fixture did not reproduce the Windows export failure');
+  assert.match(failed.stderr, /Filename too long/i);
+  exportSourceIndex(destination, repo);
+  const exported = [];
+  const walk = (path, prefix = '') => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const name = prefix + entry.name;
+      if (entry.isDirectory()) walk(join(path, entry.name), name + '/');
+      else exported.push(name);
+    }
+  };
+  walk(destination);
+  assert.deepEqual(exported.sort(), [...blobs.keys()].sort(), 'index export omitted or added files');
+  for (const [name, blob] of blobs) assert.deepEqual(readFileSync(join(destination, ...name.split('/'))), blob, name);
+  assert.deepEqual(readFileSync(join(repo, '.git', 'config')), configBefore);
+  assert.equal(git(['config', '--local', '--get', 'core.longpaths']).trim(), 'false');
+  assert.equal(git(['config', '--local', '--get', 'core.autocrlf']).trim(), 'true');
 });
 
 test('registry-state returns one complete document and --out persists the same state', async () => {
