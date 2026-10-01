@@ -96,5 +96,33 @@ ns.ProbeExecution.Run(function(p)
     scene=false;return "must not succeed"
 end,10,done)
 assert(not outcome[1] and outcome[2]=="return_scene_changed")
+-- Native propagation uses a detached effective profile, never literal F12 or
+-- a mutable caller/current table. Other protected queries still propagate none.
+local selected
+ns.ReceiverBindings={Current=function()return selected end}
+ns.Compat.ReceiverChord=function(key)return key end
+local shield=created[1]
+shield.SetPropagateKeyboardInput=function(self,value)self.propagated=value end
+for _,terminal in ipairs({"F12","F11"}) do
+    selected={wake="ALT-CTRL-"..terminal,submit="ALT-CTRL-SHIFT-"..terminal,close="ALT-CTRL-["}
+    local wake,submit=selected.wake,selected.submit
+    local lease=assert(ns.InputProtection.Acquire(2,nil,true))
+    selected.wake="ALT-CTRL-F1" -- Must not mutate the live lease's keys.
+    local keydown=shield:GetScript("OnKeyDown")
+    keydown(shield,wake);assert(shield.propagated==true,"effective wake did not propagate")
+    keydown(shield,submit);assert(shield.propagated==true,"effective submit did not propagate")
+    keydown(shield,terminal=="F12" and "ALT-CTRL-F11" or "ALT-CTRL-F12")
+    assert(shield.propagated==false,"other native profile propagated")
+    keydown(shield,"ALT-CTRL-F1");assert(shield.propagated==false,"mutable profile changed lease")
+    keydown(shield,"ALT-CTRL-[");assert(not ns.InputProtection.IsActive() and shield.propagated==false)
+    assert(not ns.InputProtection.Release(lease))
+end
+for _,profile in ipairs({{}, {wake="ALT-CTRL-F11",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["},
+    {wake="ALT-CTRL-F1",submit="ALT-CTRL-SHIFT-F1",close="ALT-CTRL-["}, Env.MakeSecret()}) do
+    selected=profile
+    local frames,timerCount=#created,#timers
+    assert(not ns.InputProtection.Acquire(2,nil,true),"invalid native profile acquired lease")
+    assert(#created==frames and #timers==timerCount and not ns.InputProtection.IsActive(),"invalid profile created work")
+end
 CreateFrame=originalCreate
 print("explicit input protection and scene guards ok")

@@ -31,7 +31,7 @@ func (b *pendingBackend) Input(context.Context, InputAction) (InputOutcome, erro
 }
 func (b *pendingBackend) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (InputObservation, error) {
 	ready := false
-	return InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready}, nil
+	return InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready}, nil
 }
 func (*pendingBackend) RuntimeCandidate(context.Context, Identity) (*Identity, error) {
 	return nil, nil

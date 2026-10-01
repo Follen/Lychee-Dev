@@ -363,7 +363,7 @@ func run() (resultErr error) {
 		defer gate.Close()
 		return reload()
 	}
-	native, err := channel.OpenNative(target.Window, parent, buildinfo.Version, filepath.Join(stateRoot, "cache", "hints.json"), *cache)
+	native, err := channel.OpenNative(ctx, target.Window, parent, buildinfo.Version, filepath.Join(stateRoot, "cache", "hints.json"), *cache)
 	if err != nil {
 		return err
 	}

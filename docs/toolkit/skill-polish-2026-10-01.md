@@ -1,9 +1,12 @@
 # Whole-skill polish — 2026-10-01
 
-This change updates the versioned Lychee Dev skill for the integrated 3.1.0
-Mailbox/source/data implementation. It changes agent instructions and UI metadata;
-the CLI, addon, generated command reference and thin launcher remain unchanged.
-It neither publishes a release nor updates an installed skill or running client.
+The initial skill commit updates the versioned Lychee Dev skill for the
+integrated 3.1.0 Mailbox/source/data implementation. Its instruction and UI
+metadata changes leave runtime code, generated commands and launcher unchanged.
+Follow-up authorized dual-instance acceptance also repairs the tagged workbench
+build, strengthens lifecycle assertions, and adds verified F12/F11 input profiles
+with conflict warnings and binding recovery. Those runtime changes and their
+acceptance are separate from the offline skill evaluation below. No release is published.
 
 ## Changes that affect decisions
 
@@ -51,7 +54,7 @@ fixtures are normalized placeholders, not runnable process identities or evidenc
 All 69 proposed CLI command paths/flags passed the actual 89-command contract;
 that check does not execute commands or validate placeholder values.
 
-## Verification
+## Initial skill verification
 
 - skill-creator quick validator: passed; implicit invocation policy preserved.
 - All 21 Markdown files: 70 relative links, including heading anchors, valid.
@@ -63,6 +66,36 @@ that check does not execute commands or validate placeholder values.
 - Skill payload SHA-256: `1a32ffd4b0d9e946832d2682efb1a2b5f0a79bae4533825f8bcc9d36564c9ee1`.
   The baseline ran with this unchanged payload; this review record was added afterward.
 
-The launcher was inspected and its existing tests passed; a documentation polish
-does not justify another launcher or transport. No runtime behavior, performance
-improvement, installation activation or newly tested client is claimed here.
+The launcher was inspected and its existing tests passed. The initial offline
+skill review does not establish runtime behavior or performance improvement.
+
+## Live follow-up and current contract
+
+Retail dual-instance acceptance exposed the F12 collision and binding recovery
+gap. The current skill startup/recovery references follow INPUT v3/hybrid v2,
+the effective complete F12/F11 profile and exact CLICK ownership. Explicitly
+unsupported loaded capabilities do not authorize automatic fallback input;
+clean installation and selected-client manual protocol activation remain separate.
+
+A fresh independent read-only evaluator handled two additional requests using
+the final references: an unsupported loaded capability with unknown old input,
+and same-build peers where only A publishes empty blocked bindings. Both retained
+the original process/project/CON and uncertainty, avoided guessed keys or peer
+identity, and selected supported status/resume/disconnect paths. These were
+offline decisions, not executed commands.
+
+The new [real-client acceptance](live-input-fallback-acceptance-2026-10-01.md)
+records staged slot competition, 47 requests per peer, capacity rollover, async
+and reload isolation, actual F11 input, warning WGC and zero final ownership.
+Three full-suite recoveries and one warning-candidate activation recovery remain
+visible; there is no first-invocation-success or new other-client claim.
+Final Windows offline baseline passed at
+`.tmp/retail-dual-fallback-offline-final/report.json`: build/vet, 3,018 named
+Go outcomes across 43 packages (40 explicit helper/environment skips, no
+failures), mandatory Lua 5.1, real LuaLS, 98 Node tests, version and both skill
+contract gates. The 13 separate live/manual cases retain `not_run` in this offline
+report; real-client results are in the linked record, not inferred from fixtures.
+Source remained unchanged during the run, SHA-256
+`f7ef6629cfdb89760cc95dd54a1f2ae6962fb50c53f2d3ce59d8b19ce420a735`.
+Tagged channel-lab build/vet and changed Node entrypoint syntax checks also
+passed. This verification paragraph was added after the frozen baseline.

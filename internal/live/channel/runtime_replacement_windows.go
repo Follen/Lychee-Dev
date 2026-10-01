@@ -117,5 +117,5 @@ func replacementRecord(r memory.Record) (InputObservation, bool) {
 		return o, false
 	}
 	runtime, err := tokenBytes(o.Runtime)
-	return o, err == nil && runtime != [16]byte{} && h.Runtime == runtime && h.Nonce == runtime && o.Schema == "lycheedev.input.v2" && validReplacementObservation(o)
+	return o, err == nil && runtime != [16]byte{} && h.Runtime == runtime && h.Nonce == runtime && o.Schema == InputSchema && validReplacementObservation(o)
 }

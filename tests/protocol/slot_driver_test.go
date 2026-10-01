@@ -73,7 +73,7 @@ func (p *slotPeer) Input(_ context.Context, a channel.InputAction) (channel.Inpu
 }
 func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (channel.InputObservation, error) {
 	blocked := false
-	return channel.InputObservation{Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
+	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Submit: "ALT-CTRL-SHIFT-F12", Close: "ALT-CTRL-["}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
 }
 func (p *slotPeer) RuntimeCandidate(context.Context, channel.Identity) (*channel.Identity, error) {
 	return nil, nil

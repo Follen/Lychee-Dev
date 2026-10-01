@@ -43,7 +43,10 @@ try{
     const kind=multiline?'multiline':'singleline';
     await execute('focus-'+kind,`
 local ns=LycheeDevInternal
-assert(ns.ReceiverBindings.Current().wake=="ALT-CTRL-F12")
+local profile=assert(ns.ReceiverBindings.Current())
+assert((profile.wake=="ALT-CTRL-F12" and profile.submit=="ALT-CTRL-SHIFT-F12")
+  or (profile.wake=="ALT-CTRL-F11" and profile.submit=="ALT-CTRL-SHIFT-F11"))
+assert(profile.close=="ALT-CTRL-[")
 assert(not GetCurrentKeyBoardFocus(),"existing user editor must be preserved")
 assert(not LycheeFocusFixture)
 local f=CreateFrame("EditBox",nil,UIParent)

@@ -109,10 +109,15 @@ Classic / Forever 双在线的后续补测见[双实例记录](live-input-multic
 实际正式服 WGC、全量 Lua/Go 测试及未测范围见[工作台审计](workbench-audit-2026-09-28.md)。
 `automation-history-baseline.mjs` 同时核验失败结果与 ACK 文案区分、滚动首尾和 reload 前后报告字节。
 
-`focus-baseline.mjs` 验证内存输入状态与 Ctrl+Alt+F12：自建单行/多行编辑框均需三次 Esc
+`focus-baseline.mjs` 验证当前 INPUT v3/hybrid v2 中实际生效的 F12/F11 完整键位：自建单行/多行编辑框均需三次 Esc
 才释放焦点，完整收尾后检查精确次数与文字/光标不变。离线覆盖旧 runtime、owner/slot
 不匹配、过期/缺字段采样、禁用采样器，以及 Esc 前落盘和同槽位恢复。普通第三方键盘
 拦截器、未知 API 和其他客户端不因这两种实机输入框通过而自动视为通过。
+
+Native 绑定回归必须覆盖：主键冲突报警并选取 F11 备用；主/备用均冲突时零输入；
+按精确按钮与动作判定所有权（相似名称不算自己的绑定）；重复 Register 不假报成功；
+显式 reset 不修改账户/SV、不在战斗或 active 输入时重绑；INPUT 缺失、混合或变更 profile
+均不能发键。旧 INPUT v2/hybrid v1 的实机结果不证明此轮 profile 合同通过。
 
 2026-09-28 Classic 50504 新增输入保护与自动化历史验收：普通探针不锁输入、显式保护按任务剩余预算释放、事件前提检查、任务成功/失败报告保留与 reload 后恢复。可重复入口为 `tests/channel-live/input-policy-baseline.mjs` 和 `tests/channel-live/automation-history-baseline.mjs`，实际结果及未测范围见 [Classic 记录](classic-input-history-2026-09-28.md)。
 

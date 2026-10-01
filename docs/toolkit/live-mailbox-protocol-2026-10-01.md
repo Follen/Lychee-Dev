@@ -13,17 +13,36 @@ OP/BTP documents remain historical; their keys and ACK rules are not native inpu
 | Binary header / trailer | LYCMEM06 / LYCEND06 |
 | Slot envelope / receipt | lycheedev.slot.v3 |
 | Identity descriptor | lycheedev.slot.identity.v2 |
-| Input observation | lycheedev.input.v2 |
+| Input observation | lycheedev.input.v3 |
 | Slot addon transport | memory-slot-v3 |
 | Public publication | lycheedev.mailbox.v1 |
 | Runtime replacement proof | lycheedev.runtime-replacement.mailbox.v1 |
 
-The optical pairing remains `lycheedev.input.hybrid.v1`: its encoding did not
-change. It accompanies a v2 memory input observation and does not replace it.
+The optical pairing is `lycheedev.input.hybrid.v2`. The color encoding is
+unchanged; this capability requires the v3 memory input's effective binding
+profile and does not replace its identity, routing or freshness checks.
 Old slot envelopes, native identities, input records and connection state are
 rejected. The installer may replace an inert managed installation using its
 old installation receipt; that is filesystem replacement, not execution of an
 old protocol. Existing unresolved ownership is preserved, never silently erased.
+
+Native registration tries two complete profiles, in order: Ctrl+Alt+F12 with
+Ctrl+Alt+Shift+F12, then Ctrl+Alt+F11 with Ctrl+Alt+Shift+F11. Both use
+Ctrl+Alt+[ to close. A conflicting or ineffective primary shortcut produces
+a bounded warning identifying the conflict and selected fallback. Other failures
+do not permit changing keys; if neither profile is effective, input stays blocked.
+Registration uses overrides only and never changes account/character bindings.
+Only exact receiver button CLICK actions count as owned, not name substrings.
+
+Every INPUT has a detached `bindings` object (`wake`, `submit`, `close`). It
+contains exactly the effective complete profile, or three empty strings only
+with `inputBlocked=true` and `reason=input_binding_unavailable`. Missing,
+partial, mixed or arbitrary profiles are invalid. The host uses that verified
+profile and requires it to match the current Mailbox reread before sending any
+key. Identity, publication, owner/fence, nonce, challenge, execution validation
+and optical freshness remain independent gates. An old F12-only host or runtime
+is rejected rather than guessed compatible. Manual `/dev receiver reset` may
+retry selection after conflict resolution; it changes no CON or pending exchange.
 
 ## Published data
 

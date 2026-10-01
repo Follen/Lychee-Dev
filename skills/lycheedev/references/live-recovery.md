@@ -147,6 +147,22 @@ does not authorize replay of unknown input. Never delete the slot to unblock
 another instance; use [verified retirement](#ownership-and-runtime-retirement)
 when the original process or runtime has ended.
 
+After the owner resolves the actual key conflict, the native addon supports
+manual `/dev receiver reset` to reselect its fixed primary/backup profiles. It refuses combat,
+active receiver input and remaining conflicts; it does not change account keys
+or saved custom profiles. This command repairs bindings only, not the CON or
+pending exchange. If the CLI cannot send input, ask the owner for this specific
+repair instead of sending raw keys. A reload retires the old runtime; close its
+original CON through verified retirement before a new investigation.
+
+Native INPUT v3 publishes the actually effective F12 or F11 profile, paired with
+hybrid v2. Primary conflicts produce a warning and try the backup without
+changing the player's bindings. The CLI verifies this profile before sending;
+agents must not choose a chord from the warning, mix profiles or substitute a
+key themselves. If both profiles conflict, resolve that specific conflict with
+the owner; ready colors alone do not authorize input. A fixed-F12 older runtime
+is not compatible with this profile contract.
+
 Input evidence is distinct from execution: `not_sent` proves zero messages were
 queued; `submitted` proves only queue submission; `uncertain` (or an intent with
 no outcome) does not permit replay. These facts drive CLI recovery. Do not

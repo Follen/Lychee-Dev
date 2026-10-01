@@ -4,6 +4,7 @@ local now,world,ready,reason=100,true,true,nil
 GetTime=function()return now end
 IsPlayerInWorld=function()return world end
 ns.Platform={ObserveInputState=function()return ready,reason end}
+ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["}end}
 ns.Compat.GetPhysicalPixelSize=function()return 1 end
 local stops=0
 ns.StartupBeacon={Stop=function()stops=stops+1 end}

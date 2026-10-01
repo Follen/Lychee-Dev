@@ -24,7 +24,7 @@ func TestSkippedSlotInputRequiresExactFreshOrigin(t *testing.T) {
 		{"before-previous-input", 2, 1050, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := InputObservation{Schema: InputSchema, Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: tc.next, GUID: e.GUID, Build: e.Build, SampleMillis: tc.sample, InputBlocked: &blocked}
+			s := InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: 1, NextSlot: tc.next, GUID: e.GUID, Build: e.Build, SampleMillis: tc.sample, InputBlocked: &blocked}
 			_, err := inputObservation(inputTestRecord(t, s), e, 1000, 1250)
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%v error=%v", tc.valid, err)

@@ -394,6 +394,13 @@ ns.L = {
     RECEIVER_BINDING_RESET = "恢复默认快捷键",
     RECEIVER_BINDING_APPLIED = "快捷键已更新",
     RECEIVER_BINDING_CONFLICT = "快捷键冲突，请选择其他组合",
+    NATIVE_RECEIVER_BINDING_WAKE = "唤醒",
+    NATIVE_RECEIVER_BINDING_SUBMIT = "提交",
+    NATIVE_RECEIVER_BINDING_CLOSE = "关闭",
+    NATIVE_RECEIVER_BINDING_CONFLICT = "%s快捷键 %s 已被占用",
+    NATIVE_RECEIVER_BINDING_INEFFECTIVE = "%s快捷键 %s 未实际生效",
+    NATIVE_RECEIVER_BINDING_FALLBACK = "%s（绑定动作：%s）。已改用备用快捷键：唤醒 %s，提交 %s，关闭 %s。",
+    NATIVE_RECEIVER_BINDING_BLOCKED = "默认与备用快捷键均不可用，已停止接收输入。默认：%s（绑定动作：%s）；备用：%s（绑定动作：%s）。现有按键设置未修改。",
     RECEIVER_BINDING_UNAVAILABLE = "无法更新快捷键；请检查输入或稍后重试",
     -- LOCALE:END
 }

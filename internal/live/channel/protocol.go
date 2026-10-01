@@ -14,7 +14,7 @@ import (
 )
 
 const IdentitySchema = "lycheedev.slot.identity.v2"
-const InputSchema = "lycheedev.input.v2"
+const InputSchema = "lycheedev.input.v3"
 
 var ErrPending = errors.New("live.channel_pending")
 var ErrPublicationPending = errors.Join(ErrPending, errors.New("live.channel_shared_publication_pending"))
