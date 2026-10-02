@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 var ErrContentMissing = errors.New("records.content_not_found")
@@ -29,7 +30,15 @@ type EncodingIndex struct {
 	encodedPageSize  int64
 	encodedPageCount int
 	cache            *encodingReadCache
+	budget           *resource.Budget
 }
+
+// Conservative backing/map overhead in addition to owned byte slices. Charges
+// last for the query, including failed reads and pages evicted from the cache:
+// another caller may still hold those bytes after eviction.
+const encodingIndexOverhead int64 = 512
+const encodingCacheEntryOverhead int64 = 128
+const encodingCacheCapacity int64 = 8 << 20
 
 type encodingReadCache struct {
 	mu        sync.Mutex
@@ -57,13 +66,15 @@ func (e *EncodingIndex) checkedPage(ctx context.Context, offset, length int64, e
 	if raw, ok := c.pages[offset]; ok {
 		return raw, nil
 	}
+	if err := e.budget.Charge(resource.Cost{RetainedBytes: length + encodingCacheEntryOverhead, MetadataBytes: length + encodingCacheEntryOverhead}); err != nil {
+		return nil, err
+	}
 	raw, err := e.source.ReadCheckedSpan(ctx, offset, length, expected)
 	if err != nil {
 		return nil, err
 	}
-	const capacity int64 = 8 << 20
-	if length <= capacity {
-		if length > capacity-c.bytes {
+	if length <= encodingCacheCapacity {
+		if length > encodingCacheCapacity-c.bytes {
 			clear(c.pages)
 			c.bytes = 0
 		}
@@ -81,6 +92,13 @@ type EncodingRecord struct {
 }
 
 func OpenEncoding(ctx context.Context, source *container.Ranges) (*EncodingIndex, error) {
+	return openEncoding(ctx, source, nil)
+}
+
+// Query-owned callers charge actual verified directories and cached pages,
+// rather than the whole logical Encoding extent. Public parsing stays uncached
+// and leaves query accounting to its caller.
+func openEncoding(ctx context.Context, source *container.Ranges, budget *resource.Budget) (*EncodingIndex, error) {
 	if source == nil || source.Size() < 22 {
 		return nil, ErrMetadataFormat
 	}
@@ -111,6 +129,9 @@ func OpenEncoding(ctx context.Context, source *container.Ranges) (*EncodingIndex
 	if encodedPageCount*(32+encodedPageSize) > source.Size()-encodedStart {
 		return nil, ErrMetadataFormat
 	}
+	if err := budget.Charge(resource.Cost{RetainedBytes: pageCount*32 + encodingIndexOverhead, MetadataBytes: pageCount*32 + encodingIndexOverhead}); err != nil {
+		return nil, err
+	}
 	directory, err := source.ReadSpan(ctx, directoryStart, pageCount*32)
 	if err != nil {
 		return nil, err
@@ -129,7 +150,7 @@ func OpenEncoding(ctx context.Context, source *container.Ranges) (*EncodingIndex
 			return nil, container.ErrIntegrity
 		}
 	}
-	return &EncodingIndex{source: source, directory: directory, pageSize: pageSize, pagesStart: pagesStart, pageCount: int(pageCount), encodedPageSize: encodedPageSize, encodedPageCount: int(encodedPageCount)}, nil
+	return &EncodingIndex{source: source, directory: directory, pageSize: pageSize, pagesStart: pagesStart, pageCount: int(pageCount), encodedPageSize: encodedPageSize, encodedPageCount: int(encodedPageCount), budget: budget}, nil
 }
 
 // FindContent fetches one candidate page and checks its full checksum, record

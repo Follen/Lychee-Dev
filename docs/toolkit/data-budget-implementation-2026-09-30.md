@@ -18,6 +18,8 @@
 
 BLTE decoder 的有界临时缓冲另通过 `ReserveScratch` 与 retained 共享同一上限，当前 scratch 和生命周期 retained 相加后必须满足额度；步骤结束释放 scratch reservation。`peakScratch` 是逻辑同时存活缓冲的峰值，不包含运行时、GC 尚未回收的 backing memory，也不等于实测 heap/RSS。
 
+2026-10-02 修正 Encoding 的计费对象：逻辑解码长度仍用于验证对象尺寸和每文件上限，但不代表整份内容常驻。查询使用的 Encoding index 在 header/范围验证后、分配前预留 CKey 页目录及保守结构开销；EKey 目录首次实际读取前独立预留。每次页缓存 miss 在读取前预留该页及 map 开销，命中不重复计费，驱逐与失败不退款。计数覆盖查询生命周期内累计读取的页面，而非缓存当前占用；锁外仍在解析的已驱逐页面也不能借驱逐重新获得额度。公开 `OpenEncoding` 的无缓存解析行为保持不变。Root 完整字节、其他索引、网络、解码工作与 scratch 仍分别计费，默认上限不变。复现和验证范围见 [Retail Encoding 记录](retail-encoding-budget-2026-10-02.md)。
+
 SQL 执行器自身的工作/内存限制继续有效。source bytes 的原有限制继续有效，但不能替代新增的累计元数据与保留内存预留。新增预算耗尽返回 `records.query_resource_budget`（exit 3），不返回一份声称完整的截断结果。SQL `resources` 和导航上下文中的 `resources` 是逻辑计费；其中 retained bytes 不可解读成当前堆大小或峰值 RSS。
 
 查询会话的存储目录、Root、Hotfix 与 CDN 计费接线和复用由同分支的 reader/session 实现提供。SQL 和导航在提交 capture 前调用 `CheckSource`，结束时关闭会话；基础视图命中由会话复用，不重新建立索引。单表定义准备与 asset 原始内容归档、file existence/encoding 元数据路径在整个准备周期持有准入。

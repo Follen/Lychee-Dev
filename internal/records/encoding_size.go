@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 var ErrEncodingMissing = errors.New("records.encoding_not_found")
@@ -23,7 +24,8 @@ type EncodedRecord struct {
 }
 
 // FindEncoding reads the EKey directory and one independently checked page.
-// No shared mutable cache is created; concurrent reads retain their own buffers.
+// Public parsers reread immutable source bytes; query sessions share their
+// authenticated directory and bounded page cache across concurrent lookups.
 func (e *EncodingIndex) FindEncoding(ctx context.Context, encodingKey string) (EncodedRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return EncodedRecord{}, err
@@ -115,7 +117,11 @@ func (e *EncodingIndex) physicalDirectory(ctx context.Context, start int64) ([]b
 	if c.directory != nil {
 		return c.directory, nil
 	}
-	raw, err := e.source.ReadSpan(ctx, start, int64(e.encodedPageCount)*32)
+	length := int64(e.encodedPageCount) * 32
+	if err := e.budget.Charge(resource.Cost{RetainedBytes: length, MetadataBytes: length}); err != nil {
+		return nil, err
+	}
+	raw, err := e.source.ReadSpan(ctx, start, length)
 	if err == nil {
 		c.directory = raw
 	}
