@@ -1,5 +1,9 @@
 # Toolkit 2.0 实施状态
 
+2026-10-02 用户授权发布 Encoding 预算修复，补丁候选为 **3.1.1**，npm `next`，`latest` 继续保持 **2.5.1**。版本身份同步更新，正式发行通过现有 OIDC、Windows 检查和 source rebuild 门禁；此条是候选准备，不声称已发布。见 [3.1.1 发布合同](release-3.1.1.md)。
+
+2026-10-02 Retail Encoding 预算开发修复：Windows 正式 3.1.0 已在用户报告的完全相同 pin 上复现提前 metadata 拒绝；查询改为按实际 CKey/EKey 目录和页缓存 miss 分配前累计计费，默认上限保持。局部回归、包测试、race 与强制 Lua 5.1 全量 baseline passed（43 packages、3,034 个命名结果、40 个显式 skip、零失败，100 项 Node 测试）。原 pin 的真实 CDN ChrClasses 两行查询在一次冷准备超时后沿原缓存延长一次成功，随后原 180 秒离线命令成功；内容校验、Root/DB2 和两行结果均确认。首次超时保留，不声明全部表/客户端或 RSS 验收。尚未发布该修复。见 [复现与修正](retail-encoding-budget-2026-10-02.md)。
+
 2026-10-01 同 build 双实例补测发现账户的 `ALT-CTRL-F12 TOGGLELYCHEE` 与 Live 唤醒键冲突。
 修订候选采用 INPUT v3/hybrid v2：注册时精确核验自己的 CLICK 按钮，主键冲突明确报警并尝试
 F11 备用完整 profile，CLI 复核当前发布的实际 profile 后才发键。重复注册和 native 显式 reset

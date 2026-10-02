@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/follenfang/lycheedev/internal/records/container"
-	"github.com/follenfang/lycheedev/internal/records/resource"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -83,9 +82,6 @@ func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.Da
 // encodingIndex authenticates and opens the CKey page directory of the
 // source's Encoding file. The returned function releases the encoded object.
 func (s fileSource) encodingIndex(ctx context.Context, q FileQuery) (*EncodingIndex, func(), error) {
-	if err := q.budget.Charge(resource.Cost{MetadataBytes: s.meta.ContentBytes, RetainedBytes: s.meta.ContentBytes}); err != nil {
-		return nil, nil, err
-	}
 	encoded, err := s.open(ctx, s.meta.EncodingKey, s.meta.EncodingBytes)
 	if err != nil {
 		return nil, nil, err
@@ -99,7 +95,7 @@ func (s fileSource) encodingIndex(ctx context.Context, q FileQuery) (*EncodingIn
 		_ = encoded.Close()
 		return nil, nil, ErrMetadataFormat
 	}
-	index, err := OpenEncoding(ctx, ranges)
+	index, err := openEncoding(ctx, ranges, q.budget)
 	if err != nil {
 		_ = encoded.Close()
 		return nil, nil, err

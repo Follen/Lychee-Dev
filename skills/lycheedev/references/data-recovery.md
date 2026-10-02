@@ -46,7 +46,10 @@ a failure in one layer does not establish failure in another.
 - Shared resource budget (`records.query_resource_budget`): inspect the failing
   dimension and narrow the required tables, relationships or source work.
   Increasing `--timeout-seconds` or a per-file byte limit does not increase this
-  budget. SQL `query.budget_exceeded` is a separate executor limit; use EXPLAIN
+  budget. If failure is in shared metadata preparation before row selection,
+  reducing `--limit`, using `--id` or narrowing WHERE cannot reduce that prerequisite.
+  Preserve the fixed pin and diagnose the charged structure; do not repeat those
+  variants or substitute another build. SQL `query.budget_exceeded` is a separate executor limit; use EXPLAIN
   or a more selective query when it can preserve the requested claim.
 - Workspace admission: heavy data reads wait for CLI-owned slots, with a
   30-second admission bound as well as the caller's deadline. Let competing
