@@ -56,6 +56,10 @@ process creation/build/runtime/owner/nonce/request，并包含递增序号、时
 精确字节的 algorithm SHA256。内容摘要不取代身份校验；game time 与 host clock
 不可直接比较，freshness 必须由原生协议的递增采样和有界观察规则判定。
 
+用户更新后的单请求源码上限为 1 MiB（1048576 字节），header 和独立控制区另计；
+结果仍为独立的 512 KiB 合同。实际生产能力须以已实现 contract/协商为准，
+当前 3.1.1 不因方案修改而获得 1 MiB 能力，Skill 不能提前发送超限内容。
+
 同一进程只允许一个数据 writer、一个 outstanding business request。
 接收、执行、结果 success/fail、结果落盘、准确 ACK、runtime release 是不同事实。
 无论业务 success 或 fail，只有对应结果已验证落盘、准确 ACK 与 released 已确认，
@@ -68,6 +72,12 @@ cancel、close、ack 使用独立控制通道和自己的有界恢复资格，�
 锁挡住取消和关闭；控制 writer 只能写自己的地址集合，不能借此接管数据区或
 绕过外来 owner。当前版本仍遵守其现有 driver 门禁。重复控制只收敛原事务，
 不重复未知业务效果。
+
+连续命令复用固定 arena。完成后的源码、编译 closure、执行环境与受管回调必须
+解除引用，已 ACK 的完整结果释放；addon 不保留每个命令的完整历史。Skill 解释
+内存时须分开 payload 容量、Lua 布局开销、GC 前临时峰值和探针自身副作用；
+不能以“140 次写入”直接算成 140 份 mailbox。连续 140/1000 条的保留量和峰值
+属于后续真实验收，不把有界设计当作已无泄漏的证据。
 
 sendbox ready 与新鲜 heartbeat 计划替代颜色采样作为输入就绪证据。移除颜色路径
 必须等能力协商、原生检查、失败语义与跨 build 验收通过；目前 Skill 仍遵守现有

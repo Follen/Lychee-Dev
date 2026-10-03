@@ -12,7 +12,7 @@
 
 推荐第一版采用：
 
-1. 一个当前业务请求；一个预分配、固定结构、完整容纳 262144 字节源码的数值请求区。数据用 uint32 打包，每个数字保存 4 字节。按 64 个 4 KiB 分片组织，分片只占本请求自己的固定位置。
+1. 一个当前业务请求；一个预分配、固定结构、完整容纳 1048576 字节（1 MiB）源码的数值请求区。数据用 uint32 打包，每个数字保存 4 字节。按 256 个 4 KiB 逻辑分片组织，分片只占本请求自己的固定位置；它们不是业务槽，也不规定必须各自分配一个 Lua 表。
 2. 独立的、定长的控制区，至少分开 bind/resume、commit、cancel、close、result_ack、reload、lease 七条控制 lane。close 不等待 cancel lane 腾空，cancel 不等待业务请求结束。
 3. sendbox 发布不可变状态记录、独立控制回执、prepare challenge、业务终态清单及结果页。明确 ready，并同时公开 transportReady、businessReady、controlReady。
 4. addon 在明确启用后使用有界轮询；私有状态每次接收和真正执行前重新验证。禁用时没有轮询、事件、计时器或动画工作。
@@ -37,7 +37,7 @@
 | 正例消费区间 consumed slots 为 15→15 | 数据传输及一次定时消费不需要追加 LoD；初始化和结果生命周期仍使用现有 LoD |
 | 原 reload 恢复后旧 namespace 不存在，旧身份 inspect 拒绝且 writes=0 | 这次 reload 后旧实验身份未被重新当作当前写入资格 |
 
-128 字节的宿主发布耗时为单次样本 1502 ms，含根定位、反复 guards 和 journal；142 次写入、110954 次具名读取、1873824 字节具名读取。它不是消费者延迟、吞吐量基准，也不能线性外推 256 KiB 的生产耗时。消费者刻意等待了 45 秒。
+128 字节的宿主发布耗时为单次样本 1502 ms，含根定位、反复 guards 和 journal；142 次写入、110954 次具名读取、1873824 字节具名读取。它不是消费者延迟、吞吐量基准，也不能线性外推新目标 1 MiB 的生产耗时。消费者刻意等待了 45 秒。
 
 ### 源码事实
 
@@ -129,7 +129,7 @@ LycheeDevInternal.Mailbox
   inbox                                  仅宿主写 number payload
     request
       manifest                           定长数字字段，当前业务元信息
-      frames[1..64]                      每帧定长 header + 1024 uint32 words
+      frames[1..256]                     每逻辑帧定长 header + 1024 uint32 words
     control
       bindResume                         bind/resume/repair，小型、独立发布
       commit
@@ -152,7 +152,9 @@ LycheeDevInternal.Mailbox
 
 原型每个字节一个 number；新方案每个 number 存一个 uint32，按 little-endian 展开成 4 字节。保持数值范围 0..4294967295，binary64 可精确表示，不使用 52/53 位打包，不把 64 位整数塞进一个 double。
 
-最多 65536 个 payload number，分为 64 个固定 4 KiB 片。若经独立验证的数组布局仍为每个 TValue 24 字节，单份 payload 存储约 1.5 MiB；这只是按布局计算的 payload 存储量，不包含 table、header、私有源码、编译对象、结果及 allocator 开销。禁止把它当成实测内存峰值。
+最多 262144 个 payload number，分为 256 个固定 4 KiB 逻辑片。若经独立验证的数组布局仍为每个 TValue 24 字节，单份 payload 存储为 262144×24=6291456 字节，即 6 MiB；这只是按布局计算的 payload 存储量，不包含 table、header、私有源码、编译对象、结果及 allocator 开销。故障同时保留 active+retiring 两份时，仅 payload 就为 12 MiB。禁止把这些估算当成实测内存峰值。
+
+逻辑分片是传输/校验/CPU 工作粒度，不是独立业务生命周期或 GC 单位。底层可使用一份固定数组，按 offset 分片，也可使用经 profile 验证的固定分块数组；实际布局须统一进 layoutId 并单独验证，不能临时混用。两种布局都必须由同一 arena 的强引用图保留全部 cells。单片结构异常按整代 arena 故障处理，不在旧地址单独补造它。
 
 每个固定 frame 有自己的 publication stamp、request ID/sequence、index、offset、byteCount 和 SHA256。分片 ACK 说明该片已复制校验，可继续写**同一请求的下一个未使用片**；它不允许覆盖这个已接收片，也不允许开始第二个请求。
 
@@ -344,14 +346,14 @@ INTENT_DURABLE -> TRANSFERRING -> PREPARED_OBSERVED
 | 项目 | 候选上限 |
 | --- | --- |
 | 当前业务 | 1；业务排队数 0 |
-| 源码 | 262144 字节，64×4096 字节片 |
+| 源码 | 1048576 字节（1 MiB），256×4096 字节逻辑片；控制区/header 另计 |
 | 每 lane 控制内容 | 1024 字节以内；独立当前记录 + 固定回执 |
 | 结果 | 沿用 512 KiB、深度 32、条目 32768 |
 | 结果页 | 32×16 KiB |
 | 当前未确认结果 | 1；不能被下一结果覆盖 |
 | 已释放业务 tombstone | 最后 1 个准确摘要 + session/request sequence 高水位 |
 | 控制历史 | 每 lane 当前/最后终态记录，有固定总条数；旧序号只拒绝，不重执行 |
-| host transfer budget | 单次业务默认 120 秒、不可由 resume 自动刷新 |
+| host transfer budget | 请求创建前声明并固定的有限预算；1 MiB 的默认值和硬上限待全尺寸性能验收定稿，不沿用未验证的 120 秒吞吐假设；resume 不刷新 |
 | 执行业务预算 | 1..120 秒；仍是合作式限制，不是同步抢占 |
 | cancel / close | 各自独立有限预算，建议 15/30 秒；不继承已耗尽业务预算 |
 
@@ -360,6 +362,29 @@ INTENT_DURABLE -> TRANSFERRING -> PREPARED_OBSERVED
 sendbox 页在 RESULT_ACK 前保持可读取的不可变版本。宿主按 manifest 中固定 page index、长度、page SHA256 逐页验证，最后验证完整 result SHA256；写临时文件、Sync、原子登记归档和 journal 完成后才 ACK。ACK 必须引用准确 request/result digest，不能是一个无身份的 ack=true。
 
 主机故障后 addon 最多保留一个完整结果。保留超时可以停止轮询、撤销新执行资格、进入 orphaned/quarantined，但不能为了空出队列自动丢结果并开始新业务。内存压力时明确拒绝新工作；只能在已确认 release、runtime 消亡或用户明确处置未知工作的路径上退役。
+
+### 连续命令的内存保留合同
+
+140 条顺序命令必须复用同一份固定 arena，不能创建 140 份邮箱、不能按 request ID 在 Lua 中永久累积源码/结果/执行对象。固定数值 payload 原位覆盖不创建新的 Lua 对象引用；新的源码字符串、哈希工作区、编译 closure、执行环境和结果是当前请求的临时对象，必须有明确释放引用的时点。
+
+| 对象 | 最多强保留 | 正常退役动作 |
+| --- | --- | --- |
+| 外部可写 arena | 正常 1 份；故障最多 active+retiring 共 2 份 | 正常请求之间原位复用；旧故障代只在全部 writer 停稳后解除根引用 |
+| 当前业务源码/片副本/hash 状态/编译 closure 与环境 | 只属于 1 个未退役业务；不建历史列表 | 不再用于校验、准备或执行后解除引用；最迟在执行静止和终态 cleanup 时释放 |
+| Timer/event/受管回调/cleanup 闭包 | 单个当前执行的有界资源集合 | 正常或取消收尾时注销/取消并断开 payload 引用；未能清理则 resourcesReleased=false，阻止下一业务 |
+| 当前完整结果及分页 | 1 份，仍按 512 KiB 上限；共享内容不无谓复制 | 已验证 RESULT_ACK 后去掉结果对象/页引用，再发布仅含摘要的 RELEASED |
+| 私有 operation ledger | 当前请求 1 条 + 最后 released 摘要 1 条 + 单调高水位 | 退役后去掉源码、closure、结果和资源引用；旧请求只按高水位拒绝，不保留所有历史 |
+| 控制回执与 sendbox 快照 | 按 lane 固定当前/最后记录 | 新快照替换旧快照，不保留 heartbeat/status 历史链 |
+
+CLI 磁盘保存完整历史、源码和结果；addon 只保存恢复当前请求和拒绝旧消息所需的有界状态。先形成独立、有界的结果/诊断 wire 快照，再断开原始返回树、错误对象/stack、源码、编译 closure、环境和日志闭包的引用；快照不能通过函数/对象引用暗中反向保留整个执行环境。编码失败产生独立的小型失败快照，也清理无用原对象。终态后仍未 ACK 时仅保留完整快照及必要身份元信息，不为了方便 resume 继续强留已经无用的执行对象。故障中的私有执行/结果仍独立保活，不能为压低内存破坏第 14 节的恢复证据。
+
+去重只保留固定摘要与高水位，不创建随命令/session 数量增长的 ever-seen ID 集合、控制历史数组或已关闭 session 映射。对已退役旧序号/旧 session 拒绝，不需要保存它们的所有明细。
+
+去掉强引用不等于内存立刻归零：自然/增量 GC 尚未运行、分配器保留页、Lua 临时拼接都会造成波动；不能每条命令强制 full GC 来掩盖引用泄漏。生产路径按有界工作片段自然运行，离线/研究验收可在测量检查点显式 GC 以区分临时垃圾和长期保留。构建完整源码或结果不能每片反复拼接累计前缀；需要测试 concat/序列化时的临时峰值，不能用结果大小代替峰值内存。
+
+1 MiB 是源码字节数上限，不是执行内存预算。这里约束的是通信与受管执行资源，不是任意探针对游戏全局的所有副作用。探针主动把大表/函数写到全局、注册未受管回调或修改第三方插件状态，可以造成另外的内存增长；CLI/Lua 代码没有因此获得隔离 sandbox。需要把这类增长与 transport 开销分开记录，不能承诺任意 140 条代码都占相同内存或全游戏总内存不会增长。
+
+验收至少比较连续 1、10、140、1000 条后的空闲保留量、自然 GC 周期、检查点 GC 后的可达对象与同基线增量、最大请求期间峰值、最大结果和故障双 arena 峰值。使用相同输入分布/固定业务，检查源码、closure、timer/callback、result page 和 ledger 条数：退役后不能随命令数增长。GC 后保留量应在由 layout/allocator 实测确定的范围内达到平台，而不是要求操作系统进程工作集每次相等。不要把一次总内存读数当作归属证明。
 
 ## 12. Cancel、disconnect 和跨 CLI 控制
 
@@ -553,15 +578,17 @@ Supervisor 自身也丢失时没有可靠自修复执行者。host 只能观察 
 
 推荐先复用已有能力证据中的 C_Timer.NewTimer，单个自重排 scheduler；不假定尚未验证的 NewTicker。在 callback 内总是先处理固定数量控制，再做最多一个业务工作片段，最后根据状态排下一次；不并排创建无界 timer。
 
-候选节奏：启用未绑定 500 ms；绑定空闲 200 ms；有传输/prepare 工作 50 ms；heartbeat 最多每秒一个完整记录，状态变化可立即发布。暂停/低帧率不能补跑累计 N 次 callback。候选工作片段上限为 512 个 uint32 复制或 4 个 SHA block，并另设 0.5 ms 软 CPU 目标；具体阈值以 real-client 测量收敛，软目标不是任何硬件上的硬实时保证。
+研究起点节奏：启用未绑定 500 ms；绑定空闲 200 ms；有传输/prepare 工作 50 ms；heartbeat 最多每秒一个完整记录，状态变化可立即发布。暂停/低帧率不能补跑累计 N 次 callback。研究起点工作片段上限为 512 个 uint32 复制或 4 个 SHA block，并另设 0.5 ms 软 CPU 目标；具体阈值以 real-client 测量收敛，软目标不是任何硬件上的硬实时保证。
+
+这些起点值不是 1 MiB 正式吞吐合同：每 50 ms 只计算 4×64 字节 SHA，理论处理速率仅 5 KiB/s，单遍 1 MiB 就约 204.8 秒，尚未计双层 hash、复制、WPM 和 journal，不能与 120 秒总传输预算同时承诺。全尺寸验收必须共同定稿有硬上限的每 callback 批次数/调度间隔和有限传输预算，记录控制延迟与 CPU 成本；不可只扩大总超时掩盖不可接受延迟，也不能提高批次却取消 CPU/控制预算。执行预算独立保持 1..120 秒，传输扩容不延长执行预算。
 
 只查少量 publish stamps 时不哈希整块 arena；只在新准确 generation 出现后处理对应固定片。源码/结果 hash 和序列化均可分段；compile 和用户同步代码无法靠这个 scheduler 分段，单独列为阻塞风险。
 
-宿主性能必须单独设计和测量。不能为 65536 个数值每次遍历整个大表并完整检查全部 cells，那会产生平方级工作。采用已经验证的固定分块数组 profile，按 frame 解析有界路径、每次具体 WPM 核对目标 tag/secret/页面和当前 generation；frame 前后做完整身份/内容验证。数组 offset/stride 本轮没有实机证据，不能猜测后投入使用。
+宿主性能必须单独设计和测量。不能为 262144 个数值每次遍历整个大表并完整检查全部 cells，那会产生平方级工作。采用已经验证的固定数组或分块数组 profile，按 frame 解析有界路径、每次具体 WPM 核对目标 tag/secret/页面和当前 generation；frame 前后做完整身份/内容验证。数组 offset/stride 本轮没有实机证据，不能猜测后投入使用。
 
 可用“一份完整 frame 写入意图先 Sync，描述所有允许字段/值/顺序”的方式替代每 word 一次意图 Sync；每个实际写入仍记录准确 outcome，frame 完成后 Sync。进程崩溃导致尚未持久化的个别 outcome 丢失时，整个未确认 frame 保守归为 partial/unknown；不借批量日志减少不确定性记录。不得把连续 TValue 连同 tag/header 一起 WPM 以节省系统调用。这个优化必须通过 crash 切点测试，尚未实现。
 
-262144B 是必须覆盖的目标源码合同，不是未经测量就承诺现有写预算能完成的默认值。先在 16/64 KiB 等明确实验能力上测量 guard calls、WPM 次数、journal Sync、CPU、内存和完整 wall time，再验证全尺寸。研究阶段更低能力必须 capability 明示并对超限返回错误；不能无声截断。未满足正式源码合同则阻止发布，不以保留或回退 LoD 补齐能力。
+1048576B（1 MiB）是用户更新后的目标源码合同，取代本方案先前的 256 KiB 上限，不是未经测量就承诺现有写预算能完成的默认值。先在 16/64/256 KiB 等明确实验能力上测量 guard calls、WPM 次数、journal Sync、CPU、内存和完整 wall time，再验证 1 MiB 全尺寸。研究阶段更低能力必须 capability 明示并对超限返回错误；不能无声截断。未满足正式源码合同则阻止发布，不以保留或回退 LoD 补齐能力。
 
 ### 明确 ready 的定义
 
@@ -684,7 +711,7 @@ probe 已结束且规定清理完成后立即隐藏；仅等待结果下载、�
 
 | 方案 | 优点 | 代价/边界 | 推荐 |
 | --- | --- | --- | --- |
-| 完整固定请求 arena + 独立控制 lanes | 最直接满足 pending 不覆盖；易解释最大源码和恢复；只一个请求 | 固定内存约 1.5 MiB payload 起，仍需大量 8 字节写入与新数组布局验证 | v1 推荐研究方向 |
+| 完整固定请求 arena + 独立控制 lanes | 最直接满足 pending 不覆盖；易解释最大源码和恢复；只一个请求 | 若 TValue 为 24B，固定 payload 6 MiB 起，故障双份 12 MiB；仍需大量 8 字节写入与新数组布局验证 | v1 推荐研究方向 |
 | 两个小 bank 流式传输 | 常驻内存较小，可传大对象 | frame ACK 后覆盖的额外语义、重组/重传/ABA复杂，不能叫业务ACK | 性能证据需要时再评估 |
 | 一个无限长字符串，由宿主改 pointer/length | 看似少量写入 | 改 GC 引用、布局、barrier 和分配，越出已有验证 | 拒绝 |
 | 只改 commit 标志、假定 8B 原子 | 实现少 | 未证明 WPM/观察原子与对象 lifetime；无法抵抗 reload | 拒绝 |
@@ -714,7 +741,7 @@ P2/P3 不把研究 profile 自动加入发行 allowlist。完整接受一个新 
 | --- | --- | --- |
 | 数值 codec | uint32 0/max、64位 hi/lo、尾 word、错误 tag/secret/NaN | 精确字节一致；任何非预期类型在写前拒绝 |
 | SHA256 | golden vectors、完整 header+source/result、错误字段/长度 | Go/Lua 相同；影响业务的 header 变化都被发现 |
-| 分片 | 1B、4095/4096/4097B、262144B、重复/缺失/乱序/冲突 | 完整私有请求才 prepared；分片ACK不准许新业务覆盖 |
+| 分片 | 0/1B、4095/4096/4097B、1048575/1048576/1048577B、重复/缺失/乱序/冲突 | 0B 有明确准入语义、超上限拒绝；合法完整私有请求才 prepared；分片ACK不准许新业务覆盖 |
 | 大结果 | 0/1/16KiB边界/512KiB、页丢失/乱序/坏hash/编码失败 | 只有完整验证落盘才ACK；失败结果保持诚实 |
 | StopWait | 当前 receiving/prepared/running/result_pending 时提交新请求 | 全部拒绝，不改旧内容，不生成隐式队列 |
 | Commit | prepared challenge错误/过期、duplicate commit、nonce/digest变更 | 准确执行一次或拒绝；unknown不自动换attempt |
@@ -726,7 +753,7 @@ P2/P3 不把研究 profile 自动加入发行 allowlist。完整接受一个新 
 | GC负例 | weak表、断private root、public替换、rehash、shape变化 | 写前拒绝或诚实unknown；不对旧地址回滚/猜测修复 |
 | GC重建 | writer停稳后实际丢arena、控制区丢失、各业务阶段、ledger丢失 | 新代重定位；仅not_started可重传；已执行不重跑；旧回调不完成新请求 |
 | Lifetime | 禁用/重启bridge、logout/reload/进程退出与WPM交错 | 明确已能拒绝的切点和未能消除的最后窗口；不写“零风险”结论 |
-| 保留上限 | 长压力多轮、结果无人ACK、lease失效、反复enabled/off | arena和结果上限固定，无历史无限增长；无隐式结果丢弃 |
+| 保留上限 | 顺序1/10/140/1000条、最大请求/结果、无人ACK、lease失效、反复enabled/off | arena/result/ledger/回调数量有界；退役后源码/closure不强留；GC后无按命令数增长；无隐式结果丢弃 |
 | 多实例 | 同exe/hash两个PID、PID复用、不同角色、多安装 | 准确进程创建实例隔离，错误目标零写入 |
 | 跨build | Retail/Classic/Titan分别，未知hash/profile | 独立证据；未知拒绝；Forever仍非默认验收对象 |
 | 登录 | 未进角色、角色选择、进入/离开世界、actorsecret/缺失 | 不伪造GUID/ready，不盲激活；host-only退出始终可用 |
