@@ -42,15 +42,6 @@ local function start(trigger)
     started = true
     local registered, registrationFailure = ns.Controls.Register()
     if not registered then ns.Startup.commandFailure = registrationFailure end
-    local receiverRegistered, receiverFailure
-    if ns.SlotRuntime then receiverRegistered,receiverFailure=ns.SlotRuntime.Register()
-    else receiverRegistered,receiverFailure=ns.Receiver.Register() end
-    if not receiverRegistered then ns.Startup.receiverFailure = receiverFailure end
-    if ns.StartupBeacon then ns.StartupBeacon.Arm() end
-    if registered and not ns.SlotRuntime then
-        local resumed, resumeFailure = ns.Reentry.Start(loader)
-        if not resumed then ns.Startup.resumeFailure = resumeFailure end
-    end
     return true
 end
 
@@ -61,16 +52,12 @@ loader:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name ~= ADDON_NAME then return end
     -- One-shot: the name-matched ADDON_LOADED owns startup, success or not;
     -- PLAYER_LOGIN is the fallback trigger when that event never matched.
-    if ns.SlotRuntime then
-        if start(event) then
-            -- Actor identity can be unavailable during ADDON_LOADED. The
-            -- existing one-shot loader owns the one PLAYER_LOGIN retry.
-            local ok=ns.SlotRuntime.Start()
-            if ok or event=="PLAYER_LOGIN" then self:UnregisterAllEvents();self:SetScript("OnEvent",nil) end
+    if start(event) then
+        local ok, reason = ns.DuplexRuntime.Enable()
+        if ns.Persistence.BridgeEnabled() and not ok then ns.Startup.transportFailure = reason end
+        if ok or not ns.Persistence.BridgeEnabled() or event == "PLAYER_LOGIN" then
+            self:UnregisterAllEvents()
+            self:SetScript("OnEvent", nil)
         end
-    else
-        self:UnregisterAllEvents()
-        self:SetScript("OnEvent", nil)
-        start(event)
     end
 end)

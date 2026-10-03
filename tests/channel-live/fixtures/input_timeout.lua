@@ -1,3 +1,0 @@
-local probe=...
-assert(probe:Async(5))
-assert(probe:ProtectInput(1))

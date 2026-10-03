@@ -47,8 +47,8 @@ was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata
 Python entrypoints to make a documented example work.
 
 Before every live call that may drive the game, run `doctor` from the same
-project context and workspace. This includes connect, execute, resume, reload
-(including fallback), cancel and disconnect; a previous successful check does
+project context and workspace. This includes connect, execute, resume, reload,
+cancel and disconnect; a previous successful check does
 not replace the next call's check. Read [live doctor](references/live-doctor.md)
 for the supported invocation, its current limits and recovery handling. Read-only
 status/history do not need this drive preflight; source/data work keeps its own
@@ -76,7 +76,7 @@ can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-The CLI owns keys, memory, optical readiness, slots and journals. Follow its
+The CLI owns duplex memory publications, result integrity and journals. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
 work does not use the old OP/BTP ACK/finish/hide sequence.

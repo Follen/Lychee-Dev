@@ -52,7 +52,7 @@ func TestHelpAndDescribeExposeTheImplementedContract(t *testing.T) {
 		t.Fatalf("describe command count = %d, want %d", len(describedCommands), len(commandContracts))
 	}
 
-	for _, args := range [][]string{{"live", "run", "--help"}, {"live", "resume", "--help"}, {"source", "query", "--help"}} {
+	for _, args := range [][]string{{"live", "execute", "--help"}, {"live", "resume", "--help"}, {"source", "query", "--help"}} {
 		response, code := invoke(t, append(args, "--format=json")...)
 		if code != 0 || !response.OK {
 			t.Fatalf("%v: code=%d response=%+v", args, code, response)
@@ -71,7 +71,7 @@ func TestHelpAndDescribeExposeTheImplementedContract(t *testing.T) {
 	if got := stringList(t, resume["flags"]); len(got) != 5 || got[0] != "--home <root>" || got[1] != "--format text|json|jsonl" {
 		t.Fatalf("live resume flags = %#v", got)
 	}
-	if got := stringList(t, resume["arguments"]); len(got) != 1 || got[0] != "<operation-id>" {
+	if got := stringList(t, resume["arguments"]); len(got) != 1 || got[0] != "<connection-id>" {
 		t.Fatalf("live resume arguments = %#v", got)
 	}
 }
@@ -289,11 +289,8 @@ func TestLiveCommandFlagAdmissionComesFromItsContract(t *testing.T) {
 	}
 
 	for _, args := range [][]string{
-		{"live", "run", "OP-loaded", "--home", "root", "--help", "--format=json"},
 		{"live", "reload", "--session", "SESSION", "--request", "reload-1", "--home", "root", "--help", "--format=json"},
-		{"live", "probe", "load", "--session", "SESSION", "--request", "load-1", "--probe", "probe-name", "--account", "ACCOUNT", "--home", "root", "--help", "--format=json"},
 		{"live", "bugs", "--session", "SESSION", "--request", "bugs-1", "--count", "10", "--account", "ACCOUNT", "--home", "root", "--help", "--format=json"},
-		{"live", "ack", "OP-verified", "--home", "root", "--help", "--format=json"},
 		{"live", "resume", "OP-existing", "--home", "root", "--help", "--format=json"},
 	} {
 		response, code := invoke(t, args...)
@@ -303,7 +300,7 @@ func TestLiveCommandFlagAdmissionComesFromItsContract(t *testing.T) {
 	}
 
 	for _, flag := range []string{"--installation=other", "--pid=7", "--character=Other", "--realm=Other", "--nonce=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--snapshot=PIN-other", "--region=window"} {
-		response, code := invoke(t, "live", "run", "OP-loaded", flag, "--format=json")
+		response, code := invoke(t, "live", "cancel", "CON-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", flag, "--format=json")
 		if code != 2 || response.OK || response.Error == nil || !strings.Contains(response.Error.Message, flag[:strings.IndexByte(flag, '=')]) {
 			t.Fatalf("live run accepted %s: code=%d response=%+v", flag, code, response)
 		}

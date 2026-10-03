@@ -1,11 +1,4 @@
--- Automation workbench tests. Page cases ported from the legacy
--- UITests/AutomationTests automation block (row rendering over fixture
--- records, newest auto-select, 48 KB report display cap without payload
--- mutation, two-click clear that keeps protected/pending records) plus
--- bridge-machinery cases: status derivation from fixture queue/report records
--- and execute routing through the shared ProbeQueue/ProbeRunner functions
--- (call counting proves no second executor exists).
-
+-- Read-only duplex projection and workbench rendering tests.
 local frameCount = 0
 
 local function NewRegion(name)
@@ -283,363 +276,54 @@ local function LoadAddonFile(relativePath, namespace)
     return LoadFile(relativePath)("Lychee Dev", namespace)
 end
 
--- ---------------------------------------------------------------------------
--- Phase A: status derivation over fixture bridge records, and Collect()
--- discovery from the queue registry, the report store and a reentry ticket.
--- ---------------------------------------------------------------------------
-local nsA = {}
-LoadAddonFile("Core/Locale.lua", nsA)
-LoadAddonFile("Core/Locale_enUS.lua", nsA)
-
-local bridgeFixture = {
-    ["req-queued"] = { absent = true, reloadScope = { codeBytes = 3, codeAdler32 = "deadbeef" } },
-    ["req-loaded"] = { reportedReason = "probe_not_reported", verifyReason = "probe_still_retained" },
-    ["req-reported"] = { readReceipt = '{"kind":"reported","sequence":7}', readBody = '{"probeStatus":"completed"}' },
-    ["req-acked"] = { ackReceipt = '{"kind":"acknowledged"}' },
-    ["req-cleared"] = { reportedReason = "probe_not_reported", absent = true, reloadReason = "queue_request_missing" },
-    ["req-broken"] = { readReason = "report_invalid_store" },
-    ["req-unbound"] = { reportedReason = "probe_not_reported", verifyReason = "session_unbound" },
-}
-
-local function FixtureOf(requestId)
-    return bridgeFixture[requestId] or {}
-end
-
-nsA.ReportStore = {
-    Read = function(requestId)
-        local fixture = FixtureOf(requestId)
-        if fixture.readReceipt then
-            return fixture.readReceipt, fixture.readBody
-        end
-        return nil, fixture.readReason or "report_unavailable"
-    end,
-    Acknowledged = function(requestId)
-        local fixture = FixtureOf(requestId)
-        if fixture.ackReceipt then
-            return fixture.ackReceipt
-        end
-        return nil, "report_acknowledgement_unavailable"
-    end,
-}
-nsA.ProbeRunner = {
-    Reported = function(requestId)
-        local fixture = FixtureOf(requestId)
-        return nil, fixture.reportedReason or "probe_not_reported"
-    end,
-    VerifyAbsent = function(requestId)
-        local fixture = FixtureOf(requestId)
-        if fixture.absent then
-            return true
-        end
-        return nil, fixture.verifyReason or "probe_still_retained"
-    end,
-}
-nsA.ProbeQueue = {
-    ReloadScope = function(requestId)
-        local fixture = FixtureOf(requestId)
-        if fixture.reloadScope then
-            return fixture.reloadScope
-        end
-        return nil, fixture.reloadReason or "queue_request_missing"
-    end,
-}
-nsA.ProbeDefinitions = {
-    schema = "lycheedev.queue.v1",
-    entries = {
-        ["req-queued"] = { codeBytes = 3, codeSHA256 = string.rep("a", 64), codeAdler32 = "deadbeef" },
-        ["req-loaded"] = { codeBytes = 5, codeSHA256 = string.rep("b", 64), codeAdler32 = "cafebabe" },
-    },
-}
-nsA.Persistence = {
-    Bridge = function()
-        return {
-            reports = {
-                ["req-reported"] = { receipt = '{"kind":"reported","sequence":7}', body = '{"probeStatus":"completed"}' },
-            },
-            reentry = { requestId = "req-acked" },
-        }
-    end,
-}
-
-LoadAddonFile("Modules/AutomationView.lua", nsA)
-local viewA = nsA.AutomationView
-
--- Retained code is not necessarily idle: surface the executor's actual phase.
-local runnerPhase
-nsA.ProbeRunner.State = function(requestId)
-    if requestId == "req-loaded" then return runnerPhase end
-end
-for phase, expected in pairs({ running="running", settling="finalizing", quarantined="unavailable", unresolved="unavailable", loaded="loaded" }) do
-    runnerPhase = phase
-    assert(viewA.DeriveStatus("req-loaded") == expected, "retained " .. phase .. " misreported as loaded")
-end
-runnerPhase = nil
-local changes = 0
-viewA.SetChangeHandler(function() changes=changes+1 end)
-viewA.Changed()
-assert(changes == 1, "visible automation view missed executor change")
-viewA.SetChangeHandler(nil)
-viewA.Changed()
-assert(changes == 1, "hidden automation view retained a subscription")
-viewA.SetChangeHandler(function() error("cosmetic refresh failure") end)
-assert(pcall(viewA.Changed), "view error escaped into executor")
-viewA.SetChangeHandler(nil)
-
-assert(viewA.HasQueueRegistry(), "AutomationView did not capture the queue registry")
-
-local expectedStatuses = {
-    ["req-queued"] = "queued",
-    ["req-loaded"] = "loaded",
-    ["req-reported"] = "reported",
-    ["req-acked"] = "acknowledged",
-    ["req-cleared"] = "cleared",
-    ["req-broken"] = "unavailable",
-    ["req-unbound"] = "unavailable",
-}
-for requestId, expected in pairs(expectedStatuses) do
-    local status, errorCode = viewA.DeriveStatus(requestId)
-    assert(status == expected,
-        requestId .. " derived status " .. tostring(status) .. " instead of " .. expected)
-    if expected == "unavailable" then
-        assert(type(errorCode) == "string" and errorCode ~= "",
-            requestId .. " did not expose its bridge error code")
-    end
-end
-local brokenStatus, brokenError = viewA.DeriveStatus("req-broken")
-assert(brokenError == "report_invalid_store", "req-broken exposed the wrong bridge error code")
-local unboundStatus, unboundError = viewA.DeriveStatus("req-unbound")
-assert(unboundError == "session_unbound", "req-unbound exposed the wrong bridge error code")
-
-viewA.Collect()
-local orderA = viewA.GetOrder()
-assert(#orderA == 4, "Collect did not discover exactly the queue/report/reentry records")
-assert(orderA[1] == "req-reported", "Collect did not order the newest record first")
-assert(viewA.GetRecord("req-queued").status == "queued", "queued record status was not derived")
-assert(viewA.GetRecord("req-queued").codeBytes == 3, "queued record lost its code digest summary")
-assert(viewA.GetRecord("req-loaded").status == "loaded", "loaded record status was not derived")
-assert(viewA.GetRecord("req-reported").status == "reported", "reported record status was not derived")
-assert(viewA.GetRecord("req-reported").reportBody == '{"probeStatus":"completed"}',
-    "reported record did not carry its stored body")
-assert(viewA.GetRecord("req-reported").probeStatus == "completed",
-    "reported record did not surface probeStatus")
-assert(viewA.GetRecord("req-acked").status == "acknowledged", "reentry record status was not derived")
-assert(viewA.GetRecord("req-cleared") == nil, "Collect invented a record nobody reported")
-
-print("automation bridge derivation tests passed")
-
--- ---------------------------------------------------------------------------
--- Phase B: page rendering over fixture records with a counting bridge.
--- ---------------------------------------------------------------------------
-local nsB = {}
-LoadAddonFile("Core/Locale.lua", nsB)
-LoadAddonFile("Core/Locale_enUS.lua", nsB)
-LoadAddonFile("UI/Theme.lua", nsB)
-LoadAddonFile("UI/Widgets.lua", nsB)
-local L = nsB.L
-
-local loadCalls, dispatchCalls, runCount = 0, 0, 0
-local loadFailure
-local readCalls = 0
-local receiptShowCalls, receiptHideCalls = 0, 0
-local shownReceipt
-
-nsB.Safety = {
-    IsCombatBlocked = function()
-        return false
-    end,
-    PrintBlocked = function()
-        error("combat refusal must not trigger in this test")
-    end,
-}
-nsB.ProbeQueue = {
-    Load = function()
-        loadCalls = loadCalls + 1
-        if loadFailure then
-            return nil, loadFailure
-        end
-        return '{"kind":"loaded"}'
-    end,
-    ReloadScope = function()
-        return nil, "queue_request_missing"
-    end,
-}
-nsB.ProbeRunner = {
-    -- The only executor in the fixture: anything else that ran probe code
-    -- would show up as runCount drift.
-    Dispatch = function()
-        dispatchCalls = dispatchCalls + 1
-        runCount = runCount + 1
-        return '{"kind":"reported"}'
-    end,
-    Reported = function()
-        return nil, "probe_not_reported"
-    end,
-    VerifyAbsent = function()
-        return true
-    end,
-}
-nsB.ReportStore = {
-    Read = function()
-        readCalls = readCalls + 1
-        return nil, "report_unavailable"
-    end,
-    Acknowledged = function()
-        return nil, "report_acknowledgement_unavailable"
-    end,
-}
-nsB.Persistence = {
-    Bridge = function()
-        return { reports = {} }
-    end,
-}
-nsB.ReceiptView = {
-    Show = function(receipt)
-        receiptShowCalls = receiptShowCalls + 1
-        shownReceipt = receipt
-        return true
-    end,
-    Hide = function()
-        receiptHideCalls = receiptHideCalls + 1
-    end,
-}
-
-LoadAddonFile("Modules/AutomationView.lua", nsB)
-LoadAddonFile("UI/Pages/Automation.lua", nsB)
-local viewB = nsB.AutomationView
-
-assert(not viewB.HasQueueRegistry(), "AutomationView invented a queue registry")
-assert(type(viewB.Load) ~= "function" and type(viewB.Dispatch) ~= "function"
-    and type(viewB.RunCode) ~= "function",
-    "AutomationView exposes a second executor")
-
-local longBody = string.rep("x", 60 * 1024)
-viewB.Observe({
-    requestId = "req-older", kind = "bug_snapshot", status = "acknowledged",
-    observedAt = 1000, errorCode = "boom",
-})
-viewB.Observe({
-    requestId = "req-newer", kind = "lua", status = "queued",
-    observedAt = 2000, codeBytes = 12, codeSHA256 = string.rep("c", 64), codeAdler32 = "deadbeef",
-    protected = true,
-})
-viewB.Observe({
-    requestId = "req-long", kind = "lua", status = "reported",
-    observedAt = 3000, reportBody = longBody, receipt = '{"kind":"reported"}', hasReport = true,
-})
-
-local parent = NewRegion("automationParent")
-local page = nsB.CreateAutomationPage(parent)
+-- Current duplex projection: the page can never execute or acknowledge work.
+local ns={}
+LoadAddonFile("Core/Locale.lua",ns)
+LoadAddonFile("Core/Locale_enUS.lua",ns)
+LoadAddonFile("UI/Theme.lua",ns)
+LoadAddonFile("UI/Widgets.lua",ns)
+LoadAddonFile("Bridge/CaptureWriter.lua",ns)
+local state={phase="idle"}
+ns.DuplexRuntime={Snapshot=function()return {protocol=state}end}
+ns.Safety={IsCombatBlocked=function()return false end,PrintBlocked=function()end}
+LoadAddonFile("Modules/AutomationView.lua",ns)
+local view=ns.AutomationView
+assert(view.Collect()==0)
+local id=string.rep("a",32)
+state={phase="prepared",request={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),requestSeq="9007199254740993"}}
+assert(view.Collect()==1 and view.GetRecord(id).status=="loaded")
+assert(not view.Execute and not view.ShowNotice,"retired execution/QR API returned")
+assert(view.ClearRecords()==0,"unsettled request was hidden")
+LoadAddonFile("UI/Pages/Automation.lua",ns)
+local page=ns.CreateAutomationPage(NewRegion("parent"))
+assert(not page.executeButton and not page.showNoticeButton and not page.hideNoticeButton)
+assert(page.rows[1].requestId==id)
+state.phase="running"
 page:Activate()
-
-assert(#page.rows == 3, "automation page did not build one row per record")
-assert(page.rows[1].requestId == "req-long" and page.rows[1].title:GetText() == L.AUTO_KIND_LUA,
-    "newest row lost its identity or readable purpose")
-assert(page.rows[3].requestId == "req-older", "rows are not ordered newest first")
-assert(not page.metadata:IsShown(),"technical metadata should start collapsed")
-page.detailsButton:Click()
-assert(page.metadata:IsShown() and page.requestValue:GetText()=="req-long","details lost the full request identity")
-page.viewReportButton:Click()
-assert(not page.metadata:IsShown() and page.reportArea:IsShown(),"result tab did not replace details")
-assert(page.rows[1].meta:GetText() == "3000",
-    "row metadata must show the timestamp without repeating its title")
-assert(page.rows[1].status:GetText() == L.AUTO_STATUS_REPORTED,
-    "row status does not render the bridge status label")
-
--- Newest record is auto-selected on refresh.
-assert(page.requestValue:GetText() == "req-long", "newest record was not auto-selected")
-assert(page.statusValue:GetText() == L.AUTO_STATUS_REPORTED, "detail status did not follow the selection")
-assert(not page.executeButton:IsEnabled(), "reported work remained executable")
-
-page.SelectRecord("req-older")
-assert(page.requestValue:GetText() == "req-older", "selecting a record did not refresh the detail pane")
-assert(page.kindValue:GetText() == L.AUTO_KIND_BUG, "detail kind label is wrong")
-assert(page.errorValue:GetText() == "boom", "detail error code is not shown")
-
--- 48 KB report display cap with the visible note, without touching the body.
-local readsBeforeReport = readCalls
-page.SelectRecord("req-long")
-page.viewReportButton:Click()
-local shownReport = page.reportArea.editBox:GetText()
-assert(#shownReport > 48 * 1024 and #shownReport < 60 * 1024,
-    "report view did not bound its displayed text at 48 KB")
-assert(shownReport:sub(-#string.format(L.AUTO_REPORT_DISPLAY_LIMIT, 48))
-        == string.format(L.AUTO_REPORT_DISPLAY_LIMIT, 48),
-    "report view did not append the display-limit note")
-assert(#viewB.GetRecord("req-long").reportBody == 60 * 1024
-        and viewB.GetRecord("req-long").reportBody == longBody,
-    "report view truncated the stored payload")
-assert(readCalls == readsBeforeReport, "report view re-read or rewrote the stored report")
-
--- Notice goes through the one overlay system, read-only.
-page.showNoticeButton:Click()
-assert(receiptShowCalls == 1 and shownReceipt == '{"kind":"reported"}',
-    "Show Notice did not reuse ns.ReceiptView with the stored receipt")
-page.hideNoticeButton:Click()
-assert(receiptHideCalls == 1, "Hide Notice did not call ns.ReceiptView.Hide")
-
--- Execute routes through the shared ProbeQueue/ProbeRunner functions only.
-viewB.Observe({ requestId = "req-exec", kind = "lua", status = "queued", observedAt = 4000 })
-page:Refresh()
-page.SelectRecord("req-exec")
-page.executeButton:Click()
-assert(loadCalls == 1 and dispatchCalls == 1 and runCount == 1,
-    "Execute did not route through ProbeQueue.Load + ProbeRunner.Dispatch exactly once")
-assert(page.errorValue:GetText() == L.NOT_AVAILABLE, "successful execute displayed a phantom error")
-page:Refresh()
-assert(runCount == 1, "refreshing the page executed the probe a second time")
-
--- Honest failure: no invented state when the bridge context is absent.
-viewB.Observe({ requestId = "req-fail", kind = "lua", status = "queued", observedAt = 5000 })
-loadFailure = "session_unbound"
-page:Refresh()
-page.SelectRecord("req-fail")
-page.executeButton:Click()
-assert(loadCalls == 2 and dispatchCalls == 1 and runCount == 1,
-    "a failed load still dispatched the probe")
-assert(page.errorValue:GetText() == "session_unbound",
-    "execute failure did not surface the real bridge error code")
-loadFailure = nil
-
--- Two-click clear keeps protected and pending records.
-page.clearButton:Click()
-assert(page.clearButton.variant == "danger",
-    "first clear click did not switch to the confirmation state")
-assert(viewB.GetRecord("req-older") ~= nil, "first clear click already removed records")
-page.clearButton:Click()
-assert(viewB.GetRecord("req-older") == nil, "clear did not remove an ordinary record")
-assert(viewB.GetRecord("req-exec") == nil, "clear did not remove an ordinary record")
-assert(viewB.GetRecord("req-fail") == nil, "clear did not remove an ordinary record")
-assert(viewB.GetRecord("req-newer") ~= nil, "clear removed a protected record")
-assert(viewB.GetRecord("req-long") ~= nil, "clear removed a record with a pending report")
-
-print("automation page tests passed")
-
--- Execution outcome and report acknowledgement must not share one label.
-for _,outcome in ipairs({"completed","failed"}) do
-    local id="req-outcome-"..outcome
-    viewB.Observe({requestId=id,kind="lua",status="acknowledged",probeStatus=outcome,observedAt=5500})
-    page:Refresh();page.SelectRecord(id)
-    assert(page.rows[1].status:GetText()==(outcome=="failed" and L.AUTO_STATUS_FAILED or L.AUTO_STATUS_SUCCEEDED),
-        "acknowledgement hid execution outcome")
-    assert(page.statusValue:GetText()==L.AUTO_STATUS_ACKNOWLEDGED,"report lifecycle detail was lost")
-    assert(not page.executeButton:IsEnabled(),"historical outcome permitted replay")
+assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_RUNNING)
+local changes=0
+view.SetChangeHandler(function()changes=changes+1 end)
+view.Changed();assert(changes==1)
+view.SetChangeHandler(function()error("cosmetic failure")end)
+assert(pcall(view.Changed))
+view.SetChangeHandler(nil)
+state.phase="terminal";state.terminal={outcome="success",resultSHA256=string.rep("c",64),resultBytes=4,pages=1}
+view.Collect()
+assert(view.GetRecord(id).probeStatus=="completed")
+assert(view.GetRecord(id).status=="reported")
+assert(view.GetReportText(id):find('"resultBytes":4',1,true))
+assert(view.ClearRecords()==0)
+state={phase="idle",released={requestId=id,requestSHA256=string.rep("b",64)}}
+view.Collect();assert(view.GetRecord(id).status=="acknowledged")
+assert(view.GetReportText(id)==nil,"released view retained result manifest")
+assert(view.ClearRecords()==1 and view.Collect()==0)
+for i=1,140 do
+    local nextID=string.format("%032x",i)
+    state={phase="running",request={requestId=nextID,totalBytes=1048576}}
+    view.Collect()
+    assert(view.GetCount()==1 and #view.GetOrder()==1)
+    assert(view.GetRecord(id)==nil,"view retained preceding requests")
 end
-
--- A visible running record refreshes from notifications, without a timer.
-viewB.Observe({ requestId="req-running", kind="lua", status="running", observedAt=6000 })
-viewB.Changed()
-page.SelectRecord("req-running")
-assert(page.statusValue:GetText()==L.AUTO_STATUS_RUNNING and not page.executeButton:IsEnabled(),
-    "running work was displayed as idle or executable")
+assert(not view.GetRecord(view.GetOrder()[1]).reportBody)
 page:Hide()
-viewB.Observe({ requestId="req-running", status="finalizing" })
-viewB.Changed()
-assert(page.statusValue:GetText()==L.AUTO_STATUS_RUNNING, "hidden page continued to refresh")
-page:Show()
-page:Activate()
-assert(page.statusValue:GetText()==L.AUTO_STATUS_FINALIZING and not page.executeButton:IsEnabled(),
-    "reactivated page missed current executor phase")
-nsB.SlotRuntime={}
-local nativePage=nsB.CreateAutomationPage(parent)
-assert(not nativePage.showNoticeButton and not nativePage.hideNoticeButton,
-    "memory transport exposed retired QR notice actions")
+print("duplex read-only workbench, current projection and bounded retention ok")

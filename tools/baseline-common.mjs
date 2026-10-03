@@ -114,38 +114,3 @@ export function parseTAP(text) {
   if (!Number.isFinite(counts.tests) || counts.tests < 1 || Object.values(counts).some(v => !Number.isFinite(v))) throw new Error('Node test summary missing or empty');
   return { ...counts, state: counts.fail || counts.cancelled ? 'failed' : counts.skipped || counts.todo ? 'blocked' : 'passed' };
 }
-
-export function assessLive(run, envelope, spec) {
-  const r = envelope?.result;
-  if (run.error || run.signal || run.code === null) return { state: 'blocked', reason: 'process interrupted; input outcome unknown' };
-  if (envelope?.schema !== 'lycheedev.result.v1') return { state: 'failed', reason: 'missing result envelope' };
-  if (run.code === 6) return { state: 'blocked', reason: 'pending; recover the recorded operation before another case' };
-  if (run.code === 3) return { state: 'blocked', reason: 'client or environment capability unavailable' };
-  const failures = [];
-  const expect = (value, message) => { if (!value) failures.push(message); };
-  expect(run.code === (spec.expectedFailure ? 5 : 0), `unexpected exit ${run.code}`);
-  expect(envelope.ok === !spec.expectedFailure, 'unexpected envelope.ok');
-  expect(/^OP-/.test(envelope.operationId ?? '') && r?.operationId === envelope.operationId, 'operation identity missing or mismatched');
-  expect(r?.goal === 'finished' && r?.complete === true && r?.cleanup === 'complete', 'incomplete cleanup');
-  expect(r?.report?.state === 'verified' && r.report.bodyCapture && r.report.receiptCapture && r.report.sha256, 'missing verified report evidence');
-  expect(r?.display?.state === 'cleared' && r.display.capture, 'missing display clear proof');
-  expect(r?.business?.state === (spec.expectedFailure ? 'failed' : 'passed'), 'unexpected business outcome');
-  const content = r?.report?.content;
-  if (spec.expectedFailure) expect(JSON.stringify(content ?? {}).includes('BASELINE_EXPECTED_FAILURE'), 'expected failure marker absent');
-  else {
-    expect(content?.result?.passed === true && content.result.baseline === spec.id, 'wrong baseline result');
-    expect(content?.acceptedBudgetSeconds === spec.budget, 'budget changed');
-    if (spec.id === 'LIVE-01') expect(content?.result?.sum === 55, 'incorrect sum');
-    if (spec.id === 'LIVE-04') {
-      expect(JSON.stringify(content?.result?.pages) === JSON.stringify(['runner', 'objects', 'events', 'trace', 'diagnostics', 'exports', 'automation', 'about', 'settings']), 'page coverage incomplete');
-      expect(content?.result?.unobstructed === true && content.result.scope === 'character-v1', 'overlay or report scope regression');
-    }
-  }
-  return { state: failures.length ? 'failed' : 'passed', findings: failures };
-}
-
-export function sameLiveEvidence(first, repeated) {
-  const identity = e => [e?.operationId, e?.result?.report?.bodyCapture, e?.result?.report?.receiptCapture,
-    e?.result?.report?.sha256, e?.result?.display?.capture];
-  return identity(first).every(Boolean) && JSON.stringify(identity(first)) === JSON.stringify(identity(repeated));
-}

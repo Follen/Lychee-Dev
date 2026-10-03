@@ -143,7 +143,31 @@ const REQUIRED_RESOURCES = [
   'skill/SKILL.md',
   'addon/Lychee Dev.toc',
 ];
-const EMPTY_PROBE_QUEUE = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
+const RETIRED_PROTOCOL_SOURCES = new Set([
+  'addon/Bridge/Session.lua',
+  'addon/Bridge/MemoryProtocol.lua',
+  'addon/Bridge/InputProtocol.lua',
+  'addon/Bridge/MatrixSymbol.lua',
+  'addon/Bridge/ReceiptView.lua',
+  'addon/Bridge/ReportStore.lua',
+  'addon/Bridge/Investigation.lua',
+  'addon/Bridge/ProbeRunner.lua',
+  'addon/Bridge/ProbeQueue.lua',
+  'addon/Bridge/Reentry.lua',
+  'addon/Bridge/Identity.lua',
+  'addon/Bridge/Receiver.lua',
+  'addon/Bridge/InputSignal.lua',
+  'addon/Bridge/FaultRunner.lua',
+  'addon/Bridge/SlotProtocol.lua',
+  'addon/Bridge/SlotRuntime.lua',
+  'addon/Bridge/InputState.lua',
+  'addon/Bridge/StartupBeacon.lua',
+  'addon/Bridge/ReceiverBindings.lua',
+  'addon/Bridge/Definitions.lua',
+  'addon/Modules/AutomationHistory.lua',
+]);
+
+export function isRetiredSlotSource(name) { return RETIRED_PROTOCOL_SOURCES.has(name); }
 
 /** REL-01 identity: commit + worktree state from VCS, never from the caller's cwd. */
 export function identity({ allowDirty = false, requireTagRef = false, tag } = {}) {
@@ -184,6 +208,7 @@ function stagePayload(stage, resources) {
     for (const file of walkFiles(source)) {
       const name = `${prefix}/${file.name}`;
       if (PAYLOAD_BAN.test(name)) throw new Error(`release.unexpected_payload: ${name}`);
+      if (isRetiredSlotSource(name)) continue;
       const content = readFileSync(file.path);
       const destination = join(stage, 'payload', prefix, ...file.name.split('/'));
       mkdirSync(dirname(destination), { recursive: true });
@@ -930,10 +955,8 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot, develop
         const match = /^package\/payload\/((?:addon|skill|tool\/luals)\/.*)$/.exec(entry.name);
         if (match && !listed.has(match[1])) violations.push(`payload file not in release.json resources: ${match[1]}`);
       }
-      const queue = byName.get('package/payload/addon/Bridge/Definitions.lua');
       const runtimeIdentity = byName.get('package/payload/tool/luals/runtime.json');
       if (runtimeIdentity && !runtimeIdentity.equals(Buffer.from(JSON.stringify(JSON.parse(readFileSync(join(repository, 'release/tools/luals.json'), 'utf8')))))) violations.push('LuaLS runtime identity differs from canonical manifest');
-      if (queue && queue.toString('utf8') !== EMPTY_PROBE_QUEUE) violations.push('payload carries local task blocks: addon/Bridge/Definitions.lua (PKG-05)');
       const source = manifest.correspondingSource;
       if (!source && !developmentOnly) violations.push('release.json missing correspondingSource (licensing closure; npm assembly requires it)');
       if (source && developmentOnly) violations.push('development-only package must omit correspondingSource claim');

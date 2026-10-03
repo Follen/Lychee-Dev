@@ -19,32 +19,16 @@ Core\Execute.lua
 Core\Stores.lua
 Core\Platform.lua
 Core\Persistence.lua
-Bridge\Session.lua
 Core\Controls.lua
 Bridge\CaptureWriter.lua
-Bridge\MemoryProtocol.lua
-Bridge\SlotProtocol.lua
 Bridge\InputProtection.lua
 Bridge\ProbeExecution.lua
-Bridge\InputProtocol.lua
-Bridge\MatrixSymbol.lua
-Bridge\ReceiptView.lua
+Bridge\SHA256.lua
+Bridge\DuplexProtocol.lua
+Bridge\DuplexRuntime.lua
 Bridge\ActivityView.lua
-Bridge\ReportStore.lua
-Bridge\Investigation.lua
-Bridge\ProbeRunner.lua
 Bridge\Definitions.lua
-Modules\AutomationHistory.lua
 Modules\AutomationView.lua
-Bridge\ProbeQueue.lua
-Bridge\Reentry.lua
-Bridge\Identity.lua
-Bridge\ReceiverBindings.lua
-Bridge\StartupBeacon.lua
-Bridge\Receiver.lua
-Bridge\SlotRuntime.lua
-Bridge\InputSignal.lua
-Bridge\InputState.lua
 # --- Event catalogs: all four load; Catalog.lua selects ns.Client's table ---
 Modules\Events\CatalogData_Mainline.lua
 Modules\Events\CatalogData_Mists.lua
@@ -56,7 +40,6 @@ Modules\Events\Monitor.lua
 Modules\ObjectInspector.lua
 Modules\FunctionTrace.lua
 Modules\Diagnostics.lua
-Bridge\FaultRunner.lua
 # --- Workbench UI foundation (Widgets, TreeView, Export popup, Window shell) ---
 UI\Theme.lua
 UI\Widgets.lua

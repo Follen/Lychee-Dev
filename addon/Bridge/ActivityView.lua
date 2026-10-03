@@ -1,84 +1,86 @@
 local _, ns = ...
 
--- Presentation has no input authority. The receiver owns the short input
--- shield; this independent, click-through companion owns only task feedback.
-local frame, receiving, requestId, startedAt, failed, collecting, collectionTimer
-local function clearTimer()
-    if collectionTimer then collectionTimer:Cancel();collectionTimer=nil end
+-- This view reports one fact only: this exact duplex request entered or left
+-- ProbeExecution. Receiving, staging and protection no longer create UI.
+local frame, activeRequest, failed, animationTime = nil, nil, false, 0
+local function valid(id)
+    return not (issecretvalue and issecretvalue(id)) and type(id)=="string" and #id==32 and id:match("^[0-9a-f]+$")~=nil
 end
-local function create()
-    frame = CreateFrame("Frame", nil, UIParent)
-    frame:Hide()
-    frame:SetSize(120, 120)
-    frame:SetFrameStrata("DIALOG")
-    frame:EnableMouse(false)
-    frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 8, -12)
-    local anchor = CreateFrame("Frame", nil, frame)
-    anchor:SetSize(96, 96)
-    anchor:SetPoint("TOP", frame, "TOP", 0, 0)
-    anchor:EnableMouse(false)
-    frame.anchor = anchor
-    frame.logo = frame:CreateTexture(nil, "ARTWORK")
-    frame.logo:SetTexture(ns.Widgets.LOGO_TEXTURE)
-    frame.logo:SetTexCoord(0, 1, 0, 1)
-    frame.label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ns.Theme.SetFont(frame.label, 14, ns.Theme.text)
-    frame.label:SetPoint("TOP", anchor, "BOTTOM", 0, 0)
-    frame:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
+local function hide()
+    if not frame then return end
+    pcall(frame.SetScript,frame,"OnUpdate",nil)
+    pcall(frame.Hide,frame)
 end
-local function anchor() end -- Position belongs to this view, never a receipt.
-local function render()
-    if not receiving and not requestId then
-        if frame then frame:SetScript("OnUpdate", nil); frame:Hide() end
-        startedAt = nil
-        return
-    end
-    if not frame then create() end
-    startedAt = startedAt or GetTime()
-    frame.label:SetText(receiving and ns.L.ACTIVITY_CONNECTING or collecting and ns.L.ACTIVITY_COLLECTING or ns.L.ACTIVITY_PROBE)
-    anchor()
-    local current = ns.Persistence.Current()
-    local reduced = current and current.options and current.options.reducedMotion == true
-    ns.Theme.DrawConnectionBounce(frame.logo, frame.anchor, 96, 0)
-    frame:SetScript("OnUpdate", not reduced and function(self)
-        ns.Theme.DrawConnectionBounce(self.logo, self.anchor, 96, math.max(0, GetTime()-startedAt))
-    end or nil)
-    frame:Show()
+local function reducedMotion()
+    local state=ns.Persistence and ns.Persistence.Current()
+    if state and state.options and state.options.reducedMotion~=nil then return state.options.reducedMotion==true end
+    return ns.Theme.reducedMotion==true
 end
-local function update()
+local function failUI()
+    failed=true;hide()
+end
+local function show(id)
     if failed then return end
-    local ok = pcall(render)
-    if not ok then
-        -- Cosmetic failure cannot interrupt execution or retain an input
-        -- shield. Fence repeated construction attempts for this runtime.
-        failed = true
-        clearTimer()
-        if frame then
-            if frame.SetScript then pcall(frame.SetScript,frame,"OnUpdate",nil) end
-            if frame.Hide then pcall(frame.Hide,frame) end
-        end
+    if not frame then
+        local ok,created=pcall(CreateFrame,"Frame",nil,UIParent)
+        if not ok or not created then failed=true;return end
+        frame=created
+        local okUI=pcall(function()
+            frame:SetSize(120,120);frame:SetFrameStrata("DIALOG");frame:EnableMouse(false)
+            frame:SetPoint("TOPLEFT",UIParent,"TOPLEFT",8,-12)
+            frame.logo=frame:CreateTexture(nil,"ARTWORK");frame.logo:SetTexture(ns.Widgets.LOGO_TEXTURE)
+            frame.logo:SetSize(96,96);frame.logo:SetPoint("TOP",frame,"TOP",0,0)
+            frame.label=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+            ns.Theme.SetFont(frame.label,14,ns.Theme.text);frame.label:SetPoint("TOP",frame.logo,"BOTTOM",0,0)
+        end)
+        if not okUI then failUI();return end
     end
-end
-ns.ActivityView = {
-    Receiving = function(value) receiving = value == true; update() end,
-    Begin = function(id) clearTimer();collecting=false;requestId = id; update() end,
-    Collecting = function(id)
-        clearTimer();requestId=id;collecting=true;update()
-        if C_Timer and C_Timer.NewTimer then collectionTimer=C_Timer.NewTimer(20,function()
-            collectionTimer=nil
-            if requestId~=id or not collecting then return end
-            if frame then frame:SetScript("OnUpdate",nil) end
-            collectionTimer=C_Timer.NewTimer(5,function()
-                collectionTimer=nil
-                if requestId==id and collecting then requestId=nil;collecting=false;update() end
+    activeRequest=id
+    animationTime=0
+    local okUI=pcall(function()
+        frame.label:SetText(ns.L.ACTIVITY_PROBE)
+        ns.Theme.DrawConnectionBounce(frame.logo,frame,96,0)
+        frame:Show()
+        if not reducedMotion() then
+            frame:SetScript("OnUpdate",function(self,elapsed)
+                if activeRequest~=id then return end
+                local motionOK,motion=pcall(reducedMotion)
+                if not motionOK then failUI();return end
+                if motion then
+                    local ok=pcall(ns.Theme.DrawConnectionBounce,self.logo,self,96,0)
+                    pcall(self.SetScript,self,"OnUpdate",nil)
+                    if not ok then failUI() end
+                    return
+                end
+                animationTime=animationTime+(tonumber(elapsed) or 0)
+                local ok=pcall(ns.Theme.DrawConnectionBounce,self.logo,self,96,animationTime)
+                if not ok then failUI() end
             end)
-        end) end
-    end,
-    Finish = function(id)
-        if requestId == id then clearTimer();requestId = nil;collecting=false; update() end
-    end,
-    Stop = function() clearTimer();receiving, requestId, collecting = false, nil, false; update() end,
-    Refresh = update,
-    Anchor = anchor,
-    Current = function() return receiving and "connecting" or collecting and "collecting" or requestId and "probe" or nil, requestId end,
+        else frame:SetScript("OnUpdate",nil) end
+    end)
+    if not okUI then failUI() end
+end
+ns.ActivityView={
+    RunStarted=function(id)if valid(id) then local ok=pcall(show,id);if not ok then failUI() end end end,
+    RunFinished=function(id)if activeRequest==id then activeRequest=nil;hide() end end,
+    Receiving=function()end,Begin=function()end,Collecting=function()end,Finish=function()end,
+    Stop=function()activeRequest=nil;hide()end,Refresh=function()
+        if not frame or not activeRequest or failed then return end
+        local id=activeRequest
+        local ok=pcall(function()
+            if reducedMotion() then
+                ns.Theme.DrawConnectionBounce(frame.logo,frame,96,0)
+                frame:SetScript("OnUpdate",nil)
+            else
+                frame:SetScript("OnUpdate",function(self,elapsed)
+                    if activeRequest~=id then return end
+                    animationTime=animationTime+(tonumber(elapsed) or 0)
+                    local drawOK=pcall(ns.Theme.DrawConnectionBounce,self.logo,self,96,animationTime)
+                    if not drawOK then failUI() end
+                end)
+            end
+        end)
+        if not ok then failUI() end
+    end,Anchor=function()end,
+    Current=function()return activeRequest and "probe" or nil,activeRequest end,
 }

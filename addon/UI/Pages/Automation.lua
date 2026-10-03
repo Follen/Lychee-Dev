@@ -1,11 +1,6 @@
 local ADDON_NAME, ns = ...
 
--- Automation workbench page: the in-game view and manual execute over the SAME
--- game-side probe machinery the CLI drives (design.md section 12). It lists
--- queue entries and execution history through Modules/AutomationView.lua,
--- which derives every status from ns.ProbeQueue / ns.ProbeRunner /
--- ns.ReportStore. No task registry, no /dev auto grammar and no parallel
--- executor exist here.
+-- Read-only view of the current duplex request and terminal manifest.
 local L = ns.L
 local W = ns.Widgets
 local view = ns.AutomationView
@@ -59,6 +54,7 @@ local function GetLifecycleText(record)
 end
 
 local function GetStatusText(record)
+    if record.probeStatus == "cancelled" then return L.AUTO_STATUS_CANCELLED end
     if record.status == "reported" or record.status == "acknowledged" then
         if record.probeStatus == "failed" then return L.AUTO_STATUS_FAILED end
         if record.probeStatus == "completed" then return L.AUTO_STATUS_SUCCEEDED end
@@ -87,12 +83,13 @@ local function FormatCode(record)
         return L.NOT_AVAILABLE
     end
     return string.format(L.AUTO_CODE_SUMMARY, record.codeBytes,
-        ShownText(record.codeAdler32, "-"), ShownText(record.codeSHA256, "-"))
+        ShownText(record.codeSHA256, "-"))
 end
 
 local function FormatRecorded(record)
     local text = FormatTime(record.observedAt)
-    if type(record.sequence) == "number" and not Restricted(record.sequence) then
+    if not Restricted(record.sequence) and type(record.sequence) == "string"
+        and #record.sequence <= 20 and record.sequence:match("^%d+$") then
         text = text .. "  ·  #" .. tostring(record.sequence)
     end
     return text
@@ -141,17 +138,6 @@ function ns.CreateAutomationPage(parent)
             page:Refresh()
         end, "secondary")
     clearButton:SetPoint("BOTTOMLEFT", 14, 14)
-
-    local hideNoticeButton, showNoticeButton
-    if not ns.SlotRuntime then
-        hideNoticeButton = W.CreateButton(page, 118, L.AUTO_HIDE_NOTICE, "secondary")
-        hideNoticeButton:SetPoint("BOTTOMRIGHT", -14, 14)
-        showNoticeButton = W.CreateButton(page, 128, L.AUTO_SHOW_NOTICE, "secondary")
-        showNoticeButton:SetPoint("RIGHT", hideNoticeButton, "LEFT", -8, 0)
-    end
-
-    local executeButton = W.CreateButton(page, 96, L.AUTO_EXECUTE, "primary")
-    executeButton:SetPoint("TOPRIGHT", -14, -84)
 
     local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
     listPanel:SetPoint("TOPLEFT", 14, -84)
@@ -254,8 +240,6 @@ function ns.CreateAutomationPage(parent)
         errorValue:SetText(hasRecord
             and ShownText(record.actionError or record.probeError or record.errorCode, L.NOT_AVAILABLE) or "")
 
-        W.SetButtonEnabled(executeButton, hasRecord and record.transport~="memory-slot" and (record.status == "queued" or record.status == "loaded"))
-        if showNoticeButton then W.SetButtonEnabled(showNoticeButton, hasRecord and record.receipt ~= nil) end
         W.SetButtonEnabled(viewReportButton, hasRecord)
         W.SetButtonEnabled(detailsButton, hasRecord)
     end
@@ -382,42 +366,6 @@ function ns.CreateAutomationPage(parent)
         page:Refresh()
     end
 
-    executeButton:SetScript("OnClick", function()
-        if ns.Safety.IsCombatBlocked() then
-            ns.Safety.PrintBlocked()
-            return
-        end
-        if not selectedRequestId then
-            return
-        end
-        -- The one execute path: ProbeQueue.Load + ProbeRunner.Dispatch, the
-        -- exact calls the /dev bridge load/run verbs make. Failures surface as
-        -- their bridge error codes; nothing is invented here.
-        local _, failure = view.Execute(selectedRequestId)
-        local record = view.GetRecord(selectedRequestId)
-        if record then
-            -- Transient action error for the detail pane; the row status stays
-            -- the derived bridge status refreshed below.
-            record.actionError = failure
-        end
-        Refresh()
-    end)
-
-    if showNoticeButton then showNoticeButton:SetScript("OnClick", function()
-        if ns.Safety.IsCombatBlocked() then
-            ns.Safety.PrintBlocked()
-            return
-        end
-        if selectedRequestId then
-            view.ShowNotice(selectedRequestId)
-        end
-    end) end
-
-    -- Hiding the notice is teardown and must stay available in every state.
-    if hideNoticeButton then hideNoticeButton:SetScript("OnClick", function()
-        view.HideNotice()
-    end) end
-
     viewReportButton:SetScript("OnClick", function()
         metadata:Hide();reportArea:Show()
         detailsButton:SetActive(false)
@@ -441,9 +389,6 @@ function ns.CreateAutomationPage(parent)
     page.codeValue = codeValue
     page.timeValue = timeValue
     page.errorValue = errorValue
-    page.executeButton = executeButton
-    page.showNoticeButton = showNoticeButton
-    page.hideNoticeButton = hideNoticeButton
     page.viewReportButton = viewReportButton
     page.clearButton = clearButton
     page.detailsButton,page.metadata=detailsButton,metadata
@@ -475,9 +420,6 @@ local definition = {
     suspend = function()
     end,
     shutdown = function()
-        if ns.AutomationView then
-            ns.AutomationView.HideNotice()
-        end
     end,
 }
 

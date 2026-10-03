@@ -105,21 +105,21 @@ or LuaLS on the target machine.
 Before updating a managed installation, finish current operations and disconnect
 your own compatible native CON connections. The installer refuses unresolved
 ownership; do not clear a foreign project's claim. Deploy through the managed
-installer, then activate the selected process using the startup workflow. Native
-3.1 uses the named Mailbox, slot-v3 and 200 LoadOnDemand slot addons; all managed
-files and receipts must match the selected CLI release. An installed CLI or Skill
-does not update an already running client, and a disk-only result is not live
-readiness.
+installer, then activate the selected process using the startup workflow. This
+candidate uses the named duplex Mailbox and creates no LoadOnDemand input addon.
+All managed files and receipts must match the selected CLI release. An installed
+CLI or Skill does not update an already running client, and a disk-only result
+is not live readiness. Targeted doctor also checks the writer profile; this
+candidate currently has none qualified for native execution.
 
 An inert older managed installation can be replaced using its installation
-receipt. This is filesystem migration, not protocol compatibility: the 3.1 driver
-rejects old wire, native identities and channel-v1 journals, including 64-slot
-connections. Preserve those records and unresolved reservations for recovery with
-their matching older CLI in the owning task. Do not ask the new driver to resume
-them, rewrite their schema or delete their claims to permit installation. With multiple
-instances, activate and verify each authorized PID after the shared installation
-is updated. If the runtime reports `restart_required` because newly installed
-slot folders are unavailable, retain that blocker and restart only within scope.
+receipt. The installer can archive byte-verified, idle managed old slot files;
+pending, modified or unknown content blocks migration. This filesystem operation
+does not make old wire or old execution journals compatible. Preserve unresolved
+records for their matching older CLI in the owning task; do not rewrite their
+schema or delete claims to permit installation. With multiple instances, activate
+and verify each authorized PID after the shared installation is updated. The
+candidate sends no bootstrap keys and has no slot-loading restart fallback.
 If the authorized task includes using the running client, follow
 [live-startup.md](live-startup.md) after deployment. Activation precedes a
 bridge session when the addon is not running; do not require that session as

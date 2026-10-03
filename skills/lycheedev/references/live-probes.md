@@ -14,17 +14,10 @@ with native execute. Old queue-oriented atomic commands belong to legacy records
 and are not the transport for CON connections.
 
 ```text
-lycheedev live execute --project <project-directory> --session <CON-id> --probe <PRB-revision> --request <stable-key> --budget-seconds 35 --policy observation --wait-seconds 120 --format json
+lycheedev live execute --project <project-directory> --session <CON-id> --probe <PRB-revision> --request <stable-key> --budget-seconds 35 --wait-seconds 120 --format json
 ```
 
-Choose `observation` only when the whole Lua chunk, including setup and cleanup,
-can safely run again after runtime loss. The CLI may start a new attempt on that
-same request after verified runtime recovery, up to three attempts; it does not
-resume the Lua stack. Reconstruct transient scene state in each attempt. A script
-that saves settings, performs a business action or changes persistent state is
-`opaque` (the default) unless its complete effects are demonstrably repeatable.
-Neither policy permits manually replaying uncertain input or extending the
-original durable deadline. Registering a probe stores source; it does not execute it.
+Source registration does not execute code. Each request has a fixed ID, source digest and execution budget. Only a private not_started proof allows retransmission; an unknown or already executed request is never rerun automatically. Keep host wait, transfer deadline and execution budget separate.
 
 ## Design a discriminating probe
 
@@ -97,10 +90,12 @@ cannot enter user code after termination and exceptions become failed reports.
 Register resource cleanup before activating each timer/frame. Cancel owned timers,
 unregister events and detach scripts; hiding a frame alone leaves its callbacks
 and captured values attached. Cleanup runs in reverse registration order on
-completion, failure or timeout. Native execution preserves any verified report
-when cleanup throws, then uses journaled reload/recovery to prove runtime
-destruction; pending recovery remains a separate obligation. Do
-not create permanent hooks or mutate Blizzard-owned APIs.
+completion, failure or timeout. A cleanup failure must leave resourcesReleased
+false and prevent result release/new business, even if a result was produced.
+Preserve that result and the exact CON for diagnosis. Do not claim that a timeout
+or reload attempt proves cleanup; the duplex reload contract requires exact
+quiescence and runtime replacement evidence. Do not create permanent hooks or
+mutate Blizzard-owned APIs.
 Choose the execute budget to cover the probe's own async deadline and cleanup; a
 longer host wait cannot extend the declared execution budget.
 
@@ -114,7 +109,7 @@ throwing predicate fails the probe with the supplied reason. At most eight
 guards and eight distinct events are supported; no polling is added. Choose
 events that actually cover the target or UI changes relevant to the experiment.
 Preserve that failed report, then reconstruct the scene or propose a revised
-experiment according to the operation's observation/opaque policy. A scene
+experiment only after the original request is completed and released. A scene
 failure is not permission to automatically replay an effect.
 
 Do not acquire input protection for ordinary data reads, listeners or waiting.
@@ -124,7 +119,7 @@ with an Agent-chosen duration no longer than the remaining probe budget; there
 is no separate five-second cap. Use
 `probe:ReleaseInput()` immediately after the exclusive actions; the remainder
 of an async probe runs normally. Completion and errors release before user
-cleanup. The hard deadline, combat, leaving the world or Ctrl+Alt+[ release the
+cleanup. The hard deadline, combat, leaving the world or Escape release the
 shield and fail the active probe rather than silently continuing unprotected.
 Use `probe:IsInputProtected()` to observe this probe's lease. Late callbacks and
 old lease timers cannot resume a finished probe or release a newer lease.
@@ -132,11 +127,10 @@ old lease timers cannot resume a finished probe or release a newer lease.
 This is an in-game input shield, not an OS-wide lock, protection from disconnects,
 or a source of secure hardware-action authority. Keep checking scene prerequisites
 even while protected. Use bounded Lua: a blocked synchronous Lua callback cannot
-be preempted by a Lua timer. Slot loading protects only its short dispatch burst
-(two-second safety deadline) and releases before business entry. Fixed reload
-retains the host's serialized, bounded input transaction; it must work even when
-the addon is not loaded, so an in-game takeover indicator is not guaranteed for
-that fallback. Never hold a game shield while scanning memory or awaiting reload.
+be preempted by a Lua timer. Mailbox transfer creates no input shield and sends
+no physical keys. Reload uses the exact prepare/challenge/lease transaction in
+[recovery](live-recovery.md), with no input fallback when the runtime is absent.
+Never hold a game shield while awaiting transfer or reload.
 
 Combat lockdown and secret values are trust boundaries. Check them before
 comparison, formatting or branching. Record unavailable and truncated values

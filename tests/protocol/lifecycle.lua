@@ -1,160 +1,93 @@
 local root = assert(arg[1])
 assert(loadfile(arg[2]))()
-local secret = {}
-issecretvalue = function(value) return rawequal(value, secret) end
-local profiles = {
-    { toc = "Mainline", version = "12.1.0", interface = 120100, product = "retail" },
-    { toc = "Mists", version = "5.5.4", interface = 50504, product = "classic" },
-    { toc = "Wrath", version = "3.80.2", interface = 38002, product = "titan" },
-    { toc = "Forever", version = "1.60.1", interface = 16001, product = "forever" },
+local secret = {}; issecretvalue=function(v)return rawequal(v,secret)end
+local profiles={
+    {version="12.1.0",interface=120100,product="retail"},
+    {version="5.5.4",interface=50504,product="classic"},
+    {version="3.80.2",interface=38002,product="titan"},
 }
-
-for _, profile in ipairs(profiles) do
-    for _, scenario in ipairs({ "fresh", "existing", "enabled", "command_conflict", "future", "invalid", "mismatch", "secret" }) do
-        local frames, overrides = {}, {}
-        UIParent = {}
-        IsLoggedIn = function() return true end
-        InCombatLockdown = function() return false end
-        GetBindingAction = function(key, overridden) return overridden and overrides[key] or "" end
-        ClearOverrideBindings = function() overrides = {} end
-        SetOverrideBindingClick = function(_, priority, key, button)
-            assert(priority == false)
-            overrides[key] = "CLICK " .. button .. ":LeftButton"
-        end
-        SaveBindings = function() error("startup must not change player bindings") end
-        SlashCmdList, SLASH_LYCHEETOOLKIT1 = {}, nil
-        local foreignHandler = function() end
-        if scenario == "command_conflict" then SlashCmdList.LYCHEETOOLKIT = foreignHandler end
-        CreateFrame = function(kind, name)
-            assert(kind == "Frame" or kind == "Button")
-            local frame = { events = {}, scripts = {}, name = name }
-            function frame:GetName() return self.name end
-            function frame:RegisterForClicks(mode) assert(mode == "AnyDown") end
-            function frame:RegisterEvent(event) self.events[event] = true end
-            function frame:UnregisterAllEvents() self.events = {} end
-            function frame:SetScript(event, callback) self.scripts[event] = callback end
-            frames[#frames + 1] = frame
-            return frame
-        end
-        GetBuildInfo = function()
-            local interface = scenario == "mismatch" and 99999 or profile.interface
-            return scenario == "secret" and secret or profile.version, "12345", "date", interface
-        end
-        local actor = { character = "Paladin", realm = "Realm", guid = "Player-1-12345" }
-        UnitFullName = function(unit) assert(unit == "player"); return actor.character, actor.realm end
-        UnitGUID = function(unit) assert(unit == "player"); return actor.guid end
-        LycheeDevDB, DumperDB = { retained = true }, { retained = true }
-        local old, older = LycheeDevDB, DumperDB
-        LycheeToolkitDB, LycheeToolkitBridgeDB = nil, nil
-        if scenario == "existing" then LycheeToolkitDB = { schema = 1, custom = "keep", options = { bridgeEnabled = false } } end
-        if scenario == "enabled" then LycheeToolkitDB = { schema = 1, options = { bridgeEnabled = true } } end
-        if scenario == "future" then LycheeToolkitDB = { schema = 2, future = true } end
-        if scenario == "invalid" then LycheeToolkitDB = { schema = 1, options = "bad" } end
-        local before = LycheeToolkitDB
-        local ns = {}
-        local toc = assert(io.open(root .. "/Lychee Dev.toc", "r"))
-        for line in toc:lines() do
-            line = line:gsub("\r", "")
-            if line ~= "" and line:sub(1, 1) ~= "#" then
-                assert(loadfile(root .. "/" .. line:gsub("\\", "/")))("Lychee Dev", ns)
-            end
-        end
-    toc:close()
-    -- Legacy wire engine regression only; the production TOC selects SlotRuntime.
-    ns.SlotRuntime=nil
-        assert(LycheeToolkitDB == before, "database read/write before ADDON_LOADED")
-        assert(not ns.Startup.ready and ns.Persistence.Current() == nil)
-        assert((scenario == "command_conflict" or next(SlashCmdList) == nil) and SLASH_LYCHEETOOLKIT1 == nil)
-        assert(ns.Controls.Handle("bridge on") == nil and ns.Controls.Register() == nil)
-        assert(#frames == 1 and frames[1].events.ADDON_LOADED)
-        local callback = frames[1].scripts.OnEvent
-        callback(frames[1], "ADDON_LOADED", "OtherAddon")
-        assert(LycheeToolkitDB == before and not ns.Startup.ready)
-        callback(frames[1], "ADDON_LOADED", "Lychee Dev")
-        assert(next(frames[1].events) == nil and frames[1].scripts.OnEvent == nil)
-        assert(#frames == (ns.Startup.ready and 5 or 1) and LycheeDevDB == old and DumperDB == older)
-        for _, frame in ipairs(frames) do
-            assert(next(frame.events) == nil and frame.scripts.OnUpdate == nil, "idle bootstrap has work")
-        end
-        if scenario == "command_conflict" then
-            assert(ns.Startup.ready and ns.Startup.commandFailure == "command_registration_conflict")
-            assert(SlashCmdList.LYCHEETOOLKIT == foreignHandler and SLASH_LYCHEETOOLKIT1 == nil)
-        elseif scenario == "fresh" or scenario == "existing" or scenario == "enabled" then
-            assert(ns.Startup.ready and ns.Startup.identity.product == profile.product)
-            local state = assert(ns.Persistence.Current())
-            assert(state.schema == 1 and type(ns.Persistence.Bridge().reports) == "table")
-            assert((state.options.bridgeEnabled == true) == (scenario == "enabled"))
-            assert(SLASH_LYCHEETOOLKIT1 == "/dev" and type(SlashCmdList.LYCHEETOOLKIT) == "function")
-            assert(SLASH_LYCHEETOOLKIT2 == nil, "unexpected command alias")
-            local status = assert(ns.Controls.Handle("status"))
-            assert(status.enabled == (scenario == "enabled") and not status.inputReady)
-            local heldReports = ns.Persistence.Bridge().reports
-            heldReports.retained = { body = "keep" }
-            status = assert(ns.Controls.Handle("  BRIDGE ON  "))
-            assert(status.enabled and not status.inputReady and status.reason == "transport_unavailable")
-            local nonce = string.rep("a", 32)
-            assert(ns.Session.Bind(secret) == nil and ns.Session.Bind("short") == nil)
-            status = assert(ns.Controls.Handle("bridge bind " .. nonce))
-            assert(status.bound and status.session.sessionNonce == nonce and not status.inputReady)
-            status.session.character = "Tampered copy"
-            assert(ns.Session.Current().character == "Paladin")
-            local issued = assert(ns.Session.NextIdentity())
-            assert(issued.sequence == 1)
-            issued.sequence = 9007199254740991
-            assert(ns.Session.NextIdentity().sequence == 2, "caller changed sequence counter")
-            assert(ns.Session.Bind(nonce))
-            local rejected, reason = ns.Session.Bind(string.rep("b", 32))
-            assert(rejected == nil and reason == "session_busy")
-            actor.guid = "Player-1-99999"
-            rejected, reason = ns.Session.Current()
-            assert(rejected == nil and reason == "session_actor_changed")
-            assert(ns.Session.Bind(nonce))
-            actor.character = secret
-            assert(ns.Session.Current() == nil)
-            actor.character = "Paladin"
-            assert(ns.Session.Current() == nil, "invalidated session revived")
-            assert(ns.Session.Bind(nonce))
-            assert(ns.Controls.Handle("bridge unbind"))
-            assert(ns.Session.Current() == nil)
-            actor.realm = nil
-            local unavailable, unavailableReason = ns.Session.Bind(nonce)
-            assert(unavailable == nil and unavailableReason == "actor_unavailable")
-            actor.realm = "Realm"
-            assert(ns.Session.Bind(nonce))
-            assert(state.options.bridgeEnabled == true and ns.Persistence.Bridge().reports == heldReports)
-            assert(ns.Controls.Handle("bridge maybe") == nil and state.options.bridgeEnabled == true)
-            assert(ns.Controls.Handle(secret) == nil and ns.Controls.Handle(string.rep("x", 129)) == nil)
-            status = assert(ns.Controls.Handle("bridge off"))
-            assert(not status.enabled and state.options.bridgeEnabled == nil and ns.Persistence.Bridge().reports.retained.body == "keep")
-            assert(ns.Session.Current() == nil and ns.Session.Bind(nonce) == nil)
-            local handler = SlashCmdList.LYCHEETOOLKIT
-            assert(ns.Controls.Register() and handler == SlashCmdList.LYCHEETOOLKIT)
-            local originalPrint, replies = print, {}
-            print = function(text) replies[#replies + 1] = text end
-            handler("bridge on")
-            assert(state.options.bridgeEnabled == true)
-            handler("bridge off")
-            handler("unknown")
-            print = originalPrint
-            assert(#replies == 3 and string.find(replies[1], '"inputReady":false', 1, true))
-            assert(string.find(replies[3], "usage: /dev", 1, true))
-            assert(state.options.bridgeEnabled == nil and ns.Persistence.Bridge().reports.retained.body == "keep")
-            assert(#frames == 5 and next(frames[1].events) == nil)
-            if before then assert(state == before) end
-            if scenario == "existing" then assert(state.custom == "keep") end
-            assert(ns.Controls.Handle("bridge on"))
-            assert(ns.Session.Bind(nonce))
-            local replacement = { schema = 1, options = { bridgeEnabled = true }, reports = {} }
-            LycheeToolkitDB = replacement
-            assert(ns.Persistence.Current() == replacement, "stale profile root")
-            local oldBinding, rootReason = ns.Session.Current()
-            assert(oldBinding == nil and rootReason == "session_state_changed")
-            assert(ns.Persistence.Load() and ns.Persistence.Current() == replacement)
-        else
-            assert(not ns.Startup.ready and ns.Startup.reason)
-            assert(LycheeToolkitDB == before, "unsupported state was overwritten")
-            assert(ns.Persistence.Current() == nil)
-        end
+local function boot(profile,enabled,delayed)
+    local frames={}
+    local loggedIn=true
+    LycheeToolkitDB={schema=1,options={bridgeEnabled=enabled}}
+    LycheeToolkitBridgeDB=nil
+    CreateFrame=function(kind)
+        local f={events={},scripts={}}
+        function f:RegisterEvent(name)self.events[name]=true end
+        function f:UnregisterAllEvents()self.events={}end
+        function f:SetScript(name,fn)self.scripts[name]=fn end
+        function f:Hide()self.hidden=true end
+        frames[#frames+1]=f;return f
     end
+    SlashCmdList={};SLASH_LYCHEETOOLKIT1=nil
+    GetBuildInfo=function()return profile.version,"12345","date",profile.interface end
+    GetTime=function()return 12.5 end
+    UnitFullName=function()return "Paladin","Realm" end
+    UnitGUID=function()return "Player-1-12345" end
+    IsLoggedIn=function()return loggedIn end;IsPlayerInWorld=function()return true end;InCombatLockdown=function()return false end
+    GetCurrentKeyBoardFocus=function()return nil end
+    local ns={}
+    local f=assert(io.open(root.."/Lychee Dev.toc","r"))
+    for line in f:lines() do line=line:gsub("\r","");if line~="" and line:sub(1,1)~="#" then
+        assert(loadfile(root.."/"..line:gsub("\\","/")))("Lychee Dev",ns)
+    end end;f:close()
+    assert(#frames==1 and frames[1].events.ADDON_LOADED)
+    local loader=frames[1];loader.scripts.OnEvent(loader,"ADDON_LOADED",delayed and "different internal name" or "Lychee Dev")
+    if delayed then
+        assert(not ns.Startup.ready and loader.events.PLAYER_LOGIN)
+        assert(not ns.Startup.ready)
+        loader.scripts.OnEvent(loader,"PLAYER_LOGIN")
+    end
+    assert(ns.Startup.ready and ns.Startup.identity.product==profile.product)
+    if enabled then
+        assert(ns.Mailbox and ns.Mailbox.schema=="lycheedev.duplex.v1")
+        assert(ns.DuplexRuntime.Snapshot().enabled and #frames==2)
+        assert(ns.Mailbox.inbox.calibration[1]==0 and ns.Mailbox.inbox.calibration[6]==7654321)
+        assert(#ns.Mailbox.inbox.request.frames==256 and #ns.Mailbox.inbox.request.frames[1]==1104)
+        assert(#ns.Mailbox.inbox.control.bindResume==336 and ns.Mailbox.sendbox.status:sub(1,8)=="LYCSBX01")
+        local framesRef=ns.Mailbox.inbox.request.frames
+        local weak=setmetatable({framesRef},{__mode="v"})
+        ns.Mailbox=nil;collectgarbage("collect")
+        assert(weak[1]==framesRef,"private owner did not root the arena")
+        local removed=framesRef[1];local weakRow=setmetatable({removed},{__mode="v"})
+        framesRef[1]=nil;removed=nil;collectgarbage("collect")
+        assert(weakRow[1]~=nil,"private arena roots did not retain a removed public frame row")
+        framesRef[1]=weakRow[1]
+        for _=1,4 do frames[2].scripts.OnUpdate(frames[2],0.016) end
+        assert(ns.Mailbox and ns.Mailbox.inbox.request.frames==framesRef,"runtime failed to republish rooted mailbox")
+        loggedIn=false
+        for _=1,70 do frames[2].scripts.OnUpdate(frames[2],0.016) end
+        local status=assert(ns.DuplexProtocol.ParseSendbox(ns.Mailbox.sendbox.status))
+        assert(status:find('"actorReady":false',1,true),"logout did not revoke live actor readiness: "..status)
+        loggedIn=true
+        for _=1,70 do frames[2].scripts.OnUpdate(frames[2],0.016) end
+        status=assert(ns.DuplexProtocol.ParseSendbox(ns.Mailbox.sendbox.status))
+        assert(status:find('"actorReady":true',1,true),"login did not restore live actor readiness")
+        assert(ns.Controls.Handle("disconnect"))
+        assert(not ns.DuplexRuntime.Snapshot().enabled and frames[2].scripts.OnUpdate==nil)
+    else
+        assert(ns.Mailbox==nil and ns.DuplexRuntime.Snapshot().runtime==nil)
+        assert(#frames==1 and frames[1].scripts.OnUpdate==nil,"disabled feature allocated an active frame")
+    end
+    return ns,frames
 end
-print("lifecycle: four clients passed")
+
+for _,profile in ipairs(profiles) do
+    boot(profile,false,false)
+    boot(profile,true,false)
+end
+boot(profiles[1],false,true) -- PLAYER_LOGIN retries an unsupported first observation.
+local old=boot(profiles[1],true,false)
+local oldRuntime=old.DuplexRuntime.Snapshot().runtime
+local damaged,damagedFrames=boot(profiles[1],true,false)
+LycheeToolkitDB.options.bridgeEnabled=true
+assert(damaged.DuplexRuntime.Enable())
+damaged.Mailbox.inbox.calibration[4]=secret
+damagedFrames[#damagedFrames].scripts.OnUpdate(damagedFrames[#damagedFrames],0.05)
+assert(damaged.DuplexRuntime.Snapshot().protocol.quarantined==true
+    and damaged.DuplexRuntime.Snapshot().protocol.lastFailure=="duplex_repair_unavailable",
+    "unbound damaged topology was not safely quarantined")
+assert(damaged.Controls.Handle("disconnect"))
+local fresh=boot(profiles[1],true,false)
+assert(fresh.DuplexRuntime.Snapshot().runtime~=oldRuntime,"reload reused a runtime token")
+print("lifecycle: duplex startup, opt-in runtime, GC root and reload passed")

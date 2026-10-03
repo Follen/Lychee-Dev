@@ -8,6 +8,7 @@ ns.ProbeExecution={Run=function(fn,budget,done)
     local timer,pending
     local cleanups,logs={},{}
     local callbacks,logBytes=0,0
+    local callbackSlots={}
     local protection,protectionUsed,guardFrame
     local guards,events={},{}
     local api={}
@@ -27,7 +28,11 @@ ns.ProbeExecution={Run=function(fn,budget,done)
         end
         for i=#cleanups,1,-1 do if not pcall(cleanups[i]) then clean=false end end
         cleanups={}
-        done(outcome.ok,outcome.value,{resourcesReleased=clean,logs=logs})
+        for _,slot in ipairs(callbackSlots) do slot.fn=nil end
+        callbackSlots={};guards={};events={};guardFrame=nil
+        local completion=done;done=nil
+        local outputLogs=logs;logs={}
+        completion(outcome.ok,outcome.value,{resourcesReleased=clean,logs=outputLogs,cancelled=outcome.cancelled==true})
     end
     local function settle(ok,value)
         if not live then return nil,"probe_not_running" end
@@ -112,10 +117,11 @@ ns.ProbeExecution={Run=function(fn,budget,done)
     function api:Callback(callback)
         if not live or type(callback)~="function" or callbacks>=16 then return nil,"probe_callback_limit" end
         callbacks=callbacks+1
+        local slot={fn=callback};callbackSlots[#callbackSlots+1]=slot
         return function(...)
-            if not live or pending then return nil,"probe_callback_inactive" end
+            if not live or pending or not slot.fn then return nil,"probe_callback_inactive" end
             local valid,reason=checkGuards();if not valid then return nil,reason end
-            depth=depth+1;local ok,result=pcall(callback,...);depth=depth-1
+            depth=depth+1;local ok,result=pcall(slot.fn,...);depth=depth-1
             if not ok then api:Fail(result) else finish() end
             return ok,result
         end
@@ -137,6 +143,16 @@ ns.ProbeExecution={Run=function(fn,budget,done)
         logs[#logs+1]=line;logBytes=logBytes+#line;return true
     end
     function api:IsCancelled()return not live end
+    -- A host cancellation is distinct from an arbitrary probe failure. This
+    -- method only acknowledges managed asynchronous work after actual cleanup.
+    -- It cannot preempt a synchronous Lua function occupying the main thread.
+    function api:RequestCancel()
+        if not live or pending then return nil,"probe_cancel_too_late" end
+        if not async then return nil,"probe_cancel_sync_unavailable" end
+        pending={ok=false,value="probe_cancelled",cancelled=true}
+        finish()
+        return true,"probe_cancel_requested"
+    end
     depth=1;local ok,result=pcall(fn,api);depth=0
     if not ok then api:Fail(result)
     elseif pending then finish()

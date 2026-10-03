@@ -1,5 +1,7 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-10-04 此开发分支以 [duplex 实施合同](live-duplex-implementation-2026-10-04.md) 为当前 live 合同；旧 LoD/按键/色块协议停止加载和发布，无旧兼容。新协议离线验证正在整合，当前没有通过验收的原生 writer profile，所有游戏内存写入默认拒绝，实机验收为 not_run。下方旧 live 结果仅保留原版本历史范围。
+
 2026-10-02 [Retail Encoding 预算](retail-encoding-budget-2026-10-02.md)：大型逻辑对象的小范围读取可用默认额度；CKey/EKey 目录及页 miss 分配前拒绝真实超额；命中复用，驱逐和失败后重读累计不退款；同查询共享额度不重置，并发填充保留完整性验证。公开无缓存行为、BLTE 临时缓冲和 Root 计费保持。合成 fixture 与固定真实 pin 的查询结果分开记录。
 
 2026-10-01 [Mailbox 新协议](live-mailbox-protocol-2026-10-01.md)要求：旧 wire/schema/state 拒绝；公开镜像和 Snapshot/原 envelope 变更不能授权；按名字读取、进程/build 绑定、路径 guard、BODY exact HEAD 授权；输入前重读当前字段；reload 两次鲜活发布证明；关闭 hints 不改变读取路径。模块映射校验查询实际请求位置并遍历原 issued/current/request 交集；未授权旧 hole、属性变化和缺口拒绝，原始读错误不被 short_read 掩盖。正式服、Classic、Titan、Forever 最终核心及各 54 步压力链已完成；Titan 实机验证未知 hash 的完整 runtime .text 唯一定位与 8 次完整 reader 回放。最终离线及各客户端实机结果见 [Mailbox 验收记录](live-mailbox-acceptance-2026-10-01.md)，不沿用旧扫描路径或先前候选验收。

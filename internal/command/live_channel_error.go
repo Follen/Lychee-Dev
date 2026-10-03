@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/follenfang/lycheedev/internal/live/channel"
+	"github.com/follenfang/lycheedev/internal/live/duplex"
 )
 
 type channelCommandError struct {
@@ -23,32 +23,42 @@ func classifyChannelResultError(err error) error {
 	}
 	// Evidence persistence failure must remain visible even when the original
 	// host wait was pending or cancelled. The business result is kept intact.
-	if errors.Is(err, channel.ErrTraceFlush) {
-		return &channelCommandError{cause: err, code: "live.channel_trace_flush", exit: 5}
+	if errors.Is(err, duplex.ErrPersistence) {
+		return &channelCommandError{cause: err, code: "live.duplex_persistence", exit: 5}
 	}
 	if errors.Is(err, context.Canceled) {
-		return &channelCommandError{cause: err, code: "live.channel_wait_cancelled", exit: 7}
+		return &channelCommandError{cause: err, code: "live.duplex_wait_cancelled", exit: 7}
 	}
-	if errors.Is(err, channel.ErrPending) {
-		return &channelCommandError{cause: err, code: "live.channel_pending", exit: 6}
+	if errors.Is(err, duplex.ErrPending) || errors.Is(err, context.DeadlineExceeded) {
+		return &channelCommandError{cause: err, code: "live.duplex_pending", exit: 6}
+	}
+	if errors.Is(err, duplex.ErrUnknown) {
+		return &channelCommandError{cause: err, code: "live.duplex_execution_unknown", exit: 5}
+	}
+	if errors.Is(err, duplex.ErrBusy) || errors.Is(err, duplex.ErrBudget) {
+		return &channelCommandError{cause: err, code: "live.duplex_pending", exit: 6}
+	}
+	if errors.Is(err, duplex.ErrIdentity) {
+		return &channelCommandError{cause: err, code: "live.duplex_identity_changed", exit: 3}
+	}
+	if errors.Is(err, duplex.ErrRejected) {
+		return &channelCommandError{cause: err, code: "live.duplex_rejected", exit: 4}
 	}
 	return classifyChannelError(err)
 }
 
 func classifyChannelError(err error) error {
 	code := strings.SplitN(err.Error(), ":", 2)[0]
-	if !strings.HasPrefix(code, "live.channel_") {
+	if !strings.HasPrefix(code, "live.duplex_") {
 		return err
 	}
 	exit := 4
 	switch code {
-	case "live.channel_pending", "live.channel_discovery_incomplete", "live.channel_transaction_pending":
+	case "live.duplex_cancel_pending", "live.duplex_closing":
 		exit = 6
-	case "live.channel_request_key_invalid", "live.channel_request_invalid", "live.channel_request_conflict", "live.channel_connection_id_required", "live.channel_target_mismatch":
+	case "live.duplex_request_key_invalid", "live.duplex_request_conflict", "live.duplex_connection_id_required", "live.duplex_target_mismatch", "live.duplex_request_invalid":
 		exit = 2
-	case "live.channel_execution_unknown", "live.channel_recovery_attempt_limit":
-		exit = 5
-	case "live.channel_activation_required", "live.channel_closed", "live.channel_not_idle", "live.channel_clean_current_addon_required", "live.channel_slot_installation_required", "live.channel_ownership_changed", "live.channel_reload_required", "live.channel_client_restart_required", "live.channel_input_capability_unsupported", "live.channel_mailbox_build_unsupported", "live.channel_mailbox_required", "live.channel_mailbox_unavailable":
+	case "live.duplex_writer_profile_unverified", "live.duplex_activation_required", "live.duplex_clean_current_addon_required", "live.duplex_ownership_changed", "live.duplex_writer_layout_unsupported", "live.duplex_mailbox_required", "live.duplex_actor_mismatch", "live.duplex_legacy_retired":
 		exit = 3
 	}
 	return &channelCommandError{cause: err, code: code, exit: exit}

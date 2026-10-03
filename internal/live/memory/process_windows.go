@@ -3,6 +3,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -19,10 +20,20 @@ type Process struct {
 }
 
 func Open(pid uint32, created uint64, image string) (*Process, error) {
+	return openWithAccess(pid, created, image, windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ)
+}
+
+// OpenDuplexWriter is used only by the typed mailbox adapter. The default
+// process API remains read-only; no command exposes arbitrary write addresses.
+func OpenDuplexWriter(pid uint32, created uint64, image string) (*Process, error) {
+	return openWithAccess(pid, created, image, windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ|windows.PROCESS_VM_WRITE|windows.PROCESS_VM_OPERATION)
+}
+
+func openWithAccess(pid uint32, created uint64, image string, access uint32) (*Process, error) {
 	if pid == 0 || created == 0 || image == "" {
 		return nil, errors.New("memory.process_identity_required")
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ, false, pid)
+	h, err := windows.OpenProcess(access, false, pid)
 	if err != nil {
 		return nil, err
 	}
@@ -32,6 +43,37 @@ func Open(pid uint32, created uint64, image string) (*Process, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+func (p *Process) WriteDuplexCell(ctx context.Context, cell NumericCell, value uint32) (int, error) {
+	if _, bounded := ctx.Deadline(); !bounded {
+		return 0, errors.New("memory.write_deadline_required")
+	}
+	if err := p.Verify(ctx); err != nil {
+		return 0, err
+	}
+	b := make([]byte, 10)
+	if n, err := p.Read(ctx, cell.Address, b); err != nil || n != len(b) {
+		return 0, errors.Join(mailboxError("numeric_cell_read"), err)
+	}
+	if b[8] != 3 || b[9] != 0 || !bytes.Equal(b[:8], numericPayload(cell.Value)) {
+		return 0, mailboxError("numeric_cell_changed")
+	}
+	var info windows.MemoryBasicInformation
+	if err := windows.VirtualQueryEx(p.handle, uintptr(cell.Address), &info, unsafe.Sizeof(info)); err != nil {
+		return 0, err
+	}
+	start, size := uint64(info.BaseAddress), uint64(info.RegionSize)
+	if cell.Address == 0 || cell.Address > ^uint64(0)-8 || info.Type != 0x20000 || info.State != windows.MEM_COMMIT || info.Protect != windows.PAGE_READWRITE || cell.Address < start || cell.Address-start > size || size-(cell.Address-start) < 8 {
+		return 0, errors.New("memory.write_interval_ineligible")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	payload := numericPayload(value)
+	var n uintptr
+	err := windows.WriteProcessMemory(p.handle, uintptr(cell.Address), &payload[0], 8, &n)
+	return int(n), err
 }
 func (p *Process) Close() error { return windows.CloseHandle(p.handle) }
 func (p *Process) Verify(ctx context.Context) error {
