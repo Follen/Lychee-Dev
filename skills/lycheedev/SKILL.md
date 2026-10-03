@@ -46,6 +46,14 @@ edited skill does not mean the installed CLI, loaded addon or agent context
 was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata/
 Python entrypoints to make a documented example work.
 
+Before every live call that may drive the game, run `doctor` from the same
+project context and workspace. This includes connect, execute, resume, reload
+(including fallback), cancel and disconnect; a previous successful check does
+not replace the next call's check. Read [live doctor](references/live-doctor.md)
+for the supported invocation, its current limits and recovery handling. Read-only
+status/history do not need this drive preflight; source/data work keeps its own
+scope. Doctor findings do not establish game readiness or authorize new effects.
+
 ## Keep the target and scope fixed
 
 Reuse explicit inputs or a matching project pin. An explicit `--snapshot` wins;
