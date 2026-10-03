@@ -18,6 +18,7 @@ import (
 )
 
 type activation struct {
+	AbandonedFrom    string         `json:"abandonedFrom,omitempty"`
 	Budget           *DurableBudget `json:"budget,omitempty"`
 	Outcome          *InputOutcome  `json:"inputOutcome,omitempty"`
 	Schema           string         `json:"schema"`
@@ -126,6 +127,13 @@ func (a activation) validate() error {
 	}
 	switch a.Phase {
 	case "prepared", "input_attempted", "runtime_selected":
+		if a.AbandonedFrom != "" {
+			return errors.New("live.channel_activation_invalid")
+		}
+	case "abandoned":
+		if a.AbandonedFrom != "prepared" && a.AbandonedFrom != "input_attempted" {
+			return errors.New("live.channel_activation_invalid")
+		}
 	default:
 		return errors.New("live.channel_activation_invalid")
 	}
@@ -134,6 +142,10 @@ func (a activation) validate() error {
 
 func (p *Project) presentActivation(id string, a activation, now time.Time) ProjectResult {
 	c := Continuation{Kind: "continue", Session: id, RequestID: a.Request, Goal: "activation"}
+	if a.Phase == "abandoned" {
+		c.Kind, c.Goal, c.RequestID = "completed", "close", "close:"+id
+		return ProjectResult{Session: id, Closed: true, Stage: "activation_abandoned", ReportState: "unavailable", Cleanup: "abandoned", Journal: p.activationPath(id), Continuation: c}
+	}
 	if a.Budget != nil {
 		// Projection only: status must not migrate or mutate the stored budget.
 		copy := *a.Budget
@@ -194,6 +206,9 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if err != nil {
 		return r, err
 	}
+	if r.Closed {
+		return p.retire(ctx, id, r)
+	}
 	meta, err := p.metadata(id)
 	if err != nil {
 		return r, err
@@ -230,6 +245,19 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	var a activation
 	if err = readProjectJSON(p.activationPath(id), &a, 16384); err != nil {
 		return r, err
+	}
+	if err = a.validate(); err != nil {
+		return r, err
+	}
+	// Disconnect may have completed after the initial status read. A terminal
+	// activation never regains input authority, even while its claim remains.
+	if a.Phase == "abandoned" {
+		r = p.presentActivation(id, a, time.Now())
+		if err = lease.Close(); err != nil {
+			return r, err
+		}
+		lease = nil
+		return p.retire(ctx, id, r)
 	}
 	remaining, err := p.observeActivationBudget(ctx, id, &a, time.Now())
 	r = p.presentActivation(id, a, time.Now())
@@ -371,6 +399,84 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+// An activation with no selected runtime has no slot publication or runtime
+// binding to unbind. Cancel its host claim under the same execution lease as
+// activation, preserving uncertain input and the original authority budget.
+func (p *Project) disconnectActivation(ctx context.Context, id string, cache bool) (r ProjectResult, err error) {
+	r, err = p.activationStatus(id)
+	if err != nil {
+		return r, err
+	}
+	if r.Closed {
+		return p.retire(ctx, id, r)
+	}
+	meta, err := p.metadata(id)
+	if err != nil {
+		return r, err
+	}
+	parent := filepath.Join(meta.Target.Client.Directory, "Interface", "AddOns")
+	lease, err := journal.LockBootstrapWindow(ctx, parent, meta.Owner)
+	if err != nil {
+		if errors.Is(err, journal.ErrBusy) {
+			b := Blocker{Kind: "active_driver", Consumer: id, Installation: parent, Condition: "active_driver_released"}
+			r.Continuation.Kind, r.Continuation.Goal, r.Continuation.Blocker = "wait_active_driver", "close", &b
+			return r, errors.Join(err, &BlockedError{Blocker: b})
+		}
+		return r, err
+	}
+	defer func() {
+		if lease != nil {
+			err = errors.Join(err, lease.Close())
+		}
+	}()
+	// Activation may have handed off to a normal connection while this caller
+	// acquired the lease. Such a connection must use verified ordinary close.
+	if _, e := Load(p.log(id), nil); e == nil {
+		if err = lease.Close(); err != nil {
+			return r, err
+		}
+		lease = nil
+		return p.Disconnect(ctx, id, cache)
+	} else if !errors.Is(e, ErrJournalMissing) {
+		return r, e
+	}
+	if _, e := os.Lstat(p.log(id)); e == nil {
+		// An existing empty log may be lost connection evidence, not a fresh
+		// activation. Do not discard runtime ownership on that ambiguity.
+		return r, ErrJournalMissing
+	} else if !errors.Is(e, os.ErrNotExist) {
+		return r, e
+	}
+	var a activation
+	if err = readProjectJSON(p.activationPath(id), &a, 16384); err != nil {
+		return r, err
+	}
+	if err = a.validate(); err != nil {
+		return r, err
+	}
+	// A selected runtime with a lost journal is damaged evidence, not proof of
+	// an unbound activation. Never abandon its possible runtime resources.
+	if a.Phase == "runtime_selected" {
+		return r, ErrJournalMissing
+	}
+	if a.Phase != "abandoned" {
+		// Use an explicit terminal phase so earlier CLIs reject it rather than
+		// ignoring a new flag and treating the attempt as eligible for input.
+		a.AbandonedFrom, a.Phase = a.Phase, "abandoned"
+		if err = writeProjectJSON(ctx, p.activationPath(id), a); err != nil {
+			return r, err
+		}
+	}
+	r = p.presentActivation(id, a, time.Now())
+	// Retirement acquires the execution lease itself. Persist terminal state
+	// first, then release this lease before retiring the exact owner marker.
+	if err = lease.Close(); err != nil {
+		return r, err
+	}
+	lease = nil
+	return p.retire(ctx, id, r)
 }
 
 // Each obligation runs even if a prior one fails. This is resource cleanup,

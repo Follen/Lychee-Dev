@@ -86,7 +86,14 @@ lycheedev live disconnect <CON-id> --project <project-directory> --wait-seconds 
 ```
 
 Disconnect when the authorized investigation ends unless continued use is needed.
-It verifies unbind or [process/runtime retirement](live-recovery.md#ownership-and-runtime-retirement)
+If activation has not produced a normal connection journal, disconnect cancels
+only that CON's host claim without game input, preserving the activation phase,
+input outcome and original budget. This also works after activation expiry.
+`closed: true`, `cleanup: abandoned`, `complete: false` and an unavailable report
+do not prove reload or runtime unbind. Start a fresh connection after cancellation.
+An active driver must finish first; a selected runtime with a missing journal or
+an empty/damaged normal journal cannot use this cancellation path.
+For ordinary connections, it verifies unbind or [process/runtime retirement](live-recovery.md#ownership-and-runtime-retirement)
 before releasing ownership. Completed-close retry is read-only or repairs its
 interrupted host retirement. `closed: true` can coexist with unavailable report/
 `execution_unknown`; connection cleanup does not establish a business outcome.
