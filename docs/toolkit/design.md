@@ -1,5 +1,12 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-10-04 未完成 Native 激活允许通过现有 `live disconnect` 取消主机占用：
+原 CON 执行锁内复核普通日志仍未生成，以 abandonedFrom 保存原激活 phase，保留输入结果与原预算，
+先持久化 abandoned，再释放执行锁并退役确切窗口 owner。无需游戏输入或进程退出证明；
+不声称 reload、unbind 或业务执行成功。已选 runtime 的缺失日志、空/损坏普通日志不能走此路径；
+普通连接继续要求原有的验证关闭。终态重试只读取记录或完成原占用退役；
+abandoned 使用明确终态 phase，旧 CLI 必须拒绝它而不能忽略新字段后重新发键。
+
 2026-10-01 Native CON 当前实现合同为 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md)：200 槽、wire06、slot.v3、identity.v2、input.v2、公开 Mailbox 定点读取；无旧原生协议兼容或扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
 
 2026-09-30 [D 阶段研究合同](phase-d-publication-luals-session-2026-09-30.md) 约束后续

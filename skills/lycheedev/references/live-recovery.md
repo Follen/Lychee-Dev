@@ -91,6 +91,16 @@ the old operation is never transferred.
 the execution lease. A game UI frame does not own that lease. Wait for the active
 call to finish before recovery; pressing Escape cannot release a host lease.
 
+For activation that has no normal connection journal yet, use the original CON's
+`live disconnect` to cancel its host claim, even after budget expiry. The CLI
+preserves the original input outcome and budget; it neither replays keys nor
+claims that reload ran. Cancellation is `closed: true`, `cleanup: abandoned`,
+`complete: false`, with an unavailable report. Terminal disconnect/resume retries
+only finish host retirement and never reactivate this CON. Once released, a new
+connection can target the now-ready client. An active driver prevents concurrent
+cancellation; missing journals after runtime selection and empty/corrupt normal
+journals remain evidence errors rather than permission to discard ownership.
+
 Disconnect does not commit prepared business merely to finish it. If the exact
 prepared exchange needs explicit reload, preserve its blocker and use the
 existing reload command only within the authorized scope. Closing is not proof
