@@ -203,7 +203,7 @@ function licenseGate(packageRoot) {
   }
 }
 
-function stagePayload(stage, resources) {
+export function stagePayload(stage, resources) {
   for (const [source, prefix] of [[join(repository, 'addon'), 'addon'], [join(repository, 'skills/lycheedev'), 'skill']]) {
     for (const file of walkFiles(source)) {
       const name = `${prefix}/${file.name}`;
