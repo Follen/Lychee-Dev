@@ -1,5 +1,12 @@
 # Toolkit 2.0 实施状态
 
+2026-10-04 mailbox v1 候选 `73f61a7` 的 x64 Lua 5.1.5 全量离线与两次 Windows CI 已通过。
+正式服新运行时、原生 world/reload 读取及插件内一次性协议自检通过：探针执行一次，
+重复帧不重跑、challenge/结果 ACK/私有 GC 根均确认。游戏内 Lychee Dev 统计约 1.77 MiB，
+单数据行加七控制行实际数组 backing 为 132 KiB；短空闲样本没有插件统计增长。
+此结果不是原生 CLI 写入验收，writer profile 仍拒绝写入，其他客户端/双实例/最大输入
+游戏峰值保持 not_run。完整范围与保留失败见 [mailbox v1 验收](live-mailbox-v1-acceptance-2026-10-04.md)。
+
 2026-10-04 本分支当前协议统一为 **Lychee Dev mailbox protocol v1**，以
 [新架构合同](live-mailbox-v1-architecture-2026-10-04.md) 替代先前 duplex 候选。
 schema、magic、摘要域和布局身份一次切换，拒绝旧协议。只保留一个 4 KiB 物理数据行，

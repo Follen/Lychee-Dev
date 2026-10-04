@@ -1,5 +1,9 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-10-04 mailbox v1 的 x64 Lua 全量离线、Windows CI 与正式服插件内自检已经通过，
+实测单数据行/七控制行 backing 共 132 KiB，整个插件短样本约 1.77 MiB。
+原生写入及相关游戏并发/生命周期验收仍未运行；见 [具体证据与范围](live-mailbox-v1-acceptance-2026-10-04.md)。
+
 2026-10-04 当前分支采用 [Lychee Dev mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)。
 新 schema/magic/hash domain/layout 必须拒绝旧协议；唯一物理数据行允许 1 MiB 逻辑请求，
 但只有准确私有帧 ACK 才能覆盖，结果持久化/ACK/release 后才能接下一条命令。
