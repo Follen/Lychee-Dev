@@ -2,8 +2,10 @@
 
 **Current whole-command candidate:** commit `b021251` changed the physical
 layout to `single-command-row-v1` and writes one 1 MiB-capacity row per command.
-The first formal Retail CLI write was followed by a client security crash and
-no verified execution result. Its exact writer profile is now disabled. See
+The first formal Retail CLI debugger-stopped write was followed by a client
+security crash and no verified execution result. That route is now disabled;
+an exact-image direct, unsuspended write trial has been authorized but is
+`not_run`. See
 [the incident record](live-mailbox-v1-retail-trial-2026-10-04.md). The 4 KiB
 candidate results below are historical and do not establish acceptance for the
 current physical layout.

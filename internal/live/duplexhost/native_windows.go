@@ -303,16 +303,18 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 	if binding.Evidence.RecipeID != memory.LuaMailboxRootRecipeID {
 		return out, errors.New("live.duplex_write_profile_unsupported")
 	}
-	return n.publishStopped(ctx, m, binding, actorGUID, memory.PublishStoppedDuplexRow)
+	return n.publishJournaled(ctx, m, binding, actorGUID, "direct", memory.PublishDirectDuplexRow)
 }
 
-type stoppedPublisher func(context.Context, memory.StoppedPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, memory.StoppedObservation, error)
+type rowPublisher func(context.Context, memory.StoppedPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, memory.StoppedObservation, error)
 
-// publishStopped owns local durability around the dedicated helper. The host
-// never opens a writable process handle; helper return proves its lifetime is
-// drained before the outcome is written or a later operation can proceed.
-func (n *Native) publishStopped(ctx context.Context, m duplex.Message, binding memory.LuaRootBinding, actorGUID string, publish stoppedPublisher) (out duplex.WriteOutcome, returned error) {
+// publishJournaled syncs the exact intent before the selected typed writer
+// runs. Neither a complete WPM nor its readback proves addon execution.
+func (n *Native) publishJournaled(ctx context.Context, m duplex.Message, binding memory.LuaRootBinding, actorGUID, mode string, publish rowPublisher) (out duplex.WriteOutcome, returned error) {
 	out.State = duplex.NoWrite
+	if mode != "direct" && mode != "stopped" {
+		return out, errors.New("live.duplex_write_mode_invalid")
+	}
 	if n.TraceDir == "" {
 		return out, errors.New("live.duplex_write_journal_required")
 	}
@@ -333,13 +335,14 @@ func (n *Native) publishStopped(ctx context.Context, m duplex.Message, binding m
 	// reference and exact header are synced before starting the native helper.
 	header := m.Header
 	intent := struct {
+		Mode          string                `json:"mode"`
 		Header        duplex.Header         `json:"header"`
 		PayloadSHA256 string                `json:"payloadSHA256"`
 		PayloadBytes  int                   `json:"payloadBytes"`
 		Root          memory.LuaRootBinding `json:"root"`
 		ActorGUID     string                `json:"actorGUID"`
 		Target        live.ClientWindow     `json:"target"`
-	}{header, digestBytes(m.Payload), len(m.Payload), binding, actorGUID, n.Target}
+	}{mode, header, digestBytes(m.Payload), len(m.Payload), binding, actorGUID, n.Target}
 	if err = enc.Encode(intent); err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
@@ -353,11 +356,12 @@ func (n *Native) publishStopped(ctx context.Context, m duplex.Message, binding m
 	out, facts, stop, writeErr := publish(ctx, request)
 	// No disk wait occurs inside the native write critical section.
 	fact := struct {
+		Mode    string                    `json:"mode"`
 		Outcome duplex.WriteOutcome       `json:"outcome"`
 		Ranges  []memory.DuplexWriteRange `json:"ranges"`
 		Stop    memory.StoppedObservation `json:"stop"`
 		Error   string                    `json:"error,omitempty"`
-	}{Outcome: out, Ranges: facts, Stop: stop}
+	}{Mode: mode, Outcome: out, Ranges: facts, Stop: stop}
 	if writeErr != nil {
 		fact.Error = writeErr.Error()
 	}

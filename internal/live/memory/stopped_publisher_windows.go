@@ -103,7 +103,8 @@ func PublishStoppedDuplexRow(ctx context.Context, request StoppedPublicationRequ
 	if e := ctx.Err(); e != nil {
 		return noWrite, nil, StoppedObservation{}, e
 	}
-	if !DuplexWriteCapability(request.ExecutableSHA256, request.Build, request.Product).Eligible {
+	profile := DuplexWriteCapability(request.ExecutableSHA256, request.Build, request.Product)
+	if !profile.Eligible || profile.Mode != "stopped" {
 		return noWrite, nil, StoppedObservation{}, errors.New("live.duplex_writer_profile_unverified")
 	}
 	if _, e := duplex.EncodeMessage(request.Message); e != nil {
@@ -328,7 +329,8 @@ func runStoppedPublicationFromParent(input io.Reader, parent ProcessIdentity) (r
 	if decoded, e := hex.DecodeString(request.Invocation); e != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != request.Invocation {
 		return fail(ErrStoppedUnavailable)
 	}
-	if !DuplexWriteCapability(request.ExecutableSHA256, request.Build, request.Product).Eligible {
+	profile := DuplexWriteCapability(request.ExecutableSHA256, request.Build, request.Product)
+	if !profile.Eligible || profile.Mode != "stopped" {
 		return fail(errors.New("live.duplex_writer_profile_unverified"))
 	}
 	if _, e = duplex.EncodeMessage(request.Message); e != nil {

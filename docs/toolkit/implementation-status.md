@@ -10,7 +10,8 @@
 SOURCE 和真实 LuaLS 检查均为 passed；整行候选提交为 `b021251`。
 [首次正式服写入](live-mailbox-v1-retail-trial-2026-10-04.md)停顿 37.368 ms，
 一次 6,293,376-byte WPM 与读回完成，随后客户端 `Security Crash`；未取得执行结果。
-精确 Retail writer profile 因此禁用，其他 build 也拒绝写入。Go 对 Lua
+调试器暂停写入路线因此禁用。用户随后授权精确 Retail build 的不挂起整行
+写入试验，其结果仍为 `not_run`；其他 build 拒绝写入。Go 对 Lua
 `totalBytes` 状态字段的拒收及换代读取 `path_changed` 已分别离线复现并修复，
 不能把这些修复当成崩溃原因已经解决。下面两段记录属于此前的 4 KiB 候选，
 不能用作当前整行写入的性能或实机证明。
