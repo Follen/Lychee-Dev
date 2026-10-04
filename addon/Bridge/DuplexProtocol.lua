@@ -473,7 +473,9 @@ function API.Create(deps)
             local ok,handle=pcall(deps.execute,r.fn,math.min(120,math.max(1,math.ceil(r.budget/1000))),function(success,value,meta)
                 if r.state~="running" then return end
                 r.fn=nil;r.execution=nil
-                local json,err=deps.encode({ok=success==true,result=success and value or nil,error=success and nil or value,resourcesReleased=not meta or meta.resourcesReleased~=false,logs=meta and meta.logs},524288)
+                local record={ok=success==true,resourcesReleased=not meta or meta.resourcesReleased~=false,logs=meta and meta.logs}
+                if success==true then record.result=value else record.error=value end
+                local json,err=deps.encode(record,524288)
                 if not json then json=assert(deps.encode({ok=false,error="result_encoding_error",resourcesReleased=false},4096));success=false end
                 local sum=SHA.Digest(json)
                 local pages={};for at=1,#json,16384 do pages[#pages+1]=json:sub(at,at+16383) end

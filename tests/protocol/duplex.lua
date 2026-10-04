@@ -141,4 +141,28 @@ assert(reconnectEngine.Snapshot().terminal and reconnectEngine.Snapshot().termin
 writeRow(reconnectArena.control.resultAck,read(bundle.."/second-ack.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
 local sendbox=assert(ns.DuplexProtocol.Sendbox({},65536))
 local f=assert(io.open(sendboxOutput,"wb"));assert(f:write(sendbox));f:close()
+-- Exercise the actual encoder at the execution callback boundary. A constant
+-- fixture encoder cannot detect a false result being dropped or an error
+-- field incorrectly appearing in a successful result.
+assert(loadfile(root.."/addon/Bridge/CaptureWriter.lua"))("Lychee Dev",ns)
+for _,case in ipairs({{ok=true,value=false},{ok=true,value=true},{ok=true,value=0},
+    {ok=true,value="answer"},{ok=false,value="failure"}}) do
+    local realArena=assert(ns.DuplexProtocol.NewArena(identity.arenaGeneration))
+    local actualPages={}
+    local realEngine=assert(ns.DuplexProtocol.Create({identity=identity,publish=function()return true end,
+        compile=function()return function()end end,
+        execute=function(_,_,done)done(case.ok,case.value,{resourcesReleased=true,logs={}});return {} end,
+        clock=function()return 100 end,challenge=function()return string.rep(string.char(187),16)end,
+        encode=ns.CaptureWriter.Encode,
+        actor=function()return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end,
+        publishPage=function(index,body)actualPages[index]=body end}))
+    assert(realEngine.BindIdentity(identity));assert(realEngine.Enable())
+    writeRow(realArena.control.bindResume,read(bundle.."/bind.bin"));assert(realEngine.Poll(realArena,8))
+    writeRow(realArena.request.frames[1],read(bundle.."/fresh-frame.bin"));assert(realEngine.Poll(realArena,8))
+    writeRow(realArena.control.commit,read(bundle.."/fresh-commit.bin"));assert(realEngine.Poll(realArena,8))
+    local expectedRecord={ok=case.ok,resourcesReleased=true,logs={}}
+    if case.ok then expectedRecord.result=case.value else expectedRecord.error=case.value end
+    local expectedBody=assert(ns.CaptureWriter.Encode(expectedRecord,524288))
+    assert(actualPages[1]==expectedBody,"execution envelope changed success/false/error: "..tostring(actualPages[1]))
+end
 print("duplex: Go wire, exact u64, ACK, repair, close and fresh-owner fencing passed")
