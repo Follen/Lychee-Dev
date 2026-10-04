@@ -31,13 +31,14 @@ type TargetRequest struct {
 }
 type Project struct{ Root string }
 type targetRecord struct {
-	Schema            string              `json:"schema"`
-	Target            live.ClientWindow   `json:"target"`
-	Claim             journal.WindowOwner `json:"claim"`
-	Identity          duplex.Identity     `json:"identity"`
-	ActorGUID         string              `json:"actorGUID"`
-	ClaimRetired      bool                `json:"claimRetired"`
-	RuntimeRetirement *runtimeRetirement  `json:"runtimeRetirement,omitempty"`
+	Schema              string              `json:"schema"`
+	Target              live.ClientWindow   `json:"target"`
+	Claim               journal.WindowOwner `json:"claim"`
+	ProcessClaimVersion uint32              `json:"processClaimVersion,omitempty"`
+	Identity            duplex.Identity     `json:"identity"`
+	ActorGUID           string              `json:"actorGUID"`
+	ClaimRetired        bool                `json:"claimRetired"`
+	RuntimeRetirement   *runtimeRetirement  `json:"runtimeRetirement,omitempty"`
 }
 type runtimeRetirement struct {
 	FromRuntime string `json:"fromRuntime"`
@@ -56,21 +57,23 @@ type requestRecord struct {
 	Complete     bool                   `json:"complete"`
 }
 type ProjectResult struct {
-	Session      string                    `json:"session"`
-	Operation    string                    `json:"operation,omitempty"`
-	Identity     duplex.Identity           `json:"identity"`
-	Bound        bool                      `json:"bound"`
-	Closed       bool                      `json:"closed"`
-	Stage        string                    `json:"stage"`
-	Complete     bool                      `json:"complete"`
-	ReportState  string                    `json:"reportState"`
-	Cleanup      string                    `json:"cleanup"`
-	Report       json.RawMessage           `json:"report,omitempty"`
-	Journal      string                    `json:"journal"`
-	Status       *duplex.Sendbox           `json:"status,omitempty"`
-	NativeReload *memory.ReloadObservation `json:"nativeReload,omitempty"`
-	Target       *live.ClientWindow        `json:"target,omitempty"`
-	Diagnostics  map[string]Diagnostic     `json:"diagnostics,omitempty"`
+	Session             string                      `json:"session"`
+	Operation           string                      `json:"operation,omitempty"`
+	Identity            duplex.Identity             `json:"identity"`
+	Bound               bool                        `json:"bound"`
+	Closed              bool                        `json:"closed"`
+	Stage               string                      `json:"stage"`
+	Complete            bool                        `json:"complete"`
+	ReportState         string                      `json:"reportState"`
+	Cleanup             string                      `json:"cleanup"`
+	Report              json.RawMessage             `json:"report,omitempty"`
+	Journal             string                      `json:"journal"`
+	Status              *duplex.Sendbox             `json:"status,omitempty"`
+	NativeReload        *memory.ReloadObservation   `json:"nativeReload,omitempty"`
+	Target              *live.ClientWindow          `json:"target,omitempty"`
+	Diagnostics         map[string]Diagnostic       `json:"diagnostics,omitempty"`
+	WriterProfile       *memory.DuplexWriterProfile `json:"writerProfile,omitempty"`
+	WriterQualification *memory.DuplexQualification `json:"writerQualification,omitempty"`
 }
 type Diagnostic struct {
 	State  string `json:"state"`
@@ -253,6 +256,9 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 	if e != nil {
 		return doctor, e
 	}
+	if doctor.WriterQualification == nil || !doctor.WriterQualification.DirectWrite {
+		return doctor, errors.New("live.duplex_writer_profile_unverified")
+	}
 	if doctor.Diagnostics["runtimeFresh"].State != "advancing" || doctor.Diagnostics["actorReady"].State != "verified" || doctor.NativeReload == nil || doctor.NativeReload.CheckBusinessWriteGate() != nil {
 		return doctor, duplex.ErrPending
 	}
@@ -264,7 +270,7 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 		return ProjectResult{}, errors.New("live.duplex_target_mismatch")
 	}
 	resource := fmt.Sprintf("window/%d/%d/%d", target.Window.ProcessID, target.Window.ProcessStartedAt, target.Window.Handle)
-	owner, busy, err := journal.InspectWindowOwner(ctx, addonParent(target), resource)
+	owner, busy, err := inspectConnectionOwner(ctx, target)
 	if err != nil {
 		return ProjectResult{}, err
 	}
@@ -327,8 +333,8 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 		return ProjectResult{Status: &s, Target: &target}, err
 	}
 	claim := journal.WindowOwner{Schema: "lycheedev.window-owner.v1", WorkspaceID: p.workspaceID(), Resource: resource, OperationID: id, IntentSHA256: digestBytes([]byte(resource + "/" + id))}
-	meta := targetRecord{Schema: "lycheedev.duplex.target.v1", Target: target, Claim: claim, Identity: identity, ActorGUID: s.ActorGUID}
-	err = journal.BeginConnectionWindow(ctx, addonParent(target), claim, func() error {
+	meta := targetRecord{Schema: "lycheedev.duplex.target.v1", Target: target, Claim: claim, ProcessClaimVersion: 1, Identity: identity, ActorGUID: s.ActorGUID}
+	err = beginConnectionClaim(ctx, target, claim, func() error {
 		if e := duplex.NewFileStore(p.path(id)).Update(ctx, func(st *duplex.State) error { st.Identity = identity; return nil }); e != nil {
 			return e
 		}
@@ -341,7 +347,7 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 	n.Guard = p.guard(meta, id)
 	n.BatchGuard = p.lightGuard(meta)
 	n.ExpectedActorGUID = meta.ActorGUID
-	lock, err := journal.LockBootstrapWindow(ctx, addonParent(target), claim)
+	lock, err := lockConnectionDriver(ctx, target, claim)
 	if err != nil {
 		return ProjectResult{Session: id}, err
 	}
@@ -376,14 +382,8 @@ func (p *Project) lightGuard(meta targetRecord) func(context.Context, duplex.Kin
 		if e := live.ConfirmClientWindow(ctx, meta.Target); e != nil {
 			return e
 		}
-		owner, busy, e := journal.InspectWindowOwner(ctx, addonParent(meta.Target), meta.Claim.Resource)
-		if e != nil {
-			return e
-		}
-		if !busy || owner != meta.Claim {
-			return errors.New("live.duplex_ownership_changed")
-		}
-		return nil
+		return verifyConnectionClaim(ctx, meta.Target, meta.Claim)
+
 	}
 }
 func businessControlGuard(st duplex.State) error {
@@ -419,6 +419,9 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 	meta, err := p.metadata(id)
 	if err != nil {
 		return result, err
+	}
+	if meta.ProcessClaimVersion != 1 {
+		return result, legacyClaimError()
 	}
 	store := duplex.NewFileStore(p.path(id))
 	before, err := store.Load(ctx)
@@ -468,9 +471,9 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 	if doctor.NativeReload == nil || doctor.NativeReload.CheckWriteGate() != nil {
 		return doctor, duplex.ErrPending
 	}
-	var driver *vault.Lease
+	var driver *connectionDriver
 	if !control {
-		driver, err = journal.LockBootstrapWindow(ctx, addonParent(meta.Target), meta.Claim)
+		driver, err = lockConnectionDriver(ctx, meta.Target, meta.Claim)
 		if err != nil {
 			return p.present(ctx, id, before, nil), err
 		}
@@ -566,7 +569,7 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 			return result, errors.Join(err, e)
 		}
 		defer release()
-		if e = journal.RetireConnectionWindow(ctx, addonParent(meta.Target), meta.Claim); e != nil {
+		if e = retireConnectionClaim(ctx, meta.Target, meta.Claim); e != nil {
 			return result, errors.Join(err, e)
 		}
 		meta.ClaimRetired = true
@@ -680,7 +683,7 @@ func (p *Project) Reload(ctx context.Context, id, key string, _ bool) (ProjectRe
 		if e != nil {
 			return st, e
 		}
-		driver, e := journal.LockBootstrapWindow(ctx, addonParent(meta.Target), meta.Claim)
+		driver, e := lockConnectionDriver(ctx, meta.Target, meta.Claim)
 		if e != nil {
 			return st, e
 		}
@@ -876,6 +879,9 @@ func historicalResultReleased(st duplex.State, record requestRecord) bool {
 // A selected session with no publication has no in-game ownership to close.
 // Retire only its exact local claim after all physical writers are drained.
 func (p *Project) retireLocalSelection(ctx context.Context, id string, meta targetRecord, st duplex.State) (ProjectResult, error) {
+	if meta.ProcessClaimVersion != 1 {
+		return p.present(ctx, id, st, nil), legacyClaimError()
+	}
 	result := p.present(ctx, id, st, nil)
 	if !st.LocalRetired || (st.LocalRetirement == nil && (st.Bound || st.Active != nil || len(st.Intents) != 0 || st.PublicationSequence != 0)) {
 		return result, duplex.ErrUnknown
@@ -886,7 +892,7 @@ func (p *Project) retireLocalSelection(ctx context.Context, id string, meta targ
 		return result, e
 	}
 	defer release()
-	if e = journal.RetireConnectionWindow(ctx, addonParent(meta.Target), meta.Claim); e != nil {
+	if e = retireConnectionClaim(ctx, meta.Target, meta.Claim); e != nil {
 		return result, e
 	}
 	meta.ClaimRetired = true
@@ -905,6 +911,9 @@ func observedLifecycleChanged(meta targetRecord, st duplex.State, s duplex.Sendb
 	return s.Runtime != st.Identity.Runtime || s.ActorBinding != st.Identity.ActorBinding || s.ActorReady && s.ActorGUID != "" && s.ActorGUID != meta.ActorGUID
 }
 func (p *Project) retireChangedRuntime(ctx context.Context, id string, meta targetRecord, store duplex.Store, st duplex.State, doctor ProjectResult) (ProjectResult, error) {
+	if meta.ProcessClaimVersion != 1 {
+		return doctor, legacyClaimError()
+	}
 	s := doctor.Status
 	if s == nil || doctor.Target == nil || *doctor.Target != meta.Target || doctor.Diagnostics["processIdentity"].State != "verified" || doctor.Diagnostics["runtimeFresh"].State != "advancing" || !observedLifecycleChanged(meta, st, *s) {
 		return doctor, duplex.ErrUnknown

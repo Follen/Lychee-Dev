@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
-2026-10-04 此开发分支以 [Lychee Dev mailbox protocol v1 单命令整行写入合同](live-mailbox-v1-architecture-2026-10-04.md) 为当前 live 合同；先前 [duplex 实施记录](live-duplex-implementation-2026-10-04.md) 与下方 LoD/按键/色块结果保留为历史范围，无旧兼容。[首次正式服调试器暂停写入](live-mailbox-v1-retail-trial-2026-10-04.md)后客户端崩溃，该路线已禁用。[不挂起整行写入试验](live-mailbox-v1-direct-retail-trial-2026-10-04.md)已验证小命令、1 MiB 命令和断开；其他 build 拒绝写入，重载瞬态与更广泛的实机验收仍未完成。
+2026-10-04 此开发分支以 [Lychee Dev mailbox protocol v1 单命令整行写入合同](live-mailbox-v1-architecture-2026-10-04.md) 为当前 live 合同；先前 [duplex 实施记录](live-duplex-implementation-2026-10-04.md) 与下方 LoD/按键/色块结果保留为历史范围，无旧兼容。[首次正式服调试器暂停写入](live-mailbox-v1-retail-trial-2026-10-04.md)后客户端崩溃，该路线已禁用。[不挂起整行写入试验](live-mailbox-v1-direct-retail-trial-2026-10-04.md)已验证小命令、1 MiB 命令和断开；同一真实进程的另一探针三次 GC、结果与断开也通过。其他 hash/build 拒绝写入，reload/新 runtime 再执行与双实例仍未运行。用户接受最终检查到 WPM 的外部 reload 竞态；Agent 写入时不发起 reload，提醒用户此时不要手动 `/reload`，请求清理后正常 reload 仍允许。
 
 [Mailbox v1 完整重构与验收计划](live-mailbox-v1-reconstruction-plan-2026-10-04.md)是后续实施清单；其中的目标和待运行矩阵不代表当前已验收。
 

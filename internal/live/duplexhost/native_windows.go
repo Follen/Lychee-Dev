@@ -68,11 +68,25 @@ func OpenNative(ctx context.Context, target live.ClientWindow) (*Native, error) 
 	return &Native{Target: target, Process: p, Mailbox: r, Reload: reload, reloadErr: reloadErr}, nil
 }
 
-func (n *Native) scope() string {
-	return filepath.Join(n.Target.Client.Directory, "Interface", "AddOns", ".lycheedev-duplex-writers")
+func (n *Native) scope() (string, error) {
+	root, err := processScope(n.Target)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "writers"), nil
 }
 func (n *Native) resource(lane string) string {
 	return fmt.Sprintf("%d/%d/%s", n.Target.Window.ProcessID, n.Target.Window.ProcessStartedAt, lane)
+}
+
+func (n *Native) writerScopes() ([]string, error) {
+	scope, err := n.scope()
+	if err != nil {
+		return nil, err
+	}
+	// The installation lease prevents an older CLI resuming this new CON from
+	// racing its writer; the instance lease handles all new-CLI path aliases.
+	return []string{scope, filepath.Join(addonParent(n.Target), ".lycheedev-duplex-writers")}, nil
 }
 func (n *Native) Close(context.Context) error {
 	if n.Process == nil {
@@ -108,7 +122,7 @@ func (n *Native) WriteCapability() memory.DuplexWriterProfile {
 	return memory.DuplexWriteCapability(n.Mailbox.Binding().ExecutableSHA256, n.Target.Client.FullBuild, n.Target.Client.Product)
 }
 func (n *Native) CheckWriteCapability() error {
-	if !n.WriteCapability().Eligible {
+	if !n.WriteCapability().CanDirectWrite() {
 		return errors.New("live.duplex_writer_profile_unverified")
 	}
 	return nil
@@ -186,19 +200,25 @@ var writeLanes = []string{"command", "stop"}
 // WritersDrained holds the independent command and stop row leases. It must be called
 // before repair permission, never inferred from an addon status boolean.
 func (n *Native) WritersDrained(ctx context.Context) (func(), error) {
+	scopes, err := n.writerScopes()
+	if err != nil {
+		return nil, err
+	}
 	var held []*vault.Lease
 	release := func() {
 		for i := len(held) - 1; i >= 0; i-- {
 			_ = held[i].Close()
 		}
 	}
-	for _, lane := range writeLanes {
-		lease, e := vault.TryAcquireLease(ctx, n.scope(), n.resource(lane))
-		if e != nil {
-			release()
-			return nil, e
+	for _, scope := range scopes {
+		for _, lane := range writeLanes {
+			lease, e := vault.TryAcquireLease(ctx, scope, n.resource(lane))
+			if e != nil {
+				release()
+				return nil, e
+			}
+			held = append(held, lease)
 		}
-		held = append(held, lease)
 	}
 	return release, nil
 }
@@ -242,11 +262,17 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 		return out, errors.New("live.duplex_drain_publication_invalid")
 	}
 	if !n.repairDrainHeld {
-		lease, e := vault.AcquireLease(ctx, n.scope(), n.resource(lane))
+		scopes, e := n.writerScopes()
 		if e != nil {
 			return out, e
 		}
-		defer func() { returned = errors.Join(returned, lease.Close()) }()
+		for _, scope := range scopes {
+			lease, e := vault.AcquireLease(ctx, scope, n.resource(lane))
+			if e != nil {
+				return out, e
+			}
+			defer func() { returned = errors.Join(returned, lease.Close()) }()
+		}
 	}
 	actorGUID := n.ExpectedActorGUID
 	guard := func(c context.Context) error {
@@ -303,18 +329,15 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 	if binding.Evidence.RecipeID != memory.LuaMailboxRootRecipeID {
 		return out, errors.New("live.duplex_write_profile_unsupported")
 	}
-	return n.publishJournaled(ctx, m, binding, actorGUID, "direct", memory.PublishDirectDuplexRow)
+	return n.publishJournaled(ctx, m, binding, actorGUID, memory.PublishDirectDuplexRow)
 }
 
-type rowPublisher func(context.Context, memory.StoppedPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, memory.StoppedObservation, error)
+type rowPublisher func(context.Context, memory.DirectPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, error)
 
 // publishJournaled syncs the exact intent before the selected typed writer
 // runs. Neither a complete WPM nor its readback proves addon execution.
-func (n *Native) publishJournaled(ctx context.Context, m duplex.Message, binding memory.LuaRootBinding, actorGUID, mode string, publish rowPublisher) (out duplex.WriteOutcome, returned error) {
+func (n *Native) publishJournaled(ctx context.Context, m duplex.Message, binding memory.LuaRootBinding, actorGUID string, publish rowPublisher) (out duplex.WriteOutcome, returned error) {
 	out.State = duplex.NoWrite
-	if mode != "direct" && mode != "stopped" {
-		return out, errors.New("live.duplex_write_mode_invalid")
-	}
 	if n.TraceDir == "" {
 		return out, errors.New("live.duplex_write_journal_required")
 	}
@@ -332,36 +355,36 @@ func (n *Native) publishJournaled(ctx context.Context, m duplex.Message, binding
 	}()
 	enc := json.NewEncoder(file)
 	// Command bytes are stored once in the coordinator journal. This immutable
-	// reference and exact header are synced before starting the native helper.
+	// reference and exact header are synced before starting the native writer.
 	header := m.Header
 	intent := struct {
-		Mode          string                `json:"mode"`
-		Header        duplex.Header         `json:"header"`
-		PayloadSHA256 string                `json:"payloadSHA256"`
-		PayloadBytes  int                   `json:"payloadBytes"`
-		Root          memory.LuaRootBinding `json:"root"`
-		ActorGUID     string                `json:"actorGUID"`
-		Target        live.ClientWindow     `json:"target"`
-	}{mode, header, digestBytes(m.Payload), len(m.Payload), binding, actorGUID, n.Target}
+		Mode          string                     `json:"mode"`
+		Header        duplex.Header              `json:"header"`
+		PayloadSHA256 string                     `json:"payloadSHA256"`
+		PayloadBytes  int                        `json:"payloadBytes"`
+		Root          memory.LuaRootBinding      `json:"root"`
+		ActorGUID     string                     `json:"actorGUID"`
+		Target        live.ClientWindow          `json:"target"`
+		Profile       memory.DuplexWriterProfile `json:"writerProfile"`
+	}{"direct", header, digestBytes(m.Payload), len(m.Payload), binding, actorGUID, n.Target, memory.DuplexWriteCapability(binding.ExecutableSHA256, n.Target.Client.FullBuild, n.Target.Client.Product)}
 	if err = enc.Encode(intent); err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
 	if err = file.Sync(); err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
-	request := memory.StoppedPublicationRequest{
+	request := memory.DirectPublicationRequest{
 		Target:           memory.ProcessIdentity{PID: n.Target.Window.ProcessID, Created: n.Target.Window.ProcessStartedAt, Image: n.Target.Window.Executable},
 		ExecutableSHA256: binding.ExecutableSHA256, Build: n.Target.Client.FullBuild, Product: n.Target.Client.Product, Release: buildinfo.Version, ActorGUID: actorGUID, Message: m,
 	}
-	out, facts, stop, writeErr := publish(ctx, request)
+	out, facts, writeErr := publish(ctx, request)
 	// No disk wait occurs inside the native write critical section.
 	fact := struct {
 		Mode    string                    `json:"mode"`
 		Outcome duplex.WriteOutcome       `json:"outcome"`
 		Ranges  []memory.DuplexWriteRange `json:"ranges"`
-		Stop    memory.StoppedObservation `json:"stop"`
 		Error   string                    `json:"error,omitempty"`
-	}{Mode: mode, Outcome: out, Ranges: facts, Stop: stop}
+	}{Mode: "direct", Outcome: out, Ranges: facts}
 	if writeErr != nil {
 		fact.Error = writeErr.Error()
 	}

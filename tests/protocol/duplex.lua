@@ -48,6 +48,8 @@ assert(f.calls()==1 and not f.engine.Snapshot().repair,"mixed row triggered repa
 f.arena.command[100]=0;F.setRow(f.arena.command,replacement);assert(f.engine.Poll(f.arena,8))
 assert(f.calls()==2 and f.engine.Snapshot().request.requestId==string.format("%032x",2),"valid completion with same stamp did not retry")
 assert(f.engine.Snapshot().released.requestId==state.request.requestId)
+assert(f.engine.Snapshot().released.outcome=="success" and f.engine.Snapshot().released.executionStarted
+    and f.engine.Snapshot().released.totalBytes==#"return false" and f.engine.Snapshot().released.requestSeq=="1")
 -- Final ACK+close is one stop message and duplicate observation is idempotent.
 state=f.engine.Snapshot();local closeOpts={seq=2,pub=50,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}
 assert(f.writeStop(P.Kind.close,f.ack(),closeOpts))
@@ -120,6 +122,24 @@ assert(validating.writeStop(P.Kind.cancel,oldAck,cancelOpts))
 state=validating.engine.Snapshot()
 assert(not state.validation and state.phase=="result_pending" and state.terminal.outcome=="cancelled" and not state.terminal.executionStarted and startedCount==1)
 assert(P.ParseSendbox(validating.publications.status):find('"phase":"result_pending"',1,true))
+-- A precise clock batches several private validation steps, yet yields on
+-- its time budget. A stop published between polls still wins before admission.
+local workMs=0
+local timed=F.engine({workClockMillis=function()workMs=workMs+0.05;return workMs end})
+local timedSource="return true"..string.rep(" ",65536)
+nonce=timed.engine.Snapshot().readyChallenge
+local timedWire=F.header(P.Kind.frame,timedSource,{challenge=nonce})
+local timedHeader=assert(P.DecodeHeader(timedWire:sub(1,320)))
+F.setRow(timed.arena.command,timedWire)
+assert(timed.engine.Poll(timed.arena,8) and timed.engine.HasPendingValidation())
+assert(timed.engine.Poll(timed.arena,8) and timed.engine.HasPendingValidation())
+state=timed.engine.Snapshot()
+assert(state.validation.copiedBytes>8192,
+    "time-bounded validator did not batch and yield")
+assert(timed.writeStop(P.Kind.cancel,"",{seq=1,pub=1,id=S.Hex(timedHeader.requestId),
+    digest=S.Hex(timedHeader.requestSHA),challenge=S.Hex(timedHeader.challenge),total=#timedSource}))
+assert(timed.calls()==0 and not timed.engine.HasPendingValidation()
+    and timed.engine.Snapshot().terminal.outcome=="cancelled", "stop lost to batched validation")
 -- A changed header discards a partly copied row without consuming its nonce.
 local changed=F.engine({started=function()startedCount=startedCount+1 end})
 nonce=changed.engine.Snapshot().readyChallenge

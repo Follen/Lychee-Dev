@@ -23,6 +23,8 @@ continue the existing goal, scope and evidence.
 | Locate, inspect or export an icon, texture, model or media file | [Asset export](references/asset-export.md) |
 | TOC/XML load order, syntax or client compatibility | [Addon validation](references/addon-validation.md) |
 | Behavior in the running game, or a new authorized live check | [Live investigation](references/live-investigation.md) |
+| Execute a prepared probe on a ready retained CON | [Live execution](references/live-execution.md) |
+| Explicit reload after request cleanup | [Live reload](references/live-reload.md) |
 | Existing CON is pending, interrupted, closing or affected by reload/process change | [Live recovery](references/live-recovery.md) |
 | Live activation, first contact or a just-updated addon | [Live startup](references/live-startup.md) |
 | Read errors retained by the addon provider | [Error diagnosis](references/error-diagnosis.md) |
@@ -46,13 +48,10 @@ edited skill does not mean the installed CLI, loaded addon or agent context
 was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata/
 Python entrypoints to make a documented example work.
 
-Before every live call that may drive the game, run `doctor` from the same
-project context and workspace. This includes connect, execute, resume, reload,
-cancel and disconnect; a previous successful check does
-not replace the next call's check. Read [live doctor](references/live-doctor.md)
-for the supported invocation, its current limits and recovery handling. Read-only
-status/history do not need this drive preflight; source/data work keeps its own
-scope. Doctor findings do not establish game readiness or authorize new effects.
+Before a live drive, use targeted [doctor](references/live-doctor.md) from the
+same project and workspace. Read-only status/history and static source/data work
+do not need this drive preflight. The CLI enforces its own final write checks;
+a doctor finding does not authorize effects or establish writer qualification.
 
 ## Keep the target and scope fixed
 
@@ -70,29 +69,25 @@ or ending page does not repair missing coverage.
 Honor the task's existing authorization: source-only work stays static; requested
 live work continues through necessary activation, observation, recovery and
 cleanup without asking again at every command. Reuse the original project/CON/
-request for pending work, with one active mutating driver per process. A new
+request for pending work, with one active mutating driver per process instance. A new
 process or actor needs its own binding; an existing arbitrary-character scope
 can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-The candidate uses **Lychee Dev mailbox protocol v1** (`lycheedev.mailbox.v1`):
-one reusable 1 MiB command row in `inbox`, one small stop row and a `sendbox`.
-The CLI publishes each complete command in one write. The next command carries
-the exact previous-result acknowledgement; final close uses the stop row.
-The CLI owns integrity checks, result retention and journals. Follow its
-[continuation](references/live-recovery.md), retaining durable deadlines. Do not
-bypass a blocker with raw input, memory tools or claim-file edits. Native CON
-work does not use the old OP/BTP ACK/finish/hide sequence. Old duplex/slot wire
-is incompatible. The debugger-stopped Retail trial ended in a client security
-crash; its helper route is disabled. An owner-authorized direct, unsuspended
-write trial is limited to the exact Retail 12.1.0.69933 image; other builds
-refuse writes. Do not repeat the old local development package's stopped trial.
-The original stopped-route request has no verified execution result. The direct
-route verified small and 1 MiB Retail commands plus close, but does not close
-the final-check-to-reload race. Other builds and multi-instance competition
-remain unqualified. An addon self-test or offline fixture does not prove
-CLI-to-game execution.
+Native CON work uses **Lychee Dev mailbox protocol v1**. The CLI owns one
+whole-command write, journals and exact result ACK/close; the addon validates
+a private copy before execution.
+Use [execution](references/live-execution.md), [recovery](references/live-recovery.md)
+and [reload](references/live-reload.md) for those operations. Preserve unknown
+effects; never bypass a blocker with raw input, memory tools or claim-file edits.
+Old OP/BTP, slot and duplex wire procedures do not apply to this candidate.
+
+During a write, do not initiate reload and tell the user to avoid manual `/reload`.
+Normal reload after request cleanup is allowed. Final checks cannot exclude an
+external reload starting during WPM; private GC roots do not pin the whole VM.
+Exact-image trial evidence and remaining qualification limits are in
+[live doctor](references/live-doctor.md), not inherited from earlier releases.
 
 ## Finish with evidence
 

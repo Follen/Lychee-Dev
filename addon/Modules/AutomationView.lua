@@ -3,7 +3,7 @@ local _, ns = ...
 -- Read-only projection of the current mailbox request. It retains no source,
 -- compiled closure, result body or historical queue, and cannot dispatch work.
 local current, mailbox, hiddenReleased, changeHandler
-local phases={ready_unbound="acknowledged",validating="queued",running="running",result_pending="reported",closing="finalizing",closed="acknowledged",quarantined="interrupted",execution_unknown="interrupted"}
+local phases={ready_unbound="acknowledged",validating="queued",running="running",sealing="finalizing",result_pending="reported",closing="finalizing",closed="acknowledged",quarantined="interrupted",execution_unknown="interrupted"}
 local function idOK(id)
     return not (issecretvalue and issecretvalue(id)) and type(id)=="string" and #id==32 and not id:find("[^0-9a-f]")
 end
@@ -17,21 +17,36 @@ local function collect()
     if not active then mailboxState="disconnected"
     elseif state.quarantined then mailboxState="unavailable"
     elseif state.ready then mailboxState="ready"
-    elseif state.phase=="validating" or state.phase=="running" or state.phase=="result_pending" or state.phase=="closing" then mailboxState="busy" end
+    elseif state.phase=="validating" or state.phase=="running" or state.phase=="sealing" or state.phase=="result_pending" or state.phase=="closing" then mailboxState="busy" end
     mailbox={state=mailboxState,phase=state.phase,actorReady=state.actorReady==true,
-        transportReady=state.transportReady==true,controlReady=state.controlReady==true}
+        transportReady=state.transportReady==true,controlReady=state.controlReady==true,
+        -- A connection/control failure has no request attribution. Keep it out
+        -- of the request record, even when a released request remains visible.
+        errorCode=state.connectionFailure and state.connectionFailure.code or state.lastFailure,
+        candidateFailure=state.candidateFailure}
     local request=state.validation or state.request or state.released
     local id=request and request.requestId
     if not idOK(id) or id==hiddenReleased and not state.request then current=nil;return 0 end
     local terminal
     if not state.validation and state.request then terminal=state.terminal end
-    if terminal and terminal.requestId and terminal.requestId~=id then terminal=nil end
+    if terminal and terminal.requestId~=id then terminal=nil end
+    local released=not state.validation and not state.request and state.released==request
+    local outcome,errorCode,executionStarted
+    if terminal then
+        outcome,errorCode,executionStarted=terminal.outcome,terminal.failureCode,terminal.executionStarted
+    elseif released then
+        outcome,errorCode,executionStarted=request.outcome,request.failureCode,request.executionStarted
+    else
+        executionStarted=request.executionStarted
+    end
     current={requestId=id,transport="mailbox-v1",kind="lua",status=phases[state.phase] or "unavailable",
         codeBytes=request.totalBytes,codeSHA256=request.requestSHA256,sequence=request.requestSeq,
         pending=state.validation~=nil or state.request~=nil,observedAt=current and current.requestId==id and current.observedAt or (time and time()) or 0,
-        errorCode=state.lastFailure or terminal and terminal.failureCode,
-        probeStatus=terminal and (terminal.outcome=="success" and "completed" or terminal.outcome),
-        terminal=terminal}
+        errorCode=errorCode,
+        probeStatus=outcome=="success" and "completed" or outcome,
+        executionStarted=executionStarted,
+        released=released,hasReport=terminal~=nil,terminal=terminal}
+    if current.executionStarted==nil then current.executionStarted=request.executionStarted end
     if state.phase=="result_pending" and not terminal then current.status="unavailable" end
     if not state.request and not state.validation then current.status="acknowledged" end
     return 1
@@ -52,7 +67,7 @@ ns.AutomationView={
     GetReportText=function(target)
         local record=get(target)
         if not record then return nil,"auto_execution_unknown" end
-        if not record.terminal then return nil,ns.L.AUTO_NO_REPORT end
+        if not record.terminal then return nil,record.released and ns.L.AUTO_RELEASED_REPORT_NOTE or ns.L.AUTO_NO_REPORT end
         return ns.CaptureWriter.Encode(record.terminal,49152)
     end,
     ClearRecords=function()

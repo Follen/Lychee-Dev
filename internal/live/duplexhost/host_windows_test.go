@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -107,12 +108,12 @@ func TestWriterLanesIndependentAndDrainFailClosed(t *testing.T) {
 	n.Target.Client.Directory = t.TempDir()
 	n.Target.Window.ProcessID = 7
 	n.Target.Window.ProcessStartedAt = 9
-	busy, e := vault.AcquireLease(ctx, n.scope(), n.resource("stop"))
+	busy, e := vault.AcquireLease(ctx, mustWriterScope(t, n), n.resource("stop"))
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer busy.Close()
-	closeLane, e := vault.TryAcquireLease(ctx, n.scope(), n.resource("command"))
+	closeLane, e := vault.TryAcquireLease(ctx, mustWriterScope(t, n), n.resource("command"))
 	if e != nil {
 		t.Fatal("stop blocked independent command", e)
 	}
@@ -121,7 +122,7 @@ func TestWriterLanesIndependentAndDrainFailClosed(t *testing.T) {
 		release()
 		t.Fatal("drain accepted active stop writer")
 	}
-	data, e := vault.TryAcquireLease(ctx, n.scope(), n.resource("command"))
+	data, e := vault.TryAcquireLease(ctx, mustWriterScope(t, n), n.resource("command"))
 	if e != nil {
 		t.Fatal("failed drain retained earlier command lock", e)
 	}
@@ -132,7 +133,7 @@ func TestWriterLanesIndependentAndDrainFailClosed(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, lane := range writeLanes {
-		lease, e := vault.TryAcquireLease(ctx, n.scope(), n.resource(lane))
+		lease, e := vault.TryAcquireLease(ctx, mustWriterScope(t, n), n.resource(lane))
 		if e == nil {
 			lease.Close()
 			t.Fatalf("drain omitted %s", lane)
@@ -377,19 +378,24 @@ func retirementFixture(t *testing.T, pending bool) (*Project, string, targetReco
 	p := &Project{Root: t.TempDir()}
 	id := "CON-" + strings.Repeat("1", 32)
 	store := duplex.NewFileStore(p.path(id))
-	meta := targetRecord{Schema: "lycheedev.duplex.target.v1", Identity: hostIdentity, ActorGUID: "actor-old"}
+	meta := targetRecord{Schema: "lycheedev.duplex.target.v1", ProcessClaimVersion: 1, Identity: hostIdentity, ActorGUID: "actor-old"}
 	meta.Target.Window.ProcessID = 7
-	meta.Target.Window.ProcessStartedAt = 9
+	meta.Target.Window.ProcessStartedAt = uint64(time.Now().UnixNano())
 	meta.Target.Window.Handle = 10
 	meta.Target.Window.Executable = filepath.Join(p.Root, "Wow.exe")
 	meta.Target.Client.Directory = filepath.Join(p.Root, "client")
 	if e := os.MkdirAll(addonParent(meta.Target), 0700); e != nil {
 		t.Fatal(e)
 	}
-	meta.Claim = journal.WindowOwner{Schema: "lycheedev.window-owner.v1", WorkspaceID: p.workspaceID(), Resource: "window/7/9/10", OperationID: id, IntentSHA256: strings.Repeat("a", 64)}
-	if e := journal.BeginConnectionWindow(ctx, addonParent(meta.Target), meta.Claim, func() error { return writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta) }); e != nil {
+	meta.Claim = journal.WindowOwner{Schema: "lycheedev.window-owner.v1", WorkspaceID: p.workspaceID(), Resource: fmt.Sprintf("window/7/%d/10", meta.Target.Window.ProcessStartedAt), OperationID: id, IntentSHA256: strings.Repeat("a", 64)}
+	if e := beginConnectionClaim(ctx, meta.Target, meta.Claim, func() error { return writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta) }); e != nil {
 		t.Fatal(e)
 	}
+	instanceScope, e := processScope(meta.Target)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(instanceScope) })
 	if e := store.Update(ctx, func(st *duplex.State) error {
 		st.Identity = hostIdentity
 		st.Selected = true
@@ -445,7 +451,7 @@ func TestManualLifecycleChangeRetiresOnlyLocalClaimAndKeepsUnknown(t *testing.T)
 			}
 			nextClaim := meta.Claim
 			nextClaim.OperationID = "CON-" + strings.Repeat("2", 32)
-			if e = journal.BeginConnectionWindow(context.Background(), addonParent(meta.Target), nextClaim, func() error { return nil }); e != nil {
+			if e = beginConnectionClaim(context.Background(), meta.Target, nextClaim, func() error { return nil }); e != nil {
 				t.Fatal("replacement instance cannot acquire fresh local selection", e)
 			}
 		})
@@ -461,7 +467,7 @@ func TestLifecycleRetirementRequiresExactFreshDoctorAndWriterDrain(t *testing.T)
 	}
 	doctor.Diagnostics["runtimeFresh"] = Diagnostic{"advancing", ""}
 	native := &Native{Target: meta.Target}
-	held, e := vault.TryAcquireLease(context.Background(), native.scope(), native.resource("command"))
+	held, e := vault.TryAcquireLease(context.Background(), mustWriterScope(t, native), native.resource("command"))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -559,7 +565,7 @@ func TestChangedRuntimeRetirementWaitsForExactDriverDrain(t *testing.T) {
 	observed := duplex.Sendbox{Identity: hostIdentity}
 	observed.Runtime = strings.Repeat("b", 32)
 	doctor := ProjectResult{Target: &meta.Target, Status: &observed, Diagnostics: map[string]Diagnostic{"processIdentity": {"verified", ""}, "runtimeFresh": {"advancing", ""}}}
-	driver, e := journal.LockBootstrapWindow(context.Background(), addonParent(meta.Target), meta.Claim)
+	driver, e := lockConnectionDriver(context.Background(), meta.Target, meta.Claim)
 	if e != nil {
 		t.Fatal(e)
 	}

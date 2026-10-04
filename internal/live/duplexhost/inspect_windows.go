@@ -5,14 +5,12 @@ package duplexhost
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/duplex"
-	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
@@ -84,8 +82,7 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 	} else {
 		r.Diagnostics["installed"] = Diagnostic{"clean", buildinfo.Version}
 	}
-	resource := fmt.Sprintf("window/%d/%d/%d", target.Window.ProcessID, target.Window.ProcessStartedAt, target.Window.Handle)
-	owner, busy, e := journal.InspectWindowOwner(ctx, addonParent(target), resource)
+	owner, busy, e := inspectConnectionOwner(ctx, target)
 	if e != nil {
 		r.Diagnostics["ownerAvailable"] = Diagnostic{"unknown", e.Error()}
 		errs = append(errs, e)
@@ -103,23 +100,27 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 	}
 	defer n.Close(ctx)
 	profile := n.WriteCapability()
+	r.WriterProfile = &profile
 	r.Diagnostics["rootRecipe"] = Diagnostic{"resolved", n.Mailbox.Binding().Evidence.RecipeID}
-	state := "unverified"
-	if profile.Eligible {
-		state = "eligible"
+	observation := memory.DuplexProfileObservation{ProcessIdentified: true, RootRecipeID: n.Mailbox.Binding().Evidence.RecipeID}
+	if n.Reload != nil && lifecycleErr == nil {
+		observation.LifecycleID = n.Reload.Resolution.RecipeID
 	}
-	r.Diagnostics["writerProfile"] = Diagnostic{state, profile.Validation + ": " + profile.LayoutEvidence + "; " + profile.LifetimeEvidence}
+	qualification := projectWriterQualification(&r, profile, observation)
 	s, e := n.Observe(ctx)
 	if e != nil {
 		r.Diagnostics["runtimePublished"] = Diagnostic{"unavailable", e.Error()}
 		return r, errors.Join(append(errs, e)...)
 	}
 	r.Status = &s
-	if _, e := n.Mailbox.ResolveDuplexArray(ctx, []memory.DuplexPath{{Name: "inbox"}, {Name: "stop"}}, s.Runtime, s.Arena, 80+256); e != nil {
+	observation.TypedMailbox = true
+	if row, e := n.Mailbox.ResolveDuplexArray(ctx, []memory.DuplexPath{{Name: "inbox"}, {Name: "stop"}}, s.Runtime, s.Arena, 80+256); e != nil {
 		r.Diagnostics["numericLayout"] = Diagnostic{"unavailable", e.Error()}
 	} else {
+		observation.NumericRow = row.Frozen
 		r.Diagnostics["numericLayout"] = Diagnostic{"observed", "read-only six-number calibration; not write eligibility"}
 	}
+	qualification = projectWriterQualification(&r, profile, observation)
 	r.Diagnostics["runtimePublished"] = Diagnostic{"verified", s.Runtime}
 	r.Diagnostics["actorReady"] = Diagnostic{"verified", s.ActorGUID}
 	if !s.ActorReady || s.ActorGUID == "" {
@@ -172,12 +173,19 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 		}
 		r.Diagnostics[name] = Diagnostic{state, s.Phase}
 	}
-	if fresh && s.TransportReady && s.ControlReady && profile.Eligible && lifecycle.CheckBusinessWriteGate() == nil {
+	if fresh && s.TransportReady && s.ControlReady && qualification.DirectWrite && lifecycle.CheckBusinessWriteGate() == nil {
 		r.Stage = "healthy"
 	} else {
 		r.Stage = "degraded"
 	}
 	return r, errors.Join(errs...)
+}
+
+func projectWriterQualification(result *ProjectResult, profile memory.DuplexWriterProfile, observation memory.DuplexProfileObservation) memory.DuplexQualification {
+	qualification := profile.Qualify(observation)
+	result.WriterQualification = &qualification
+	result.Diagnostics["writerProfile"] = Diagnostic{string(qualification.Level), profile.Validation + ": " + profile.LayoutEvidence + "; " + profile.LifetimeEvidence}
+	return qualification
 }
 
 func inspectionIdentity(st duplex.State, s duplex.Sendbox) bool {

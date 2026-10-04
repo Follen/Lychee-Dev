@@ -136,7 +136,7 @@ func TestReloadCrossBuildRelocatesCompleteUniquePatterns(t *testing.T) {
 		if e != nil || o.CheckBusinessWriteGate() != nil {
 			t.Fatal(e, o)
 		}
-		if DuplexWriteCapability(s.ExecutableSHA256, s.Build, s.Product).Eligible {
+		if DuplexWriteCapability(s.ExecutableSHA256, s.Build, s.Product).CanDirectWrite() {
 			t.Fatal("read recipe granted write capability")
 		}
 	}

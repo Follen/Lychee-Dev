@@ -45,7 +45,8 @@ local function engine(options)
         compile=options.compile or function(source)return loadstring(source,"=mailbox_fixture")end,
         started=options.started,finished=options.finished,reload=options.reload,
         execute=options.execute or function(fn,_,done)calls=calls+1;local ok,value=pcall(fn);done(ok,value,{resourcesReleased=true});return {}end,
-        clock=function()return time end,challenge=function()return string.rep(string.char(187),16)end,
+        clock=function()return time end,workClockMillis=options.workClockMillis,
+        challenge=function()return string.rep(string.char(187),16)end,
         encode=options.encode or ns.CaptureWriter.Encode,actor=function()if options.noActor then return nil end;return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end,
         publishPage=function(n,body)pages[n]=body end,clearPages=function()for n in pairs(pages)do pages[n]=nil end end}
     local e=assert(P.Create(dep));assert(e.BindIdentity(identity));assert(e.Enable())

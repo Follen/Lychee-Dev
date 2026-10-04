@@ -9,49 +9,56 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/duplex"
 )
 
+// DirectPublicationRequest has protocol identities only; the typed adapter
+// resolves and checks current addresses immediately before publication.
+type DirectPublicationRequest struct {
+	Target                             ProcessIdentity
+	ExecutableSHA256                   string
+	Build, Product, Release, ActorGUID string
+	Message                            duplex.Message
+}
+
 // PublishDirectDuplexRow never attaches a debugger or suspends a target thread.
-// It preserves the exact one-row publication and its readback, but a game
-// reload between the final gate and WPM can invalidate the Lua allocation.
-// This route is only enabled for the owner's exact-image trial profile.
-func PublishDirectDuplexRow(ctx context.Context, request StoppedPublicationRequest) (duplex.WriteOutcome, []DuplexWriteRange, StoppedObservation, error) {
+// Reload between its final gate and WPM can still invalidate the allocation.
+// Only the exact-image direct trial profile is enabled.
+func PublishDirectDuplexRow(ctx context.Context, request DirectPublicationRequest) (duplex.WriteOutcome, []DuplexWriteRange, error) {
 	noWrite := duplex.WriteOutcome{State: duplex.NoWrite}
-	noStop := StoppedObservation{}
 	if _, ok := ctx.Deadline(); !ok {
-		return noWrite, nil, noStop, errors.New("memory.write_deadline_required")
+		return noWrite, nil, errors.New("memory.write_deadline_required")
 	}
 	if err := ctx.Err(); err != nil {
-		return noWrite, nil, noStop, err
+		return noWrite, nil, err
 	}
 	profile := DuplexWriteCapability(request.ExecutableSHA256, request.Build, request.Product)
-	if !profile.Eligible || profile.Mode != "direct" {
-		return noWrite, nil, noStop, errors.New("live.duplex_writer_profile_unverified")
+	if !profile.CanDirectWrite() || profile.Mode != "direct" {
+		return noWrite, nil, errors.New("live.duplex_writer_profile_unverified")
 	}
 	if request.Release == "" || request.ActorGUID == "" {
-		return noWrite, nil, noStop, duplex.ErrIdentity
+		return noWrite, nil, duplex.ErrIdentity
 	}
 	if _, err := duplex.EncodeMessage(request.Message); err != nil {
-		return noWrite, nil, noStop, err
+		return noWrite, nil, err
 	}
 	p, err := OpenDuplexWriter(request.Target.PID, request.Target.Created, request.Target.Image)
 	if err != nil {
-		return noWrite, nil, noStop, err
+		return noWrite, nil, err
 	}
 	defer p.Close()
 	module, err := p.MainModule(ctx)
 	if err != nil {
-		return noWrite, nil, noStop, err
+		return noWrite, nil, err
 	}
 	if module.ExecutableSHA256 != request.ExecutableSHA256 {
-		return noWrite, nil, noStop, errors.New("memory.image_changed")
+		return noWrite, nil, errors.New("memory.image_changed")
 	}
 	readModule := func(c context.Context, at uint64, b []byte) (int, error) { return p.ReadModule(c, module, at, b) }
 	reload, err := ResolveReloadState(ctx, module.Base, module.Size, module.ExecutableSHA256, request.Build, request.Product, module.LuaImageLayout(), readModule)
 	if err != nil {
-		return noWrite, nil, noStop, err
+		return noWrite, nil, err
 	}
 	reader, err := OpenLuaMailbox(ctx, p, module.Base, module.Size, module.ExecutableSHA256, request.Release, module.LuaImageLayout(), readModule)
 	if err != nil {
-		return noWrite, nil, noStop, err
+		return noWrite, nil, err
 	}
 	guard := func(c context.Context) error {
 		if err := p.Verify(c); err != nil {
@@ -101,5 +108,5 @@ func PublishDirectDuplexRow(ctx context.Context, request StoppedPublicationReque
 		return nil
 	}
 	out, facts, err := p.PublishDuplexRow(ctx, reader, request.Message, guard)
-	return out, facts, noStop, err
+	return out, facts, err
 }

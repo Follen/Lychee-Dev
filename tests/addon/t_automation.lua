@@ -287,6 +287,7 @@ local state={phase="ready_unbound",ready=true,actorReady=true,transportReady=tru
 ns.DuplexRuntime={Snapshot=function()return {enabled=true,protocol=state}end}
 ns.Safety={IsCombatBlocked=function()return false end,PrintBlocked=function()end}
 LoadAddonFile("Modules/AutomationView.lua",ns)
+assert(frameCount==0,"read-only projection created resources before /dev")
 local view=ns.AutomationView
 assert(view.Collect()==0)
 local id=string.rep("a",32)
@@ -299,12 +300,17 @@ local page=ns.CreateAutomationPage(NewRegion("parent"))
 assert(not page.executeButton and not page.showNoticeButton and not page.hideNoticeButton)
 assert(page.rows[1].requestId==id)
 assert(page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_BUSY)
+assert(page.mailboxText.point[1]=="TOPRIGHT","mailbox readiness is below the help instead of in the header")
+assert(not page.viewReportButton:IsEnabled(),"running request enabled an unavailable report")
 page:Activate()
 assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_RUNNING)
+assert(view.GetRecord(id).errorCode==nil and page.errorValue:GetText()==ns.L.NOT_AVAILABLE,
+    "running request invented an error")
 state={phase="validating",validation={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),copiedBytes=8192,hashedBytes=0},terminal={requestId=string.rep("e",32),outcome="failed"}}
 page:Refresh()
 assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_QUEUED and page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_BUSY)
 assert(view.GetRecord(id).terminal==nil,"previous result was attributed to validating command")
+assert(not page.viewReportButton:IsEnabled(),"validating request enabled previous result report")
 state={phase="running",request={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),requestSeq="9007199254740993"}}
 local changes=0
 view.SetChangeHandler(function()changes=changes+1 end)
@@ -312,17 +318,57 @@ view.Changed();assert(changes==1)
 view.SetChangeHandler(function()error("cosmetic failure")end)
 assert(pcall(view.Changed))
 view.SetChangeHandler(nil)
-state.phase="result_pending";state.terminal={outcome="success",resultSHA256=string.rep("c",64),resultBytes=4,pages=1}
+state.phase="sealing";page:Refresh()
+assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_FINALIZING)
+assert(page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_BUSY and not page.viewReportButton:IsEnabled())
+state.phase="result_pending";state.terminal={requestId=id,outcome="success",executionStarted=true,resultSHA256=string.rep("c",64),resultBytes=4,pages=1}
 view.Collect()
 assert(view.GetRecord(id).probeStatus=="completed")
 assert(view.GetRecord(id).status=="reported")
 assert(view.GetReportText(id):find('"resultBytes":4',1,true))
+page:Refresh();assert(page.viewReportButton:IsEnabled())
+page.viewReportButton:Click()
+assert(page.reportArea.editBox:GetText():find('"resultBytes":4',1,true))
 assert(view.ClearRecords()==0)
-state={phase="ready_unbound",ready=true,actorReady=true,transportReady=true,controlReady=true,released={requestId=id,requestSHA256=string.rep("b",64)}}
+state={phase="ready_unbound",ready=true,actorReady=true,transportReady=true,controlReady=true,
+    lastFailure="duplex_control_identity",released={requestId=id,requestSHA256=string.rep("b",64),
+        totalBytes=1048576,requestSeq="9007199254740993",outcome="success",executionStarted=true}}
 view.Collect();assert(view.GetRecord(id).status=="acknowledged")
 assert(view.GetReportText(id)==nil,"released view retained result manifest")
+page:Refresh()
+assert(view.GetRecord(id).errorCode==nil,"connection failure contaminated released request")
+assert(view.GetRecord(id).probeStatus=="completed" and page.rows[1].status:GetText()==ns.L.AUTO_STATUS_SUCCEEDED)
+assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_ACKNOWLEDGED)
+assert(page.errorValue:GetText()==ns.L.NOT_AVAILABLE)
+assert(page.connectionError:GetText()==string.format(ns.L.AUTO_CONNECTION_ERROR,"duplex_control_identity"))
+assert(not page.viewReportButton:IsEnabled(),"released request enabled an unavailable report")
+assert(page.reportArea.editBox:GetText():find(ns.L.AUTO_EXECUTION_SUMMARY,1,true))
+assert(page.reportArea.editBox:GetText():find(ns.L.AUTO_RELEASED_REPORT_NOTE,1,true))
+assert(page.codeValue:GetText():find("1048576",1,true),"released code bytes were dropped")
+assert(not page.reportArea.editBox:GetText():find('"resultBytes"',1,true),"released summary retained terminal manifest")
+page.detailsButton:Click();assert(page.metadata:IsShown() and not page.reportArea:IsShown())
+page.summaryButton:Click();assert(page.reportArea:IsShown() and not page.metadata:IsShown(),
+    "released summary cannot be reopened after viewing details")
+-- Older summaries remain truthful and cannot manufacture a successful result.
+state.released={requestId=id,requestSHA256=string.rep("b",64)}
+state.lastFailure=nil;page:Refresh()
+assert(view.GetRecord(id).probeStatus==nil)
+assert(page.codeValue:GetText()==string.format(ns.L.AUTO_CODE_CHECKSUM_ONLY,string.rep("b",64)))
+assert(page.connectionError:GetText()=="")
+-- A terminal request failure and a rejected candidate/control are separate facts.
+state={phase="result_pending",request={requestId=id,totalBytes=1},
+    terminal={requestId=id,outcome="failed",executionStarted=false,failureCode="compile_error"},
+    lastFailure="duplex_control_identity",candidateFailure={requestId=string.rep("f",32),code="duplex_digest"}}
+page:Refresh()
+assert(page.errorValue:GetText()=="compile_error")
+assert(page.candidateError:GetText()==string.format(ns.L.AUTO_CANDIDATE_ERROR,string.rep("f",32),"duplex_digest"))
+assert(page.connectionError:GetText()==string.format(ns.L.AUTO_CONNECTION_ERROR,"duplex_control_identity"))
+assert(page.rows[1].status:GetText()==ns.L.AUTO_STATUS_FAILED)
+state={phase="ready_unbound",ready=true,released={requestId=id,requestSHA256=string.rep("b",64)}}
+page:Refresh()
 assert(view.ClearRecords()==1 and view.Collect()==0)
 page:Refresh();assert(page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_READY)
+assert(page.reportArea.editBox:GetText()==ns.L.AUTO_SELECT_RECORD,"cleared selection retained a stale report")
 for i=1,140 do
     local nextID=string.format("%032x",i)
     state={phase="running",request={requestId=nextID,totalBytes=1048576}}

@@ -2,8 +2,9 @@
 
 Superseded for this branch by the authoritative
 [Lychee Dev mailbox protocol v1 contract](live-mailbox-v1-architecture-2026-10-04.md).
-The current schema is `lycheedev.mailbox.v1`; one physical data row carries up to
-256 logical frames / 1 MiB. The older duplex magic, domains and layout below are
+The current schema is `lycheedev.mailbox.v1` with `single-command-row-v1`:
+one full command of up to 1 MiB is published in one WPM. The 4 KiB/256-frame
+mailbox candidate and the older duplex magic, domains and layout below are
 historical and rejected, not compatibility options. Consult the new contract and
 `implementation-status.md` for current implementation and validation boundaries.
 

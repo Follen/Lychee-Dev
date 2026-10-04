@@ -80,7 +80,7 @@ local function makeOwner()
     controller,reason=ns.DuplexProtocol.Create({identity=identity,publish=publish,
         compile=function(source)return loadstring(source,"=LycheeDuplexProbe")end,
         execute=ns.ProbeExecution.Run,encode=ns.CaptureWriter.Encode,
-        clock=ns.Compat.MonotonicSeconds,challenge=challenge,
+        clock=ns.Compat.MonotonicSeconds,workClockMillis=ns.Compat.ProfileMilliseconds,challenge=challenge,
         actor=function()local a=currentActor();if a and a.guid==identity.actorGUID then return a end end,
         reload=function()return type(ReloadUI)=="function" end,
         clearPages=function()

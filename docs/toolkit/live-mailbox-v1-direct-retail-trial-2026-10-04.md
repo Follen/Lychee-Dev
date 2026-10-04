@@ -28,11 +28,25 @@ journal intervals above include admission, addon validation and observation;
 they do not measure WPM time alone. In particular, the 1 MiB result does not
 support a claim of low end-to-end latency.
 
+A later probe on the same PID/creation identity and exact image ran
+`collectgarbage('collect')` three consecutive times. Connection
+`CON-c5c42ed7b42c747dcb1cc333bea1bc0c`, request
+`38a49dd7e4da95044337ce2df4049699`, used the same CLI package commit `39844a4`
+and clean installed addon commit `b021251`. Its exact retained result was
+`{beforeKiB:430522.38085938, afterKiB:368828.50683594, inWorld:true, kind:'gc-live'}`;
+status verified it, then disconnect verified `closed=true`, `cleanup=complete`.
+These are whole Lua VM counters, not the addon's isolated memory. This verifies
+in-probe GC and subsequent close, **not** GC occurring simultaneously with WPM
+or long-duration collector safety.
+
 The direct route checks the process, exact image, Lua root, actor, sendbox,
 world and reload state before WPM. Strong private Lua references protect the
 row from ordinary GC. A `/reload`, logout or VM teardown that begins after the
 last check can still free it before or during WPM. This race is explicitly
-unresolved; the successful trials did not exercise it. Cancel, reload,
+unresolved; the successful trials did not exercise it. The owner accepts this
+residual risk. During a write the Agent must not initiate reload and must tell
+the user to avoid manual `/reload`; normal reload after request cleanup is
+allowed. Finite successful trials do not eliminate the race. Cancel, reload,
 multi-instance competition, other builds and long-duration memory behavior
 remain outside this real-client observation.
 
@@ -45,3 +59,6 @@ Local evidence (ignored by Git):
   small-request journal, result and command/close write traces.
 - `Analyze/duplex-mailbox/live-project/.lycheedev/live/duplex/CON-7017f059db1e824546f28444820fc703/`:
   1 MiB journal, result and command/close write traces.
+- `Analyze/duplex-mailbox/probes/native-gc-smoke.lua`: three-GC probe source.
+- `Analyze/duplex-mailbox/live-project/.lycheedev/live/duplex/CON-c5c42ed7b42c747dcb1cc333bea1bc0c/state.json`:
+  three-GC request journal and verified result/close evidence.

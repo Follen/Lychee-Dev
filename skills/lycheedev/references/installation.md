@@ -111,8 +111,10 @@ no LoadOnDemand input addon. Its one whole-command row is reused for successive
 commands; the previous 4 KiB row and older duplex schemas are rejected.
 All managed files and receipts must match the selected CLI release. An installed
 CLI or Skill does not update an already running client, and a disk-only result
-is not live readiness. Targeted doctor also checks the writer profile; this
-candidate currently has none qualified for native execution.
+is not live readiness. Targeted doctor also checks the exact-image writer
+profile. Current direct-writer evidence qualifies only the tested Retail
+`12.1.0.69933` image and its recorded scenarios; other images and clients
+remain read-only until separately qualified.
 
 An inert older managed installation can be replaced using its installation
 receipt. The installer can archive byte-verified, idle managed old slot files;

@@ -6,11 +6,14 @@
 执行结果确认、取消/断开、GC 与重载恢复、角色与双实例隔离、插件内存和
 `/dev` 工作台；跳动荔枝只在探针执行时出现。本轮离线基线已全部通过，
 证据在忽略目录 `Analyze/duplex-mailbox/evidence/offline-final-20261004-12/`；
-正式服原生写入仍为 `not_run`。以下 4 KiB 候选的通过结果不能继承。
+[精确 Retail direct 实测](live-mailbox-v1-direct-retail-trial-2026-10-04.md)已通过小命令、
+1 MiB、独立断开及探针内三次 GC。写入后 reload/新 runtime 再执行、同 build
+双实例、其他 build 与长时内存/性能保持 `not_run`。最终检查到 WPM 的外部 reload
+竞态是用户接受的剩余风险，并未被有限次通过消除。以下 4 KiB 候选的通过结果不能继承。
 
-2026-10-04 mailbox v1 的 x64 Lua 全量离线、Windows CI 与正式服插件内自检已经通过，
+2026-10-04 历史 4 KiB mailbox v1 候选的 x64 Lua 全量离线、Windows CI 与正式服插件内自检已经通过，
 实测单数据行/七控制行 backing 共 132 KiB，整个插件短样本约 1.77 MiB。
-原生写入及相关游戏并发/生命周期验收仍未运行；见 [具体证据与范围](live-mailbox-v1-acceptance-2026-10-04.md)。
+当时未做原生写入；该历史限制不覆盖后续 direct 整行试验。见 [具体证据与范围](live-mailbox-v1-acceptance-2026-10-04.md)。
 
 2026-10-04 前一版候选采用 [Lychee Dev mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)。
 新 schema/magic/hash domain/layout 必须拒绝旧协议；唯一物理数据行允许 1 MiB 逻辑请求，
@@ -18,7 +21,7 @@
 回归覆盖全部 lane 的阴影缓存保留量、冷/热状态空闲分配、同标记内容变化、
 清零/odd 后重新发布、换 owner 后旧输入拒绝、GC 私有根和两代 writer-drain。
 `TestMailboxRuntimeIdleMemory` 测真实 TOC/Runtime/encoder；Go/Lua 压力覆盖最大输入和 140 条释放请求。
-新 native 执行与游戏内部 self-check 分开记账；当前 writer profile 仍未资格验证。
+该候选的 native 执行与游戏内部 self-check 分开记账；当时 writer profile 未资格验证。
 旧 LoD/按键/色块输入不加载、不打包、不回退。下方旧 live 结果只保留原版本历史范围。
 
 2026-10-02 [Retail Encoding 预算](retail-encoding-budget-2026-10-02.md)：大型逻辑对象的小范围读取可用默认额度；CKey/EKey 目录及页 miss 分配前拒绝真实超额；命中复用，驱逐和失败后重读累计不退款；同查询共享额度不重置，并发填充保留完整性验证。公开无缓存行为、BLTE 临时缓冲和 Root 计费保持。合成 fixture 与固定真实 pin 的查询结果分开记录。
@@ -146,7 +149,7 @@ Native 绑定回归必须覆盖：主键冲突报警并选取 F11 备用；主/�
 
 2026-09-28 原生内存/64 槽位验收使用[新矩阵](live-memory-slot-tests.md)及[实测记录](live-memory-slot-implementation-2026-09-28.md)。可重复的公开 CLI 基准入口为 `tests/channel-live/public-baseline.mjs`，需要显式传入候选 CLI、独立项目目录、安装路径与 PID；不在 CI 自动操控游戏。下方旧二维码/队列的基准结果不能代替新传输的验收。
 
-双客户端并发与 reload 故障注入使用 `tests/channel-live/cross-client-baseline.mjs`；入口和目标文件格式见[运行说明](../../tests/channel-live/README.md)，Titan / Forever 的具体证据与范围见[本轮记录](live-memory-slot-clients-2026-09-28.md)。独立安装目录的并发不等于共享同一物理槽位池的验收。
+当时双客户端并发与 reload 故障注入使用 `tests/channel-live/cross-client-baseline.mjs`；该旧入口已从当前 mailbox 分支移除，不能据此运行当前协议。Titan / Forever 的历史证据与范围见[本轮记录](live-memory-slot-clients-2026-09-28.md)。独立安装目录的并发不等于共享同一物理槽位池的验收。
 
 状态：完整验收设计；部分用例已有 Go/Lua 实现，不代表全部通过。日期：2026-09-24（本次修订新增 wowdoc/wowdata 逐业务 parity 台账说明；此前已新增 11a 工作台能力回归矩阵 WKB-01..13，LUA-07 改为分项引用 WKB 用例，§16 增加工作台发布判定）。
 当前执行证据见 [implementation-status.md](implementation-status.md)，不以本清单充当测试结果。

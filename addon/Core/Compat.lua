@@ -19,6 +19,15 @@ ns.Compat = {
             or value ~= value or value < 0 or value == math.huge then return nil end
         return value
     end,
+    -- A high-resolution, monotonic clock for bounded mailbox work. Unlike
+    -- debugprofilestart, this does not reset a global profiler used by addons.
+    ProfileMilliseconds = function()
+        if type(GetTimePreciseSec) ~= "function" then return nil end
+        local ok, value = pcall(GetTimePreciseSec)
+        if not ok or (issecretvalue and issecretvalue(value)) or type(value) ~= "number"
+            or value ~= value or value < 0 or value == math.huge then return nil end
+        return value * 1000
+    end,
     GetAddOnMetadata = function(addonName, field)
         if type(C_AddOns) ~= "table" or type(C_AddOns.GetAddOnMetadata) ~= "function" then
             return nil

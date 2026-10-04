@@ -202,6 +202,29 @@ func TestSendboxAcceptsAddonRequestTotalBytes(t *testing.T) {
 	}
 }
 
+func TestSendboxSealingAndReleasedSummary(t *testing.T) {
+	s := fixtureSendbox()
+	s.Phase, s.Ready, s.BusinessReady = "sealing", false, false
+	s.Request = &RequestState{RequestID: strings.Repeat("6", 32), RequestSHA256: strings.Repeat("7", 64), RequestSeq: 1, TransportAttempt: 1, TotalBytes: 149, AcceptedFrames: []uint32{1}}
+	wire, err := EncodeSendbox(s)
+	if err != nil {
+		t.Fatal("sealing projection", err)
+	}
+	if _, err = DecodeSendbox(wire); err != nil {
+		t.Fatal("sealing decode", err)
+	}
+	s.Phase, s.Ready, s.BusinessReady, s.Request = "ready_unbound", true, true, nil
+	s.Released = &Released{RequestID: strings.Repeat("6", 32), RequestSHA256: strings.Repeat("7", 64), RequestSeq: 1, TotalBytes: 149, Outcome: "success", ExecutionStarted: true}
+	wire, err = EncodeSendbox(s)
+	if err != nil {
+		t.Fatal("released projection", err)
+	}
+	out, err := DecodeSendbox(wire)
+	if err != nil || out.Released == nil || out.Released.RequestSeq != 1 || out.Released.TotalBytes != 149 || out.Released.Outcome != "success" || !out.Released.ExecutionStarted {
+		t.Fatalf("released summary lost: %+v, %v", out.Released, err)
+	}
+}
+
 type fixtureStore struct {
 	mu         sync.Mutex
 	state      State
@@ -304,7 +327,7 @@ func (b *fixtureBackend) Publish(ctx context.Context, m Message) (WriteOutcome, 
 				return WriteOutcome{State: NoWrite}, e
 			}
 			if b.box.Terminal != nil {
-				b.box.Released = &Released{b.box.Terminal.RequestID, b.box.Terminal.RequestSHA256}
+				b.box.Released = &Released{RequestID: b.box.Terminal.RequestID, RequestSHA256: b.box.Terminal.RequestSHA256}
 			}
 			b.box.Identity = Identity{h.Runtime, h.Arena, h.Session, h.Owner, h.ActorBinding, h.Fence}
 			b.box.Terminal = nil
@@ -350,7 +373,7 @@ func (b *fixtureBackend) Publish(ctx context.Context, m Message) (WriteOutcome, 
 				if string(expected) != string(m.Payload) || b.box.ReadyChallenge != h.Challenge {
 					return WriteOutcome{State: NoWrite}, ErrIdentity
 				}
-				b.box.Released = &Released{b.box.Terminal.RequestID, b.box.Terminal.RequestSHA256}
+				b.box.Released = &Released{RequestID: b.box.Terminal.RequestID, RequestSHA256: b.box.Terminal.RequestSHA256}
 				b.box.Terminal = nil
 				b.box.Request = nil
 			}
@@ -365,7 +388,7 @@ func (b *fixtureBackend) Publish(ctx context.Context, m Message) (WriteOutcome, 
 				if string(expected) != string(m.Payload) || st.Active == nil || !st.Active.ResultSaved {
 					return WriteOutcome{State: NoWrite}, errors.New("ACK before exact durable result")
 				}
-				b.box.Released = &Released{h.RequestID, h.RequestSHA256}
+				b.box.Released = &Released{RequestID: h.RequestID, RequestSHA256: h.RequestSHA256}
 				b.box.Terminal = nil
 				b.box.Request = nil
 				b.box.Phase = "closed"
@@ -932,7 +955,7 @@ func TestValidatingProjectionKeepsFirstOwnerUnbound(t *testing.T) {
 			if closed {
 				b.box.Identity = fixtureIdentity
 				b.box.ClosedAdmission = true
-				b.box.Released = &Released{strings.Repeat("7", 32), strings.Repeat("0", 64)}
+				b.box.Released = &Released{RequestID: strings.Repeat("7", 32), RequestSHA256: strings.Repeat("0", 64)}
 				id, e := NextIdentity(b.box, strings.Repeat("b", 32), strings.Repeat("c", 32))
 				if e != nil {
 					t.Fatal(e)

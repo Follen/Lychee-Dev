@@ -28,8 +28,9 @@ type NumericCell struct {
 }
 
 type DuplexArray struct {
-	Cells []NumericCell
-	a     *luaAccess
+	Cells  []NumericCell
+	Frozen bool
+	a      *luaAccess
 }
 
 func (v *DuplexArray) Verify(ctx context.Context) error {
@@ -225,7 +226,7 @@ func (r *MailboxReader) ResolveDuplexArray(ctx context.Context, path []DuplexPat
 	if err != nil {
 		return nil, err
 	}
-	result := &DuplexArray{a: row.a, Cells: make([]NumericCell, count)}
+	result := &DuplexArray{a: row.a, Cells: make([]NumericCell, count), Frozen: row.frozen}
 	for i := range result.Cells {
 		cell := row.image[i*24 : (i+1)*24]
 		value := math.Float64frombits(binary.LittleEndian.Uint64(cell))

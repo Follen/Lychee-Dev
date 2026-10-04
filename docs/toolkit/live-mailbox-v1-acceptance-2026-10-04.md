@@ -12,9 +12,14 @@ current physical layout.
 
 The direct trial's small request reached observed execution in 267 ms; the
 1 MiB request took 19,156 ms. These journal intervals include validation and
-host observation, so they are not isolated WPM measurements. The final check
-to `/reload` race remains, and other builds and multi-instance competition have
-not passed this writer's real-client acceptance.
+host observation, so they are not isolated WPM measurements. The same process then passed a separate probe with three full Lua GC cycles,
+verified result and close; the direct-trial record retains its CON/request and
+whole-VM counters. It does not prove GC overlapping WPM. The final check
+to `/reload` race remains and is an owner-accepted residual risk: the Agent does
+not initiate reload during a write and tells the user to avoid manual `/reload`
+then; normal reload after request cleanup is allowed. Other builds,
+reload/new-runtime execution and multi-instance competition have not passed
+this writer's real-client acceptance.
 
 The current contract is [mailbox v1 architecture](live-mailbox-v1-architecture-2026-10-04.md).
 Code candidate `73f61a74623b0468c0fe6aa0709a0a51b0453a2a` was installed from a
@@ -135,17 +140,38 @@ its timestamp did not advance on the successful reload. It cannot prove the
 absence of all later errors. The completed in-memory report establishes that
 the corrected test scripts actually ran.
 
-## Remaining acceptance boundary
+## Historical 4 KiB acceptance boundary
 
-All native writer profiles remain ineligible. Targeted doctor deliberately
-reports `healthy=false` / `live.duplex_writer_profile_unverified`. Observed
+At the historical 4 KiB self-check above, all native writer profiles were
+ineligible. Targeted doctor deliberately
+reported `healthy=false` / `live.duplex_writer_profile_unverified`. Observed
 reload flags and strong roots do not close the final-check-to-WPM VM teardown
 race. No external game-memory writes, native CON probe, debugger attachment or
 thread suspension were used for this self-check.
 
-Native CLI-to-addon execution, true maximum-input game peak, game-side
-cancel/disconnect/reload/repair during external writes, same-build dual instance,
-other clients and real cross-build writer reuse remain **not_run**. Offline
-protocol and addon-owned execution results do not qualify those paths. A proved
-VM lifetime mechanism is still required under architecture section 8; the PR
-remains draft and this candidate is not merged or published.
+At that stage, native CLI-to-addon execution, true maximum-input game peak,
+game-side cancel/disconnect/reload/repair during external writes, same-build
+dual instance, other clients and real cross-build writer reuse were **not_run**.
+Offline protocol and addon-owned execution did not qualify those paths. Those
+historical restrictions do not erase the later exact-image direct trial.
+The earlier candidate was not merged or published by this self-check.
+
+## Current whole-command remaining acceptance
+
+| Scenario | Evidence state |
+| --- | --- |
+| Exact Retail 12.1.0.69933 image: small and 1 MiB direct command, readback, result and final close | passed, restricted to the direct-trial identities |
+| Three full GC cycles in a later probe on that same process, then verified result and close | passed; not simultaneous GC/WPM or long-duration safety |
+| Reload after request cleanup, replacement runtime and a new command | not_run |
+| Same-build real dual instances and competing host drivers | not_run for real clients; do not substitute offline fixtures |
+| Classic/Titan writer and another Retail hash/build | not_run; write-ineligible |
+| Forever writer | excluded from the acceptance matrix |
+| True 1 MiB game memory peak, matched CPU/frame/latency distributions, 140 real commands and long idle | not_run |
+| External reload starting after final check or during WPM | residual risk accepted by owner; not eliminated |
+
+The [reconstruction plan](live-mailbox-v1-reconstruction-plan-2026-10-04.md)
+defines remaining implementation and scene-specific acceptance. It does not
+upgrade an unrun scene to passed. New offline or real-client results must retain
+exact CLI/addon commit, install receipt, product/build/hash, PID/creation,
+runtime/arena, actor, CON and request/control IDs; previous release acceptance
+cannot be inherited by this layout.

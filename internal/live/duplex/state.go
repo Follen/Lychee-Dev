@@ -46,8 +46,13 @@ type ResultManifest struct {
 	FailureCode       string   `json:"failureCode,omitempty"`
 }
 type Released struct {
-	RequestID     string `json:"requestId"`
-	RequestSHA256 string `json:"requestSHA256"`
+	RequestID        string `json:"requestId"`
+	RequestSHA256    string `json:"requestSHA256"`
+	RequestSeq       uint64 `json:"requestSeq,string,omitempty"`
+	TotalBytes       uint32 `json:"totalBytes,omitempty"`
+	Outcome          string `json:"outcome,omitempty"`
+	ExecutionStarted bool   `json:"executionStarted,omitempty"`
+	FailureCode      string `json:"failureCode,omitempty"`
 }
 
 type ReloadPreparation struct {
@@ -138,7 +143,7 @@ func validateSendbox(s Sendbox) error {
 		return errors.New("missing sendbox sequence")
 	}
 	switch s.Phase {
-	case "ready_unbound", "validating", "running", "result_pending", "closing", "closed", "quarantined", "execution_unknown":
+	case "ready_unbound", "validating", "running", "sealing", "result_pending", "closing", "closed", "quarantined", "execution_unknown":
 	default:
 		return errors.New("invalid sendbox phase")
 	}
@@ -234,6 +239,10 @@ func validateSendbox(s Sendbox) error {
 		}
 		if _, e := digest(s.Released.RequestSHA256); e != nil {
 			return e
+		}
+		if s.Released.TotalBytes > MaxSourceBytes ||
+			(s.Released.Outcome != "" && s.Released.Outcome != "success" && s.Released.Outcome != "failed" && s.Released.Outcome != "cancelled") {
+			return errors.New("invalid released summary")
 		}
 	}
 	if p := s.Repair; p != nil {

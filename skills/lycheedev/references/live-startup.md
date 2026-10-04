@@ -16,10 +16,17 @@ alone. Old duplex schemas/layouts, LoD slots and bootstrap keys are incompatible
    no LoD slots. Exact inactive managed old slot files may be archived by an
    upgrade; unknown or pending files are preserved and block that migration.
 3. Enter the authorized character and enable the addon using `/dev connect`.
-   If a replaced addon is not loaded yet, a manual `/reload` is needed. There is
+   If a replaced addon is not loaded yet, a manual `/reload` is needed after
+   request cleanup and with no active writer; see [reload](live-reload.md). There is
    no automatic key fallback or old protocol compatibility on this branch.
 4. Run targeted [doctor](live-doctor.md), then `live connect` with the exact target
    and project. Preserve any returned CON, even when the host wait is pending.
+
+If no character has entered the world, keep the selected installation/PID and
+report that character entry is required; do not attempt a business write or
+silently switch to another window. After entry, repeat targeted doctor before
+the drive. A world-ready reading during reload is insufficient while native
+reload diagnostics still show reload in progress.
 
 An absent actor, disabled bridge, unsupported Lua layout, missing publication,
 foreign owner or modified installation is a concrete blocker. Do not select a

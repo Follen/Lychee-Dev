@@ -11,8 +11,12 @@ SOURCE 和真实 LuaLS 检查均为 passed；整行候选提交为 `b021251`。
 [首次正式服写入](live-mailbox-v1-retail-trial-2026-10-04.md)停顿 37.368 ms，
 一次 6,293,376-byte WPM 与读回完成，随后客户端 `Security Crash`；未取得执行结果。
 调试器暂停写入路线因此禁用。[不挂起整行写入试验](live-mailbox-v1-direct-retail-trial-2026-10-04.md)
-在精确 Retail build 上验证了小命令、1 MiB 命令和断开，其他 build 拒绝写入。
-最后一次检查与 `/reload` 之间的竞态仍存在。Go 对 Lua
+在精确 Retail `12.1.0.69933` 映像上验证了小命令、1 MiB 命令和断开；同一真实
+进程的另一探针连续三次完整 GC、结果验证与断开也通过。此 GC 样本不证明 GC 与 WPM
+恰好同时发生。其他 hash/build 拒绝写入，写入后 reload/新 runtime 再执行、同 build
+双实例与长时性能仍为 `not_run`。用户接受最后一次检查到 WPM 的外部 reload 剩余
+风险：Agent 写入时不发起 reload，并提醒用户该间隔不要手动 `/reload`；请求清理后
+正常 reload 仍允许。Go 对 Lua
 `totalBytes` 状态字段的拒收及换代读取 `path_changed` 已分别离线复现并修复，
 不能把这些修复当成崩溃原因已经解决。下面两段记录属于此前的 4 KiB 候选，
 不能用作当前整行写入的性能或实机证明。
@@ -21,7 +25,7 @@ SOURCE 和真实 LuaLS 检查均为 passed；整行候选提交为 `b021251`。
 正式服新运行时、原生 world/reload 读取及插件内一次性协议自检通过：探针执行一次，
 重复帧不重跑、challenge/结果 ACK/私有 GC 根均确认。游戏内 Lychee Dev 统计约 1.77 MiB，
 单数据行加七控制行实际数组 backing 为 132 KiB；短空闲样本没有插件统计增长。
-此结果不是原生 CLI 写入验收，writer profile 仍拒绝写入，其他客户端/双实例/最大输入
+此结果不是原生 CLI 写入验收；该历史候选的 writer profile 当时仍拒绝写入，其他客户端/双实例/最大输入
 游戏峰值保持 not_run。完整范围与保留失败见 [mailbox v1 验收](live-mailbox-v1-acceptance-2026-10-04.md)。
 
 2026-10-04 前一版候选将协议统一为 **Lychee Dev mailbox protocol v1**，以
@@ -33,7 +37,7 @@ schema、magic、摘要域和布局身份一次切换，拒绝旧协议。只保
 全部控制行阴影缓存存在时约 185.63 KiB，空闲五秒约 116.63 KiB 临时分配；
 这些不是 WoW 内存数值。旧正式服布局只读测得 256 个 2048-cell 数组共 12 MiB backing，
 仍未解释用户报告的全部 70 MB。新版本完整离线与实机结果继续单独记录。
-原生 reload/world 配方及逐次写入检查保留；当前无合格 writer profile，
+原生 reload/world 配方及逐次写入检查保留；该历史候选当时无合格 writer profile，
 插件内部实机 self-check 不替代 CLI 原生写入验收，不解除此门禁。
 
 2026-10-04 duplex 新增原生重载/进入世界只读门禁与跨 build 指令配方解析。正式服 12.1.0.69933 同一进程中实际记录了一次用户手动 reload：Lua 根更换时 bit 8 保持重载状态，bit 4 先清除后恢复，且进入世界先于重载结束。新版 Go doctor 随后独立读到 world_ready/no_reload_observed；旧 addon schema 不影响这些原生诊断。此结果只证明只读状态路径，所有 writer profile 仍拒绝写入；跨真实 build 迁移与新协议实机执行不继承此结果。见 [实施合同](live-duplex-implementation-2026-10-04.md#native-lifecycle-read-gate)。

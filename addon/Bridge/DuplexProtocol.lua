@@ -265,7 +265,7 @@ function API.Create(deps)
         return {schema="lycheedev.mailbox.v1",layoutId="single-command-row-v1",runtimeToken=i.runtime,arenaGeneration=i.arenaGeneration,
             sessionToken=p.session or string.rep("0",32),ownerToken=p.owner or string.rep("0",32),actorBindingId=i.actorBindingId,
             fence=uint64String(p.fenceHi,p.fenceLo),actorGUID=i.actorGUID,character=i.character,realm=i.realm,build=i.build,product=i.product,release=i.release,
-            resourcesReleased=not t or t.resourcesReleased==true,phase=phase(),ready=ready,businessReady=ready,
+            resourcesReleased=not r or t and t.resourcesReleased==true or false,phase=phase(),ready=ready,businessReady=ready,
             transportReady=not p.disabled and not p.quarantined and not p.closing and not p.repair,actorReady=available,controlReady=not p.disabled and not p.quarantined,
             readyChallenge=p.readyRaw and hex(p.readyRaw) or "",admissionSequence=uint64String(0,p.admission),
             statusSequence=uint64String(0,p.statusSequence),heartbeat=uint64String(0,p.heartbeat),receipts=detached(p.receipts),
@@ -321,8 +321,10 @@ function API.Create(deps)
         return hi<4294967296 and h.requestSeqHi==hi and h.requestSeqLo==lo
     end
     local function terminalize(r,success,value,meta,started,code)
-        if p.request~=r or r.state=="terminal" then return end
+        if p.request~=r or r.state=="terminal" or r.state=="sealing" then return end
+        r.state="sealing";r.fn=nil;r.execution=nil;r.executionStarted=started==true
         if started and deps.finished then pcall(deps.finished,r.requestId) end
+        publish("status")
         meta=meta or {}
         local released=meta.resourcesReleased~=false
         local body={ok=success==true,resourcesReleased=released,logs=meta.logs}
@@ -403,7 +405,11 @@ function API.Create(deps)
             attemptHi=h.attemptHi,attemptLo=h.attemptLo,totalBytes=h.totalBytes,budget=h.budget,challenge=hex(h.challenge),previousResultAckSHA=h.previousResultAckSHA or ZERO32,executionStarted=false,state="running"}
     end
     local function retire()
-        local r=p.request;p.released={requestId=r.requestId,requestSHA256=r.digest};p.request=nil;p.terminal=nil
+        local r,t=p.request,p.terminal
+        p.released={requestId=r.requestId,requestSHA256=r.digest,requestSeq=uint64String(r.seqHi,r.seqLo),
+            totalBytes=r.totalBytes,outcome=t and t.outcome or nil,executionStarted=t and t.executionStarted or false,
+            failureCode=t and t.failureCode or nil}
+        p.request=nil;p.terminal=nil
         if deps.clearPages then pcall(deps.clearPages) end
     end
     local function admissionChecks(h)
@@ -471,7 +477,7 @@ function API.Create(deps)
         if not current or current~=j.raw then return discard(why or "duplex_frame_changed") end
         local sourceCells=math.ceil(h.payloadBytes/4)
         if j.copiedCells<sourceCells then
-            local count=math.min(8192,sourceCells-j.copiedCells)
+            local count=math.min(2048,sourceCells-j.copiedCells)
             local bytes;bytes,why=wordsToBytes(j.row,81+j.copiedCells,count)
             if not bytes then return discard(why) end
             j.parts[#j.parts+1]=bytes;j.copiedCells=j.copiedCells+count
@@ -607,7 +613,22 @@ function API.Create(deps)
         local check,stamp=candidate(arena.stop)
         if check then local ok,err=stopRow(arena.stop);if ok then remember(arena.stop,stamp);processed=processed+1 elseif err then p.lastFailure=err;failed(arena.stop,stamp) end end
         if processed<budget and p.validation then
-            local ok=advanceValidation();if ok then processed=processed+1 end
+            -- The stop row was inspected first. Batch only private validation
+            -- work, with a small wall-clock cap and a hard microstep ceiling.
+            -- Without a safe high-resolution clock, retain one step per poll.
+            local started
+            if type(deps.workClockMillis)=="function" then
+                local valid,value=pcall(deps.workClockMillis)
+                if valid and safe(value) and type(value)=="number" and value==value and value>=0 and value<math.huge then started=value end
+            end
+            local steps=0
+            repeat
+                local ok=advanceValidation();steps=steps+1
+                if ok then processed=processed+1 end
+                if not p.validation or not started or steps>=64 then break end
+                local valid,value=pcall(deps.workClockMillis)
+                if not valid or not safe(value) or type(value)~="number" or value~=value or value<started or value-started>=0.75 then break end
+            until false
         elseif processed<budget and eligible() then
             check,stamp=candidate(arena.command)
             if check then

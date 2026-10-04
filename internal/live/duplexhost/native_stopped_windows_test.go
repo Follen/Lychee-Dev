@@ -87,7 +87,7 @@ func TestStoppedHostPublicationDurabilityAndExactPins(t *testing.T) {
 				}
 				return tc.out, ranges, stop, tc.err
 			}
-			out, err := n.publishJournaled(ctx, message, binding, actor, "stopped", publish)
+			out, err := n.publishHistoricalJournaled(ctx, message, binding, actor, "stopped", publish)
 			if out != tc.out || !errors.Is(err, tc.err) || calls != 1 {
 				t.Fatal("helper outcome changed", out, err, calls)
 			}
@@ -115,7 +115,7 @@ func TestStoppedHostPublicationDurabilityAndExactPins(t *testing.T) {
 				t.Fatal("unexpected extra publication facts", err)
 			}
 			if tc.out.State == duplex.UnknownWrite {
-				if _, err = n.publishJournaled(ctx, message, binding, actor, "stopped", publish); !errors.Is(err, duplex.ErrPersistence) || calls != 1 {
+				if _, err = n.publishHistoricalJournaled(ctx, message, binding, actor, "stopped", publish); !errors.Is(err, duplex.ErrPersistence) || calls != 1 {
 					t.Fatal("uncertain publication replayed", calls, err)
 				}
 			}
@@ -132,7 +132,7 @@ func TestStoppedHostIntentFailurePreventsHelper(t *testing.T) {
 	}
 	for _, dir := range []string{"", filepath.Join(blocked, "trace")} {
 		n := &Native{TraceDir: dir}
-		out, err := n.publishJournaled(ctx, message, memory.LuaRootBinding{}, "actor", "stopped", func(context.Context, memory.StoppedPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, memory.StoppedObservation, error) {
+		out, err := n.publishHistoricalJournaled(ctx, message, memory.LuaRootBinding{}, "actor", "stopped", func(context.Context, memory.StoppedPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, memory.StoppedObservation, error) {
 			t.Fatal("helper started without durable intent")
 			return duplex.WriteOutcome{}, nil, memory.StoppedObservation{}, nil
 		})

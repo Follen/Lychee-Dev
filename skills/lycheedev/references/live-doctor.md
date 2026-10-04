@@ -36,12 +36,22 @@ and `writerProfile`. A resolved root and readable sendbox do not qualify writes.
 The exact Retail 12.1.0.69933 stopped-helper route is disabled after a
 real-client security crash immediately following its first whole-row write.
 Only the owner-authorized direct, unsuspended route can write that exact image;
-small and 1 MiB commands plus close passed one real-client trial, while all
-other builds remain ineligible.
+small and 1 MiB commands plus close passed one real-client trial. A later
+probe on the same process completed three full GC cycles, verified result and
+close; it did not exercise GC overlapping WPM. Reload/new-runtime execution
+and same-build dual-instance scenes remain not_run, so do not advertise them
+as accepted. This scene gap is distinct from exact-image write eligibility:
+for an authorized controlled dual-instance check, each process must independently
+pass the CLI's current exact-image profile and fresh runtime gates. A shared
+build or installation grants neither instance the other's authority. Other
+image hashes/builds remain write-ineligible; a relocated recipe is read-only
+evidence, not permission to inherit another image's writer qualification.
 A final address check alone
 cannot prevent VM teardown during an external write. Private GC roots and a host
 writer drain protect controlled arena replacement, but do not pin the whole VM
-through reload. Addon self-tests and owned-process fixtures do not establish
+through reload. The owner accepts that residual risk: do not initiate reload
+while writing, tell the user to avoid manual `/reload` then, and allow normal
+reload after request cleanup. Addon self-tests and owned-process fixtures do not establish
 CLI-to-game execution. Do not patch away the gate or inherit old-release acceptance.
 
 `ready` means a fresh one-use command challenge is published; `controlReady` is

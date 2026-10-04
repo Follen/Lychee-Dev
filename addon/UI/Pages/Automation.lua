@@ -86,10 +86,31 @@ end
 
 local function FormatCode(record)
     if Restricted(record.codeBytes) or type(record.codeBytes) ~= "number" then
+        if record.codeSHA256 then
+            return string.format(L.AUTO_CODE_CHECKSUM_ONLY, ShownText(record.codeSHA256))
+        end
         return L.NOT_AVAILABLE
     end
     return string.format(L.AUTO_CODE_SUMMARY, record.codeBytes,
         ShownText(record.codeSHA256, "-"))
+end
+
+local function FormatSummary(record)
+    local started = L.UNKNOWN
+    if record.executionStarted == true then started = L.AUTO_EXECUTION_STARTED
+    elseif record.executionStarted == false then started = L.AUTO_EXECUTION_NOT_STARTED end
+    local lines = {
+        L.AUTO_EXECUTION_SUMMARY,
+        L.AUTO_FIELD_REQUEST .. ": " .. ShownText(record.requestId),
+        L.AUTO_FIELD_STATUS .. ": " .. GetStatusText(record),
+        L.AUTO_FIELD_CODE .. ": " .. FormatCode(record),
+        L.AUTO_FIELD_EXECUTION .. ": " .. started,
+    }
+    if record.errorCode then lines[#lines + 1] = L.AUTO_FIELD_ERROR .. ": " .. ShownText(record.errorCode) end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = record.released and L.AUTO_RELEASED_REPORT_NOTE
+        or record.hasReport and L.AUTO_RESULT_RETAINED_NOTE or L.AUTO_NO_REPORT
+    return table.concat(lines, "\n")
 end
 
 local function FormatRecorded(record)
@@ -124,6 +145,7 @@ function ns.CreateAutomationPage(parent)
     page:SetAllPoints(parent)
 
     local selectedRequestId
+    local detailMode = "summary"
     local rows = {}
 
     local heading = W.CreatePageHeading(page, L.TAB_AUTOMATION, L.AUTOMATION_PAGE_HELP)
@@ -135,8 +157,25 @@ function ns.CreateAutomationPage(parent)
 
     local mailboxText = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ns.Theme.SetFont(mailboxText, 11, ns.Theme.textDim)
-    mailboxText:SetPoint("TOPLEFT", 14, -65)
+    mailboxText:SetPoint("TOPRIGHT", -14, -22)
+    mailboxText:SetWidth(300)
+    mailboxText:SetJustifyH("RIGHT")
+    mailboxText:SetWordWrap(false)
     mailboxText:SetTextColor(unpack(ns.Theme.textDim))
+
+    local connectionError = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(connectionError, 11, ns.Theme.warning)
+    connectionError:SetPoint("TOPLEFT", 14, -65)
+    connectionError:SetPoint("TOPRIGHT", -14, -65)
+    connectionError:SetJustifyH("LEFT")
+    connectionError:SetWordWrap(false)
+
+    local candidateError = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(candidateError, 11, ns.Theme.warning)
+    candidateError:SetPoint("TOPLEFT", 14, -81)
+    candidateError:SetPoint("TOPRIGHT", -14, -81)
+    candidateError:SetJustifyH("LEFT")
+    candidateError:SetWordWrap(false)
 
     local clearButton = W.CreateConfirmButton(page, 118, L.AUTO_CLEAR_HISTORY,
         L.CONFIRM_CLEAR_CACHE, function()
@@ -151,7 +190,7 @@ function ns.CreateAutomationPage(parent)
     clearButton:SetPoint("BOTTOMLEFT", 14, 14)
 
     local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
-    listPanel:SetPoint("TOPLEFT", 14, -84)
+    listPanel:SetPoint("TOPLEFT", 14, -104)
     listPanel:SetPoint("BOTTOMLEFT", 14, 64)
     listPanel:SetWidth(LIST_WIDTH)
 
@@ -193,20 +232,24 @@ function ns.CreateAutomationPage(parent)
     local timeValue = CreateField(metadata, L.AUTO_FIELD_TIME, 4, -156, 232)
     local errorValue = CreateField(metadata, L.AUTO_FIELD_ERROR, 254, -156, 240)
 
+    local summaryButton = W.CreateModeTab(detailPanel, L.AUTO_EXECUTION_SUMMARY, nil)
+    summaryButton:SetPoint("TOPLEFT",4,-56)
     local viewReportButton = W.CreateModeTab(detailPanel, L.AUTO_VIEW_REPORT, nil)
-    viewReportButton:SetWidth(112);viewReportButton:SetPoint("TOPLEFT",4,-56)
+    viewReportButton:SetPoint("LEFT",summaryButton,"RIGHT",4,0)
     local detailsButton=W.CreateModeTab(detailPanel,L.AUTO_EVIDENCE_DETAILS,nil)
-    detailsButton:SetWidth(112);detailsButton:SetPoint("LEFT",viewReportButton,"RIGHT",4,0)
-    viewReportButton:SetActive(true)
+    detailsButton:SetPoint("LEFT",viewReportButton,"RIGHT",4,0)
+    summaryButton:SetActive(true)
 
     local reportArea = W.CreateTextArea(detailPanel, true)
     reportArea:SetPoint("TOPLEFT", 4, -94)
     reportArea:SetPoint("BOTTOMRIGHT", -4, 4)
     W.SetReadOnlyText(reportArea, L.AUTO_SELECT_RECORD)
     detailsButton:SetScript("OnClick",function()
+        detailMode = "details"
         metadata:Show();reportArea:Hide()
         detailsButton:SetActive(true)
         viewReportButton:SetActive(false)
+        summaryButton:SetActive(false)
     end)
 
     local function StatusColor(record)
@@ -249,13 +292,29 @@ function ns.CreateAutomationPage(parent)
         codeValue:SetText(hasRecord and FormatCode(record) or "")
         timeValue:SetText(hasRecord and FormatRecorded(record) or "")
         errorValue:SetText(hasRecord
-            and ShownText(record.actionError or record.probeError or record.errorCode, L.NOT_AVAILABLE) or "")
+            and ShownText(record.errorCode, L.NOT_AVAILABLE) or "")
 
-        W.SetButtonEnabled(viewReportButton, hasRecord)
+        W.SetButtonEnabled(viewReportButton, hasRecord and record.hasReport)
         W.SetButtonEnabled(detailsButton, hasRecord)
+        W.SetButtonEnabled(summaryButton, hasRecord)
+        if detailMode == "report" and not (hasRecord and record.hasReport) then detailMode = "summary" end
+        summaryButton:SetActive(detailMode == "summary")
+        viewReportButton:SetActive(detailMode == "report")
+        detailsButton:SetActive(detailMode == "details")
+        metadata:SetShown(detailMode == "details")
+        reportArea:SetShown(detailMode ~= "details")
     end
 
     local function ShowSelectedReport()
+        local record = selectedRequestId and view.GetRecord(selectedRequestId)
+        if not record then
+            W.SetReadOnlyText(reportArea, L.AUTO_SELECT_RECORD)
+            return
+        end
+        if detailMode ~= "report" or not record.hasReport then
+            W.SetReadOnlyText(reportArea, FormatSummary(record))
+            return
+        end
         local text,failure=view.GetReportText(selectedRequestId)
         W.SetReadOnlyText(reportArea,text or ShownText(failure,L.AUTO_NO_REPORT))
     end
@@ -325,6 +384,20 @@ function ns.CreateAutomationPage(parent)
         local mailbox = view.GetMailboxStatus()
         local mailboxKey = MAILBOX_LABELS[mailbox.state]
         mailboxText:SetText(L[mailboxKey or "AUTO_MAILBOX_UNAVAILABLE"])
+        mailboxText:SetTextColor(unpack(mailbox.state == "ready" and ns.Theme.success
+            or mailbox.state == "busy" and ns.Theme.warning or ns.Theme.textDim))
+        local failure = mailbox.candidateFailure
+        if failure and failure.requestId and failure.code then
+            candidateError:SetText(string.format(L.AUTO_CANDIDATE_ERROR,
+                ShownText(failure.requestId), ShownText(failure.code)))
+        else
+            candidateError:SetText("")
+        end
+        if mailbox.errorCode then
+            connectionError:SetText(string.format(L.AUTO_CONNECTION_ERROR, ShownText(mailbox.errorCode)))
+        else
+            connectionError:SetText("")
+        end
         local order = view.GetOrder()
         countText:SetText(string.format(L.AUTO_EXECUTION_COUNT, #order))
         emptyTitle:SetShown(#order == 0)
@@ -368,7 +441,7 @@ function ns.CreateAutomationPage(parent)
         if not selectedRequestId and order[1] then
             selectedRequestId = order[1]
         end
-        if selectedRequestId then ShowSelectedReport() end
+        ShowSelectedReport()
         for index = 1, #rows do
             ApplyRowState(rows[index])
         end
@@ -376,14 +449,22 @@ function ns.CreateAutomationPage(parent)
     end
     page.Refresh = Refresh
 
+    summaryButton:SetScript("OnClick", function()
+        detailMode = "summary"
+        ShowSelectedReport()
+        RefreshDetail()
+    end)
+
     listScroll.onVerticalScrollChanged = function()
         page:Refresh()
     end
 
     viewReportButton:SetScript("OnClick", function()
+        detailMode = "report"
         metadata:Hide();reportArea:Show()
         detailsButton:SetActive(false)
         viewReportButton:SetActive(true)
+        summaryButton:SetActive(false)
         if ns.Safety.IsCombatBlocked() then
             ns.Safety.PrintBlocked()
             return
@@ -397,6 +478,8 @@ function ns.CreateAutomationPage(parent)
 
     page.rows = rows
     page.mailboxText = mailboxText
+    page.connectionError = connectionError
+    page.candidateError = candidateError
     page.reportArea = reportArea
     page.requestValue = requestValue
     page.kindValue = kindValue
@@ -405,6 +488,7 @@ function ns.CreateAutomationPage(parent)
     page.timeValue = timeValue
     page.errorValue = errorValue
     page.viewReportButton = viewReportButton
+    page.summaryButton = summaryButton
     page.clearButton = clearButton
     page.detailsButton,page.metadata=detailsButton,metadata
     function page:Activate()

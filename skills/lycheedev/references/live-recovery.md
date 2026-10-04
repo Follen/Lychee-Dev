@@ -37,7 +37,11 @@ the old outcome and claim have been handled honestly.
 ## Durable result and next command
 
 The CLI has a transfer deadline independent of the addon execution budget.
-Host timeout renews neither. Verify the terminal record and all result pages,
+Host timeout renews neither. Continue bounded observation while new evidence
+can resolve the original request. If the deadline expires or fresh evidence
+becomes unavailable, retain pending/unknown and report the concrete blocker;
+do not extend the deadline or resend the command to force progress.
+Verify the terminal record and all result pages,
 then durably save exact result bytes and digest. The **next** whole command
 carries the previous terminal ACK digest in its header; addon validates that
 ACK and the replacement command before retiring either result or ready token.
@@ -68,15 +72,8 @@ probe to escape pending work. Same-build windows have distinct PID/creation,
 runtime and actor pins. A new build needs a verified recipe and matching ABI;
 one located RVA is not writer qualification.
 
-Intentional reload remains an independent operation:
-
-```text
-lycheedev live reload --project <project-directory> --session <CON-id> --request <reload-key> --format json
-```
-
-It uses the small stop row with a durable prepare challenge and exact lease
-message, and must serialize with the command writer. An uncertain prepare or
-lease is observed by its original message ID, never sent again blindly. It
-preserves any unresolved command.
-After runtime replacement, run doctor and establish a new session for new work.
+Intentional reload is a separate [reload operation](live-reload.md), available
+after request and retained-result cleanup. Recovery does not use reload to
+resolve an unknown effect. After runtime replacement, use a new session for
+new work; old requests and their evidence stay in the original journal.
 Old duplex, slot and LoD journals are not upgraded or relabeled as mailbox v1.
