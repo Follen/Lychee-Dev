@@ -54,7 +54,7 @@ func NextIdentity(s Sendbox, owner, session string) (Identity, error) {
 // EncodeClosedBindProof binds the next session to the exact retained closed
 // owner, session, fence and final released tombstone. It grants no execution.
 func EncodeClosedBindProof(s Sendbox) ([]byte, error) {
-	if s.Phase != "closed" || !s.ResourcesReleased || s.Request != nil || s.Terminal != nil || s.Owner == "00000000000000000000000000000000" || s.Session == "00000000000000000000000000000000" || s.Fence == 0 {
+	if (s.Phase != "closed" && !((s.Phase == "ready_unbound" || s.Phase == "validating") && s.ClosedAdmission)) || !s.ResourcesReleased || s.Request != nil || s.Terminal != nil || s.Owner == "00000000000000000000000000000000" || s.Session == "00000000000000000000000000000000" || s.Fence == 0 {
 		return nil, ErrBusy
 	}
 	o, e := token(s.Owner)

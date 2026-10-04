@@ -5,42 +5,36 @@ import (
 	"testing"
 )
 
-func TestSingleRowRequiresExactPrivateFrameAcknowledgement(t *testing.T) {
-	frames, err := NewFrames(fixtureIdentity, strings.Repeat("6", 32), 3, 2, 1234, 1000, make([]byte, 8192))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestCommandRequiresFreshChallengeAndExactJointACK(t *testing.T) {
+	frames, _ := NewFrames(fixtureIdentity, strings.Repeat("6", 32), 1, 1, 1234, 1000, []byte("return42"))
+	m := frames[0]
 	s := fixtureSendbox()
-	if err := ValidateFrameTransition(s, frames[0]); err != nil {
-		t.Fatal(err)
+	m.Header.Challenge = s.ReadyChallenge
+	m.Header.PreviousResultAckSHA = zeroDigest
+	if e := ValidateFrameTransition(s, m); e != nil {
+		t.Fatal(e)
 	}
-	if err := ValidateFrameTransition(s, frames[1]); err == nil {
-		t.Fatal("second frame overwrote unacknowledged first frame")
-	}
-	h := frames[0].Header
-	s.Phase = "receiving"
-	s.BusinessReady, s.Ready = false, false
-	s.Request = &RequestState{RequestID: h.RequestID, RequestSHA256: h.RequestSHA256, RequestSeq: h.RequestSeq, TransportAttempt: h.TransportAttempt, NotStarted: true, AcceptedFrames: []uint32{1}}
-	if err := ValidateFrameTransition(s, frames[1]); err != nil {
-		t.Fatal(err)
-	}
-	if err := ValidateFrameTransition(s, frames[0]); err == nil {
-		t.Fatal("old logical frame permitted reuse")
-	}
-	s.Request.AcceptedFrames = []uint32{2}
-	if err := ValidateFrameTransition(s, frames[1]); err == nil {
-		t.Fatal("noncontiguous acknowledgement permitted reuse")
-	}
-	s.Request.AcceptedFrames = []uint32{1}
-	s.Request.TransportAttempt++
-	if err := ValidateFrameTransition(s, frames[1]); err == nil {
-		t.Fatal("old repair attempt permitted reuse")
-	}
-	s.Request.TransportAttempt--
-	for _, phase := range []string{"prepared", "running", "execution_unknown", "result_pending", "closed"} {
-		s.Phase = phase
-		if err := ValidateFrameTransition(s, frames[1]); err == nil {
-			t.Fatalf("reuse allowed during %s", phase)
+	for _, mutate := range []func(*Sendbox){func(s *Sendbox) { s.ReadyChallenge = strings.Repeat("b", 32) }, func(s *Sendbox) { s.Phase = "running" }, func(s *Sendbox) { s.ActorReady = false }, func(s *Sendbox) { s.Owner = strings.Repeat("c", 32) }} {
+		bad := s
+		mutate(&bad)
+		if ValidateFrameTransition(bad, m) == nil {
+			t.Fatal("invalid admission permitted")
 		}
+	}
+	c, b, _ := newFixtureCoordinator(t)
+	st, e := c.Execute(t.Context(), []byte("return42"), 1000)
+	if e != nil {
+		t.Fatal(e)
+	}
+	frames, _ = NewFrames(fixtureIdentity, strings.Repeat("7", 32), 2, 1, 1235, 1000, []byte("return43"))
+	m = frames[0]
+	m.Header.Challenge = b.box.ReadyChallenge
+	m.Header.PreviousResultAckSHA, _ = ResultAckSHA256(*st.Active.Result)
+	if e = ValidateFrameTransition(b.box, m); e != nil {
+		t.Fatal(e)
+	}
+	m.Header.PreviousResultAckSHA = zeroDigest
+	if ValidateFrameTransition(b.box, m) == nil {
+		t.Fatal("jointACK mismatch accepted")
 	}
 }

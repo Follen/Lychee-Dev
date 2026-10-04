@@ -25,6 +25,12 @@ local STATUS_LABELS = {
     unavailable = "AUTO_STATUS_UNAVAILABLE",
     interrupted = "AUTO_STATUS_INTERRUPTED",
 }
+local MAILBOX_LABELS = {
+    ready = "AUTO_MAILBOX_READY",
+    busy = "AUTO_MAILBOX_BUSY",
+    disconnected = "AUTO_MAILBOX_DISCONNECTED",
+    unavailable = "AUTO_MAILBOX_UNAVAILABLE",
+}
 
 local KIND_LABELS = {
     lua = "AUTO_KIND_LUA",
@@ -126,6 +132,11 @@ function ns.CreateAutomationPage(parent)
     ns.Theme.SetFont(countText, 11, ns.Theme.textDim)
     countText:SetPoint("LEFT", heading, "RIGHT", 12, 0)
     countText:SetTextColor(unpack(ns.Theme.textDim))
+
+    local mailboxText = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(mailboxText, 11, ns.Theme.textDim)
+    mailboxText:SetPoint("TOPLEFT", 14, -65)
+    mailboxText:SetTextColor(unpack(ns.Theme.textDim))
 
     local clearButton = W.CreateConfirmButton(page, 118, L.AUTO_CLEAR_HISTORY,
         L.CONFIRM_CLEAR_CACHE, function()
@@ -311,6 +322,9 @@ function ns.CreateAutomationPage(parent)
 
     local function Refresh()
         view.Collect()
+        local mailbox = view.GetMailboxStatus()
+        local mailboxKey = MAILBOX_LABELS[mailbox.state]
+        mailboxText:SetText(L[mailboxKey or "AUTO_MAILBOX_UNAVAILABLE"])
         local order = view.GetOrder()
         countText:SetText(string.format(L.AUTO_EXECUTION_COUNT, #order))
         emptyTitle:SetShown(#order == 0)
@@ -382,6 +396,7 @@ function ns.CreateAutomationPage(parent)
     end)
 
     page.rows = rows
+    page.mailboxText = mailboxText
     page.reportArea = reportArea
     page.requestValue = requestValue
     page.kindValue = kindValue

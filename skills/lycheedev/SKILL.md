@@ -77,13 +77,17 @@ transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
 The candidate uses **Lychee Dev mailbox protocol v1** (`lycheedev.mailbox.v1`):
-one small reusable data table, one current request and independent controls.
-The CLI owns publications, frame/result acknowledgements, result integrity and journals. Follow its
+one reusable 1 MiB command row in `inbox`, one small stop row and a `sendbox`.
+The CLI publishes each complete command in one write. The next command carries
+the exact previous-result acknowledgement; final close uses the stop row.
+The CLI owns integrity checks, result retention and journals. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
 work does not use the old OP/BTP ACK/finish/hide sequence. Old duplex/slot wire
-is incompatible. Current writer profiles remain unverified and refuse game
-writes; an addon self-test or offline fixture does not prove CLI-to-game execution.
+is incompatible. Only the exact reviewed Retail 12.1.0.69933 executable can
+enter the stopped-helper write trial; other builds refuse writes. Its real-client
+result remains `not_run` until observed. An addon self-test or offline fixture
+does not prove CLI-to-game execution.
 
 ## Finish with evidence
 

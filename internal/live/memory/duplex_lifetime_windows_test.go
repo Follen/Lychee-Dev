@@ -133,8 +133,8 @@ func TestDuplexLifecycleObservationDoesNotPinAllocation(t *testing.T) {
 	if n != 8 || err != nil || !bytes.Equal(got, numericPayload(99)) {
 		t.Fatalf("self-process ABA premise changed: bytes=%d error=%v payload=%x", n, err, got)
 	}
-	if DuplexWriteCapability(retailReloadExecutableSHA256, retailReloadSourceBuild, "retail").Eligible {
-		t.Fatal("read gate was promoted to allocation lifetime authority")
+	if DuplexWriteCapability("unreviewed", retailReloadSourceBuild, "retail").Eligible {
+		t.Fatal("read gate promoted an unreviewed executable to write authority")
 	}
 }
 

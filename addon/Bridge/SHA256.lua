@@ -78,8 +78,8 @@ local function put32(n)
     n=u32(n)
     return string.char(math.floor(n/16777216)%256,math.floor(n/65536)%256,math.floor(n/256)%256,n%256)
 end
-local function block(h, s, offset)
-    local w={}
+local function block(h, w, s, offset)
+    -- Every slot is overwritten; reuse one private schedule per digest context.
     for i=0,15 do w[i]=word(s,offset+i*4) end
     for i=16,63 do
         local x,y=w[i-15],w[i-2]
@@ -103,7 +103,7 @@ end
 local API={}
 function API.New()
     local h={};for i=1,8 do h[i]=INITIAL[i] end
-    return {h=h,buffer="",bytes=0,done=false}
+    return {h=h,work={},buffer="",bytes=0,done=false}
 end
 function API.Update(ctx, text)
     if type(ctx)~="table" or ctx.done or type(text)~="string" then return nil,"sha256_state_invalid" end
@@ -111,7 +111,7 @@ function API.Update(ctx, text)
     ctx.bytes=ctx.bytes+#text
     local data=ctx.buffer..text
     local last=#data-#data%64
-    for offset=1,last,64 do block(ctx.h,data,offset) end
+    for offset=1,last,64 do block(ctx.h,ctx.work,data,offset) end
     ctx.buffer=data:sub(last+1)
     return true
 end
@@ -121,9 +121,9 @@ function API.Final(ctx)
     local bithi=math.floor(ctx.bytes/536870912)%MOD
     local pad="\128"..string.rep("\0",(55-ctx.bytes)%64)..put32(bithi)..put32(bitlo)
     local data=ctx.buffer..pad
-    for offset=1,#data,64 do block(ctx.h,data,offset) end
+    for offset=1,#data,64 do block(ctx.h,ctx.work,data,offset) end
     local raw={};for i=1,8 do raw[i]=put32(ctx.h[i]) end
-    ctx.done=true;ctx.buffer="";ctx.h=nil
+    ctx.done=true;ctx.buffer="";ctx.h=nil;ctx.work=nil
     return table.concat(raw)
 end
 function API.Hex(raw)
@@ -135,4 +135,5 @@ function API.Digest(text)
     local raw;raw,err=API.Final(ctx);if not raw then return nil,err end
     return raw,API.Hex(raw)
 end
+API.NativeBit=bitlib~=nil
 ns.SHA256=API

@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
-2026-10-04 此开发分支以 [duplex 实施合同](live-duplex-implementation-2026-10-04.md) 为当前 live 合同；旧 LoD/按键/色块协议停止加载和发布，无旧兼容。新协议离线验证正在整合，当前没有通过验收的原生 writer profile，所有游戏内存写入默认拒绝，实机验收为 not_run。下方旧 live 结果仅保留原版本历史范围。
+2026-10-04 此开发分支以 [Lychee Dev mailbox protocol v1 单命令整行写入合同](live-mailbox-v1-architecture-2026-10-04.md) 为当前 live 合同；先前 [duplex 实施记录](live-duplex-implementation-2026-10-04.md) 与下方 LoD/按键/色块结果保留为历史范围，无旧兼容。精确 Retail 12.1.0.69933 可执行文件已开放 stopped-helper 试验资格，其他 build 拒绝写入；正式服实机验收仍为 not_run。
 
 2026-10-01 Native CON 当前实现合同为 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md)：200 槽、wire06、slot.v3、identity.v2、input.v2、公开 Mailbox 定点读取；无旧原生协议兼容或扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
 

@@ -204,9 +204,14 @@ func deployment(ctx context.Context, t live.ClientWindow) error {
 	return nil
 }
 func (p *Project) present(ctx context.Context, id string, st duplex.State, status *duplex.Sendbox) ProjectResult {
-	r := ProjectResult{Session: id, Identity: st.Identity, Bound: st.Bound, Closed: st.Closed, Stage: "connecting", Complete: st.Bound, ReportState: "unavailable", Cleanup: "none", Journal: filepath.Join(p.path(id), "state.json"), Status: status}
-	if st.Bound {
-		r.Stage = "connected"
+	r := ProjectResult{Session: id, Identity: st.Identity, Bound: st.Bound, Closed: st.Closed, Stage: "connecting", Complete: st.Selected || st.Bound, ReportState: "unavailable", Cleanup: "none", Journal: filepath.Join(p.path(id), "state.json"), Status: status}
+	if st.Selected || st.Bound {
+		r.Stage = "selected"
+	}
+	if st.LocalRetired {
+		r.Stage = "retired"
+		r.Complete = true
+		r.Cleanup = "pending"
 	}
 	if st.Closed {
 		r.Stage = "closed"
@@ -215,7 +220,7 @@ func (p *Project) present(ctx context.Context, id string, st duplex.State, statu
 	if a := st.Active; a != nil {
 		r.Operation = a.RequestID
 		r.Stage = a.Phase
-		r.Complete = a.Released
+		r.Complete = a.ResultSaved
 		r.Cleanup = "pending"
 		if a.ResultSaved && a.Result != nil && validToken(a.RequestID) && a.Result.RequestID == a.RequestID {
 			b, err := boundedBytes(filepath.Join(p.path(id), "result-"+a.RequestID+".bin"), duplex.MaxResultBytes)
@@ -232,10 +237,25 @@ func (p *Project) present(ctx context.Context, id string, st duplex.State, statu
 			r.Complete = a.Released
 		}
 	}
+	if st.LocalRetired {
+		r.Stage = "retired"
+		r.Cleanup = "pending"
+		r.Complete = st.Active == nil || st.Active.ResultSaved
+		if st.Active != nil && !st.Active.ResultSaved {
+			r.Stage = "execution_unknown"
+		}
+	}
 	return r
 }
 
 func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (ProjectResult, error) {
+	doctor, e := p.InspectTarget(ctx, req)
+	if e != nil {
+		return doctor, e
+	}
+	if doctor.Diagnostics["runtimeFresh"].State != "advancing" || doctor.Diagnostics["actorReady"].State != "verified" || doctor.NativeReload == nil || doctor.NativeReload.CheckBusinessWriteGate() != nil {
+		return doctor, duplex.ErrPending
+	}
 	target, err := live.ResolveClientWindow(ctx, req.Installation, req.PID)
 	if err != nil {
 		return ProjectResult{}, err
@@ -259,6 +279,14 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 		if meta.Target != target {
 			return ProjectResult{}, duplex.ErrIdentity
 		}
+		resumed, resumeErr := p.Resume(ctx, owner.OperationID, false)
+		latestMeta, metaErr := p.metadata(owner.OperationID)
+		if metaErr == nil && latestMeta.ClaimRetired {
+			return p.Connect(ctx, req, false)
+		}
+		if resumeErr != nil {
+			return resumed, resumeErr
+		}
 		if req.Character != "" || req.Realm != "" {
 			observed, e := p.Inspect(ctx, owner.OperationID)
 			if e != nil {
@@ -268,7 +296,7 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 				return observed, duplex.ErrIdentity
 			}
 		}
-		return p.Resume(ctx, owner.OperationID, false)
+		return resumed, nil
 	}
 	if err = deployment(ctx, target); err != nil {
 		return ProjectResult{}, err
@@ -281,9 +309,6 @@ func (p *Project) Connect(ctx context.Context, req TargetRequest, _ bool) (Proje
 	s, err := n.Observe(ctx)
 	if err != nil {
 		return ProjectResult{}, err
-	}
-	if err = n.CheckWriteCapability(); err != nil {
-		return ProjectResult{Status: &s, Target: &target, Stage: "unavailable", Diagnostics: map[string]Diagnostic{"writerProfile": {"unverified", err.Error()}}}, err
 	}
 	if s.Build != target.Client.FullBuild || s.Product != target.Client.Product || s.Release != buildinfo.Version || s.ActorGUID == "" || req.Character != "" && s.Character != req.Character || req.Realm != "" && s.Realm != req.Realm {
 		return ProjectResult{}, errors.New("live.duplex_actor_or_build_mismatch")
@@ -362,17 +387,22 @@ func (p *Project) lightGuard(meta targetRecord) func(context.Context, duplex.Kin
 	}
 }
 func businessControlGuard(st duplex.State) error {
+	if st.Closing {
+		return errors.New("live.duplex_closing")
+	}
+	if st.ReloadPrepared != nil {
+		return errors.New("live.duplex_reload_pending")
+	}
 	if st.Closed {
 		return errors.New("live.duplex_closing")
 	}
-	if _, ok := st.Intents["close"]; ok {
-		return errors.New("live.duplex_closing")
-	}
-	if _, ok := st.Intents["reload"]; ok {
-		return errors.New("live.duplex_reload_pending")
-	}
-	if in, ok := st.Intents["cancel"]; ok && st.Active != nil && in.Message.Header.RequestID == st.Active.RequestID && in.Message.Header.RequestSHA256 == st.Active.Digest {
-		return errors.New("live.duplex_cancel_pending")
+	if in, ok := st.Intents["stop"]; ok {
+		if in.Message.Header.Kind == duplex.Close {
+			return errors.New("live.duplex_closing")
+		}
+		if !in.Accepted {
+			return errors.New("live.duplex_stop_pending")
+		}
 	}
 	return nil
 }
@@ -396,7 +426,8 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 		return result, err
 	}
 	if proof := meta.RuntimeRetirement; proof != nil {
-		in, ok := before.Intents["reload"]
+		in := before.ReloadPrepared
+		ok := in != nil
 		if !ok || (!in.Accepted && !proof.RuntimeGone) || in.Message.Header.MessageID != proof.MessageID || proof.FromRuntime != before.Identity.Runtime || !validToken(proof.ToRuntime) || proof.ToRuntime == proof.FromRuntime || !proof.Quiescent || before.Active != nil && !before.Active.Released {
 			return result, duplex.ErrUnknown
 		}
@@ -409,8 +440,33 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 	}
 	if meta.ClaimRetired {
 		retired := p.present(ctx, id, before, nil)
-		retired.Cleanup = "complete"
+		if before.LocalRetirement != nil {
+			retired.Cleanup = "local_retired"
+		} else {
+			retired.Cleanup = "complete"
+		}
 		return retired, nil
+	}
+	if before.LocalRetired {
+		return p.retireLocalSelection(ctx, id, meta, before)
+	}
+	doctor, doctorErr := p.Inspect(ctx, id)
+	if doctor.Status != nil && doctor.Diagnostics["processIdentity"].State == "verified" && doctor.Diagnostics["runtimeFresh"].State == "advancing" && observedLifecycleChanged(meta, before, *doctor.Status) {
+		if before.ReloadPrepared == nil || before.Active != nil && !before.Active.Released {
+			return p.retireChangedRuntime(ctx, id, meta, store, before, doctor)
+		}
+	}
+	if doctorErr != nil {
+		retiringReload := before.ReloadPrepared != nil && (before.Active == nil || before.Active.Released) && doctor.Status != nil && doctor.Status.Runtime != before.Identity.Runtime && errors.Is(doctorErr, duplex.ErrIdentity)
+		if !retiringReload {
+			return doctor, doctorErr
+		}
+	}
+	if doctor.Status == nil || doctor.Diagnostics["runtimeFresh"].State != "advancing" || doctor.Status.ActorBinding != before.Identity.ActorBinding || (!control && doctor.Status.ActorGUID != meta.ActorGUID || control && doctor.Status.ActorGUID != "" && doctor.Status.ActorGUID != meta.ActorGUID) {
+		return doctor, duplex.ErrIdentity
+	}
+	if doctor.NativeReload == nil || doctor.NativeReload.CheckWriteGate() != nil {
+		return doctor, duplex.ErrPending
 	}
 	var driver *vault.Lease
 	if !control {
@@ -434,6 +490,14 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 	n.ExpectedActorGUID = meta.ActorGUID
 	defer func() { returned = errors.Join(returned, n.Close(context.WithoutCancel(ctx))) }()
 	c := duplex.NewCoordinator(n, store)
+	if doctor.Status.Repair != nil && doctor.Status.Arena != before.Identity.Arena {
+		if _, e := n.repair(ctx, c); e != nil {
+			return p.present(ctx, id, before, doctor.Status), e
+		}
+		if _, e := c.Resume(ctx); e != nil {
+			return p.present(ctx, id, before, doctor.Status), e
+		}
+	}
 	var st duplex.State
 	if before.Closed && (before.Active == nil || before.Active.Released) {
 		st = before
@@ -444,6 +508,19 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 		st, err = reloadCurrent(ctx, store, st, err)
 	}
 	result = p.present(ctx, id, st, nil)
+	if st.LocalRetired {
+		if driver != nil {
+			if e := driver.Close(); e != nil {
+				return result, errors.Join(err, e)
+			}
+			driver = nil
+		}
+		if e := n.Close(ctx); e != nil {
+			return result, errors.Join(err, e)
+		}
+		retired, e := p.retireLocalSelection(ctx, id, meta, st)
+		return retired, errors.Join(err, e)
+	}
 	if st.Closed {
 		latestMeta, e := p.metadata(id)
 		if e != nil {
@@ -477,7 +554,7 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 			return result, errors.Join(err, e)
 		}
 		result.Status = &s
-		retirementValid := s.Identity == st.Identity && s.Phase == "closed" && s.ResourcesReleased
+		retirementValid := s.Identity == st.Identity && (s.Phase == "closed" || s.Phase == "ready_unbound" && s.ClosedAdmission) && s.ResourcesReleased
 		if proof := meta.RuntimeRetirement; proof != nil {
 			retirementValid = s.Runtime == proof.ToRuntime && s.Runtime != proof.FromRuntime && proof.Quiescent
 		}
@@ -511,10 +588,8 @@ func (p *Project) Resume(ctx context.Context, id string, _ bool) (ProjectResult,
 		if e != nil {
 			return st, e
 		}
-		if !st.Bound {
-			if in, ok := st.Intents["bindResume"]; !ok || in.Outcome.State == duplex.NoWrite {
-				return c.Connect(ctx, st.Identity)
-			}
+		if !st.Selected && !st.Bound && st.Active == nil {
+			return c.Connect(ctx, st.Identity)
 		}
 		n := c.Backend.(*Native)
 		s, e := n.Observe(ctx)
@@ -522,9 +597,15 @@ func (p *Project) Resume(ctx context.Context, id string, _ bool) (ProjectResult,
 			return st, e
 		}
 		if s.Runtime != st.Identity.Runtime {
-			if _, ok := st.Intents["reload"]; ok && (st.Active == nil || st.Active.Released) {
+			if st.ReloadPrepared != nil && (st.Active == nil || st.Active.Released) {
 				return p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
 			}
+		}
+		if st.ReloadPrepared != nil {
+			return p.resumeReload(ctx, id, c)
+		}
+		if in, ok := st.Intents["stop"]; ok && (in.Message.Header.Kind == duplex.Reload || in.Message.Header.Kind == duplex.Lease) {
+			return p.resumeReload(ctx, id, c)
 		}
 		if s.Runtime == st.Identity.Runtime && s.Arena != st.Identity.Arena && s.Repair != nil {
 			if _, e = n.repair(ctx, c); e != nil {
@@ -538,7 +619,48 @@ func (p *Project) Cancel(ctx context.Context, id string) (ProjectResult, error) 
 	return p.drive(ctx, id, true, func(c *duplex.Coordinator) (duplex.State, error) { return c.Cancel(ctx, 15*time.Second) })
 }
 func (p *Project) Disconnect(ctx context.Context, id string, _ bool) (ProjectResult, error) {
+	// This preflight is entirely local. A selected session with no publication
+	// has no addon ownership to close, even if the target stopped or exited.
+	meta, e := p.metadata(id)
+	if e != nil {
+		return ProjectResult{}, e
+	}
+	store := duplex.NewFileStore(p.path(id))
+	before, e := store.Load(ctx)
+	if e != nil {
+		return ProjectResult{}, e
+	}
+	if selectedWithoutPublication(before) {
+		if meta.ClaimRetired {
+			result := p.present(ctx, id, before, nil)
+			result.Cleanup = "complete"
+			return result, nil
+		}
+		e = store.Update(ctx, func(current *duplex.State) error {
+			if current.Identity != before.Identity || current.Identity != meta.Identity {
+				return duplex.ErrIdentity
+			}
+			if !selectedWithoutPublication(*current) {
+				return duplex.ErrPending
+			}
+			current.LocalRetired = true
+			current.Closing = true
+			return nil
+		})
+		if e != nil {
+			latest, loadErr := store.Load(ctx)
+			return p.present(ctx, id, latest, nil), errors.Join(e, loadErr)
+		}
+		retired, e := store.Load(ctx)
+		if e != nil {
+			return ProjectResult{}, e
+		}
+		return p.retireLocalSelection(ctx, id, meta, retired)
+	}
 	return p.drive(ctx, id, true, func(c *duplex.Coordinator) (duplex.State, error) { return c.Disconnect(ctx, 30*time.Second) })
+}
+func selectedWithoutPublication(st duplex.State) bool {
+	return st.Selected && !st.Bound && st.Active == nil && len(st.Intents) == 0 && st.PublicationSequence == 0 && st.RequestSequence == 0 && st.ReloadPrepared == nil && st.LocalRetirement == nil && !st.Closed
 }
 func (p *Project) Reload(ctx context.Context, id, key string, _ bool) (ProjectResult, error) {
 	if err := ValidateRequest(key); err != nil {
@@ -551,7 +673,7 @@ func (p *Project) Reload(ctx context.Context, id, key string, _ bool) (ProjectRe
 		if e != nil {
 			return st, e
 		}
-		if st.Active != nil && !st.Active.Released {
+		if st.Active != nil && !st.Active.ResultSaved {
 			return st, duplex.ErrBusy
 		}
 		meta, e := p.metadata(id)
@@ -568,50 +690,17 @@ func (p *Project) Reload(ctx context.Context, id, key string, _ bool) (ProjectRe
 		if e != nil {
 			return st, e
 		}
-		if before.Identity != st.Identity || !before.ResourcesReleased {
+		if !inspectionIdentity(st, before) || !before.ResourcesReleased {
 			return st, duplex.ErrPending
 		}
-		st, e = c.Reload(ctx, 30*time.Second)
-		if e != nil {
-			st, e = reloadCurrent(ctx, c.Store, st, e)
-			if s, observeErr := n.Observe(ctx); observeErr == nil && s.Runtime != st.Identity.Runtime && (st.Active == nil || st.Active.Released) {
-				retired, saveErr := p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
-				return retired, errors.Join(e, saveErr)
-			}
-			return st, e
-		}
-		in, ok := st.Intents["reload"]
-		if !ok || !in.Accepted {
-			return st, duplex.ErrUnknown
-		}
-		st, e = c.CommitReload(ctx, 15*time.Second)
-		if e != nil {
-			st, e = reloadCurrent(ctx, c.Store, st, e)
-			if s, observeErr := n.Observe(ctx); observeErr == nil && s.Runtime != st.Identity.Runtime && (st.Active == nil || st.Active.Released) {
-				retired, saveErr := p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
-				return retired, errors.Join(e, saveErr)
-			}
-			return st, e
-		}
-		for {
-			s, observeErr := n.Observe(ctx)
-			if observeErr == nil && s.Runtime != st.Identity.Runtime {
-				return p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
-			}
-			timer := time.NewTimer(25 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return st, duplex.ErrPending
-			case <-timer.C:
-			}
-		}
+		return p.resumeReload(ctx, id, c)
+
 	})
 }
 
 func (p *Project) saveRuntimeRetirement(ctx context.Context, id string, store duplex.Store, st duplex.State, s duplex.Sendbox) (duplex.State, error) {
-	in, ok := st.Intents["reload"]
-	if !ok || !validToken(s.Runtime) || s.Runtime == st.Identity.Runtime || st.Active != nil && !st.Active.Released {
+	in := st.ReloadPrepared
+	if in == nil || !validToken(s.Runtime) || s.Runtime == st.Identity.Runtime || st.Active != nil && !st.Active.Released {
 		return st, duplex.ErrUnknown
 	}
 	meta, e := p.metadata(id)
@@ -663,7 +752,7 @@ func (p *Project) Execute(ctx context.Context, id, key, code string, budget int,
 				if e = duplex.ValidateResult(*record.Result, b); e != nil {
 					return st, e
 				}
-				return duplex.State{Identity: st.Identity, Bound: st.Bound, Active: &duplex.ActiveRequest{RequestID: record.RequestID, Result: record.Result, ResultSaved: true, Released: true, Phase: "released"}}, nil
+				return duplex.State{Identity: st.Identity, Bound: st.Bound, Active: &duplex.ActiveRequest{RequestID: record.RequestID, Result: record.Result, ResultSaved: true, Released: historicalResultReleased(st, record), Phase: "result_pending"}}, nil
 			}
 			if st.Active != nil && st.Active.Sequence == record.Sequence {
 				if e := matchRequestRecord(record, st, []byte(code)); e != nil {
@@ -676,7 +765,7 @@ func (p *Project) Execute(ctx context.Context, id, key, code string, budget int,
 				return st, duplex.ErrUnknown
 			}
 		} else if os.IsNotExist(err) {
-			if st.Active != nil && !st.Active.Released {
+			if st.Active != nil && !st.Active.ResultSaved {
 				return st, duplex.ErrBusy
 			}
 			if st.RequestSequence == math.MaxUint64 {
@@ -699,7 +788,7 @@ func (p *Project) Execute(ctx context.Context, id, key, code string, budget int,
 			}
 			record.RequestID = a.RequestID
 			record.Result = a.Result
-			record.Complete = a.Released
+			record.Complete = a.ResultSaved
 			durable, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			err = errors.Join(err, writeJSON(durable, path, record))
@@ -719,4 +808,123 @@ func matchRequestRecord(record requestRecord, st duplex.State, source []byte) er
 		return errors.New("live.duplex_request_conflict")
 	}
 	return nil
+}
+
+func (p *Project) resumeReload(ctx context.Context, id string, c *duplex.Coordinator) (duplex.State, error) {
+	n := c.Backend.(*Native)
+	st, e := c.Reload(ctx, 30*time.Second)
+	if e != nil {
+		st, e = reloadCurrent(ctx, c.Store, st, e)
+		if s, observeErr := n.Observe(ctx); observeErr == nil && s.Runtime != st.Identity.Runtime && (st.Active == nil || st.Active.Released) {
+			retired, saveErr := p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
+			if saveErr == nil {
+				return retired, nil
+			}
+			return retired, errors.Join(e, saveErr)
+		}
+		return st, e
+	}
+	in := st.ReloadPrepared
+	if in == nil || !in.Accepted {
+		return st, duplex.ErrUnknown
+	}
+	st, e = c.CommitReload(ctx, 15*time.Second)
+	if e != nil {
+		st, e = reloadCurrent(ctx, c.Store, st, e)
+		if s, observeErr := n.Observe(ctx); observeErr == nil && s.Runtime != st.Identity.Runtime && (st.Active == nil || st.Active.Released) {
+			retired, saveErr := p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
+			if saveErr == nil {
+				return retired, nil
+			}
+			return retired, errors.Join(e, saveErr)
+		}
+		return st, e
+	}
+	for {
+		s, observeErr := n.Observe(ctx)
+		if observeErr == nil && s.Runtime != st.Identity.Runtime {
+			return p.saveRuntimeRetirement(ctx, id, c.Store, st, s)
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return st, duplex.ErrPending
+		case <-timer.C:
+		}
+	}
+}
+
+func historicalResultReleased(st duplex.State, record requestRecord) bool {
+	a := st.Active
+	if a == nil {
+		return false
+	}
+	if a.RequestID == record.RequestID {
+		return a.Released
+	}
+	// Staging the next request is not proof its joint ACK was accepted.
+	if a.Sequence <= record.Sequence {
+		return false
+	}
+	if a.Sequence-record.Sequence > 1 {
+		return true
+	}
+	return a.PreviousResultAck != nil && a.PreviousResultAck.RequestID == record.RequestID && a.NextFrame == 1
+}
+
+// A selected session with no publication has no in-game ownership to close.
+// Retire only its exact local claim after all physical writers are drained.
+func (p *Project) retireLocalSelection(ctx context.Context, id string, meta targetRecord, st duplex.State) (ProjectResult, error) {
+	result := p.present(ctx, id, st, nil)
+	if !st.LocalRetired || (st.LocalRetirement == nil && (st.Bound || st.Active != nil || len(st.Intents) != 0 || st.PublicationSequence != 0)) {
+		return result, duplex.ErrUnknown
+	}
+	native := &Native{Target: meta.Target}
+	release, e := native.WritersDrained(ctx)
+	if e != nil {
+		return result, e
+	}
+	defer release()
+	if e = journal.RetireConnectionWindow(ctx, addonParent(meta.Target), meta.Claim); e != nil {
+		return result, e
+	}
+	meta.ClaimRetired = true
+	if e = writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta); e != nil {
+		return result, e
+	}
+	if st.LocalRetirement != nil {
+		result.Cleanup = "local_retired"
+	} else {
+		result.Cleanup = "complete"
+	}
+	return result, nil
+}
+
+func observedLifecycleChanged(meta targetRecord, st duplex.State, s duplex.Sendbox) bool {
+	return s.Runtime != st.Identity.Runtime || s.ActorBinding != st.Identity.ActorBinding || s.ActorReady && s.ActorGUID != "" && s.ActorGUID != meta.ActorGUID
+}
+func (p *Project) retireChangedRuntime(ctx context.Context, id string, meta targetRecord, store duplex.Store, st duplex.State, doctor ProjectResult) (ProjectResult, error) {
+	s := doctor.Status
+	if s == nil || doctor.Target == nil || *doctor.Target != meta.Target || doctor.Diagnostics["processIdentity"].State != "verified" || doctor.Diagnostics["runtimeFresh"].State != "advancing" || !observedLifecycleChanged(meta, st, *s) {
+		return doctor, duplex.ErrUnknown
+	}
+	proof := duplex.LocalRetirementProof{ProcessID: meta.Target.Window.ProcessID, ProcessCreated: meta.Target.Window.ProcessStartedAt, Executable: meta.Target.Window.Executable, PreviousRuntime: st.Identity.Runtime, ObservedRuntime: s.Runtime, PreviousActorBinding: st.Identity.ActorBinding, ObservedActorBinding: s.ActorBinding, PreviousActorGUID: meta.ActorGUID, ObservedActorGUID: s.ActorGUID}
+	if e := store.Update(ctx, func(current *duplex.State) error {
+		if current.Identity != st.Identity {
+			return duplex.ErrIdentity
+		}
+		current.LocalRetired = true
+		current.Closing = true
+		current.Closed = false
+		current.LocalRetirement = &proof
+		return nil
+	}); e != nil {
+		return doctor, e
+	}
+	latest, e := store.Load(ctx)
+	if e != nil {
+		return doctor, e
+	}
+	return p.retireLocalSelection(ctx, id, meta, latest)
 }

@@ -276,47 +276,53 @@ local function LoadAddonFile(relativePath, namespace)
     return LoadFile(relativePath)("Lychee Dev", namespace)
 end
 
--- Current duplex projection: the page can never execute or acknowledge work.
+-- Current mailbox projection: the page cannot execute or acknowledge work.
 local ns={}
 LoadAddonFile("Core/Locale.lua",ns)
 LoadAddonFile("Core/Locale_enUS.lua",ns)
 LoadAddonFile("UI/Theme.lua",ns)
 LoadAddonFile("UI/Widgets.lua",ns)
 LoadAddonFile("Bridge/CaptureWriter.lua",ns)
-local state={phase="idle"}
-ns.DuplexRuntime={Snapshot=function()return {protocol=state}end}
+local state={phase="ready_unbound",ready=true,actorReady=true,transportReady=true,controlReady=true}
+ns.DuplexRuntime={Snapshot=function()return {enabled=true,protocol=state}end}
 ns.Safety={IsCombatBlocked=function()return false end,PrintBlocked=function()end}
 LoadAddonFile("Modules/AutomationView.lua",ns)
 local view=ns.AutomationView
 assert(view.Collect()==0)
 local id=string.rep("a",32)
-state={phase="prepared",request={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),requestSeq="9007199254740993"}}
-assert(view.Collect()==1 and view.GetRecord(id).status=="loaded")
+state={phase="running",request={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),requestSeq="9007199254740993"}}
+assert(view.Collect()==1 and view.GetRecord(id).status=="running")
 assert(not view.Execute and not view.ShowNotice,"retired execution/QR API returned")
 assert(view.ClearRecords()==0,"unsettled request was hidden")
 LoadAddonFile("UI/Pages/Automation.lua",ns)
 local page=ns.CreateAutomationPage(NewRegion("parent"))
 assert(not page.executeButton and not page.showNoticeButton and not page.hideNoticeButton)
 assert(page.rows[1].requestId==id)
-state.phase="running"
+assert(page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_BUSY)
 page:Activate()
 assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_RUNNING)
+state={phase="validating",validation={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),copiedBytes=8192,hashedBytes=0},terminal={requestId=string.rep("e",32),outcome="failed"}}
+page:Refresh()
+assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_QUEUED and page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_BUSY)
+assert(view.GetRecord(id).terminal==nil,"previous result was attributed to validating command")
+state={phase="running",request={requestId=id,totalBytes=1048576,requestSHA256=string.rep("b",64),requestSeq="9007199254740993"}}
 local changes=0
 view.SetChangeHandler(function()changes=changes+1 end)
 view.Changed();assert(changes==1)
 view.SetChangeHandler(function()error("cosmetic failure")end)
 assert(pcall(view.Changed))
 view.SetChangeHandler(nil)
-state.phase="terminal";state.terminal={outcome="success",resultSHA256=string.rep("c",64),resultBytes=4,pages=1}
+state.phase="result_pending";state.terminal={outcome="success",resultSHA256=string.rep("c",64),resultBytes=4,pages=1}
 view.Collect()
 assert(view.GetRecord(id).probeStatus=="completed")
 assert(view.GetRecord(id).status=="reported")
 assert(view.GetReportText(id):find('"resultBytes":4',1,true))
 assert(view.ClearRecords()==0)
-state={phase="idle",released={requestId=id,requestSHA256=string.rep("b",64)}}
+state={phase="ready_unbound",ready=true,actorReady=true,transportReady=true,controlReady=true,released={requestId=id,requestSHA256=string.rep("b",64)}}
 view.Collect();assert(view.GetRecord(id).status=="acknowledged")
 assert(view.GetReportText(id)==nil,"released view retained result manifest")
 assert(view.ClearRecords()==1 and view.Collect()==0)
+page:Refresh();assert(page.mailboxText:GetText()==ns.L.AUTO_MAILBOX_READY)
 for i=1,140 do
     local nextID=string.format("%032x",i)
     state={phase="running",request={requestId=nextID,totalBytes=1048576}}

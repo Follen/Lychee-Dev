@@ -14,10 +14,14 @@ import (
 
 const (
 	HeaderBytes     = 320
-	FrameBytes      = 4096
+	FrameBytes      = 1048576
 	MaxSourceBytes  = 1048576
-	MaxFrames       = 256
+	MaxFrames       = 1
 	MaxControlBytes = 1024
+	MailboxLayoutID = "single-command-row-v1"
+	// A source is persisted once; command and intent retain only its headers.
+	// One base64 MiB plus bounded manifests and metadata fits within 2 MiB.
+	MaxJournalBytes = 2 << 20
 )
 
 type Kind uint32
@@ -36,22 +40,10 @@ const (
 
 func (k Kind) Lane() string {
 	switch k {
-	case Bind, Repair:
-		return "bindResume"
 	case Frame:
-		return "request"
-	case Commit:
-		return "commit"
-	case Cancel:
-		return "cancel"
-	case Close:
-		return "close"
-	case ResultAck:
-		return "resultAck"
-	case Reload:
-		return "reload"
-	case Lease:
-		return "lease"
+		return "command"
+	case Cancel, Close, Repair, Reload, Lease:
+		return "stop"
 	default:
 		return ""
 	}
@@ -67,30 +59,31 @@ type Identity struct {
 }
 
 type Header struct {
-	Kind             Kind   `json:"kind"`
-	Runtime          string `json:"runtimeToken"`
-	Arena            string `json:"arenaGeneration"`
-	Session          string `json:"sessionToken"`
-	Owner            string `json:"ownerToken"`
-	ActorBinding     string `json:"actorBindingId"`
-	RequestID        string `json:"requestId"`
-	MessageID        string `json:"messageId"`
-	Challenge        string `json:"challenge"`
-	Fence            uint64 `json:"fence,string"`
-	PublicationSeq   uint64 `json:"publicationSeq,string"`
-	RequestSeq       uint64 `json:"requestSeq,string"`
-	TransportAttempt uint64 `json:"transportAttempt,string"`
-	CreatedUTCMillis uint64 `json:"createdUtcMillis,string"`
-	BudgetMillis     uint32 `json:"budgetMillis"`
-	PayloadBytes     uint32 `json:"payloadBytes"`
-	TotalBytes       uint32 `json:"totalBytes"`
-	FrameIndex       uint32 `json:"frameIndex"`
-	FrameCount       uint32 `json:"frameCount"`
-	RequestSHA256    string `json:"requestSHA256"`
-	FrameSHA256      string `json:"frameSHA256"`
-	HeaderSHA256     string `json:"headerSHA256"`
-	PublicationBegin uint64 `json:"publicationBegin,string"`
-	PublicationEnd   uint64 `json:"publicationEnd,string"`
+	Kind                 Kind   `json:"kind"`
+	Runtime              string `json:"runtimeToken"`
+	Arena                string `json:"arenaGeneration"`
+	Session              string `json:"sessionToken"`
+	Owner                string `json:"ownerToken"`
+	ActorBinding         string `json:"actorBindingId"`
+	RequestID            string `json:"requestId"`
+	MessageID            string `json:"messageId"`
+	Challenge            string `json:"challenge"`
+	Fence                uint64 `json:"fence,string"`
+	PublicationSeq       uint64 `json:"publicationSeq,string"`
+	RequestSeq           uint64 `json:"requestSeq,string"`
+	TransportAttempt     uint64 `json:"transportAttempt,string"`
+	CreatedUTCMillis     uint64 `json:"createdUtcMillis,string"`
+	BudgetMillis         uint32 `json:"budgetMillis"`
+	PayloadBytes         uint32 `json:"payloadBytes"`
+	TotalBytes           uint32 `json:"totalBytes"`
+	FrameIndex           uint32 `json:"frameIndex"`
+	FrameCount           uint32 `json:"frameCount"`
+	RequestSHA256        string `json:"requestSHA256"`
+	PreviousResultAckSHA string `json:"previousResultAckSHA"`
+	ControlSHA256        string `json:"controlSHA256,omitempty"`
+	HeaderSHA256         string `json:"headerSHA256"`
+	PublicationBegin     uint64 `json:"publicationBegin,string"`
+	PublicationEnd       uint64 `json:"publicationEnd,string"`
 }
 
 type Message struct {
@@ -190,11 +183,20 @@ func validateShape(h Header, payload []byte) error {
 	} else if len(payload) > MaxControlBytes || h.FrameIndex != 0 || h.FrameCount != 0 {
 		return errors.New("invalid control shape")
 	}
+	if h.Kind == Reload || h.Kind == Lease {
+		if h.RequestID != "00000000000000000000000000000000" || h.RequestSHA256 != "0000000000000000000000000000000000000000000000000000000000000000" || h.RequestSeq != 0 || h.BudgetMillis != 0 || h.TotalBytes != 0 {
+			return errors.New("reload control must not carry a business request")
+		}
+		if h.Kind == Reload && len(payload) != 0 || h.Kind == Lease && len(payload) != 16 {
+			return errors.New("invalid reload control payload")
+		}
+	}
 	return nil
 }
 
-// EncodeMessage computes the frame and header digests; digest fields supplied by
-// the caller are ignored except for the immutable logical request digest.
+// The 232..263 digest is a kind-discriminated union: previous result ACK for
+// commands, independent control payload checksum for the exceptional stop row.
+// A complete command uses its immutable request digest to authenticate source.
 func EncodeMessage(m Message) ([]byte, error) {
 	h := m.Header
 	h.PayloadBytes = uint32(len(m.Payload))
@@ -222,7 +224,24 @@ func EncodeMessage(m Message) ([]byte, error) {
 		return nil, e
 	}
 	copy(b[200:], d)
-	fd := hash("LYCMBX/frame/v1\x00", b[:232], m.Payload)
+	fd := ""
+	if h.Kind == Frame {
+		if d, err := RequestDigest(h, m.Payload); err != nil || d != h.RequestSHA256 {
+			return nil, errors.New("request SHA256 mismatch")
+		}
+		fd = h.PreviousResultAckSHA
+		if fd == "" {
+			fd = "0000000000000000000000000000000000000000000000000000000000000000"
+		}
+		if _, err := digest(fd); err != nil {
+			return nil, err
+		}
+	} else {
+		if h.PreviousResultAckSHA != "" && h.PreviousResultAckSHA != "0000000000000000000000000000000000000000000000000000000000000000" {
+			return nil, errors.New("control cannot acknowledge a previous result")
+		}
+		fd = hash("LYCMBX/frame/v1\x00", b[:232], m.Payload)
+	}
 	f, _ := hex.DecodeString(fd)
 	copy(b[232:], f)
 	hd := hash("LYCMBX/header/v1\x00", b[:HeaderBytes])
@@ -257,7 +276,12 @@ func DecodeMessage(b []byte) (Message, error) {
 		*n = binary.LittleEndian.Uint32(b[180+i*4 : 184+i*4])
 	}
 	h.RequestSHA256 = hex.EncodeToString(b[200:232])
-	h.FrameSHA256 = hex.EncodeToString(b[232:264])
+	if h.Kind == Frame {
+		h.PreviousResultAckSHA = hex.EncodeToString(b[232:264])
+	} else {
+		h.ControlSHA256 = hex.EncodeToString(b[232:264])
+		h.PreviousResultAckSHA = "0000000000000000000000000000000000000000000000000000000000000000"
+	}
 	h.HeaderSHA256 = hex.EncodeToString(b[264:296])
 	h.PublicationBegin = binary.LittleEndian.Uint64(b[296:304])
 	h.PublicationEnd = binary.LittleEndian.Uint64(b[304:312])
@@ -268,8 +292,12 @@ func DecodeMessage(b []byte) (Message, error) {
 	if err := validateShape(*h, m.Payload); err != nil {
 		return Message{}, err
 	}
-	if hash("LYCMBX/frame/v1\x00", b[:232], m.Payload) != h.FrameSHA256 {
-		return Message{}, errors.New("frame SHA256 mismatch")
+	if h.Kind == Frame {
+		if d, err := RequestDigest(*h, m.Payload); err != nil || d != h.RequestSHA256 {
+			return Message{}, errors.New("request SHA256 mismatch")
+		}
+	} else if hash("LYCMBX/frame/v1\x00", b[:232], m.Payload) != h.ControlSHA256 {
+		return Message{}, errors.New("control SHA256 mismatch")
 	}
 	c := append([]byte(nil), b[:HeaderBytes]...)
 	clear(c[264:312])

@@ -63,7 +63,6 @@ end
 ns.ActivityView={
     RunStarted=function(id)if valid(id) then local ok=pcall(show,id);if not ok then failUI() end end end,
     RunFinished=function(id)if activeRequest==id then activeRequest=nil;hide() end end,
-    Receiving=function()end,Begin=function()end,Collecting=function()end,Finish=function()end,
     Stop=function()activeRequest=nil;hide()end,Refresh=function()
         if not frame or not activeRequest or failed then return end
         local id=activeRequest
@@ -81,6 +80,6 @@ ns.ActivityView={
             end
         end)
         if not ok then failUI() end
-    end,Anchor=function()end,
+    end,
     Current=function()return activeRequest and "probe" or nil,activeRequest end,
 }

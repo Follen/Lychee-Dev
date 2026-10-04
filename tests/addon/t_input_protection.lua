@@ -3,8 +3,7 @@ local ns=Env.LoadWorkbench()
 local now,ready=0,true
 ns.Compat.MonotonicSeconds=function()return now end
 ns.Platform={ObserveInputState=function()return ready end}
-local protecting=false
-ns.ActivityView={Receiving=function(value)protecting=value end}
+ns.ActivityView=setmetatable({}, {__index=function()error("input protection touched probe activity")end})
 local timers={}
 C_Timer.NewTimer=function(seconds,callback)
     local t={seconds=seconds,callback=callback}
@@ -32,9 +31,9 @@ callback();assert(outcome[1])
 
 ns.ProbeExecution.Run(function(p)
     assert(not p:ProtectInput(11));assert(not p:ProtectInput(0/0));assert(not p:ProtectInput(math.huge))
-    assert(p:ProtectInput(2) and p:IsInputProtected() and protecting)
+    assert(p:ProtectInput(2) and p:IsInputProtected() and ns.InputProtection.IsActive())
     assert(not p:ProtectInput(1),"nested lease")
-    assert(p:ReleaseInput() and not protecting)
+    assert(p:ReleaseInput() and not ns.InputProtection.IsActive())
     assert(not p:ProtectInput(1),"repeated leases bypassed hard budget")
     return true
 end,10,done)
@@ -43,7 +42,7 @@ ns.ProbeExecution.Run(function(p)
     assert(p:ProtectInput(90),"arbitrary five-second limit retained")
     return true
 end,120,done)
-assert(outcome[1] and not protecting)
+assert(outcome[1] and not ns.InputProtection.IsActive())
 local oldTimer=timers[#timers]
 ns.ProbeExecution.Run(function(p)
     assert(p:Async(10));assert(p:ProtectInput(2))
@@ -51,7 +50,7 @@ ns.ProbeExecution.Run(function(p)
     p:OnCleanup(function()assert(not ns.InputProtection.IsActive());error("cleanup failure")end)
     callback=assert(p:Callback(function()error("probe failure")end))
 end,10,done)
-callback();assert(not outcome[1] and not metadata.resourcesReleased and not protecting)
+callback();assert(not outcome[1] and not metadata.resourcesReleased and not ns.InputProtection.IsActive())
 
 for _,kind in ipairs({"timeout","cancel","combat","world"}) do
     ns.ProbeExecution.Run(function(p)
@@ -62,12 +61,12 @@ for _,kind in ipairs({"timeout","cancel","combat","world"}) do
     if kind=="timeout" then timers[#timers].callback()
     elseif kind=="cancel" then ns.InputProtection.Cancel()
     else created[1]:GetScript("OnEvent")(created[1],kind=="combat" and "PLAYER_REGEN_DISABLED" or "PLAYER_LEAVING_WORLD") end
-    assert(completed==count+1 and not outcome[1] and not protecting and not ns.InputProtection.IsActive())
+    assert(completed==count+1 and not outcome[1] and not ns.InputProtection.IsActive() and not ns.InputProtection.IsActive())
     assert(not callback() and completed==count+1)
 end
 ready=false
 ns.ProbeExecution.Run(function(p)assert(not p:ProtectInput(1));return true end,10,done)
-assert(outcome[1] and not protecting);ready=true
+assert(outcome[1] and not ns.InputProtection.IsActive());ready=true
 
 local scene=true
 ns.ProbeExecution.Run(function(p)
@@ -78,7 +77,7 @@ end,10,done)
 scene=false
 local watcher=created[#created]
 watcher:GetScript("OnEvent")(watcher,"PLAYER_TARGET_CHANGED")
-assert(not outcome[1] and outcome[2]=="scene_changed" and not protecting)
+assert(not outcome[1] and outcome[2]=="scene_changed" and not ns.InputProtection.IsActive())
 assert(not watcher:GetScript("OnEvent") and not callback(),"guard survived completion")
 scene=true
 ns.ProbeExecution.Run(function(p)

@@ -1,5 +1,18 @@
 # Toolkit 2.0 实施状态
 
+2026-10-04 当前 `codex/duplex-mailbox` 工作树正在把正式插件与 Go CLI 改为
+[一次整行写入的 mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)：
+`inbox.command` 预分配 1 MiB 命令容量，CLI 对每条命令只发布一次完整数据行；
+`inbox.stop` 单独承担取消、断开、重载和修复，`sendbox` 给出显式状态与结果。
+插件对大命令分帧**校验计算**，不分帧传输；`/dev` 工作台显示邮箱状态，
+跳动荔枝仅在探针实际执行时显示“Agent执行中”。这些是工作树中的实现，
+本轮离线 baseline 已通过：build、vet、强制 Lua 5.1 全量 Go、Node、版本、Skill、
+SOURCE 和真实 LuaLS 检查均为 passed；本次运行源码仍未提交。
+正式服 CLI 原生写入仍未验收。
+仅精确匹配 Retail 12.1.0.69933 可执行文件哈希的 stopped-helper 试验资格已开放，
+其他 build 仍拒绝写入。用户已授权实测；游戏验证尚未完成。下面两段记录属于此前的 4 KiB 候选，
+不能用作当前整行写入的性能或实机证明。
+
 2026-10-04 mailbox v1 候选 `73f61a7` 的 x64 Lua 5.1.5 全量离线与两次 Windows CI 已通过。
 正式服新运行时、原生 world/reload 读取及插件内一次性协议自检通过：探针执行一次，
 重复帧不重跑、challenge/结果 ACK/私有 GC 根均确认。游戏内 Lychee Dev 统计约 1.77 MiB，
@@ -7,7 +20,7 @@
 此结果不是原生 CLI 写入验收，writer profile 仍拒绝写入，其他客户端/双实例/最大输入
 游戏峰值保持 not_run。完整范围与保留失败见 [mailbox v1 验收](live-mailbox-v1-acceptance-2026-10-04.md)。
 
-2026-10-04 本分支当前协议统一为 **Lychee Dev mailbox protocol v1**，以
+2026-10-04 前一版候选将协议统一为 **Lychee Dev mailbox protocol v1**，以
 [新架构合同](live-mailbox-v1-architecture-2026-10-04.md) 替代先前 duplex 候选。
 schema、magic、摘要域和布局身份一次切换，拒绝旧协议。只保留一个 4 KiB 物理数据行，
 逐帧私有复制并准确确认后复用；单条命令仍最多 1 MiB。新增 native 发布准入检查，

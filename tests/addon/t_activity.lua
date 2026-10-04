@@ -7,7 +7,7 @@ ns.Persistence.Current=function() return state end
 Env.LoadAddon("Bridge/ActivityView.lua",ns)
 local view=ns.ActivityView
 assert(Env.framesCreated==0 and view.Current()==nil)
-for i=1,100 do view.Receiving(true);view.Begin("staged");view.Collecting("staged");view.Receiving(false) end
+assert(view.Receiving==nil and view.Begin==nil and view.Collecting==nil and view.Finish==nil,"retired transport activity API survived")
 assert(Env.framesCreated==0 and view.Current()==nil,"transport staging animated the probe badge")
 local originalCreate=CreateFrame
 CreateFrame=function(...) local f=originalCreate(...);displayed=displayed or f;return f end
@@ -16,6 +16,7 @@ view.RunStarted(id)
 CreateFrame=originalCreate
 assert(view.Current()=="probe" and displayed:IsShown())
 assert(displayed.label:GetText()==ns.L.ACTIVITY_PROBE)
+assert(ns.L.ACTIVITY_PROBE=="Agent执行中" and ns.L.ACTIVITY_CONNECTING==nil and ns.L.ACTIVITY_COLLECTING==nil)
 assert(displayed.mouseEnabled==false and not displayed:GetScript("OnKeyDown"))
 assert(displayed:GetScript("OnUpdate"),"active probe has no animation")
 view.RunFinished(string.rep("b",32))

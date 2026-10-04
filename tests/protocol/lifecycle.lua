@@ -1,5 +1,8 @@
 local root = assert(arg[1])
 assert(loadfile(arg[2]))()
+local frozen=setmetatable({}, {__mode="k"})
+table.freeze=function(row)frozen[row]=true;return row end
+table.isfrozen=function(row)return frozen[row]==true end
 local secret = {}; issecretvalue=function(v)return rawequal(v,secret)end
 local profiles={
     {version="12.1.0",interface=120100,product="retail"},
@@ -43,20 +46,19 @@ local function boot(profile,enabled,delayed)
         assert(ns.Mailbox and ns.Mailbox.schema=="lycheedev.mailbox.v1")
         assert(ns.DuplexRuntime.Snapshot().enabled and #frames==2)
         assert(ns.Mailbox.inbox.calibration[1]==0 and ns.Mailbox.inbox.calibration[6]==7654321)
-        assert(ns.DuplexProtocol.FrameSlots==1 and #ns.Mailbox.inbox.request.frames==ns.DuplexProtocol.FrameSlots
-            and #ns.Mailbox.inbox.request.frames[1]==1104)
-        assert(ns.DuplexProtocol.MaxFrames==256 and ns.DuplexProtocol.MaxSource==1048576)
-        assert(#ns.Mailbox.inbox.control.bindResume==336 and ns.Mailbox.sendbox.status:sub(1,8)=="LYCMSB01")
-        local framesRef=ns.Mailbox.inbox.request.frames
-        local weak=setmetatable({framesRef},{__mode="v"})
+        assert(ns.DuplexProtocol.FrameSlots==1 and #ns.Mailbox.inbox.command==262224)
+        assert(ns.DuplexProtocol.MaxFrames==1 and ns.DuplexProtocol.MaxSource==1048576)
+        assert(#ns.Mailbox.inbox.stop==336 and ns.Mailbox.sendbox.status:sub(1,8)=="LYCMSB01")
+        local commandRef=ns.Mailbox.inbox.command
+        local weak=setmetatable({commandRef},{__mode="v"})
         ns.Mailbox=nil;collectgarbage("collect")
-        assert(weak[1]==framesRef,"private owner did not root the arena")
-        local removed=framesRef[1];local weakRow=setmetatable({removed},{__mode="v"})
-        framesRef[1]=nil;removed=nil;collectgarbage("collect")
-        assert(weakRow[1]~=nil,"private arena roots did not retain a removed public frame row")
-        framesRef[1]=weakRow[1]
+        assert(weak[1]==commandRef,"private owner did not root the arena")
         for _=1,4 do frames[2].scripts.OnUpdate(frames[2],0.016) end
-        assert(ns.Mailbox and ns.Mailbox.inbox.request.frames==framesRef,"runtime failed to republish rooted mailbox")
+        assert(ns.Mailbox and ns.Mailbox.inbox.command==commandRef,"runtime failed to republish rooted mailbox")
+        local weakRow=setmetatable({ns.Mailbox.inbox.stop},{__mode="v"})
+        ns.Mailbox.inbox.stop=nil;collectgarbage("collect")
+        assert(weakRow[1]~=nil,"private arena roots did not retain a removed public stop row")
+        ns.Mailbox.inbox.stop=weakRow[1]
         loggedIn=false
         for _=1,70 do frames[2].scripts.OnUpdate(frames[2],0.016) end
         local status=assert(ns.DuplexProtocol.ParseSendbox(ns.Mailbox.sendbox.status))

@@ -40,8 +40,9 @@ context independently; it neither selects nor authenticates a running process.
 
 One process has one durable connection owner and one active CLI driver. Each
 same-build instance keeps its own CON/request and target; shared addon files
-do not make them interchangeable. A fresh bind establishes runtime ownership;
-execution remains within the authorized task. A foreign
+do not make them interchangeable. The first valid command binds the selected
+runtime and actor to its owner/session; connecting alone does not establish
+that in-game binding. A foreign
 project's claim, missing publication or stale sample is not an expired timeout.
 
 ## Complete an investigation
@@ -56,16 +57,14 @@ bounds addon execution (1..120); `--wait-seconds` bounds this host call
 (1..600, default 120). The [durable recovery deadline](live-recovery.md#durable-evidence-and-older-journals)
 survives between calls. Host timeout does not cancel Lua or renew either budget.
 
-The inbox reuses one physical data table for up to 1 MiB of source: at most
-256 logical frames of 4096 bytes, one outstanding request and one unacknowledged
-data publication. A verified frame ACK means the addon copied that frame into
-private strings; only then may the CLI overwrite the data table. It does not
-release the request or authorize execution. The addon checks identity, sequence,
-frame hashes and complete request SHA256, then requires the exact private commit
-challenge. Result ACK is separate: the CLI verifies and durably saves the result
-before acknowledging it, and must observe exact RELEASED before new business.
-Unknown execution never replays; retained private not_started evidence and
-drained writers are required to repair transfer of the original request.
+The inbox holds one complete command of up to 1 MiB. The CLI submits it in one
+whole-row publication; the addon copies and validates it before executing once.
+It checks the selected process/actor, runtime, single-use ready challenge,
+request identity, source SHA256 and exact previous-result acknowledgement.
+The CLI verifies and durably saves the current result before the next command
+carries that ACK. With no next command, disconnect ACKs and closes through the
+small stop row. Unknown execution never replays; cancel of an unaccepted command
+must leave exact `not_started` terminal evidence before another admission.
 
 Read the result on three independent axes:
 
@@ -81,7 +80,7 @@ execution. Completed native work needs no ACK/finish/hide command. Repeating
 the exact completed request reads retained bytes without rerunning Lua, even
 after later operations or game exit; edited parameters/code are not that retry.
 
-The single data table is reused without a capacity-triggered reload. An explicit
+The command row is reused without a capacity-triggered reload. An explicit
 reload follows [recovery](live-recovery.md); its replacement runtime does not
 inherit or rerun the original request. Scene-dependent probes must reconstruct
 prerequisites or record that they cannot. Ordinary observation

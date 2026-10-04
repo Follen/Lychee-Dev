@@ -1,10 +1,18 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-10-04 当前整行写入候选的新增验收目标见
+[mailbox protocol v1 架构](live-mailbox-v1-architecture-2026-10-04.md#acceptance-and-skill-routing)。
+重点是正式插件与 Go CLI 的一条命令一次 1 MiB 容量整行发布、增量校验、
+执行结果确认、取消/断开、GC 与重载恢复、角色与双实例隔离、插件内存和
+`/dev` 工作台；跳动荔枝只在探针执行时出现。本轮离线基线已全部通过，
+证据在忽略目录 `Analyze/duplex-mailbox/evidence/offline-final-20261004-12/`；
+正式服原生写入仍为 `not_run`。以下 4 KiB 候选的通过结果不能继承。
+
 2026-10-04 mailbox v1 的 x64 Lua 全量离线、Windows CI 与正式服插件内自检已经通过，
 实测单数据行/七控制行 backing 共 132 KiB，整个插件短样本约 1.77 MiB。
 原生写入及相关游戏并发/生命周期验收仍未运行；见 [具体证据与范围](live-mailbox-v1-acceptance-2026-10-04.md)。
 
-2026-10-04 当前分支采用 [Lychee Dev mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)。
+2026-10-04 前一版候选采用 [Lychee Dev mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)。
 新 schema/magic/hash domain/layout 必须拒绝旧协议；唯一物理数据行允许 1 MiB 逻辑请求，
 但只有准确私有帧 ACK 才能覆盖，结果持久化/ACK/release 后才能接下一条命令。
 回归覆盖全部 lane 的阴影缓存保留量、冷/热状态空闲分配、同标记内容变化、

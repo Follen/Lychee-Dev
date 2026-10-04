@@ -6,7 +6,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
 	"math"
+
+	"github.com/follenfang/lycheedev/internal/live/duplex"
 )
 
 const DuplexMailboxSchema = "lycheedev.mailbox.v1"
@@ -84,7 +87,7 @@ func (r *MailboxReader) duplexRoot(ctx context.Context) (*luaAccess, uint64, err
 		return nil, 0, errors.Join(mailboxError("mailbox_layout"), err)
 	}
 	box := v.pointer
-	for _, check := range []struct{ name, want string }{{"schema", DuplexMailboxSchema}, {"layoutId", "single-data-row-v1"}, {"release", r.release}} {
+	for _, check := range []struct{ name, want string }{{"schema", DuplexMailboxSchema}, {"layoutId", duplex.MailboxLayoutID}, {"release", r.release}} {
 		value, e := a.lookup(ctx, box, check.name)
 		if e != nil || value.tag != 4 {
 			return nil, 0, errors.Join(mailboxError("duplex_"+check.name), e)
@@ -101,21 +104,53 @@ func (a *luaAccess) arrayRange(ctx context.Context, table uint64, first, count i
 	if first < 1 || count < 1 || count > 2048 {
 		return 0, nil, mailboxError("array_range")
 	}
-	h, err := a.read(ctx, table, 72, false)
+	at, err := a.arrayLocation(ctx, table, first, count)
 	if err != nil {
 		return 0, nil, err
+	}
+	b, err := a.read(ctx, at, count*24, false)
+	return at, b, err
+}
+
+func (a *luaAccess) arrayLocation(ctx context.Context, table uint64, first, count int) (uint64, error) {
+	h, err := a.read(ctx, table, 72, false)
+	if err != nil {
+		return 0, err
 	}
 	size := uint64(binary.LittleEndian.Uint32(h[64:68]))
 	array := binary.LittleEndian.Uint64(h[32:40])
 	last := uint64(first-1) + uint64(count)
 	if h[16] != 5 || size > 1<<20 || last > size || array == 0 || array > ^uint64(0)-size*24 {
-		return 0, nil, mailboxError("array_layout_unsupported")
+		return 0, mailboxError("array_layout_unsupported")
 	}
 	a.guard(table+16, h[16:17], false)
 	a.guard(table+64, h[64:68], false)
 	a.guard(table+32, h[32:40], false)
-	at := array + uint64(first-1)*24
-	b, err := a.read(ctx, at, count*24, false)
+	return array + uint64(first-1)*24, nil
+}
+
+func (a *luaAccess) duplexArrayRange(ctx context.Context, table uint64, count int) (uint64, []byte, error) {
+	if count <= 2048 {
+		return a.arrayRange(ctx, table, 1, count)
+	}
+	// Only the exact full command row receives this dedicated TValue budget.
+	// General array/hash/string reads keep their 2048/1MiB/512-call bounds.
+	if count != duplexCommandWords {
+		return 0, nil, mailboxError("duplex_row_budget")
+	}
+	at, err := a.arrayLocation(ctx, table, 1, count)
+	if err != nil {
+		return 0, nil, err
+	}
+	if a.calls >= 512 || ctx.Err() != nil {
+		return 0, nil, errors.Join(mailboxError("read_budget"), ctx.Err())
+	}
+	a.calls++
+	b := make([]byte, count*24)
+	n, err := a.reader.source.Read(ctx, at, b)
+	if err != nil || n != len(b) {
+		err = errors.Join(mailboxError("short_read"), err, io.ErrUnexpectedEOF, ctx.Err())
+	}
 	return at, b, err
 }
 
@@ -176,6 +211,23 @@ func (r *MailboxReader) ReadDuplexString(ctx context.Context, path []DuplexPath,
 }
 
 func (r *MailboxReader) ResolveDuplexArray(ctx context.Context, path []DuplexPath, runtime, arena string, count int) (*DuplexArray, error) {
+	row, err := r.resolveDuplexRow(ctx, path, runtime, arena, count)
+	if err != nil {
+		return nil, err
+	}
+	result := &DuplexArray{a: row.a, Cells: make([]NumericCell, count)}
+	for i := range result.Cells {
+		cell := row.image[i*24 : (i+1)*24]
+		value := math.Float64frombits(binary.LittleEndian.Uint64(cell))
+		if cell[8] != 3 || cell[9] != 0 || value < 0 || value > math.MaxUint32 || math.Trunc(value) != value || math.IsNaN(value) {
+			return nil, mailboxError("duplex_numeric_cell")
+		}
+		result.Cells[i] = NumericCell{Address: row.address + uint64(i*24), Value: uint32(value)}
+	}
+	return result, nil
+}
+
+func (r *MailboxReader) resolveDuplexRow(ctx context.Context, path []DuplexPath, runtime, arena string, count int) (*duplexRow, error) {
 	a, box, err := r.duplexRoot(ctx)
 	if err != nil {
 		return nil, err
@@ -209,23 +261,19 @@ func (r *MailboxReader) ResolveDuplexArray(ctx context.Context, path []DuplexPat
 	if err != nil || v.tag != 5 {
 		return nil, errors.Join(mailboxError("duplex_array_type"), err)
 	}
-	at, b, err = a.arrayRange(ctx, v.pointer, 1, count)
+	at, b, err = a.duplexArrayRange(ctx, v.pointer, count)
 	if err != nil {
 		return nil, err
 	}
-	result := &DuplexArray{a: a, Cells: make([]NumericCell, count)}
-	for i := range result.Cells {
-		cell := b[i*24 : (i+1)*24]
-		value := math.Float64frombits(binary.LittleEndian.Uint64(cell))
-		if cell[8] != 3 || cell[9] != 0 || value < 0 || value > math.MaxUint32 || math.Trunc(value) != value || math.IsNaN(value) {
-			return nil, mailboxError("duplex_numeric_cell")
-		}
-		result.Cells[i] = NumericCell{Address: at + uint64(i*24), Value: uint32(value)}
+	flag, err := a.read(ctx, v.pointer+0x45, 1, false)
+	if err != nil {
+		return nil, err
 	}
+	a.guard(v.pointer+0x45, flag, false)
 	if err = a.verify(ctx); err != nil {
 		return nil, err
 	}
-	return result, nil
+	return &duplexRow{a: a, address: at, image: b, frozen: flag[0] == 1}, nil
 }
 
 func numericPayload(value uint32) []byte {

@@ -1,168 +1,241 @@
-local root, framePath, controlPath, sendboxInput, sendboxOutput, bundle = arg[1], arg[2], arg[3], arg[4], arg[5], arg[6]
-local ns = {CaptureWriter={}}
-assert(loadfile(root.."/addon/Bridge/SHA256.lua"))("Lychee Dev",ns)
-assert(loadfile(root.."/addon/Bridge/DuplexProtocol.lua"))("Lychee Dev",ns)
+local F=assert(loadfile(arg[1].."/tests/protocol/duplex_fixture.lua"))()
+local P,S=F.P,F.S
+-- SHA contexts may span many blocks and interleave without sharing state.
+assert(S.Hex(S.Digest(""))=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+local vector="abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
+local a,b=S.New(),S.New()
+assert(S.Update(a,vector:sub(1,65)));assert(S.Update(b,"a"))
+assert(S.Update(a,vector:sub(66)));assert(S.Update(b,"bc"))
+assert(S.Hex(S.Final(a))=="cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1")
+assert(S.Hex(S.Final(b))=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+assert(not S.Final(a) and not S.Update(b,"late"),"finalized SHA context reused")
 local function read(path)local f=assert(io.open(path,"rb"));local b=f:read("*a");f:close();return b end
-local function words(bytes,count)
-    local out={};for i=1,count do
-        local p=(i-1)*4+1;local a,b,c,d=bytes:byte(p,p+3)
-        out[i]=(a or 0)+((b or 0)*256)+((c or 0)*65536)+((d or 0)*16777216)
-    end;return out
+if arg[2] then
+    local wire=read(arg[2]);local h=assert(P.DecodeHeader(wire:sub(1,320),P.Kind.frame))
+    assert(h.requestSeqHi==2097152 and h.requestSeqLo==1,"u64 request sequence lost precision")
+    assert(P.VerifyFrame(wire:sub(1,320),wire:sub(321)))
+    local cells={};for n=1,262224 do cells[n]=0 end;F.setRow(cells,wire)
+    assert(P.ReadHeader(cells)==wire:sub(1,320))
 end
-local frame=read(framePath)
-local header=frame:sub(1,320)
-local h,err=ns.DuplexProtocol.DecodeHeader(header,ns.DuplexProtocol.Kind.frame);assert(h,err)
-assert(h.requestSeqHi==2097152 and h.requestSeqLo==1,"u64 request sequence lost precision")
-local cells=words(frame,1104)
-local parsedHeader=assert(ns.DuplexProtocol.ReadHeader(cells))
-local payload=frame:sub(321)
-assert(ns.DuplexProtocol.VerifyFrame(parsedHeader,payload,h))
-local expected=assert(ns.DuplexProtocol.RequestDigest(h.requestId,h.actorBinding,h.budget,h.utcHi,h.utcLo,h.totalBytes,payload))
-assert(expected==h.requestSHA)
-local control=read(controlPath)
-local controlWords=words(control,336)
-local controlHeader=assert(ns.DuplexProtocol.ReadControl(controlWords))
-local c=assert(ns.DuplexProtocol.DecodeHeader(controlHeader,ns.DuplexProtocol.Kind.reload))
-assert(c.laneName=="reload" and c.publicationSeqHi==0 and c.publicationSeqLo==9)
-local json=read(sendboxInput)
-ns.CaptureWriter.Encode=function()return json end
-local function writeRow(row,wire)
-    for i=1,#row do row[i]=0 end
-    local source=words(wire,#row)
-    for i=1,#source do row[i]=source[i] end
+if arg[3] then
+    local wire=read(arg[3]);local cells={};for n=1,336 do cells[n]=0 end;F.setRow(cells,wire)
+    assert(P.ReadControl(cells)==wire:sub(1,320))
 end
-local identity={runtime="00112233445566778899aabbccddeeff",arenaGeneration="10112233445566778899aabbccddeeff",
-    actorBindingId="40112233445566778899aabbccddeeff",actorGUID="Player-1-1",character="Paladin",realm="Realm",build="12.1.0.12345",product="retail",release="3.1.1"}
-local arena=assert(ns.DuplexProtocol.NewArena(identity.arenaGeneration))
-local executions,pages=0,{}
-local resultBody='{"ok":false,"error":"closed_before_execution","resourcesReleased":true}'
-local engine=assert(ns.DuplexProtocol.Create({identity=identity,publish=function()return true end,
-    compile=function()return function()end end,execute=function()executions=executions+1 end,
-    clock=function()return 100 end,challenge=function()return string.rep(string.char(187),16)end,
-    encode=function()return resultBody end,actor=function()return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end,
-    publishPage=function(index,body)pages[index]=body end}))
-assert(engine.BindIdentity(identity));assert(engine.Enable())
-writeRow(arena.control.bindResume,read(bundle.."/bind.bin"));assert(engine.Poll(arena,8))
-writeRow(arena.request.frames[1],frame);assert(engine.Poll(arena,8))
-assert(engine.Snapshot().phase=="prepared","Go frame was not staged for commit")
-writeRow(arena.control.close,read(bundle.."/close.bin"))
-writeRow(arena.control.cancel,read(bundle.."/cancel.bin"))
-writeRow(arena.control.commit,read(bundle.."/commit.bin"))
-assert(engine.Poll(arena,8))
-local state=engine.Snapshot()
-assert(executions==0,"close/cancel did not win the same-tick commit race")
-assert(state.terminal and state.terminal.outcome=="cancelled" and state.terminal.resourcesReleased==true)
-assert(pages[1]==resultBody and state.terminal.resultBytes==#resultBody and #state.terminal.pageSHA256==1)
-assert(state.receipts.close.state=="closed" and state.receipts.cancel.state=="cancel_too_late")
-local forbidden,why=engine.BeginRepair("90112233445566778899aabbccddeeff",string.rep(string.char(171),16))
-assert(not forbidden and why=="duplex_repair_unavailable","unacknowledged result entered idle repair")
-writeRow(arena.control.resultAck,read(bundle.."/ack.bin"));assert(engine.Poll(arena,8))
-assert(engine.Snapshot().request==nil,"result ACK did not retire the exact request")
-assert(engine.Poll(arena,8));assert(engine.Snapshot().request==nil,"retired frame replay resurrected an old request")
-local cancelArena=assert(ns.DuplexProtocol.NewArena(identity.arenaGeneration))
-local completion,finished= nil,0
-local cancelPages={}
-local cancelEngine=assert(ns.DuplexProtocol.Create({identity=identity,publish=function()return true end,
-    compile=function()return function()end end,execute=function(_,_,done)
-        completion=done
-        return {RequestCancel=function(self)completion(false,"probe_cancelled",{cancelled=true,resourcesReleased=false});return true,"cancelled"end}
-    end,clock=function()return 100 end,challenge=function()return string.rep(string.char(187),16)end,
-    encode=function()return resultBody end,actor=function()return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end,
-    publishPage=function(index,body)cancelPages[index]=body end,finished=function()finished=finished+1 end}))
-assert(cancelEngine.BindIdentity(identity));assert(cancelEngine.Enable())
-writeRow(cancelArena.control.bindResume,read(bundle.."/bind.bin"));assert(cancelEngine.Poll(cancelArena,8))
-writeRow(cancelArena.request.frames[1],frame);assert(cancelEngine.Poll(cancelArena,8))
-writeRow(cancelArena.control.commit,read(bundle.."/commit.bin"));assert(cancelEngine.Poll(cancelArena,8))
-assert(cancelEngine.Snapshot().phase=="running" and completion,"async request did not enter running state")
-assert(cancelEngine.Disable())
-local disabled=cancelEngine.Snapshot()
-assert(disabled.disabled and disabled.terminal and disabled.terminal.outcome=="cancelled"
-    and disabled.terminal.resourcesReleased==false and cancelPages[1]==resultBody and finished==1,
-    "disable lost the cancellation terminal or claimed resources were released")
-local nextGeneration="90112233445566778899aabbccddeeff"
-local idleArena=assert(ns.DuplexProtocol.NewArena(identity.arenaGeneration))
-local nextArena=assert(ns.DuplexProtocol.NewArena(nextGeneration))
-local idleEngine=assert(ns.DuplexProtocol.Create({identity=identity,publish=function()return true end,
-    compile=function(source)return function()end end,execute=function()end,clock=function()return 100 end,
-    challenge=function()return string.rep(string.char(187),16)end,encode=function()return resultBody end,
-    actor=function()return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end,
-    publishPage=function()end}))
-assert(idleEngine.BindIdentity(identity));assert(idleEngine.Enable())
-writeRow(idleArena.control.bindResume,read(bundle.."/bind.bin"));assert(idleEngine.Poll(idleArena,8))
-assert(idleEngine.BeginRepair(nextGeneration,string.rep(string.char(171),16)))
-writeRow(nextArena.control.bindResume,read(bundle.."/repair.bin"));assert(idleEngine.Poll(nextArena,8))
-local repaired=idleEngine.Snapshot()
-assert(repaired.repaired and repaired.repair and repaired.repair.idle and repaired.repair.noPendingRequest
-    and repaired.repair.resourcesReleased and repaired.repair.ledgerRetained and repaired.repair.previousWriterDrained,
-    "repair proof missing: repaired="..tostring(repaired.repaired).." repair="..tostring(repaired.repair and repaired.repair.idle).." noPending="..tostring(repaired.repair and repaired.repair.noPendingRequest).." released="..tostring(repaired.repair and repaired.repair.resourcesReleased).." ledger="..tostring(repaired.repair and repaired.repair.ledgerRetained).." drained="..tostring(repaired.repair and repaired.repair.previousWriterDrained).." receipt="..tostring(repaired.receipts.bindResume and repaired.receipts.bindResume.state).." failure="..tostring(repaired.lastFailure))
-assert(repaired.repair.requestId==string.rep("0",32) and repaired.repair.requestSHA256==string.rep("0",64))
-assert(idleEngine.ReleaseRetiredArena())
-local reconnectArena=assert(ns.DuplexProtocol.NewArena(identity.arenaGeneration))
-local reconnectIdentity={runtime=identity.runtime,arenaGeneration=identity.arenaGeneration,
-    actorBindingId=identity.actorBindingId,actorGUID=identity.actorGUID,character=identity.character,realm=identity.realm,
-    build=identity.build,product=identity.product,release=identity.release}
-local reconnectEngine=assert(ns.DuplexProtocol.Create({identity=reconnectIdentity,publish=function()return true end,
-    compile=function()return function()end end,execute=function(_,_,done)
-        done(true,true,{resourcesReleased=true});return {}
-    end,clock=function()return 100 end,challenge=function()return string.rep(string.char(187),16)end,
-    encode=function()return '{"ok":true,"result":true,"resourcesReleased":true}' end,
-    actor=function()return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end}))
-assert(reconnectEngine.BindIdentity(reconnectIdentity));assert(reconnectEngine.Enable())
-writeRow(reconnectArena.control.bindResume,read(bundle.."/bind.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-writeRow(reconnectArena.request.frames[1],read(bundle.."/fresh-frame.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-writeRow(reconnectArena.control.commit,read(bundle.."/fresh-commit.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().terminal and reconnectEngine.Snapshot().terminal.outcome=="success")
-writeRow(reconnectArena.control.resultAck,read(bundle.."/fresh-ack.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-writeRow(reconnectArena.control.close,read(bundle.."/fresh-close.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().closing and reconnectEngine.Snapshot().phase=="closed")
-writeRow(reconnectArena.control.bindResume,read(bundle.."/fresh-bind.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().receipts.bindResume.state=="bound","closed owner proof did not admit fresh owner")
-for i=1,#reconnectArena.request.frames[1] do reconnectArena.request.frames[1][i]=0 end
-writeRow(reconnectArena.control.cancel,read(bundle.."/stale-control.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().request==nil and reconnectEngine.Snapshot().lastFailure=="duplex_control_identity",
-    "old owner control was admitted after fresh bind: request="..tostring(reconnectEngine.Snapshot().request).." failure="..tostring(reconnectEngine.Snapshot().lastFailure).." cancel="..tostring(reconnectEngine.Snapshot().receipts.cancel and reconnectEngine.Snapshot().receipts.cancel.state))
-for i=1,#reconnectArena.control.cancel do reconnectArena.control.cancel[i]=0 end
-writeRow(reconnectArena.request.frames[1],read(bundle.."/stale-frame.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().request==nil and reconnectEngine.Snapshot().lastFailure=="duplex_frame_identity",
-    "old owner frame was admitted after fresh bind")
-for i=1,#reconnectArena.request.frames[1] do reconnectArena.request.frames[1][i]=0 end
-for _,lane in ipairs({"close","cancel","commit","resultAck","reload","lease"}) do
-    for i=1,#reconnectArena.control[lane] do reconnectArena.control[lane][i]=0 end
+if arg[6] and arg[7] then
+    local reload,lease=read(arg[6]),read(arg[7])
+    local rh=assert(P.DecodeHeader(reload:sub(1,320),P.Kind.reload))
+    local lh=assert(P.DecodeHeader(lease:sub(1,320),P.Kind.lease))
+    assert(#reload==320 and #lease==336 and lease:sub(321)==rh.messageId)
+    assert(lh.challenge~=F.Z16 and lh.runtime==rh.runtime and lh.owner==rh.owner and lh.session==rh.session)
+    assert(S.Digest("LYCMBX/frame/v1\0"..reload:sub(1,232))==rh.frameSHA)
+    assert(S.Digest("LYCMBX/frame/v1\0"..lease:sub(1,232)..lease:sub(321))==lh.frameSHA)
 end
-writeRow(reconnectArena.control.bindResume,read(bundle.."/bad-fence-bind.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().identity and reconnectEngine.Snapshot().identity.runtime==identity.runtime
-    and reconnectEngine.Snapshot().lastFailure=="duplex_bind_owner_conflict",
-    "same owner/session bind changed the fence: failure="..tostring(reconnectEngine.Snapshot().lastFailure).." owner="..tostring(reconnectEngine.Snapshot().receipts.bindResume and reconnectEngine.Snapshot().receipts.bindResume.state))
-for i=1,#reconnectArena.control.bindResume do reconnectArena.control.bindResume[i]=0 end
-writeRow(reconnectArena.request.frames[1],read(bundle.."/second-frame.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().phase=="prepared","fresh owner request sequence 1 was not accepted")
-writeRow(reconnectArena.control.commit,read(bundle.."/second-commit.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-assert(reconnectEngine.Snapshot().terminal and reconnectEngine.Snapshot().terminal.outcome=="success")
-writeRow(reconnectArena.control.resultAck,read(bundle.."/second-ack.bin"));assert(reconnectEngine.Poll(reconnectArena,8))
-local sendbox=assert(ns.DuplexProtocol.Sendbox({},65536))
-local f=assert(io.open(sendboxOutput,"wb"));assert(f:write(sendbox));f:close()
--- Exercise the actual encoder at the execution callback boundary. A constant
--- fixture encoder cannot detect a false result being dropped or an error
--- field incorrectly appearing in a successful result.
-assert(loadfile(root.."/addon/Bridge/CaptureWriter.lua"))("Lychee Dev",ns)
-for _,case in ipairs({{ok=true,value=false},{ok=true,value=true},{ok=true,value=0},
-    {ok=true,value="answer"},{ok=false,value="failure"}}) do
-    local realArena=assert(ns.DuplexProtocol.NewArena(identity.arenaGeneration))
-    local actualPages={}
-    local realEngine=assert(ns.DuplexProtocol.Create({identity=identity,publish=function()return true end,
-        compile=function()return function()end end,
-        execute=function(_,_,done)done(case.ok,case.value,{resourcesReleased=true,logs={}});return {} end,
-        clock=function()return 100 end,challenge=function()return string.rep(string.char(187),16)end,
-        encode=ns.CaptureWriter.Encode,
-        actor=function()return {guid=identity.actorGUID,character=identity.character,realm=identity.realm}end,
-        publishPage=function(index,body)actualPages[index]=body end}))
-    assert(realEngine.BindIdentity(identity));assert(realEngine.Enable())
-    writeRow(realArena.control.bindResume,read(bundle.."/bind.bin"));assert(realEngine.Poll(realArena,8))
-    writeRow(realArena.request.frames[1],read(bundle.."/fresh-frame.bin"));assert(realEngine.Poll(realArena,8))
-    writeRow(realArena.control.commit,read(bundle.."/fresh-commit.bin"));assert(realEngine.Poll(realArena,8))
-    local expectedRecord={ok=case.ok,resourcesReleased=true,logs={}}
-    if case.ok then expectedRecord.result=case.value else expectedRecord.error=case.value end
-    local expectedBody=assert(ns.CaptureWriter.Encode(expectedRecord,524288))
-    assert(actualPages[1]==expectedBody,"execution envelope changed success/false/error: "..tostring(actualPages[1]))
+-- First command binds and executes in the same callback; no control write.
+local f=F.engine();local nonce=f.engine.Snapshot().readyChallenge
+local first=f.command("return false")
+assert(f.calls()==1 and f.engine.Snapshot().phase=="result_pending")
+assert(f.engine.Snapshot().terminal.executionStarted and f.engine.Snapshot().terminal.resourcesReleased)
+assert(f.pages[1]:find('"result":false',1,true),"false result disappeared")
+assert(f.engine.Snapshot().readyChallenge~=nonce,"single-use nonce repeated")
+assert(f.engine.Poll(f.arena,8));assert(f.calls()==1,"same row executed twice")
+-- Changed replay and checksum/padding failures preserve the retained result.
+local ack=f.ack();local state=f.engine.Snapshot();local secondNonce=state.readyChallenge
+f.command("return true",{seq=2,ack=string.rep("x",92)})
+assert(f.calls()==1 and f.engine.Snapshot().request.requestId==state.request.requestId and f.engine.Snapshot().readyChallenge==secondNonce)
+local replacement=F.header(P.Kind.frame,"return true",{seq=2,ack=ack,challenge=secondNonce})
+F.setRow(f.arena.command,replacement);f.arena.command[100]=1;assert(f.engine.Poll(f.arena,8))
+assert(f.calls()==1 and not f.engine.Snapshot().repair,"mixed row triggered repair or execution")
+f.arena.command[100]=0;F.setRow(f.arena.command,replacement);assert(f.engine.Poll(f.arena,8))
+assert(f.calls()==2 and f.engine.Snapshot().request.requestId==string.format("%032x",2),"valid completion with same stamp did not retry")
+assert(f.engine.Snapshot().released.requestId==state.request.requestId)
+-- Final ACK+close is one stop message and duplicate observation is idempotent.
+state=f.engine.Snapshot();local closeOpts={seq=2,pub=50,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}
+assert(f.writeStop(P.Kind.close,f.ack(),closeOpts))
+assert(f.engine.Snapshot().phase=="closed" and not f.engine.Snapshot().request and not f.pages[1])
+assert(f.engine.Poll(f.arena,8));assert(f.calls()==2)
+local rearmed=f.engine.Snapshot()
+assert(rearmed.phase=="ready_unbound" and rearmed.closedAdmission and rearmed.readyChallenge~="")
+f.command("return true",{seq=1,fence=12,owner="60112233445566778899aabbccddeeff",session="70112233445566778899aabbccddeeff"})
+assert(f.calls()==3 and not f.engine.Snapshot().closedAdmission,"precisely retired owner did not rearm")
+-- Stop wins the same tick against a not-yet-accepted command and retains an
+-- exact terminal record that can be acknowledged by the next command.
+local c=F.engine();local late=F.header(P.Kind.frame,"return true",{challenge=c.engine.Snapshot().readyChallenge})
+local lateHeader=assert(P.DecodeHeader(late:sub(1,320)))
+F.setRow(c.arena.command,late)
+assert(c.writeStop(P.Kind.cancel,"",{seq=1,pub=1,id=S.Hex(lateHeader.requestId),digest=S.Hex(lateHeader.requestSHA),challenge=S.Hex(lateHeader.challenge)}))
+state=c.engine.Snapshot()
+assert(c.calls()==0 and state.terminal and state.terminal.outcome=="cancelled" and state.terminal.executionStarted==false and state.receipts.stop.state=="not_started")
+assert(state.terminal.effects=="none_started")
+assert(c.engine.Poll(c.arena,8));assert(c.calls()==0,"late write escaped revoked challenge")
+c.command("return true",{seq=2,ack=c.ack()});assert(c.calls()==1)
+-- A later unknown write can still expose the previous retained result.
+-- Exact prior ACK + cancellation revoke the next admission atomically.
+local uncertain=F.engine();uncertain.command("return true")
+local old=uncertain.engine.Snapshot();local oldAck=uncertain.ack()
+local unknown=F.header(P.Kind.frame,"return false",{seq=2,ack=oldAck,challenge=old.readyChallenge})
+local unknownHeader=assert(P.DecodeHeader(unknown:sub(1,320)))
+local cancelOpts={seq=2,pub=1,id=S.Hex(unknownHeader.requestId),digest=S.Hex(unknownHeader.requestSHA),challenge=S.Hex(unknownHeader.challenge)}
+assert(uncertain.writeStop(P.Kind.cancel,string.rep("x",92),cancelOpts))
+assert(uncertain.calls()==1 and uncertain.engine.Snapshot().request.requestId==old.request.requestId and uncertain.engine.Snapshot().readyChallenge==old.readyChallenge,
+    "wrong prior ACK retired result or nonce")
+F.setRow(uncertain.arena.command,unknown)
+assert(uncertain.writeStop(P.Kind.cancel,oldAck,cancelOpts))
+state=uncertain.engine.Snapshot()
+assert(uncertain.calls()==1 and state.request.requestId==cancelOpts.id and state.terminal.outcome=="cancelled" and not state.terminal.executionStarted)
+assert(state.released.requestId==old.request.requestId and state.receipts.stop.state=="not_started")
+assert(uncertain.engine.Poll(uncertain.arena,8));assert(uncertain.calls()==1,"late second command executed after revocation")
+uncertain.command("return true",{seq=3,ack=uncertain.ack()});assert(uncertain.calls()==2)
+-- The same stop payload is legal if the second command won first: cancel
+-- the current execution and retain its effects, never restore the old result.
+local executions,signals=0,0
+local accepted=F.engine({execute=function(_,_,completion)
+    executions=executions+1
+    if executions==1 then completion(true,true,{resourcesReleased=true});return {} end
+    return {RequestCancel=function()signals=signals+1;completion(false,"cancelled",{cancelled=true,resourcesReleased=true});return true end}
+end})
+accepted.command("return true");old=accepted.engine.Snapshot();oldAck=accepted.ack()
+accepted.command("return false",{seq=2,ack=oldAck});state=accepted.engine.Snapshot()
+local currentId=state.request.requestId
+cancelOpts={seq=2,pub=1,id=currentId,digest=state.request.requestSHA256,challenge=state.request.challenge}
+assert(accepted.writeStop(P.Kind.cancel,string.rep("x",92),cancelOpts));assert(signals==0)
+assert(accepted.writeStop(P.Kind.cancel,oldAck,cancelOpts))
+state=accepted.engine.Snapshot()
+assert(executions==2 and signals==1 and state.request.requestId==currentId and state.terminal.outcome=="cancelled" and state.terminal.executionStarted
+    and state.terminal.effects=="may_have_occurred" and state.released.requestId==old.request.requestId,
+    "accepted replacement cancellation rolled execution back")
+-- Incremental validation keeps its source private and consumes nothing before
+-- completion. Cancel wins after copying starts, including a prior-result ACK.
+local startedCount=0
+local validating=F.engine({started=function()startedCount=startedCount+1 end})
+validating.command("return true");old=validating.engine.Snapshot();oldAck=validating.ack()
+local larger="return false"..string.rep(" ",1012)
+unknown=F.header(P.Kind.frame,larger,{seq=2,ack=oldAck,challenge=old.readyChallenge})
+unknownHeader=assert(P.DecodeHeader(unknown:sub(1,320)))
+F.setRow(validating.arena.command,unknown);assert(validating.engine.Poll(validating.arena,8));assert(validating.engine.Poll(validating.arena,8))
+state=validating.engine.Snapshot()
+assert(state.phase=="validating" and state.validation.copiedBytes>0 and not state.ready and state.readyChallenge==old.readyChallenge
+    and state.request.requestId==old.request.requestId and startedCount==1)
+cancelOpts={seq=2,pub=1,id=S.Hex(unknownHeader.requestId),digest=S.Hex(unknownHeader.requestSHA),challenge=S.Hex(unknownHeader.challenge),total=#larger}
+assert(validating.writeStop(P.Kind.cancel,oldAck,cancelOpts))
+state=validating.engine.Snapshot()
+assert(not state.validation and state.phase=="result_pending" and state.terminal.outcome=="cancelled" and not state.terminal.executionStarted and startedCount==1)
+assert(P.ParseSendbox(validating.publications.status):find('"phase":"result_pending"',1,true))
+-- A changed header discards a partly copied row without consuming its nonce.
+local changed=F.engine({started=function()startedCount=startedCount+1 end})
+nonce=changed.engine.Snapshot().readyChallenge
+unknown=F.header(P.Kind.frame,larger,{challenge=nonce})
+F.setRow(changed.arena.command,unknown);assert(changed.engine.Poll(changed.arena,8));assert(changed.engine.HasPendingValidation())
+local firstCell=changed.arena.command[1];changed.arena.command[1]=0;assert(changed.engine.Poll(changed.arena,8))
+assert(not changed.engine.HasPendingValidation() and not changed.engine.Snapshot().request and changed.engine.Snapshot().readyChallenge==nonce)
+assert(P.ParseSendbox(changed.publications.status):find('"phase":"ready_unbound"',1,true))
+changed.arena.command[1]=firstCell
+local count=0
+repeat assert(changed.engine.Poll(changed.arena,8));count=count+1;assert(count<100) until not changed.engine.HasPendingValidation()
+assert(changed.calls()==1 and startedCount==2)
+local actorOptions={noActor=false}
+local actorChange=F.engine(actorOptions);nonce=actorChange.engine.Snapshot().readyChallenge
+F.setRow(actorChange.arena.command,F.header(P.Kind.frame,larger,{challenge=nonce}));assert(actorChange.engine.Poll(actorChange.arena,8))
+actorOptions.noActor=true;assert(actorChange.engine.Poll(actorChange.arena,8))
+assert(not actorChange.engine.HasPendingValidation() and actorChange.calls()==0 and actorChange.engine.Snapshot().readyChallenge~=nonce)
+actorOptions.noActor=false;assert(actorChange.engine.Poll(actorChange.arena,8));assert(actorChange.calls()==0,"actor recovery revived the old admission")
+-- Actor and competing owner changes execute zero times and preserve nonce.
+local contender=F.engine();nonce=contender.engine.Snapshot().readyChallenge
+contender.command("return true");ack=contender.ack();nonce=contender.engine.Snapshot().readyChallenge
+contender.command("return true",{seq=2,ack=ack,owner="50112233445566778899aabbccddeeff"})
+assert(contender.calls()==1 and contender.engine.Snapshot().readyChallenge==nonce)
+local absent=F.engine({noActor=true});absent.command("return true");assert(absent.calls()==0)
+local idle=F.engine();nonce=idle.engine.Snapshot().readyChallenge;idle.clock(100000);idle.command("return true")
+assert(idle.calls()==1 and idle.engine.Snapshot().request.challenge==nonce,"long idle made ready admission unusable")
+-- Compile failure is retained as failed/no-execution; execution failure and
+-- cancellation have distinct explicit terminal outcomes.
+local bad=F.engine();bad.command("this is not lua")
+assert(bad.calls()==0 and bad.engine.Snapshot().terminal.outcome=="failed" and bad.engine.Snapshot().terminal.executionStarted==false)
+local thrown=F.engine();thrown.command("error('broken')")
+assert(thrown.calls()==1 and thrown.engine.Snapshot().terminal.outcome=="failed" and thrown.engine.Snapshot().terminal.executionStarted)
+local done,cancelCalls
+cancelCalls=0
+local running=F.engine({execute=function(_,_,completion)done=completion;return {RequestCancel=function()cancelCalls=cancelCalls+1;done(false,"cancelled",{cancelled=true,resourcesReleased=false});return true end}end})
+running.command("return true");state=running.engine.Snapshot()
+assert(state.phase=="running" and state.readyChallenge=="")
+assert(running.writeStop(P.Kind.close,"",{seq=1,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}))
+state=running.engine.Snapshot();assert(cancelCalls==1 and state.phase=="closing" and not state.terminal.resourcesReleased and state.readyChallenge=="")
+assert(running.writeStop(P.Kind.close,running.ack(),{seq=1,pub=2,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}))
+assert(running.engine.Snapshot().request,"unreleased resource ACK retired evidence")
+-- Repeated mixed-image failures back off but retry the completed body with
+-- the same header/marker. No repair or nonce consumption occurs.
+local partial=F.engine();local valid=F.header(P.Kind.frame,"return true",{challenge=partial.engine.Snapshot().readyChallenge})
+F.setRow(partial.arena.command,valid);partial.arena.command[100]=1
+for _=1,10 do assert(partial.engine.Poll(partial.arena,8)) end
+assert(partial.calls()==0 and not partial.engine.Snapshot().repair)
+partial.arena.command[100]=0;assert(partial.engine.Poll(partial.arena,8));assert(partial.calls()==0)
+partial.clock(100.5);assert(partial.engine.Poll(partial.arena,8));assert(partial.calls()==1)
+-- Activity ends when execution finishes, before result encoding/pagination.
+local active,encodedWhileActive=false,false
+local activity=F.engine({started=function()active=true end,finished=function()active=false end,
+    encode=function(record,limit)if record.ok~=nil and active then encodedWhileActive=true end;return F.ns.CaptureWriter.Encode(record,limit)end})
+activity.command("return true");assert(not active and not encodedWhileActive)
+local startEvents,finishEvents=0,0
+local function beganActivity()startEvents=startEvents+1;active=true end
+local function endedActivity()finishEvents=finishEvents+1;active=false end
+local compileActivity=F.engine({started=beganActivity,finished=endedActivity})
+compileActivity.command("this is not lua");assert(startEvents==0 and finishEvents==0 and not active)
+local exceptionActivity=F.engine({started=beganActivity,finished=endedActivity,execute=function()error("executor_exception")end})
+exceptionActivity.command("return true");assert(startEvents==1 and finishEvents==1 and not active)
+local quarantineActivity=F.engine({started=beganActivity,finished=endedActivity,execute=function(_,_,done)
+    return {RequestCancel=function()done(false,"cancelled",{cancelled=true,resourcesReleased=true});return true end}
+end})
+quarantineActivity.command("return true");assert(active)
+assert(quarantineActivity.engine.Quarantine("topology_fault"))
+assert(not active and startEvents==2 and finishEvents==2 and quarantineActivity.engine.Snapshot().terminal.outcome=="cancelled")
+assert(quarantineActivity.engine.Quarantine("still_faulted"));assert(finishEvents==2)
+local finishUncancelled
+local uncancellable=F.engine({started=beganActivity,finished=endedActivity,execute=function(_,_,done)
+    finishUncancelled=done;return {RequestCancel=function()return false end}
+end})
+uncancellable.command("return true");assert(active)
+assert(uncancellable.engine.Quarantine("topology_fault"))
+assert(active and finishEvents==2,"quarantine pretended running work ended")
+finishUncancelled(false,"budget_elapsed",{resourcesReleased=true})
+assert(not active and startEvents==3 and finishEvents==3,"actual completion left activity visible")
+local disabledActivity=F.engine({started=beganActivity,finished=endedActivity,execute=function(_,_,done)
+    return {RequestCancel=function()done(false,"cancelled",{cancelled=true,resourcesReleased=true});return true end}
+end})
+disabledActivity.command("return true");assert(active);assert(disabledActivity.engine.Disable())
+assert(not active and startEvents==4 and finishEvents==4)
+-- Reload is a separate new stop intent and needs the exact prepared lease.
+local reload=F.engine({reload=function()return true end})
+reload.command("return true");state=reload.engine.Snapshot()
+assert(reload.writeStop(P.Kind.close,reload.ack(),{seq=1,pub=1,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}))
+assert(reload.writeStop(P.Kind.reload,"",{seq=0,pub=2,mid=string.format("%032x",19000),id=string.rep("0",32),digest=string.rep("0",64),budget=0,total=0}))
+local receipt=reload.engine.Snapshot().receipts.stop
+assert(receipt.state=="accepted" and receipt.challenge and not reload.engine.TakeReload())
+assert(reload.writeStop(P.Kind.lease,F.raw(receipt.messageId),{seq=0,pub=3,mid=string.format("%032x",20000),id=string.rep("0",32),digest=string.rep("0",64),challenge=receipt.challenge,budget=0,total=0}))
+local reloadStatus=assert(P.ParseSendbox(reload.publications.status))
+assert(reloadStatus:find(string.format("%032x",20000),1,true) and reload.publications.status==reload.publications.receipts,"lease receipt was invisible before reload")
+assert(reload.engine.TakeReload() and not reload.engine.TakeReload())
+-- Repair stays bounded and requires the exact stop challenge before dropping
+-- private references to the retired arena.
+local repair=F.engine();local nextArena=assert(P.NewArena("90112233445566778899aabbccddeeff"))
+repair.command("return true");state=repair.engine.Snapshot()
+assert(repair.writeStop(P.Kind.close,repair.ack(),{seq=1,pub=1,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}))
+assert(repair.engine.Poll(repair.arena,8))
+assert(repair.engine.BeginRepair("90112233445566778899aabbccddeeff",string.rep(string.char(171),16)))
+assert(not repair.engine.ReleaseRetiredArena())
+F.setRow(nextArena.stop,F.header(P.Kind.repair,"",{seq=0,pub=2,mid=string.format("%032x",30000),id=string.rep("0",32),digest=string.rep("0",64),challenge=string.rep("ab",16),arena="90112233445566778899aabbccddeeff"}))
+assert(repair.engine.Poll(nextArena,8));assert(repair.engine.Snapshot().repaired)
+assert(repair.engine.ReleaseRetiredArena())
+assert(not repair.engine.BeginRepair("90112233445566778899aabbccddeeff",string.rep(string.char(171),16)))
+-- Exercise the actual JSON encoder for values that conditional expressions
+-- can accidentally discard.
+for _,case in ipairs({{ok=true,value=false},{ok=true,value=0},{ok=true,value="answer"},{ok=false,value="failure"}}) do
+    local e=F.engine({execute=function(_,_,completion)completion(case.ok,case.value,{resourcesReleased=true,logs={}});return {}end})
+    e.command("return true")
+    local expected={ok=case.ok,resourcesReleased=true,logs={}}
+    if case.ok then expected.result=case.value else expected.error=case.value end
+    assert(e.pages[1]==F.ns.CaptureWriter.Encode(expected,524288))
 end
-print("duplex: Go wire, exact u64, ACK, repair, close and fresh-owner fencing passed")
+if arg[4] and arg[5] then
+    local json=read(arg[4]);F.ns.CaptureWriter.Encode=function()return json end
+    local out=assert(io.open(arg[5],"wb"));assert(out:write(P.Sendbox({},65536)));out:close()
+end
+print("duplex: Go wire, one write, exact u64, ACK, repair, close and fresh-owner fencing passed")

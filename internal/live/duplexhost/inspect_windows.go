@@ -24,18 +24,15 @@ func (p *Project) Inspect(ctx context.Context, id string) (ProjectResult, error)
 	if e != nil {
 		return ProjectResult{}, e
 	}
-	var st duplex.State
-	if e = boundedJSON(filepath.Join(p.path(id), "state.json"), &st, 4*duplex.MaxSourceBytes); e != nil {
-		return ProjectResult{Session: id, Journal: filepath.Join(p.path(id), "state.json")}, e
-	}
-	if e = duplex.ValidateState(st); e != nil {
+	st, e := duplex.NewFileStore(p.path(id)).Inspect(ctx)
+	if e != nil {
 		return ProjectResult{Session: id, Journal: filepath.Join(p.path(id), "state.json")}, errors.Join(errors.New("live.duplex_journal_invalid"), e)
 	}
 	r := p.present(ctx, id, st, nil)
 	r.Target = &meta.Target
 	r.Diagnostics = map[string]Diagnostic{}
 	observed, observeErr := p.inspectWindow(ctx, meta.Target, r)
-	if observed.Status != nil && observed.Status.Identity != st.Identity {
+	if observed.Status != nil && !inspectionIdentity(st, *observed.Status) {
 		observed.Diagnostics["connectionIdentity"] = Diagnostic{"changed", "original request is retained; no replay into replacement runtime"}
 		observeErr = errors.Join(observeErr, duplex.ErrIdentity)
 	} else if observed.Status != nil {
@@ -118,7 +115,7 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 		return r, errors.Join(append(errs, e)...)
 	}
 	r.Status = &s
-	if _, e := n.Mailbox.ResolveDuplexArray(ctx, []memory.DuplexPath{{Name: "inbox"}, {Name: "control"}, {Name: "bindResume"}}, s.Runtime, s.Arena, 80+256); e != nil {
+	if _, e := n.Mailbox.ResolveDuplexArray(ctx, []memory.DuplexPath{{Name: "inbox"}, {Name: "stop"}}, s.Runtime, s.Arena, 80+256); e != nil {
 		r.Diagnostics["numericLayout"] = Diagnostic{"unavailable", e.Error()}
 	} else {
 		r.Diagnostics["numericLayout"] = Diagnostic{"observed", "read-only six-number calibration; not write eligibility"}
@@ -146,16 +143,18 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 			errs = append(errs, err)
 			break
 		}
-		if next.Identity != s.Identity || next.StatusSequence < s.StatusSequence || next.Heartbeat < s.Heartbeat {
-			errs = append(errs, duplex.ErrIdentity)
+		advancing, advanceErr := statusAdvance(s, next)
+		if advanceErr != nil {
+			errs = append(errs, advanceErr)
 			break
 		}
-		if next.StatusSequence > s.StatusSequence && next.Heartbeat > s.Heartbeat {
+		if advancing {
 			s = next
 			r.Status = &s
 			fresh = true
 			break
 		}
+
 	}
 	if fresh {
 		r.Diagnostics["runtimeFresh"] = Diagnostic{"advancing", ""}
@@ -179,4 +178,27 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 		r.Stage = "degraded"
 	}
 	return r, errors.Join(errs...)
+}
+
+func inspectionIdentity(st duplex.State, s duplex.Sendbox) bool {
+	if s.Identity == st.Identity {
+		return true
+	}
+	if p := s.Repair; p != nil && p.PreviousArena == st.Identity.Arena && p.NewArena == s.Arena && p.LedgerRetained && p.Idle && p.NoPendingRequest && p.ResourcesReleased && s.Runtime == st.Identity.Runtime && s.ActorBinding == st.Identity.ActorBinding && (st.Active == nil || st.Active.Released) {
+		candidate := st
+		candidate.Identity.Arena = s.Arena
+		return inspectionIdentity(candidate, s)
+	}
+	if st.Bound {
+		return false
+	}
+	expected, e := duplex.NextIdentity(s, st.Identity.Owner, st.Identity.Session)
+	return e == nil && expected == st.Identity
+}
+
+func statusAdvance(previous, next duplex.Sendbox) (bool, error) {
+	if next.Identity != previous.Identity || next.StatusSequence < previous.StatusSequence || next.Heartbeat < previous.Heartbeat {
+		return false, duplex.ErrIdentity
+	}
+	return next.StatusSequence > previous.StatusSequence && next.Heartbeat > previous.Heartbeat, nil
 }

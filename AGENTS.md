@@ -95,23 +95,27 @@ readiness or old schema/wire/layout compatibility here.
   polling while mailbox is enabled; it is not a general exception for features.
 - `inbox` is CLI to addon; `sendbox` is addon to CLI. Identity, SHA256, exact
   uint64 sequences, fresh private challenge and one outstanding request govern
-  execution. One physical data table is reused for up to 256 logical 4096-byte
-  frames (1 MiB total). Frame ACK permits overwriting that row; exact terminal +
-  durable result + result ACK + RELEASED gate new work.
+  execution. One preallocated command row carries one complete source of up to
+  1 MiB in one native write. The next command carries the exact ACK for the
+  previous durably saved result; final disconnect uses the small stop row.
 - Run read-only targeted doctor before each live drive. Business readiness must
   not block independently eligible cancel, result retrieval or disconnect.
 - Retain project, CON, request, source and budget on pending work. Unknown effects
-  do not replay. Only retained private not_started evidence plus drained writers
-  permits the same request to be retransmitted after generation repair.
+  do not replay. A cancelled unaccepted command retains exact `not_started`
+  terminal evidence and consumes its challenge; it is not retransmitted.
 - Private strong roots retain every exchange row. Repair permits at most the
-  current and one retired arena; all eight host writer lanes must drain before
+  current and one retired arena; command and stop writers must drain before
   exact repair acceptance can release retired roots. They do not pin VM lifetime.
-- The CLI owns native publication and leases. Do not bypass it with raw writes,
-  guessed offsets, deleted claims, process suspension or injection. Raw address
+- The CLI owns native publication and leases. Its exact-target stopped writer
+  must pass owned-process safety checks and preserve the game on helper failure.
+  Do not bypass it with raw writes, guessed offsets, deleted claims, unowned
+  process suspension or injection. Raw address
   research is a separate, explicitly scoped workflow.
 - Build-bound read/RVA qualification does not establish native write capability.
   Every writer profile needs independent array/number and collector/lifetime
-  evidence. Current candidate profiles are not_run and refuse production writes.
+  evidence. The exact Retail 12.1.0.69933 executable is enabled only for the
+  owner-authorized stopped-helper trial; real-client validation remains not_run.
+  Every other hash/build remains write-ineligible.
   Addon self-tests and offline fixtures do not establish CLI-to-game execution.
 - Deploy sealed candidate files using addon install. A clean managed installation
   must match the CLI; no overlay copying. First enablement uses /dev connect;

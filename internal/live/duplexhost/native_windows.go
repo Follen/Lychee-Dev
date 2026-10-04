@@ -5,12 +5,10 @@ package duplexhost
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -183,9 +181,9 @@ func (n *Native) ReadResult(ctx context.Context, m duplex.ResultManifest) ([]byt
 	return out, duplex.ValidateResult(m, out)
 }
 
-var writeLanes = []string{"data", "control-bindResume", "control-commit", "control-cancel", "control-close", "control-resultAck", "control-reload", "control-lease"}
+var writeLanes = []string{"command", "stop"}
 
-// WritersDrained holds all eight independent OS lane leases. It must be called
+// WritersDrained holds the independent command and stop row leases. It must be called
 // before repair permission, never inferred from an addon status boolean.
 func (n *Native) WritersDrained(ctx context.Context) (func(), error) {
 	var held []*vault.Lease
@@ -206,7 +204,7 @@ func (n *Native) WritersDrained(ctx context.Context) (func(), error) {
 }
 
 // Repair holds the drain proof across the repair publication, while explicitly
-// avoiding recursively acquiring its own bindResume lane. No ordinary publish
+// avoiding recursively acquiring its own stop row lease. No ordinary publish
 // may borrow these leases.
 func (n *Native) repair(ctx context.Context, c *duplex.Coordinator) (duplex.State, error) {
 	if e := n.CheckWriteCapability(); e != nil {
@@ -227,89 +225,101 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 	if _, ok := ctx.Deadline(); !ok {
 		return out, errors.New("live.duplex_deadline_required")
 	}
-	wire, err := duplex.EncodeMessage(m)
-	if err != nil {
+	if m.Header.Kind != duplex.Frame && m.Header.Kind != duplex.Cancel && m.Header.Kind != duplex.Close && m.Header.Kind != duplex.Repair && m.Header.Kind != duplex.Reload && m.Header.Kind != duplex.Lease {
+		return out, errors.New("live.mailbox_control_unavailable")
+	}
+	if _, err := duplex.EncodeMessage(m); err != nil {
 		return out, err
 	}
-	if err = n.CheckWriteCapability(); err != nil {
+	if err := n.CheckWriteCapability(); err != nil {
 		return out, err
 	}
-	if err = n.checkLifecycleWriteGate(ctx, m.Header.Kind); err != nil {
-		return out, err
-	}
-	lane := "control-" + m.Header.Kind.Lane()
+	lane := "stop"
 	if m.Header.Kind == duplex.Frame {
-		lane = "data"
+		lane = "command"
 	}
 	if n.repairDrainHeld && m.Header.Kind != duplex.Repair {
 		return out, errors.New("live.duplex_drain_publication_invalid")
 	}
 	if !n.repairDrainHeld {
-		lock, e := vault.AcquireLease(ctx, n.scope(), n.resource(lane))
+		lease, e := vault.AcquireLease(ctx, n.scope(), n.resource(lane))
 		if e != nil {
 			return out, e
 		}
-		defer func() { returned = errors.Join(returned, lock.Close()) }()
+		defer func() { returned = errors.Join(returned, lease.Close()) }()
 	}
-	if n.Guard != nil {
-		if err = n.Guard(ctx, m.Header.Kind); err != nil {
-			return out, err
+	actorGUID := n.ExpectedActorGUID
+	guard := func(c context.Context) error {
+		if err := n.checkLifecycleWriteGate(c, m.Header.Kind); err != nil {
+			return err
 		}
+		if n.Guard != nil {
+			if err := n.Guard(c, m.Header.Kind); err != nil {
+				return err
+			}
+		}
+		if n.BatchGuard != nil {
+			if err := n.BatchGuard(c, m.Header.Kind); err != nil {
+				return err
+			}
+		}
+		s, err := n.Observe(c)
+		if err != nil {
+			return err
+		}
+		h := m.Header
+		if s.Runtime != h.Runtime || s.Arena != h.Arena || s.ActorBinding != h.ActorBinding {
+			return duplex.ErrIdentity
+		}
+		if actorGUID == "" {
+			actorGUID = s.ActorGUID
+		}
+		if s.ActorGUID == "" || s.ActorGUID != actorGUID {
+			return duplex.ErrIdentity
+		}
+		if h.Kind == duplex.Frame {
+			if err = duplex.ValidateFrameTransition(s, m); err != nil {
+				return err
+			}
+		} else {
+			matched := s.Session == h.Session && s.Owner == h.Owner && s.Fence == h.Fence
+			if !matched {
+				candidate, e := duplex.NextIdentity(s, h.Owner, h.Session)
+				matched = e == nil && candidate == (duplex.Identity{Runtime: h.Runtime, Arena: h.Arena, Session: h.Session, Owner: h.Owner, ActorBinding: h.ActorBinding, Fence: h.Fence}) && (s.ReadyChallenge == h.Challenge || h.Kind == duplex.Repair && s.Repair != nil && s.Repair.Challenge == h.Challenge)
+			}
+			if !matched {
+				return duplex.ErrIdentity
+			}
+			if !s.ControlReady {
+				return duplex.ErrPending
+			}
+		}
+		return nil
 	}
-	s, err := n.Observe(ctx)
-	if err != nil {
+	if err := guard(ctx); err != nil {
 		return out, err
 	}
-	h := m.Header
-	if h.Kind == duplex.Bind {
-		if e := duplex.ValidateBindTransition(s, m); e != nil {
-			return out, e
-		}
-	}
-	if s.Runtime != h.Runtime || s.Arena != h.Arena || s.ActorBinding != h.ActorBinding {
-		return out, duplex.ErrIdentity
-	}
-	if h.Kind != duplex.Bind && (s.Session != h.Session || s.Owner != h.Owner || s.Fence != h.Fence) {
-		return out, duplex.ErrIdentity
-	}
-	if h.Kind == duplex.Frame && s.Request != nil && (s.Request.RequestID != h.RequestID || s.Request.RequestSHA256 != h.RequestSHA256) {
-		return out, duplex.ErrBusy
-	}
-	if h.Kind == duplex.Frame {
-		if err = duplex.ValidateFrameTransition(s, m); err != nil {
-			return out, err
-		}
-	}
-	if h.Kind == duplex.Frame || h.Kind == duplex.Commit {
-		if !s.TransportReady || !s.ActorReady || s.ActorGUID == "" || n.ExpectedActorGUID != "" && s.ActorGUID != n.ExpectedActorGUID {
-			return out, duplex.ErrIdentity
-		}
-	} else if !s.ControlReady {
-		return out, duplex.ErrPending
-	}
-	path := []memory.DuplexPath{{Name: "inbox"}, {Name: "control"}, {Name: h.Kind.Lane()}}
-	count := 80 + 256
-	if h.Kind == duplex.Frame {
-		path = []memory.DuplexPath{{Name: "inbox"}, {Name: "request"}, {Name: "frames"}, {Index: 1}}
-		count = 80 + 1024
-	}
-	array, err := n.Mailbox.ResolveDuplexArray(ctx, path, h.Runtime, h.Arena, count)
-	if err != nil {
-		return out, err
-	}
-	// A writer profile must establish independent layout and lifetime evidence.
-	// A root recipe or six-number calibration grants no write authority.
 	binding := n.Mailbox.Binding()
 	if binding.Evidence.RecipeID != memory.LuaMailboxRootRecipeID {
 		return out, errors.New("live.duplex_write_profile_unsupported")
 	}
+	return n.publishStopped(ctx, m, binding, actorGUID, memory.PublishStoppedDuplexRow)
+}
+
+type stoppedPublisher func(context.Context, memory.StoppedPublicationRequest) (duplex.WriteOutcome, []memory.DuplexWriteRange, memory.StoppedObservation, error)
+
+// publishStopped owns local durability around the dedicated helper. The host
+// never opens a writable process handle; helper return proves its lifetime is
+// drained before the outcome is written or a later operation can proceed.
+func (n *Native) publishStopped(ctx context.Context, m duplex.Message, binding memory.LuaRootBinding, actorGUID string, publish stoppedPublisher) (out duplex.WriteOutcome, returned error) {
+	out.State = duplex.NoWrite
 	if n.TraceDir == "" {
 		return out, errors.New("live.duplex_write_journal_required")
 	}
-	if err = os.MkdirAll(n.TraceDir, 0700); err != nil {
+	if err := os.MkdirAll(n.TraceDir, 0700); err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
-	file, err := os.OpenFile(filepath.Join(n.TraceDir, fmt.Sprintf("%s-%d.jsonl", h.MessageID, h.PublicationSeq)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(filepath.Join(n.TraceDir, fmt.Sprintf("%s-%d.jsonl", m.Header.MessageID, m.Header.PublicationSeq)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
@@ -318,107 +328,46 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 			returned = errors.Join(returned, duplex.ErrPersistence, e)
 		}
 	}()
-	intent := struct {
-		Message duplex.Message        `json:"message"`
-		Root    memory.LuaRootBinding `json:"root"`
-		Target  live.ClientWindow     `json:"target"`
-	}{m, binding, n.Target}
 	enc := json.NewEncoder(file)
+	// Command bytes are stored once in the coordinator journal. This immutable
+	// reference and exact header are synced before starting the native helper.
+	header := m.Header
+	intent := struct {
+		Header        duplex.Header         `json:"header"`
+		PayloadSHA256 string                `json:"payloadSHA256"`
+		PayloadBytes  int                   `json:"payloadBytes"`
+		Root          memory.LuaRootBinding `json:"root"`
+		ActorGUID     string                `json:"actorGUID"`
+		Target        live.ClientWindow     `json:"target"`
+	}{header, digestBytes(m.Payload), len(m.Payload), binding, actorGUID, n.Target}
 	if err = enc.Encode(intent); err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
 	if err = file.Sync(); err != nil {
 		return out, errors.Join(duplex.ErrPersistence, err)
 	}
-	if err = array.Verify(ctx); err != nil {
-		return out, err
+	request := memory.StoppedPublicationRequest{
+		Target:           memory.ProcessIdentity{PID: n.Target.Window.ProcessID, Created: n.Target.Window.ProcessStartedAt, Image: n.Target.Window.Executable},
+		ExecutableSHA256: binding.ExecutableSHA256, Build: n.Target.Client.FullBuild, Product: n.Target.Client.Product, Release: buildinfo.Version, ActorGUID: actorGUID, Message: m,
 	}
-	writer, err := memory.OpenDuplexWriter(n.Target.Window.ProcessID, n.Target.Window.ProcessStartedAt, n.Target.Window.Executable)
+	out, facts, stop, writeErr := publish(ctx, request)
+	// No disk wait occurs inside the native write critical section.
+	fact := struct {
+		Outcome duplex.WriteOutcome       `json:"outcome"`
+		Ranges  []memory.DuplexWriteRange `json:"ranges"`
+		Stop    memory.StoppedObservation `json:"stop"`
+		Error   string                    `json:"error,omitempty"`
+	}{Outcome: out, Ranges: facts, Stop: stop}
+	if writeErr != nil {
+		fact.Error = writeErr.Error()
+	}
+	if err = enc.Encode(fact); err == nil {
+		err = file.Sync()
+	}
 	if err != nil {
-		return out, err
+		return out, errors.Join(writeErr, duplex.ErrPersistence, err)
 	}
-	defer func() { returned = errors.Join(returned, writer.Close()) }()
-	words := make([]uint32, count)
-	for i := 0; i < len(wire); i += 4 {
-		var packed [4]byte
-		copy(packed[:], wire[i:min(i+4, len(wire))])
-		words[i/4] = binary.LittleEndian.Uint32(packed[:])
-	}
-	writeCount := 0
-	write := func(index int, value uint32) error {
-		if writeCount%32 == 0 {
-			if n.BatchGuard != nil {
-				if e := n.BatchGuard(ctx, h.Kind); e != nil {
-					return e
-				}
-			}
-			if e := array.Verify(ctx); e != nil {
-				return e
-			}
-		}
-		cell := array.Cells[index]
-		nbytes, e := writer.WriteDuplexCell(ctx, cell, value, func(c context.Context) error { return n.checkLifecycleWriteGate(c, h.Kind) })
-		if nbytes > 0 {
-			out.Bytes += uint64(nbytes)
-			out.State = duplex.PartialWrite
-		}
-		fact := struct {
-			Index int    `json:"index"`
-			Bytes int    `json:"bytes"`
-			Error string `json:"error,omitempty"`
-		}{Index: index + 1, Bytes: nbytes}
-		if e != nil {
-			fact.Error = e.Error()
-		}
-		journalErr := enc.Encode(fact)
-		if journalErr != nil {
-			journalErr = errors.Join(duplex.ErrPersistence, journalErr)
-		}
-		writeCount++
-		if e != nil || nbytes != 8 || journalErr != nil {
-			return errors.Join(e, journalErr, io.ErrShortWrite)
-		}
-		array.Cells[index].Value = value
-		return nil
-	}
-	// begin low word becomes odd first. No stamp is treated as atomic.
-	odd := h.PublicationBegin - 1
-	for _, entry := range []struct {
-		index int
-		value uint32
-	}{{74, uint32(odd)}, {75, uint32(odd >> 32)}, {76, uint32(odd)}, {77, uint32(odd >> 32)}} {
-		if err = write(entry.index, entry.value); err != nil {
-			return out, err
-		}
-	}
-	for i, value := range words {
-		if i >= 74 && i <= 77 {
-			continue
-		}
-		if err = write(i, value); err != nil {
-			return out, err
-		}
-	}
-	for _, i := range []int{76, 77, 75, 74} {
-		if err = write(i, words[i]); err != nil {
-			return out, err
-		}
-	}
-	check, err := n.Mailbox.ResolveDuplexArray(ctx, path, h.Runtime, h.Arena, count)
-	if err != nil {
-		return out, err
-	}
-	for i, value := range words {
-		if check.Cells[i].Value != value {
-			return out, errors.New("live.duplex_readback_mismatch")
-		}
-	}
-	if err = file.Sync(); err != nil {
-		return out, errors.Join(duplex.ErrPersistence, err)
-	}
-	out.State = duplex.CompleteWrite
-	out.ReadbackVerified = true
-	return out, nil
+	return out, writeErr
 }
 
 func digestBytes(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }

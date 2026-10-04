@@ -8,7 +8,6 @@ local function release(token, reason)
     local prior=active;active=nil
     if prior.timer then pcall(prior.timer.Cancel,prior.timer) end
     frame:Hide();frame:UnregisterAllEvents();frame:SetScript("OnEvent",nil)
-    if ns.ActivityView then pcall(ns.ActivityView.Receiving,false) end
     if reason and prior.interrupted then prior.interrupted(reason) end
     return true
 end
@@ -48,7 +47,6 @@ ns.InputProtection={
             frame:SetScript("OnEvent",function(_,event)release(token,event=="PLAYER_REGEN_DISABLED"
                 and "input_protection_combat" or "input_protection_world_changed")end)
             frame:Show()
-            if ns.ActivityView then ns.ActivityView.Receiving(true) end
         end)
         if not ok then release(token);return nil,"input_protection_unavailable" end
         return token

@@ -24,24 +24,34 @@ type RequestState struct {
 	NotStarted       bool     `json:"notStarted"`
 }
 type Receipt struct {
-	MessageID     string `json:"messageId"`
-	RequestID     string `json:"requestId"`
-	RequestSHA256 string `json:"requestSHA256"`
-	State         string `json:"state"`
-	Challenge     string `json:"challenge,omitempty"`
+	MessageID        string `json:"messageId"`
+	RequestID        string `json:"requestId"`
+	RequestSHA256    string `json:"requestSHA256"`
+	State            string `json:"state"`
+	Challenge        string `json:"challenge,omitempty"`
+	ExecutionStarted bool   `json:"executionStarted"`
 }
 type ResultManifest struct {
-	RequestID     string   `json:"requestId"`
-	RequestSHA256 string   `json:"requestSHA256"`
-	State         string   `json:"state"`
-	SHA256        string   `json:"sha256"`
-	Bytes         uint32   `json:"bytes"`
-	Pages         uint32   `json:"pages"`
-	PageSHA256    []string `json:"pageSHA256"`
+	RequestID         string   `json:"requestId"`
+	RequestSHA256     string   `json:"requestSHA256"`
+	State             string   `json:"state"`
+	SHA256            string   `json:"sha256"`
+	Bytes             uint32   `json:"bytes"`
+	Pages             uint32   `json:"pages"`
+	PageSHA256        []string `json:"pageSHA256"`
+	ExecutionStarted  bool     `json:"executionStarted"`
+	Effects           string   `json:"effects"`
+	ResourcesReleased bool     `json:"resourcesReleased"`
+	FailureCode       string   `json:"failureCode,omitempty"`
 }
 type Released struct {
 	RequestID     string `json:"requestId"`
 	RequestSHA256 string `json:"requestSHA256"`
+}
+
+type ReloadPreparation struct {
+	MessageID string `json:"messageId"`
+	Challenge string `json:"challenge"`
 }
 type RepairProof struct {
 	PreviousArena         string `json:"previousArena"`
@@ -56,7 +66,16 @@ type RepairProof struct {
 	NoPendingRequest      bool   `json:"noPendingRequest,omitempty"`
 	ResourcesReleased     bool   `json:"resourcesReleased,omitempty"`
 }
+type ValidationProgress struct {
+	RequestID     string `json:"requestId"`
+	RequestSHA256 string `json:"requestSHA256"`
+	TotalBytes    uint32 `json:"totalBytes"`
+	CopiedBytes   uint32 `json:"copiedBytes"`
+	HashedBytes   uint32 `json:"hashedBytes"`
+}
 type Sendbox struct {
+	Validation      *ValidationProgress `json:"validation,omitempty"`
+	ClosedAdmission bool                `json:"closedAdmission"`
 	Identity
 	ActorGUID         string             `json:"actorGUID"`
 	ActorReady        bool               `json:"actorReady"`
@@ -73,6 +92,8 @@ type Sendbox struct {
 	TransportReady    bool               `json:"transportReady"`
 	BusinessReady     bool               `json:"businessReady"`
 	ControlReady      bool               `json:"controlReady"`
+	ReadyChallenge    string             `json:"readyChallenge"`
+	AdmissionSequence uint64             `json:"admissionSequence,string"`
 	StatusSequence    uint64             `json:"statusSequence,string"`
 	Heartbeat         uint64             `json:"heartbeat,string"`
 	Request           *RequestState      `json:"request,omitempty"`
@@ -80,19 +101,31 @@ type Sendbox struct {
 	Terminal          *ResultManifest    `json:"terminal,omitempty"`
 	Released          *Released          `json:"released,omitempty"`
 	Repair            *RepairProof       `json:"repair,omitempty"`
+	Reload            *ReloadPreparation `json:"reload,omitempty"`
 }
 
 func validateSendbox(s Sendbox) error {
+	if s.ClosedAdmission && ((s.Phase != "ready_unbound" && s.Phase != "validating") || !s.ResourcesReleased || s.Request != nil || s.Terminal != nil || s.Owner == zeroToken || s.Session == zeroToken || s.Fence == 0) {
+		return errors.New("invalid closed admission proof")
+	}
 	if s.Ready != s.BusinessReady {
 		return errors.New("ready does not match businessReady")
 	}
 	if s.BusinessReady && !s.ActorReady {
 		return errors.New("businessReady requires current actorReady")
 	}
+	if s.ReadyChallenge != "" {
+		if _, err := token(s.ReadyChallenge); err != nil || s.AdmissionSequence == 0 {
+			return errors.New("invalid ready challenge")
+		}
+	}
+	if s.BusinessReady && (s.ReadyChallenge == "" || s.ReadyChallenge == "00000000000000000000000000000000") {
+		return errors.New("businessReady requires a one-use challenge")
+	}
 	if s.Schema != "lycheedev.mailbox.v1" {
 		return errors.New("incompatible sendbox schema")
 	}
-	if s.LayoutID != "single-data-row-v1" {
+	if s.LayoutID != MailboxLayoutID {
 		return errors.New("incompatible mailbox layout")
 	}
 	for _, v := range []string{s.Runtime, s.Arena, s.Session, s.Owner, s.ActorBinding} {
@@ -104,15 +137,28 @@ func validateSendbox(s Sendbox) error {
 		return errors.New("missing sendbox sequence")
 	}
 	switch s.Phase {
-	case "idle", "binding", "receiving", "prepared", "running", "result_pending", "released", "closed", "fault", "execution_unknown":
+	case "ready_unbound", "validating", "running", "result_pending", "closing", "closed", "quarantined", "execution_unknown":
 	default:
 		return errors.New("invalid sendbox phase")
 	}
-	if len(s.Receipts) > 7 {
+	if v := s.Validation; v != nil {
+		if s.Phase != "validating" || s.Ready || v.TotalBytes > MaxSourceBytes || v.CopiedBytes > v.TotalBytes || v.HashedBytes > v.TotalBytes || v.HashedBytes > v.CopiedBytes {
+			return errors.New("invalid validation progress")
+		}
+		if _, e := token(v.RequestID); e != nil {
+			return e
+		}
+		if _, e := digest(v.RequestSHA256); e != nil {
+			return e
+		}
+	} else if s.Phase == "validating" {
+		return errors.New("validating phase requires progress")
+	}
+	if len(s.Receipts) > 1 {
 		return errors.New("control receipt bound exceeded")
 	}
 	for lane, r := range s.Receipts {
-		if lane != "bindResume" && lane != "commit" && lane != "cancel" && lane != "close" && lane != "resultAck" && lane != "reload" && lane != "lease" {
+		if lane != "stop" {
 			return errors.New("unknown receipt lane")
 		}
 		if _, e := token(r.MessageID); e != nil {
@@ -150,6 +196,9 @@ func validateSendbox(s Sendbox) error {
 	}
 	if s.Terminal != nil {
 		r := s.Terminal
+		if r.ExecutionStarted && r.Effects != "may_have_occurred" || !r.ExecutionStarted && r.Effects != "none_started" {
+			return errors.New("invalid terminal execution/effects proof")
+		}
 		if _, e := token(r.RequestID); e != nil {
 			return e
 		}
@@ -200,6 +249,17 @@ func validateSendbox(s Sendbox) error {
 		}
 		if p.Idle && (!p.NoPendingRequest || !p.ResourcesReleased || p.NotStarted || p.RequestID != "00000000000000000000000000000000" || p.RequestSHA256 != "0000000000000000000000000000000000000000000000000000000000000000") {
 			return errors.New("invalid idle repair proof")
+		}
+	}
+	if r := s.Reload; r != nil {
+		if _, err := token(r.MessageID); err != nil || r.MessageID == "00000000000000000000000000000000" {
+			return errors.New("invalid reload preparation message")
+		}
+		if _, err := token(r.Challenge); err != nil || r.Challenge == "00000000000000000000000000000000" {
+			return errors.New("invalid reload preparation challenge")
+		}
+		if s.Request != nil || s.Terminal != nil || !s.ResourcesReleased || s.BusinessReady {
+			return errors.New("reload preparation is not quiescent")
 		}
 	}
 	return nil
@@ -320,6 +380,15 @@ func EncodeResultAck(m ResultManifest) ([]byte, error) {
 	binary.LittleEndian.PutUint32(b[84:], m.Bytes)
 	binary.LittleEndian.PutUint32(b[88:], m.Pages)
 	return b, nil
+}
+
+// ResultAckSHA256 binds the exact fixed-width ACK to the following command.
+func ResultAckSHA256(m ResultManifest) (string, error) {
+	b, err := EncodeResultAck(m)
+	if err != nil {
+		return "", err
+	}
+	return hash("LYCMBX/result-ack/v1\x00", b), nil
 }
 func DecodeResultAck(b []byte) (ResultManifest, error) {
 	var m ResultManifest

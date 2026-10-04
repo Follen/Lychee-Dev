@@ -11,7 +11,7 @@ import (
 
 var (
 	ErrPersistence = errors.New("duplex durable persistence failed")
-	ErrRejected    = errors.New("duplex exact control was rejected")
+	ErrRejected    = errors.New("duplex exact publication was rejected")
 	ErrPending     = errors.New("duplex operation pending; resume original identity")
 	ErrBusy        = errors.New("duplex business request is outstanding")
 	ErrIdentity    = errors.New("duplex identity changed")
@@ -19,24 +19,19 @@ var (
 	ErrBudget      = errors.New("duplex original transfer deadline exhausted; execution outcome retained")
 )
 
-// Backend must re-observe exact OS/runtime/arena identity and guard the layout
-// before every write. Observe and ReadResult are read-only. Publish performs at
-// most one publication and reports actual write facts, including on errors.
-// Controls must use independent lane locks; Frame cannot monopolize controls.
+// Backend re-observes the exact process/runtime/arena before every publication.
+// Command and stop have independent locks; an uncertain write is never replayed.
 type Backend interface {
 	Observe(context.Context) (Sendbox, error)
 	Publish(context.Context, Message) (WriteOutcome, error)
 	ReadResult(context.Context, ResultManifest) ([]byte, error)
 	Close(context.Context) error
 }
-
 type Coordinator struct {
-	Backend      Backend
-	Store        Store
-	PollInterval time.Duration
-	Now          func() time.Time
-	// Host transfer deadline is independent of the immutable addon execution
-	// budget. 600 seconds is a bounded candidate, not a measured throughput.
+	Backend              Backend
+	Store                Store
+	PollInterval         time.Duration
+	Now                  func() time.Time
 	TransferBudgetMillis uint32
 }
 
@@ -66,6 +61,10 @@ func (c *Coordinator) wait(ctx context.Context) error {
 		return nil
 	}
 }
+
+const zeroToken = "00000000000000000000000000000000"
+const zeroDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+
 func exact(id Identity, s Sendbox) bool { return id == s.Identity }
 func requestMatches(a *ActiveRequest, r *RequestState) bool {
 	return a != nil && r != nil && a.RequestID == r.RequestID && a.Digest == r.RequestSHA256 && a.Sequence == r.RequestSeq && a.Attempt == r.TransportAttempt
@@ -73,15 +72,23 @@ func requestMatches(a *ActiveRequest, r *RequestState) bool {
 func releasedMatches(a *ActiveRequest, r *Released) bool {
 	return a != nil && r != nil && a.RequestID == r.RequestID && a.Digest == r.RequestSHA256
 }
-
 func rejectedReceipt(state string) bool {
 	switch state {
-	case "rejected", "expired", "owner_conflict", "actor_binding_mismatch", "bind_identity_invalid", "commit_rejected", "actor_changed", "clock_unavailable", "challenge_expired", "reload_blocked", "reload_unavailable", "reload_expired", "reload_lease_rejected", "ack_rejected", "ack_mismatch", "repair_rejected", "unsupported", "cancel_rejected":
+	case "rejected", "expired", "owner_conflict", "actor_binding_mismatch", "actor_changed", "clock_unavailable", "challenge_expired", "ack_rejected", "ack_mismatch", "repair_rejected", "unsupported", "cancel_rejected", "challenge_mismatch", "identity_mismatch":
 		return true
 	}
 	return false
 }
-
+func observedIdentity(st State, s Sendbox) bool {
+	if exact(st.Identity, s) {
+		return true
+	}
+	if st.Bound {
+		return false
+	}
+	id, e := NextIdentity(s, st.Identity.Owner, st.Identity.Session)
+	return e == nil && id == st.Identity
+}
 func (c *Coordinator) Status(ctx context.Context) (State, Sendbox, error) {
 	st, e := c.Store.Load(ctx)
 	if e != nil {
@@ -91,76 +98,38 @@ func (c *Coordinator) Status(ctx context.Context) (State, Sendbox, error) {
 	return st, s, e
 }
 
+// Connect fixes the local claim and identity. Only an accepted first command
+// establishes the addon session; connection itself performs no memory write.
 func (c *Coordinator) Connect(ctx context.Context, id Identity) (State, error) {
-	for _, v := range []string{id.Runtime, id.Arena, id.Session, id.Owner, id.ActorBinding} {
-		if _, e := token(v); e != nil {
-			return State{}, e
-		}
-	}
-	if id.Fence == 0 {
-		return State{}, errors.New("zero owner fence")
-	}
-	first, e := c.Backend.Observe(ctx)
+	s, e := c.Backend.Observe(ctx)
 	if e != nil {
 		return State{}, e
 	}
-	if first.Runtime != id.Runtime || first.Arena != id.Arena || first.ActorBinding != id.ActorBinding {
-		return State{}, ErrIdentity
-	}
-	if !first.ControlReady {
-		return State{}, ErrPending
-	}
-	var bindPayload []byte
-	if !exact(id, first) && first.Owner != "00000000000000000000000000000000" {
-		bindPayload, e = EncodeClosedBindProof(first)
-		if e != nil {
-			return State{}, e
-		}
-	}
-	h := Header{Kind: Bind, Runtime: id.Runtime, Arena: id.Arena, Session: id.Session, Owner: id.Owner, ActorBinding: id.ActorBinding, Fence: id.Fence, RequestID: "00000000000000000000000000000000", RequestSHA256: "0000000000000000000000000000000000000000000000000000000000000000"}
-	if e = ValidateBindTransition(first, Message{Header: h, Payload: bindPayload}); e != nil {
+	if e = validateSendbox(s); e != nil {
 		return State{}, e
 	}
-	// A static ready projection cannot authorize even the initial bind.
-	for {
-		if e = c.wait(ctx); e != nil {
-			return State{}, e
-		}
-		second, err := c.Backend.Observe(ctx)
-		if err != nil {
-			return State{}, err
-		}
-		if second.Identity != first.Identity || second.Phase != first.Phase || !releasedEqual(second.Released, first.Released) || second.ResourcesReleased != first.ResourcesReleased {
-			return State{}, ErrIdentity
-		}
-		if second.StatusSequence < first.StatusSequence || second.Heartbeat < first.Heartbeat {
-			return State{}, ErrIdentity
-		}
-		if second.StatusSequence > first.StatusSequence && second.Heartbeat > first.Heartbeat {
-			break
-		}
+	expected, e := NextIdentity(s, id.Owner, id.Session)
+	if !exact(id, s) && (e != nil || id != expected) {
+		return State{}, ErrIdentity
+	}
+	if !s.ControlReady {
+		return State{}, ErrPending
 	}
 	e = c.Store.Update(ctx, func(st *State) error {
-		if in, ok := st.Intents["bindResume"]; ok && in.Message.Header.Kind == Repair && !in.Accepted {
-			return ErrPending
-		}
-		if st.Bound && st.Identity != id {
+		if st.Identity != (Identity{}) && st.Identity != id {
 			return ErrBusy
 		}
-		if st.Active != nil && !st.Active.Released {
+		if st.Active != nil && !st.Active.ResultSaved {
 			return ErrBusy
 		}
 		st.Identity = id
-		st.Closed = false
+		st.Selected = true
 		return nil
 	})
 	if e != nil {
 		return State{}, e
 	}
-	if e = c.publishControl(ctx, Bind, "00000000000000000000000000000000", bindPayload); e != nil && !errors.Is(e, ErrPending) {
-		return State{}, e
-	}
-	return c.Resume(ctx)
+	return c.Store.Load(ctx)
 }
 
 func (c *Coordinator) Execute(ctx context.Context, source []byte, budgetMillis uint32) (State, error) {
@@ -174,18 +143,37 @@ func (c *Coordinator) Execute(ctx context.Context, source []byte, budgetMillis u
 	if e = validateSendbox(s); e != nil {
 		return State{}, e
 	}
-	if !s.BusinessReady || !s.TransportReady {
-		return State{}, ErrBusy
-	}
 	e = c.Store.Update(ctx, func(st *State) error {
-		if !st.Bound || st.Closed || !exact(st.Identity, s) {
+		if (!st.Selected && !st.Bound) || (st.Closed || st.Closing) || !observedIdentity(*st, s) {
 			return ErrIdentity
 		}
-		if in, ok := st.Intents["bindResume"]; ok && in.Message.Header.Kind == Repair && !in.Accepted {
+		if !s.Ready || !s.TransportReady || !s.ActorReady || s.ReadyChallenge == "" || s.ReadyChallenge == zeroToken {
+			return ErrBusy
+		}
+		if st.ReloadPrepared != nil {
 			return ErrPending
 		}
-		if st.Active != nil && !st.Active.Released {
-			return ErrBusy
+		if in, ok := st.Intents["stop"]; ok && (!in.Accepted || in.Message.Header.Kind == Close || in.Message.Header.Kind == Reload || in.Message.Header.Kind == Lease) {
+			return ErrPending
+		}
+		var previous *ResultManifest
+		if a := st.Active; a != nil && !a.Released {
+			if !a.ResultSaved || a.Result == nil || !s.ResourcesReleased || s.Terminal == nil {
+				return ErrBusy
+			}
+			if s.Terminal.RequestID != a.RequestID || s.Terminal.RequestSHA256 != a.Digest {
+				return ErrIdentity
+			}
+			expected, err := ResultAckSHA256(*a.Result)
+			if err != nil {
+				return err
+			}
+			actual, err := ResultAckSHA256(*s.Terminal)
+			if err != nil || actual != expected {
+				return ErrIdentity
+			}
+			copied := *a.Result
+			previous = &copied
 		}
 		if st.RequestSequence == math.MaxUint64 {
 			return errors.New("request sequence exhausted")
@@ -196,22 +184,31 @@ func (c *Coordinator) Execute(ctx context.Context, source []byte, budgetMillis u
 		}
 		seq := st.RequestSequence + 1
 		created := uint64(c.now().UnixMilli())
-		transferBudget := c.TransferBudgetMillis
-		if transferBudget == 0 {
-			transferBudget = 600000
+		transfer := c.TransferBudgetMillis
+		if transfer == 0 {
+			transfer = 600000
 		}
-		if transferBudget > 600000 {
+		if transfer > 600000 {
 			return errors.New("transfer budget exceeds 600000 ms")
 		}
 		frames, err := NewFrames(st.Identity, rid, seq, 1, created, budgetMillis, source)
 		if err != nil {
 			return err
 		}
+		frames[0].Header.Challenge = s.ReadyChallenge
+		frames[0].Header.PreviousResultAckSHA = zeroDigest
+		if previous != nil {
+			frames[0].Header.PreviousResultAckSHA, err = ResultAckSHA256(*previous)
+			if err != nil {
+				return err
+			}
+		}
 		st.RequestSequence = seq
-		st.Active = &ActiveRequest{RequestID: rid, Digest: frames[0].Header.RequestSHA256, Sequence: seq, Attempt: 1, Created: created, Budget: budgetMillis, TransferDeadline: created + uint64(transferBudget), Source: append([]byte(nil), source...), Frames: frames, Phase: "receiving"}
-		delete(st.Intents, "request")
-		delete(st.Intents, "commit")
-		delete(st.Intents, "resultAck")
+		st.Active = &ActiveRequest{RequestID: rid, Digest: frames[0].Header.RequestSHA256, Sequence: seq, Attempt: 1, Created: created, Budget: budgetMillis, TransferDeadline: created + uint64(transfer), Source: append([]byte(nil), source...), Frames: frames, Phase: "submitted", PreviousResultAck: previous}
+		delete(st.Intents, "command")
+		if in, ok := st.Intents["stop"]; ok && in.Accepted {
+			delete(st.Intents, "stop")
+		}
 		return nil
 	})
 	if e != nil {
@@ -224,6 +221,9 @@ func (c *Coordinator) publish(ctx context.Context, m Message, prepare ...func(*S
 	lane := m.Header.Kind.Lane()
 	var intent Intent
 	e := c.Store.Update(ctx, func(st *State) error {
+		if st.LocalRetired {
+			return ErrIdentity
+		}
 		if old, ok := st.Intents[lane]; ok && !old.Accepted && old.Outcome.State != NoWrite {
 			return ErrPending
 		}
@@ -308,11 +308,10 @@ func (c *Coordinator) publishControl(ctx context.Context, kind Kind, challenge s
 	return c.publish(ctx, Message{h, payload})
 }
 
-// reconcile never infers execution from bytes-written. Only exact current
-// private-protocol receipts, request projections and tombstones advance facts.
+// Reconcile accepts only exact private receipts, never WPM completion alone.
 func (c *Coordinator) reconcile(ctx context.Context, s Sendbox) error {
 	return c.Store.Update(ctx, func(st *State) error {
-		if !exact(st.Identity, s) {
+		if !observedIdentity(*st, s) {
 			return ErrIdentity
 		}
 		for lane, in := range st.Intents {
@@ -320,68 +319,71 @@ func (c *Coordinator) reconcile(ctx context.Context, s Sendbox) error {
 			h := in.Message.Header
 			if ok && r.MessageID == h.MessageID && r.RequestID == h.RequestID && r.RequestSHA256 == h.RequestSHA256 {
 				switch r.State {
-				case "accepted", "released", "closed", "closing", "cancel_requested", "not_started", "lease_observed", "commit_accepted", "cancelled", "cancel_too_late", "bound", "repaired", "renewed":
+				case "accepted", "closed", "closing", "cancel_requested", "not_started", "cancelled", "cancel_too_late", "repaired", "lease_observed":
 					in.Accepted = true
+					if lane == "stop" && s.Identity == st.Identity {
+						st.Bound = true
+					}
 					in.Challenge = r.Challenge
-					st.Intents[lane] = in
 				default:
 					if rejectedReceipt(r.State) {
 						in.Rejected = r.State
-						st.Intents[lane] = in
 					}
 				}
+				st.Intents[lane] = in
 			}
 		}
-		if in, ok := st.Intents["bindResume"]; ok && in.Accepted && in.Message.Header.Kind == Bind {
-			st.Bound = true
-		}
-		if in, ok := st.Intents["close"]; ok && in.Accepted {
-			st.Closed = s.Phase == "closed"
-		}
 		if a := st.Active; a != nil && !a.Released {
+			if v := s.Validation; v != nil && v.RequestID == a.RequestID && v.RequestSHA256 == a.Digest {
+				a.Phase = "validating"
+			}
 			if requestMatches(a, s.Request) {
-				a.Phase = s.Phase
-				if !s.Request.NotStarted && a.ExecutionObservedHostAt == 0 {
-					a.ExecutionObservedHostAt = uint64(c.now().UnixMilli())
+				if s.Phase != "validating" {
+					st.Bound = true
 				}
-				if in, ok := st.Intents["request"]; ok {
-					for _, n := range s.Request.AcceptedFrames {
-						if n == in.Message.Header.FrameIndex {
+				a.Phase = s.Phase
+				for _, n := range s.Request.AcceptedFrames {
+					if n == 1 {
+						a.NextFrame = 1
+						if in, ok := st.Intents["command"]; ok && in.Message.Header.RequestID == a.RequestID {
 							in.Accepted = true
-							st.Intents["request"] = in
-							if n == a.NextFrame+1 {
-								a.NextFrame = n
-							}
-							break
+							st.Intents["command"] = in
 						}
 					}
 				}
-			}
-			if releasedMatches(a, s.Released) {
-				if !s.ResourcesReleased {
-					return nil
+				if !s.Request.NotStarted && a.ExecutionObservedHostAt == 0 {
+					a.ExecutionObservedHostAt = uint64(c.now().UnixMilli())
 				}
+			}
+			if s.Terminal != nil && s.Terminal.RequestID == a.RequestID && s.Terminal.RequestSHA256 == a.Digest {
+				st.Bound = true
+			}
+			if releasedMatches(a, s.Released) && s.ResourcesReleased {
 				if !a.ResultSaved {
 					return errors.New("release observed before host result durability")
 				}
-				ack, ok := st.Intents["resultAck"]
-				if !ok {
-					return errors.New("release without result ACK intent")
+				in, ok := st.Intents["stop"]
+				if !ok || in.Message.Header.Kind != Close || len(in.Message.Payload) != 92 {
+					return errors.New("release without exact final ACK/close intent")
 				}
-				ack.Accepted = true
-				st.Intents["resultAck"] = ack
+				in.Accepted = true
+				st.Intents["stop"] = in
 				a.Released = true
 				a.Phase = "released"
 				a.Source = nil
 				a.Frames = nil
+				delete(st.Intents, "command")
 			}
+		}
+		if in, ok := st.Intents["stop"]; ok && in.Accepted && in.Message.Header.Kind == Close && (s.Phase == "closed" || s.Phase == "ready_unbound" && s.ClosedAdmission) && s.ResourcesReleased {
+			st.Closed = true
 		}
 		return nil
 	})
 }
 
-// Step performs at most one side effect. A caller can integrate it with its own
-// bounded observer loop; Resume is the convenience loop for the same journal.
+// Step performs at most one side effect. A saved terminal remains retained in
+// the addon until a later command jointly acknowledges it, or final close.
 func (c *Coordinator) Step(ctx context.Context) (State, error) {
 	s, e := c.Backend.Observe(ctx)
 	if e != nil {
@@ -390,30 +392,6 @@ func (c *Coordinator) Step(ctx context.Context) (State, error) {
 	if e = validateSendbox(s); e != nil {
 		return State{}, e
 	}
-	prior, loadErr := c.Store.Load(ctx)
-	if loadErr != nil {
-		return prior, loadErr
-	}
-	if !prior.Bound && !exact(prior.Identity, s) {
-		if in, ok := prior.Intents["bindResume"]; ok && in.Message.Header.Kind == Bind && ValidateBindTransition(s, in.Message) == nil {
-			if r, ok := s.Receipts["bindResume"]; ok && r.MessageID == in.Message.Header.MessageID && r.RequestID == in.Message.Header.RequestID && r.RequestSHA256 == in.Message.Header.RequestSHA256 && rejectedReceipt(r.State) {
-				e = c.Store.Update(ctx, func(st *State) error {
-					current := st.Intents["bindResume"]
-					if current.Message.Header.MessageID != r.MessageID {
-						return ErrIdentity
-					}
-					current.Rejected = r.State
-					st.Intents["bindResume"] = current
-					return nil
-				})
-				return prior, errors.Join(e, fmt.Errorf("%w: bindResume %s", ErrRejected, r.State))
-			}
-			if in.Outcome.State == NoWrite {
-				return prior, c.publish(ctx, in.Message)
-			}
-			return prior, ErrPending
-		}
-	}
 	if e = c.reconcile(ctx, s); e != nil {
 		return State{}, e
 	}
@@ -421,173 +399,191 @@ func (c *Coordinator) Step(ctx context.Context) (State, error) {
 	if e != nil {
 		return st, e
 	}
-	a := st.Active
-	if in, ok := st.Intents["bindResume"]; ok && in.Rejected != "" {
-		return st, fmt.Errorf("%w: bindResume %s", ErrRejected, in.Rejected)
-	}
-	if a != nil && !a.Released {
-		for _, lane := range []string{"request", "commit", "resultAck"} {
-			if lane != "resultAck" && s.Terminal != nil && s.Terminal.RequestID == a.RequestID && s.Terminal.RequestSHA256 == a.Digest {
-				continue
-			}
-			if in, ok := st.Intents[lane]; ok && in.Message.Header.RequestID == a.RequestID && in.Message.Header.RequestSHA256 == a.Digest && in.Rejected != "" {
-				return st, fmt.Errorf("%w: %s %s", ErrRejected, lane, in.Rejected)
-			}
+	if in, ok := st.Intents["stop"]; ok && in.Message.Header.Kind == Repair && !in.Accepted {
+		if in.Rejected != "" {
+			return st, fmt.Errorf("%w: repair %s", ErrRejected, in.Rejected)
 		}
-	}
-	if !st.Bound {
-		return st, ErrPending
-	}
-	if in, ok := st.Intents["bindResume"]; ok && in.Message.Header.Kind == Repair && !in.Accepted {
 		if in.Outcome.State == NoWrite {
-			e = c.publish(ctx, in.Message)
-			return st, e
+			return st, c.publish(ctx, in.Message)
 		}
 		return st, ErrPending
 	}
+	a := st.Active
 	if a == nil || a.Released {
 		return st, nil
 	}
 	if s.Terminal != nil && s.Terminal.RequestID == a.RequestID && s.Terminal.RequestSHA256 == a.Digest {
+		if a.ResultSaved {
+			return st, nil
+		}
 		m := *s.Terminal
-		if !a.ResultSaved {
-			p, err := c.Backend.ReadResult(ctx, m)
-			if err != nil {
-				return st, err
+		p, err := c.Backend.ReadResult(ctx, m)
+		if err != nil {
+			return st, err
+		}
+		if err = ValidateResult(m, p); err != nil {
+			return st, err
+		}
+		if err = c.Store.SaveResult(ctx, m, p); err != nil {
+			return st, errors.Join(ErrPersistence, err)
+		}
+		e = c.Store.Update(ctx, func(current *State) error {
+			if current.Active == nil || current.Active.RequestID != a.RequestID {
+				return ErrIdentity
 			}
-			if err = ValidateResult(m, p); err != nil {
-				return st, err
-			}
-			if err = c.Store.SaveResult(ctx, m, p); err != nil {
-				return st, errors.Join(ErrPersistence, err)
-			}
-			e = c.Store.Update(ctx, func(current *State) error {
-				if current.Active == nil || current.Active.RequestID != a.RequestID {
-					return ErrIdentity
-				}
-				current.Active.Result = &m
-				current.Active.ResultSaved = true
-				current.Active.Phase = "result_pending"
-				return nil
-			})
+			current.Active.Result = &m
+			current.Active.ResultSaved = true
+			current.Active.Phase = "result_pending"
+			return nil
+		})
+		if e != nil {
 			return st, e
 		}
-		if in, ok := st.Intents["resultAck"]; !ok || in.Outcome.State == NoWrite {
-			p, err := EncodeResultAck(m)
-			if err != nil {
-				return st, err
-			}
-			e = c.publishControl(ctx, ResultAck, "00000000000000000000000000000000", p)
-			return st, e
-		}
-		return st, ErrPending
+		return c.Store.Load(ctx)
 	}
-	// Budget does not prevent result collection or independent cleanup controls.
+	if in, ok := st.Intents["command"]; ok {
+		if in.Rejected != "" {
+			return st, fmt.Errorf("%w: request %s", ErrRejected, in.Rejected)
+		}
+		if in.Accepted || in.Outcome.State != NoWrite {
+			if !in.Accepted && a.ExecutionObservedHostAt == 0 && c.now().UnixMilli() >= int64(a.TransferDeadline) {
+				return st, ErrBudget
+			}
+			return st, ErrPending
+		}
+	}
 	if a.ExecutionObservedHostAt == 0 && c.now().UnixMilli() >= int64(a.TransferDeadline) {
 		return st, ErrBudget
 	}
-	if st.Closed || s.Phase == "closed" {
+	if st.Closed {
 		return st, ErrPending
 	}
-	if !s.TransportReady {
+	if in, ok := st.Intents["stop"]; ok && (in.Message.Header.RequestID == a.RequestID || in.Message.Header.Kind == Close) {
 		return st, ErrPending
 	}
-	if a.NextFrame < uint32(len(a.Frames)) {
-		if in, ok := st.Intents["request"]; ok && !in.Accepted && in.Outcome.State != NoWrite {
-			return st, ErrPending
-		}
-		if s.Request != nil && !requestMatches(a, s.Request) {
-			return st, ErrBusy
-		}
-		e = c.publish(ctx, a.Frames[a.NextFrame])
+	if e = ValidateFrameTransition(s, a.Frames[0]); e != nil {
 		return st, e
 	}
-	if requestMatches(a, s.Request) && s.Phase == "prepared" && s.Request.NotStarted {
-		if s.Request.Challenge == "" || s.Request.Challenge == "00000000000000000000000000000000" {
-			return st, errors.New("missing prepare challenge")
-		}
-		if in, ok := st.Intents["commit"]; ok && !in.Accepted && in.Outcome.State != NoWrite {
-			return st, ErrPending
-		}
-		if in, ok := st.Intents["commit"]; !ok || in.Outcome.State == NoWrite {
-			e = c.publishControl(ctx, Commit, s.Request.Challenge, nil)
-			return st, e
-		}
-	}
-	return st, ErrPending
+	return st, c.publish(ctx, a.Frames[0])
 }
-
 func (c *Coordinator) Resume(ctx context.Context) (State, error) {
 	for {
 		st, e := c.Step(ctx)
-		if e == nil && (st.Active == nil || st.Active.Released) && st.Bound {
+		if e == nil && (st.Active == nil || st.Active.ResultSaved || st.Active.Released) {
 			return st, nil
 		}
 		if e != nil && !errors.Is(e, ErrPending) {
 			return st, e
 		}
 		if e = c.wait(ctx); e != nil {
-			durableCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			latest, _ := c.Store.Load(durableCtx)
+			durable, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			latest, _ := c.Store.Load(durable)
 			cancel()
 			return latest, ErrPending
 		}
 	}
 }
 
-func (c *Coordinator) control(ctx context.Context, kind Kind, cleanupBudget time.Duration) (State, error) {
-	if cleanupBudget <= 0 {
+func (c *Coordinator) control(ctx context.Context, kind Kind, budget time.Duration) (State, error) {
+	if budget <= 0 {
 		return State{}, errors.New("cleanup budget must be positive")
 	}
-	ctx, cancel := context.WithTimeout(ctx, cleanupBudget)
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	st, e := c.Store.Load(ctx)
-	if e != nil {
-		return st, e
-	}
-	s, e := c.Backend.Observe(ctx)
-	if e != nil {
-		return st, e
-	}
-	if e = validateSendbox(s); e != nil {
-		return st, e
-	}
-	if !exact(st.Identity, s) || !s.ControlReady {
-		return st, ErrIdentity
-	}
-	if e = c.reconcile(ctx, s); e != nil {
-		return st, e
-	}
-	lane := kind.Lane()
-	st, e = c.Store.Load(ctx)
-	if e != nil {
-		return st, e
-	}
-	if in, ok := st.Intents[lane]; ok && in.Rejected != "" {
-		return st, fmt.Errorf("%w: %s %s", ErrRejected, lane, in.Rejected)
-	}
-	if in, ok := st.Intents[lane]; !ok || in.Accepted && kind != Reload || in.Outcome.State == NoWrite {
-		if e = c.publishControl(ctx, kind, "00000000000000000000000000000000", nil); e != nil && !errors.Is(e, ErrPending) {
-			return st, e
+	if kind == Close {
+		if e := c.Store.Update(ctx, func(st *State) error { st.Closing = true; return nil }); e != nil {
+			return State{}, e
 		}
 	}
 	for {
-		s, e = c.Backend.Observe(ctx)
+		s, e := c.Backend.Observe(ctx)
 		if e != nil {
-			return st, e
+			return State{}, e
+		}
+		if e = validateSendbox(s); e != nil {
+			return State{}, e
 		}
 		if e = c.reconcile(ctx, s); e != nil {
-			return st, e
+			return State{}, e
 		}
-		st, e = c.Store.Load(ctx)
+		st, e := c.Store.Load(ctx)
 		if e != nil {
 			return st, e
 		}
-		if in, ok := st.Intents[lane]; ok && in.Accepted {
+		if st.Closed && kind != Reload {
 			return st, nil
 		}
-		if in, ok := st.Intents[lane]; ok && in.Rejected != "" {
-			return st, fmt.Errorf("%w: %s %s", ErrRejected, lane, in.Rejected)
+		if !s.ControlReady {
+			return st, ErrPending
+		}
+		in, has := st.Intents["stop"]
+		if has && in.Rejected != "" {
+			return st, fmt.Errorf("%w: stop %s", ErrRejected, in.Rejected)
+		}
+		if has && !in.Accepted && in.Outcome.State != NoWrite {
+			// This physical row must remain untouched until its original receipt.
+		} else {
+			var payload []byte
+			a := st.Active
+			publicationKind := kind
+			if kind == Cancel && a != nil && a.PreviousResultAck != nil && !a.ResultSaved {
+				payload, e = EncodeResultAck(*a.PreviousResultAck)
+				if e != nil {
+					return st, e
+				}
+			}
+			if kind == Close && a != nil && a.PreviousResultAck != nil && !a.ResultSaved && !requestMatches(a, s.Request) {
+				// Closing an uncertain replacement command first revokes that exact nonce.
+				// Its previous-result ACK is cancellation proof, never final-close ACK.
+				publicationKind = Cancel
+				payload, e = EncodeResultAck(*a.PreviousResultAck)
+				if e != nil {
+					return st, e
+				}
+			}
+
+			if (kind == Cancel || kind == Reload) && has && in.Accepted && in.Message.Header.Kind == kind {
+				return st, nil
+			}
+			if kind == Cancel && (a == nil || a.ResultSaved) {
+				return st, nil
+			}
+			if kind == Close && a != nil && !a.ResultSaved && s.Terminal != nil && s.Terminal.RequestID == a.RequestID && s.Terminal.RequestSHA256 == a.Digest {
+				if _, e = c.Step(ctx); e != nil {
+					return st, e
+				}
+				continue
+			}
+			if kind == Close && a != nil && a.ResultSaved && !a.Released {
+				if a.Result == nil || !s.ResourcesReleased {
+					return st, ErrPending
+				}
+				payload, e = EncodeResultAck(*a.Result)
+				if e != nil {
+					return st, e
+				}
+			}
+			if has && in.Accepted && in.Message.Header.Kind == kind {
+				if kind == Cancel {
+					return st, nil
+				}
+				if len(in.Message.Payload) == len(payload) { // closing ACK/close must be a new exact intent only after result durability.
+					if e = c.wait(ctx); e != nil {
+						return st, ErrPending
+					}
+					continue
+				}
+			}
+			challenge := zeroToken
+			if !st.Bound && a == nil {
+				challenge = s.ReadyChallenge
+			}
+			if a != nil && !a.Released && len(a.Frames) > 0 {
+				challenge = a.Frames[0].Header.Challenge
+			}
+			if e = c.publishControl(ctx, publicationKind, challenge, payload); e != nil {
+				return st, e
+			}
 		}
 		if e = c.wait(ctx); e != nil {
 			return st, ErrPending
@@ -597,17 +593,85 @@ func (c *Coordinator) control(ctx context.Context, kind Kind, cleanupBudget time
 func (c *Coordinator) Cancel(ctx context.Context, budget time.Duration) (State, error) {
 	return c.control(ctx, Cancel, budget)
 }
-
-// Reload records an exact control and observes its original-runtime receipt.
-// A runtime transition before that receipt remains unknown; no request is
-// rebound or replayed into the replacement runtime.
-func (c *Coordinator) Reload(ctx context.Context, budget time.Duration) (State, error) {
-	return c.control(ctx, Reload, budget)
+func (c *Coordinator) Disconnect(ctx context.Context, budget time.Duration) (State, error) {
+	before, e := c.Store.Load(ctx)
+	if e != nil {
+		return before, e
+	}
+	if before.Selected && !before.Bound && before.Active == nil && len(before.Intents) == 0 && before.PublicationSequence == 0 && before.ReloadPrepared == nil {
+		e = c.Store.Update(ctx, func(st *State) error {
+			if st.Bound || st.Active != nil || len(st.Intents) != 0 || st.PublicationSequence != 0 || st.ReloadPrepared != nil {
+				return ErrPending
+			}
+			st.LocalRetired = true
+			st.Closing = true
+			return nil
+		})
+		if e != nil {
+			return before, e
+		}
+		latest, e := c.Store.Load(ctx)
+		return latest, errors.Join(e, c.Backend.Close(context.WithoutCancel(ctx)))
+	}
+	st, e := c.control(ctx, Close, budget)
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	closeErr := c.Backend.Close(closeCtx)
+	return st, errors.Join(e, closeErr)
 }
 
-// CommitReload is a distinct lease publication after the prepared reload
-// receipt (including its challenge) has become durable. Unknown publication is
-// never replayed; a replacement runtime can only retire the original session.
+// Reload first saves and finally acknowledges any retained terminal, then
+// prepares an exact, bounded reload challenge in the same stop row.
+func (c *Coordinator) Reload(ctx context.Context, budget time.Duration) (State, error) {
+	if budget <= 0 {
+		return State{}, errors.New("cleanup budget must be positive")
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	st, e := c.Store.Load(ctx)
+	if e != nil {
+		return st, e
+	}
+	if !st.Bound {
+		return st, ErrBusy
+	}
+	if st.ReloadPrepared != nil {
+		return st, nil
+	}
+	if a := st.Active; a != nil && !a.Released {
+		if !a.ResultSaved {
+			return st, ErrBusy
+		}
+		if _, e = c.control(ctx, Close, budget); e != nil {
+			return st, e
+		}
+	}
+	st, e = c.control(ctx, Reload, budget)
+	if e != nil {
+		return st, e
+	}
+	in, ok := st.Intents["stop"]
+	if !ok || in.Message.Header.Kind != Reload || !in.Accepted || in.Challenge == "" || in.Challenge == zeroToken {
+		return st, ErrPending
+	}
+	e = c.Store.Update(ctx, func(current *State) error {
+		entry := current.Intents["stop"]
+		if entry.Message.Header.MessageID != in.Message.Header.MessageID || !entry.Accepted {
+			return ErrIdentity
+		}
+		copy := entry
+		current.ReloadPrepared = &copy
+		current.Closed = false
+		return nil
+	})
+	if e != nil {
+		return st, e
+	}
+	return c.Store.Load(ctx)
+}
+
+// CommitReload never republishes an uncertain lease. Its original preparation
+// remains durable separately from the reused stop row.
 func (c *Coordinator) CommitReload(ctx context.Context, budget time.Duration) (State, error) {
 	if budget <= 0 {
 		return State{}, errors.New("cleanup budget must be positive")
@@ -618,25 +682,35 @@ func (c *Coordinator) CommitReload(ctx context.Context, budget time.Duration) (S
 	if e != nil {
 		return st, e
 	}
-	prepared, ok := st.Intents["reload"]
-	if !ok || !prepared.Accepted || prepared.Challenge == "" || prepared.Challenge == "00000000000000000000000000000000" || st.Active != nil && !st.Active.Released {
+	prepared := st.ReloadPrepared
+	if prepared == nil || !prepared.Accepted || prepared.Challenge == "" || st.Active != nil && !st.Active.Released {
 		return st, ErrPending
 	}
 	payload, e := token(prepared.Message.Header.MessageID)
 	if e != nil {
 		return st, e
 	}
-	if _, e = token(prepared.Challenge); e != nil {
-		return st, e
-	}
-	old, exists := st.Intents["lease"]
-	same := exists && hex.EncodeToString(old.Message.Payload) == prepared.Message.Header.MessageID && old.Message.Header.Challenge == prepared.Challenge
-	if !exists || old.Outcome.State == NoWrite || old.Accepted && !same {
+	old, has := st.Intents["stop"]
+	if has && old.Message.Header.Kind == Lease {
+		if hex.EncodeToString(old.Message.Payload) != prepared.Message.Header.MessageID || old.Message.Header.Challenge != prepared.Challenge {
+			return st, ErrIdentity
+		}
+		if old.Accepted {
+			return st, nil
+		}
+		if old.Outcome.State == NoWrite {
+			e = c.publish(ctx, old.Message)
+			if e != nil {
+				return st, e
+			}
+		}
+	} else {
+		if has && !old.Accepted && old.Outcome.State != NoWrite {
+			return st, ErrPending
+		}
 		if e = c.publishControl(ctx, Lease, prepared.Challenge, payload); e != nil {
 			return st, e
 		}
-	} else if !same {
-		return st, ErrPending
 	}
 	for {
 		s, err := c.Backend.Observe(ctx)
@@ -650,31 +724,22 @@ func (c *Coordinator) CommitReload(ctx context.Context, budget time.Duration) (S
 		if err != nil {
 			return st, err
 		}
-		if in, ok := st.Intents["lease"]; ok && in.Accepted && hex.EncodeToString(in.Message.Payload) == prepared.Message.Header.MessageID && in.Message.Header.Challenge == prepared.Challenge {
+		in := st.Intents["stop"]
+		if in.Accepted && in.Message.Header.Kind == Lease {
 			return st, nil
 		}
-		if in, ok := st.Intents["lease"]; ok && in.Rejected != "" {
-			return st, fmt.Errorf("%w: lease %s", ErrRejected, in.Rejected)
+		if in.Rejected != "" {
+			return st, fmt.Errorf("%w: reload lease %s", ErrRejected, in.Rejected)
 		}
-		if err = c.wait(ctx); err != nil {
+		if e = c.wait(ctx); e != nil {
 			return st, ErrPending
 		}
 	}
 }
-func (c *Coordinator) Disconnect(ctx context.Context, budget time.Duration) (State, error) {
-	st, e := c.control(ctx, Close, budget)
-	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-	defer cancel()
-	closeErr := c.Backend.Close(closeCtx)
-	if e != nil {
-		return st, e
-	}
-	return st, closeErr
-}
 
-// Repair cannot adopt a new runtime or guess an old writer is dead. Both the
-// transport drain and addon private ledger must prove the original not_started.
-func (c *Coordinator) Repair(ctx context.Context, previousWriterDrained bool) (State, error) {
+// Repair switches only a proven idle arena. Unknown business is retained and
+// never automatically resubmitted into the replacement allocation.
+func (c *Coordinator) Repair(ctx context.Context, drained bool) (State, error) {
 	st, e := c.Store.Load(ctx)
 	if e != nil {
 		return st, e
@@ -683,96 +748,38 @@ func (c *Coordinator) Repair(ctx context.Context, previousWriterDrained bool) (S
 	if e != nil {
 		return st, e
 	}
+	if e = validateSendbox(s); e != nil {
+		return st, e
+	}
 	p := s.Repair
-	a := st.Active
-	if !previousWriterDrained || p == nil || !p.LedgerRetained || p.PreviousArena == p.NewArena || p.PreviousArena != st.Identity.Arena || p.NewArena != s.Arena || s.Runtime != st.Identity.Runtime || s.Session != st.Identity.Session || s.Owner != st.Identity.Owner || s.ActorBinding != st.Identity.ActorBinding || s.Fence != st.Identity.Fence {
+	if !st.Bound {
+		return st, ErrBusy
+	}
+	if !drained || p == nil || !p.LedgerRetained || !p.Idle || !p.NoPendingRequest || !p.ResourcesReleased || p.NotStarted || p.PreviousArena != st.Identity.Arena || p.NewArena != s.Arena || p.PreviousArena == p.NewArena || s.Runtime != st.Identity.Runtime || s.ActorBinding != st.Identity.ActorBinding || s.Request != nil || s.Terminal != nil || !s.ResourcesReleased || st.Active != nil && !st.Active.Released {
 		return st, ErrUnknown
 	}
-	if p.Idle {
-		return c.repairIdle(ctx, st, s, *p)
+	id := st.Identity
+	id.Arena = s.Arena
+	probe := st
+	probe.Identity = id
+	if !observedIdentity(probe, s) {
+		return st, ErrIdentity
 	}
-	if !p.NotStarted || a == nil || a.Released || p.RequestID != a.RequestID || p.RequestSHA256 != a.Digest {
-		return st, ErrUnknown
-	}
-	if in, ok := st.Intents["commit"]; ok && in.Accepted {
-		return st, ErrUnknown
-	}
-	if a.PreviousCommit != nil {
-		return st, ErrUnknown
-	}
-	if a.Attempt == math.MaxUint64 {
-		return st, errors.New("transport attempt exhausted")
-	}
-	if c.now().UnixMilli() >= int64(a.TransferDeadline) {
-		return st, ErrBudget
+	if in, ok := st.Intents["stop"]; ok && !in.Accepted && in.Outcome.State != NoWrite {
+		return st, ErrPending
 	}
 	mid, e := NewToken()
 	if e != nil {
 		return st, e
 	}
-	id := st.Identity
-	id.Arena = s.Arena
-	h := Header{Kind: Repair, Runtime: id.Runtime, Arena: id.Arena, Session: id.Session, Owner: id.Owner, ActorBinding: id.ActorBinding, Fence: id.Fence, MessageID: mid, Challenge: p.Challenge, RequestID: a.RequestID, RequestSeq: a.Sequence, RequestSHA256: a.Digest, TransportAttempt: a.Attempt + 1, CreatedUTCMillis: a.Created, BudgetMillis: a.Budget, TotalBytes: uint32(len(a.Source))}
+	h := Header{Kind: Repair, Runtime: id.Runtime, Arena: id.Arena, Session: id.Session, Owner: id.Owner, ActorBinding: id.ActorBinding, Fence: id.Fence, MessageID: mid, RequestID: zeroToken, RequestSHA256: zeroDigest, Challenge: p.Challenge, TransportAttempt: 1, CreatedUTCMillis: uint64(c.now().UnixMilli())}
 	e = c.publish(ctx, Message{Header: h}, func(current *State) error {
-		if current.Identity != st.Identity || current.Active == nil || current.Active.RequestID != a.RequestID || current.Active.Attempt != a.Attempt {
+		if current.Identity != st.Identity || current.Active != nil && !current.Active.Released {
 			return ErrIdentity
-		}
-		if in, ok := current.Intents["commit"]; ok {
-			current.Active.PreviousCommit = &in
-			delete(current.Intents, "commit")
 		}
 		proof := *p
-		current.Active.RepairProof = &proof
-		current.Identity.Arena = s.Arena
-		current.Active.Attempt++
-		frames, err := NewFrames(current.Identity, a.RequestID, a.Sequence, current.Active.Attempt, a.Created, a.Budget, a.Source)
-		if err != nil {
-			return err
-		}
-		current.Active.Frames = frames
-		current.Active.NextFrame = 0
-		current.Active.Phase = "repairing"
-		delete(current.Intents, "request")
-		return nil
-	})
-	if e != nil {
-		return st, e
-	}
-	return c.Store.Load(ctx)
-}
-
-// repairIdle changes only the physical arena. Both the host journal and the
-// retained private ledger must prove there is no unacknowledged business. A
-// released request remains in host history and the addon tombstone remains the
-// sequence fence; neither is converted into a new request or owner.
-func (c *Coordinator) repairIdle(ctx context.Context, st State, s Sendbox, p RepairProof) (State, error) {
-	const zeroToken = "00000000000000000000000000000000"
-	const zeroDigest = "0000000000000000000000000000000000000000000000000000000000000000"
-	if !st.Bound || !p.NoPendingRequest || !p.ResourcesReleased || p.NotStarted || p.RequestID != zeroToken || p.RequestSHA256 != zeroDigest || !s.ResourcesReleased || s.Terminal != nil || s.Request != nil {
-		return st, ErrUnknown
-	}
-	if a := st.Active; a != nil {
-		if !a.Released || !a.ResultSaved || a.Result == nil || !releasedMatches(a, s.Released) {
-			return st, ErrUnknown
-		}
-	}
-	mid, e := NewToken()
-	if e != nil {
-		return st, e
-	}
-	id := st.Identity
-	id.Arena = s.Arena
-	h := Header{Kind: Repair, Runtime: id.Runtime, Arena: id.Arena, Session: id.Session, Owner: id.Owner, ActorBinding: id.ActorBinding, Fence: id.Fence, MessageID: mid, Challenge: p.Challenge, RequestID: zeroToken, RequestSHA256: zeroDigest, TransportAttempt: 1, CreatedUTCMillis: uint64(c.now().UnixMilli())}
-	e = c.publish(ctx, Message{Header: h}, func(current *State) error {
-		if current.Identity != st.Identity || !current.Bound || current.Active != nil && !current.Active.Released {
-			return ErrIdentity
-		}
-		if st.Active != nil && (current.Active == nil || current.Active.RequestID != st.Active.RequestID || !current.Active.ResultSaved) {
-			return ErrIdentity
-		}
-		proof := p
 		current.RepairProof = &proof
-		current.Identity.Arena = s.Arena
+		current.Identity = id
 		return nil
 	})
 	if e != nil {

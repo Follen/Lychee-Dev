@@ -35,6 +35,7 @@ type Intent struct {
 	Rejected  string       `json:"rejected,omitempty"`
 }
 type ActiveRequest struct {
+	PreviousResultAck       *ResultManifest `json:"previousResultAck,omitempty"`
 	RequestID               string          `json:"requestId"`
 	Digest                  string          `json:"requestSHA256"`
 	Sequence                uint64          `json:"requestSeq,string"`
@@ -53,16 +54,32 @@ type ActiveRequest struct {
 	ResultSaved             bool            `json:"resultSaved"`
 	Released                bool            `json:"released"`
 }
+type LocalRetirementProof struct {
+	ProcessID            uint32 `json:"processId"`
+	ProcessCreated       uint64 `json:"processCreated,string"`
+	Executable           string `json:"executable"`
+	PreviousRuntime      string `json:"previousRuntime"`
+	ObservedRuntime      string `json:"observedRuntime"`
+	PreviousActorBinding string `json:"previousActorBinding"`
+	ObservedActorBinding string `json:"observedActorBinding"`
+	PreviousActorGUID    string `json:"previousActorGUID"`
+	ObservedActorGUID    string `json:"observedActorGUID"`
+}
 type State struct {
-	Schema              string            `json:"schema"`
-	Identity            Identity          `json:"identity"`
-	Bound               bool              `json:"bound"`
-	Closed              bool              `json:"closed"`
-	RequestSequence     uint64            `json:"requestSequence,string"`
-	PublicationSequence uint64            `json:"publicationSequence,string"`
-	Active              *ActiveRequest    `json:"active,omitempty"`
-	Intents             map[string]Intent `json:"intents"`
-	RepairProof         *RepairProof      `json:"repairProof,omitempty"`
+	LocalRetirement     *LocalRetirementProof `json:"localRetirement,omitempty"`
+	LocalRetired        bool                  `json:"localRetired"`
+	Closing             bool                  `json:"closing"`
+	ReloadPrepared      *Intent               `json:"reloadPrepared,omitempty"`
+	Selected            bool                  `json:"selected"`
+	Schema              string                `json:"schema"`
+	Identity            Identity              `json:"identity"`
+	Bound               bool                  `json:"bound"`
+	Closed              bool                  `json:"closed"`
+	RequestSequence     uint64                `json:"requestSequence,string"`
+	PublicationSequence uint64                `json:"publicationSequence,string"`
+	Active              *ActiveRequest        `json:"active,omitempty"`
+	Intents             map[string]Intent     `json:"intents"`
+	RepairProof         *RepairProof          `json:"repairProof,omitempty"`
 }
 
 // Update is an atomic, durable read-modify-write across all host processes.
@@ -88,24 +105,47 @@ func (s *FileStore) lock(ctx context.Context) (func(), error) {
 }
 func (s *FileStore) load() (State, error) {
 	var st State
-	p, e := readBounded(filepath.Join(s.Dir, "state.json"), 4*MaxSourceBytes)
+	p, e := readBounded(filepath.Join(s.Dir, "state.json"), MaxJournalBytes)
 	if os.IsNotExist(e) {
 		return State{Schema: "lycheedev.duplex.journal.v1", Intents: map[string]Intent{}}, nil
 	}
 	if e != nil {
 		return st, e
 	}
-	if len(p) > 4*MaxSourceBytes {
+	return decodeJournal(p)
+}
+
+// Inspect reads one committed journal snapshot without acquiring a lease or
+// creating artifacts. Atomic journal replacement keeps the snapshot consistent.
+// It restores compact command references before the same protocol validation
+// used by transactions and recovery.
+func (s *FileStore) Inspect(ctx context.Context) (State, error) {
+	if e := ctx.Err(); e != nil {
+		return State{}, e
+	}
+	p, e := readBounded(filepath.Join(s.Dir, "state.json"), MaxJournalBytes)
+	if e != nil {
+		return State{}, e
+	}
+	return decodeJournal(p)
+}
+func decodeJournal(p []byte) (State, error) {
+	var st State
+	if len(p) > MaxJournalBytes {
 		return st, errors.New("journal capacity exceeded")
 	}
-	if e = json.Unmarshal(p, &st); e != nil {
+	if e := json.Unmarshal(p, &st); e != nil {
 		return st, e
 	}
 	if st.Schema != "lycheedev.duplex.journal.v1" || st.Intents == nil {
 		return st, errors.New("invalid journal schema")
 	}
+	if e := restoreCommandPayloads(&st); e != nil {
+		return st, e
+	}
 	return st, ValidateState(st)
 }
+
 func (s *FileStore) Load(ctx context.Context) (State, error) {
 	unlock, e := s.lock(ctx)
 	if e != nil {
@@ -130,11 +170,11 @@ func (s *FileStore) Update(ctx context.Context, f func(*State) error) error {
 	if e = ValidateState(st); e != nil {
 		return e
 	}
-	p, e := json.Marshal(st)
+	p, e := json.Marshal(compactCommandPayloads(st))
 	if e != nil {
 		return e
 	}
-	if len(p) > 4*MaxSourceBytes {
+	if len(p) > MaxJournalBytes {
 		return errors.New("journal capacity exceeded")
 	}
 	if e = vault.ReplaceFile(ctx, filepath.Join(s.Dir, "state.json"), p); e != nil {
@@ -194,6 +234,40 @@ func ValidateState(st State) error {
 	if st.Schema != "lycheedev.duplex.journal.v1" || st.Intents == nil || len(st.Intents) > 8 {
 		return errors.New("invalid durable journal")
 	}
+	if st.LocalRetired {
+		if !st.Closing || st.Closed {
+			return errors.New("local retirement cannot claim in-game close")
+		}
+		if proof := st.LocalRetirement; proof != nil {
+			if proof.ProcessID == 0 || proof.ProcessCreated == 0 || proof.Executable == "" || proof.PreviousRuntime != st.Identity.Runtime || proof.PreviousActorBinding != st.Identity.ActorBinding {
+				return errors.New("invalid runtime retirement pins")
+			}
+			for _, v := range []string{proof.ObservedRuntime, proof.ObservedActorBinding} {
+				if _, e := token(v); e != nil {
+					return e
+				}
+			}
+			if proof.PreviousRuntime == proof.ObservedRuntime && proof.PreviousActorBinding == proof.ObservedActorBinding && (proof.ObservedActorGUID == "" || proof.ObservedActorGUID == proof.PreviousActorGUID) {
+				return errors.New("local retirement requires observed lifecycle change")
+			}
+		} else if st.Bound || st.Active != nil || len(st.Intents) != 0 || st.PublicationSequence != 0 || st.ReloadPrepared != nil {
+			return errors.New("invalid local-only retirement")
+		}
+	} else if st.LocalRetirement != nil {
+		return errors.New("retirement proof without local retirement")
+	}
+	if st.ReloadPrepared != nil {
+		in := st.ReloadPrepared
+		if in.Message.Header.Kind != Reload || !in.Accepted || in.Challenge == "" {
+			return errors.New("invalid reload preparation")
+		}
+		if _, e := EncodeMessage(in.Message); e != nil {
+			return e
+		}
+		if _, e := token(in.Challenge); e != nil {
+			return e
+		}
+	}
 	if st.Identity != (Identity{}) {
 		for _, v := range []string{st.Identity.Runtime, st.Identity.Arena, st.Identity.Session, st.Identity.Owner, st.Identity.ActorBinding} {
 			if _, e := token(v); e != nil {
@@ -203,7 +277,7 @@ func ValidateState(st State) error {
 		if st.Identity.Fence == 0 {
 			return errors.New("invalid journal fence")
 		}
-	} else if st.Bound || st.Closed || st.Active != nil || len(st.Intents) != 0 || st.RepairProof != nil || st.RequestSequence != 0 || st.PublicationSequence != 0 {
+	} else if st.LocalRetired || st.Closing || st.Selected || st.Bound || st.Closed || st.Active != nil || len(st.Intents) != 0 || st.RepairProof != nil || st.RequestSequence != 0 || st.PublicationSequence != 0 {
 		return errors.New("durable facts require an identity")
 	}
 	for lane, in := range st.Intents {
@@ -231,8 +305,8 @@ func ValidateState(st State) error {
 	if a == nil {
 		return nil
 	}
-	if !st.Bound {
-		return errors.New("durable request requires binding")
+	if !st.Bound && !st.Selected {
+		return errors.New("durable request requires exact selected identity")
 	}
 	if _, e := token(a.RequestID); e != nil {
 		return e
@@ -242,6 +316,18 @@ func ValidateState(st State) error {
 	}
 	if a.Sequence == 0 || a.Attempt == 0 || a.Sequence > st.RequestSequence || a.Budget == 0 || a.Budget > 120000 || a.Created > math.MaxInt64-600000 || a.TransferDeadline < a.Created || a.TransferDeadline > a.Created+600000 {
 		return errors.New("invalid durable request")
+	}
+	if prior := a.PreviousResultAck; prior != nil {
+		if e := validateResultManifest(*prior); e != nil {
+			return e
+		}
+		ack, e := ResultAckSHA256(*prior)
+		if e != nil || len(a.Frames) > 0 && a.Frames[0].Header.PreviousResultAckSHA != ack {
+			return errors.New("durable previous ACK mismatch")
+		}
+		if prior.RequestID == a.RequestID {
+			return errors.New("self ACK")
+		}
 	}
 	if a.Result != nil {
 		if e := validateResultManifest(*a.Result); e != nil {
@@ -280,6 +366,46 @@ func ValidateState(st State) error {
 	}
 	if a.ResultSaved && (a.Result == nil || a.Result.RequestID != a.RequestID || a.Result.RequestSHA256 != a.Digest) {
 		return errors.New("invalid durable result manifest")
+	}
+	return nil
+}
+
+// The source is stored once. Headers and intent records reference that exact
+// immutable body; load reconstructs payloads before protocol validation.
+func compactCommandPayloads(st State) State {
+	if st.Active == nil {
+		return st
+	}
+	a := *st.Active
+	st.Active = &a
+	a.Frames = append([]Message(nil), a.Frames...)
+	for i := range a.Frames {
+		a.Frames[i].Payload = nil
+	}
+	intents := make(map[string]Intent, len(st.Intents))
+	for lane, in := range st.Intents {
+		if in.Message.Header.Kind == Frame && in.Message.Header.RequestID == a.RequestID {
+			in.Message.Payload = nil
+		}
+		intents[lane] = in
+	}
+	st.Intents = intents
+	return st
+}
+func restoreCommandPayloads(st *State) error {
+	a := st.Active
+	if a == nil || a.Released {
+		return nil
+	}
+	if len(a.Frames) != 1 {
+		return errors.New("invalid single command journal")
+	}
+	if a.Frames[0].Payload == nil {
+		a.Frames[0].Payload = append([]byte(nil), a.Source...)
+	}
+	if in, ok := st.Intents["command"]; ok && in.Message.Header.RequestID == a.RequestID && in.Message.Payload == nil {
+		in.Message.Payload = append([]byte(nil), a.Source...)
+		st.Intents["command"] = in
 	}
 	return nil
 }

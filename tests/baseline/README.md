@@ -30,7 +30,7 @@ test result, including tests outside the minimum case catalog.
 | BASE-03–04 | Exact source worktrees, dirty detection, leases and semantic cache identity |
 | BASE-05–06 | Hotfix pagination, missing-key integrity and asset evidence |
 | BASE-07 | First managed install, modified-file refusal and upgrade recovery |
-| BASE-08 | Duplex wire integrity, durable execution, recovery and bounded retention |
+| BASE-08 | Mailbox v1 one-write integrity, durable execution and recovery |
 | BASE-09 | Verified migration of idle legacy LoD files and refusal of unresolved pools |
 | BASE-15–16 | Read-only installation/window inventory and process crash recovery |
 | BASE-17 | Workbench pages, shared controls, layout, locale and disabled-cost fixtures |

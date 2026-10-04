@@ -5,8 +5,7 @@ local _, ns = ...
 local owner, arena, engine, ticker, generation, retiredArena, repairPending, arenaRoots, retiredRoots = nil, nil, nil, nil, 0, nil, false, nil, nil
 local privatePages, projectedPages = {}, nil
 local CALIBRATION_EXPECTED={0,1,4294967295,0.125,-13.5,7654321}
-local CONTROL_LANES={"bindResume","close","cancel","commit","resultAck","reload","lease"}
-local FRAME_SLOTS=ns.DuplexProtocol.FrameSlots
+local ROW_KEYS={"command","stop"}
 local function restricted(v)return issecretvalue and issecretvalue(v)end
 local function plainTable(v)return not restricted(v) and type(v)=="table" and getmetatable(v)==nil end
 local function freshToken(seed)
@@ -29,8 +28,8 @@ end
 local function publicMailbox(identity, cells)
     local pages={};for i,v in pairs(privatePages) do pages[i]=v end;projectedPages=pages
     local sendbox={status="",receipts="",resultPages=pages}
-    local inbox={calibration=cells.calibration,request=cells.request,control=cells.control}
-    return {schema="lycheedev.mailbox.v1",layoutId="single-data-row-v1",release=ns.Release,runtime=identity.runtime,
+    local inbox={calibration=cells.calibration,command=cells.command,stop=cells.stop}
+    return {schema="lycheedev.mailbox.v1",layoutId="single-command-row-v1",release=ns.Release,runtime=identity.runtime,
         arenaGeneration=identity.arenaGeneration,inbox=inbox,sendbox=sendbox}
 end
 local function ensureSendbox()
@@ -56,6 +55,10 @@ local function publish(kind,wire)
     if kind=="results" then return nil end
     local sendbox=ensureSendbox();if not sendbox then return nil end
     rawset(sendbox,kind=="receipts" and "receipts" or "status",wire)
+    -- Changed only invokes the handler installed by the visible workbench.
+    -- Publications occur at actual transitions or the bounded heartbeat,
+    -- never on every idle transport poll.
+    if ns.AutomationView and type(ns.AutomationView.Changed)=="function" then pcall(ns.AutomationView.Changed) end
     return true
 end
 local function makeOwner()
@@ -99,15 +102,18 @@ local function makeOwner()
 end
 local heartbeatElapsed=0
 local function repairArena()
+    if not engine.HasOwner() then
+        engine.Quarantine("duplex_repair_unavailable")
+        return nil,"duplex_repair_unavailable"
+    end
     if retiredArena or retiredRoots then
         engine.Quarantine("duplex_arena_damaged_during_repair")
         return nil,"duplex_arena_damaged_during_repair"
     end
     local state=engine.Snapshot()
-    local active=state.request and (state.phase=="receiving" or state.phase=="prepared")
     local safeIdle=not state.request and not state.terminal and not state.closing
-        and (state.phase=="idle" or state.phase=="released")
-    if not active and not safeIdle then
+        and state.phase=="ready_unbound"
+    if not safeIdle then
         engine.Quarantine("duplex_arena_state_unknown")
         return nil,"duplex_arena_state_unknown"
     end
@@ -116,7 +122,7 @@ local function repairArena()
     if not cells then engine.Quarantine(roots or "duplex_arena_rebuild_failed");return nil,roots end
     local challengeRaw=ns.SHA256.Digest(newGeneration..tostring(math.random())..tostring(ns.Compat.MonotonicSeconds() or 0))
     challengeRaw=challengeRaw:sub(1,16)
-    local ok;ok,reason=engine.BeginRepair(newGeneration,challengeRaw)
+    local ok,reason;ok,reason=engine.BeginRepair(newGeneration,challengeRaw)
     if not ok then engine.Quarantine(reason or "duplex_arena_rebuild_failed");return nil,reason end
     retiredArena=arena;retiredRoots=arenaRoots;repairPending=true;generation=generation+1
     arena,arenaRoots=cells,roots
@@ -132,19 +138,11 @@ local function topologyValid()
     local calibration=rawget(inbox,"calibration")
     if not plainTable(calibration) or calibration~=rawget(arena,"calibration") or calibration~=rawget(arenaRoots,"calibration") or #calibration~=6 then return false end
     for i=1,6 do local value=rawget(calibration,i);if restricted(value) or value~=CALIBRATION_EXPECTED[i] then return false end end
-    local request=rawget(inbox,"request");local control=rawget(inbox,"control")
-    if request~=rawget(arena,"request") or control~=rawget(arena,"control") then return false end
-    if not plainTable(request) or not plainTable(control) or request~=rawget(arenaRoots,"request")
-        or control~=rawget(arenaRoots,"control") then return false end
-    local frames=rawget(request,"frames")
-    if not plainTable(frames) or frames~=rawget(arenaRoots,"frames") or #frames~=FRAME_SLOTS then return false end
-    for i=1,FRAME_SLOTS do
-        local row=rawget(frames,i)
-        if not plainTable(row) or row~=rawget(arenaRoots,"frameRows")[i] or #row~=1104 then return false end
-    end
-    for _,lane in ipairs(CONTROL_LANES) do
-        local row=rawget(control,lane)
-        if not plainTable(row) or row~=rawget(arenaRoots,"controlRows")[lane] or #row~=336 then return false end
+    for _,key in ipairs(ROW_KEYS) do
+        local row=rawget(inbox,key)
+        local expected=key=="command" and 80+ns.DuplexProtocol.FrameBytes/4 or 336
+        if not plainTable(row) or row~=rawget(arena,key) or row~=rawget(arenaRoots,key) or #row~=expected
+            or table.isfrozen(row)~=true then return false end
     end
     return true
 end
@@ -153,7 +151,7 @@ local function tick(elapsed)
     if not owner or not arena or not engine or not enabledByOwner() then return end
     heartbeatElapsed=heartbeatElapsed+(elapsed or 0)
     pollElapsed=pollElapsed+(elapsed or 0)
-    if pollElapsed<0.05 then return end
+    if pollElapsed<0.05 and not engine.HasPendingValidation() then return end
     pollElapsed=pollElapsed%0.05
     if engine.TakeReload and engine.TakeReload() then
         local ok=pcall(ReloadUI)
@@ -170,11 +168,10 @@ local function tick(elapsed)
     end
     local enabled=engine.Enable();if not enabled then return end
     engine.Poll(arena,8)
-    local _,lastFailure,repaired=engine.RuntimeState()
-    if lastFailure=="duplex_frame_shape" or lastFailure=="duplex_lane_shape" or lastFailure=="duplex_cell_invalid"
-        or lastFailure=="duplex_control_shape" or lastFailure=="duplex_control_padding" or lastFailure=="duplex_frame_padding" then
-        repairArena();return
-    end
+    local _,_,repaired=engine.RuntimeState()
+    -- A single whole-row OS write is not atomic. While it is in progress,
+    -- content and padding checks can reject a mixed snapshot. The same row is
+    -- retried after the write completes; only damaged topology starts repair.
     if repairPending and repaired then
         engine.ReleaseRetiredArena();retiredArena=nil;retiredRoots=nil;repairPending=false
     end

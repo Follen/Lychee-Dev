@@ -9,7 +9,7 @@ export const offlineCases = [
   go('BASE-05', 'Hotfix pagination and missing-key integrity', 'internal/records', 'TestWagoHotfixMultiPageWithIdentityKeys', 'TestMissingBytesCannotBecomeZeroValues', 'TestKeySourcesAreExplicitBoundedAndOffline'),
   go('BASE-06', 'Asset evidence and failed export preservation', 'internal/records', 'TestExportAssetEvidenceAndFailurePreservation'),
   go('BASE-07', 'Clean managed install and upgrade', 'internal/delivery', 'TestInstallAddonFirstInstallAndRetry', 'TestInstallAddonRefusesModifiedManagedInstallation', 'TestUpgradeAddonResumeAndRemovePreserveOwnedState'),
-  go('BASE-08', 'Duplex wire integrity, durable execution, recovery and bounded retention', 'internal/live/duplex', 'TestWireBoundariesAndTampering', 'TestExecuteDurableAckReleaseAndReuse', 'TestUnknownCommitNeverReexecutes', 'TestSyncFailureStopsEffectAndOutcomeLossRecovers', 'TestResultFailureNeverAcknowledgesAndCloseIndependent', 'TestOutstandingCancelAndExpiredBusinessDoNotBlockClose', 'TestGCRepairRequiresPrivateProofAndDrain', 'TestFileStoreDurableRestartAndCorruptEvidence', 'TestRetentionAfter1000Requests', 'TestUnknownControlDoesNotOverwriteLane', 'TestCorruptResultAndCleanupFailureBlockRelease'),
+  go('BASE-08', 'Mailbox v1 one-write integrity, durable execution and recovery', 'internal/live/duplex', 'TestWireBoundariesAndTampering', 'TestExecuteOneWriteAndRetainedResult', 'TestUnknownCommandRecoversExactTerminalWithoutReplay', 'TestUnknownUnacceptedCommandNeverReplays', 'TestPersistenceBeforeEffectAndResultACK', 'TestStopUncertainIntentSerializesCancelAndClose', 'TestRuntimeChangeRetainsUnknownEvidence', 'TestSequentialCommandsBoundedCurrentState', 'TestFileStoreDurableRestartAndCorruptEvidence', 'TestIdleRepairRequiresDrainAndDoesNotReplayHistory', 'TestFileStoreInspectionRestoresCompactedCommandWithoutLease', 'TestValidationUsesTransferDeadlineNotExecutionBudget'),
   go('BASE-09', 'Verified migration of idle legacy LoD files and refusal of unresolved pools', 'internal/delivery', 'TestAddonInstallDoesNotCreateLoDSlotPool', 'TestAddonInstallRequiresUpgradeWhenManagedLegacyPoolExists', 'TestAddonUpgradeArchivesIdleManagedSlots', 'TestAddonUpgradeBlocksPendingOrModifiedLegacySlots', 'TestLegacySlotMigrationArchivesOnlyVerifiedIdlePool', 'TestLegacySlotMigrationBlocksPendingModifiedAndUnknownContent', 'TestLegacySlotMigrationResumesPartialDirectoryMoves'),
   go('BASE-15', 'Read-only client installation and native window inventory', 'internal/live', 'TestDiscoveryIsReadOnlyInstallationAndWindowInventory', 'TestDiscoveryKeepsUnsupportedClientPlatformInventory', 'TestClientWindowSelection', 'TestDiscoveredClientWindowAmbiguityDoesNotUseTitle'),
   go('BASE-16', 'Process crash and durable window ownership', 'internal/live/journal', 'TestWindowAdmissionCrashRecovery', 'TestWindowRunOwnershipAndTerminalRelease'),
@@ -21,14 +21,14 @@ export const offlineCases = [
 ];
 // These are real-client checks, not satisfied by four-profile Lua fixtures.
 export const manualCases = [
-  ['REAL-01', 'WGC visual review of the current duplex request and release view'],
+  ['REAL-01', 'WGC visual review of the current mailbox request and release view'],
   ['REAL-02', 'Chinese/English, small viewport and UI scaling'],
-  ['REAL-03', 'Duplex request, result, cancellation and terminal release on the real client'],
-  ['REAL-04', 'Reload and relogin preserve durable duplex request evidence'],
+  ['REAL-03', 'Mailbox request, result, cancellation and terminal release on the real client'],
+  ['REAL-04', 'Reload and relogin preserve durable mailbox request evidence'],
   ['REAL-05', 'First installation, upgrade, relogin and combat transitions'],
   ['REAL-06', 'Two live windows, characters, workspaces and client builds'],
   ['REAL-07', 'Classic 50504 production execution and finish'],
   ['REAL-08', 'Titan 38002 production execution and finish'],
   ['REAL-09', 'Long-running and adversarial schedule acceptance'],
-  ['REAL-10', 'Native Duplex real-client acceptance (not_run until a real-client run is recorded)'],
+  ['REAL-10', 'Native mailbox v1 real-client acceptance (not_run until a real-client run is recorded)'],
 ].map(([id, title]) => ({ id, title, kind: 'manual', state: 'not_run' }));
