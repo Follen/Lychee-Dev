@@ -26,7 +26,7 @@ func duplexFixture(t *testing.T) (*mailboxFixture, *MailboxReader, uint64) {
 	cal := array("cal", []float64{0, 1, 4294967295, 0.125, -13.5, 7654321})
 	inbox := f.table("inbox", []mailboxFixtureEntry{{"calibration", luaValue{cal, 5}}, {"cells", luaValue{cells, 5}}})
 	sendbox := f.table("sendbox", []mailboxFixtureEntry{{"status", luaValue{f.text([]byte("immutable-status")), 4}}})
-	box := f.table("duplex", []mailboxFixtureEntry{{"schema", luaValue{f.text([]byte(DuplexMailboxSchema)), 4}}, {"release", luaValue{f.text([]byte("fixture-release")), 4}}, {"runtime", luaValue{f.text([]byte(strings.Repeat("a", 32))), 4}}, {"arenaGeneration", luaValue{f.text([]byte(strings.Repeat("b", 32))), 4}}, {"inbox", luaValue{inbox, 5}}, {"sendbox", luaValue{sendbox, 5}}})
+	box := f.table("duplex", []mailboxFixtureEntry{{"schema", luaValue{f.text([]byte(DuplexMailboxSchema)), 4}}, {"layoutId", luaValue{f.text([]byte("single-data-row-v1")), 4}}, {"release", luaValue{f.text([]byte("fixture-release")), 4}}, {"runtime", luaValue{f.text([]byte(strings.Repeat("a", 32))), 4}}, {"arenaGeneration", luaValue{f.text([]byte(strings.Repeat("b", 32))), 4}}, {"inbox", luaValue{inbox, 5}}, {"sendbox", luaValue{sendbox, 5}}})
 	binary.LittleEndian.PutUint64(f.bytes(f.nodes["namespace.Mailbox"], 8), box)
 	return f, f.reader(), cells
 }
@@ -51,6 +51,14 @@ func TestDuplexArrayCalibrationAndEphemeralProof(t *testing.T) {
 	binary.LittleEndian.PutUint64(f.bytes(cells+32, 8), old+24)
 	if err := a.Verify(context.Background()); err == nil {
 		t.Fatal("relocated array accepted")
+	}
+}
+
+func TestMailboxReaderRejectsOldPhysicalLayout(t *testing.T) {
+	f, r, _ := duplexFixture(t)
+	binary.LittleEndian.PutUint64(f.bytes(f.nodes["duplex.layoutId"], 8), f.text([]byte("256-row-v1")))
+	if _, err := r.ReadDuplexString(context.Background(), []DuplexPath{{Name: "sendbox"}, {Name: "status"}}, 64); err == nil {
+		t.Fatal("old physical layout accepted through new schema")
 	}
 }
 

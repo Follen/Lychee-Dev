@@ -275,6 +275,11 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 	if h.Kind == duplex.Frame && s.Request != nil && (s.Request.RequestID != h.RequestID || s.Request.RequestSHA256 != h.RequestSHA256) {
 		return out, duplex.ErrBusy
 	}
+	if h.Kind == duplex.Frame {
+		if err = duplex.ValidateFrameTransition(s, m); err != nil {
+			return out, err
+		}
+	}
 	if h.Kind == duplex.Frame || h.Kind == duplex.Commit {
 		if !s.TransportReady || !s.ActorReady || s.ActorGUID == "" || n.ExpectedActorGUID != "" && s.ActorGUID != n.ExpectedActorGUID {
 			return out, duplex.ErrIdentity
@@ -285,7 +290,7 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 	path := []memory.DuplexPath{{Name: "inbox"}, {Name: "control"}, {Name: h.Kind.Lane()}}
 	count := 80 + 256
 	if h.Kind == duplex.Frame {
-		path = []memory.DuplexPath{{Name: "inbox"}, {Name: "request"}, {Name: "frames"}, {Index: int(h.FrameIndex)}}
+		path = []memory.DuplexPath{{Name: "inbox"}, {Name: "request"}, {Name: "frames"}, {Index: 1}}
 		count = 80 + 1024
 	}
 	array, err := n.Mailbox.ResolveDuplexArray(ctx, path, h.Runtime, h.Arena, count)

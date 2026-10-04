@@ -1,5 +1,12 @@
 # Duplex implementation candidate — 2026-10-04
 
+Superseded for this branch by the authoritative
+[Lychee Dev mailbox protocol v1 contract](live-mailbox-v1-architecture-2026-10-04.md).
+The current schema is `lycheedev.mailbox.v1`; one physical data row carries up to
+256 logical frames / 1 MiB. The older duplex magic, domains and layout below are
+historical and rejected, not compatibility options. Consult the new contract and
+`implementation-status.md` for current implementation and validation boundaries.
+
 This branch replaces the live transport. It does not retain the LoD execution
 scheme, old input keys, optical readiness, or old wire compatibility. Published
 3.1.1 evidence applies to that release, not this candidate. No version promotion,

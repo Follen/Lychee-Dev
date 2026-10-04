@@ -28,7 +28,9 @@ collectgarbage("collect");local baseline=collectgarbage("count")
 local f=assert(io.open(largePath,"rb"))
 for i=1,256 do
     local wire=f:read(4416);assert(wire and #wire==4416,"truncated megabyte frame stream")
-    setRow(arena.request.frames[i],wire);assert(engine.Poll(arena,8))
+    setRow(arena.request.frames[1],wire);assert(engine.Poll(arena,8))
+    local progress=engine.Snapshot().request
+    assert(progress and progress.acceptedFrames==i,"single slot did not acknowledge exact logical frame")
 end
 f:close();assert(engine.Snapshot().phase=="prepared","1 MiB request not prepared")
 local ops=assert(io.open(opsPath,"rb"))

@@ -91,7 +91,7 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 ## doctor
 
-- `doctor` — read-only. Read workspace health and optional fresh duplex target readiness without connecting, input or repairs
+- `doctor` — read-only. Read workspace health and optional fresh mailbox protocol v1 target readiness without connecting, input or repairs
   Flags: `--home <root>`, `--format text|json|jsonl`, `--offline`, `--session <CON-id>`, `--installation <client>`, `--pid <pid>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 
 ## evidence
@@ -128,21 +128,21 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live instances` — read-only. List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding
   Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`, `--passive`.
-- `live connect` — mutates. Discover and freshly bind a duplex memory connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work
+- `live connect` — mutates. Discover and freshly bind a mailbox protocol v1 connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work
   Flags: `--home <root>`, `--format text|json|jsonl`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--session <session-id>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live reload` — mutates. Perform one correlated UI reload on the selected client and verify the new runtime: --session <session-id> --request <idempotency-key>
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live bugs` — mutates. Read 1-100 retained provider errors; native CON connections persist and release the bounded observation result automatically
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--count <1-100>`, `--account <account>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
-- `live status <connection-id>` — read-only. Read retained duplex connection and request evidence without driving the game: live status <connection-id>
+- `live status <connection-id>` — read-only. Read retained mailbox connection and request evidence without driving the game: live status <connection-id>
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`.
-- `live resume <connection-id>` — mutates. Resume the exact duplex connection and outstanding request; revalidate identity and never replay unknown execution
+- `live resume <connection-id>` — mutates. Resume the exact mailbox connection and outstanding request; revalidate identity and never replay unknown execution
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
-- `live cancel <connection-id>` — mutates. Cancel the exact outstanding duplex request through an independent control lane; running synchronous Lua can stop only after it returns
+- `live cancel <connection-id>` — mutates. Cancel the exact outstanding mailbox request through an independent control lane; running synchronous Lua can stop only after it returns
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
-- `live session <connection-id>` — read-only. Read retained duplex connection and evidence: live session <connection-id>; does not reconnect or authorize execution
+- `live session <connection-id>` — read-only. Read retained mailbox connection and evidence: live session <connection-id>; does not reconnect or authorize execution
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`.
-- `live disconnect <connection-id>` — mutates. Close the exact duplex connection through its independent control lane, verify resource release, and retire ownership; repeat safely after interruption
+- `live disconnect <connection-id>` — mutates. Close the exact mailbox connection through its independent control lane, verify resource release, and retire ownership; repeat safely after interruption
   Flags: `--format text|json|jsonl`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 
 ## project

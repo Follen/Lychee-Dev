@@ -76,10 +76,14 @@ can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-The CLI owns duplex memory publications, result integrity and journals. Follow its
+The candidate uses **Lychee Dev mailbox protocol v1** (`lycheedev.mailbox.v1`):
+one small reusable data table, one current request and independent controls.
+The CLI owns publications, frame/result acknowledgements, result integrity and journals. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
-work does not use the old OP/BTP ACK/finish/hide sequence.
+work does not use the old OP/BTP ACK/finish/hide sequence. Old duplex/slot wire
+is incompatible. Current writer profiles remain unverified and refuse game
+writes; an addon self-test or offline fixture does not prove CLI-to-game execution.
 
 ## Finish with evidence
 

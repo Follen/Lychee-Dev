@@ -1,5 +1,10 @@
 # 双向 mailbox 方案入口
 
+本页保留早期 duplex 方案历史。当前分支以
+[Lychee Dev mailbox protocol v1 权威合同](live-mailbox-v1-architecture-2026-10-04.md)
+为准：`lycheedev.mailbox.v1`，单物理 data 表复用，1 MiB / 256 帧为逻辑容量。
+下文旧布局、预算推算和阶段状态不作为当前实现事实或旧协议兼容许可。
+
 2026-10-04。状态：协议候选已实现，离线验证正在整合；原生写入没有合格的生命周期保证，仍拒绝写入，未实机验收。当前代码与限制见 [实施合同](live-duplex-implementation-2026-10-04.md)。
 任务分支：`codex/duplex-mailbox`。不做旧协议兼容，不保留 LoD 输入或 LoD 回退。
 

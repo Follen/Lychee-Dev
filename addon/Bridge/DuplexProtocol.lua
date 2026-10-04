@@ -5,9 +5,9 @@ local _, ns = ...
 local SHA = ns.SHA256
 local M = 4294967296
 local HEADER, FRAME_BYTES, CONTROL_BYTES = 320, 4096, 1024
-local REQUEST_BYTES, FRAME_COUNT = 1048576, 256
+local REQUEST_BYTES, FRAME_COUNT, FRAME_SLOTS = 1048576, 256, 1
 local ZERO16, ZERO32 = string.rep("\0",16), string.rep("\0",32)
-local MAGIC, SEND_MAGIC = "LYCDPX01", "LYCSBX01"
+local MAGIC, SEND_MAGIC = "LYCMBX01", "LYCMSB01"
 local KIND = {bind=1,frame=2,commit=3,cancel=4,close=5,resultAck=6,reload=7,lease=8,repair=9}
 local KINDBYID = {[1]="bind",[2]="frame",[3]="commit",[4]="cancel",[5]="close",[6]="resultAck",[7]="reload",[8]="lease",[9]="repair"}
 local LANES={"bindResume","close","cancel","commit","resultAck","reload","lease"}
@@ -64,17 +64,17 @@ local function zeroRange(bytes,first,last)
 end
 local function fail(reason)return nil,reason end
 
-local API={HeaderBytes=HEADER,FrameBytes=FRAME_BYTES,ControlBytes=CONTROL_BYTES,MaxSource=REQUEST_BYTES,MaxFrames=FRAME_COUNT,SendboxMagic=SEND_MAGIC,Kind=KIND}
+local API={HeaderBytes=HEADER,FrameBytes=FRAME_BYTES,ControlBytes=CONTROL_BYTES,MaxSource=REQUEST_BYTES,MaxFrames=FRAME_COUNT,FrameSlots=FRAME_SLOTS,SendboxMagic=SEND_MAGIC,Kind=KIND}
 function API.NewArena(generation)
     if type(generation)~="string" or #generation~=32 or generation:find("[^0-9a-f]") then return fail("duplex_arena_generation") end
     local function cells(n)local a={};for i=1,n do a[i]=0 end;return a end
     local frames,control={},{}
     local roots={frameRows={},controlRows={}}
-    for i=1,FRAME_COUNT do local row=cells(80+FRAME_BYTES/4);frames[i]=row;roots.frameRows[i]=row end
+    for i=1,FRAME_SLOTS do local row=cells(80+FRAME_BYTES/4);frames[i]=row;roots.frameRows[i]=row end
     for _,lane in ipairs(LANES) do local row=cells(80+CONTROL_BYTES/4);control[lane]=row;roots.controlRows[lane]=row end
     local request={frames=frames};local calibration={0,1,4294967295,0.125,-13.5,7654321}
     roots.request=request;roots.frames=frames;roots.control=control;roots.calibration=calibration
-    return {schema="lycheedev.duplex.v1",generation=generation,calibration=calibration,request=request,control=control},roots
+    return {schema="lycheedev.mailbox.v1",generation=generation,calibration=calibration,request=request,control=control},roots
 end
 
 -- Converts 80 header words into bytes, rejecting secret and non-integer cells.
@@ -104,7 +104,7 @@ function API.DecodeHeader(raw, expectedKind)
     local frameHash=raw:sub(233,264)
     local headerHash=raw:sub(265,296)
     local normalized=zeroRange(raw,265,312)
-    local computed,err=SHA.Digest("LYCDPX/header/v1\0"..normalized)
+    local computed,err=SHA.Digest("LYCMBX/header/v1\0"..normalized)
     if not computed then return nil,err end
     if computed~=headerHash then return fail("duplex_header_checksum") end
     local publicationHi,publicationLo=read64le(raw,149)
@@ -127,7 +127,7 @@ end
 function API.VerifyFrame(rawHeader,payload,expected)
     local h,err=API.DecodeHeader(rawHeader,KIND.frame);if not h then return nil,err end
     if type(payload)~="string" or #payload~=h.payloadBytes then return fail("duplex_frame_length") end
-    local digest;digest,err=SHA.Digest("LYCDPX/frame/v1\0"..rawHeader:sub(1,232)..payload)
+    local digest;digest,err=SHA.Digest("LYCMBX/frame/v1\0"..rawHeader:sub(1,232)..payload)
     if not digest then return nil,err end
     if digest~=h.frameSHA then return fail("duplex_frame_checksum") end
     if expected then
@@ -140,7 +140,7 @@ end
 function API.RequestDigest(requestId,actorBinding,budget,utcHi,utcLo,total,source)
     if type(source)~="string" or #source~=total or #source>REQUEST_BYTES then return fail("duplex_request_length") end
     if type(requestId)~="string" or #requestId~=16 or type(actorBinding)~="string" or #actorBinding~=16 then return fail("duplex_request_identity") end
-    local body="LYCDPX/request/v1\0"..requestId..actorBinding..u32le(budget)..u64word(utcHi,utcLo)..u32le(total)..source
+    local body="LYCMBX/request/v1\0"..requestId..actorBinding..u32le(budget)..u64word(utcHi,utcLo)..u32le(total)..source
     return SHA.Digest(body)
 end
 function API.VerifyResultAck(payload,requestId,requestSHA,terminal)
@@ -172,7 +172,7 @@ function API.ResultPage(requestId,requestSHA,index,count,body)
     if not id or not digest or not numberCell(index) or index<1 or index>32 or not numberCell(count) or count<1 or count>32
         or index>count or type(body)~="string" or #body>16384 then return fail("duplex_result_page_invalid") end
     local pageSHA=SHA.Digest(body)
-    return "LYCDPG01"..id..digest..u32le(index)..u32le(count)..u32le(#body)..pageSHA..body
+    return "LYCMRP01"..id..digest..u32le(index)..u32le(count)..u32le(#body)..pageSHA..body
 end
 
 local function detached(t)
@@ -182,6 +182,42 @@ function API.Create(deps)
     if not safe(deps) or type(deps)~="table" or type(deps.identity)~="table" and type(deps.identity)~="function" or type(deps.publish)~="function" or type(deps.execute)~="function" or type(deps.compile)~="function" or type(deps.clock)~="function" or type(deps.encode)~="function" then return nil,"duplex_dependencies_invalid" end
     local private={identity=nil,owner=nil,fenceHi=0,fenceLo=0,request=nil,terminal=nil,closing=false,disabled=true,lanes={},controlPublication={},controlFingerprint={},statusSequence=0,publication=0,reloadPending=false,reload=nil,lastSeqHi=0,lastSeqLo=0,lastRequestRaw=nil,lastDigestRaw=nil}
     local protocol={}
+    -- A negative fast path never grants execution. Weak keys cannot retain a
+    -- retired arena; shadows contain only numbers, not Lua object addresses.
+    local observedRows=setmetatable({}, {__mode="k"})
+    local function pollCandidate(words,count)
+        if not safe(words) or type(words)~="table" or getmetatable(words)~=nil then return true end
+        if #words~=count or rawget(words,count+1)~=nil then return true end
+        local lo,hi,tailLo,tailHi=rawget(words,75),rawget(words,76),rawget(words,77),rawget(words,78)
+        if not numberCell(lo) or not numberCell(hi) or not numberCell(tailLo) or not numberCell(tailHi) then return true end
+        if lo==0 and hi==0 or lo%2==1 or lo~=tailLo or hi~=tailHi then
+            observedRows[words]=nil;return false
+        end
+        local old=observedRows[words]
+        if old then
+            local unchanged=true
+            for i=1,count do
+                local value=rawget(words,i)
+                if not numberCell(value) or value~=old[i] then unchanged=false;break end
+            end
+            if unchanged then return false end
+        end
+        local shadow={}
+        for i=1,count do
+            local value=rawget(words,i)
+            if not numberCell(value) then return true end
+            shadow[i]=value
+        end
+        return true,shadow
+    end
+    local function rememberRow(words,shadow)
+        if not shadow then return end
+        for i=1,#shadow do
+            local value=rawget(words,i)
+            if not numberCell(value) or value~=shadow[i] then observedRows[words]=nil;return end
+        end
+        observedRows[words]=shadow
+    end
     local function snapshotRecord(phase)
         private.statusSequence=private.statusSequence+1
         local i=private.identity or {}
@@ -208,7 +244,7 @@ function API.Create(deps)
             actorOK=ok and actor~=nil and actor.guid==private.identity.actorGUID and actor.character==private.identity.character and actor.realm==private.identity.realm or false
         end
         local businessReady=not private.disabled and not private.closing and private.owner~=nil and actorOK and (not r or r.state=="released")
-        return {schema="lycheedev.duplex.v1",runtimeToken=i.runtime or "",arenaGeneration=i.arenaGeneration or "",
+        return {schema="lycheedev.mailbox.v1",layoutId="single-data-row-v1",runtimeToken=i.runtime or "",arenaGeneration=i.arenaGeneration or "",
             sessionToken=private.session or string.rep("0",32),ownerToken=private.owner or string.rep("0",32),
             actorBindingId=private.actorBinding or i.actorBindingId or string.rep("0",32),fence=uint64String(private.fenceHi,private.fenceLo),
             actorGUID=i.actorGUID or "",character=i.character or "",realm=i.realm or "",build=i.build or "",
@@ -266,7 +302,7 @@ function API.Create(deps)
         if h.payloadBytes%4~=0 or h.payloadBytes>capacity then return nil,"duplex_control_payload_length" end
         local payload;payload,err=wordsToBytes(words,81,h.payloadBytes/4)
         if not payload then return nil,err end
-        local digest;digest,err=SHA.Digest("LYCDPX/frame/v1\0"..hdr:sub(1,232)..payload)
+        local digest;digest,err=SHA.Digest("LYCMBX/frame/v1\0"..hdr:sub(1,232)..payload)
         if not digest or digest~=hdr:sub(233,264) then return nil,"duplex_control_checksum" end
         local again;again,err=wordsToBytes(words,1,80);if not again or again~=hdr then return nil,"duplex_control_changed" end
         for i=81+h.payloadBytes/4,80+capacity/4 do if rawget(words,i)~=0 then return nil,"duplex_control_padding" end end
@@ -298,20 +334,20 @@ function API.Create(deps)
         if not r then
             if h.frameIndex~=1 or private.closing or private.terminal or not newerSequence(h.requestSeqHi,h.requestSeqLo)
                 or private.lastRequestRaw==h.requestId or private.lastDigestRaw==h.requestSHA then return nil,"duplex_request_unexpected" end
-            local req={requestRaw=h.requestId,requestId=hex(h.requestId),seqHi=h.requestSeqHi,seqLo=h.requestSeqLo,digestRaw=h.requestSHA,digest=hex(h.requestSHA),attemptHi=h.attemptHi,attemptLo=h.attemptLo,totalBytes=h.totalBytes,frameCount=h.frameCount,budget=h.budget,utcHi=h.utcHi,utcLo=h.utcLo,state="receiving",parts={},frames={},bytes=0,nextFrame=0,hash=SHA.New()}
-            local prefix="LYCDPX/request/v1\0"..h.requestId..h.actorBinding..u32le(h.budget)..u64word(h.utcHi,h.utcLo)..u32le(h.totalBytes)
+            local req={requestRaw=h.requestId,requestId=hex(h.requestId),seqHi=h.requestSeqHi,seqLo=h.requestSeqLo,digestRaw=h.requestSHA,digest=hex(h.requestSHA),attemptHi=h.attemptHi,attemptLo=h.attemptLo,totalBytes=h.totalBytes,frameCount=h.frameCount,budget=h.budget,utcHi=h.utcHi,utcLo=h.utcLo,state="receiving",parts={},bytes=0,nextFrame=0,hash=SHA.New()}
+            local prefix="LYCMBX/request/v1\0"..h.requestId..h.actorBinding..u32le(h.budget)..u64word(h.utcHi,h.utcLo)..u32le(h.totalBytes)
             local hashOK,hashErr=SHA.Update(req.hash,prefix);if not hashOK then return nil,hashErr end
             if deps.clearPages then pcall(deps.clearPages) end
             private.request=req;r=req;private.lastSeqHi=h.requestSeqHi;private.lastSeqLo=h.requestSeqLo;private.lastRequestRaw=h.requestId;private.lastDigestRaw=h.requestSHA
         elseif h.requestId~=r.requestRaw or h.requestSeqHi~=r.seqHi or h.requestSeqLo~=r.seqLo or h.requestSHA~=r.digestRaw then
             return nil,"duplex_request_unexpected"
         end
-        if r.state~="receiving" or h.frameIndex~=r.nextFrame+1 or r.frames[h.frameIndex] then return nil,"duplex_frame_order" end
+        if r.state~="receiving" or h.frameIndex~=r.nextFrame+1 then return nil,"duplex_frame_order" end
         if h.frameCount~=r.frameCount or h.totalBytes~=r.totalBytes or h.budget~=r.budget or h.attemptHi~=r.attemptHi or h.attemptLo~=r.attemptLo then return nil,"duplex_frame_manifest_changed" end
         local expected=math.min(FRAME_BYTES,r.totalBytes-r.bytes)
         if expected<0 or #payload~=expected then return nil,"duplex_frame_extent" end
         local hashOK,hashErr=SHA.Update(r.hash,payload);if not hashOK then return nil,hashErr end
-        r.parts[#r.parts+1]=payload;r.frames[h.frameIndex]=true;r.bytes=r.bytes+#payload;r.nextFrame=r.nextFrame+1
+        r.parts[#r.parts+1]=payload;r.bytes=r.bytes+#payload;r.nextFrame=r.nextFrame+1
         private.released=nil;private.terminal=nil
             local ok,reason=publish("transfer",{phase="receiving",request={requestId=r.requestId,requestSHA256=r.digest,requestSeq=uint64String(r.seqHi,r.seqLo),acceptedFrames=r.nextFrame,frameCount=r.frameCount,receivedBytes=r.bytes,totalBytes=r.totalBytes}})
         if not ok then return nil,reason end
@@ -390,6 +426,9 @@ function API.Create(deps)
                     return nil,"duplex_bind_owner_conflict"
                 end
             end
+            -- Cached negative observations belong to one execution owner.
+            -- Rebinding must reclassify even byte-identical old publications.
+            observedRows=setmetatable({}, {__mode="k"})
             private.session=hex(h.session);private.owner=hex(h.owner);private.actorBinding=hex(h.actorBinding);private.fenceHi=h.fenceHi;private.fenceLo=h.fenceLo
             private.closing=false
             private.controlPublication[laneName]={hi=h.publicationSeqHi,lo=h.publicationSeqLo}
@@ -463,7 +502,7 @@ function API.Create(deps)
             if not API.VerifyResultAck(payload,r.requestId,r.digest,private.terminal) then return receipt(laneName,h.messageId,r.requestRaw,"ack_mismatch") end
             if not private.terminal.resourcesReleased then return receipt(laneName,h.messageId,r.requestRaw,"resources_pending") end
             private.released={requestId=r.requestId,requestSHA256=r.digest};r.state="released";r.fn=nil;r.execution=nil
-            local permit=hex(SHA.Digest("LYCDPX/reuse/v1\0"..r.requestRaw..r.digestRaw..h.messageId))
+            local permit=hex(SHA.Digest("LYCMBX/reuse/v1\0"..r.requestRaw..r.digestRaw..h.messageId))
             private.request=nil;private.terminal=nil
             if deps.clearPages then pcall(deps.clearPages) end
             return receipt(laneName,h.messageId,r.requestRaw,"released",{reusePermit=permit})
@@ -501,9 +540,9 @@ function API.Create(deps)
                 or r.digest~=repair.requestSHA256) then return receipt(laneName,h.messageId,h.requestId,"repair_rejected") end
             if h.attemptHi==0 and h.attemptLo==0 then return receipt(laneName,h.messageId,h.requestId,"repair_rejected") end
             if not repair.idle then
-                r.attemptHi=h.attemptHi;r.attemptLo=h.attemptLo;r.state="receiving";r.parts={};r.frames={};r.bytes=0;r.nextFrame=0
+                r.attemptHi=h.attemptHi;r.attemptLo=h.attemptLo;r.state="receiving";r.parts={};r.bytes=0;r.nextFrame=0
                 r.hash=SHA.New()
-                local prefix="LYCDPX/request/v1\0"..r.requestRaw..h.actorBinding..u32le(r.budget)..u64word(r.utcHi,r.utcLo)..u32le(r.totalBytes)
+                local prefix="LYCMBX/request/v1\0"..r.requestRaw..h.actorBinding..u32le(r.budget)..u64word(r.utcHi,r.utcLo)..u32le(r.totalBytes)
                 local hashOK,hashErr=SHA.Update(r.hash,prefix);if not hashOK then return nil,hashErr end
                 r.fn=nil;r.challenge=nil;r.challengeRaw=nil;r.challengeAt=nil;private.terminal=nil
             end
@@ -553,17 +592,27 @@ function API.Create(deps)
         local processed=0
         for _,lane in ipairs(LANES) do
             if processed>=budget then break end
-            local h,payload=processControl(lane,rawget(arena.control,lane))
-            if h then processed=processed+1 end
-            if not h and payload and payload~="duplex_header_invalid" and payload~="duplex_publication_unstable" then private.lastFailure=payload end
+            local words=rawget(arena.control,lane)
+            local candidate,shadow=pollCandidate(words,80+CONTROL_BYTES/4)
+            if candidate then
+                local h,payload=processControl(lane,words)
+                rememberRow(words,shadow)
+                if h then processed=processed+1 end
+                if not h and payload and payload~="duplex_header_invalid" and payload~="duplex_publication_unstable" then private.lastFailure=payload end
+            end
         end
         if processed<budget and not private.closing and (not private.request or private.request.state=="receiving") then
             local frames=arena.request.frames
-            local r=private.request
-            local index=r and r.nextFrame+1 or 1
-            local words=rawget(frames,index)
-            local ok,err=processFrame(words)
-            if ok then processed=processed+1 elseif err and err~="duplex_publication_unstable" and err~="duplex_header_invalid" then private.lastFailure=err end
+            -- Logical frame numbers advance only after a private copy and ACK.
+            -- All frames reuse one physical row; old/unknown writes cannot be
+            -- overwritten merely because their host publication returned.
+            local words=rawget(frames,1)
+            local candidate,shadow=pollCandidate(words,80+FRAME_BYTES/4)
+            if candidate then
+                local ok,err=processFrame(words)
+                rememberRow(words,shadow)
+                if ok then processed=processed+1 elseif err and err~="duplex_publication_unstable" and err~="duplex_header_invalid" then private.lastFailure=err end
+            end
         end
         if private.reload then
             local clockOK,now=pcall(deps.clock)
@@ -577,6 +626,9 @@ function API.Create(deps)
         return true
     end
     function protocol.Enable()if private.quarantined then return nil,"duplex_quarantined" end;private.disabled=false;return true end
+    function protocol.RuntimeState()
+        return private.quarantined==true,private.lastFailure,private.repaired==true
+    end
     function protocol.Disable()
         local r=private.request
         if r and (r.state=="receiving" or r.state=="prepared") then

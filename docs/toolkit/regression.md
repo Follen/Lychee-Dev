@@ -1,6 +1,13 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
-2026-10-04 此开发分支以 [duplex 实施合同](live-duplex-implementation-2026-10-04.md) 为当前 live 合同；旧 LoD/按键/色块协议停止加载和发布，无旧兼容。新协议离线验证正在整合，当前没有通过验收的原生 writer profile，所有游戏内存写入默认拒绝，实机验收为 not_run。下方旧 live 结果仅保留原版本历史范围。
+2026-10-04 当前分支采用 [Lychee Dev mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)。
+新 schema/magic/hash domain/layout 必须拒绝旧协议；唯一物理数据行允许 1 MiB 逻辑请求，
+但只有准确私有帧 ACK 才能覆盖，结果持久化/ACK/release 后才能接下一条命令。
+回归覆盖全部 lane 的阴影缓存保留量、冷/热状态空闲分配、同标记内容变化、
+清零/odd 后重新发布、换 owner 后旧输入拒绝、GC 私有根和两代 writer-drain。
+`TestMailboxRuntimeIdleMemory` 测真实 TOC/Runtime/encoder；Go/Lua 压力覆盖最大输入和 140 条释放请求。
+新 native 执行与游戏内部 self-check 分开记账；当前 writer profile 仍未资格验证。
+旧 LoD/按键/色块输入不加载、不打包、不回退。下方旧 live 结果只保留原版本历史范围。
 
 2026-10-02 [Retail Encoding 预算](retail-encoding-budget-2026-10-02.md)：大型逻辑对象的小范围读取可用默认额度；CKey/EKey 目录及页 miss 分配前拒绝真实超额；命中复用，驱逐和失败后重读累计不退款；同查询共享额度不重置，并发填充保留完整性验证。公开无缓存行为、BLTE 临时缓冲和 Root 计费保持。合成 fixture 与固定真实 pin 的查询结果分开记录。
 

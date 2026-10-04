@@ -40,11 +40,13 @@ local function boot(profile,enabled,delayed)
     end
     assert(ns.Startup.ready and ns.Startup.identity.product==profile.product)
     if enabled then
-        assert(ns.Mailbox and ns.Mailbox.schema=="lycheedev.duplex.v1")
+        assert(ns.Mailbox and ns.Mailbox.schema=="lycheedev.mailbox.v1")
         assert(ns.DuplexRuntime.Snapshot().enabled and #frames==2)
         assert(ns.Mailbox.inbox.calibration[1]==0 and ns.Mailbox.inbox.calibration[6]==7654321)
-        assert(#ns.Mailbox.inbox.request.frames==256 and #ns.Mailbox.inbox.request.frames[1]==1104)
-        assert(#ns.Mailbox.inbox.control.bindResume==336 and ns.Mailbox.sendbox.status:sub(1,8)=="LYCSBX01")
+        assert(ns.DuplexProtocol.FrameSlots==1 and #ns.Mailbox.inbox.request.frames==ns.DuplexProtocol.FrameSlots
+            and #ns.Mailbox.inbox.request.frames[1]==1104)
+        assert(ns.DuplexProtocol.MaxFrames==256 and ns.DuplexProtocol.MaxSource==1048576)
+        assert(#ns.Mailbox.inbox.control.bindResume==336 and ns.Mailbox.sendbox.status:sub(1,8)=="LYCMSB01")
         local framesRef=ns.Mailbox.inbox.request.frames
         local weak=setmetatable({framesRef},{__mode="v"})
         ns.Mailbox=nil;collectgarbage("collect")
@@ -90,4 +92,4 @@ assert(damaged.DuplexRuntime.Snapshot().protocol.quarantined==true
 assert(damaged.Controls.Handle("disconnect"))
 local fresh=boot(profiles[1],true,false)
 assert(fresh.DuplexRuntime.Snapshot().runtime~=oldRuntime,"reload reused a runtime token")
-print("lifecycle: duplex startup, opt-in runtime, GC root and reload passed")
+print("lifecycle: mailbox v1 startup, opt-in runtime, GC root and reload passed")

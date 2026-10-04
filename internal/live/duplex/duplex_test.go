@@ -17,6 +17,41 @@ import (
 
 var fixtureIdentity = Identity{Runtime: "11111111111111111111111111111111", Arena: "22222222222222222222222222222222", Session: "33333333333333333333333333333333", Owner: "44444444444444444444444444444444", ActorBinding: "55555555555555555555555555555555", Fence: 1}
 
+func TestMailboxV1RejectsPreviousSchemaAndMagic(t *testing.T) {
+	frames, err := NewFrames(fixtureIdentity, strings.Repeat("6", 32), 1, 1, 1234, 1000, []byte("return true"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := EncodeMessage(frames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(wire, "LYCDPX01")
+	if _, err := DecodeMessage(wire); err == nil {
+		t.Fatal("accepted retired duplex header")
+	}
+	box := fixtureSendbox()
+	box.Schema = "lycheedev.duplex.v1"
+	if _, err := EncodeSendbox(box); err == nil {
+		t.Fatal("accepted retired duplex schema")
+	}
+	box.Schema = "lycheedev.mailbox.v1"
+	wire, err = EncodeSendbox(box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(wire, "LYCSBX01")
+	if _, err := DecodeSendbox(wire); err == nil {
+		t.Fatal("accepted retired duplex sendbox")
+	}
+	for _, layout := range []string{"", "256-row-v1"} {
+		box.LayoutID = layout
+		if _, err := EncodeSendbox(box); err == nil {
+			t.Fatalf("accepted incompatible layout %q", layout)
+		}
+	}
+}
+
 func TestWireBoundariesAndTampering(t *testing.T) {
 	for _, n := range []int{0, 1, 4095, 4096, 4097, MaxSourceBytes - 1, MaxSourceBytes} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
@@ -91,7 +126,7 @@ func TestLogicalDigestExcludesRepairIdentity(t *testing.T) {
 		t.Fatal("u64 rounded")
 	}
 	// Fixed cross-language request/header vector (exact CRLF is significant).
-	if before != "35680b5b9ee65ad4eb056008c462d591aaae2327d17d52c377c4c016c9238881" {
+	if before != "f23f71e94dabb63d2de798fa76a023b15d1d0c7f3fb6ffd0c124fa4862d05a22" {
 		t.Fatal("request golden mismatch", before)
 	}
 	frames[0].Header.MessageID = "77777777777777777777777777777777"
@@ -99,7 +134,7 @@ func TestLogicalDigestExcludesRepairIdentity(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if hex.EncodeToString(wire[232:264]) != "fb7da94043e1d06f3867c15f93a52688345e33adc79f64c42568955e7285f345" || hex.EncodeToString(wire[264:296]) != "4fe91111ad00870d3f5f2b4ff9d481d8fe9b516ffee3817e9a904370803b2542" {
+	if hex.EncodeToString(wire[232:264]) != "a277f615b61fef4f0c5c430e961610457ecbae21bc955a998087b29645c7483e" || hex.EncodeToString(wire[264:296]) != "b1f4f14eca6a39fb0f51063e23e793428c57824f820b877961262d3157b7e8a4" {
 		t.Fatal("cross language frame/header golden mismatch")
 	}
 }
@@ -178,7 +213,7 @@ func (s *fixtureStore) SaveResult(_ context.Context, m ResultManifest, p []byte)
 }
 
 func fixtureSendbox() Sendbox {
-	return Sendbox{Identity: fixtureIdentity, Schema: "lycheedev.duplex.v1", Phase: "idle", Ready: true, ActorReady: true, TransportReady: true, BusinessReady: true, ControlReady: true, StatusSequence: 1, Heartbeat: 1, Receipts: map[string]Receipt{}}
+	return Sendbox{Identity: fixtureIdentity, Schema: "lycheedev.mailbox.v1", LayoutID: "single-data-row-v1", Phase: "idle", Ready: true, ActorReady: true, TransportReady: true, BusinessReady: true, ControlReady: true, StatusSequence: 1, Heartbeat: 1, Receipts: map[string]Receipt{}}
 }
 
 type fixtureBackend struct {

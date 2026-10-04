@@ -1,4 +1,4 @@
-# Duplex recovery
+# Mailbox v1 recovery
 
 Preserve project, CON, request key, exact source and execution budget. Run
 [doctor](live-doctor.md) before drives. Status is read-only; resume reconciles
@@ -10,6 +10,8 @@ lycheedev live resume <CON-id> --project <project-directory> --wait-seconds 120 
 lycheedev live cancel <CON-id> --project <project-directory> --format json
 lycheedev live disconnect <CON-id> --project <project-directory> --format json
 ```
+
+## Input and recovery
 
 One business request can be outstanding. Cancel and close use independent control
 lanes; they do not need the business driver lease. Cancel is a request, not proof
@@ -24,24 +26,48 @@ itself revoke cancellation or close authority. Follow the independent native
 stops all writes and preserves the original journal; wait and re-observe that
 same process instead of writing to retained addresses.
 
+## Durable evidence and older journals
+
 The CLI retains a transfer deadline separate from the addon execution budget.
 A host timeout does not cancel Lua or renew either budget. The exact terminal
 manifest and all result page hashes must verify, result bytes must be durable,
-and the exact ACK and RELEASED must be observed before another business request.
+and the exact result ACK and RELEASED must be observed before another business request.
+Frame ACK only permits the next logical frame to overwrite the single physical
+data table; it does not retire the request or prove business execution.
 A successful or failed verified report with pending release is useful evidence
 with an unfinished cleanup obligation.
 
-If the public arena is lost, the addon revokes its generation and retains its
-private execution ledger and old arena until host writers are drained. The CLI
-can repair only from that proof. A private `not_started` result permits resending
-the same request ID, source and digest to a new arena. Already executed work
-returns its original result. Missing ledger, unknown execution or an uncertain
+Old duplex and slot journals are not upgraded into mailbox v1 requests. Retain
+their evidence for the matching older release; do not relabel or replay them.
+
+## Recover without replay
+
+If the public arena is damaged, the addon revokes its generation and retains its
+private execution ledger and the old leaf rows through private strong roots.
+At most two arena generations exist during repair; a second unresolved failure
+quarantines the runtime. The host must drain the data writer and all seven
+control writers before exact repair acceptance can release the old roots.
+The CLI can repair only from those independent facts. A private `not_started` proof permits resending
+the same request ID, source and digest to a new arena. For executed work, retrieve
+the retained original result if available; never retransmit the source. Missing
+ledger, unknown execution or an uncertain
 commit never permits automatic replay, even for read-only probes.
+
+Clean idle/released repair additionally requires no unacknowledged request or
+terminal result, released resources and retained owner/session/fence/tombstone.
+It preserves ownership and sequence evidence; it does not create a fresh owner.
+
+## Ownership and runtime retirement
 
 Actual loss of the private roots or ledger is not recoverable by guessing an
 address. Stop writes and preserve uncertainty. A different process, actor or Lua
 runtime cannot inherit old request authority. Do not clear claims, alter journals,
 force GC, inject a runtime, or recreate empty state to escape a pending request.
+
+A completed close retains its old private owner/session/fence and released
+request proof. A new connection in the same runtime must prove that exact closed,
+quiescent binding and use a new owner/session with the next fence. The CLI owns
+this fresh-bind handshake; clearing an owner field is not a reconnect procedure.
 
 Intentional reload is an independent, nonce-correlated command:
 
@@ -49,6 +75,8 @@ Intentional reload is an independent, nonce-correlated command:
 lycheedev live reload --project <project-directory> --session <CON-id> --request <reload-key> --format json
 ```
 
-Reload ending the old runtime does not prove its probe had no effects. Preserve
-the old outcome and bind the replacement only after exact retirement. A new key
+Reload uses an exact private prepare challenge and a durably recorded lease
+commit. Reload ending the old runtime does not prove its probe had no effects.
+Preserve the old outcome and connect to the replacement only after exact
+retirement. Resume does not silently bind a new runtime or continue old code. A new key
 means a new experiment after completion, never a retry shortcut.

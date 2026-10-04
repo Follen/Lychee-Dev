@@ -82,28 +82,37 @@ from acceptance. A client folder is a location, not an identity: read
 
 ## Live (game) rules
 
-This development branch uses `docs/toolkit/live-duplex-implementation-2026-10-04.md`
-and `skills/lycheedev/references/live-investigation.md`. Published 3.1.1 and older
-live acceptance records retain only their historical scope. There is no LoD,
-keyboard bootstrap, optical readiness or old protocol compatibility here.
+The current branch's protocol authority is
+`docs/toolkit/live-mailbox-v1-architecture-2026-10-04.md`, with operational guidance
+in `skills/lycheedev/references/live-investigation.md`. Lychee Dev mailbox protocol
+v1 (`lycheedev.mailbox.v1`) supersedes the earlier duplex and native slot/routing
+contracts for this branch. Those contracts and published 3.1.1 acceptance records
+retain only their historical scope. There is no LoD, keyboard bootstrap, optical
+readiness or old schema/wire/layout compatibility here.
 
 - Disabled transport allocates no arena, event subscriptions, timers or OnUpdate.
   The one-shot core loader is separately budgeted. The owner authorized bounded
-  polling while duplex is enabled; it is not a general exception for features.
+  polling while mailbox is enabled; it is not a general exception for features.
 - `inbox` is CLI to addon; `sendbox` is addon to CLI. Identity, SHA256, exact
   uint64 sequences, fresh private challenge and one outstanding request govern
-  execution. Exact terminal + durable result + ACK + RELEASED gate new work.
+  execution. One physical data table is reused for up to 256 logical 4096-byte
+  frames (1 MiB total). Frame ACK permits overwriting that row; exact terminal +
+  durable result + result ACK + RELEASED gate new work.
 - Run read-only targeted doctor before each live drive. Business readiness must
   not block independently eligible cancel, result retrieval or disconnect.
 - Retain project, CON, request, source and budget on pending work. Unknown effects
   do not replay. Only retained private not_started evidence plus drained writers
   permits the same request to be retransmitted after generation repair.
+- Private strong roots retain every exchange row. Repair permits at most the
+  current and one retired arena; all eight host writer lanes must drain before
+  exact repair acceptance can release retired roots. They do not pin VM lifetime.
 - The CLI owns native publication and leases. Do not bypass it with raw writes,
   guessed offsets, deleted claims, process suspension or injection. Raw address
   research is a separate, explicitly scoped workflow.
 - Build-bound read/RVA qualification does not establish native write capability.
   Every writer profile needs independent array/number and collector/lifetime
   evidence. Current candidate profiles are not_run and refuse production writes.
+  Addon self-tests and offline fixtures do not establish CLI-to-game execution.
 - Deploy sealed candidate files using addon install. A clean managed installation
   must match the CLI; no overlay copying. First enablement uses /dev connect;
   replaced incompatible runtimes require an explicit manual reload.

@@ -93,7 +93,7 @@ and captured values attached. Cleanup runs in reverse registration order on
 completion, failure or timeout. A cleanup failure must leave resourcesReleased
 false and prevent result release/new business, even if a result was produced.
 Preserve that result and the exact CON for diagnosis. Do not claim that a timeout
-or reload attempt proves cleanup; the duplex reload contract requires exact
+or reload attempt proves cleanup; the mailbox v1 reload contract requires exact
 quiescence and runtime replacement evidence. Do not create permanent hooks or
 mutate Blizzard-owned APIs.
 Choose the execute budget to cover the probe's own async deadline and cleanup; a

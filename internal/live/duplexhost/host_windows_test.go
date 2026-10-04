@@ -160,7 +160,7 @@ func TestRepairDoesNotReacquireOwnLane(t *testing.T) {
 	}); e != nil {
 		t.Fatal(e)
 	}
-	box := duplex.Sendbox{Identity: hostIdentity, Schema: "lycheedev.duplex.v1", Phase: "idle", TransportReady: true, ControlReady: true, Heartbeat: 1, StatusSequence: 1}
+	box := duplex.Sendbox{Identity: hostIdentity, Schema: "lycheedev.mailbox.v1", LayoutID: "single-data-row-v1", Phase: "idle", TransportReady: true, ControlReady: true, Heartbeat: 1, StatusSequence: 1}
 	box.Arena = "77777777777777777777777777777777"
 	box.Repair = &duplex.RepairProof{PreviousArena: hostIdentity.Arena, NewArena: box.Arena, Challenge: "88888888888888888888888888888888", RequestID: frames[0].Header.RequestID, RequestSHA256: frames[0].Header.RequestSHA256, NotStarted: true, LedgerRetained: true}
 	n := &Native{Mailbox: &readFixture{}, observe: func(context.Context) (duplex.Sendbox, error) { return box, nil }}

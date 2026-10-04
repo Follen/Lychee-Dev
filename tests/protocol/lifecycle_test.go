@@ -12,7 +12,7 @@ func TestDuplexRuntimeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output)
 	}
-	if !bytes.Contains(output, []byte("lifecycle: duplex startup, opt-in runtime, GC root and reload passed")) {
+	if !bytes.Contains(output, []byte("lifecycle: mailbox v1 startup, opt-in runtime, GC root and reload passed")) {
 		t.Fatalf("missing lifecycle result: %s", output)
 	}
 }

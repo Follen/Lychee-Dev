@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const DuplexMailboxSchema = "lycheedev.duplex.v1"
+const DuplexMailboxSchema = "lycheedev.mailbox.v1"
 
 // Array layout is checked against a runtime calibration, never inherited from
 // the root RVA alone. A calibration is evidence of this instance's layout, not
@@ -84,7 +84,7 @@ func (r *MailboxReader) duplexRoot(ctx context.Context) (*luaAccess, uint64, err
 		return nil, 0, errors.Join(mailboxError("mailbox_layout"), err)
 	}
 	box := v.pointer
-	for _, check := range []struct{ name, want string }{{"schema", DuplexMailboxSchema}, {"release", r.release}} {
+	for _, check := range []struct{ name, want string }{{"schema", DuplexMailboxSchema}, {"layoutId", "single-data-row-v1"}, {"release", r.release}} {
 		value, e := a.lookup(ctx, box, check.name)
 		if e != nil || value.tag != 4 {
 			return nil, 0, errors.Join(mailboxError("duplex_"+check.name), e)

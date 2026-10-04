@@ -1,9 +1,12 @@
 local _, ns = ...
 
--- Opt-in owner for the single native duplex mailbox. Its arena and controller
+-- Opt-in owner for the Lychee Dev mailbox protocol v1. Its arena and controller
 -- stay strongly reachable from this closure; the public object carries cells.
 local owner, arena, engine, ticker, generation, retiredArena, repairPending, arenaRoots, retiredRoots = nil, nil, nil, nil, 0, nil, false, nil, nil
 local privatePages, projectedPages = {}, nil
+local CALIBRATION_EXPECTED={0,1,4294967295,0.125,-13.5,7654321}
+local CONTROL_LANES={"bindResume","close","cancel","commit","resultAck","reload","lease"}
+local FRAME_SLOTS=ns.DuplexProtocol.FrameSlots
 local function restricted(v)return issecretvalue and issecretvalue(v)end
 local function plainTable(v)return not restricted(v) and type(v)=="table" and getmetatable(v)==nil end
 local function freshToken(seed)
@@ -27,7 +30,7 @@ local function publicMailbox(identity, cells)
     local pages={};for i,v in pairs(privatePages) do pages[i]=v end;projectedPages=pages
     local sendbox={status="",receipts="",resultPages=pages}
     local inbox={calibration=cells.calibration,request=cells.request,control=cells.control}
-    return {schema="lycheedev.duplex.v1",release=ns.Release,runtime=identity.runtime,
+    return {schema="lycheedev.mailbox.v1",layoutId="single-data-row-v1",release=ns.Release,runtime=identity.runtime,
         arenaGeneration=identity.arenaGeneration,inbox=inbox,sendbox=sendbox}
 end
 local function ensureSendbox()
@@ -63,7 +66,7 @@ local function makeOwner()
     local identity={runtime=runtime,arenaGeneration=arenaGeneration,release=ns.Release,
         actorGUID=actor.guid,character=actor.character,realm=actor.realm,build=build.build,
         product=build.product,version=build.build,
-        actorBindingId=ns.SHA256.Hex(ns.SHA256.Digest("LYCDPX/actor/v1\0"..actor.guid.."\0"..build.build.."\0"..build.product)):sub(1,32)}
+        actorBindingId=ns.SHA256.Hex(ns.SHA256.Digest("LYCMBX/actor/v1\0"..actor.guid.."\0"..build.build.."\0"..build.product)):sub(1,32)}
     local cells,roots=ns.DuplexProtocol.NewArena(arenaGeneration);if not cells then return nil,roots end
     local box=publicMailbox(identity,cells)
     local challenge=function()
@@ -128,19 +131,18 @@ local function topologyValid()
     if not plainTable(inbox) then return false end
     local calibration=rawget(inbox,"calibration")
     if not plainTable(calibration) or calibration~=rawget(arena,"calibration") or calibration~=rawget(arenaRoots,"calibration") or #calibration~=6 then return false end
-    local expected={0,1,4294967295,0.125,-13.5,7654321}
-    for i=1,6 do local value=rawget(calibration,i);if restricted(value) or value~=expected[i] then return false end end
+    for i=1,6 do local value=rawget(calibration,i);if restricted(value) or value~=CALIBRATION_EXPECTED[i] then return false end end
     local request=rawget(inbox,"request");local control=rawget(inbox,"control")
     if request~=rawget(arena,"request") or control~=rawget(arena,"control") then return false end
     if not plainTable(request) or not plainTable(control) or request~=rawget(arenaRoots,"request")
         or control~=rawget(arenaRoots,"control") then return false end
     local frames=rawget(request,"frames")
-    if not plainTable(frames) or frames~=rawget(arenaRoots,"frames") or #frames~=256 then return false end
-    for i=1,256 do
+    if not plainTable(frames) or frames~=rawget(arenaRoots,"frames") or #frames~=FRAME_SLOTS then return false end
+    for i=1,FRAME_SLOTS do
         local row=rawget(frames,i)
         if not plainTable(row) or row~=rawget(arenaRoots,"frameRows")[i] or #row~=1104 then return false end
     end
-    for _,lane in ipairs({"bindResume","close","cancel","commit","resultAck","reload","lease"}) do
+    for _,lane in ipairs(CONTROL_LANES) do
         local row=rawget(control,lane)
         if not plainTable(row) or row~=rawget(arenaRoots,"controlRows")[lane] or #row~=336 then return false end
     end
@@ -159,8 +161,8 @@ local function tick(elapsed)
         return
     end
     if ns.Mailbox~=owner then ns.Mailbox=owner;return end
-    local current=engine.Snapshot()
-    if current.quarantined then return end
+    local quarantined=engine.RuntimeState()
+    if quarantined then return end
     -- Validate all public roots and row identities before indexed access. A
     -- damaged topology is repaired from private references without reading it.
     if not topologyValid() then
@@ -168,12 +170,12 @@ local function tick(elapsed)
     end
     local enabled=engine.Enable();if not enabled then return end
     engine.Poll(arena,8)
-    local after=engine.Snapshot()
-    if after.lastFailure=="duplex_frame_shape" or after.lastFailure=="duplex_lane_shape" or after.lastFailure=="duplex_cell_invalid"
-        or after.lastFailure=="duplex_control_shape" or after.lastFailure=="duplex_control_padding" or after.lastFailure=="duplex_frame_padding" then
+    local _,lastFailure,repaired=engine.RuntimeState()
+    if lastFailure=="duplex_frame_shape" or lastFailure=="duplex_lane_shape" or lastFailure=="duplex_cell_invalid"
+        or lastFailure=="duplex_control_shape" or lastFailure=="duplex_control_padding" or lastFailure=="duplex_frame_padding" then
         repairArena();return
     end
-    if repairPending and after.repaired then
+    if repairPending and repaired then
         engine.ReleaseRetiredArena();retiredArena=nil;retiredRoots=nil;repairPending=false
     end
     if heartbeatElapsed>=1 then heartbeatElapsed=heartbeatElapsed-1;engine.Heartbeat() end

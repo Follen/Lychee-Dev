@@ -150,7 +150,7 @@ func RequestDigest(h Header, source []byte) (string, error) {
 	binary.LittleEndian.PutUint32(n[:4], h.BudgetMillis)
 	binary.LittleEndian.PutUint64(n[4:12], h.CreatedUTCMillis)
 	binary.LittleEndian.PutUint32(n[12:], h.TotalBytes)
-	return hash("LYCDPX/request/v1\x00", r, a, n[:], source), nil
+	return hash("LYCMBX/request/v1\x00", r, a, n[:], source), nil
 }
 
 func validateShape(h Header, payload []byte) error {
@@ -202,7 +202,7 @@ func EncodeMessage(m Message) ([]byte, error) {
 		return nil, err
 	}
 	b := make([]byte, HeaderBytes+len(m.Payload))
-	copy(b, "LYCDPX01")
+	copy(b, "LYCMBX01")
 	binary.LittleEndian.PutUint32(b[8:12], uint32(h.Kind))
 	for i, s := range []string{h.Runtime, h.Arena, h.Session, h.Owner, h.ActorBinding, h.RequestID, h.MessageID, h.Challenge} {
 		v, e := token(s)
@@ -222,10 +222,10 @@ func EncodeMessage(m Message) ([]byte, error) {
 		return nil, e
 	}
 	copy(b[200:], d)
-	fd := hash("LYCDPX/frame/v1\x00", b[:232], m.Payload)
+	fd := hash("LYCMBX/frame/v1\x00", b[:232], m.Payload)
 	f, _ := hex.DecodeString(fd)
 	copy(b[232:], f)
-	hd := hash("LYCDPX/header/v1\x00", b[:HeaderBytes])
+	hd := hash("LYCMBX/header/v1\x00", b[:HeaderBytes])
 	v, _ := hex.DecodeString(hd)
 	copy(b[264:], v)
 	binary.LittleEndian.PutUint64(b[296:], h.PublicationBegin)
@@ -236,7 +236,7 @@ func EncodeMessage(m Message) ([]byte, error) {
 
 func DecodeMessage(b []byte) (Message, error) {
 	var m Message
-	if len(b) < HeaderBytes || string(b[:8]) != "LYCDPX01" {
+	if len(b) < HeaderBytes || string(b[:8]) != "LYCMBX01" {
 		return m, errors.New("invalid wire header")
 	}
 	if !bytes.Equal(b[312:320], make([]byte, 8)) {
@@ -268,12 +268,12 @@ func DecodeMessage(b []byte) (Message, error) {
 	if err := validateShape(*h, m.Payload); err != nil {
 		return Message{}, err
 	}
-	if hash("LYCDPX/frame/v1\x00", b[:232], m.Payload) != h.FrameSHA256 {
+	if hash("LYCMBX/frame/v1\x00", b[:232], m.Payload) != h.FrameSHA256 {
 		return Message{}, errors.New("frame SHA256 mismatch")
 	}
 	c := append([]byte(nil), b[:HeaderBytes]...)
 	clear(c[264:312])
-	if hash("LYCDPX/header/v1\x00", c) != h.HeaderSHA256 {
+	if hash("LYCMBX/header/v1\x00", c) != h.HeaderSHA256 {
 		return Message{}, errors.New("header SHA256 mismatch")
 	}
 	return m, nil

@@ -1,11 +1,12 @@
-# Duplex startup
+# Mailbox v1 startup
 
 Read this for first installation or an unavailable runtime. Installation, addon
 enablement, character entry and a fresh connection are separate facts.
 
-Use the installed CLI's command contract. This source branch uses duplex
-mailboxes; an installed 3.1.1 CLI may still use the older transport. Do not mix
-them or send old bootstrap keys to a duplex runtime.
+Use the installed CLI's command contract. This source branch uses Lychee Dev
+mailbox protocol v1 (`lycheedev.mailbox.v1`); an installed 3.1.1 CLI may still
+use an older transport. Match release bytes and identity, not the version label
+alone. Old duplex schemas/layouts, LoD slots and bootstrap keys are incompatible.
 
 1. Select the authorized executable path and PID. Read installation flavor and
    build metadata; a filename or folder name is not identity. Preserve process

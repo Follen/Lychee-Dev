@@ -106,7 +106,9 @@ Before updating a managed installation, finish current operations and disconnect
 your own compatible native CON connections. The installer refuses unresolved
 ownership; do not clear a foreign project's claim. Deploy through the managed
 installer, then activate the selected process using the startup workflow. This
-candidate uses the named duplex Mailbox and creates no LoadOnDemand input addon.
+candidate uses Lychee Dev mailbox protocol v1 (`lycheedev.mailbox.v1`) and creates
+no LoadOnDemand input addon. Its data table is reused for logical frames; old
+duplex schemas and 256-row layouts are rejected.
 All managed files and receipts must match the selected CLI release. An installed
 CLI or Skill does not update an already running client, and a disk-only result
 is not live readiness. Targeted doctor also checks the writer profile; this

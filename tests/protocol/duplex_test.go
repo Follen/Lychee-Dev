@@ -126,7 +126,7 @@ func TestDuplexGoLuaGolden(t *testing.T) {
 	put("fresh-ack.bin", ctl(id, duplex.ResultAck, 1, "a2112233445566778899aabbccddeeff", firstRun[0].Header.RequestID, firstRun[0].Header.RequestSHA256, zeroToken, 500, 0, 0, successAck))
 	put("fresh-close.bin", ctl(id, duplex.Close, 1, "a3112233445566778899aabbccddeeff", zeroToken, zeroDigest, zeroToken, 0, 0, 0, nil))
 	oldBox := duplex.Sendbox{Identity: id, ActorGUID: "Player-1-1", Character: "Paladin", Realm: "Realm", Build: "12.1.0.12345", Product: "retail", Release: "3.1.1",
-		Schema: "lycheedev.duplex.v1", Phase: "closed", ResourcesReleased: true, ActorReady: true, ControlReady: true,
+		Schema: "lycheedev.mailbox.v1", LayoutID: "single-data-row-v1", Phase: "closed", ResourcesReleased: true, ActorReady: true, ControlReady: true,
 		StatusSequence: 1, Heartbeat: 1,
 		Released: &duplex.Released{RequestID: firstRun[0].Header.RequestID, RequestSHA256: firstRun[0].Header.RequestSHA256}}
 	newIdentity, e := duplex.NextIdentity(oldBox, "c0112233445566778899aabbccddeeff", "d0112233445566778899aabbccddeeff")
@@ -162,7 +162,7 @@ func TestDuplexGoLuaGolden(t *testing.T) {
 	if err = os.WriteFile(controlPath, controlWire, 0600); err != nil {
 		t.Fatal(err)
 	}
-	box := duplex.Sendbox{Identity: id, ActorGUID: "Player-1-1", Character: "Paladin", Realm: "Realm", Build: "12.1.0.12345", Product: "retail", Release: "3.1.1", ResourcesReleased: true, Schema: "lycheedev.duplex.v1", Phase: "idle", ActorReady: true, Ready: true, TransportReady: true, BusinessReady: true, ControlReady: true, StatusSequence: 1, Heartbeat: 1, Receipts: map[string]duplex.Receipt{}}
+	box := duplex.Sendbox{Identity: id, ActorGUID: "Player-1-1", Character: "Paladin", Realm: "Realm", Build: "12.1.0.12345", Product: "retail", Release: "3.1.1", ResourcesReleased: true, Schema: "lycheedev.mailbox.v1", LayoutID: "single-data-row-v1", Phase: "idle", ActorReady: true, Ready: true, TransportReady: true, BusinessReady: true, ControlReady: true, StatusSequence: 1, Heartbeat: 1, Receipts: map[string]duplex.Receipt{}}
 	plain, err := json.Marshal(box)
 	if err != nil {
 		t.Fatal(err)

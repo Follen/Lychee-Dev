@@ -67,6 +67,7 @@ type Sendbox struct {
 	Release           string             `json:"release"`
 	ResourcesReleased bool               `json:"resourcesReleased"`
 	Schema            string             `json:"schema"`
+	LayoutID          string             `json:"layoutId"`
 	Phase             string             `json:"phase"`
 	Ready             bool               `json:"ready"`
 	TransportReady    bool               `json:"transportReady"`
@@ -88,8 +89,11 @@ func validateSendbox(s Sendbox) error {
 	if s.BusinessReady && !s.ActorReady {
 		return errors.New("businessReady requires current actorReady")
 	}
-	if s.Schema != "lycheedev.duplex.v1" {
+	if s.Schema != "lycheedev.mailbox.v1" {
 		return errors.New("incompatible sendbox schema")
+	}
+	if s.LayoutID != "single-data-row-v1" {
+		return errors.New("incompatible mailbox layout")
 	}
 	for _, v := range []string{s.Runtime, s.Arena, s.Session, s.Owner, s.ActorBinding} {
 		if _, e := token(v); e != nil {
@@ -213,7 +217,7 @@ func EncodeSendbox(s Sendbox) ([]byte, error) {
 		return nil, errors.New("sendbox capacity exceeded")
 	}
 	b := make([]byte, 44+len(p))
-	copy(b, "LYCSBX01")
+	copy(b, "LYCMSB01")
 	binary.LittleEndian.PutUint32(b[8:12], uint32(len(p)))
 	d := sha256.Sum256(p)
 	copy(b[12:44], d[:])
@@ -224,7 +228,7 @@ func EncodeSendbox(s Sendbox) ([]byte, error) {
 // DecodeSendbox accepts exactly one bounded, digest-verified JSON object.
 func DecodeSendbox(b []byte) (Sendbox, error) {
 	var s Sendbox
-	if len(b) < 44 || string(b[:8]) != "LYCSBX01" || len(b) > 44+MaxSendboxBytes || int(binary.LittleEndian.Uint32(b[8:12])) != len(b)-44 {
+	if len(b) < 44 || string(b[:8]) != "LYCMSB01" || len(b) > 44+MaxSendboxBytes || int(binary.LittleEndian.Uint32(b[8:12])) != len(b)-44 {
 		return s, errors.New("invalid sendbox envelope")
 	}
 	d := sha256.Sum256(b[44:])
