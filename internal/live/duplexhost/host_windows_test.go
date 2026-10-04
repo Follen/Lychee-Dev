@@ -786,6 +786,9 @@ func TestProjectIdleDisconnectWaitsForLocalDriverWithoutRemoteDoctor(t *testing.
 func TestProjectDisconnectDoesNotTreatUnknownCommandAsUnusedSelection(t *testing.T) {
 	ctx := context.Background()
 	p, id, meta, store, _ := retirementFixture(t, true)
+	// This case asserts the live-process path. PID 7 is absent on some CI
+	// hosts and protected on others; neither is a stable fixture for it.
+	p.processEnded = func(context.Context, desktop.WindowIdentity) (string, error) { return "", nil }
 	if e := store.Update(ctx, func(st *duplex.State) error { st.Bound = false; return nil }); e != nil {
 		t.Fatal(e)
 	}
