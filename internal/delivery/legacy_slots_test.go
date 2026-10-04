@@ -55,7 +55,7 @@ func writeLegacyPoolMarker(t *testing.T, parent string, pool SlotPool) {
 
 func TestLegacySlotMigrationArchivesOnlyVerifiedIdlePool(t *testing.T) {
 	parent, pool := legacySlotPoolFixture(t)
-	archive := filepath.Join(t.TempDir(), "upgrade.slots")
+	archive := filepath.ToSlash(filepath.Join(t.TempDir(), "upgrade.slots"))
 	ready, err := preflightLegacySlots(context.Background(), parent, pool.Version, archive)
 	if err != nil || !ready {
 		t.Fatalf("preflight: ready=%v err=%v", ready, err)

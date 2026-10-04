@@ -105,7 +105,10 @@ func plainSlotDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || resolved != path {
+	// EvalSymlinks returns native separators on Windows, including for an
+	// ordinary directory passed with forward slashes by the CLI. Normalize
+	// spelling only; resolving a junction still changes the compared path.
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || resolved != filepath.Clean(path) {
 		return fmt.Errorf("%w: redirected slot", ErrInstallation)
 	}
 	return nil
