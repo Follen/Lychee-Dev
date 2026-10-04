@@ -30,6 +30,10 @@ local function tokenRaw(hex,bytes)
 end
 local function hex(raw)return SHA.Hex(raw)end
 local function uint64String(hi,lo)
+    -- Heartbeats, status sequences and ordinary fences fit in the low word.
+    -- Every uint32 is exact in Lua's double; avoid the full uint64 conversion's
+    -- temporary tables on each idle status publication.
+    if hi==0 then return string.format("%.0f",lo) end
     local bytes={math.floor(hi/16777216)%256,math.floor(hi/65536)%256,math.floor(hi/256)%256,hi%256,math.floor(lo/16777216)%256,math.floor(lo/65536)%256,math.floor(lo/256)%256,lo%256}
     local digits="0"
     for i=1,8 do local carry=bytes[i];local out={};for j=#digits,1,-1 do local n=(digits:byte(j)-48)*256+carry;out[#out+1]=string.char(48+n%10);carry=math.floor(n/10) end
