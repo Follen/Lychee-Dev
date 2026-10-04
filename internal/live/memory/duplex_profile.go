@@ -24,7 +24,8 @@ func DuplexWriteCapability(executableSHA256, build, product string) DuplexWriter
 		p.ID = "retail-69933-direct-mailbox-v1-trial"
 		p.Mode = "direct"
 		p.LayoutEvidence = "matching runtime .text static evidence: Table array=0x20, count=0x40, TValue stride=24; runtime calibration and frozen row rechecked for each write"
-		p.LifetimeEvidence = "owner-authorized no-suspend trial; strong Lua roots pin ordinary GC; final-check-to-reload race remains; previous debugger-assisted trial crashed and is disabled"
+		p.LifetimeEvidence = "2026-10-04 direct Retail PID 180212: small and 1 MiB commands plus close verified without debugger or suspend; strong Lua roots pin ordinary GC; final-check-to-reload race remains"
+		p.Validation = "retail_small_and_1mib_verified"
 		p.Eligible = true
 	}
 	return p

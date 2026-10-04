@@ -1,7 +1,7 @@
 # Mailbox v1 Retail stopped-write incident (2026-10-04)
 
 This is the first formal CLI-to-game write trial, not an addon-only self-check.
-It **did not pass**. The exact Retail writer profile is disabled in source. Do
+It **did not pass**. The debugger-stopped Retail writer route is disabled in source. Do
 not repeat the stopped-helper route against this client from the earlier local
 development package.
 
@@ -41,3 +41,5 @@ fixes. Neither fixes or explains the client security crash. No second game
 write, automatic replay, cancel or disconnect was sent after the failure.
 Small/1 MiB command execution, ACK, cancel, disconnect, reload, GC, dual
 instance and cross-build write acceptance remain unverified in this version.
+The later [direct, unsuspended trial](live-mailbox-v1-direct-retail-trial-2026-10-04.md)
+is separate evidence and does not retroactively resolve this request.

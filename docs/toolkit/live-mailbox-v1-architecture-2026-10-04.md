@@ -1,6 +1,6 @@
 # Lychee Dev mailbox protocol v1 — one-write Live design
 
-Status (2026-10-04): target contract for the `codex/duplex-mailbox` worktree. The one-write runtime and native writer exist, but the [first formal Retail debugger-stopped write trial](live-mailbox-v1-retail-trial-2026-10-04.md) was not accepted: a 37.368 ms stop and one full-row WPM/readback were followed by a client security crash, without a verified addon execution result. That helper route is disabled. An owner-authorized direct write trial for the exact Retail image does not suspend the game and remains `not_run`; other builds cannot write. This contract is not an assertion that either external-write mechanism is safe.
+Status (2026-10-04): target contract for the `codex/duplex-mailbox` worktree. The one-write runtime and native writer exist. The [first formal Retail debugger-stopped write trial](live-mailbox-v1-retail-trial-2026-10-04.md) was not accepted: a 37.368 ms stop and one full-row WPM/readback were followed by a client security crash, without a verified addon execution result. That helper route is disabled. The [direct Retail trial](live-mailbox-v1-direct-retail-trial-2026-10-04.md) verified a small and a 1 MiB command plus close without suspending the game. Other builds cannot write. The direct route still has a final-check-to-reload race and is not a general safety proof.
 
 ## Product contract
 

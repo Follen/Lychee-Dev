@@ -88,9 +88,11 @@ is incompatible. The debugger-stopped Retail trial ended in a client security
 crash; its helper route is disabled. An owner-authorized direct, unsuspended
 write trial is limited to the exact Retail 12.1.0.69933 image; other builds
 refuse writes. Do not repeat the old local development package's stopped trial.
-The original request has no verified execution result. The direct route does
-not close the final-check-to-reload race, and its real-client result is
-`not_run`. An addon self-test or offline fixture does not prove CLI-to-game execution.
+The original stopped-route request has no verified execution result. The direct
+route verified small and 1 MiB Retail commands plus close, but does not close
+the final-check-to-reload race. Other builds and multi-instance competition
+remain unqualified. An addon self-test or offline fixture does not prove
+CLI-to-game execution.
 
 ## Finish with evidence
 

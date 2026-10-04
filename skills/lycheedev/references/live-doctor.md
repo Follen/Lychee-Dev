@@ -35,8 +35,9 @@ Inspect the per-layer diagnostics, especially `actorReady`, numeric read layout
 and `writerProfile`. A resolved root and readable sendbox do not qualify writes.
 The exact Retail 12.1.0.69933 stopped-helper route is disabled after a
 real-client security crash immediately following its first whole-row write.
-Only the owner-authorized direct, unsuspended trial can write that exact image;
-its real-client result is `not_run`, and all other builds remain ineligible.
+Only the owner-authorized direct, unsuspended route can write that exact image;
+small and 1 MiB commands plus close passed one real-client trial, while all
+other builds remain ineligible.
 A final address check alone
 cannot prevent VM teardown during an external write. Private GC roots and a host
 writer drain protect controlled arena replacement, but do not pin the whole VM

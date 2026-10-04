@@ -3,19 +3,25 @@
 **Current whole-command candidate:** commit `b021251` changed the physical
 layout to `single-command-row-v1` and writes one 1 MiB-capacity row per command.
 The first formal Retail CLI debugger-stopped write was followed by a client
-security crash and no verified execution result. That route is now disabled;
-an exact-image direct, unsuspended write trial has been authorized but is
-`not_run`. See
-[the incident record](live-mailbox-v1-retail-trial-2026-10-04.md). The 4 KiB
+security crash and no verified execution result. That route is now disabled.
+The exact-image [direct Retail trial](live-mailbox-v1-direct-retail-trial-2026-10-04.md)
+verified a small probe, a 1 MiB probe and independent close, without debugger
+attachment or thread suspension. See also [the stopped-write incident](live-mailbox-v1-retail-trial-2026-10-04.md). The 4 KiB
 candidate results below are historical and do not establish acceptance for the
 current physical layout.
+
+The direct trial's small request reached observed execution in 267 ms; the
+1 MiB request took 19,156 ms. These journal intervals include validation and
+host observation, so they are not isolated WPM measurements. The final check
+to `/reload` race remains, and other builds and multi-instance competition have
+not passed this writer's real-client acceptance.
 
 The current contract is [mailbox v1 architecture](live-mailbox-v1-architecture-2026-10-04.md).
 Code candidate `73f61a74623b0468c0fe6aa0709a0a51b0453a2a` was installed from a
 clean development package, not published to npm. The version label remains
 3.1.1; the commit and new schema/layout identify this candidate.
 
-## Implemented contract
+## Historical 4 KiB candidate contract
 
 - `lycheedev.mailbox.v1` / `single-data-row-v1`, new wire magic and SHA256 domains;
   earlier schemas, layouts and wire records are rejected.
