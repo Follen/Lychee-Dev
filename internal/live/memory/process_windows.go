@@ -45,7 +45,10 @@ func openWithAccess(pid uint32, created uint64, image string, access uint32) (*P
 	return p, nil
 }
 
-func (p *Process) WriteDuplexCell(ctx context.Context, cell NumericCell, value uint32) (int, error) {
+func (p *Process) WriteDuplexCell(ctx context.Context, cell NumericCell, value uint32, guard func(context.Context) error) (int, error) {
+	if guard == nil {
+		return 0, ErrReloadGuardRequired
+	}
 	if _, bounded := ctx.Deadline(); !bounded {
 		return 0, errors.New("memory.write_deadline_required")
 	}
@@ -66,6 +69,14 @@ func (p *Process) WriteDuplexCell(ctx context.Context, cell NumericCell, value u
 	start, size := uint64(info.BaseAddress), uint64(info.RegionSize)
 	if cell.Address == 0 || cell.Address > ^uint64(0)-8 || info.Type != 0x20000 || info.State != windows.MEM_COMMIT || info.Protect != windows.PAGE_READWRITE || cell.Address < start || cell.Address-start > size || size-(cell.Address-start) < 8 {
 		return 0, errors.New("memory.write_interval_ineligible")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	// This must run after the cell and page checks for every individual write.
+	// It blocks observed reload/teardown, but does not pin allocation lifetime.
+	if err := guard(ctx); err != nil {
+		return 0, err
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, err

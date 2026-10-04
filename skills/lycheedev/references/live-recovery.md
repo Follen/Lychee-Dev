@@ -18,6 +18,12 @@ requires actual cleanup and an exact terminal result. Disconnect can proceed
 without waiting for an unanswered cancel, but ownership retirement still needs
 verified resource release and drained host writers.
 
+Character selection or a loading screen blocks new business. It does not by
+itself revoke cancellation or close authority. Follow the independent native
+[world/reload diagnostics](live-doctor.md): observed reload or unknown lifecycle
+stops all writes and preserves the original journal; wait and re-observe that
+same process instead of writing to retained addresses.
+
 The CLI retains a transfer deadline separate from the addon execution budget.
 A host timeout does not cancel Lua or renew either budget. The exact terminal
 manifest and all result page hashes must verify, result bytes must be durable,

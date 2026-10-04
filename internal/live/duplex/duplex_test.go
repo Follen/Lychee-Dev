@@ -677,6 +677,18 @@ func TestCorruptResultAndCleanupFailureBlockRelease(t *testing.T) {
 			b.afterWrite = nil
 		}
 	}
+	// Establish the exact cut after ACK and before resource release. A short
+	// Resume wait may expire after SaveResult alone under race instrumentation;
+	// it cannot prove the ACK callback has already run.
+	if _, e := c.Step(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := c.Step(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if b.afterWrite != nil || b.box.ResourcesReleased || b.box.Released == nil {
+		t.Fatal("cleanup fixture did not reach the acknowledged, unreleased cut")
+	}
 	shortCtx, shortCancel := context.WithTimeout(ctx, 5*time.Millisecond)
 	defer shortCancel()
 	st, e := c.Resume(shortCtx)
@@ -684,7 +696,9 @@ func TestCorruptResultAndCleanupFailureBlockRelease(t *testing.T) {
 		t.Fatal("resource cleanup failure erased verified result or released", e)
 	}
 	b.box.ResourcesReleased = true
-	if _, e = c.Resume(ctx); e != nil {
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+	defer cleanupCancel()
+	if _, e = c.Resume(cleanupCtx); e != nil {
 		t.Fatal(e)
 	}
 }

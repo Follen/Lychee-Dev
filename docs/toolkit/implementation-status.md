@@ -1,5 +1,7 @@
 # Toolkit 2.0 实施状态
 
+2026-10-04 duplex 新增原生重载/进入世界只读门禁与跨 build 指令配方解析。正式服 12.1.0.69933 同一进程中实际记录了一次用户手动 reload：Lua 根更换时 bit 8 保持重载状态，bit 4 先清除后恢复，且进入世界先于重载结束。新版 Go doctor 随后独立读到 world_ready/no_reload_observed；旧 addon schema 不影响这些原生诊断。此结果只证明只读状态路径，所有 writer profile 仍拒绝写入；跨真实 build 迁移与新协议实机执行不继承此结果。见 [实施合同](live-duplex-implementation-2026-10-04.md#native-lifecycle-read-gate)。
+
 2026-10-04 此开发分支以 [duplex 实施合同](live-duplex-implementation-2026-10-04.md) 为当前 live 合同；旧 LoD/按键/色块协议停止加载和发布，无旧兼容。新协议离线验证正在整合，当前没有通过验收的原生 writer profile，所有游戏内存写入默认拒绝，实机验收为 not_run。下方旧 live 结果仅保留原版本历史范围。
 
 2026-10-02 用户授权发布 Encoding 预算修复，补丁候选为 **3.1.1**，npm `next`，`latest` 继续保持 **2.5.1**。版本身份同步更新，正式发行通过现有 OIDC、Windows 检查和 source rebuild 门禁；此条是候选准备，不声称已发布。见 [3.1.1 发布合同](release-3.1.1.md)。

@@ -19,6 +19,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/duplex"
 	"github.com/follenfang/lycheedev/internal/live/journal"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -55,20 +56,21 @@ type requestRecord struct {
 	Complete     bool                   `json:"complete"`
 }
 type ProjectResult struct {
-	Session     string                `json:"session"`
-	Operation   string                `json:"operation,omitempty"`
-	Identity    duplex.Identity       `json:"identity"`
-	Bound       bool                  `json:"bound"`
-	Closed      bool                  `json:"closed"`
-	Stage       string                `json:"stage"`
-	Complete    bool                  `json:"complete"`
-	ReportState string                `json:"reportState"`
-	Cleanup     string                `json:"cleanup"`
-	Report      json.RawMessage       `json:"report,omitempty"`
-	Journal     string                `json:"journal"`
-	Status      *duplex.Sendbox       `json:"status,omitempty"`
-	Target      *live.ClientWindow    `json:"target,omitempty"`
-	Diagnostics map[string]Diagnostic `json:"diagnostics,omitempty"`
+	Session      string                    `json:"session"`
+	Operation    string                    `json:"operation,omitempty"`
+	Identity     duplex.Identity           `json:"identity"`
+	Bound        bool                      `json:"bound"`
+	Closed       bool                      `json:"closed"`
+	Stage        string                    `json:"stage"`
+	Complete     bool                      `json:"complete"`
+	ReportState  string                    `json:"reportState"`
+	Cleanup      string                    `json:"cleanup"`
+	Report       json.RawMessage           `json:"report,omitempty"`
+	Journal      string                    `json:"journal"`
+	Status       *duplex.Sendbox           `json:"status,omitempty"`
+	NativeReload *memory.ReloadObservation `json:"nativeReload,omitempty"`
+	Target       *live.ClientWindow        `json:"target,omitempty"`
+	Diagnostics  map[string]Diagnostic     `json:"diagnostics,omitempty"`
 }
 type Diagnostic struct {
 	State  string `json:"state"`

@@ -14,6 +14,20 @@ target check observes the exact process, managed deployment and fresh sendbox;
 it does not bind, send keys, execute probes or repair anything. General workspace
 checks alone do not establish game readiness.
 
+`nativeReload` and `nativeWorld` are independent of the addon publication. The
+native IsPlayerInWorld getter qualifies `worldReady`; login, a nonzero Lua root
+and the GameUI mode bit cannot substitute for it. New bind/frame/commit requires
+world readiness and no observed reload. Cancel, close, ACK and lease use their
+own authority without requiring world readiness, but every write still rejects
+reload, teardown or an unknown lifecycle. Missing world evidence is unknown,
+not false and never true.
+
+The Retail lifecycle recipe verifies current instruction anchors and RIP data
+targets. A compatible new build is relocated from unique full-text patterns;
+zero/multiple matches or changed metadata reject it. Successful relocation is
+read evidence, not cross-build writer acceptance. During reload, world can turn
+true before the reload flag clears, so inspect both independent diagnostics.
+
 Inspect the per-layer diagnostics, especially `actorReady`, numeric read layout
 and `writerProfile`. A resolved root and readable sendbox do not qualify writes.
 This candidate has no eligible writer profile: targeted doctor reports that

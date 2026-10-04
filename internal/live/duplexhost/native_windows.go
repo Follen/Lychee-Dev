@@ -31,6 +31,8 @@ type Native struct {
 	Target            live.ClientWindow
 	Process           *memory.Process
 	Mailbox           duplexMailbox
+	Reload            *memory.ReloadBinding
+	reloadErr         error
 	Guard             func(context.Context, duplex.Kind) error
 	BatchGuard        func(context.Context, duplex.Kind) error
 	ExpectedActorGUID string
@@ -49,12 +51,23 @@ func OpenNative(ctx context.Context, target live.ClientWindow) (*Native, error) 
 		p.Close()
 		return nil, err
 	}
+	reload, reloadErr := memory.ResolveReloadState(ctx, m.Base, m.Size, m.ExecutableSHA256, target.Client.FullBuild, target.Client.Product, m.LuaImageLayout(), func(c context.Context, at uint64, b []byte) (int, error) { return p.ReadModule(c, m, at, b) })
+	if reload != nil {
+		observation, e := reload.Observe(ctx)
+		if e != nil {
+			reloadErr = e
+		}
+		if e == nil && errors.Is(observation.CheckWriteGate(), memory.ErrReloadActive) {
+			p.Close()
+			return nil, observation.CheckWriteGate()
+		}
+	}
 	r, err := memory.OpenLuaMailbox(ctx, p, m.Base, m.Size, m.ExecutableSHA256, buildinfo.Version, m.LuaImageLayout(), func(c context.Context, at uint64, b []byte) (int, error) { return p.ReadModule(c, m, at, b) })
 	if err != nil {
 		p.Close()
 		return nil, err
 	}
-	return &Native{Target: target, Process: p, Mailbox: r}, nil
+	return &Native{Target: target, Process: p, Mailbox: r, Reload: reload, reloadErr: reloadErr}, nil
 }
 
 func (n *Native) scope() string {
@@ -101,6 +114,34 @@ func (n *Native) CheckWriteCapability() error {
 		return errors.New("live.duplex_writer_profile_unverified")
 	}
 	return nil
+}
+
+func (n *Native) ObserveReload(ctx context.Context) (memory.ReloadObservation, error) {
+	if n.Reload == nil {
+		return memory.ReloadObservation{State: "unknown", WorldState: "unknown", Reason: "reload recipe unavailable"}, errors.Join(memory.ErrReloadUnknown, n.reloadErr)
+	}
+	return n.Reload.Observe(ctx)
+}
+
+func (n *Native) CheckReloadWriteGate(ctx context.Context) error {
+	o, err := n.ObserveReload(ctx)
+	if err != nil {
+		return err
+	}
+	return o.CheckWriteGate()
+}
+
+// Leaving the world closes business admission, not cancellation or cleanup.
+// Every kind still needs a fresh reload gate; none establishes a lifetime pin.
+func (n *Native) checkLifecycleWriteGate(ctx context.Context, kind duplex.Kind) error {
+	o, err := n.ObserveReload(ctx)
+	if err != nil {
+		return err
+	}
+	if kind == duplex.Bind || kind == duplex.Frame || kind == duplex.Commit {
+		return o.CheckBusinessWriteGate()
+	}
+	return o.CheckWriteGate()
 }
 
 func (n *Native) ReadResult(ctx context.Context, m duplex.ResultManifest) ([]byte, error) {
@@ -191,6 +232,9 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 		return out, err
 	}
 	if err = n.CheckWriteCapability(); err != nil {
+		return out, err
+	}
+	if err = n.checkLifecycleWriteGate(ctx, m.Header.Kind); err != nil {
 		return out, err
 	}
 	lane := "control-" + m.Header.Kind.Lane()
@@ -308,7 +352,7 @@ func (n *Native) Publish(ctx context.Context, m duplex.Message) (out duplex.Writ
 			}
 		}
 		cell := array.Cells[index]
-		nbytes, e := writer.WriteDuplexCell(ctx, cell, value)
+		nbytes, e := writer.WriteDuplexCell(ctx, cell, value, func(c context.Context) error { return n.checkLifecycleWriteGate(c, h.Kind) })
 		if nbytes > 0 {
 			out.Bytes += uint64(nbytes)
 			out.State = duplex.PartialWrite

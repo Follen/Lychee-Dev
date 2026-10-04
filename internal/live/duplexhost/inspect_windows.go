@@ -72,6 +72,15 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 		return r, e
 	}
 	r.Diagnostics["processIdentity"] = Diagnostic{"verified", "exact PID, creation instance and executable"}
+	// Native lifecycle diagnostics precede addon/root traversal so reload and
+	// character selection remain visible when no sendbox can be read.
+	lifecycle, lifecycleErr := ObserveTargetReload(ctx, target)
+	r.NativeReload = &lifecycle
+	r.Diagnostics["nativeReload"] = Diagnostic{lifecycle.State, lifecycle.Reason}
+	r.Diagnostics["nativeWorld"] = Diagnostic{lifecycle.WorldState, lifecycle.WorldReason}
+	if lifecycleErr != nil {
+		r.Diagnostics["nativeReload"] = Diagnostic{"unknown", lifecycleErr.Error()}
+	}
 	if e := deployment(ctx, target); e != nil {
 		r.Diagnostics["installed"] = Diagnostic{"unavailable", e.Error()}
 		errs = append(errs, e)
@@ -164,7 +173,7 @@ func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r
 		}
 		r.Diagnostics[name] = Diagnostic{state, s.Phase}
 	}
-	if fresh && s.TransportReady && s.ControlReady && profile.Eligible {
+	if fresh && s.TransportReady && s.ControlReady && profile.Eligible && lifecycle.CheckBusinessWriteGate() == nil {
 		r.Stage = "healthy"
 	} else {
 		r.Stage = "degraded"

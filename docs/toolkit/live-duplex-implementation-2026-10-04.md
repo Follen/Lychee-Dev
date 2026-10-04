@@ -49,6 +49,40 @@ without binding or repairing. It distinguishes business readiness, cleanup
 control eligibility, root/read observations and write capability. Cosmetic
 activity has only one active transport state: Agent执行中 during actual probes.
 
+## Native lifecycle read gate
+
+Retail uses a separately proven native `IsPlayerInWorld` getter (mode word bit
+4), GameUI reload request (bit 7), reload worker lifetime (bit 8), and the Glue
+reload request byte. GameUI mode bit 9 is not world readiness. Bit 1 is a teardown
+candidate, not a complete logout proof. Unknown observations fail closed.
+Every individual eight-byte write must run the gate after TValue/page checks
+and recheck the context afterward. New bind/frame/commit also requires native
+world readiness. Independent cancel/close/ACK/lease and repair do not require
+world readiness, but still cannot write during reload or unknown lifecycle.
+
+`retail-ui-reload-state-rip-v1` verifies complete current anchors for the known
+hash and decodes RIP-relative data references. For other compatible Retail
+builds it scans bounded complete `.text` for unique instruction patterns and
+validates widths, shared mode-word references and readable/writable nonexecute
+PE data ranges. The world getter qualifies independently; absent or ambiguous
+world evidence stays unknown without erasing valid reload read evidence. Cached
+binding proofs do not cache changing flags or grant write capability. Synthetic
+relocation tests do not certify unseen client builds.
+
+Targeted doctor reads this lifecycle before Lua-heap traversal and reports
+native reload/world independently even when the loaded addon is absent or
+uses an obsolete schema. Its world warning restricts new business; it does not
+require business readiness for cleanup. See the portable
+[read-only research record](research/reload-state-69933/README.md).
+
+Owner-triggered Retail reload was observed on 2026-10-04 in the same process
+instance: bit 8 was set across replacement of the Lua root, bit 4 cleared and
+returned, then bit 8 cleared. World readiness returned while bit 8 was still
+set, directly demonstrating why both gates are necessary. The new Go reader
+then verified current anchors and reported `world_ready`/`no_reload_observed`
+without writing. These are non-atomic read observations, not a writer lifetime
+pin or real duplex execution acceptance. All writer profiles remain ineligible.
+
 ## GC and memory ownership
 
 Private leaf roots retain every writable row independently of public parent
@@ -86,6 +120,15 @@ be fixed by simply enabling a profile. No suspension, injection or LoD fallback
 is added. Static disassembly evidence is kept outside CI in the local research
 directory; no developer machine path becomes a build input.
 
+A Windows self-process fixture reproduces allocator ABA with real WPM after
+all ordinary cell/page checks. The final read gate rejects an already observed
+reload and rejects cancellation occurring inside the guard. A separate
+limitation fixture deliberately reuses the suballocation just after a passing
+guard and demonstrates the remaining overwrite; it also asserts the Retail
+writer profile stays ineligible. These fixtures target only their own allocated
+test page. Future profile qualification also needs measured per-cell gate cost
+over real 1 MiB transfer; offline codec throughput cannot substitute for it.
+
 The 1 MiB limit describes logical source, not total RAM. Lua numeric TValue
 storage, table capacity, compiled code, result encoding and probe-created
 objects add overhead. The transport reuses its fixed arena and releases source,
@@ -96,6 +139,24 @@ The automation page projects only the current request or one release identity;
 it cannot execute work, acknowledge results or import old queue/history records.
 
 ## Verification and remaining work
+
+The native lifecycle follow-up baseline passed on 2026-10-04 03:04:51 UTC:
+build/vet, required Lua 5.1 uncached full Go suite, all 17 required cases, Node
+distribution tests, real LuaLS, version/skill/generated-reference checks and
+unchanged-source verification. Its source digest is
+`14512ac94a3e4304be2d54de45887ff60985270e1afb6e3f15042db51b7cfe24`;
+raw local report is `Analyze/duplex-mailbox/evidence/offline-final-20261004-03/report.json`.
+Affected duplex/host/memory race tests and skill-creator validation also passed.
+New fixtures cover relocation, ambiguous/missing/mutated anchors, image/read
+failures, world-independent cleanup, private proof tampering, observed reload,
+post-guard cancellation and the deliberately retained allocation ABA limitation.
+Verification text was added afterward without changing product source.
+
+Package install/release smoke now exercises the duplex CON contract and exact
+read-only durable-result recovery, instead of deleted OP commands and an obsolete
+test name. Corrupt stored result hashes are refused without rewriting state.
+The race fixture establishes durable result/ACK progress before its short wait;
+it no longer assumes a scheduling-sensitive timeout guarantees that progress.
 
 Offline fixtures and real-client evidence are separate. The Go coordinator has
 1 MiB boundary, 1000-request retention, unknown publication, independent

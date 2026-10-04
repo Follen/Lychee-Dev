@@ -7,7 +7,7 @@
 //
 //   node packages/npm/lycheedev/test/release-smoke.mjs <lycheedev-x.y.z.tgz> <npm-cli.js> [--report <path>]
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -109,7 +109,7 @@ assert(describe.result.commands.some(command => command.path === 'data hotfix'))
 const home = join(root, 'fresh-home 空格');
 const initialized = JSON.parse(run(process.execPath, [launcher, 'init', '--home', home, '--format=json']));
 assert.equal(initialized.ok, true);
-for (const command of [['target', 'show', 'PIN-missing'], ['evidence', 'show', 'CAP-missing'], ['live', 'status', 'OP-missing']]) {
+for (const command of [['target', 'show', 'PIN-missing'], ['evidence', 'show', 'CAP-missing']]) {
   const read = spawnSync(process.execPath, [launcher, ...command, '--home', home, '--format=json'], {
     cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 60000,
   });
@@ -119,6 +119,18 @@ for (const command of [['target', 'show', 'PIN-missing'], ['evidence', 'show', '
   assert.equal(result.error.code, 'vault.record_missing');
   assert.equal(result.result, null);
 }
+// Retired transport IDs are invalid input, not missing vault records. The
+// installed release must reject them without creating any operation evidence.
+const retiredRead = spawnSync(process.execPath, [launcher, 'live', 'status', 'OP-missing', '--home', home, '--format=json'], {
+  cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 60000,
+});
+assert.ifError(retiredRead.error);
+assert.equal(retiredRead.status, 2);
+const retiredResponse = JSON.parse(retiredRead.stdout);
+assert.equal(retiredResponse.error.code, 'command.invalid_arguments');
+assert.equal(retiredResponse.result, null);
+assert.deepEqual(readdirSync(join(home, 'state')), [], 'retired transport admission wrote global state');
+assert.deepEqual(readdirSync(join(home, 'locks')), [], 'retired transport admission created a lock');
 const selectionFile = join(root, 'selection.json');
 writeFileSync(selectionFile, JSON.stringify({ data: {
   product: 'retail', region: 'cn', language: 'zhCN', fullBuild: '12.1.0.69875',

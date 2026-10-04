@@ -32,13 +32,13 @@ func liveDoctorChecks(ctx context.Context, opts Options) []vault.Check {
 
 func liveDoctorProjection(result duplexhost.ProjectResult, err error) []vault.Check {
 	check := vault.Check{ID: "live.duplex", OK: true, Status: "ok"}
-	check.Data = map[string]any{"diagnostics": result.Diagnostics, "target": result.Target, "sendbox": result.Status}
+	check.Data = map[string]any{"diagnostics": result.Diagnostics, "target": result.Target, "sendbox": result.Status, "nativeReload": result.NativeReload}
 	if err != nil {
 		check.OK = false
 		check.Status = "error"
 		check.Detail = err.Error()
 		check.NextStep = "verify the exact client and clean managed addon; enter a character and enable /dev connect"
-		return []vault.Check{check}
+		return append([]vault.Check{check}, lifecycleDoctorChecks(result)...)
 	}
 	if result.Status == nil {
 		check.OK = false
@@ -65,7 +65,38 @@ func liveDoctorProjection(result duplexhost.ProjectResult, err error) []vault.Ch
 			Code: "live.duplex_writer_profile_unverified", Detail: profile.Reason,
 			NextStep: "this exact executable/build has no validated writer profile; native writes remain unavailable"})
 	}
-	return checks
+	return append(checks, lifecycleDoctorChecks(result)...)
+}
+
+// These independent native observations survive an absent or obsolete addon.
+// A world warning blocks new business, while controls use their own authority.
+func lifecycleDoctorChecks(result duplexhost.ProjectResult) []vault.Check {
+	o := result.NativeReload
+	if o == nil {
+		return nil
+	}
+	reload := vault.Check{ID: "live.duplex.reload", Status: "error", Detail: o.State, Data: map[string]any{"observation": o}}
+	switch o.State {
+	case "no_reload_observed":
+		reload.OK, reload.Status = true, "ok"
+	case "requested", "reloading":
+		reload.Status, reload.Code = "warn", "live.duplex_runtime_reloading"
+		reload.NextStep = "wait for reload to finish, then observe the exact process again"
+	default:
+		reload.Code = "live.duplex_reload_state_unavailable"
+		reload.NextStep = "resolve and verify the native lifecycle recipe for this exact executable; do not write"
+	}
+	world := vault.Check{ID: "live.duplex.world", Status: "error", Detail: o.WorldState}
+	if o.WorldReady != nil && o.WorldState == "world_ready" && *o.WorldReady {
+		world.OK, world.Status = true, "ok"
+	} else if o.WorldReady != nil && o.WorldState == "not_in_world" && !*o.WorldReady {
+		world.Status, world.Code = "warn", "live.duplex_character_not_in_world"
+		world.NextStep = "enter the selected character before new business; cancellation and cleanup have separate readiness"
+	} else {
+		world.Code = "live.duplex_world_state_unavailable"
+		world.NextStep = "verify the IsPlayerInWorld getter recipe; missing evidence must stay unknown"
+	}
+	return []vault.Check{reload, world}
 }
 
 // Every live drive runs doctor and records its findings. Readiness does not
