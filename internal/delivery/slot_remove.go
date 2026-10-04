@@ -35,19 +35,22 @@ func removeAddonAndSlots(ctx context.Context, parent, archive string) (Removal, 
 	if errors.Is(err, os.ErrNotExist) {
 		pool, e := readSlotPool(parent)
 		if errors.Is(e, os.ErrNotExist) {
+			if e = rejectUnmanagedLegacySlots(parent); e != nil {
+				return Removal{}, e
+			}
 			return RemoveInstallation(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
 		}
 		if e != nil {
 			return Removal{}, e
 		}
-		pool, e = InspectSlots(ctx, parent, pool.Version)
-		if e != nil {
-			return Removal{}, e
+		if !managedLegacySlotPool(pool, pool.Version) {
+			return Removal{}, fmt.Errorf("%w: unsupported legacy slot receipt", ErrConflict)
 		}
-		for _, entry := range pool.Files {
-			if entry.PendingHash != "" || entry.Nonce != "" && !entry.Consumed && entry.RetiredRuntime == "" && !entry.RetiredProcess {
-				return Removal{}, fmt.Errorf("%w: slot reservation pending", ErrConflict)
-			}
+		if _, e = inspectSlotPool(ctx, parent, pool, pool.Version); e != nil {
+			return Removal{}, fmt.Errorf("%w: legacy slot verification failed: %v", ErrConflict, e)
+		}
+		if hasPendingSlotReservation(pool) {
+			return Removal{}, fmt.Errorf("%w: slot reservation pending", ErrConflict)
 		}
 		main, e := InspectInstallation(ctx, filepath.Join(parent, "Lychee Dev"), "addon")
 		if e != nil {

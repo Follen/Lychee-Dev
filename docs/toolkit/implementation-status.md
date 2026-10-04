@@ -1,5 +1,21 @@
 # Toolkit 2.0 实施状态
 
+2026-10-04 本分支当前协议统一为 **Lychee Dev mailbox protocol v1**，以
+[新架构合同](live-mailbox-v1-architecture-2026-10-04.md) 替代先前 duplex 候选。
+schema、magic、摘要域和布局身份一次切换，拒绝旧协议。只保留一个 4 KiB 物理数据行，
+逐帧私有复制并准确确认后复用；单条命令仍最多 1 MiB。新增 native 发布准入检查，
+没有当前请求的准确连续帧 ACK，不能覆盖该行。取消/断开保持独立控制路径。
+真实 Runtime + CaptureWriter 的 stock Lua 5.1 回归测得冷态固定增量约 96.82 KiB，
+全部控制行阴影缓存存在时约 185.63 KiB，空闲五秒约 116.63 KiB 临时分配；
+这些不是 WoW 内存数值。旧正式服布局只读测得 256 个 2048-cell 数组共 12 MiB backing，
+仍未解释用户报告的全部 70 MB。新版本完整离线与实机结果继续单独记录。
+原生 reload/world 配方及逐次写入检查保留；当前无合格 writer profile，
+插件内部实机 self-check 不替代 CLI 原生写入验收，不解除此门禁。
+
+2026-10-04 duplex 新增原生重载/进入世界只读门禁与跨 build 指令配方解析。正式服 12.1.0.69933 同一进程中实际记录了一次用户手动 reload：Lua 根更换时 bit 8 保持重载状态，bit 4 先清除后恢复，且进入世界先于重载结束。新版 Go doctor 随后独立读到 world_ready/no_reload_observed；旧 addon schema 不影响这些原生诊断。此结果只证明只读状态路径，所有 writer profile 仍拒绝写入；跨真实 build 迁移与新协议实机执行不继承此结果。见 [实施合同](live-duplex-implementation-2026-10-04.md#native-lifecycle-read-gate)。
+
+2026-10-04 先前 duplex 候选的实现见 [阶段实施记录](live-duplex-implementation-2026-10-04.md)，当前 live 合同已由 mailbox protocol v1 替代。旧 LoD/按键/色块协议停止加载和发布，无旧兼容。下方旧 live 结果仅保留原版本历史范围。
+
 2026-10-02 用户授权发布 Encoding 预算修复，补丁候选为 **3.1.1**，npm `next`，`latest` 继续保持 **2.5.1**。版本身份同步更新，正式发行通过现有 OIDC、Windows 检查和 source rebuild 门禁；此条是候选准备，不声称已发布。见 [3.1.1 发布合同](release-3.1.1.md)。
 
 2026-10-02 Retail Encoding 预算开发修复：Windows 正式 3.1.0 已在用户报告的完全相同 pin 上复现提前 metadata 拒绝；查询改为按实际 CKey/EKey 目录和页缓存 miss 分配前累计计费，默认上限保持。局部回归、包测试、race 与强制 Lua 5.1 全量 baseline passed（43 packages、3,034 个命名结果、40 个显式 skip、零失败，100 项 Node 测试）。原 pin 的真实 CDN ChrClasses 两行查询在一次冷准备超时后沿原缓存延长一次成功，随后原 180 秒离线命令成功；内容校验、Root/DB2 和两行结果均确认。首次超时保留，不声明全部表/客户端或 RSS 验收。尚未发布该修复。见 [复现与修正](retail-encoding-budget-2026-10-02.md)。

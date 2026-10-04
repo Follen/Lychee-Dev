@@ -3,13 +3,11 @@ package command
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/archive"
 	"github.com/follenfang/lycheedev/internal/records/container"
@@ -34,7 +32,6 @@ func TestQueryStructuredErrors(t *testing.T) {
 		exit  int
 		code  string
 	}{
-		{errors.Join(live.ErrAckReadinessPending, context.DeadlineExceeded), 6, "live.ack_readiness_pending"},
 		{records.ErrRemoteRange, 4, "records.remote_range"}, {records.ErrRemoteObjectMissing, 3, "records.remote_object_missing"},
 		{records.ErrObjectUnavailable, 3, "records.local_object_unavailable"},
 		{archive.ErrIndexIntegrity, 4, "archive.index_integrity"},

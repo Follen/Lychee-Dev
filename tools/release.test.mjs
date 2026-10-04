@@ -10,12 +10,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags, exportSourceIndex,
+  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags, exportSourceIndex, isRetiredSlotSource,
 } from './release.mjs';
 import { readTarGz } from './tar.mjs';
 import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './luals.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('retired receiver and slot modules are excluded from release payloads', () => {
+  for (const path of [
+    'addon/Bridge/Session.lua', 'addon/Bridge/MemoryProtocol.lua',
+    'addon/Bridge/InputProtocol.lua', 'addon/Bridge/MatrixSymbol.lua',
+    'addon/Bridge/ReceiptView.lua', 'addon/Bridge/ReportStore.lua',
+    'addon/Bridge/Investigation.lua', 'addon/Bridge/ProbeRunner.lua',
+    'addon/Bridge/ProbeQueue.lua', 'addon/Bridge/Reentry.lua',
+    'addon/Bridge/Identity.lua', 'addon/Bridge/Receiver.lua',
+    'addon/Bridge/InputSignal.lua', 'addon/Bridge/FaultRunner.lua',
+    'addon/Bridge/SlotProtocol.lua', 'addon/Bridge/SlotRuntime.lua',
+    'addon/Bridge/InputState.lua', 'addon/Bridge/StartupBeacon.lua',
+    'addon/Bridge/ReceiverBindings.lua', 'addon/Bridge/Definitions.lua',
+    'addon/Modules/AutomationHistory.lua',
+  ]) assert.equal(isRetiredSlotSource(path), true, path);
+  assert.equal(isRetiredSlotSource('addon/Bridge/DuplexProtocol.lua'), false);
+});
 
 test('current release channel never moves latest and rejects stale policy',()=>{
   const channel=JSON.parse(readFileSync(new URL('../release/npm-channel.json',import.meta.url),'utf8'));
@@ -401,13 +418,6 @@ test('PKG-05/REL-08: extra, banned, missing and tampered content all fail closed
     pkg.dependencies = { leftpad: '1.0.0' };
     entry.bytes = Buffer.from(JSON.stringify(pkg));
   }).violations.join(), /dependencies must be empty/);
-  assert.match(mutate(base(), entries => {
-    entries.push({
-      name: 'package/payload/addon/Bridge/Definitions.lua',
-      bytes: Buffer.from('local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n  {id=1},\n}}\n'),
-      mode: 0o644,
-    });
-  }).violations.join(), /task blocks/);
 });
 
 test('the audit binds commit and version of the assembly (REL-01/05)', () => {

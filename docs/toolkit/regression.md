@@ -1,5 +1,14 @@
 # Lychee Dev Toolkit 2.0 回归测试方案
 
+2026-10-04 当前分支采用 [Lychee Dev mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)。
+新 schema/magic/hash domain/layout 必须拒绝旧协议；唯一物理数据行允许 1 MiB 逻辑请求，
+但只有准确私有帧 ACK 才能覆盖，结果持久化/ACK/release 后才能接下一条命令。
+回归覆盖全部 lane 的阴影缓存保留量、冷/热状态空闲分配、同标记内容变化、
+清零/odd 后重新发布、换 owner 后旧输入拒绝、GC 私有根和两代 writer-drain。
+`TestMailboxRuntimeIdleMemory` 测真实 TOC/Runtime/encoder；Go/Lua 压力覆盖最大输入和 140 条释放请求。
+新 native 执行与游戏内部 self-check 分开记账；当前 writer profile 仍未资格验证。
+旧 LoD/按键/色块输入不加载、不打包、不回退。下方旧 live 结果只保留原版本历史范围。
+
 2026-10-02 [Retail Encoding 预算](retail-encoding-budget-2026-10-02.md)：大型逻辑对象的小范围读取可用默认额度；CKey/EKey 目录及页 miss 分配前拒绝真实超额；命中复用，驱逐和失败后重读累计不退款；同查询共享额度不重置，并发填充保留完整性验证。公开无缓存行为、BLTE 临时缓冲和 Root 计费保持。合成 fixture 与固定真实 pin 的查询结果分开记录。
 
 2026-10-01 [Mailbox 新协议](live-mailbox-protocol-2026-10-01.md)要求：旧 wire/schema/state 拒绝；公开镜像和 Snapshot/原 envelope 变更不能授权；按名字读取、进程/build 绑定、路径 guard、BODY exact HEAD 授权；输入前重读当前字段；reload 两次鲜活发布证明；关闭 hints 不改变读取路径。模块映射校验查询实际请求位置并遍历原 issued/current/request 交集；未授权旧 hole、属性变化和缺口拒绝，原始读错误不被 short_read 掩盖。正式服、Classic、Titan、Forever 最终核心及各 54 步压力链已完成；Titan 实机验证未知 hash 的完整 runtime .text 唯一定位与 8 次完整 reader 回放。最终离线及各客户端实机结果见 [Mailbox 验收记录](live-mailbox-acceptance-2026-10-01.md)，不沿用旧扫描路径或先前候选验收。

@@ -51,7 +51,7 @@ func PutProbe(ctx context.Context, root, name string, code []byte) (ProbePutResu
 	if !probeNamePattern.MatchString(name) {
 		return zero, errors.New("live.probe_name_invalid")
 	}
-	if len(code) == 0 || len(code) > 256<<10 {
+	if len(code) == 0 || len(code) > 1<<20 {
 		return zero, errors.New("bridge.queue_invalid_code")
 	}
 	digest := sha256.Sum256(code)
@@ -190,7 +190,7 @@ func validProbeName(value ProbeName) bool {
 }
 
 func validProbeRevision(value ProbeRevision) bool {
-	if value.Schema != "lycheedev.probe-revision.v1" || value.ID != probeRevisionPrefix+value.SHA256 || len(value.SHA256) != 64 || value.Bytes != len(value.Code) || value.Bytes < 1 || value.Bytes > 256<<10 || value.CreatedAt.IsZero() {
+	if value.Schema != "lycheedev.probe-revision.v1" || value.ID != probeRevisionPrefix+value.SHA256 || len(value.SHA256) != 64 || value.Bytes != len(value.Code) || value.Bytes < 1 || value.Bytes > 1<<20 || value.CreatedAt.IsZero() {
 		return false
 	}
 	digest := sha256.Sum256(value.Code)

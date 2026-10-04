@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { offlineCases, liveCases, manualCases } from '../tests/baseline/catalog.mjs';
+import { offlineCases, manualCases } from '../tests/baseline/catalog.mjs';
 import { createReport, goCaseResult, options, parseGoEvents, parseTAP, repository, runCommand, saveReport, sourceIdentity } from './baseline-common.mjs';
 
 export async function main(argv = process.argv.slice(2)) {
@@ -17,7 +17,7 @@ export async function main(argv = process.argv.slice(2)) {
   for (const [flag, key] of [['--lua51', 'LYCHEEDEV_LUA51'], ['--luals-archive', 'LYCHEEDEV_LUALS_ARCHIVE'], ['--luals-runtime', 'LYCHEEDEV_LUALS_TEST_RUNTIME']]) {
     if (opts[flag]) env[key] = resolve(opts[flag]);
   }
-  const report = createReport('offline', opts['--out'], [...offlineCases, ...liveCases, ...manualCases]);
+  const report = createReport('offline', opts['--out'], [...offlineCases, ...manualCases]);
   saveReport(report);
   console.log(`Baseline evidence: ${report.output}`);
   async function check(id, title, command, args, inspect) {
@@ -46,8 +46,6 @@ export async function main(argv = process.argv.slice(2)) {
   const nodeFiles = [
     ...readdirSync(join(repository, 'tools')).filter(f => f.endsWith('.test.mjs')).map(f => `tools/${f}`),
     ...readdirSync(join(repository, 'packages/npm/lycheedev/test')).filter(f => f.endsWith('.test.mjs')).map(f => `packages/npm/lycheedev/test/${f}`),
-    // Pure runner-policy tests only; real-client entrypoints are never invoked.
-    ...readdirSync(join(repository, 'tests/channel-live')).filter(f => f.endsWith('.test.mjs')).map(f => `tests/channel-live/${f}`),
   ].sort();
   await check('NODE', 'Distribution, launcher and regression runner tests', process.execPath, ['--test', '--test-reporter=tap', ...nodeFiles], (entry, text) => Object.assign(entry, parseTAP(text)));
   await check('VERSION', 'Release version consistency', process.execPath, ['tools/version.mjs', '--check']);

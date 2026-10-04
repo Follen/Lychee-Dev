@@ -29,14 +29,22 @@ ns.Platform = {
         if combat then return false, "input_combat_lockdown" end
         local focusOK, focus = pcall(GetCurrentKeyBoardFocus)
         if not focusOK or restricted(focus) then return nil, "input_focus_unavailable" end
-        -- The slot path sends a non-text key and neither clears nor edits this
-        -- object. Other input paths still require an empty keyboard focus.
+        -- The optional probe input shield requires an empty keyboard focus.
         if focus ~= nil and allowFocusedInput ~= true then return false, "input_keyboard_focus" end
         return true
     end,
     ObserveActor = function()
-        local character, realm = UnitFullName("player")
-        local guid = UnitGUID("player")
+        if type(IsLoggedIn)~="function" or not ns.Compat or type(ns.Compat.InWorld)~="function"
+            or type(UnitFullName)~="function" or type(UnitGUID)~="function" then
+            return nil,"actor_observation_unavailable"
+        end
+        local loginOK,loggedIn=pcall(IsLoggedIn)
+        if not loginOK or restricted(loggedIn) or type(loggedIn)~="boolean" then return nil,"actor_login_unavailable" end
+        if not loggedIn then return nil,"actor_not_logged_in" end
+        if ns.Compat.InWorld()~=true then return nil,"actor_not_in_world" end
+        local nameOK,character,realm=pcall(UnitFullName,"player")
+        local guidOK,guid=pcall(UnitGUID,"player")
+        if not nameOK or not guidOK then return nil,"actor_observation_failed" end
         for _, value in pairs({ character = character, realm = realm, guid = guid }) do
             if restricted(value) then return nil, "actor_restricted_identity" end
             if type(value) ~= "string" or #value == 0 or #value > 128

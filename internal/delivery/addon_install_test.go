@@ -2,14 +2,53 @@ package delivery_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
-	"github.com/follenfang/lycheedev/internal/bridge"
+	"fmt"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/testkit"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func seedLegacySlotPool(t *testing.T, parent, version string, pending bool) {
+	t.Helper()
+	pool := delivery.SlotPool{Schema: "lycheedev.slots.v1", Version: version, State: "ready", Files: make([]delivery.SlotFile, 64)}
+	for index := 1; index <= len(pool.Files); index++ {
+		dir := delivery.SlotDirectory(parent, index)
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		name := fmt.Sprintf("Lychee Dev Slot %02d", index)
+		files := map[string][]byte{
+			name + ".toc": []byte(fmt.Sprintf("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot %02d\n## Version: %s\n## LoadOnDemand: 1\n## X-Lychee-Slot: %d\n## X-Lychee-Transport: memory-slot-v1\nPayload.lua\nLoader.lua\n", index, version, index)),
+			"Loader.lua":  []byte(fmt.Sprintf("local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.SlotRuntime then ns.SlotRuntime.Receive(%d, envelope) end\n", index)),
+			"Payload.lua": []byte("LycheeDevSlotEnvelope = nil\n"),
+		}
+		for fileName, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, fileName), content, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		digest := sha256.Sum256(files["Payload.lua"])
+		pool.Files[index-1].PayloadHash = hex.EncodeToString(digest[:])
+	}
+	if pending {
+		pool.Files[0].Nonce = strings.Repeat("a", 32)
+		pool.Files[0].PendingHash = strings.Repeat("b", 64)
+	}
+	marker, err := json.MarshalIndent(pool, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(parent, ".lycheedev-slots.json"), marker, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestInstallAddonFirstInstallAndRetry(t *testing.T) {
 	release := testkit.Release(t, "")
@@ -35,76 +74,152 @@ func TestInstallAddonFirstInstallAndRetry(t *testing.T) {
 	}
 }
 
-func TestSlotUpgradeResumesAfterMainPublicationAndStatusIncludesPool(t *testing.T) {
+func TestAddonInstallDoesNotCreateLoDSlotPool(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.Client(t, "flavor")
-	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, ""), client, testkit.Version); err != nil {
+	release := testkit.Release(t, "slot-runtime") // A historical receipt still naming SlotRuntime is not a reason to generate slots.
+	if _, err := delivery.InstallAddon(ctx, release, client, testkit.Version); err != nil {
 		t.Fatal(err)
 	}
-	archive := filepath.Join(t.TempDir(), "upgrade")
-	// Model interruption after the main transaction committed, before slots.
-	if _, err := delivery.UpgradeInstallation(ctx, testkit.Release(t, "slot-runtime"), delivery.AddonDirectory(client), archive, "addon", testkit.Version); err != nil {
+	parent := filepath.Join(client, "Interface", "AddOns")
+	if _, err := os.Stat(filepath.Join(parent, ".lycheedev-slots.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("install wrote the legacy slot marker: %v", err)
+	}
+	if entries, err := os.ReadDir(parent); err != nil {
 		t.Fatal(err)
-	}
-	status, err := delivery.InspectAddonDeployment(ctx, client)
-	if err != nil || status.Installation.State != "managed" || status.Slots == nil || status.Slots.State != "incomplete" {
-		t.Fatalf("%+v %v", status, err)
-	}
-	if _, err = delivery.UpgradeAddon(ctx, "", client, archive, testkit.Version, true); err != nil {
-		t.Fatal(err)
-	}
-	status, err = delivery.InspectAddonDeployment(ctx, client)
-	if err != nil || status.Slots.State != "managed" || status.Slots.Count != bridge.SlotCount {
-		t.Fatalf("%+v %v", status, err)
-	}
-	path := filepath.Join(client, "Interface", "AddOns", "Lychee Dev Slot 64", "Loader.lua")
-	if err = os.WriteFile(path, []byte("external drift"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	status, err = delivery.InspectAddonDeployment(ctx, client)
-	if err != nil || status.Slots.State != "incomplete" {
-		t.Fatalf("slot drift was hidden: %+v %v", status, err)
+	} else {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "Lychee Dev Slot ") {
+				t.Fatalf("install created legacy slot directory %s", entry.Name())
+			}
+		}
 	}
 }
 
-func TestRemoveAddonIncludesSlotsAndResumesPartialMoves(t *testing.T) {
+func TestAddonInstallRequiresUpgradeWhenManagedLegacyPoolExists(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	legacyRelease := testkit.Release(t, "slot-runtime")
+	if _, err := delivery.InstallAddon(ctx, legacyRelease, client, testkit.Version); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(client, "Interface", "AddOns")
+	seedLegacySlotPool(t, parent, testkit.Version, false)
+	markerPath := filepath.Join(parent, ".lycheedev-slots.json")
+	before, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = delivery.InstallAddon(ctx, legacyRelease, client, testkit.Version); !errors.Is(err, delivery.ErrConflict) {
+		t.Fatalf("repeat install retained a managed legacy pool: %v", err)
+	}
+	after, err := os.ReadFile(markerPath)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("legacy receipt changed: %v", err)
+	}
+}
+
+func TestAddonInstallBlocksAndPreservesUnmanagedSlotDirectory(t *testing.T) {
+	client := testkit.Client(t, "flavor")
+	parent := filepath.Join(client, "Interface", "AddOns")
+	unknown := filepath.Join(parent, "Lychee Dev Slot 07")
+	if err := os.Mkdir(unknown, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(unknown, "user.lua")
+	if err := os.WriteFile(sentinel, []byte("user data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := delivery.InstallAddon(context.Background(), testkit.Release(t, ""), client, testkit.Version); !errors.Is(err, delivery.ErrConflict) {
+		t.Fatalf("unmanaged slot directory did not block install: %v", err)
+	}
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "user data" {
+		t.Fatalf("unmanaged directory changed: %q %v", got, err)
+	}
+	if _, err := os.Stat(delivery.AddonDirectory(client)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("main addon unexpectedly installed: %v", err)
+	}
+}
+
+func TestAddonUpgradeArchivesIdleManagedSlots(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.Client(t, "flavor")
 	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, "slot-runtime"), client, testkit.Version); err != nil {
 		t.Fatal(err)
 	}
-	parent := filepath.Dir(delivery.AddonDirectory(client))
+	parent := filepath.Join(client, "Interface", "AddOns")
+	seedLegacySlotPool(t, parent, testkit.Version, false)
+	archive := filepath.Join(t.TempDir(), "upgrade")
+	if _, err := delivery.UpgradeAddon(ctx, testkit.Release(t, ""), client, archive, testkit.Version, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(parent, ".lycheedev-slots.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy marker remains live: %v", err)
+	}
+	if _, err := os.Stat(delivery.SlotDirectory(parent, 1)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy slot remains live: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(archive+".slots", ".lycheedev-slots.json")); err != nil {
+		t.Fatalf("managed legacy receipt was not archived: %v", err)
+	}
+	status, err := delivery.InspectAddonDeployment(ctx, client)
+	if err != nil || status.Installation.State != "managed" {
+		t.Fatalf("upgrade health: %+v %v", status, err)
+	}
+}
+
+func TestAddonUpgradeBlocksPendingOrModifiedLegacySlots(t *testing.T) {
+	for _, mode := range []string{"pending", "modified"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			client := testkit.Client(t, "flavor")
+			if _, err := delivery.InstallAddon(ctx, testkit.Release(t, "slot-runtime"), client, testkit.Version); err != nil {
+				t.Fatal(err)
+			}
+			parent := filepath.Join(client, "Interface", "AddOns")
+			seedLegacySlotPool(t, parent, testkit.Version, mode == "pending")
+			var changedPath string
+			if mode == "modified" {
+				changedPath = filepath.Join(delivery.SlotDirectory(parent, 1), "Loader.lua")
+				if err := os.WriteFile(changedPath, []byte("user change"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mainPath := filepath.Join(delivery.AddonDirectory(client), "Core", "Start.lua")
+			before, err := os.ReadFile(mainPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			archive := filepath.Join(t.TempDir(), "upgrade")
+			if _, err = delivery.UpgradeAddon(ctx, testkit.Release(t, ""), client, archive, testkit.Version, false); !errors.Is(err, delivery.ErrConflict) {
+				t.Fatalf("unsafe legacy pool admitted: %v", err)
+			}
+			after, err := os.ReadFile(mainPath)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("main addon changed: %q %v", after, err)
+			}
+			if _, err = os.Stat(archive); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("upgrade archive created before rejection: %v", err)
+			}
+			if mode == "modified" {
+				if got, readErr := os.ReadFile(changedPath); readErr != nil || string(got) != "user change" {
+					t.Fatalf("user edit changed: %q %v", got, readErr)
+				}
+			}
+		})
+	}
+}
+
+func TestRemoveAddonArchivesManagedInstallationWithoutSlots(t *testing.T) {
+	ctx := context.Background()
+	client := testkit.Client(t, "flavor")
+	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, ""), client, testkit.Version); err != nil {
+		t.Fatal(err)
+	}
 	archive := filepath.Join(t.TempDir(), "removed")
 	result, err := delivery.RemoveAddon(ctx, client, archive)
-	if err != nil || result.State != "archived" || result.SlotArchive != archive+".slots" {
+	if err != nil || result.State != "archived" || result.Archive != archive || result.SlotArchive != "" {
 		t.Fatalf("%+v %v", result, err)
-	}
-	for i := 1; i <= bridge.SlotCount; i++ {
-		if _, err := os.Stat(delivery.SlotDirectory(parent, i)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatal("slot remains", i, err)
-		}
-	}
-	// Recreate an interruption after the first 32 slot moves. The intent remains
-	// durable; retry must validate both sides and finish the exact same removal.
-	for i := 33; i <= bridge.SlotCount; i++ {
-		if err := os.Rename(delivery.SlotDirectory(result.SlotArchive, i), delivery.SlotDirectory(parent, i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Rename(filepath.Join(result.SlotArchive, ".lycheedev-slots.json"), filepath.Join(parent, ".lycheedev-slots.json")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(archive, delivery.AddonDirectory(client)); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 2; i++ {
-		resumed, err := delivery.RemoveAddon(ctx, client, archive)
-		if err != nil || resumed.State != "archived" || resumed.SlotArchive != result.SlotArchive {
-			t.Fatalf("retry %d: %+v %v", i, resumed, err)
-		}
-	}
-	if _, err := delivery.InspectSlots(ctx, result.SlotArchive, testkit.Version); err != nil {
-		t.Fatal("archived pool failed integrity", err)
 	}
 }
 
@@ -115,7 +230,6 @@ func TestRemoveAddonWithSlotsReportsModifiedMainAsConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	main := delivery.AddonDirectory(client)
-	parent := filepath.Dir(main)
 	path := filepath.Join(main, "Core", "Runtime.lua")
 	if err := os.WriteFile(path, []byte("-- user edit\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -132,19 +246,20 @@ func TestRemoveAddonWithSlotsReportsModifiedMainAsConflict(t *testing.T) {
 			t.Fatalf("refused removal created %s: %v", target, err)
 		}
 	}
-	if _, err := delivery.InspectSlots(ctx, parent, testkit.Version); err != nil {
-		t.Fatal("refused removal changed slots:", err)
-	}
 }
 
-func TestRemoveAddonRefusesModifiedSlotBeforeMovingAnything(t *testing.T) {
+func TestRemoveAddonRefusesUnownedSlotDirectoryBeforeMovingAnything(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.Client(t, "flavor")
 	if _, err := delivery.InstallAddon(ctx, testkit.Release(t, "slot-runtime"), client, testkit.Version); err != nil {
 		t.Fatal(err)
 	}
 	parent := filepath.Dir(delivery.AddonDirectory(client))
-	if err := os.WriteFile(filepath.Join(delivery.SlotDirectory(parent, 64), "Loader.lua"), []byte("external edit"), 0600); err != nil {
+	unmanaged := filepath.Join(parent, "Lychee Dev Slot 64")
+	if err := os.Mkdir(unmanaged, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unmanaged, "Loader.lua"), []byte("external edit"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	archive := filepath.Join(t.TempDir(), "removed")
@@ -154,10 +269,8 @@ func TestRemoveAddonRefusesModifiedSlotBeforeMovingAnything(t *testing.T) {
 	if _, err := os.Stat(delivery.AddonDirectory(client)); err != nil {
 		t.Fatal(err)
 	}
-	for i := 1; i <= bridge.SlotCount; i++ {
-		if _, err := os.Stat(delivery.SlotDirectory(parent, i)); err != nil {
-			t.Fatal(i, err)
-		}
+	if got, err := os.ReadFile(filepath.Join(unmanaged, "Loader.lua")); err != nil || string(got) != "external edit" {
+		t.Fatalf("unmanaged slot directory changed: %q %v", got, err)
 	}
 	if _, err := os.Stat(archive); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("archive unexpectedly created", err)

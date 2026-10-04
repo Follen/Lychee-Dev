@@ -12,8 +12,6 @@ func TestReadCommandsDoNotInitializeMetadata(t *testing.T) {
 		t.Fatalf("init: %+v %d", result, code)
 	}
 	for _, command := range [][]string{
-		{"live", "status", "OP-missing"},
-		{"live", "session", "SESSION-missing"},
 		{"target", "show", "PIN-missing"},
 		{"evidence", "show", "CAP-missing"},
 		{"evidence", "verify", "CAP-missing"},

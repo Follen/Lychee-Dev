@@ -46,6 +46,14 @@ edited skill does not mean the installed CLI, loaded addon or agent context
 was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata/
 Python entrypoints to make a documented example work.
 
+Before every live call that may drive the game, run `doctor` from the same
+project context and workspace. This includes connect, execute, resume, reload,
+cancel and disconnect; a previous successful check does
+not replace the next call's check. Read [live doctor](references/live-doctor.md)
+for the supported invocation, its current limits and recovery handling. Read-only
+status/history do not need this drive preflight; source/data work keeps its own
+scope. Doctor findings do not establish game readiness or authorize new effects.
+
 ## Keep the target and scope fixed
 
 Reuse explicit inputs or a matching project pin. An explicit `--snapshot` wins;
@@ -68,10 +76,14 @@ can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-The CLI owns keys, memory, optical readiness, slots and journals. Follow its
+The candidate uses **Lychee Dev mailbox protocol v1** (`lycheedev.mailbox.v1`):
+one small reusable data table, one current request and independent controls.
+The CLI owns publications, frame/result acknowledgements, result integrity and journals. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
-work does not use the old OP/BTP ACK/finish/hide sequence.
+work does not use the old OP/BTP ACK/finish/hide sequence. Old duplex/slot wire
+is incompatible. Current writer profiles remain unverified and refuse game
+writes; an addon self-test or offline fixture does not prove CLI-to-game execution.
 
 ## Finish with evidence
 

@@ -10,8 +10,9 @@ idle CON. Read [startup](live-startup.md) when activation or installation is nee
 Use [retained errors](error-diagnosis.md) or [performance measurement](runtime-investigations.md)
 when they answer the question; write a [probe](live-probes.md) only for missing evidence.
 
-Native 3.1 uses a build-bound Lua root and the named public Mailbox, with a
-matching clean 200-slot installation. The CLI validates the current process,
+This candidate uses **Lychee Dev mailbox protocol v1**, schema
+`lycheedev.mailbox.v1`, a build-bound Lua root and the named public Mailbox, with a
+matching clean managed installation. The CLI validates the current process,
 typed path, publication, owner/fence, challenge and exact result. Old native
 wire/identity is rejected. Unsupported code/layout, ambiguity or read gaps
 fail closed; they do not invoke a heap scanner or reuse another build's RVA.
@@ -46,7 +47,7 @@ project's claim, missing publication or stale sample is not an expired timeout.
 ## Complete an investigation
 
 ```text
-lycheedev live execute --project <project-directory> --session <CON-id> --file <probe.lua> --request <stable-key> --budget-seconds 30 --wait-seconds 120 --policy observation --format json
+lycheedev live execute --project <project-directory> --session <CON-id> --file <probe.lua> --request <stable-key> --budget-seconds 30 --wait-seconds 120 --format json
 ```
 
 Use `--probe <immutable-PRB-revision>` instead of a file for registered source.
@@ -55,12 +56,16 @@ bounds addon execution (1..120); `--wait-seconds` bounds this host call
 (1..600, default 120). The [durable recovery deadline](live-recovery.md#durable-evidence-and-older-journals)
 survives between calls. Host timeout does not cancel Lua or renew either budget.
 
-Select `observation` only when repeating the entire probe after confirmed
-runtime loss is safe. The default `opaque` preserves uncertainty for effects
-that cannot safely repeat. CLI-managed observation recovery keeps the logical
-operation and records another attempt/ticket; it does not prove the old attempt
-did nothing. A new request key is for a genuinely new completed-task experiment,
-not for escaping a pending one.
+The inbox reuses one physical data table for up to 1 MiB of source: at most
+256 logical frames of 4096 bytes, one outstanding request and one unacknowledged
+data publication. A verified frame ACK means the addon copied that frame into
+private strings; only then may the CLI overwrite the data table. It does not
+release the request or authorize execution. The addon checks identity, sequence,
+frame hashes and complete request SHA256, then requires the exact private commit
+challenge. Result ACK is separate: the CLI verifies and durably saves the result
+before acknowledging it, and must observe exact RELEASED before new business.
+Unknown execution never replays; retained private not_started evidence and
+drained writers are required to repair transfer of the original request.
 
 Read the result on three independent axes:
 
@@ -76,8 +81,10 @@ execution. Completed native work needs no ACK/finish/hide command. Repeating
 the exact completed request reads retained bytes without rerunning Lua, even
 after later operations or game exit; edited parameters/code are not that retry.
 
-The CLI may reload at a quiescent capacity boundary. Scene-dependent probes
-must reconstruct prerequisites or record that they cannot. Ordinary observation
+The single data table is reused without a capacity-triggered reload. An explicit
+reload follows [recovery](live-recovery.md); its replacement runtime does not
+inherit or rerun the original request. Scene-dependent probes must reconstruct
+prerequisites or record that they cannot. Ordinary observation
 does not need an input shield, and UI activity labels prove neither execution
 nor result retrieval.
 

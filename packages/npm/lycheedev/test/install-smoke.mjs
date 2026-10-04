@@ -96,7 +96,7 @@ assert.deepEqual(shimVersion, version);
 const home = join(root, 'fresh-home');
 const initialized = JSON.parse(run(process.execPath, [launcher, 'init', '--home', home, '--format=json']));
 assert.equal(initialized.ok, true);
-for (const command of [['live', 'status', 'OP-missing'], ['live', 'session', 'SESSION-missing'], ['target', 'show', 'PIN-missing'], ['evidence', 'show', 'CAP-missing'], ['evidence', 'verify', 'CAP-missing']]) {
+for (const command of [['target', 'show', 'PIN-missing'], ['evidence', 'show', 'CAP-missing'], ['evidence', 'verify', 'CAP-missing']]) {
   const read = spawnSync(process.execPath, [launcher, ...command, '--home', home, '--format=json'], {
     cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
   });
@@ -107,6 +107,18 @@ for (const command of [['live', 'status', 'OP-missing'], ['live', 'session', 'SE
   assert.equal(result.result, null);
   assert.deepEqual(readdirSync(join(home, 'state')), [], 'read initialized database');
   assert.deepEqual(readdirSync(join(home, 'locks')), [], 'read created schema lock');
+}
+for (const retiredID of ['OP-missing', 'BTP-missing', 'SESSION-missing']) {
+  const read = spawnSync(process.execPath, [launcher, 'live', 'status', retiredID, '--home', home, '--format=json'], {
+    cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
+  });
+  assert.ifError(read.error);
+  assert.equal(read.status, 2);
+  const result = JSON.parse(read.stdout);
+  assert.equal(result.error.code, 'command.invalid_arguments');
+  assert.equal(result.result, null);
+  assert.deepEqual(readdirSync(join(home, 'state')), [], 'retired transport admission wrote global state');
+  assert.deepEqual(readdirSync(join(home, 'locks')), [], 'retired transport admission created a lock');
 }
 const describe = JSON.parse(run(process.execPath, [launcher, 'describe', '--format=json']));
 assert.equal(describe.ok, true);
@@ -160,15 +172,19 @@ const assetExport = { status: 'passed', scope: 'synthetic authenticated CDN cach
 const sessionContract = describe.result.commands.find(command => command.path === 'live session');
 assert(sessionContract, 'installed CLI is missing session evidence query');
 assert.equal(sessionContract.mutates, false);
-assert.equal(describe.result.commands.find(command => command.path === 'live bind')?.mutates, true);
+assert.equal(describe.result.commands.find(command => command.path === 'live connect')?.mutates, true);
 assert.equal(describe.result.commands.find(command => command.path === 'live resume')?.mutates, true);
-assert.equal(describe.result.commands.find(command => command.path === 'live run')?.mutates, true);
+assert.equal(describe.result.commands.find(command => command.path === 'live execute')?.mutates, true);
+for (const retired of ['live bind', 'live run', 'live ack', 'live finish']) {
+  assert.equal(describe.result.commands.find(command => command.path === retired), undefined, `retired command advertised: ${retired}`);
+}
 const probeFile = join(root, 'probe.lua');
 writeFileSync(probeFile, 'return 42\n');
-const absentRunHome = join(root, 'absent-run-home');
-const runAdmission = [];
-for (const extra of [[], ['--session', 'SESSION-missing', '--account', 'Account-A', '--file', probeFile]]) {
-  const attempt = spawnSync(process.execPath, [launcher, 'live', 'run', ...extra, '--home', absentRunHome, '--format=json'], {
+const absentRunHome = join(root, 'absent-execute-home');
+const executeAdmission = [];
+const missingConnection = 'CON-00000000000000000000000000000001';
+for (const extra of [[], ['--session', missingConnection, '--request', 'package-admission', '--file', probeFile]]) {
+  const attempt = spawnSync(process.execPath, [launcher, 'live', 'execute', ...extra, '--home', absentRunHome, '--format=json'], {
     cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
   });
   assert.ifError(attempt.error);
@@ -177,25 +193,25 @@ for (const extra of [[], ['--session', 'SESSION-missing', '--account', 'Account-
   assert.equal(result.ok, false);
   assert.equal(result.operationId, '');
   assert.equal(result.result, null);
-  if (extra.length === 0) assert.equal(result.error.code, 'command.invalid_arguments');
-  assert(!existsSync(absentRunHome), 'run admission created an implicit workspace');
-  runAdmission.push(result);
+  assert.equal(attempt.status, 2, 'incomplete execute should fail argument admission');
+  assert(!existsSync(absentRunHome), 'execute admission created an implicit workspace');
+  executeAdmission.push(result);
 }
-const recoveryOutput = run('go', ['test', '-count=1', '-run', '^TestOperationReportLifecycleUsesArchivedEvidence$', '-v', './internal/live'], repository, {
-  LYCHEEDEV_RECOVERY_NODE: process.execPath,
-  LYCHEEDEV_RECOVERY_LAUNCHER: launcher,
+const recoveryOutput = run('go', ['test', '-count=1', '-run', '^TestInstalledDuplexReadOnlyRecovery$', '-v', './tests/process'], repository, {
+  LYCHEEDEV_DUPLEX_NODE: process.execPath,
+  LYCHEEDEV_DUPLEX_LAUNCHER: launcher,
 });
-assert(recoveryOutput.includes(`using installed recovery launcher: ${launcher}`), 'recovery did not use installed package');
-assert(recoveryOutput.includes('--- PASS: TestOperationReportLifecycleUsesArchivedEvidence'), 'recovery integration test did not pass');
-const terminalRecovery = { status: 'passed', scope: 'synthetic completed operation, real installed CLI owner retirement, not game execution', launcher, output: recoveryOutput };
-const incompleteBind = spawnSync(process.execPath, [launcher, 'live', 'bind', '--format=json'], {
+assert(recoveryOutput.includes(`using installed duplex launcher: ${launcher}`), 'recovery did not use installed package');
+assert(recoveryOutput.includes('--- PASS: TestInstalledDuplexReadOnlyRecovery'), 'duplex recovery integration test did not pass');
+const terminalRecovery = { status: 'passed', scope: 'synthetic durable duplex result; installed CLI preserves verified evidence with an absent runtime, rejects altered bytes and performs no journal writes', launcher, output: recoveryOutput };
+const incompleteExecute = spawnSync(process.execPath, [launcher, 'live', 'execute', '--session', missingConnection, '--format=json'], {
   cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
 });
-assert.ifError(incompleteBind.error);
-assert.equal(incompleteBind.status, 2);
-assert.equal(JSON.parse(incompleteBind.stdout).error.code, 'command.invalid_arguments');
+assert.ifError(incompleteExecute.error);
+assert.equal(incompleteExecute.status, 2);
+assert.equal(JSON.parse(incompleteExecute.stdout).ok, false);
 const absentSessionHome = join(root, 'absent-session-home');
-const missingSession = spawnSync(process.execPath, [launcher, 'live', 'session', 'SESSION-missing', '--home', absentSessionHome, '--format=json'], {
+const missingSession = spawnSync(process.execPath, [launcher, 'live', 'session', missingConnection, '--project', root, '--home', absentSessionHome, '--format=json'], {
   cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
 });
 assert.ifError(missingSession.error);
@@ -203,18 +219,8 @@ assert.notEqual(missingSession.status, 0);
 const sessionFailure = JSON.parse(missingSession.stdout);
 assert.equal(sessionFailure.ok, false);
 assert.equal(sessionFailure.result, null, 'failed lookup returned a fabricated empty session');
-assert(!existsSync(absentSessionHome), 'historical session lookup created a workspace');
-let nativeBinding = { status: 'not-run', scope: 'owned synthetic Windows window, not WoW' };
-if (process.env.LYCHEEDEV_TEST_DESKTOP === '1') {
-  assert.equal(target, 'windows-amd64', 'native binding fixture requires Windows amd64');
-  const output = run('go', ['test', '-count=1', '-run', '^TestLiveBindNativeCLI$', '-v', './internal/command'], repository, {
-    LYCHEEDEV_BINDING_NODE: process.execPath,
-    LYCHEEDEV_BINDING_LAUNCHER: launcher,
-  });
-  assert(output.includes(`using installed npm launcher: ${launcher}`), 'native test did not use installed launcher');
-  assert(output.includes('--- PASS: TestLiveBindNativeCLI'), 'native binding test was skipped or failed');
-  nativeBinding = { ...nativeBinding, status: 'passed', launcher, output };
-}
+assert(!existsSync(absentSessionHome), 'duplex session lookup created a global workspace');
+const nativeWriteAcceptance = { status: 'not_run', scope: 'game memory writing requires independently verified layout and lifetime evidence; package smoke covers read-only durable duplex recovery' };
 function cli(...args) {
   const result = JSON.parse(run(process.execPath, [launcher, ...args, '--format=json']));
   assert.equal(result.ok, true);
@@ -274,7 +280,7 @@ writeFileSync(join(skillPath, 'SKILL.md'), skillOriginal);
 const skillRemove = cli('skill', 'remove', '--path', skillPath, '--output', join(root, 'removed-skill'));
 assert.equal(cli('skill', 'status', '--path', skillPath).result.state, 'absent');
 assert.equal(createHash('sha256').update(readFileSync(tgz)).digest('hex'), digest);
-const report = { scope: 'development host binary and current addon/skill payload; simulated deployment, not game or release acceptance', target, root, tgz, sha256: digest, commit, workspaceDirty, resources, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, ignoreScripts: true, version, shimVersion, initialized, describe, projectContext, hotfixQuery, assetExport, runAdmission, sessionFailure, nativeBinding, terminalRecovery, skillInstall, skillUpgrade, skillResume, skillRemove, skillConflict, addonInstall, addonUpgrade, addonResume, addonRemove, addonConflict };
+const report = { scope: 'development host binary and current addon/skill payload; simulated deployment, not game or release acceptance', target, root, tgz, sha256: digest, commit, workspaceDirty, resources, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, ignoreScripts: true, version, shimVersion, initialized, describe, projectContext, hotfixQuery, assetExport, executeAdmission, sessionFailure, nativeWriteAcceptance, terminalRecovery, skillInstall, skillUpgrade, skillResume, skillRemove, skillConflict, addonInstall, addonUpgrade, addonResume, addonRemove, addonConflict };
 writeFileSync(join(root, 'report.json'), JSON.stringify(report, null, 2));
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `report=${join(root, 'report.json')}\n`);
 process.stdout.write(JSON.stringify({ root, target, sha256: digest, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, status: 'passed' }) + '\n');
