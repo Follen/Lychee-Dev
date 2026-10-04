@@ -58,6 +58,7 @@ type LocalRetirementProof struct {
 	ProcessID            uint32 `json:"processId"`
 	ProcessCreated       uint64 `json:"processCreated,string"`
 	Executable           string `json:"executable"`
+	ProcessExit          string `json:"processExit,omitempty"`
 	PreviousRuntime      string `json:"previousRuntime"`
 	ObservedRuntime      string `json:"observedRuntime"`
 	PreviousActorBinding string `json:"previousActorBinding"`
@@ -247,7 +248,12 @@ func ValidateState(st State) error {
 					return e
 				}
 			}
-			if proof.PreviousRuntime == proof.ObservedRuntime && proof.PreviousActorBinding == proof.ObservedActorBinding && (proof.ObservedActorGUID == "" || proof.ObservedActorGUID == proof.PreviousActorGUID) {
+			if proof.ProcessExit != "" {
+				if (proof.ProcessExit != "process_absent" && proof.ProcessExit != "pid_reused" && proof.ProcessExit != "process_exited") ||
+					proof.ObservedRuntime != zeroToken || proof.ObservedActorBinding != zeroToken || proof.ObservedActorGUID != "" {
+					return errors.New("invalid process-exit retirement proof")
+				}
+			} else if proof.PreviousRuntime == proof.ObservedRuntime && proof.PreviousActorBinding == proof.ObservedActorBinding && (proof.ObservedActorGUID == "" || proof.ObservedActorGUID == proof.PreviousActorGUID) {
 				return errors.New("local retirement requires observed lifecycle change")
 			}
 		} else if st.Bound || st.Active != nil || len(st.Intents) != 0 || st.PublicationSequence != 0 || st.ReloadPrepared != nil {

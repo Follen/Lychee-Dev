@@ -30,12 +30,42 @@ if arg[6] and arg[7] then
     assert(S.Digest("LYCMBX/frame/v1\0"..reload:sub(1,232))==rh.frameSHA)
     assert(S.Digest("LYCMBX/frame/v1\0"..lease:sub(1,232)..lease:sub(321))==lh.frameSHA)
 end
--- First command binds and executes in the same callback; no control write.
+-- The first command binds and executes after bounded validation; no control write.
 local f=F.engine();local nonce=f.engine.Snapshot().readyChallenge
 local first=f.command("return false")
 assert(f.calls()==1 and f.engine.Snapshot().phase=="result_pending")
 assert(f.engine.Snapshot().terminal.executionStarted and f.engine.Snapshot().terminal.resourcesReleased)
+assert(f.engine.Snapshot().terminal.requestId==f.engine.Snapshot().request.requestId)
 assert(f.pages[1]:find('"result":false',1,true),"false result disappeared")
+local projected=f
+F.ns.DuplexRuntime={Snapshot=function()return {enabled=true,protocol=projected.engine.Snapshot()}end}
+assert(loadfile(arg[1].."/addon/Modules/AutomationView.lua"))("Lychee Dev",F.ns)
+local view=F.ns.AutomationView
+assert(view.Collect()==1 and view.GetRecord(f.engine.Snapshot().request.requestId).hasReport,
+    "real protocol terminal was dropped by workbench projection")
+for _,size in ipairs({512,513}) do
+    local bounded=F.engine()
+    local source="return true"..string.rep(" ",size-#"return true")
+    F.setRow(bounded.arena.command,F.header(P.Kind.frame,source,{challenge=bounded.engine.Snapshot().readyChallenge}))
+    assert(bounded.engine.Poll(bounded.arena,8))
+    assert(bounded.engine.HasPendingValidation() and bounded.calls()==0,
+        "short command bypassed bounded zero-tail validation")
+    while bounded.engine.HasPendingValidation() do assert(bounded.engine.Poll(bounded.arena,8)) end
+    assert(bounded.calls()==1 and bounded.engine.Snapshot().terminal.outcome=="success")
+end
+local rejected=F.engine()
+local rejectedID=string.format("%032x",1)
+F.setRow(rejected.arena.command,F.header(P.Kind.frame,"return true",{
+    challenge=rejected.engine.Snapshot().readyChallenge,digest=string.rep("a",64)}))
+assert(rejected.engine.Poll(rejected.arena,8))
+while rejected.engine.HasPendingValidation() do assert(rejected.engine.Poll(rejected.arena,8)) end
+local rejectedState=rejected.engine.Snapshot()
+assert(rejectedState.candidateFailure and rejectedState.candidateFailure.requestId==rejectedID
+    and rejectedState.candidateFailure.code=="duplex_request_checksum" and not rejectedState.connectionFailure)
+projected=rejected
+assert(view.Collect()==0 and view.GetMailboxStatus().candidateFailure.requestId==rejectedID
+    and not view.GetMailboxStatus().errorCode,"candidate rejection was shown as a connection failure")
+projected=f
 assert(f.engine.Snapshot().readyChallenge~=nonce,"single-use nonce repeated")
 assert(f.engine.Poll(f.arena,8));assert(f.calls()==1,"same row executed twice")
 -- Changed replay and checksum/padding failures preserve the retained result.
@@ -46,10 +76,13 @@ local replacement=F.header(P.Kind.frame,"return true",{seq=2,ack=ack,challenge=s
 F.setRow(f.arena.command,replacement);f.arena.command[100]=1;assert(f.engine.Poll(f.arena,8))
 assert(f.calls()==1 and not f.engine.Snapshot().repair,"mixed row triggered repair or execution")
 f.arena.command[100]=0;F.setRow(f.arena.command,replacement);assert(f.engine.Poll(f.arena,8))
+while f.engine.HasPendingValidation() do assert(f.engine.Poll(f.arena,8)) end
 assert(f.calls()==2 and f.engine.Snapshot().request.requestId==string.format("%032x",2),"valid completion with same stamp did not retry")
 assert(f.engine.Snapshot().released.requestId==state.request.requestId)
 assert(f.engine.Snapshot().released.outcome=="success" and f.engine.Snapshot().released.executionStarted
     and f.engine.Snapshot().released.totalBytes==#"return false" and f.engine.Snapshot().released.requestSeq=="1")
+assert(view.Collect()==1 and view.GetRecord(f.engine.Snapshot().request.requestId).hasReport,
+    "next real terminal lost its request identity")
 -- Final ACK+close is one stop message and duplicate observation is idempotent.
 state=f.engine.Snapshot();local closeOpts={seq=2,pub=50,id=state.request.requestId,digest=state.request.requestSHA256,challenge=state.request.challenge}
 assert(f.writeStop(P.Kind.close,f.ack(),closeOpts))
@@ -188,7 +221,9 @@ F.setRow(partial.arena.command,valid);partial.arena.command[100]=1
 for _=1,10 do assert(partial.engine.Poll(partial.arena,8)) end
 assert(partial.calls()==0 and not partial.engine.Snapshot().repair)
 partial.arena.command[100]=0;assert(partial.engine.Poll(partial.arena,8));assert(partial.calls()==0)
-partial.clock(100.5);assert(partial.engine.Poll(partial.arena,8));assert(partial.calls()==1)
+partial.clock(100.5);assert(partial.engine.Poll(partial.arena,8))
+while partial.engine.HasPendingValidation() do assert(partial.engine.Poll(partial.arena,8)) end
+assert(partial.calls()==1)
 -- Activity ends when execution finishes, before result encoding/pagination.
 local active,encodedWhileActive=false,false
 local activity=F.engine({started=function()active=true end,finished=function()active=false end,

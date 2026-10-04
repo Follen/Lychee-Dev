@@ -16,6 +16,7 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/delivery"
+	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/duplex"
 	"github.com/follenfang/lycheedev/internal/live/journal"
@@ -29,7 +30,10 @@ type TargetRequest struct {
 	PID                              uint32
 	Character, Realm, Build, Product string
 }
-type Project struct{ Root string }
+type Project struct {
+	Root         string
+	processEnded func(context.Context, desktop.WindowIdentity) (string, error)
+}
 type targetRecord struct {
 	Schema              string              `json:"schema"`
 	Target              live.ClientWindow   `json:"target"`
@@ -420,13 +424,20 @@ func (p *Project) drive(ctx context.Context, id string, control bool, action fun
 	if err != nil {
 		return result, err
 	}
-	if meta.ProcessClaimVersion != 1 {
-		return result, legacyClaimError()
-	}
 	store := duplex.NewFileStore(p.path(id))
 	before, err := store.Load(ctx)
 	if err != nil {
 		return result, err
+	}
+	processEnded := desktop.ProcessEnded
+	if p.processEnded != nil {
+		processEnded = p.processEnded
+	}
+	if reason, e := processEnded(ctx, meta.Target.Window); e == nil && reason != "" {
+		return p.retireExitedProcess(ctx, id, meta, store, before, reason)
+	}
+	if meta.ProcessClaimVersion != 1 {
+		return p.present(ctx, id, before, nil), legacyClaimError()
 	}
 	if proof := meta.RuntimeRetirement; proof != nil {
 		in := before.ReloadPrepared
@@ -632,6 +643,13 @@ func (p *Project) Disconnect(ctx context.Context, id string, _ bool) (ProjectRes
 	before, e := store.Load(ctx)
 	if e != nil {
 		return ProjectResult{}, e
+	}
+	if meta.ProcessClaimVersion != 1 {
+		// Only the original CLI may retire a live legacy selection. A proven
+		// process exit is handled by drive without contacting the game.
+		return p.drive(ctx, id, true, func(c *duplex.Coordinator) (duplex.State, error) {
+			return c.Disconnect(ctx, 30*time.Second)
+		})
 	}
 	if selectedWithoutPublication(before) {
 		if meta.ClaimRetired {
@@ -879,7 +897,7 @@ func historicalResultReleased(st duplex.State, record requestRecord) bool {
 // A selected session with no publication has no in-game ownership to close.
 // Retire only its exact local claim after all physical writers are drained.
 func (p *Project) retireLocalSelection(ctx context.Context, id string, meta targetRecord, st duplex.State) (ProjectResult, error) {
-	if meta.ProcessClaimVersion != 1 {
+	if meta.ProcessClaimVersion != 1 && (st.LocalRetirement == nil || st.LocalRetirement.ProcessExit == "") {
 		return p.present(ctx, id, st, nil), legacyClaimError()
 	}
 	result := p.present(ctx, id, st, nil)
@@ -892,7 +910,12 @@ func (p *Project) retireLocalSelection(ctx context.Context, id string, meta targ
 		return result, e
 	}
 	defer release()
-	if e = retireConnectionClaim(ctx, meta.Target, meta.Claim); e != nil {
+	if meta.ProcessClaimVersion == 1 {
+		e = retireConnectionClaim(ctx, meta.Target, meta.Claim)
+	} else {
+		e = journal.RetireConnectionWindow(ctx, addonParent(meta.Target), meta.Claim)
+	}
+	if e != nil {
 		return result, e
 	}
 	meta.ClaimRetired = true
@@ -905,6 +928,77 @@ func (p *Project) retireLocalSelection(ctx context.Context, id string, meta targ
 		result.Cleanup = "complete"
 	}
 	return result, nil
+}
+
+// A proven process exit ends address authority even when the old runtime left
+// no receipt. Retire only this exact local claim after both writer lanes drain;
+// keep the request and its unknown effects in the durable journal.
+func (p *Project) retireExitedProcess(ctx context.Context, id string, meta targetRecord, store duplex.Store, st duplex.State, reason string) (ProjectResult, error) {
+	if (reason != "process_absent" && reason != "pid_reused" && reason != "process_exited") ||
+		!claimMatchesTarget(meta.Target, meta.Claim) || meta.Identity != st.Identity {
+		return p.present(ctx, id, st, nil), duplex.ErrIdentity
+	}
+	if meta.ClaimRetired {
+		r := p.present(ctx, id, st, nil)
+		if st.LocalRetirement != nil {
+			r.Cleanup = "local_retired"
+		} else {
+			r.Cleanup = "complete"
+		}
+		return r, nil
+	}
+	if st.Closed {
+		// The close was already durable; only its host claim remains.
+		return p.retireClosedClaim(ctx, id, meta, st)
+	}
+	if !st.LocalRetired || st.LocalRetirement == nil {
+		proof := duplex.LocalRetirementProof{ProcessID: meta.Target.Window.ProcessID, ProcessCreated: meta.Target.Window.ProcessStartedAt,
+			Executable: meta.Target.Window.Executable, ProcessExit: reason,
+			PreviousRuntime: st.Identity.Runtime, ObservedRuntime: "00000000000000000000000000000000",
+			PreviousActorBinding: st.Identity.ActorBinding, ObservedActorBinding: "00000000000000000000000000000000",
+			PreviousActorGUID: meta.ActorGUID}
+		if e := store.Update(ctx, func(current *duplex.State) error {
+			if current.Identity != st.Identity || current.Closed {
+				return duplex.ErrIdentity
+			}
+			current.LocalRetired = true
+			current.Closing = true
+			current.LocalRetirement = &proof
+			return nil
+		}); e != nil {
+			return p.present(ctx, id, st, nil), e
+		}
+		var e error
+		st, e = store.Load(ctx)
+		if e != nil {
+			return ProjectResult{}, e
+		}
+	}
+	return p.retireLocalSelection(ctx, id, meta, st)
+}
+
+func (p *Project) retireClosedClaim(ctx context.Context, id string, meta targetRecord, st duplex.State) (ProjectResult, error) {
+	r := p.present(ctx, id, st, nil)
+	native := &Native{Target: meta.Target}
+	release, e := native.WritersDrained(ctx)
+	if e != nil {
+		return r, e
+	}
+	defer release()
+	if meta.ProcessClaimVersion == 1 {
+		e = retireConnectionClaim(ctx, meta.Target, meta.Claim)
+	} else {
+		e = journal.RetireConnectionWindow(ctx, addonParent(meta.Target), meta.Claim)
+	}
+	if e != nil {
+		return r, e
+	}
+	meta.ClaimRetired = true
+	if e = writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta); e != nil {
+		return r, e
+	}
+	r.Cleanup = "complete"
+	return r, nil
 }
 
 func observedLifecycleChanged(meta targetRecord, st duplex.State, s duplex.Sendbox) bool {

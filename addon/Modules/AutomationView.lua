@@ -22,7 +22,7 @@ local function collect()
         transportReady=state.transportReady==true,controlReady=state.controlReady==true,
         -- A connection/control failure has no request attribution. Keep it out
         -- of the request record, even when a released request remains visible.
-        errorCode=state.connectionFailure and state.connectionFailure.code or state.lastFailure,
+        errorCode=state.connectionFailure and state.connectionFailure.code,
         candidateFailure=state.candidateFailure}
     local request=state.validation or state.request or state.released
     local id=request and request.requestId

@@ -331,7 +331,7 @@ page.viewReportButton:Click()
 assert(page.reportArea.editBox:GetText():find('"resultBytes":4',1,true))
 assert(view.ClearRecords()==0)
 state={phase="ready_unbound",ready=true,actorReady=true,transportReady=true,controlReady=true,
-    lastFailure="duplex_control_identity",released={requestId=id,requestSHA256=string.rep("b",64),
+    connectionFailure={code="duplex_control_identity"},released={requestId=id,requestSHA256=string.rep("b",64),
         totalBytes=1048576,requestSeq="9007199254740993",outcome="success",executionStarted=true}}
 view.Collect();assert(view.GetRecord(id).status=="acknowledged")
 assert(view.GetReportText(id)==nil,"released view retained result manifest")
@@ -351,14 +351,14 @@ page.summaryButton:Click();assert(page.reportArea:IsShown() and not page.metadat
     "released summary cannot be reopened after viewing details")
 -- Older summaries remain truthful and cannot manufacture a successful result.
 state.released={requestId=id,requestSHA256=string.rep("b",64)}
-state.lastFailure=nil;page:Refresh()
+state.connectionFailure=nil;page:Refresh()
 assert(view.GetRecord(id).probeStatus==nil)
 assert(page.codeValue:GetText()==string.format(ns.L.AUTO_CODE_CHECKSUM_ONLY,string.rep("b",64)))
 assert(page.connectionError:GetText()=="")
 -- A terminal request failure and a rejected candidate/control are separate facts.
 state={phase="result_pending",request={requestId=id,totalBytes=1},
     terminal={requestId=id,outcome="failed",executionStarted=false,failureCode="compile_error"},
-    lastFailure="duplex_control_identity",candidateFailure={requestId=string.rep("f",32),code="duplex_digest"}}
+    connectionFailure={code="duplex_control_identity"},candidateFailure={requestId=string.rep("f",32),code="duplex_digest"}}
 page:Refresh()
 assert(page.errorValue:GetText()=="compile_error")
 assert(page.candidateError:GetText()==string.format(ns.L.AUTO_CANDIDATE_ERROR,string.rep("f",32),"duplex_digest"))

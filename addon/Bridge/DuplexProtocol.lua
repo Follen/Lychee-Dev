@@ -216,6 +216,14 @@ function API.Create(deps)
     local observed=setmetatable({}, {__mode="k"})
     local failures=setmetatable({}, {__mode="k"})
     local api={}
+    local function candidateError(h,code)
+        p.lastFailure=code
+        p.candidateFailure={requestId=h and hex(h.requestId) or nil,code=code}
+    end
+    local function connectionError(code)
+        p.lastFailure=code
+        p.connectionFailure={code=code}
+    end
     local function actorReady()
         local ok,a=pcall(function()return deps.actor and deps.actor()end)
         local i=p.identity
@@ -225,7 +233,10 @@ function API.Create(deps)
         local available=actorReady()
         if p.lastActorReady~=nil and p.lastActorReady~=available then
             p.readyRaw=nil;p.readyAt=nil
-            if p.validation then p.validation=nil;p.lastFailure="duplex_actor_changed_before_acceptance" end
+            if p.validation then
+                candidateError(p.validation.header,"duplex_actor_changed_before_acceptance")
+                p.validation=nil
+            end
         end
         p.lastActorReady=available
         return available
@@ -242,10 +253,10 @@ function API.Create(deps)
         if p.readyRaw or not eligible() then return end
         if available==nil then available=actorReady() end
         if not available then return end
-        local clock=now();if not clock then p.lastFailure="duplex_clock_unavailable";return end
+        local clock=now();if not clock then connectionError("duplex_clock_unavailable");return end
         p.admission=p.admission+1
         local ok,raw=pcall(deps.challenge,{admissionSequence=p.admission})
-        if not ok or type(raw)~="string" or #raw~=16 then p.lastFailure="duplex_challenge_unavailable";return end
+        if not ok or type(raw)~="string" or #raw~=16 then connectionError("duplex_challenge_unavailable");return end
         -- Even a deterministic fixture source must yield a different token for
         -- every admission; consumption can never be undone by token reuse.
         p.readyRaw=SHA.Digest("LYCMBX/admission/v1\0"..tokenRaw(p.identity.runtime,16)..tokenRaw(p.identity.arenaGeneration,16)..u64word(0,p.admission)..raw):sub(1,16)
@@ -335,7 +346,7 @@ function API.Create(deps)
         for at=1,#json,16384 do local page=json:sub(at,at+16383);pages[#pages+1]=page;hashes[#hashes+1]=hex(SHA.Digest(page)) end
         if #pages==0 then pages[1]="";hashes[1]=hex(SHA.Digest("")) end
         r.state="terminal";r.fn=nil;r.execution=nil;r.executionStarted=started==true
-        p.terminal={outcome=meta.cancelled and "cancelled" or success and "success" or "failed",executionStarted=started==true,
+        p.terminal={requestId=r.requestId,requestSHA256=r.digest,outcome=meta.cancelled and "cancelled" or success and "success" or "failed",executionStarted=started==true,
             failureCode=code or not success and (meta.cancelled and "cancelled" or "probe_failed") or nil,
             effects=started and "may_have_occurred" or "none_started",resourcesReleased=released,resultSHA256=hex(SHA.Digest(json)),resultBytes=#json,pages=#pages,pageSHA256=hashes}
         if deps.publishPage then for n,page in ipairs(pages) do pcall(deps.publishPage,n,page) end end
@@ -431,7 +442,7 @@ function API.Create(deps)
         -- All validations finish before either the old result or nonce changes.
         if p.terminal then retire() end
         bind(h);p.readyRaw=nil;p.readyAt=nil;p.seqHi=h.requestSeqHi;p.seqLo=h.requestSeqLo;p.lastRequestRaw=h.requestId
-        local r=newRequest(h);p.request=r;p.lastFailure=nil
+        local r=newRequest(h);p.request=r;p.lastFailure=nil;p.candidateFailure=nil;p.connectionFailure=nil
         local ok,fn=pcall(deps.compile,source);source=nil
         if not ok or type(fn)~="function" then terminalize(r,false,"compile_error",{resourcesReleased=true},false,"compile_error");return true end
         r.fn=fn;r.executionStarted=true
@@ -445,16 +456,13 @@ function API.Create(deps)
         return true
     end
     local function commandRow(row,stamp)
-        local raw,err=API.ReadHeader(row);if not raw then return nil,err end
-        local h;h,err=API.DecodeHeader(raw,KIND.frame);if not h then return nil,err end
-        if h.frameIndex~=1 or h.frameCount~=1 or h.payloadBytes~=h.totalBytes then return fail("duplex_frame_bounds") end
+        local raw,err=API.ReadHeader(row);if not raw then candidateError(nil,err);return nil,err end
+        local h;h,err=API.DecodeHeader(raw,KIND.frame);if not h then candidateError(nil,err);return nil,err end
+        if h.frameIndex~=1 or h.frameCount~=1 or h.payloadBytes~=h.totalBytes then candidateError(h,"duplex_frame_bounds");return nil,"duplex_frame_bounds" end
         h.previousResultAckSHA=h.frameSHA
         refreshActor()
-        local checked,why,rejected=admissionChecks(h);if not checked then return nil,why,rejected end
-        if h.payloadBytes<=512 then
-            local verified,source=readRow(row,FRAME_BYTES,true);if not verified then return nil,source end
-            return admit(verified,source)
-        end
+        local checked,why,rejected=admissionChecks(h);if not checked then candidateError(h,why);return nil,why,rejected end
+        p.candidateFailure=nil
         p.validation={row=row,stamp=stamp,raw=raw,header=h,parts={},copiedCells=0,tailCell=81+math.ceil(h.payloadBytes/4),hashedBytes=0}
         publish("status")
         return false
@@ -464,15 +472,17 @@ function API.Create(deps)
         local h=j.header
         refreshActor()
         local function discard(reason)
-            p.validation=nil;p.lastFailure=reason;failed(j.row,j.stamp);publish("status")
+            p.validation=nil;candidateError(h,reason);failed(j.row,j.stamp);publish("status")
             return nil,reason
         end
         -- Admission is still unconsumed. Exact stop revocation, actor changes
         -- or any changed row header discard this private candidate immediately.
         if not actorReady() then
-            p.validation=nil;p.readyRaw=nil;p.readyAt=nil;p.lastFailure="duplex_actor_changed_before_acceptance";remember(j.row,j.stamp);publish("status");return false
+            p.validation=nil;p.readyRaw=nil;p.readyAt=nil;candidateError(h,"duplex_actor_changed_before_acceptance");remember(j.row,j.stamp);publish("status");return false
         end
-        if not eligible() or h.challenge~=p.readyRaw or not identity(h,true) then p.validation=nil;publish("status");return false end
+        if not eligible() or h.challenge~=p.readyRaw or not identity(h,true) then
+            p.validation=nil;candidateError(h,"duplex_admission_changed");publish("status");return false
+        end
         local current,why=API.ReadHeader(j.row)
         if not current or current~=j.raw then return discard(why or "duplex_frame_changed") end
         local sourceCells=math.ceil(h.payloadBytes/4)
@@ -510,7 +520,7 @@ function API.Create(deps)
         p.validation=nil
         local ok,err,rejected=admit(h,j.source);j.source=nil
         if ok or rejected then remember(j.row,j.stamp) end
-        if not ok then p.lastFailure=err end
+        if not ok then candidateError(h,err) end
         return ok,err
     end
     local function stopRow(row)
@@ -542,7 +552,7 @@ function API.Create(deps)
             return receipt(h,"accepted",p.reload and {challenge=p.reload.challenge} or nil)
         elseif h.kind==KIND.repair then
             if #payload~=0 or not p.repair or h.challenge~=tokenRaw(p.repair.challenge,16) then return fail("duplex_repair_mismatch") end
-            p.repair.previousWriterDrained=true;p.repaired=true;p.lastFailure=nil
+            p.repair.previousWriterDrained=true;p.repaired=true;p.lastFailure=nil;p.connectionFailure=nil
         elseif #payload~=0 and not ((h.kind==KIND.close or h.kind==KIND.cancel) and #payload==92) then return fail("duplex_control_payload_length") end
         local r=p.request
         if h.kind==KIND.close and #payload==92 then
@@ -569,7 +579,7 @@ function API.Create(deps)
                 if h.kind==KIND.close then p.closing=true;p.validation=nil;p.readyRaw=nil;p.readyAt=nil end
                 if r.state=="running" then
                     local ok,accepted=pcall(function()return r.execution and r.execution:RequestCancel()end)
-                    if not ok or not accepted then p.lastFailure="duplex_cancel_pending" end
+                    if not ok or not accepted then connectionError("duplex_cancel_pending") end
                 end
             elseif h.requestId~=ZERO16 then
                 -- Revocation wins over a late or same-tick command publication.
@@ -611,7 +621,7 @@ function API.Create(deps)
         if p.reload then local clock=now();if clock and clock>=p.reload.expires then p.reload=nil end end
         issueReady();local processed=0
         local check,stamp=candidate(arena.stop)
-        if check then local ok,err=stopRow(arena.stop);if ok then remember(arena.stop,stamp);processed=processed+1 elseif err then p.lastFailure=err;failed(arena.stop,stamp) end end
+        if check then local ok,err=stopRow(arena.stop);if ok then remember(arena.stop,stamp);processed=processed+1 elseif err then connectionError(err);failed(arena.stop,stamp);publish("status") end end
         if processed<budget and p.validation then
             -- The stop row was inspected first. Batch only private validation
             -- work, with a small wall-clock cap and a hard microstep ceiling.
@@ -634,13 +644,13 @@ function API.Create(deps)
             if check then
                 local ok,err,rejected=commandRow(arena.command,stamp)
                 if ok or rejected then remember(arena.command,stamp) end
-                if ok then processed=processed+1 elseif err then p.lastFailure=err;if not rejected then failed(arena.command,stamp) end end
+                if ok then processed=processed+1 elseif err then if not rejected then failed(arena.command,stamp) end;publish("status") end
             end
         end
         return processed
     end
     function api.Quarantine(reason)
-        p.disabled=true;p.quarantined=true;p.validation=nil;p.readyRaw=nil;p.lastFailure=reason or "duplex_quarantined"
+        p.disabled=true;p.quarantined=true;p.validation=nil;p.readyRaw=nil;connectionError(reason or "duplex_quarantined")
         local r=p.request
         if r and r.state=="running" and r.execution and type(r.execution.RequestCancel)=="function" then
             -- Cancellation invokes the normal completion only after actual
@@ -669,6 +679,7 @@ function API.Create(deps)
         local actor=actorReady();local ready=eligible() and not p.validation and p.readyRaw~=nil and actor
         return {identity=detached(p.identity),phase=phase(),request=r and {requestId=r.requestId,requestSHA256=r.digest,requestSeq=uint64String(r.seqHi,r.seqLo),acceptedFrames=1,frameCount=1,receivedBytes=r.totalBytes,totalBytes=r.totalBytes,challenge=r.challenge,executionStarted=r.executionStarted} or nil,
             terminal=p.terminal and detached(p.terminal),receipts=detached(p.receipts),closing=p.closing==true,disabled=p.disabled,quarantined=p.quarantined==true,lastFailure=p.lastFailure,
+            candidateFailure=p.candidateFailure and detached(p.candidateFailure),connectionFailure=p.connectionFailure and detached(p.connectionFailure),
             ready=ready,businessReady=ready,actorReady=actor,transportReady=not p.disabled and not p.quarantined and not p.closing and not p.repair,controlReady=not p.disabled and not p.quarantined,
             readyChallenge=p.readyRaw and hex(p.readyRaw) or "",admissionSequence=uint64String(0,p.admission),closedAdmission=p.closedAdmission==true,released=p.released and detached(p.released),repair=p.repair and detached(p.repair),repaired=p.repaired==true,retiredArena=p.retiredArena==true,
             validation=p.validation and {requestId=hex(p.validation.header.requestId),requestSHA256=hex(p.validation.header.requestSHA),totalBytes=p.validation.header.totalBytes,copiedBytes=math.min(p.validation.header.payloadBytes,p.validation.copiedCells*4),hashedBytes=p.validation.hashedBytes} or nil}

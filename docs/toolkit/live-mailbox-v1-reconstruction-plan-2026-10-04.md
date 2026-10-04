@@ -1,6 +1,8 @@
 # Lychee Dev mailbox protocol v1：完整重构与验收计划
 
-状态：**待审阅的实施计划，不是完成报告**。日期：2026-10-04。实施范围为当前 `codex/duplex-mailbox` 工作树的 Go CLI、游戏内插件、`/dev` 工作台、版本化 Skill 与合同文档。不恢复 LoD、按键、色块、旧槽位或旧 wire 兼容；正式写入不挂起游戏线程，也不安装游戏函数 hook。
+状态：**离线实现已形成候选；真实客户端验收未完成**。日期：2026-10-04。实施范围为当前 `codex/duplex-mailbox` 工作树的 Go CLI、游戏内插件、`/dev` 工作台、版本化 Skill 与合同文档。不恢复 LoD、按键、色块、旧槽位或旧 wire 兼容；正式写入不挂起游戏线程，也不安装游戏函数 hook。
+
+实施记录：候选 `59274ce` 已加入分帧预算校验、明确的 sealing/released 投影、精确 build 资格与进程实例占用、工作台和 Skill 改动。其完整离线基线通过。之后补充了进程退出时的本地 claim 退役：只凭 PID＋创建时间的退出证据清理精确占用，保留未确认请求的 unknown 结果，且要求 writer 排空；相应确定性测试通过。此段只说明离线实现，不能把下表尚未进行的真实客户端场景升级为 passed。2026-10-04 新候选安装预检因旧 `CON` 占用而拒绝，未部署新版插件；随后游戏退出，原因未确定，真实客户端试验暂停。
 
 本计划以 [v1 协议合同](live-mailbox-v1-architecture-2026-10-04.md)、[direct Retail 实测](live-mailbox-v1-direct-retail-trial-2026-10-04.md) 和[先前挂起写入事故](live-mailbox-v1-retail-trial-2026-10-04.md)为依据。后两份记录不能互相覆盖：挂起路线已禁用；direct 路线在一个精确 Retail 映像上通过了小命令、1 MiB 命令和最终断开，但仍有外部 reload 与写入相撞的瞬态风险。
 

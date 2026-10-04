@@ -1,5 +1,19 @@
 # Toolkit 2.0 实施状态
 
+2026-10-04 mailbox v1 重构候选 `59274ce` 已提交：插件验证器按帧时间预算推进，
+Go 端按精确映像与进程实例管理 writer 资格和占用，工作台区分验证、执行、封存、
+释放阶段，版本化 Skill 与合同同步。强制 Lua 5.1 全量 Go 测试、build/vet 和
+Node 离线 baseline 已通过；结果只覆盖离线/夹具路径。进程退出后的旧 `CON`
+本地占用清理另有补丁与确定性回归：仅在进程生命周期证据成立且 writer 排空后
+释放精确 claim，保留未知请求，不声称游戏内 ACK 或执行结果。
+
+新版插件尚未安装到真实客户端：安装预检遇到旧连接的未决占用并拒绝，未改动插件
+文件。随后 Retail 进程退出；`18:12:54` 有 `#138 / SECURITY-CODE<212>`
+崩溃报告，但 `18:15` 的 WGC 仍见进程运行，最终退出的直接原因未确认。本次安装
+预检前后没有向该进程写内存、发送按键或触发 reload。真实 Retail 新候选、
+Classic、Titan、双实例、reload 与工作台画面验收均为 `not_run`，不能继承旧候选
+的实测结论。
+
 2026-10-04 当前 `codex/duplex-mailbox` 工作树正在把正式插件与 Go CLI 改为
 [一次整行写入的 mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)：
 `inbox.command` 预分配 1 MiB 命令容量，CLI 对每条命令只发布一次完整数据行；

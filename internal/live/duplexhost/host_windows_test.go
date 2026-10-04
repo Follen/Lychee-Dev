@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/duplex"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/live/memory"
@@ -453,6 +454,155 @@ func TestManualLifecycleChangeRetiresOnlyLocalClaimAndKeepsUnknown(t *testing.T)
 			nextClaim.OperationID = "CON-" + strings.Repeat("2", 32)
 			if e = beginConnectionClaim(context.Background(), meta.Target, nextClaim, func() error { return nil }); e != nil {
 				t.Fatal("replacement instance cannot acquire fresh local selection", e)
+			}
+		})
+	}
+}
+
+func TestExitedProcessRetiresExactClaimAndPreservesUnknownRequest(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			ctx := context.Background()
+			p, id, meta, store, before := retirementFixture(t, true)
+			p.processEnded = func(context.Context, desktop.WindowIdentity) (string, error) { return "process_absent", nil }
+			if legacy {
+				if e := retireConnectionClaim(ctx, meta.Target, meta.Claim); e != nil {
+					t.Fatal(e)
+				}
+				if e := journal.BeginConnectionWindow(ctx, addonParent(meta.Target), meta.Claim, func() error { return nil }); e != nil {
+					t.Fatal(e)
+				}
+				meta.ProcessClaimVersion = 0
+				if e := writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta); e != nil {
+					t.Fatal(e)
+				}
+			}
+			result, e := p.Resume(ctx, id, false)
+			if e != nil || result.Cleanup != "local_retired" || result.ReportState != "unavailable" || result.Complete || result.Closed || result.Stage != "execution_unknown" {
+				t.Fatal("process exit did not preserve unknown effects", e, result)
+			}
+			latest, e := store.Load(ctx)
+			if e != nil || !latest.LocalRetired || !latest.Closing || latest.Closed || latest.LocalRetirement == nil || latest.LocalRetirement.ProcessExit != "process_absent" ||
+				latest.Active == nil || latest.Active.RequestID != before.Active.RequestID || latest.Active.ResultSaved || latest.Active.Released || latest.Intents["command"].Outcome.State != duplex.UnknownWrite {
+				t.Fatal("durable process-exit evidence lost unknown request", e, latest)
+			}
+			_, busy, e := journal.InspectWindowOwner(ctx, addonParent(meta.Target), meta.Claim.Resource)
+			if e != nil || busy {
+				t.Fatal("exact installation claim remains", e)
+			}
+			saved, e := p.metadata(id)
+			if e != nil || !saved.ClaimRetired {
+				t.Fatal("claim retirement not durable", e)
+			}
+			result, e = p.Resume(ctx, id, false)
+			if e != nil || result.Cleanup != "local_retired" || result.Stage != "execution_unknown" {
+				t.Fatal("completed local retirement was not idempotent", e, result)
+			}
+		})
+	}
+}
+
+func TestExitedProcessClaimRetirementWaitsForWriterAndExactIdentity(t *testing.T) {
+	ctx := context.Background()
+	p, id, meta, store, before := retirementFixture(t, true)
+	p.processEnded = func(context.Context, desktop.WindowIdentity) (string, error) { return "process_absent", nil }
+	native := &Native{Target: meta.Target}
+	held, e := vault.TryAcquireLease(ctx, mustWriterScope(t, native), native.resource("command"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = p.Resume(ctx, id, false); e == nil {
+		t.Fatal("retired claim while a writer lane was active")
+	}
+	_, busy, e := journal.InspectWindowOwner(ctx, addonParent(meta.Target), meta.Claim.Resource)
+	if e != nil || !busy {
+		t.Fatal("writer drain failure removed claim", e)
+	}
+	if e = held.Close(); e != nil {
+		t.Fatal(e)
+	}
+	mismatch := meta
+	mismatch.Identity.Runtime = strings.Repeat("f", 32)
+	if _, e = p.retireExitedProcess(ctx, id, mismatch, store, before, "process_absent"); !errors.Is(e, duplex.ErrIdentity) {
+		t.Fatal("mismatched target and journal retired", e)
+	}
+	_, busy, e = journal.InspectWindowOwner(ctx, addonParent(meta.Target), meta.Claim.Resource)
+	if e != nil || !busy {
+		t.Fatal("identity mismatch removed claim", e)
+	}
+	if _, e = p.Resume(ctx, id, false); e != nil {
+		t.Fatal("retry after writer drain failed", e)
+	}
+}
+
+func TestLegacyProcessClaimWithoutExitProofRemainsOccupied(t *testing.T) {
+	ctx := context.Background()
+	p, id, meta, store, _ := retirementFixture(t, false)
+	if e := retireConnectionClaim(ctx, meta.Target, meta.Claim); e != nil {
+		t.Fatal(e)
+	}
+	if e := journal.BeginConnectionWindow(ctx, addonParent(meta.Target), meta.Claim, func() error { return nil }); e != nil {
+		t.Fatal(e)
+	}
+	meta.ProcessClaimVersion = 0
+	if e := writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta); e != nil {
+		t.Fatal(e)
+	}
+	p.processEnded = func(context.Context, desktop.WindowIdentity) (string, error) { return "", nil }
+	if _, e := p.Resume(ctx, id, false); e == nil || !strings.Contains(e.Error(), "legacy_process_claim") {
+		t.Fatal("legacy claim was adopted without exit proof", e)
+	}
+	latest, e := store.Load(ctx)
+	if e != nil || latest.LocalRetired {
+		t.Fatal("legacy claim changed journal without exit proof", e)
+	}
+	_, busy, e := journal.InspectWindowOwner(ctx, addonParent(meta.Target), meta.Claim.Resource)
+	if e != nil || !busy {
+		t.Fatal("legacy claim was removed without exit proof", e)
+	}
+}
+
+func TestLegacyIdleDisconnectRequiresExitAndRepairsEarlierLocalRetirement(t *testing.T) {
+	for _, earlierLocalRetirement := range []bool{false, true} {
+		t.Run(fmt.Sprintf("earlierLocalRetirement=%t", earlierLocalRetirement), func(t *testing.T) {
+			ctx := context.Background()
+			p, id, meta, store, _ := retirementFixture(t, false)
+			if e := retireConnectionClaim(ctx, meta.Target, meta.Claim); e != nil {
+				t.Fatal(e)
+			}
+			if e := journal.BeginConnectionWindow(ctx, addonParent(meta.Target), meta.Claim, func() error { return nil }); e != nil {
+				t.Fatal(e)
+			}
+			meta.ProcessClaimVersion = 0
+			if e := writeJSON(ctx, filepath.Join(p.path(id), "target.json"), meta); e != nil {
+				t.Fatal(e)
+			}
+			if e := store.Update(ctx, func(st *duplex.State) error {
+				st.Bound = false
+				if earlierLocalRetirement {
+					st.LocalRetired = true
+					st.Closing = true
+				}
+				return nil
+			}); e != nil {
+				t.Fatal(e)
+			}
+			p.processEnded = func(context.Context, desktop.WindowIdentity) (string, error) { return "", nil }
+			if _, e := p.Disconnect(ctx, id, false); e == nil || !strings.Contains(e.Error(), "legacy_process_claim") {
+				t.Fatal("live legacy selection changed without its original CLI", e)
+			}
+			p.processEnded = func(context.Context, desktop.WindowIdentity) (string, error) { return "process_absent", nil }
+			result, e := p.Disconnect(ctx, id, false)
+			if e != nil || result.Cleanup != "local_retired" || result.Closed {
+				t.Fatal("exited legacy idle selection was not retired", e, result)
+			}
+			latest, e := store.Load(ctx)
+			if e != nil || latest.LocalRetirement == nil || latest.LocalRetirement.ProcessExit != "process_absent" {
+				t.Fatal("process-exit proof not durable", e)
+			}
+			result, e = p.Resume(ctx, id, false)
+			if e != nil || result.Cleanup != "local_retired" {
+				t.Fatal("recovered legacy idle selection was not idempotent", e, result)
 			}
 		})
 	}

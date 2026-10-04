@@ -387,9 +387,9 @@ function ns.CreateAutomationPage(parent)
         mailboxText:SetTextColor(unpack(mailbox.state == "ready" and ns.Theme.success
             or mailbox.state == "busy" and ns.Theme.warning or ns.Theme.textDim))
         local failure = mailbox.candidateFailure
-        if failure and failure.requestId and failure.code then
+        if failure and failure.code then
             candidateError:SetText(string.format(L.AUTO_CANDIDATE_ERROR,
-                ShownText(failure.requestId), ShownText(failure.code)))
+                ShownText(failure.requestId or L.UNKNOWN), ShownText(failure.code)))
         else
             candidateError:SetText("")
         end
