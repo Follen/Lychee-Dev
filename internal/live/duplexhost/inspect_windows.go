@@ -1,0 +1,212 @@
+//go:build windows && amd64
+
+package duplexhost
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"time"
+
+	"github.com/follenfang/lycheedev/internal/buildinfo"
+	"github.com/follenfang/lycheedev/internal/live"
+	"github.com/follenfang/lycheedev/internal/live/duplex"
+	"github.com/follenfang/lycheedev/internal/live/memory"
+)
+
+// Inspect observes a saved connection without creating a lease, claiming,
+// binding, renewing, repairing or writing inbox. A verified saved result is
+// preserved when the current runtime is unavailable or changed.
+func (p *Project) Inspect(ctx context.Context, id string) (ProjectResult, error) {
+	meta, e := p.metadata(id)
+	if e != nil {
+		return ProjectResult{}, e
+	}
+	st, e := duplex.NewFileStore(p.path(id)).Inspect(ctx)
+	if e != nil {
+		return ProjectResult{Session: id, Journal: filepath.Join(p.path(id), "state.json")}, errors.Join(errors.New("live.duplex_journal_invalid"), e)
+	}
+	r := p.present(ctx, id, st, nil)
+	r.Target = &meta.Target
+	r.Diagnostics = map[string]Diagnostic{}
+	observed, observeErr := p.inspectWindow(ctx, meta.Target, r)
+	if observed.Status != nil && !inspectionIdentity(st, *observed.Status) {
+		observed.Diagnostics["connectionIdentity"] = Diagnostic{"changed", "original request is retained; no replay into replacement runtime"}
+		observeErr = errors.Join(observeErr, duplex.ErrIdentity)
+	} else if observed.Status != nil {
+		observed.Diagnostics["connectionIdentity"] = Diagnostic{"verified", ""}
+	}
+	return observed, observeErr
+}
+
+// InspectTarget is the pre-connect read-only diagnostic path. Busy business
+// readiness is reported independently from cancellation/close capability.
+func (p *Project) InspectTarget(ctx context.Context, req TargetRequest) (ProjectResult, error) {
+	target, e := live.ResolveClientWindow(ctx, req.Installation, req.PID)
+	if e != nil {
+		return ProjectResult{Stage: "unknown", Diagnostics: map[string]Diagnostic{"processIdentity": {"unavailable", e.Error()}}}, e
+	}
+	r := ProjectResult{Stage: "unknown", Target: &target, ReportState: "unavailable", Cleanup: "none", Diagnostics: map[string]Diagnostic{}}
+	if req.Build != "" && req.Build != target.Client.FullBuild || req.Product != "" && req.Product != target.Client.Product {
+		return r, errors.New("live.duplex_target_mismatch")
+	}
+	r, e = p.inspectWindow(ctx, target, r)
+	if s := r.Status; s != nil && (req.Character != "" && req.Character != s.Character || req.Realm != "" && req.Realm != s.Realm) {
+		r.Diagnostics["actorReady"] = Diagnostic{"changed", "requested character or realm differs from observed actor"}
+		e = errors.Join(e, duplex.ErrIdentity)
+	}
+	return r, e
+}
+
+func (p *Project) inspectWindow(ctx context.Context, target live.ClientWindow, r ProjectResult) (ProjectResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var errs []error
+	if e := live.ConfirmClientWindow(ctx, target); e != nil {
+		r.Diagnostics["processIdentity"] = Diagnostic{"unavailable", e.Error()}
+		return r, e
+	}
+	r.Diagnostics["processIdentity"] = Diagnostic{"verified", "exact PID, creation instance and executable"}
+	// Native lifecycle diagnostics precede addon/root traversal so reload and
+	// character selection remain visible when no sendbox can be read.
+	lifecycle, lifecycleErr := ObserveTargetReload(ctx, target)
+	r.NativeReload = &lifecycle
+	r.Diagnostics["nativeReload"] = Diagnostic{lifecycle.State, lifecycle.Reason}
+	r.Diagnostics["nativeWorld"] = Diagnostic{lifecycle.WorldState, lifecycle.WorldReason}
+	if lifecycleErr != nil {
+		r.Diagnostics["nativeReload"] = Diagnostic{"unknown", lifecycleErr.Error()}
+	}
+	if e := deployment(ctx, target); e != nil {
+		r.Diagnostics["installed"] = Diagnostic{"unavailable", e.Error()}
+		errs = append(errs, e)
+	} else {
+		r.Diagnostics["installed"] = Diagnostic{"clean", buildinfo.Version}
+	}
+	owner, busy, e := inspectConnectionOwner(ctx, target)
+	if e != nil {
+		r.Diagnostics["ownerAvailable"] = Diagnostic{"unknown", e.Error()}
+		errs = append(errs, e)
+	} else if !busy {
+		r.Diagnostics["ownerAvailable"] = Diagnostic{"free", ""}
+	} else if owner.WorkspaceID == p.workspaceID() {
+		r.Diagnostics["ownerAvailable"] = Diagnostic{"own", owner.OperationID}
+	} else {
+		r.Diagnostics["ownerAvailable"] = Diagnostic{"foreign", owner.OperationID}
+	}
+	n, e := OpenNative(ctx, target)
+	if e != nil {
+		r.Diagnostics["runtimePublished"] = Diagnostic{"unavailable", e.Error()}
+		return r, errors.Join(append(errs, e)...)
+	}
+	defer n.Close(ctx)
+	profile := n.WriteCapability()
+	r.WriterProfile = &profile
+	r.Diagnostics["rootRecipe"] = Diagnostic{"resolved", n.Mailbox.Binding().Evidence.RecipeID}
+	observation := memory.DuplexProfileObservation{ProcessIdentified: true, RootRecipeID: n.Mailbox.Binding().Evidence.RecipeID}
+	if n.Reload != nil && lifecycleErr == nil {
+		observation.LifecycleID = n.Reload.Resolution.RecipeID
+	}
+	qualification := projectWriterQualification(&r, profile, observation)
+	s, e := n.Observe(ctx)
+	if e != nil {
+		r.Diagnostics["runtimePublished"] = Diagnostic{"unavailable", e.Error()}
+		return r, errors.Join(append(errs, e)...)
+	}
+	r.Status = &s
+	observation.TypedMailbox = true
+	if row, e := n.Mailbox.ResolveDuplexArray(ctx, []memory.DuplexPath{{Name: "inbox"}, {Name: "stop"}}, s.Runtime, s.Arena, 80+256); e != nil {
+		r.Diagnostics["numericLayout"] = Diagnostic{"unavailable", e.Error()}
+	} else {
+		observation.NumericRow = row.Frozen
+		r.Diagnostics["numericLayout"] = Diagnostic{"observed", "read-only six-number calibration; not write eligibility"}
+	}
+	qualification = projectWriterQualification(&r, profile, observation)
+	r.Diagnostics["runtimePublished"] = Diagnostic{"verified", s.Runtime}
+	r.Diagnostics["actorReady"] = Diagnostic{"verified", s.ActorGUID}
+	if !s.ActorReady || s.ActorGUID == "" {
+		r.Diagnostics["actorReady"] = Diagnostic{"unavailable", "no current ordinary actor GUID"}
+	}
+	freshCtx, freshCancel := context.WithTimeout(ctx, time.Second)
+	defer freshCancel()
+	fresh := false
+	for {
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-freshCtx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+		if freshCtx.Err() != nil {
+			break
+		}
+		next, err := n.Observe(freshCtx)
+		if err != nil {
+			errs = append(errs, err)
+			break
+		}
+		advancing, advanceErr := statusAdvance(s, next)
+		if advanceErr != nil {
+			errs = append(errs, advanceErr)
+			break
+		}
+		if advancing {
+			s = next
+			r.Status = &s
+			fresh = true
+			break
+		}
+
+	}
+	if fresh {
+		r.Diagnostics["runtimeFresh"] = Diagnostic{"advancing", ""}
+	} else {
+		r.Diagnostics["runtimeFresh"] = Diagnostic{"unknown", "heartbeat did not advance within the bounded observation window"}
+	}
+	r.Diagnostics["actorReady"] = Diagnostic{"verified", s.ActorGUID}
+	if !s.ActorReady || s.ActorGUID == "" {
+		r.Diagnostics["actorReady"] = Diagnostic{"unavailable", "current actor or world readiness is unavailable"}
+	}
+	for name, ready := range map[string]bool{"transportReady": s.TransportReady, "businessReady": s.BusinessReady, "controlReady": s.ControlReady} {
+		state := "false"
+		if ready {
+			state = "true"
+		}
+		r.Diagnostics[name] = Diagnostic{state, s.Phase}
+	}
+	if fresh && s.TransportReady && s.ControlReady && qualification.DirectWrite && lifecycle.CheckBusinessWriteGate() == nil {
+		r.Stage = "healthy"
+	} else {
+		r.Stage = "degraded"
+	}
+	return r, errors.Join(errs...)
+}
+
+func projectWriterQualification(result *ProjectResult, profile memory.DuplexWriterProfile, observation memory.DuplexProfileObservation) memory.DuplexQualification {
+	qualification := profile.Qualify(observation)
+	result.WriterQualification = &qualification
+	result.Diagnostics["writerProfile"] = Diagnostic{string(qualification.Level), profile.Validation + ": " + profile.LayoutEvidence + "; " + profile.LifetimeEvidence}
+	return qualification
+}
+
+func inspectionIdentity(st duplex.State, s duplex.Sendbox) bool {
+	if s.Identity == st.Identity {
+		return true
+	}
+	if p := s.Repair; p != nil && p.PreviousArena == st.Identity.Arena && p.NewArena == s.Arena && p.LedgerRetained && p.Idle && p.NoPendingRequest && p.ResourcesReleased && s.Runtime == st.Identity.Runtime && s.ActorBinding == st.Identity.ActorBinding && (st.Active == nil || st.Active.Released) {
+		candidate := st
+		candidate.Identity.Arena = s.Arena
+		return inspectionIdentity(candidate, s)
+	}
+	if st.Bound {
+		return false
+	}
+	expected, e := duplex.NextIdentity(s, st.Identity.Owner, st.Identity.Session)
+	return e == nil && expected == st.Identity
+}
+
+func statusAdvance(previous, next duplex.Sendbox) (bool, error) {
+	if next.Identity != previous.Identity || next.StatusSequence < previous.StatusSequence || next.Heartbeat < previous.Heartbeat {
+		return false, duplex.ErrIdentity
+	}
+	return next.StatusSequence > previous.StatusSequence && next.Heartbeat > previous.Heartbeat, nil
+}

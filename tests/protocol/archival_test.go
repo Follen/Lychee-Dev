@@ -3,7 +3,9 @@ package protocol_test
 import (
 	"bytes"
 	"context"
-	"os/exec"
+	"encoding/json"
+	"fmt"
+	"hash/adler32"
 	"path/filepath"
 	"testing"
 
@@ -14,13 +16,8 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-func TestLuaPersistenceArchivesAndReopensExactReport(t *testing.T) {
-	lua := luaRuntime(t)
-
-	output, err := exec.Command(lua, "persistence.lua", "../../addon").CombinedOutput()
-	if err != nil {
-		t.Fatalf("%v\n%s", err, output)
-	}
+func TestPersistedReportArchivesAndReopensExactReport(t *testing.T) {
+	code, body := []byte("return 42"), []byte(`{"result":42}`)
 	expected := bridge.SignalExpectation{
 		Kind:          "reported",
 		Release:       buildinfo.Version,
@@ -32,7 +29,18 @@ func TestLuaPersistenceArchivesAndReopensExactReport(t *testing.T) {
 		Build:         "12.1.0.69875",
 		AfterSequence: 3,
 	}
-	report, err := bridge.ReadPersistedReport(bytes.NewReader(output), []byte("return 42"), expected, "character-v1")
+	receipt := bridge.Signal{Schema: "lycheedev.signal.v1", Release: expected.Release, Kind: "reported",
+		SessionNonce: expected.SessionNonce, RequestID: expected.RequestID, Character: expected.Character,
+		Realm: expected.Realm, Product: expected.Product, Build: expected.Build, Sequence: 4,
+		CodeBytes: uint32(len(code)), CodeAdler32: fmt.Sprintf("%08x", adler32.Checksum(code)),
+		ReportBytes: uint32(len(body)), ReportAdler32: fmt.Sprintf("%08x", adler32.Checksum(body))}
+	receiptBytes, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := fmt.Sprintf(`LycheeToolkitBridgeDB={schema=1,reports={[%q]={receipt=%q,body=%q}}}`,
+		expected.RequestID, receiptBytes, body)
+	report, err := bridge.ReadPersistedReport(bytes.NewReader([]byte(saved)), code, expected, "character-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

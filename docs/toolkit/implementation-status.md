@@ -1,5 +1,63 @@
 # Toolkit 2.0 实施状态
 
+2026-10-04 mailbox v1 重构候选 `59274ce` 已提交：插件验证器按帧时间预算推进，
+Go 端按精确映像与进程实例管理 writer 资格和占用，工作台区分验证、执行、封存、
+释放阶段，版本化 Skill 与合同同步。强制 Lua 5.1 全量 Go 测试、build/vet 和
+Node 离线 baseline 已通过；结果只覆盖离线/夹具路径。进程退出后的旧 `CON`
+本地占用清理另有补丁与确定性回归：仅在进程生命周期证据成立且 writer 排空后
+释放精确 claim，保留未知请求，不声称游戏内 ACK 或执行结果。
+
+新版插件尚未安装到真实客户端：安装预检遇到旧连接的未决占用并拒绝，未改动插件
+文件。随后 Retail 进程退出；`18:12:54` 有 `#138 / SECURITY-CODE<212>`
+崩溃报告，但 `18:15` 的 WGC 仍见进程运行，最终退出的直接原因未确认。本次安装
+预检前后没有向该进程写内存、发送按键或触发 reload。真实 Retail 新候选、
+Classic、Titan、双实例、reload 与工作台画面验收均为 `not_run`，不能继承旧候选
+的实测结论。
+
+2026-10-04 当前 `codex/duplex-mailbox` 工作树正在把正式插件与 Go CLI 改为
+[一次整行写入的 mailbox protocol v1](live-mailbox-v1-architecture-2026-10-04.md)：
+`inbox.command` 预分配 1 MiB 命令容量，CLI 对每条命令只发布一次完整数据行；
+`inbox.stop` 单独承担取消、断开、重载和修复，`sendbox` 给出显式状态与结果。
+插件对大命令分帧**校验计算**，不分帧传输；`/dev` 工作台显示邮箱状态，
+跳动荔枝仅在探针实际执行时显示“Agent执行中”。这些是工作树中的实现，
+本轮离线 baseline 已通过：build、vet、强制 Lua 5.1 全量 Go、Node、版本、Skill、
+SOURCE 和真实 LuaLS 检查均为 passed；整行候选提交为 `b021251`。
+[首次正式服写入](live-mailbox-v1-retail-trial-2026-10-04.md)停顿 37.368 ms，
+一次 6,293,376-byte WPM 与读回完成，随后客户端 `Security Crash`；未取得执行结果。
+调试器暂停写入路线因此禁用。[不挂起整行写入试验](live-mailbox-v1-direct-retail-trial-2026-10-04.md)
+在精确 Retail `12.1.0.69933` 映像上验证了小命令、1 MiB 命令和断开；同一真实
+进程的另一探针连续三次完整 GC、结果验证与断开也通过。此 GC 样本不证明 GC 与 WPM
+恰好同时发生。其他 hash/build 拒绝写入，写入后 reload/新 runtime 再执行、同 build
+双实例与长时性能仍为 `not_run`。用户接受最后一次检查到 WPM 的外部 reload 剩余
+风险：Agent 写入时不发起 reload，并提醒用户该间隔不要手动 `/reload`；请求清理后
+正常 reload 仍允许。Go 对 Lua
+`totalBytes` 状态字段的拒收及换代读取 `path_changed` 已分别离线复现并修复，
+不能把这些修复当成崩溃原因已经解决。下面两段记录属于此前的 4 KiB 候选，
+不能用作当前整行写入的性能或实机证明。
+
+2026-10-04 mailbox v1 候选 `73f61a7` 的 x64 Lua 5.1.5 全量离线与两次 Windows CI 已通过。
+正式服新运行时、原生 world/reload 读取及插件内一次性协议自检通过：探针执行一次，
+重复帧不重跑、challenge/结果 ACK/私有 GC 根均确认。游戏内 Lychee Dev 统计约 1.77 MiB，
+单数据行加七控制行实际数组 backing 为 132 KiB；短空闲样本没有插件统计增长。
+此结果不是原生 CLI 写入验收；该历史候选的 writer profile 当时仍拒绝写入，其他客户端/双实例/最大输入
+游戏峰值保持 not_run。完整范围与保留失败见 [mailbox v1 验收](live-mailbox-v1-acceptance-2026-10-04.md)。
+
+2026-10-04 前一版候选将协议统一为 **Lychee Dev mailbox protocol v1**，以
+[新架构合同](live-mailbox-v1-architecture-2026-10-04.md) 替代先前 duplex 候选。
+schema、magic、摘要域和布局身份一次切换，拒绝旧协议。只保留一个 4 KiB 物理数据行，
+逐帧私有复制并准确确认后复用；单条命令仍最多 1 MiB。新增 native 发布准入检查，
+没有当前请求的准确连续帧 ACK，不能覆盖该行。取消/断开保持独立控制路径。
+真实 Runtime + CaptureWriter 的 stock Lua 5.1 回归测得冷态固定增量约 96.82 KiB，
+全部控制行阴影缓存存在时约 185.63 KiB，空闲五秒约 116.63 KiB 临时分配；
+这些不是 WoW 内存数值。旧正式服布局只读测得 256 个 2048-cell 数组共 12 MiB backing，
+仍未解释用户报告的全部 70 MB。新版本完整离线与实机结果继续单独记录。
+原生 reload/world 配方及逐次写入检查保留；该历史候选当时无合格 writer profile，
+插件内部实机 self-check 不替代 CLI 原生写入验收，不解除此门禁。
+
+2026-10-04 duplex 新增原生重载/进入世界只读门禁与跨 build 指令配方解析。正式服 12.1.0.69933 同一进程中实际记录了一次用户手动 reload：Lua 根更换时 bit 8 保持重载状态，bit 4 先清除后恢复，且进入世界先于重载结束。新版 Go doctor 随后独立读到 world_ready/no_reload_observed；旧 addon schema 不影响这些原生诊断。此结果只证明只读状态路径，所有 writer profile 仍拒绝写入；跨真实 build 迁移与新协议实机执行不继承此结果。见 [实施合同](live-duplex-implementation-2026-10-04.md#native-lifecycle-read-gate)。
+
+2026-10-04 先前 duplex 候选的实现见 [阶段实施记录](live-duplex-implementation-2026-10-04.md)，当前 live 合同已由 mailbox protocol v1 替代。旧 LoD/按键/色块协议停止加载和发布，无旧兼容。下方旧 live 结果仅保留原版本历史范围。
+
 2026-10-02 用户授权发布 Encoding 预算修复，补丁候选为 **3.1.1**，npm `next`，`latest` 继续保持 **2.5.1**。版本身份同步更新，正式发行通过现有 OIDC、Windows 检查和 source rebuild 门禁；此条是候选准备，不声称已发布。见 [3.1.1 发布合同](release-3.1.1.md)。
 
 2026-10-02 Retail Encoding 预算开发修复：Windows 正式 3.1.0 已在用户报告的完全相同 pin 上复现提前 metadata 拒绝；查询改为按实际 CKey/EKey 目录和页缓存 miss 分配前累计计费，默认上限保持。局部回归、包测试、race 与强制 Lua 5.1 全量 baseline passed（43 packages、3,034 个命名结果、40 个显式 skip、零失败，100 项 Node 测试）。原 pin 的真实 CDN ChrClasses 两行查询在一次冷准备超时后沿原缓存延长一次成功，随后原 180 秒离线命令成功；内容校验、Root/DB2 和两行结果均确认。首次超时保留，不声明全部表/客户端或 RSS 验收。尚未发布该修复。见 [复现与修正](retail-encoding-budget-2026-10-02.md)。

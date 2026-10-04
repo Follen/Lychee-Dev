@@ -1,0 +1,106 @@
+# Lychee Dev mailbox protocol v1 — one-write Live design
+
+Status (2026-10-04): target contract for the `codex/duplex-mailbox` worktree. The one-write runtime and native writer exist. The [first formal Retail debugger-stopped write trial](live-mailbox-v1-retail-trial-2026-10-04.md) was not accepted: a 37.368 ms stop and one full-row WPM/readback were followed by a client security crash, without a verified addon execution result. That helper route is disabled. The [direct Retail trial](live-mailbox-v1-direct-retail-trial-2026-10-04.md) verified a small and a 1 MiB command plus close without suspending the game; a separate probe performed three GC cycles and then closed successfully. Other builds cannot write. The direct route still has a final-check-to-reload race and is not a general safety proof.
+
+## Product contract
+
+The addon owns an `inbox` and a `sendbox`. There is one current command and no command queue. A command contains at most 1,048,576 source bytes. The CLI submits all source bytes and the complete header in **one** Windows `WriteProcessMemory` call to one preallocated numeric Lua row. It never publishes a 4 KiB sequence. The addon validates and copies the whole command before execution. `sendbox` is written only by the addon and read by the CLI.
+
+The public name stays **Lychee Dev mailbox protocol v1**, schema `lycheedev.mailbox.v1`. The physical layout ID becomes `single-command-row-v1`; the old `single-data-row-v1` 4 KiB row is rejected, as are earlier LoD/key/color/QR inputs. One command write refers to the command row: a later cancel or disconnect is a separate, newly arising control intent.
+
+| Region | Owner | Maximum | Role |
+| --- | --- | --- | --- |
+| `inbox.command` | CLI writes; addon reads | 320-byte header + 1 MiB source; 262,224 pre-existing numeric cells | One complete command publication |
+| `inbox.stop` | CLI writes; addon reads | Small fixed row | Cancel, close, final result ACK/close, or explicit reload/repair control |
+| `sendbox.status` | Addon writes; CLI reads | Bounded envelope | Identity, `readyChallenge`, readiness, request phase, heartbeat, control receipts |
+| `sendbox.resultPages` | Addon writes; CLI reads | 512 KiB, at most 32 pages | Exact success/failure/cancel result; retained until ACK |
+
+The 1 MiB row holds 262,224 Lua values. At the verified Retail 24-byte TValue stride, the logical row is 6,293,376 bytes; allocator capacity may round up to 524,288 values, so this is not an actual Retail memory measurement. A stock Lua 5.1 fixture measured about 8.2 MiB retained after GC, 21.4 MiB total at its sampled 1 MiB receive peak, and about 14 KiB retained growth after 140 commands. Retail memory and CPU remain to be measured in the new runtime. Small commands still fill the same physical row with zero tail so a previous long command cannot leak into the next one. This costs one full-row WPM per command. The seven old routine control lanes and their bind/commit/result ACK writes are removed from the normal path.
+
+The protocol covers accidental target confusion, stale/duplicate requests,
+cooperating CLI contention, mixed publication, corruption and lifecycle changes.
+A same-permission malicious process with arbitrary game-memory read/write is
+outside its threat model: SHA256 and a readable challenge are not keyed
+authentication against it. Identity, freshness and private-copy integrity checks
+remain required for all supported failure cases.
+
+## Identity, admission and execution
+
+`doctor` runs before every Live drive and fixes an exact process target: executable path/hash, product/build, PID plus process creation time, module identity, addon release, runtime generation, arena generation, actor GUID, and world/reload state. A same-build second window has a different process identity and journal. A directory name alone never identifies a client or character. The CLI holds a local exclusive driver claim for the process instance; only the addon can accept a request for its current runtime/actor.
+
+When ready for a command, the addon publishes a fresh 128-bit `readyChallenge` with its runtime, arena, actor and monotonically advancing admission number. This is a **single-use freshness token**, not a secret against a process that can already modify game memory. It remains valid through long idle periods until consumed or invalidated by a lifecycle/identity change; only reload's separate prepare challenge has a short 30-second lease. The command header binds the challenge, owner/session/fence, actor/build, request ID and sequence, creation timestamp, immutable execution budget, byte length, source SHA256, and exact previous-result ACK when applicable. The host retains the original transfer deadline. Header and full-message SHA256 use domain-separated canonical encoding. Reserved bytes and unused tail are zero.
+
+First contact requires no separate in-game bind write: the first valid command establishes owner/session after all checks pass. `live connect` selects, diagnoses and journals the target; it does not claim that the addon has accepted a session. A later command must retain that owner/session and advance its request sequence. Competing CLIs cannot both consume the same admission number; stale or changed reuse is rejected. Any token/owner/actor/runtime mismatch is zero execution.
+
+The command header remains exactly 320 bytes. Bytes 125–140 hold the current ready challenge; bytes 233–264 are a kind-dependent field. For a command they hold `previousResultAckSHA`, zero for the first command, otherwise `SHA256("LYCMBX/result-ack/v1\0" || canonical 92-byte ResultAck)`. ResultAck consists of the previous request ID (16), request SHA (32), outcome code (4), result SHA (32), result length (4), and result page count (4). The addon reconstructs these 92 bytes from its retained terminal record and compares the digest. For a stop/control message, those bytes retain the payload checksum `SHA256("LYCMBX/frame/v1\0" || header[0:232] || exact payload)`. The full request SHA already covers the complete command source; header SHA covers the challenge and kind-dependent digest. Frame index and count are fixed at one. Timestamp/expiry and budget use the existing header fields; admission sequence is carried by the challenge's private addon record rather than adding unchecked bytes.
+
+The addon checks the lightweight publication marker first. A new candidate is copied into private Lua memory and SHA-verified across bounded game ticks, with the header sampled before and after. This is internal validation of the **one written command**, not a sequence of transport writes or a 4 KiB ACK protocol. `sendbox` reports `validating` and bounded progress; cancel/close remains available throughout. The addon checks full shape, numeric cell types, zero tail, identity, nonce, sequence, request SHA and previous-result ACK. A partial or mixed WPM image permits only bounded re-reading and private-copy validation of the original candidate, never command retransmission or arena repair merely for a checksum mismatch. Only after all checks pass does one Lua callback consume the nonce, retire the exactly acknowledged previous result, and record the new request. Compile failure produces an explicit failed result with `executionStarted=false`. A successfully compiled request executes **once** under its immutable budget. The result reports success, failure or cancellation, `executionStarted`, effects/cleanup state, length and SHA; no missing result is inferred to mean failure or no execution.
+
+`result_pending` may publish the next `readyChallenge` only after the prior execution resources are released. The CLI reads and verifies every result page, then durably saves the result and its digest. The next command carries that exact ACK in its one command write. The addon verifies the ACK and all fields of the replacement command before changing either the old result or nonce. If any check fails, both remain. For the final result, `live disconnect` sends one small `stop` message containing the ACK and close. If close was requested while work was running, a later final ACK/close may still be necessary; no control message is silently replayed.
+
+## State machine
+
+| Private addon state | Accepts | Transition |
+| --- | --- | --- |
+| `ready_unbound` | One candidate command, or exact stop for an unaccepted first command | Candidate enters `validating` without binding; stop consumes challenge and records `not_started` -> `result_pending` |
+| `validating` | Host observation and exact stop; no second command admitted | Bounded private copy/SHA advances without consuming nonce; valid command -> `running`, exact cancel -> `result_pending` with `not_started` |
+| `running` | Exact cancel or close; no replacement command | Explicit terminal result -> `result_pending` |
+| `result_pending` | Read-only result fetch; next command with exact ACK; ACK/close | Valid replacement enters `validating` while the old result remains; verified ACK + command -> `running`; ACK/close -> `closed` |
+| `closing` | Recovery of current result and final ACK; no new command | Resources released and ACK observed -> `closed` |
+| `closed` | New session only after precise retirement | New runtime/session admission -> `ready_unbound` |
+| `quarantined` | Read-only diagnostics, bounded repair after all writers drained | A new arena generation with old evidence retained; otherwise manual recovery |
+
+`sendbox.ready` means an admission challenge exists for a new command; `transportReady`, `actorReady`, and `controlReady` remain separately reported by doctor. The visual “荔枝跳动” state is only `Agent执行中`, displayed during actual probe execution. There is no color-block readiness channel.
+
+`stop` is a single independent row. A cancel for a current request is idempotent. A cancel for a submitted but unaccepted request names the runtime/arena/challenge/request ID/owner and **revokes that challenge**, leaving an explicit `not_started` fact; a late completion of the old WPM cannot execute it. Close includes cancellation and prevents future admission. Explicit CLI reload uses this same row only when no request or terminal is pending: one durable prepare intent yields a private 30-second challenge; a distinct exact lease message cites that challenge and original prepare ID, then the addon schedules `ReloadUI` on its next tick. Neither message is repeated after an uncertain write. Repair likewise uses the same row after the command and stop writers drain and private ledger evidence is retained. One host writer owns each row at a time. If the addon is gone, the CLI can retire its local claim while preserving execution as unknown; it must not claim in-game ACK or cleanup.
+
+For any never-accepted command, the addon records the cancelled request ID, request SHA, owner/session, challenge, `executionStarted=false` and a small cancelled result. When it still holds the **previous** terminal result, that cancel also carries the previous result's exact 92-byte ACK; the addon validates and retires the previous terminal together with the new `not_started` fact. Without that ACK, it changes neither result nor challenge. The cancelled result remains until its own exact ACK arrives with a later command or final close. A simple new ready token must not erase this proof. If the command and stop race, the addon serializes them in its private Lua callback: one consumes the challenge; the loser cannot alter the execution fact.
+
+## Write path, GC and lifecycle
+
+The addon allocates the entire numeric row before publication, freezes the row with native `table.freeze`, checks `table.isfrozen`, and holds private strong references to it and the calibration/control leaves. This prevents ordinary Lua mutation/resize and ordinary GC of a reachable row. The host verifies the Retail frozen flag, every TValue numeric tag and secret bit, array address/capacity and all writable pages before its single WPM. It builds a local image from a fresh complete row snapshot, changes only the 8-byte numeric value of each 24-byte cell, and preserves every metadata byte. Readback must match the intended image before the operation is reported as written. A full-row WPM is **one call, not an atomic transaction**; the addon accepts only a consistent, checksum-valid private copy.
+
+Normal `/reload`, logout and process replacement destroy the old runtime. A stale root address is never carried to a new operation. User-requested CLI reload is serialized with the CLI's own writer. The native world/reload recipe is checked at admission and again immediately before writing. The stopped-helper route checked PID/exe/creation, lifecycle and row **while stopped**, then made one WPM and readback; it did not patch game code or install hooks. Owned-process 20-run measurements were 1.445–2.873 ms, but the first real Retail trial stopped for 37.368 ms and was followed by a `Security Crash`. A preceding same-class crash limits precise attribution; nevertheless that route is rejected for this client. The owner authorized one direct-write route that makes the same full-row WPM without debugger attachment or thread suspension. It keeps identity/actor/world/reload checks, but a `/reload` that begins after the last check can still release the row during WPM. Ordinary GC is separately addressed by the addon's strong private roots; three full GC cycles inside a real probe passed, which does not prove a GC cycle overlapping WPM. The Agent must not initiate reload during a write and must tell the user to avoid manual `/reload` in that interval. Normal reload after request cleanup is allowed. The owner accepts the residual final-check-to-WPM external-reload risk; finite passing trials do not eliminate it. Reload followed by execution in a replacement runtime remains `not_run`.
+
+Repair is for damaged ownership/topology, not a checksum/padding error seen during an incomplete write. At most one active and one retired arena generation are held. The addon invalidates the old challenge and retains the old generation until all host writers are proven drained, then switches generations. A second unresolved fault quarantines rather than allocating forever. An observed runtime change preserves the old request and result as unknown unless explicit terminal evidence was recorded. Cancel/close/reload never resets the original execution budget.
+
+## Journaling and recovery
+
+Before the single WPM, the CLI durably records the exact process/actor/session, command bytes or immutable content reference, request/challenge/sequence, expiry/budget and write intent. The direct write phase contains no debugger attach, thread suspension, disk wait, network wait or addon ACK wait. After WPM, it records the observed byte count/readback and waits for an exact addon receipt/result. `WriteProcessMemory` failure, partial count, driver death, timeout and missing receipt retain `unknown` until fresh evidence resolves them; none authorizes resending the same command to another row, runtime or actor. Results are durably saved **before** the next command carries the prior ACK. The current journal already persists compressed command source and restores it for continuation; native traces retain digests and lengths rather than a second full command image. Derive the row image from the retained source. The earlier triplicate-base64 problem is not an outstanding defect in this candidate.
+
+New builds are located by reusable instruction/root recipes with unique complete-source matches. A recipe match is a locator, not automatic ABI or writer qualification: the target's TValue stride, table/freeze semantics, lifecycle flags, Lua root, actor and source/build identity must pass declared checks. Identical verified invariants may be reused automatically; ambiguity or changed semantics refuses writes with a concrete doctor reason. Multiple same-build instances remain separate by PID and creation time. Unknown build, no actor, pre-world, reload in progress, stale heartbeat, mismatch, or missing addon can be diagnosed read-only and never guessed into readiness.
+
+## Qualification boundary
+
+Reusable locator recipes and production write qualification are separate.
+Profiles bind product/full build/executable hash, recipe version, named ABI
+(Table array, TValue stride, numeric/tag/secret/freeze semantics), native
+world/reload interpretation, CLI/addon commits and scene evidence. Per-process
+root, actor, arena, writable pages and lifecycle checks remain fresh even when
+static exact-image evidence is reused. A changed hash never inherits writer
+qualification merely because the recipe matches; ambiguity or changed ABI
+fails read-only, without guessed offsets or heap scanning.
+
+| Evidence level | Scope | Authority |
+| --- | --- | --- |
+| L0 identified | Product/build/hash, module, PID/creation | Read-only doctor |
+| L1 located | Unique recipe, typed mailbox root, independent world/reload | Mailbox observation |
+| L2 writer conditions | Numeric layout, capacity/freeze, strong roots, pages, lifecycle semantics | Controlled direct-trial candidate |
+| L3 exact-image trial | Formal CLI and clean addon; small/large write, readback, execution, result and close | Restricted to that exact image and evidenced scenes |
+| L4 scene acceptance | Cancel/recovery, reload/actor, real dual instances, performance and memory | Only the corresponding passed scenarios |
+
+The exact Retail `12.1.0.69933` image has the documented L3 subset plus three
+in-probe GC cycles, not general L4 acceptance. Classic `50504` and Titan `38002`
+writer scenes remain `not_run`; Forever `16001` is excluded. Another hash/build
+needs independent ABI and exact-image evidence before production writes.
+See the [reconstruction plan](live-mailbox-v1-reconstruction-plan-2026-10-04.md)
+for the remaining matrix; this level contract does not itself assert that the
+profile implementation or every required scene has passed.
+
+## Acceptance and skill routing
+
+Offline: Go/Lua wire fixtures for zero/small/1 MiB/oversize, strict new layout, exact one-command write and previous-result ACK, two-CLI contention, duplicate/partial/mixed/old publications, cancel before acceptance, execute-once, failed execution, close, GC roots, bounded repair, 140 sequential commands, max-input journal durability and stable idle memory. Windows owned-process acceptance must cover actual direct one-WPM row bytes, frozen/type/page rejection, partial write/short read, driver interruption, lifecycle/identity replacement, no replay and target survival. Historical stopped-helper timing/crash tests are not qualification for the current unsuspended path. Full repository build, vet, required Lua 5.1 tests and baseline run before delivery.
+
+Real-client acceptance uses the *formal packaged CLI and managed addon*, not a synthetic addon-only self-test: doctor, install/reload, one small command, 1 MiB command, explicit success and failure results, persisted ACK via next command and final disconnect, cancellation, GC, reload/relogin, two same-build instances, memory/CPU/latency, then cross-build recipe replay on available clients. Record each `not_run` honestly. The stopped trial is preserved as a rejected route. Current direct Retail evidence covers small/1 MiB commands, verified close and three in-probe GC cycles; it does not cover reload/new-runtime execution, same-build dual instances, cross-build writes or long-duration performance.
+
+The versioned `lycheedev` skill routes source/data/asset/static work to their references. Live startup, every new command, resume, cancel, close and reload first run targeted doctor and keep its exact process/actor/runtime pins. Normal command flow uses one command-row publication; the skill does not manufacture a separate bind/commit/result ACK. Recovery first reads the original journal and sendbox, uses an exact receipt when present, and never replays an unknown effect. It finishes the final result via ACK/close and distinguishes transport, business result, and cleanup in its answer. Generated command references still come from the CLI contract table, not handwritten invented flags.

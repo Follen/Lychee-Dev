@@ -17,9 +17,12 @@ Authoritative documents, in order of precedence for implementation work:
 2. `docs/toolkit/implementation-status.md` — current verified facts; honest
    boundaries (`not_run` stays `not_run`).
 3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-3.0.2.md` — Windows CI and release contract for the current candidate.
-   `release-2.0.1.md` is retained as the immutable historical contract for the
-   already-published release.
+4. `docs/toolkit/live-mailbox-v1-architecture-2026-10-04.md` — current branch's
+   live protocol and qualification contract; the reconstruction plan records
+   remaining work, not completed acceptance.
+5. Version-bound release documents retain their own release scope. The mailbox
+   candidate still has a 3.1.1 label; that does not give it the published release's
+   protocol acceptance or authorize publication.
 
 Use `go test ./...` and `go vet ./...` at the repository root. The Lua protocol
 suites need a Lua 5.1 interpreter (`LYCHEEDEV_REQUIRE_LUA51=1`); build one with
@@ -46,10 +49,10 @@ docs/toolkit/       design, status, regression, release contracts
 ## Non-negotiable acceptance criteria
 
 1. **Zero cost while disabled.** Opt-in addon features create no frames, no
-   events, no hooks until enabled. The owner-approved r4 bootstrap foundation
-   is separately budgeted: one loader, one binding owner, three binding buttons;
-   no idle events, hooks, timers or OnUpdate after registration. The opted-in
-   reload beacon has a hard 45-second lifetime and stops on receiver wake.
+   events, no hooks until enabled. For this mailbox branch, the one-shot core
+   loader is separately budgeted; disabled mailbox allocates no arena, events,
+   timers or OnUpdate. Earlier r4 binding buttons and reload beacon belong to
+   the retired input protocol, not the current disabled-state allowance.
 2. **Zero behavior change without opt-in.** Only narrowly scoped bug fixes may
    change existing behavior.
 3. **Event-driven and bounded.** No polling gates; bounded queues, budgets and
@@ -82,68 +85,55 @@ from acceptance. A client folder is a location, not an identity: read
 
 ## Live (game) rules
 
-Native `CON-...` connections use the memory/200-slot architecture described in
-`docs/toolkit/live-slot-routing-2026-09-29.md` (current slot allocation and migration),
-`docs/toolkit/live-input-architecture-2026-09-28.md` and the current
-`skills/lycheedev/references/live-investigation.md`. Those contracts govern
-native connection input, recovery, reload, disconnect and installation.
-The receiver/QR `OP-...` and `BTP-...` rules below remain historical recovery
-contracts; do not apply their keys, queue or ACK sequence to native connections.
+The current branch's protocol authority is
+`docs/toolkit/live-mailbox-v1-architecture-2026-10-04.md`, with operational guidance
+in `skills/lycheedev/references/live-investigation.md`. Lychee Dev mailbox protocol
+v1 (`lycheedev.mailbox.v1`) supersedes the earlier duplex and native slot/routing
+contracts for this branch. Those contracts and published 3.1.1 acceptance records
+retain only their historical scope. There is no LoD, keyboard bootstrap, optical
+readiness or old schema/wire/layout compatibility here.
 
-- The dedicated receiver is the machine input path, including first-contact
-  identify/connect/reset. Its minimal wake entry is available when the addon
-  loads; wake does not authorize probe execution. CLI sends bounded LDB1 stage,
-  verifies the staged receipt, triggers physical submit, reads the fresh
-  `receiver_commit_ready` challenge, then sends an exact LDC1 commit and final
-  Enter for intent-v2 dispatch from a key event. OnTextChanged never executes
-  business code. Wake is Ctrl+Alt+], submit Ctrl+Alt+Shift+], close Ctrl+Alt+[.
-  Never interpret a staged receipt or old submit key as accepted execution.
-- Each command hides the receiver and releases focus before business dispatch.
-  Asynchronous execution must leave no waiting panel or handshake QR over the
-  scene. Terminal receipts remain necessary; finish visual sampling before
-  Finish/Fail, and use complete execute/finish to clear the terminal display.
-- Bootstrap input is journaled before sending. A pending `BTP-...` is recovered
-  with `live status`/`live resume` on that ID; resume observes the original
-  receipt and does not resend unknown input. Keep its selected target fixed.
-  For installation activation or bridge loss, `live reload fallback` selects one
-  clean managed installation and PID, journals the fixed Esc×3 Enter /reload
-  Enter sequence, and verifies the runtime. Pending `OP-...` recovery does not
-  replay uncertain keys or override another owner.
-- Probe queues require a **clean managed addon**: files must match the
-  installation receipt byte for byte. Deploy addon updates with
-  `addon install` from a release root; overlay-copying the repo onto a managed
-  installation makes it `modified` and the queue will (correctly) refuse it.
-- `live run` executes only an already loaded operation and stops at a verified
-  report. `live ack` explicitly acknowledges that exact operation, retires its
-  queue entry and releases its window ownership; ACK does not trigger a cleanup
-  reload. Use standalone `live reload` when requested or needed within the
-  authorized task; the agent performs it automatically. Reconnect automatically
-  when a reload changes readiness, retaining the selected window and character.
-- `live probe load` requires `--budget-seconds <1-120>`. The budget is immutable
-  for that operation; resume does not restart its execution time. Loading and
-  SV persistence can reload the client, so probes that need transient scenes
-  rebuild them after load and finish observation before report flush.
-- Live results distinguish `report.state` (verified/unavailable) from
-  `cleanup` (pending/complete). A verified report with pending cleanup is a
-  usable result plus a recovery obligation — never report it as a failure.
-- `live finish` combines ACK with verified display cleanup and archives the clear
-  evidence. Its `complete=true` also requires `display.state=cleared`; retrying a
-  successfully finished operation is read-only. Keep atomic `live ack` for requests
-  that intentionally retain the display.
-- `live reload` may activate an older runtime only when the current CLI's exact
-  version is installed as a clean managed addon. It records from/to release and
-  manifest commit, preserves window/actor/nonce checks and rechecks bytes before input.
-- `live abandon` requires an explicit decision for unresolved probe/bugs work
-  after preparation through ack_requested, including zero/partial/unknown input.
-  Missing reports stay unavailable and execution/ACK remain unconfirmed.
-  It preserves evidence, retires only the exact disk queue
-  entry and releases ownership without game input. `cleanup=abandoned` and
-  `complete=false` never mean ACK or runtime unload succeeded.
-- Real-machine observation goes through `internal/desktop` WGC capture; screen
-  screenshots are not evidence for D3D windows.
-- Interactive desktop and game acceptance are recorded manually by the owner.
-  CI has no self-hosted interactive desktop job or desktop-evidence gate.
-
+- Disabled transport allocates no arena, event subscriptions, timers or OnUpdate.
+  The one-shot core loader is separately budgeted. The owner authorized bounded
+  polling while mailbox is enabled; it is not a general exception for features.
+- `inbox` is CLI to addon; `sendbox` is addon to CLI. Identity, SHA256, exact
+  uint64 sequences, fresh private challenge and one outstanding request govern
+  execution. One preallocated command row carries one complete source of up to
+  1 MiB in one native write. The next command carries the exact ACK for the
+  previous durably saved result; final disconnect uses the small stop row.
+- Run read-only targeted doctor before each live drive. Business readiness must
+  not block independently eligible cancel, result retrieval or disconnect.
+- Retain project, CON, request, source and budget on pending work. Unknown effects
+  do not replay. A cancelled unaccepted command retains exact `not_started`
+  terminal evidence and consumes its challenge; it is not retransmitted.
+- Private strong roots retain every exchange row. Repair permits at most the
+  current and one retired arena; command and stop writers must drain before
+  exact repair acceptance can release retired roots. They do not pin VM lifetime.
+- The CLI owns native publication and leases. Production publication uses the
+  direct, unsuspended route, without debugger attach, game-function hooks or
+  thread suspension. The stopped-helper route is disabled after its preserved
+  Retail security crash. Do not bypass eligibility with raw writes, guessed
+  offsets, deleted claims, suspension or injection. Raw address research is a
+  separate, explicitly scoped workflow.
+- Build-bound read/RVA qualification does not establish native write capability.
+  Every writer profile needs independent array/number and collector/lifecycle
+  evidence. Exact Retail 12.1.0.69933 image qualification is limited to the
+  documented small/1 MiB/close direct trial and three in-probe GC cycles.
+  Reload/new-runtime follow-up, same-build dual instances and other builds
+  remain not_run; every other hash/build remains write-ineligible. Addon
+  self-tests and offline fixtures do not establish CLI-to-game execution.
+- Do not initiate reload during a command write; tell the user to avoid manual
+  /reload in that interval. Normal reload after request cleanup is allowed.
+  The owner accepts the residual external-reload race between the final check
+  and WPM: private roots do not keep a destroyed Lua VM alive. Do not describe
+  a finite trial as having eliminated it.
+- Deploy sealed candidate files using addon install. A clean managed installation
+  must match the CLI; no overlay copying. First enablement uses /dev connect;
+  replaced incompatible runtimes require an explicit manual reload.
+- Cosmetic transport feedback shows Agent执行中 only while probe code runs.
+  Real D3D visual evidence goes through internal/desktop WGC.
+- Real client and interactive desktop acceptance remain separate from CI fixtures;
+  there is no self-hosted interactive desktop job or desktop-evidence gate.
 ## Change and verification workflow
 
 - One focused behavioral change at a time. Inspect the nearest equivalent

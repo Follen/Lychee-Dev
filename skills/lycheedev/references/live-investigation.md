@@ -10,8 +10,9 @@ idle CON. Read [startup](live-startup.md) when activation or installation is nee
 Use [retained errors](error-diagnosis.md) or [performance measurement](runtime-investigations.md)
 when they answer the question; write a [probe](live-probes.md) only for missing evidence.
 
-Native 3.1 uses a build-bound Lua root and the named public Mailbox, with a
-matching clean 200-slot installation. The CLI validates the current process,
+This candidate uses **Lychee Dev mailbox protocol v1**, schema
+`lycheedev.mailbox.v1`, a build-bound Lua root and the named public Mailbox, with a
+matching clean managed installation. The CLI validates the current process,
 typed path, publication, owner/fence, challenge and exact result. Old native
 wire/identity is rejected. Unsupported code/layout, ambiguity or read gaps
 fail closed; they do not invoke a heap scanner or reuse another build's RVA.
@@ -25,7 +26,10 @@ scope. Match the verified executable path and process creation identity, not
 just `Wow.exe`, a folder name or a shared build hash. If multiple targets remain
 and the task does not choose them, present known product/build, actor/realm and
 PID; unknown identity stays unknown. “Test both” or an established arbitrary-
-character scope already resolves that choice within its stated limits.
+character scope already resolves that choice within its stated limits. Target
+selection does not waive writer qualification: diagnose each process separately,
+use only the CLI's eligible exact-image route, and report scene acceptance gaps
+from [doctor](live-doctor.md).
 
 ```text
 lycheedev live connect --project <project-directory> --installation <client> --pid <pid> --character <name> --realm <realm> --wait-seconds 120 --format json
@@ -39,58 +43,17 @@ context independently; it neither selects nor authenticates a running process.
 
 One process has one durable connection owner and one active CLI driver. Each
 same-build instance keeps its own CON/request and target; shared addon files
-do not make them interchangeable. A fresh bind establishes runtime ownership;
-execution remains within the authorized task. A foreign
+do not make them interchangeable. The first valid command binds the selected
+runtime and actor to its owner/session; connecting alone does not establish
+that in-game binding. A foreign
 project's claim, missing publication or stale sample is not an expired timeout.
 
-## Complete an investigation
+## Execute and finish
 
-```text
-lycheedev live execute --project <project-directory> --session <CON-id> --file <probe.lua> --request <stable-key> --budget-seconds 30 --wait-seconds 120 --policy observation --format json
-```
-
-Use `--probe <immutable-PRB-revision>` instead of a file for registered source.
-Keep the exact code, request and budget for continuation. `--budget-seconds`
-bounds addon execution (1..120); `--wait-seconds` bounds this host call
-(1..600, default 120). The [durable recovery deadline](live-recovery.md#durable-evidence-and-older-journals)
-survives between calls. Host timeout does not cancel Lua or renew either budget.
-
-Select `observation` only when repeating the entire probe after confirmed
-runtime loss is safe. The default `opaque` preserves uncertainty for effects
-that cannot safely repeat. CLI-managed observation recovery keeps the logical
-operation and records another attempt/ticket; it does not prove the old attempt
-did nothing. A new request key is for a genuinely new completed-task experiment,
-not for escaping a pending one.
-
-Read the result on three independent axes:
-
-| Fact | Meaning |
-| --- | --- |
-| `reportState: verified` | Exact result bytes were verified and retained |
-| `report.ok`, error, assertions and result coverage | Whether the probe's business check succeeded and what it observed |
-| `complete: true` with `cleanup: complete` | This command finished its lifecycle |
-
-A verified Lua error/timeout is useful evidence, even when its business result
-failed. Pending cleanup still needs [recovery](live-recovery.md), not another
-execution. Completed native work needs no ACK/finish/hide command. Repeating
-the exact completed request reads retained bytes without rerunning Lua, even
-after later operations or game exit; edited parameters/code are not that retry.
-
-The CLI may reload at a quiescent capacity boundary. Scene-dependent probes
-must reconstruct prerequisites or record that they cannot. Ordinary observation
-does not need an input shield, and UI activity labels prove neither execution
-nor result retrieval.
-
-```text
-lycheedev live disconnect <CON-id> --project <project-directory> --wait-seconds 120 --format json
-```
-
-Disconnect when the authorized investigation ends unless continued use is needed.
-It verifies unbind or [process/runtime retirement](live-recovery.md#ownership-and-runtime-retirement)
-before releasing ownership. Completed-close retry is read-only or repairs its
-interrupted host retirement. `closed: true` can coexist with unavailable report/
-`execution_unknown`; connection cleanup does not establish a business outcome.
-Keep the project's whole `.lycheedev/live` evidence directory together.
+Read [execution](live-execution.md) for command submission, immutable budgets,
+result interpretation and final disconnect. Read [reload](live-reload.md) for
+an intentional reload after request cleanup. Pending alone does not call for
+reload or another publication of the original source.
 
 ## Design a discriminating probe
 
@@ -115,5 +78,5 @@ Keep one original CON/request driven serially.
 
 ## Recover without replay
 
-Read [recovery](live-recovery.md#recover-without-replay) before resuming or reloading.
+Read [recovery](live-recovery.md#input-and-recovery) before resuming or reloading.
 Pending alone does not call for reload or an unchanged retry loop.

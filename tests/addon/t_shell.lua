@@ -51,7 +51,7 @@ assert(W.RegisterExportHook({
 
 -- Unknown verbs keep their legacy usage error (bridge parsing untouched).
 local usageOk, usageError = ns.Controls.Handle("frobnicate")
-assert(usageOk == nil and usageError == "usage: /dev status | connect | disconnect | receiver bind <wake|submit|close> <chord> | receiver reset",
+assert(usageOk == nil and usageError == "usage: /dev | status | connect | disconnect",
     "unknown /dev verbs changed their usage contract")
 
 -- First /dev builds the window lazily.

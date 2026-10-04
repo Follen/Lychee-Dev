@@ -1,3 +1,0 @@
-local probe=...
-assert(probe:ProtectInput(10))
-error("input_protection_fixture_error")

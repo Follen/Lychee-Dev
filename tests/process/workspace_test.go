@@ -13,7 +13,6 @@ import (
 
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/evidence"
-	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/testkit"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -102,8 +101,8 @@ func TestNativeWorkspaceAcrossProcesses(t *testing.T) {
 		t.Fatal("pin changed across CLI processes")
 	}
 
-	// Seed one unfinished operation in the game journal,
-	// close the database, then observe it only through a fresh native process.
+	// Verify persisted evidence through a fresh native process without creating
+	// a legacy live operation.
 	ctx := context.Background()
 	store, err := vault.OpenStore(root)
 	if err != nil {
@@ -113,25 +112,13 @@ func TestNativeWorkspaceAcrossProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	book := journal.OpenBook(metadata)
-	work, err := book.BeginWork(ctx, journal.WorkIntent{Kind: "probe", Resource: "synthetic-window", Snapshot: id, Session: "WIN-fixture", Request: json.RawMessage(`{"code":"return 1"}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
 	archive := evidence.OpenArchive(store, metadata)
-	capture, err := archive.CommitCapture(ctx, evidence.CaptureDraft{Reader: strings.NewReader("exact bytes\r\n"), MaxBytes: 1024, MediaType: "text/plain", Complete: true, Provenance: evidence.Provenance{Kind: "fixture", Locator: "test-input", Snapshot: id, OperationID: work.OperationID}})
+	capture, err := archive.CommitCapture(ctx, evidence.CaptureDraft{Reader: strings.NewReader("exact bytes\r\n"), MaxBytes: 1024, MediaType: "text/plain", Complete: true, Provenance: evidence.Provenance{Kind: "fixture", Locator: "test-input", Snapshot: id}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := metadata.Close(); err != nil {
 		t.Fatal(err)
-	}
-	status := run("live", "status", work.OperationID)["result"].(map[string]any)
-	if status["status"] != "pending" || status["operationId"] != work.OperationID || status["snapshot"] != id || status["complete"] != false || status["cleanup"] != "pending" {
-		t.Fatalf("wrong status %v", status)
-	}
-	if status["report"].(map[string]any)["state"] != "unavailable" || status["observation"] != nil || status["intent"] != nil || status["stage"] != nil {
-		t.Fatalf("status exposed protocol machinery or invented a report: %v", status)
 	}
 	verified := run("evidence", "verify", capture.ID)["result"].(map[string]any)
 	if verified["id"] != capture.ID || verified["complete"] != true {
@@ -143,10 +130,6 @@ func TestNativeWorkspaceAcrossProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer metadata.Close()
-	observed, err := journal.OpenBook(metadata).InspectWork(ctx, work.OperationID)
-	if err != nil || observed.Stage != "prepared" || observed.Generation != 1 {
-		t.Fatalf("read command advanced live work: %+v %v", observed, err)
-	}
 
 	// Offline source inspection crosses the actual CLI, pin store and archive.
 	// Only Git fixture construction is in-process test setup; no network needed.

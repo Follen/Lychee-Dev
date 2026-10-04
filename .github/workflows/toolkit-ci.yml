@@ -98,8 +98,7 @@ jobs:
           if-no-files-found: error
       - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
         run: |
-          # The 200-slot installation suites verify more files. Bound concurrent
-          # packages while retaining each package's concurrency tests.
+          # Bound concurrent packages while retaining each package's concurrency tests.
           go test -p=2 -parallel=4 -count=1 -timeout=10m ./...
           if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
       - name: Native release-shape build
@@ -107,11 +106,6 @@ jobs:
           $env:CGO_ENABLED = '0'
           go build -buildvcs=true ./cmd/lycheedev
           if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
-      - name: Compile interactive contention workbench (no game execution)
-        run: |
-          $labExecutable = Join-Path $env:RUNNER_TEMP 'lycheedev-channel-lab.exe'
-          go build -tags lycheedev_channel_lab -o $labExecutable ./tests/channel-live
-          if ($LASTEXITCODE -ne 0) { throw 'channel lab build failed' }
       - run: go run ./cmd/lycheedev describe --format json
       - name: Skill / command-reference consistency (schema vs documented commands)
         run: |

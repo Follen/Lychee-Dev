@@ -1,11 +1,6 @@
 local ADDON_NAME, ns = ...
 
--- Automation workbench page: the in-game view and manual execute over the SAME
--- game-side probe machinery the CLI drives (design.md section 12). It lists
--- queue entries and execution history through Modules/AutomationView.lua,
--- which derives every status from ns.ProbeQueue / ns.ProbeRunner /
--- ns.ReportStore. No task registry, no /dev auto grammar and no parallel
--- executor exist here.
+-- Read-only view of the current duplex request and terminal manifest.
 local L = ns.L
 local W = ns.Widgets
 local view = ns.AutomationView
@@ -29,6 +24,12 @@ local STATUS_LABELS = {
     cleared = "AUTO_STATUS_CLEARED",
     unavailable = "AUTO_STATUS_UNAVAILABLE",
     interrupted = "AUTO_STATUS_INTERRUPTED",
+}
+local MAILBOX_LABELS = {
+    ready = "AUTO_MAILBOX_READY",
+    busy = "AUTO_MAILBOX_BUSY",
+    disconnected = "AUTO_MAILBOX_DISCONNECTED",
+    unavailable = "AUTO_MAILBOX_UNAVAILABLE",
 }
 
 local KIND_LABELS = {
@@ -59,6 +60,7 @@ local function GetLifecycleText(record)
 end
 
 local function GetStatusText(record)
+    if record.probeStatus == "cancelled" then return L.AUTO_STATUS_CANCELLED end
     if record.status == "reported" or record.status == "acknowledged" then
         if record.probeStatus == "failed" then return L.AUTO_STATUS_FAILED end
         if record.probeStatus == "completed" then return L.AUTO_STATUS_SUCCEEDED end
@@ -84,15 +86,37 @@ end
 
 local function FormatCode(record)
     if Restricted(record.codeBytes) or type(record.codeBytes) ~= "number" then
+        if record.codeSHA256 then
+            return string.format(L.AUTO_CODE_CHECKSUM_ONLY, ShownText(record.codeSHA256))
+        end
         return L.NOT_AVAILABLE
     end
     return string.format(L.AUTO_CODE_SUMMARY, record.codeBytes,
-        ShownText(record.codeAdler32, "-"), ShownText(record.codeSHA256, "-"))
+        ShownText(record.codeSHA256, "-"))
+end
+
+local function FormatSummary(record)
+    local started = L.UNKNOWN
+    if record.executionStarted == true then started = L.AUTO_EXECUTION_STARTED
+    elseif record.executionStarted == false then started = L.AUTO_EXECUTION_NOT_STARTED end
+    local lines = {
+        L.AUTO_EXECUTION_SUMMARY,
+        L.AUTO_FIELD_REQUEST .. ": " .. ShownText(record.requestId),
+        L.AUTO_FIELD_STATUS .. ": " .. GetStatusText(record),
+        L.AUTO_FIELD_CODE .. ": " .. FormatCode(record),
+        L.AUTO_FIELD_EXECUTION .. ": " .. started,
+    }
+    if record.errorCode then lines[#lines + 1] = L.AUTO_FIELD_ERROR .. ": " .. ShownText(record.errorCode) end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = record.released and L.AUTO_RELEASED_REPORT_NOTE
+        or record.hasReport and L.AUTO_RESULT_RETAINED_NOTE or L.AUTO_NO_REPORT
+    return table.concat(lines, "\n")
 end
 
 local function FormatRecorded(record)
     local text = FormatTime(record.observedAt)
-    if type(record.sequence) == "number" and not Restricted(record.sequence) then
+    if not Restricted(record.sequence) and type(record.sequence) == "string"
+        and #record.sequence <= 20 and record.sequence:match("^%d+$") then
         text = text .. "  ·  #" .. tostring(record.sequence)
     end
     return text
@@ -121,6 +145,7 @@ function ns.CreateAutomationPage(parent)
     page:SetAllPoints(parent)
 
     local selectedRequestId
+    local detailMode = "summary"
     local rows = {}
 
     local heading = W.CreatePageHeading(page, L.TAB_AUTOMATION, L.AUTOMATION_PAGE_HELP)
@@ -129,6 +154,28 @@ function ns.CreateAutomationPage(parent)
     ns.Theme.SetFont(countText, 11, ns.Theme.textDim)
     countText:SetPoint("LEFT", heading, "RIGHT", 12, 0)
     countText:SetTextColor(unpack(ns.Theme.textDim))
+
+    local mailboxText = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(mailboxText, 11, ns.Theme.textDim)
+    mailboxText:SetPoint("TOPRIGHT", -14, -22)
+    mailboxText:SetWidth(300)
+    mailboxText:SetJustifyH("RIGHT")
+    mailboxText:SetWordWrap(false)
+    mailboxText:SetTextColor(unpack(ns.Theme.textDim))
+
+    local connectionError = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(connectionError, 11, ns.Theme.warning)
+    connectionError:SetPoint("TOPLEFT", 14, -65)
+    connectionError:SetPoint("TOPRIGHT", -14, -65)
+    connectionError:SetJustifyH("LEFT")
+    connectionError:SetWordWrap(false)
+
+    local candidateError = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ns.Theme.SetFont(candidateError, 11, ns.Theme.warning)
+    candidateError:SetPoint("TOPLEFT", 14, -81)
+    candidateError:SetPoint("TOPRIGHT", -14, -81)
+    candidateError:SetJustifyH("LEFT")
+    candidateError:SetWordWrap(false)
 
     local clearButton = W.CreateConfirmButton(page, 118, L.AUTO_CLEAR_HISTORY,
         L.CONFIRM_CLEAR_CACHE, function()
@@ -142,19 +189,8 @@ function ns.CreateAutomationPage(parent)
         end, "secondary")
     clearButton:SetPoint("BOTTOMLEFT", 14, 14)
 
-    local hideNoticeButton, showNoticeButton
-    if not ns.SlotRuntime then
-        hideNoticeButton = W.CreateButton(page, 118, L.AUTO_HIDE_NOTICE, "secondary")
-        hideNoticeButton:SetPoint("BOTTOMRIGHT", -14, 14)
-        showNoticeButton = W.CreateButton(page, 128, L.AUTO_SHOW_NOTICE, "secondary")
-        showNoticeButton:SetPoint("RIGHT", hideNoticeButton, "LEFT", -8, 0)
-    end
-
-    local executeButton = W.CreateButton(page, 96, L.AUTO_EXECUTE, "primary")
-    executeButton:SetPoint("TOPRIGHT", -14, -84)
-
     local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
-    listPanel:SetPoint("TOPLEFT", 14, -84)
+    listPanel:SetPoint("TOPLEFT", 14, -104)
     listPanel:SetPoint("BOTTOMLEFT", 14, 64)
     listPanel:SetWidth(LIST_WIDTH)
 
@@ -196,20 +232,24 @@ function ns.CreateAutomationPage(parent)
     local timeValue = CreateField(metadata, L.AUTO_FIELD_TIME, 4, -156, 232)
     local errorValue = CreateField(metadata, L.AUTO_FIELD_ERROR, 254, -156, 240)
 
+    local summaryButton = W.CreateModeTab(detailPanel, L.AUTO_EXECUTION_SUMMARY, nil)
+    summaryButton:SetPoint("TOPLEFT",4,-56)
     local viewReportButton = W.CreateModeTab(detailPanel, L.AUTO_VIEW_REPORT, nil)
-    viewReportButton:SetWidth(112);viewReportButton:SetPoint("TOPLEFT",4,-56)
+    viewReportButton:SetPoint("LEFT",summaryButton,"RIGHT",4,0)
     local detailsButton=W.CreateModeTab(detailPanel,L.AUTO_EVIDENCE_DETAILS,nil)
-    detailsButton:SetWidth(112);detailsButton:SetPoint("LEFT",viewReportButton,"RIGHT",4,0)
-    viewReportButton:SetActive(true)
+    detailsButton:SetPoint("LEFT",viewReportButton,"RIGHT",4,0)
+    summaryButton:SetActive(true)
 
     local reportArea = W.CreateTextArea(detailPanel, true)
     reportArea:SetPoint("TOPLEFT", 4, -94)
     reportArea:SetPoint("BOTTOMRIGHT", -4, 4)
     W.SetReadOnlyText(reportArea, L.AUTO_SELECT_RECORD)
     detailsButton:SetScript("OnClick",function()
+        detailMode = "details"
         metadata:Show();reportArea:Hide()
         detailsButton:SetActive(true)
         viewReportButton:SetActive(false)
+        summaryButton:SetActive(false)
     end)
 
     local function StatusColor(record)
@@ -252,15 +292,29 @@ function ns.CreateAutomationPage(parent)
         codeValue:SetText(hasRecord and FormatCode(record) or "")
         timeValue:SetText(hasRecord and FormatRecorded(record) or "")
         errorValue:SetText(hasRecord
-            and ShownText(record.actionError or record.probeError or record.errorCode, L.NOT_AVAILABLE) or "")
+            and ShownText(record.errorCode, L.NOT_AVAILABLE) or "")
 
-        W.SetButtonEnabled(executeButton, hasRecord and record.transport~="memory-slot" and (record.status == "queued" or record.status == "loaded"))
-        if showNoticeButton then W.SetButtonEnabled(showNoticeButton, hasRecord and record.receipt ~= nil) end
-        W.SetButtonEnabled(viewReportButton, hasRecord)
+        W.SetButtonEnabled(viewReportButton, hasRecord and record.hasReport)
         W.SetButtonEnabled(detailsButton, hasRecord)
+        W.SetButtonEnabled(summaryButton, hasRecord)
+        if detailMode == "report" and not (hasRecord and record.hasReport) then detailMode = "summary" end
+        summaryButton:SetActive(detailMode == "summary")
+        viewReportButton:SetActive(detailMode == "report")
+        detailsButton:SetActive(detailMode == "details")
+        metadata:SetShown(detailMode == "details")
+        reportArea:SetShown(detailMode ~= "details")
     end
 
     local function ShowSelectedReport()
+        local record = selectedRequestId and view.GetRecord(selectedRequestId)
+        if not record then
+            W.SetReadOnlyText(reportArea, L.AUTO_SELECT_RECORD)
+            return
+        end
+        if detailMode ~= "report" or not record.hasReport then
+            W.SetReadOnlyText(reportArea, FormatSummary(record))
+            return
+        end
         local text,failure=view.GetReportText(selectedRequestId)
         W.SetReadOnlyText(reportArea,text or ShownText(failure,L.AUTO_NO_REPORT))
     end
@@ -327,6 +381,23 @@ function ns.CreateAutomationPage(parent)
 
     local function Refresh()
         view.Collect()
+        local mailbox = view.GetMailboxStatus()
+        local mailboxKey = MAILBOX_LABELS[mailbox.state]
+        mailboxText:SetText(L[mailboxKey or "AUTO_MAILBOX_UNAVAILABLE"])
+        mailboxText:SetTextColor(unpack(mailbox.state == "ready" and ns.Theme.success
+            or mailbox.state == "busy" and ns.Theme.warning or ns.Theme.textDim))
+        local failure = mailbox.candidateFailure
+        if failure and failure.code then
+            candidateError:SetText(string.format(L.AUTO_CANDIDATE_ERROR,
+                ShownText(failure.requestId or L.UNKNOWN), ShownText(failure.code)))
+        else
+            candidateError:SetText("")
+        end
+        if mailbox.errorCode then
+            connectionError:SetText(string.format(L.AUTO_CONNECTION_ERROR, ShownText(mailbox.errorCode)))
+        else
+            connectionError:SetText("")
+        end
         local order = view.GetOrder()
         countText:SetText(string.format(L.AUTO_EXECUTION_COUNT, #order))
         emptyTitle:SetShown(#order == 0)
@@ -370,7 +441,7 @@ function ns.CreateAutomationPage(parent)
         if not selectedRequestId and order[1] then
             selectedRequestId = order[1]
         end
-        if selectedRequestId then ShowSelectedReport() end
+        ShowSelectedReport()
         for index = 1, #rows do
             ApplyRowState(rows[index])
         end
@@ -378,50 +449,22 @@ function ns.CreateAutomationPage(parent)
     end
     page.Refresh = Refresh
 
+    summaryButton:SetScript("OnClick", function()
+        detailMode = "summary"
+        ShowSelectedReport()
+        RefreshDetail()
+    end)
+
     listScroll.onVerticalScrollChanged = function()
         page:Refresh()
     end
 
-    executeButton:SetScript("OnClick", function()
-        if ns.Safety.IsCombatBlocked() then
-            ns.Safety.PrintBlocked()
-            return
-        end
-        if not selectedRequestId then
-            return
-        end
-        -- The one execute path: ProbeQueue.Load + ProbeRunner.Dispatch, the
-        -- exact calls the /dev bridge load/run verbs make. Failures surface as
-        -- their bridge error codes; nothing is invented here.
-        local _, failure = view.Execute(selectedRequestId)
-        local record = view.GetRecord(selectedRequestId)
-        if record then
-            -- Transient action error for the detail pane; the row status stays
-            -- the derived bridge status refreshed below.
-            record.actionError = failure
-        end
-        Refresh()
-    end)
-
-    if showNoticeButton then showNoticeButton:SetScript("OnClick", function()
-        if ns.Safety.IsCombatBlocked() then
-            ns.Safety.PrintBlocked()
-            return
-        end
-        if selectedRequestId then
-            view.ShowNotice(selectedRequestId)
-        end
-    end) end
-
-    -- Hiding the notice is teardown and must stay available in every state.
-    if hideNoticeButton then hideNoticeButton:SetScript("OnClick", function()
-        view.HideNotice()
-    end) end
-
     viewReportButton:SetScript("OnClick", function()
+        detailMode = "report"
         metadata:Hide();reportArea:Show()
         detailsButton:SetActive(false)
         viewReportButton:SetActive(true)
+        summaryButton:SetActive(false)
         if ns.Safety.IsCombatBlocked() then
             ns.Safety.PrintBlocked()
             return
@@ -434,6 +477,9 @@ function ns.CreateAutomationPage(parent)
     end)
 
     page.rows = rows
+    page.mailboxText = mailboxText
+    page.connectionError = connectionError
+    page.candidateError = candidateError
     page.reportArea = reportArea
     page.requestValue = requestValue
     page.kindValue = kindValue
@@ -441,10 +487,8 @@ function ns.CreateAutomationPage(parent)
     page.codeValue = codeValue
     page.timeValue = timeValue
     page.errorValue = errorValue
-    page.executeButton = executeButton
-    page.showNoticeButton = showNoticeButton
-    page.hideNoticeButton = hideNoticeButton
     page.viewReportButton = viewReportButton
+    page.summaryButton = summaryButton
     page.clearButton = clearButton
     page.detailsButton,page.metadata=detailsButton,metadata
     function page:Activate()
@@ -475,9 +519,6 @@ local definition = {
     suspend = function()
     end,
     shutdown = function()
-        if ns.AutomationView then
-            ns.AutomationView.HideNotice()
-        end
     end,
 }
 

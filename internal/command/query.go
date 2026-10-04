@@ -8,7 +8,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/codebase/environment"
 	"github.com/follenfang/lycheedev/internal/codebase/flow"
 	"github.com/follenfang/lycheedev/internal/evidence"
-	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/luals"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/archive"
@@ -63,14 +62,6 @@ func queryFault(err error) (int, string, bool) {
 		{luals.ErrBudget, 3, "luals.input_budget"},
 		{luals.ErrUnsupported, 3, "luals.unsupported"},
 		{luals.ErrFailed, 5, "luals.check_failed"},
-		{live.ErrAckReadinessPending, 6, "live.ack_readiness_pending"},
-		{live.ErrInvestigationPending, 6, "live.investigation_pending"},
-		{live.ErrBusinessFailed, 5, "live.business_failed"},
-		{live.ErrReportWriterAmbiguous, 3, "live.report_writer_ambiguous"},
-		{live.ErrReceiptHidePending, 6, "live.receipt_hide_pending"},
-		{live.ErrReceiptWindowBusy, 3, "live.receipt_window_busy"},
-		{live.ErrUpgradeInstallation, 3, "live.upgrade_requires_current_managed_addon"},
-		{live.ErrUpgradeChanged, 3, "live.upgrade_installation_changed"},
 		{selection.ErrTargetMissing, 3, "selection.target_missing"},
 		{records.ErrInstallationMissing, 3, "selection.installation_missing"},
 		{records.ErrInstallationAmbiguous, 2, "selection.installation_ambiguous"},

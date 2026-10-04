@@ -21,6 +21,7 @@ const RetailLuaMailboxRootRVA uint64 = 0x79c0c18
 const MailboxSchema = "lycheedev.mailbox.v1"
 
 var ErrMailboxUnavailable = errors.New("memory.mailbox_unavailable")
+var ErrMailboxPathChanged = fmt.Errorf("%w: path_changed", ErrMailboxUnavailable)
 
 // MailboxReader locates current records through a build-bound Lua root and
 // named hash lookup. It stores no heap addresses, hints, payloads or authority.
@@ -117,7 +118,7 @@ func (a *luaAccess) verify(ctx context.Context) error {
 			return err
 		}
 		if !bytes.Equal(b, g.bytes) {
-			return mailboxError("path_changed")
+			return ErrMailboxPathChanged
 		}
 	}
 	if err := a.reader.source.Verify(ctx); err != nil {

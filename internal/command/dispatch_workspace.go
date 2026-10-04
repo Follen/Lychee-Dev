@@ -207,6 +207,7 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 		toolCheck.NextStep = "install the complete lycheedev npm package or native release for source refs/context semantic analysis and source validate --semantic"
 	}
 	checks = append(checks, toolCheck)
+	checks = append(checks, liveDoctorChecks(ctx, opts)...)
 	// The mirror check joins only when the nearest project declares a product;
 	// doctor never invents a repository or a product default.
 	if directory, projectErr := projectDirectory(""); projectErr == nil {

@@ -230,28 +230,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "live probe put":
 				response.Result, err, code = putLiveProbe(ctx, opts)
-			case "live execute":
-				var record live.Outcome
-				record, err, code = executeLive(ctx, opts)
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
-			case "live probe load":
-				if opts.budgetSeconds == 0 {
-					err, code = errors.New("live probe load requires --budget-seconds <1-120>"), 2
-					break
-				}
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var record live.Outcome
-				if err == nil {
-					record, err = live.LoadProbe(ctx, root, live.LoadProbeRequest{Session: opts.session, Account: opts.account, Probe: opts.probe, Request: opts.request, BudgetSeconds: opts.budgetSeconds})
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
 			case "live probe list":
 				var root string
 				root, err = workspaceRoot(opts.home)
@@ -269,137 +247,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				root, err = workspaceRoot(opts.home)
 				if err == nil {
 					response.Result, err = live.RemoveProbe(ctx, root, argument)
-				}
-			case "live run":
-				var record live.Outcome
-				var root string
-				root, err = workspaceRoot(opts.home)
-				if err == nil {
-					record, err = live.RunLoaded(ctx, root, argument)
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
-			case "live reload":
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var record live.Outcome
-				if err == nil {
-					record, err = live.ReloadClient(ctx, root, live.ReloadRequest{Session: opts.session, Request: opts.request})
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
-			case "live reload fallback":
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var record live.Outcome
-				if err == nil {
-					record, err = live.FixedReloadClient(ctx, root, live.FixedReloadRequest{Installation: opts.installation, PID: opts.pid, Request: opts.request, Session: opts.session, WakeBinding: opts.wakeBinding})
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"] = record.Stage
-				}
-			case "live ack":
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var record live.Outcome
-				if err == nil {
-					record, err = live.AcknowledgeVerified(ctx, root, argument)
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
-			case "live finish":
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var record live.FinishOutcome
-				if err == nil {
-					record, err = live.FinishProbe(ctx, root, argument)
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
-			case "live bugs":
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var record live.Outcome
-				if err == nil {
-					record, err = live.Bugs(ctx, root, live.BugsRequest{Session: opts.session, Account: opts.account, Request: opts.request, Count: opts.count})
-				}
-				if record.OperationID != "" {
-					response.Result, response.OperationID = record, record.OperationID
-					response.Context["stage"], response.Context["snapshot"] = record.Stage, record.Snapshot
-				}
-			case "live hide":
-				var root string
-				root, err = workspaceRoot(opts.home)
-				var dismissal live.HideReceiptResult
-				if err == nil {
-					dismissal, err = live.HideReceipt(ctx, root, opts.session)
-				}
-				if err == nil {
-					response.Result = dismissal
-					response.Context["session"] = dismissal.Session
-				}
-			case "live connect":
-				request := live.ConnectRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation, Session: opts.session, CaptureArea: opts.region, WakeBinding: opts.wakeBinding}
-				if err = request.Validate(); err != nil {
-					code = 2
-					break
-				}
-				var root string
-				root, err = workspaceRoot(opts.home)
-				if err != nil {
-					break
-				}
-				var connection live.Connection
-				connection, err = live.ConnectWindow(ctx, root, request)
-				if err == nil {
-					response.Result = connection
-					response.Context["session"], response.Context["snapshot"] = connection.ID, connection.Snapshot
-					response.Warnings = append(response.Warnings, "Connected through the two fixed bootstrap commands only; identity markers bound no session. The retained identity is a reconnection target, not standing input authority.")
-				}
-			case "live reset":
-				request := live.ResetRequest{Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, PID: opts.pid, Installation: opts.installation, WakeBinding: opts.wakeBinding}
-				if err = request.Validate(); err != nil {
-					code = 2
-					break
-				}
-				var root string
-				root, err = workspaceRoot(opts.home)
-				if err != nil {
-					break
-				}
-				var outcome live.ResetOutcome
-				outcome, err = live.ResetWindow(ctx, root, request)
-				if err == nil {
-					response.Result = outcome
-					response.Context["session"], response.Context["snapshot"] = outcome.Connection.ID, outcome.Connection.Snapshot
-					response.Warnings = append(response.Warnings, "Reset sent one fixed nonce-correlated recovery trigger to an unowned window and reconnected through the normal bootstrap; retained reports were never acknowledged or deleted.")
-				}
-			case "live bind":
-				request := live.WindowBindingRequest{Installation: opts.installation, PID: opts.pid, Snapshot: opts.snapshot, Character: opts.character, Realm: opts.realm, Region: opts.region, WakeBinding: opts.wakeBinding}
-				if err = request.Validate(); err != nil {
-					code = 2
-					break
-				}
-				var root string
-				root, err = workspaceRoot(opts.home)
-				if err != nil {
-					break
-				}
-				var bound live.RecordedSession
-				bound, err = live.BindWindowSession(ctx, root, request)
-				if err == nil {
-					response.Result = bound.Connection()
-					response.Context["session"], response.Context["snapshot"] = bound.Record.ID, bound.Record.Snapshot
-					response.Warnings = append(response.Warnings, "Ready receipt observed and saved; capture stream is closed. Binding sends a journaled identity request to an already enabled bridge, but does not execute business work or authorize later input from history.")
 				}
 			case "addon install":
 				if opts.installation == "" || (!opts.resume && opts.release == "") || (opts.resume && (opts.output == "" || opts.release != "")) {
@@ -650,7 +497,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				request := live.DiscoveryRequest{Passive: true}
+				request := live.DiscoveryRequest{}
 				if opts.installation != "" {
 					request.Roots = []string{opts.installation}
 				}
@@ -856,7 +703,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 			case "target list", "target add", "target remove", "target available":
 				code, err = runTargetVerb(ctx, route, argument, opts, &response)
-			case "target show", "live status", "live resume", "live cancel", "live abandon", "live session", "evidence show", "evidence verify", "evidence keep", "evidence remove":
+			case "target show", "evidence show", "evidence verify", "evidence keep", "evidence remove":
 				if argument == "" {
 					err, code = errors.New("missing selection file or record ID; use describe"), 2
 					break
@@ -873,54 +720,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					} else {
 						response.Result, err = selection.ShowTarget(ctx, root, argument)
 					}
-				case "live status":
-					if strings.HasPrefix(argument, "BTP-") {
-						response.Result, err = live.InspectBootstrapReceiver(ctx, root, argument)
-					} else {
-						response.Result, err = live.Status(ctx, root, argument)
-					}
-					response.OperationID = argument
-				case "live resume":
-					if strings.HasPrefix(argument, "BTP-") {
-						response.Result, err = live.ResumeBootstrapReceiver(ctx, root, argument)
-						response.OperationID = argument
-						break
-					}
-					var record live.Outcome
-					record, err = live.Resume(ctx, root, argument)
-					response.OperationID = argument
-					if record.OperationID != "" {
-						response.Context["stage"] = record.Stage
-						response.Result = record
-					}
-				case "live cancel", "live abandon":
-					if route == "live abandon" && strings.HasPrefix(argument, "BTP-") {
-						response.Result, err = live.AbandonBootstrapReceiver(ctx, root, argument)
-						response.OperationID = argument
-						break
-					}
-					var record live.Outcome
-					if route == "live abandon" {
-						record, err = live.Abandon(ctx, root, argument)
-					} else {
-						record, err = live.Cancel(ctx, root, argument)
-					}
-					response.OperationID = argument
-					if record.OperationID != "" {
-						response.Result = record
-						response.Context["stage"] = record.Stage
-					}
-					if record.Status == "abandoned" {
-						response.Warnings = append(response.Warnings, "Cleanup abandoned explicitly; available evidence retained; missing report results remain unknown. No game ACK or runtime unload was performed.")
-					}
-				case "live session":
-					var session live.RecordedSession
-					session, err = live.ReadWindowSession(ctx, root, argument)
-					if err == nil {
-						response.Result = session.Connection()
-						response.Context["session"] = argument
-						response.Warnings = append(response.Warnings, "Historical session evidence only; live window identity and readiness have not been refreshed.")
-					}
 				case "evidence show", "evidence verify":
 					response.Result, err = evidence.InspectEvidence(ctx, root, argument, route == "evidence verify")
 				case "evidence keep":
@@ -932,7 +731,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						return evidence.OpenArchive(s, m).RemoveCapture(ctx, argument)
 					})
 				}
-				if err != nil && (route == "live status" || route == "target show" || route == "evidence show" || route == "evidence verify") {
+				if err != nil && (route == "target show" || route == "evidence show" || route == "evidence verify") {
 					response.Result = nil
 				}
 			case "evidence list":
@@ -962,18 +761,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				code, faultCode = 3, "journal.resource_busy"
 			case errors.Is(err, journal.ErrTransition):
 				code, faultCode = 3, "journal.invalid_transition"
-			case errors.Is(err, live.ErrCandidateAmbiguous):
-				code, faultCode = 2, "live.candidate_ambiguous"
-			case errors.Is(err, live.ErrCandidateMissing):
-				code, faultCode = 2, "live.candidate_missing"
-			case errors.Is(err, live.ErrSessionConstraint):
-				code, faultCode = 2, "live.session_constraint_mismatch"
-			case errors.Is(err, live.ErrInputNotReady):
-				code, faultCode = 3, "live.input_not_ready"
-			case errors.Is(err, live.ErrIdentityUnreadable):
-				code, faultCode = 3, "live.identity_unreadable"
-			case errors.Is(err, live.ErrActorChanged):
-				code, faultCode = 5, "live.actor_changed"
 			case errors.Is(err, desktop.ErrIdentityChanged):
 				code, faultCode = 5, "desktop.identity_changed"
 			case errors.Is(err, selection.ErrClientIdentity):
@@ -1021,20 +808,6 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		stage := "dispatch"
-		switch {
-		case errors.Is(err, live.ErrCandidateAmbiguous), errors.Is(err, live.ErrCandidateMissing), errors.Is(err, live.ErrSessionConstraint):
-			stage = "selection"
-		case errors.Is(err, live.ErrInputNotReady), errors.Is(err, live.ErrIdentityUnreadable), errors.Is(err, live.ErrActorChanged):
-			stage = "connect"
-		}
-		var accountChoice *live.AccountSelectionError
-		if errors.As(err, &accountChoice) {
-			code, faultCode, stage = 2, "live.account_selection_required", "selection"
-			response.Context["accounts"] = append([]string{}, accountChoice.Candidates...)
-		}
-		if errors.Is(err, live.ErrAccountScanLimit) {
-			code, faultCode, stage = 3, "live.account_scan_limit", "selection"
-		}
 		if queryExit, queryCode, ok := queryFault(err); ok && code != 2 {
 			code, faultCode, stage = queryExit, queryCode, "query"
 			if len(opts.words) >= 2 && opts.words[0] == "target" && opts.words[1] == "resolve" {
@@ -1055,16 +828,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
-		if response.Context["transport"] == "memory-slot-v3" && code == 6 {
-			response.Error.Retryable = true
-		}
-		if response.OperationID != "" && len(opts.words) >= 2 && opts.words[0] == "live" {
-			if actual, ok := response.Context["stage"].(string); ok {
-				response.Error.Stage = actual
-				response.Error.ResumeOperationID = response.OperationID
-				response.Error.Retryable = errors.Is(err, journal.ErrBusy) || errors.Is(err, live.ErrAckReadinessPending) || errors.Is(err, live.ErrReceiptHidePending) || errors.Is(err, live.ErrInvestigationPending)
-			}
-		}
+
 		var diagnostic *relational.Diagnostic
 		var binding *relational.BindingDiagnostic
 		if errors.As(err, &binding) {
@@ -1073,34 +837,12 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &diagnostic) {
 			response.Error.Location = &QueryLocation{Offset: diagnostic.Offset, Line: diagnostic.Line, Column: diagnostic.Column}
 		}
-		// Selection ambiguity and precise connect states carry their data in the
-		// envelope context so the user can choose and retry with constraints.
-		var choice *live.CandidateSelectionError
-		if errors.As(err, &choice) {
-			response.Context["candidates"] = append([]live.Candidate{}, choice.Candidates...)
-		}
 		var installationChoice *records.InstallationSelectionError
 		if errors.As(err, &installationChoice) {
 			response.Context["installationSelection"] = installationChoice.Discovery
 			response.Context["requestedProduct"] = installationChoice.Product
 		}
-		var notReady *live.InputNotReadyError
-		if errors.As(err, &notReady) {
-			response.Context["inputReason"] = notReady.Reason
-			response.Error.Retryable = true
-		}
-		if errors.Is(err, live.ErrActorChanged) || errors.Is(err, live.ErrIdentityUnreadable) {
-			response.Error.Retryable = true
-		}
-		var bootstrapPending *live.BootstrapPendingError
-		if errors.As(err, &bootstrapPending) {
-			code, response.Error.Code = 6, "live.input_pending"
-			response.Error.ResumeOperationID = bootstrapPending.ID
-			response.Error.Retryable = true
-			if response.OperationID == "" {
-				response.OperationID = bootstrapPending.ID
-			}
-		}
+
 	} else {
 		response.OK = true
 	}

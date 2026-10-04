@@ -104,7 +104,7 @@ func updateToolkit(ctx context.Context, opts Options) (any, error, int) {
 				}
 			}
 		}
-		discovered, err := live.DiscoverCandidates(ctx, root, live.DiscoveryRequest{Passive: true, Roots: roots})
+		discovered, err := live.DiscoverCandidates(ctx, root, live.DiscoveryRequest{Roots: roots})
 		if err != nil {
 			return nil, err, 3
 		}

@@ -5,15 +5,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/follenfang/lycheedev/internal/live/journal"
 	"os"
 	"path/filepath"
+
+	"github.com/follenfang/lycheedev/internal/live/journal"
 )
 
 // InstallAddon publishes only a validated, independent release snapshot. Existing
 // unmanaged addons, including legacy task registries, are never adopted.
 func InstallAddon(ctx context.Context, releaseDirectory, clientDirectory, version string) (receipt InstallationReceipt, err error) {
 	return withAddonRelease(ctx, releaseDirectory, clientDirectory, version, func(prepared, target string) (InstallationReceipt, error) {
+		current, inspectErr := InspectInstallation(ctx, target, "addon")
+		if inspectErr != nil {
+			return InstallationReceipt{}, inspectErr
+		}
+		if current.State == "managed" && current.Receipt != nil {
+			if err := rejectLegacySlotsForInstall(ctx, filepath.Dir(target), current.Receipt.Version); err != nil {
+				return InstallationReceipt{}, err
+			}
+		}
 		return InstallFresh(ctx, prepared, target, "addon", version)
 	})
 }
@@ -29,31 +39,74 @@ func UpgradeAddon(ctx context.Context, releaseDirectory, clientDirectory, archiv
 			return Upgrade{}, err
 		}
 		defer gate.Close()
-		upgrade, err := ResumeUpgrade(ctx, filepath.Join(parent, "Lychee Dev"), archive, "addon")
+		target := filepath.Join(parent, "Lychee Dev")
+		if err = preflightResumeLegacySlots(ctx, parent, target, archive, version); err != nil {
+			return Upgrade{}, err
+		}
+		upgrade, err := ResumeUpgrade(ctx, target, archive, "addon")
 		if err == nil {
-			err = installReceiptSlots(ctx, parent, upgrade.Receipt)
+			previous, previousErr := InspectInstallation(ctx, filepath.Join(archive, "previous"), "addon")
+			if previousErr != nil {
+				err = previousErr
+			} else if previous.State == "managed" && previous.Receipt != nil {
+				err = archiveLegacySlots(ctx, parent, archive+".slots", previous.Receipt.Version)
+			}
 		}
 		return upgrade, err
 	}
 	return withAddonRelease(ctx, releaseDirectory, clientDirectory, version, func(prepared, target string) (Upgrade, error) {
-		return UpgradeInstallation(ctx, prepared, target, archive, "addon", version)
+		parent := filepath.Dir(target)
+		current, inspectErr := InspectInstallation(ctx, target, "addon")
+		if inspectErr != nil {
+			return Upgrade{}, inspectErr
+		}
+		var oldVersion string
+		if current.State == "managed" && current.Receipt != nil {
+			oldVersion = current.Receipt.Version
+			if _, err := preflightLegacySlots(ctx, parent, oldVersion, archive+".slots"); err != nil {
+				return Upgrade{}, err
+			}
+		}
+		upgrade, err := UpgradeInstallation(ctx, prepared, target, archive, "addon", version)
+		if err == nil && oldVersion != "" {
+			err = archiveLegacySlots(ctx, parent, archive+".slots", oldVersion)
+		}
+		return upgrade, err
 	})
 }
 
-func receiptUsesSlots(receipt InstallationReceipt) bool {
-	for _, resource := range receipt.Resources {
-		if resource.Path == "addon/Bridge/SlotRuntime.lua" {
-			return true
-		}
+func preflightResumeLegacySlots(ctx context.Context, parent, target, archive, version string) error {
+	marker := filepath.Join(parent, slotMarker)
+	if _, err := os.Lstat(marker); errors.Is(err, os.ErrNotExist) {
+		return rejectUnmanagedLegacySlots(parent)
+	} else if err != nil {
+		return err
 	}
-	return false
-}
-
-func installReceiptSlots(ctx context.Context, parent string, receipt InstallationReceipt) error {
-	if !receiptUsesSlots(receipt) {
-		return nil
+	current, err := InspectInstallation(ctx, target, "addon")
+	if err != nil {
+		return err
 	}
-	_, err := installSlotPool(ctx, parent, receipt.Version)
+	previous, err := InspectInstallation(ctx, filepath.Join(archive, "previous"), "addon")
+	if err != nil {
+		return err
+	}
+	oldVersion := ""
+	if previous.State == "managed" && previous.Receipt != nil {
+		oldVersion = previous.Receipt.Version
+	} else if current.State == "managed" && current.Receipt != nil && current.Receipt.Version != version {
+		oldVersion = current.Receipt.Version
+	}
+	if oldVersion == "" {
+		return fmt.Errorf("%w: cannot bind legacy slot migration to the interrupted upgrade", ErrConflict)
+	}
+	archiveSlots := archive + ".slots"
+	intentPath := archiveSlots + ".migration.json"
+	if _, err = os.Lstat(intentPath); err == nil {
+		return archiveLegacySlots(ctx, parent, archiveSlots, oldVersion)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	_, err = preflightLegacySlots(ctx, parent, oldVersion, archiveSlots)
 	return err
 }
 
@@ -132,11 +185,11 @@ func withAddonRelease[T any](ctx context.Context, releaseDirectory, clientDirect
 	if _, err := InspectAddonRelease(ctx, private, version); err != nil {
 		return receipt, err
 	}
-	current, currentParent, err := ResolveAddonDestination(ctx, clientDirectory)
+	currentDeployment, currentParent, err := ResolveAddonDestination(ctx, clientDirectory)
 	if err != nil {
 		return receipt, err
 	}
-	if current.Client != deployment.Client || currentParent != parent {
+	if currentDeployment.Client != deployment.Client || currentParent != parent {
 		return receipt, fmt.Errorf("%w: client identity changed during preparation", ErrConflict)
 	}
 	gate, err := journal.AcquireInstallationMaintenance(ctx, parent)
@@ -144,16 +197,15 @@ func withAddonRelease[T any](ctx context.Context, releaseDirectory, clientDirect
 		return receipt, err
 	}
 	defer func() { err = errors.Join(err, gate.Close()) }()
-	receipt, err = publish(private, filepath.Join(parent, "Lychee Dev"))
+	installed, err := InspectInstallation(ctx, filepath.Join(parent, "Lychee Dev"), "addon")
 	if err != nil {
 		return receipt, err
 	}
-	// Older immutable release packages do not advertise the slot runtime.
-	for _, resource := range release.Resources {
-		if resource.Path == "addon/Bridge/SlotRuntime.lua" {
-			_, err = installSlotPool(ctx, parent, version)
-			break
+	if installed.State == "absent" {
+		if err = rejectUnmanagedLegacySlots(parent); err != nil {
+			return receipt, err
 		}
 	}
+	receipt, err = publish(private, filepath.Join(parent, "Lychee Dev"))
 	return receipt, err
 }
