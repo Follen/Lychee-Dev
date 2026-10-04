@@ -192,6 +192,16 @@ func (r *MailboxReader) ReadDuplexString(ctx context.Context, path []DuplexPath,
 	if maximum < 1 || maximum > 600<<10 {
 		return nil, mailboxError("duplex_string_budget")
 	}
+	for attempt := 0; attempt < 3; attempt++ {
+		b, err := r.readDuplexStringOnce(ctx, path, maximum)
+		if !errors.Is(err, ErrMailboxPathChanged) || ctx.Err() != nil {
+			return b, err
+		}
+	}
+	return nil, ErrMailboxPathChanged
+}
+
+func (r *MailboxReader) readDuplexStringOnce(ctx context.Context, path []DuplexPath, maximum int) ([]byte, error) {
 	a, box, err := r.duplexRoot(ctx)
 	if err != nil {
 		return nil, err

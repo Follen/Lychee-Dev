@@ -168,6 +168,40 @@ func TestSendboxDigestAndU64(t *testing.T) {
 	}
 }
 
+func TestSendboxAcceptsAddonRequestTotalBytes(t *testing.T) {
+	s := fixtureSendbox()
+	s.Identity = fixtureIdentity
+	s.Phase, s.Ready, s.BusinessReady = "running", false, false
+	s.Request = &RequestState{RequestID: strings.Repeat("6", 32), RequestSHA256: strings.Repeat("7", 64), RequestSeq: 1, TransportAttempt: 1, AcceptedFrames: []uint32{1}}
+	wire, err := EncodeSendbox(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(wire[44:], &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["request"].(map[string]any)["totalBytes"] = 149
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := make([]byte, 44+len(payload))
+	copy(w, "LYCMSB01")
+	binary.LittleEndian.PutUint32(w[8:12], uint32(len(payload)))
+	digest := sha256.Sum256(payload)
+	copy(w[12:44], digest[:])
+	copy(w[44:], payload)
+	out, err := DecodeSendbox(w)
+	if err != nil || out.Request == nil {
+		t.Fatalf("addon request projection rejected: %v", err)
+	}
+	projection, _ := json.Marshal(out.Request)
+	if !strings.Contains(string(projection), `"totalBytes":149`) {
+		t.Fatal("addon request length was lost")
+	}
+}
+
 type fixtureStore struct {
 	mu         sync.Mutex
 	state      State

@@ -84,10 +84,11 @@ The CLI owns integrity checks, result retention and journals. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
 work does not use the old OP/BTP ACK/finish/hide sequence. Old duplex/slot wire
-is incompatible. Only the exact reviewed Retail 12.1.0.69933 executable can
-enter the stopped-helper write trial; other builds refuse writes. Its real-client
-result remains `not_run` until observed. An addon self-test or offline fixture
-does not prove CLI-to-game execution.
+is incompatible. The first stopped-helper Retail trial ended in a client
+security crash after one whole-row write; that exact writer profile is now
+disabled, and all other builds also refuse writes. Do not repeat the old local
+development package's write trial. The request has no verified execution
+result. An addon self-test or offline fixture does not prove CLI-to-game execution.
 
 ## Finish with evidence
 

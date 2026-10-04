@@ -33,9 +33,9 @@ true before the reload flag clears, so inspect both independent diagnostics.
 
 Inspect the per-layer diagnostics, especially `actorReady`, numeric read layout
 and `writerProfile`. A resolved root and readable sendbox do not qualify writes.
-The exact Retail 12.1.0.69933 executable has a stopped-helper trial profile;
-its real-client validation remains `not_run`. Every other build remains
-write-ineligible until separately qualified. A final address check alone
+The exact Retail 12.1.0.69933 stopped-helper profile is disabled after a
+real-client security crash immediately following its first whole-row write.
+Every other build remains write-ineligible until separately qualified. A final address check alone
 cannot prevent VM teardown during an external write. Private GC roots and a host
 writer drain protect controlled arena replacement, but do not pin the whole VM
 through reload. Addon self-tests and owned-process fixtures do not establish

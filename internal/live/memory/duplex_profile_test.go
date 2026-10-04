@@ -4,8 +4,8 @@ import "testing"
 
 func TestRootAndCalibrationDoNotGrantWriterCapability(t *testing.T) {
 	trial := DuplexWriteCapability("d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd", "12.1.0.69933", "retail")
-	if !trial.Eligible || trial.Validation != "not_run" || trial.ID != "retail-69933-stopped-mailbox-v1-trial" {
-		t.Fatal("exact stopped-helper trial profile missing", trial)
+	if trial.Eligible || trial.Validation != "failed" || trial.ID != "retail-69933-stopped-mailbox-v1-rejected" {
+		t.Fatal("crashed stopped-helper trial must remain blocked", trial)
 	}
 	for _, v := range []struct{ hash, build, product string }{
 		{"d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd", "12.1.0.69934", "retail"},

@@ -98,3 +98,20 @@ func TestDuplexReadRejectsChangedRootDuringPublication(t *testing.T) {
 		t.Fatal("changed root accepted")
 	}
 }
+
+func TestDuplexReadRetriesFreshStatusAfterPublicationSwap(t *testing.T) {
+	f, r, _ := duplexFixture(t)
+	path := []DuplexPath{{Name: "sendbox"}, {Name: "status"}}
+	statusAt := binary.LittleEndian.Uint64(f.bytes(f.nodes["sendbox.status"], 8)) + 32
+	newStatus := f.text([]byte("new-status"))
+	f.beforeRead = func(at uint64, _ int) {
+		if at == statusAt {
+			f.beforeRead = nil
+			binary.LittleEndian.PutUint64(f.bytes(f.nodes["sendbox.status"], 8), newStatus)
+		}
+	}
+	b, err := r.ReadDuplexString(context.Background(), path, 64)
+	if err != nil || string(b) != "new-status" {
+		t.Fatalf("status publication swap was not sampled afresh: %q %v", b, err)
+	}
+}

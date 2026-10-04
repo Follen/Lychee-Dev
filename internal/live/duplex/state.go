@@ -19,6 +19,7 @@ type RequestState struct {
 	RequestSHA256    string   `json:"requestSHA256"`
 	RequestSeq       uint64   `json:"requestSeq,string"`
 	TransportAttempt uint64   `json:"transportAttempt,string"`
+	TotalBytes       uint32   `json:"totalBytes"`
 	AcceptedFrames   []uint32 `json:"acceptedFrames"`
 	Challenge        string   `json:"challenge"`
 	NotStarted       bool     `json:"notStarted"`
@@ -178,7 +179,7 @@ func validateSendbox(s Sendbox) error {
 		if _, e := digest(r.RequestSHA256); e != nil {
 			return e
 		}
-		if r.RequestSeq == 0 || r.TransportAttempt == 0 || len(r.AcceptedFrames) > MaxFrames {
+		if r.RequestSeq == 0 || r.TransportAttempt == 0 || r.TotalBytes > MaxSourceBytes || len(r.AcceptedFrames) > MaxFrames {
 			return errors.New("invalid request projection")
 		}
 		seen := map[uint32]bool{}

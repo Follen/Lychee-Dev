@@ -7,10 +7,12 @@
 插件对大命令分帧**校验计算**，不分帧传输；`/dev` 工作台显示邮箱状态，
 跳动荔枝仅在探针实际执行时显示“Agent执行中”。这些是工作树中的实现，
 本轮离线 baseline 已通过：build、vet、强制 Lua 5.1 全量 Go、Node、版本、Skill、
-SOURCE 和真实 LuaLS 检查均为 passed；本次运行源码仍未提交。
-正式服 CLI 原生写入仍未验收。
-仅精确匹配 Retail 12.1.0.69933 可执行文件哈希的 stopped-helper 试验资格已开放，
-其他 build 仍拒绝写入。用户已授权实测；游戏验证尚未完成。下面两段记录属于此前的 4 KiB 候选，
+SOURCE 和真实 LuaLS 检查均为 passed；整行候选提交为 `b021251`。
+[首次正式服写入](live-mailbox-v1-retail-trial-2026-10-04.md)停顿 37.368 ms，
+一次 6,293,376-byte WPM 与读回完成，随后客户端 `Security Crash`；未取得执行结果。
+精确 Retail writer profile 因此禁用，其他 build 也拒绝写入。Go 对 Lua
+`totalBytes` 状态字段的拒收及换代读取 `path_changed` 已分别离线复现并修复，
+不能把这些修复当成崩溃原因已经解决。下面两段记录属于此前的 4 KiB 候选，
 不能用作当前整行写入的性能或实机证明。
 
 2026-10-04 mailbox v1 候选 `73f61a7` 的 x64 Lua 5.1.5 全量离线与两次 Windows CI 已通过。

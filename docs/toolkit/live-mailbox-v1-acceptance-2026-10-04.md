@@ -1,5 +1,13 @@
 # Lychee Dev mailbox protocol v1: implementation and acceptance
 
+**Current whole-command candidate:** commit `b021251` changed the physical
+layout to `single-command-row-v1` and writes one 1 MiB-capacity row per command.
+The first formal Retail CLI write was followed by a client security crash and
+no verified execution result. Its exact writer profile is now disabled. See
+[the incident record](live-mailbox-v1-retail-trial-2026-10-04.md). The 4 KiB
+candidate results below are historical and do not establish acceptance for the
+current physical layout.
+
 The current contract is [mailbox v1 architecture](live-mailbox-v1-architecture-2026-10-04.md).
 Code candidate `73f61a74623b0468c0fe6aa0709a0a51b0453a2a` was installed from a
 clean development package, not published to npm. The version label remains
