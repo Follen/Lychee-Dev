@@ -460,3 +460,24 @@ func TestDiscoveryScansOnlyKnownRootsAndProducts(t *testing.T) {
 		t.Fatalf("running installations still reported: %+v %v", empty.Installations, err)
 	}
 }
+
+func TestDiscoveryIncludesChinaForeverRoot(t *testing.T) {
+	game := t.TempDir()
+	cn := makeTestClient(t, game, "_cn_beta_", "wow_cn_beta", "1.60.1.70245")
+	international := makeTestClient(t, game, "_classic_beta_", "wow_classic_beta", "1.60.1.70124")
+	fake := newFakeIO(t)
+	installations := discoverInstallations(context.Background(), []string{game}, nil, map[string]bool{}, fake.io())
+	if len(installations) != 2 {
+		t.Fatalf("missing regional installation: %+v", installations)
+	}
+	seen := map[string]bool{}
+	for _, candidate := range installations {
+		if candidate.Client.Product != "forever" {
+			t.Fatalf("wrong identity: %+v", candidate)
+		}
+		seen[candidate.Client.Directory] = true
+	}
+	if !seen[cn] || !seen[international] {
+		t.Fatalf("regional folders merged: %v", seen)
+	}
+}

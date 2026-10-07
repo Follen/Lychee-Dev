@@ -239,7 +239,9 @@ func deploymentGuard(ctx context.Context, target live.ClientWindow) error {
 	if err != nil {
 		return err
 	}
-	if client != target.Client || status.State != "managed" || status.Receipt == nil || status.Receipt.Version != buildinfo.Version {
+	observed := target
+	observed.Client = client
+	if !sameConnectionTarget(target, observed) || status.State != "managed" || status.Receipt == nil || status.Receipt.Version != buildinfo.Version {
 		return errors.New("live.channel_clean_current_addon_required")
 	}
 	return nil
@@ -296,7 +298,7 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 		if e != nil {
 			return ProjectResult{}, e
 		}
-		if meta.Target != target || meta.Owner != owner {
+		if !sameConnectionTarget(meta.Target, target) || meta.Owner != owner {
 			return ProjectResult{}, errors.New("live.channel_ownership_changed")
 		}
 		status, e := p.Status(owner.OperationID)

@@ -40,6 +40,9 @@ func inspectExactClient(ctx context.Context, directory string) (selection.Client
 	}
 	// version.txt cannot override contradictory active launcher metadata.
 	slot, _ := selection.DataProductSlot(client.Product)
+	if client.CatalogProduct != "" {
+		slot = client.CatalogProduct
+	}
 	for _, row := range active {
 		if (row.ProductCode == client.ProductCode || row.ProductCode == slot) && row.FullBuild != client.FullBuild {
 			return client, ErrInstallationConflict
@@ -50,21 +53,25 @@ func inspectExactClient(ctx context.Context, directory string) (selection.Client
 
 // A data reader accepts either a CASC root or the selected client directory.
 // Client metadata must agree with the pin before using its parent archives.
-func dataInstallationRoot(ctx context.Context, directory, product, fullBuild string) (string, error) {
+// Return the observed catalog product as well, preserving regional slot selection.
+func dataInstallationRoot(ctx context.Context, directory, product, fullBuild string) (string, string, error) {
 	if _, err := os.Stat(filepath.Join(directory, ".build.info")); err == nil {
-		return directory, nil
+		return directory, product, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return "", "", err
 	}
 	client, err := InspectClientInstallation(ctx, directory)
 	if err != nil {
 		if errors.Is(err, ErrInstallationConflict) {
-			return "", errors.Join(ErrPinnedBuildChanged, err)
+			return "", "", errors.Join(ErrPinnedBuildChanged, err)
 		}
-		return "", err
+		return "", "", err
 	}
 	if client.ProductCode != product || client.FullBuild != fullBuild {
-		return "", ErrPinnedBuildChanged
+		return "", "", ErrPinnedBuildChanged
 	}
-	return filepath.Dir(client.Directory), nil
+	if client.CatalogProduct != "" {
+		product = client.CatalogProduct
+	}
+	return filepath.Dir(client.Directory), product, nil
 }

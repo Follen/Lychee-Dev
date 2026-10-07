@@ -18,9 +18,12 @@ var ErrClientIdentity = errors.New("selection.client_identity")
 // It is a fallback for absent version.txt, not a folder identity override.
 type ClientBuild struct{ ProductCode, FullBuild string }
 type ClientInstallation struct {
-	Directory      string `json:"directory"`
-	Product        string `json:"product"`
-	ProductCode    string `json:"productCode"`
+	Directory   string `json:"directory"`
+	Product     string `json:"product"`
+	ProductCode string `json:"productCode"`
+	// CatalogProduct preserves the observed reusable launcher slot independently
+	// of the canonical product, so regional installations cannot borrow rows.
+	CatalogProduct string `json:"catalogProduct,omitempty"`
 	FullBuild      string `json:"fullBuild"`
 	Interface      int    `json:"interface"`
 	TOC            string `json:"toc"`
@@ -32,7 +35,7 @@ var flavorWord = regexp.MustCompile(`\bwow[a-z0-9_]*\b`)
 // reusableSlots are manifest slots a product ID can reuse for a different
 // game. A flavor naming one of these is slot evidence, never a product;
 // unknown flavors still fail closed instead of falling back.
-var reusableSlots = map[string]bool{"wow_classic_beta": true}
+var reusableSlots = map[string]bool{"wow_classic_beta": true, "wow_cn_beta": true}
 
 // InspectClient resolves only one explicitly selected client. Product evidence
 // outranks version evidence, then a known folder is the last fallback. A reused
@@ -92,8 +95,8 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 				break
 			}
 		}
-		// A MoP build in the historical beta slot is not a supported install.
-		if folder == "_classic_beta_" && !strings.HasPrefix(version, "1.60.1.") {
+		// Reused Forever test slots require a verified Forever build series.
+		if (folder == "_classic_beta_" || folder == "_cn_beta_" || slot == "wow_cn_beta") && !strings.HasPrefix(version, "1.60.1.") {
 			return result, fmt.Errorf("%w: unsupported test track", ErrClientIdentity)
 		}
 		if product == "" {
@@ -156,11 +159,11 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 	if !build(version) || !strings.HasPrefix(version, selected.BuildSeries+".") {
 		return result, fmt.Errorf("%w: missing or unsupported product/build pair", ErrClientIdentity)
 	}
-	// A MoP build in the historical beta slot is not a supported install.
-	if folder == "_classic_beta_" && !strings.HasPrefix(version, "1.60.1.") {
+	// Reused Forever test slots require a verified Forever build series.
+	if (folder == "_classic_beta_" || folder == "_cn_beta_" || slot == "wow_cn_beta") && !strings.HasPrefix(version, "1.60.1.") {
 		return result, fmt.Errorf("%w: unsupported test track", ErrClientIdentity)
 	}
-	return ClientInstallation{Directory: absolute, Product: selected.Product, ProductCode: product, FullBuild: version, Interface: selected.Interface, TOC: selected.TOC, IdentitySource: source}, nil
+	return ClientInstallation{Directory: absolute, Product: selected.Product, ProductCode: product, CatalogProduct: slot, FullBuild: version, Interface: selected.Interface, TOC: selected.TOC, IdentitySource: source}, nil
 }
 
 func clientText(ctx context.Context, root *os.Root, name string) (string, error) {

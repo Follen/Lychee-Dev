@@ -169,7 +169,15 @@ func SelectClientInstallation(ctx context.Context, directory, product string) (s
 	slot, _ := selection.DataProductSlot(product)
 	conflict := false
 	for _, issue := range report.Issues {
-		if product == "" || issue.ProductCode == "" || issue.ProductCode == productCode || issue.ProductCode == slot {
+		relatedSlot := issue.ProductCode == slot
+		for _, baseline := range selection.VerifiedClientBaselines() {
+			if baseline.Product == product {
+				for _, localSlot := range baseline.LocalDataSlots {
+					relatedSlot = relatedSlot || issue.ProductCode == localSlot
+				}
+			}
+		}
+		if product == "" || issue.ProductCode == "" || issue.ProductCode == productCode || relatedSlot {
 			conflict = true
 		}
 	}
@@ -196,7 +204,7 @@ func clientMarkers(directory string) (bool, error) {
 
 func knownClientFolder(name string) bool {
 	switch strings.ToLower(name) {
-	case "_retail_", "_classic_", "_classic_titan_", "_classic_beta_", "_forever_":
+	case "_retail_", "_classic_", "_classic_titan_", "_classic_beta_", "_cn_beta_", "_forever_":
 		return true
 	}
 	return false

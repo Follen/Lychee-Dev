@@ -128,3 +128,65 @@ func TestInstallationDiscoveryDoesNotInventOrOverrideClients(t *testing.T) {
 		})
 	}
 }
+
+func TestChinaAndInternationalForeverRemainSeparate(t *testing.T) {
+	game := t.TempDir()
+	catalog := "Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\n"
+	for _, row := range []struct{ folder, flavor, build string }{
+		{"_cn_beta_", "wow_cn_beta", "1.60.1.70245"},
+		{"_classic_beta_", "wow_classic_beta", "1.60.1.70124"},
+	} {
+		client := filepath.Join(game, row.folder)
+		if err := os.Mkdir(client, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(client, ".flavor.info"), []byte(row.flavor), 0600); err != nil {
+			t.Fatal(err)
+		}
+		catalog += row.flavor + "|" + row.build + "|" + strings.Repeat("a", 32) + "|" + strings.Repeat("b", 32) + "|1\n"
+	}
+	if err := os.WriteFile(filepath.Join(game, ".build.info"), []byte(catalog), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, folder := range []string{"_cn_beta_", "_classic_beta_"} {
+		client, err := InspectClientInstallation(context.Background(), filepath.Join(game, folder))
+		if err != nil || client.Product != "forever" || client.Directory != filepath.Join(game, folder) {
+			t.Fatalf("%+v %v", client, err)
+		}
+		root, slot, err := dataInstallationRoot(context.Background(), client.Directory, client.ProductCode, client.FullBuild)
+		if err != nil || root != game || slot != client.CatalogProduct {
+			t.Fatalf("data source lost regional slot: %s %s %v", root, slot, err)
+		}
+	}
+	if _, err := SelectClientInstallation(context.Background(), game, "forever"); !errors.Is(err, ErrInstallationAmbiguous) {
+		t.Fatalf("must choose a region directory: %v", err)
+	}
+	cn := filepath.Join(game, "_cn_beta_")
+	if err := os.WriteFile(filepath.Join(cn, "version.txt"), []byte("1.60.1.70000"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectClientInstallation(context.Background(), cn); !errors.Is(err, ErrInstallationConflict) {
+		t.Fatalf("CN metadata conflict ignored: %v", err)
+	}
+}
+
+func TestChinaForeverUnsupportedBuildBlocksProductSelection(t *testing.T) {
+	game := t.TempDir()
+	for _, row := range []struct{ folder, flavor, build string }{
+		{"_cn_beta_", "wow_cn_beta", "5.5.4.69934"},
+		{"_classic_beta_", "wow_classic_beta", "1.60.1.70124"},
+	} {
+		client := filepath.Join(game, row.folder)
+		if err := os.Mkdir(client, 0700); err != nil {
+			t.Fatal(err)
+		}
+		for name, value := range map[string]string{".flavor.info": row.flavor, "version.txt": row.build} {
+			if err := os.WriteFile(filepath.Join(client, name), []byte(value), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := SelectClientInstallation(context.Background(), game, "forever"); !errors.Is(err, ErrInstallationConflict) {
+		t.Fatalf("ignored CN slot issue and selected international: %v", err)
+	}
+}

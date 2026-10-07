@@ -197,3 +197,35 @@ func TestClientDataReadChecksSelectedClientBeforeArchives(t *testing.T) {
 		t.Fatal("changed client was accepted", err)
 	}
 }
+
+func TestResolveLocalTargetChinaForeverSlot(t *testing.T) {
+	fixture, client, store, _ := targetFixture(t, "wow_cn_beta", "1.60.1.70245", "_cn_beta_")
+	if err := os.Remove(filepath.Join(client, "version.txt")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := records.ResolveLocalTarget(context.Background(), store.Root(), records.LocalTargetRequest{
+		Installation: client, Region: "cn", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Client.ProductCode != "wow_forever" || result.Client.CatalogProduct != "wow_cn_beta" || result.Pin.Data.BuildConfig != fixture.buildKey {
+		t.Fatalf("wrong CN identity: %+v", result)
+	}
+	meta, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wow_forever", fixture.fullBuild)
+	if err != nil || meta.Installed.Product != "wow_cn_beta" {
+		t.Fatalf("CN data slot unavailable: %+v %v", meta, err)
+	}
+}
+
+func TestLocalForeverCatalogDoesNotChooseBetweenRegions(t *testing.T) {
+	fixture, client, store, _ := targetFixture(t, "wow_cn_beta", "1.60.1.70245", "_cn_beta_")
+	writeCatalog(t, fixture.root, fmt.Sprintf("wow_cn_beta|%s|%s|%s|1\nwow_classic_beta|%s|%s|%s|1\n", fixture.fullBuild, fixture.buildKey, fixture.cdnKey, fixture.fullBuild, fixture.buildKey, fixture.cdnKey))
+	if _, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wow_forever", fixture.fullBuild); !errors.Is(err, records.ErrBuildAmbiguous) {
+		t.Fatalf("ambiguous regions silently selected: %v", err)
+	}
+	result, err := records.ResolveLocalTarget(context.Background(), store.Root(), records.LocalTargetRequest{Installation: client, Region: "cn", Locale: "zhCN", Definitions: strings.Repeat("d", 40), Offline: true})
+	if err != nil || result.Client.CatalogProduct != "wow_cn_beta" {
+		t.Fatalf("explicit CN client lost its slot: %+v %v", result, err)
+	}
+}

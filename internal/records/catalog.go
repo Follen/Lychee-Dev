@@ -112,7 +112,21 @@ func ResolveLocalBuild(ctx context.Context, root, product, fullBuild string) (Bu
 		// baseline mapping for its exact build series, never a folder guess.
 		for _, baseline := range selection.VerifiedClientBaselines() {
 			if baseline.ProductCode == product && baseline.DataSlot != "" && baseline.DataSlot != product && strings.HasPrefix(fullBuild, baseline.BuildSeries+".") {
-				return ResolveLocalBuild(ctx, root, baseline.DataSlot, fullBuild)
+				slots := append([]string{baseline.DataSlot}, baseline.LocalDataSlots...)
+				matched := ""
+				for _, row := range rows {
+					for _, slot := range slots {
+						if row.Active && row.Product == slot && row.FullBuild == fullBuild {
+							if matched != "" {
+								return BuildMetadata{}, ErrBuildAmbiguous
+							}
+							matched = slot
+						}
+					}
+				}
+				if matched != "" {
+					return ResolveLocalBuild(ctx, root, matched, fullBuild)
+				}
 			}
 		}
 		return result, ErrBuildUnavailable
