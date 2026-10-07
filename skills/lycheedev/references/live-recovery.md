@@ -96,6 +96,15 @@ prepared exchange needs explicit reload, preserve its blocker and use the
 existing reload command only within the authorized scope. Closing is not proof
 that an already submitted opaque operation was cancelled or never ran.
 
+An activation may still be prepared before an ordinary connection journal
+exists. `live disconnect` can cancel it without game input only when its saved
+state proves no input intent or a `not_sent` outcome with zero queued messages
+and no input progress. It preserves the activation record as
+`activation_cancelled` and releases only its exact window owner. Status, resume
+and repeated disconnect retain this terminal state; `closed=true` does not
+claim a successful activation or business result (`complete=false`). Submitted,
+uncertain or runtime-selected activations do not use this cancellation path.
+
 ## Ownership and runtime retirement
 
 A PID has one durable owner across projects and one active host driver. CLI exit

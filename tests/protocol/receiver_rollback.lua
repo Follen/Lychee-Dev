@@ -55,7 +55,7 @@ local function scenario(fault)
     end
     CreateFrame = object
     local ns = {
-        Release = "3.1.1", Startup = {ready = true,
+        Release = "3.1.2", Startup = {ready = true,
             identity = {product = "retail", build = "12.1.0.70000"}},
         L = {RECEIVER_TITLE = "Connection", RECEIVER_BUDGET = "%d s | %s",
             RECEIVER_READY = "Ready"},

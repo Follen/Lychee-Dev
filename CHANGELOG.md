@@ -7,7 +7,7 @@ Detailed acceptance records and evidence live in
 [docs/toolkit/implementation-status.md](docs/toolkit/implementation-status.md);
 per-release publishing contracts live in `docs/toolkit/release-*.md`.
 
-## [Unreleased]
+## [3.1.2] — 2026-10-08
 
 ### Fixed
 
@@ -17,6 +17,14 @@ per-release publishing contracts live in `docs/toolkit/release-*.md`.
   Existing international Live connection records remain recoverable when their
   older metadata omits the launcher slot; regional or other identity changes
   still fail closed.
+- Disconnect can cancel an activation that has not sent input, even before
+  its ordinary connection journal exists. Cancellation preserves activation
+  evidence and releases only its exact window ownership; uncertain or submitted
+  input remains protected.
+
+## [Unreleased]
+
+### Fixed
 
 - Local target resolution accepts game roots and client directories with optional
   product constraints. Shared installation discovery reports candidates and

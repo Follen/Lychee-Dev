@@ -126,6 +126,10 @@ func (a activation) validate() error {
 	}
 	switch a.Phase {
 	case "prepared", "input_attempted", "runtime_selected":
+	case "cancelled":
+		if !a.inputFree() {
+			return errors.New("live.channel_activation_invalid")
+		}
 	default:
 		return errors.New("live.channel_activation_invalid")
 	}
@@ -134,6 +138,10 @@ func (a activation) validate() error {
 
 func (p *Project) presentActivation(id string, a activation, now time.Time) ProjectResult {
 	c := Continuation{Kind: "continue", Session: id, RequestID: a.Request, Goal: "activation"}
+	if a.Phase == "cancelled" {
+		c.Kind = "completed"
+		return ProjectResult{Session: id, Stage: "activation_cancelled", Closed: true, ReportState: "unavailable", Cleanup: "none", Journal: p.activationPath(id), Continuation: c}
+	}
 	if a.Budget != nil {
 		// Projection only: status must not migrate or mutate the stored budget.
 		copy := *a.Budget
@@ -194,6 +202,9 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if err != nil {
 		return r, err
 	}
+	if r.Closed {
+		return p.retire(ctx, id, r)
+	}
 	meta, err := p.metadata(id)
 	if err != nil {
 		return r, err
@@ -230,6 +241,16 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	var a activation
 	if err = readProjectJSON(p.activationPath(id), &a, 16384); err != nil {
 		return r, err
+	}
+	if err = a.validate(); err != nil {
+		return r, err
+	}
+	if a.Phase == "cancelled" {
+		if err = lease.Close(); err != nil {
+			return p.presentActivation(id, a, time.Now()), err
+		}
+		lease = nil
+		return p.retire(ctx, id, p.presentActivation(id, a, time.Now()))
 	}
 	remaining, err := p.observeActivationBudget(ctx, id, &a, time.Now())
 	r = p.presentActivation(id, a, time.Now())
@@ -371,6 +392,73 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+// A prepared activation has no input intent. A recorded not_sent outcome may
+// return it to prepared, but neither an uncertain intent nor legacy progress
+// can be treated as proof that no input occurred.
+func (a activation) inputFree() bool {
+	return a.InputStep == 0 && (a.Outcome == nil || a.Outcome.Disposition == "not_sent" && a.Outcome.MessagesQueued == 0)
+}
+
+func (p *Project) disconnectActivation(ctx context.Context, id string, cache bool) (r ProjectResult, err error) {
+	r, err = p.activationStatus(id)
+	if err != nil {
+		return r, err
+	}
+	if r.Closed {
+		return p.retire(ctx, id, r)
+	}
+	meta, err := p.metadata(id)
+	if err != nil {
+		return r, err
+	}
+	parent := filepath.Join(meta.Target.Client.Directory, "Interface", "AddOns")
+	lease, err := journal.LockBootstrapWindow(ctx, parent, meta.Owner)
+	if err != nil {
+		return r, err
+	}
+	defer func() {
+		if lease != nil {
+			err = errors.Join(err, lease.Close())
+		}
+	}()
+	// Re-read both authorities under the exact owner/driver lease. Activation
+	// may already have handed off to the ordinary connection driver.
+	if _, e := Load(p.log(id), nil); e == nil {
+		if err = lease.Close(); err != nil {
+			return r, err
+		}
+		lease = nil
+		return p.Disconnect(ctx, id, cache)
+	} else if !errors.Is(e, ErrJournalMissing) {
+		return r, e
+	}
+	var a activation
+	if err = readProjectJSON(p.activationPath(id), &a, 16384); err != nil {
+		return r, err
+	}
+	if err = a.validate(); err != nil {
+		return r, err
+	}
+	r = p.presentActivation(id, a, time.Now())
+	if a.Phase != "cancelled" {
+		if a.Phase != "prepared" || !a.inputFree() {
+			return r, ErrJournalMissing
+		}
+		a.Phase = "cancelled"
+		// Terminal evidence precedes claim retirement; retries can finish that
+		// retirement after a crash without any game IO or a business ledger.
+		if err = writeProjectJSON(ctx, p.activationPath(id), a); err != nil {
+			return r, err
+		}
+		r = p.presentActivation(id, a, time.Now())
+	}
+	if err = lease.Close(); err != nil {
+		return r, err
+	}
+	lease = nil
+	return p.retire(ctx, id, r)
 }
 
 // Each obligation runs even if a prior one fails. This is resource cleanup,

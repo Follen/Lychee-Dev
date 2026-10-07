@@ -556,6 +556,11 @@ func (p *Project) Disconnect(ctx context.Context, id string, cache bool) (Projec
 	if state.Closed {
 		return p.retire(ctx, id, state)
 	}
+	if _, err := Load(p.log(id), nil); errors.Is(err, ErrJournalMissing) {
+		return p.disconnectActivation(ctx, id, cache)
+	} else if err != nil {
+		return state, err
+	}
 	meta, err := p.metadata(id)
 	if err != nil {
 		return state, err
