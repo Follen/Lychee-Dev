@@ -61,7 +61,11 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 			return result, selection.ErrTargetBuildUnavailable
 		}
 		installation := filepath.Dir(client.Directory)
-		build, err := ResolveLocalBuild(ctx, installation, client.ProductCode, client.FullBuild)
+		catalogProduct := client.ProductCode
+		if client.CatalogProduct != "" {
+			catalogProduct = client.CatalogProduct
+		}
+		build, err := ResolveLocalBuild(ctx, installation, catalogProduct, client.FullBuild)
 		if err != nil {
 			return result, err
 		}
@@ -92,7 +96,7 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 		if current != client {
 			return result, ErrPinnedBuildChanged
 		}
-		after, err := ResolveLocalBuild(ctx, installation, client.ProductCode, client.FullBuild)
+		after, err := ResolveLocalBuild(ctx, installation, catalogProduct, client.FullBuild)
 		if err != nil {
 			return result, err
 		}

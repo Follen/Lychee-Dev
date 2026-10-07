@@ -47,11 +47,11 @@ func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.Da
 		src.setStats = func(stats *DecodedCacheStats) { remote.stats = stats }
 		src.done = func() { _ = remote.metadata.Close() }
 	} else {
-		installation, err := dataInstallationRoot(ctx, q.Installation, product, pin.FullBuild)
+		installation, catalogProduct, err := dataInstallationRoot(ctx, q.Installation, product, pin.FullBuild)
 		if err != nil {
 			return fileSource{}, err
 		}
-		meta, err := ResolveLocalBuild(ctx, installation, product, pin.FullBuild)
+		meta, err := ResolveLocalBuild(ctx, installation, catalogProduct, pin.FullBuild)
 		if err != nil {
 			return fileSource{}, err
 		}

@@ -102,7 +102,7 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	if !validContentVariant(q.ContentVariant) {
 		return FileReading{}, ErrFileQuery
 	}
-	product, locale, err := selection.DataIdentity(pin)
+	_, locale, err := selection.DataIdentity(pin)
 	if err != nil {
 		return FileReading{}, err
 	}
@@ -172,7 +172,7 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	// Detect launcher metadata changes during the read. Already published immutable
 	// blobs may be reused, but no successful reading may claim a different pin.
 	if !q.CDN {
-		after, err := ResolveLocalBuild(ctx, src.root, product, pin.FullBuild)
+		after, err := ResolveLocalBuild(ctx, src.root, src.meta.Installed.Product, pin.FullBuild)
 		if err != nil {
 			return FileReading{}, err
 		}

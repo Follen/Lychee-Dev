@@ -134,11 +134,11 @@ func (s *readSession) check(ctx context.Context) error {
 	if !s.ready || s.query.CDN {
 		return nil
 	}
-	product, _, err := selection.DataIdentity(s.pin)
+	_, _, err := selection.DataIdentity(s.pin)
 	if err != nil {
 		return err
 	}
-	after, err := ResolveLocalBuild(ctx, s.source.root, product, s.pin.FullBuild)
+	after, err := ResolveLocalBuild(ctx, s.source.root, s.source.meta.Installed.Product, s.pin.FullBuild)
 	if err != nil {
 		return err
 	}

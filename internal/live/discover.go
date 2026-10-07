@@ -67,7 +67,7 @@ type DiscoveryRequest struct {
 }
 
 // clientFolders are the only directory names inspected below a known root.
-var clientFolders = []string{"_retail_", "_classic_", "_classic_titan_", "_classic_beta_", "_forever_"}
+var clientFolders = []string{"_retail_", "_classic_", "_classic_titan_", "_classic_beta_", "_cn_beta_", "_forever_"}
 
 // DiscoverCandidates scans known roots for supported installations and probes
 // each running game window once with a fixed identity trigger, one window at a
