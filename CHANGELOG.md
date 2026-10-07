@@ -14,6 +14,9 @@ per-release publishing contracts live in `docs/toolkit/release-*.md`.
 - Recognize China Forever installations in `_cn_beta_` with `wow_cn_beta`
   metadata and matching 1.60.1 builds. Keep China and international launcher
   slots separate during installation discovery and local target resolution.
+  Existing international Live connection records remain recoverable when their
+  older metadata omits the launcher slot; regional or other identity changes
+  still fail closed.
 
 - Local target resolution accepts game roots and client directories with optional
   product constraints. Shared installation discovery reports candidates and
