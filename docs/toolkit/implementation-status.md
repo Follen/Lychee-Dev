@@ -1,5 +1,15 @@
 # Toolkit 2.0 实施状态
 
+2026-10-11 国服 Forever 静态数据读取修复：CN 的远程版本列表、target resolve 与 CDN
+准备统一选择 wow_cn_beta，其他地区保持 wow_classic_beta；产品仍为 forever，保留
+build 系列、build-uid 和配置哈希校验。定义冷下载的最坏读缓冲改用受限临时预留，
+持久元数据按实际字节计费，与热缓存一致，不提高默认预算。Windows 上以
+1.60.1.70338 / cn / zhCN 和固定 WoWDBDefs 07d008f28907c00827cacadf2d7c1a40f578b6a3
+验证：旧版全新工作区 SpellName 报 metadata_bytes；修复版全新工作区成功，
+metadataBytes=118999800（上限134217728）。独立远程 target resolve 与 CDN SpellName
+也成功；部分加密分区不可读仍明确 partial，不宣称全表完整或游戏内技能验收。
+一次冷验证遇到公钥源网络失败，另一个独立新工作区成功；未绕过密钥或完整性检查。
+
 2026-10-08 用户授权发布 PR #11 修复并更新本机 addon，补丁候选为 **3.1.2**，
 npm `next`，`latest` 保持 **2.5.1**，GitHub latest 保持 **v3.0.0**。
 本次从已合并的 main 准备，不包含工作区其他未提交改动。
