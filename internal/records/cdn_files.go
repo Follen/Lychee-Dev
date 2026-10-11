@@ -61,7 +61,7 @@ func (c *cdnFiles) prepare(pin selection.DataPin) (BuildMetadata, error) {
 	if err != nil {
 		return BuildMetadata{}, err
 	}
-	slot, err := selection.DataProductSlot(pin.Product)
+	slot, err := selection.RegionalDataProductSlot(pin.Product, pin.Region)
 	if err != nil {
 		return BuildMetadata{}, err
 	}

@@ -81,46 +81,50 @@ func TestCDNDeadlineStopsRecovery(t *testing.T) {
 }
 
 func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
-	f := newRemoteTargetFixture(t)
-	build := []byte("root = " + strings.Repeat("1", 32) + "\nencoding = " + strings.Repeat("2", 32) + " " + strings.Repeat("3", 32) + "\nencoding-size = 123 456\nbuild-uid = wow_classic_beta\n")
-	buildKey := fmt.Sprintf("%x", md5.Sum(build))
-	cdn := f.transport.responses[f.configURL].body
-	cdnKey := fmt.Sprintf("%x", md5.Sum(cdn))
-	buildURL := "https://cdn.example.test/tpr/wow/config/" + buildKey[:2] + "/" + buildKey[2:4] + "/" + buildKey
-	catalogURL := remoteVersionBase("us") + "wow_classic_beta/cdns"
-	f.transport.responses = map[string]definitionResponse{
-		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
-		buildURL:   {status: 200, body: build}, f.configURL: {status: 200, body: cdn},
-	}
-	c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
-	pin := selection.DataPin{Product: "forever", Region: "us", Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
-	meta, err := c.prepare(pin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta.Installed.BuildConfig != buildKey || meta.Installed.FullBuild != pin.FullBuild {
-		t.Fatalf("changed pin: %+v", meta)
-	}
-	if got := f.transport.callURLs(); !equalStrings(got, []string{catalogURL, buildURL, f.configURL}) {
-		t.Fatal(got)
-	}
-	f.transport.responses = nil
-	c.offline = true
-	if _, err := c.prepare(pin); err != nil {
-		t.Fatalf("offline exact-pin reuse: %v", err)
-	}
-	// Fresh target resolution must validate the same distribution identity,
-	// while retaining the user-facing Forever product in its resulting pin.
-	f.transport.responses = map[string]definitionResponse{
-		remoteVersionBase("us") + "wow_classic_beta/versions": {status: 200, body: []byte(fmt.Sprintf("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\nus|%s|%s|70009|1.60.1.70009\n", buildKey, cdnKey))},
-		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
-	}
-	resolved, err := f.resolve(context.Background(), RemoteTargetRequest{Product: "forever", Region: "us", Locale: "enUS", FullBuild: pin.FullBuild, Definitions: definitionsTestCommit})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.Pin.Data.Product != "forever" || resolved.Pin.Data.BuildConfig != buildKey {
-		t.Fatal(resolved.Pin)
+	for _, tc := range []struct{ region, slot string }{{"us", "wow_classic_beta"}, {"cn", "wow_cn_beta"}} {
+		t.Run(tc.region, func(t *testing.T) {
+			f := newRemoteTargetFixture(t)
+			build := []byte("root = " + strings.Repeat("1", 32) + "\nencoding = " + strings.Repeat("2", 32) + " " + strings.Repeat("3", 32) + "\nencoding-size = 123 456\nbuild-uid = " + tc.slot + "\n")
+			buildKey := fmt.Sprintf("%x", md5.Sum(build))
+			cdn := f.transport.responses[f.configURL].body
+			cdnKey := fmt.Sprintf("%x", md5.Sum(cdn))
+			buildURL := "https://cdn.example.test/tpr/wow/config/" + buildKey[:2] + "/" + buildKey[2:4] + "/" + buildKey
+			catalogURL := remoteVersionBase(tc.region) + tc.slot + "/cdns"
+			f.transport.responses = map[string]definitionResponse{
+				catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\n" + tc.region + "|tpr/wow|cdn.example.test\n")},
+				buildURL:   {status: 200, body: build}, f.configURL: {status: 200, body: cdn},
+			}
+			c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+			pin := selection.DataPin{Product: "forever", Region: tc.region, Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
+			meta, err := c.prepare(pin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Installed.BuildConfig != buildKey || meta.Installed.FullBuild != pin.FullBuild {
+				t.Fatalf("changed pin: %+v", meta)
+			}
+			if got := f.transport.callURLs(); !equalStrings(got, []string{catalogURL, buildURL, f.configURL}) {
+				t.Fatal(got)
+			}
+			f.transport.responses = nil
+			c.offline = true
+			if _, err := c.prepare(pin); err != nil {
+				t.Fatalf("offline exact-pin reuse: %v", err)
+			}
+			// Fresh target resolution must validate the same distribution identity,
+			// while retaining the user-facing Forever product in its resulting pin.
+			f.transport.responses = map[string]definitionResponse{
+				remoteVersionBase(tc.region) + tc.slot + "/versions": {status: 200, body: []byte(fmt.Sprintf("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\n"+tc.region+"|%s|%s|70009|1.60.1.70009\n", buildKey, cdnKey))},
+				catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\n" + tc.region + "|tpr/wow|cdn.example.test\n")},
+			}
+			resolved, err := f.resolve(context.Background(), RemoteTargetRequest{Product: "forever", Region: tc.region, Locale: "enUS", FullBuild: pin.FullBuild, Definitions: definitionsTestCommit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Pin.Data.Product != "forever" || resolved.Pin.Data.BuildConfig != buildKey {
+				t.Fatal(resolved.Pin)
+			}
+		})
 	}
 }
 

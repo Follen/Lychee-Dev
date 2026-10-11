@@ -102,7 +102,7 @@ func ListRemoteAvailability(ctx context.Context, options AvailabilityOptions) (A
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		slot, err := DataProductSlot(baseline.Product)
+		slot, err := RegionalDataProductSlot(baseline.Product, options.Region)
 		if err != nil {
 			return Availability{}, err
 		}

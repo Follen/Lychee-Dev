@@ -43,32 +43,36 @@ type manifestTransportFunc func(*http.Request) (*http.Response, error)
 func (f manifestTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestAvailabilityForeverRequestsPublishingSlot(t *testing.T) {
-	var requested []string
-	client := &http.Client{Transport: manifestTransportFunc(func(r *http.Request) (*http.Response, error) {
-		requested = append(requested, r.URL.String())
-		if r.URL.String() != "https://us.version.battle.net/wow_classic_beta/versions" {
-			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: make(http.Header)}, nil
-		}
-		body := "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\nus|05215079e3905ef5922ae0b03ffefb73|7b0257bf0fe52d0f11cd8e7b71f7f832|70009|1.60.1.70009\n"
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-	})}
-	got, err := ListRemoteAvailability(context.Background(), AvailabilityOptions{Region: "us", Fetch: HTTPManifestFetcher(client)})
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct{ region, locator string }{{"us", "https://us.version.battle.net/wow_classic_beta/versions"}, {"cn", "https://cn.version.battlenet.com.cn/wow_cn_beta/versions"}} {
+		t.Run(tc.region, func(t *testing.T) {
+			var requested []string
+			client := &http.Client{Transport: manifestTransportFunc(func(r *http.Request) (*http.Response, error) {
+				requested = append(requested, r.URL.String())
+				if r.URL.String() != tc.locator {
+					return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: make(http.Header)}, nil
+				}
+				body := "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\n" + tc.region + "|05215079e3905ef5922ae0b03ffefb73|7b0257bf0fe52d0f11cd8e7b71f7f832|70009|1.60.1.70009\n"
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})}
+			got, err := ListRemoteAvailability(context.Background(), AvailabilityOptions{Region: tc.region, Fetch: HTTPManifestFetcher(client)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(requested) != len(VerifiedClientBaselines()) {
+				t.Fatalf("unexpected request count: %v", requested)
+			}
+			for _, product := range got.Products {
+				if product.Product != "forever" {
+					continue
+				}
+				if product.ProductCode != "wow_forever" || product.Locator != tc.locator || product.Error != "" || len(product.Rows) != 1 || product.Rows[0].FullBuild != "1.60.1.70009" {
+					t.Fatalf("Forever discovery = %+v; actual requests = %v", product, requested)
+				}
+				return
+			}
+			t.Fatal("Forever absent from discovery")
+		})
 	}
-	if len(requested) != len(VerifiedClientBaselines()) {
-		t.Fatalf("unexpected request count: %v", requested)
-	}
-	for _, product := range got.Products {
-		if product.Product != "forever" {
-			continue
-		}
-		if product.ProductCode != "wow_forever" || product.Locator != "https://us.version.battle.net/wow_classic_beta/versions" || product.Error != "" || len(product.Rows) != 1 || product.Rows[0].FullBuild != "1.60.1.70009" {
-			t.Fatalf("Forever discovery = %+v; actual requests = %v", product, requested)
-		}
-		return
-	}
-	t.Fatal("Forever absent from discovery")
 }
 
 func manifestFixture() []byte {

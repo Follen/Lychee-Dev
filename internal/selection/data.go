@@ -55,6 +55,19 @@ func DataProductSlot(product string) (string, error) {
 	return "", errors.New("selection.unsupported_data_product")
 }
 
+// RegionalDataProductSlot selects the publishing catalog, not the install
+// flavor. CN Forever uses wow_cn_beta; other regions retain their baseline
+// slot. Build-series and build-uid validation still apply to the selected slot.
+func RegionalDataProductSlot(product, region string) (string, error) {
+	if _, err := DataLocale(region, "enUS"); err != nil {
+		return "", err
+	}
+	if product == "forever" && region == "cn" {
+		return "wow_cn_beta", nil
+	}
+	return DataProductSlot(product)
+}
+
 // DataProduct translates a toolkit track without deriving identity from a path.
 func DataProduct(product string) (string, error) {
 	for _, baseline := range VerifiedClientBaselines() {

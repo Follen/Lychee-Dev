@@ -47,8 +47,8 @@ func (f remoteTargetFixture) resolve(ctx context.Context, request RemoteTargetRe
 func TestRemoteTargetRejectsReusedSlotBeforeConfigDownload(t *testing.T) {
 	f := newRemoteTargetFixture(t)
 	versions := f.transport.responses[f.versionsURL]
-	f.transport.responses[remoteVersionBase("cn")+"wow_classic_beta/versions"] = versions
-	f.transport.responses[remoteVersionBase("cn")+"wow_classic_beta/cdns"] = f.transport.responses[f.cdnsURL]
+	f.transport.responses[remoteVersionBase("cn")+"wow_cn_beta/versions"] = versions
+	f.transport.responses[remoteVersionBase("cn")+"wow_cn_beta/cdns"] = f.transport.responses[f.cdnsURL]
 	f.request.Product = "forever"
 	got, err := f.resolve(context.Background(), f.request)
 	if !errors.Is(err, selection.ErrDataProductBuild) || got.Pin.ID != "" || len(f.transport.callURLs()) != 2 {

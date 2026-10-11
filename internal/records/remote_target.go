@@ -72,7 +72,7 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 	return vault.WriteMetadata(ctx, root, func(store *vault.Store, metadata *vault.Metadata) (RemoteTarget, error) {
 		var result RemoteTarget
 		product, _ := selection.DataProduct(request.Product)
-		slot, _ := selection.DataProductSlot(request.Product)
+		slot, _ := selection.RegionalDataProductSlot(request.Product, request.Region)
 		pinner := selection.OpenPinner(metadata)
 		definitions := request.Definitions
 		if request.Parent != "" {
