@@ -14,6 +14,8 @@ func TestClientEvidencePrecedence(t *testing.T) {
 		active                              []ClientBuild
 	}{
 		{name: "retail catalog", folder: "_retail_", flavor: "wow", want: "retail", active: []ClientBuild{{"wow", "12.1.0.69875"}}},
+		{name: "anniversary catalog", folder: "_anniversary_", flavor: "wow_anniversary", want: "anniversary", active: []ClientBuild{{"wow_anniversary", "2.5.6.70006"}}},
+		{name: "anniversary version", folder: "custom", flavor: "wow_anniversary", version: "2.5.6.70006", want: "anniversary"},
 		{name: "reused Forever slot", folder: "_classic_beta_", flavor: "wow_forever", version: "1.60.1.69893", want: "forever"},
 		// The real Forever client: the flavor names the reusable slot, the
 		// launcher catalog carries the build, and version.txt does not exist.

@@ -1,6 +1,6 @@
 // Package addon_test drives the workbench Lua suites under tests/addon across
 // the client profiles represented by the test harness with a standalone
-// Lua 5.1 interpreter. Forever is exercised as an unverified, non-acceptance profile.
+// Lua 5.1 interpreter. This does not replace real-client acceptance.
 // New suites are discovered by glob: drop a t_*.lua file into this directory.
 package addon_test
 
@@ -45,7 +45,7 @@ func luaRuntime(t *testing.T) string {
 // TestWorkbenchLuaSuites runs every t_*.lua suite under every client profile.
 func TestWorkbenchLuaSuites(t *testing.T) {
 	lua := luaRuntime(t)
-	clients := []string{"retail", "classic", "titan", "forever", "classic-era"}
+	clients := []string{"retail", "classic", "titan", "forever", "classic-era", "anniversary"}
 	testFiles, err := filepath.Glob("t_*.lua")
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestUnifiedTOCContract(t *testing.T) {
 	for _, part := range strings.Split(interfaceLine, ",") {
 		declared[strings.TrimSpace(part)] = true
 	}
-	for _, iface := range []string{"120100", "50504", "38002", "16001", "11509"} {
+	for _, iface := range []string{"120100", "50504", "38002", "16001", "11509", "20506"} {
 		if !declared[iface] {
 			t.Fatalf("missing declared interface %s", iface)
 		}
@@ -129,8 +129,8 @@ func TestUnifiedTOCContract(t *testing.T) {
 			catalogs++
 		}
 	}
-	if catalogs != 5 {
-		t.Fatalf("expected all five event catalogs, found %d", catalogs)
+	if catalogs != 6 {
+		t.Fatalf("expected all six event catalogs, found %d", catalogs)
 	}
 }
 

@@ -17,6 +17,12 @@ CLI 只读游戏内存。运行时指令特征匹配与 RIP 相对位移解析�
 每次读取重新核验当前路径和发布对象。禁止私有堆暴扫、旧地址回退、把磁盘 EXE
 中的固定地址当成当前根，或把其他构建的 RVA 直接套用到当前进程。
 
+Forever 在主模块 `.text` 的可读区间内匹配指令，不依赖构建 hash 白名单。
+短读已返回的前缀仍参与匹配，剩余部分按页有界补读；不跨不可读缺口拼接特征。
+全部命中先解析 RIP，再按目标根去重；不同根通过 Lua/Mailbox 路径验证选择，
+多个有效根仍报告歧义。根证据保存实际读取字节、缺口、特征命中和候选根数；
+存在缺口时 `scanComplete=false`，成功读取 Mailbox 不代表完整扫描或全范围唯一。
+
 目标由 installation、PID、进程创建时间、HWND、构建与产品共同确定；进入世界后
 再绑定角色 GUID、runtime、owner、fence。目录名只是位置，产品以实际客户端元数据为准。
 
@@ -61,8 +67,13 @@ CLI 不硬编码发送默认值。缺少任一有效键时返回 `input_binding_
 晚于该输入 100ms 的新样本。发键前重新读取同一发布并核对采样、身份、路由与键位。
 Lua 执行回调在加载槽前再次检查输入状态；聚焦时还要确认透传仍作用于当前编辑框。
 
+启用 bridge 后的 INPUT 采样框架不依附 UIParent，避免挂机界面隐藏 UIParent 时
+连带停止采样。未登录、加载和战斗等限制仍生效；这不保证第三方键盘框架会透传快捷键。
+
 Native CLI 只发送执行或重载组合键。**没有 Esc、Enter、聊天文字或盲发降级路线。**
 输入向固定 HWND 发送 PostMessage，不抢 Windows 前台；最小化窗口不能输入。
+发键前检查 Ctrl、Alt、Shift、左右 Win 和本次组合键；发现实体键按住则等待松开，
+不强制释放玩家按键。发送途中仍可能受到实体输入干扰，是否执行以精确插件回执为准。
 
 ## 4. 启动、doctor 与首次安装
 
@@ -95,6 +106,8 @@ CLI 从当前 Lua 路径读取它；这些静态启动事实没有 INPUT 的新�
 首次安装没有 addon 回调时，任何“自动打 /reload”都缺少输入落点证据，因此不自动发送。
 协议改名不等于首次安装。已加载的二键运行时仍可提供重载许可；兼容读取只用于这次
 升级的 identity/INPUT，不接受旧业务信封、回执或 BODY。新发布和正常业务只使用本协议全名。
+旧 schema 名称曾用于三键和二键两个实现，不能单凭名称判定自动重载能力。doctor 与激活
+先读取实际 INPUT 键位；三键实现进入手动等待，二键实现仍须取得新鲜 INPUT 才能发键。
 手动完成后用原 CON resume；CLI 观察新 runtime、验证身份和 inventory 后才继续。
 手动等待尚未授权机器输入，不消耗后续连接预算；新运行时被选中时只启动一次连接预算。
 已有未知机器输入的历史 activation 保留原预算和不确定事实，不转为“未发送”。
@@ -119,6 +132,11 @@ CLI 从当前 Lua 路径读取它；这些静态启动事实没有 INPUT 的新�
 资源清理是否完成（cleanup）。报告成功但清理 pending 时保留可用报告并完成后续清理。
 同一已完成 request 的重复调用读取原结果，不重新执行源码。
 
+报告已核实、release 已尝试发送但没有精确回执时，先继续观察原回执。持续等待
+5 秒后，CLI 在原操作期限内持久化一次清理重载，取得新鲜 INPUT 后发送独立重载键。
+原 release 和业务不重发，报告、ticket 与尝试次数不变。只有确认旧 runtime 退役后
+才能记为 `cleanupMethod: runtime_destroyed`；这与正常 `released` 回执分别记录。
+
 ## 6. 日志与恢复
 
 每次输入先记录 intent，再记录 not_sent、submitted 或 uncertain outcome。
@@ -130,6 +148,10 @@ submitted 仅证明消息已入队。缺失 outcome 或未知执行结果都不�
 也继续原观察流程。普通阶段的布局错误、协议不兼容、根指令配方及进程身份变化仍报告错误。
 发键前复核与普通读取共用错误分类和 trace；只有明确 not_sent、0 条消息才允许再次准备输入。
 读取重试不构成重发 submitted/uncertain 输入的许可。
+
+初始 bind 没收到回执而需要结束连接时，先 disconnect 保留原关闭意图。显式 reload
+可沿同一 CON 清理这个尚未确认绑定的连接：仍要求新鲜 INPUT，核实旧 runtime 退役后
+关闭原连接，不绑定替代 runtime，不重发 bind，也不重新启动业务。
 
 `--wait-seconds` 只限定本次宿主调用；连接、操作、重载、关闭的持久期限单独保留。
 超时、进程重启或换 CLI 不延长已开始的业务预算。
@@ -151,7 +173,7 @@ doctor --fix 只对选定进程执行恢复；维护锁和原占用继续约束�
 
 ## 8. 支持范围与验收
 
-交付目录包含七产品。Addon 当前具有 Retail、Classic、Classic Era、Titan 和两种 Forever beta 的运行时 profile；Anniversary 尚待补齐，不能由 Source/Data 可用推断 Live 已接通。
+交付目录和 Addon profile 均包含 Retail、Classic、Classic Era、Titan、两种 Forever beta 与 Anniversary 七产品；不能由 Source/Data 可用推断 Live 实机验收已通过。
 产品差异归入 Compat、产品目录和运行时定位配方；两个 Beta 的源码 track 都是 forever，
 数据与安装身份仍按地区产品隔离。
 

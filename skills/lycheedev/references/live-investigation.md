@@ -15,8 +15,12 @@ Lycheedev mailbox protocol v1 uses runtime instruction matching and RIP-relative
 displacement decoding to locate the Lua root and named public Mailbox, with a
 matching clean 500-slot installation. The CLI validates the current process,
 typed path, publication, owner/fence, challenge and exact result. Old native
-wire/identity is rejected. Unsupported code/layout, ambiguity or read gaps
-fail closed; they do not invoke a heap scanner or reuse another build's RVA.
+wire/identity is rejected. Forever scans readable module code, retains short-read
+bytes, decodes RIP targets and deduplicates roots before Lua/Mailbox validation.
+Root evidence records coverage gaps: a successful lookup with `scanComplete=false`
+does not establish uniqueness across unreadable code. Unsupported code/layout
+or unresolved root ambiguity stops discovery; it never invokes a heap scanner
+or reuses another build's RVA.
 `--no-cache` follows this same path. Raw address research is a separate task.
 
 ## Select and connect

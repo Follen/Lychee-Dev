@@ -66,9 +66,6 @@ type DiscoveryRequest struct {
 	Passive      bool
 }
 
-// clientFolders are the only directory names inspected below a known root.
-var clientFolders = []string{"_retail_", "_classic_", "_classic_titan_", "_classic_beta_", "_cn_beta_", "_forever_"}
-
 // DiscoverCandidates scans known roots for supported installations and probes
 // each running game window once with a fixed identity trigger, one window at a
 // time. Per-window failures stay isolated and busy windows are never typed
@@ -200,7 +197,7 @@ func discoverInstallations(ctx context.Context, roots, runningDirs []string, run
 			continue
 		}
 		add(root)
-		for _, folder := range clientFolders {
+		for _, folder := range selection.ClientFolders() {
 			add(filepath.Join(root, folder))
 		}
 	}

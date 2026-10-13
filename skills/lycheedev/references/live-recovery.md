@@ -26,6 +26,13 @@ goal, blocker condition and remaining budget:
 | `budget_exhausted` | Retain results and consider permitted cleanup/recovery; do not renew business time |
 | `completed` | Read this command's terminal outcome; check whether the overall investigation is done |
 
+For a verified report whose attempted release has no exact receipt, the CLI
+observes the original receipt for five seconds, then journals one automatic
+cleanup reload within the original operation deadline. Resume the same CON;
+do not issue a new probe or resend release. Reload still requires fresh INPUT,
+and cleanup completes only after verified runtime retirement. The report and
+original attempt remain unchanged.
+
 `needs_decision` is not an automatic permission prompt. Necessary recovery can
 already be authorized; an unresolved opaque effect may instead require an
 independent observation or a truthful handoff. Do not infer recovery from an
@@ -76,6 +83,11 @@ by a new request. Completion here means the CON is closed, not connected to the
 replacement runtime; it does not prove this CLI sent or caused a reload.
 Saved `runtimeEnd` evidence needs only input-free retirement.
 The original input record remains the authority for what was sent.
+
+This closing recovery also covers an initial bind whose input was attempted but
+never acknowledged: disconnect first preserves closing intent, then the same
+explicit reload can retire it. It does not bind the replacement or resend the
+old bind. An ordinary unbound connection does not gain reload permission.
 
 Use this explicit recovery only when needed within the authorized task, after
 inspecting the concrete blocker; pending, contention or budget exhaustion alone
@@ -142,7 +154,13 @@ bridge is enabled. Focus and draft text stay intact. Current INPUT publishes
 editors return `input_focus_unavailable`; retain the CON and wait for the user to
 leave that field. Combat, loading and stale evidence never authorize keys.
 Old upgrade journals retain their original bounded Esc counts; do not reset them.
-Held system keys wait for release.
+Held Ctrl, Alt, Shift, either Win key or a key in the selected chord delays input
+until release. The CLI never forces the user's physical keys up. A user can
+still interrupt a chord after that check; only the addon receipt confirms execution.
+
+The enabled INPUT sampler remains active when an AFK interface hides UIParent.
+Loading, world state and focus checks still apply. Fresh telemetry does not
+prove that a third-party keyboard frame forwards the binding.
 
 In-game edit focus differs from Windows foreground focus. Input targets the
 verified HWND through PostMessage without activating or stealing the foreground.

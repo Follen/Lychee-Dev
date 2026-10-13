@@ -52,7 +52,45 @@ func OpenLuaMailbox(ctx context.Context, source Source, moduleBase, moduleSize u
 	if err := source.Verify(ctx); err != nil {
 		return nil, err
 	}
-	binding, err := ResolveLuaMailboxRoot(ctx, moduleBase, moduleSize, executableSHA256, layout, readModule)
+	newReader := func(binding LuaRootBinding) *MailboxReader {
+		return &MailboxReader{source: source, root: moduleBase + binding.RootRVA, readRoot: readModule, release: release, binding: binding}
+	}
+	binding, err := resolveLuaMailboxRoot(ctx, moduleBase, moduleSize, executableSHA256, layout, readModule, func(bindings []LuaRootBinding) (LuaRootBinding, error) {
+		if len(bindings) == 1 {
+			return bindings[0], nil // The normal Lookup validates the current Lua path.
+		}
+		var selected LuaRootBinding
+		best, count := 0, 0
+		var failures error
+		for _, candidate := range bindings {
+			found, err := newReader(candidate).Lookup(ctx, Selector{Kind: bridge.MemoryIdentity})
+			if ctx.Err() != nil {
+				return LuaRootBinding{}, ctx.Err()
+			}
+			if errors.Is(err, ErrMailboxPathChanged) {
+				return LuaRootBinding{}, err
+			}
+			if err != nil && !errors.Is(err, ErrMailboxIncompatible) {
+				failures = errors.Join(failures, err)
+				continue
+			}
+			// Prefer an actual Mailbox over an otherwise valid Lua state without
+			// this addon. An older protocol remains selectable for doctor diagnostics.
+			score := 1
+			if len(found.Records) != 0 || errors.Is(err, ErrMailboxIncompatible) {
+				score = 2
+			}
+			if score > best {
+				selected, best, count = candidate, score, 1
+			} else if score == best {
+				count++
+			}
+		}
+		if count != 1 {
+			return LuaRootBinding{}, errors.Join(luaRootError("ambiguous_or_unverified_lua_roots"), failures)
+		}
+		return selected, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +103,7 @@ func OpenLuaMailbox(ctx context.Context, source Source, moduleBase, moduleSize u
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &MailboxReader{source: source, root: moduleBase + binding.RootRVA, readRoot: readModule, release: release, binding: binding}, nil
+	return newReader(binding), nil
 }
 
 func (r *MailboxReader) Binding() LuaRootBinding { return r.binding }

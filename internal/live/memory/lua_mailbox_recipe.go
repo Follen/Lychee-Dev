@@ -30,10 +30,6 @@ const ForeverLuaMailboxRootPattern = "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? 
 // only RIP displacements vary, as in the original Forever recipe.
 const ForeverContextLuaMailboxRootRecipeID = "forever-lua-state-context-rip-v1"
 const ForeverContextLuaMailboxRootPattern = "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ?? 48 8b cb 48 8b 28 e8 ?? ?? ?? ?? 48 8b d5 48 8b cb 44 8b 40 08 e8 ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ??"
-const ForeverLuaMailboxExecutableSHA256 = "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f"
-const ForeverLuaMailboxKnownAnchorRVA uint64 = 0x75a69d
-const ForeverLuaMailboxRootRVA uint64 = 0x7b780b8
-const foreverLuaMailboxAnchorHex = "488b1d14da4107488bcbe82447fb03488bcb4c8b38e81947fb03498bd7488bcb448b4008e81a74fb03488bcbe80247fb03"
 const luaRootHeaderBudget = 1 << 20
 const luaRootTextBudget = 128 << 20
 const luaRootReadChunk = 1 << 20
@@ -49,6 +45,13 @@ type LuaRootEvidence struct {
 	ModuleReadBytes uint64 `json:"moduleReadBytes"`
 	ReadCalls       uint64 `json:"readCalls"`
 	StableRootGuard bool   `json:"stableRootGuard"`
+	TextBytes       uint64 `json:"textBytes"`
+	ScanComplete    bool   `json:"scanComplete"`
+	Gaps            []Gap  `json:"gaps"` // Module-relative ranges, never heap coverage.
+	ReadFailures    uint64 `json:"readFailures"`
+	PatternMatches  int    `json:"patternMatches"`
+	RejectedMatches int    `json:"rejectedMatches"`
+	RootCandidates  int    `json:"rootCandidates"`
 }
 
 type LuaRootBinding struct {
@@ -75,12 +78,12 @@ func luaRootError(reason string) error {
 }
 
 type luaRootModule struct {
-	ctx                            context.Context
-	base, size                     uint64
-	read                           func(context.Context, uint64, []byte) (int, error)
-	calls, total, headers, scanned uint64
-	headerGuards                   []luaRootHeaderGuard
-	readCause                      error
+	ctx                                      context.Context
+	base, size                               uint64
+	read                                     func(context.Context, uint64, []byte) (int, error)
+	calls, total, received, headers, scanned uint64
+	headerGuards                             []luaRootHeaderGuard
+	readCause                                error
 }
 
 type luaRootHeaderGuard struct {
@@ -88,20 +91,29 @@ type luaRootHeaderGuard struct {
 	bytes []byte
 }
 
-func (r *luaRootModule) exact(rva uint64, b []byte) error {
+func (r *luaRootModule) readSome(rva uint64, b []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	if len(b) > luaRootReadChunk || rva > r.size || uint64(len(b)) > r.size-rva {
-		return luaRootError("read_range")
+		return 0, luaRootError("read_range")
 	}
-	// PE metadata plus at most one complete .text pass and fixed guards.
-	if r.calls >= 2048 || r.total+uint64(len(b)) > 2*luaRootHeaderBudget+luaRootTextBudget+4096 {
-		return luaRootError("read_budget")
+	// One text pass plus page-sized recovery of failed reads, metadata/guards.
+	if r.calls >= 8192 || r.total+uint64(len(b)) > 2*luaRootHeaderBudget+2*luaRootTextBudget+4096 {
+		return 0, luaRootError("read_budget")
 	}
 	r.calls++
 	r.total += uint64(len(b))
 	n, err := r.read(r.ctx, r.base+rva, b)
+	if n < 0 || n > len(b) {
+		return 0, luaRootError("invalid_read_count")
+	}
+	r.received += uint64(n)
+	return n, errors.Join(err, r.ctx.Err())
+}
+
+func (r *luaRootModule) exact(rva uint64, b []byte) error {
+	n, err := r.readSome(rva, b)
 	if err != nil {
 		r.readCause = errors.Join(luaRootError("module_read"), err)
 		return r.readCause
@@ -235,7 +247,12 @@ func luaRootRecipeTarget(anchor uint64, code []byte, size uint64, sections []lua
 // LuaRootImageLayout is issued from the same locked executable handle that
 // MainModule hashes. Its opaque, immutable metadata is never caller-supplied RVA
 // authority. Runtime code and locating metadata are still verified separately.
-type LuaRootImageLayout struct{ proof *luaRootImageLayoutProof }
+type LuaRootImageLayout struct {
+	proof *luaRootImageLayoutProof
+	// OS-issued, ordered, non-overlapping module-relative readable spans.
+	// nil is used only by the fixed metadata decoder/test adapters.
+	readable []Range
+}
 type luaRootImageLayoutProof struct {
 	hash                  string
 	moduleSize, imageSize uint64
@@ -352,7 +369,7 @@ func readLuaRootImageLayout(reader io.ReaderAt, executableSHA256 string, moduleS
 		}
 		guards = append(guards, luaRootHeaderGuard{part.rva, b})
 	}
-	return LuaRootImageLayout{&luaRootImageLayoutProof{executableSHA256, moduleSize, imageSize, sections, text, guards}}, nil
+	return LuaRootImageLayout{proof: &luaRootImageLayoutProof{executableSHA256, moduleSize, imageSize, sections, text, guards}}, nil
 }
 
 // ResolveLuaMailboxRoot reads an OS-sealed MEM_IMAGE/MEM_MAPPED main module.
@@ -362,6 +379,10 @@ func readLuaRootImageLayout(reader io.ReaderAt, executableSHA256 string, moduleS
 // validation, never an old RVA shortcut. No heap discovery or layout inference
 // occurs, and unrelated protected runtime header fields are never normalized.
 func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA256 string, layout LuaRootImageLayout, readModule func(context.Context, uint64, []byte) (int, error)) (LuaRootBinding, error) {
+	return resolveLuaMailboxRoot(ctx, base, size, executableSHA256, layout, readModule, nil)
+}
+
+func resolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA256 string, layout LuaRootImageLayout, readModule func(context.Context, uint64, []byte) (int, error), choose func([]LuaRootBinding) (LuaRootBinding, error)) (result LuaRootBinding, resultErr error) {
 	var empty LuaRootBinding
 	digest, err := hex.DecodeString(executableSHA256)
 	if base == 0 || size == 0 || base > ^uint64(0)-size || size > 1<<32 || len(digest) != 32 || err != nil || executableSHA256 != strings.ToLower(executableSHA256) || readModule == nil {
@@ -372,6 +393,13 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 		return empty, luaRootError("image_layout_required")
 	}
 	imageSize, sections, text := layout.proof.imageSize, layout.proof.sections, layout.proof.text
+	scan := LuaRootEvidence{TextBytes: text.end - text.start, Gaps: []Gap{}}
+	defer func() {
+		if resultErr != nil {
+			scan.ScannedBytes, scan.ModuleReadBytes, scan.ReadCalls, scan.HeaderBytes = r.scanned, r.received, r.calls, r.headers
+			resultErr = &LuaRootScanError{Evidence: scan, Cause: resultErr}
+		}
+	}()
 	for _, guard := range layout.proof.guards {
 		current := make([]byte, len(guard.bytes))
 		if err := r.exact(guard.rva, current); err != nil {
@@ -383,21 +411,15 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 		}
 	}
 	r.headerGuards = layout.proof.guards
-	type recipe struct {
-		id       string
-		pattern  []byte
-		mask     []bool
-		operands []luaRootOperand
-	}
 	pattern, mask := luaRootPattern()
 	secondPattern, secondMask := parseLuaRootPattern(ForeverLuaMailboxRootPattern)
 	contextPattern, contextMask := parseLuaRootPattern(ForeverContextLuaMailboxRootPattern)
-	recipes := []recipe{
+	recipes := []luaRootRecipe{
 		{LuaMailboxRootRecipeID, pattern, mask, retailLuaRootOperands},
 		{ForeverLuaMailboxRootRecipeID, secondPattern, secondMask, foreverLuaRootOperands},
 		{ForeverContextLuaMailboxRootRecipeID, contextPattern, contextMask, foreverLuaRootOperands},
 	}
-	bind := func(anchor, root uint64, code []byte, method string, selectedRecipe recipe) (LuaRootBinding, error) {
+	bind := func(anchor, root uint64, code []byte, method string, selectedRecipe luaRootRecipe) (LuaRootBinding, error) {
 		rootGuard, anchorGuard, rootAfter := make([]byte, 8), make([]byte, len(code)), make([]byte, 8)
 		if err := r.exact(root, rootGuard); err != nil {
 			return empty, err
@@ -427,44 +449,10 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 			return empty, err
 		}
 		hash := sha256.Sum256(code)
-		return LuaRootBinding{RootRVA: root, AnchorRVA: anchor, ExecutableSHA256: executableSHA256, Method: method, Evidence: LuaRootEvidence{RecipeID: selectedRecipe.id, PatternBytes: len(selectedRecipe.pattern), AnchorSHA256: hex.EncodeToString(hash[:]), HeaderBytes: r.headers, ScannedBytes: r.scanned, ModuleReadBytes: r.total, ReadCalls: r.calls, StableRootGuard: true}, proof: &luaRootBindingProof{base, size, root, anchor, executableSHA256, method}}, nil
-	}
-	// Protected Forever builds cannot provide a complete .text scan. Select
-	// only an independently captured site for this exact file identity, then
-	// verify every runtime instruction byte and decode its RIP operand anew.
-	for _, known := range []struct {
-		hash, code   string
-		anchor, root uint64
-		recipe       int
-	}{
-		{ForeverLuaMailboxExecutableSHA256, foreverLuaMailboxAnchorHex, ForeverLuaMailboxKnownAnchorRVA, ForeverLuaMailboxRootRVA, 1},
-		// Asia Forever 70338: both observed context callers use this root.
-		// Sparse runtime coverage does not establish full-text uniqueness.
-		{"cfe26cc200fda36407736c7e6b5575a1f2ca2b774c8176529814e32d51312185", "488b1d66fb2807488bcbe85613e303488bcb488b28e84b13e303488bd5488bcb448b4008e84c40e303488bcbe83413e303", 0x764b4b, 0x79f46b8, 2},
-	} {
-		if executableSHA256 != known.hash {
-			continue
-		}
-		anchor, selectedRecipe := known.anchor, recipes[known.recipe]
-		if anchor < text.start || anchor > text.end || uint64(len(selectedRecipe.pattern)) > text.end-anchor {
-			return empty, luaRootError("known_anchor_range")
-		}
-		code := make([]byte, len(selectedRecipe.pattern))
-		if err := r.exact(anchor, code); err != nil {
-			return empty, err
-		}
-		expected, _ := hex.DecodeString(known.code)
-		if !bytes.Equal(code, expected) {
-			return empty, luaRootError("known_anchor_bytes")
-		}
-		root, err := luaRootRecipeTarget(anchor, code, imageSize, sections, selectedRecipe.operands)
-		if err != nil {
-			return empty, err
-		}
-		if root != known.root {
-			return empty, luaRootError("known_root_target")
-		}
-		return bind(anchor, root, code, "known_anchor", selectedRecipe)
+		evidence := scan
+		evidence.RecipeID, evidence.PatternBytes, evidence.AnchorSHA256 = selectedRecipe.id, len(selectedRecipe.pattern), hex.EncodeToString(hash[:])
+		evidence.HeaderBytes, evidence.ScannedBytes, evidence.ModuleReadBytes, evidence.ReadCalls, evidence.StableRootGuard = r.headers, r.scanned, r.received, r.calls, true
+		return LuaRootBinding{RootRVA: root, AnchorRVA: anchor, ExecutableSHA256: executableSHA256, Method: method, Evidence: evidence, proof: &luaRootBindingProof{base, size, root, anchor, executableSHA256, method}}, nil
 	}
 	if executableSHA256 == RetailLuaMailboxExecutableSHA256 && LuaMailboxKnownAnchorRVA >= text.start && LuaMailboxKnownAnchorRVA <= text.end && uint64(len(pattern)) <= text.end-LuaMailboxKnownAnchorRVA {
 		code := make([]byte, len(pattern))
@@ -474,69 +462,39 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 		if luaRootMatches(code, pattern, mask) {
 			root, e := luaRootTarget(LuaMailboxKnownAnchorRVA, code, imageSize, sections)
 			if e == nil && root == RetailLuaMailboxRootRVA {
+				scan.Gaps = []Gap{{Range: Range{Start: text.start, End: text.end}, Reason: "known_anchor_only"}}
+				scan.RootCandidates, scan.PatternMatches = 1, 1
 				return bind(LuaMailboxKnownAnchorRVA, root, code, "known_anchor", recipes[0])
 			}
 		}
 	}
-	// Keep only a fixed tail to match instructions crossing a read boundary.
-	buffer := make([]byte, luaRootReadChunk)
-	var tail, selected []byte
-	var anchor uint64
-	var selectedRecipe recipe
-	maxPattern := 0
-	for _, candidate := range recipes {
-		if len(candidate.pattern) > maxPattern {
-			maxPattern = len(candidate.pattern)
-		}
-	}
-	matches := 0
-	for at := text.start; at < text.end; {
-		n := uint64(len(buffer))
-		if n > text.end-at {
-			n = text.end - at
-		}
-		chunk := buffer[:int(n)]
-		if err := r.exact(at, chunk); err != nil {
-			return empty, err
-		}
-		r.scanned += n
-		combined := make([]byte, len(tail)+len(chunk))
-		copy(combined, tail)
-		copy(combined[len(tail):], chunk)
-		start := at - uint64(len(tail))
-		for i := 0; i < len(combined); i++ {
-			if i&4095 == 0 {
-				if err := ctx.Err(); err != nil {
-					return empty, err
-				}
-			}
-			for _, candidate := range recipes {
-				length := len(candidate.pattern)
-				if i+length > len(combined) || at > text.start && start+uint64(i+length) <= at || combined[i] != candidate.pattern[0] || !luaRootMatches(combined[i:i+length], candidate.pattern, candidate.mask) {
-					continue
-				}
-				matches++
-				if matches > 1 {
-					return empty, luaRootError("ambiguous_anchor")
-				}
-				anchor = start + uint64(i)
-				selected = append([]byte(nil), combined[i:i+length]...)
-				selectedRecipe = candidate
-			}
-		}
-		keep := maxPattern - 1
-		if keep > len(combined) {
-			keep = len(combined)
-		}
-		tail = append(tail[:0], combined[len(combined)-keep:]...)
-		at += n
-	}
-	if matches != 1 {
-		return empty, luaRootError("anchor_missing")
-	}
-	root, err := luaRootRecipeTarget(anchor, selected, imageSize, sections, selectedRecipe.operands)
+	candidates, err := scanLuaRoots(r, layout, recipes, &scan)
 	if err != nil {
 		return empty, err
 	}
-	return bind(anchor, root, selected, "recipe_unique_text", selectedRecipe)
+	if len(candidates) == 0 {
+		return empty, luaRootError("anchor_missing")
+	}
+	method := "recipe_unique_text"
+	if !scan.ScanComplete {
+		method = "recipe_readable_text"
+	}
+	if len(candidates) > 1 {
+		method = "recipe_validated_root"
+	}
+	bindings := make([]LuaRootBinding, 0, len(candidates))
+	for _, candidate := range candidates {
+		binding, err := bind(candidate.anchor, candidate.root, candidate.code, method, candidate.recipe)
+		if err != nil {
+			return empty, err
+		}
+		bindings = append(bindings, binding)
+	}
+	if choose != nil {
+		return choose(bindings)
+	}
+	if len(bindings) != 1 {
+		return empty, luaRootError("ambiguous_root")
+	}
+	return bindings[0], nil
 }

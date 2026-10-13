@@ -83,6 +83,27 @@ func TestExplicitReloadClosesExpiredGoalWithoutRebinding(t *testing.T) {
 		t.Fatal("lost reload audit")
 	}
 }
+
+func TestExplicitReloadClosesInitialBindWithoutResubmittingIt(t *testing.T) {
+	d, p := closingReloadFixture(t)
+	d.State.Operation = nil
+	d.State.Transaction = nil
+	d.State.Bound = false
+	d.State.Identity.Owner, d.State.Identity.Fence = "", 0
+	if err := d.begin(context.Background(), "bind", d.State.Owner, nil); err != nil {
+		t.Fatal(err)
+	}
+	d.State.Transaction.Phase = "published"
+	if err := d.RequestReload(context.Background(), "close-initial-bind"); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopReconcileContinue(d); err != nil {
+		t.Fatal(err)
+	}
+	if !d.State.Closed || d.State.Bound || len(p.inputs) != 1 || p.inputs[0].Kind != "reload" || len(p.publications) != 0 {
+		t.Fatal("unconfirmed bind was repeated instead of closed")
+	}
+}
 func TestClosingExplicitReloadResumeKeepsRequestBudgetAndInput(t *testing.T) {
 	d, p := closingReloadFixture(t)
 	proof := p.retirement.proof

@@ -42,7 +42,7 @@ test('update performs real npm replacement in isolated prefixes, keeps both clie
     const files = new Map();
     const payload = new Map([
       ['skill/SKILL.md', `---\nname: lycheedev\ndescription: Fixture\n---\n${v}\n`],
-      ['addon/Lychee Dev.toc', `## Interface: 120100, 50504, 38002, 16001, 11509\n## Version: ${v}\n## SavedVariables: LycheeToolkitDB\nCore/ClientGate.lua\nCore/Start.lua\n`],
+      ['addon/Lychee Dev.toc', `## Interface: 120100, 50504, 38002, 16001, 11509, 20506\n## Version: ${v}\n## SavedVariables: LycheeToolkitDB\nCore/ClientGate.lua\nCore/Start.lua\n`],
       ['addon/Core/ClientGate.lua', 'local name, ns = ...\n'],
       ['addon/Core/Start.lua', `local name, ns = ...\nns.version = "${v}"\n`],
       ['tool/luals/runtime.json', `{"version":"fixture-${v}"}`],

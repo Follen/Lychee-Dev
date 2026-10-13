@@ -16,11 +16,12 @@ import (
 )
 
 type Transaction struct {
-	Envelope         bridge.SlotEnvelope `json:"envelope"`
-	Phase            string              `json:"phase"`
-	Receipt          *Receipt            `json:"receipt,omitempty"`
-	EscapeAttempts   int                 `json:"escapeAttempts,omitempty"`
-	InputObservation *InputObservation   `json:"inputObservation,omitempty"`
+	ReleaseWaitStartedAtMS int64               `json:"releaseWaitStartedAtMs,omitempty"`
+	Envelope               bridge.SlotEnvelope `json:"envelope"`
+	Phase                  string              `json:"phase"`
+	Receipt                *Receipt            `json:"receipt,omitempty"`
+	EscapeAttempts         int                 `json:"escapeAttempts,omitempty"`
+	InputObservation       *InputObservation   `json:"inputObservation,omitempty"`
 }
 type Operation struct {
 	RecoveryBudget *DurableBudget `json:"recoveryBudget,omitempty"`
@@ -456,6 +457,9 @@ func (d *Driver) Run(ctx context.Context) error {
 			}
 			r, err := d.advance(ctx)
 			if err != nil {
+				if errors.Is(err, ErrPending) {
+					return d.recoverMissingRelease(ctx, err)
+				}
 				var rejection *RejectedError
 				if errors.As(err, &rejection) && rejection.Reason == "slot_resources_pending" {
 					op.CleanupMethod = "reload_required"

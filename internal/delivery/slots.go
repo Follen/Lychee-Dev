@@ -23,7 +23,8 @@ const legacySlotPoolSchema = "lycheedev.slots.v1"
 const slotPoolMigrationSchema = "lycheedev.slots.migration.v4"
 const previousSlotPoolMigrationSchema = "lycheedev.slots.migration.v3"
 const slotPoolManifestLimit = 256 << 10
-const slotInterfaces = "120100, 50504, 38002, 16001, 11509"
+const slotInterfaces = "120100, 50504, 38002, 16001, 11509, 20506"
+const previousMailboxSlotInterfaces = "120100, 50504, 38002, 16001, 11509"
 const previousSlotInterfaces = "120100, 50504, 38002, 16001"
 
 const inertSlot = "LycheeDevSlotEnvelope = nil\n"
@@ -84,13 +85,13 @@ func slotStaticMatches(name string, actual, want []byte) bool {
 	if !strings.HasSuffix(name, ".toc") {
 		return false
 	}
-	previous := bytes.Replace(want, []byte("## Interface: "+slotInterfaces+"\n"), []byte("## Interface: "+previousSlotInterfaces+"\n"), 1)
-	if bytes.Equal(actual, previous) {
-		return true
-	}
 	// Recognize exact pre-Mailbox-Protocol-V1 TOCs for managed installation
 	// migration only. Payload schema validation still rejects the old protocol.
-	for _, toc := range [][]byte{want, previous} {
+	for _, interfaces := range []string{slotInterfaces, previousMailboxSlotInterfaces, previousSlotInterfaces} {
+		toc := bytes.Replace(want, []byte("## Interface: "+slotInterfaces+"\n"), []byte("## Interface: "+interfaces+"\n"), 1)
+		if bytes.Equal(actual, toc) {
+			return true
+		}
 		for _, retired := range []string{"memory-slot-v3", "lycheedev-mailbox-v1"} {
 			old := bytes.Replace(toc, []byte("## X-Lychee-Transport: Lycheedev mailbox protocol v1\n"), []byte("## X-Lychee-Transport: "+retired+"\n"), 1)
 			if bytes.Equal(actual, old) {

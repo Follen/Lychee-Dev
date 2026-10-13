@@ -313,7 +313,11 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 		}
 		if len(candidates) > 0 {
 			candidate := candidates[0]
-			if reloadInputCapability(candidate.InputState) && (a.Phase == "prepared" || candidate.InputState == bridge.PreviousMailboxSchema) {
+			canReload, e := activationInputCapability(ctx, n, candidate, uptimeMillis())
+			if e != nil {
+				return r, e
+			}
+			if canReload && (a.Phase == "prepared" || candidate.InputState == bridge.PreviousMailboxSchema) {
 				if candidate.Owner != "" {
 					return r, errors.New("live.channel_ownership_changed")
 				}

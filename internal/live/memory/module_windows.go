@@ -199,7 +199,14 @@ func (m Module) LuaImageLayout() LuaRootImageLayout {
 	if m.proof == nil || !m.validFor(m.proof.process) {
 		return LuaRootImageLayout{}
 	}
-	return m.proof.layout
+	layout := m.proof.layout
+	layout.readable = make([]Range, 0, len(m.proof.segments))
+	for _, segment := range m.proof.segments {
+		if segment.eligible {
+			layout.readable = append(layout.readable, Range{Start: segment.start - m.Base, End: segment.end - m.Base})
+		}
+	}
+	return layout
 }
 
 // The issued module-clamped spans and mapping identity remain sealed.
@@ -394,7 +401,9 @@ func (p *Process) ReadModule(ctx context.Context, module Module, address uint64,
 	}
 	var n uintptr
 	readErr := windows.ReadProcessMemory(p.handle, uintptr(address), &b[0], uintptr(len(b)), &n)
-	if err := verifyModuleSegments(ctx, module.Base, module.Size, address, end, module.proof.segments, p.queryModuleMapping); err != nil {
+	// A short read's valid prefix does not depend on the unread suffix retaining
+	// its protection. Validate only returned bytes; the scanner records the gap.
+	if err := verifyModuleSegments(ctx, module.Base, module.Size, address, address+uint64(n), module.proof.segments, p.queryModuleMapping); err != nil {
 		return 0, errors.Join(readErr, fmt.Errorf("memory.module_mapping_check stage=after_read: %w", err))
 	}
 	if err := p.Verify(ctx); err != nil {

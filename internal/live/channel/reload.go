@@ -4,7 +4,33 @@ import (
 	"context"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/bridge"
+	"time"
 )
+
+// A queued key does not prove delivery. After the report is durable, a missing
+// release receipt can be reconciled by destroying the old runtime. Keep the
+// original exchange and deadline; the ordinary reload path still requires fresh
+// INPUT and will never resend an uncertain key.
+func (d *Driver) recoverMissingRelease(ctx context.Context, pending error) error {
+	tx := d.State.Transaction
+	if tx.Phase != "input_attempted" {
+		return pending
+	}
+	now := d.now().UnixMilli()
+	if tx.ReleaseWaitStartedAtMS == 0 {
+		tx.ReleaseWaitStartedAtMS = now
+		return errors.Join(pending, d.Save(ctx, "release_receipt_waiting"))
+	}
+	if now-tx.ReleaseWaitStartedAtMS < (5 * time.Second).Milliseconds() {
+		return pending
+	}
+	op := d.State.Operation
+	d.State.Reload = &ReloadAttempt{Request: "cleanup-" + op.ID, From: d.State.Identity.Runtime, Phase: "intent", RecoveryBudget: op.RecoveryBudget, Automatic: true, ReconcilePending: true}
+	if err := d.Save(ctx, "release_recovery_reload_intent"); err != nil {
+		return err
+	}
+	return errProgress
+}
 
 // RequestReload records an explicit recovery request without discarding an
 // uncertain exchange. Open connections bind a fresh runtime; closing connections
@@ -16,7 +42,10 @@ func (d *Driver) RequestReload(ctx context.Context, request string) error {
 	if err := ValidateRequest(request); err != nil {
 		return err
 	}
-	if !d.State.Bound || d.State.Closed || d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
+	// Closing an initial bind may also need destruction proof: its published
+	// slot can exist even though no binding receipt has ever been observed.
+	closingBind := d.State.Closing && d.State.Transaction != nil && d.State.Transaction.Envelope.Action == "bind"
+	if !d.State.Bound && !closingBind || d.State.Closed || d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
 		return ErrPending
 	}
 	pending := d.State.Transaction != nil || d.State.Operation != nil && d.State.Operation.Stage != "complete"

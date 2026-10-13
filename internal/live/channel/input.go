@@ -207,6 +207,27 @@ func reloadInputCapability(capability string) bool {
 	return observedInputCapability(capability) || capability == bridge.PreviousMailboxSchema
 }
 
+// The previous schema name covered both the retired three-key receiver and
+// the later two-key runtime. Inspect its actual INPUT before selecting automatic
+// activation. A stale valid profile proves capability only; submitInput still
+// requires a fresh sample before sending any key.
+func activationInputCapability(ctx context.Context, reader RecordReader, identity Identity, now int64) (bool, error) {
+	if identity.InputState != bridge.PreviousMailboxSchema {
+		return reloadInputCapability(identity.InputState), nil
+	}
+	runtime, _ := tokenBytes(identity.Runtime)
+	found, err := reader.Find(ctx, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}, true)
+	if err != nil {
+		return false, err
+	}
+	if len(found.Records) != 1 {
+		return false, nil
+	}
+	e := bridge.SlotEnvelope{Runtime: identity.Runtime, Owner: identity.Owner, Fence: identity.Fence, Index: identity.NextSlot, GUID: identity.GUID, Build: identity.Build, Action: "reload"}
+	s, err := inputObservation(found.Records[0], e, 0, now)
+	return (err == nil || errors.Is(err, errInputStateStale)) && s.Bindings != nil && s.Bindings.Reload != "", nil
+}
+
 func upgradeInputCapability(capability string) bool {
 	return capability == legacyInputSchema || capability == "lycheedev.input.hybrid.v2" || capability == bridge.PreviousMailboxSchema
 }

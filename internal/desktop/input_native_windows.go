@@ -215,11 +215,11 @@ func (in *nativeInput) ReceiverChord(chord string) error {
 
 func (in *nativeInput) chordKeys(keys []uint16) error {
 	// The lab records the target layout; OEM brackets require live validation.
-	for _, vk := range keys {
+	if err := checkChordKeys(keys, func(vk uint16) bool {
 		pressed, _, _ := userLibrary.NewProc("GetAsyncKeyState").Call(uintptr(vk))
-		if pressed&0x8000 != 0 {
-			return ErrKeyAlreadyHeld
-		}
+		return pressed&0x8000 != 0
+	}); err != nil {
+		return err
 	}
 	alt := false
 	for _, vk := range keys {

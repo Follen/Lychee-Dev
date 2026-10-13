@@ -6,7 +6,7 @@ import (
 )
 
 func TestSourceInterfaceRequiresExactApprovedIdentity(t *testing.T) {
-	want := map[string]int{"retail": 120100, "classic": 50504, "classic-era": 11509, "titan": 38002, "forever": 16001}
+	want := map[string]int{"retail": 120100, "classic": 50504, "classic-era": 11509, "anniversary": 20506, "titan": 38002, "forever": 16001}
 	for _, baseline := range VerifiedClientBaselines() {
 		pin := SourcePin{Repository: "wow-ui-source", Product: baseline.Product, ExactCommit: baseline.SourceCommit}
 		value, ok := SourceInterface(pin)

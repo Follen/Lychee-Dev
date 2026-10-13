@@ -61,7 +61,9 @@ ns.InputState={
         if frame and frame:GetScript("OnUpdate") then return true end
         if ns.FocusBindings then ns.FocusBindings.Start() end
         sequence,last=sequence or 0,0
-        if not frame then frame=CreateFrame("Frame",nil,UIParent);frame:Hide();frame:EnableMouse(false) end
+        -- AFK/cinematic UIs hide UIParent. Transport telemetry has no visual
+        -- content and must remain independent while the player is in-world.
+        if not frame then frame=CreateFrame("Frame");frame:Hide();frame:EnableMouse(false) end
         loading,leaving=false,false
         for _,event in ipairs({"PLAYER_ENTERING_WORLD","PLAYER_LEAVING_WORLD","LOADING_SCREEN_ENABLED","LOADING_SCREEN_DISABLED","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do frame:RegisterEvent(event) end
         frame:SetScript("OnEvent",function(_,event)

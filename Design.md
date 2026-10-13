@@ -44,7 +44,7 @@ internal/selection/products.go 定义七个交付产品；源码家族和交付�
 
 两个 Forever beta 可以共享 Source 家族 pin，但不共用区域 Data pin。相同 build 字符串不等于相同 BuildConfig。DataPin 固定产品、build、BuildConfig、CDNConfig、地区、locale 和 DBD 来源。
 
-Addon 当前具有 Retail 120100、Classic 50504、Era 11509、Titan 38002、Forever 16001 五个运行时 profile。周年服已有 Source/Data 产品路由，尚无对应 addon profile。产品目录、API 基线和实机验收分别维护。
+Addon 当前具有 Retail 120100、Classic 50504、Era 11509、Titan 38002、Forever 16001、Anniversary 20506 六个运行时 profile。周年服采用 2.5.6.70006 对应的 classic_anniversary 源码提交 2cfec7c00f0f24762d5ca35a4beb1e93c0cde328，生成独立的 1483 项事件目录；实机 GetBuildInfo 已确认 Interface 20506，探针已确认事件目录加载。主插件与 500 个 LoD 槽使用相同的多 Interface 声明，旧声明通过受管安装迁移。产品目录、API 基线和实机验收分别维护。
 
 ## 4. Source
 
@@ -77,6 +77,8 @@ DB2、SQL、关联记录和资源共用固定数据身份。Hotfix 保留 provid
 
 CLI 只读进程内存。运行时指令特征匹配和 RIP 相对解析得到 Lua 根，沿命名对象读取 Mailbox。每次读取核验指令、指针路径和发布对象；不扫描私有堆，不把旧地址当成当前输入许可。
 
+Forever 根扫描按主模块 `.text` 可读区间进行，保留短读前缀并按页补读未返回部分。多个命中先解析 RIP、按根去重，再验证 Lua/Mailbox；移除固定 Forever hash 的定位捷径。覆盖证据保留不可读缺口，部分扫描成功不等于全范围唯一。
+
 输入通过 500 个不可重用的 LoD 槽和两个正式快捷键实现。prepare → challenge → commit 后执行业务，HEAD/BODY 确认报告，confirm/release 完成结果与资源清理。容量不足时独立重载并继续原请求。
 
 目标固定 installation、PID、进程创建时间、HWND、build 和产品；绑定后增加 GUID、runtime、owner、fence。共享安装采用短发布锁和持久槽预约，业务等待不占发布锁。
@@ -85,9 +87,13 @@ CLI 只读进程内存。运行时指令特征匹配和 RIP 相对解析得到 L
 
 reportState、report.ok、cleanup 表示不同事实。报告已核实但清理未完成时，报告仍可用，同时保留清理义务。
 
+已发送 release 的精确回执持续缺失 5 秒时，CLI 在原操作期限内自动走一次重载清理。保留报告和原事务，不重发 release 或业务；只有旧 runtime 退役得到验证后才完成清理。实体修饰键按住时推迟发送，不强制松开玩家按键；发送成功入队仍不等于插件执行成功。
+
 ## 7. Addon 与工作台
 
 未启用的业务功能不创建 frame、事件、hook、计时器或 OnUpdate。独立启动核注册正式绑定和启动诊断；注册完成后不保留空闲事件和计时器。启用 bridge 后的 INPUT 采样与普通 EditBox 透传是明确例外，停用时撤销。
+
+INPUT 采样框架不依附 UIParent，挂机界面隐藏主 UI 时仍可发布输入状态；登录、加载、战斗及受限焦点检查保持有效。
 
 受保护、forbidden、密码、secure text 和 secret 值属于边界。战斗和不可安全观察的输入状态不能授权机器输入。所有客户端分支集中在兼容层或生成目录。
 

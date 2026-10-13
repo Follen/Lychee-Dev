@@ -432,6 +432,8 @@ func TestDiscoveryScansOnlyKnownRootsAndProducts(t *testing.T) {
 	gameRoot := t.TempDir()
 	retail := makeTestClient(t, gameRoot, "_retail_", "wow", "12.1.0.69875")
 	makeTestClient(t, gameRoot, "_classic_", "wow_classic", "5.5.4.12345")
+	makeTestClient(t, gameRoot, "_classic_era_", "wow_classic_era", "1.15.9.70003")
+	makeTestClient(t, gameRoot, "_anniversary_", "wow_anniversary", "2.5.6.70006")
 	makeTestClient(t, gameRoot, "_classic_beta_", "wow_beta", "12.1.0.69875") // unsupported product: excluded
 	makeTestClient(t, gameRoot, "_ptr_", "wow", "12.1.0.69875")               // never scanned
 	fake := newFakeIO(t)
@@ -445,14 +447,14 @@ func TestDiscoveryScansOnlyKnownRootsAndProducts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Installations) != 2 {
+	if len(report.Installations) != 4 {
 		t.Fatalf("installations: %+v", report.Installations)
 	}
 	states := map[string]string{}
 	for _, installation := range report.Installations {
 		states[filepath.Base(installation.Client.Directory)] = installation.State
 	}
-	if states["_retail_"] != InstallationRunning || states["_classic_"] != InstallationInstalled {
+	if states["_retail_"] != InstallationRunning || states["_classic_"] != InstallationInstalled || states["_classic_era_"] != InstallationInstalled || states["_anniversary_"] != InstallationInstalled {
 		t.Fatalf("installation states: %v", states)
 	}
 	empty, err := discoverCandidates(ctx, root, DiscoveryRequest{}, fake.io())

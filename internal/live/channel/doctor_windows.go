@@ -172,7 +172,12 @@ func (p *Project) Doctor(ctx context.Context, request TargetRequest, session str
 		r.add("live.runtime", "error", "runtime and installation identity differ", "select the matching installation and PID")
 		return
 	}
-	if !reloadInputCapability(identity.InputState) || identity.Slots != bridge.SlotCount {
+	canReload, err := activationInputCapability(ctx, n, identity, uptimeMillis())
+	if err != nil {
+		r.add("live.runtime", "blocked", err.Error(), "retry diagnosis for the selected client")
+		return
+	}
+	if !canReload || identity.Slots != bridge.SlotCount {
 		r.add("live.runtime", "blocked", "older runtime requires activation", "reload the selected client manually; old input protocols do not authorize keys")
 		return
 	}

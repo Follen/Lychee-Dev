@@ -143,7 +143,9 @@ func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Se
 		if err != nil {
 			trace.Error = err.Error()
 		}
-		if n.Mailbox != nil {
+		// The binding is immutable for this Native invocation. Its sparse scan
+		// ledger can be large; retain it once, in the first trace of this directory.
+		if n.Mailbox != nil && n.traceSequence == 1 {
 			binding := n.Mailbox.Binding()
 			trace.RootBinding = &binding
 		}

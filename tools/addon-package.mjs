@@ -16,7 +16,7 @@ const MAIN_TOC = 'Lychee Dev.toc';
 // product profile from the running build at load time. A per-client TOC variant
 // is exactly the engine selection rule this architecture removed, so the
 // archive ships exactly one manifest and it must declare all of these.
-const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001', '11509'];
+const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001', '11509', '20506'];
 const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
 const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.

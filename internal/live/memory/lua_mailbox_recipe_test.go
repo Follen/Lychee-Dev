@@ -153,7 +153,7 @@ func TestLuaMailboxForeverContextRecipeMigration(t *testing.T) {
 			}
 			copy(f.text[at-f.textRVA:], code)
 			binding, err := f.resolve(context.Background(), rootRecipeUnknownHash())
-			if mode == "relocated" || mode == "chunk_crossing" {
+			if mode == "relocated" || mode == "chunk_crossing" || mode == "old_and_new" {
 				if err != nil || binding.RootRVA != root || binding.AnchorRVA != at || binding.Evidence.RecipeID != ForeverContextLuaMailboxRootRecipeID {
 					t.Fatal(binding, err)
 				}
@@ -207,112 +207,12 @@ func TestLuaMailboxForeverRecipeUnknownMigrationAndCrossTemplateAmbiguity(t *tes
 				f.text[at-f.textRVA+35] = 9
 			}
 			binding, err := f.resolve(context.Background(), rootRecipeUnknownHash())
-			if mode == "ordinary" || mode == "chunk_crossing" || mode == "tail_duplicate" {
+			if mode == "ordinary" || mode == "chunk_crossing" || mode == "tail_duplicate" || mode == "both_templates" || mode == "two_forever" {
 				if err != nil || binding.RootRVA != root || binding.AnchorRVA != at || binding.Evidence.RecipeID != ForeverLuaMailboxRootRecipeID || binding.Evidence.PatternBytes != 49 || binding.Evidence.ScannedBytes != uint64(len(f.text)) {
 					t.Fatal(binding, err)
 				}
 			} else if !errors.Is(err, ErrLuaMailboxRootUnsupported) {
 				t.Fatalf("unsafe %s accepted: %+v %v", mode, binding, err)
-			}
-		})
-	}
-}
-
-func TestLuaMailboxForeverExactBuildGuardsAvoidProtectedText(t *testing.T) {
-	for _, mode := range []string{"valid", "raw_bytes_changed", "metadata_changed", "root_changed", "anchor_reread_changed", "module_read_denied", "cancel"} {
-		t.Run(mode, func(t *testing.T) {
-			// Only the bounded known site is readable. Metadata describes the real
-			// large code range; no synthetic full-text allocation or scan is needed.
-			f := newRootRecipeFixture(t, 0x1000, 4096, ForeverLuaMailboxRootRVA&^4095)
-			sectionAt := 0x98 + binary.Size(pe.OptionalHeader64{})
-			binary.LittleEndian.PutUint32(f.header[sectionAt+8:], 0x4800000-0x1000)
-			f.diskHeader = append([]byte(nil), f.header...)
-			code, _ := hex.DecodeString(foreverLuaMailboxAnchorHex)
-			if mode == "raw_bytes_changed" {
-				code[3] ^= 8
-			}
-			if mode == "metadata_changed" {
-				f.header[sectionAt+36] ^= 1
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			anchors, roots := 0, 0
-			f.hook = func(rva uint64, b []byte) (int, error, bool) {
-				if rva == ForeverLuaMailboxKnownAnchorRVA {
-					anchors++
-					if mode == "module_read_denied" {
-						return 0, errors.New("NOACCESS"), true
-					}
-					copy(b, code)
-					if mode == "anchor_reread_changed" && anchors > 1 {
-						b[0] ^= 1
-					}
-					if mode == "cancel" {
-						cancel()
-					}
-					return len(b), nil, true
-				}
-				if rva == ForeverLuaMailboxRootRVA && mode == "root_changed" {
-					roots++
-					b[0] = byte(roots)
-					return len(b), nil, true
-				}
-				if rva >= 0x1000 && rva < 0x4800000 {
-					t.Errorf("known build scanned protected text at %#x", rva)
-					return 0, io.EOF, true
-				}
-				return 0, nil, false
-			}
-			binding, err := f.resolve(ctx, ForeverLuaMailboxExecutableSHA256)
-			if mode == "valid" {
-				if err != nil || binding.RootRVA != ForeverLuaMailboxRootRVA || binding.AnchorRVA != ForeverLuaMailboxKnownAnchorRVA || binding.Method != "known_anchor" || binding.Evidence.RecipeID != ForeverLuaMailboxRootRecipeID || binding.Evidence.ScannedBytes != 0 || !binding.Evidence.StableRootGuard {
-					t.Fatal(binding, err)
-				}
-			} else if err == nil {
-				t.Fatalf("%s silently bound", mode)
-			}
-			if mode == "cancel" && !errors.Is(err, context.Canceled) {
-				t.Fatal("cancellation discarded", err)
-			}
-		})
-	}
-}
-
-func TestLuaMailboxForeverAsia70338ProtectedRuntimeAnchor(t *testing.T) {
-	const hash = "cfe26cc200fda36407736c7e6b5575a1f2ca2b774c8176529814e32d51312185"
-	const anchor, root = uint64(0x764b4b), uint64(0x79f46b8)
-	for _, mode := range []string{"valid", "anchor_changed", "unknown_hash"} {
-		t.Run(mode, func(t *testing.T) {
-			f := newRootRecipeFixture(t, 0x1000, 4096, root&^4095)
-			sectionAt := 0x98 + binary.Size(pe.OptionalHeader64{})
-			binary.LittleEndian.PutUint32(f.header[sectionAt+8:], 0x4800000-0x1000)
-			f.diskHeader = append([]byte(nil), f.header...)
-			// Actual runtime bytes captured by wowdump 3.0.1. The first .text
-			// pages are NOACCESS; this fixture must not pretend they were read.
-			code, _ := hex.DecodeString("488b1d66fb2807488bcbe85613e303488bcb488b28e84b13e303488bd5488bcb448b4008e84c40e303488bcbe83413e303")
-			if mode == "anchor_changed" {
-				code[3] ^= 8
-			}
-			f.hook = func(rva uint64, b []byte) (int, error, bool) {
-				if rva == anchor && len(b) == len(code) {
-					return copy(b, code), nil, true
-				}
-				if rva >= 0x1000 && rva < 0x4800000 {
-					return 0, errors.New("NOACCESS"), true
-				}
-				return 0, nil, false
-			}
-			identity := hash
-			if mode == "unknown_hash" {
-				identity = rootRecipeUnknownHash()
-			}
-			binding, err := f.resolve(context.Background(), identity)
-			if mode == "valid" {
-				if err != nil || binding.RootRVA != root || binding.AnchorRVA != anchor || binding.Method != "known_anchor" || binding.Evidence.RecipeID != ForeverContextLuaMailboxRootRecipeID || binding.Evidence.ScannedBytes != 0 || !binding.Evidence.StableRootGuard {
-					t.Fatal(binding, err)
-				}
-			} else if !errors.Is(err, ErrLuaMailboxRootUnsupported) || binding.proof != nil {
-				t.Fatal("unverified runtime anchor accepted", binding, err)
 			}
 		})
 	}
@@ -399,7 +299,7 @@ func TestLuaMailboxRootRecipeRejectsIncompleteOrUnsafeImages(t *testing.T) {
 			case "missing":
 				clear(f.text)
 			case "ambiguous":
-				f.anchor(t, anchor+512, root)
+				f.anchor(t, anchor+512, root+8)
 			case "instruction_changed":
 				f.text[anchor-f.textRVA+16] ^= 1
 			case "root_exec":

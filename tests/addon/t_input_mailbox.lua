@@ -40,8 +40,9 @@ event(frame,"PLAYER_ENTERING_WORLD");absent()
 event(frame,"LOADING_SCREEN_DISABLED");published(false)
 event(frame,"PLAYER_LEAVING_WORLD");absent()
 event(frame,"PLAYER_ENTERING_WORLD");published(false)
-UIParent:Hide();absent()
+UIParent:Hide();published(false)
 ready,reason=false,"input_keyboard_focus"
+ns.InputState.Refresh();published(true,reason)
 UIParent:Show();published(true,reason)
 identity=nil;ns.InputState.Refresh();absent()
 identity={runtime=string.rep("2",32),owner="",fence=0,nextSlot=1,guid="g2",build="b"}

@@ -17,6 +17,22 @@ type InputReceipt struct {
 
 var ErrKeyAlreadyHeld = errors.New("lab.key_already_held")
 
+// Extra modifiers also change the effective binding, even when the user holds
+// them in another window. Do not begin a background chord in that state.
+func checkChordKeys(keys []uint16, pressed func(uint16) bool) error {
+	for _, vk := range []uint16{0x10, 0x11, 0x12, 0x5B, 0x5C} {
+		if pressed(vk) {
+			return ErrKeyAlreadyHeld
+		}
+	}
+	for _, vk := range keys {
+		if pressed(vk) {
+			return ErrKeyAlreadyHeld
+		}
+	}
+	return nil
+}
+
 const bootstrapIdentifyPrefix = "/dev bridge identify "
 const bootstrapConnectCommand = "/dev connect"
 const bootstrapResetPrefix = "/dev bridge reset "

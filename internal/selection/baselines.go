@@ -28,6 +28,9 @@ func VerifiedClientBaselines() []ClientBaseline {
 		{Product: "retail", ProductCode: "wow", BuildSeries: "12.1.0", TOC: MainTOC, Interface: 120100, SourceCommit: "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"},
 		{Product: "classic", ProductCode: "wow_classic", BuildSeries: "5.5.4", TOC: MainTOC, Interface: 50504, SourceCommit: "1028c1e687f721ba9d3af14d1b12a5745e4227c7"},
 		{Product: "classic-era", ProductCode: "wow_classic_era", BuildSeries: "1.15.9", TOC: MainTOC, Interface: 11509, SourceCommit: "8165d4cd6e48d606369336cc3a7977902310e81e"},
+		// Anniversary 2.5.6.70006: source version.txt and installed client
+		// engineSurveyPatch 20506. Runtime acceptance is tracked separately.
+		{Product: "anniversary", ProductCode: "wow_anniversary", BuildSeries: "2.5.6", TOC: MainTOC, Interface: 20506, SourceCommit: "2cfec7c00f0f24762d5ca35a4beb1e93c0cde328"},
 		{Product: "titan", ProductCode: "wow_classic_titan", BuildSeries: "3.80.2", TOC: MainTOC, Interface: 38002, SourceCommit: "825d29d3662b372f0bead725ee6abd339e4a77b5"},
 		// Forever installs report flavor wow_forever, but its data is published
 		// in the reusable wow_classic_beta manifest slot (1.60.x); the two codes differ.

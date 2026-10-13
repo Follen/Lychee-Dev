@@ -107,7 +107,7 @@ func (s State) validate() error {
 		}
 	}
 	if tx := s.Transaction; tx != nil {
-		if tx.EscapeAttempts < 0 {
+		if tx.EscapeAttempts < 0 || tx.ReleaseWaitStartedAtMS < 0 {
 			return bad
 		}
 		e := tx.Envelope

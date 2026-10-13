@@ -28,6 +28,13 @@ ready,reason=true,nil
 now=101;created[1]:GetScript("OnUpdate")(created[1],.8)
 assert(ns.InputState.Snapshot():find('"inputBlocked":false',1,true),"refresh reset periodic cadence")
 ns.InputState.Start(provider,mailbox);assert(#created==1,"repeated starts allocated a frame")
+-- AFK/cinematic addons may hide the entire UIParent while the player remains
+-- in the world. Transport telemetry must keep sampling independently.
+UIParent:Hide()
+assert(created[1]:IsVisible() and mailbox.input,"UIParent hid live INPUT")
+now=101.1;ns.InputState.Refresh()
+assert(mailbox.input:find('"sampleMillis":101100',1,true),"hidden UI stopped fresh INPUT")
+UIParent:Show()
 local prior=ns.InputState.Snapshot()
 now=101.5;created[1]:GetScript("OnUpdate")(created[1],.5)
 assert(ns.InputState.Snapshot()==prior)
