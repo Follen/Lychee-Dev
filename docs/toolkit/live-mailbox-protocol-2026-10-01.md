@@ -1,5 +1,8 @@
 # Native Mailbox protocol (3.1.0 candidate)
 
+> 历史合同：当前协议及命名以 [Lycheedev mailbox protocol v1](lycheedev-live-protocol-v1.md) 为准。
+> 本文的运行时定位与定点读取规定继续适用；hybrid 输入与独立子协议版本已退役。
+
 The owner requested one complete protocol cutover, with no old wire compatibility
 and with identity, challenge and execution validation retained. This contract
 supersedes native CON memory discovery in the September 28/29 contracts. Receiver
@@ -15,7 +18,7 @@ OP/BTP documents remain historical; their keys and ACK rules are not native inpu
 | Identity descriptor | lycheedev.slot.identity.v2 |
 | Input observation | lycheedev.input.v3 |
 | Slot addon transport | memory-slot-v3 |
-| Public publication | lycheedev.mailbox.v1 |
+| Public publication | Lycheedev mailbox protocol v1 |
 | Runtime replacement proof | lycheedev.runtime-replacement.mailbox.v1 |
 
 The optical pairing is `lycheedev.input.hybrid.v2`. The color encoding is
@@ -58,7 +61,8 @@ The CLI requires a validated HEAD before reading a BODY, with the exact nonce,
 runtime, ticket, length and checksum. Header/trailer integrity is corruption
 detection, not execution authorization.
 
-The existing retention bounds remain 200 receipts and 46 operations. Successful
+The 3.2.0 capacity update in [500 slots](live-500-slots-3.2.0.md) raises retention
+to 500 receipts and 121 operations (previously 200 and 46). Successful
 release removes that task's BODY; input stop/hide clears the current input field.
 Reload replaces the publication table and runtime. Explicit bridge-off creates
 no new mailbox or input sampling work.
@@ -101,10 +105,31 @@ RunScript state load: exact build 1.60.1.70124, executable SHA-256
 anchor `0x75a69d`, root `0x7b780b8`. Its fast path verifies all 49 original
 runtime code bytes and the derived root, not a bare numeric RVA. This bounded
 semantic site was readable even though other text pages were protected; it does
-not assert unique coverage of those pages. Known hashes verify their complete
-runtime anchor first. Other executable hashes require exactly one match across
-both the 58-byte and 49-byte recipes over the complete runtime `.text` section
-(at most 128 MiB). Matching both recipes or multiple sites is ambiguous, and a
+not assert unique coverage of those pages. CN Forever 1.60.1.70338 adds a second
+49-byte context recipe: it holds the Lua context in `rbp`, where the old recipe
+uses `r15`, while preserving the same repeated getter-call relationship. Its
+runtime `.text` uniquely matched at `0x63441b` and derived root `0x7fa8878` for
+executable SHA-256 `20d62993de642e17055bdd2b2575f3ca571f86763b301ebc77765da5547aa1f2`.
+These coordinates are research results, not a new hardcoded fast path; see the
+[CN live validation](live-500-slots-3.2.0.md#国服无限测试服补测).
+Asia Forever 1.60.1.70338 has a separate exact-build binding for executable
+SHA-256 `cfe26cc200fda36407736c7e6b5575a1f2ca2b774c8176529814e32d51312185`.
+The same context recipe appears at two observed runtime sites, `0x6fcb98` and
+`0x764b4b`; both derive root `0x79f46b8` and call the state `+0xe0` context
+getter at `0x4595eb0`. The bounded fast path verifies all 49 captured bytes at
+`0x764b4b` before decoding the root, followed by the normal stable-root and Lua
+publication checks. wowdump 3.0.1 read 89,624,576 of 139,165,696 module bytes;
+2,310 blind ranges remain. This binding makes no complete-text uniqueness
+claim, and another hash cannot inherit it.
+Classic Era 1.15.9.70003 uses the existing Retail recipe without a new hash
+binding. Its complete runtime module capture has one match at `0x62fcc4`,
+deriving root `0x70273a8`; stable Lua state/globals checks and actual Mailbox
+reads pass. These are observed coordinates, not a fixed-root implementation;
+see [Era validation](live-500-slots-3.2.0.md#classic-era-支持与运行时定位).
+Known hashes verify their complete runtime anchor first. Other executable hashes
+require exactly one match across the Retail recipe and both Forever variants
+over the complete runtime `.text` section (at most 128 MiB).
+Matching multiple recipes or sites is ambiguous, and a
 shorter match crossing a chunk boundary must be counted once. All RIP global
 targets must be readable/writable non-executable image data; call targets must
 be executable text. Missing/ambiguous matches, gaps, invalid targets or changed
@@ -143,8 +168,8 @@ No diagnostic increment does not prove non-delivery, and a callback observed
 on the same route does not prove the host key caused it. The callback cannot
 know a nonce before loading the corresponding envelope.
 
-Protocol `Snapshot` exposes only bounded detached facts: at most 200 receipts
-and consumed bits and 46 operation metadata objects. It never returns execution
+Protocol `Snapshot` exposes only bounded detached facts: at most 500 receipts
+and consumed bits and 121 operation metadata objects in 3.2.0. It never returns execution
 functions, callbacks, source code or writable private table aliases. A prepared
 envelope is copied into private state before compilation and observation;
 later mutation of the caller's table or a snapshot cannot change its challenge,

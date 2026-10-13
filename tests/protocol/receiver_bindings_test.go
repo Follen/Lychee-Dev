@@ -11,7 +11,7 @@ func TestLuaReceiverBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receiver bindings Lua test: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "receiver bindings: conflict, rollback and effective profile") {
+	if !strings.Contains(string(output), "receiver bindings: saved actions, deferred lifecycle and assignment rollback") {
 		t.Fatalf("receiver bindings Lua test did not complete: %s", output)
 	}
 }

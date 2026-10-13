@@ -89,7 +89,7 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 	}
 	folder := strings.ToLower(filepath.Base(absolute))
 	if product == "" && version != "" {
-		for _, baseline := range VerifiedClientBaselines() {
+		for _, baseline := range clientIdentityBaselines() {
 			if strings.HasPrefix(version, baseline.BuildSeries+".") {
 				product, source = baseline.ProductCode, "version.txt"
 				break
@@ -110,7 +110,7 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 			if candidate.ProductCode != slot {
 				continue
 			}
-			for _, baseline := range VerifiedClientBaselines() {
+			for _, baseline := range clientIdentityBaselines() {
 				if strings.HasPrefix(candidate.FullBuild, baseline.BuildSeries+".") {
 					if product != "" && product != baseline.ProductCode {
 						return result, fmt.Errorf("%w: ambiguous active builds", ErrClientIdentity)
@@ -124,11 +124,19 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		}
 	}
 	if product == "" {
-		product = map[string]string{"_retail_": "wow", "_classic_": "wow_classic", "_classic_titan_": "wow_classic_titan", "_forever_": "wow_forever"}[folder]
+		if folder == "_forever_" {
+			product = "wow_forever"
+		} else {
+			for _, profile := range DataProducts() {
+				if profile.Folder == folder && !profile.ReusedSlot {
+					product = profile.ProductCode
+				}
+			}
+		}
 		source = "folder"
 	}
 	var selected *ClientBaseline
-	for _, baseline := range VerifiedClientBaselines() {
+	for _, baseline := range clientIdentityBaselines() {
 		if baseline.ProductCode == product {
 			value := baseline
 			selected = &value

@@ -159,7 +159,7 @@ func SelectClientInstallation(ctx context.Context, directory, product string) (s
 	}
 	var matches []selection.ClientInstallation
 	for _, client := range report.Candidates {
-		if product == "" || client.Product == product {
+		if selection.ClientMatchesProduct(client, product) {
 			matches = append(matches, client)
 		}
 	}
@@ -203,9 +203,10 @@ func clientMarkers(directory string) (bool, error) {
 }
 
 func knownClientFolder(name string) bool {
-	switch strings.ToLower(name) {
-	case "_retail_", "_classic_", "_classic_titan_", "_classic_beta_", "_cn_beta_", "_forever_":
-		return true
+	for _, folder := range selection.ClientFolders() {
+		if strings.EqualFold(name, folder) {
+			return true
+		}
 	}
 	return false
 }

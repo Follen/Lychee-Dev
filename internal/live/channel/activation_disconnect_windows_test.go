@@ -14,49 +14,51 @@ import (
 )
 
 func TestDisconnectUnsentActivationIsDurableAndIdempotent(t *testing.T) {
-	for _, outcome := range []*InputOutcome{nil, {Disposition: "not_sent", Reason: "slot_pool_invalid"}} {
-		p, d, meta, parent := projectFixture(t)
-		ctx := context.Background()
-		// Use this process's actual lifetime so the old Disconnect reaches its
-		// ordinary driver and fails with ErrJournalMissing, as on the real client.
-		var created, exited, kernel, user windows.Filetime
-		if err := windows.GetProcessTimes(windows.CurrentProcess(), &created, &exited, &kernel, &user); err != nil {
-			t.Fatal(err)
-		}
-		if err := journal.RetireConnectionWindow(ctx, parent, meta.Owner); err != nil {
-			t.Fatal(err)
-		}
-		meta.Target.Window.ProcessID = uint32(os.Getpid())
-		meta.Target.Window.ProcessStartedAt = uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
-		meta.Owner.Resource = fmt.Sprintf("window/%d/%d/0", meta.Target.Window.ProcessID, meta.Target.Window.ProcessStartedAt)
-		if err := journal.BeginConnectionWindow(ctx, parent, meta.Owner, func() error {
-			return writeProjectJSON(ctx, p.path("connections", d.State.ID+".target.json"), meta)
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(d.Log); err != nil {
-			t.Fatal(err)
-		}
-		a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "prepared", Outcome: outcome, Budget: NewDurableBudget(time.Now().Add(-time.Hour), DefaultRecoveryBudget, false)}
-		if err := writeProjectJSON(ctx, p.activationPath(d.State.ID), a); err != nil {
-			t.Fatal(err)
-		}
-		for _, call := range []func() (ProjectResult, error){
-			func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID, false) },
-			func() (ProjectResult, error) { return p.Status(d.State.ID) },
-			func() (ProjectResult, error) { return p.Resume(ctx, d.State.ID, false) },
-			func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID, false) },
-		} {
-			r, err := call()
-			if err != nil || !r.Closed || r.Complete || r.Stage != "activation_cancelled" || r.ReportState != "unavailable" || r.Continuation.Kind != "completed" {
-				t.Fatalf("%+v %v", r, err)
+	for _, phase := range []string{"prepared", "waiting_manual_reload"} {
+		for _, outcome := range []*InputOutcome{nil, {Disposition: "not_sent", Reason: "slot_pool_invalid"}} {
+			p, d, meta, parent := projectFixture(t)
+			ctx := context.Background()
+			// Use this process's actual lifetime so the old Disconnect reaches its
+			// ordinary driver and fails with ErrJournalMissing, as on the real client.
+			var created, exited, kernel, user windows.Filetime
+			if err := windows.GetProcessTimes(windows.CurrentProcess(), &created, &exited, &kernel, &user); err != nil {
+				t.Fatal(err)
 			}
-		}
-		if _, err := os.Stat(d.Log); !os.IsNotExist(err) {
-			t.Fatal("created business ledger", err)
-		}
-		if _, busy, err := journal.InspectWindowOwner(ctx, parent, meta.Owner.Resource); err != nil || busy {
-			t.Fatal("claim retained", err)
+			if err := journal.RetireConnectionWindow(ctx, parent, meta.Owner); err != nil {
+				t.Fatal(err)
+			}
+			meta.Target.Window.ProcessID = uint32(os.Getpid())
+			meta.Target.Window.ProcessStartedAt = uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+			meta.Owner.Resource = fmt.Sprintf("window/%d/%d/0", meta.Target.Window.ProcessID, meta.Target.Window.ProcessStartedAt)
+			if err := journal.BeginConnectionWindow(ctx, parent, meta.Owner, func() error {
+				return writeProjectJSON(ctx, p.path("connections", d.State.ID+".target.json"), meta)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(d.Log); err != nil {
+				t.Fatal(err)
+			}
+			a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: phase, Outcome: outcome, Budget: NewDurableBudget(time.Now().Add(-time.Hour), DefaultRecoveryBudget, false)}
+			if err := writeProjectJSON(ctx, p.activationPath(d.State.ID), a); err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range []func() (ProjectResult, error){
+				func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID, false) },
+				func() (ProjectResult, error) { return p.Status(d.State.ID) },
+				func() (ProjectResult, error) { return p.Resume(ctx, d.State.ID, false) },
+				func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID, false) },
+			} {
+				r, err := call()
+				if err != nil || !r.Closed || r.Complete || r.Stage != "activation_cancelled" || r.ReportState != "unavailable" || r.Continuation.Kind != "completed" {
+					t.Fatalf("%+v %v", r, err)
+				}
+			}
+			if _, err := os.Stat(d.Log); !os.IsNotExist(err) {
+				t.Fatal("created business ledger", err)
+			}
+			if _, busy, err := journal.InspectWindowOwner(ctx, parent, meta.Owner.Resource); err != nil || busy {
+				t.Fatal("claim retained", err)
+			}
 		}
 	}
 }

@@ -8,7 +8,7 @@ local runtime=string.rep("1",32)
 local actor={character="测试角色",realm="测试服",guid="Player-1-1"}
 local mailbox
 local function create(run)
-    mailbox={schema="lycheedev.mailbox.v1",runtime=run,release="test"}
+    mailbox={schema="Lycheedev mailbox protocol v1",runtime=run,release="test"}
     return ns.SlotProtocol.Create({runtime=run,build="1.2.3.4",product=client,release="test",
         mailbox=mailbox,
         actor=function()return actor end,encode=ns.CaptureWriter.Encode,
@@ -20,7 +20,7 @@ local engine=create(runtime)
 local serial=0
 local function message(action,ticket)
     serial=serial+1
-    return {schema="lycheedev.slot.v3",index=engine.NextSlot(),runtime=runtime,
+    return {schema="Lycheedev mailbox protocol v1",index=engine.NextSlot(),runtime=runtime,
         owner=string.rep("2",32),fence=1,nonce=string.format("%032x",serial),ticket=ticket or string.rep("3",32),
         action=action,guid=actor.guid,build="1.2.3.4"}
 end
@@ -60,15 +60,15 @@ local record,rejection,skip=replacement.Receive(binding.index,binding)
 assert(not record and rejection=="slot_skipped_foreign" and skip)
 assert(executions==1)
 -- Invalid-but-loaded files consume all remaining positions without reuse.
-for i=engine.NextSlot(),200 do assert(engine.Receive(i,nil)==nil) end
-assert(engine.NextSlot()==201)
-assert(engine.Receive(201,{})==nil)
+for i=engine.NextSlot(),500 do assert(engine.Receive(i,nil)==nil) end
+assert(engine.NextSlot()==501)
+assert(engine.Receive(501,{})==nil)
 
 
--- The 200-slot profile reserves control capacity and admits 46 complete jobs.
+-- The 500-slot profile reserves control capacity and admits 121 complete jobs.
 engine=create(runtime)
 assert(send(message("bind")).state=="bound")
-for i=1,46 do
+for i=1,121 do
     local ticket=string.format("%032x",10000+i)
     local prepare=message("prepare",ticket)
     prepare.code="return 1";prepare.budget=1;prepare.codeBytes=#prepare.code;prepare.codeChecksum=ns.MemoryProtocol.Checksum(prepare.code)
@@ -80,7 +80,7 @@ for i=1,46 do
     assert(send(release).state=="released")
     assert(mailbox.bodies[ticket]==nil)
 end
-assert(engine.NextSlot()==186)
+assert(engine.NextSlot()==486)
 assert(send(message("prepare",string.rep("e",32))).reason=="slot_capacity")
 -- A malformed foreign public header must stop rather than authorize skipping.
 local malformed=message("bind");malformed.runtime=string.rep("a",32);malformed.fence=0
@@ -90,4 +90,4 @@ local retained=0
 for nonce,record in pairs(mailbox.receipts)do
     retained=retained+1;assert(engine.Snapshot().receipts[nonce]==record)
 end
-assert(retained<=200 and next(mailbox.bodies)==nil,"mailbox exceeded existing retention")
+assert(retained<=500 and next(mailbox.bodies)==nil,"mailbox exceeded existing retention")

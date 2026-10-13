@@ -20,8 +20,11 @@ func legacySlotPoolFixture(t *testing.T) (string, SlotPool) {
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		for name, data := range slotStatic(i, pool.Version) {
-			data = []byte(strings.ReplaceAll(string(data), "memory-slot-v3", "memory-slot-v1"))
+		files := slotStatic(i, pool.Version)
+		// Freeze the published v1 TOC; current Interface additions must not
+		// silently change the historical installation being migrated.
+		files[fmt.Sprintf("Lychee Dev Slot %02d.toc", i)] = []byte(fmt.Sprintf("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot %02d\n## Version: %s\n## LoadOnDemand: 1\n## X-Lychee-Slot: %d\n## X-Lychee-Transport: memory-slot-v1\nPayload.lua\nLoader.lua\n", i, pool.Version, i))
+		for name, data := range files {
 			if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -47,15 +50,15 @@ func TestSlotPoolLegacyMigrationAndInspection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pool.Schema != slotPoolSchema || len(pool.Files) != 200 || pool.State != "ready" {
+	if pool.Schema != slotPoolSchema || len(pool.Files) != bridge.SlotCount || pool.State != "ready" {
 		t.Fatalf("not migrated: %+v", pool)
 	}
 	if _, err = InspectSlots(ctx, parent, legacy.Version); err != nil {
 		t.Fatal(err)
 	}
-	for _, i := range []int{1, 64, 65, 100, 200} {
+	for _, i := range []int{1, 64, 65, 200, 201, 500} {
 		data, err := os.ReadFile(filepath.Join(SlotDirectory(parent, i), fmt.Sprintf("Lychee Dev Slot %02d.toc", i)))
-		if err != nil || !strings.Contains(string(data), "memory-slot-v3") {
+		if err != nil || !strings.Contains(string(data), "Lycheedev mailbox protocol v1") {
 			t.Fatal("wrong static generation", i, err)
 		}
 	}
@@ -142,7 +145,7 @@ func TestSlotPoolMigrationResumesPartialStaticAndExtension(t *testing.T) {
 				write(1, true)
 				write(65, false)
 			case "all_files":
-				for i := 1; i <= 200; i++ {
+				for i := 1; i <= bridge.SlotCount; i++ {
 					write(i, true)
 				}
 			}
@@ -150,7 +153,7 @@ func TestSlotPoolMigrationResumesPartialStaticAndExtension(t *testing.T) {
 				t.Fatal("incomplete migration exposed as ready")
 			}
 			actual, err := installSlotPool(context.Background(), parent, "3.0.1")
-			if err != nil || actual.Schema != slotPoolSchema || len(actual.Files) != 200 || actual.PendingVersion != "" {
+			if err != nil || actual.Schema != slotPoolSchema || len(actual.Files) != bridge.SlotCount || actual.PendingVersion != "" {
 				t.Fatal("resume failed", err)
 			}
 			if _, err = InspectSlots(context.Background(), parent, "3.0.1"); err != nil {
@@ -240,11 +243,11 @@ func TestSlotPoolExpandedManifestAndUpperSlot(t *testing.T) {
 	if _, err = InspectSlots(ctx, parent, pool.Version); err != nil {
 		t.Fatal(err)
 	}
-	pool.Files[199] = SlotFile{PayloadHash: slotDigest([]byte(inertSlot))}
+	pool.Files[bridge.SlotCount-1] = SlotFile{PayloadHash: slotDigest([]byte(inertSlot))}
 	if err = saveSlotPool(ctx, parent, pool); err != nil {
 		t.Fatal(err)
 	}
-	e := bridge.SlotEnvelope{Schema: bridge.SlotSchema, Index: 200, Runtime: strings.Repeat("1", 32), Owner: strings.Repeat("2", 32), Nonce: strings.Repeat("3", 32), Ticket: strings.Repeat("4", 32), Fence: 1, Action: "bind"}
+	e := bridge.SlotEnvelope{Schema: bridge.SlotSchema, Index: bridge.SlotCount, Runtime: strings.Repeat("1", 32), Owner: strings.Repeat("2", 32), Nonce: strings.Repeat("3", 32), Ticket: strings.Repeat("4", 32), Fence: 1, Action: "bind"}
 	if err = PublishSlot(ctx, parent, pool.Version, "1/2", e); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +258,7 @@ func TestSlotPoolExpandedManifestAndUpperSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool, err = InspectSlots(ctx, parent, pool.Version)
-	if err != nil || pool.Files[199].Consumed || pool.Files[199].RetiredRuntime == "" {
+	if err != nil || pool.Files[bridge.SlotCount-1].Consumed || pool.Files[bridge.SlotCount-1].RetiredRuntime == "" {
 		t.Fatal("upper slot retirement failed", err)
 	}
 }
@@ -370,16 +373,16 @@ func TestSlotPoolRejectsCrossGenerationEnvelopes(t *testing.T) {
 	}
 }
 
-func TestSlotPoolPrevious200MetadataMigration(t *testing.T) {
-	ctx := context.Background()
+func slotPool200Fixture(t *testing.T, schema, version string) (string, SlotPool) {
+	t.Helper()
 	parent := t.TempDir()
-	pool := SlotPool{Schema: previousSlotPoolSchema, Version: "3.0.2", State: "ready", Files: make([]SlotFile, bridge.SlotCount)}
-	for i := 1; i <= bridge.SlotCount; i++ {
+	pool := SlotPool{Schema: schema, Version: version, State: "ready", Files: make([]SlotFile, 200)}
+	for i := 1; i <= len(pool.Files); i++ {
 		dir := SlotDirectory(parent, i)
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		files := slotStaticForSchema(i, pool.Version, previousSlotPoolSchema)
+		files := slotStaticForSchema(i, pool.Version, schema)
 		files["Payload.lua"] = []byte(inertSlot)
 		for name, data := range files {
 			if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
@@ -388,9 +391,15 @@ func TestSlotPoolPrevious200MetadataMigration(t *testing.T) {
 		}
 		pool.Files[i-1].PayloadHash = slotDigest([]byte(inertSlot))
 	}
-	if err := saveSlotPool(ctx, parent, pool); err != nil {
+	if err := saveSlotPool(context.Background(), parent, pool); err != nil {
 		t.Fatal(err)
 	}
+	return parent, pool
+}
+
+func TestSlotPoolPrevious200MetadataMigration(t *testing.T) {
+	ctx := context.Background()
+	parent, pool := slotPool200Fixture(t, previousSlotPoolSchema, "3.0.2")
 	if _, err := InspectSlots(ctx, parent, pool.Version); err == nil {
 		t.Fatal("old 200-slot pool admitted")
 	}
@@ -400,6 +409,59 @@ func TestSlotPoolPrevious200MetadataMigration(t *testing.T) {
 	}
 	if _, err := InspectSlots(ctx, parent, "3.0.3"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSlotPool200ExpansionSameVersion(t *testing.T) {
+	for _, mode := range []string{"ready", "partial_extension", "pending", "foreign_extension"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			parent, pool := slotPool200Fixture(t, slotPoolSchema, "3.1.2")
+			if _, err := InspectSlots(ctx, parent, pool.Version); err == nil {
+				t.Fatal("200-slot installation admitted for 500-slot runtime")
+			}
+			if err := RepairSlotBootstrap(ctx, parent, pool.Version); err == nil {
+				t.Fatal("bootstrap repair admitted 200-slot installation")
+			}
+			switch mode {
+			case "partial_extension":
+				pool.SourceSchema, pool.Schema = pool.Schema, previousSlotPoolMigrationSchema
+				pool.State, pool.PendingVersion = "upgrading", pool.Version
+				if err := os.Mkdir(SlotDirectory(parent, 201), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(SlotDirectory(parent, 201), "Loader.lua"), slotStatic(201, pool.Version)["Loader.lua"], 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "pending":
+				pool.Files[0].PendingHash = pool.Files[0].PayloadHash
+			case "foreign_extension":
+				if err := os.Mkdir(SlotDirectory(parent, 500), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := saveSlotPool(ctx, parent, pool); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.ReadFile(filepath.Join(parent, slotMarker))
+			next, err := installSlotPool(ctx, parent, pool.Version)
+			if mode == "pending" || mode == "foreign_extension" {
+				if err == nil {
+					t.Fatal("unresolved or foreign installation overwritten")
+				}
+				after, _ := os.ReadFile(filepath.Join(parent, slotMarker))
+				if string(before) != string(after) {
+					t.Fatal("rejected expansion changed ledger")
+				}
+				return
+			}
+			if err != nil || len(next.Files) != 500 || next.State != "ready" {
+				t.Fatal("200-slot expansion failed", err)
+			}
+			if _, err := InspectSlots(ctx, parent, pool.Version); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 func TestSlotPoolOldMigrationMarkerIsRejectedUnchanged(t *testing.T) {

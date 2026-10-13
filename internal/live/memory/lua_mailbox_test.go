@@ -78,7 +78,7 @@ func TestLuaMailboxPreservesReadCauses(t *testing.T) {
 }
 
 func TestLuaMailboxNamedRecordsWithoutScanning(t *testing.T) {
-	for _, label := range []string{"identity", "input", "receipt", "confirmation", "body"} {
+	for _, label := range []string{"identity", "input", "receipt", "confirmation", "body", "bootstrap"} {
 		t.Run(label, func(t *testing.T) {
 			f := newMailboxFixture(t, 0x140000000, 0x200000000)
 			result, err := f.reader().Lookup(context.Background(), f.selectors[label])
@@ -270,6 +270,9 @@ func TestLuaMailboxIdentityAndLayoutFailClosed(t *testing.T) {
 			result, err := f.reader().Lookup(context.Background(), f.selectors["input"])
 			if !errors.Is(err, ErrMailboxUnavailable) || len(result.Records) != 0 || f.regions != 0 {
 				t.Fatal("invalid identity/layout accepted", err)
+			}
+			if errors.Is(err, ErrMailboxIncompatible) != (tc.name == "schema" || tc.name == "release") {
+				t.Fatal("layout failure mistaken for a manual protocol upgrade", err)
 			}
 		})
 	}

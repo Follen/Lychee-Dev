@@ -518,8 +518,8 @@ func TestCDNFilesOpenArchiveFallbackAuthenticatesIndexAndPage(t *testing.T) {
 	if !bytes.Equal(got, encoded) {
 		t.Fatalf("archive object = %x, want %x", got, encoded)
 	}
-	if len(transport.callsFor(indexKey+".index")) < 3 {
-		t.Fatalf("index requests = %#v, want authenticated footer, TOC and page", transport.callsFor(indexKey+".index"))
+	if calls := transport.callsFor(indexKey + ".index"); len(calls) != 2 || calls[1].offset != 0 || calls[1].length != int64(len(index)) {
+		t.Fatalf("index requests = %#v, want size discovery and one complete authenticated small index", calls)
 	}
 }
 

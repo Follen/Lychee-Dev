@@ -46,10 +46,12 @@ docs/toolkit/       design, status, regression, release contracts
 ## Non-negotiable acceptance criteria
 
 1. **Zero cost while disabled.** Opt-in addon features create no frames, no
-   events, no hooks until enabled. The owner-approved r4 bootstrap foundation
-   is separately budgeted: one loader, one binding owner, three binding buttons;
-   no idle events, hooks, timers or OnUpdate after registration. The opted-in
-   reload beacon has a hard 45-second lifetime and stops on receiver wake.
+   events, no hooks until enabled. Bootstrap uses one loader and two formal
+   Bindings.xml actions; binding registration may use one one-shot login/combat
+   event frame, with no idle events, timers or OnUpdate after registration.
+   Native Mailbox input sampling and focused-EditBox forwarding are explicit
+   enabled-only exceptions; bridge-off removes their events, OnUpdate and script
+   wrapper. No native optical signal or reload beacon is created.
 2. **Zero behavior change without opt-in.** Only narrowly scoped bug fixes may
    change existing behavior.
 3. **Event-driven and bounded.** No polling gates; bounded queues, budgets and
@@ -61,10 +63,12 @@ docs/toolkit/       design, status, regression, release contracts
 
 ## Client matrix
 
-Retail `120100`, Classic `50504`, Titan `38002` are the 2.0 acceptance matrix.
-Forever `16001` code paths stay in the tree but are unverified and excluded
-from acceptance. A client folder is a location, not an identity: read
-`.flavor.info` and `version.txt` before trusting a directory name.
+The current product matrix is Retail, Classic, Classic Era, Titan, Forever Asia
+beta, Forever CN beta and Anniversary. Record real-client acceptance separately
+for each product and protocol revision in `docs/toolkit/implementation-status.md`;
+historical passes do not verify the current protocol. A client folder is a
+location, not an identity: read the available `.flavor.info` and `version.txt`
+metadata before trusting a directory name.
 
 ## CLI and command surface
 
@@ -82,13 +86,23 @@ from acceptance. A client folder is a location, not an identity: read
 
 ## Live (game) rules
 
-Native `CON-...` connections use the memory/200-slot architecture described in
-`docs/toolkit/live-slot-routing-2026-09-29.md` (current slot allocation and migration),
-`docs/toolkit/live-input-architecture-2026-09-28.md` and the current
-`skills/lycheedev/references/live-investigation.md`. Those contracts govern
-native connection input, recovery, reload, disconnect and installation.
+Native `CON-...` connections use the memory/500-slot architecture described in
+`docs/toolkit/lycheedev-mailbox-protocol-v1.md` (current input and reload contract),
+`docs/toolkit/live-500-slots-3.2.0.md` (current capacity and installation migration),
+and `skills/lycheedev/references/live-investigation.md`. Those contracts govern
+native connection input, recovery, reload, disconnect and installation. The older
+slot-routing and input-architecture documents retain historical designs and
+evidence; current protocol rules take precedence.
 The receiver/QR `OP-...` and `BTP-...` rules below remain historical recovery
 contracts; do not apply their keys, queue or ACK sequence to native connections.
+Native defaults are Ctrl+Alt+F12 (execute) and Ctrl+Alt+F11 (reload), saved as
+normal bindings and advertised from their actual effective assignments. An
+ordinary focused EditBox forwards only these actions; native input uses zero Esc.
+`live doctor` is read-only by default; `--fix` uses the existing managed installer
+and original CON recovery. Top-level `doctor` with a live target shares these
+checks. The early bootstrap publishes independent startup diagnostics. A prior
+two-key runtime with verified fresh INPUT may authorize one upgrade reload using
+its actual key. With no compatible INPUT, activation waits for one manual reload.
 
 - The dedicated receiver is the machine input path, including first-contact
   identify/connect/reset. Its minimal wake entry is available when the addon

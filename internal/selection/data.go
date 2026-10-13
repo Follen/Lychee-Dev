@@ -11,6 +11,12 @@ var ErrDataProductBuild = errors.New("selection.data_product_build_mismatch")
 // ValidateDataRelease guards reusable publishing slots using the verified
 // series. Stable product endpoints can advance independently of this baseline.
 func ValidateDataRelease(product, fullBuild string) error {
+	if profile, ok := dataProductProfile(product); ok {
+		if profile.ReusedSlot && (!build(fullBuild) || !strings.HasPrefix(fullBuild, profile.BuildSeries+".")) {
+			return fmt.Errorf("%w: %s slot %s serves %s; verified series is %s", ErrDataProductBuild, product, profile.ProductCode, fullBuild, profile.BuildSeries)
+		}
+		return nil
+	}
 	for _, baseline := range VerifiedClientBaselines() {
 		if baseline.Product == product {
 			if baseline.DataSlot != "" && (!build(fullBuild) || !strings.HasPrefix(fullBuild, baseline.BuildSeries+".")) {
@@ -44,6 +50,9 @@ func DataIdentity(pin DataPin) (product string, locale uint32, err error) {
 // published under. The installation flavor code and the data slot differ for
 // tracks that reuse another product's slot (Forever on wow_classic_beta).
 func DataProductSlot(product string) (string, error) {
+	if profile, ok := dataProductProfile(product); ok {
+		return profile.ProductCode, nil
+	}
 	for _, baseline := range VerifiedClientBaselines() {
 		if baseline.Product == product {
 			if baseline.DataSlot != "" {
@@ -57,6 +66,9 @@ func DataProductSlot(product string) (string, error) {
 
 // DataProduct translates a toolkit track without deriving identity from a path.
 func DataProduct(product string) (string, error) {
+	if profile, ok := dataProductProfile(product); ok {
+		return profile.ProductCode, nil
+	}
 	for _, baseline := range VerifiedClientBaselines() {
 		if baseline.Product == product {
 			return baseline.ProductCode, nil

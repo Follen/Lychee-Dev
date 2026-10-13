@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -19,8 +20,11 @@ const slotMarker = ".lycheedev-slots.json"
 const slotPoolSchema = "lycheedev.slots.v3"
 const previousSlotPoolSchema = "lycheedev.slots.v2"
 const legacySlotPoolSchema = "lycheedev.slots.v1"
-const slotPoolMigrationSchema = "lycheedev.slots.migration.v3"
+const slotPoolMigrationSchema = "lycheedev.slots.migration.v4"
+const previousSlotPoolMigrationSchema = "lycheedev.slots.migration.v3"
 const slotPoolManifestLimit = 256 << 10
+const slotInterfaces = "120100, 50504, 38002, 16001, 11509"
+const previousSlotInterfaces = "120100, 50504, 38002, 16001"
 
 const inertSlot = "LycheeDevSlotEnvelope = nil\n"
 
@@ -53,20 +57,52 @@ func slotStatic(index int, version string) map[string][]byte {
 	return slotStaticForSchema(index, version, slotPoolSchema)
 }
 func slotStaticForSchema(index int, version, schema string) map[string][]byte {
-	transport := "memory-slot-v3"
+	transport := "Lycheedev mailbox protocol v1"
 	if schema == legacySlotPoolSchema {
 		transport = "memory-slot-v1"
 	} else if schema == previousSlotPoolSchema {
 		transport = "memory-slot-v2"
 	}
 	name := fmt.Sprintf("Lychee Dev Slot %02d", index)
+	interfaces := previousSlotInterfaces
+	if schema == slotPoolSchema {
+		interfaces = slotInterfaces
+	}
 	return map[string][]byte{
-		name + ".toc": []byte(fmt.Sprintf("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot %02d\n## Version: %s\n## LoadOnDemand: 1\n## X-Lychee-Slot: %d\n## X-Lychee-Transport: %s\nPayload.lua\nLoader.lua\n", index, version, index, transport)),
+		name + ".toc": []byte(fmt.Sprintf("## Interface: %s\n## Title: Lychee Dev input slot %02d\n## Version: %s\n## LoadOnDemand: 1\n## X-Lychee-Slot: %d\n## X-Lychee-Transport: %s\nPayload.lua\nLoader.lua\n", interfaces, index, version, index, transport)),
 		"Loader.lua":  []byte(fmt.Sprintf("local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.SlotRuntime then ns.SlotRuntime.Receive(%d, envelope) end\n", index)),
 	}
 }
 
-// RepairSlotBootstrap removes only the exact pre-release dependency declaration.
+// Adding an Interface does not change the slot wire protocol. Recognize the
+// exact previous TOC bytes so existing clients remain readable; installation
+// migrates that declaration under the existing maintenance/upgrade contract.
+func slotStaticMatches(name string, actual, want []byte) bool {
+	if bytes.Equal(actual, want) {
+		return true
+	}
+	if !strings.HasSuffix(name, ".toc") {
+		return false
+	}
+	previous := bytes.Replace(want, []byte("## Interface: "+slotInterfaces+"\n"), []byte("## Interface: "+previousSlotInterfaces+"\n"), 1)
+	if bytes.Equal(actual, previous) {
+		return true
+	}
+	// Recognize exact pre-Mailbox-Protocol-V1 TOCs for managed installation
+	// migration only. Payload schema validation still rejects the old protocol.
+	for _, toc := range [][]byte{want, previous} {
+		for _, retired := range []string{"memory-slot-v3", "lycheedev-mailbox-v1"} {
+			old := bytes.Replace(toc, []byte("## X-Lychee-Transport: Lycheedev mailbox protocol v1\n"), []byte("## X-Lychee-Transport: "+retired+"\n"), 1)
+			if bytes.Equal(actual, old) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RepairSlotBootstrap updates recognized prior TOC declarations and removes
+// the exact pre-release dependency declaration.
 // Payloads, reservations and loaders are preserved. Call under the installation
 // publication lease; a client must refresh its addon catalog before retrying.
 // The loader is passive unless the main runtime explicitly expects this slot.
@@ -75,7 +111,7 @@ func RepairSlotBootstrap(ctx context.Context, parent, version string) error {
 	if err != nil {
 		return err
 	}
-	if pool.Schema != slotPoolSchema || pool.State != "ready" || pool.Version != version {
+	if pool.Schema != slotPoolSchema || len(pool.Files) != bridge.SlotCount || pool.State != "ready" || pool.Version != version {
 		return ErrInstallation
 	}
 	type replacement struct {
@@ -97,11 +133,11 @@ func RepairSlotBootstrap(ctx context.Context, parent, version string) error {
 			if e != nil {
 				return e
 			}
-			if slotDigest(actual) == slotDigest(want) {
+			if bytes.Equal(actual, want) {
 				continue
 			}
-			old := strings.Replace(string(want), "## LoadOnDemand: 1\n", "## LoadOnDemand: 1\n## Dependencies: Lychee Dev\n", 1)
-			if !strings.HasSuffix(name, ".toc") || string(actual) != old {
+			withoutDependency := bytes.Replace(actual, []byte("## LoadOnDemand: 1\n## Dependencies: Lychee Dev\n"), []byte("## LoadOnDemand: 1\n"), 1)
+			if !strings.HasSuffix(name, ".toc") || !slotStaticMatches(name, withoutDependency, want) {
 				return ErrInstallation
 			}
 			changes = append(changes, replacement{path, want})
@@ -147,13 +183,13 @@ func validSlotPoolShape(pool SlotPool) bool {
 	}
 	switch pool.Schema {
 	case slotPoolSchema:
-		return len(pool.Files) == bridge.SlotCount && pool.SourceSchema == ""
+		return (len(pool.Files) == bridge.SlotCount || len(pool.Files) == 200) && pool.SourceSchema == ""
 	case legacySlotPoolSchema:
 		return len(pool.Files) == 64 && pool.State == "ready" && pool.SourceSchema == ""
 	case previousSlotPoolSchema:
-		return len(pool.Files) == bridge.SlotCount && pool.State == "ready" && pool.SourceSchema == ""
-	case slotPoolMigrationSchema:
-		return pool.State == "upgrading" && pool.PendingVersion != "" && (pool.SourceSchema == legacySlotPoolSchema && len(pool.Files) == 64 || (pool.SourceSchema == previousSlotPoolSchema || pool.SourceSchema == slotPoolSchema) && len(pool.Files) == bridge.SlotCount)
+		return len(pool.Files) == 200 && pool.State == "ready" && pool.SourceSchema == ""
+	case slotPoolMigrationSchema, previousSlotPoolMigrationSchema:
+		return pool.State == "upgrading" && pool.PendingVersion != "" && (pool.SourceSchema == legacySlotPoolSchema && len(pool.Files) == 64 || pool.SourceSchema == previousSlotPoolSchema && len(pool.Files) == 200 || pool.SourceSchema == slotPoolSchema && (len(pool.Files) == 200 || len(pool.Files) == bridge.SlotCount))
 	}
 	return false
 }
@@ -229,7 +265,7 @@ func installSlotPool(ctx context.Context, parent, version string) (SlotPool, err
 		}
 	} else if err != nil {
 		return pool, err
-	} else if pool.State == "upgrading" || pool.State == "ready" && (pool.Version != version || pool.Schema != slotPoolSchema) {
+	} else if pool.State == "upgrading" || pool.State == "ready" && (pool.Version != version || pool.Schema != slotPoolSchema || len(pool.Files) != bridge.SlotCount) {
 		return upgradeSlotPool(ctx, parent, pool, version)
 	} else if pool.State != "ready" && pool.State != "installing" {
 		return pool, ErrInstallation
@@ -247,6 +283,9 @@ func installSlotPool(ctx context.Context, parent, version string) (SlotPool, err
 			actual, e := readSlotFile(path, 16384)
 			if e == nil {
 				if slotDigest(actual) != slotDigest(want) {
+					if pool.State == "ready" && slotStaticMatches(name, actual, want) {
+						return upgradeSlotPool(ctx, parent, pool, version)
+					}
 					return pool, fmt.Errorf("%w: modified slot file", ErrInstallation)
 				}
 			} else if errors.Is(e, os.ErrNotExist) && pool.State == "installing" {
@@ -283,7 +322,7 @@ func installSlotPool(ctx context.Context, parent, version string) (SlotPool, err
 	if err = saveSlotPool(ctx, parent, pool); err != nil {
 		return pool, err
 	}
-	if pool.Schema != slotPoolSchema || pool.Version != version {
+	if pool.Schema != slotPoolSchema || pool.Version != version || len(pool.Files) != bridge.SlotCount {
 		return upgradeSlotPool(ctx, parent, pool, version)
 	}
 	return pool, nil
@@ -317,6 +356,14 @@ func upgradeSlotPool(ctx context.Context, parent string, pool SlotPool, version 
 	}
 	if pool.State != "upgrading" || pool.PendingVersion != version {
 		return pool, ErrConflict
+	}
+	// Old installers must not finish a 500-slot extension as a 200-slot pool.
+	// Resume their existing intent under the new migration marker first.
+	if pool.Schema == previousSlotPoolMigrationSchema {
+		pool.Schema = slotPoolMigrationSchema
+		if err := saveSlotPool(ctx, parent, pool); err != nil {
+			return pool, err
+		}
 	}
 	for _, entry := range pool.Files {
 		if entry.PendingHash != "" || entry.Nonce != "" && !entry.Consumed && entry.RetiredRuntime == "" && !entry.RetiredProcess {
@@ -399,7 +446,9 @@ func upgradeSlotPool(ctx context.Context, parent string, pool SlotPool, version 
 			if existing && pool.Schema == slotPoolMigrationSchema && name != "Payload.lua" {
 				legacyTarget = slotDigest(slotStaticForSchema(i, version, pool.SourceSchema)[name])
 			}
-			if allowed == "" || hash != allowed && hash != legacyTarget {
+			previousStatic := existing && name != "Payload.lua" && slotStaticMatches(name, actual, previous[name])
+			legacyStatic := existing && pool.Schema == slotPoolMigrationSchema && name != "Payload.lua" && slotStaticMatches(name, actual, slotStaticForSchema(i, version, pool.SourceSchema)[name])
+			if allowed == "" || hash != allowed && hash != legacyTarget && !previousStatic && !legacyStatic {
 				return pool, ErrInstallation
 			}
 			writes = append(writes, replacement{path, want})
@@ -440,7 +489,7 @@ func InspectSlots(ctx context.Context, parent, version string) (SlotPool, error)
 	if err != nil {
 		return pool, err
 	}
-	if pool.Schema != slotPoolSchema {
+	if pool.Schema != slotPoolSchema || len(pool.Files) != bridge.SlotCount {
 		return pool, ErrInstallation
 	}
 	return inspectSlotPool(ctx, parent, pool, version)
@@ -469,7 +518,7 @@ func inspectSlotPool(ctx context.Context, parent string, pool SlotPool, version 
 			if e != nil {
 				return pool, e
 			}
-			if slotDigest(actual) != slotDigest(want) {
+			if !slotStaticMatches(name, actual, want) {
 				return pool, ErrInstallation
 			}
 		}

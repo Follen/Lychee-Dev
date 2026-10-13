@@ -16,7 +16,7 @@ func TestAvailabilityRejectsReusedSlotAndExposesTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range got.Products {
-		if p.Product == "forever" && (len(p.Rows) != 0 || p.Error == "") {
+		if strings.HasPrefix(p.Product, "forever-") && (len(p.Rows) != 0 || p.Error == "") {
 			t.Errorf("foreign slot build advertised as Forever: %+v", p)
 		}
 		if p.Product == "retail" {
@@ -56,14 +56,14 @@ func TestAvailabilityForeverRequestsPublishingSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requested) != len(VerifiedClientBaselines()) {
+	if len(requested) != len(DataProducts()) {
 		t.Fatalf("unexpected request count: %v", requested)
 	}
 	for _, product := range got.Products {
-		if product.Product != "forever" {
+		if product.Product != "forever-asia-beta" {
 			continue
 		}
-		if product.ProductCode != "wow_forever" || product.Locator != "https://us.version.battle.net/wow_classic_beta/versions" || product.Error != "" || len(product.Rows) != 1 || product.Rows[0].FullBuild != "1.60.1.70009" {
+		if product.ProductCode != "wow_classic_beta" || product.Locator != "https://us.version.battle.net/wow_classic_beta/versions" || product.Error != "" || len(product.Rows) != 1 || product.Rows[0].FullBuild != "1.60.1.70009" {
 			t.Fatalf("Forever discovery = %+v; actual requests = %v", product, requested)
 		}
 		return
@@ -97,7 +97,7 @@ func TestListRemoteAvailabilityParsesAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRemoteAvailability() error = %v", err)
 	}
-	if len(calls) != 4 {
+	if len(calls) != 7 {
 		t.Fatalf("bounded listing made %d fetches: %v", len(calls), calls)
 	}
 	wow := result.Products[0]

@@ -76,7 +76,7 @@ func (*stopReconcilePeer) Consumed(context.Context, bridge.SlotEnvelope) error {
 
 func stopReconcileFixture(t *testing.T) (*Driver, *stopReconcilePeer) {
 	t.Helper()
-	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 4, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: "3.0.0"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 4, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "120100", Product: "retail", Release: "3.0.0"}
 	p := &stopReconcilePeer{current: i}
 	d, err := New(filepath.Join(t.TempDir(), "connections", "test.jsonl"), p, i)
 	if err != nil {
@@ -115,8 +115,8 @@ func TestStopBeforePrepareNeverStartsBusiness(t *testing.T) {
 
 func TestStopBeforePrepareAtCapacityDoesNotReload(t *testing.T) {
 	d, p := stopReconcileFixture(t)
-	d.State.Identity.NextSlot = 186
-	p.current.NextSlot = 186
+	d.State.Identity.NextSlot = 486
+	p.current.NextSlot = 486
 	if err := d.PrepareRequest(context.Background(), "stop-at-capacity", "return 1", 5, "opaque"); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestStopBeforePrepareAtCapacityDoesNotReload(t *testing.T) {
 
 func TestAutomaticCapacityReloadContinuesOriginalRequest(t *testing.T) {
 	d, p := stopReconcileFixture(t)
-	d.State.Identity.NextSlot = 186
+	d.State.Identity.NextSlot = 486
 	if err := d.PrepareRequest(context.Background(), "capacity-original", "return 1", 5, "opaque"); err != nil {
 		t.Fatal(err)
 	}

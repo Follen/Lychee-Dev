@@ -24,6 +24,12 @@ const LuaMailboxKnownAnchorRVA uint64 = 0x6749b4
 // resolver. This is a second code recipe, not a copied Retail root address.
 const ForeverLuaMailboxRootRecipeID = "forever-lua-state-root-runscript-rip-v1"
 const ForeverLuaMailboxRootPattern = "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ?? 48 8b cb 4c 8b 38 e8 ?? ?? ?? ?? 49 8b d7 48 8b cb 44 8b 40 08 e8 ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ??"
+
+// CN Forever 70338 preserves the Lua context/getter sequence but allocates
+// its saved context pointer to rbp. Keep the register relationship exact;
+// only RIP displacements vary, as in the original Forever recipe.
+const ForeverContextLuaMailboxRootRecipeID = "forever-lua-state-context-rip-v1"
+const ForeverContextLuaMailboxRootPattern = "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ?? 48 8b cb 48 8b 28 e8 ?? ?? ?? ?? 48 8b d5 48 8b cb 44 8b 40 08 e8 ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ??"
 const ForeverLuaMailboxExecutableSHA256 = "3d2fbfb0a20567097fa9cedbeb55a8fed895cead6c1ff86103c89ee96f5ff58f"
 const ForeverLuaMailboxKnownAnchorRVA uint64 = 0x75a69d
 const ForeverLuaMailboxRootRVA uint64 = 0x7b780b8
@@ -176,7 +182,7 @@ func luaRootTarget(anchor uint64, code []byte, size uint64, sections []luaRootSe
 	return luaRootRecipeTarget(anchor, code, size, sections, retailLuaRootOperands)
 }
 func luaRootRecipeTarget(anchor uint64, code []byte, size uint64, sections []luaRootSection, operands []luaRootOperand) (uint64, error) {
-	// Both recipes start with a seven-byte RIP-relative state pointer load.
+	// Each recipe starts with a seven-byte RIP-relative state pointer load.
 	if anchor > size || uint64(len(code)) > size-anchor {
 		return 0, luaRootError("anchor_range")
 	}
@@ -385,7 +391,12 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 	}
 	pattern, mask := luaRootPattern()
 	secondPattern, secondMask := parseLuaRootPattern(ForeverLuaMailboxRootPattern)
-	recipes := []recipe{{LuaMailboxRootRecipeID, pattern, mask, retailLuaRootOperands}, {ForeverLuaMailboxRootRecipeID, secondPattern, secondMask, foreverLuaRootOperands}}
+	contextPattern, contextMask := parseLuaRootPattern(ForeverContextLuaMailboxRootPattern)
+	recipes := []recipe{
+		{LuaMailboxRootRecipeID, pattern, mask, retailLuaRootOperands},
+		{ForeverLuaMailboxRootRecipeID, secondPattern, secondMask, foreverLuaRootOperands},
+		{ForeverContextLuaMailboxRootRecipeID, contextPattern, contextMask, foreverLuaRootOperands},
+	}
 	bind := func(anchor, root uint64, code []byte, method string, selectedRecipe recipe) (LuaRootBinding, error) {
 		rootGuard, anchorGuard, rootAfter := make([]byte, 8), make([]byte, len(code)), make([]byte, 8)
 		if err := r.exact(root, rootGuard); err != nil {
@@ -418,27 +429,42 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 		hash := sha256.Sum256(code)
 		return LuaRootBinding{RootRVA: root, AnchorRVA: anchor, ExecutableSHA256: executableSHA256, Method: method, Evidence: LuaRootEvidence{RecipeID: selectedRecipe.id, PatternBytes: len(selectedRecipe.pattern), AnchorSHA256: hex.EncodeToString(hash[:]), HeaderBytes: r.headers, ScannedBytes: r.scanned, ModuleReadBytes: r.total, ReadCalls: r.calls, StableRootGuard: true}, proof: &luaRootBindingProof{base, size, root, anchor, executableSHA256, method}}, nil
 	}
-	if executableSHA256 == ForeverLuaMailboxExecutableSHA256 {
-		anchor := ForeverLuaMailboxKnownAnchorRVA
-		if anchor < text.start || anchor > text.end || uint64(len(secondPattern)) > text.end-anchor {
+	// Protected Forever builds cannot provide a complete .text scan. Select
+	// only an independently captured site for this exact file identity, then
+	// verify every runtime instruction byte and decode its RIP operand anew.
+	for _, known := range []struct {
+		hash, code   string
+		anchor, root uint64
+		recipe       int
+	}{
+		{ForeverLuaMailboxExecutableSHA256, foreverLuaMailboxAnchorHex, ForeverLuaMailboxKnownAnchorRVA, ForeverLuaMailboxRootRVA, 1},
+		// Asia Forever 70338: both observed context callers use this root.
+		// Sparse runtime coverage does not establish full-text uniqueness.
+		{"cfe26cc200fda36407736c7e6b5575a1f2ca2b774c8176529814e32d51312185", "488b1d66fb2807488bcbe85613e303488bcb488b28e84b13e303488bd5488bcb448b4008e84c40e303488bcbe83413e303", 0x764b4b, 0x79f46b8, 2},
+	} {
+		if executableSHA256 != known.hash {
+			continue
+		}
+		anchor, selectedRecipe := known.anchor, recipes[known.recipe]
+		if anchor < text.start || anchor > text.end || uint64(len(selectedRecipe.pattern)) > text.end-anchor {
 			return empty, luaRootError("known_anchor_range")
 		}
-		code := make([]byte, len(secondPattern))
+		code := make([]byte, len(selectedRecipe.pattern))
 		if err := r.exact(anchor, code); err != nil {
 			return empty, err
 		}
-		expected, _ := hex.DecodeString(foreverLuaMailboxAnchorHex)
+		expected, _ := hex.DecodeString(known.code)
 		if !bytes.Equal(code, expected) {
 			return empty, luaRootError("known_anchor_bytes")
 		}
-		root, err := luaRootRecipeTarget(anchor, code, imageSize, sections, foreverLuaRootOperands)
+		root, err := luaRootRecipeTarget(anchor, code, imageSize, sections, selectedRecipe.operands)
 		if err != nil {
 			return empty, err
 		}
-		if root != ForeverLuaMailboxRootRVA {
+		if root != known.root {
 			return empty, luaRootError("known_root_target")
 		}
-		return bind(anchor, root, code, "known_anchor", recipes[1])
+		return bind(anchor, root, code, "known_anchor", selectedRecipe)
 	}
 	if executableSHA256 == RetailLuaMailboxExecutableSHA256 && LuaMailboxKnownAnchorRVA >= text.start && LuaMailboxKnownAnchorRVA <= text.end && uint64(len(pattern)) <= text.end-LuaMailboxKnownAnchorRVA {
 		code := make([]byte, len(pattern))
@@ -457,9 +483,11 @@ func ResolveLuaMailboxRoot(ctx context.Context, base, size uint64, executableSHA
 	var tail, selected []byte
 	var anchor uint64
 	var selectedRecipe recipe
-	maxPattern := len(pattern)
-	if len(secondPattern) > maxPattern {
-		maxPattern = len(secondPattern)
+	maxPattern := 0
+	for _, candidate := range recipes {
+		if len(candidate.pattern) > maxPattern {
+			maxPattern = len(candidate.pattern)
+		}
 	}
 	matches := 0
 	for at := text.start; at < text.end; {

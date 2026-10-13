@@ -13,8 +13,9 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
-const IdentitySchema = "lycheedev.slot.identity.v2"
-const InputSchema = "lycheedev.input.v3"
+const IdentitySchema = bridge.MailboxSchema
+const InputSchema = bridge.MailboxSchema
+const legacyIdentitySchema = "lycheedev.slot.identity.v2"
 
 var ErrPending = errors.New("live.channel_pending")
 var ErrPublicationPending = errors.Join(ErrPending, errors.New("live.channel_shared_publication_pending"))
@@ -74,7 +75,7 @@ func tokenBytes(s string) ([16]byte, error) {
 	return b, nil
 }
 func (i Identity) Validate() error {
-	if i.Schema != IdentitySchema {
+	if i.Schema != IdentitySchema && !(i.Schema == legacyIdentitySchema && upgradeInputCapability(i.InputState)) && !(i.Schema == bridge.PreviousMailboxSchema && i.InputState == bridge.PreviousMailboxSchema) {
 		return errors.New("live.channel_identity_schema_invalid")
 	}
 	return i.validateFields()

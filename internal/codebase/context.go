@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -101,19 +100,19 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 
 	result := ContextResult{Repository: pin.Repository, Product: pin.Product, Commit: pin.ExactCommit, Snapshot: snapshot, Snippets: []ContextSnippet{}, Relations: []ResearchRelation{}, LoadEvidence: []ResearchRelation{}, Candidates: []SymbolMatch{}}
 	if query.Depth < 0 || query.Depth > 4 {
-		return result, errors.New("codebase.invalid_context_depth")
+		return result, fmt.Errorf("%w: codebase.invalid_context_depth", ErrInvalidQuery)
 	}
 	if query.MaxBytes == 0 {
 		query.MaxBytes = 16 << 10
 	}
 	if query.MaxBytes < 1 || query.MaxBytes > 1<<20 {
-		return result, errors.New("codebase.invalid_context_bytes")
+		return result, fmt.Errorf("%w: codebase.invalid_context_bytes", ErrInvalidQuery)
 	}
 	if query.MaxLines == 0 {
 		query.MaxLines = 80
 	}
 	if query.MaxLines < 1 || query.MaxLines > 2000 {
-		return result, errors.New("codebase.invalid_context_lines")
+		return result, fmt.Errorf("%w: codebase.invalid_context_lines", ErrInvalidQuery)
 	}
 	limit, err := researchLimit(query.Limit)
 	if err != nil {
@@ -203,7 +202,7 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 					candidates[r.Symbol.Name] = append(candidates[r.Symbol.Name], *r.Symbol)
 				}
 				return nil
-			})
+			}, nameLookupKeys(calleeNames, recordName)...)
 			if err != nil {
 				return result, err
 			}
@@ -243,7 +242,7 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 				}
 			}
 			return nil
-		})
+		}, recordLookupKey{recordLoadTarget, loadTarget})
 		if err != nil {
 			return result, err
 		}
@@ -278,7 +277,7 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 				sites = append(sites, site{s.Path, max(s.Line-2, 1), s.Line + 2, "static-depth:" + strconv.Itoa(depth)})
 				next[s.Name], next[s.Target] = true, true
 				return nil
-			})
+			}, nameLookupKeys(frontier, recordName, recordTarget)...)
 			if err != nil {
 				return result, err
 			}

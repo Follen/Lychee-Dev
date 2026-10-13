@@ -67,7 +67,7 @@ func dataInstallationRoot(ctx context.Context, directory, product, fullBuild str
 		}
 		return "", "", err
 	}
-	if client.ProductCode != product || client.FullBuild != fullBuild {
+	if client.ProductCode != product && client.CatalogProduct != product || client.FullBuild != fullBuild {
 		return "", "", ErrPinnedBuildChanged
 	}
 	if client.CatalogProduct != "" {

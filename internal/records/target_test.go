@@ -95,7 +95,7 @@ func TestResolveLocalTargetForeverReusableDataSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Client.ProductCode != "wow_forever" || result.Pin.Data.Product != "forever" || result.Pin.Data.BuildConfig != fixture.buildKey {
+	if result.Client.ProductCode != "wow_forever" || result.Pin.Data.Product != "forever-asia-beta" || result.Pin.Data.BuildConfig != fixture.buildKey {
 		t.Fatalf("wrong identity: %+v", result)
 	}
 	if _, err := records.ResolveLocalBuild(context.Background(), fixture.root, "wow_classic", fixture.fullBuild); !errors.Is(err, records.ErrBuildUnavailable) {

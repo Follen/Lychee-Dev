@@ -13,30 +13,51 @@ import (
 // A missing member is distinct from an explicitly unavailable empty profile.
 type InputBindings struct {
 	Wake   string `json:"wake"`
-	Submit string `json:"submit"`
-	Close  string `json:"close"`
+	Reload string `json:"reload,omitempty"`
+	// Retained only to read existing journals. These fields grant no input.
+	Submit string `json:"submit,omitempty"`
+	Close  string `json:"close,omitempty"`
+}
+
+func (b InputBindings) MarshalJSON() ([]byte, error) {
+	if b.Submit == "" && b.Close == "" {
+		return json.Marshal(desktop.MailboxBindings{Wake: b.Wake, Reload: b.Reload})
+	}
+	type legacy struct {
+		Wake   string `json:"wake"`
+		Submit string `json:"submit"`
+		Close  string `json:"close"`
+	}
+	return json.Marshal(legacy{b.Wake, b.Submit, b.Close})
 }
 
 func (b *InputBindings) UnmarshalJSON(data []byte) error {
 	var wire struct {
 		Wake   *string `json:"wake"`
+		Reload *string `json:"reload"`
 		Submit *string `json:"submit"`
 		Close  *string `json:"close"`
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
-	if d.Decode(&wire) != nil || d.Decode(new(any)) != io.EOF || wire.Wake == nil || wire.Submit == nil || wire.Close == nil {
+	if d.Decode(&wire) != nil || d.Decode(new(any)) != io.EOF || wire.Wake == nil {
 		return errors.New("live.channel_input_bindings_invalid")
 	}
-	*b = InputBindings{*wire.Wake, *wire.Submit, *wire.Close}
+	if wire.Reload != nil && wire.Submit == nil && wire.Close == nil {
+		*b = InputBindings{Wake: *wire.Wake, Reload: *wire.Reload}
+	} else if wire.Reload == nil && wire.Submit != nil && wire.Close != nil {
+		*b = InputBindings{Wake: *wire.Wake, Submit: *wire.Submit, Close: *wire.Close}
+	} else {
+		return errors.New("live.channel_input_bindings_invalid")
+	}
 	return nil
 }
 
 func primaryInputBindings() *InputBindings {
-	return &InputBindings{"ALT-CTRL-F12", "ALT-CTRL-SHIFT-F12", "ALT-CTRL-["}
+	return &InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}
 }
 func fallbackInputBindings() *InputBindings {
-	return &InputBindings{"ALT-CTRL-F11", "ALT-CTRL-SHIFT-F11", "ALT-CTRL-["}
+	return &InputBindings{Wake: "ALT-CTRL-F10", Reload: "ALT-CTRL-F9"}
 }
 func (s InputObservation) validBindings() bool {
 	if s.Bindings == nil || s.InputBlocked == nil {
@@ -46,15 +67,21 @@ func (s InputObservation) validBindings() bool {
 	if b == (InputBindings{}) {
 		return *s.InputBlocked && s.Reason == "input_binding_unavailable"
 	}
-	return s.Reason != "input_binding_unavailable" && (b == *primaryInputBindings() || b == *fallbackInputBindings())
+	if s.Reason == "input_binding_unavailable" {
+		return false
+	}
+	if b.Reload != "" {
+		return b.Submit == "" && b.Close == "" && desktop.ValidateMailboxBindings(desktop.MailboxBindings{Wake: b.Wake, Reload: b.Reload}) == nil
+	}
+	return false
 }
 
-// receiverProfile grants key authority only to a complete effective profile.
-func (s InputObservation) receiverProfile() (desktop.ReceiverBindings, error) {
-	if s.Schema != InputSchema || !s.validBindings() || *s.Bindings == (InputBindings{}) {
-		return desktop.ReceiverBindings{}, errors.New("live.channel_input_bindings_invalid")
+// mailboxProfile grants key authority only to a complete effective profile.
+func (s InputObservation) mailboxProfile(action string) (desktop.MailboxBindings, error) {
+	if !s.validSchema(action) || !s.validBindings() || *s.Bindings == (InputBindings{}) {
+		return desktop.MailboxBindings{}, errors.New("live.channel_input_bindings_invalid")
 	}
-	return desktop.ReceiverBindings{WakeBinding: s.Bindings.Wake, SubmitBinding: s.Bindings.Submit, CloseBinding: s.Bindings.Close}, nil
+	return desktop.MailboxBindings{Wake: s.Bindings.Wake, Reload: s.Bindings.Reload}, nil
 }
 
 // Equal timestamps alone cannot authorize a changed publication's key profile.

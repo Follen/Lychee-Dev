@@ -75,10 +75,9 @@ For controlled interruption, `interrupt-observation` requires a running observat
 and the exact owning project/target. `interrupt-opaque-fixture` additionally
 requires the checked-in read-only `async_reload.lua` bytes under opaque policy;
 it tests unknown-effect handling without executing a real state-changing effect.
-Both retain the pre-interruption state, WGC image and input steps. The optional
-`-reload-hint=false` omits RGB sampling for fault injection; the returned input
-receipt does not prove reload. Public resume must verify a new runtime/binding.
-Default hint sampling remains available for the separate beacon check.
+Both retain the pre-interruption state, WGC image and input steps. The returned
+input receipt does not prove reload. Public resume must verify a new runtime/binding.
+Native readiness uses Lycheedev mailbox protocol v1 without optical sampling.
 An opaque operation may close with `closed=true` and `complete=false`: ownership
 has ended while its business outcome remains unknown. Keep these facts separate.
 
@@ -145,12 +144,25 @@ top; it does not claim a physical mouse-drag test.
 
 ## Workbench pages and focus
 
+Lycheedev mailbox protocol v1 end-to-end acceptance:
+
+```powershell
+node tests/channel-live/mailbox-protocol-baseline.mjs <cli> <new-project> <installation> <pid>
+```
+
+This validates unified protocol identifiers and all 500 slot metadata entries,
+one/three Esc recovery, the three-Esc ceiling across separate CLI invocations,
+resume after the fixture releases focus, no-cache reload, execution and disconnect.
+The expected focus-exhausted steps exit 6; success requires that no fourth Esc
+is sent and the original operation subsequently completes. Fixture editors have
+bounded cleanup timers and never overwrite an existing user editor.
+
 ```powershell
 node tests/channel-live/focus-baseline.mjs .tmp/channel-live/lycheedev.exe <new-project> <installation> <pid>
 ```
 
 The matching native candidate publishes its effective Ctrl+Alt+F12 or fallback
-Ctrl+Alt+F11 profile in INPUT v3, with hybrid v2 memory/optical preflight.
+Ctrl+Alt+F11 profile under Lycheedev mailbox protocol v1, with Mailbox preflight.
 The sender verifies the complete profile again before input; it does not guess
 a key or alter a player's conflicting binding. Both unavailable profiles stay blocked.
 `fixtures/binding_fallback.lua` is an opt-in probe for an already bound, noncombat

@@ -96,7 +96,7 @@ prepared exchange needs explicit reload, preserve its blocker and use the
 existing reload command only within the authorized scope. Closing is not proof
 that an already submitted opaque operation was cancelled or never ran.
 
-An activation may still be prepared before an ordinary connection journal
+An activation may be prepared or waiting for manual reload before a connection journal
 exists. `live disconnect` can cancel it without game input only when its saved
 state proves no input intent or a `not_sent` outcome with zero queued messages
 and no input progress. It preserves the activation record as
@@ -131,24 +131,26 @@ never automatically transfer the old request or probe.
 
 ## Input and recovery
 
-The CLI journals input and selects the observation adapter from the verified
-current runtime capability. Hybrid optical readiness keeps identity, routing
-and reports Mailbox-backed. Unsupported native wire/input versions are rejected;
-they are not a memory-only fallback. Missing signals do not permit blind input.
-Agents do not decode colors, manage capture or locate memory addresses.
+The CLI journals input under Lycheedev mailbox protocol v1. Current Mailbox
+records carry input readiness, identity, routing and results. Native input does
+not use colors, capture, QR or a startup beacon. Missing or stale input records
+never authorize keys or a blind reload fallback.
 
-With an ordinary focused editor, the coordinator may send one Esc and observe
-again; Esc can close/cancel that UI. Combat, unknown observations, missing signals
-and stale evidence do not permit Esc. Held system keys wait for release. A fresh
-capture frame or changing heartbeat alone proves neither runtime identity nor
-freshness of the Lua state. Do not infer readiness from a screenshot or extend
-input time limits to bypass a pending result. No manual foreground-input or
-color-decoding workflow is required; native invocation keys and slots belong to
-the CLI.
+Ordinary EditBoxes forward only the two formal Lychee Dev actions while the
+bridge is enabled. Focus and draft text stay intact. Current INPUT publishes
+`escapeLimit=0`; no Esc is needed. Password, secure text, protected or forbidden
+editors return `input_focus_unavailable`; retain the CON and wait for the user to
+leave that field. Combat, loading and stale evidence never authorize keys.
+Old upgrade journals retain their original bounded Esc counts; do not reset them.
+Held system keys wait for release.
 
-For `receiver_binding_conflict`, `receiver_binding_ineffective`, or no effective
-machine shortcut, resolve the selected target's binding conflict before further
-wake attempts. Do not change user bindings or protocol keys, or repeat wake to
+In-game edit focus differs from Windows foreground focus. Input targets the
+verified HWND through PostMessage without activating or stealing the foreground.
+The CLI verifies process/window identity and rejects minimized targets. Agents
+do not send keys, clear focus, decode colors or locate memory addresses manually.
+
+For `input_binding_unavailable`, run `live doctor` on the same CON and resolve
+the selected target’s effective binding before further input. Do not change user bindings or protocol keys, or repeat wake to
 test the conflict. A ready input observation does not prove the shortcut reaches
 the receiver. If input was already submitted or uncertain, retain the original
 CON and slot reservation and follow official CLI recovery; fixing the binding
@@ -156,21 +158,17 @@ does not authorize replay of unknown input. Never delete the slot to unblock
 another instance; use [verified retirement](#ownership-and-runtime-retirement)
 when the original process or runtime has ended.
 
-After the owner resolves the actual key conflict, the native addon supports
-manual `/dev receiver reset` to reselect its fixed primary/backup profiles. It refuses combat,
-active receiver input and remaining conflicts; it does not change account keys
-or saved custom profiles. This command repairs bindings only, not the CON or
-pending exchange. If the CLI cannot send input, ask the owner for this specific
-repair instead of sending raw keys. A reload retires the old runtime; close its
-original CON through verified retirement before a new investigation.
-
-Native INPUT v3 publishes the actually effective F12 or F11 profile, paired with
-hybrid v2. Primary conflicts produce a warning and try the backup without
-changing the player's bindings. The CLI verifies this profile before sending;
-agents must not choose a chord from the warning, mix profiles or substitute a
-key themselves. If both profiles conflict, resolve that specific conflict with
-the owner; ready colors alone do not authorize input. A fixed-F12 older runtime
-is not compatible with this profile contract.
+The in-game keybinding settings contain execute and reload under Lychee Dev.
+Defaults are Ctrl+Alt+F12 and Ctrl+Alt+F11, with F10/F9 as conflict fallbacks.
+Existing assignments are preserved. `/dev receiver reset` fills missing actions
+using free defaults; it does not overwrite player keys or repair a pending CON.
+The CLI reads actual effective bindings from Mailbox; never substitute a chord.
+Reload uses its own game binding and calls the UI reload API directly. Legacy
+input-v3/hybrid-v2 grants no new keys; install the current addon, reload manually
+and resume the retained activation.
+The previous name of the two-key protocol is different: its fresh INPUT with
+zero Esc may authorize only the upgrade reload. Let the CLI complete that step;
+the new runtime publishes the full current name before business resumes.
 
 Input evidence is distinct from execution: `not_sent` proves zero messages were
 queued; `submitted` proves only queue submission; `uncertain` (or an intent with
@@ -186,10 +184,10 @@ replay. Diagnose unsupported roots/layouts or read gaps from retained evidence;
 do not fix them by copying an RVA, scanning memory or looping reloads.
 
 `waiting: shared_publication` is shared-file contention inside one installation,
-not proof of a lost connection. Native 3.1.0 requires the new Mailbox wire,
-identity and 200-slot pool; it rejects older native connection identities.
+not proof of a lost connection. Native 3.2 development requires the Mailbox wire,
+identity and 500-slot pool; it rejects older native connection identities.
 Retain incompatible evidence for its matching older CLI rather than applying
-the new driver to it. The current 200-slot allocator can skip another
+the new driver to it. The current 500-slot allocator can skip another
 owner's reservations for a new exchange only before publication or input. The
 runtime skips empty/foreign slots and stops at the first envelope for itself;
 it does not skip its own pending work. Once published, submitted or uncertain,
@@ -206,7 +204,7 @@ A combat or focus wait retains its reservation, not the short publication lock.
 
 `complete` applies to the current command: a connected runtime does not complete
 a pending disconnect, and a previous report does not complete reload. UI activity
-and reload hints are not execution or result proof.
+is not execution or result proof.
 
 The whole `.lycheedev/live` directory is the recovery unit. Keep connection logs,
 linked history segments, content-addressed `connections/artifacts`, target metadata
@@ -218,7 +216,8 @@ a recovery error, never a reason to generate another request key.
 
 Durable deadlines are 600 seconds per business request or explicit reload,
 120 seconds for initial bind or first close, and 600 seconds for activation
-carried into its bind. Time between calls counts. Resume, repeated close and
+carried into its bind. Waiting for the first manual reload starts no connection
+budget until the new runtime is observed. Other time between calls counts. Resume, repeated close and
 changing request keys do not extend a goal. Close retains its own allowance
 after business exhaustion; existing evidence remains readable. Detected clock
 rollback stops automatic work; an unseen offline clock change cannot be detected.

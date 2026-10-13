@@ -15,6 +15,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/journal"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 type activation struct {
@@ -33,9 +34,8 @@ func (p *Project) activationPath(id string) string {
 	return p.path("connections", id+".activation.json")
 }
 
-// Activate performs one journaled, fixed reload for an explicitly selected clean
-// installation. It also handles first installation where no memory descriptor
-// exists yet. Neither the patch nor installation bytes alone establish readiness.
+// Activate uses observed input for a loaded current runtime. Without that
+// capability it retains the exact target and waits for one manual reload.
 func (p *Project) Activate(ctx context.Context, request TargetRequest, key string, cache bool) (ProjectResult, error) {
 	if err := ValidateRequest(key); err != nil {
 		return ProjectResult{}, err
@@ -124,8 +124,11 @@ func (a activation) validate() error {
 	if a.Outcome != nil && a.Outcome.validate() != nil {
 		return errors.New("live.channel_activation_invalid")
 	}
+	if a.Phase == "waiting_manual_reload" && !a.inputFree() {
+		return errors.New("live.channel_activation_invalid")
+	}
 	switch a.Phase {
-	case "prepared", "input_attempted", "runtime_selected":
+	case "prepared", "waiting_manual_reload", "input_attempted", "runtime_selected":
 	case "cancelled":
 		if !a.inputFree() {
 			return errors.New("live.channel_activation_invalid")
@@ -138,11 +141,15 @@ func (a activation) validate() error {
 
 func (p *Project) presentActivation(id string, a activation, now time.Time) ProjectResult {
 	c := Continuation{Kind: "continue", Session: id, RequestID: a.Request, Goal: "activation"}
+	if a.Phase == "waiting_manual_reload" {
+		c.Kind = "wait_external"
+		c.Blocker = &Blocker{Kind: "manual_reload_required", Condition: "reload_selected_client_then_resume"}
+	}
 	if a.Phase == "cancelled" {
 		c.Kind = "completed"
 		return ProjectResult{Session: id, Stage: "activation_cancelled", Closed: true, ReportState: "unavailable", Cleanup: "none", Journal: p.activationPath(id), Continuation: c}
 	}
-	if a.Budget != nil {
+	if a.Budget != nil && a.Phase != "waiting_manual_reload" {
 		// Projection only: status must not migrate or mutate the stored budget.
 		copy := *a.Budget
 		remaining, _, err := copy.Observe(now)
@@ -252,7 +259,10 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 		lease = nil
 		return p.retire(ctx, id, p.presentActivation(id, a, time.Now()))
 	}
-	remaining, err := p.observeActivationBudget(ctx, id, &a, time.Now())
+	remaining := DefaultRecoveryBudget
+	if a.Phase != "waiting_manual_reload" {
+		remaining, err = p.observeActivationBudget(ctx, id, &a, time.Now())
+	}
 	r = p.presentActivation(id, a, time.Now())
 	if err != nil {
 		return r, err
@@ -263,7 +273,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	// context. Do not replace the ordinary driver's projection after handoff.
 	finalizeBudget = func() error {
 		defer cancelBudget()
-		if r.Continuation.Goal != "activation" {
+		if r.Continuation.Goal != "activation" || a.Phase == "waiting_manual_reload" {
 			return nil
 		}
 		budgetErr := p.finishActivationBudget(ctx, id, &a)
@@ -296,20 +306,19 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if err = guard(ctx); err != nil {
 		return r, err
 	}
-	if a.Phase == "prepared" {
+	if a.Phase == "prepared" || a.Phase == "waiting_manual_reload" {
 		candidates, _, e := n.Discover(ctx, a.Selection.Character, a.Selection.Realm)
-		if e != nil {
+		if e != nil && !errors.Is(e, memory.ErrMailboxIncompatible) {
 			return r, e
 		}
 		if len(candidates) > 0 {
-			a.PriorRuntime = candidates[0].Runtime
 			candidate := candidates[0]
-			if err := inputCapabilityError(candidate.InputState); err != nil {
-				return r, err
-			}
-			if observedInputCapability(candidate.InputState) {
+			if reloadInputCapability(candidate.InputState) && (a.Phase == "prepared" || candidate.InputState == bridge.PreviousMailboxSchema) {
 				if candidate.Owner != "" {
 					return r, errors.New("live.channel_ownership_changed")
+				}
+				if a.Phase == "waiting_manual_reload" {
+					a.Budget = NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)
 				}
 				// Even the explicit fallback command uses the ordinary coordinator
 				// when this runtime advertises memory input telemetry. Never silently
@@ -330,33 +339,24 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 				e = d.Continue(ctx)
 				return present(d), e
 			}
+			if a.Phase == "prepared" {
+				a.PriorRuntime = candidate.Runtime
+			}
 		}
-		a.Phase = "input_attempted"
-		if err = writeProjectJSON(ctx, p.activationPath(id), a); err != nil {
-			return r, err
-		}
-		n.Guard = guard
-		out, inputErr := n.Input(ctx, InputAction{Kind: "reload_fallback"})
-		a.Outcome = &out
-		if out.Disposition == "not_sent" {
-			a.Phase = "prepared"
-		}
-		flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		err = writeProjectJSON(flush, p.activationPath(id), a)
-		cancel()
-		if err != nil {
-			return r, err
-		}
-		if out.Disposition == "not_sent" && out.Retryable {
-			return r, ErrPending
-		}
-		if inputErr != nil {
-			return r, inputErr
+		if a.Phase == "prepared" {
+			a.Phase = "waiting_manual_reload"
+			if err = writeProjectJSON(ctx, p.activationPath(id), a); err != nil {
+				return r, err
+			}
+			return p.presentActivation(id, a, time.Now()), manualReloadRequired()
 		}
 	}
 	for {
 		candidates, _, e := n.Discover(ctx, a.Selection.Character, a.Selection.Realm)
 		if e != nil {
+			if a.Phase == "waiting_manual_reload" && errors.Is(e, memory.ErrMailboxIncompatible) {
+				return p.presentActivation(id, a, time.Now()), manualReloadRequired()
+			}
 			return r, e
 		}
 		for _, candidate := range candidates {
@@ -365,6 +365,14 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 			}
 			if candidate.Slots != bridge.SlotCount || candidate.Inventory != nil && *candidate.Inventory != candidate.Slots {
 				return r, errors.New("live.channel_client_restart_required")
+			}
+			if err := inputCapabilityError(candidate.InputState); err != nil {
+				return r, err
+			}
+			if a.Phase == "waiting_manual_reload" {
+				// No machine input was authorized while waiting for the owner.
+				// The connection budget starts at observed activation, once.
+				a.Budget = NewDurableBudget(time.Now(), DefaultRecoveryBudget, false)
 			}
 			d, e := New(p.log(id), n, candidate)
 			if e != nil {
@@ -386,6 +394,9 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 			return present(d), err
 		}
 		r.Stage = "activation_waiting_runtime"
+		if a.Phase == "waiting_manual_reload" {
+			return p.presentActivation(id, a, time.Now()), manualReloadRequired()
+		}
 		select {
 		case <-ctx.Done():
 			return r, errors.Join(ErrPending, ctx.Err())
@@ -443,7 +454,7 @@ func (p *Project) disconnectActivation(ctx context.Context, id string, cache boo
 	}
 	r = p.presentActivation(id, a, time.Now())
 	if a.Phase != "cancelled" {
-		if a.Phase != "prepared" || !a.inputFree() {
+		if (a.Phase != "prepared" && a.Phase != "waiting_manual_reload") || !a.inputFree() {
 			return r, ErrJournalMissing
 		}
 		a.Phase = "cancelled"
@@ -459,6 +470,10 @@ func (p *Project) disconnectActivation(ctx context.Context, id string, cache boo
 	}
 	lease = nil
 	return p.retire(ctx, id, r)
+}
+
+func manualReloadRequired() error {
+	return &BlockedError{Blocker: Blocker{Kind: "manual_reload_required", Condition: "reload_selected_client_then_resume"}}
 }
 
 // Each obligation runs even if a prior one fails. This is resource cleanup,

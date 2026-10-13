@@ -12,10 +12,6 @@ ns.Controls = {
         end
         local trimmed = string.match(message, "^%s*(.-)%s*$")
         local command = string.lower(trimmed)
-        local receiverAction, receiverChord = string.match(trimmed, "^receiver%s+bind%s+(%S+)%s+(%S+)$")
-        if receiverAction then
-            receiverAction, receiverChord = string.lower(receiverAction), string.upper(receiverChord)
-        end
         local nonce = string.match(command, "^bridge bind ([0-9a-f]+)$")
         local identify = string.match(command, "^bridge identify ([0-9a-f]+)$")
         local prefix, verb, requestId = string.match(trimmed, "^(%S+)%s+(%S+)%s+([%w_%-]+)$")
@@ -64,8 +60,8 @@ ns.Controls = {
         end
         if command ~= "" and command ~= "status" and command ~= "connect" and command ~= "disconnect" and command ~= "bridge on" and command ~= "bridge off"
             and command ~= "bridge unbind" and command ~= "receiver reset"
-            and not receiverAction and not nonce and not identify and not action then
-            return nil, "usage: /dev status | connect | disconnect | receiver bind <wake|submit|close> <chord> | receiver reset"
+            and not nonce and not identify and not action then
+            return nil, "usage: /dev status | connect | disconnect | receiver reset"
         end
         if not ns.Startup.ready then return nil, ns.Startup.reason or "addon_not_ready" end
         -- Bare /dev toggles the workbench. Everything below keeps the exact
@@ -95,7 +91,7 @@ ns.Controls = {
                 if ns.ActivityView then ns.ActivityView.Stop() end
                 return true
             elseif command=="status" then
-                return {transport="memory-slot-v1",enabled=ns.Persistence.BridgeEnabled()}
+                return {transport="Lycheedev mailbox protocol v1",enabled=ns.Persistence.BridgeEnabled()}
             else
                 return nil,"command_retired: use the memory-slot CLI"
             end
@@ -104,11 +100,6 @@ ns.Controls = {
             local profile, reason = ns.ReceiverBindings.Reset()
             if not profile then return nil, reason end
             return "receiver bindings reset"
-        end
-        if receiverAction then
-            local profile, reason = ns.ReceiverBindings.Configure(receiverAction, receiverChord)
-            if not profile then return nil, reason end
-            return "receiver " .. receiverAction .. " = " .. profile[receiverAction]
         end
         if command == "connect" then
             if not state.options then state.options = {} end
@@ -232,7 +223,6 @@ ns.Controls = {
             -- Reports survive opt-out; disabling never acknowledges or deletes.
             state.options.bridgeEnabled = command == "bridge on" and true or nil
             if command ~= "bridge on" then
-                if ns.StartupBeacon then ns.StartupBeacon.Stop() end
                 if ns.Reentry then ns.Reentry.Cancel(true) end
                 ns.Session.Release(); ns.ReceiptView.Hide()
             end

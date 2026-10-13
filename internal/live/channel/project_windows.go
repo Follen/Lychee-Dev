@@ -19,6 +19,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/live/journal"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -319,11 +320,12 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	}
 	defer func() { err = errors.Join(err, native.Close()) }()
 	candidates, coverage, err := native.Discover(ctx, request.Character, request.Realm)
-	if err != nil {
+	incompatible := errors.Is(err, memory.ErrMailboxIncompatible)
+	if err != nil && !incompatible {
 		return ProjectResult{}, err
 	}
 	if len(candidates) == 0 {
-		if !coverage.Complete || coverage.Truncated {
+		if !incompatible && (!coverage.Complete || coverage.Truncated) {
 			return ProjectResult{Scans: native.TraceDir}, errors.New("live.channel_discovery_incomplete")
 		}
 		key, e := token()
@@ -333,7 +335,10 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 		return p.activateTarget(ctx, target, request, "connect-"+key, "", cache)
 	}
 	identity := candidates[0]
-	if identity.Slots != bridge.SlotCount {
+	if identity.Build != target.Client.FullBuild || identity.Product != target.Client.Product {
+		return ProjectResult{}, errors.New("live.channel_runtime_build_mismatch")
+	}
+	if identity.Slots != bridge.SlotCount || upgradeInputCapability(identity.InputState) {
 		key, e := token()
 		if e != nil {
 			return ProjectResult{}, e
@@ -343,8 +348,8 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	if identity.Inventory != nil && *identity.Inventory != identity.Slots {
 		return ProjectResult{}, errors.New("live.channel_slot_inventory_incomplete")
 	}
-	if identity.Build != target.Client.FullBuild || identity.Product != target.Client.Product {
-		return ProjectResult{}, errors.New("live.channel_runtime_build_mismatch")
+	if err := inputCapabilityError(identity.InputState); err != nil {
+		return ProjectResult{}, err
 	}
 	d, err := New("", native, identity)
 	if err != nil {

@@ -66,7 +66,7 @@ func TestRuntimeRecoveryDistinguishesObservationFromOpaqueExecution(t *testing.T
 	for _, policy := range []string{"observation", "opaque"} {
 		t.Run(policy, func(t *testing.T) {
 			ctx := context.Background()
-			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 			current := old
 			current.Runtime = strings.Repeat("2", 32)
 			current.NextSlot = 1
@@ -120,7 +120,7 @@ func TestCommitPublicationWithoutNewInputIsStillExecutionUnknown(t *testing.T) {
 	for _, phase := range []string{"intent", "published"} {
 		t.Run(phase, func(t *testing.T) {
 			ctx := context.Background()
-			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 3, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 3, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 			current := old
 			current.Runtime = strings.Repeat("2", 32)
 			current.NextSlot = 1

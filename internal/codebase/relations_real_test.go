@@ -73,6 +73,8 @@ func TestRealLuaLSMapsAPIReferencesAndDefinitions(t *testing.T) {
 	if _, err := b.IndexSource(ctx, pin); err != nil {
 		t.Fatal(err)
 	}
+	ctx, closeQuery := sourceQueryContext(ctx)
+	defer closeQuery()
 	apiRefs, err := b.Relate(ctx, "fixed", pin, RelationQuery{Symbol: "UnitHealth", Direction: "incoming", Limit: 25}, ResearchOptions{Semantic: runtime})
 	if err != nil {
 		t.Fatal(err)
@@ -104,5 +106,13 @@ func TestRealLuaLSMapsAPIReferencesAndDefinitions(t *testing.T) {
 	}
 	if !resolvedOutgoing {
 		t.Fatalf("API outgoing definition not mapped to original pinned source: %+v", outgoing)
+	}
+	owner := ctx.Value(sourceQueryKey{}).(*sourceQuerySession)
+	if len(owner.semantic) != 1 || len(owner.environments) != 1 {
+		t.Fatalf("two symbols did not share LuaLS/API preparation: workers=%d environments=%d", len(owner.semantic), len(owner.environments))
+	}
+	closeQuery()
+	if len(owner.semantic) != 0 {
+		t.Fatal("request retained LuaLS after completion")
 	}
 }

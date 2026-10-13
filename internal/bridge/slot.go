@@ -6,8 +6,16 @@ import (
 	"strings"
 )
 
-const SlotCount = 200
-const SlotSchema = "lycheedev.slot.v3"
+const SlotCount = 500
+
+// MailboxSchema names the complete Lycheedev mailbox protocol v1. The record
+// kind and named publication field distinguish identity, input and receipts.
+const MailboxSchema = "Lycheedev mailbox protocol v1"
+
+// PreviousMailboxSchema is read only to activate an already loaded two-key
+// runtime during the name migration. Current producers never emit it.
+const PreviousMailboxSchema = "lycheedev.mailbox.v1"
+const SlotSchema = MailboxSchema
 
 type SlotEnvelope struct {
 	Schema         string `json:"schema"`

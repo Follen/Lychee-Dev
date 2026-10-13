@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -77,7 +76,7 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 	response := SearchResponse{SourceID: pin.Repository, Product: pin.Product, RequestedRef: pin.RequestedRef, MatchedTag: nil, ResolvedCommit: pin.ExactCommit, SnapshotID: snapshotID, Results: []Match{}}
 	text := strings.TrimSpace(query.Text)
 	if text == "" || len(text) > 512 {
-		return response, errors.New("codebase.query_required")
+		return response, fmt.Errorf("%w: codebase.query_required", ErrInvalidQuery)
 	}
 	topic := strings.ToLower(strings.TrimSpace(query.Topic))
 	if err := searchTopicFilter(topic); err != nil {
@@ -88,10 +87,10 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 		limit = 10
 	}
 	if limit > 200 {
-		return response, errors.New("codebase.invalid_search_limit")
+		return response, fmt.Errorf("%w: codebase.invalid_search_limit", ErrInvalidQuery)
 	}
 	if query.Mode != "" && query.Mode != SearchModePrecise && query.Mode != SearchModeExploratory {
-		return response, errors.New("codebase.invalid_search_mode")
+		return response, fmt.Errorf("%w: codebase.invalid_search_mode", ErrInvalidQuery)
 	}
 	identity := sha256.Sum256([]byte(pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + string(query.Mode) + "\x00" + text + "\x00" + topic))
 	cursorKey := hex.EncodeToString(identity[:8])
@@ -120,107 +119,136 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 
 	normalized := normalizeAssetPath(text)
 	tokens := strings.Fields(strings.ToLower(text))
-	err = cache.scanSelected(ctx, func(e recordOffset) bool {
-		if topic == "asset" {
-			return e.Kind == "asset" && strings.Contains(normalizeAssetPath(e.Path), normalized)
-		}
-		if e.Kind != "symbol" {
-			return false
-		}
-		if e.SymbolKind == "relationship" {
-			return e.Name == text || e.Target == text || broad && (strings.Contains(strings.ToLower(e.Name), strings.ToLower(text)) || strings.Contains(strings.ToLower(e.Target), strings.ToLower(text)))
-		}
-		if e.SymbolKind != "declaration" && e.SymbolKind != "header" {
-			return false
-		}
-		if topic == "api" && !strings.HasPrefix(e.Category, "api-") {
-			return false
-		}
-		if (topic == "lua" || topic == "xml" || topic == "toc") && !strings.HasSuffix(strings.ToLower(e.Path), "."+topic) {
-			return false
-		}
-		if e.Name == text || e.Target == text || strings.HasSuffix(e.Name, "."+text) || strings.HasPrefix(e.Name, text) || strings.Contains(e.Name, "."+text) {
-			return true
-		}
-		lower := strings.ToLower(e.Name + " " + e.Target + " " + e.Signature)
-		count := 0
-		for _, token := range tokens {
-			if strings.Contains(lower, token) {
-				count++
+	stage := "all"
+	collectRelations := true
+	scanCandidates := func(keys ...recordLookupKey) error {
+		return cache.scanSelected(ctx, func(e recordOffset) bool {
+			if topic == "asset" {
+				return e.Kind == "asset" && strings.Contains(normalizeAssetPath(e.Path), normalized)
 			}
-		}
-		return len(tokens) > 0 && (broad && count > 0 || !broad && count == len(tokens))
-	}, func(r sourceRecord) error {
-		if r.Kind == "asset" && topic == "asset" && r.Asset != nil && strings.Contains(normalizeAssetPath(r.Path), normalized) {
-			rank := 70
-			if normalizeAssetPath(r.Path) == normalized {
-				rank = 100
+			if e.Kind != "symbol" {
+				return false
 			}
-			if len(assets) < 10000 {
-				assets = append(assets, searchCandidate{symbol: SymbolMatch{Kind: "asset", Name: r.Path, Category: "asset", Confidence: "exact", Path: r.Path, Line: 1}, matched: "asset_path", rank: rank})
-			} else {
-				candidateCut = true
+			if e.SymbolKind == "relationship" {
+				return collectRelations && (e.Name == text || e.Target == text || broad && (strings.Contains(strings.ToLower(e.Name), strings.ToLower(text)) || strings.Contains(strings.ToLower(e.Target), strings.ToLower(text))))
 			}
-			return nil
-		}
-		if r.Kind != "symbol" || r.Symbol == nil || topic == "asset" {
-			return nil
-		}
-		s := *r.Symbol
-		if s.Kind == "relationship" {
-			match := s.Name == text || s.Target == text
-			if broad {
-				match = strings.Contains(strings.ToLower(s.Name), strings.ToLower(text)) || strings.Contains(strings.ToLower(s.Target), strings.ToLower(text))
+			if e.SymbolKind != "declaration" && e.SymbolKind != "header" {
+				return false
 			}
-			if match && len(relations) <= limit {
-				source := s.Name
-				if source == "<file>" {
-					source = s.Path
+			if topic == "api" && !strings.HasPrefix(e.Category, "api-") {
+				return false
+			}
+			if (topic == "lua" || topic == "xml" || topic == "toc") && !strings.HasSuffix(strings.ToLower(e.Path), "."+topic) {
+				return false
+			}
+			if stage == "exact" {
+				return e.SymbolKind == "declaration" && (e.Name == text || e.Target == text || strings.HasSuffix(e.Name, "."+text)) || e.SymbolKind == "header" && e.Name == text
+			}
+			if stage == "prefix" {
+				return strings.HasPrefix(e.Name, text) || e.SymbolKind == "declaration" && strings.Contains(e.Name, "."+text)
+			}
+			if e.Name == text || e.Target == text || strings.HasSuffix(e.Name, "."+text) || strings.HasPrefix(e.Name, text) || strings.Contains(e.Name, "."+text) {
+				return true
+			}
+			lower := strings.ToLower(e.Name + " " + e.Target + " " + e.Signature)
+			count := 0
+			for _, token := range tokens {
+				if strings.Contains(lower, token) {
+					count++
 				}
-				relations = append(relations, Relation{Source: source, Target: s.Target, Kind: s.Category, Confidence: s.Confidence, Path: s.Path, Line: s.Line})
 			}
-			return nil
-		}
-		if s.Kind != "declaration" && s.Kind != "header" {
-			return nil
-		}
-		if topic == "api" && !strings.HasPrefix(s.Category, "api-") {
-			return nil
-		}
-		if topic == "lua" || topic == "xml" || topic == "toc" {
-			if !strings.HasSuffix(strings.ToLower(s.Path), "."+topic) {
+			return len(tokens) > 0 && (broad && count > 0 || !broad && count == len(tokens))
+		}, func(r sourceRecord) error {
+			if r.Kind == "asset" && topic == "asset" && r.Asset != nil && strings.Contains(normalizeAssetPath(r.Path), normalized) {
+				rank := 70
+				if normalizeAssetPath(r.Path) == normalized {
+					rank = 100
+				}
+				if len(assets) < 10000 {
+					assets = append(assets, searchCandidate{symbol: SymbolMatch{Kind: "asset", Name: r.Path, Category: "asset", Confidence: "exact", Path: r.Path, Line: 1}, matched: "asset_path", rank: rank})
+				} else {
+					candidateCut = true
+				}
 				return nil
 			}
-		}
-		lower := strings.ToLower(s.Name + " " + s.Target + " " + s.Signature)
-		add := func(slice *[]searchCandidate, matched string, rank int) {
-			if len(*slice) < 10000 {
-				*slice = append(*slice, searchCandidate{symbol: s, matched: matched, rank: rank})
-			} else {
-				candidateCut = true
+			if r.Kind != "symbol" || r.Symbol == nil || topic == "asset" {
+				return nil
+			}
+			s := *r.Symbol
+			if s.Kind == "relationship" && collectRelations {
+				match := s.Name == text || s.Target == text
+				if broad {
+					match = strings.Contains(strings.ToLower(s.Name), strings.ToLower(text)) || strings.Contains(strings.ToLower(s.Target), strings.ToLower(text))
+				}
+				if match && len(relations) <= limit {
+					source := s.Name
+					if source == "<file>" {
+						source = s.Path
+					}
+					relations = append(relations, Relation{Source: source, Target: s.Target, Kind: s.Category, Confidence: s.Confidence, Path: s.Path, Line: s.Line})
+				}
+				return nil
+			}
+			if s.Kind != "declaration" && s.Kind != "header" {
+				return nil
+			}
+			if topic == "api" && !strings.HasPrefix(s.Category, "api-") {
+				return nil
+			}
+			if topic == "lua" || topic == "xml" || topic == "toc" {
+				if !strings.HasSuffix(strings.ToLower(s.Path), "."+topic) {
+					return nil
+				}
+			}
+			lower := strings.ToLower(s.Name + " " + s.Target + " " + s.Signature)
+			add := func(slice *[]searchCandidate, matched string, rank int) {
+				if len(*slice) < 10000 {
+					*slice = append(*slice, searchCandidate{symbol: s, matched: matched, rank: rank})
+				} else {
+					candidateCut = true
+				}
+			}
+			if s.Kind == "declaration" && (s.Name == text || s.Target == text || strings.HasSuffix(s.Name, "."+text)) {
+				add(&exact, "exact_symbol", 100)
+			} else if s.Kind == "header" && s.Name == text {
+				add(&exact, "exact_fact", 90)
+			}
+			if s.Kind == "declaration" && (strings.HasPrefix(s.Name, text) || strings.Contains(s.Name, "."+text)) {
+				add(&prefix, "symbol_prefix", 80)
+			} else if s.Kind == "header" && strings.HasPrefix(s.Name, text) {
+				add(&prefix, "name_prefix", 80)
+			}
+			count := 0
+			for _, token := range tokens {
+				if strings.Contains(lower, token) {
+					count++
+				}
+			}
+			if len(tokens) > 0 && (broad && count > 0 || !broad && count == len(tokens)) {
+				add(&full, "indexed_text", 70+min(9, count))
+			}
+			return nil
+		}, keys...)
+	}
+	if !broad && topic != "asset" {
+		stage = "exact"
+		err = scanCandidates(recordLookupKey{recordSearchName, text}, recordLookupKey{recordName, text}, recordLookupKey{recordTarget, text})
+		collectRelations = false
+		if err == nil && len(exact) == 0 {
+			stage = "prefix"
+			prefix, full, candidateCut = nil, nil, false
+			err = scanCandidates(recordLookupKey{recordSearchPrefix, text})
+			if err == nil && len(prefix) == 0 {
+				stage = "all"
+				full, candidateCut = nil, false
+				err = scanCandidates(recordLookupKey{recordKind, "symbol"})
 			}
 		}
-		if s.Kind == "declaration" && (s.Name == text || s.Target == text || strings.HasSuffix(s.Name, "."+text)) {
-			add(&exact, "exact_symbol", 100)
-		} else if s.Kind == "header" && s.Name == text {
-			add(&exact, "exact_fact", 90)
-		}
-		if s.Kind == "declaration" && (strings.HasPrefix(s.Name, text) || strings.Contains(s.Name, "."+text)) {
-			add(&prefix, "symbol_prefix", 80)
-		} else if s.Kind == "header" && strings.HasPrefix(s.Name, text) {
-			add(&prefix, "name_prefix", 80)
-		}
-		count := 0
-		for _, token := range tokens {
-			if strings.Contains(lower, token) {
-				count++
-			}
-		}
-		if len(tokens) > 0 && (broad && count > 0 || !broad && count == len(tokens)) {
-			add(&full, "indexed_text", 70+min(9, count))
-		}
-		return nil
-	})
+	} else if topic == "asset" {
+		err = scanCandidates(recordLookupKey{recordKind, "asset"})
+	} else {
+		err = scanCandidates(recordLookupKey{recordKind, "symbol"})
+	}
 	if err != nil {
 		return response, err
 	}
@@ -375,6 +403,6 @@ func searchTopicFilter(topic string) error {
 	case "lua", "xml", "toc", "asset":
 		return nil
 	default:
-		return errors.New("codebase.invalid_topic: use api, lua, xml, toc, or asset")
+		return fmt.Errorf("%w: codebase.invalid_topic: use api, lua, xml, toc, or asset", ErrInvalidQuery)
 	}
 }

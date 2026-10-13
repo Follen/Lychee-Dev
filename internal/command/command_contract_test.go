@@ -192,7 +192,7 @@ func TestWorkspaceVerbContractsAreAdvertised(t *testing.T) {
 		t.Fatalf("target add definition: %#v", commands)
 	}
 	got := stringList(t, commands[0]["flags"])
-	want := map[string]bool{"--home <root>": false, "--format text|json|jsonl": false, "--product <retail|classic|titan|forever>": false,
+	want := map[string]bool{"--home <root>": false, "--format text|json|jsonl": false, "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)": false,
 		"--region <us|eu|cn|kr|tw>": false, "--locale <locale>": false, "--build <full-build>": false,
 		"--installation <client-directory>": false, "--remote": false, "--replace": false}
 	for _, flag := range got {

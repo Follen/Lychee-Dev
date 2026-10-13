@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -51,6 +52,52 @@ func TestSlotPoolInstallPublicationAndIsolation(t *testing.T) {
 	}
 	if _, err = InspectSlots(ctx, parent, "2.5.1"); err == nil {
 		t.Fatal("static drift ignored")
+	}
+}
+
+func TestSlotPoolEraTOCMigration(t *testing.T) {
+	ctx := context.Background()
+	parent := t.TempDir()
+	pool, err := installSlotPool(ctx, parent, "3.1.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range pool.Files {
+		path := filepath.Join(SlotDirectory(parent, i+1), fmt.Sprintf("Lychee Dev Slot %02d.toc", i+1))
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), ", 11509\n") {
+			t.Fatal("new slot does not declare Era")
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(b), ", 11509\n", "\n", 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := InspectSlots(ctx, parent, pool.Version); err != nil {
+		t.Fatal("existing four-profile slots became modified", err)
+	}
+	pool.Files[0].Nonce = strings.Repeat("a", 32)
+	if err := saveSlotPool(ctx, parent, pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installSlotPool(ctx, parent, pool.Version); err == nil {
+		t.Fatal("TOC migration discarded an unresolved reservation")
+	}
+	pool.Files[0].Consumed = true
+	if err := saveSlotPool(ctx, parent, pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installSlotPool(ctx, parent, pool.Version); err != nil {
+		t.Fatal("same-version TOC migration failed", err)
+	}
+	for _, index := range []int{1, bridge.SlotCount} {
+		path := filepath.Join(SlotDirectory(parent, index), fmt.Sprintf("Lychee Dev Slot %02d.toc", index))
+		b, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(b), ", 11509\n") {
+			t.Fatal("Era TOC migration incomplete", index, err)
+		}
 	}
 }
 
@@ -214,6 +261,16 @@ func TestSlotBootstrapRepairPreservesPayloadAndRejectsDrift(t *testing.T) {
 	}
 	if err := RepairSlotBootstrap(ctx, parent, "2.5.1"); err != nil {
 		t.Fatal("not resumable", err)
+	}
+	oldTransport := strings.Replace(string(want), bridge.MailboxSchema, "lycheedev-mailbox-v1", 1)
+	if err := os.WriteFile(path, []byte(oldTransport), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RepairSlotBootstrap(ctx, parent, "2.5.1"); err != nil {
+		t.Fatal("protocol-name migration", err)
+	}
+	if current, err := os.ReadFile(path); err != nil || !bytes.Equal(current, want) {
+		t.Fatal("protocol name was not migrated", err)
 	}
 	if err := os.WriteFile(path, []byte(old+"Injected.lua\n"), 0600); err != nil {
 		t.Fatal(err)

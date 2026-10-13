@@ -96,7 +96,7 @@ func ListRemoteAvailability(ctx context.Context, options AvailabilityOptions) (A
 	if maxRows > manifestMaxRows {
 		maxRows = manifestMaxRows
 	}
-	baselines := VerifiedClientBaselines()
+	baselines := DataProducts()
 	result.Products = make([]ProductAvailability, 0, len(baselines))
 	for _, baseline := range baselines {
 		if err := ctx.Err(); err != nil {

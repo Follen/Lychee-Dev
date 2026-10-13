@@ -163,7 +163,7 @@ func validatePins(spec SelectionSpec) error {
 		}
 	}
 	product := ""
-	for _, value := range []string{sourceProduct(spec.Source), dataProduct(spec.Data), changeProduct(spec.Changes)} {
+	for _, value := range []string{dataProduct(spec.Data), changeProduct(spec.Changes)} {
 		if value == "" {
 			continue
 		}
@@ -171,6 +171,9 @@ func validatePins(spec SelectionSpec) error {
 			return fmt.Errorf("selection.product_mismatch: %s / %s", product, value)
 		}
 		product = value
+	}
+	if spec.Source != nil && product != "" && !SourceSupportsProduct(*spec.Source, product) {
+		return fmt.Errorf("selection.product_mismatch: %s / %s", spec.Source.Product, product)
 	}
 	return nil
 }
@@ -204,12 +207,6 @@ func build(s string) bool {
 		}
 	}
 	return true
-}
-func sourceProduct(s *SourcePin) string {
-	if s == nil {
-		return ""
-	}
-	return s.Product
 }
 func dataProduct(s *DataPin) string {
 	if s == nil {

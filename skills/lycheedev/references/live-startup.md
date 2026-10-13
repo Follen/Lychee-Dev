@@ -1,80 +1,93 @@
-# Native live startup and installation
+# Live doctor and startup
 
-Use this reference for first installation, an upgraded addon, or contact without
-a usable CON connection. Disk installation and runtime activation are separate.
-Native 3.1.0 uses the public Mailbox with wire06, slot-v3, identity-v2 and
-input-v3 with hybrid-v2 readiness and the effective F12/F11 binding profile.
-The CLI owns the main addon and 200 LoadOnDemand slots; never overlay-copy files,
-edit slot payloads or import old queues/SavedVariables.
+Use this for first contact, a newly installed or upgraded addon, or a startup
+failure. Disk installation and a loaded runtime are separate facts. Native live
+uses Lycheedev mailbox protocol v1: a named Mailbox, 500 slots and two formal game bindings.
 
-Use the shared installation candidates to select a verified client directory;
-directory names alone do not establish product identity. A game root may contain
-several clients, and a client may have several processes: retain the selected path,
-PID, process creation identity and later character binding. Resolve only remaining ambiguity, not a fresh
-choice on every retry. Local selection errors never authorize another installation.
+## Diagnose the selected target
 
-1. Select the authorized installation and PID. Inspect `addon status`; the main
-   addon must be a clean managed installation matching the CLI, and all 200 slot
-   files must pass inspection. Use [installation](installation.md) for deployment.
-2. Use `live connect` with the invoking project's `--project` and exact target.
-   It resolves the verified Mailbox identity and binds with a new nonce. If the runtime is
-   absent under a supported activation condition, it records an activation and
-   performs one fixed reload automatically. An explicitly unsupported loaded
-   input capability is a blocker, not permission to send fallback keys.
-3. Preserve any returned CON ID, including activation-pending results. Use status
-   and resume in the same project; do not start another connection or resend keys.
-
-A clean inactive older managed slot installation can be replaced before new
-work. Incompatible pending reservations or older connection identities are
-rejected, with their evidence preserved; the new driver does not resume old
-wire exchanges or use old records as current-runtime proof. Journaled activation
-can reload a compatible loaded runtime after a clean managed installation.
-For an unsupported loaded protocol, finish the clean installation first and
-ask the owner to reload that selected client manually; then verify the new
-runtime without replaying pending input. Verify activation separately for every authorized PID,
-including same-build instances sharing one installation: 200 files on disk do
-not prove any running client loaded them. If the client cannot discover the full
-inventory, `restart_required` requires a scoped client restart; do not loop reloads.
-
-After an intentional installation/update with no usable connection, explicit
-activation is also available:
+Retain the authorized installation and PID, or the original project and CON.
+Use `live instances --passive` only when a target is missing. Folder names,
+shared builds and the Windows foreground window do not identify a connection.
 
 ```text
-lycheedev live reload fallback --project <project-directory> --installation <client> --pid <pid> --request <activation-key> --wait-seconds 120 --format json
+lycheedev live doctor --project <project-directory> --installation <client> --pid <pid> --format json
+lycheedev live doctor --project <project-directory> --session <CON-id> --format json
 ```
 
-The CLI selects the verified runtime's input observation path. Capable runtimes
-use normal readiness checks; missing signals or stale evidence stay pending.
-Only supported first-install/activation conditions permit the fixed activation
-fallback. Unsupported input capabilities never use a blind key fallback.
-Agents do not send that key sequence manually. Input intent and outcome
-are journaled; repeating the request resumes activation without replaying uncertain
-input. A startup beacon is only a temporary hint, never identity or bind proof.
+Doctor checks the managed files, 500-slot inventory, PID ownership, runtime
+locator, independent bootstrap diagnostic, current runtime and fresh INPUT.
+It sends no keys and creates no connection. Read each check’s state, detail and
+nextStep. A bootstrap snapshot explains startup; only fresh INPUT authorizes
+machine input. Top-level `doctor` with the same target selectors includes these
+same checks alongside workspace/data/source checks.
 
-If the game is at character selection, loading, in combat, explicitly disabled,
-or otherwise cannot accept the narrow input, preserve pending evidence and
-inspect that condition. An absent descriptor does not prove a build mismatch or
-that a reload executed. Client versions that cannot discover newly installed
-addon folders through reload may require a client restart; do not loop reloads
-or claim that disk files prove those folders are loaded. Keep pending activation
-bound to its selected process; a restart ends that process rather than transferring
-its unknown input. Retire the old CON using process/runtime proof, then bind the
-replacement under the user's scope. An already authorized current-character task
-does not require another character choice; a specifically named actor stays fixed.
+## Complete the authorized repair
 
-## Ownership and recovery
+Use the installed CLI's describe/help to confirm this command is available.
+Within an authorized live task, activation and recovery need no repeated approval.
+Use `--fix` when diagnosis requires installation, activation or connection recovery:
 
-Retain the original CON and project on failed activation or interrupted cleanup.
-A foreign owner's claim is not an expired timeout. Use [ownership and runtime
-retirement](live-recovery.md#ownership-and-runtime-retirement) for process exit,
-character changes or a replaced runtime; never delete claims or slot files.
+```text
+lycheedev live doctor --fix --project <project-directory> --installation <client> --pid <pid> --format json
+```
 
-Do not use legacy bind/reset/QR commands for a native CON connection. The fixed
-profiles are part of the protocol: the addon selects F12 or F11 and the CLI
-verifies the effective published profile before sending keys. Do not choose
-arbitrary chords or infer ownership from a similar addon name. Slot allocation, publication, consumption,
-capacity reload and shared-installation coordination belong to the CLI.
+The packaged CLI uses its own distribution. Development or separately staged
+releases can supply `--release <release-root>`; `--output <archive-directory>`
+selects the upgrade archive. The CLI installs absent files or upgrades a clean
+managed installation through the existing installer. Modified/unmanaged files
+need [installation](installation.md) diagnosis, not an overlay copy.
 
-When activation completes, continue the authorized investigation immediately via
-[live-investigation](live-investigation.md). Connection-only tasks do not need a
-fabricated probe; close their quiescent CON with `live disconnect` when done.
+| Result | Continue |
+| --- | --- |
+| Ready runtime, clean installation | Connect and keep the returned CON |
+| Two formal bindings loaded under the previous protocol name | Let fix/resume send the verified reload key once, then bind the current protocol; do not ask for manual reload merely because the name changed |
+| Existing connection in this project | Resume its original request; pending input is not replaced |
+| Foreign project owns the PID | Continue from the owning project; do not delete its claim |
+| manual_reload_required | Ask the user to reload once in the selected game window, then resume the returned CON |
+| Bootstrap failed | Read its startup reason and addon errors; the manual reload binding remains available |
+| restart_required / incomplete loaded inventory | Restart that selected client within scope; repeated reloads do not discover missing folders |
+| Combat, restricted editor, stale INPUT | Preserve the CON and wait for the reported condition to change |
+
+When updating a selected PID that already has a connection, fix first completes
+its recovery and disconnects before replacing files. Unresolved input or another
+instance’s claim can block the shared-directory update; retain the original IDs.
+Each process sharing the installation must load and verify the new runtime
+independently. One PID’s successful reload never activates another PID.
+
+## First installation and reload
+
+A loaded runtime with fresh two-key INPUT can reload automatically during a
+protocol-name upgrade. The CLI reads its effective reload binding, journals
+one key delivery and observes the new runtime. Its old business wire is not
+reused. A pending activation is reassessed by resume when this capability is available.
+
+If the addon is not running, it cannot register a key or report where text would
+land. The CLI records `activation_waiting_manual_reload` and sends nothing.
+The user enters `/reload` once in that exact game window; then:
+
+```text
+lycheedev live resume <CON-id> --project <project-directory> --wait-seconds 120 --format json
+```
+
+Manual waiting does not spend the later connection budget. Once the CLI observes
+the new runtime, normal bounded binding begins. If the client must restart to
+find new slot folders, retire the old process's connection and bind the new PID;
+do not transfer unknown input to it. Preserve the selected actor when specified.
+
+The compatibility command `live reload fallback` follows the same activation
+rules. It no longer sends Esc, Enter or chat text. Older input-v3/hybrid-v2
+runtimes require manual activation; their records do not authorize new keys.
+
+## Keyboard behavior
+
+The keybinding page shows Execute and Reload under Lychee Dev. Defaults are
+Ctrl+Alt+F12 and Ctrl+Alt+F11; free conflict fallbacks are F10 and F9. Existing
+player assignments are preserved, and the CLI reads actual effective keys from
+Mailbox. `/dev receiver reset` fills missing actions using free defaults.
+
+Ordinary EditBoxes selectively forward these two actions while keeping draft,
+cursor and focus. Password/secure/protected editors stay blocked. Native input
+uses zero Esc; reload directly invokes the UI API. A submitted or unknown key
+is observed through the original CON rather than retried. See
+[live recovery](live-recovery.md) for retained input and runtime retirement.

@@ -50,6 +50,7 @@ type Envelope struct {
 }
 
 type Options struct {
+	fix                                  bool
 	updatePaths, updateInstallations     []string
 	semantic                             bool
 	staticOnly, sourceFlow, sessionReuse bool
@@ -666,7 +667,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 						response.Context["snapshot"] = opts.snapshot
 					}
 				}
-			case "source refs", "source context":
+			case "source refs", "source context", "source batch":
 				code, err = runSourceResearch(ctx, route, opts, &response)
 			case "source session status", "source session close":
 				code, err = runSourceSession(ctx, route, opts, &response)
@@ -1055,7 +1056,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			code, faultCode, stage = 2, "records.export_options", "export"
 		}
 		response.Error = &Fault{Code: faultCode, Message: err.Error(), Stage: stage}
-		if response.Context["transport"] == "memory-slot-v3" && code == 6 {
+		if response.Context["transport"] == "Lycheedev mailbox protocol v1" && code == 6 {
 			response.Error.Retryable = true
 		}
 		if response.OperationID != "" && len(opts.words) >= 2 && opts.words[0] == "live" {
@@ -1162,6 +1163,8 @@ func parseOptions(args []string) (Options, error) {
 			}
 			seen[arg] = true
 			switch arg {
+			case "--fix":
+				opts.fix = true
 			case "--stdin":
 				opts.stdin = true
 			case "--passive":

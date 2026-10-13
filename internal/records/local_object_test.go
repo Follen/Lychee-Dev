@@ -1,15 +1,84 @@
 package records
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/records/archive"
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
+
+func TestLocalObjectReadsPreferredBucketWithinBudget(t *testing.T) {
+	ctx := context.Background()
+	raw := headerlessBLTE([]byte("local bucket budget regression 1"))
+	key := md5.Sum(raw)
+	var folded byte
+	for _, b := range key[:9] {
+		folded ^= b
+	}
+	preferred := (folded >> 4) ^ (folded & 15)
+	if preferred == 0 {
+		t.Fatal("fixture must exercise a later bucket")
+	}
+	root := t.TempDir()
+	data := filepath.Join(root, "Data", "data")
+	if err := os.MkdirAll(data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "data.000"), append(make([]byte, 30), raw...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	var files []localDirectory
+	for bucket := byte(0); bucket < 16; bucket++ {
+		files = append(files, localDirectory{name: fmt.Sprintf("%02x00000001.idx", bucket), bucket: bucket, generation: 1})
+	}
+	for _, actual := range []byte{preferred, 0} {
+		t.Run(fmt.Sprintf("stored-in-%02x", actual), func(t *testing.T) {
+			limits := resource.DefaultLimits()
+			limits.MetadataBytes = 2 << 20
+			if actual != preferred {
+				limits.MetadataBytes *= 16
+			}
+			budget := resource.New(limits)
+			var visited []byte
+			object, err := openLocalObject(ctx, dir, files, hex.EncodeToString(key[:]), int64(len(raw)), func(index localDirectory, candidate [16]byte) ([]archive.Span, error) {
+				visited = append(visited, index.bucket)
+				if err := budget.Charge(resource.Cost{MetadataBytes: 2 << 20}); err != nil {
+					return nil, err
+				}
+				if index.bucket != actual {
+					return nil, nil
+				}
+				return []archive.Span{{Bytes: int64(len(raw) + 30)}}, nil
+			})
+			if err != nil {
+				t.Fatalf("lookup visited %v: %v", visited, err)
+			}
+			defer object.Close()
+			got, err := io.ReadAll(object)
+			if err != nil || !bytes.Equal(got, raw) || visited[0] != preferred {
+				t.Fatalf("lookup visited %v, body=%x: %v", visited, got, err)
+			}
+			if actual == preferred && len(visited) != 1 {
+				t.Fatalf("unrelated indexes consumed budget: %v", visited)
+			}
+		})
+	}
+}
 
 func TestLocalDirectoryGenerations(t *testing.T) {
 	root := t.TempDir()

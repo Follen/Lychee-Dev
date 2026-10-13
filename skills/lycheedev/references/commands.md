@@ -3,7 +3,7 @@
 
 # Command reference
 
-89 implemented commands. Every command accepts `--format text|json|jsonl`;
+91 implemented commands. Every command accepts `--format text|json|jsonl`;
 `--help` works on the root and on any command. Read the JSON envelope, not
 just the exit code; preserve capture IDs and partial/truncated warnings.
 
@@ -46,7 +46,7 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 ## data
 
 - `data hotfix` — mutates. Inspect independent Hotfix records with an explicit source: --source <wago|dbcache|raidbots>. dbcache reads a pinned --snapshot <pin> (--dbcache <DBCache.bin> | --from <cache-capture>); wago queries the remote record set from --product/--build/--region/--locale with an optional --snapshot parent; raidbots reads --raidbots <DBCache.bin> under 30 days. Filters: --table --table-hash --record --push --status --region-id --search and wago --from/--to; --latest selects the largest matching push batch before pagination; dbcache --scan owns bounded pagination with --max-pages and a resumable --cursor; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--source <wago|dbcache|raidbots>`, `--snapshot <pin>`, `--dbcache <DBCache.bin>`, `--raidbots <DBCache.bin>`, `--from <cache-capture-or-time>`, `--to <time>`, `--product <retail|classic|titan|forever>`, `--build <full-build>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--table <name>`, `--table-hash <8-hex>`, `--record <n>`, `--push <n>`, `--status <0-255>`, `--region-id <n>`, `--search <text>`, `--latest`, `--scan (dbcache: complete bounded scan; --cursor resumes its capture)`, `--offline`, `--limit <1-200>`, `--cursor <opaque>`, `--page <n>`, `--after-index <n>`, `--max-pages <n>`, `--max-requests <n>`, `--max-bytes <n>`, `--encoding csv`, `--output <file>`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--source <wago|dbcache|raidbots>`, `--snapshot <pin>`, `--dbcache <DBCache.bin>`, `--raidbots <DBCache.bin>`, `--from <cache-capture-or-time>`, `--to <time>`, `--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)`, `--build <full-build>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--table <name>`, `--table-hash <8-hex>`, `--record <n>`, `--push <n>`, `--status <0-255>`, `--region-id <n>`, `--search <text>`, `--latest`, `--scan (dbcache: complete bounded scan; --cursor resumes its capture)`, `--offline`, `--limit <1-200>`, `--cursor <opaque>`, `--page <n>`, `--after-index <n>`, `--max-pages <n>`, `--max-requests <n>`, `--max-bytes <n>`, `--encoding csv`, `--output <file>`.
 - `data sql` — mutates. Read-only SQL over pinned static tables, meta.Table enum/flags metadata, or explicit effective.Table overlays (query JSON hotfix array): exactly one of --sql <text>, --file <query.sql|query.json>, or --stdin; repeated --param <name=scalar> binds named values; --encoding csv --output <file> writes a captured CSV and manifest; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--key-file <WoW.txt|keys.json>`, `--snapshot <pin>`, `--installation <client-or-game-root>`, `--cdn`, `--sql <text>`, `--file <query.sql|query.json>`, `--stdin`, `--param <name=scalar>`, `--encoding csv`, `--output <file>`, `--overwrite`, `--max-bytes <n>`, `--offline`, `--timeout-seconds <1-3600> (default 300; entire query)`.
 - `data db2` — mutates. Read typed rows: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --table <name> [--id <n> | --limit <n> --after-id <n>] [--max-bytes <n>] [--offline]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
@@ -91,8 +91,8 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 ## doctor
 
-- `doctor` — read-only. Aggregate read-only workspace, target catalog, bundled LuaLS and source-mirror health checks; the mirror check joins only when the nearest project declares a product, and exit 3 reports that at least one check found an error
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--offline`.
+- `doctor` — read-only. Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--session <CON-id>`, `--project <directory>`, `--offline`.
 
 ## evidence
 
@@ -130,15 +130,17 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `live run <operation-id>` — mutates. Execute one loaded operation and return its verified report with cleanup pending; acknowledge separately with live ack: live run <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
+- `live doctor` — mutates. Diagnose one PID or retained CON without input; --fix installs a clean release when needed and resumes or activates that same target under Lycheedev mailbox protocol v1; missing runtime requires one manual reload
+  Flags: `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--session <CON-id>`, `--project <directory>`, `--fix`, `--release <distribution-root>`, `--output <upgrade-archive>`, `--request <idempotency-key>`, `--wait-seconds <1-600> (default 30)`, `--no-cache`.
 - `live instances` — read-only. List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding
   Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client-or-game-root>`, `--passive`.
-- `live connect` — mutates. Discover and freshly bind a native memory/200-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work
+- `live connect` — mutates. Discover and freshly bind a native memory/500-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work
   Flags: `--home <root>`, `--format text|json|jsonl`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--session <session-id>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live reset` — mutates. Unblock a stuck window whose in-game queue blocks identity after abandon or a lost receipt: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>]; sends one fixed nonce-correlated reset trigger per unowned matching window, expects its receipt, then reconnects; disk-owned windows are never touched; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`, `--character <name>`, `--realm <realm>`, `--pid <pid>`, `--installation <client>`, `--wake-binding <chord>`.
 - `live reload` — mutates. Perform one correlated UI reload on the selected client and verify the new runtime: --session <session-id> --request <idempotency-key>
   Flags: `--home <root>`, `--format text|json|jsonl`, `--session <session-id>`, `--request <idempotency-key>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
-- `live reload fallback` — mutates. Activate a clean managed addon and its 200 slots on an explicit installation/PID with a recorded reload using memory readiness when available (fixed bootstrap otherwise), then verify a new runtime and fresh connection; --request is idempotent
+- `live reload fallback` — mutates. Activate a clean managed addon and its 500 slots on an explicit installation/PID using fresh Mailbox readiness for a recorded reload, or waiting for one manual reload when no current input protocol is loaded, then verify a new runtime and fresh connection; --request is idempotent
   Flags: `--home <root>`, `--format text|json|jsonl`, `--installation <client>`, `--pid <pid>`, `--request <idempotency-key>`, `--session <prior-session>`, `--wake-binding <chord>`, `--project <directory>`, `--wait-seconds <1-600> (default 120)`, `--no-cache`.
 - `live ack <operation-id>` — mutates. Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>
   Flags: `--home <root>`, `--format text|json|jsonl`.
@@ -185,6 +187,8 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 
 - `source list` — read-only. List source repositories and product branches; --snapshot <pin> reports fixed file-mapping readiness; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
   Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin>`.
+- `source batch` — mutates. Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped LuaLS session; each item retains its own cursor and coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--project <directory>`, `--snapshot <pin-id>`, `--file <requests.json>`, `--environment <client-pin>`, `--flow`, `--session-reuse`, `--static-only`, `--release <release-root>`.
 - `source sync` — mutates. Fetch --source <key> --product <track> [--ref <full-ref-or-commit>] and return a fixed snapshot
   Flags: `--home <root>`, `--format text|json|jsonl`, `--source <key>`, `--product <track>`, `--ref <full-ref-or-commit>`.
 - `source inspect` — mutates. Inspect one fixed source: --path <file> for original lines, --symbol <qualified-name> for symbol candidates, or --target-path <path> for file/asset facts; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins
@@ -211,13 +215,13 @@ just the exit code; preserve capture IDs and partial/truncated warnings.
 ## target
 
 - `target resolve` — mutates. Pin data identity from --target <name>, --installation <game-root-or-client> optionally constrained by --product <track>, remote --product <track> without installation, or --file <selection.json>; local selection never falls back to remote; named targets resolve their exact configured identity at command start
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--file <selection.json>`, `--target <name>`, `--installation <game-root-or-client>`, `--product <retail|classic|titan|forever>`, `--build <full-build>`, `--definitions <commit-or-full-ref>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--from <parent-pin>`, `--offline`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--file <selection.json>`, `--target <name>`, `--installation <game-root-or-client>`, `--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)`, `--build <full-build>`, `--definitions <commit-or-full-ref>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--from <parent-pin>`, `--offline`.
 - `target show <name-or-pin-id>` — read-only. Read a named target configuration and its references, or an explicit PIN- selection ID
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `target list` — read-only. List every named target configuration in name order; a brand new workspace has no targets
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `target add <name>` — mutates. Create or explicitly replace one named target: target add <name> --product <track> --region <region> --locale <locale> with exactly one of --installation <client> or --remote; optional --build <full-build> pins that exact release; --replace confirms replacement
-  Flags: `--home <root>`, `--format text|json|jsonl`, `--product <retail|classic|titan|forever>`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--build <full-build>`, `--installation <client-directory>`, `--definitions <commit-or-full-ref>`, `--remote`, `--replace`.
+  Flags: `--home <root>`, `--format text|json|jsonl`, `--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)`, `--region <us|eu|cn|kr|tw>`, `--locale <locale>`, `--build <full-build>`, `--installation <client-directory>`, `--definitions <commit-or-full-ref>`, `--remote`, `--replace`.
 - `target remove <name>` — mutates. Remove one named target and its reference ledger: target remove <name>; resolved pins stay intact, running operations block removal
   Flags: `--home <root>`, `--format text|json|jsonl`.
 - `target available` — read-only. List the releases the version manifests serve for one region: --region <region>; one bounded manifest fetch per supported product with per-product failures reported inline; --offline is refused because the listing is inherently current

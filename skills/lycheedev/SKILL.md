@@ -24,7 +24,7 @@ continue the existing goal, scope and evidence.
 | TOC/XML load order, syntax or client compatibility | [Addon validation](references/addon-validation.md) |
 | Behavior in the running game, or a new authorized live check | [Live investigation](references/live-investigation.md) |
 | Existing CON is pending, interrupted, closing or affected by reload/process change | [Live recovery](references/live-recovery.md) |
-| Live activation, first contact or a just-updated addon | [Live startup](references/live-startup.md) |
+| First contact, startup failure, installation activation or a just-updated addon | [Live doctor and startup](references/live-startup.md) |
 | Read errors retained by the addon provider | [Error diagnosis](references/error-diagnosis.md) |
 | Addon CPU, memory growth, stutter or repeated-operation cost | [Performance investigation](references/runtime-investigations.md) |
 | Toolkit install/update/remove, or managed addon deployment needed by the authorized task | [Installation](references/installation.md) |
@@ -68,7 +68,13 @@ can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-The CLI owns keys, memory, optical readiness, slots and journals. Follow its
+For startup or readiness failures, use `live doctor` before choosing a repair.
+Its default is read-only; `--fix` follows the task’s authorized installation and
+live scope. A returned manual reload wait needs one user action in that exact
+window, then resume the same CON. Do not simulate chat input.
+
+The CLI owns keys, Mailbox readiness, slots and journals. Native Live uses
+Lycheedev mailbox protocol v1. The same name is used in schema and transport. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
 work does not use the old OP/BTP ACK/finish/hide sequence.

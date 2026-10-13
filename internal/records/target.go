@@ -57,6 +57,7 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 		if err != nil {
 			return result, err
 		}
+		dataProduct := selection.ClientDataProduct(client)
 		if request.FullBuild != "" && client.FullBuild != request.FullBuild {
 			return result, selection.ErrTargetBuildUnavailable
 		}
@@ -76,7 +77,7 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 			if err != nil {
 				return result, err
 			}
-			if parent.Source != nil && parent.Source.Product != client.Product || parent.Data != nil && parent.Data.Product != client.Product || parent.Changes != nil && parent.Changes.Product != client.Product {
+			if parent.Source != nil && !selection.SourceSupportsProduct(*parent.Source, dataProduct) || parent.Data != nil && parent.Data.Product != dataProduct || parent.Changes != nil && parent.Changes.Product != dataProduct {
 				return result, errors.New("selection.product_mismatch")
 			}
 			if definitions == "" && parent.Data != nil {
@@ -105,7 +106,7 @@ func ResolveLocalTarget(ctx context.Context, root string, request LocalTargetReq
 		}
 		build = after
 		pin, err := pinner.PinSelection(ctx, selection.SelectionSpec{Parent: request.Parent, Data: &selection.DataPin{
-			Product: client.Product, Region: request.Region, Language: request.Locale, FullBuild: client.FullBuild,
+			Product: dataProduct, Region: request.Region, Language: request.Locale, FullBuild: client.FullBuild,
 			BuildConfig: build.Installed.BuildConfig, CDNConfig: build.Installed.CDNConfig, DefinitionCommit: commit,
 		}})
 		if err != nil {

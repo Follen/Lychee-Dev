@@ -1,6 +1,39 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
-2026-10-01 Native CON 当前实现合同为 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md)：200 槽、wire06、slot.v3、identity.v2、input.v2、公开 Mailbox 定点读取；无旧原生协议兼容或扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
+2026-10-13，Native Live 当前合同统一为 [Lycheedev mailbox protocol v1](lycheedev-mailbox-protocol-v1.md)。
+Go CLI 与 Lua addon 使用命名 Mailbox、500 个 LoD 槽和两个正式快捷键：执行 Ctrl+Alt+F12，
+重载 Ctrl+Alt+F11。普通 EditBox 选择性透传两个动作，保留焦点、文字和光标。
+Native 只发送执行或重载组合键，escapeLimit=0；不使用光学、Esc 或聊天命令重载。
+独立启动核在业务模块之前注册绑定并发布 BootstrapMailbox。live doctor 默认只读，--fix
+复用受管安装及原 CON 恢复；顶层 doctor 选定 Live 目标时复用相同检查。
+已加载的二键运行时在改名升级时仍由 CLI 发一次验证过的重载键；首次未加载且无输入证据时
+才等待手动重载。等待保留原 PID/CON，不消耗后续连接预算。
+历史输入方案及其验收保留原时间和范围，不能作为当前协议通过证据。
+
+2026-10-13，3.2.0 Live 按 [500 槽合同](live-500-slots-3.2.0.md) 扩展容量：
+500 个 LoD 槽、121 个操作身份，`nextSlot > 485` 进入现有容量 reload。
+支持受管 64/200 槽安装迁移；单个 Retail、国服无限 beta、泰坦与亚服无限 beta 的实测
+分别记录，沿用现有 Mailbox 与输入协议。国服 70338 增加运行时 Lua context 指令变体；
+亚服 70338 在同一变体下补充精确构建的完整指令校验，保留运行时代码缺页限制。
+两者仍由 RIP 位移解析 Lua 根，再沿 state、globals 和 Mailbox 定点读取。
+
+同日补齐 Classic Era `1.15.9.70003` / Interface `11509` 的 runtime profile、
+独立事件目录和主插件/500 槽 TOC 声明。事件目录来自固定的 `classic_era` 源码提交，
+Interface 已由实际客户端核实。既有四 Interface 的精确槽 TOC 仍可读取；
+`addon install` 沿原受管升级流程迁移声明，保留未决预约和中断继续语义。
+Era 沿用现有运行时特征及 RIP 解析，不增加固定 Lua 根或内存扫描回退。
+
+2026-10-13，3.2.0 的 Source 按 [产品映射与查询优化](source-products-performance-3.2.0.md)
+接通七产品：两个 Forever beta 共同使用 GitHub `forever` 分支，Data 仍各自固定交付身份。
+认证 offset 上建立请求内名称、ID、路径、入向/出向和加载目标查找表；精确查询按 exact、prefix、
+文本顺序推进。`source batch --file <requests.json>` 让同一 pin 的 1–32 项 query/refs/context
+共享准备、文件与行索引、API 环境和请求内 LuaLS 会话，保留各项分页和覆盖状态。
+
+2026-10-13，3.2.0 开发线的 Data 产品、区域端点和本地安装选择遵循
+[七产品 Data 合同](data-products-3.2.0.md)。两个 Forever beta 的交付身份分别保存；
+Data 支持目录与已验证的 addon/API 基线分开维护。Live 阶段见上述 500 槽合同。
+
+2026-10-01 Native CON 的 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md) 继续约束 wire06、slot.v3、identity.v2 与公开 Mailbox 定点读取；容量以上述 500 槽合同为准，输入规则已由上方 Lycheedev mailbox protocol v1 替代。无扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
 
 2026-09-30 [D 阶段研究合同](phase-d-publication-luals-session-2026-09-30.md) 约束后续
 addon 发布优化与可选跨 CLI LuaLS 会话：保留输入新鲜度，先做等价编码复用；语义会话
@@ -289,7 +322,7 @@ CLI 的合同与调用者身份无关：人手写、脚本及 Agent 生成的相
 | `init`、`doctor`、`version`、`describe` | 初始化、能力检查、版本、机器可读命令契约 |
 | `target` | `list / add / show / resolve / remove`，目标配置与快照 |
 | `project` | `init / lock / status`，项目级意图和不可变依赖 |
-| `source` | `list / sync / index / query / inspect / refs / context / diff / validate / prune`；refs/context 以固定符号 ID 和有界游标继续研究；prune 仅显式清理闲置 source 工作树 |
+| `source` | `list / sync / index / query / inspect / refs / context / batch / diff / validate / prune`；refs/context 以固定符号 ID 和有界游标继续研究；batch 共享同一来源的准备；prune 仅显式清理闲置 source 工作树 |
 | `data` | `sql / db2 / hotfix / spell / item / creature / encounter / decor` |
 | `asset` | `search / inspect / export / demux`，文件、图标、图片、视频 |
 | `live` | `instances / connect / bind / probe put / probe load / run / ack / bugs / reload / status / resume / cancel / abandon`；`instances` 为发现+身份识别，`connect` 为整任务自动连接 |

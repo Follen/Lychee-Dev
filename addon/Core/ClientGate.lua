@@ -11,6 +11,7 @@ ns.Client = nil
 local baselines = {
 	{ product = "forever", version = "1.60.1", interface = 16001 },
 	{ product = "classic", version = "5.5.4", interface = 50504 },
+	{ product = "classic-era", version = "1.15.9", interface = 11509 },
 	{ product = "titan", version = "3.80.2", interface = 38002 },
 	{ product = "retail", version = "12.1.0", interface = 120100 },
 }

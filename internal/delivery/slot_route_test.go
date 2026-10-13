@@ -18,11 +18,11 @@ func TestForwardAllocationIsBoundedAndPreservesUnknown(t *testing.T) {
 	if NextFreeSlot(p, 1) != 0 {
 		t.Fatal("allocated unknown reservation")
 	}
-	p.Files[199].Consumed = true
-	if NextFreeSlot(p, 1) != 200 {
+	p.Files[bridge.SlotCount-1].Consumed = true
+	if NextFreeSlot(p, 1) != bridge.SlotCount {
 		t.Fatal("last slot unavailable")
 	}
-	p.Files[199].PendingHash = "interrupted"
+	p.Files[bridge.SlotCount-1].PendingHash = "interrupted"
 	if NextFreeSlot(p, 1) != 0 {
 		t.Fatal("allocated incomplete publication")
 	}

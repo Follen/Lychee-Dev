@@ -1,23 +1,17 @@
 local _, ns = ...
 
--- Owner-approved native transport telemetry. One sampler/display, no input
+-- Owner-approved native transport telemetry. One sampler, no input
 -- hooks or focus mutation. Explicit bridge-off removes all recurring work.
 local frame, provider, record, last, sequence, lastTick,mailbox
-local loading,leaving,refreshing,heartbeat
+local loading,leaving,refreshing
 local zero=string.rep("0",32)
 local function nativeBindings()
     if not ns.ReceiverBindings or type(ns.ReceiverBindings.Current)~="function" then return nil end
     local ok,profile=pcall(ns.ReceiverBindings.Current)
     if not ok or (issecretvalue and issecretvalue(profile)) or type(profile)~="table" then return nil end
-    for _,key in ipairs({"wake","submit","close"}) do
-        if issecretvalue and issecretvalue(profile[key]) then return nil end
-    end
-    if profile.close~="ALT-CTRL-[" or not
-        ((profile.wake=="ALT-CTRL-F12" and profile.submit=="ALT-CTRL-SHIFT-F12")
-        or (profile.wake=="ALT-CTRL-F11" and profile.submit=="ALT-CTRL-SHIFT-F11")) then return nil end
-    return {wake=profile.wake,submit=profile.submit,close=profile.close}
+    return {wake=profile.wake,reload=profile.reload}
 end
-local function hide()record=nil;if mailbox then rawset(mailbox,"input",nil) end;ns.InputSignal.Hide() end
+local function hide()record=nil;if mailbox then rawset(mailbox,"input",nil) end end
 local function sample()
     if loading or leaving or ns.Compat.InWorld()~=true then hide();return end
     local identity=provider and provider()
@@ -25,18 +19,21 @@ local function sample()
     local tick=ns.Compat.MonotonicSeconds()
     if not tick or (lastTick and tick<lastTick) then hide();return end
     lastTick=tick
-    local ready,reason=ns.Platform.ObserveInputState()
+    local forwarded=ns.FocusBindings and ns.FocusBindings.Refresh()
+    local ready,reason=ns.Platform.ObserveInputState(forwarded==true)
+    if ns.FocusBindings and reason=="input_keyboard_focus" then reason="input_focus_unavailable" end
     if issecretvalue and (issecretvalue(ready) or issecretvalue(reason)) then ready,reason=nil,"input_observation_unavailable" end
     local bindings=nativeBindings()
     if not bindings then ready,reason=false,"input_binding_unavailable" end
     if ready~=true and (type(reason)~="string" or reason=="") then reason="input_observation_unavailable" end
     sequence=sequence+1
     if sequence>=4294967295 then ns.InputState.Stop();return end
-    identity.schema="lycheedev.input.v3"
-    identity.bindings=bindings or {wake="",submit="",close=""}
+    identity.schema="Lycheedev mailbox protocol v1"
+    identity.bindings=bindings or {wake="",reload=""}
     identity.sampleMillis=math.floor(tick*1000)
     identity.inputBlocked=ready~=true
     identity.reason=reason or ""
+    identity.escapeLimit=0
     -- Always obtain a detached private snapshot; public mailbox values never
     -- drive the attempt sequence or any input/receipt authorization.
     if ns.SlotRuntime and ns.SlotRuntime.InputDiagnostic then identity.inputAttempt=ns.SlotRuntime.InputDiagnostic() end
@@ -44,10 +41,6 @@ local function sample()
     if not text then hide();return end
     record=ns.MemoryProtocol.Encode(identity.runtime,identity.runtime,zero,5,1,sequence,text)
     if not record then hide();return end
-    local state=ready==true and "ready" or (reason=="input_keyboard_focus" or reason=="input_combat_lockdown") and reason or "unknown"
-    local nextHeartbeat=not heartbeat
-    if not ns.InputSignal.Render(state,nextHeartbeat) then hide();return end
-    heartbeat=nextHeartbeat
     if mailbox then rawset(mailbox,"input",record) end
 end
 local function refresh()
@@ -66,8 +59,9 @@ ns.InputState={
         end
         provider=observe
         if frame and frame:GetScript("OnUpdate") then return true end
+        if ns.FocusBindings then ns.FocusBindings.Start() end
         sequence,last=sequence or 0,0
-        if not frame then frame=ns.InputSignal.Frame() end
+        if not frame then frame=CreateFrame("Frame",nil,UIParent);frame:Hide();frame:EnableMouse(false) end
         loading,leaving=false,false
         for _,event in ipairs({"PLAYER_ENTERING_WORLD","PLAYER_LEAVING_WORLD","LOADING_SCREEN_ENABLED","LOADING_SCREEN_DISABLED","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do frame:RegisterEvent(event) end
         frame:SetScript("OnEvent",function(_,event)
@@ -93,6 +87,7 @@ ns.InputState={
     -- Transaction completion refreshes facts without moving the periodic tick.
     Refresh=refresh,
     Stop=function()
+        if ns.FocusBindings then ns.FocusBindings.Stop() end
         if frame then
             frame:SetScript("OnUpdate",nil);frame:SetScript("OnEvent",nil)
             frame:SetScript("OnShow",nil);frame:SetScript("OnHide",nil);frame:UnregisterAllEvents()
@@ -101,7 +96,6 @@ ns.InputState={
         hide()
         mailbox=nil
         if frame then frame:Hide() end
-        if ns.StartupBeacon then ns.StartupBeacon.Stop() end
     end,
     Snapshot=function()return record end,
 }

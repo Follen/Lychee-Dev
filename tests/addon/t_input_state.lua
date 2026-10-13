@@ -2,12 +2,11 @@ local Env=...
 local ns=Env.LoadWorkbench()
 Env.LoadAddon("Bridge/CaptureWriter.lua",ns)
 Env.LoadAddon("Bridge/MemoryProtocol.lua",ns)
-Env.LoadAddon("Bridge/InputSignal.lua",ns)
 IsPlayerInWorld=function()return true end
 local now,ready,reason=100,true,nil
 GetTime=function()return now end
 ns.Platform={ObserveInputState=function()return ready,reason end}
-ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["}end}
+ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",reload="ALT-CTRL-F11"}end}
 local created={}
 local create=CreateFrame
 CreateFrame=function(... )local f=create(...);created[#created+1]=f;return f end
@@ -16,9 +15,9 @@ assert(#created==0,"loading telemetry created idle work")
 local provider=function()return {runtime=string.rep("1",32),owner="",fence=0,nextSlot=1,guid="g",build="b"}end
 local mailbox={}
 ns.InputState.Start(provider,mailbox)
-assert(#created==1 and not created[1]:GetScript("OnKeyDown"))
+assert(#created==1 and not created[1]:GetScript("OnKeyDown") and #created[1].children==0)
 assert(ns.InputState.Snapshot():find('"inputBlocked":false',1,true))
-assert(mailbox.input==ns.InputState.Snapshot() and mailbox.input:find('"schema":"lycheedev.input.v3"',1,true))
+assert(mailbox.input==ns.InputState.Snapshot() and mailbox.input:find('"schema":"Lycheedev mailbox protocol v1"',1,true))
 ready,reason=false,"input_keyboard_focus"
 now=100.2;created[1]:GetScript("OnUpdate")(created[1],.2)
 assert(ns.InputState.Snapshot():find('"inputBlocked":false',1,true),"sampler ran before one second")
@@ -60,7 +59,6 @@ ns.InputState.Stop()
 Env.LoadAddon("Bridge/InputState.lua",ns)
 assert(not ns.InputState.Snapshot() and #created==1)
 ns.InputState.Refresh();assert(#created==1 and not ns.InputState.Snapshot())
-Env.LoadAddon("Bridge/InputSignal.lua",ns)
 local oldMailbox=mailbox;mailbox={}
 ns.InputState.Start(provider,mailbox);assert(#created==2 and mailbox.input==ns.InputState.Snapshot() and oldMailbox.input==nil)
 ns.InputState.Stop();assert(not created[2]:GetScript("OnUpdate"))

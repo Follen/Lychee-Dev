@@ -11,7 +11,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
-const InputDiagnosticSchema = "lycheedev.input-attempt.v1"
+const InputDiagnosticSchema = bridge.MailboxSchema
 
 // InputDiagnostic describes a callback, not an execution receipt or permission
 // to repeat input. SampleMillis is copied from the containing current INPUT.

@@ -12,25 +12,28 @@ import (
 
 var errInputStateStale = errors.New("live.channel_input_state_stale")
 
+const maxInputEscapes = 3
+const legacyInputSchema = "lycheedev.input.v3"
+
 // A bounded wait for a structurally valid, matching but out-of-date sample.
 // This scheduling hint grants no input authority and proves no live runtime.
 var ErrInputObservationStale = errors.Join(ErrPending, errors.New("live.channel_input_observation_stale"))
 
 type InputObservation struct {
-	Bindings        *InputBindings       `json:"bindings"`
-	Schema          string               `json:"schema"`
-	Runtime         string               `json:"runtime"`
-	Owner           string               `json:"owner"`
-	Fence           uint64               `json:"fence"`
-	NextSlot        int                  `json:"nextSlot"`
-	GUID            string               `json:"guid"`
-	Build           string               `json:"build"`
-	SampleMillis    int64                `json:"sampleMillis"`
-	InputBlocked    *bool                `json:"inputBlocked"`
-	Reason          string               `json:"reason"`
-	Address         uint64               `json:"-"`
-	Optical         *InputSignalEvidence `json:"optical,omitempty"`
-	InputDiagnostic *InputDiagnostic     `json:"inputAttempt,omitempty"`
+	Bindings        *InputBindings   `json:"bindings"`
+	Schema          string           `json:"schema"`
+	Runtime         string           `json:"runtime"`
+	Owner           string           `json:"owner"`
+	Fence           uint64           `json:"fence"`
+	NextSlot        int              `json:"nextSlot"`
+	GUID            string           `json:"guid"`
+	Build           string           `json:"build"`
+	SampleMillis    int64            `json:"sampleMillis"`
+	InputBlocked    *bool            `json:"inputBlocked"`
+	Reason          string           `json:"reason"`
+	EscapeLimit     int              `json:"escapeLimit"`
+	Address         uint64           `json:"-"`
+	InputDiagnostic *InputDiagnostic `json:"inputAttempt,omitempty"`
 }
 
 type InputAction struct {
@@ -51,6 +54,7 @@ type InputAttempt struct {
 	Exchange        string            `json:"exchange"`
 	Runtime         string            `json:"runtime"`
 	Kind            string            `json:"kind"`
+	EscapeAttempts  int               `json:"escapeAttempts,omitempty"`
 	Observation     *InputObservation `json:"observation,omitempty"`
 	Outcome         *InputOutcome     `json:"outcome,omitempty"`
 	AfterDiagnostic *InputDiagnostic  `json:"afterDiagnostic,omitempty"`
@@ -81,6 +85,7 @@ func (d *Driver) perform(ctx context.Context, exchange, runtime string, action I
 	}
 	return out, sendErr
 }
+
 func (o InputOutcome) validate() error {
 	if o.MessagesQueued < 0 || o.AtMillis < 0 || (o.Disposition != "not_sent" && o.Disposition != "submitted" && o.Disposition != "uncertain") || o.Disposition == "not_sent" && o.MessagesQueued != 0 || o.Disposition == "submitted" && o.MessagesQueued == 0 || o.Retryable && o.Disposition != "not_sent" {
 		return errors.New("live.channel_input_outcome_invalid")
@@ -95,8 +100,8 @@ func (d *Driver) invoke(ctx context.Context, tx *Transaction) error {
 	return d.Save(ctx, "input_attempted")
 }
 
-// submitInput shares readiness and single-Escape decisions between slot input
-// and observed reload. Only bootstrap without telemetry uses fixed fallback.
+// submitInput shares readiness between slot input and direct reload. Focus is
+// handled by the addon; the host never sends Escape or chat text.
 func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired string, envelope bridge.SlotEnvelope) error {
 	if d.State.RuntimeEnd != nil {
 		return runtimeRetirementPending()
@@ -117,28 +122,20 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 	s, err := d.Backend.ObserveInput(ctx, envelope, after, d.State.Identity.InputState)
 	if err != nil {
 		d.Waiting = "input_observation_unavailable"
-		var signalErr *inputSignalPending
-		if errors.As(err, &signalErr) {
-			d.Waiting = signalErr.reason
-		}
 		if errors.Is(err, ErrInputObservationStale) {
 			d.Waiting = "input_observation_stale"
 		}
 		return err
 	}
-	if s.InputBlocked == nil || !s.validBindings() {
+	if !s.validReadiness() || !s.validBindings() {
 		d.Waiting = "input_observation_unavailable"
 		return ErrPending
 	}
-	kind := desired
 	if *s.InputBlocked {
 		d.Waiting = s.Reason
-		if s.Reason != "input_keyboard_focus" {
-			return ErrPending
-		}
-		kind = "escape"
+		return ErrPending
 	}
-	out, err := d.perform(ctx, exchange, runtime, InputAction{Kind: kind, Envelope: envelope, Observation: &s, Capability: d.State.Identity.InputState})
+	out, err := d.perform(ctx, exchange, runtime, InputAction{Kind: desired, Envelope: envelope, Observation: &s, Capability: d.State.Identity.InputState})
 	if out.Disposition == "not_sent" {
 		d.Waiting = out.Reason
 		if out.Retryable {
@@ -152,10 +149,6 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 	if err != nil {
 		return err
 	}
-	if kind == "escape" {
-		d.Waiting = "input_keyboard_focus"
-		return ErrPending
-	}
 	return nil
 }
 
@@ -164,7 +157,7 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 func inputObservation(r memory.Record, e bridge.SlotEnvelope, after, now int64) (InputObservation, error) {
 	var s InputObservation
 	h := r.Header
-	if len(r.Payload) > 2048 || h.Kind != bridge.MemoryInputState || h.State != 1 || h.Sequence == 0 || h.Sequence == ^uint32(0) || h.Ticket != [16]byte{} || json.Unmarshal(r.Payload, &s) != nil || s.Schema != InputSchema || s.InputBlocked == nil || !s.validBindings() {
+	if len(r.Payload) > 2048 || h.Kind != bridge.MemoryInputState || h.State != 1 || h.Sequence == 0 || h.Sequence == ^uint32(0) || h.Ticket != [16]byte{} || json.Unmarshal(r.Payload, &s) != nil || !s.validSchema(e.Action) || !s.validReadiness() || !s.validBindings() {
 		return s, errors.New("live.channel_input_state_invalid")
 	}
 	runtime, err := tokenBytes(s.Runtime)
@@ -175,9 +168,6 @@ func inputObservation(r memory.Record, e bridge.SlotEnvelope, after, now int64) 
 	// action merely because the game has already advanced its slot counter.
 	if s.Runtime != e.Runtime || s.GUID != e.GUID || s.Build != e.Build || (e.Action != "reload" && s.NextSlot != slotStart(e)) || (s.Owner != e.Owner && !(e.Action == "bind" && s.Owner == "")) || (s.Owner != "" && s.Fence != e.Fence) {
 		return s, errors.New("live.channel_input_target_changed")
-	}
-	if !*s.InputBlocked && s.Reason != "" || *s.InputBlocked && s.Reason == "" {
-		return s, errors.New("live.channel_input_state_invalid")
 	}
 	if s.SampleMillis < 0 || s.SampleMillis > now+100 {
 		return s, errors.New("live.channel_input_clock_invalid")
@@ -210,4 +200,35 @@ func slotStart(e bridge.SlotEnvelope) int {
 		return e.StartSlot
 	}
 	return e.Index
+}
+
+func observedInputCapability(capability string) bool { return capability == InputSchema }
+func reloadInputCapability(capability string) bool {
+	return observedInputCapability(capability) || capability == bridge.PreviousMailboxSchema
+}
+
+func upgradeInputCapability(capability string) bool {
+	return capability == legacyInputSchema || capability == "lycheedev.input.hybrid.v2" || capability == bridge.PreviousMailboxSchema
+}
+
+func inputCapabilityError(capability string) error {
+	if observedInputCapability(capability) {
+		return nil
+	}
+	return errors.New("live.channel_input_capability_unsupported")
+}
+
+func inputActionCapabilityError(capability, action string) error {
+	if action == "reload" && reloadInputCapability(capability) {
+		return nil
+	}
+	return inputCapabilityError(capability)
+}
+
+func (s InputObservation) validSchema(action string) bool {
+	return s.Schema == InputSchema || (action == "reload" && s.Schema == bridge.PreviousMailboxSchema)
+}
+
+func (s InputObservation) validReadiness() bool {
+	return s.InputBlocked != nil && (*s.InputBlocked == (s.Reason != "")) && s.EscapeLimit == 0
 }

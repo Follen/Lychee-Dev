@@ -73,7 +73,7 @@ func (p *slotPeer) Input(_ context.Context, a channel.InputAction) (channel.Inpu
 }
 func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (channel.InputObservation, error) {
 	blocked := false
-	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Submit: "ALT-CTRL-SHIFT-F12", Close: "ALT-CTRL-["}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
+	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
 }
 func (p *slotPeer) RuntimeCandidate(context.Context, channel.Identity) (*channel.Identity, error) {
 	return nil, nil
@@ -154,7 +154,7 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 			if !peer.out.Scan() || peer.out.Text() != "ready" {
 				t.Fatal("peer not ready")
 			}
-			identity := channel.Identity{Schema: channel.IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "Player-1-123", Character: "Tester", Realm: "Realm", Build: "70000", Product: "retail", Release: "2.5.1"}
+			identity := channel.Identity{Schema: channel.IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 500, GUID: "Player-1-123", Character: "Tester", Realm: "Realm", Build: "70000", Product: "retail", Release: "2.5.1"}
 			path := filepath.Join(dir, "connections", "connection.jsonl")
 			d, err := channel.New(path, peer, identity)
 			if err != nil {

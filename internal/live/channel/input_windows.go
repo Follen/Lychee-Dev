@@ -19,7 +19,7 @@ var inputUptime = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount
 func uptimeMillis() int64 { n, _, _ := inputUptime.Call(); return int64(n) }
 
 func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after int64, capability string) (InputObservation, error) {
-	if err := inputCapabilityError(capability); err != nil {
+	if err := inputActionCapabilityError(capability, e.Action); err != nil {
 		return InputObservation{}, err
 	}
 	if n.Guard == nil {
@@ -28,13 +28,7 @@ func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after 
 	if err := n.Guard(ctx); err != nil {
 		return InputObservation{}, err
 	}
-	lookup := func() (InputObservation, error) {
-		return n.observeInputFrom(ctx, n.Process, e, after, uptimeMillis, time.Now)
-	}
-	if capability != bridge.InputSignalCapability {
-		return lookup()
-	}
-	return observeHybridInput(func() (InputSignalEvidence, error) { return n.observeSignal(ctx, e.Runtime) }, lookup)
+	return n.observeInputFrom(ctx, n.Process, e, after, uptimeMillis, time.Now)
 }
 
 func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
@@ -104,16 +98,11 @@ func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e b
 // Input performs one already-journaled effect. No loop, journal callback or
 // business transition lives here. The address is revalidated, never trusted.
 func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, err error) {
-	if err := inputCapabilityError(a.Capability); err != nil {
-		return InputOutcome{Disposition: "not_sent", Reason: "input_capability_unsupported"}, err
+	if a.Kind != "invoke" && a.Kind != "reload" {
+		return InputOutcome{Disposition: "not_sent", Reason: "input_action_retired"}, errors.New("live.channel_input_action_invalid")
 	}
-	if a.Capability == bridge.InputSignalCapability {
-		if a.Observation == nil {
-			return InputOutcome{Disposition: "not_sent", Reason: "input_signal_unavailable", Retryable: true}, ErrPending
-		}
-		if err := n.recheckSignal(a.Envelope.Runtime, *a.Observation); err != nil {
-			return InputOutcome{Disposition: "not_sent", Reason: "input_signal_unavailable", Retryable: true}, err
-		}
+	if err := inputActionCapabilityError(a.Capability, a.Kind); err != nil {
+		return InputOutcome{Disposition: "not_sent", Reason: "input_capability_unsupported"}, err
 	}
 	if n.Guard == nil {
 		return InputOutcome{Disposition: "not_sent", Reason: "guard_missing"}, errors.New("live.channel_guard_required")
@@ -124,7 +113,7 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 		return InputOutcome{Disposition: "not_sent", Reason: "shared_publication", Retryable: errors.Is(err, ErrPending)}, err
 	}
 	defer func() { err = errors.Join(err, n.unlockPublication()) }()
-	slotAction := a.Kind == "invoke" || a.Kind == "escape" && a.Envelope.Action != "reload"
+	slotAction := a.Kind == "invoke"
 	if slotAction {
 		if err := delivery.VerifySlotPublication(ctx, n.Parent, n.Version, n.Consumer, a.Envelope); err != nil {
 			return InputOutcome{Disposition: "not_sent", Reason: "slot_publication_changed"}, err
@@ -142,24 +131,10 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return InputOutcome{Disposition: "not_sent", Reason: "slot_pool_invalid"}, err
 		}
 	}
-	bindings := desktop.SlotReceiverBindings()
-	if a.Kind != "reload_fallback" {
-		if a.Observation == nil {
-			return InputOutcome{Disposition: "not_sent", Reason: "input_observation_unavailable", Retryable: true}, ErrPending
-		}
-		var profileErr error
-		bindings, profileErr = a.Observation.receiverProfile()
-		if profileErr != nil {
-			return InputOutcome{Disposition: "not_sent", Reason: "input_bindings_invalid"}, profileErr
-		}
+	if a.Observation == nil || !a.Observation.validBindings() || a.Observation.Bindings.Reload == "" {
+		return InputOutcome{Disposition: "not_sent", Reason: "input_bindings_invalid"}, ErrPending
 	}
-	receipt, err := desktop.WithReceiverInputProfile(ctx, n.Target, bindings, n.Guard, func(in *desktop.ReceiverInput) error {
-		if a.Kind == "reload_fallback" {
-			return in.FixedReload(func(int) error { return nil })
-		}
-		if a.Kind != "invoke" && a.Kind != "escape" && a.Kind != "reload" {
-			return errors.New("live.channel_input_action_invalid")
-		}
+	send := func(wake, reload func() error) error {
 		if a.Observation == nil || a.Observation.Address == 0 {
 			return ErrPending
 		}
@@ -167,7 +142,7 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 		if n.Mailbox == nil {
 			return errors.New("live.channel_mailbox_required")
 		}
-		current, readErr := n.Mailbox.Lookup(ctx, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState})
+		current, readErr := n.Find(ctx, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}, true)
 		if readErr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -182,42 +157,29 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 		if readErr != nil || s.SampleMillis != a.Observation.SampleMillis || !sameInputProfile(s, *a.Observation) {
 			return ErrPending
 		}
-		if a.Capability == bridge.InputSignalCapability {
-			s.Optical = a.Observation.Optical
-			if err := n.recheckSignal(a.Envelope.Runtime, s); err != nil {
-				return err
-			}
-		}
-		if a.Kind == "escape" {
-			if !*s.InputBlocked || s.Reason != "input_keyboard_focus" {
-				return ErrPending
-			}
-			return in.Escape()
-		}
+
 		if *s.InputBlocked {
 			return ErrPending
 		}
 		if a.Kind == "reload" {
-			return in.ReadyReload()
+			return reload()
 		}
-		return in.Wake()
-	})
+		return wake()
+	}
+	profile, err := a.Observation.mailboxProfile(a.Kind)
+	if err != nil {
+		return InputOutcome{Disposition: "not_sent", Reason: err.Error()}, err
+	}
+	receipt, err := desktop.WithMailboxInput(ctx, n.Target, profile, n.Guard, send)
 	out = InputOutcome{MessagesQueued: receipt.MessagesQueued, AtMillis: uptimeMillis(), Disposition: "uncertain"}
 	if err == nil && receipt.SubmissionComplete {
 		out.Disposition = "submitted"
 	} else if receipt.MessagesQueued == 0 {
 		out.Disposition = "not_sent"
-		out.Retryable = errors.Is(err, desktop.ErrKeyAlreadyHeld) || errors.Is(err, ErrPending)
+		out.Retryable = errors.Is(err, desktop.ErrKeyAlreadyHeld) || errors.Is(err, ErrPending) || errors.Is(err, memory.ErrMailboxPathChanged)
 	}
 	if err != nil {
 		out.Reason = err.Error()
-		var signalErr *inputSignalPending
-		if errors.As(err, &signalErr) {
-			out.Reason = signalErr.reason
-		}
-	}
-	if out.Disposition != "not_sent" && n.inputSignal != nil {
-		n.inputSignal.afterInput()
 	}
 	return out, err
 }

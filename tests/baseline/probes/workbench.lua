@@ -25,12 +25,11 @@ for index, key in ipairs(pages) do
 end
 timers[#timers + 1] = C_Timer.NewTimer(45, assert(probe:Callback(function()
     clear()
-    assert(ns.Workbench.ShowSettings())
-    local page = assert(ns.Workbench.GetSettingsPage())
-    for _, action in ipairs({ "wake", "submit", "close" }) do
-        assert(page.bindings[action].button.label:GetText() == ns.ReceiverBindings.Display(action), "binding_display_mismatch")
+    local profile = assert(ns.ReceiverBindings.Current())
+    for _, action in ipairs({ "wake", "reload" }) do
+        assert(GetBindingAction(profile[action], true) == "LYCHEEDEV_" .. string.upper(action), "binding_action_mismatch")
     end
-    results[#results + 1] = "settings"
+    results[#results + 1] = "native_bindings"
 end)))
 timers[#timers + 1] = C_Timer.NewTimer(55, assert(probe:Callback(function()
     clear()

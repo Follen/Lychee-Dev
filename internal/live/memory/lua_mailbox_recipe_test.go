@@ -110,6 +110,60 @@ func (f *rootRecipeFixture) anchor(t *testing.T, at, root uint64) {
 }
 func rootRecipeUnknownHash() string { return strings.Repeat("a", 64) }
 
+func TestLuaMailboxForeverCN70338RuntimeAnchor(t *testing.T) {
+	// wowdump 3.0.1 runtime capture, wow_cn_beta 1.60.1.70338,
+	// executable 20d62993de642e17055bdd2b2575f3ca571f86763b301ebc77765da5547aa1f2.
+	// The state context is held in rbp here, versus r15 in the 70124 recipe.
+	const anchor, root = uint64(0x63441b), uint64(0x7fa8878)
+	f := newRootRecipeFixture(t, 0x1000, 69805516, 0x7fa8000)
+	code, err := hex.DecodeString("488b1d56449707488bcbe866c9a403488bcb488b28e85bc9a403488bd5488bcb448b4008e86ce7a403488bcbe844c9a403")
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(f.text[anchor-f.textRVA:], code)
+	binding, err := f.resolve(context.Background(), "20d62993de642e17055bdd2b2575f3ca571f86763b301ebc77765da5547aa1f2")
+	if err != nil || binding.RootRVA != root || binding.AnchorRVA != anchor || binding.Method != "recipe_unique_text" || binding.Evidence.RecipeID != ForeverContextLuaMailboxRootRecipeID || binding.Evidence.PatternBytes != 49 || binding.Evidence.ScannedBytes != uint64(len(f.text)) {
+		t.Fatal(binding, err)
+	}
+}
+
+func TestLuaMailboxForeverContextRecipeMigration(t *testing.T) {
+	for _, mode := range []string{"relocated", "chunk_crossing", "old_and_new", "wrong_repeat_call", "wrong_context_register"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newRootRecipeFixture(t, 0x2000, 2<<20, 0x203000)
+			at, root := f.textRVA+128, f.dataRVA+24
+			if mode == "chunk_crossing" {
+				at = f.textRVA + (1 << 20) - 20
+			}
+			code, _ := parseLuaRootPattern(ForeverContextLuaMailboxRootPattern)
+			for _, operand := range foreverLuaRootOperands {
+				target := root
+				if operand.call {
+					target = f.textRVA + 32
+				}
+				binary.LittleEndian.PutUint32(code[operand.offset+operand.disp:], uint32(int32(int64(target)-int64(at)-int64(operand.offset+operand.length))))
+			}
+			switch mode {
+			case "old_and_new":
+				f.foreverAnchor(t, at+256, root)
+			case "wrong_repeat_call":
+				binary.LittleEndian.PutUint32(code[22:], uint32(int32(int64(f.textRVA+40)-int64(at)-26)))
+			case "wrong_context_register":
+				code[28] = 0xd7 // rdi no longer matches the rbp context load.
+			}
+			copy(f.text[at-f.textRVA:], code)
+			binding, err := f.resolve(context.Background(), rootRecipeUnknownHash())
+			if mode == "relocated" || mode == "chunk_crossing" {
+				if err != nil || binding.RootRVA != root || binding.AnchorRVA != at || binding.Evidence.RecipeID != ForeverContextLuaMailboxRootRecipeID {
+					t.Fatal(binding, err)
+				}
+			} else if !errors.Is(err, ErrLuaMailboxRootUnsupported) {
+				t.Fatalf("unsafe %s accepted: %+v %v", mode, binding, err)
+			}
+		})
+	}
+}
+
 func (f *rootRecipeFixture) foreverAnchor(t *testing.T, at, root uint64) {
 	t.Helper()
 	code, _ := parseLuaRootPattern(ForeverLuaMailboxRootPattern)
@@ -219,6 +273,46 @@ func TestLuaMailboxForeverExactBuildGuardsAvoidProtectedText(t *testing.T) {
 			}
 			if mode == "cancel" && !errors.Is(err, context.Canceled) {
 				t.Fatal("cancellation discarded", err)
+			}
+		})
+	}
+}
+
+func TestLuaMailboxForeverAsia70338ProtectedRuntimeAnchor(t *testing.T) {
+	const hash = "cfe26cc200fda36407736c7e6b5575a1f2ca2b774c8176529814e32d51312185"
+	const anchor, root = uint64(0x764b4b), uint64(0x79f46b8)
+	for _, mode := range []string{"valid", "anchor_changed", "unknown_hash"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newRootRecipeFixture(t, 0x1000, 4096, root&^4095)
+			sectionAt := 0x98 + binary.Size(pe.OptionalHeader64{})
+			binary.LittleEndian.PutUint32(f.header[sectionAt+8:], 0x4800000-0x1000)
+			f.diskHeader = append([]byte(nil), f.header...)
+			// Actual runtime bytes captured by wowdump 3.0.1. The first .text
+			// pages are NOACCESS; this fixture must not pretend they were read.
+			code, _ := hex.DecodeString("488b1d66fb2807488bcbe85613e303488bcb488b28e84b13e303488bd5488bcb448b4008e84c40e303488bcbe83413e303")
+			if mode == "anchor_changed" {
+				code[3] ^= 8
+			}
+			f.hook = func(rva uint64, b []byte) (int, error, bool) {
+				if rva == anchor && len(b) == len(code) {
+					return copy(b, code), nil, true
+				}
+				if rva >= 0x1000 && rva < 0x4800000 {
+					return 0, errors.New("NOACCESS"), true
+				}
+				return 0, nil, false
+			}
+			identity := hash
+			if mode == "unknown_hash" {
+				identity = rootRecipeUnknownHash()
+			}
+			binding, err := f.resolve(context.Background(), identity)
+			if mode == "valid" {
+				if err != nil || binding.RootRVA != root || binding.AnchorRVA != anchor || binding.Method != "known_anchor" || binding.Evidence.RecipeID != ForeverContextLuaMailboxRootRecipeID || binding.Evidence.ScannedBytes != 0 || !binding.Evidence.StableRootGuard {
+					t.Fatal(binding, err)
+				}
+			} else if !errors.Is(err, ErrLuaMailboxRootUnsupported) || binding.proof != nil {
+				t.Fatal("unverified runtime anchor accepted", binding, err)
 			}
 		})
 	}

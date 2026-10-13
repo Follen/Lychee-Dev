@@ -29,6 +29,9 @@ func TestRelationBatchPreserves128OutgoingSites(t *testing.T) {
 	if cut || len(outgoing) != 128 || len(sites) != 128 {
 		t.Fatalf("outgoing=%d sites=%d cut=%v", len(outgoing), len(sites), cut)
 	}
+	if cache.work.LineIndexBuilds != 1 || cache.work.DocumentReads != 1 {
+		t.Fatalf("same-file positions repeated work: %+v", cache.work)
+	}
 	queries := append([]luals.Query{{Kind: luals.References, Path: "probe.lua"}, {Kind: luals.Hover, Path: "probe.lua"}}, outgoing...)
 	batches := luals.SplitQueries(queries)
 	if len(batches) != 2 || len(batches[0]) != 128 || len(batches[1]) != 2 {

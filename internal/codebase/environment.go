@@ -56,12 +56,19 @@ func (b *Browser) researchEnvironment(ctx context.Context, source selection.Sour
 	identity := environment.Identity{Repository: pin.Repository, Commit: pin.ExactCommit, Client: pin.Product, GeneratorVersion: environment.GeneratorVersion, DependencyCommits: map[string]string{}}
 	keyHash := sha256.Sum256([]byte(pin.Repository + "\x00" + pin.Product + "\x00" + pin.ExactCommit + "\x00" + cache.manifest.RecordsHash + "\x00" + environment.GeneratorVersion))
 	dir := filepath.Join(b.store.Root(), "source", "v1", "environments", hex.EncodeToString(keyHash[:]))
+	owner := ctx.Value(sourceQueryKey{}).(*sourceQuerySession)
+	if result, ok := owner.environments[dir]; ok {
+		return result, "ready", ctx.Err()
+	}
 	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:environment:"+hex.EncodeToString(keyHash[:]))
 	if err != nil {
 		return environment.Result{}, "unavailable", err
 	}
 	defer lease.Close()
 	if result, err := readEnvironmentCache(ctx, dir, cache.manifest.RecordsHash, identity); err == nil {
+		if len(owner.environments) < 4 {
+			owner.environments[dir] = result
+		}
 		return result, "ready", nil
 	}
 	docs := map[string][]byte{}
@@ -82,7 +89,7 @@ func (b *Browser) researchEnvironment(ctx context.Context, source selection.Sour
 		wanted = append(wanted, treeFile{path: r.Path, object: r.Object, size: r.Bytes})
 		records[r.Path] = r
 		return nil
-	})
+	}, recordLookupKey{recordKind, "document"})
 	if err != nil {
 		return environment.Result{}, "unavailable", err
 	}
@@ -116,6 +123,9 @@ func (b *Browser) researchEnvironment(ctx context.Context, source selection.Sour
 	}
 	if err := b.writeEnvironmentCache(ctx, dir, cache.manifest.RecordsHash, result); err != nil {
 		return result, "unavailable", err
+	}
+	if len(owner.environments) < 4 {
+		owner.environments[dir] = result
 	}
 	return result, "ready", nil
 }

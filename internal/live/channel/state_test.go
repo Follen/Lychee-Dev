@@ -10,7 +10,7 @@ import (
 )
 
 func TestResultPersistenceKeepsExactWhitespaceAndHTMLBytes(t *testing.T) {
-	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 9, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 9, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "connections", "c.jsonl"), nil, i)
 	if err != nil {
 		t.Fatal(err)

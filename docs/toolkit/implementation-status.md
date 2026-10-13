@@ -1,5 +1,150 @@
 # Toolkit 2.0 实施状态
 
+2026-10-14，[Mailbox 读取中断修复与复测](mailbox-read-interruptions-2026-10-14.md#修复与复测完成)
+完成：Go 在原请求和期限内继续处理 path_changed；仅已提交重载阶段等待 Lua 根为空或旧字符串
+布局暂不可读，持续布局/协议/配方/进程错误仍停止。发键前复核共用 Native.Find，读取错误保留到 trace。
+五个故障入口从失败变为通过，build、vet 与 memory/channel/command 三包完整测试通过。
+双正式服各完成 8 次业务和 1 次重载，22 条 CLI 命令均 exit 0；其中实际遇到一次 path_changed，
+同一命令内部恢复，无外部 resume、无重复输入。两连接关闭，pending=0、owner 文件为 0。
+当前修复 CLI 为 `.tmp/live-protocol-v1/mailbox-fix/lycheedev.exe`，结果为同目录 `smoke.json`。
+插件字节未变；版本仍为 3.1.2，未提交、发布或替换全局 npm。
+
+2026-10-14，[六次 Mailbox 中断调查](mailbox-read-interruptions-2026-10-14.md)：
+最小复现与两个 Retail 进程各 8 秒只读插桩确认，INPUT 发布替换字符串指针会触发读取末尾
+的 path_changed；下一次读取即可恢复。Go 的调度器未把该状态作为有界等待，发键前直读
+又绕过统一包装，导致同一问题分别返回 exit 3/5。另两次发生在重载观察中：一次明确根值为 0，
+一次 string_layout 缺少当时对象字节，只能高概率归因于重载销毁窗口。
+初次调查结论与复现证据保留；随后产品修复及实测见上条，原 string_layout 的对象证据缺口未补写。
+
+2026-10-14，当前协议的 [同一 Retail 安装双实例](live-500-slots-3.2.0.md#2026-10-14同一-retail-安装双实例)
+实测完成：灵止光—死亡之翼（PID 30552）与荔枝小月亮—燃烧之刃（PID 58940）共享
+`_retail_` 安装和 500 槽池，各完成 122 次容量循环及一次自动重载，再各续跑 25 次。
+两次异步检查确认仅重载或断开 A 时，B 的任务与 runtime 不受影响；A 重连后双方继续成功。
+跨 project 抢占对方 PID 被正确拒绝。合计 296 次业务报告和清理成功，三个 CON 最终关闭，
+managed、pending=0、owner 文件为 0；44 段完整日志中 1,200 次提交输入无重复、零 Esc。
+期间出现 6 次 Mailbox 读取中断，均保留原请求和期限通过 resume 恢复；原始错误留存，
+产品代码未修改。因此记为双实例功能及恢复通过，不记为无中断稳定性通过。
+其余五产品的新协议实机验收仍为 `not_run`。未提交或发布。
+
+2026-10-14，Lycheedev mailbox protocol v1 的国服无限与单正式服
+[并行容量及释放后续跑](live-500-slots-3.2.0.md#2026-10-14国服无限与正式服并行容量及释放后续跑)完成：
+两边分别执行 125 次完整调用、累计 500 个业务槽，在第 122 次自动容量重载并继续；
+断开后验证 owner 已释放、pending=0，再各建新 CON 执行 25 次、累计 100 槽。
+合计 300 次报告和清理全部通过，四个 CON 最终均关闭，两套主插件及 500 槽均 managed。
+容量重载保留原 LMO/期限，完整分段日志确认每服一次自动重载、零 Esc、无重复提交 input ID。
+正式服插件已受管更新，原 hybrid 运行时由用户手动重载一次激活；后续测试均使用新协议。
+这次通过范围包括国服无限与单正式服的容量轮换、释放及重连；随后双实例结果见上条。
+其余五产品的新协议实机验收仍为 `not_run`。仅增加实测记录，未提交或发布。
+
+2026-10-13，Native Live 当前合同统一为 [Lycheedev mailbox protocol v1](lycheedev-mailbox-protocol-v1.md)。
+Go CLI 与 Lua addon 使用命名 Mailbox、500 个 LoD 槽和两个正式快捷键：执行 Ctrl+Alt+F12，
+重载 Ctrl+Alt+F11。普通 EditBox 选择性透传两个动作，保留焦点、文字和光标。
+Native 只发送执行或重载组合键，escapeLimit=0；不使用光学、Esc 或聊天命令重载。
+独立启动核在业务模块之前注册绑定并发布 BootstrapMailbox。live doctor 默认只读，--fix
+复用受管安装及原 CON 恢复；顶层 doctor 选定 Live 目标时复用相同检查。
+已加载的二键运行时在改名升级时仍由 CLI 发一次验证过的重载键；首次未加载且无输入证据时
+才等待手动重载。等待保留原 PID/CON，不消耗后续连接预算。
+历史输入方案及其验收保留原时间和范围，不能作为当前协议通过证据。
+
+本轮实现、部署与验证已完成的范围：
+
+- 国服无限测试服 `1.60.1.70338`，PID `61388`、角色晴—岚：普通编辑框保持文字、
+  光标与焦点时执行成功；真实 `ChatFrame1EditBox` 聚焦时 F11 重载成功并恢复原 CON，
+  全程 `escapeLimit=0`。最终运行时为 `0000001600030de882d07ffa3185ab10`。
+- 协议改名升级已从先前保留的等待连接自动发一次已验证的 F11 完成，未再要求手动重载。
+  游戏内 identity、INPUT、BootstrapMailbox、`/dev status` 和全部 500 个槽的元数据
+  均使用当前全名；两个正式动作的实际绑定是 Ctrl+Alt+F12 与 Ctrl+Alt+F11。
+- `live doctor` 和带明确目标的顶层 `doctor` 均通过当前安装、槽、占用、启动、运行时
+  与输入检查。最后一次升级在重载重绑时遇到 `path_changed`，沿原 CON resume 后恢复；
+  没有重发该重载。doctor 修复失败时不再保留修复前的 `healthy=true`。
+- 最终 `CON-ab2c83339050818e5ca61f6deacddc18` 正常断开，主插件与 500 槽受管，
+  `pending=0`。新版 skill 已受管升级到 `C:/Users/follen/.agents/skills/lycheedev`。
+- 构建、vet、命令定向回归、Lua 5.1 addon/跨语言套件、包装/隔离更新、协议改名输入
+  授权与旧 TOC 修复回归通过；skill 命令合同、源与已安装 skill 校验、版本一致性通过。
+  本轮全仓库测试发现一个旧 TOC 名称迁移用例失败，修正后该用例定向通过，其余包通过；
+  未把这一过程记为一次最终全仓库全绿运行。
+
+本轮开发 CLI：`.tmp/live-protocol-v1/complete-release/dev-npm-stage/native/windows-amd64/lycheedev.exe`。
+本机原始记录在 `.tmp/live-protocol-v1/`；关键记录为 `name-hotkey-upgrade.json`、
+`final-runtime-check.json`、`final-chat-focus.json`、`final-chat-reload.json`、
+`final-doctor.json`、`final-root-doctor.json`、`final-disconnect.json`。
+版本仍为 3.1.2；未提交、发布或替换全局 npm。截至该条记录，新协议在其余六产品、Retail 双实例、
+真实战斗/受限焦点、重新登录、干净首次安装及完整容量循环上的实机验收为 `not_run`；
+后续国服无限、Retail 容量与双实例实测见本页 2026-10-14 记录。
+启动失败和首次手动激活目前只有离线覆盖，下面历史协议的实测不自动继承。
+
+2026-10-13，[Classic Era](live-500-slots-3.2.0.md#classic-era-支持与运行时定位)
+`1.15.9.70003` / Interface `11509` 已接通：补齐 runtime profile、主插件/500 槽 TOC
+和 1,483 项事件目录。API 基线固定于 `classic_era` 提交
+`8165d4cd6e48d606369336cc3a7977902310e81e`，Interface 由当前游戏实际返回值确认。
+Lua 根复用现有运行时特征和 RIP 解析，未新增定位代码。
+容量循环从 nextSlot=10 开始，121 次执行全部通过：第 120 次在 nextSlot=486 自动 reload，
+保留原 LMO/期限；第 121 次在新 runtime 继续执行。最终正常断开，主插件与 500 槽均 managed、
+pending=0。前置探针对 Interface 元数据的错误断言已修正，原失败与诊断记录保留。
+build、vet、selection 和五 profile Lua 套件、14 项 Node 包装/更新测试通过；
+delivery 全包发现的历史 fixture 问题修正后，其全部调用用例定向重跑通过。
+后续使用 `.tmp/live-era/dev-release/dev-npm-stage/native/windows-amd64/lycheedev.exe`。
+未提交或发布；预留槽 486–500 未强行逐槽执行，重新登录与其他产品的未测项目仍未验收。
+
+2026-10-13，[泰坦重铸](live-500-slots-3.2.0.md#泰坦重铸容量循环实测) `3.80.2.70315`
+与[亚服无限 beta](live-500-slots-3.2.0.md#亚服容量循环实测) `1.60.1.70338`
+分别完成 500 槽实机容量循环：各 123 次执行全部通过，前 121 次连续推进至 nextSlot=486，
+第 122 次自动 reload 保留原 LMO/期限，第 123 次在新 runtime 继续执行。
+两服均正常断开，主插件和 500 槽 managed、pending=0。泰坦覆盖 200→500 受管升级，
+亚服覆盖首次安装自动激活；预留物理槽 486–500 没有强行逐槽执行。
+亚服首次连接遇到运行时代码缺页，用 wowdump 3.0.1 核实两处 context 指令及 Lua 类型，
+为该精确构建补充完整 49 字节运行时校验，再由 RIP 解析根；保留缺页与非唯一覆盖限制。
+build、vet 与内存包回归通过。后续开发 CLI 为
+`.tmp/live-titan-asia/dev-release/dev-npm-stage/native/windows-amd64/lycheedev.exe`。
+未提交或发布；重新登录、Retail 双实例及其他未测产品仍未验收。
+
+2026-10-13，国服无限 70338 [500 槽容量循环实测通过](live-500-slots-3.2.0.md#国服容量循环实测)：
+同一 runtime 连续 120 次操作从第 8 槽推进到 nextSlot=488，第 121 次请求由 CLI
+自然触发容量 reload，在同一 LMO/期限下完成；第 122 次在新 runtime 继续成功。
+122 次报告与清理全部通过，最后正常断开，managed、pending=0。协议预留的
+488–500 物理槽本轮没有强行消耗；不将容量循环通过表述为逐槽执行到 500。
+仅补实测和文档，未提交或发布。
+
+2026-10-13，`3.2.0` 开发线完成 [国服无限测试服 Live 补测](live-500-slots-3.2.0.md#国服无限测试服补测)：
+`wow_cn_beta` / `_cn_beta_`，`1.60.1.70338`。用 wowdump 3.0.1 确认现有定位模板的
+寄存器差异，新增运行时指令特征并继续通过 RIP 解析 Lua 根；不使用固定根地址或堆扫描。
+首次安装自动激活、500 槽逐项元数据检查、探针报告及清理、reload 重绑、旧结果复用、
+reload 后新探针与正常断开均通过，最终 managed、pending=0。
+构建、vet 与内存包回归通过。后续 CLI 为
+`.tmp/live-cn-beta/dev-release/dev-npm-stage/native/windows-amd64/lycheedev.exe`。
+尚未提交或发布；本条基础测试不包含容量循环，后续结果见上条；重新登录、双实例
+及其他未测产品仍不在通过范围。
+
+2026-10-13，`3.2.0` 开发工作树完成 [Live 500 槽与单 Retail 验证](live-500-slots-3.2.0.md)：
+Go/Lua 容量统一为 500，121 个操作身份，支持 64/200 槽受管迁移及同版本扩容。
+Retail `12.1.0.69933` 已从 200 槽升级并在激活后确认 `slots=500`、`inventory=500`。
+同一 runtime 连续 51 次探针全部完成、报告核实且资源释放，最后一次从第 202 槽开始；
+已通过第 206 槽正常断开。构建、vet、Lua/跨语言套件、命令及容量相关回归通过；
+通道全包中的旧非法槽号样例修正后对应组通过。其他客户端、双实例和实机耗尽未外推为通过。
+当前 Retail 使用本地开发 addon；后续用 `.tmp/live-500-retail-final/dev-npm-stage/native/windows-amd64/lycheedev.exe`
+连接。版本文件仍为 3.1.2；未提交、发布或替换全局 npm。新 Mailbox 输入就绪设计另行实施。
+
+2026-10-13，`3.2.0` 开发工作树完成 [Source 产品映射与查询优化](source-products-performance-3.2.0.md)：
+实际核实 GitHub 并完成七产品 sync，两个 Beta 均映射 `forever`，区域 Data 身份仍隔离。
+名称/ID/路径/关系查找表、按层搜索、行位置缓存与 `source batch` 已接通；批量复用固定快照、
+Git、API 环境和请求内 LuaLS，会话结束后回收。完整 Retail 源码七项暖查询逐项结果/游标等价：
+原独立调用合计 5,401 ms，当前独立调用 5,196 ms，当前 batch 870 ms；不作为冷启动或 p95 结论。
+build/vet、强制 Lua 5.1 且启用真实 LuaLS 的 `go test -count=1 ./...`、Source 定向 `-race`、
+Skill 命令合同与生成参考、版本一致性检查全部通过。设计和 Skill 用法已同步。
+尚未提交、发布；版本文件仍为 3.1.2。此结果不增加 addon/Live 实机验收项。
+
+2026-10-13，`3.2.0` 开发工作树优先完成 [七产品 Data](data-products-3.2.0.md)：
+Retail、Classic、Classic Era、Titan、Forever 亚服 beta、Forever 国服 beta、Anniversary
+使用统一交付目录；两个相同 build 的 beta 仍保存不同产品和 BuildConfig，CDN 目录与缓存按产品隔离。
+本地与远端均已真实解析七产品并读取 `ChrRaces` ID 1、2，内容校验通过；亚服 CDN 首次访问的串行
+归档定位在 300/600 秒超时，改为最多八个索引并发及小索引合并读取后，独立空缓存约 193 秒通过，
+使用默认 300 秒限制且无 decoded cache 命中。旧缓存离线可用，CDN 定向竞态检测通过。
+Retail 本地首次读取的元数据
+预算故障已修复：优先查找 EKey 对应索引桶，独立空缓存查询约 1.4 秒通过，不提高默认预算。
+最终 build/vet、强制 Lua 5.1 的 `go test -count=1 ./...`、CDN 定向 `-race`、版本一致性及 Skill
+命令合同检查均通过。最终 CLI 的七产品 CDN 离线复读通过，内容摘要与在线结果一致。
+这是本地开发结果，未提交、未发布；Mailbox 输入就绪协议、500 槽和游戏内实机验收仍待后续阶段。
+
 2026-10-08 用户授权发布 PR #11 修复并更新本机 addon，补丁候选为 **3.1.2**，
 npm `next`，`latest` 保持 **2.5.1**，GitHub latest 保持 **v3.0.0**。
 本次从已合并的 main 准备，不包含工作区其他未提交改动。

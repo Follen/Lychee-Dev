@@ -354,22 +354,7 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 		}
 	}
 	lookup := func(indexKey, object string, expectedSize int64) (cdnSpan, error) {
-		if !metadataKey(indexKey) {
-			return cdnSpan{}, ErrMetadataFormat
-		}
-		source, err := c.source(indexKey+".index", expectedSize, true)
-		if err != nil {
-			return cdnSpan{}, err
-		}
-		index, err := openCDNIndex(c.ctx, source, source.size, indexKey)
-		if err != nil {
-			return cdnSpan{}, err
-		}
-		span, err := index.locate(c.ctx, key, archives, object)
-		if err == nil && span.Bytes != size {
-			return cdnSpan{}, ErrMetadataFormat
-		}
-		return span, err
+		return c.lookupIndex(key, size, archives, indexKey, object, expectedSize)
 	}
 	if groups := c.config.Fields["archive-group"]; len(groups) > 0 {
 		if len(groups) != 1 {
@@ -389,22 +374,102 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 	// Published CN configurations have positional index-size hints that differ
 	// from the actual keyed indexes. Discover length from a bounded response;
 	// the footer identity and authenticated TOC establish the index's identity.
-	for _, a := range archives {
-		span, err := lookup(a, a, 0)
-		if err == nil {
-			return span, nil
-		}
-		if terminalCDNLookupError(err) {
-			return cdnSpan{}, err
-		}
-		if errors.Is(err, ErrRemoteHTTP) || errors.Is(err, ErrRemoteObjectMissing) && unavailable == nil {
-			unavailable = err
+	width := 1
+	if c.budget != nil && !c.offline {
+		width = 8
+	}
+	for start := 0; start < len(archives); start += width {
+		batch := archives[start:min(start+width, len(archives))]
+		for _, result := range c.lookupArchiveBatch(key, size, archives, batch) {
+			if result.err == nil {
+				return result.span, nil
+			}
+			if terminalCDNLookupError(result.err) {
+				return cdnSpan{}, result.err
+			}
+			if errors.Is(result.err, ErrRemoteHTTP) || errors.Is(result.err, ErrRemoteObjectMissing) && unavailable == nil {
+				unavailable = result.err
+			}
 		}
 	}
 	if unavailable != nil {
 		return cdnSpan{}, unavailable
 	}
 	return cdnSpan{}, ErrRemoteObjectMissing
+}
+
+func (c *cdnFiles) lookupIndex(key string, size int64, archives []string, indexKey, object string, expectedSize int64) (cdnSpan, error) {
+	if !metadataKey(indexKey) {
+		return cdnSpan{}, ErrMetadataFormat
+	}
+	source, err := c.source(indexKey+".index", expectedSize, true)
+	if err != nil {
+		return cdnSpan{}, err
+	}
+	var input io.ReaderAt = source
+	// A small index fits in one bounded range. Fetch its footer, TOC and page
+	// together instead of paying three network round trips per archive.
+	if source.size <= 256<<10 {
+		release, err := c.budget.ReserveScratch(source.size * 2)
+		if err != nil {
+			return cdnSpan{}, err
+		}
+		defer release()
+		raw, _, err := c.rangeBytes(source.object, 0, source.size, source.size)
+		if err == nil {
+			input = bytes.NewReader(raw)
+		} else if !c.offline || !errors.Is(err, ErrRemoteUnavailable) {
+			return cdnSpan{}, err
+		}
+		// Old offline caches contain separate footer/TOC/page fragments.
+	}
+	index, err := openCDNIndex(c.ctx, input, source.size, indexKey)
+	if err != nil {
+		return cdnSpan{}, err
+	}
+	span, err := index.locate(c.ctx, key, archives, object)
+	if err == nil && span.Bytes != size {
+		return cdnSpan{}, ErrMetadataFormat
+	}
+	return span, err
+}
+
+type cdnLookupResult struct {
+	span cdnSpan
+	err  error
+}
+
+// Workers share the query's atomic budget and HTTP transport. Route attempts
+// and counters stay local until joined; results retain archive order so an
+// earlier integrity failure cannot be hidden by a later successful lookup.
+func (c *cdnFiles) lookupArchiveBatch(key string, size int64, archives, batch []string) []cdnLookupResult {
+	results := make([]cdnLookupResult, len(batch))
+	if len(batch) == 1 {
+		results[0].span, results[0].err = c.lookupIndex(key, size, archives, batch[0], batch[0], 0)
+		return results
+	}
+	workers := make([]cdnFiles, len(batch))
+	var group sync.WaitGroup
+	for i, archive := range batch {
+		workers[i] = *c
+		workers[i].stats = &DecodedCacheStats{}
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			results[i].span, results[i].err = workers[i].lookupIndex(key, size, archives, archive, archive, 0)
+		}()
+	}
+	group.Wait()
+	requests, transferred := c.requests, c.transferred
+	for i := range workers {
+		c.requests += workers[i].requests - requests
+		c.transferred += workers[i].transferred - transferred
+		if c.stats != nil {
+			c.stats.FragmentLoads += workers[i].stats.FragmentLoads
+			c.stats.BlockCacheHits += workers[i].stats.BlockCacheHits
+		}
+	}
+	return results
 }
 
 func terminalCDNLookupError(err error) bool {

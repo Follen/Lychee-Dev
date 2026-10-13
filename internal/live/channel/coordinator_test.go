@@ -24,6 +24,8 @@ func (p *coordinatorPeer) ObserveInput(ctx context.Context, e bridge.SlotEnvelop
 	s.InputBlocked = &blocked
 	if blocked {
 		s.Reason = "input_keyboard_focus"
+		s.EscapeLimit = 0
+		p.blocked-- // the focused field closes externally; the CLI sends no Esc
 	}
 	return s, err
 }
@@ -34,9 +36,6 @@ func (p *coordinatorPeer) Input(ctx context.Context, a InputAction) (InputOutcom
 		p.t.Fatalf("physical input without durable intent: %v", err)
 	}
 	p.kinds = append(p.kinds, a.Kind)
-	if a.Kind == "escape" {
-		p.blocked--
-	}
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -45,7 +44,7 @@ func (p *coordinatorPeer) Input(ctx context.Context, a InputAction) (InputOutcom
 func TestReloadUsesOneCoordinatorAndNeverReplaysLostOutcome(t *testing.T) {
 	for _, mode := range []string{"new", "lost", "submitted", "zero", "focused"} {
 		t.Run(mode, func(t *testing.T) {
-			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+			old := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 5, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 			current := old
 			current.Runtime = strings.Repeat("2", 32)
 			current.NextSlot = 1
@@ -85,7 +84,7 @@ func TestReloadUsesOneCoordinatorAndNeverReplaysLostOutcome(t *testing.T) {
 				want = "reload,invoke"
 			}
 			if mode == "focused" {
-				want = "escape,escape,escape,reload,invoke"
+				want = "reload,invoke"
 			}
 			if strings.Join(p.kinds, ",") != want || !d.State.Bound || d.State.Reload.Phase != "complete" || d.State.Identity.Runtime != current.Runtime {
 				t.Fatalf("%v %+v", p.kinds, d.State)
@@ -97,7 +96,7 @@ func TestReloadUsesOneCoordinatorAndNeverReplaysLostOutcome(t *testing.T) {
 	}
 }
 func TestKnownInputOutcomeSurvivesCancellation(t *testing.T) {
-	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	p := &coordinatorPeer{log: filepath.Join(t.TempDir(), "connection.jsonl"), t: t, cancel: cancel}

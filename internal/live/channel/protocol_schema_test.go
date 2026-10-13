@@ -15,17 +15,26 @@ func TestIdentityAndReceiptOnlyCurrentSchema(t *testing.T) {
 	if err := i.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, schema := range []string{"lycheedev.slot.identity.v1", bridge.SlotSchema, ""} {
+	for _, schema := range []string{"lycheedev.slot.identity.v1", legacyIdentitySchema, "lycheedev.slot.v3", ""} {
 		q := i
 		q.Schema = schema
 		if q.Validate() == nil {
-			t.Fatalf("old/receipt identity accepted: %q", schema)
+			t.Fatalf("old identity without upgrade capability accepted: %q", schema)
 		}
 	}
-	q := i
-	q.Slots = 64
-	if q.Validate() == nil {
-		t.Fatal("old 64-slot identity accepted")
+	for _, slots := range []int{64, 200} {
+		q := i
+		q.Slots = slots
+		if q.Validate() == nil {
+			t.Fatalf("old %d-slot identity accepted", slots)
+		}
+	}
+	for _, cursor := range []int{500, 501, 502} {
+		q := i
+		q.NextSlot = cursor
+		if (q.Validate() == nil) != (cursor <= 501) {
+			t.Fatalf("wrong upper cursor bound: %d", cursor)
+		}
 	}
 	e := bridge.SlotEnvelope{Schema: bridge.SlotSchema, Index: 1, Runtime: i.Runtime, GUID: i.GUID, Build: i.Build, Nonce: strings.Repeat("2", 32), Ticket: strings.Repeat("3", 32), Action: "bind"}
 	i.Schema = bridge.SlotSchema
@@ -37,7 +46,7 @@ func TestIdentityAndReceiptOnlyCurrentSchema(t *testing.T) {
 	if _, err := decodeReceipt(publicationTestRecord(t, r, h), e); err != nil {
 		t.Fatal("current receipt rejected", err)
 	}
-	for _, schema := range []string{"lycheedev.slot.v1", "lycheedev.slot.v2", IdentitySchema} {
+	for _, schema := range []string{"lycheedev.slot.v1", "lycheedev.slot.v2", "lycheedev.slot.v3", legacyIdentitySchema} {
 		r.Schema = schema
 		e.Schema = schema
 		if _, err := decodeReceipt(publicationTestRecord(t, r, h), e); err == nil {
@@ -61,6 +70,26 @@ func TestJournalRejectsOldNativeProtocol(t *testing.T) {
 	d.State.Schema = "lycheedev.channel.v1"
 	if d.State.validate() == nil {
 		t.Fatal("old channel journal resumed")
+	}
+}
+
+func TestLegacyIdentityOnlySelectsKnownUpgradeCapabilities(t *testing.T) {
+	i := Identity{Schema: legacyIdentitySchema, Runtime: strings.Repeat("1", 32), Slots: bridge.SlotCount, NextSlot: 1, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "3.1.2"}
+	runtime, _ := tokenBytes(i.Runtime)
+	h := bridge.MemoryHeader{Kind: bridge.MemoryIdentity, State: 1, Runtime: runtime}
+	for _, capability := range []string{legacyInputSchema, "lycheedev.input.hybrid.v2", "future", "", InputSchema} {
+		i.InputState = capability
+		payload, err := json.Marshal(i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := decodeIdentityRecord(memory.Record{Header: h, Payload: payload}, i.Release)
+		if (err == nil) != upgradeInputCapability(capability) {
+			t.Fatalf("upgrade capability %q: %v", capability, err)
+		}
+		if err == nil && (got.Schema != legacyIdentitySchema || got.InputState != capability || inputActionCapabilityError(capability, "bind") == nil) {
+			t.Fatal("old identity relabelled or granted business input", got)
+		}
 	}
 }
 

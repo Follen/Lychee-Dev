@@ -22,6 +22,7 @@ const (
 	MemoryBody         MemoryKind = 3
 	MemoryConfirmation MemoryKind = 4
 	MemoryInputState   MemoryKind = 5
+	MemoryBootstrap    MemoryKind = 6
 )
 
 // MemoryHeader is a bounded corruption-checked envelope, NOT publication proof.
@@ -38,7 +39,7 @@ type MemoryHeader struct {
 }
 
 func EncodeMemoryRecord(h MemoryHeader, payload []byte) ([]byte, error) {
-	if len(payload) > MemoryMaxPayload || h.Kind < MemoryIdentity || h.Kind > MemoryInputState || h.State == 0 {
+	if len(payload) > MemoryMaxPayload || h.Kind < MemoryIdentity || h.Kind > MemoryBootstrap || h.State == 0 {
 		return nil, errors.New("bridge.memory_record_invalid")
 	}
 	b := make([]byte, MemoryHeaderBytes+len(payload)+MemoryTrailerBytes)
@@ -74,7 +75,7 @@ func DecodeMemoryHeader(b []byte) (MemoryHeader, error) {
 	h.Sequence = binary.LittleEndian.Uint32(b[60:64])
 	h.Length = binary.LittleEndian.Uint32(b[64:68])
 	h.Checksum = binary.LittleEndian.Uint32(b[68:72])
-	if h.Length > MemoryMaxPayload || h.Kind < MemoryIdentity || h.Kind > MemoryInputState || h.State == 0 {
+	if h.Length > MemoryMaxPayload || h.Kind < MemoryIdentity || h.Kind > MemoryBootstrap || h.State == 0 {
 		return MemoryHeader{}, errors.New("bridge.memory_header_bounds")
 	}
 	return h, nil

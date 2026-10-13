@@ -106,7 +106,7 @@ function verified(t,e) {
   assert.equal(e.result.identity.product,t.product);
 }
 async function interrupt(t,opaque) {
-  await run(host,['-mode',opaque?'interrupt-opaque-fixture':'interrupt-observation','-installation',t.installation,'-pid',String(t.pid),'-project',t.project,'-connection',t.session,'-reload-hint=false','-timeout','30'],opaque?'opaque-reload':'observation-reload',t);
+  await run(host,['-mode',opaque?'interrupt-opaque-fixture':'interrupt-observation','-installation',t.installation,'-pid',String(t.pid),'-project',t.project,'-connection',t.session,'-timeout','30'],opaque?'opaque-reload':'observation-reload',t);
 }
 async function awaitRunning(t,e,name) {
   return observeRunning(t,e,(attempt,wait)=>call(t,`${name}-wait-${attempt}`,['live','resume',t.session],6,wait));

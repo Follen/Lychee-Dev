@@ -15,6 +15,9 @@ import (
 )
 
 func runChannelCommand(ctx context.Context, route, argument string, opts Options, response *Envelope) (bool, int, error) {
+	if route == "live doctor" {
+		return runLiveDoctorCommand(ctx, opts, response)
+	}
 	handled := route == "live connect" || route == "live disconnect" || route == "live reload fallback"
 	if strings.HasPrefix(opts.session, "CON-") || strings.HasPrefix(argument, "CON-") {
 		switch route {
@@ -55,7 +58,7 @@ return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailab
 		result, err = project.Activate(ctx, channel.TargetRequest{Installation: opts.installation, PID: opts.pid}, opts.request, !opts.noCache)
 	case "live connect":
 		if opts.wakeBinding != "" || !opts.region.Empty() {
-			return true, 2, errors.New("memory/slot connections use fixed keys and do not accept capture-area or wake-binding")
+			return true, 2, errors.New("native connections use effective Mailbox bindings and do not accept capture-area or wake-binding")
 		}
 		if opts.session != "" {
 			if opts.installation != "" || opts.pid != 0 || opts.character != "" || opts.realm != "" || opts.snapshot != "" {
@@ -113,7 +116,7 @@ return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailab
 	case "live reload":
 		result, err = project.Reload(ctx, opts.session, opts.request, !opts.noCache)
 	}
-	response.Context["project"], response.Context["transport"] = project.Root, "memory-slot-v3"
+	response.Context["project"], response.Context["transport"] = project.Root, "Lycheedev mailbox protocol v1"
 	if result.Session != "" {
 		response.Result, response.OperationID = result, result.Session
 		response.Context["session"], response.Context["stage"] = result.Session, result.Stage

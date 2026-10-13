@@ -150,6 +150,9 @@ func decodeDerived(ctx context.Context, raw []byte) (derivedIndex, error) {
 			if err != nil || token != json.Delim('[') {
 				return d, errors.New("invalid offsets entries")
 			}
+			// Decode directly into the retained slice: a temporary record per
+			// Decode otherwise allocates once for every entry of a large source.
+			d.Entries = make([]recordOffset, 0, min(maxDerivedRecords, len(raw)/320))
 			for decoder.More() {
 				if err := ctx.Err(); err != nil {
 					return d, err
@@ -157,11 +160,10 @@ func decodeDerived(ctx context.Context, raw []byte) (derivedIndex, error) {
 				if len(d.Entries) >= maxDerivedRecords {
 					return d, errors.New("offsets entry budget")
 				}
-				var e recordOffset
-				if err = decoder.Decode(&e); err != nil {
+				d.Entries = append(d.Entries, recordOffset{})
+				if err = decoder.Decode(&d.Entries[len(d.Entries)-1]); err != nil {
 					return d, err
 				}
-				d.Entries = append(d.Entries, e)
 			}
 			_, err = decoder.Token()
 		default:
@@ -241,11 +243,38 @@ func (r *contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
-func (c *snapshotCache) scanSelected(ctx context.Context, selectRecord func(recordOffset) bool, visit func(sourceRecord) error) error {
+func (c *snapshotCache) scanSelected(ctx context.Context, selectRecord func(recordOffset) bool, visit func(sourceRecord) error, keys ...recordLookupKey) error {
 	if c.offsets == nil {
-		return c.scanLegacy(ctx, visit)
+		return c.scanLegacy(ctx, func(r sourceRecord) error {
+			e := recordOffset{Kind: r.Kind, Path: r.Path}
+			if s := r.Symbol; s != nil {
+				e.SymbolKind, e.Name, e.Target, e.ID = s.Kind, s.Name, s.Target, s.ID
+				e.Category, e.Signature, e.Line = s.Category, s.Signature, s.Line
+			}
+			if selectRecord(e) {
+				return visit(r)
+			}
+			return nil
+		})
 	}
-	for _, e := range c.offsets {
+	var positions []int
+	if len(keys) > 0 {
+		var err error
+		positions, err = c.lookupOffsets(ctx, keys)
+		if err != nil {
+			return err
+		}
+	}
+	count := len(c.offsets)
+	if len(keys) > 0 {
+		count = len(positions)
+	}
+	for i := 0; i < count; i++ {
+		position := i
+		if len(keys) > 0 {
+			position = positions[i]
+		}
+		e := c.offsets[position]
 		c.work.MetadataVisits++
 		if err := ctx.Err(); err != nil {
 			return err

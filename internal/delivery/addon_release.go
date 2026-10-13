@@ -22,7 +22,7 @@ type AddonManifest struct {
 	LoadedFiles []string `json:"loadedFiles"`
 }
 
-// InspectAddonRelease verifies release bytes and the four shipped TOC contracts.
+// InspectAddonRelease verifies release bytes and the shared client TOC contract.
 // It checks recursive XML loads and Lua syntax, not Lua execution safety,
 // runtime readiness, or the installed client's identity. Those are separate gates.
 func InspectAddonRelease(ctx context.Context, directory, version string) ([]AddonManifest, error) {

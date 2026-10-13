@@ -54,6 +54,7 @@ for _,profile in ipairs(profiles) do
     toc:close()
     -- Legacy wire engine regression only; the production TOC selects SlotRuntime.
     ns.SlotRuntime=nil
+    assert(loadfile("legacy_startup.lua"))(ns,frames[#frames])
         ns.ReceiptView={Hide=function() shown=nil end,Show=function(value) shown=value;return true end,
             ShowIdentity=function(value) shown=value;return true end}
         local loader=frames[#frames]

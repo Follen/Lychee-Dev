@@ -14,7 +14,7 @@ local function noteAttempt(stage,reason,slot)
     if reason and not attemptReasons[reason] then
         reason=type(reason)=="string" and reason:match("^slot_inventory_incomplete:") and "slot_inventory_incomplete" or "slot_wake_rejected"
     end
-    lastAttempt={schema="lycheedev.input-attempt.v1",runtime=runtimeToken,attemptSeq=attemptSequence,
+    lastAttempt={schema="Lycheedev mailbox protocol v1",runtime=runtimeToken,attemptSeq=attemptSequence,
         slot=slot or engine.NextSlot(),stage=stage,reason=reason or "",received=attemptReceived}
 end
 local function attemptSnapshot()
@@ -42,7 +42,7 @@ local function activity(state,ticket)
 end
 local function publishMailbox(runtime)
     if not mailbox then
-        mailbox={schema="lycheedev.mailbox.v1",release=ns.Release,runtime=runtime,receipts={},bodies={}}
+        mailbox={schema="Lycheedev mailbox protocol v1",release=ns.Release,runtime=runtime,receipts={},bodies={}}
         engine.AttachMailbox(mailbox)
     end
     ns.Mailbox=mailbox
@@ -77,11 +77,11 @@ local function start()
         local name=string.format("Lychee Dev Slot %02d",i)
         if ns.Compat.GetAddOnMetadata(name,"X-Lychee-Slot")==tostring(i)
             and ns.Compat.GetAddOnMetadata(name,"Version")==ns.Release
-            and ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")=="memory-slot-v3" then available=available+1 end
+            and ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")=="Lycheedev mailbox protocol v1" then available=available+1 end
     end
     ns.AutomationHistory.Begin(runtime,{character=actor.character,realm=actor.realm,guid=actor.guid,build=build.build,product=build.product})
     engine=ns.SlotProtocol.Create({runtime=runtime,build=build.build,product=build.product,release=ns.Release,inventory=available,
-        inputState=ns.InputState and "lycheedev.input.hybrid.v2" or nil,
+        inputState=ns.InputState and "Lycheedev mailbox protocol v1" or nil,
         actor=function()
             local current=ns.Platform.ObserveActor()
             if current and current.guid==actor.guid then return current end
@@ -101,7 +101,7 @@ local function inventory()
         local name=string.format("Lychee Dev Slot %02d",i)
         if ns.Compat.GetAddOnMetadata(name,"X-Lychee-Slot")~=tostring(i)
             or ns.Compat.GetAddOnMetadata(name,"Version")~=ns.Release
-            or ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")~="memory-slot-v3" then return nil,"slot_inventory_incomplete:"..i end
+            or ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")~="Lycheedev mailbox protocol v1" then return nil,"slot_inventory_incomplete:"..i end
     end
     return true
 end
@@ -112,10 +112,9 @@ local function wake()
     if attemptActive then attemptSequence=attemptSequence+1;attemptReceived=false;lastAttempt=nil end
     local ok,reason=start();if not ok then return nil,reason end
     noteAttempt("entered")
-    if ns.Platform.ObserveInputState(true)~=true and not receiving then return nil,"slot_input_not_ready" end
+    if ns.Platform.ObserveInputState(ns.FocusBindings and ns.FocusBindings.Ready())~=true then return nil,"slot_input_not_ready" end
     ok,reason=inventory();if not ok then return nil,reason end
     state.options.bridgeEnabled=true -- Explicit wake opts in; explicit off stays off.
-    if ns.StartupBeacon then ns.StartupBeacon.Stop() end
     ok,reason=protectInput();if not ok then releaseInput();return nil,reason end
     -- One wake may traverse foreign/empty physical slots, but can process at
     -- most one own-runtime envelope. A rejected own envelope is still a stop.
@@ -172,7 +171,4 @@ ns.SlotRuntime={
         return record,value
     end,
     Snapshot=function()return engine and engine.Snapshot()end,
-    Register=function()
-        return ns.ReceiverBindings.Register({wake=guardedWake,submit=guardedWake,close=close})
-    end,
 }

@@ -91,6 +91,7 @@ end
 local clients = {
     { id = "retail", file = "Modules/Events/CatalogData_Mainline.lua", count = 1782, bnConnected = "suppressNotification", delve = true, arena = false, externalUrl = true },
     { id = "classic", file = "Modules/Events/CatalogData_Mists.lua", count = 1483, bnConnected = "", delve = false, arena = true, externalUrl = false },
+    { id = "classic-era", file = "Modules/Events/CatalogData_Era.lua", count = 1483, bnConnected = "", delve = false, arena = true, externalUrl = false },
     { id = "titan", file = "Modules/Events/CatalogData_Titan.lua", count = 1486, bnConnected = "", delve = false, arena = true, externalUrl = true },
     { id = "forever", file = "Modules/Events/CatalogData_Forever.lua", count = 1802, bnConnected = "suppressNotification", delve = true, arena = false, externalUrl = true },
 }

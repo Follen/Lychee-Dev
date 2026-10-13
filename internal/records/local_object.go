@@ -74,8 +74,20 @@ func openLocalObject(ctx context.Context, dir *os.Root, files []localDirectory, 
 	decoded, _ := hex.DecodeString(encodingKey)
 	var key [16]byte
 	copy(key[:], decoded)
+	// Native indexes partition the nine-byte prefix by folded XOR. Start with
+	// that bucket so a cold query does not retain every shared-storage index.
+	// Some writers place records elsewhere; preserve the remaining lookup order.
+	var folded byte
+	for _, b := range key[:9] {
+		folded ^= b
+	}
+	bucket := (folded >> 4) ^ (folded & 15)
+	ordered := append([]localDirectory(nil), files...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].bucket == bucket && ordered[j].bucket != bucket
+	})
 	var candidateError error
-	for _, index := range files {
+	for _, index := range ordered {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

@@ -104,7 +104,7 @@ func (c *snapshotCache) fixtureBodyCandidates(ctx context.Context, text, topic s
 			}
 		}
 		return nil
-	})
+	}, recordLookupKey{recordKind, "document"})
 	return rows, cut, err
 }
 

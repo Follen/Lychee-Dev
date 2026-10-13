@@ -17,6 +17,7 @@ func TestRepositoriesContainAllSourceRepositories(t *testing.T) {
 			"classic": "classic", "classic-ptr": "classic_ptr", "classic-beta": "classic_beta",
 			"classic-era": "classic_era", "classic-era-ptr": "classic_era_ptr",
 			"anniversary": "classic_anniversary", "titan": "classic_titan", "forever": "forever",
+			"forever-asia-beta": "forever", "forever-cn-beta": "forever",
 		},
 		"elvui":       {"main": "main", "ptr": "ptr"},
 		"weakauras":   {"main": "main"},

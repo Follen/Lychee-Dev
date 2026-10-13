@@ -61,6 +61,7 @@ for _,profile in ipairs(profiles) do
     toc:close()
     -- Legacy wire engine regression only; the production TOC selects SlotRuntime.
     ns.SlotRuntime=nil
+    assert(loadfile("legacy_startup.lua"))(ns,frames[#frames])
     -- Renderer lifecycle has its own native-like UI fixture (t_activity.lua).
     -- Keep this protocol suite's no-executor-frames assertion independent.
     ns.ActivityView={Begin=function() end,Finish=function() end,Stop=function() end}

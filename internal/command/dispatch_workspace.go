@@ -44,7 +44,7 @@ func runTargetVerb(ctx context.Context, route, argument string, opts Options, re
 			return 2, errors.New("target add requires --product, --region, and --locale")
 		}
 		if _, err := selection.DataProduct(opts.product); err != nil {
-			return 2, errors.New("target add requires --product <retail|classic|titan|forever>")
+			return 2, fmt.Errorf("target add requires %s", dataProductFlag().display)
 		}
 		if _, err := selection.DataLocale(opts.dataRegion, opts.locale); err != nil {
 			return 2, errors.New("target add requires a supported --region and --locale pair")
@@ -207,6 +207,7 @@ func runDoctor(ctx context.Context, opts Options, response *Envelope) (int, erro
 		toolCheck.NextStep = "install the complete lycheedev npm package or native release for source refs/context semantic analysis and source validate --semantic"
 	}
 	checks = append(checks, toolCheck)
+	checks = append(checks, liveDoctorChecks(ctx, opts)...)
 	// The mirror check joins only when the nearest project declares a product;
 	// doctor never invents a repository or a product default.
 	if directory, projectErr := projectDirectory(""); projectErr == nil {

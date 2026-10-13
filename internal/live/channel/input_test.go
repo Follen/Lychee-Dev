@@ -133,18 +133,13 @@ func (b *focusBackend) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, 
 	s.InputBlocked = &b.blocked
 	if b.blocked {
 		s.Reason = "input_keyboard_focus"
+		s.EscapeLimit = 0
 	}
 	return s, nil
 }
-func (b *focusBackend) Input(ctx context.Context, a InputAction) (InputOutcome, error) {
-	if a.Kind == "escape" {
-		return InputOutcome{Disposition: "submitted", MessagesQueued: 2}, nil
-	}
-	return b.pendingBackend.Input(ctx, a)
-}
-func TestEscRecoveryPersistsBeforeWakeAndResumesOriginalSlot(t *testing.T) {
+func TestFocusWaitResumesOriginalSlotWithoutEscape(t *testing.T) {
 	b := &focusBackend{blocked: true}
-	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -153,8 +148,8 @@ func TestEscRecoveryPersistsBeforeWakeAndResumesOriginalSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	nonce := d.State.Transaction.Envelope.Nonce
-	if b.sends != 0 || d.State.Transaction.Phase != "published" || d.State.Input.Kind != "escape" || d.State.Input.Outcome == nil {
-		t.Fatal("Esc preflight was labelled as slot input")
+	if b.sends != 0 || d.State.Transaction.Phase != "published" || d.State.Input != nil {
+		t.Fatal("blocked focus sent input or lost its published slot")
 	}
 	d, err = Load(d.Log, b)
 	if err != nil {
@@ -189,7 +184,7 @@ func (b *zeroInputBackend) Input(ctx context.Context, a InputAction) (InputOutco
 }
 func TestProvenZeroInputResumesSameSlot(t *testing.T) {
 	b := &zeroInputBackend{zero: true}
-	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +216,7 @@ func TestProvenZeroInputResumesSameSlot(t *testing.T) {
 
 func TestMissingInputOutcomeNeverAuthorizesResend(t *testing.T) {
 	b := &pendingBackend{}
-	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 200, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
+	i := Identity{Schema: IdentitySchema, Runtime: strings.Repeat("1", 32), NextSlot: 1, Slots: 500, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "2.5.1"}
 	d, err := New(filepath.Join(t.TempDir(), "c.jsonl"), b, i)
 	if err != nil {
 		t.Fatal(err)

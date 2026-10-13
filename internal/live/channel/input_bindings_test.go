@@ -16,14 +16,14 @@ func TestInputBindingsRequiredExactProfiles(t *testing.T) {
 		name, raw string
 		valid     bool
 	}{
-		{"primary", `{"wake":"ALT-CTRL-F12","submit":"ALT-CTRL-SHIFT-F12","close":"ALT-CTRL-["}`, true},
-		{"fallback", `{"wake":"ALT-CTRL-F11","submit":"ALT-CTRL-SHIFT-F11","close":"ALT-CTRL-["}`, true},
+		{"primary", `{"wake":"ALT-CTRL-F12","reload":"ALT-CTRL-F11"}`, true},
+		{"fallback", `{"wake":"ALT-CTRL-F10","reload":"ALT-CTRL-F9"}`, true},
 		{"absent", "", false}, {"null", "null", false}, {"empty-object", "{}", false},
 		{"partial", `{"wake":"ALT-CTRL-F11","close":"ALT-CTRL-["}`, false},
-		{"mixed", `{"wake":"ALT-CTRL-F11","submit":"ALT-CTRL-SHIFT-F12","close":"ALT-CTRL-["}`, false},
-		{"arbitrary", `{"wake":"ALT-CTRL-F1","submit":"ALT-CTRL-SHIFT-F1","close":"ALT-CTRL-["}`, false},
-		{"empty-ready", `{"wake":"","submit":"","close":""}`, false},
-		{"null-member", `{"wake":null,"submit":"","close":""}`, false},
+		{"mixed", `{"wake":"ALT-CTRL-F10","reload":"ALT-CTRL-F11"}`, true},
+		{"custom", `{"wake":"ALT-CTRL-F1","reload":"ALT-CTRL-F2"}`, true},
+		{"empty-ready", `{"wake":"","reload":""}`, false},
+		{"null-member", `{"wake":null,"reload":""}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			record := inputTestRecord(t, base)
@@ -42,8 +42,8 @@ func TestInputBindingsRequiredExactProfiles(t *testing.T) {
 				t.Fatalf("valid=%v error=%v", tc.valid, err)
 			}
 			if tc.valid {
-				profile, err := s.receiverProfile()
-				if err != nil || profile.WakeBinding != s.Bindings.Wake || profile.SubmitBinding != s.Bindings.Submit {
+				profile, err := s.mailboxProfile("bind")
+				if err != nil || profile.Wake != s.Bindings.Wake || profile.Reload != s.Bindings.Reload {
 					t.Fatalf("actual profile not selected: %#v %v", profile, err)
 				}
 			}
@@ -66,7 +66,7 @@ func TestInputBindingsUnavailableDoesNotAuthorizeKeys(t *testing.T) {
 	if !validReplacementObservation(s) {
 		t.Fatal("blocked runtime cannot prove retirement")
 	}
-	if _, err := s.receiverProfile(); err == nil {
+	if _, err := s.mailboxProfile("bind"); err == nil {
 		t.Fatal("unavailable profile authorized keys")
 	}
 	s.Bindings = nil
@@ -105,8 +105,8 @@ func TestInputBindingsChangedAtSameSampleRejectsAuthorization(t *testing.T) {
 	if !sameInputProfile(current, stored) {
 		t.Fatal("verified fallback rejected")
 	}
-	profile, err := stored.receiverProfile()
-	if err != nil || profile.WakeBinding != "ALT-CTRL-F11" || profile.SubmitBinding != "ALT-CTRL-SHIFT-F11" || profile.CloseBinding != "ALT-CTRL-[" {
+	profile, err := stored.mailboxProfile("bind")
+	if err != nil || profile.Wake != "ALT-CTRL-F10" || stored.Bindings.Reload != "ALT-CTRL-F9" {
 		t.Fatalf("fallback profile = %#v, %v", profile, err)
 	}
 }

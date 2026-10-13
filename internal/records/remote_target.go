@@ -80,7 +80,7 @@ func resolveRemoteTarget(ctx context.Context, root string, request RemoteTargetR
 			if err != nil {
 				return result, err
 			}
-			if parent.Source != nil && parent.Source.Product != request.Product || parent.Data != nil && parent.Data.Product != request.Product || parent.Changes != nil && parent.Changes.Product != request.Product {
+			if parent.Source != nil && !selection.SourceSupportsProduct(*parent.Source, request.Product) || parent.Data != nil && parent.Data.Product != request.Product || parent.Changes != nil && parent.Changes.Product != request.Product {
 				return result, errors.New("selection.product_mismatch")
 			}
 			if parent.Data != nil {

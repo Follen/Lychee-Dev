@@ -23,6 +23,7 @@ environment comes from a separately pinned Retail or Forever source.
 | --- | --- |
 | Exact file and line | `source inspect --path` with a bounded line range |
 | API, event, template or feature name | `source query` with the relevant topic, then inspect the returned original location |
+| Several known questions on the same fixed source | `source batch --file` shares snapshot, document and LuaLS preparation; retain each item's coverage and cursor |
 | Callers, dependencies or implementation across files | [source-relations.md](source-relations.md), using returned symbol IDs |
 | Difference between two revisions | `source diff` on two fixed pins from the same repository; interpretation below |
 | Addon load order, syntax or client compatibility | [addon-validation.md](addon-validation.md) |
@@ -54,6 +55,33 @@ can change the answer, preserving the command's snapshot, query and budgets.
 Query, refs and context cursors are not interchangeable.
 Changing the term, symbol, environment or budgets begins a new investigation
 without the previous cursor; keep its captures separate from the earlier pages.
+
+For several known symbols, prepare a JSON file with 1-32 requests (at most
+64 KiB), then run:
+
+```text
+lycheedev source batch --snapshot <pin> --file requests.json --format json
+```
+
+```json
+{"requests":[
+  {"id":"definition","query":{"text":"C_Spell.GetSpellInfo","topic":"api","limit":10}},
+  {"id":"callers","refs":{"symbol":"C_Spell.GetSpellInfo","direction":"incoming","limit":20}},
+  {"id":"implementation","context":{"symbol":"C_Spell.GetSpellInfo","depth":1,"limit":10,"maxBytes":16384,"maxLines":120}}
+]}
+```
+
+Each request contains exactly one `query`, `refs` or `context` object. Their
+fields are the corresponding query fields in camelCase; `symbolId` can replace
+`symbol`, and `cursor` continues that individual item. All items share the
+selected snapshot and optional `--environment`. The default worker ends with
+the batch; `--session-reuse` opts into the existing cross-command broker.
+Use `--static-only` when only structural evidence is needed. Batch defaults
+match the source engine: query limit 10, refs/context limit 25, context depth 0,
+context maxBytes 16384 and maxLines 80; specify larger context explicitly.
+The batch archives one combined capture. A partial or truncated item remains
+partial in the aggregate. An item error fails the command and names its position;
+earlier answers are not presented as a completed batch.
 
 `source inspect --path` archives the whole file but returns a bounded excerpt.
 Report its path, first/last/total lines, exact commit, full-file hash and capture;

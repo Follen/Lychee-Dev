@@ -25,13 +25,7 @@ ns.InputProtection={
             if not ns.ReceiverBindings or type(ns.ReceiverBindings.Current)~="function" then return nil,"input_protection_not_ready" end
             local ok,profile=pcall(ns.ReceiverBindings.Current)
             if not ok or (issecretvalue and issecretvalue(profile)) or type(profile)~="table" then return nil,"input_protection_not_ready" end
-            for _,action in ipairs({"wake","submit","close"}) do
-                if issecretvalue and issecretvalue(profile[action]) then return nil,"input_protection_not_ready" end
-            end
-            if profile.close~="ALT-CTRL-[" or not
-                ((profile.wake=="ALT-CTRL-F12" and profile.submit=="ALT-CTRL-SHIFT-F12")
-                or (profile.wake=="ALT-CTRL-F11" and profile.submit=="ALT-CTRL-SHIFT-F11")) then return nil,"input_protection_not_ready" end
-            bindings={wake=profile.wake,submit=profile.submit,close=profile.close}
+            bindings={wake=profile.wake,reload=profile.reload}
         end
         if not frame then
             local candidate
@@ -43,9 +37,8 @@ ns.InputProtection={
                 local chord=ns.Compat.ReceiverChord(key)
                 local token=active
                 self:SetPropagateKeyboardInput(false)
-                if chord=="ALT-CTRL-[" then release(token,"input_protection_cancelled");return end
                 if token and activeBindings then
-                    self:SetPropagateKeyboardInput(chord==activeBindings.wake or chord==activeBindings.submit)
+                    self:SetPropagateKeyboardInput(chord==activeBindings.wake or chord==activeBindings.reload)
                 end
             end)
             end)

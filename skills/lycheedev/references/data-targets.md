@@ -16,8 +16,10 @@ rows and error separately; a successful listing can contain a failed product.
 means the displayed list is incomplete. A reused-slot product/build mismatch
 requires updating verified product metadata, not treating another beta as Forever.
 Use region/locale from the request or established project context, not the language
-of the conversation. The CLI maps `--product forever` to its publication endpoint;
-do not substitute the endpoint name for the product. Resolve a matching target
+of the conversation. Use `forever-asia-beta` or `forever-cn-beta` for their separate
+publication endpoints; legacy `forever` retains the Asia endpoint remotely and
+is ambiguous locally when both clients exist. Do not substitute launcher keys
+for product names. Resolve a matching target
 when no fixed data pin exists. Ask only for identity choices still ambiguous.
 
 Prepare a local target from a game root or selected client directory. When the

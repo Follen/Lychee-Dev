@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,7 +115,7 @@ func researchLimit(limit int) (int, error) {
 		return 25, nil
 	}
 	if limit < 1 || limit > 200 {
-		return 0, errors.New("codebase.invalid_relation_limit")
+		return 0, fmt.Errorf("%w: codebase.invalid_relation_limit", ErrInvalidQuery)
 	}
 	return limit, nil
 }
@@ -148,7 +149,7 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 		direction = "both"
 	}
 	if direction != "incoming" && direction != "outgoing" && direction != "both" {
-		return result, errors.New("codebase.invalid_relation_direction")
+		return result, fmt.Errorf("%w: codebase.invalid_relation_direction", ErrInvalidQuery)
 	}
 	limit, err := researchLimit(query.Limit)
 	if err != nil {
@@ -199,7 +200,7 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 			declarations = append(declarations, s)
 		}
 		return nil
-	})
+	}, recordLookupKey{recordID, query.SymbolID}, recordLookupKey{recordName, query.Symbol})
 	if err != nil {
 		return result, err
 	}
@@ -241,7 +242,7 @@ func (b *Browser) Relate(ctx context.Context, snapshot string, pin selection.Sou
 		}
 		edges = append(edges, s)
 		return nil
-	})
+	}, recordLookupKey{recordName, name}, recordLookupKey{recordTarget, name})
 	if err != nil {
 		return result, err
 	}
@@ -364,12 +365,7 @@ func (b *Browser) semanticRelations(ctx context.Context, cache *snapshotCache, p
 	if analyzer != nil {
 		analysis, err = analyzer(ctx, pin, cache.manifest.RecordsHash, manifest, queries)
 	} else {
-		lease, leaseErr := b.AcquireWorktree(ctx, pin)
-		if leaseErr != nil {
-			return nil, "fixed worktree unavailable: " + leaseErr.Error()
-		}
-		defer lease.Close()
-		analysis, err = runtime.AnalyzeWorkspaceBatches(ctx, lease.Path(), definitions, luals.SplitQueries(queries))
+		analysis, err = b.analyzeInRequest(ctx, pin, runtime, definitions, manifest, queries)
 	}
 	if err != nil {
 		return nil, "LuaLS relation batch failed: " + err.Error()
@@ -474,11 +470,13 @@ func semanticOutgoingQueries(ctx context.Context, cache *snapshotCache, symbol S
 func projectOutgoing(ctx context.Context, cache *snapshotCache, pin selection.SourcePin, symbol SymbolMatch, sites []SymbolMatch, uncertain bool, analysis luals.Analysis, mappings []environment.DefinitionMapping, manifest environment.Manifest) ([]ResearchRelation, string) {
 	lookup := map[string][]SymbolMatch{}
 	targets := map[string]bool{}
+	targetPaths := map[string]bool{}
 	for _, answer := range analysis.Results {
 		if answer.State == "complete" && len(answer.Locations) == 1 {
 			loc := answer.Locations[0]
 			if loc.Path != luals.DefinitionPath {
 				targets[loc.Path+"\x00"+strconv.Itoa(loc.Range.Start.Line+1)] = true
+				targetPaths[loc.Path] = true
 			}
 		}
 	}
@@ -491,7 +489,7 @@ func projectOutgoing(ctx context.Context, cache *snapshotCache, pin selection.So
 			lookup[key] = append(lookup[key], s)
 		}
 		return nil
-	})
+	}, nameLookupKeys(targetPaths, recordDeclarationPath)...)
 	if err != nil {
 		return nil, err.Error()
 	}
@@ -543,15 +541,10 @@ func projectOutgoing(ctx context.Context, cache *snapshotCache, pin selection.So
 }
 
 func symbolPosition(ctx context.Context, cache *snapshotCache, s SymbolMatch) (luals.Position, error) {
-	data, _, err := cache.document(ctx, s.Path)
+	line, err := cache.documentLine(ctx, s.Path, s.Line)
 	if err != nil {
 		return luals.Position{}, err
 	}
-	lines := strings.Split(string(data), "\n")
-	if s.Line < 1 || s.Line > len(lines) {
-		return luals.Position{}, errors.New("codebase.symbol_line_out_of_range")
-	}
-	line := lines[s.Line-1]
 	needle := s.Name
 	if dot := strings.LastIndexAny(needle, ".:"); dot >= 0 {
 		needle = needle[dot+1:]

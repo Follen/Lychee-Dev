@@ -23,7 +23,6 @@ for (const entry of (await fs.readdir(evidence, { withFileTypes: true })).sort((
     run: entry.name, connection: state?.id, bound: state?.bound, runtime: state?.identity.runtime,
     nextSlot: state?.identity.nextSlot,
     operation: operation && { id: operation.id, stage: operation.stage, bytes: operation.reportBytes, ok: body?.ok, error: body?.error, resourcesReleased: body?.resourcesReleased },
-    reloadHint: await read('reload-hint.json'),
     discovery: discovery && { candidates: discovery.candidates.length, ...coverage(discovery.coverage) },
     scans: scans?.map(s=>({ path:s.path,elapsedMillis:s.elapsedMillis,...coverage(s.coverage) })),
     captures: (await fs.readdir(directory)).filter(name=>name.endsWith('.png')),

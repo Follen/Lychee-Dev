@@ -27,6 +27,7 @@ func VerifiedClientBaselines() []ClientBaseline {
 	return []ClientBaseline{
 		{Product: "retail", ProductCode: "wow", BuildSeries: "12.1.0", TOC: MainTOC, Interface: 120100, SourceCommit: "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"},
 		{Product: "classic", ProductCode: "wow_classic", BuildSeries: "5.5.4", TOC: MainTOC, Interface: 50504, SourceCommit: "1028c1e687f721ba9d3af14d1b12a5745e4227c7"},
+		{Product: "classic-era", ProductCode: "wow_classic_era", BuildSeries: "1.15.9", TOC: MainTOC, Interface: 11509, SourceCommit: "8165d4cd6e48d606369336cc3a7977902310e81e"},
 		{Product: "titan", ProductCode: "wow_classic_titan", BuildSeries: "3.80.2", TOC: MainTOC, Interface: 38002, SourceCommit: "825d29d3662b372f0bead725ee6abd339e4a77b5"},
 		// Forever installs report flavor wow_forever, but its data is published
 		// in the reusable wow_classic_beta manifest slot (1.60.x); the two codes differ.
@@ -38,7 +39,7 @@ func SourceInterface(pin SourcePin) (int, bool) {
 		return 0, false
 	}
 	for _, baseline := range VerifiedClientBaselines() {
-		if pin.Product == baseline.Product && pin.ExactCommit == baseline.SourceCommit {
+		if SourceProductFamily(pin.Product) == baseline.Product && pin.ExactCommit == baseline.SourceCommit {
 			return baseline.Interface, true
 		}
 	}

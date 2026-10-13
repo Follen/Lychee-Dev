@@ -47,6 +47,8 @@ func queryFault(err error) (int, string, bool) {
 	}{
 		{errDoctorUnhealthy, 3, "doctor.check_failed"},
 		{codebase.ErrInvalidSearchCursor, 2, "codebase.invalid_search_cursor"},
+		{codebase.ErrInvalidBatch, 2, "codebase.invalid_batch"},
+		{codebase.ErrInvalidQuery, 2, "codebase.invalid_query"},
 		{codebase.ErrUnknownRepository, 2, "codebase.unknown_repository"},
 		{codebase.ErrUnknownProduct, 2, "codebase.unknown_product"},
 		{codebase.ErrInvalidSourceRef, 2, "codebase.invalid_source_ref"},

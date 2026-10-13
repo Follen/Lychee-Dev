@@ -13,7 +13,17 @@ import (
 // boundary. The source engine can still return bounded structural evidence
 // when a complete packaged runtime is unavailable on this machine.
 func runSourceResearch(ctx context.Context, route string, opts Options, response *Envelope) (int, error) {
-	if opts.snapshot == "" || (opts.symbolID == "") == (opts.symbol == "") {
+	var batch codebase.BatchRequest
+	if route == "source batch" {
+		if opts.snapshot == "" || opts.file == "" {
+			return 2, errors.New("source batch requires --snapshot and --file")
+		}
+		var err error
+		batch, err = codebase.ReadSourceBatch(opts.file)
+		if err != nil {
+			return 0, err
+		}
+	} else if opts.snapshot == "" || (opts.symbolID == "") == (opts.symbol == "") {
 		return 2, errors.New("source refs/context require --snapshot and exactly one of --symbol-id or --symbol")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -26,7 +36,7 @@ func runSourceResearch(ctx context.Context, route string, opts Options, response
 		return 0, err
 	}
 	options := codebase.ResearchOptions{EnvironmentSnapshot: opts.environmentSnapshot, Flow: opts.sourceFlow}
-	if !opts.staticOnly {
+	if !opts.staticOnly && (route != "source batch" || batch.NeedsResearch()) {
 		options.Semantic, err = openLuaLS(ctx, opts.release)
 		if err != nil {
 			if opts.release != "" || !errors.Is(err, luals.ErrUnavailable) {
@@ -41,6 +51,13 @@ func runSourceResearch(ctx context.Context, route string, opts Options, response
 	}
 	response.Context["snapshot"] = opts.snapshot
 	switch route {
+	case "source batch":
+		reading, err := codebase.BatchSource(ctx, root, opts.snapshot, batch, options)
+		if err != nil {
+			return 0, err
+		}
+		response.Result = reading.Result
+		response.Captures = append(response.Captures, reading.Capture)
 	case "source refs":
 		reading, err := codebase.RelateSource(ctx, root, opts.snapshot, codebase.RelationQuery{
 			SymbolID: opts.symbolID, Symbol: opts.symbol, Direction: opts.direction,

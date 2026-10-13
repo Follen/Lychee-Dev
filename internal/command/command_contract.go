@@ -3,6 +3,8 @@ package command
 import (
 	"fmt"
 	"strings"
+
+	"github.com/follenfang/lycheedev/internal/selection"
 )
 
 // Definition is the public, machine-readable description of an implemented
@@ -29,6 +31,23 @@ type commandContract struct {
 	allowsHome bool
 }
 
+func dataProductFlag() flagSpec {
+	var names []string
+	for _, product := range selection.DataProducts() {
+		names = append(names, product.Product)
+	}
+	return flagSpec{name: "--product", display: "--product <" + strings.Join(names, "|") + "> (legacy: forever)", value: true}
+}
+
+func liveDoctorTargetFlags() []flagSpec {
+	return []flagSpec{
+		{name: "--installation", display: "--installation <client>", value: true},
+		{name: "--pid", display: "--pid <pid>", value: true},
+		{name: "--session", display: "--session <CON-id>", value: true},
+		{name: "--project", display: "--project <directory>", value: true},
+	}
+}
+
 // dataSourceFlags is the shared pinned-data source selection every data query
 // verb accepts: a fixed snapshot plus installation or CDN reads, with the
 // documented byte budget.
@@ -53,7 +72,7 @@ var commandContracts = []commandContract{
 		{name: "--raidbots", display: "--raidbots <DBCache.bin>", value: true},
 		{name: "--from", display: "--from <cache-capture-or-time>", value: true},
 		{name: "--to", display: "--to <time>", value: true},
-		{name: "--product", display: "--product <retail|classic|titan|forever>", value: true},
+		dataProductFlag(),
 		{name: "--build", display: "--build <full-build>", value: true},
 		{name: "--region", display: "--region <us|eu|cn|kr|tw>", value: true},
 		{name: "--locale", display: "--locale <locale>", value: true},
@@ -161,7 +180,14 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "version", Summary: "Inspect the native toolkit build", Mutates: false}, allowsHome: true},
 	{Definition: Definition{Path: "describe", Summary: "Read implemented command contracts", Mutates: false}, allowsHome: true},
 	{Definition: Definition{Path: "init", Summary: "Create a new-format workspace without importing old data; --plan resolves the fresh-isolation plan without changing anything, --fresh isolates an occupied legacy root into a deterministic sibling archive first, --resume completes an interrupted archive switch", Mutates: true}, flags: []flagSpec{{name: "--plan", display: "--plan"}, {name: "--fresh", display: "--fresh"}, {name: "--resume", display: "--resume"}}, allowsHome: true},
-	{Definition: Definition{Path: "doctor", Summary: "Aggregate read-only workspace, target catalog, bundled LuaLS and source-mirror health checks; the mirror check joins only when the nearest project declares a product, and exit 3 reports that at least one check found an error", Mutates: false}, flags: []flagSpec{{name: "--offline", display: "--offline"}}, allowsHome: true},
+	{Definition: Definition{Path: "doctor", Summary: "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check", Mutates: false}, flags: append(liveDoctorTargetFlags(), flagSpec{name: "--offline", display: "--offline"}), allowsHome: true},
+	{Definition: Definition{Path: "live doctor", Summary: "Diagnose one PID or retained CON without input; --fix installs a clean release when needed and resumes or activates that same target under Lycheedev mailbox protocol v1; missing runtime requires one manual reload", Mutates: true}, flags: append(liveDoctorTargetFlags(),
+		flagSpec{name: "--fix", display: "--fix"},
+		flagSpec{name: "--release", display: "--release <distribution-root>", value: true},
+		flagSpec{name: "--output", display: "--output <upgrade-archive>", value: true},
+		flagSpec{name: "--request", display: "--request <idempotency-key>", value: true},
+		flagSpec{name: "--wait-seconds", display: "--wait-seconds <1-600> (default 30)", value: true},
+		flagSpec{name: "--no-cache", display: "--no-cache"}), allowsHome: false},
 	{Definition: Definition{Path: "config show", Summary: "Read the workspace user preference and resource budget document; a missing document reports the documented defaults", Mutates: false}, allowsHome: true},
 	{Definition: Definition{Path: "config set", Summary: "Update the workspace budget: --cache-max-bytes <n> and/or --download-workers <n>; at least one flag is required", Mutates: true}, flags: []flagSpec{{name: "--cache-max-bytes", display: "--cache-max-bytes <n>", value: true}, {name: "--download-workers", display: "--download-workers <n>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "cache status", Summary: "Report managed cache accounting, protection visibility and the configured limit", Mutates: false}, allowsHome: true},
@@ -173,7 +199,7 @@ var commandContracts = []commandContract{
 		{name: "--dry-run", display: "--dry-run"},
 	}, allowsHome: true},
 	{Definition: Definition{Path: "live instances", Summary: "List supported installations and running windows without game input or actor claims; use live connect for fresh native identity binding", Mutates: false}, flags: []flagSpec{{name: "--installation", display: "--installation <client-or-game-root>", value: true}, {name: "--passive", display: "--passive"}}, allowsHome: true},
-	{Definition: Definition{Path: "live connect", Summary: "Discover and freshly bind a native memory/200-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work", Mutates: true}, flags: []flagSpec{
+	{Definition: Definition{Path: "live connect", Summary: "Discover and freshly bind a native memory/500-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work", Mutates: true}, flags: []flagSpec{
 		{name: "--snapshot", display: "--snapshot <pin>", value: true},
 		{name: "--character", display: "--character <name>", value: true},
 		{name: "--realm", display: "--realm <realm>", value: true},
@@ -190,7 +216,7 @@ var commandContracts = []commandContract{
 		{name: "--wake-binding", display: "--wake-binding <chord>", value: true},
 	}, allowsHome: true},
 	{Definition: Definition{Path: "live reload", Summary: "Perform one correlated UI reload on the selected client and verify the new runtime: --session <session-id> --request <idempotency-key>", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}}, allowsHome: true},
-	{Definition: Definition{Path: "live reload fallback", Summary: "Activate a clean managed addon and its 200 slots on an explicit installation/PID with a recorded reload using memory readiness when available (fixed bootstrap otherwise), then verify a new runtime and fresh connection; --request is idempotent", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client>", value: true}, {name: "--pid", display: "--pid <pid>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--session", display: "--session <prior-session>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}}, allowsHome: true},
+	{Definition: Definition{Path: "live reload fallback", Summary: "Activate a clean managed addon and its 500 slots on an explicit installation/PID using fresh Mailbox readiness for a recorded reload, or waiting for one manual reload when no current input protocol is loaded, then verify a new runtime and fresh connection; --request is idempotent", Mutates: true}, flags: []flagSpec{{name: "--installation", display: "--installation <client>", value: true}, {name: "--pid", display: "--pid <pid>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--session", display: "--session <prior-session>", value: true}, {name: "--wake-binding", display: "--wake-binding <chord>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "live ack", Summary: "Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>", Mutates: true}, positional: "<operation-id>", allowsHome: true},
 	{Definition: Definition{Path: "live finish", Summary: "Acknowledge one verified operation and verify its receipt display is cleared; retry the same operation to finish pending display cleanup: live finish <operation-id>", Mutates: true}, positional: "<operation-id>", allowsHome: true},
 	{Definition: Definition{Path: "live bugs", Summary: "Read 1-100 retained provider errors; native CON connections persist and release the bounded observation result automatically", Mutates: true}, flags: []flagSpec{{name: "--session", display: "--session <session-id>", value: true}, {name: "--request", display: "--request <idempotency-key>", value: true}, {name: "--count", display: "--count <1-100>", value: true}, {name: "--account", display: "--account <account>", value: true}}, allowsHome: true},
@@ -200,7 +226,7 @@ var commandContracts = []commandContract{
 		{name: "--file", display: "--file <selection.json>", value: true},
 		{name: "--target", display: "--target <name>", value: true},
 		{name: "--installation", display: "--installation <game-root-or-client>", value: true},
-		{name: "--product", display: "--product <retail|classic|titan|forever>", value: true},
+		dataProductFlag(),
 		{name: "--build", display: "--build <full-build>", value: true},
 		{name: "--definitions", display: "--definitions <commit-or-full-ref>", value: true},
 		{name: "--region", display: "--region <us|eu|cn|kr|tw>", value: true},
@@ -211,7 +237,7 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "target show", Summary: "Read a named target configuration and its references, or an explicit PIN- selection ID", Mutates: false}, positional: "<name-or-pin-id>", allowsHome: true},
 	{Definition: Definition{Path: "target list", Summary: "List every named target configuration in name order; a brand new workspace has no targets", Mutates: false}, allowsHome: true},
 	{Definition: Definition{Path: "target add", Summary: "Create or explicitly replace one named target: target add <name> --product <track> --region <region> --locale <locale> with exactly one of --installation <client> or --remote; optional --build <full-build> pins that exact release; --replace confirms replacement", Mutates: true}, flags: []flagSpec{
-		{name: "--product", display: "--product <retail|classic|titan|forever>", value: true},
+		dataProductFlag(),
 		{name: "--region", display: "--region <us|eu|cn|kr|tw>", value: true},
 		{name: "--locale", display: "--locale <locale>", value: true},
 		{name: "--build", display: "--build <full-build>", value: true},
@@ -235,6 +261,7 @@ var commandContracts = []commandContract{
 	{Definition: Definition{Path: "evidence keep", Summary: "Record an explicit retention decision for one capture; repeated calls are idempotent: evidence keep <capture-id>", Mutates: true}, positional: "<capture-id>", allowsHome: true},
 	{Definition: Definition{Path: "evidence remove", Summary: "Explicitly remove one unreferenced capture manifest and its unshared blob: evidence remove <capture-id>; never follows cache pruning or deletes a shared blob", Mutates: true}, positional: "<capture-id>", allowsHome: true},
 	{Definition: Definition{Path: "source list", Summary: "List source repositories and product branches; --snapshot <pin> reports fixed file-mapping readiness", Mutates: false}, flags: []flagSpec{{name: "--snapshot", display: "--snapshot <pin>", value: true}}, allowsHome: true},
+	{Definition: Definition{Path: "source batch", Summary: "Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped LuaLS session; each item retains its own cursor and coverage", Mutates: true}, flags: []flagSpec{{name: "--snapshot", display: "--snapshot <pin-id>", value: true}, {name: "--file", display: "--file <requests.json>", value: true}, {name: "--environment", display: "--environment <client-pin>", value: true}, {name: "--flow", display: "--flow"}, {name: "--session-reuse", display: "--session-reuse"}, {name: "--static-only", display: "--static-only"}, {name: "--release", display: "--release <release-root>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "source sync", Summary: "Fetch --source <key> --product <track> [--ref <full-ref-or-commit>] and return a fixed snapshot", Mutates: true}, flags: []flagSpec{{name: "--source", display: "--source <key>", value: true}, {name: "--product", display: "--product <track>", value: true}, {name: "--ref", display: "--ref <full-ref-or-commit>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "source inspect", Summary: "Inspect one fixed source: --path <file> for original lines, --symbol <qualified-name> for symbol candidates, or --target-path <path> for file/asset facts", Mutates: true}, flags: []flagSpec{{name: "--snapshot", display: "--snapshot <pin-id>", value: true}, {name: "--path", display: "--path <file>", value: true}, {name: "--symbol", display: "--symbol <qualified-name>", value: true}, {name: "--target-path", display: "--target-path <path>", value: true}, {name: "--line", display: "--line <n>", value: true}, {name: "--count", display: "--count <n>", value: true}}, allowsHome: true},
 	{Definition: Definition{Path: "source index", Summary: "Explicitly warm the rebuildable file mapping for --snapshot <pin-id>, retaining parse diagnostics", Mutates: true}, flags: []flagSpec{{name: "--snapshot", display: "--snapshot <pin-id>", value: true}}, allowsHome: true},

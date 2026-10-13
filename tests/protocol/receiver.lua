@@ -13,7 +13,14 @@ ns.Theme = {window={.055,.055,.063}, field={.085,.085,.095},
     SetFont=function() end}
 ns.Widgets = {LOGO_TEXTURE="logo"}
 GetTime = function() return 0 end
-local frames, bindings, timers, shown, calls = {}, {}, {}, {}, {}
+local frames, timers, shown, calls = {}, {}, {}, {}
+-- Historical LDB1/LDC1 framing regression. Native binding registration is
+-- tested separately; the old receiver is invoked directly in this fixture.
+local legacyProfile = { wake = "ALT-CTRL-]", submit = "ALT-CTRL-SHIFT-]", close = "ALT-CTRL-[" }
+ns.ReceiverBindings = {
+    Current = function() return legacyProfile end,
+    MatchKey = function(key, action) return key == legacyProfile[action]:match("([^%-]+)$") end,
+}
 local visible
 local businessReceipt = '{"schema":"lycheedev.signal.v1","kind":"reported",' ..
     '"sessionNonce":"' .. string.rep("2",32) .. '","requestId":"OP-one",' ..
@@ -21,13 +28,8 @@ local businessReceipt = '{"schema":"lycheedev.signal.v1","kind":"reported",' ..
 UIParent = {}
 local secret={}
 issecretvalue = function(value) return rawequal(value,secret) end
-local combat=true
+local combat=false
 InCombatLockdown = function() return combat end
-GetBindingAction = function(chord, override)
-    return override and bindings[chord] and ("CLICK " .. bindings[chord] .. ":LeftButton") or ""
-end
-SetOverrideBindingClick = function(_, _, chord, button) bindings[chord] = button end
-ClearOverrideBindings = function() bindings = {} end
 local function object(kind, name)
     local value = {kind=kind,name=name,scripts={},text="",focus=false}
     function value:SetScript(key, callback) self.scripts[key]=callback end
@@ -96,7 +98,7 @@ end}
 LycheeToolkitDB={schema=1}
 LycheeToolkitBridgeDB={schema=1}
 for _, path in ipairs({"UI/Theme.lua","Bridge/CaptureWriter.lua","Bridge/MatrixSymbol.lua",
-    "Bridge/InputProtocol.lua","Bridge/ReceiverBindings.lua","Bridge/Receiver.lua"}) do
+    "Bridge/InputProtocol.lua","Bridge/Receiver.lua"}) do
     assert(loadfile(root.."/"..path))("Lychee Dev",ns)
 end
 local goldenCount=0
@@ -120,12 +122,6 @@ for line in io.lines(golden) do
 end
 assert(goldenCount>=20,"receiver golden fixtures not read")
 assert(#frames==0,"receiver built UI at module load")
-assert(ns.Receiver.Register())
-assert(#frames==1,"binding owner should defer protected setup during combat")
-combat=false
-assert(frames[1].scripts.OnEvent)
-frames[1].scripts.OnEvent(frames[1],"PLAYER_REGEN_ENABLED")
-assert(#frames==4,"only owner and three binding buttons should exist cold")
 local function editor()
     for _, value in ipairs(frames) do if value.kind=="EditBox" then return value end end
 end
@@ -245,8 +241,8 @@ assert(string.find(shown[#shown],'"errorCode":"receiver_dispatch_failed"',1,true
     "accepted replay lost the original dispatch failure across wakes")
 assert(ns.Receiver.Close())
 
-assert(ns.ReceiverBindings.Configure("close","ALT-CTRL-F12"))
-assert(ns.ReceiverBindings.Configure("wake","ALT-CTRL-["))
+legacyProfile.close = "ALT-CTRL-F12"
+legacyProfile.wake = "ALT-CTRL-["
 assert(ns.ReceiverBindings.MatchKey("[", "wake"))
 assert(ns.Receiver.Wake())
 editor():SetText("[") -- Late custom wake WM_CHAR must not reject the ready phase.
@@ -258,7 +254,7 @@ assert(ns.Receiver.Submit())
 editor():SetText("]") -- Submit still uses ], independent of the wake terminal.
 assert(string.find(shown[#shown],'"kind":"receiver_commit_ready"',1,true))
 assert(ns.Receiver.Close())
-assert(ns.ReceiverBindings.Configure("wake","ALT-CTRL-F1"))
+legacyProfile.wake = "ALT-CTRL-F1"
 assert(ns.Receiver.Wake())
 local fkeyWire=stage("run","OP-fkey","-",string.rep("1",16))
 send(fkeyWire)

@@ -47,7 +47,7 @@ func (s State) validate() error {
 		if in.Kind != "invoke" && in.Kind != "escape" && in.Kind != "reload" {
 			return bad
 		}
-		if in.Exchange == "" || in.Outcome != nil && in.Outcome.validate() != nil {
+		if in.Exchange == "" || in.EscapeAttempts < 0 || in.EscapeAttempts > maxInputEscapes || in.Outcome != nil && in.Outcome.validate() != nil {
 			return bad
 		}
 		if in.AfterDiagnostic != nil && (!in.AfterDiagnostic.valid() || in.AfterDiagnostic.Runtime != in.Runtime) {

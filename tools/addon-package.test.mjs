@@ -9,7 +9,7 @@ import { buildAddonZip, collectAddonZipEntries, parseToc, verifyAddonZip } from 
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = 'Lychee Dev/Lychee Dev.toc';
-const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
+const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001', '11509'];
 
 // Fixture ZIPs are written with writeZip into temp dirs; the repository is
 // never modified. `mutate` edits the collected entry map in memory.
@@ -64,6 +64,7 @@ test('collectAddonZipEntries ships one flat manifest, its loads and Media', () =
   const { entries, tocs, report } = collectAddonZipEntries(repo);
   assert.deepEqual(tocs.map(toc => toc.name), ['Lychee Dev.toc']);
   assert.ok(entries.has(MANIFEST));
+  assert.ok(entries.has('Lychee Dev/Bindings.xml'));
   // A per-client TOC variant is the engine selection rule the single-manifest
   // architecture removed; the archive must not carry one.
   for (const client of ['Mainline', 'Mists', 'Wrath', 'Forever']) {
@@ -76,7 +77,8 @@ test('collectAddonZipEntries ships one flat manifest, its loads and Media', () =
   const declared = toc.interface.split(',').map(part => part.trim());
   assert.deepEqual(declared, SUPPORTED_INTERFACES);
   assert.ok(toc.loads.some(line => /^Core\\ClientGate\.lua$/i.test(line)));
-  assert.equal(toc.loads.at(-1), 'Core\\Runtime.lua');
+  assert.equal(toc.loads.at(-1), 'Core\\Startup.lua');
+  assert.ok(toc.loads.indexOf('Core\\Runtime.lua') < toc.loads.indexOf('Core\\Controls.lua'));
 });
 
 test('built addon zip verifies clean', async t => {
@@ -95,6 +97,11 @@ test('built addon zip verifies clean', async t => {
 test('a deleted load file entry fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => entries.delete('Lychee Dev/Core/Locale.lua'));
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Core\/Locale\.lua/);
+});
+
+test('missing automatically loaded bindings fails verification', async t => {
+  const { buffer } = await fixtureZip(t, entries => entries.delete('Lychee Dev/Bindings.xml'));
+  assertViolation(verifyAddonZip(buffer), /missing bindings/);
 });
 
 test('an extra tests entry fails verification', async t => {

@@ -45,7 +45,6 @@ func run() (resultErr error) {
 	code := flag.String("file", "", "probe file")
 	release := flag.String("release", "", "candidate release root")
 	cache := flag.Bool("cache", true, "disposable hints")
-	reloadHint := flag.Bool("reload-hint", true, "capture optional reload color hint; false leaves runtime verification to public resume")
 	seconds := flag.Int("timeout", 120, "bounded wall time")
 	budget := flag.Int("budget", 15, "probe seconds")
 	connection := flag.String("connection", "", "project CON id for controlled observation reload fault")
@@ -122,45 +121,6 @@ func run() (resultErr error) {
 	if *mode == "capture" {
 		return capture("frame")
 	}
-	if *mode == "input-signal" {
-		stream, err := desktop.CaptureFramesWithStartupTimeout(ctx, target.Window, desktop.InputSignalCapture(), 2*time.Second)
-		if err != nil {
-			return err
-		}
-		defer stream.Close()
-		type sample struct {
-			Ticks  int64              `json:"ticks"`
-			AgeMS  int64              `json:"ageMs"`
-			Signal bridge.InputSignal `json:"signal"`
-			Error  string             `json:"error,omitempty"`
-		}
-		var samples []sample
-		for len(samples) < 40 {
-			frame, err := stream.Next(ctx)
-			if err != nil {
-				return err
-			}
-			now, err := desktop.CaptureSystemTicks()
-			if err != nil {
-				return err
-			}
-			age, err := desktop.FrameAge(frame, now)
-			if err != nil {
-				return err
-			}
-			signal, decodeErr := bridge.DecodeInputSignal(frame.NRGBA)
-			s := sample{Ticks: frame.SystemTicks, AgeMS: age.Milliseconds(), Signal: signal}
-			if decodeErr != nil {
-				s.Error = decodeErr.Error()
-			}
-			samples = append(samples, s)
-		}
-		return save(ctx, filepath.Join(evidence, "input-signal.json"), struct {
-			Window  desktop.WindowIdentity `json:"window"`
-			Area    any                    `json:"area"`
-			Samples []sample               `json:"samples"`
-		}{target.Window, stream.CaptureArea(), samples})
-	}
 	reload := func() error {
 		if err = guardBase(ctx); err != nil {
 			return err
@@ -179,45 +139,7 @@ func run() (resultErr error) {
 		if inputErr != nil {
 			return inputErr
 		}
-		if !*reloadHint {
-			return nil
-		}
-		stream, err := desktop.CaptureFrames(ctx, target.Window, desktop.WholeWindowCapture())
-		if err != nil {
-			return err
-		}
-		defer stream.Close()
-		previous, ticks, transitions := -1, int64(0), 0
-		for frames := 0; frames < 1200; frames++ {
-			frame, err := stream.Next(ctx)
-			if err != nil {
-				return err
-			}
-			if frame.SystemTicks <= ticks {
-				continue
-			}
-			ticks = frame.SystemTicks
-			patch, found := desktop.ReadReloadPatch(frame.NRGBA)
-			if !found {
-				continue
-			}
-			if previous >= 0 && patch.Phase == (previous+1)%3 {
-				transitions++
-			}
-			previous = patch.Phase
-			if transitions >= 2 {
-				f, err := os.Create(filepath.Join(evidence, "reload-patch.png"))
-				if err != nil {
-					return err
-				}
-				err = errors.Join(png.Encode(f, frame.NRGBA), f.Close())
-				if err != nil {
-					return err
-				}
-				return save(ctx, filepath.Join(evidence, "reload-hint.json"), map[string]any{"transitions": transitions, "ticks": ticks, "identityVerified": false})
-			}
-		}
-		return errors.New("reload patch not observed; input result remains unconfirmed")
+		return nil
 	}
 	if *mode == "stage-observation" {
 		return stageObservation(ctx, root, parent, resource, *connection, evidence, target, guardBase)
@@ -403,13 +325,15 @@ func run() (resultErr error) {
 		}}
 		found, findErr := native.Find(ctx, selector, false)
 		var latest channel.InputObservation
+		var latestPayload json.RawMessage
 		for _, record := range found.Records {
 			var state channel.InputObservation
 			if json.Unmarshal(record.Payload, &state) == nil && state.SampleMillis > latest.SampleMillis {
 				latest = state
+				latestPayload = append(json.RawMessage(nil), record.Payload...)
 			}
 		}
-		if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"latest": latest, "minimumAgeMillis": minimumAge, "coverage": found.Coverage}); err != nil {
+		if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"latest": latest, "publication": latestPayload, "minimumAgeMillis": minimumAge, "coverage": found.Coverage}); err != nil {
 			return err
 		}
 		return findErr

@@ -18,9 +18,19 @@ import (
 // inferred from stock Lua or automatically inherited by another executable.
 const RetailLuaMailboxExecutableSHA256 = "d41f11de411f6fdb280a7c1c6380ba3d1b17614f03e5aca8fabce2cc715cd7dd"
 const RetailLuaMailboxRootRVA uint64 = 0x79c0c18
-const MailboxSchema = "lycheedev.mailbox.v1"
+const MailboxSchema = bridge.MailboxSchema
 
 var ErrMailboxUnavailable = errors.New("memory.mailbox_unavailable")
+
+// Keep publication changes distinct from invalid layouts and root recipes.
+// A caller may re-observe a changed path, but must never authorize its old bytes.
+var ErrMailboxPathChanged = fmt.Errorf("%w: path_changed", ErrMailboxUnavailable)
+var ErrMailboxStateNull = fmt.Errorf("%w: lua_state_null", ErrMailboxUnavailable)
+var ErrMailboxStringLayout = fmt.Errorf("%w: string_layout", ErrMailboxUnavailable)
+
+// A structurally readable publication from another protocol/release needs
+// manual activation, not a locator retry or permission to send an old key.
+var ErrMailboxIncompatible = errors.New("memory.mailbox_incompatible")
 
 // MailboxReader locates current records through a build-bound Lua root and
 // named hash lookup. It stores no heap addresses, hints, payloads or authority.
@@ -76,7 +86,18 @@ type luaAccess struct {
 	readError    error
 }
 
-func mailboxError(reason string) error { return fmt.Errorf("%w: %s", ErrMailboxUnavailable, reason) }
+func mailboxError(reason string) error {
+	switch reason {
+	case "path_changed":
+		return ErrMailboxPathChanged
+	case "lua_state_null":
+		return ErrMailboxStateNull
+	case "string_layout":
+		return ErrMailboxStringLayout
+	default:
+		return fmt.Errorf("%w: %s", ErrMailboxUnavailable, reason)
+	}
+}
 
 func (a *luaAccess) read(ctx context.Context, address uint64, size int, root bool) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
@@ -117,6 +138,9 @@ func (a *luaAccess) verify(ctx context.Context) error {
 			return err
 		}
 		if !bytes.Equal(b, g.bytes) {
+			if g.root && g.address != a.reader.root {
+				return mailboxError("root_recipe_changed")
+			}
 			return mailboxError("path_changed")
 		}
 	}
@@ -276,7 +300,11 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	if ns.tag != 5 {
 		return out, mailboxError("namespace_layout")
 	}
-	box, err = a.lookup(ctx, ns.pointer, "Mailbox")
+	mailboxField := "Mailbox"
+	if selector.Kind == bridge.MemoryBootstrap {
+		mailboxField = "BootstrapMailbox"
+	}
+	box, err = a.lookup(ctx, ns.pointer, mailboxField)
 	if err != nil {
 		return out, err
 	}
@@ -301,7 +329,10 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 			return out, err
 		}
 		if string(b) != check.want {
-			return out, mailboxError("mailbox_" + check.name + "_mismatch")
+			if check.name == "schema" && string(b) == bridge.PreviousMailboxSchema && (selector.Kind == bridge.MemoryIdentity || selector.Kind == bridge.MemoryInputState) {
+				continue // read-only upgrade evidence; no old receipts or business bodies
+			}
+			return out, errors.Join(ErrMailboxIncompatible, mailboxError("mailbox_"+check.name+"_mismatch"))
 		}
 	}
 	var rt luaValue
@@ -335,6 +366,8 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		field = "identity"
 	case bridge.MemoryInputState:
 		field = "input"
+	case bridge.MemoryBootstrap:
+		field = "bootstrap"
 	case bridge.MemoryReceipt, bridge.MemoryConfirmation:
 		field = "receipts"
 		if selector.Nonce == ([16]byte{}) {

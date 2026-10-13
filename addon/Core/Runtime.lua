@@ -2,75 +2,57 @@ local ADDON_NAME, ns = ...
 
 ns.Release = "3.1.2"
 ns.Startup = { ready = false, reason = "addon_not_loaded" }
--- Observability handle: mirrors the addon namespace for host-side /run
--- introspection (startup state, identity, commandFailure) on every client.
 _G.LycheeDevInternal = ns
 
--- This one-shot loader is core infrastructure, not an enabled bridge feature.
--- No optional feature creates frames, hooks, timers, or event subscriptions here.
---
--- The name-matched ADDON_LOADED owns startup, success or not; PLAYER_LOGIN is
--- the fallback trigger when that event never matches (some engines signal
--- ADDON_LOADED under a modified internal name). Every distinct startup
--- failure is reported to chat exactly once, so a stalled runtime is never
--- invisible again.
-local started = false
-local printed = {}
-local loader
-
-local function report(trigger, failure)
-    if printed[failure] then return end
-    printed[failure] = true
-    print("|cffd83b4eLychee Dev:|r startup via " .. trigger .. " failed: " .. tostring(failure))
+-- This small bootstrap loads before the workbench. It retains diagnostic
+-- publication and manual reload even when a later module cannot start.
+local clock = ns.Compat.MonotonicSeconds() or 0
+local boot = string.format("%08x%04x%04x%04x%04x%08x", math.floor(clock),
+    math.random(0,65535), math.random(0,65535), math.random(0,65535), math.random(0,65535), 1)
+local zero = string.rep("0",32)
+local phase, failure, sequence = "loading", "", 0
+local publication = {schema="Lycheedev mailbox protocol v1",release=ns.Release,runtime=boot}
+ns.BootstrapMailbox = publication
+local function publish()
+    sequence = sequence + 1
+    local bindings, bindingFailure = ns.ReceiverBindings.Current()
+    local value = {schema="Lycheedev mailbox protocol v1",bootstrap=boot,release=ns.Release,
+        phase=phase,reason=failure,bindings=bindings or {wake="",reload=""},
+        bindingFailure=bindingFailure or ""}
+    local payload = ns.CaptureWriter.Encode(value,4096)
+    if payload then publication.bootstrap=ns.MemoryProtocol.Encode(boot,boot,zero,6,1,sequence,payload) end
 end
-
-local function start(trigger)
-    if started then return true end
-    local identity, reason = ns.Platform.ObserveBuild()
-    if not identity then
-        ns.Startup = { ready = false, reason = reason }
-        report(trigger, reason)
-        return false
-    end
-    local loaded, failure = ns.Persistence.Load()
-    if not loaded then
-        ns.Startup = { ready = false, reason = failure }
-        report(trigger, failure)
-        return false
-    end
-    ns.Startup = { ready = true, identity = identity }
-    started = true
-    local registered, registrationFailure = ns.Controls.Register()
-    if not registered then ns.Startup.commandFailure = registrationFailure end
-    local receiverRegistered, receiverFailure
-    if ns.SlotRuntime then receiverRegistered,receiverFailure=ns.SlotRuntime.Register()
-    else receiverRegistered,receiverFailure=ns.Receiver.Register() end
-    if not receiverRegistered then ns.Startup.receiverFailure = receiverFailure end
-    if ns.StartupBeacon then ns.StartupBeacon.Arm() end
-    if registered and not ns.SlotRuntime then
-        local resumed, resumeFailure = ns.Reentry.Start(loader)
-        if not resumed then ns.Startup.resumeFailure = resumeFailure end
-    end
-    return true
+ns.Bootstrap = { Publish = publish }
+local function reload()
+    local ready, reason = ns.Compat.CanReload()
+    if not ready then return nil, reason end
+    return ns.Compat.ReloadUI()
 end
-
-loader = CreateFrame("Frame")
+local function wake()
+    if not ns.Startup.ready or not ns.SlotRuntime then return nil,ns.Startup.reason or "startup_failed" end
+    return ns.SlotRuntime.Wake()
+end
+local reported={}
+local loader=CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:RegisterEvent("PLAYER_LOGIN")
-loader:SetScript("OnEvent", function(self, event, name)
-    if event == "ADDON_LOADED" and name ~= ADDON_NAME then return end
-    -- One-shot: the name-matched ADDON_LOADED owns startup, success or not;
-    -- PLAYER_LOGIN is the fallback trigger when that event never matched.
-    if ns.SlotRuntime then
-        if start(event) then
-            -- Actor identity can be unavailable during ADDON_LOADED. The
-            -- existing one-shot loader owns the one PLAYER_LOGIN retry.
-            local ok=ns.SlotRuntime.Start()
-            if ok or event=="PLAYER_LOGIN" then self:UnregisterAllEvents();self:SetScript("OnEvent",nil) end
-        end
+loader:SetScript("OnEvent",function(self,event,name)
+    if event=="ADDON_LOADED" and name~=ADDON_NAME then return end
+    local bound,bindingFailure=ns.ReceiverBindings.Register({wake=wake,reload=reload})
+    ns.Startup.receiverFailure=not bound and bindingFailure or nil
+    local ok,started,reason
+    if ns.StartRuntime then ok,started,reason=pcall(ns.StartRuntime)
+    else ok,started,reason=true,nil,"startup_module_unavailable" end
+    if not ok then started,reason=nil,"startup_exception" end
+    if started then phase,failure="ready",""
     else
-        self:UnregisterAllEvents()
-        self:SetScript("OnEvent", nil)
-        start(event)
+        phase,failure="failed",reason or "startup_failed"
+        ns.Startup.ready,ns.Startup.reason=false,failure
+        if not reported[failure] then print("Lychee Dev: "..failure);reported[failure]=true end
+    end
+    publish()
+    if started or event=="PLAYER_LOGIN" then
+        self:UnregisterAllEvents();self:SetScript("OnEvent",nil)
     end
 end)
+publish()

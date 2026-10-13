@@ -49,7 +49,7 @@ func (b *Browser) SnapshotStatus(ctx context.Context, pin selection.SourcePin) (
 			failed[r.Path] = true
 		}
 		return nil
-	})
+	}, recordLookupKey{recordKind, "document"}, recordLookupKey{recordKind, "diagnostic"})
 	if err != nil {
 		return status, err
 	}

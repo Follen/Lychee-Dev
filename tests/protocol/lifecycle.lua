@@ -60,8 +60,11 @@ for _, profile in ipairs(profiles) do
             end
         end
     toc:close()
-    -- Legacy wire engine regression only; the production TOC selects SlotRuntime.
+    -- Legacy session/persistence regression only. Native binding startup has
+    -- its own receiver_bindings fixture; no legacy physical keys are installed.
     ns.SlotRuntime=nil
+    assert(loadfile("legacy_startup.lua"))(ns,frames[#frames])
+    ns.Receiver.Register=function() return true end
         assert(LycheeToolkitDB == before, "database read/write before ADDON_LOADED")
         assert(not ns.Startup.ready and ns.Persistence.Current() == nil)
         assert((scenario == "command_conflict" or next(SlashCmdList) == nil) and SLASH_LYCHEETOOLKIT1 == nil)
@@ -72,7 +75,7 @@ for _, profile in ipairs(profiles) do
         assert(LycheeToolkitDB == before and not ns.Startup.ready)
         callback(frames[1], "ADDON_LOADED", "Lychee Dev")
         assert(next(frames[1].events) == nil and frames[1].scripts.OnEvent == nil)
-        assert(#frames == (ns.Startup.ready and 5 or 1) and LycheeDevDB == old and DumperDB == older)
+        assert(#frames == 1 and LycheeDevDB == old and DumperDB == older)
         for _, frame in ipairs(frames) do
             assert(next(frame.events) == nil and frame.scripts.OnUpdate == nil, "idle bootstrap has work")
         end
@@ -139,7 +142,7 @@ for _, profile in ipairs(profiles) do
             assert(#replies == 3 and string.find(replies[1], '"inputReady":false', 1, true))
             assert(string.find(replies[3], "usage: /dev", 1, true))
             assert(state.options.bridgeEnabled == nil and ns.Persistence.Bridge().reports.retained.body == "keep")
-            assert(#frames == 5 and next(frames[1].events) == nil)
+            assert(#frames == 1 and next(frames[1].events) == nil)
             if before then assert(state == before) end
             if scenario == "existing" then assert(state.custom == "keep") end
             assert(ns.Controls.Handle("bridge on"))

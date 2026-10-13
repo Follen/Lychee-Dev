@@ -123,7 +123,7 @@ for _, profile in ipairs(profiles) do
     assert(ns.Controls.Handle("bridge hide") == true and not frames[1].visible)
     -- The fixed command vocabulary rejects anything beyond bare dismissal.
     refused, reason = ns.Controls.Handle("bridge hide now")
-    assert(refused == nil and reason == "usage: /dev status | connect | disconnect | receiver bind <wake|submit|close> <chord> | receiver reset", tostring(reason))
+    assert(refused == nil and reason == "usage: /dev status | connect | disconnect | receiver reset", tostring(reason))
     assert(#printed == 0)
 end
 realPrint("receipt hide: four profiles passed")

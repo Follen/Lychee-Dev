@@ -6,9 +6,22 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 var errProgress = errors.New("live.channel_progress")
+
+// A changed publication is an observation gap, not an input failure. During
+// an already-submitted reload, the old Lua state may also disappear before the
+// replacement is readable. Other layout/protocol/process failures stay errors.
+func (d *Driver) pendingObservation(err error) error {
+	reloading := d.State.Reload != nil && d.State.Reload.Phase == "input_attempted"
+	if errors.Is(err, memory.ErrMailboxPathChanged) || reloading && (errors.Is(err, memory.ErrMailboxStateNull) || errors.Is(err, memory.ErrMailboxStringLayout)) {
+		return errors.Join(ErrPending, err)
+	}
+	return err
+}
 
 // A cold discovery can cost seconds. Start its cooldown after completion so
 // the ordinary protocol gets time to progress rather than scanning back to
@@ -59,7 +72,8 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		if closed {
 			return err
 		}
-		if err != nil && !(ctx.Err() == nil && d.State.RuntimeEnd == nil && errors.Is(err, context.DeadlineExceeded) && optionalObservationTimeout(err)) {
+		err = d.pendingObservation(err)
+		if err != nil && !errors.Is(err, ErrPending) && !(ctx.Err() == nil && d.State.RuntimeEnd == nil && errors.Is(err, context.DeadlineExceeded) && optionalObservationTimeout(err)) {
 			return err
 		}
 	}
@@ -69,7 +83,7 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 			return errors.Join(ErrPending, err)
 		}
 		d.Waiting = ""
-		err := d.next(ctx)
+		err := d.pendingObservation(d.next(ctx))
 		var blocked *BlockedError
 		if errors.As(err, &blocked) {
 			d.Waiting = blocked.Blocker.Kind
@@ -93,7 +107,7 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		if !d.closingExplicitReload() && (!knownBlock || d.State.Closing && d.Waiting != "input_observation_stale") && ctx.Err() == nil && !time.Now().Before(nextDiscovery) {
 			discoveryStarted := time.Now()
 			if tx := d.State.Transaction; !d.State.Bound && d.State.Operation == nil && tx != nil && tx.Envelope.Action == "bind" && tx.Phase == "input_attempted" {
-				if recoverErr := d.RecoverBinding(ctx); recoverErr == nil {
+				if recoverErr := d.pendingObservation(d.RecoverBinding(ctx)); recoverErr == nil {
 					nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
 					continue
 				} else if !errors.Is(recoverErr, ErrPending) {
@@ -102,11 +116,12 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 			}
 			candidate, observeErr := d.Backend.RuntimeCandidate(ctx, d.State.Identity)
 			nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
-			if observeErr != nil {
+			observeErr = d.pendingObservation(observeErr)
+			if observeErr != nil && !errors.Is(observeErr, ErrPending) {
 				return observeErr
 			}
-			if candidate != nil {
-				if err = d.RecoverRuntime(ctx, *candidate); err == nil {
+			if observeErr == nil && candidate != nil {
+				if err = d.pendingObservation(d.RecoverRuntime(ctx, *candidate)); err == nil {
 					continue
 				}
 				if errors.As(err, &blocked) {
@@ -135,11 +150,11 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 	}
 }
 
-// Missing optical liveness is not evidence that the old runtime still exists.
+// Missing mailbox input is not evidence that the old runtime still exists.
 // Keep the existing bounded discovery cooldown as its recovery exit.
 func knownInputBlocker(reason string) bool {
 	switch reason {
-	case "", "input_observation_unavailable", "input_signal_unavailable", "input_signal_waiting", "input_signal_unknown":
+	case "", "input_observation_unavailable":
 		return false
 	default:
 		return true

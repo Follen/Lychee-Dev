@@ -106,7 +106,7 @@ Before updating a managed installation, finish current operations and disconnect
 your own compatible native CON connections. The installer refuses unresolved
 ownership; do not clear a foreign project's claim. Deploy through the managed
 installer, then activate the selected process using the startup workflow. Native
-3.1 uses the named Mailbox, slot-v3 and 200 LoadOnDemand slot addons; all managed
+3.2 development uses Lycheedev mailbox protocol v1 and 500 LoadOnDemand slot addons; all managed
 files and receipts must match the selected CLI release. An installed CLI or Skill
 does not update an already running client, and a disk-only result is not live
 readiness.

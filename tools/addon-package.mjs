@@ -16,7 +16,7 @@ const MAIN_TOC = 'Lychee Dev.toc';
 // product profile from the running build at load time. A per-client TOC variant
 // is exactly the engine selection rule this architecture removed, so the
 // archive ships exactly one manifest and it must declare all of these.
-const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
+const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001', '11509'];
 const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
 const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.
@@ -73,6 +73,9 @@ export function collectAddonZipEntries(repoRoot) {
   const tocs = [];
   const report = [];
   const loads = new Map();
+  // WoW loads this reserved filename independently of the TOC load list.
+  // Ship the real binding declarations as well as their Lua dispatcher.
+  loads.set(`${ROOT}/Bindings.xml`, 'Bindings.xml');
   {
     const bytes = readFileSync(join(repoRoot, 'addon', MAIN_TOC));
     const parse = parseToc(bytes.toString('utf8'));
@@ -176,8 +179,8 @@ export function verifyAddonZip(input, options = {}) {
       violations.push(`${key}: Core\\ClientGate.lua must be loaded (runtime profile selection)`);
     }
     const catalogData = parse.loads.filter(line => CATALOG_DATA.test(line));
-    if (catalogData.length !== 4) {
-      violations.push(`${key}: expected all four event catalog data files, found ${catalogData.length}`);
+    if (catalogData.length !== SUPPORTED_INTERFACES.length) {
+      violations.push(`${key}: expected all ${SUPPORTED_INTERFACES.length} event catalog data files, found ${catalogData.length}`);
     }
   }
   const expected = options.repoRoot
@@ -202,7 +205,8 @@ export function verifyAddonZip(input, options = {}) {
   }
 
   const tocKeys = new Set([tocKey()]);
-  const loadKeys = new Set();
+  const loadKeys = new Set([`${ROOT}/Bindings.xml`]);
+  if (!zip.has(`${ROOT}/Bindings.xml`)) violations.push(`missing bindings: ${ROOT}/Bindings.xml`);
   for (const parse of parsed.values()) for (const line of parse.loads) loadKeys.add(loadKey(line));
   for (const name of names) {
     const selected = tocKeys.has(name) ? 'toc' : loadKeys.has(name) ? 'load'

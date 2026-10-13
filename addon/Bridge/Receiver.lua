@@ -296,7 +296,6 @@ local function wake()
         rollbackWake(false)
         return nil, ok and (failure or "receiver_ui_unavailable") or "receiver_ui_unavailable"
     end
-    if ns.StartupBeacon then ns.StartupBeacon.Stop() end
     return shown, failure
 end
 local function close()

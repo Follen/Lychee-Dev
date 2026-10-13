@@ -12,6 +12,28 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/journal"
 )
 
+func TestManualActivationWaitDoesNotExpireOrInventInput(t *testing.T) {
+	p, d, _, _ := projectFixture(t)
+	if err := os.Remove(d.Log); err != nil {
+		t.Fatal(err)
+	}
+	a := activation{Schema: "lycheedev.channel-activation.v3", Request: "activation", Phase: "waiting_manual_reload", Budget: NewDurableBudget(time.Now().Add(-time.Hour), DefaultRecoveryBudget, false)}
+	if err := writeProjectJSON(context.Background(), p.activationPath(d.State.ID), a); err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.Status(d.State.ID)
+	if err != nil || r.Continuation.Kind != "wait_external" || r.Continuation.Blocker == nil || r.Continuation.Blocker.Kind != "manual_reload_required" || r.Continuation.RemainingBudgetMS != nil || r.Bound || r.Complete {
+		t.Fatalf("manual wait expired or granted business: %+v %v", r, err)
+	}
+	a.Outcome = &InputOutcome{Disposition: "submitted", MessagesQueued: 2}
+	if err := writeProjectJSON(context.Background(), p.activationPath(d.State.ID), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Status(d.State.ID); err == nil {
+		t.Fatal("submitted input became manual, unsent activation")
+	}
+}
+
 func TestActivationRejectsPriorGenerationsWithoutMigration(t *testing.T) {
 	for _, schema := range []string{"lycheedev.channel-activation.v1", "lycheedev.channel-activation.v2"} {
 		t.Run(schema, func(t *testing.T) {

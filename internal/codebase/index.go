@@ -104,10 +104,13 @@ type snapshotCache struct {
 	pathsErr       error
 	records        *os.File
 	offsets        []recordOffset
+	lookups        *recordLookups
 	derivedRebuilt bool
 	shared         bool
 	memo           map[string][]byte
 	memoBytes      int
+	lineMemo       map[string][]uint32
+	lineMemoBytes  int
 	batch          *documentBatch
 	work           sourceQueryWork
 }
@@ -116,6 +119,9 @@ type sourceQueryWork struct {
 	VerificationPasses int
 	VerifiedBytes      int64
 	MetadataVisits     int
+	LookupBuilds       int
+	LookupEntries      int
+	LineIndexBuilds    int
 	DecodedRecords     int
 	RecordReadBytes    int64
 	DocumentReads      int
@@ -617,7 +623,7 @@ func (c *snapshotCache) loadPaths(ctx context.Context) error {
 				c.assets[r.Path] = r
 			}
 			return nil
-		})
+		}, recordLookupKey{recordKind, "document"}, recordLookupKey{recordKind, "asset"})
 	})
 	return c.pathsErr
 }
@@ -639,7 +645,7 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 					c.documents[name] = r
 				}
 				return nil
-			}); err != nil {
+			}, recordLookupKey{recordDocument, name}); err != nil {
 				return nil, "", err
 			}
 		}
@@ -759,7 +765,7 @@ func (b *Browser) FindSymbols(ctx context.Context, pin selection.SourcePin, term
 			matches = append(matches, *r.Symbol)
 		}
 		return nil
-	})
+	}, recordLookupKey{recordName, term}, recordLookupKey{recordTarget, term})
 	if err != nil {
 		return result, err
 	}

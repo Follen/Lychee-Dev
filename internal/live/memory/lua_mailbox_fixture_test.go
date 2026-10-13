@@ -112,7 +112,7 @@ func mailboxFixtureToken(value byte) (out [16]byte) {
 }
 func (f *mailboxFixture) record(label string, kind bridge.MemoryKind, nonce [16]byte) uint64 {
 	runtime, ticket := mailboxFixtureToken(2), mailboxFixtureToken(3)
-	if kind == bridge.MemoryIdentity || kind == bridge.MemoryInputState {
+	if kind == bridge.MemoryIdentity || kind == bridge.MemoryInputState || kind == bridge.MemoryBootstrap {
 		nonce = runtime
 		ticket = [16]byte{}
 	}
@@ -146,6 +146,7 @@ func (f *mailboxFixture) install(heapBase uint64) {
 	f.next = heapBase
 	identity := f.record("identity", bridge.MemoryIdentity, [16]byte{})
 	input := f.record("input", bridge.MemoryInputState, [16]byte{})
+	bootstrap := f.record("bootstrap", bridge.MemoryBootstrap, [16]byte{})
 	receiptNonce, confirmationNonce := mailboxFixtureToken(4), mailboxFixtureToken(5)
 	receipt := f.record("receipt", bridge.MemoryReceipt, receiptNonce)
 	confirmation := f.record("confirmation", bridge.MemoryConfirmation, confirmationNonce)
@@ -155,7 +156,8 @@ func (f *mailboxFixture) install(heapBase uint64) {
 	bodies := f.table("bodies", []mailboxFixtureEntry{{hex.EncodeToString(ticket[:]), luaValue{body, 4}}})
 	runtime := mailboxFixtureToken(2)
 	box := f.table("box", []mailboxFixtureEntry{{"schema", luaValue{f.text([]byte(MailboxSchema)), 4}}, {"release", luaValue{f.text([]byte("fixture-release")), 4}}, {"runtime", luaValue{f.text([]byte(hex.EncodeToString(runtime[:]))), 4}}, {"identity", luaValue{identity, 4}}, {"input", luaValue{input, 4}}, {"receipts", luaValue{receipts, 5}}, {"bodies", luaValue{bodies, 5}}})
-	ns := f.table("namespace", []mailboxFixtureEntry{{"Mailbox", luaValue{box, 5}}})
+	bootBox := f.table("bootstrapBox", []mailboxFixtureEntry{{"schema", luaValue{f.text([]byte(MailboxSchema)), 4}}, {"release", luaValue{f.text([]byte("fixture-release")), 4}}, {"runtime", luaValue{f.text([]byte(hex.EncodeToString(runtime[:]))), 4}}, {"bootstrap", luaValue{bootstrap, 4}}})
+	ns := f.table("namespace", []mailboxFixtureEntry{{"Mailbox", luaValue{box, 5}}, {"BootstrapMailbox", luaValue{bootBox, 5}}})
 	globals := f.table("globals", []mailboxFixtureEntry{{"LycheeDevInternal", luaValue{ns, 5}}})
 	state, b := f.allocate(0xb0)
 	b[16] = 8

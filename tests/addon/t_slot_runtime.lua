@@ -6,7 +6,7 @@ local state={options={bridgeEnabled=false}}
 local bridge={}
 ns.Persistence={Current=function()return state end,Bridge=function()return bridge end}
 local ready=true
-ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["}end}
+ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",reload="ALT-CTRL-F11"}end}
 IsPlayerInWorld=function()return true end
 ns.Platform={ObserveBuild=function()return {build="70000",product=client}end,
     ObserveActor=function()return {guid="Player-1-1",character="Tester",realm="Realm"}end,
@@ -15,15 +15,14 @@ ns.Platform={ObserveBuild=function()return {build="70000",product=client}end,
         return ready,not ready and "input_keyboard_focus" or nil
     end}
 ns.ActivityView={Receiving=function()end,Begin=function()end,Finish=function()end,Collecting=function()end}
-ns.StartupBeacon={Stop=function()end}
 C_Timer.NewTimer=function(_,callback)return {Cancel=function()end}end
 ns.Compat.GetAddOnMetadata=function(name,key)
     if key=="Version" then return ns.Release end
-    if key=="X-Lychee-Transport" then return "memory-slot-v3" end
+    if key=="X-Lychee-Transport" then return "Lycheedev mailbox protocol v1" end
     return tostring(tonumber(name:match("(%d+)$")))
 end
 Env.LoadAddon("Modules/AutomationHistory.lua",ns)
-for _,file in ipairs({"MemoryProtocol","CaptureWriter","SlotProtocol","InputProtection","ProbeExecution","InputSignal","InputState","SlotRuntime"}) do
+for _,file in ipairs({"MemoryProtocol","CaptureWriter","SlotProtocol","InputProtection","ProbeExecution","InputState","SlotRuntime"}) do
     Env.LoadAddon("Bridge/"..file..".lua",ns)
 end
 local frames=Env.framesCreated
@@ -36,7 +35,7 @@ state.options.bridgeEnabled=true
 ready=false
 assert(not ns.SlotRuntime.Wake() and Env.framesCreated==frames+1)
 local mailbox=assert(ns.Mailbox)
-assert(mailbox.schema=="lycheedev.mailbox.v1" and mailbox.release==ns.Release)
+assert(mailbox.schema=="Lycheedev mailbox protocol v1" and mailbox.release==ns.Release)
 assert(mailbox.identity==ns.SlotRuntime.Snapshot().descriptor and mailbox.input==ns.InputState.Snapshot())
 assert(ns.InputState.Snapshot():find('"inputBlocked":true',1,true))
 local rejected=ns.InputState.Snapshot()
@@ -50,7 +49,7 @@ assert(not ns.SlotRuntime.IsActive(),"exception retained input")
 assert(ns.InputState.Snapshot()~=rejected and ns.InputState.Snapshot():find('"inputBlocked":false',1,true),"failed wake did not refresh after release")
 local descriptor=ns.SlotRuntime.Snapshot().descriptor
 local runtime=descriptor:sub(25,40):gsub(".",function(c)return string.format("%02x",c:byte())end)
-local e={schema="lycheedev.slot.v3",index=1,runtime=runtime,owner=string.rep("2",32),fence=1,
+local e={schema="Lycheedev mailbox protocol v1",index=1,runtime=runtime,owner=string.rep("2",32),fence=1,
     nonce=string.rep("3",32),ticket=string.rep("4",32),action="bind",guid="Player-1-1",build="70000"}
 assert(not ns.SlotRuntime.Receive(1,e),"failed load left a receive capability armed")
 ns.Compat.LoadInputSlot=function()
@@ -99,7 +98,7 @@ assert(ns.InputState.Snapshot():find('"owner":""',1,true),"unbind sample retaine
 -- One wake traverses only empty/foreign slots and stops at the first own envelope.
 local loads={}
 local function envelope(index,action,run)
-    return {schema="lycheedev.slot.v3",index=index,runtime=run or runtime,owner=e.owner,fence=1,
+    return {schema="Lycheedev mailbox protocol v1",index=index,runtime=run or runtime,owner=e.owner,fence=1,
         nonce=string.format("%032x",index+1000),ticket=string.rep("0",32),action=action or "bind",guid=e.guid,build=e.build}
 end
 ns.Compat.LoadInputSlot=function(name)
@@ -136,24 +135,24 @@ local ok,reason=ns.SlotRuntime.Wake()
 assert(not ok and reason=="slot_loader_no_dispatch" and not ns.SlotRuntime.IsActive())
 local metadata=ns.Compat.GetAddOnMetadata
 ns.Compat.GetAddOnMetadata=function(name,key)
-    if name=="Lychee Dev Slot 200" and key=="X-Lychee-Transport" then return "memory-slot-v1" end
+    if name=="Lychee Dev Slot 500" and key=="X-Lychee-Transport" then return "memory-slot-v1" end
     return metadata(name,key)
 end
-local ok,reason=ns.SlotRuntime.Wake();assert(not ok and reason=="slot_inventory_incomplete:200")
+local ok,reason=ns.SlotRuntime.Wake();assert(not ok and reason=="slot_inventory_incomplete:500")
 ns.Compat.GetAddOnMetadata=metadata
 loads={};ns.Compat.LoadInputSlot=function(name)
     local index=tonumber(name:match("(%d+)$"));loads[#loads+1]=index
-    ns.SlotRuntime.Receive(index,index==200 and envelope(index) or nil);return true
+    ns.SlotRuntime.Receive(index,index==500 and envelope(index) or nil);return true
 end
-assert(ns.SlotRuntime.Wake() and #loads==189 and loads[1]==12 and loads[#loads]==200)
-assert(ns.InputState.Snapshot():find('"nextSlot":201',1,true))
-local ok,reason=ns.SlotRuntime.Wake();assert(not ok and reason=="slot_exhausted" and #loads==189)
+assert(ns.SlotRuntime.Wake() and #loads==489 and loads[1]==12 and loads[#loads]==500)
+assert(ns.InputState.Snapshot():find('"nextSlot":501',1,true))
+local ok,reason=ns.SlotRuntime.Wake();assert(not ok and reason=="slot_exhausted" and #loads==489)
 assert(not ns.SlotRuntime.IsActive(),"exhaustion retained input")
--- Canonical two/three-digit names only; numeric expansion is bounded at 200.
+-- Canonical two/three-digit names only; numeric expansion is bounded at 500.
 local addonLoader=C_AddOns.LoadAddOn;local named={}
 C_AddOns.LoadAddOn=function(name)named[#named+1]=name;return true end
-for _,name in ipairs({"Lychee Dev Slot 01","Lychee Dev Slot 99","Lychee Dev Slot 100","Lychee Dev Slot 200"}) do assert(validatedLoadInputSlot(name)) end
-for _,name in ipairs({"Lychee Dev Slot 00","Lychee Dev Slot 201","Lychee Dev Slot 001","Lychee Dev Slot 1","Lychee Dev Slot -1"}) do assert(not validatedLoadInputSlot(name)) end
+for _,name in ipairs({"Lychee Dev Slot 01","Lychee Dev Slot 99","Lychee Dev Slot 100","Lychee Dev Slot 500"}) do assert(validatedLoadInputSlot(name)) end
+for _,name in ipairs({"Lychee Dev Slot 00","Lychee Dev Slot 501","Lychee Dev Slot 001","Lychee Dev Slot 1","Lychee Dev Slot -1"}) do assert(not validatedLoadInputSlot(name)) end
 assert(#named==4);C_AddOns.LoadAddOn=addonLoader
 ready=false
 ns.SlotRuntime.Close()
@@ -178,7 +177,7 @@ assert(not ns.SlotRuntime.Wake() and not ns.InputState.Snapshot(),"disabled wake
 print("slot runtime input and disabled-state invariants ok")
 
 
--- A freshly loaded runtime can burn all 200 empty slots in one bounded wake.
+-- A freshly loaded runtime can burn all 500 empty slots in one bounded wake.
 Env.LoadAddon("Bridge/SlotRuntime.lua",ns)
 state.options.bridgeEnabled=true;ready=true
 local emptyLoads=0
@@ -187,5 +186,5 @@ ns.Compat.LoadInputSlot=function(name)
     ns.SlotRuntime.Receive(index,nil);return true
 end
 local ok,reason=ns.SlotRuntime.Wake()
-assert(not ok and reason=="slot_exhausted" and emptyLoads==200)
-assert(not ns.SlotRuntime.IsActive() and ns.InputState.Snapshot():find('"nextSlot":201',1,true))
+assert(not ok and reason=="slot_exhausted" and emptyLoads==500)
+assert(not ns.SlotRuntime.IsActive() and ns.InputState.Snapshot():find('"nextSlot":501',1,true))

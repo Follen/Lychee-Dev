@@ -34,7 +34,6 @@ type Native struct {
 	inputWait                            inputSampleWait
 	inputHintRuntime                     string
 	inputHintMillis                      int64
-	inputSignal                          *nativeInputSignal
 	inputAttemptProbe                    receiptAttemptProbe
 }
 
@@ -47,6 +46,7 @@ type lookupTrace struct {
 	Matches                int
 	Lookup                 memory.LookupResult
 	RootBinding            *memory.LuaRootBinding `json:"rootBinding,omitempty"`
+	Error                  string                 `json:"error,omitempty"`
 	sequence               int
 }
 
@@ -92,10 +92,6 @@ func (n *Native) Close() error {
 	if n.Process != nil {
 		err = errors.Join(err, n.Process.Close())
 		n.Process = nil
-	}
-	if n.inputSignal != nil {
-		n.inputSignal.close()
-		n.inputSignal = nil
 	}
 	// Never retain an input/publication lease while writing diagnostics. This
 	// final bounded flush also runs after the command context was cancelled.
@@ -144,6 +140,9 @@ func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Se
 	if n.TraceDir != "" {
 		n.traceSequence++
 		trace := lookupTrace{Nonce: hex.EncodeToString(s.Nonce[:]), Runtime: hex.EncodeToString(s.Runtime[:]), Ticket: hex.EncodeToString(s.Ticket[:]), Kind: s.Kind, Matches: len(found.Records), Lookup: evidence, sequence: n.traceSequence}
+		if err != nil {
+			trace.Error = err.Error()
+		}
 		if n.Mailbox != nil {
 			binding := n.Mailbox.Binding()
 			trace.RootBinding = &binding
@@ -327,7 +326,9 @@ func (n *Native) Discover(ctx context.Context, character, realm string) ([]Ident
 	for _, record := range found.Records {
 		i, decodeErr := decodeIdentityRecord(record, n.Version)
 		if decodeErr != nil {
-			continue
+			// A present, incompatible descriptor is not an absent installation.
+			// Do not turn a protocol error into blind first-install reload input.
+			return nil, found.Coverage, decodeErr
 		}
 		if (character != "" && i.Character != character) || (realm != "" && i.Realm != realm) {
 			continue

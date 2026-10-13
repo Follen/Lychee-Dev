@@ -63,7 +63,7 @@ func (p *retirementPeer) RetireReplacedRuntime(_ context.Context, e bridge.SlotE
 func retirementFixture(t *testing.T) (*Driver, *stopReconcilePeer, *retirementPeer) {
 	t.Helper()
 	d, transport := stopReconcileFixture(t)
-	d.State.Identity.InputState = bridge.InputSignalCapability
+	d.State.Identity.InputState = InputSchema
 	if err := d.PrepareRequest(context.Background(), "old-request", "return 1", 5, "opaque"); err != nil {
 		t.Fatal(err)
 	}

@@ -49,3 +49,28 @@ func TestPinsAreStableDerivedAndIsolated(t *testing.T) {
 		t.Fatalf("parent changed: %+v %v", original, err)
 	}
 }
+
+func TestForeverSourceFamilyKeepsRegionalDataIdentity(t *testing.T) {
+	source := &SourcePin{Repository: "wow-ui-source", Product: "forever", RequestedRef: "refs/heads/forever", ExactCommit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069", ParserRevision: "source-v1"}
+	data := &DataPin{Region: "cn", Language: "zhCN", FullBuild: "1.60.1.70338", BuildConfig: strings.Repeat("c", 32), CDNConfig: strings.Repeat("d", 32), DefinitionCommit: strings.Repeat("e", 40)}
+	for _, product := range []string{"forever-asia-beta", "forever-cn-beta"} {
+		data.Product = product
+		if err := validatePins(SelectionSpec{Source: source, Data: data}); err != nil {
+			t.Fatal(err)
+		}
+		regional := *source
+		regional.Product = product
+		if value, ok := SourceInterface(regional); !ok || value != 16001 {
+			t.Fatalf("shared exact source baseline lost: %s %d %v", product, value, ok)
+		}
+	}
+	source.Product = "forever-asia-beta"
+	if err := validatePins(SelectionSpec{Source: source, Data: data}); err == nil {
+		t.Fatal("regional source pin silently changed to CN")
+	}
+	source.Product = "forever"
+	data.Product = "classic-era"
+	if err := validatePins(SelectionSpec{Source: source, Data: data}); err == nil {
+		t.Fatal("unrelated API family accepted")
+	}
+}

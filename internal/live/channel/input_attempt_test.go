@@ -62,7 +62,7 @@ func TestInputDiagnosticOptionalPreservesEligibilityAndErrors(t *testing.T) {
 	}
 	for _, edit := range []func(*InputDiagnostic){
 		func(d *InputDiagnostic) { d.AttemptSeq = 0 }, func(d *InputDiagnostic) { d.AttemptSeq = 9007199254740992 },
-		func(d *InputDiagnostic) { d.Slot = 202 }, func(d *InputDiagnostic) { d.Stage = "unknown" },
+		func(d *InputDiagnostic) { d.Slot = 502 }, func(d *InputDiagnostic) { d.Stage = "unknown" },
 		func(d *InputDiagnostic) { d.Reason = "slot_load_failed: private raw suffix" },
 		func(d *InputDiagnostic) { d.Stage = "received"; d.Reason = ""; d.Received = false },
 		func(d *InputDiagnostic) { d.Runtime = strings.Repeat("0", 32) },

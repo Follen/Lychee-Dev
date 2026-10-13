@@ -122,7 +122,7 @@ func captureFrames(parent, startup context.Context, target WindowIdentity, roi i
 	if err := ConfirmWindow(parent, target); err != nil {
 		return nil, err
 	}
-	if roi != (image.Rectangle{}) && roi != WholeWindowCapture() && roi != InputSignalCapture() && (roi.Empty() || roi.Min.X < 0 || roi.Min.Y < 0 || roi.Dx() > 4096 || roi.Dy() > 4096) {
+	if roi != (image.Rectangle{}) && roi != WholeWindowCapture() && (roi.Empty() || roi.Min.X < 0 || roi.Min.Y < 0 || roi.Dx() > 4096 || roi.Dy() > 4096) {
 		return nil, errors.New("desktop.invalid_capture_region")
 	}
 	if err := retainCaptureRuntime(); err != nil {
@@ -152,13 +152,8 @@ func captureFrames(parent, startup context.Context, target WindowIdentity, roi i
 			return
 		}
 		defer capture.close()
-		inputSignal := roi == InputSignalCapture()
 		extent := image.Pt(int(capture.extent.Width), int(capture.extent.Height))
-		if inputSignal {
-			roi, err = inputSignalArea(target, extent)
-		} else {
-			roi, err = ResolveCaptureArea(roi, extent)
-		}
+		roi, err = ResolveCaptureArea(roi, extent)
 		if err != nil {
 			ready <- err
 			return
@@ -176,15 +171,6 @@ func captureFrames(parent, startup context.Context, target WindowIdentity, roi i
 					return
 				}
 				copyPixels := time.Since(lastCopy) >= 100*time.Millisecond
-				// Dropped arrival frames carry no observations. Resolve geometry
-				// only for copied frames; readRegion still verifies their extent.
-				if inputSignal && copyPixels {
-					current, geometryErr := inputSignalArea(target, extent)
-					if geometryErr != nil || current != roi {
-						failures <- errors.New("desktop.capture_client_geometry_changed")
-						return
-					}
-				}
 				frame, err := capture.readRegion(roi, copyPixels)
 				if err != nil {
 					failures <- err
@@ -192,12 +178,6 @@ func captureFrames(parent, startup context.Context, target WindowIdentity, roi i
 				}
 				if frame == nil {
 					continue
-				}
-				if inputSignal {
-					if err := waitCaptureFrameTime(ctx, frame.SystemTicks); err != nil {
-						failures <- err
-						return
-					}
 				}
 				lastCopy = time.Now()
 				select {
@@ -284,10 +264,8 @@ func startFrameCapture(target WindowIdentity, roi image.Rectangle) (result *fram
 	if err != nil {
 		return nil, err
 	}
-	if roi != InputSignalCapture() {
-		if _, err := ResolveCaptureArea(roi, image.Pt(int(extent.Width), int(extent.Height))); err != nil {
-			return nil, err
-		}
+	if _, err := ResolveCaptureArea(roi, image.Pt(int(extent.Width), int(extent.Height))); err != nil {
+		return nil, err
 	}
 	c.extent = extent
 	factory, err := activationFactory("Windows.Graphics.Capture.Direct3D11CaptureFramePool", &framePoolFactoryID)
@@ -413,34 +391,4 @@ func (c *frameCapture) readRegion(roi image.Rectangle, copyPixels bool) (*Captur
 		}
 	}
 	return &CapturedFrame{NRGBA: pixels, SystemTicks: ticks, ObservedAt: time.Now()}, nil
-}
-
-// inputSignalArea runs on the capture's locked OS thread. PMv2 keeps USER32
-// client coordinates physical; DWM extended bounds are already physical.
-func inputSignalArea(target WindowIdentity, extent image.Point) (image.Rectangle, error) {
-	dpi := userLibrary.NewProc("SetThreadDpiAwarenessContext")
-	prior, _, err := dpi.Call(^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (-4)
-	if prior == 0 {
-		return image.Rectangle{}, fmt.Errorf("desktop.capture_dpi_context: %w", err)
-	}
-	defer dpi.Call(prior)
-	type rect struct{ Left, Top, Right, Bottom int32 }
-	type point struct{ X, Y int32 }
-	var visible, client rect
-	code, _, _ := windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmGetWindowAttribute").Call(uintptr(target.Handle), 9, uintptr(unsafe.Pointer(&visible)), unsafe.Sizeof(visible))
-	if err := runtimeFailure("capture_visible_bounds", code); err != nil {
-		return image.Rectangle{}, err
-	}
-	ok, _, err := userLibrary.NewProc("GetClientRect").Call(uintptr(target.Handle), uintptr(unsafe.Pointer(&client)))
-	if ok == 0 {
-		return image.Rectangle{}, fmt.Errorf("desktop.capture_client_rect: %w", err)
-	}
-	top, bottom := point{client.Left, client.Top}, point{client.Right, client.Bottom}
-	for _, p := range []*point{&top, &bottom} {
-		ok, _, err = userLibrary.NewProc("ClientToScreen").Call(uintptr(target.Handle), uintptr(unsafe.Pointer(p)))
-		if ok == 0 {
-			return image.Rectangle{}, fmt.Errorf("desktop.capture_client_origin: %w", err)
-		}
-	}
-	return resolveInputSignalArea(extent, image.Rect(int(visible.Left), int(visible.Top), int(visible.Right), int(visible.Bottom)), image.Rect(int(top.X), int(top.Y), int(bottom.X), int(bottom.Y)))
 }
