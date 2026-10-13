@@ -24,3 +24,6 @@ packages/npm/lycheedev/*.tgz
 # Local working artifacts and evidence (never shipped)
 .tmp/
 .lycheedev/
+# Rust workspace build outputs; generated evidence stays under the existing .tmp rule.
+/target/
+/target-symbols/

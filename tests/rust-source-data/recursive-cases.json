@@ -1,0 +1,694 @@
+[
+  {
+    "name": "delta-linear",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID AS n FROM a WHERE ID=1 UNION ALL SELECT n+1 FROM walk WHERE n<4) SELECT n FROM walk ORDER BY n",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-empty",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID AS n FROM a WHERE ID=0 UNION ALL SELECT n+1 FROM walk WHERE n<4) SELECT COUNT(*) FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "recursive-keyword-nonrecursive",
+    "sql": "WITH RECURSIVE plain AS (SELECT ID FROM a WHERE ID=2) SELECT ID FROM plain",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-two-seeds",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID AS n FROM a WHERE ID<3 UNION ALL SELECT n+2 FROM walk WHERE n<4) SELECT n FROM walk ORDER BY n",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-aggregate",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID AS n FROM a WHERE ID=1 UNION ALL SELECT n+1 FROM walk WHERE n<4) SELECT COUNT(*) AS count,SUM(n) AS total FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-wide",
+    "sql": "WITH RECURSIVE walk AS (SELECT 18446744073709551613 AS n FROM a WHERE ID=1 UNION ALL SELECT n+1 FROM walk WHERE n<18446744073709551615) SELECT n FROM walk ORDER BY n",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-parameter",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID AS n FROM a WHERE ID=1 UNION ALL SELECT n+1 FROM walk WHERE n<:bound) SELECT n FROM walk ORDER BY n",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-parent-cte",
+    "sql": "WITH RECURSIVE seed AS (SELECT ID FROM a WHERE ID=1),walk AS (SELECT ID AS n FROM seed UNION ALL SELECT n+1 FROM walk WHERE n<4) SELECT n FROM walk ORDER BY n",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "delta-outer-limit",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID AS n FROM a WHERE ID=1 UNION ALL SELECT n+1 FROM walk WHERE n<4) SELECT n FROM walk ORDER BY n DESC LIMIT 2 OFFSET 1",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "bad-recursive-seed",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID FROM walk UNION ALL SELECT ID FROM walk) SELECT ID FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "bad-double-reference",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID FROM a UNION ALL SELECT x.ID FROM walk x JOIN walk y ON x.ID=y.ID) SELECT ID FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "bad-three-branches",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID FROM a WHERE ID=1 UNION ALL SELECT ID+1 FROM walk WHERE ID<3 UNION ALL SELECT ID FROM a) SELECT ID FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "bad-column-width",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID FROM a WHERE ID=1 UNION ALL SELECT ID,ID FROM walk) SELECT ID FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "bad-empty-step-binding",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID FROM a WHERE ID=0 UNION ALL SELECT missing FROM walk) SELECT ID FROM walk",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "bad-unused-recursive-binding",
+    "sql": "WITH RECURSIVE walk AS (SELECT ID FROM a WHERE ID=0 UNION ALL SELECT missing FROM walk) SELECT ID FROM a",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  },
+  {
+    "name": "qualified-self-is-physical",
+    "sql": "WITH RECURSIVE a AS (SELECT ID FROM static.a WHERE ID=1) SELECT ID FROM a",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      "static.a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "bound": 4
+    }
+  }
+]

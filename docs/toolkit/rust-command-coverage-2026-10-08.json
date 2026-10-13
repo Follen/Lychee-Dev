@@ -1,0 +1,2306 @@
+{
+  "schema": "lycheedev.rust-public-command-coverage.v1",
+  "binary": {
+    "path": "D:\\Code\\wow\\addons\\Lychee Dev\\.worktrees\\rust-refactor\\.tmp\\rust-full-tools-npm-stage-04\\installed\\node_modules\\lycheedev\\native\\windows-amd64\\lycheedev.exe",
+    "sha256": "262c2c88c0ff8c8ed3615f1ca52ba2d653e45fb44862ac0d9b7c752374360a58"
+  },
+  "inventory": 89,
+  "registered": 58,
+  "complete": false,
+  "meaning": "registered is an actual advertised handler, not proof that every parameter profile or regression matrix passes; evidence paths bind their own frozen artifacts, never implicitly this binary",
+  "commands": [
+    {
+      "path": "update",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--file <targets.json> (explicit array; disables discovery)",
+        "--release <distribution-root>",
+        "--path <skill-directory> (repeatable)",
+        "--installation <client-directory> (repeatable)",
+        "--plan"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "--release offline managed update",
+        "--plan with zero target writes",
+        "repeat path/installation scopes",
+        "all-target preflight",
+        "persisted target inventory",
+        "resumable replacement and exact internal cleanup",
+        "Rust version-bound next npm pack/SRI/preflight/old-native-exit/helper handoff",
+        "two genuine successive Rust prefix upgrades in isolated local registry",
+        "real prefix deny-delete recovery, durable completed-result repeat",
+        "prefix-committed managed Skill failure recovery with protected prefix; next lifecycle changes targets"
+      ],
+      "moduleImplementedProfiles": [
+        "--release offline managed update",
+        "--plan with zero target writes",
+        "repeat path/installation scopes",
+        "all-target preflight",
+        "persisted target inventory",
+        "resumable replacement and exact internal cleanup",
+        "Rust version-bound next npm pack/SRI/preflight/old-native-exit/helper handoff",
+        "two genuine successive Rust prefix upgrades in isolated local registry",
+        "real prefix deny-delete recovery, durable completed-result repeat",
+        "prefix-committed managed Skill failure recovery with protected prefix; next lifecycle changes targets"
+      ],
+      "profileEvidence": [
+        ".tmp/rust-supervision/npm-handoff-independent-01/report.json",
+        ".tmp/rust-supervision/npm-prefix-fault-independent-01/report.json",
+        ".tmp/rust-supervision/npm-target-fault-independent-01/report.json"
+      ],
+      "remainingProfiles": [
+        "actual npm cancellation/deadline and all prefix failure cutpoints",
+        "current-registry Go target rejection and subsequent observation lifecycle",
+        "mixed addon/skill/npm transaction matrix",
+        "full passive discovery",
+        "all combined addon/slot upgrade fault matrix",
+        "latest full release closure and publication gates"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "project init",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--product <track>",
+        "--path <directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data hotfix",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--source <wago|dbcache|raidbots>",
+        "--snapshot <pin>",
+        "--dbcache <DBCache.bin>",
+        "--raidbots <DBCache.bin>",
+        "--from <cache-capture-or-time>",
+        "--to <time>",
+        "--product <retail|classic|titan|forever>",
+        "--build <full-build>",
+        "--region <us|eu|cn|kr|tw>",
+        "--locale <locale>",
+        "--table <name>",
+        "--table-hash <8-hex>",
+        "--record <n>",
+        "--push <n>",
+        "--status <0-255>",
+        "--region-id <n>",
+        "--search <text>",
+        "--latest",
+        "--scan (dbcache: complete bounded scan; --cursor resumes its capture)",
+        "--offline",
+        "--limit <1-200>",
+        "--cursor <opaque>",
+        "--page <n>",
+        "--after-index <n>",
+        "--max-pages <n>",
+        "--max-requests <n>",
+        "--max-bytes <n>",
+        "--encoding csv",
+        "--output <file>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "explicit dbcache typed raw filters/captured pagination"
+      ],
+      "moduleImplementedProfiles": [
+        "explicit dbcache typed raw filters/captured pagination"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "named-table lookup",
+        "--scan continuation",
+        "wago/raidbots providers and all export profiles"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "project lock",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--snapshot <pin>",
+        "--path <directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "project status",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--path <directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live probe put",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--name <name>",
+        "--file <probe.lua>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live execute",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--file <lua-file>",
+        "--session <session-id>",
+        "--probe <name-or-revision>",
+        "--request <idempotency-key>",
+        "--budget-seconds <1-120>",
+        "--account <account>",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache",
+        "--policy <opaque|observation> (default opaque)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live probe load",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--session <session-id>",
+        "--probe <name-or-revision>",
+        "--request <idempotency-key>",
+        "--budget-seconds <1-120>",
+        "--account <account>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live probe list",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--include-removed",
+        "--limit <1-1000>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live probe show",
+      "owner": "live/windows",
+      "arguments": [
+        "<name-or-revision>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live probe remove",
+      "owner": "live/windows",
+      "arguments": [
+        "<name>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live run",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "skill install",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--release <distribution-root>",
+        "--path <target>",
+        "--output <archive>",
+        "--resume"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "skill status",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--path <installed-directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "skill remove",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--path <parent/lycheedev>",
+        "--output <recovery-directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "addon status",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--path <addon-directory>",
+        "--installation <client-directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "addon install",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--release <distribution-root>",
+        "--installation <client-directory>",
+        "--output <archive>",
+        "--resume"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "verified v4 release closure",
+        "fresh/repeat managed install",
+        "explicit archive/resume",
+        "500 slots and 200→500 migration",
+        "one combined main/slots intent with real Windows deny-write recovery",
+        "v4 release generation2→3 with preserved migration history",
+        "claim/resource/wanted-release/edited-main negatives"
+      ],
+      "moduleImplementedProfiles": [
+        "verified v4 release closure",
+        "fresh/repeat managed install",
+        "explicit archive/resume",
+        "500 slots and 200→500 migration",
+        "one combined main/slots intent with real Windows deny-write recovery",
+        "v4 release generation2→3 with preserved migration history",
+        "claim/resource/wanted-release/edited-main negatives"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all combined process termination and archive/control-file cut points",
+        "all client build-catalog identity fallbacks",
+        "actual client acceptance"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "addon remove",
+      "owner": "delivery",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--installation <client-directory>",
+        "--output <recovery-directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "unchanged owned main+500 modules archival",
+        "same intent resume/idempotence",
+        "unresolved reservations/claims blocked",
+        "SavedVariables preserved"
+      ],
+      "moduleImplementedProfiles": [
+        "unchanged owned main+500 modules archival",
+        "same intent resume/idempotence",
+        "unresolved reservations/claims blocked",
+        "SavedVariables preserved"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all old pool and control-file migration/remove interleavings"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data sql",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--key-file <WoW.txt|keys.json>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--sql <text>",
+        "--file <query.sql|query.json>",
+        "--stdin",
+        "--param <name=scalar>",
+        "--encoding csv",
+        "--output <file>",
+        "--overwrite",
+        "--max-bytes <n>",
+        "--offline",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data db2",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--key-file <WoW.txt|keys.json>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--table <name>",
+        "--id <n>",
+        "--limit <n>",
+        "--after-id <n>",
+        "--max-bytes <n>",
+        "--offline",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data db2 schema",
+      "owner": "data",
+      "arguments": [
+        "<Table>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data db2 search",
+      "owner": "data",
+      "arguments": [
+        "<Table>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--field <name>",
+        "--query <text>",
+        "--limit <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data db2 foreign-key",
+      "owner": "data",
+      "arguments": [
+        "<Table>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--field <name>",
+        "--value <n>",
+        "--limit <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data db2 stream",
+      "owner": "data",
+      "arguments": [
+        "<Table>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--fields <a,b>",
+        "--filter <field=value>",
+        "--limit <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "direct typed row provider and exact Go begin/record/end sequences",
+        "same pinned source/field/float32 identity",
+        "real closed stdout consumer exit5/noend",
+        "actual yielded deadline exit7/noend under controlled pipe backpressure"
+      ],
+      "moduleImplementedProfiles": [
+        "direct typed row provider and exact Go begin/record/end sequences",
+        "same pinned source/field/float32 identity",
+        "real closed stdout consumer exit5/noend",
+        "actual yielded deadline exit7/noend under controlled pipe backpressure"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "actual public stream Ctrl+C and permanently blocked writer cancellation",
+        "all partial/CDN/key/provider/fault profiles",
+        "whole performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data spell info",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--spell-id <n>",
+        "--max-depth <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data spell auras",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--spell-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data spell summons",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--spell-id <n>",
+        "--npc-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data item get",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--item-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data item models",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--item-id <n>",
+        "--race-id <n>",
+        "--gender <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data item geosets",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--item-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data item textures",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--item-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data creature display",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--display-id <n>",
+        "--file-data-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data creature model",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--file-data-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data encounter get",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--journal-encounter-id <n>",
+        "--max-depth <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data decor list",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--limit <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "data decor get",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--offline",
+        "--max-bytes <n>",
+        "--key-file <WoW.txt|keys.json>",
+        "--id <n>",
+        "--item-id <n>",
+        "--model-file-data-id <n>",
+        "--timeout-seconds <1-3600> (default 300; entire query)"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "asset inspect",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--key-file <WoW.txt|keys.json>",
+        "--content-variant <standard|low-violence> (default: strict)",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--file-id <id>",
+        "--max-bytes <n>",
+        "--offline"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "asset search",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--listfile <community-csv|wowexport-text|wowexport-binary>",
+        "--query <text>",
+        "--extension <ext>",
+        "--name <path>",
+        "--file-id <id>",
+        "--limit <1-200>",
+        "--max-bytes <n>",
+        "--offline"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "asset export",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--key-file <WoW.txt|keys.json>",
+        "--content-variant <standard|low-violence> (default: strict)",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--file-id <id>",
+        "--output <file>",
+        "--encoding raw|png|webp",
+        "--mipmap <0..15>",
+        "--channels <rgba-subset>",
+        "--max-pixels <n>",
+        "--overwrite",
+        "--max-bytes <n>",
+        "--offline"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "asset demux",
+      "owner": "data",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--key-file <WoW.txt|keys.json>",
+        "--path <local-file>",
+        "--snapshot <pin>",
+        "--installation <client-or-game-root>",
+        "--cdn",
+        "--file-id <id>",
+        "--output <existing-directory>",
+        "--max-bytes <n>",
+        "--max-frames <n>",
+        "--allow-partial",
+        "--overwrite",
+        "--offline"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "version",
+      "owner": "cli",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "describe",
+      "owner": "cli",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "init",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--plan",
+        "--fresh",
+        "--resume"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "empty initialization",
+        "explicit --fresh --plan",
+        "legacy isolation and exact journal recovery"
+      ],
+      "moduleImplementedProfiles": [
+        "empty initialization",
+        "explicit --fresh --plan",
+        "legacy isolation and exact journal recovery"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "cross-process fault matrix and all Go error projections"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "doctor",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--offline"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "workspace/metadata/write probe/cache/reference/catalog/archive health checks"
+      ],
+      "moduleImplementedProfiles": [
+        "workspace/metadata/write probe/cache/reference/catalog/archive health checks"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "provider-specific LuaLS/source-mirror and all legacy-location diagnostics"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "config show",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "config set",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--cache-max-bytes <n>",
+        "--download-workers <n>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "cache status",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "cache verify",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "cache prune",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--target-bytes <n>",
+        "--max-objects <n>",
+        "--uncommitted",
+        "--dry-run"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "protected and active objects preserved",
+        "bounded target/objects",
+        "dry-run",
+        "explicit recognized staging cleanup with OS lease"
+      ],
+      "moduleImplementedProfiles": [
+        "protected and active objects preserved",
+        "bounded target/objects",
+        "dry-run",
+        "explicit recognized staging cleanup with OS lease"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all uncommitted/foreign layouts and concurrent quota/write race matrix",
+        "cancellation and interrupted scans"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live instances",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--installation <client-or-game-root>",
+        "--passive"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live connect",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--snapshot <pin>",
+        "--character <name>",
+        "--realm <realm>",
+        "--pid <pid>",
+        "--installation <client>",
+        "--session <session-id>",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live reset",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>",
+        "--character <name>",
+        "--realm <realm>",
+        "--pid <pid>",
+        "--installation <client>",
+        "--wake-binding <chord>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live reload",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--session <session-id>",
+        "--request <idempotency-key>",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live reload fallback",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--installation <client>",
+        "--pid <pid>",
+        "--request <idempotency-key>",
+        "--session <prior-session>",
+        "--wake-binding <chord>",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live ack",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live finish",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live bugs",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--session <session-id>",
+        "--request <idempotency-key>",
+        "--count <1-100>",
+        "--account <account>",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live hide",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--session <session-id>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live bind",
+      "owner": "live/windows",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--installation <client>",
+        "--pid <pid>",
+        "--snapshot <pin>",
+        "--character <name>",
+        "--realm <realm>",
+        "--capture-area <window|x,y,width,height>",
+        "--wake-binding <chord>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "target resolve",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--file <selection.json>",
+        "--target <name>",
+        "--installation <game-root-or-client>",
+        "--product <retail|classic|titan|forever>",
+        "--build <full-build>",
+        "--definitions <commit-or-full-ref>",
+        "--region <us|eu|cn|kr|tw>",
+        "--locale <locale>",
+        "--from <parent-pin>",
+        "--offline"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "--file exact resolved selection, immutable pin and parent conflict checks",
+        "local authenticated Data provider with canonical track and observed catalog slot",
+        "definitions exact/full-ref/fresh default/offline observed revision",
+        "named target preparer and immutable target-ref ledger"
+      ],
+      "moduleImplementedProfiles": [
+        "--file exact resolved selection, immutable pin and parent conflict checks",
+        "local authenticated Data provider with canonical track and observed catalog slot",
+        "definitions exact/full-ref/fresh default/offline observed revision",
+        "named target preparer and immutable target-ref ledger"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "remote product/build provider",
+        "full local regional identity/public error differential matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "target show",
+      "owner": "core",
+      "arguments": [
+        "<name-or-pin-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "target list",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "target add",
+      "owner": "core",
+      "arguments": [
+        "<name>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--product <retail|classic|titan|forever>",
+        "--region <us|eu|cn|kr|tw>",
+        "--locale <locale>",
+        "--build <full-build>",
+        "--installation <client-directory>",
+        "--definitions <commit-or-full-ref>",
+        "--remote",
+        "--replace"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "target remove",
+      "owner": "core",
+      "arguments": [
+        "<name>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "target available",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--region <us|eu|cn|kr|tw>",
+        "--offline"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live status",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live resume",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live cancel",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live abandon",
+      "owner": "live/windows",
+      "arguments": [
+        "<operation-or-bootstrap-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live session",
+      "owner": "live/windows",
+      "arguments": [
+        "<session-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "live disconnect",
+      "owner": "live/windows",
+      "arguments": [
+        "<connection-id>"
+      ],
+      "acceptedFlags": [
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--wait-seconds <1-600> (default 120)",
+        "--no-cache"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "evidence show",
+      "owner": "core",
+      "arguments": [
+        "<capture-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "evidence verify",
+      "owner": "core",
+      "arguments": [
+        "<capture-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "evidence list",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--limit <n>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "evidence bundle",
+      "owner": "core",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--ids <capture-id,...>",
+        "--output <new-file>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "evidence keep",
+      "owner": "core",
+      "arguments": [
+        "<capture-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "evidence remove",
+      "owner": "core",
+      "arguments": [
+        "<capture-id>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "bounded SQLite reference transaction",
+        "shared blobs preserved",
+        "exact retention validation and deletion",
+        "kernel blob publication/removal guard",
+        "atomic metadata intent and Windows disk-delete denial recovery with same capture",
+        "bounded actual blob reads before disposal"
+      ],
+      "moduleImplementedProfiles": [
+        "bounded SQLite reference transaction",
+        "shared blobs preserved",
+        "exact retention validation and deletion",
+        "kernel blob publication/removal guard",
+        "atomic metadata intent and Windows disk-delete denial recovery with same capture",
+        "bounded actual blob reads before disposal"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "cross-process reference creation/deletion fault matrix",
+        "all process termination/checkpoint interleavings"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source list",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source sync",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--source <key>",
+        "--product <track>",
+        "--ref <full-ref-or-commit>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source inspect",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin-id>",
+        "--path <file>",
+        "--symbol <qualified-name>",
+        "--target-path <path>",
+        "--line <n>",
+        "--count <n>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source index",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin-id>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source query",
+      "owner": "source",
+      "arguments": [
+        "<term>"
+      ],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin-id>",
+        "--mode precise|exploratory",
+        "--topic <api|lua|xml|toc|asset>",
+        "--limit <1-200>",
+        "--cursor <token>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "real handler present; detailed business parity belongs to its lane evidence"
+      ],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "full frozen Go parameter/error/output/fault and performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source refs",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin-id>",
+        "--symbol-id <id>",
+        "--symbol <name>",
+        "--direction <incoming|outgoing|both>",
+        "--limit <1-200>",
+        "--cursor <token>",
+        "--environment <client-pin>",
+        "--session-reuse",
+        "--static-only",
+        "--release <release-root>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [
+        "fixed structural candidates with exact selector/cursor and original capture",
+        "full fixed-source LuaLS definitions/references fixture with independent real runtime",
+        "legacy pinned ZIP runtime identity; environment original repository/commit mapping",
+        "sealed optional broker service composition"
+      ],
+      "profileEvidence": [
+        ".tmp/rust-supervision/source-context-semantic-independent-01.log"
+      ],
+      "remainingProfiles": [
+        "public legacy output/parameter differential",
+        "actual shared broker reuse/profile verification",
+        "fixed multi-client full source precision and 50% performance",
+        "bounded secret flow provider"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source context",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--snapshot <pin-id>",
+        "--symbol-id <id>",
+        "--symbol <name>",
+        "--limit <1-200>",
+        "--max-bytes <1-1048576>",
+        "--max-lines <1-2000>",
+        "--depth <0-4>",
+        "--cursor <token>",
+        "--environment <client-pin>",
+        "--flow",
+        "--session-reuse",
+        "--static-only",
+        "--release <release-root>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [
+        "original fixed Git snippets and authenticated TOC/XML load evidence",
+        "query-bound UTF-8 byte/line/site cursor with changed-query refusal",
+        "bounded depth2..4 structural frontier, callee candidate sites",
+        "CJK/emoji/CRLF tiny-byte continuation fixtures",
+        "full fixed-source semantic provider with ClientPin gaps retained"
+      ],
+      "profileEvidence": [
+        ".tmp/rust-supervision/source-context-continuation-independent-01.log",
+        ".tmp/rust-supervision/source-context-semantic-independent-01.log"
+      ],
+      "remainingProfiles": [
+        "public legacy output/cursor/depth differential",
+        "API-fact/semantic multi-client quality matrix",
+        "bounded secret flow and actual shared broker profiles",
+        "whole same-work performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source session status",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--release <release-root>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source session close",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--release <release-root>"
+      ],
+      "implementation": "not_registered",
+      "implementedProfiles": [],
+      "moduleImplementedProfiles": [],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all public profiles; retain full command scope"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source diff",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--from <pin-id>",
+        "--to <pin-id>",
+        "--limit <n>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "same canonical fixed repository/parser pins",
+        "requires authenticated existing index",
+        "duplicate declaration sites/signature/line moves",
+        "per-category limits and full counts",
+        "incomplete syntax refuses absence claims",
+        "exact from/to CAP provenance and changed Git blob SHA1/SHA256 proofs",
+        "public Go success/failure field differential"
+      ],
+      "moduleImplementedProfiles": [
+        "same canonical fixed repository/parser pins",
+        "requires authenticated existing index",
+        "duplicate declaration sites/signature/line moves",
+        "per-category limits and full counts",
+        "incomplete syntax refuses absence claims",
+        "exact from/to CAP provenance and changed Git blob SHA1/SHA256 proofs",
+        "public Go success/failure field differential"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "all real multi-client symbol/scope/API declaration comparison matrix",
+        "timely public console cancellation through child processes",
+        "formal same-work performance matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source prune",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--target-bytes <n>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "source-only verified ready worktree manifests and full Git framed file hashes",
+        "exact Git indirection and detached registration",
+        "shared Go capacity/worktree/repository kernel locks",
+        "actual-byte accounting with unknown objects preserved",
+        "modified/active owners preserved",
+        "precise stale registration removal and immutable pins/evidence preserved"
+      ],
+      "moduleImplementedProfiles": [
+        "source-only verified ready worktree manifests and full Git framed file hashes",
+        "exact Git indirection and detached registration",
+        "shared Go capacity/worktree/repository kernel locks",
+        "actual-byte accounting with unknown objects preserved",
+        "modified/active owners preserved",
+        "precise stale registration removal and immutable pins/evidence preserved"
+      ],
+      "profileEvidence": [],
+      "remainingProfiles": [
+        "broker retirement via formal process/session protocol",
+        "authenticated orphan recovery with all failure cut points",
+        "timely cancellation during underlying Git subprocesses",
+        "full frozen Go error/profile matrix"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    },
+    {
+      "path": "source validate",
+      "owner": "source",
+      "arguments": [],
+      "acceptedFlags": [
+        "--home <root>",
+        "--format text|json|jsonl",
+        "--project <directory>",
+        "--semantic",
+        "--environment <client-pin>",
+        "--release <release-root>",
+        "--path <addon-root>",
+        "--toc <relative-manifest>",
+        "--snapshot <pin-id>",
+        "--matrix <config.json>"
+      ],
+      "implementation": "registered_requires_full_profile_parity",
+      "implementedProfiles": [
+        "fixed TOC/XML closure and inline handlers",
+        "actual bundled stdin luac5.1 (goto identifier lexical compatibility; goto jump/labels remain invalid)",
+        "structural compatibility and original evidence",
+        "fixed API environment and real LuaLS SDK semantic tests",
+        "matrix SDK two-client fixture",
+        "installed full LuaLS/luac candidate public semantic matrix four distinct fixed pins; 21 captures verified"
+      ],
+      "moduleImplementedProfiles": [
+        "fixed TOC/XML closure and inline handlers",
+        "actual bundled stdin luac5.1 (goto identifier lexical compatibility; goto jump/labels remain invalid)",
+        "structural compatibility and original evidence",
+        "fixed API environment and real LuaLS SDK semantic tests",
+        "matrix SDK two-client fixture",
+        "installed full LuaLS/luac candidate public semantic matrix four distinct fixed pins; 21 captures verified"
+      ],
+      "profileEvidence": [
+        ".tmp/rust-source-matrix-packaged-public-01/report-with-catalog-coverage.json"
+      ],
+      "remainingProfiles": [
+        "all public matrix target/error/timeout/opt-in profiles",
+        "catalog extraction gaps remain partial",
+        "all fixture/source differential and performance acceptance",
+        "latest full release/current source closure"
+      ],
+      "verification": "partial_or_not_run_not_full_acceptance"
+    }
+  ]
+}

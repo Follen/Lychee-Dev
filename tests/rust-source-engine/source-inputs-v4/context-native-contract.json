@@ -1,0 +1,1915 @@
+{
+  "schema": "lycheedev.emmy-native-context-contract.v1",
+  "rulesVersion": "wow-native-binding-context-v4-source-inputs",
+  "capabilityProfile": "typed-call-v1",
+  "inputs": [
+    {
+      "file": "profile.lua",
+      "diskFile": "profile.lua",
+      "bytes": 266,
+      "sha256": "062c8d92c16bdd7c16ff10c6134b38734f4f91ddf21b0c65a72506010018b990"
+    },
+    {
+      "file": "generic-defs.lua",
+      "diskFile": "native/generic-defs.lua",
+      "bytes": 342,
+      "sha256": "20c76a693bf6c1b007659e2f9523027c4f3a6cc8e67511c6e0035bced2b273a1"
+    },
+    {
+      "file": "generic-calls.lua",
+      "diskFile": "native/generic-calls.lua",
+      "bytes": 666,
+      "sha256": "bb1d4a042e543d3521149e3713052e17ac648fe0b02da1e627c3d210dbf3d660"
+    },
+    {
+      "file": "generic-replace.lua",
+      "diskFile": "native/generic-replace.lua",
+      "bytes": 24,
+      "sha256": "cf62e412269815ddb9e61afdc1144116849d6bda7686d1be1e7db639fb50ec62"
+    }
+  ],
+  "scenarios": [
+    "after-a",
+    "unknown-a",
+    "after-b"
+  ],
+  "interleave": [
+    0,
+    1,
+    2,
+    0,
+    2,
+    1
+  ],
+  "assertions": [
+    {
+      "name": "after-a:identity_number:interleave:0:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:identity_number:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:identity_number:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:identity_number:interleave:1:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "unknown-a:identity_number:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:identity_number:interleave:1:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:identity_number:interleave:2:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:identity_number:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:identity_number:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:identity_number:interleave:3:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:identity_number:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:identity_number:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:identity_number:interleave:4:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:identity_number:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:identity_number:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:identity_number:interleave:5:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "unknown-a:identity_number:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:identity_number:interleave:5:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:identity_string:interleave:0:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:identity_string:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:identity_string:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:identity_string:interleave:1:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "unknown-a:identity_string:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:identity_string:interleave:1:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:identity_string:interleave:2:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-b:identity_string:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:identity_string:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:identity_string:interleave:3:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:identity_string:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:identity_string:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:identity_string:interleave:4:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-b:identity_string:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:identity_string:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:identity_string:interleave:5:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "unknown-a:identity_string:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:identity_string:interleave:5:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:copied_number:interleave:0:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:copied_number:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:copied_number:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:copied_number:interleave:1:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "unknown-a:copied_number:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:copied_number:interleave:1:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:copied_number:interleave:2:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:copied_number:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:copied_number:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:copied_number:interleave:3:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:copied_number:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:copied_number:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:copied_number:interleave:4:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:copied_number:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:copied_number:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:copied_number:interleave:5:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "unknown-a:copied_number:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:copied_number:interleave:5:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:replaced_string:interleave:0:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:replaced_string:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:replaced_string:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:replaced_string:interleave:1:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "unknown-a:replaced_string:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:replaced_string:interleave:1:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:replaced_string:interleave:2:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-b:replaced_string:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:replaced_string:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:replaced_string:interleave:3:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:replaced_string:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:replaced_string:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:replaced_string:interleave:4:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-b:replaced_string:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:replaced_string:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:replaced_string:interleave:5:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "unknown-a:replaced_string:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:replaced_string:interleave:5:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:colon_number:interleave:0:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:colon_number:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:colon_number:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:colon_number:interleave:1:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "unknown-a:colon_number:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:colon_number:interleave:1:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:colon_number:interleave:2:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:colon_number:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:colon_number:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:colon_number:interleave:3:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:colon_number:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:colon_number:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:colon_number:interleave:4:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:colon_number:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:colon_number:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:colon_number:interleave:5:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "unknown-a:colon_number:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:colon_number:interleave:5:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:dot_string:interleave:0:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:dot_string:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:dot_string:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:dot_string:interleave:1:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "unknown-a:dot_string:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:dot_string:interleave:1:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:dot_string:interleave:2:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-b:dot_string:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:dot_string:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:dot_string:interleave:3:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:dot_string:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:dot_string:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:dot_string:interleave:4:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-b:dot_string:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:dot_string:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:dot_string:interleave:5:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "unknown-a:dot_string:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:dot_string:interleave:5:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:copied_return:interleave:0:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:copied_return:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:copied_return:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:copied_return:interleave:1:native_type",
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown-a:copied_return:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:copied_return:interleave:1:managed_candidate_count",
+      "expected": 0
+    },
+    {
+      "name": "after-b:copied_return:interleave:2:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:copied_return:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:copied_return:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:copied_return:interleave:3:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:copied_return:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:copied_return:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:copied_return:interleave:4:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:copied_return:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:copied_return:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:copied_return:interleave:5:native_type",
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown-a:copied_return:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:copied_return:interleave:5:managed_candidate_count",
+      "expected": 0
+    },
+    {
+      "name": "after-a:method_return:interleave:0:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:method_return:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:method_return:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:method_return:interleave:1:native_type",
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown-a:method_return:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:method_return:interleave:1:managed_candidate_count",
+      "expected": 0
+    },
+    {
+      "name": "after-b:method_return:interleave:2:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:method_return:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:method_return:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:method_return:interleave:3:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-a:method_return:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:method_return:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:method_return:interleave:4:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:method_return:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:method_return:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:method_return:interleave:5:native_type",
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown-a:method_return:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:method_return:interleave:5:managed_candidate_count",
+      "expected": 0
+    },
+    {
+      "name": "after-a:late_return:interleave:0:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:late_return:interleave:0:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:late_return:interleave:0:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:late_return:interleave:1:native_type",
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown-a:late_return:interleave:1:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:late_return:interleave:1:managed_candidate_count",
+      "expected": 0
+    },
+    {
+      "name": "after-b:late_return:interleave:2:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:late_return:interleave:2:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:late_return:interleave:2:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-a:late_return:interleave:3:native_type",
+      "expected": "string"
+    },
+    {
+      "name": "after-a:late_return:interleave:3:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:late_return:interleave:3:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "after-b:late_return:interleave:4:native_type",
+      "expected": "number"
+    },
+    {
+      "name": "after-b:late_return:interleave:4:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:late_return:interleave:4:managed_candidate_count",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:late_return:interleave:5:native_type",
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown-a:late_return:interleave:5:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:late_return:interleave:5:managed_candidate_count",
+      "expected": 0
+    },
+    {
+      "name": "after-a:foreign_model_inherits_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-a"
+      }
+    },
+    {
+      "name": "after-a:foreign_formal_parameter_identity",
+      "expected": true
+    },
+    {
+      "name": "after-a:copied_wrong_return:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-a:method_wrong_return:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-a:late_wrong_return:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-a:wrong_label:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-a:late_wrong_argument:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-a:native_diagnostic_total",
+      "expected": 5
+    },
+    {
+      "name": "after-a:late_return_check_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "after-a:copied_value_reference_overlay",
+      "expected": true
+    },
+    {
+      "name": "unknown-a:foreign_model_inherits_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "unknown-a"
+      }
+    },
+    {
+      "name": "unknown-a:foreign_formal_parameter_identity",
+      "expected": true
+    },
+    {
+      "name": "unknown-a:copied_wrong_return:native_diagnostic_original_range",
+      "expected": 0
+    },
+    {
+      "name": "unknown-a:method_wrong_return:native_diagnostic_original_range",
+      "expected": 0
+    },
+    {
+      "name": "unknown-a:late_wrong_return:native_diagnostic_original_range",
+      "expected": 0
+    },
+    {
+      "name": "unknown-a:wrong_label:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:late_wrong_argument:native_diagnostic_original_range",
+      "expected": 0
+    },
+    {
+      "name": "unknown-a:native_diagnostic_total",
+      "expected": 1
+    },
+    {
+      "name": "unknown-a:late_return_check_coverage",
+      "expected": "unavailable"
+    },
+    {
+      "name": "unknown-a:copied_value_reference_overlay",
+      "expected": true
+    },
+    {
+      "name": "after-b:foreign_model_inherits_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "after-b"
+      }
+    },
+    {
+      "name": "after-b:foreign_formal_parameter_identity",
+      "expected": true
+    },
+    {
+      "name": "after-b:copied_wrong_return:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-b:method_wrong_return:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-b:late_wrong_return:native_diagnostic_original_range",
+      "expected": 0
+    },
+    {
+      "name": "after-b:wrong_label:native_diagnostic_original_range",
+      "expected": 1
+    },
+    {
+      "name": "after-b:late_wrong_argument:native_diagnostic_original_range",
+      "expected": 0
+    },
+    {
+      "name": "after-b:native_diagnostic_total",
+      "expected": 3
+    },
+    {
+      "name": "after-b:late_return_check_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "after-b:copied_value_reference_overlay",
+      "expected": true
+    },
+    {
+      "name": "same_database_phase_order_context_keys_distinct",
+      "expected": 3
+    }
+  ],
+  "queryExpectations": [
+    {
+      "scenario": "after-a",
+      "query": "identity_number",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 21,
+        "end": 32
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "identity_number",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 21,
+        "end": 32
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "identity_number",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 21,
+        "end": 32
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "identity_number",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 21,
+        "end": 32
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "identity_number",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 21,
+        "end": 32
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "identity_number",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 21,
+        "end": 32
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "identity_string",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 55,
+        "end": 72
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "identity_string",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 55,
+        "end": 72
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "identity_string",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 55,
+        "end": 72
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "identity_string",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 55,
+        "end": 72
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "identity_string",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 55,
+        "end": 72
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "identity_string",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 55,
+        "end": 72
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "copied_number",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 206,
+        "end": 220
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "copied_number",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 206,
+        "end": 220
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "copied_number",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 206,
+        "end": 220
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "copied_number",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 206,
+        "end": 220
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "copied_number",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 206,
+        "end": 220
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "copied_number",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 206,
+        "end": 220
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "replaced_string",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 245,
+        "end": 265
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "replaced_string",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 245,
+        "end": 265
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "replaced_string",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 245,
+        "end": 265
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "replaced_string",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 245,
+        "end": 265
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "replaced_string",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 245,
+        "end": 265
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "replaced_string",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 245,
+        "end": 265
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "colon_number",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 287,
+        "end": 311
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "colon_number",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 287,
+        "end": 311
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "colon_number",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 287,
+        "end": 311
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "colon_number",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 287,
+        "end": 311
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "colon_number",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 287,
+        "end": 311
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "colon_number",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 287,
+        "end": 311
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "dot_string",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 331,
+        "end": 370
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "dot_string",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 331,
+        "end": 370
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "dot_string",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 331,
+        "end": 370
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "dot_string",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 331,
+        "end": 370
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "dot_string",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 331,
+        "end": 370
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "dot_string",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 331,
+        "end": 370
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "copied_return",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "copied_return",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "nativeFamily": "unknown",
+      "selectedFunction": null,
+      "typeCoverage": "unavailable",
+      "candidateCount": 0
+    },
+    {
+      "scenario": "after-b",
+      "query": "copied_return",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "copied_return",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "copied_return",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "copied_return",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "nativeFamily": "unknown",
+      "selectedFunction": null,
+      "typeCoverage": "unavailable",
+      "candidateCount": 0
+    },
+    {
+      "scenario": "after-a",
+      "query": "method_return",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "method_return",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "nativeFamily": "unknown",
+      "selectedFunction": null,
+      "typeCoverage": "unavailable",
+      "candidateCount": 0
+    },
+    {
+      "scenario": "after-b",
+      "query": "method_return",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "method_return",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "method_return",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Echo",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "method_return",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "nativeFamily": "unknown",
+      "selectedFunction": null,
+      "typeCoverage": "unavailable",
+      "candidateCount": 0
+    },
+    {
+      "scenario": "after-a",
+      "query": "late_return",
+      "interleaveStep": 0,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "late_return",
+      "interleaveStep": 1,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "nativeFamily": "unknown",
+      "selectedFunction": null,
+      "typeCoverage": "unavailable",
+      "candidateCount": 0
+    },
+    {
+      "scenario": "after-b",
+      "query": "late_return",
+      "interleaveStep": 2,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "query": "late_return",
+      "interleaveStep": 3,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "nativeFamily": "string",
+      "selectedFunction": "Replacement",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "query": "late_return",
+      "interleaveStep": 4,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "nativeFamily": "number",
+      "selectedFunction": "Identity",
+      "typeCoverage": "native_projected",
+      "candidateCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "query": "late_return",
+      "interleaveStep": 5,
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "nativeFamily": "unknown",
+      "selectedFunction": null,
+      "typeCoverage": "unavailable",
+      "candidateCount": 0
+    }
+  ],
+  "diagnosticExpectations": [
+    {
+      "scenario": "after-a",
+      "name": "copied_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "name": "method_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "name": "late_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "name": "wrong_label",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 404,
+        "end": 406
+      },
+      "code": "param-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-a",
+      "name": "late_wrong_argument",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 657,
+        "end": 658
+      },
+      "code": "param-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "name": "copied_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 0
+    },
+    {
+      "scenario": "unknown-a",
+      "name": "method_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 0
+    },
+    {
+      "scenario": "unknown-a",
+      "name": "late_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 0
+    },
+    {
+      "scenario": "unknown-a",
+      "name": "wrong_label",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 404,
+        "end": 406
+      },
+      "code": "param-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "unknown-a",
+      "name": "late_wrong_argument",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 657,
+        "end": 658
+      },
+      "code": "param-type-mismatch",
+      "expectedCount": 0
+    },
+    {
+      "scenario": "after-b",
+      "name": "copied_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 474,
+        "end": 488
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "name": "method_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 557,
+        "end": 581
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "name": "late_wrong_return",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 648,
+        "end": 659
+      },
+      "code": "return-type-mismatch",
+      "expectedCount": 0
+    },
+    {
+      "scenario": "after-b",
+      "name": "wrong_label",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 404,
+        "end": 406
+      },
+      "code": "param-type-mismatch",
+      "expectedCount": 1
+    },
+    {
+      "scenario": "after-b",
+      "name": "late_wrong_argument",
+      "sourceSite": {
+        "file": "generic-calls.lua",
+        "start": 657,
+        "end": 658
+      },
+      "code": "param-type-mismatch",
+      "expectedCount": 0
+    }
+  ],
+  "scope": "fixed annotated pure-return signatures, copy identity and native argument/return diagnostics; no general effects/flow or complete Source acceptance"
+}

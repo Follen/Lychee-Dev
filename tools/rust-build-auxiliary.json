@@ -1,0 +1,16 @@
+{
+  "schema": "lycheedev.build-auxiliary-policy.v1",
+  "scope": "Local Cargo runner only. Reviewed identities are not product processes. Unknown or changed tools retain the ordinary orphan-failure rule.",
+  "cargoSHA256": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
+  "helpers": [
+    {
+      "kind": "msvc-vctip",
+      "programFilesPath": "Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/HostX64/x64/VCTIP.EXE",
+      "bytes": 335552,
+      "sha256": "19ef53326abd9a087b08d14ff9f4cd938c2019003cc4e1ac84d50fa49384b519",
+      "fileVersion": "14.50.35724.0",
+      "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "signerThumbprint": "F5877012FBD62FABCBDC8D8CEE9C9585BA30DF79"
+    }
+  ]
+}

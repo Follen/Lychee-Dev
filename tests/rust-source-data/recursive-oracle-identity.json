@@ -1,0 +1,9 @@
+{
+  "adapter": "tests/rust-source-data/oracle/main.go",
+  "exeSHA256": "193352b3cb940bb4768e7e015cd731ee845ba4cd4751323b33f090abe397723a",
+  "expectedSHA256": "a3002cfbd73d3bc560ad78941cf4a86ecaf0d7e8641389db885e449d65a411d7",
+  "casesSHA256": "eefd2fc4f8376811216fa2e7d7af1adecf6b68d7131aebbd185fc5b15284bef3",
+  "adapterSHA256": "5c1793102760a5b17896a37276f7a9dbc9342ac14c280c803cb8f5fd05e915b4",
+  "scope": "test-only frozen Go business oracle, runtime Rust never calls Go;16library cases pass, public recursive CLI not_run",
+  "schema": "lycheedev.test-oracle-identity.v1"
+}

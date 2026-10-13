@@ -1,0 +1,823 @@
+[
+  {
+    "name": "global-five-aggregates",
+    "sql": "SELECT COUNT(*),COUNT(V),SUM(V),AVG(V),MIN(V),MAX(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "grouped-order-having",
+    "sql": "SELECT G,COUNT(*) AS c,SUM(V) AS s FROM t GROUP BY G HAVING COUNT(*)>1 ORDER BY G",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "grouped-expression",
+    "sql": "SELECT LOWER(G),SUM(V)+1 FROM t GROUP BY LOWER(G) ORDER BY LOWER(G)",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "empty-global",
+    "sql": "SELECT COUNT(*),SUM(V),AVG(V),MIN(V),MAX(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "name": "empty-groups",
+    "sql": "SELECT G,COUNT(*) FROM t GROUP BY G",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "name": "filtered-global",
+    "sql": "SELECT COUNT(*),SUM(V) FROM t WHERE ID<0",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "all-null",
+    "sql": "SELECT COUNT(V),SUM(V),AVG(V),MIN(V),MAX(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            null
+          ],
+          [
+            null
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "distinct-aggregate",
+    "sql": "SELECT COUNT(DISTINCT V),SUM(DISTINCT V),AVG(DISTINCT V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            1
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            null
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "numeric-equality-distinct",
+    "sql": "SELECT COUNT(DISTINCT V),SUM(DISTINCT V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            1
+          ],
+          [
+            1.0
+          ],
+          [
+            2.0
+          ],
+          [
+            2
+          ],
+          [
+            9007199254740993
+          ],
+          [
+            9007199254740992.0
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "null-group-key",
+    "sql": "SELECT G,COUNT(*) FROM t GROUP BY G ORDER BY G",
+    "sources": {
+      "t": {
+        "columns": [
+          "G"
+        ],
+        "rows": [
+          [
+            null
+          ],
+          [
+            "a"
+          ],
+          [
+            null
+          ],
+          [
+            "b"
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "multi-group-key",
+    "sql": "SELECT G,V,COUNT(*) FROM t GROUP BY G,V ORDER BY G,V",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "sum-wide-exact",
+    "sql": "SELECT SUM(V),AVG(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            9007199254740993
+          ],
+          [
+            1
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "sum-u64-overflow",
+    "sql": "SELECT SUM(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            18446744073709551615
+          ],
+          [
+            1
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "sum-cancel-wide",
+    "sql": "SELECT SUM(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            18446744073709551615
+          ],
+          [
+            -9223372036854775808
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "sum-float-cancellation",
+    "sql": "SELECT SUM(V),AVG(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            1e+16
+          ],
+          [
+            1.0
+          ],
+          [
+            -1e+16
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "aggregate-expression",
+    "sql": "SELECT COALESCE(SUM(V),0),COUNT(*)*2 FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "having-empty-global",
+    "sql": "SELECT COUNT(*) FROM t HAVING COUNT(*)>9",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "group-no-aggregate",
+    "sql": "SELECT G FROM t GROUP BY G ORDER BY G",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "aggregate-nongrouped-column",
+    "sql": "SELECT G,COUNT(*) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "aggregate-where-rejected",
+    "sql": "SELECT V FROM t WHERE COUNT(*)>1",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "aggregate-group-input-rejected",
+    "sql": "SELECT COUNT(*) FROM t GROUP BY SUM(V)",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "aggregate-nested-rejected",
+    "sql": "SELECT SUM(COUNT(V)) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "count-star-distinct-rejected",
+    "sql": "SELECT COUNT(DISTINCT *) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "count-qualified-star-rejected",
+    "sql": "SELECT COUNT(t.*) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "aggregate-arity-rejected",
+    "sql": "SELECT SUM(V,ID) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "sum-text-rejected",
+    "sql": "SELECT SUM(G) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "extreme-mixed-types-rejected",
+    "sql": "SELECT MIN(V) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "V"
+        ],
+        "rows": [
+          [
+            1
+          ],
+          [
+            "text"
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "min-max-text",
+    "sql": "SELECT MIN(G),MAX(G) FROM t",
+    "sources": {
+      "t": {
+        "columns": [
+          "ID",
+          "G",
+          "V"
+        ],
+        "rows": [
+          [
+            1,
+            "a",
+            1
+          ],
+          [
+            2,
+            "a",
+            2
+          ],
+          [
+            3,
+            "b",
+            null
+          ],
+          [
+            4,
+            "b",
+            3
+          ]
+        ]
+      }
+    }
+  }
+]

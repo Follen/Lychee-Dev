@@ -1,0 +1,572 @@
+[
+  {
+    "name": "cte-simple",
+    "sql": "WITH picked AS (SELECT ID,Name FROM a WHERE ID<3) SELECT Name FROM picked ORDER BY ID",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-dependent",
+    "sql": "WITH picked AS (SELECT ID FROM a WHERE ID<3), counted AS (SELECT COUNT(*) AS n FROM picked) SELECT n FROM counted",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-join",
+    "sql": "WITH picked AS (SELECT ID FROM a WHERE ID<3) SELECT p.ID FROM picked p JOIN b ON p.ID=b.ID",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-case-binding",
+    "sql": "WITH Picked AS (SELECT ID FROM a WHERE ID<3) SELECT ID FROM picked ORDER BY ID",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-unused-evaluated",
+    "sql": "WITH bad AS (SELECT missing FROM a) SELECT ID FROM a",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-unused-computed",
+    "sql": "WITH unused AS (SELECT COUNT(*) FROM b) SELECT ID FROM a WHERE ID=2",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-self-shadow",
+    "sql": "WITH a AS (SELECT ID FROM a) SELECT ID FROM a",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-forward",
+    "sql": "WITH x AS (SELECT ID FROM y),y AS (SELECT ID FROM a) SELECT ID FROM x",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-qualified",
+    "sql": "WITH a AS (SELECT ID FROM static.a) SELECT COUNT(*) FROM a",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      "static.a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-nested-shadow",
+    "sql": "WITH x AS (SELECT ID FROM a WHERE ID=1), y AS (WITH x AS (SELECT ID FROM b WHERE ID=3) SELECT ID FROM x) SELECT x.ID,y.ID FROM x CROSS JOIN y",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-invalid-bind-empty",
+    "sql": "WITH x AS (SELECT ID FROM a WHERE ID<0) SELECT missing FROM x",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-duplicates",
+    "sql": "WITH x AS (SELECT ID FROM a),X AS (SELECT ID FROM b) SELECT ID FROM x",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "cte-parameter",
+    "sql": "WITH x AS (SELECT ID FROM a WHERE ID>:minimum) SELECT ID FROM x WHERE ID<:maximum ORDER BY ID",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    },
+    "parameters": {
+      "minimum": 1,
+      "maximum": 3
+    }
+  },
+  {
+    "name": "cte-wide",
+    "sql": "WITH x AS (SELECT 18446744073709551615 AS n FROM a WHERE ID=1) SELECT n FROM x",
+    "sources": {
+      "a": {
+        "columns": [
+          "ID",
+          "Name"
+        ],
+        "rows": [
+          [
+            1,
+            "one"
+          ],
+          [
+            2,
+            "two"
+          ],
+          [
+            3,
+            "three"
+          ]
+        ]
+      },
+      "b": {
+        "columns": [
+          "ID"
+        ],
+        "rows": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    }
+  }
+]

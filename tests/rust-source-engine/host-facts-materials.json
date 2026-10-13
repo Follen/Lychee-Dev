@@ -1,0 +1,259 @@
+{
+  "materials": [
+    {
+      "name": "fixed-host-v2",
+      "bytes": "{\"schema\":\"lycheedev.fixed-flow-host.v2\",\"scope\":\"explicit toy declarations/effects/arity only; production WoW API acceptance remains not_run\",\"rules\":{\"sha256\":\"46d1eb22b3303ee199be9570b5efc0526c4a7e6a02c897556b8c0263a4fa5f51\",\"evidence\":\"complete frozen rules JSON and JSON pointer; path/line are metadata labels, no api.lua source bytes supplied\"},\"callables\":[{\"name\":\"Allow\",\"identity\":\"fixed-flow-api:Allow\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false,\"returnArity\":0},{\"name\":\"Pair\",\"identity\":\"fixed-flow-api:Pair\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false,\"returnArity\":2},{\"name\":\"Source\",\"identity\":\"fixed-flow-api:Source\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false,\"returnArity\":1},{\"name\":\"Use\",\"identity\":\"fixed-flow-api:Use\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false,\"returnArity\":0},{\"name\":\"UseSecond\",\"identity\":\"fixed-flow-api:UseSecond\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false,\"returnArity\":0}],\"predicates\":[{\"name\":\"issecretvalue\",\"identity\":\"fixed-flow-guard:issecretvalue\",\"argument\":1,\"meaning\":\"true/false branch constraints on exact selected value and write observation\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"returnArity\":1}],\"initialObjects\":[{\"name\":\"Box\",\"identity\":\"fixed-flow-object:Box\",\"fields\":[],\"purpose\":\"original F05 method fixture requires preexisting receiver\"}],\"unresolvedGlobals\":\"unavailable_external_binding; never infer a tested API solely from source spelling\",\"sourceRisk\":\"secret return labels mark a potentially secret candidate, not proof that a guard always returns true\",\"operationRules\":\"missing arithmetic/comparison/concat/index rules remain explicit unknown\",\"sourceExecution\":false,\"configExecution\":false}",
+      "length": 1861,
+      "sha256": "1bebd66fa9140e43d680fc5368bfc9de482998d7945e8aff713d1393b7317832"
+    },
+    {
+      "name": "original-flow-rules-v1",
+      "bytes": "{\"identity\":{\"client\":\"retail\",\"apiCommit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"metadataDigest\":\"fixture\",\"version\":\"1\"},\"calls\":{\"Allow\":{\"name\":\"Allow\",\"path\":\"api.lua\",\"line\":40,\"arguments\":{\"1\":{\"secret\":\"allowed\"}}},\"Pair\":{\"name\":\"Pair\",\"path\":\"api.lua\",\"line\":20,\"returns\":{\"1\":{\"state\":\"never\"},\"2\":{\"state\":\"secret\"}}},\"Source\":{\"name\":\"Source\",\"path\":\"api.lua\",\"line\":10,\"returns\":{\"1\":{\"state\":\"secret\"}}},\"Use\":{\"name\":\"Use\",\"path\":\"api.lua\",\"line\":30,\"arguments\":{\"1\":{\"secret\":\"forbidden\"}}},\"UseSecond\":{\"name\":\"UseSecond\",\"path\":\"api.lua\",\"line\":50,\"arguments\":{\"2\":{\"secret\":\"forbidden\"}}}}}",
+      "length": 615,
+      "sha256": "46d1eb22b3303ee199be9570b5efc0526c4a7e6a02c897556b8c0263a4fa5f51"
+    },
+    {
+      "name": "fixed-host-open-arity-v1",
+      "bytes": "{\"schema\":\"lycheedev.fixed-flow-host.open-arity.v1\",\"scope\":\"explicit toy declarations/effects/arity only; production WoW API acceptance remains not_run\",\"rules\":{\"sha256\":\"46d1eb22b3303ee199be9570b5efc0526c4a7e6a02c897556b8c0263a4fa5f51\",\"evidence\":\"complete frozen rules JSON and JSON pointer; path/line are metadata labels, no api.lua source bytes supplied\"},\"callables\":[{\"name\":\"Allow\",\"identity\":\"fixed-flow-api:Allow\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false},{\"name\":\"Pair\",\"identity\":\"fixed-flow-api:Pair\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false},{\"name\":\"Source\",\"identity\":\"fixed-flow-api:Source\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false},{\"name\":\"Use\",\"identity\":\"fixed-flow-api:Use\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false},{\"name\":\"UseSecond\",\"identity\":\"fixed-flow-api:UseSecond\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"sourceExecution\":false}],\"predicates\":[{\"name\":\"issecretvalue\",\"identity\":\"fixed-flow-guard:issecretvalue\",\"argument\":1,\"meaning\":\"true/false branch constraints on exact selected value and write observation\",\"effect\":\"no_lua_heap_write\",\"retainsArguments\":false,\"returnArity\":1}],\"initialObjects\":[{\"name\":\"Box\",\"identity\":\"fixed-flow-object:Box\",\"fields\":[],\"purpose\":\"original F05 method fixture requires preexisting receiver\"}],\"unresolvedGlobals\":\"unavailable_external_binding; never infer a tested API solely from source spelling\",\"sourceRisk\":\"secret return labels mark a potentially secret candidate, not proof that a guard always returns true\",\"operationRules\":\"missing arithmetic/comparison/concat/index rules remain explicit unknown\",\"sourceExecution\":false,\"configExecution\":false}",
+      "length": 1792,
+      "sha256": "ddb6d331a80f00103d5434d63cdd5a8030a8ed085aa818f3980c9dbc901b669f"
+    }
+  ],
+  "bindings": [
+    {
+      "kind": "callable",
+      "name": "Allow",
+      "identity": "fixed-flow-api:Allow",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/callables/0"
+      },
+      "rules": {
+        "material": "original-flow-rules-v1",
+        "pointer": "/calls/Allow"
+      },
+      "returnArity": 0
+    },
+    {
+      "kind": "callable",
+      "name": "Pair",
+      "identity": "fixed-flow-api:Pair",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/callables/1"
+      },
+      "rules": {
+        "material": "original-flow-rules-v1",
+        "pointer": "/calls/Pair"
+      },
+      "returnArity": 2
+    },
+    {
+      "kind": "callable",
+      "name": "Source",
+      "identity": "fixed-flow-api:Source",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/callables/2"
+      },
+      "rules": {
+        "material": "original-flow-rules-v1",
+        "pointer": "/calls/Source"
+      },
+      "returnArity": 1
+    },
+    {
+      "kind": "callable",
+      "name": "Use",
+      "identity": "fixed-flow-api:Use",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/callables/3"
+      },
+      "rules": {
+        "material": "original-flow-rules-v1",
+        "pointer": "/calls/Use"
+      },
+      "returnArity": 0
+    },
+    {
+      "kind": "callable",
+      "name": "UseSecond",
+      "identity": "fixed-flow-api:UseSecond",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/callables/4"
+      },
+      "rules": {
+        "material": "original-flow-rules-v1",
+        "pointer": "/calls/UseSecond"
+      },
+      "returnArity": 0
+    },
+    {
+      "kind": "predicate",
+      "name": "issecretvalue",
+      "identity": "fixed-flow-guard:issecretvalue",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/predicates/0"
+      },
+      "returnArity": 1
+    },
+    {
+      "kind": "empty_object",
+      "name": "Box",
+      "identity": "fixed-flow-object:Box",
+      "declaration": {
+        "material": "fixed-host-v2",
+        "pointer": "/initialObjects/0"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "direct",
+      "files": [
+        "host-direct.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "shadow",
+      "files": [
+        "host-shadow.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "colon",
+      "files": [
+        "host-colon.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "slots",
+      "files": [
+        "host-slots.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "transfers",
+      "files": [
+        "host-transfers.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "entry",
+      "files": [
+        "host-entry.lua"
+      ],
+      "host": "exact",
+      "entry": {
+        "kind": "symbol",
+        "file": "host-entry.lua",
+        "name": "Demo"
+      }
+    },
+    {
+      "name": "entry-ambiguous",
+      "files": [
+        "host-entry-ambiguous.lua"
+      ],
+      "host": "exact",
+      "entry": {
+        "kind": "line",
+        "file": "host-entry-ambiguous.lua",
+        "line": 1
+      },
+      "selectorRequired": true
+    },
+    {
+      "name": "entry-exact-a",
+      "files": [
+        "host-entry-ambiguous.lua"
+      ],
+      "host": "exact",
+      "entry": {
+        "kind": "symbol",
+        "file": "host-entry-ambiguous.lua",
+        "name": "A"
+      }
+    },
+    {
+      "name": "guard",
+      "files": [
+        "host-guard.lua"
+      ],
+      "host": "exact",
+      "entry": {
+        "kind": "symbol",
+        "file": "host-guard.lua",
+        "name": "Guarded"
+      }
+    },
+    {
+      "name": "phi",
+      "files": [
+        "host-phi.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "unknown-order",
+      "files": [
+        "host-order-a.lua",
+        "host-order-b.lua",
+        "host-order-main.lua"
+      ],
+      "host": "exact",
+      "unknownOrder": true
+    },
+    {
+      "name": "open-arity",
+      "files": [
+        "host-open-arity.lua"
+      ],
+      "host": "open"
+    },
+    {
+      "name": "unknown-effects",
+      "files": [
+        "host-unknown.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "capture-mutation",
+      "files": [
+        "host-capture-mutation.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "cardinality",
+      "files": [
+        "host-cardinality.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "return-join",
+      "files": [
+        "host-return-join.lua"
+      ],
+      "host": "exact"
+    },
+    {
+      "name": "unknown-tail",
+      "files": [
+        "host-unknown-tail.lua"
+      ],
+      "host": "exact"
+    }
+  ],
+  "schema": "lycheedev.source-host-probe-data.v1"
+}

@@ -1,0 +1,76 @@
+## Interface: 120100, 50504, 38002, 16001
+## Title: Lychee Dev
+## Version: 3.1.2
+## SavedVariables: LycheeToolkitDB
+## SavedVariablesPerCharacter: LycheeToolkitBridgeDB
+
+# One manifest for every supported client. The engine loads this file when its
+# own build matches any declared interface; the running build's profile is
+# selected at load time by Core\ClientGate.lua, never by TOC file choice.
+Core\ClientGate.lua
+# --- Toolkit 2.0 core engines (Locale, Compat, Serializer, Inspector, Safety, Execute, Stores) ---
+Core\Locale.lua
+Core\Locale_enUS.lua
+Core\Compat.lua
+Core\Serializer.lua
+Core\Inspector.lua
+Core\Safety.lua
+Core\Execute.lua
+Core\Stores.lua
+Core\Platform.lua
+Core\Persistence.lua
+Bridge\Session.lua
+Core\Controls.lua
+Bridge\CaptureWriter.lua
+Bridge\NativeWire.lua
+Bridge\NativeProtocol.lua
+Bridge\InputProtection.lua
+Bridge\ProbeExecution.lua
+Bridge\InputProtocol.lua
+Bridge\MatrixSymbol.lua
+Bridge\ReceiptView.lua
+Bridge\ActivityView.lua
+Bridge\ReportStore.lua
+Bridge\Investigation.lua
+Bridge\ProbeRunner.lua
+Bridge\Definitions.lua
+Modules\AutomationHistory.lua
+Modules\AutomationView.lua
+Bridge\ProbeQueue.lua
+Bridge\Reentry.lua
+Bridge\Identity.lua
+Bridge\ReceiverBindings.lua
+Bridge\StartupBeacon.lua
+Bridge\Receiver.lua
+Bridge\NativeRuntime.lua
+Bridge\InputSignal.lua
+Bridge\NativeInputState.lua
+Bridge\NativeAdapter.lua
+# --- Event catalogs: all four load; Catalog.lua selects ns.Client's table ---
+Modules\Events\CatalogData_Mainline.lua
+Modules\Events\CatalogData_Mists.lua
+Modules\Events\CatalogData_Titan.lua
+Modules\Events\CatalogData_Forever.lua
+Modules\Events\Catalog.lua
+Modules\Events\Monitor.lua
+# --- Workbench feature modules (object inspection, function trace, diagnostics) ---
+Modules\ObjectInspector.lua
+Modules\FunctionTrace.lua
+Modules\Diagnostics.lua
+Bridge\FaultRunner.lua
+# --- Workbench UI foundation (Widgets, TreeView, Export popup, Window shell) ---
+UI\Theme.lua
+UI\Widgets.lua
+UI\TreeView.lua
+UI\Export.lua
+UI\Window.lua
+# --- Workbench pages: later page modules insert their load line here ---
+UI\Pages\About.lua
+UI\Pages\Run.lua
+UI\Pages\Object.lua
+UI\Pages\Trace.lua
+UI\Pages\Diagnostics.lua
+UI\Pages\Events.lua
+UI\Pages\Automation.lua
+UI\Pages\ExportRecords.lua
+Core\Runtime.lua

@@ -1,0 +1,21 @@
+[package]
+name = "lycheedev-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "lycheedev"
+path = "src/main.rs"
+
+[dependencies]
+lycheedev-core.workspace = true
+lycheedev-source.workspace = true
+lycheedev-data.workspace = true
+lycheedev-live.workspace = true
+lycheedev-delivery.workspace = true
+lycheedev-windows.workspace = true
+serde.workspace = true
+serde_json.workspace = true

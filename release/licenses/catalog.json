@@ -1,0 +1,106 @@
+{
+  "schema": "lycheedev.license-supplements.v1",
+  "packages": [
+    {
+      "name": "tree-sitter-lua",
+      "version": "0.5.0",
+      "path": "tree-sitter-lua-0.5.0.LICENSE",
+      "sha256": "9a32b02e4c917b1ce6b5e79d8ea81e25cefd7f27d89c7235f2afb262c06cf32e",
+      "repository": "https://github.com/tree-sitter-grammars/tree-sitter-lua",
+      "commit": "10fe0054734eec83049514ea2e718b2a56acd0c9",
+      "source": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-lua/10fe0054734eec83049514ea2e718b2a56acd0c9/LICENSE.md",
+      "reason": "The published crate includes /LICENSE while the exact upstream file is LICENSE.md, omitting the license text. Preserve the exact upstream license without modifying the registry cache."
+    },
+    {
+      "name": "defmt-parser",
+      "version": "1.0.0",
+      "repository": "https://github.com/knurling-rs/defmt",
+      "commit": "4a8cdb44891ed57b8ff5a023b6bec7137c48708f",
+      "source": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-MIT",
+      "path": "defmt-parser-1.0.0.LICENSE",
+      "sha256": "2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50",
+      "reason": "Published subcrate omits the workspace MIT license; preserve the exact license from its Cargo VCS revision."
+    },
+    {
+      "name": "include_dir",
+      "version": "0.7.4",
+      "repository": "https://github.com/Michael-F-Bryan/include_dir",
+      "commit": "d742c6fffce99ee89da91b934e7ce6fb2a82680c",
+      "source": "https://raw.githubusercontent.com/Michael-F-Bryan/include_dir/d742c6fffce99ee89da91b934e7ce6fb2a82680c/LICENSE",
+      "path": "include_dir-0.7.4.LICENSE",
+      "sha256": "9369f62987b3a116111f2edfdc4cc72633e44ddc94d5d0c68659cf537b76a31f",
+      "reason": "Published subcrate omits the workspace MIT license; preserve the exact license from its Cargo VCS revision."
+    },
+    {
+      "name": "include_dir_macros",
+      "version": "0.7.4",
+      "repository": "https://github.com/Michael-F-Bryan/include_dir",
+      "commit": "d742c6fffce99ee89da91b934e7ce6fb2a82680c",
+      "source": "https://raw.githubusercontent.com/Michael-F-Bryan/include_dir/d742c6fffce99ee89da91b934e7ce6fb2a82680c/LICENSE",
+      "path": "include_dir_macros-0.7.4.LICENSE",
+      "sha256": "9369f62987b3a116111f2edfdc4cc72633e44ddc94d5d0c68659cf537b76a31f",
+      "reason": "Published subcrate omits the workspace MIT license; preserve the exact license from its Cargo VCS revision."
+    },
+    {
+      "name": "luars",
+      "version": "0.26.3",
+      "repository": "https://github.com/CppCXY/lua-rs",
+      "commit": "2f8c204bcd4fc28ba054caa8cee89c18112ebb41",
+      "source": "https://raw.githubusercontent.com/CppCXY/lua-rs/2f8c204bcd4fc28ba054caa8cee89c18112ebb41/LICENSE",
+      "path": "luars-0.26.3.LICENSE",
+      "sha256": "70552741caf73b662f35e8ae0a686ae423b1ace551165a9c0eebda63935666b3",
+      "reason": "Published subcrate omits the workspace MIT license; preserve the exact license from its Cargo VCS revision."
+    },
+    {
+      "name": "luars-derive",
+      "version": "0.11.1",
+      "repository": "https://github.com/CppCXY/lua-rs",
+      "commit": "7c878233b37617fe5920558a20fafd47592c518b",
+      "source": "https://raw.githubusercontent.com/CppCXY/lua-rs/7c878233b37617fe5920558a20fafd47592c518b/LICENSE",
+      "path": "luars-derive-0.11.1.LICENSE",
+      "sha256": "70552741caf73b662f35e8ae0a686ae423b1ace551165a9c0eebda63935666b3",
+      "reason": "Published subcrate omits the workspace MIT license; preserve the exact license from its Cargo VCS revision."
+    },
+    {
+      "name": "rust-i18n-macro",
+      "version": "3.1.5",
+      "path": "rust-i18n-3.1.5.LICENSE",
+      "sha256": "d6fde6c28ecbccfc7f6d97c0badbb14bbea2cc8f5e81a8c1537204bdfed9a6d5",
+      "repository": "https://github.com/longbridge/rust-i18n",
+      "commit": "a6b110e5bf48e3c20aa19bfb4c0f05146b5017c6",
+      "source": "https://raw.githubusercontent.com/longbridge/rust-i18n/5624dcb1dd62c9b1a8eae5e9a10b957fd5932ff1/LICENSE",
+      "sourceCommit": "5624dcb1dd62c9b1a8eae5e9a10b957fd5932ff1",
+      "sourceScope": "shared workspace license at the official v3.1.5 release",
+      "exactCrateRevisionLicenseVerified": false,
+      "reason": "Both published subcrates declare MIT and omit the shared workspace license. The official v3.1.5 release updates all three package versions and retains this LICENSE. Their Cargo VCS revision a6b110e is not reachable upstream; no claim is made about license bytes at that revision."
+    },
+    {
+      "name": "rust-i18n-support",
+      "version": "3.1.5",
+      "path": "rust-i18n-3.1.5.LICENSE",
+      "sha256": "d6fde6c28ecbccfc7f6d97c0badbb14bbea2cc8f5e81a8c1537204bdfed9a6d5",
+      "repository": "https://github.com/longbridge/rust-i18n",
+      "commit": "a6b110e5bf48e3c20aa19bfb4c0f05146b5017c6",
+      "source": "https://raw.githubusercontent.com/longbridge/rust-i18n/5624dcb1dd62c9b1a8eae5e9a10b957fd5932ff1/LICENSE",
+      "sourceCommit": "5624dcb1dd62c9b1a8eae5e9a10b957fd5932ff1",
+      "sourceScope": "shared workspace license at the official v3.1.5 release",
+      "exactCrateRevisionLicenseVerified": false,
+      "reason": "Both published subcrates declare MIT and omit the shared workspace license. The official v3.1.5 release updates all three package versions and retains this LICENSE. Their Cargo VCS revision a6b110e is not reachable upstream; no claim is made about license bytes at that revision."
+    }
+  ],
+  "dataResources": [
+    {
+      "name": "Unicode simple casing",
+      "version": "17.0.0",
+      "source": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+      "sourcePath": "release/data/unicode-17.0.0/UnicodeData.txt",
+      "sourceSHA256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+      "generatorPath": "tests/rust-source-data/generate-unicode-simple.mjs",
+      "generatedPath": "crates/lycheedev-data/src/unicode_simple.rs",
+      "license": "Unicode-3.0",
+      "licensePath": "crates/lycheedev-data/UNICODE-LICENSE",
+      "licenseSHA256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "licenseSource": "https://unicode.org/license.txt"
+    }
+  ]
+}

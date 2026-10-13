@@ -1,0 +1,1893 @@
+mod contract;
+use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, VERSION};
+use serde_json::{Value, json};
+use std::{collections::BTreeMap, io::Write, path::PathBuf};
+
+fn home(flags: &BTreeMap<String, String>) -> PathBuf {
+    flags
+        .get("--home")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("LYCHEEDEV_HOME").map(PathBuf::from))
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join(".lycheedev")
+        })
+}
+fn parse(args: &[String]) -> Result<Invocation> {
+    let mut flags = BTreeMap::new();
+    let mut flag_order = Vec::new();
+    let mut words = vec![];
+    let all = contract::all();
+    let mut index = 0;
+    while index < args.len() {
+        let token = &args[index];
+        if token == "-h" || token == "--help" {
+            flags.insert("--help".into(), "true".into());
+        } else if token.starts_with('-') {
+            let (key, inline) = token
+                .split_once('=')
+                .map(|(k, v)| (k, Some(v)))
+                .unwrap_or((token.as_str(), None));
+            let spec = all
+                .iter()
+                .flat_map(|d| d.flags.iter())
+                .find(|f| f.name() == key)
+                .ok_or_else(|| ToolkitError::arguments(format!("unknown flag {key}")))?;
+            let value = if spec.takes_value() {
+                match inline {
+                    Some(v) => v.to_owned(),
+                    None => {
+                        index += 1;
+                        args.get(index)
+                            .filter(|v| !v.starts_with("--"))
+                            .cloned()
+                            .ok_or_else(|| {
+                                ToolkitError::arguments(format!("missing value for {key}"))
+                            })?
+                    }
+                }
+            } else {
+                if inline.is_some() {
+                    return Err(ToolkitError::arguments(format!("{key} takes no value")));
+                }
+                "true".into()
+            };
+            flag_order.push((key.to_owned(), value.clone()));
+            if let Some(previous) = flags.insert(key.into(), value.clone()) {
+                if !["--path", "--installation", "--param"].contains(&key) {
+                    return Err(ToolkitError::arguments(format!("duplicate flag {key}")));
+                }
+                let store = format!("__repeat:{key}");
+                let mut values: Vec<String> = flags
+                    .get(&store)
+                    .map(|raw| serde_json::from_str(raw))
+                    .transpose()?
+                    .unwrap_or_else(|| vec![previous]);
+                if values.len() >= 256 {
+                    return Err(ToolkitError::arguments(
+                        "repeated option exceeds 256 values",
+                    ));
+                }
+                values.push(value);
+                flags.insert(store, serde_json::to_string(&values)?);
+            }
+        } else {
+            words.push(token.clone());
+        }
+        index += 1;
+    }
+    if words.is_empty() {
+        flags.insert("--help".into(), "true".into());
+    }
+    let definition = all
+        .iter()
+        .filter(|d| {
+            words.starts_with(
+                &d.path
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .max_by_key(|d| d.path.split_whitespace().count());
+    if definition.is_none() && !words.is_empty() {
+        return Err(ToolkitError::arguments(format!(
+            "unknown command {}",
+            words.join(" ")
+        )));
+    }
+    let (command, positional) = if let Some(def) = definition {
+        let count = def.path.split_whitespace().count();
+        if words.len() > count + usize::from(!def.arguments.is_empty()) {
+            return Err(ToolkitError::arguments("unexpected positional argument"));
+        }
+        for flag in flags.keys() {
+            if let Some(name) = flag.strip_prefix("__repeat:") {
+                if !(def.path == "update" && ["--path", "--installation"].contains(&name)
+                    || def.path == "data sql" && name == "--param")
+                {
+                    return Err(ToolkitError::arguments(format!("duplicate flag {name}")));
+                }
+                continue;
+            }
+            if flag != "--help" && !def.flags.iter().any(|f| f.name() == flag) {
+                return Err(ToolkitError::arguments(format!(
+                    "{} does not accept {flag}",
+                    def.path
+                )));
+            }
+        }
+        if !def.arguments.is_empty() && words.len() == count && !flags.contains_key("--help") {
+            return Err(ToolkitError::arguments(format!(
+                "missing required argument {}",
+                def.arguments[0]
+            )));
+        }
+        (def.path.clone(), words.get(count).cloned())
+    } else {
+        (String::new(), None)
+    };
+    if let Some(format) = flags.get("--format")
+        && !["text", "json", "jsonl"].contains(&format.as_str())
+    {
+        return Err(ToolkitError::arguments(
+            "format must be text, json, or jsonl",
+        ));
+    }
+    // The frozen public parser completes token/route validation before rejecting
+    // typed Data IDs. Keep this in parse (and its context empty), while a later
+    // unknown/unsupported flag retains priority over an empty or malformed ID.
+    for (key, value) in &flag_order {
+        let key = key.as_str();
+        let typed_id = [
+            "--spell-id",
+            "--item-id",
+            "--npc-id",
+            "--display-id",
+            "--journal-encounter-id",
+        ]
+        .contains(&key)
+            || catalog_command(&command)
+                && ["--id", "--file-data-id", "--model-file-data-id"].contains(&key);
+        if typed_id
+            && (value.is_empty()
+                || !value.bytes().all(|byte| byte.is_ascii_digit())
+                || value
+                    .parse::<u32>()
+                    .ok()
+                    .is_none_or(|number| !["--npc-id", "--id"].contains(&key) && number == 0))
+        {
+            return Err(ToolkitError::arguments(format!("invalid {key}")));
+        }
+        if key == "--max-depth" && value.parse::<i64>().ok().is_none_or(|n| n < 0) {
+            return Err(ToolkitError::arguments("invalid --max-depth"));
+        }
+        if command == "data item models"
+            && ["--race-id", "--gender"].contains(&key)
+            && value.parse::<i64>().is_err()
+        {
+            return Err(ToolkitError::arguments(format!("invalid {key}")));
+        }
+        if catalog_command(&command) {
+            match key {
+                "--limit"
+                    if value
+                        .parse::<i64>()
+                        .ok()
+                        .is_none_or(|n| !(1..=200000).contains(&n)) =>
+                {
+                    return Err(ToolkitError::arguments("invalid --limit"));
+                }
+                "--timeout-seconds"
+                    if value
+                        .parse::<i64>()
+                        .ok()
+                        .is_none_or(|n| !(1..=3600).contains(&n)) =>
+                {
+                    return Err(ToolkitError::arguments(
+                        "--timeout-seconds must be between 1 and 3600",
+                    ));
+                }
+                "--max-bytes"
+                    if value
+                        .parse::<i64>()
+                        .ok()
+                        .is_none_or(|n| !(1..=536870912).contains(&n)) =>
+                {
+                    return Err(ToolkitError::arguments(
+                        "--max-bytes must be between 1 and 536870912",
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(Invocation {
+        command,
+        positional,
+        home: home(&flags),
+        flags,
+        cwd: std::env::current_dir()?,
+        control: Default::default(),
+    })
+}
+fn catalog_command(command: &str) -> bool {
+    matches!(
+        command,
+        "data spell info"
+            | "data item models"
+            | "data item geosets"
+            | "data item textures"
+            | "data item get"
+            | "data decor list"
+            | "data decor get"
+            | "data creature display"
+            | "data creature model"
+            | "data encounter get"
+    )
+}
+fn dispatch_catalog(inv: &Invocation) -> Result<Outcome> {
+    let mut selected = inv.clone();
+    let project = lycheedev_core::selection::resolve_optional_project(inv)?;
+    let mut context = json!({});
+    if let Some((path, pin)) = project {
+        selected.flags.insert("--snapshot".into(), pin.id.clone());
+        context = json!({"project":path,"snapshot":pin.id});
+    }
+    let result = if selected.flag("--snapshot").is_none_or(str::is_empty)
+        || !selected.flag_bool("--cdn") && selected.flag("--installation").is_none_or(str::is_empty)
+    {
+        Err(ToolkitError::arguments(format!(
+            "{} requires --snapshot, and either --installation or --cdn",
+            inv.command
+        )))
+    } else {
+        lycheedev_data::dispatch(&selected)
+    };
+    match result {
+        Ok(mut outcome) => {
+            if context.get("project").is_some() {
+                outcome.selection = context;
+            }
+            Ok(outcome)
+        }
+        Err(mut error) => {
+            if context.get("project").is_some() {
+                if !error.details.is_object() {
+                    error.details = json!({});
+                }
+                error.details["__commandContext"] = context;
+            }
+            Err(error)
+        }
+    }
+}
+fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if inv.flag_bool("--help") {
+        let commands: Vec<_> = contract::implemented()
+            .into_iter()
+            .filter(|d| inv.command.is_empty() || d.path == inv.command)
+            .collect();
+        return Ok(Outcome::new(
+            json!({"commands":commands,"flags":["--home <root>","--format text|json|jsonl","--help"]}),
+        ));
+    }
+    if catalog_command(&inv.command) {
+        return dispatch_catalog(inv);
+    }
+    match inv.command.as_str() {
+        "version" => Ok(Outcome::new(
+            json!({"version":VERSION,"rust":env!("LYCHEEDEV_RUST_VERSION"),"platform":format!("{}/{}",std::env::consts::OS,if std::env::consts::ARCH=="x86_64"{"amd64"}else{std::env::consts::ARCH}),"commit":env!("LYCHEEDEV_BUILD_COMMIT"),"workspaceDirty":env!("LYCHEEDEV_BUILD_DIRTY")=="true"}),
+        )),
+        "describe" => Ok(Outcome::new(json!({"commands":contract::implemented()}))),
+        "target resolve" => dispatch_target(inv),
+        "target available" => dispatch_available(inv),
+        "doctor" => dispatch_doctor(inv),
+        value if value.starts_with("source ") => dispatch_source(inv),
+        value if value.starts_with("data ") || value.starts_with("asset ") => {
+            lycheedev_data::dispatch(inv)
+        }
+        value if value.starts_with("live ") => lycheedev_live::host::dispatch_with(
+            inv,
+            &lycheedev_live::native::WindowsServices::with_control(
+                DeliveryAdapter,
+                inv.control.clone(),
+            ),
+        ),
+        value
+            if value.starts_with("addon ") || value.starts_with("skill ") || value == "update" =>
+        {
+            lycheedev_delivery::dispatch(inv)
+        }
+        value if value.starts_with("project ") => lycheedev_core::selection::dispatch_project(inv),
+        "evidence verify" => {
+            // The library retains its verification receipt. The frozen public
+            // command returns the verified capture itself, just as show does.
+            let mut outcome = lycheedev_core::evidence::dispatch(inv)?;
+            outcome.data = outcome.data["capture"].take();
+            Ok(outcome)
+        }
+        value if value.starts_with("evidence ") => lycheedev_core::evidence::dispatch(inv),
+        value if value.starts_with("cache ") => lycheedev_core::cache::dispatch(inv),
+        _ => lycheedev_core::workspace::dispatch(inv),
+    }
+}
+fn dispatch_target(inv: &Invocation) -> Result<Outcome> {
+    if inv.flag("--file").is_some() {
+        return lycheedev_core::workspace::dispatch(inv);
+    }
+    let mut selected = inv.clone();
+    let mut config = Value::Null;
+    if let Some(name) = inv.flag("--target") {
+        if inv.flag("--installation").is_some()
+            || inv.flag("--product").is_some()
+            || inv.flag("--region").is_some()
+            || inv.flag("--locale").is_some()
+        {
+            return Err(ToolkitError::arguments(
+                "named target resolve cannot combine direct target selectors",
+            ));
+        }
+        let mut show = inv.clone();
+        show.command = "target show".into();
+        show.positional = Some(name.into());
+        config = lycheedev_core::workspace::dispatch(&show)?.data["config"].clone();
+        for (key, field) in [
+            ("--installation", "installation"),
+            ("--product", "product"),
+            ("--region", "region"),
+            ("--locale", "locale"),
+            ("--build", "fullBuild"),
+            ("--definitions", "definitions"),
+        ] {
+            if selected.flag(key).is_none()
+                && let Some(value) = config[field].as_str().filter(|value| !value.is_empty())
+            {
+                selected.flags.insert(key.into(), value.into());
+            }
+        }
+        if config["source"] != "installation" {
+            return Err(ToolkitError::new(
+                "records.remote_provider_required",
+                "remote target preparation remains a data-provider profile",
+                3,
+            )
+            .with_details(json!({"target":config})));
+        }
+    }
+    let installation = selected.required("--installation")?;
+    let definition = lycheedev_data::definitions::resolve_revision(
+        &inv.home,
+        selected.flag("--definitions").unwrap_or(""),
+        selected.flag_bool("--offline"),
+    )?;
+    let request = lycheedev_data::installed::LocalTargetRequest {
+        installation: installation.into(),
+        product: selected.flag("--product").map(str::to_owned),
+        full_build: selected.flag("--build").map(str::to_owned),
+        region: selected.required("--region")?.into(),
+        language: selected.required("--locale")?.into(),
+        definition_commit: definition,
+    };
+    let resolved = lycheedev_data::installed::resolve_target(&request)?;
+    let pin = lycheedev_core::selection::pin_selection(
+        &inv.home,
+        lycheedev_core::selection::SelectionSpec {
+            parent: inv.flag("--from").unwrap_or("").into(),
+            data: Some(resolved.data.clone()),
+            ..Default::default()
+        },
+    )?;
+    let capture = lycheedev_core::evidence::commit_capture(
+        &inv.home,
+        &serde_json::to_vec(&resolved)?,
+        "application/json",
+        json!({"kind":"local-target","locator":resolved.installation,"snapshot":pin.id,"dataBuild":resolved.data.full_build}),
+        true,
+        false,
+    )?;
+    let mut outcome = if config.is_null() {
+        Outcome::new(serde_json::to_value(&pin)?)
+    } else {
+        let name = config["name"]
+            .as_str()
+            .ok_or_else(|| ToolkitError::invalid("target config name missing"))?;
+        let at = lycheedev_core::storage::utc_now();
+        let mut metadata = lycheedev_core::metadata::Metadata::open(&inv.home, true)?;
+        if metadata.generation(&format!("target/{name}"))?.is_none() {
+            return Err(ToolkitError::new(
+                "selection.target_missing",
+                "named target was removed during preparation; immutable pin retained",
+                2,
+            )
+            .with_details(json!({"result":pin})));
+        }
+        metadata.put(&format!("target-ref/{name}/pin/{}",pin.id),&json!({"schema":"lycheedev.target-ref.v1","name":name,"kind":"pin","id":pin.id,"createdAt":at}),None)?;
+        Outcome::new(json!({"config":config,"pin":pin,"resolvedAt":at}))
+    };
+    outcome.selection = json!({"snapshot":pin.id,"installation":resolved.installation});
+    outcome.provenance.push(capture);
+    Ok(outcome)
+}
+#[derive(Clone)]
+struct DeliveryAdapter;
+impl lycheedev_live::managed::ManagedInstallation for DeliveryAdapter {
+    fn verify_clean(
+        &self,
+        path: &std::path::Path,
+        release: &str,
+        protocol: &str,
+        slots: u16,
+    ) -> Result<lycheedev_live::managed::ManagedIdentity> {
+        let identity = lycheedev_delivery::verify_clean(path, release, protocol, slots)?;
+        Ok(lycheedev_live::managed::ManagedIdentity {
+            canonical_path: identity.canonical_path,
+            manifest_sha256: identity.manifest_sha256,
+            generation: identity.generation,
+        })
+    }
+    fn publish_slot(
+        &self,
+        identity: &lycheedev_live::managed::ManagedIdentity,
+        slot: u16,
+        expected_sha256: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<()> {
+        lycheedev_delivery::slots::publish(
+            &lycheedev_delivery::VerifiedInstallation {
+                canonical_path: identity.canonical_path.clone(),
+                manifest_sha256: identity.manifest_sha256.clone(),
+                generation: identity.generation,
+            },
+            slot,
+            expected_sha256,
+            bytes,
+        )
+    }
+}
+fn dispatch_source(inv: &Invocation) -> Result<Outcome> {
+    if inv.command.starts_with("source session ") {
+        return lycheedev_source::native_session::dispatch(inv);
+    }
+    if inv.command == "source prune" {
+        let packaged = std::env::current_exe()?
+            .parent()
+            .and_then(|path| path.parent())
+            .and_then(|path| path.parent())
+            .map(std::path::Path::to_path_buf);
+        if let Some(root) = packaged.filter(|root| root.join("release.json").is_file()) {
+            let admission = broker_client_identity(&root, &inv.control, false)?;
+            return lycheedev_source::dispatch_with_services(
+                inv,
+                lycheedev_source::SourceTools::default(),
+                Some(&admission.identity),
+            );
+        }
+    }
+    let needs_tools = inv.command == "source validate"
+        || ["source refs", "source context"].contains(&inv.command.as_str())
+            && (!inv.flag_bool("--static-only") || inv.flag_bool("--flow"));
+    if !needs_tools {
+        return lycheedev_source::dispatch(inv);
+    }
+    let root = inv
+        .flag("--release")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|exe| {
+                exe.parent()?
+                    .parent()?
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+            })
+        })
+        .ok_or_else(|| {
+            ToolkitError::new(
+                "delivery.invalid_release",
+                "unable to resolve distribution root",
+                3,
+            )
+        })?;
+    let release_profile = (std::env::var("LYCHEEDEV_SOURCE_PHASE_PROFILE").as_deref() == Ok("1"))
+        .then(std::time::Instant::now);
+    let release_result = lycheedev_delivery::release::inspect_with_control(&root, VERSION, &inv.control);
+    if let Some(started) = release_profile {
+        eprintln!("{}", json!({
+            "schema":"lycheedev.source-phase.v1",
+            "phase":"main.source.release_inspect",
+            "elapsedMs":started.elapsed().as_secs_f64()*1000.0,
+            "status":if release_result.is_ok(){"ok"}else{"error"},
+            "errorCode":release_result.as_ref().err().map(|error|error.code.as_str()),
+            "files":release_result.as_ref().ok().map(|release|release.resources.len()),
+        }));
+    }
+    let release = release_result?;
+    let tools = source_runtime_bundle_from_release(&root, false, &release)?;
+    lycheedev_source::dispatch_with_services(
+        inv,
+        lycheedev_source::SourceTools {
+            luac: Some(&tools.luac),
+            luals: tools.luals.as_ref(),
+        },
+        None,
+    )
+}
+struct BrokerAdmission {
+    _exe_hold: std::fs::File,
+    _release_hold: std::fs::File,
+    identity: lycheedev_source::session::BrokerIdentity,
+    _release: lycheedev_delivery::release::Release,
+}
+fn broker_client_identity(
+    root: &std::path::Path,
+    control: &lycheedev_core::control::OperationControl,
+    full: bool,
+) -> Result<BrokerAdmission> {
+    let root = root.canonicalize()?;
+    let exe = std::env::current_exe()?.canonicalize()?;
+    let (exe_hold, exe_sha) = lycheedev_core::storage::locked_sha256(&exe, 128 << 20, control)?;
+    let (release_hold, release_sha) =
+        lycheedev_core::storage::locked_sha256(&root.join("release.json"), 1 << 20, control)?;
+    let release = if full {
+        lycheedev_delivery::release::inspect_with_control(&root, VERSION, control)?
+    } else {
+        lycheedev_delivery::release::read_manifest_with_control(&root, VERSION, control)?
+    };
+    let binary = &release.binaries["windows-amd64"];
+    if root.join(&binary.path).canonicalize()? != exe || binary.sha256 != exe_sha {
+        return Err(ToolkitError::invalid(
+            "broker client executable is not the exact sealed release native binary",
+        ));
+    }
+    Ok(BrokerAdmission {
+        _exe_hold: exe_hold,
+        _release_hold: release_hold,
+        identity: lycheedev_source::session::BrokerIdentity {
+            exe_path: exe,
+            exe_sha256: exe_sha,
+            release_root: root,
+            release_manifest_sha256: release_sha,
+        },
+        _release: release,
+    })
+}
+struct SourceRuntimeBundle {
+    luac: lycheedev_source::luac::Runtime,
+    luals: Option<lycheedev_source::luals::Runtime>,
+}
+fn dispatch_available(inv: &Invocation) -> Result<Outcome> {
+    let region = inv
+        .flag("--region")
+        .filter(|region| !region.is_empty())
+        .ok_or_else(|| ToolkitError::arguments("target available requires --region"))?;
+    let value = lycheedev_core::availability::list(
+        region,
+        inv.flag_bool("--offline"),
+        64,
+        &inv.control,
+        &mut lycheedev_data::availability::fetch_versions,
+    )?;
+    let failed = value["products"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|product| product.get("error").is_some());
+    let mut result = Outcome::new(value);
+    if failed {
+        result.warnings.push(json!("At least one product manifest could not be read; inspect products[].error for the exact failure."));
+    }
+    Ok(result)
+}
+fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
+    inv.control.check()?;
+    let root = std::env::current_exe()?
+        .parent()
+        .and_then(|path| path.parent())
+        .and_then(|path| path.parent())
+        .map(std::path::Path::to_path_buf);
+    let runtime = (|| -> Result<()> {
+        let root = root.as_ref().ok_or_else(|| {
+            ToolkitError::new(
+                "luals.unavailable",
+                "complete distribution root unavailable",
+                3,
+            )
+        })?;
+        let release =
+            lycheedev_delivery::release::inspect_with_control(root, VERSION, &inv.control)?;
+        let inventory = release
+            .resources
+            .iter()
+            .filter_map(|resource| {
+                resource
+                    .path
+                    .strip_prefix("tool/luals/")
+                    .map(|name| (name.to_owned(), resource.sha256.clone()))
+            })
+            .collect();
+        lycheedev_source::luals::Runtime::prepare_inspected_release(
+            &root.join("payload/tool/luals"),
+            inventory,
+        )?
+        .verify_with_control(&inv.control)
+    })();
+    inv.control.check()?;
+    let tool = match runtime {
+        Ok(()) => json!({"id":"luals.runtime","ok":true,"detail":"bundled LuaLS 3.19.1 verified"}),
+        Err(error) => {
+            json!({"id":"luals.runtime","ok":false,"status":"warn","detail":error.message,"nextStep":"install the complete lycheedev npm package or native release for source refs/context semantic analysis and source validate --semantic"})
+        }
+    };
+    let mut providers = vec![tool];
+    if let Ok(project) = lycheedev_core::selection::find_project(&inv.cwd)
+        .and_then(|directory| lycheedev_core::selection::inspect_project(&directory))
+        && let Some(product) = project["project"]["product"].as_str()
+    {
+        let observed = lycheedev_source::git::mirror_health_with_control(
+            &inv.home,
+            "wow-ui-source",
+            product,
+            &inv.control,
+        );
+        inv.control.check()?;
+        let detail = match &observed {
+            Ok(value) if value["exists"] == false => {
+                format!("mirror for {product} is not initialized yet")
+            }
+            Ok(_) => format!(
+                "mirror for {product} is a contained bare SHA-1 repository; commit/object authentication is not covered by this format check"
+            ),
+            Err(error) => format!("mirror health probe failed: {}", error.message),
+        };
+        providers.push(json!({"id":"codebase.source_mirror","ok":true,"status":"unknown","detail":format!("{detail}; remote currency {}",if inv.flag_bool("--offline"){"not checked (--offline)"}else{"unknown"}),"nextStep":format!("run source sync --source wow-ui-source --product {product} to prepare or refresh the mirror"),"scope":"repository-format","objectsVerified":false}));
+    }
+    lycheedev_core::doctor::inspect_with_checks(inv, providers)
+}
+fn source_runtime_bundle_from_release(
+    root: &std::path::Path,
+    semantic: bool,
+    release: &lycheedev_delivery::release::Release,
+) -> Result<SourceRuntimeBundle> {
+    let identity: Value = serde_json::from_str(include_str!("../../../release/tools/luac.json"))?;
+    let runtime: lycheedev_source::luac::Manifest =
+        serde_json::from_value(identity["runtime"].clone())?;
+    let packaged: Value =
+        lycheedev_core::storage::read_json(&root.join("payload/tool/luac/runtime.json"))?;
+    if packaged != identity["runtime"] {
+        return Err(ToolkitError::new(
+            "luac.unavailable",
+            "bundled compiler manifest differs from pinned identity",
+            3,
+        ));
+    }
+    let luac = lycheedev_source::luac::Runtime::verified(&root.join("payload/tool/luac"), runtime)?;
+    let luals = if semantic {
+        let inventory = release
+            .resources
+            .iter()
+            .filter_map(|resource| {
+                resource
+                    .path
+                    .strip_prefix("tool/luals/")
+                    .map(|name| (name.to_owned(), resource.sha256.clone()))
+            })
+            .collect();
+        Some(lycheedev_source::luals::Runtime::prepare_inspected_release(
+            &root.join("payload/tool/luals"),
+            inventory,
+        )?)
+    } else {
+        None
+    };
+    Ok(SourceRuntimeBundle { luac, luals })
+}
+fn broker_options(args: &[String]) -> Result<BTreeMap<String, String>> {
+    let accepted = [
+        "--home",
+        "--release",
+        "--parent-pid",
+        "--parent-created",
+        "--start-token",
+    ];
+    if args.len() != 11
+        || args
+            .first()
+            .is_none_or(|arg| arg != "--source-broker-server")
+    {
+        return Err(ToolkitError::arguments(
+            "private Source broker startup requires exact owned arguments",
+        ));
+    }
+    let mut options = BTreeMap::new();
+    for pair in args[1..].as_chunks::<2>().0 {
+        if !accepted.contains(&pair[0].as_str())
+            || pair[1].is_empty()
+            || options.insert(pair[0].clone(), pair[1].clone()).is_some()
+        {
+            return Err(ToolkitError::arguments(
+                "private Source broker startup contains unknown or duplicate arguments",
+            ));
+        }
+    }
+    Ok(options)
+}
+fn broker_server(args: &[String]) -> Result<()> {
+    let flags = broker_options(args)?;
+    let token = &flags["--start-token"];
+    if !lycheedev_core::selection::valid_digest(token, 32)
+        || std::env::var("LYCHEEDEV_BROKER_START").ok().as_ref() != Some(token)
+    {
+        return Err(ToolkitError::invalid("broker parent startup token differs"));
+    }
+    let pid = flags["--parent-pid"]
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid != 0)
+        .ok_or_else(|| ToolkitError::arguments("broker parent PID is invalid"))?;
+    let created = flags["--parent-created"]
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value != 0)
+        .ok_or_else(|| ToolkitError::arguments("broker parent creation identity is invalid"))?;
+    let fault = |message: String| ToolkitError::new("luals.unavailable", message, 3);
+    let console = lycheedev_windows::cancellation::ConsoleCancellation::install().map_err(fault)?;
+    let control = lycheedev_core::control::OperationControl::new(
+        std::time::Instant::now() + std::time::Duration::from_secs(600),
+        console.token(),
+    );
+    let own = lycheedev_windows::Process::open(std::process::id()).map_err(fault)?;
+    if own.parent_pid().map_err(fault)? != pid {
+        return Err(ToolkitError::invalid("broker actual parent PID differs"));
+    }
+    let parent = lycheedev_windows::Process::open(pid).map_err(fault)?;
+    if parent.identity().created != created {
+        return Err(ToolkitError::invalid(
+            "broker parent creation identity differs",
+        ));
+    }
+    let exe = std::env::current_exe()?.canonicalize()?;
+    if parent.image_path().map_err(fault)?.canonicalize()? != exe {
+        return Err(ToolkitError::invalid(
+            "broker parent executable path differs",
+        ));
+    }
+    let root = PathBuf::from(&flags["--release"]).canonicalize()?;
+    let home = PathBuf::from(&flags["--home"]).canonicalize()?;
+    if !PathBuf::from(&flags["--home"]).is_absolute()
+        || !PathBuf::from(&flags["--release"]).is_absolute()
+    {
+        return Err(ToolkitError::arguments("broker roots must be absolute"));
+    }
+    let (_exe_hold, exe_sha) = lycheedev_core::storage::locked_sha256(&exe, 128 << 20, &control)?;
+    let (_release_hold, release_sha) =
+        lycheedev_core::storage::locked_sha256(&root.join("release.json"), 1 << 20, &control)?;
+    let release = lycheedev_delivery::release::inspect_with_control(&root, VERSION, &control)?;
+    let binary = &release.binaries["windows-amd64"];
+    if root.join(&binary.path).canonicalize()? != exe || binary.sha256 != exe_sha {
+        return Err(ToolkitError::invalid(
+            "broker executable is not this sealed release's native binary",
+        ));
+    }
+    let inv = Invocation {
+        command: String::new(),
+        positional: None,
+        flags,
+        home,
+        cwd: std::env::current_dir()?,
+        control,
+    };
+    let tools = source_runtime_bundle_from_release(&root, true, &release)?;
+    parent.verify().map_err(fault)?;
+    let identity = lycheedev_source::session::BrokerIdentity {
+        exe_path: exe,
+        exe_sha256: exe_sha,
+        release_root: root,
+        release_manifest_sha256: release_sha,
+    };
+    lycheedev_source::session::consume_startup(
+        &inv,
+        &identity,
+        pid,
+        created,
+        &inv.flags["--start-token"],
+    )?;
+    lycheedev_source::session::serve(
+        &inv,
+        lycheedev_source::SourceTools {
+            luac: Some(&tools.luac),
+            luals: tools.luals.as_ref(),
+        },
+        identity,
+    )
+}
+fn envelope(result: &Result<Outcome>) -> Value {
+    match result {
+        Ok(outcome) => {
+            let mut context = if outcome.selection["schema"] == "lycheedev.selection.v1" {
+                json!({"snapshot":outcome.selection["id"]})
+            } else {
+                outcome.selection.clone()
+            };
+            if !outcome.coverage.as_object().is_some_and(|m| m.is_empty())
+                && outcome.data.get("coverage") != Some(&outcome.coverage)
+            {
+                context["coverage"] = outcome.coverage.clone();
+            }
+            json!({"schema":"lycheedev.result.v1","ok":true,"operationId":outcome.operation["operationId"].as_str().unwrap_or(""),"context":context,"result":outcome.data,"captures":outcome.provenance,"warnings":outcome.warnings,"error":null})
+        }
+        Err(error) => {
+            let mut fault = json!({"code":error.code,"message":error.message,"stage":error.details["stage"].as_str().unwrap_or("dispatch"),"retryable":error.exit_code==6,"resumeOperationId":error.details["operationId"].as_str().unwrap_or("")});
+            if let Some(location) = error.details.get("location") {
+                fault["location"] = location.clone();
+            }
+            if let Some(details) = error.details.as_object() {
+                let mut public = details.clone();
+                public.remove("stage");
+                public.remove("__commandContext");
+                public.remove("location");
+                if !public.is_empty() {
+                    fault["details"] = Value::Object(public);
+                }
+            } else if !error.details.is_null() {
+                fault["details"] = error.details.clone();
+            }
+            json!({"schema":"lycheedev.result.v1","ok":false,"operationId":error.details["operationId"].as_str().unwrap_or(""),"context":error.details.get("__commandContext").or_else(||error.details.get("context")).cloned().unwrap_or(json!({})),"result":error.details.get("result").cloned().unwrap_or(Value::Null),"captures":error.details.get("captures").cloned().unwrap_or(json!([])),"warnings":[],"error":fault})
+        }
+    }
+}
+fn render(out: &mut impl Write, format: &str, result: &Result<Outcome>) -> Result<()> {
+    render_with_context(out, format, result, None)
+}
+fn render_with_context(
+    out: &mut impl Write,
+    format: &str,
+    result: &Result<Outcome>,
+    invocation: Option<&Invocation>,
+) -> Result<()> {
+    let mut value = envelope(result);
+    if let Some(inv) = invocation
+        && !inv.flag_bool("--help")
+        && let Some(seconds) = data_timeout_seconds(inv)?
+    {
+        value["context"]["timeoutSeconds"] = json!(seconds);
+    }
+    match format {
+        "json" => writeln!(out, "{value}")?,
+        "jsonl" => {
+            writeln!(
+                out,
+                "{}",
+                json!({"type":"begin","schema":"lycheedev.result.v1"})
+            )?;
+            match result {
+                Ok(outcome) => {
+                    writeln!(out, "{}", json!({"type":"record","result":outcome.data}))?;
+                    writeln!(out, "{}", json!({"type":"end","envelope":value}))?;
+                }
+                Err(_) => writeln!(out, "{}", json!({"type":"error","envelope":value}))?,
+            }
+        }
+        _ => match result {
+            Ok(outcome) => writeln!(out, "{}", serde_json::to_string_pretty(&outcome.data)?)?,
+            Err(error) => writeln!(out, "{error}")?,
+        },
+    }
+    out.flush()?;
+    Ok(())
+}
+fn data_timeout_seconds(inv: &Invocation) -> Result<Option<u64>> {
+    if contract::all().iter().any(|definition| {
+        definition.path == inv.command
+            && definition
+                .flags
+                .iter()
+                .any(|flag| flag.name() == "--timeout-seconds")
+    }) {
+        Ok(Some(
+            inv.usize_flag("--timeout-seconds", 300, 1, 3600)? as u64
+        ))
+    } else {
+        Ok(None)
+    }
+}
+fn operation_seconds(inv: &Invocation) -> Result<u64> {
+    if inv.command == "update" {
+        return Ok(600);
+    }
+    let command = contract::all()
+        .into_iter()
+        .find(|definition| definition.path == inv.command);
+    if let Some(seconds) = data_timeout_seconds(inv)? {
+        return Ok(seconds);
+    }
+    if command.as_ref().is_some_and(|definition| {
+        definition
+            .flags
+            .iter()
+            .any(|flag| flag.name() == "--wait-seconds")
+    }) {
+        return Ok(inv.usize_flag("--wait-seconds", 120, 1, 600)? as u64 + 60);
+    }
+    Ok(180)
+}
+fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
+    // Frozen Go's selected-content byte boundary is a query failure. Keep the
+    // diagnostic inside Data, and project the observed public asset envelope.
+    if matches!(inv.command.as_str(), "asset inspect" | "asset export")
+        && error.code == "records.metadata_limit"
+    {
+        error.message = error.code.clone();
+        error.details = json!({"stage":"query"});
+    }
+    if catalog_command(&inv.command) {
+        if error.code == "schema.definition_missing" {
+            error.code = "schema.definition_not_found".into();
+        }
+        if matches!(
+            error.code.as_str(),
+            "schema.definition_not_found"
+                | "schema.invalid_definition"
+                | "schema.ambiguous_definition"
+                | "schema.limit_exceeded"
+                | "records.definition_unavailable_offline"
+        ) {
+            error.message = error.code.clone();
+        }
+        // Frozen Go queryFault deliberately does not map table failures. Keep
+        // typed library errors internally and translate only this public seam.
+        let stage = match error.code.as_str() {
+            code if code.starts_with("table.") => {
+                error.message = error.code.clone();
+                error.code = "command.failed".into();
+                error.exit_code = 5;
+                Some("dispatch")
+            }
+            "records.content_missing" | "records.file_ambiguous" => {
+                error.message = if error.code == "records.content_missing" {
+                    "records.content_not_found".into()
+                } else {
+                    error.code.clone()
+                };
+                error.code = "command.failed".into();
+                error.exit_code = 5;
+                Some("dispatch")
+            }
+            "selection.project_missing"
+            | "selection.project_unlocked"
+            | "selection.project_format"
+            | "selection.project_conflict" => Some("selection"),
+            "records.query_limit"
+            | "records.request_conflict"
+            | "records.field_unknown"
+            | "records.field_type_mismatch"
+            | "records.record_not_found"
+            | "records.relation_cycle"
+            | "query.budget_exceeded"
+            | "records.definition_unavailable_offline"
+            | "records.definition_identity"
+            | "schema.definition_not_found"
+            | "schema.invalid_definition"
+            | "schema.ambiguous_definition"
+            | "schema.limit_exceeded"
+            | "records.query_resource_budget"
+            | "records.pinned_build_changed"
+            | "records.local_object_unavailable"
+            | "records.configuration_integrity"
+            | "records.invalid_metadata"
+            | "records.metadata_limit"
+            | "records.build_unavailable"
+            | "records.build_ambiguous"
+            | "container.key_unavailable"
+            | "container.unsupported_encoding"
+            | "container.resource_limit"
+            | "container.invalid_format"
+            | "container.integrity_mismatch"
+            | "selection.installation_missing"
+            | "selection.installation_ambiguous"
+            | "selection.installation_product_mismatch"
+            | "selection.installation_metadata_conflict"
+            | "selection.data_product_build_mismatch" => Some("query"),
+            _ => None,
+        };
+        if let Some(stage) = stage {
+            if !error.details.is_object() {
+                error.details = json!({});
+            }
+            error.details["stage"] = json!(stage);
+        }
+    }
+    if inv.command == "target available" && error.code == "selection.listing_requires_network" {
+        error.details = json!({"stage":"query"});
+    }
+    if inv.command == "asset export"
+        && (error.code.starts_with("texture.")
+            || [
+                "records.image_output_limit",
+                "records.export_conflict",
+                "records.export_path",
+                "records.export_options",
+            ]
+            .contains(&error.code.as_str()))
+    {
+        if !error.details.is_object() {
+            error.details = json!({});
+        }
+        error.details["stage"] = json!("export");
+    }
+    if ["source refs", "source context"].contains(&inv.command.as_str())
+        && ["codebase.invalid_symbol", "codebase.invalid_search_cursor"]
+            .contains(&error.code.as_str())
+    {
+        error.message = error.code.clone();
+        if !error.details.is_object() {
+            error.details = json!({});
+        }
+        error.details["stage"] = json!("query");
+        error.details["__commandContext"] =
+            json!({"snapshot":inv.flag("--snapshot").unwrap_or("")});
+    }
+    match error.code.as_str() {
+        "process.cancelled" | "operation.cancelled" => {
+            error.code = "command.cancelled".into();
+            error.exit_code = 7;
+        }
+        "vault.generation_conflict" => error.exit_code = 3,
+        "vault.record_missing" | "evidence.capture_referenced" => error.exit_code = 2,
+        "evidence.reference_scan_limit" => error.exit_code = 3,
+        "codebase.incompatible_comparison"
+        | "codebase.incomplete_index"
+        | "codebase.source_pin_required"
+        | "codebase.index_not_ready"
+            if inv.command == "source diff" =>
+        {
+            error.code = "command.failed".into()
+        }
+        _ => {}
+    }
+    if error.message == "External process execution deadline exceeded"
+        && let Err(control) = inv.control.check()
+    {
+        error.code = control.code;
+        error.exit_code = control.exit_code;
+    }
+    if error.code == "command.deadline" && inv.command.starts_with("live ") {
+        error.code = "live.deadline_pending".into();
+        error.exit_code = 6;
+    }
+    error
+}
+struct StreamWriter<'a, W: Write> {
+    out: &'a mut W,
+    yielded: bool,
+}
+impl<W: Write> StreamWriter<'_, W> {
+    fn emit(&mut self, frame: &Value) -> Result<()> {
+        self.yielded = true;
+        writeln!(self.out, "{frame}")?;
+        self.out.flush()?;
+        Ok(())
+    }
+}
+fn stream_fault(mut error: ToolkitError, yielded: bool) -> ToolkitError {
+    if yielded && error.code == "command.deadline" {
+        error.exit_code = 7;
+    }
+    error
+}
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args
+        .first()
+        .is_some_and(|value| value == "--source-native-session-server")
+    {
+        let result = lycheedev_source::native_session::server(&args);
+        if let Err(error) = &result {
+            let _ = writeln!(std::io::stderr(), "{error}");
+        }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
+        .is_some_and(|value| value == "--source-native-worker")
+    {
+        let result = if args.len() == 1 {
+            lycheedev_source::native_research::worker_stdio()
+        } else {
+            Err(ToolkitError::arguments(
+                "private Source native worker accepts stdin only",
+            ))
+        };
+        if let Err(error) = &result {
+            let _ = writeln!(std::io::stderr(), "{error}");
+        }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
+        .is_some_and(|value| value == "--source-flow-worker")
+    {
+        let result = if args.len() == 1 {
+            lycheedev_source::flow::public::worker_stdio()
+        } else {
+            Err(ToolkitError::arguments(
+                "private Source flow worker accepts stdin only",
+            ))
+        };
+        if let Err(error) = &result {
+            let _ = writeln!(std::io::stderr(), "{error}");
+        }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
+        .is_some_and(|value| value == "--source-broker-server")
+    {
+        let result = broker_server(&args);
+        if let Err(error) = &result {
+            let _ = writeln!(std::io::stderr(), "{error}");
+        }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
+        .is_some_and(|value| value == "__lycheedev_update_apply")
+    {
+        let mut format = String::from("json");
+        let result = (|| -> Result<Outcome> {
+            if args.len() != 3 {
+                return Err(ToolkitError::arguments(
+                    "private update handoff requires exact file and nonce",
+                ));
+            }
+            let path = PathBuf::from(&args[1]).canonicalize()?;
+            format = lycheedev_delivery::npm_update::helper_format(&path)?;
+            let console = lycheedev_windows::cancellation::ConsoleCancellation::install()
+                .map_err(|error| ToolkitError::new("windows.console_unavailable", error, 3))?;
+            let control = lycheedev_delivery::npm_update::helper_control(&path, console.token())?;
+            lycheedev_delivery::npm_update::apply_handoff(&path, &args[2], &control)
+        })();
+        if let Err(error) = render(&mut std::io::stdout().lock(), &format, &result) {
+            let _ = writeln!(std::io::stderr(), "output: {error}");
+            std::process::exit(5);
+        }
+        std::process::exit(result.err().map(|error| error.exit_code).unwrap_or(0));
+    }
+    let mut parsed = parse(&args);
+    let mut console = None;
+    if let Ok(inv) = &mut parsed
+        && !["", "version", "describe"].contains(&inv.command.as_str())
+        && !inv.flag_bool("--help")
+    {
+        match lycheedev_windows::cancellation::ConsoleCancellation::install() {
+            Ok(handler) => {
+                let seconds = match operation_seconds(inv) {
+                    Ok(seconds) => seconds,
+                    Err(error) => {
+                        parsed = Err(error);
+                        0
+                    }
+                };
+                if seconds == 0 {
+                    drop(handler);
+                } else {
+                    let inv = parsed.as_mut().expect("validated invocation");
+                    inv.control = lycheedev_core::control::OperationControl::new(
+                        std::time::Instant::now() + std::time::Duration::from_secs(seconds),
+                        handler.token(),
+                    );
+                    console = Some(handler);
+                }
+            }
+            Err(message) => {
+                parsed = Err(ToolkitError::new("windows.console_unavailable", message, 3))
+            }
+        }
+    }
+    let mut format = "text";
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--format" {
+            if let Some(value) = args.get(index + 1) {
+                format = value;
+            }
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            format = value;
+        }
+    }
+    if !["text", "json", "jsonl"].contains(&format) {
+        format = "json";
+    }
+    let mut stdout = std::io::stdout().lock();
+    let mut yielded = false;
+    let result = parsed.as_ref().map_err(Clone::clone).and_then(|inv| {
+        inv.control
+            .check()
+            .and_then(|_| {
+                if inv.command == "data db2 stream" && !inv.flag_bool("--help") {
+                    let mut stream = StreamWriter {
+                        out: &mut stdout,
+                        yielded: false,
+                    };
+                    let result =
+                        lycheedev_data::stream::stream(inv, &mut |frame| stream.emit(frame));
+                    yielded = stream.yielded;
+                    result.map_err(|error| stream_fault(error, yielded))
+                } else {
+                    dispatch(inv)
+                }
+            })
+            .map_err(|error| command_fault(inv, error))
+    });
+    if !yielded
+        && let Err(error) = render_with_context(&mut stdout, format, &result, parsed.as_ref().ok())
+    {
+        let _ = writeln!(std::io::stderr(), "output: {error}");
+        std::process::exit(5);
+    }
+    let exit = result.err().map(|e| e.exit_code).unwrap_or(0);
+    drop(console);
+    std::process::exit(exit);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+    #[test]
+    fn passive_instances_public_parser_and_report_do_not_enter_target_selection() {
+        use lycheedev_live::{host::{Services, Target}, lifecycle::{Session, Transport}, managed::ManagedInstallation, passive::Report};
+        struct PassiveOnly;
+        impl Services for PassiveOnly {
+            fn instances(&self, _: &Invocation) -> Result<Report> {
+                Ok(Report { installations: vec![], candidates: None })
+            }
+            fn targets(&self, _: &Invocation) -> Result<Vec<Target>> { panic!("passive request entered target selection") }
+            fn open(&self, _: &Target, _: Option<&Session>) -> Result<Box<dyn Transport>> { panic!("passive request opened transport") }
+            fn managed(&self) -> &dyn ManagedInstallation { panic!("passive request opened installation") }
+        }
+        for command in [args(&["live", "instances"]), args(&["--passive", "live", "instances"])] {
+            let inv = parse(&command).unwrap();
+            let outcome = lycheedev_live::host::dispatch_with(&inv, &PassiveOnly);
+            assert_eq!(envelope(&outcome), json!({"schema":"lycheedev.result.v1","ok":true,"operationId":"","context":{},"result":{"installations":[],"candidates":null},"captures":[],"warnings":[],"error":null}));
+            let error = command_fault(&inv, ToolkitError::new("command.deadline", "expired", 5));
+            assert_eq!((error.code.as_str(), error.exit_code), ("live.deadline_pending", 6));
+        }
+        for command in [
+            args(&["live", "instances", "--passive=false"]),
+            args(&["live", "instances", "--passive", "--passive"]),
+            args(&["live", "instances", "--pid", "12"]),
+            args(&["live", "instances", "--project", "P-123"]),
+            args(&["live", "connect", "--passive"]),
+        ] {
+            assert_eq!(parse(&command).unwrap_err().exit_code, 2);
+        }
+    }
+    #[test]
+    fn asset_content_limit_keeps_the_observed_go_error_envelope() {
+        for command in ["inspect", "export"] {
+            let inv = parse(&args(&["asset", command])).unwrap();
+            let error = command_fault(
+                &inv,
+                ToolkitError::new(
+                    "records.metadata_limit",
+                    "Selected encoded content exceeds byte budget",
+                    3,
+                ),
+            );
+            assert_eq!(error.exit_code, 3);
+            assert_eq!(
+                envelope(&Err(error)),
+                json!({
+                    "schema":"lycheedev.result.v1","ok":false,"operationId":"",
+                    "context":{},"result":null,"captures":[],"warnings":[],
+                    "error":{"code":"records.metadata_limit","message":"records.metadata_limit",
+                        "stage":"query","retryable":false,"resumeOperationId":""}
+                })
+            );
+        }
+    }
+    #[test]
+    fn catalog_depth_parse_order_and_public_fault_stages_match_go() {
+        for (tail, expected) in [
+            (
+                vec!["--max-depth", "-1", "--journal-encounter-id", "bad"],
+                "invalid --max-depth",
+            ),
+            (
+                vec!["--journal-encounter-id", "bad", "--max-depth", "-1"],
+                "invalid --journal-encounter-id",
+            ),
+            (
+                vec!["--max-depth", "9223372036854775808"],
+                "invalid --max-depth",
+            ),
+        ] {
+            let mut input = args(&["data", "encounter", "get"]);
+            input.extend(args(&tail));
+            let error = parse(&input).unwrap_err();
+            assert_eq!(error.message, expected);
+            assert_eq!(envelope(&Err(error))["context"], json!({}));
+        }
+        let inv = parse(&args(&["data", "encounter", "get", "--max-depth", "+1"])).unwrap();
+        for (internal, message, exit, public, stage) in [
+            (
+                "records.relation_cycle",
+                "records.relation_cycle",
+                4,
+                "records.relation_cycle",
+                "query",
+            ),
+            (
+                "records.query_limit",
+                "records.query_limit",
+                2,
+                "records.query_limit",
+                "query",
+            ),
+            (
+                "query.budget_exceeded",
+                "relational.budget_exceeded",
+                3,
+                "query.budget_exceeded",
+                "query",
+            ),
+            (
+                "schema.definition_not_found",
+                "schema.definition_not_found",
+                3,
+                "schema.definition_not_found",
+                "query",
+            ),
+            (
+                "table.invalid_format",
+                "table.invalid_format",
+                5,
+                "command.failed",
+                "dispatch",
+            ),
+            (
+                "records.content_missing",
+                "records.content_not_found",
+                5,
+                "command.failed",
+                "dispatch",
+            ),
+            (
+                "selection.project_unlocked",
+                "selection.project_unlocked",
+                3,
+                "selection.project_unlocked",
+                "selection",
+            ),
+        ] {
+            let error = command_fault(&inv, ToolkitError::new(internal, message, exit));
+            assert_eq!(
+                (error.code.as_str(), error.message.as_str(), error.exit_code),
+                (public, message, exit)
+            );
+            assert_eq!(error.details["stage"], stage);
+        }
+    }
+
+    #[test]
+    fn public_evidence_verify_returns_the_exact_capture_after_checking_its_blob() {
+        use lycheedev_core::{evidence, workspace};
+        let home = std::env::temp_dir().join(format!(
+            "lycheedev-cli-verify-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert!(!home.exists());
+        workspace::initialize(&home).unwrap();
+        let capture = evidence::commit_capture(
+            &home,
+            b"123",
+            "application/json",
+            json!({"kind":"fixture","locator":"cli:verify"}),
+            true,
+            false,
+        )
+        .unwrap();
+        let inv = parse(&args(&[
+            "evidence",
+            "verify",
+            capture["id"].as_str().unwrap(),
+            "--home",
+            home.to_str().unwrap(),
+        ]))
+        .unwrap();
+        let internal = evidence::dispatch(&inv).unwrap();
+        assert_eq!(internal.data, json!({"capture":capture,"verified":true}));
+        let result = dispatch(&inv);
+        let expected = json!({"schema":"lycheedev.result.v1","ok":true,"operationId":"","context":{},"result":capture,"captures":[],"warnings":[],"error":null});
+        assert_eq!(envelope(&result), expected);
+        for format in ["json", "jsonl"] {
+            let mut raw = Vec::new();
+            render_with_context(&mut raw, format, &result, Some(&inv)).unwrap();
+            let frames = String::from_utf8(raw)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            if format == "json" {
+                assert_eq!(frames, vec![expected.clone()]);
+            } else {
+                assert_eq!(
+                    frames,
+                    vec![
+                        json!({"type":"begin","schema":"lycheedev.result.v1"}),
+                        json!({"type":"record","result":capture}),
+                        json!({"type":"end","envelope":expected})
+                    ]
+                );
+            }
+        }
+        // Replacing the blob with equally sized bytes must still fail before
+        // the presentation projection can return a successful capture.
+        std::fs::write(
+            evidence::blob_path(&home, capture["blob"]["sha256"].as_str().unwrap()).unwrap(),
+            b"456",
+        )
+        .unwrap();
+        assert!(dispatch(&inv).is_err());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn public_parser_flag_value_messages_match_the_frozen_contract() {
+        for flag in ["--format", "--home"] {
+            let error = parse(&args(&["version", flag])).unwrap_err();
+            assert_eq!(error.message, format!("missing value for {flag}"));
+            assert_eq!(error.exit_code, 2);
+        }
+        let error = parse(&args(&["version", "--format", "not-a-format"])).unwrap_err();
+        assert_eq!(error.message, "format must be text, json, or jsonl");
+        assert_eq!(error.exit_code, 2);
+    }
+    #[test]
+    fn unknown_and_route_flags_keep_priority_over_typed_data_id_validation() {
+        for (path, flag) in [
+            ("data spell auras", "--spell-id"),
+            ("data item get", "--item-id"),
+            ("data spell summons", "--npc-id"),
+            ("data creature display", "--display-id"),
+            ("data encounter get", "--journal-encounter-id"),
+        ] {
+            let mut input: Vec<String> = path.split_whitespace().map(str::to_owned).collect();
+            input.extend([format!("{flag}="), "--__rust_parity_unknown_flag".into()]);
+            let error = parse(&input).unwrap_err();
+            assert_eq!(error.message, "unknown flag --__rust_parity_unknown_flag");
+            assert_eq!(error.exit_code, 2);
+            let mut raw = Vec::new();
+            render_with_context(&mut raw, "json", &Err(error), None).unwrap();
+            let envelope: Value = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(envelope["context"], json!({}));
+            assert_eq!(envelope["error"]["stage"], "dispatch");
+            input.pop();
+            assert_eq!(
+                parse(&input).unwrap_err().message,
+                format!("invalid {flag}")
+            );
+            input.extend(["--output".into(), "unused".into()]);
+            assert_eq!(
+                parse(&input).unwrap_err().message,
+                format!("{path} does not accept --output")
+            );
+        }
+    }
+    #[test]
+    fn bounded_data_envelopes_preserve_timeout_after_parse_on_success_and_failure() {
+        let inv = parse(&args(&["data", "spell", "auras", "--spell-id", "100"])).unwrap();
+        let mut outcome = Outcome::new(json!({"spellID":100}));
+        outcome.selection = json!({"schema":"lycheedev.selection.v1","id":"PIN-kept"});
+        let mut raw = vec![];
+        render_with_context(&mut raw, "json", &Ok(outcome), Some(&inv)).unwrap();
+        let value: Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(
+            value["context"],
+            json!({"snapshot":"PIN-kept","timeoutSeconds":300})
+        );
+
+        let missing = parse(&args(&["data", "spell", "auras"])).unwrap();
+        raw.clear();
+        render_with_context(&mut raw, "json", &dispatch(&missing), Some(&missing)).unwrap();
+        let value: Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(value["context"], json!({"timeoutSeconds":300}));
+        assert_eq!(
+            value["error"]["message"],
+            "data spell auras requires --spell-id"
+        );
+
+        let explicit = parse(&args(&["data", "sql", "--timeout-seconds", "1"])).unwrap();
+        raw.clear();
+        render_with_context(
+            &mut raw,
+            "jsonl",
+            &Err(ToolkitError::new("command.deadline", "deadline", 5)
+                .with_details(json!({"__commandContext":{"snapshot":"PIN-kept"}}))),
+            Some(&explicit),
+        )
+        .unwrap();
+        let frames: Vec<Value> = String::from_utf8(raw)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(frames.last().unwrap()["type"], "error");
+        assert_eq!(
+            frames.last().unwrap()["envelope"]["context"],
+            json!({"snapshot":"PIN-kept","timeoutSeconds":1})
+        );
+    }
+    #[test]
+    fn parse_failures_help_and_nonquery_commands_do_not_gain_data_timeout_context() {
+        for value in ["0", "-1", "+1", "4294967296", "bad"] {
+            let parsed = parse(&args(&["data", "spell", "auras", "--spell-id", value]));
+            assert!(parsed.is_err());
+            let mut raw = vec![];
+            render_with_context(&mut raw, "json", &Err(parsed.unwrap_err()), None).unwrap();
+            let value: Value = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(value["context"], json!({}));
+        }
+        assert!(parse(&args(&["data", "spell", "summons", "--npc-id", "0"])).is_ok());
+        assert!(
+            parse(&args(&[
+                "data",
+                "spell",
+                "summons",
+                "--npc-id",
+                "4294967296"
+            ]))
+            .is_err()
+        );
+        for command in [
+            vec!["data", "spell", "auras", "--help"],
+            vec!["data", "hotfix"],
+            vec!["asset", "inspect"],
+            vec!["source", "list"],
+        ] {
+            let inv = parse(&args(&command)).unwrap();
+            let mut raw = vec![];
+            render_with_context(&mut raw, "json", &Ok(Outcome::new(json!({}))), Some(&inv))
+                .unwrap();
+            let value: Value = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(value["context"], json!({}));
+        }
+    }
+    #[test]
+    fn repeated_scopes_are_retained_only_on_their_contract() {
+        let inv = parse(&args(&[
+            "update",
+            "--path",
+            "a",
+            "--path",
+            "b",
+            "--installation",
+            "c",
+            "--installation",
+            "d",
+        ]))
+        .unwrap();
+        assert_eq!(inv.flag_values("--path"), ["a", "b"]);
+        assert_eq!(inv.flag_values("--installation"), ["c", "d"]);
+        assert!(parse(&args(&["source", "inspect", "--path", "a", "--path", "b"])).is_err());
+        assert!(parse(&args(&["version", "--format", "json", "--format", "text"])).is_err());
+    }
+    #[test]
+    fn longest_path_and_required_argument_admission_are_stable() {
+        assert_eq!(
+            parse(&args(&["data", "db2", "schema", "Spell"]))
+                .unwrap()
+                .command,
+            "data db2 schema"
+        );
+        assert_eq!(
+            parse(&args(&["evidence", "show"])).err().unwrap().exit_code,
+            2
+        );
+        assert!(parse(&args(&["evidence", "show", "--help"])).is_ok());
+        assert!(parse(&args(&["version", "extra"])).is_err());
+    }
+    #[test]
+    fn jsonl_errors_never_claim_end_and_preserve_usable_result() {
+        let result=Err(ToolkitError::new("live.pending","pending settlement",6).with_details(json!({"operationId":"CON-exact","result":{"report":{"state":"verified"},"complete":false},"captures":[{"id":"CAP-kept"}]})));
+        let mut out = vec![];
+        render(&mut out, "jsonl", &result).unwrap();
+        let frames: Vec<Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0]["type"], "begin");
+        assert_eq!(frames[1]["type"], "error");
+        assert_eq!(
+            frames[1]["envelope"]["result"]["report"]["state"],
+            "verified"
+        );
+        assert_eq!(frames[1]["envelope"]["operationId"], "CON-exact");
+    }
+    #[test]
+    fn jsonl_complete_transport_retains_partial_business_coverage() {
+        let mut out = vec![];
+        let mut outcome =
+            Outcome::new(json!({"complete":false,"truncated":true,"coverage":{"complete":true}}));
+        outcome.complete = false;
+        render(&mut out, "jsonl", &Ok(outcome)).unwrap();
+        let frames: Vec<Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[2]["type"], "end");
+        assert_eq!(frames[2]["envelope"]["result"]["complete"], false);
+    }
+    struct Closed;
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "closed consumer",
+            ))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn closed_output_returns_io_fault_instead_of_panicking() {
+        assert_eq!(
+            render(&mut Closed, "jsonl", &Ok(Outcome::new(json!({}))))
+                .err()
+                .unwrap()
+                .exit_code,
+            5
+        );
+    }
+    #[test]
+    fn default_context_keeps_legacy_identity_without_duplicate_selection() {
+        let mut outcome = Outcome::new(json!({"coverage":{"complete":true}}));
+        outcome.selection = json!({"schema":"lycheedev.selection.v1","id":"PIN-exact","source":{"exactCommit":"fixed"}});
+        outcome.coverage = json!({"complete":true});
+        let env = envelope(&Ok(outcome));
+        assert_eq!(env["context"], json!({"snapshot":"PIN-exact"}));
+        assert_eq!(env["result"]["coverage"]["complete"], true);
+    }
+    #[test]
+    fn local_target_default_offline_ref_and_named_resolution_preserve_observed_identity() {
+        use lycheedev_core::{metadata::Metadata, selection, storage, workspace};
+        let root = std::env::temp_dir().join(format!(
+            "lycheedev-cli-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let selected = root.join("renamed-client");
+        let home = root.join("workspace");
+        std::fs::create_dir_all(&selected).unwrap();
+        std::fs::write(
+            selected.join(".flavor.info"),
+            "Product Flavor!STRING:0\nwow\n",
+        )
+        .unwrap();
+        std::fs::write(selected.join("version.txt"), "12.1.0.69933").unwrap();
+        let key = "6854a2d8622b8d8a65fd8ce724f32334";
+        let config_path = root.join("Data/config/68/54");
+        std::fs::create_dir_all(&config_path).unwrap();
+        std::fs::write(config_path.join(key), b"root = 01234567890123456789012345678901\nencoding = 01234567890123456789012345678901 abcdef01234567890123456789012345\nencoding-size = 20 30\n").unwrap();
+        std::fs::write(root.join(".build.info"), format!("Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\nwow|12.1.0.69933|{key}|{key}|1\n")).unwrap();
+        workspace::initialize(&home).unwrap();
+        let mut direct = parse(&args(&[
+            "target",
+            "resolve",
+            "--installation",
+            selected.to_str().unwrap(),
+            "--region",
+            "cn",
+            "--locale",
+            "zhCN",
+            "--offline",
+            "--home",
+            home.to_str().unwrap(),
+        ]))
+        .unwrap();
+        assert_eq!(
+            dispatch(&direct).unwrap_err().code,
+            "records.definition_unavailable_offline"
+        );
+        let commit = "a".repeat(40);
+        Metadata::open(&home, true)
+            .unwrap()
+            .put(
+                &format!("definition-ref/{}", storage::sha256(b"refs/heads/master")),
+                &json!({"reference":"refs/heads/master","commit":commit}),
+                None,
+            )
+            .unwrap();
+        let outcome = dispatch(&direct).unwrap();
+        assert_eq!(outcome.data["data"]["product"], "retail");
+        assert_eq!(outcome.data["data"]["region"], "cn");
+        assert_eq!(outcome.data["data"]["fullBuild"], "12.1.0.69933");
+        assert_eq!(outcome.data["data"]["definitionCommit"], commit);
+        assert_eq!(outcome.provenance.len(), 1);
+        let id = outcome.data["id"].as_str().unwrap();
+        assert!(selection::load_pinned(&home, id).is_ok());
+        direct.flags.insert("--product".into(), "classic".into());
+        assert_eq!(
+            dispatch(&direct).unwrap_err().code,
+            "records.client_identity"
+        );
+        let add = parse(&args(&[
+            "target",
+            "add",
+            "fixture",
+            "--installation",
+            selected.to_str().unwrap(),
+            "--product",
+            "retail",
+            "--region",
+            "cn",
+            "--locale",
+            "zhCN",
+            "--home",
+            home.to_str().unwrap(),
+        ]))
+        .unwrap();
+        dispatch(&add).unwrap();
+        let named = parse(&args(&[
+            "target",
+            "resolve",
+            "--target",
+            "fixture",
+            "--offline",
+            "--home",
+            home.to_str().unwrap(),
+        ]))
+        .unwrap();
+        let resolved = dispatch(&named).unwrap();
+        assert_eq!(resolved.data["pin"]["id"], id);
+        assert_eq!(resolved.data["config"]["name"], "fixture");
+        let metadata = Metadata::open(&home, false).unwrap();
+        assert!(
+            metadata
+                .read::<Value>(&format!("target-ref/fixture/pin/{id}"))
+                .is_ok()
+        );
+        assert!(!selected.join("LycheeDev").exists());
+    }
+    #[test]
+    fn public_operation_budget_honors_entire_query_and_explicit_live_wait_limits() {
+        let query = parse(&args(&[
+            "data",
+            "sql",
+            "--sql",
+            "select 1",
+            "--timeout-seconds",
+            "3600",
+        ]))
+        .unwrap();
+        assert_eq!(operation_seconds(&query).unwrap(), 3600);
+        let live = parse(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
+        assert_eq!(operation_seconds(&live).unwrap(), 660);
+        let invalid = parse(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap();
+        assert_eq!(operation_seconds(&invalid).unwrap_err().exit_code, 2);
+        let deadline = ToolkitError::new("command.deadline", "exhausted", 5);
+        let pending = command_fault(&live, deadline.clone());
+        assert_eq!(pending.exit_code, 6);
+        assert_eq!(pending.code, "live.deadline_pending");
+        assert_eq!(command_fault(&query, deadline).exit_code, 5);
+        assert_eq!(
+            command_fault(&live, ToolkitError::new("command.cancelled", "caller", 7)).exit_code,
+            7
+        );
+    }
+    #[test]
+    fn typed_stream_has_no_generic_envelope_and_maps_only_yielded_deadlines_to_seven() {
+        let mut out = vec![];
+        let mut writer = StreamWriter {
+            out: &mut out,
+            yielded: false,
+        };
+        writer
+            .emit(&json!({"frame":"begin","begin":{"table":"Map"}}))
+            .unwrap();
+        writer
+            .emit(&json!({"frame":"record","record":{"ID":1,"Float":-230.989}}))
+            .unwrap();
+        assert!(writer.yielded);
+        let text = String::from_utf8(out).unwrap();
+        assert!(!text.contains("lycheedev.result.v1"));
+        assert!(!text.contains("\"end\""));
+        let deadline = ToolkitError::new("command.deadline", "whole query expired", 5);
+        assert_eq!(stream_fault(deadline.clone(), false).exit_code, 5);
+        assert_eq!(stream_fault(deadline, true).exit_code, 7);
+        let mut closed = Closed;
+        let mut writer = StreamWriter {
+            out: &mut closed,
+            yielded: false,
+        };
+        assert_eq!(
+            writer
+                .emit(&json!({"frame":"begin"}))
+                .unwrap_err()
+                .exit_code,
+            5
+        );
+        assert!(writer.yielded);
+    }
+    #[test]
+    fn query_stage_control_is_projected_once_and_business_evidence_is_kept() {
+        let fault = ToolkitError::new("relational.field_unknown", "missing field", 2)
+            .with_details(json!({"stage":"query"}));
+        let value = envelope(&Err(fault));
+        assert_eq!(value["error"]["stage"], "query");
+        assert!(value["error"].get("details").is_none());
+        let fault = ToolkitError::new("source.partial", "usable evidence", 3).with_details(
+            json!({"stage":"query","result":{"verified":true},"captures":[{"id":"CAP-kept"}]}),
+        );
+        let value = envelope(&Err(fault));
+        assert_eq!(value["result"]["verified"], true);
+        assert_eq!(value["captures"][0]["id"], "CAP-kept");
+        assert_eq!(value["error"]["details"]["result"]["verified"], true);
+        assert!(value["error"]["details"].get("stage").is_none());
+    }
+    #[test]
+    fn private_source_broker_startup_rejects_unknown_duplicate_and_missing_identity_arguments() {
+        let valid = args(&[
+            "--source-broker-server",
+            "--home",
+            "D:/fixture/home",
+            "--release",
+            "D:/fixture/release",
+            "--parent-pid",
+            "123",
+            "--parent-created",
+            "456",
+            "--start-token",
+            "0123456789abcdef0123456789abcdef",
+        ]);
+        assert_eq!(broker_options(&valid).unwrap().len(), 5);
+        let mut unknown = valid.clone();
+        unknown[3] = "--public-test-flag".into();
+        assert_eq!(broker_options(&unknown).unwrap_err().exit_code, 2);
+        let mut duplicate = valid.clone();
+        duplicate[3] = "--home".into();
+        assert_eq!(broker_options(&duplicate).unwrap_err().exit_code, 2);
+        assert_eq!(broker_options(&valid[..9]).unwrap_err().exit_code, 2);
+        let mut extra = valid;
+        extra.push("--help".into());
+        assert_eq!(broker_options(&extra).unwrap_err().exit_code, 2);
+    }
+    #[test]
+    fn structured_query_location_is_projected_once_without_losing_business_details() {
+        let location = json!({"offset":25,"line":1,"column":26});
+        let error = ToolkitError::new(
+            "query.invalid_syntax",
+            "relational.invalid_syntax at 1:26: expected ALL",
+            2,
+        )
+        .with_details(json!({"stage":"query","location":location}));
+        let value = envelope(&Err(error));
+        assert_eq!(value["error"]["location"], location);
+        assert!(value["error"].get("details").is_none());
+        let error = ToolkitError::new("query.invalid_syntax", "invalid", 2)
+            .with_details(json!({"location":location,"evidence":"kept"}));
+        assert_eq!(
+            envelope(&Err(error))["error"]["details"]["evidence"],
+            "kept"
+        );
+    }
+}

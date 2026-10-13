@@ -1,0 +1,234 @@
+{
+  "schema": "lycheedev.source-input-contract.v1",
+  "rulesVersion": "wow-native-binding-context-v6-control-occurrences",
+  "original": [
+    {
+      "file": "owned.lua",
+      "bytes": 16,
+      "sha256": "41e3d47e8c6b6888bce89a0d466c6bb472805b27aa05f539a70bfe9c99e05abf",
+      "analysisBytes": 16,
+      "analysisSHA256": "41e3d47e8c6b6888bce89a0d466c6bb472805b27aa05f539a70bfe9c99e05abf",
+      "map": {
+        "kind": "identity"
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "name": "input:actual_original_bytes",
+      "expected": "local value = 1\n"
+    },
+    {
+      "name": "input:syntax_is_pending",
+      "expected": "pending"
+    },
+    {
+      "name": "input:never_executes_source",
+      "expected": false
+    },
+    {
+      "name": "input:never_executes_config",
+      "expected": false
+    },
+    {
+      "name": "input:hash_tamper",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:unmapped_analysis_tamper",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:fake_bom_map",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:duplicate_path",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:windows_case_collision",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:path_escape",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:empty_input",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:byte_budget",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:prototype_ceiling",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:missing_load_file",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:wrong_luac_version",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:relative_logical_root",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:wrong_analysis_lua_version",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:unverified_external_library",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:bom_unicode_original_range",
+      "expected": [
+        9,
+        12
+      ]
+    },
+    {
+      "name": "input:bom_reverse_range",
+      "expected": [
+        6,
+        9
+      ]
+    },
+    {
+      "name": "input:unicode_boundary_rejected",
+      "expected": 4
+    },
+    {
+      "name": "input:removed_bom_not_analysis",
+      "expected": 4
+    },
+    {
+      "name": "input:phase_invalidates_key",
+      "expected": true
+    },
+    {
+      "name": "input:duplicate_load_invalidates_key",
+      "expected": true
+    },
+    {
+      "name": "input:duplicate_load_preserved",
+      "expected": 2
+    },
+    {
+      "name": "input:source_identity_invalidates_key",
+      "expected": true
+    },
+    {
+      "name": "input:actual_limits_in_key",
+      "expected": true
+    },
+    {
+      "name": "input:luac_identity_invalidates_key",
+      "expected": true
+    },
+    {
+      "name": "input:cancel_classification",
+      "expected": {
+        "code": "command.cancelled",
+        "exit": 7
+      }
+    },
+    {
+      "name": "input:deadline_classification",
+      "expected": {
+        "code": "command.deadline",
+        "exit": 5
+      }
+    },
+    {
+      "name": "input:larger_control_budget_refused",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:prepare_uses_admitted_file",
+      "expected": [
+        "owned.lua"
+      ]
+    },
+    {
+      "name": "input:prepare_clock_reset_refused",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:prepare_foreign_token_refused",
+      "expected": {
+        "code": "source.native_invalid_input",
+        "exit": 4
+      }
+    },
+    {
+      "name": "input:cancel_after_admit",
+      "expected": {
+        "code": "command.cancelled",
+        "exit": 7
+      }
+    },
+    {
+      "name": "input:deadline_after_admit",
+      "expected": {
+        "code": "command.deadline",
+        "exit": 5
+      }
+    }
+  ],
+  "scope": "fixed dynamicadmission/map/identity/control cases; no full Source or public migration"
+}

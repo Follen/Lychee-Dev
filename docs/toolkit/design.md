@@ -1,5 +1,7 @@
 # Lychee Dev Toolkit 2.0 设计方案
 
+2026-10-12 Rust 重构候选的 Mailbox 定位按 [总方案 §7](rust-refactor-plan-2026-10-08.md#7-mailbox-运行时指令定位与-lua-路径读取)：参考 Go `v3.1.0`，在指定进程的运行时代码中匹配指令特征、解析有符号 RIP 位移，动态求出 Lua 根 RVA，再从 `module base + Lua 根 RVA` 沿 `Lua state → globals → LycheeDevInternal → Mailbox` 读取。停止私有堆暴扫及 hints/附近搜索回退；新定位入口不读取或哈希磁盘 EXE，不沿用固定数值 RVA。`3.1.0` 是参考实现版本，不改变产品版本或发行渠道；本修订不表示 Rust 生产通道或实机验收已完成。
+
 2026-10-01 Native CON 当前实现合同为 [Mailbox 协议](live-mailbox-protocol-2026-10-01.md)：200 槽、wire06、slot.v3、identity.v2、input.v2、公开 Mailbox 定点读取；无旧原生协议兼容或扫描回退。后文旧 QR、64 槽与扫描说明保留历史范围。
 
 2026-09-30 [D 阶段研究合同](phase-d-publication-luals-session-2026-09-30.md) 约束后续

@@ -1,0 +1,1129 @@
+{
+  "schema": "lycheedev.creature-public-extra-cases.v1",
+  "scope": "Planned authenticated synthetic fixtures. Recipes are a construction contract, not evidence of execution. Baseline 17 cases remain in creature-public-cases.json.",
+  "fixtures": {
+    "creature": "Existing baseline from creature_navigation_parity::tables(), unchanged.",
+    "firstModelNoDisplays": "Baseline without the ModelID=2 display rows (10 and 30); retain model rows 2 and 3 for file 500 and display 20 for model 3.",
+    "modelFileZero": "Baseline with CreatureModelData row 2 FileDataID=0; direct display 10 stays complete and emits no model_file relation.",
+    "scalarTextures": "Baseline with TextureVariationFileDataID a scalar uint field (800 on display 10); every projection is [].",
+    "signedTextures": "Baseline with TextureVariationFileDataID int32[2]; display 10 is [-1,800], other rows [0,0].",
+    "floatTextures": "Baseline with TextureVariationFileDataID float32[2]; display 10 is [800.75,900.5], other rows [0,0]; all texture projections are [].",
+    "missingPresentation": "Baseline without TextureVariationFileDataID and without both GeosetIndex/GeosetValue columns; display 10 has variations [100,100].",
+    "signedGeosets": "Baseline except Geoset rows are ID1/display10/index-1/value0, ID2/display10/index-2/value-3, ID3/display10/index0/value-7.",
+    "floatGeosets": "Baseline except GeosetIndex and GeosetValue are float32 and the only Geoset row is ID1/display10/index-2.75/value-3.75.",
+    "wideGeosets": "Authenticated signed 64-bit GeosetIndex/GeosetValue: rows ID1..4 for display10 hold [i64MAX,0],[i64MAX-1,0],[i64MIN,0],[0,i64MAX], yielding [0,-100,100,-9223372036854775709]. Must not fake this with 32-bit fields.",
+    "missingDisplay": "Baseline with CreatureDisplayInfo omitted.",
+    "missingModel": "Baseline with CreatureModelData omitted.",
+    "missingGeoset": "Baseline with CreatureDisplayInfoGeosetData omitted.",
+    "firstInvalidThenMissing": "Baseline CreatureDisplayInfo WDC truncated by one final byte, with CreatureModelData omitted; first-table failure must win before missing second-table resolution.",
+    "invalidNonmatchingDisplay": "Baseline display table gains unused text column and ID999/ModelID99/nonmatching row with BadString; all original rows use valid empty text.",
+    "invalidNonmatchingModel": "Baseline model table gains unused text column and ID99/FileDataID999/nonmatching row with BadString; original rows have valid empty text.",
+    "invalidNonmatchingGeoset": "Baseline geoset table gains unused text column and ID999/CreatureDisplayInfoID999/nonmatching row with BadString; original rows have valid empty text.",
+    "modelFileMissing": "Baseline without CreatureModelData.FileDataID; direct display10 projects file0, scanning file500 is field_unknown.",
+    "modelFileFloat": "Baseline CreatureModelData.FileDataID is float32; row2=500.75,row3=500.5,row4=600.0. Direct display10 projects500; file-key/model scans reject field type.",
+    "displayModelMissing": "Baseline without CreatureDisplayInfo.ModelID; direct display10 is unresolved/model0; file-key/model scans reject absent field.",
+    "displayModelFloat": "Baseline CreatureDisplayInfo.ModelID is float32; display10=2.75, display30=2.5, others use original integral values. Direct display10 resolves model2; file-key/model scans reject field type.",
+    "geosetDisplayMissing": "Baseline without CreatureDisplayInfoGeosetData.CreatureDisplayInfoID; any reached variation scan rejects absent field.",
+    "geosetDisplayFloat": "Baseline CreatureDisplayInfoGeosetData.CreatureDisplayInfoID is float32 holding original values; any reached variation scan rejects field type.",
+    "geosetExact": "Baseline display10/model2/file500, only Geoset rows ID1..65536 matching display10, index0,value=rowID.",
+    "geosetRowBound": "Same as geosetExact with rows ID1..65537; retain first65536, row_budget.",
+    "relationExact": "Only display rows ID1..65535 with ModelID2 and zero texture array; only model2/file500; empty Geoset table. File lookup emits65535 display links then one model_file link, without truncation.",
+    "relationBound": "Same as relationExact with65536 displays; model_file link exceeds relation cap; retain all65536 display links and relation_budget.",
+    "displayRowBound": "Same as relationExact with65537 displays; retain65536 display links and row_budget as first reason.",
+    "modelExact": "Only models ID1..65536 all FileDataID500; only display10/ModelID1/zero texture array; empty Geoset table. Multiple models are ambiguous, no row truncation.",
+    "modelRowBound": "Same as modelExact with65537 models; row_budget and ambiguity, same selected/listed display10.",
+    "captureOverflow": "Exactly the existing large_model_capture_limit test:65536 displays IDs3000000000+i,ModelID3333333333,textures[u32MAX,u32MAX,u32MAX]; only model3333333333/file3444444444; empty Geoset table."
+  },
+  "cases": [
+    {
+      "id": "display-id-warm",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {}
+    },
+    {
+      "id": "display-file-warm",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {}
+    },
+    {
+      "id": "model-warm",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {}
+    },
+    {
+      "id": "display-file-absent",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "999"
+      ],
+      "exit": 3,
+      "expect": {
+        "error.code": "records.record_not_found"
+      }
+    },
+    {
+      "id": "first-model-without-display-does-not-fallback",
+      "fixture": "firstModelNoDisplays",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 3,
+      "expect": {
+        "error.code": "records.record_not_found"
+      }
+    },
+    {
+      "id": "model-continues-after-empty-first-model",
+      "fixture": "firstModelNoDisplays",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays": [
+          {
+            "displayID": 20,
+            "modelID": 3,
+            "fileDataID": 500,
+            "textures": [
+              900
+            ],
+            "variations": []
+          }
+        ],
+        "result.partialReasons": [
+          "relation_ambiguous"
+        ]
+      }
+    },
+    {
+      "id": "existing-model-file-zero",
+      "fixture": "modelFileZero",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.fileDataID": 0,
+        "result.modelFileDataID": 0,
+        "result.complete": true,
+        "result.partialReasons": null,
+        "result.relations": []
+      }
+    },
+    {
+      "id": "display-scalarTextures",
+      "fixture": "scalarTextures",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.textures": []
+      }
+    },
+    {
+      "id": "model-scalarTextures",
+      "fixture": "scalarTextures",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays.0.textures": []
+      }
+    },
+    {
+      "id": "display-signedTextures",
+      "fixture": "signedTextures",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.textures": [
+          800
+        ]
+      }
+    },
+    {
+      "id": "model-signedTextures",
+      "fixture": "signedTextures",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays.0.textures": [
+          800
+        ]
+      }
+    },
+    {
+      "id": "display-floatTextures",
+      "fixture": "floatTextures",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.textures": []
+      }
+    },
+    {
+      "id": "model-floatTextures",
+      "fixture": "floatTextures",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays.0.textures": []
+      }
+    },
+    {
+      "id": "missing-presentation-fields",
+      "fixture": "missingPresentation",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.textures": [],
+        "result.variations": [
+          100,
+          100
+        ],
+        "result.complete": true
+      }
+    },
+    {
+      "id": "signed-geoset-values",
+      "fixture": "signedGeosets",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.variations": [
+          0,
+          -103,
+          93
+        ]
+      }
+    },
+    {
+      "id": "float-geoset-values",
+      "fixture": "floatGeosets",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.variations": [
+          -103
+        ]
+      }
+    },
+    {
+      "id": "wide-geoset-display",
+      "fixture": "wideGeosets",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.variations": [
+          0,
+          -100,
+          100,
+          {
+            "$exactInteger": "-9223372036854775709"
+          }
+        ]
+      },
+      "rawIntegers": [
+        "-9223372036854775709"
+      ]
+    },
+    {
+      "id": "wide-geoset-model",
+      "fixture": "wideGeosets",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays.0.variations": [
+          0,
+          -100,
+          100,
+          {
+            "$exactInteger": "-9223372036854775709"
+          }
+        ]
+      },
+      "rawIntegers": [
+        "-9223372036854775709"
+      ]
+    },
+    {
+      "id": "missingDisplay-display",
+      "fixture": "missingDisplay",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 3,
+      "expect": {}
+    },
+    {
+      "id": "missingDisplay-model-empty",
+      "fixture": "missingDisplay",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "999"
+      ],
+      "exit": 3,
+      "expect": {}
+    },
+    {
+      "id": "missingModel-display",
+      "fixture": "missingModel",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 3,
+      "expect": {}
+    },
+    {
+      "id": "missingModel-model-empty",
+      "fixture": "missingModel",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "999"
+      ],
+      "exit": 3,
+      "expect": {}
+    },
+    {
+      "id": "missingGeoset-display",
+      "fixture": "missingGeoset",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 3,
+      "expect": {}
+    },
+    {
+      "id": "missingGeoset-model-empty",
+      "fixture": "missingGeoset",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "999"
+      ],
+      "exit": 3,
+      "expect": {}
+    },
+    {
+      "id": "first-invalid-before-missing-display",
+      "fixture": "firstInvalidThenMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "first-invalid-before-missing-file",
+      "fixture": "firstInvalidThenMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "first-invalid-before-missing-model",
+      "fixture": "firstInvalidThenMissing",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalidNonmatchingDisplay-unused-direct",
+      "fixture": "invalidNonmatchingDisplay",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displayID": 10,
+        "result.complete": true
+      }
+    },
+    {
+      "id": "invalidNonmatchingDisplay-file",
+      "fixture": "invalidNonmatchingDisplay",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalidNonmatchingDisplay-model",
+      "fixture": "invalidNonmatchingDisplay",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalidNonmatchingModel-unused-direct",
+      "fixture": "invalidNonmatchingModel",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displayID": 10,
+        "result.complete": true
+      }
+    },
+    {
+      "id": "invalidNonmatchingModel-file",
+      "fixture": "invalidNonmatchingModel",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalidNonmatchingModel-model",
+      "fixture": "invalidNonmatchingModel",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalid-nonmatching-geoset-display",
+      "fixture": "invalidNonmatchingGeoset",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalid-nonmatching-geoset-model",
+      "fixture": "invalidNonmatchingGeoset",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 5,
+      "expect": {}
+    },
+    {
+      "id": "invalid-geoset-unused-empty-model",
+      "fixture": "invalidNonmatchingGeoset",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "999"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays": [],
+        "result.complete": true
+      }
+    },
+    {
+      "id": "typed-modelFileMissing",
+      "fixture": "modelFileMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "records.field_unknown"
+      }
+    },
+    {
+      "id": "typed-modelFileFloat",
+      "fixture": "modelFileFloat",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "records.field_type_mismatch"
+      }
+    },
+    {
+      "id": "typed-displayModelMissing",
+      "fixture": "displayModelMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "records.field_unknown"
+      }
+    },
+    {
+      "id": "typed-displayModelFloat",
+      "fixture": "displayModelFloat",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "records.field_type_mismatch"
+      }
+    },
+    {
+      "id": "typed-geosetDisplayMissing",
+      "fixture": "geosetDisplayMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "records.field_unknown"
+      }
+    },
+    {
+      "id": "typed-geosetDisplayFloat",
+      "fixture": "geosetDisplayFloat",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "records.field_type_mismatch"
+      }
+    },
+    {
+      "id": "missing-file-presentation",
+      "fixture": "modelFileMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.fileDataID": 0,
+        "result.complete": true,
+        "result.relations": []
+      }
+    },
+    {
+      "id": "float-file-presentation",
+      "fixture": "modelFileFloat",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.fileDataID": 500,
+        "result.complete": true
+      }
+    },
+    {
+      "id": "missing-model-presentation",
+      "fixture": "displayModelMissing",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.modelID": 0,
+        "result.fileDataID": 0,
+        "result.partialReasons": [
+          "relation_unresolved"
+        ]
+      }
+    },
+    {
+      "id": "float-model-presentation",
+      "fixture": "displayModelFloat",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.modelID": 2,
+        "result.fileDataID": 500,
+        "result.complete": true
+      }
+    },
+    {
+      "id": "geosetExact",
+      "fixture": "geosetExact",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "none",
+        "result.truncated": false,
+        "result.complete": true
+      },
+      "large": true,
+      "check": "geosetBound"
+    },
+    {
+      "id": "geosetRowBound",
+      "fixture": "geosetRowBound",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "10"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "row_budget",
+        "result.truncated": true,
+        "result.complete": false
+      },
+      "large": true,
+      "check": "geosetBound"
+    },
+    {
+      "id": "relationExact",
+      "fixture": "relationExact",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "none",
+        "result.truncated": false,
+        "result.complete": true,
+        "result.partialReasons": null
+      },
+      "large": true,
+      "check": "relationExact"
+    },
+    {
+      "id": "relationBound",
+      "fixture": "relationBound",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "relation_budget",
+        "result.truncated": true,
+        "result.complete": false,
+        "result.partialReasons": null
+      },
+      "large": true,
+      "check": "relationBound"
+    },
+    {
+      "id": "displayRowBound",
+      "fixture": "displayRowBound",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "row_budget",
+        "result.truncated": true,
+        "result.complete": false,
+        "result.partialReasons": null
+      },
+      "large": true,
+      "check": "displayRowBound"
+    },
+    {
+      "id": "modelExact-file",
+      "fixture": "modelExact",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "none",
+        "result.truncated": false,
+        "result.partialReasons": [
+          "relation_ambiguous"
+        ],
+        "result.complete": false
+      },
+      "check": "modelBound"
+    },
+    {
+      "id": "modelExact-model",
+      "fixture": "modelExact",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "none",
+        "result.truncated": false,
+        "result.partialReasons": [
+          "relation_ambiguous"
+        ],
+        "result.complete": false
+      },
+      "check": "modelBound"
+    },
+    {
+      "id": "modelRowBound-file",
+      "fixture": "modelRowBound",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "row_budget",
+        "result.truncated": true,
+        "result.partialReasons": [
+          "relation_ambiguous"
+        ],
+        "result.complete": false
+      },
+      "check": "modelBound"
+    },
+    {
+      "id": "modelRowBound-model",
+      "fixture": "modelRowBound",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "500"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.truncationReason": "row_budget",
+        "result.truncated": true,
+        "result.partialReasons": [
+          "relation_ambiguous"
+        ],
+        "result.complete": false
+      },
+      "check": "modelBound"
+    },
+    {
+      "id": "large-model-capture-rejected",
+      "fixture": "captureOverflow",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "3444444444"
+      ],
+      "exit": 3,
+      "expect": {
+        "error.code": "query.budget_exceeded",
+        "error.message": "relational.budget_exceeded"
+      }
+    },
+    {
+      "id": "display-invalid-0",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "0"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --display-id"
+      }
+    },
+    {
+      "id": "display-invalid-negative1",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "-1"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --display-id"
+      }
+    },
+    {
+      "id": "display-invalid-plus10",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "+10"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --display-id"
+      }
+    },
+    {
+      "id": "file-invalid-0",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "0"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --file-data-id"
+      }
+    },
+    {
+      "id": "file-invalid-negative1",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "-1"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --file-data-id"
+      }
+    },
+    {
+      "id": "file-invalid-plus500",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "+500"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --file-data-id"
+      }
+    },
+    {
+      "id": "file-invalid-bad",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "bad"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --file-data-id"
+      }
+    },
+    {
+      "id": "file-invalid-4294967296",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--file-data-id",
+        "4294967296"
+      ],
+      "exit": 2,
+      "expect": {
+        "error.code": "command.invalid_arguments",
+        "error.message": "invalid --file-data-id"
+      }
+    },
+    {
+      "id": "display-unknown-flag-before-invalid-id",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "bad",
+        "--unexpected",
+        "1"
+      ],
+      "exit": 2,
+      "expect": {}
+    },
+    {
+      "id": "display-uint32-maximum",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "display",
+        "--display-id",
+        "4294967295"
+      ],
+      "exit": 3,
+      "expect": {
+        "error.code": "records.record_not_found"
+      }
+    },
+    {
+      "id": "model-uint32-maximum",
+      "fixture": "creature",
+      "args": [
+        "data",
+        "creature",
+        "model",
+        "--file-data-id",
+        "4294967295"
+      ],
+      "exit": 0,
+      "expect": {
+        "result.displays": [],
+        "result.complete": true
+      }
+    }
+  ]
+}

@@ -6,7 +6,9 @@ import { writeFileSync, readFileSync } from 'node:fs';
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputIndex = process.argv.indexOf('--output');
 const output = outputIndex >= 0 ? resolve(process.argv[outputIndex + 1]) : join(repository, 'skills', 'lycheedev', 'references', 'commands.md');
-const run = spawnSync('go', ['run', './cmd/lycheedev', 'describe', '--format=json'], {
+const binaryIndex=process.argv.indexOf('--bin');
+const binary=binaryIndex>=0?resolve(process.argv[binaryIndex+1]):undefined;
+const run = spawnSync(binary??'go', binary?['describe','--format=json']:['run', './cmd/lycheedev', 'describe', '--format=json'], {
   cwd: repository, encoding: 'utf8', shell: false, windowsHide: true, timeout: 300000,
 });
 if (run.error) throw run.error;

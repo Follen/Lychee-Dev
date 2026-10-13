@@ -1,0 +1,26 @@
+{
+  "schema": "lycheedev.object-observation-contracts.v1",
+  "rulesVersion": "wow-native-binding-context-v2-object-observations",
+  "originalRulesVersion": "wow-native-binding-context-v1",
+  "onlyRulesIdentityChanged": true,
+  "contracts": [
+    {
+      "file": "context-native-contract.json",
+      "originalSHA256": "b1f57cb35cfbf71529fc8871cdca8a01654e62ab0979f3ff4a4913004e3ea753",
+      "versionedSHA256": "5186963c614c73345cdfa6eba73a7f16ed5b2ed0c7e590b27a3f9eeaffb21b11",
+      "assertions": 193
+    },
+    {
+      "file": "context-coverage-fixed-contract.json",
+      "originalSHA256": "86edd6cfe02d631aedaec8ad52542acaa4b52b20c570f0f79c2480b4b551c86d",
+      "versionedSHA256": "d571556345fab9a45572b0ae70d35934da0b0250d88a9e2221cd062197104975",
+      "assertions": 12
+    },
+    {
+      "file": "context-object-contract.json",
+      "originalSHA256": "ebe2646f4320f7776986d15bfe77ee356835891de698a71382251b8f51df762f",
+      "versionedSHA256": "d47ebb49309806f579ae02e1ceeab0884edcb66394dc28f9b072364e176f2913",
+      "assertions": 101
+    }
+  ]
+}

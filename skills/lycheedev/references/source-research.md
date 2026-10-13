@@ -4,6 +4,13 @@ Use this branch for pinned API definitions, Lua/XML/TOC implementations,
 relationships and source comparisons. Follow the shortest path that answers
 the question; the CLI owns Git preparation, mapping and LuaLS lifecycle.
 
+Read the selected CLI's command directory before choosing an advanced route.
+The same workflow applies to an installed release and a Rust candidate: use
+query/inspect for fixed original evidence; use refs/context, session reuse or
+flow only when that directory includes the path and its required flags. A
+source guide or candidate guide cannot add a missing capability. Retain useful
+static results when navigation is unavailable, and state the remaining gap.
+
 ## Fix the source
 
 Reuse an explicit snapshot or the invoking project's matching source pin. Check
@@ -23,10 +30,10 @@ environment comes from a separately pinned Retail or Forever source.
 | --- | --- |
 | Exact file and line | `source inspect --path` with a bounded line range |
 | API, event, template or feature name | `source query` with the relevant topic, then inspect the returned original location |
-| Callers, dependencies or implementation across files | [source-relations.md](source-relations.md), using returned symbol IDs |
+| Callers, dependencies or implementation across files | If refs/context are advertised, [source-relations.md](source-relations.md) using returned symbol IDs; otherwise inspect fixed candidate locations and keep binding/coverage unresolved |
 | Difference between two revisions | `source diff` on two fixed pins from the same repository; interpretation below |
 | Addon load order, syntax or client compatibility | [addon-validation.md](addon-validation.md) |
-| Secret value or secure taint | [source-value-flow.md](source-value-flow.md) |
+| Secret value or secure taint | Read original API constraints first; use [source-value-flow.md](source-value-flow.md) only when the required flow profile is available |
 
 For a normal API lookup, the fixed original declaration and its constraints can
 be sufficient. Do not require full indexing, relationship traversal or live work
@@ -35,8 +42,8 @@ optional warm-up. Use installed `describe --format json` or help for supported
 flags, including when source documentation is newer than the installed CLI.
 
 ```text
-lycheedev source query <term> --snapshot <pin> --mode precise --topic api --limit 50 --format json
-lycheedev source inspect --snapshot <pin> --path <returned-path> --line <first-line> --count 80 --format json
+lycheedev source query <term> --snapshot <pin> --mode precise --topic api --limit 10 --format json
+lycheedev source inspect --snapshot <pin> --path <returned-path> --line <first-line> --count 30 --format json
 ```
 
 Choose `api`, `lua`, `xml`, `toc` or `asset` for the question. Broaden with
@@ -45,19 +52,52 @@ not proof of a unique definition. Resolve collisions by repository, commit, path
 and scope; retain `symbolId` for relations. If evidence still leaves alternatives,
 show those choices rather than silently taking the first match.
 
+Use the returned `whyMatch`, `role`, `confidence`, `signature` and exact
+`sourceSpan` when available to decide whether a result answers the question.
+For an exact API declaration, quote only the relevant contract and inspect more
+original lines when its argument or secret-value rules need context. A short
+default excerpt is a starting point, not a restriction on reading the source.
+Scope and local binding identity matter for aliases and member calls; a matching
+string or comment does not establish a call.
+For `body_text` or `indexed_text`, `confidence=exact` can mean an exact literal
+text match. Read `whyMatch`; this value does not prove lexical or LuaLS binding.
+
+Read `analysis`, `structure`, `syntaxCompilation` and `semantic` as separate
+facts. tree-sitter identifies syntax structure; `luac -p` checks Lua 5.1 syntax;
+LuaLS definitions/references are semantic observations only when the reported
+engine actually ran against the fixed source and client API environment.
+Do not describe templates, name matches or static alias inference as LuaLS
+results. Preserve parse diagnostics and excluded or unresolved scope.
+
 ## Decide whether to continue
 
 Inspect coverage and truncation separately from exit status. An incomplete map or
 dynamic edge cannot establish absence. A query's relation list is only a preview;
-use `source refs` if callers matter. Continue `nextCursor` only while another page
+use refs if callers matter and that command is advertised. A unique exact
+declaration may be covered while `result.complete=false` because its attached
+relation preview was truncated. Check `matchCoverage` and
+`relationPreviewTruncated` separately: definition completeness, candidate-page
+completeness and relation completeness are different questions. A declaration
+can answer a signature question without establishing all callers.
+Continue `nextCursor` only while another page
 can change the answer, preserving the command's snapshot, query and budgets.
 Query, refs and context cursors are not interchangeable.
+Follow the returned next action only when it is listed by the current CLI's
+command directory. During the Rust migration, a registered command can still
+report a precise unsupported profile or environment; retain that capability
+gap and the useful static evidence instead of inventing another call or using
+a Go fallback. Candidate tooling is not the installed release's capability.
 Changing the term, symbol, environment or budgets begins a new investigation
 without the previous cursor; keep its captures separate from the earlier pages.
 
 `source inspect --path` archives the whole file but returns a bounded excerpt.
 Report its path, first/last/total lines, exact commit, full-file hash and capture;
-capture completion does not imply that every line was read.
+capture completion applies to the requested range, not every line of the file.
+`result.blob` identifies the original full-file bytes; the CAP blob holds the
+inspection result/provenance JSON and can have a different hash and length.
+CAP verification establishes that capture's integrity, not LuaLS binding or
+runtime behavior. Use first/last/total lines to say which original bytes were
+actually read, and expand that range when it matters.
 
 `source diff --from <pin-a> --to <pin-b> --limit 50` compares document/declaration
 content and declaration sites, not all assets or version metadata. It has no
@@ -82,6 +122,11 @@ Source-only work does not authorize game input.
 
 
 ## Optional LuaLS session reuse
+
+Use this section only if the selected directory advertises refs/context with
+session reuse and both session status/close paths. Otherwise keep the available
+query/inspect workflow; session documentation is not a reason to invoke an
+unregistered path.
 
 `source refs` and `source context` keep one-shot semantic execution as the
 default behavior. Add `--session-reuse` only when several semantic cache misses

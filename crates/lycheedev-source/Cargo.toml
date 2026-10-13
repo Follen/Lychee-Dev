@@ -1,0 +1,75 @@
+[package]
+name = "lycheedev-source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["emmy-prototype"]
+emmy-prototype = ["dep:emmylua_code_analysis", "dep:emmylua_parser", "dep:rowan", "dep:tokio-util"]
+
+[[example]]
+name = "emmy_library_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_xml_program"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_wow_binding_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_native_context_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_source_input_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_source_query_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_source_control_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_source_host_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_source_host_execution_probe"
+required-features = ["emmy-prototype"]
+
+[[example]]
+name = "emmy_source_flow_probe"
+required-features = ["emmy-prototype"]
+
+[[test]]
+name = "native_quota_peer"
+path = "tests/native_quota_peer.rs"
+harness = false
+
+[dependencies]
+lycheedev-core = { path = "../lycheedev-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sha1 = "0.10.6"
+quick-xml = "0.38"
+tree-sitter = "=0.26.3"
+tree-sitter-lua = "=0.5.0"
+lycheedev-windows = { path = "../lycheedev-windows" }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+url = "2.5"
+# Evaluation only: base archive and the private BindingContext patch inventory
+# require separate build custody. This feature does not replace the default
+# Source execution path before validation.
+emmylua_code_analysis = { path = "../../.tmp/rust-source-binding-context-01/upstream/crates/emmylua_code_analysis", version = "=0.30.0", optional = true }
+emmylua_parser = { path = "../../.tmp/rust-source-binding-context-01/upstream/crates/emmylua_parser", version = "=0.30.0", optional = true }
+rowan = { version = "=0.17.0", optional = true }
+tokio-util = { version = "=0.7.19", optional = true }

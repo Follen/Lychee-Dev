@@ -1,0 +1,358 @@
+//! Strict multi-target validation: every target resolves independently to a
+//! fixed SourcePin and keeps its own syntax/catalog/semantic evidence.
+use crate::{SourceTools, git, validate};
+use lycheedev_core::{
+    Invocation, Outcome, Result, ToolkitError, control::OperationControl, evidence,
+    selection::SourcePin,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Target {
+    pub id: String,
+    pub toc: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    pub product: String,
+    #[serde(rename = "ref")]
+    pub reference: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    #[serde(default)]
+    pub path: String,
+    pub targets: Vec<Target>,
+}
+fn invalid(detail: &str) -> ToolkitError {
+    ToolkitError::new(
+        "codebase.invalid_matrix_config",
+        format!("codebase.invalid_matrix_config: {detail}"),
+        4,
+    )
+}
+pub fn read_config(path: &Path, control: &OperationControl) -> Result<(Config, PathBuf)> {
+    control.check()?;
+    let mut file = fs::File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(invalid("matrix config is not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    (&mut file).take((1 << 20) + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 1 << 20 {
+        return Err(invalid("matrix config exceeds 1 MiB"));
+    }
+    let config: Config = serde_json::from_slice(&bytes)
+        .map_err(|e| invalid(&format!("cannot parse matrix config: {e}")))?;
+    if config.targets.is_empty() {
+        return Err(invalid("matrix targets must not be empty"));
+    }
+    if config.targets.len() > 32 {
+        return Err(ToolkitError::new(
+            "codebase.matrix_budget",
+            "Matrix target count exceeds 32",
+            3,
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    for target in &config.targets {
+        if target.id.is_empty()
+            || target.toc.is_empty()
+            || target.product.is_empty()
+            || target.reference.is_empty()
+        {
+            return Err(invalid("each target requires id, toc, product, and ref"));
+        }
+        if !ids.insert(&target.id) {
+            return Err(ToolkitError::new(
+                "codebase.duplicate_target_id",
+                format!(
+                    "codebase.duplicate_target_id: duplicate matrix target id: {}",
+                    target.id
+                ),
+                4,
+            ));
+        }
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let root = if config.path.is_empty() {
+        base.to_path_buf()
+    } else if Path::new(&config.path).is_absolute() {
+        PathBuf::from(&config.path)
+    } else {
+        base.join(&config.path)
+    };
+    control.check()?;
+    Ok((config, std::path::absolute(root)?))
+}
+fn array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
+    value[key].as_array().map_or(&[], Vec::as_slice)
+}
+fn text<'a>(value: &'a Value, key: &str) -> &'a str {
+    value[key].as_str().unwrap_or("")
+}
+fn diagnostic_key(d: &Value) -> String {
+    format!(
+        "{}\0{}\0{}\0{:010}\0{:010}\0{}",
+        text(d, "severity"),
+        text(d, "code"),
+        text(d, "file"),
+        d["line"].as_u64().unwrap_or(0),
+        d["column"].as_u64().unwrap_or(0),
+        text(d, "message")
+    )
+}
+fn unresolved_key(d: &Value) -> (String, String, String, u64, u64, String) {
+    (
+        text(d, "kind").into(),
+        text(d, "expression").into(),
+        text(d, "file").into(),
+        d["line"].as_u64().unwrap_or(0),
+        d["column"].as_u64().unwrap_or(0),
+        text(d, "reason").into(),
+    )
+}
+fn facts(targets: &[Value], kinds: &[&str]) -> Value {
+    let mut by_name = BTreeMap::<String, BTreeMap<String, Value>>::new();
+    for target in targets {
+        for fact in array(target, "facts") {
+            if !kinds.contains(&text(fact, "kind").to_ascii_lowercase().as_str()) {
+                continue;
+            }
+            by_name
+                .entry(text(fact, "name").into())
+                .or_default()
+                .insert(
+                    text(target, "id").into(),
+                    json!({"exists":fact["exists"]==true,"signature":text(fact,"signature")}),
+                );
+        }
+    }
+    let mut shared = vec![];
+    let mut differences = vec![];
+    for (name, observed) in by_name {
+        let mut values = BTreeMap::new();
+        let mut first = None;
+        let mut same = true;
+        for target in targets {
+            let id = text(target, "id");
+            let value = observed
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| json!({"exists":false,"signature":""}));
+            if !observed.contains_key(id) || first.as_ref().is_some_and(|old| old != &value) {
+                same = false;
+            }
+            first.get_or_insert_with(|| value.clone());
+            values.insert(id, value);
+        }
+        if same {
+            shared.push(name);
+        } else {
+            differences.push(json!({"name":name,"targets":values}));
+        }
+    }
+    json!({"shared":shared,"differences":differences})
+}
+pub fn merge(path: &Path, targets: &[Value]) -> Value {
+    let mut interfaces = BTreeMap::new();
+    let mut unresolved = BTreeMap::new();
+    let mut all_files = BTreeSet::new();
+    let mut by_files = BTreeMap::new();
+    let mut all_diagnostics = BTreeSet::new();
+    let mut by_diagnostics = BTreeMap::new();
+    for target in targets {
+        let id = text(target, "id");
+        let mut facts = array(target, "facts")
+            .iter()
+            .filter(|f| text(f, "kind").to_ascii_lowercase().contains("interface"))
+            .cloned()
+            .collect::<Vec<_>>();
+        facts.sort_by_key(|f| {
+            (
+                text(f, "kind").to_owned(),
+                text(f, "name").to_owned(),
+                f["exists"] == true,
+                text(f, "signature").to_owned(),
+            )
+        });
+        let mut diagnostics = array(target, "diagnostics")
+            .iter()
+            .filter(|f| text(f, "code").to_ascii_lowercase().contains("interface"))
+            .cloned()
+            .collect::<Vec<_>>();
+        diagnostics.sort_by_key(diagnostic_key);
+        interfaces.insert(
+            id,
+            json!({"declared":text(target,"interface"),"facts":facts,"diagnostics":diagnostics}),
+        );
+        let mut items = array(target, "unresolved").to_vec();
+        items.sort_by_key(unresolved_key);
+        unresolved.insert(id, items);
+        let files = array(target, "loadClosure")
+            .iter()
+            .map(|f| text(f, "path").to_owned())
+            .collect::<BTreeSet<_>>();
+        all_files.extend(files.iter().cloned());
+        by_files.insert(id, files);
+        let mut diagnostics = BTreeMap::new();
+        for d in array(target, "diagnostics") {
+            let key = diagnostic_key(d);
+            all_diagnostics.insert(key.clone());
+            diagnostics.entry(key).or_insert_with(|| d.clone());
+        }
+        by_diagnostics.insert(id, diagnostics);
+    }
+    let mut shared_files = vec![];
+    let mut only_files = BTreeMap::<_, Vec<String>>::new();
+    let mut shared_diagnostics = vec![];
+    let mut only_diagnostics = BTreeMap::<_, Vec<Value>>::new();
+    for target in targets {
+        let id = text(target, "id");
+        only_files.insert(id, vec![]);
+        only_diagnostics.insert(id, vec![]);
+    }
+    for file in all_files {
+        if targets
+            .iter()
+            .all(|t| by_files[text(t, "id")].contains(&file))
+        {
+            shared_files.push(file);
+        } else {
+            for target in targets {
+                let id = text(target, "id");
+                if by_files[id].contains(&file) {
+                    only_files.get_mut(id).unwrap().push(file.clone());
+                }
+            }
+        }
+    }
+    for key in all_diagnostics {
+        if targets
+            .iter()
+            .all(|t| by_diagnostics[text(t, "id")].contains_key(&key))
+        {
+            shared_diagnostics.push(by_diagnostics[text(&targets[0], "id")][&key].clone());
+        } else {
+            for target in targets {
+                let id = text(target, "id");
+                if let Some(d) = by_diagnostics[id].get(&key) {
+                    only_diagnostics.get_mut(id).unwrap().push(d.clone());
+                }
+            }
+        }
+    }
+    json!({"path":path,"valid":targets.iter().all(|t|t["valid"]==true),"targets":targets,"summary":{"apis":facts(targets,&["api"]),"events":facts(targets,&["event"]),"xml":facts(targets,&["template","mixin","frame-type"]),"interfaces":interfaces,"sharedFiles":shared_files,"targetOnlyFiles":only_files,"sharedDiagnostics":shared_diagnostics,"targetOnlyDiagnostics":only_diagnostics,"unresolved":unresolved}})
+}
+pub fn dispatch(inv: &Invocation, tools: SourceTools<'_>) -> Result<Outcome> {
+    validate_with_resolver(inv, tools, &mut |target| {
+        git::resolve_source_with_control(
+            &inv.home,
+            if target.source.is_empty() {
+                "wow-ui-source"
+            } else {
+                &target.source
+            },
+            &target.product,
+            &target.reference,
+            &inv.control,
+        )
+    })
+}
+pub fn validate_with_resolver(
+    inv: &Invocation,
+    tools: SourceTools<'_>,
+    resolve: &mut dyn FnMut(&Target) -> Result<SourcePin>,
+) -> Result<Outcome> {
+    for key in ["--snapshot", "--path", "--toc", "--environment"] {
+        if inv.flag(key).is_some() {
+            return Err(ToolkitError::arguments(
+                "source validate requires either --matrix or --snapshot/--path/--toc; matrix targets require their own client source",
+            ));
+        }
+    }
+    let configured = Path::new(inv.required("--matrix")?);
+    let matrix = if configured.is_absolute() {
+        configured.to_path_buf()
+    } else {
+        inv.cwd.join(configured)
+    };
+    let (config, root) = read_config(&matrix, &inv.control)?;
+    let mut targets = Vec::with_capacity(config.targets.len());
+    let mut output_budget = OutputBudget(16 << 20);
+    for target in &config.targets {
+        inv.control.check()?;
+        let pin = resolve(target)?;
+        git::validate_pin(&pin)?;
+        if pin.product != target.product
+            || pin.repository
+                != if target.source.is_empty() {
+                    "wow-ui-source"
+                } else {
+                    &target.source
+                }
+        {
+            return Err(ToolkitError::new(
+                "codebase.source_integrity",
+                "Matrix resolver returned another target identity",
+                4,
+            ));
+        }
+        let mut value = validate::toc_with_control(
+            &inv.home,
+            &pin,
+            "",
+            &root,
+            &target.toc,
+            &tools,
+            inv.flag_bool("--semantic"),
+            &inv.control,
+        )?;
+        value["id"] = json!(target.id);
+        value["ref"] = json!(target.reference);
+        value["requestedRef"] = json!(target.reference);
+        serde_json::to_writer(&mut output_budget, &value).map_err(|_| {
+            ToolkitError::new(
+                "codebase.matrix_budget",
+                "Combined matrix target output exceeds16MiB",
+                3,
+            )
+        })?;
+        targets.push(value);
+    }
+    let mut out = Outcome::new(merge(&root, &targets));
+    out.complete = out.data["valid"] == true;
+    out.coverage = json!({"targets":targets.len(),"complete":targets.iter().all(|t|t["complete"]==true),"scope":"independently validated target closures; target semantic and unresolved coverage remain explicit"});
+    out.provenance.push(evidence::commit_capture(
+        &inv.home,
+        &serde_json::to_vec(&out.data)?,
+        "application/json",
+        json!({"kind":"addon-matrix-validate","locator":matrix}),
+        out.complete,
+        false,
+    )?);
+    if !out.complete {
+        return Err(ToolkitError::new("codebase.addon_static_check_failed","Addon validation found invalid source",4).with_details(json!({"result":out.data,"captures":out.provenance,"context":{"coverage":out.coverage}})));
+    }
+    Ok(out)
+}
+struct OutputBudget(usize);
+impl Write for OutputBudget {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self
+            .0
+            .checked_sub(bytes.len())
+            .ok_or_else(|| std::io::Error::other("matrix output budget"))?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}

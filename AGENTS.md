@@ -2,6 +2,47 @@
 
 Guidance for agents working in this repository.
 
+## Current Rust refactor authority (2026-10-08)
+
+For this worktree's Rust refactor, the user's revised requirements in
+`docs/toolkit/rust-refactor-requirements-2026-10-08.md` take precedence over the
+historical Go contracts below where explicitly changed. Preserve the frozen Go
+v3.1.2 oracle and its evidence. In particular:
+
+- Mailbox is the sole Live state, readiness, receipt and result channel.
+  Color blocks, optical heartbeats and WGC are removed from the Rust candidate;
+  there is no optical fallback. Record those explicit compatibility changes.
+- Redesign the complete Native protocol before broad replacement. Existing
+  EXECUTE/SETTLE code is reference material, not an approved final protocol.
+  Independent fresh-context audit and executable fault/model validation must
+  close correctness, isolation, recovery and resource issues before finalizing.
+- Managed installations provide 500 slots. Final acceptance includes Retail,
+  Classic, Titan, Forever Asia Beta (`wow_classic_beta`) and Forever CN Beta
+  (`wow_cn_beta`) as distinct products/channels, even at the same build, with the
+  required single/multiple instance and mixed-build scenarios. Missing evidence
+  remains unaccepted; the historical Forever exclusion does not apply here.
+- The latest 2026-10-12 user revision replaces private-heap discovery with Go
+  v3.1.0 runtime instruction-pattern/RIP-relative Lua root lookup. Match only
+  the selected module's mapped runtime code, derive root RVA from current
+  instructions, then read Lua state -> globals -> LycheeDevInternal -> Mailbox.
+  Stop heap-wide scans, hints and nearby-search fallback as a product route;
+  preserve tested prototypes as historical evidence. Verify unique recipes,
+  operands, mappings, anchor/root/path stability and validated Lua layouts.
+  Disk-static finalization is not a gate. Current identity, authentication,
+  freshness and protocol checks still govern input.
+- Main and child agents use GPT-6 Astra / high. The main agent coordinates,
+  integrates and independently verifies. Keep actual game acceptance last.
+- The 2026-10-09 user-edited goal replaces the old Source engine prerequisite.
+  Design Source from its business contracts and validate EmmyLua Analyzer Rust
+  through its parser/analysis libraries first. LuaLS, LSP, the old broker and
+  tree-sitter are not mandatory. Preserve old failures and map their risks into
+  the new design; do not keep patching a replaced chain because it already exists.
+  Complete design and a minimal complete prototype before migrating default
+  commands, cache/session ownership, packaging and Skill. Never execute studied
+  source or repository configuration. Query, cleanup and error-return time must
+  fit their defined total budget; keep coverage, completion, truncation and
+  uncertainty distinct.
+
 ## What this project is
 
 Lychee Dev Toolkit 2.0: one Go CLI (`lycheedev`), one in-game Lua workbench
@@ -145,6 +186,32 @@ contracts; do not apply their keys, queue or ACK sequence to native connections.
   CI has no self-hosted interactive desktop job or desktop-evidence gate.
 
 ## Change and verification workflow
+
+### Rust disk and process ownership during this refactor
+
+- Reuse this worktree's project Cargo cache. Use at most two controlled build
+  channels: `target` for ordinary dev/test/release and `target-symbols` for the
+  optimized `symbols` profile. Do not create a fresh target per fixture or
+  package. Daily dev/test uses debug=1, dependency debug=0 and incremental;
+  one-shot builds disable incremental. Preserve a matching EXE/PDB pair from
+  the same `symbols` invocation in its sealed artifact record.
+- Run Rust build/package runners through `tools/rust-disk.mjs` admission and
+  ownership records. Initial caps are 20 GiB combined build caches and 5 GiB
+  scratch, with a free-space reserve. Exceeding a cap stops admission until
+  explicit terminal, rebuildable owner records have been reviewed. Existing
+  unregistered targets and scratch are protected, not silently adopted.
+- Classify build cache, scratch, immutable artifacts and evidence separately.
+  Record owner, state, active process or held channel lease and retention.
+  Never reclaim by age/mtime, dead PID alone, or another agent's namespace.
+- Fixture input/home/prefix isolation remains required; reuse fixed-hash EXE
+  and tgz when rebuilding is unnecessary. In success and failure paths, seal
+  command/input hashes and logs before cleanup. Reap owned process handles
+  before removing their scratch; unresolved or interrupted processes retain
+  scratch for explicit recovery. Keep artifact and evidence receipts.
+- The formal corresponding-source gate still requires two independent fresh
+  Cargo homes and offline rebuilds. Run them sequentially within controlled
+  channels, preserve the comparison artifacts and evidence, and reclaim only
+  their terminal, registered rebuild caches afterward.
 
 - One focused behavioral change at a time. Inspect the nearest equivalent
   feature and the relevant contracts before editing.

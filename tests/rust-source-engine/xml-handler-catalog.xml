@@ -1,0 +1,1 @@
+<Ui><Actor><Scripts><OnModelLoading>self:Ready()</OnModelLoading></Scripts></Actor><AnimationGroup><Scripts><OnLoop>self:Loop()</OnLoop></Scripts><LineTranslation><Scripts><OnPlay>self:Play()</OnPlay><OnPause>self:Pause()</OnPause><OnStop>self:Stop()</OnStop><OnFinished>self:Finish()</OnFinished></Scripts></LineTranslation></AnimationGroup></Ui>

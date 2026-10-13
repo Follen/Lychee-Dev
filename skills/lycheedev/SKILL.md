@@ -18,7 +18,7 @@ continue the existing goal, scope and evidence.
 
 | Need | Entry |
 | --- | --- |
-| API/event constraints, implementation, callers, revision differences, stack trace, secrets or taint | [Source research](references/source-research.md) |
+| API/event constraints, implementation, callers, revision differences, stack trace, secrets or taint | [Source research](references/source-research.md); its capability check chooses the available static or semantic workflow |
 | IDs, localized names, coefficients, DB2/SQL or Hotfix records | [Data investigation](references/data-investigation.md) |
 | Locate, inspect or export an icon, texture, model or media file | [Asset export](references/asset-export.md) |
 | TOC/XML load order, syntax or client compatibility | [Addon validation](references/addon-validation.md) |
@@ -41,6 +41,9 @@ evidence branch is unavailable.
 Invoke `lycheedev` on PATH, or `node <skill-directory>/scripts/lycheedev.mjs`.
 Use that CLI's `describe --format json` or command help for available commands
 and flags; [commands](references/commands.md) is the generated source reference.
+Read the chosen mode's examples through that directory: migration guides can
+describe later capabilities. If a path is absent, use the available evidence
+for the question and retain the specific gap; a second guide does not enable it.
 Resolve a version mismatch using supported capabilities. New source or an
 edited skill does not mean the installed CLI, loaded addon or agent context
 was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata/
@@ -72,6 +75,13 @@ The CLI owns keys, memory, optical readiness, slots and journals. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
 work does not use the old OP/BTP ACK/finish/hide sequence.
+
+For source questions, start with a small exact query or the known original
+location. Use match reason, scope and source spans to decide whether another
+read is needed; expand the original source when it can change the conclusion.
+Keep structural indexing, Lua 5.1 compilation and actual LuaLS navigation
+distinct. See [Source research](references/source-research.md) for these fields
+and the capability checks used during the Rust migration.
 
 ## Finish with evidence
 

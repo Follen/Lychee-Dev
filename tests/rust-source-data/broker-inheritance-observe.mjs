@@ -1,0 +1,42 @@
+import {spawn,spawnSync} from 'node:child_process';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+import {createHash} from 'node:crypto';
+const release=resolve(process.env.LYCHEEDEV_RELEASE_ROOT||'.tmp/rust-full-tools-npm-stage-08/installed/node_modules/lycheedev');
+const bin=join(release,'native/windows-amd64/lycheedev.exe');
+const home=resolve(process.env.LYCHEEDEV_ENVIRONMENT_HOME||'.tmp/rust-source-broker-inheritance-input-02/home');
+const pin='PIN-9e101198396228da82d822287f9ada729e75e3669384bac22b8ceb750b04d281';
+const out=resolve(process.argv[2]||'.tmp/rust-source-broker-inheritance-observe-01');mkdirSync(out,{recursive:true});
+const hash=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
+const identity={binary:hash(bin),release:hash(join(release,'release.json'))};const started=performance.now(),events=[];
+let raw='',stderr='',failure,retired=false,exitSeen=false,stdoutEnded=false,closedSeen=false,endedBeforeRetire;
+const expectNoInherit=process.env.LYCHEEDEV_EXPECT_NO_INHERIT==='1';
+let controlFinished;const controlled=new Promise(resolve=>{controlFinished=resolve});
+function event(name,values={}){events.push({name,ms:performance.now()-started,...values});}
+function control(name,verb){const result=spawnSync(bin,['source','session',verb,'--release',release,'--home',home,'--format','json'],{encoding:'utf8',windowsHide:true,timeout:20000,maxBuffer:1<<20});writeFileSync(join(out,name+'.json'),result.stdout||'');const env=JSON.parse(result.stdout||'{}');event(name,{exit:result.status,result:env.result});if(result.status!==0||!env.ok)throw Error('Failed control '+name);return env.result;}
+if(control('absent','status').state!=='closed')throw Error('Existing broker is owned');
+const child=spawn(bin,['source','refs','--snapshot',pin,'--symbol','First','--direction','incoming','--session-reuse','--release',release,'--home',home,'--format','json'],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+const timer=setTimeout(()=>{failure='Bounded observation expired';child.kill();try{control('timeout-owned-retire','close')}catch{}},30000);
+child.stdout.on('data',chunk=>{raw+=chunk;if(Buffer.byteLength(raw)>16<<20){failure='stdout budget';child.kill();}});
+child.stderr.on('data',chunk=>{stderr+=chunk;if(Buffer.byteLength(stderr)>1<<20){failure='stderr budget';child.kill();}});
+child.stdout.on('end',()=>{stdoutEnded=true;event('stdout-end')});
+child.on('error',error=>{failure=String(error);event('spawn-error',{failure});controlFinished();});
+child.on('exit',async(code,signal)=>{exitSeen=true;event('parent-exit',{code,signal});
+ await new Promise(resolve=>setTimeout(resolve,2000));
+ endedBeforeRetire=stdoutEnded;event('nonblocking-yield',{stdoutEnded,closedSeen});
+ try{
+ if(code!==0)throw Error('First parent did not exit successfully');
+ const lifecycle=JSON.parse(readFileSync(join(home,'tmp/source-broker-last-run.json'),'utf8'));
+ const os=spawnSync('powershell',['-NoProfile','-NonInteractive','-Command',`$p=Get-Process -Id ${lifecycle.pid} -ErrorAction SilentlyContinue; if($p){[string]$p.StartTime.ToUniversalTime().ToFileTimeUtc()};exit 0`],{windowsHide:true,encoding:'utf8',timeout:5000});
+ event('broker-os-observation',{lifecycle,osExit:os.status,osCreated:os.stdout?.trim()||null});
+ const ready=control('ready-before-retire','status');if(ready.state!=='ready')throw Error('Server not alive before retire');
+ if(lifecycle.terminal||os.status!==0||os.stdout.trim()!==lifecycle.created)throw Error('Exact owned server PID/creation not live');
+ control('owned-retire','close');retired=true;
+ if(endedBeforeRetire!==expectNoInherit)throw Error('Unexpected EOF after actual nonblocking observation');
+}catch(error){failure=String(error);try{control('failed-owned-retire','close')}catch{}}finally{controlFinished()}});
+const closed=new Promise(resolve=>child.on('close',(code,signal)=>{closedSeen=true;event('parent-close',{code,signal});resolve();}));
+await Promise.all([closed,controlled]);clearTimeout(timer);
+writeFileSync(join(out,'first.stdout.json'),raw);writeFileSync(join(out,'first.stderr.txt'),stderr);
+const final={binary:hash(bin),release:hash(join(release,'release.json'))};const stable=identity.binary===final.binary&&identity.release===final.release;
+const report={schema:'lycheedev.source-broker-inheritance-observation.v1',passed:!failure&&exitSeen&&retired&&stable,scope:'Actual packaged parent exit versus stdout EOF/close; authenticated live broker and exact OS PID/creation before owned retirement. This is diagnosis, not complete retained/cache/lifecycle certification.',identity,final,artifactStable:stable,expectNoInherit,stdoutEndedBeforeRetire:endedBeforeRetire,events,failure};
+writeFileSync(join(out,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));if(!report.passed)process.exitCode=1;

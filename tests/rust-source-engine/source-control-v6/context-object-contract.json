@@ -1,0 +1,1225 @@
+{
+  "schema": "lycheedev.emmy-native-context-contract.v1",
+  "command": "object-red",
+  "rulesVersion": "wow-native-binding-context-v6-control-occurrences",
+  "capabilityProfile": "typed-call-v1",
+  "inputs": [
+    {
+      "file": "profile.lua",
+      "diskFile": "profile.lua",
+      "bytes": 266,
+      "sha256": "062c8d92c16bdd7c16ff10c6134b38734f4f91ddf21b0c65a72506010018b990"
+    },
+    {
+      "file": "generic-defs.lua",
+      "diskFile": "native/generic-defs.lua",
+      "bytes": 342,
+      "sha256": "20c76a693bf6c1b007659e2f9523027c4f3a6cc8e67511c6e0035bced2b273a1"
+    },
+    {
+      "file": "generic-calls.lua",
+      "diskFile": "native/generic-calls.lua",
+      "bytes": 666,
+      "sha256": "bb1d4a042e543d3521149e3713052e17ac648fe0b02da1e627c3d210dbf3d660"
+    },
+    {
+      "file": "generic-replace.lua",
+      "diskFile": "native/generic-replace.lua",
+      "bytes": 24,
+      "sha256": "cf62e412269815ddb9e61afdc1144116849d6bda7686d1be1e7db639fb50ec62"
+    },
+    {
+      "file": "object-versions.lua",
+      "diskFile": "native/object-versions.lua",
+      "bytes": 1293,
+      "sha256": "d084dc1d72825b47337cbf369abbe30a847a9a9dcfbd46e6f69af6b9a496666f"
+    }
+  ],
+  "scenarios": [
+    "object-versions"
+  ],
+  "assertions": [
+    {
+      "name": "object_red:source_old:step:0:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:source_old:step:0:member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:source_old:step:0:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:source_old:step:0:direct_index",
+      "expected": {
+        "value": "number",
+        "run": "generic_function",
+        "added": "nil"
+      }
+    },
+    {
+      "name": "object_red:source_old:step:0:public_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_old:step:0:foreign_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_old:step:0:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:source_old:step:0:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:source_new:step:1:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:source_new:step:1:member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:source_new:step:1:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:source_new:step:1:direct_index",
+      "expected": {
+        "value": "string",
+        "run": "string_function",
+        "added": "boolean"
+      }
+    },
+    {
+      "name": "object_red:source_new:step:1:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:source_new:step:1:foreign_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:source_new:step:1:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:source_new:step:1:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:source_old:step:2:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:source_old:step:2:member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:source_old:step:2:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:source_old:step:2:direct_index",
+      "expected": {
+        "value": "number",
+        "run": "generic_function",
+        "added": "nil"
+      }
+    },
+    {
+      "name": "object_red:source_old:step:2:public_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_old:step:2:foreign_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_old:step:2:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:source_old:step:2:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:3:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:copied_old:step:3:member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:3:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:3:direct_index",
+      "expected": {
+        "value": "number",
+        "run": "generic_function",
+        "added": "nil"
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:3:public_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_old:step:3:foreign_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_old:step:3:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:copied_old:step:3:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:copied_new:step:4:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:copied_new:step:4:member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:copied_new:step:4:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:copied_new:step:4:direct_index",
+      "expected": {
+        "value": "string",
+        "run": "string_function",
+        "added": "boolean"
+      }
+    },
+    {
+      "name": "object_red:copied_new:step:4:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:copied_new:step:4:foreign_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:copied_new:step:4:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:copied_new:step:4:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:5:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:copied_old:step:5:member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:5:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:5:direct_index",
+      "expected": {
+        "value": "number",
+        "run": "generic_function",
+        "added": "nil"
+      }
+    },
+    {
+      "name": "object_red:copied_old:step:5:public_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_old:step:5:foreign_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_old:step:5:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:copied_old:step:5:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:twin:step:6:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:twin:step:6:member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:twin:step:6:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:twin:step:6:direct_index",
+      "expected": {
+        "value": "string",
+        "run": "string_function",
+        "added": "boolean"
+      }
+    },
+    {
+      "name": "object_red:twin:step:6:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:twin:step:6:foreign_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:twin:step:6:public_structure_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:twin:step:6:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:dynamic:step:7:frozen_object_view",
+      "expected": "recorded"
+    },
+    {
+      "name": "object_red:dynamic:step:7:members_not_known",
+      "expected": true
+    },
+    {
+      "name": "object_red:dynamic:step:7:foreign_members_not_known",
+      "expected": true
+    },
+    {
+      "name": "object_red:dynamic:step:7:direct_index",
+      "expected": {
+        "value": "unknown",
+        "run": "unknown",
+        "added": "unknown"
+      }
+    },
+    {
+      "name": "object_red:dynamic:step:7:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:dynamic:step:7:foreign_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:dynamic:step:7:public_structure_coverage",
+      "expected": "unavailable"
+    },
+    {
+      "name": "object_red:dynamic:step:7:foreign_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "object-versions"
+      }
+    },
+    {
+      "name": "object_red:source_changed:object_identity",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_changed:epoch_changed",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_changed:native_type_identity_distinct",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_changed:object_identity",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_changed:epoch_changed",
+      "expected": true
+    },
+    {
+      "name": "object_red:copied_changed:native_type_identity_distinct",
+      "expected": true
+    },
+    {
+      "name": "object_red:source_vs_copy:object_identity",
+      "expected": false
+    },
+    {
+      "name": "object_red:source_vs_copy:native_type_identity_distinct",
+      "expected": true
+    },
+    {
+      "name": "object_red:same_shape_twin:object_identity",
+      "expected": false
+    },
+    {
+      "name": "object_red:same_shape_twin:native_type_identity_distinct",
+      "expected": true
+    },
+    {
+      "name": "object_red:dynamic_changed:object_identity",
+      "expected": true
+    },
+    {
+      "name": "object_red:dynamic_changed:epoch_changed",
+      "expected": true
+    },
+    {
+      "name": "object_red:dynamic_changed:native_type_identity_distinct",
+      "expected": true
+    },
+    {
+      "name": "object_red:same_shape_distinct_reference_evidence",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_old:version_preserved",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_old:member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:generic_old:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "number",
+            "withKey": [
+              "number"
+            ],
+            "withKeyAll": [
+              "number"
+            ],
+            "memberType": "number"
+          },
+          "run": {
+            "memberInfo": "generic_function",
+            "withKey": [
+              "generic_function"
+            ],
+            "withKeyAll": [
+              "generic_function"
+            ],
+            "memberType": "generic_function"
+          },
+          "added": {
+            "memberInfo": null,
+            "withKey": [],
+            "withKeyAll": [],
+            "memberType": null
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:generic_old:public_structure_boolean",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_new:version_preserved",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_new:member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:generic_new:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:generic_new:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:generic_copy:version_preserved",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_copy:member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:generic_copy:foreign_member_api_matrix",
+      "expected": {
+        "keys": [
+          "added",
+          "run",
+          "value"
+        ],
+        "fields": {
+          "value": {
+            "memberInfo": "string",
+            "withKey": [
+              "string"
+            ],
+            "withKeyAll": [
+              "string"
+            ],
+            "memberType": "string"
+          },
+          "run": {
+            "memberInfo": "string_function",
+            "withKey": [
+              "string_function"
+            ],
+            "withKeyAll": [
+              "string_function"
+            ],
+            "memberType": "string_function"
+          },
+          "added": {
+            "memberInfo": "boolean",
+            "withKey": [
+              "boolean"
+            ],
+            "withKeyAll": [
+              "boolean"
+            ],
+            "memberType": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "object_red:generic_copy:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:generic_dynamic:version_preserved",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_dynamic:members_not_known",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_dynamic:foreign_members_not_known",
+      "expected": true
+    },
+    {
+      "name": "object_red:generic_dynamic:public_structure_boolean",
+      "expected": false
+    },
+    {
+      "name": "object_red:exact_two_structural_argument_diagnostics",
+      "expected": [
+        {
+          "code": "param-type-mismatch",
+          "start": 583,
+          "end": 589
+        },
+        {
+          "code": "param-type-mismatch",
+          "start": 888,
+          "end": 894
+        }
+      ]
+    },
+    {
+      "name": "object_red:source_old:native_argument_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:source_new:native_argument_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:copied_old:native_argument_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:copied_new:native_argument_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "object_red:dynamic:native_argument_coverage",
+      "expected": "unavailable"
+    },
+    {
+      "name": "object_red:explicit_five_inputs",
+      "expected": 5
+    }
+  ],
+  "scope": "complete finite static-field/shallow-copy observation and structural API expectations; first failure must be preserved, not accepted as business completion"
+}

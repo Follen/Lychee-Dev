@@ -1,0 +1,104 @@
+{
+  "schema": "lycheedev.emmy-native-context-contract.v1",
+  "command": "coverage-red",
+  "rulesVersion": "wow-native-binding-context-v1",
+  "capabilityProfile": "typed-call-v1",
+  "inputs": [
+    {
+      "file": "profile.lua",
+      "diskFile": "profile.lua",
+      "bytes": 266,
+      "sha256": "062c8d92c16bdd7c16ff10c6134b38734f4f91ddf21b0c65a72506010018b990"
+    },
+    {
+      "file": "generic-defs.lua",
+      "diskFile": "native/generic-defs.lua",
+      "bytes": 342,
+      "sha256": "20c76a693bf6c1b007659e2f9523027c4f3a6cc8e67511c6e0035bced2b273a1"
+    },
+    {
+      "file": "generic-calls.lua",
+      "diskFile": "native/generic-calls.lua",
+      "bytes": 666,
+      "sha256": "bb1d4a042e543d3521149e3713052e17ac648fe0b02da1e627c3d210dbf3d660"
+    },
+    {
+      "file": "generic-replace.lua",
+      "diskFile": "native/generic-replace.lua",
+      "bytes": 24,
+      "sha256": "cf62e412269815ddb9e61afdc1144116849d6bda7686d1be1e7db639fb50ec62"
+    },
+    {
+      "file": "coverage-unknown-argument.lua",
+      "diskFile": "native/coverage-unknown-argument.lua",
+      "bytes": 127,
+      "sha256": "e406a9390c3cb083f3e91ced5bef97ec85a2938c0b1eb3c7289a8ba85f5f424f"
+    }
+  ],
+  "scenarios": [
+    "fixed-return-unknown-argument"
+  ],
+  "assertions": [
+    {
+      "name": "coverage_red:fixture_bytes",
+      "expected": 127
+    },
+    {
+      "name": "coverage_red:input_file_count",
+      "expected": 5
+    },
+    {
+      "name": "coverage_red:callee_bound_closure",
+      "expected": true
+    },
+    {
+      "name": "coverage_red:argument_binding",
+      "expected": "unavailable"
+    },
+    {
+      "name": "coverage_red:native_result_type",
+      "expected": "String"
+    },
+    {
+      "name": "coverage_red:native_result_coverage",
+      "expected": "native_projected"
+    },
+    {
+      "name": "coverage_red:native_argument_coverage",
+      "expected": "unavailable"
+    },
+    {
+      "name": "coverage_red:native_return_coverage",
+      "expected": "native_checked"
+    },
+    {
+      "name": "coverage_red:native_diagnostic_exact",
+      "expected": [
+        {
+          "code": "return-type-mismatch",
+          "start": 98,
+          "end": 122
+        }
+      ]
+    },
+    {
+      "name": "coverage_red:coverage_same_result_proof",
+      "expected": true
+    },
+    {
+      "name": "coverage_red:model_context",
+      "expectedRef": {
+        "kind": "snapshotKey",
+        "scenario": "fixed-return-unknown-argument"
+      }
+    },
+    {
+      "name": "coverage_red:single_native_string_candidate",
+      "expected": true
+    }
+  ],
+  "expectedRedFailures": [
+    "coverage_red:native_result_coverage"
+  ],
+  "scope": "precise expected-red reproduction of fixed-return result versus unknown-argument coverage; not business acceptance"
+}

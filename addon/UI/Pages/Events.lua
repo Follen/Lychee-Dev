@@ -630,6 +630,12 @@ function ns.CreateEventsPage(parent)
     end
 
     local function QueueRefresh()
+        -- Capture continues while another page is selected. Its hidden view
+        -- needs one activation refresh, not a new timer for every event burst.
+        if not page:IsShown() then
+            dirty = true
+            return
+        end
         if refreshQueued then
             return
         end

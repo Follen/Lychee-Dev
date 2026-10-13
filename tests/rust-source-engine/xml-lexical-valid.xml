@@ -1,0 +1,2 @@
+ 	
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="UI.xsd" 窗口="&lt;" a·b="ok"><Élément_名-0.̀‿ 𐀀="v"/><𐀀/><!-- < and ]]> are legal comment text --><Script><![CDATA[local a = 1 < 2; local s = "]]]]><![CDATA[>";]]>local t = "]]&gt;";</Script></Ui> 	

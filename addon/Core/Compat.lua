@@ -5,6 +5,15 @@ local ADDON_NAME, ns = ...
 -- before it is compared, formatted, indexed or branched on; failures open to a
 -- harmless visible state instead of throwing.
 ns.Compat = {
+    LoadNativeInputSlot = function(name)
+        if (issecretvalue and issecretvalue(name)) or type(name)~="string" then return nil,"slot_name_invalid" end
+        local index=tonumber(name:match("^Lychee Dev Slot (%d+)$"))
+        if not index or index<1 or index>500 or name~=string.format("Lychee Dev Slot %02d",index) then return nil,"slot_name_invalid" end
+        if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
+        local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
+        if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end
+        return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
+    end,
     -- Pinned PlayerScriptDocumentation declares this on Retail/Classic/Titan.
     InWorld = function()
         if type(IsPlayerInWorld)~="function" then return nil end

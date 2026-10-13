@@ -1,0 +1,53 @@
+[workspace]
+members = ["crates/lycheedev-core", "crates/lycheedev-cli", "crates/lycheedev-source", "crates/lycheedev-data", "crates/lycheedev-live", "crates/lycheedev-delivery", "crates/lycheedev-windows"]
+exclude = [".tmp/rust-source-engine-research-01/upstream", ".tmp/rust-source-engine-research-01/upstream/crates/*", ".tmp/rust-source-binding-context-01/upstream", ".tmp/rust-source-binding-context-01/upstream/crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "3.1.2"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }
+sha2 = "0.10"
+hex = "0.4"
+fs2 = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+lycheedev-core = { path = "crates/lycheedev-core" }
+lycheedev-windows = { path = "crates/lycheedev-windows" }
+lycheedev-source = { path = "crates/lycheedev-source" }
+lycheedev-data = { path = "crates/lycheedev-data" }
+lycheedev-live = { path = "crates/lycheedev-live" }
+lycheedev-delivery = { path = "crates/lycheedev-delivery" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "debuginfo"
+
+[profile.dev]
+debug = 1
+incremental = true
+
+[profile.dev.package."*"]
+debug = 0
+
+[profile.test]
+debug = 1
+incremental = true
+
+[profile.test.package."*"]
+debug = 0
+
+# This separate profile preserves matching EXE/PDB from one optimized build.
+# Tools use the second project channel, not a new target directory per run.
+[profile.symbols]
+inherits = "release"
+debug = 2
+strip = "none"
+incremental = false
