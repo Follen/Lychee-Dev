@@ -1,3 +1,0 @@
-local probe = ...
-assert(probe:OnCleanup(function() error("intentional cleanup failure") end))
-return { marker = "cleanup-reload", expectedCleanupFailure = true }

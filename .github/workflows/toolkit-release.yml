@@ -1,6 +1,6 @@
 name: toolkit release
 
-# Toolkit 2.0.1 release pipeline (docs/toolkit/release-2.0.1.md).
+# Toolkit release pipeline; current contract: docs/development.md.
 #
 # Triggers: a strictly validated `v*` tag push, or manual workflow_dispatch
 # which is DRY-RUN ONLY (a manual run with dry_run=false fails fast in the

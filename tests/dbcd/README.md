@@ -35,4 +35,4 @@ requires investigation of both implementations, not automatic upstream trust.
 The committed C# source does not enforce checkout identity: verify the upstream
 commit before building. No upstream all-DB2 test-suite pass is claimed. The
 2026-09-27 run compares SpellMisc and Spell from fixed retail CN zhCN build
-12.1.0.69933; see the [verification ledger](../../docs/toolkit/data-improvements-2026-09-27.md).
+12.1.0.69933; current product coverage is summarized in [todo.md](../../todo.md).

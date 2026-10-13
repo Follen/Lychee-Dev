@@ -2,7 +2,7 @@
 
 Lychee Dev Toolkit's project-owned code is distributed under the [MIT license](LICENSE).
 The owner's licensing decision for this tree is recorded in
-[the licensing record](docs/toolkit/licensing.md). Third-party components retain
+[the licensing record](docs/licensing.md). Third-party components retain
 their own licenses and attribution below. Full license texts for distributed
 components are reproduced in
 [the package notices](packages/npm/lycheedev/THIRD_PARTY_NOTICES).
@@ -122,5 +122,5 @@ and are not part of any 2.0 payload.
 
 Releases include the project LICENSE, applicable third-party notices and
 corresponding source. The owner's project licensing decision is recorded in
-[the licensing record](docs/toolkit/licensing.md); release artifact and integrity
+[the licensing record](docs/licensing.md); release artifact and integrity
 checks remain required by the release contract.

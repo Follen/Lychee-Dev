@@ -1,195 +1,53 @@
 # AGENTS.md
 
-Guidance for agents working in this repository.
+## Project baseline
 
-## What this project is
+Lychee Dev Toolkit is a Go CLI, a Lua workbench addon, an Agent skill and an npm distribution. The current development baseline is 3.2.0; release/version.json remains the version authority. Windows amd64 is the shipped platform.
 
-Lychee Dev Toolkit 2.0: one Go CLI (`lycheedev`), one in-game Lua workbench
-addon (`addon/`), one agent skill (`skills/lycheedev/`), one npm distribution
-package (`packages/npm/lycheedev/`). Source research, game data, asset export
-and live game investigation share one workspace, one evidence chain and pinned
-references. The legacy Python-delegation implementation (1.x) is retired; its
-history stays in git, its user data is never imported.
+Read these current documents:
 
-Authoritative documents, in order of precedence for implementation work:
+1. Design.md — architecture, module boundaries, products and contracts.
+2. docs/live-protocol.md — Lycheedev mailbox protocol v1.
+3. todo.md — incomplete work and honest real-client coverage.
+4. docs/development.md — build, tests, workspace hygiene and release.
+5. Changelog.md — changes in this development baseline.
 
-1. `docs/toolkit/design.md` — architecture, contracts, naming.
-2. `docs/toolkit/implementation-status.md` — current verified facts; honest
-   boundaries (`not_run` stays `not_run`).
-3. `docs/toolkit/regression.md` — acceptance matrix.
-4. `docs/toolkit/release-3.0.2.md` — Windows CI and release contract for the current candidate.
-   `release-2.0.1.md` is retained as the immutable historical contract for the
-   already-published release.
+Do not recreate historical design ledgers or use Git history as current acceptance.
 
-Use `go test ./...` and `go vet ./...` at the repository root. The Lua protocol
-suites need a Lua 5.1 interpreter (`LYCHEEDEV_REQUIRE_LUA51=1`); build one with
-`node tests/tools/build-lua.mjs`.
-The repeatable functional baseline is `node tools/baseline.mjs`; setup and the
-separate real-client entry are documented in `tests/baseline/README.md`. Keep
-manual/other-client acceptance separate from automated fixture results.
+## Working rules
 
-## Repository layout
+Follow the user's task scope. Reuse the current branch/worktree; do not create repositories, worktrees or PRs just to satisfy a workflow. Preserve unrelated edits. Do not commit or push without task authorization.
 
-```text
-cmd/lycheedev/      program entry
-internal/           command, selection, codebase, records, live(+journal),
-                    bridge, evidence, vault, desktop, delivery, buildinfo
-addon/              the in-game Lua side (workbench + bridge)
-skills/lycheedev/   the versioned skill source (references + thin launcher)
-packages/npm/       distribution package (binaries + payload, no runtime deps)
-protocol/           cross-language protocol samples and fixtures
-tests/              addon, protocol, process, qrfixture workbenches
-tools/              version, packaging, release and consistency tooling
-docs/toolkit/       design, status, regression, release contracts
-```
+Use a focused change and verify its actual risks. Existing contracts belong at their boundary; do not add redundant guards, fallback frameworks or new approval gates. Keep logs only when needed for a current failure or requested result.
 
-## Non-negotiable acceptance criteria
+## Code and contracts
 
-1. **Zero cost while disabled.** Opt-in addon features create no frames, no
-   events, no hooks until enabled. Bootstrap uses one loader and two formal
-   Bindings.xml actions; binding registration may use one one-shot login/combat
-   event frame, with no idle events, timers or OnUpdate after registration.
-   Native Mailbox input sampling and focused-EditBox forwarding are explicit
-   enabled-only exceptions; bridge-off removes their events, OnUpdate and script
-   wrapper. No native optical signal or reload beacon is created.
-2. **Zero behavior change without opt-in.** Only narrowly scoped bug fixes may
-   change existing behavior.
-3. **Event-driven and bounded.** No polling gates; bounded queues, budgets and
-   pagination everywhere; truncation is always visible.
-4. **Zero taint risk.** Protected UI and Blizzard objects are trust boundaries;
-   combat lockdown and secret values are handled before unsafe operations.
-5. **One shared API surface.** Client differences live in
-   `addon/Core/Compat.lua` or the generated client catalogs, never scattered.
+- internal/command/command_contract.go is the only command directory. Parser, help, describe and generated Skill references derive from it.
+- Query results use lycheedev.result.v1. JSONL requires a valid end frame and exit 0. Preserve explicit truncation and partial coverage.
+- Exit codes: 0 complete, 2 arguments/selection, 3 capability/environment, 4 invalid input/protocol, 5 external/business failure, 6 pending, 7 cancelled, 8 internal.
+- Source/Data/Changes use fixed references. A folder is a location, not product identity. The two Forever beta products share the forever source family but retain independent Data identities.
+- Use pinned API facts and current code. Client differences belong in addon/Core/Compat.lua, ClientGate or generated catalogs.
+- Never use retired wowdoc/wowdata/Python entrypoints or import legacy user data.
 
-## Client matrix
+## Addon and Live
 
-The current product matrix is Retail, Classic, Classic Era, Titan, Forever Asia
-beta, Forever CN beta and Anniversary. Record real-client acceptance separately
-for each product and protocol revision in `docs/toolkit/implementation-status.md`;
-historical passes do not verify the current protocol. A client folder is a
-location, not an identity: read the available `.flavor.info` and `version.txt`
-metadata before trusting a directory name.
+- Disabled features create no frames, hooks, events, timers or OnUpdate. The minimal bootstrap and enabled-only INPUT/EditBox handling follow the explicit protocol exceptions.
+- Protected/forbidden UI, combat and secret values are trust boundaries. Chinese and English locale changes stay paired.
+- Native Live uses 500 LoD slots, runtime instruction/RIP Lua-root discovery and named Mailbox reads. No private-heap scan or cached address authorizes input.
+- The two formal bindings default to Ctrl+Alt+F12 and Ctrl+Alt+F11. Read their actual effective assignments from fresh INPUT. Native input sends zero Esc and no chat text.
+- Bind a fixed installation/PID/creation time/HWND, then GUID/runtime/owner/fence. Shared-installation tests must keep each process identity separate.
+- Use clean managed installation through delivery; do not overlay-copy source into managed game files.
+- Persist input intent before sending. Recover the original project/CON/request and deadline. Submitted or uncertain input never licenses replay.
+- Read-only doctor diagnoses; doctor --fix uses managed installation and original connection recovery. Without compatible fresh INPUT, first activation needs one manual reload.
+- A verified report and pending cleanup are separate facts. Complete cleanup without discarding the useful report.
+- WGC supplies game-window screenshots. Offline fixtures do not prove game behavior. Keep the current product matrix honest in todo.md.
 
-## CLI and command surface
+## Validation and delivery
 
-- `lycheedev describe --format json` is the only command directory. The parser,
-  help and the skill's generated `references/commands.md` all derive from the
-  contract table in `internal/command/command_contract.go`.
-- Never advertise an unimplemented command; `tools/skill-contract.mjs` fails the
-  build when the skill references a missing command or flag.
-- Exit codes per design §7: 0 complete, 2 arguments/selection, 3
-  capability/environment, 4 invalid input/protocol, 5 external failure,
-  6 pending, 7 cancelled, 8 internal. Map module errors explicitly in
-  `internal/command/query.go` or the dispatch helpers.
-- Results are `lycheedev.result.v1` envelopes; JSONL only counts as complete
-  with a legal `end` frame and exit 0.
+Run go build ./... and go vet ./... after code edit batches, followed by affected tests. The full Lua-required Go suite must pass before presenting a code commit as done; use bounded package/test concurrency and the documented installation-test timeout. Missing required interpreters are failures, not passes.
 
-## Live (game) rules
+Check tools/version.mjs --check and the Skill contract when their inputs change. Do not repeat successful checks unless a new change, actual failure or unresolved issue requires it.
 
-Native `CON-...` connections use the memory/500-slot architecture described in
-`docs/toolkit/lycheedev-mailbox-protocol-v1.md` (current input and reload contract),
-`docs/toolkit/live-500-slots-3.2.0.md` (current capacity and installation migration),
-and `skills/lycheedev/references/live-investigation.md`. Those contracts govern
-native connection input, recovery, reload, disconnect and installation. The older
-slot-routing and input-architecture documents retain historical designs and
-evidence; current protocol rules take precedence.
-The receiver/QR `OP-...` and `BTP-...` rules below remain historical recovery
-contracts; do not apply their keys, queue or ACK sequence to native connections.
-Native defaults are Ctrl+Alt+F12 (execute) and Ctrl+Alt+F11 (reload), saved as
-normal bindings and advertised from their actual effective assignments. An
-ordinary focused EditBox forwards only these actions; native input uses zero Esc.
-`live doctor` is read-only by default; `--fix` uses the existing managed installer
-and original CON recovery. Top-level `doctor` with a live target shares these
-checks. The early bootstrap publishes independent startup diagnostics. A prior
-two-key runtime with verified fresh INPUT may authorize one upgrade reload using
-its actual key. With no compatible INPUT, activation waits for one manual reload.
+Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; preserve latest at 2.5.1 unless the user explicitly changes that policy. Published artifacts are immutable.
 
-- The dedicated receiver is the machine input path, including first-contact
-  identify/connect/reset. Its minimal wake entry is available when the addon
-  loads; wake does not authorize probe execution. CLI sends bounded LDB1 stage,
-  verifies the staged receipt, triggers physical submit, reads the fresh
-  `receiver_commit_ready` challenge, then sends an exact LDC1 commit and final
-  Enter for intent-v2 dispatch from a key event. OnTextChanged never executes
-  business code. Wake is Ctrl+Alt+], submit Ctrl+Alt+Shift+], close Ctrl+Alt+[.
-  Never interpret a staged receipt or old submit key as accepted execution.
-- Each command hides the receiver and releases focus before business dispatch.
-  Asynchronous execution must leave no waiting panel or handshake QR over the
-  scene. Terminal receipts remain necessary; finish visual sampling before
-  Finish/Fail, and use complete execute/finish to clear the terminal display.
-- Bootstrap input is journaled before sending. A pending `BTP-...` is recovered
-  with `live status`/`live resume` on that ID; resume observes the original
-  receipt and does not resend unknown input. Keep its selected target fixed.
-  For installation activation or bridge loss, `live reload fallback` selects one
-  clean managed installation and PID, journals the fixed Esc×3 Enter /reload
-  Enter sequence, and verifies the runtime. Pending `OP-...` recovery does not
-  replay uncertain keys or override another owner.
-- Probe queues require a **clean managed addon**: files must match the
-  installation receipt byte for byte. Deploy addon updates with
-  `addon install` from a release root; overlay-copying the repo onto a managed
-  installation makes it `modified` and the queue will (correctly) refuse it.
-- `live run` executes only an already loaded operation and stops at a verified
-  report. `live ack` explicitly acknowledges that exact operation, retires its
-  queue entry and releases its window ownership; ACK does not trigger a cleanup
-  reload. Use standalone `live reload` when requested or needed within the
-  authorized task; the agent performs it automatically. Reconnect automatically
-  when a reload changes readiness, retaining the selected window and character.
-- `live probe load` requires `--budget-seconds <1-120>`. The budget is immutable
-  for that operation; resume does not restart its execution time. Loading and
-  SV persistence can reload the client, so probes that need transient scenes
-  rebuild them after load and finish observation before report flush.
-- Live results distinguish `report.state` (verified/unavailable) from
-  `cleanup` (pending/complete). A verified report with pending cleanup is a
-  usable result plus a recovery obligation — never report it as a failure.
-- `live finish` combines ACK with verified display cleanup and archives the clear
-  evidence. Its `complete=true` also requires `display.state=cleared`; retrying a
-  successfully finished operation is read-only. Keep atomic `live ack` for requests
-  that intentionally retain the display.
-- `live reload` may activate an older runtime only when the current CLI's exact
-  version is installed as a clean managed addon. It records from/to release and
-  manifest commit, preserves window/actor/nonce checks and rechecks bytes before input.
-- `live abandon` requires an explicit decision for unresolved probe/bugs work
-  after preparation through ack_requested, including zero/partial/unknown input.
-  Missing reports stay unavailable and execution/ACK remain unconfirmed.
-  It preserves evidence, retires only the exact disk queue
-  entry and releases ownership without game input. `cleanup=abandoned` and
-  `complete=false` never mean ACK or runtime unload succeeded.
-- Real-machine observation goes through `internal/desktop` WGC capture; screen
-  screenshots are not evidence for D3D windows.
-- Interactive desktop and game acceptance are recorded manually by the owner.
-  CI has no self-hosted interactive desktop job or desktop-evidence gate.
-
-## Change and verification workflow
-
-- One focused behavioral change at a time. Inspect the nearest equivalent
-  feature and the relevant contracts before editing.
-- Run `go build ./... && go vet ./...` after every edit batch; run the affected
-  package tests before moving on; the full `LYCHEEDEV_REQUIRE_LUA51=1 go test
-  -count=1 ./...` must pass before any commit you present as done.
-- API facts come from the pinned baselines recorded in
-  `docs/toolkit/implementation-status.md`, never from memory.
-- Test both disabled and enabled addon states; stateful changes also need
-  `/reload`, relogin, first-install and upgrade coverage.
-- Visual changes need before/after screenshots from the real client; locale
-  keys change in `Core/Locale.lua` and `Core/Locale_enUS.lua` together.
-- Never call the retired wowdoc/wowdata/Python entrypoints; never read or
-  import legacy user data (`LycheeDevDB`, `DumperDB`, old workspaces).
-
-## Release discipline
-
-- **Keep npm `latest` unchanged at `2.5.1` unless the owner explicitly requests
-  changing that tag.** Publish new versions (including 3.0.2) under `next`;
-  never move `latest` temporarily or promote a release automatically. Update
-  the version-bound `release/npm-channel.json` for each release and verify
-  both tags before and after publication. Keep the GitHub latest release
-  unchanged for this channel as well.
-- Version source is `release/version.json`; `node tools/version.mjs --write`
-  syncs package, TOCs, addon runtime and Go buildinfo. `--check` gates CI.
-- Publishing requires: clean tree at the tagged commit, required CI jobs
-  green, `release.mjs assemble` (license gate, windows-amd64 binary,
-  corresponding-source rebuild compare), sealed digests, isolated
-  `--ignore-scripts` install smoke, windows run evidence, OIDC publish
-  without token fallback, registry read-back, then the GitHub Release.
-- The product ships Windows amd64 only (2026-09-23 owner decision):
-  non-Windows platforms are not built, shipped or accepted.
-- A published tgz is immutable; failures after publish use new versions, never
-  a moved tag.
+Temporary work belongs in ignored .tmp. Keep reusable tests in tests/ and current documentation concise. Do not delete .lycheedev, another task's worktree, or another task's changes as repository hygiene.

@@ -1,136 +1,23 @@
-# Functional regression baseline
+# 功能回归基线
 
-Run this suite after changing the CLI, addon, source/data modules or skill.
-It checks the current working tree, including uncommitted changes. It does not
-publish, install an addon or replace the release acceptance matrix.
+正式离线入口为 tools/baseline.mjs。它检查当前工作树，不发布、不安装游戏插件，也不执行游戏输入。
 
-## Offline baseline
+## 环境与运行
 
-From the repository root on Windows amd64:
+需要 Lua 5.1，以及 release/tools/luals.json 固定的真实 LuaLS archive/runtime：
 
-```powershell
-node tools/baseline.mjs --lua51 "C:/path/to/lua.exe" --luals-archive "C:/path/to/pinned-luals.zip" --luals-runtime "C:/path/to/payload/tool/luals"
-```
+    node tools/baseline.mjs --lua51 "C:/path/to/lua.exe" --luals-archive "C:/path/to/pinned-luals.zip" --luals-runtime "C:/path/to/payload/tool/luals"
 
-Lua must be **5.1**. Build it with `node tests/tools/build-lua.mjs` if needed.
-The LuaLS archive and runtime must match `release/tools/luals.json`; use the runtime
-from a development or release package. The corresponding environment variables
-are `LYCHEEDEV_LUA51`, `LYCHEEDEV_LUALS_ARCHIVE` and
-`LYCHEEDEV_LUALS_TEST_RUNTIME`; when set, the invocation is simply:
+也可以设置 LYCHEEDEV_LUA51、LYCHEEDEV_LUALS_ARCHIVE 和 LYCHEEDEV_LUALS_TEST_RUNTIME 后直接运行入口。
 
-```powershell
-node tools/baseline.mjs
-```
+检查包括 build、vet、Lua 必需的完整 Go 套件、Node 工具和 npm 测试、版本一致性、Skill 合同，以及运行前后源码身份。Go 测试限制包并发为 2、测试并发为 4，并使用 20 分钟包时限。
 
-The runner executes `go build ./...`, `go vet ./...`, uncached full Go tests
-with mandatory Lua suites, all Node tool/npm tests, version consistency and
-the skill command contract. It also verifies that the source did not change
-during the run. Missing/skipped required tests, missing real LuaLS integration
-or skipped Node tests prevent a passing baseline. Other optional-environment
-and helper-process Go skips are listed separately in `checks.GO.skipped` (the
-`checks` array entry whose ID is `GO`); they do not count as passed tests.
-Raw output preserves every test result, including tests
-outside the minimum case catalog.
+## 目录与结果
 
-| IDs | Required behavior |
-| --- | --- |
-| BASE-01–02 | CLI flag admission, passive discovery, fixed targets and concurrent resolution |
-| BASE-03–04 | Exact source worktrees, dirty detection, leases and semantic cache identity |
-| BASE-05–06 | Hotfix pagination, missing-key integrity and asset evidence |
-| BASE-07 | First managed install, modified-file refusal and upgrade recovery |
-| BASE-08–11 | Receiver focus release, hardware confirmation, input intent, bounded wake and reload beacon |
-| BASE-12–14 | Async ownership, character SV, verified reports, ACK/display cleanup and no replay after interruption |
-| BASE-15–16 | Workspace/window/character isolation and process crash recovery |
-| BASE-17 | Workbench pages, readable shared controls, layout, locale and disabled-cost fixtures |
-| BASE-18 | Evidence corruption detection and workspace isolation |
-| BASE-19–20 | SQL partial coverage, hotfix provenance, JSONL completion, aggregation and subqueries |
-| BASE-21 | Update all-target preflight, managed replacement, no-backup completion and interrupted recovery |
-| LUALS | Real LuaLS process: API references and definitions |
+[catalog.mjs](catalog.mjs) 为必要的行为指定实际 Go 测试名称；测试缺失、被跳过或包没有正常结束，不能作为通过。当前 Mailbox 的编辑框输入、独立重载、启动诊断和读取恢复位于 BASE-08–11。
 
-The exact required test names live in [catalog.mjs](catalog.mjs). Removing or
-renaming a required test without updating this contract fails the baseline.
-Four-profile fixtures include Forever as an unverified compatibility path;
-they are not evidence of running any real client.
+生产模块测试还保留已有格式、历史持久化和兼容解析覆盖。这些结果不能证明当前协议的游戏实机场景。基础 runner 的旧 Live envelope 验证仍有离线回归，不作为 3.2.0 的实机入口。
 
-The Node suite includes `tools/update-isolated.test.mjs`: real npm against a
-loopback registry, temporary prefixes and two simulated clients. On a host with
-different repository/temp drives it also exercises cross-volume layouts. It
-does not replace the user's installed CLI, Skill or game addon.
+当前实机验收直接使用公共 live doctor/connect/execute/resume/reload/disconnect 命令，遵循 [协议](../../docs/live-protocol.md)，并对照 [待办矩阵](../../todo.md)。保留本次失败所需的原连接；不要为了重跑创建竞争请求或重放未知输入。
 
-## Real-client baseline
-
-Use a clean managed addon matching the CLI and an existing connected session.
-The selected character must be logged in and out of combat. This suite can
-reload the game for loading and SavedVariables persistence, briefly opens all
-workbench pages and closes its workbench during cleanup. It does not change
-shortcut settings. Run it when no other task needs that client.
-
-```powershell
-node tools/live-baseline.mjs --cli "C:/path/to/lycheedev.exe" --session "SESSION-..."
-```
-
-Optional: `--home <workspace>`, `--account <account>`, `--out <new-directory>`.
-The session determines the window, character and build; the runner does not
-automatically select or connect a different client. The old `--connect` string,
-named temporary probe and `--skip-hide` flow have been removed. Connect through
-the production CLI first; complete cleanup is mandatory.
-
-| ID | Pass criteria |
-| --- | --- |
-| LIVE-01 | Inline sum 1…10 = 55; receiver inactive and optical overlay absent at business entry; verified report, complete cleanup and display-clear capture |
-| LIVE-02 | Repeat the exact request, then resume its completed operation; same operation ID, body/receipt digest and clear capture |
-| LIVE-03 | Deliberate `BASELINE_EXPECTED_FAILURE` yields business failure/exit 5 **and** verified report with complete cleanup |
-| LIVE-04 | 55-second async probe visits eight main pages and Settings; receiver and transport QR remain absent at each callback; displayed shortcuts match current settings; final cleanup succeeds |
-
-Live probes are versioned in [probes/](probes/), copied into each run's evidence
-directory before use, and assigned immutable request keys and source hashes.
-
-The optional [UI activity probe](probes/ui_activity.lua) exercises event selection,
-Diagnostics, the running Automation state, report/details switching, fixed
-read-only shortcuts, and a persistent activity indicator with input released.
-Run it with `live execute --session <session> --file tests/baseline/probes/ui_activity.lua
---request <unique-key> --budget-seconds 75 --format json` and capture the same
-window through WGC for visual review. It changes the visible workbench for 56
-seconds and closes it on cleanup. Its assertions do not prove physical mouse,
-IME or OS shortcut behavior; those remain REAL-03 acceptance.
-
-The runner stops at the first failure/pending result. It never retries unknown
-input, auto-abandons an operation or continues with a new request after a
-blocked case. The CLI owns journal recovery, not the test runner.
-
-For interruption, inspect `report.json` and the matching `*.command.json`,
-`*.stdout` and `*.stderr`. Recover the recorded `OP-...` or `BTP-...` through
-`lycheedev live status <id>` / `lycheedev live resume <id>` using the original
-workspace. If the process died before returning an ID, the saved execute
-arguments preserve the same request key. Do not create another baseline run
-until the original ownership has been resolved. A new run uses new request keys.
-
-LIVE-02 verifies evidence reuse through the public CLI. The no-input and
-immutable-journal guarantees are additionally tested by the offline lifecycle
-fixtures; the live runner does not infer zero keyboard input from elapsed time.
-
-## Evidence and remaining acceptance
-
-Each run creates a fresh `.tmp/baseline-<mode>-<timestamp>/` containing:
-
-- `report.json`: source commit/tree digest, check outcomes, durations, raw
-  command paths, live request/operation IDs and CLI report/clear evidence.
-- `summary.md`: readable result table.
-- `*.command.json` written before process launch; `*.process.json` plus raw
-  stdout/stderr; copied immutable live probes.
-
-An existing output directory is refused. Exit **0** means this mode's selected
-checks passed, **1** failed, **2** blocked/incomplete. `passed` is never a claim
-that the whole client matrix or visual acceptance passed.
-
-REAL-01…09 remain `not_run` in generated reports: WGC visual inspection,
-locale/viewport/scale, physical input/IME, RGB timing, first-install/relogin/
-combat, multiple real windows/builds, Classic, Titan and long-running stress.
-Record actual WGC captures, client identity and reviewer observations in the
-acceptance document before changing those statuses. Functional page activation
-alone does not prove font readability, unobstructed pixels or rounded corners.
-Production scope remains Retail 120100, Classic 50504 and Titan 38002; Forever
-16001 is excluded from acceptance.
-
-The runner's own fault tests run with `node --test tools/baseline.test.mjs` and
-are also discovered by the existing CI Node test glob.
+工作台探针保留在 probes/，用于明确授权的特定场景。临时日志和捕获放入 .tmp，完成后清理。

@@ -24,3 +24,7 @@ packages/npm/lycheedev/*.tgz
 # Local working artifacts and evidence (never shipped)
 .tmp/
 .lycheedev/
+
+# Local task checkouts
+/.worktrees/
+/.claude/worktrees/

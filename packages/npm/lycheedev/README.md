@@ -1,55 +1,23 @@
 # Lychee Dev Toolkit
 
-**WoW source research, game data, asset export and live investigation in one native toolkit.**
+用于魔兽世界插件开发的原生 Go CLI：Source 调查、DB2/SQL、Hotfix、资源导出和游戏内 Live 验证。
 
-[![npm](https://img.shields.io/npm/v/lycheedev)](https://www.npmjs.com/package/lycheedev)
-[![CI](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-ci.yml/badge.svg?branch=main)](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-ci.yml)
-[![Windows amd64](https://img.shields.io/badge/platform-Windows_amd64-0078d4)](https://github.com/Follen/Lychee-Dev)
-[![Zero runtime dependencies](https://img.shields.io/badge/runtime_dependencies-0-52a788)](https://www.npmjs.com/package/lycheedev)
-[![MIT](https://img.shields.io/badge/license-MIT-52a788)](https://github.com/Follen/Lychee-Dev/blob/main/LICENSE)
+[项目文档](https://github.com/Follen/Lychee-Dev#readme) · [开发基线](https://github.com/Follen/Lychee-Dev/blob/main/Design.md) · [更新记录](https://github.com/Follen/Lychee-Dev/blob/main/Changelog.md)
 
-[English documentation](https://github.com/Follen/Lychee-Dev#readme) · [简体中文](https://github.com/Follen/Lychee-Dev/blob/main/README_zhCN.md)
+需要 Windows amd64 和 Node.js 22.14.0 及以上。启动器没有运行时 npm 依赖，不下载替代可执行文件。
 
-## For developers
+    npm install --global lycheedev@next --ignore-scripts
+    lycheedev version --format json
+    lycheedev describe --format json
 
-| Workflow | Capabilities |
-| --- | --- |
-| Source | Pin Blizzard UI source; search APIs, symbols and paths; compare revisions and validate addon closures. |
-| Data | Query DB2 and SQL; inspect spells, items, creatures, encounters, decor and independent Hotfix records. |
-| Assets | Search listfiles; inspect CASC files; export raw files and BLP2 images as PNG or lossless WebP. |
-| Live | Use the in-game `/dev` workbench or bounded Lua probes with archived reports and explicit cleanup. |
-| Evidence | Reuse fixed project references, verify captures and manage bounded caches. |
+包内包含原生 CLI、addon、Agent Skill、LuaLS 工具资源、发行清单与许可文件。npm 安装不会自动部署游戏插件或 Skill；组件安装与升级通过 CLI 显式执行。
 
-Windows x64 and Node.js **≥22.14.0** are required. The CLI is native Go; the Node launcher forwards arguments and exit codes. There are no runtime npm dependencies or required install scripts.
+    $release = Join-Path (npm root -g) 'lycheedev'
+    lycheedev addon install --release $release --installation 'D:/Game/World of Warcraft/_retail_'
+    lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
 
-```powershell
-npm install --global lycheedev --ignore-scripts
-lycheedev version --format json
-lycheedev describe --format json
+仓库当前文档以 3.2.0 开发基线为准，可能领先于本包。以 version 和 describe 确认已安装版本的能力；Live 需要配套的受管插件与运行时。
 
-$release = Join-Path (npm root -g) 'lycheedev'
-lycheedev addon install --release $release --installation 'D:\Game\World of Warcraft\_retail_'
-lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents\skills\lycheedev')
-```
+Source、Data 和 Assets 无需启动游戏。Live 使用固定客户端和持久连接，恢复时保留原 project、CON、request 及预算。当前协议与已验证产品范围以对应版本文档为准。
 
-The last two commands explicitly deploy the included resources for first installation. npm installation alone does not deploy them. For upgrades, inspect component status and use a recovery directory on the same drive; see the [installation guide](https://github.com/Follen/Lychee-Dev#install).
-
-Source and data investigation do not require a running game. Live investigation requires a logged-in client with the addon loaded. Encrypted records may be unavailable; bounded Hotfix pages and static validation retain their completeness limits.
-
-## For Agents
-
-The included `lycheedev` skill routes source, data, assets, validation and running-client questions. Automatic invocation is enabled; discover the installed command surface through `lycheedev describe --format json` and carry returned fixed references between calls.
-
-**A visible QR is an intermediate state.** Within an authorized live investigation, read and retain the verified report, ACK the same operation, then hide the final receipt and verify it cleared. Recover interruptions by the existing operation ID. Respect an explicit pause or report-retention request.
-
-See the [Agent guide](https://github.com/Follen/Lychee-Dev#for-agents) and [skill](https://github.com/Follen/Lychee-Dev/blob/main/skills/lycheedev/SKILL.md).
-
-## Package contents
-
-- `native/windows-amd64/lycheedev.exe` — native CLI.
-- `bin/lycheedev.mjs` — platform selection and process forwarding.
-- `payload/addon/`, `payload/skill/` — deployable addon and Agent skill.
-- `release.json` — component sizes and SHA-256 digests checked by the installer.
-- `LICENSE`, `THIRD_PARTY_NOTICES` — licensing and third-party attribution.
-
-The launcher never downloads fallback binaries. The toolkit uses `~/.lycheedev` and does not import legacy workspaces or SavedVariables. Uninstalling npm does not remove deployed resources; component removal is explicit.
+项目采用 MIT；第三方许可见包内 LICENSE 和 THIRD_PARTY_NOTICES。
