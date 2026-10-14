@@ -6,6 +6,15 @@ uses Lycheedev mailbox protocol v1: a named Mailbox, 500 slots and two formal ga
 
 ## Diagnose the selected target
 
+Use the installed CLI's known `describe`/help capabilities before selecting a
+doctor command; reuse that information when already available. If `live doctor`
+is absent, do not substitute top-level `doctor` unless its actual help includes
+the required live target checks. A newer Skill or the same displayed version
+number does not establish the same commit, wire protocol or slot inventory.
+Keep an older CON with its matching CLI for supported diagnosis/recovery;
+[current drivers cannot execute old-wire journals](live-recovery.md#durable-evidence-and-older-journals).
+Do not replace its journal or install a new driver merely to make these examples fit.
+
 Retain the authorized installation and PID, or the original project and CON.
 Use `live instances --passive` only when a target is missing. Folder names,
 shared builds and the Windows foreground window do not identify a connection.
@@ -24,7 +33,6 @@ same checks alongside workspace/data/source checks.
 
 ## Complete the authorized repair
 
-Use the installed CLI's describe/help to confirm this command is available.
 Within an authorized live task, activation and recovery need no repeated approval.
 Use `--fix` when diagnosis requires installation, activation or connection recovery:
 

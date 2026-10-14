@@ -180,13 +180,16 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 				if fault != "bind" && fault != "reload_bind" {
 					t.Fatal(err)
 				}
+				original := d.State.Transaction.Envelope
+				phase, runtime := d.State.Transaction.Phase, d.State.Identity.Runtime
 				restart()
 				if fault == "reload_bind" {
-					err = d.RecoverBinding(ctx)
-					// v2 foreign loads are skipped without emitting a receipt for
+					err = d.Connect(ctx)
+					// Foreign loads are skipped without emitting a receipt for
 					// another runtime. Missing evidence cannot authorize replay.
-					if !errors.Is(err, channel.ErrPending) || peer.sends != 1 {
-						t.Fatal("foreign bootstrap was replayed", err)
+					tx := d.State.Transaction
+					if !errors.Is(err, channel.ErrPending) || peer.sends != 1 || d.State.Bound || d.State.Identity.Runtime != runtime || tx == nil || tx.Envelope != original || tx.Phase != phase || tx.Receipt != nil {
+						t.Fatalf("foreign bind was replayed or its pending evidence changed: err=%v state=%+v sends=%d", err, d.State, peer.sends)
 					}
 					return
 				} else {

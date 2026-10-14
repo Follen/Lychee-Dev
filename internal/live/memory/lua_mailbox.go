@@ -282,6 +282,21 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	a := &luaAccess{reader: r}
 	out = LookupResult{Path: "lua_mailbox"}
 	defer func() {
+		// Any traversed object can retire after its parent was read, not only
+		// the final record string. Recheck the recorded prefix once before
+		// calling such a failure permanent; old bytes never become a result.
+		if err != nil && errors.Is(err, ErrMailboxUnavailable) && !errors.Is(err, ErrMailboxPathChanged) && ctx.Err() == nil {
+			if verifyErr := a.verify(ctx); errors.Is(verifyErr, ErrMailboxPathChanged) {
+				if identityErr := r.source.Verify(ctx); identityErr != nil {
+					err = errors.Join(err, identityErr)
+				} else {
+					err = verifyErr
+				}
+			}
+		}
+		if err != nil {
+			err = errors.Join(err, ctx.Err())
+		}
 		out.ElapsedMillis = time.Since(started).Milliseconds()
 		out.Coverage = Coverage{Complete: err == nil, Gaps: []Gap{}, Workers: []Worker{{Complete: err == nil, ReadCalls: a.calls, ScannedBytes: a.count, PlannedBytes: a.count, Gaps: []Gap{}}}, ScannedBytes: a.count, PlannedBytes: a.count, ElapsedMillis: out.ElapsedMillis}
 	}()
@@ -442,18 +457,9 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	if value.tag != 4 {
 		return out, mailboxError("record_type")
 	}
-	// The named field may move while its previous immutable string is reclaimed.
-	// A definite path change supersedes a failure to read that retired object;
-	// a stable path preserves the original layout/read failure.
-	recordFailure := func(cause error) error {
-		if verifyErr := a.verify(ctx); errors.Is(verifyErr, ErrMailboxPathChanged) {
-			return verifyErr
-		}
-		return errors.Join(cause, ctx.Err())
-	}
 	h, readErr := a.read(ctx, value.pointer, 32, false)
 	if readErr != nil {
-		return out, recordFailure(readErr)
+		return out, readErr
 	}
 	length := binary.LittleEndian.Uint64(h[24:32])
 	maximum := uint64(16<<10) + bridge.MemoryHeaderBytes + bridge.MemoryTrailerBytes
@@ -461,7 +467,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		maximum = uint64(selector.BodyLength) + bridge.MemoryHeaderBytes + bridge.MemoryTrailerBytes
 	}
 	if h[16] != 4 || length < bridge.MemoryHeaderBytes+bridge.MemoryTrailerBytes || length > maximum || value.pointer > ^uint64(0)-32-length {
-		return out, recordFailure(mailboxError("record_string_length"))
+		return out, mailboxError("record_string_length")
 	}
 	a.guard(value.pointer+16, h[16:17], false)
 	a.guard(value.pointer+24, h[24:32], false)
@@ -478,10 +484,10 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 			err = a.verify(ctx)
 			return out, err
 		}
-		return out, recordFailure(errors.Join(mailboxError("record_invalid: "+readErr.Error()), a.readError))
+		return out, errors.Join(mailboxError("record_invalid: "+readErr.Error()), a.readError)
 	}
 	if uint64(len(record.Payload))+bridge.MemoryHeaderBytes+bridge.MemoryTrailerBytes != length || record.Header.Runtime != currentRuntime {
-		return out, recordFailure(mailboxError("record_identity"))
+		return out, mailboxError("record_identity")
 	}
 	if err = a.verify(ctx); err != nil {
 		return out, err

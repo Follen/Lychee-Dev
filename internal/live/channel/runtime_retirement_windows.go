@@ -10,6 +10,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/desktop"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 type runtimeRetirementBackend interface {
@@ -108,6 +109,12 @@ func (d *Driver) continueOrRetire(ctx context.Context, n *Native, closing bool) 
 }
 
 func (d *Driver) continueOrRetireWith(ctx context.Context, backend runtimeRetirementBackend, target desktop.WindowIdentity, closing bool) error {
+	// A durably unbound, quiescent close needs only the existing terminal
+	// transition. Optional runtime observation cannot improve that evidence.
+	// Saved retirement proof still owns its separate exact-cleanup path.
+	if d.State.RuntimeEnd == nil && d.closeBookkeepingOnly() {
+		return d.Continue(ctx)
+	}
 	if d.closingExplicitReload() && d.State.RuntimeEnd == nil {
 		// Inspect this control's budget, not a blocker retained from an older goal.
 		available := true
@@ -134,6 +141,12 @@ func (d *Driver) continueOrRetireWith(ctx context.Context, backend runtimeRetire
 			optionalTimeout := ctx.Err() == nil && d.State.RuntimeEnd == nil &&
 				errors.Is(err, context.DeadlineExceeded) && optionalObservationTimeout(err)
 			if !optionalTimeout {
+				// The independent retirement probe uses the same publication-gap
+				// contract as ordinary observations. This is a later observation,
+				// never proof of retirement or permission to replay the exchange.
+				if d.State.RuntimeEnd == nil && ctx.Err() == nil && errors.Is(err, memory.ErrMailboxPathChanged) {
+					return d.pendingObservation(err)
+				}
 				return err
 			}
 		}

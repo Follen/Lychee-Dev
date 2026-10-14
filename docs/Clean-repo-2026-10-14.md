@@ -1330,7 +1330,7 @@ R12已推送`787eff3b4fdb5c49ef5da4164e684c569ca0e1e0`（tree `f58ea9ca57cbaaade
 - 仅复用runner预装MSVC/Windows SDK，编译日志、SDK/VC版本、source/DLL/hash随同原始WGCartifact保留；无下载安装、无产品依赖/发布内容或策略更改。Windows Go交叉build/vet、Linux desktop、import合同、workflow正式10项及YAML检查通过；本地无MSVC，原生C++编译和运行待新CI。
 - 本批906文件冻结aggregate `f6529b24f2a1ebe2db02c8f85f73655a3e5a9a35b31fb28f8c2224d4f767acd5`（审查期间仅workflow及其正式测试增加显式临时工作目录，避免编译器默认旁产物污染checkout；其余904文件保持原SHA），parent787eff3b，新鲜R15审计者复核ABI/cleanup/PowerShell编排。原生未执行前不填写通过；SDK若同样失败只证明该runner/这两个fixture的官方API边界，不扩展为产品平台限制。
 
-## R16：用户追加高风险覆盖补强（独立下一批）
+## R16：用户追加高风险覆盖补强（当前结论见R19–R22更正）
 
 - 基于787eff3b实际未覆盖块及现有测试去重，隔离准备5个独立边界：Bundle完成stage后的目标抢占；archive已rename而journal仍planned；DeleteDocuments中途失败的文档与删除世代回滚；RecoverBinding拒绝bootstrap/Consumed失败后的原nonce恢复；finishRecovery报告保存失败后的原ticket/期限保全。只保留能证明新增边界的正式回归与负对照，不为百分比改产品合同。
 - 当前仅在忽略的overlay中开发，不混入WGC固定树；实现、负对照、整合原生及最终覆盖均待后续实际结果。
@@ -1338,14 +1338,14 @@ R12已推送`787eff3b4fdb5c49ef5da4164e684c569ca0e1e0`（tree `f58ea9ca57cbaaade
 
 R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机、COM/BSTR释放及PowerShell/cmd编排无新增确认问题。起点906文件吻合；终点只包含声明的2文件临时cwd修正，其余904未变，修正aggregate全匹配。正式workflow10项通过；MSVC/native运行仍待CI，不预填通过。
 
-### R16-01 · 已确认 · bootstrap拒绝后的槽回收失败无法沿原连接继续
+### R16-01 · R19已撤回当前缺陷分类 · 合成bootstrap拒绝恢复
 
 - 新正式回归在787eff3b负对照复现：RecoverBinding验证并持久化精确slot_runtime_changed bootstrap拒绝后，若Consumed失败，transaction保持received；Load后实际Project→Continue路径直接重报拒绝，既不能完成回收/新绑定，也不能在closing分支关闭。wait.go仅input_attempted可进入原恢复入口，已核对真实消费者，不是任意错误状态假设。
 - 下一隔离批次修正中：只消费已核实精确拒绝的原nonce，重试原槽回收，不重发不确定输入；之后依原closing意图退出或新challenge。修复/正式正反对照/原生结果待补。其他拟补存储/报告边界目前通过，不按用例数增加bug数。
 
 ## R17：用户实际Skill源码调查案例
 
-### R17-01 · 已确认指引缺口 · 可用Source调查仍外搜/猜raw路径
+### R17-01 · 已修复并推送0f26b9a7 · 可用Source调查仍外搜/猜raw路径
 
 - 用户实际案例明确指定$lycheedev且Source可用，却额外搜GitHub并猜中404的raw路径，未增加有效证据、绕过固定版本调查。当前主Skill/source references未统一规定默认固定Source、空结果自查和外部例外的证据界线。
 - 专项实施中，仅LycheeDev Skill目录：复用已有发现/固定版本/query/inspect，refs/context按需；无结果先核模式/关键词/版本/覆盖；只读工具返回或已核实路径；真实缺来源/版本/能力或用户明确要求才转外部并标缺口/证据身份。已足够证据直接回答，不增加审批、强制步骤或重复验证。修订后用该案例和例外行为独立复核、正式Skill/生成目录检查，再提交同PR。未修改Lychee Talent或连接游戏。
@@ -1369,3 +1369,71 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 - 新确认R16-02：Consumed取消前提前写入Bound/operation stage/cleanup/Reload，使recordBlocker把逻辑已推进、旧transaction未退役一起落盘；重载后跳过原回收，非幂等commit后续确认停滞。最小修复将8处既有逻辑迁移集中到finishTransaction的内部callback，先Consumed成功再迁移/清transaction/原Save，不加新状态框架。
 - 六个新顶层测试覆盖5个独立边界；18个回收子场景分别覆盖9种逻辑分支的回收前取消和回收后journal保存失败。旧实现11个叶节点负对照失败（2bootstrap+9取消），9个保存失败对照本就通过；四个定点故障mutation在预期数据保全断言失败，不按新增测试数增加bug数。
 - Linux三受影响包364事件pass/0fail/0skip，六新测试race×3共90pass；build/vet与Windows测试交叉编译通过，正式文件无overlay定向重跑通过。完整Lua必需套件和全新R19独立复核进行中；未推送、未执行新head原生，不填写最终覆盖或客户端通过。
+
+
+### R15 原生SDK对照结果与WGC收口
+
+- 精确head `310a5d7db14d5e66179c3460eef0745eee0c356a`，tree `75770dbc98939433fd28df485d71c97e4dfc9b31`，[push CI38555308695](https://github.com/Follen/Lychee-Dev/actions/runs/38555308695)：完整Go及16项固定集成、race/process/addon/package通过；独立WGC和原汇总失败。主套件24734/32122=77.0002%，该阶段值不替代后续产品修正重测。
+- [WGC artifact11890052167](https://github.com/Follen/Lychee-Dev/actions/runs/38555308695/artifacts/11890052167)下载SHA256 `a078f69c34da67d8fa16cb3222726bd8e2da4961337f9c6079bb8077370c0369`核对一致。Windows SDK10.0.26100.0/MSVC19.51.36260.0真实编译成功；两个自建HWND的Go和SDK共4次item调用均0x80070057，factory/QI成功，立即restricted-error retrieval/details均S_OK，文本均为“The parameter is incorrect.” / “Could not capture the given window.”，不是事后陈旧error。
+- 这排除了当前证据中的Go特有ABI解释，未证明具体宿主/驱动/策略根因，也不证明一般Windows不支持。没有可离线确认的WGC产品修复依据，停止猜测式窗口样式试错。保留R12-C01为特定环境未完成验证，原测试失败不改成skip。
+- 恢复既有发行合同边界：WGC单列非门禁观察，保留原test失败、exit1、raw events、SDK身份及醒目warning/summary；无效JSON、丢失/矛盾终态、编译/准备及artifact错误仍失败。复用Go coverage事件解析器的最小观察汇总工具有正式正反例；不把观察作业完成混称capture通过，不把独立probe并入主套件覆盖率。
+- 后续复验环境：具备交互图形会话的Windows/amd64主机及Go1.27.1，无需WoW；记录OS/显示驱动/session/desktop信息。设置`LYCHEEDEV_TEST_DESKTOP=1`，运行`go test -v -count=1 -timeout=1m ./internal/desktop -run '^TestWGCLifetimeBetweenSessions$'`，只创建自己的窗口，不填写外部PID。预期10轮采帧/释放与delegate归零；如失败保留HRESULT与窗口信息，可使用仓内SDK适配器对照。实际复验结果：
+
+## R19：高风险修正独立复审及更正
+
+- 独立复核确认R16-02是真实回收取消边界缺陷：Native Consumed持有既有发布lease并幂等退役精确nonce，不触碰更新reservation；8处逻辑迁移后移符合真实消费者。独立三包364pass，九种回收前取消负对照失败，九种回收后保存失败对照通过。
+- **撤回R16-01的当前确认缺陷分类。** 进一步核对生产者与受支持journal发现：`slot_runtime_changed`只有旧64槽/`lycheedev.slot.v1`协议曾产生，当前addon对其他runtime返回`slot_skipped_foreign`且不发布回执；当前协议/slot校验明确拒绝旧记录，没有使旧回执进入当前Connect的受支持迁移。前述fixture只证明合成状态，不能当真实触发。新增修复和用例撤回，不维持“两项当前bug”的计数。
+- R19-01确认死代码：退役的RecoverBinding/ bootstrap_changed消费及专属测试已无当前生产者。清理范围不触碰RuntimeCandidate→RecoverRuntime、不扩大旧协议兼容；现代初始bind、closing、unknown slot及原请求不重放回归仍保留。
+- R19-02另确认当前可达缺陷：unbind Consumed成功，Save遇到原关闭预算到期，deferred保存了Closing=true、Bound=false、transaction=nil与exhausted；Project Resume/Disconnect仍进入Continue，在纯终态记账之前再次被预算阻断。当前树和310a5d7负对照均复现；只允许已无输入/交易待做的完成记账，不能重新赋予操作预算。实施/正式验证待本批完成。
+
+## R20：用户切换角色后旧连接closing现场专项（初始状态，后续摘录已补）
+
+- 用户报告正式服12.1.0.69933、CLI3.1.2，角色切换与mailbox short_read/ineligible_read顺序未知，reload/resume无效、disconnect停在closing_exchange_unconfirmed。现场原CON日志/已安装命令输出尚未取得，不能把报告顺序或角色切换直接当根因。
+- 已核实正式发布v3.1.2为旧三键/INPUT v3合同；PR13采用新两键协议且拒绝旧native日志，较新Skill不改变已装CLI能力。两版已有基于替代runtime证据或原进程结束的无输入退役路径，读取失败本身不证明旧环境已结束。后续仅按真实证据分析，不手工删claim/日志、不重放旧请求或以反复reload替代恢复。
+- 本云无用户D盘日志读取权限，已由主聊天请求提供诊断材料；不连接游戏、不改Lychee Talent。离线独立组继续核对当前真实可达路径与正式fixture，现场因果/客户端验证保持未确认。
+
+
+### R20 现场证据边界与已确认离线路径
+
+- 已读取用户提供的230行命令输出摘录，**不是完整连接jsonl**。已装CLI确为发布v3.1.2/commit `9d3d3598`、200槽旧identity/hybrid INPUT，已装Skill却描述新Mailbox/500槽/live doctor；合同差异确认但不等于现场根因。原连接尚未bound；invoke submitted只证明6条消息入队，不证明执行。disconnect剩余约119973ms，因此不能用R19-02预算耗尽复现解释该次输出。
+- 精确v3.1.2源码中Disconnect在普通Continue/旧exchange之前已有独立closeReplacedRuntime。`closing_exchange_unconfirmed`只说明随后进入旧回执路径，与“独立观察没有得到可接受替代证据后才失败”一致，不能断言旧回执必须先成功。Resume保留原角色；changed-GUID的新runtime只有在同进程两份新鲜递增INPUT证明后才可退役旧CON，不转移未知业务。历史identity/input字段不证明用户未reload，short_read/ineligible_read不证明原环境结束。
+- R20-01已离线确认：Mailbox Lookup读取路径父节点后，旧state/globals/namespace/Mailbox/hash-node对象可能退役；最终字符串原本会核已记录guard，早期遍历错误却直接硬失败。5个真实路径切换fixture在旧代码均失败，配对稳定不可读控制仍应保留硬错。最小修复复用同一读取预算/guard的失败出口，只在路径变化被证明且进程身份仍有效时返回path_changed，不增加循环、输入或runtimeEnd权力；进程变化和取消不能被掩盖。正式memory测试已实施，最终整合验证待补。
+- R20-02为已确认Skill合同指引缺口：doctor可用性须在首次诊断示例之前按已知installed describe/help选择，旧顶层doctor并不自动等同live doctor；同版本字符串不能证明同commit/协议。保留旧CON和匹配CLI诊断，不以新driver运行不兼容日志。状态中的历史字段、continuation=continue与retryable=false含义已明确，不盲目resume/reload循环。两份references合同21文件/84命令/228引用0违规、目录检查与2项正式测试通过。
+- R20-03已确认并实施，由当前原函数离线抽取复现：独立退役预检的已证明path_changed没有沿现有pending合同分类，被包装成硬错误；仅修正无保存proof的观察分支，不吞普通坏读/权限/身份错误。正式Windows边界测试及原生结果待完成，抽取验证不冒充Windows执行。
+- 最小补证：仅该CON的jsonl与同名target元数据；失败connect、首次reload后resume、no-cache resume、disconnect的result.scans所指子目录及时间（无指向则先给目录列表）；activation记录只在存在或被引用时补，history/artifact只按原日志引用补。无需业务源码。旧扫描trace不含新Error字段且省略record payload，某些历史freshness/准确失败地址可能不能回溯；未拿到的文件不声称已读。
+
+
+### R19/R20 本批实现与正式验证
+
+- R19-01七文件删除清单/回归已完成。全局vet发现独立审计最初清单漏掉`tests/protocol/slot_driver_test.go`的直接测试调用；保留这个有价值的当前Lua外来runtime无回执负例，改走真实Connect并断言原envelope/phase/runtime、未bound、无receipt及只发一次输入，不删有效覆盖。
+- R19-02复用原budgetContext与next关闭迁移：只在Closing、未bound、无transaction、operation终态/无operation、reload/recovery完成或不存在时允许无输入记账；RuntimeEnd精确退役仍独立，原budget耗尽/回拨证据及caller取消保留。直接旧snapshot六类安全/十八类不安全控制，成功Consumed/Save取消实际边界以及现代未知bind恢复都加入正式测试。七个单guard移除mutation均在独立安全断言失败。
+- 修正树全局build/vet通过；channel297事件pass/0fail/0skip，必需Lua跨语言tests/protocol16pass，六项定向channel race×3共150pass。旧310a5d7基线取消前9个边界失败、回收后9个保存失败控制通过；关闭终态旧码8个叶节点失败、18个unsafe控制保持通过。R16-01合成用例不再计入本批验证。
+- R20-01正式memory整包通过；12个新叶节点（5路径变化+5稳定不可读+进程变化+取消），旧实现只失败5个变化边界；受影响memory race×3通过。R20-03实际Windows边界新增8叶：raw/wrapped path_changed变pending，short_read/access/process/protocol/parent取消/saved-proof清理错误保持硬错；当前函数的逐字可移植验证8叶通过，旧函数只失败2个gap控制，race×3通过。Windows测试程序交叉编译通过，仍须本批原生执行，未称Linux跑过Windows测试。
+- WGC观察汇总复用既有Go事件parser，正式正反例区分完整pass/完整failed、compile错误、skip、截断、冲突、错test/exit及无效证据时的结果保全；fixture的warning/summary隔离，不污染CI观察报告。原SDK失败artifact实读重算仍为failed。workflow结构及该工具13项通过，完整Node工具85pass/6Windows-only skip/0fail（后续仅fixture输出隔离调整已定向复验）。
+- R20 Skill两references已完成合同/目录正式检查；不把显示版本号当协议同一性，不把历史identity/input当fresh，不以continue覆盖具体硬错误。
+
+## R21：修正整合树新鲜独立复审
+
+- parent `0f26b9a7`，冻结924个代码/Skill/工具文件，aggregate `aacc1ac475a17f866699af0afe72caf086c3eda4d4586af147715c078e638cb0`。只排除协调者维护的五份状态文档；新审计者对实际产品、正式测试、Skill及WGC观察编排复核，完整Lua必需套件并行运行。
+- 当前复审与整套结果尚待完成，不预填无缺陷或最终覆盖。原生Windows、当前skip和覆盖率将在精确新提交上重测；现场根因仍需用户原始诊断材料，七项客户端整合与WGC非游戏验证结果保持空白。
+
+
+### R21 当前实际结果与新确认项
+
+- 924文件树完整Lua必需Linux套件实际结束：2576事件pass、3个既有平台fail、28skip；30包pass、command1包fail、4无测试。失败仍仅TestLiveConnectArgumentAdmission、TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess、TestSourceResearchThroughCLI；全局build/vet通过。Node工具85pass/6个Windows-only skip/0fail；版本3.1.2、Skill21文件/84命令/228引用、生成目录、import及本地文档引用通过。
+- R21独立受影响证据/vault/channel/memory/Lua真实负例共81事件pass，WGC/workflow13项pass；未重复整套。**发现R21-01：已无输入/交易需要的quiescent关闭仍先做optional runtime替换预检，若返回已证明path_changed，公共wrapper提前pending，阻止R19允许的纯终态记账。** 不变runtime/no-proof对照能关闭，公开Resume/Disconnect均用该wrapper；逐字抽取Windows函数离线复现，不冒称Windows原生已执行。
+- 最小修正范围为该wrapper及正式Windows回归：无saved RuntimeEnd且已有closeBookkeepingOnly证据时先复用Continue；不绕过Native/身份/lease准入，不跳过有proof的精确退役，不放行仍bound/transaction/unfinished operation/reload/recovery，不延长任何预算。修正/后续新鲜R22复核及原生验证待补，不能把本轮标为无发现。
+
+
+### R21-01 实施完成，进入R22
+
+- 仅两个Windows文件变化：`runtime_retirement_windows.go`在无RuntimeEnd且原closeBookkeepingOnly为真时先调用既有Continue；其余预检/退役路径不变。`runtime_retirement_windows_test.go`加入11个正式叶节点：3个终态/已核实报告/unknown结果正例、5个active-work负例、saved-proof正确路由、wrong-process proof拒绝和caller取消。共用原证据比较helper，不重复低层200ms计时测试。
+- 精确R20旧freeze仅3个应完成终态场景失败，8个控制通过；新11例及实际R19到期→持久化→Load→wrapper链均通过，相关逐字可移植验证race×3通过，实际Windows测试程序交叉编译通过。尚不是原生通过；没有新增输入、claim绕过或预算更新。
+- R22全新审计者在924文件新freeze aggregate `dcae36da3ad5bc001f5c4ac91bd50b5e098b9784ce91a5247787aa921f30aaeb`上复核；与R21只差上述2文件，剩余922文件SHA保持。完整Lua必需Go重跑已启动，复审与原生结果待回填。
+
+
+## R22：最终恢复组合独立复核
+
+- 冻结924文件 aggregate `dcae36da3ad5bc001f5c4ac91bd50b5e098b9784ce91a5247787aa921f30aaeb`；与R21仅两个Windows retirement文件不同。完整Lua必需Linux命令 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 已实际结束：2576 test/subtest pass、3既有平台fail、28skip，30包pass、command1包fail、4无测试；build/vet通过，起终924文件SHA无变化。三个失败仍仅LiveConnectArgumentAdmission、ExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess及SourceResearchThroughCLI，不冒称Linux全套通过。
+- 新鲜审计者已逐字抽取当前Windows retirement函数与完整正式retirement/closing-reload回归，并验证真正的到期→保存中断→Load→公共wrapper链；114事件pass/0fail/0skip。精确旧R21实现仍只在真实链及3个终态正例失败，8个排除/proof/取消控制通过。Windows原生执行待推送后的精确head CI，不以抽取或交叉编译代替。
+- R22最终独立复核无新增可操作离线缺陷。消费者114事件、race 69事件、相邻Go/Lua 31事件及Node 13项全部通过；924文件和aggregate起终一致，无产品写入。覆盖真实消费者、saved proof/身份/取消/原期限、Skill兼容指引和WGC证据边界。此结论限冻结树的离线可确认范围；Windows原生、当前覆盖/skip待精确提交CI，七项客户端与WGC单列实测结果仍空白。

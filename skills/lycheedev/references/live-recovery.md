@@ -11,7 +11,9 @@ lycheedev live status <CON-id> --project <project-directory> --format json
 lycheedev live resume <CON-id> --project <project-directory> --wait-seconds 120 --format json
 ```
 
-Status reads persisted evidence. Resume acquires the same connection's driver
+Status reads persisted evidence; retained identity/input is not a fresh sample
+and cannot establish that a user reload or character change did not happen.
+Resume acquires the same connection's driver
 lease, reconciles original nonces and continues within both the caller's wait
 limit and the original durable deadline. Exit 6 retains usable results and
 unfinished cleanup. Choose from the returned `continuation`, including its
@@ -19,12 +21,19 @@ goal, blocker condition and remaining budget:
 
 | Kind | Next action |
 | --- | --- |
-| `continue` | Continue the original CON serially within its budget; reconcile the receipt or focus condition |
+| `continue` | Continue the original CON serially within its budget when no unresolved hard error prevents progress; reconcile the receipt or focus condition |
 | `wait_active_driver` | Wait for the existing host call; do not start a competing resume |
 | `wait_external` | Resolve or wait for the named dependency to change, then resume |
 | `needs_decision` | Inspect the concrete outcome/blocker and choose an action covered by the task's scope |
 | `budget_exhausted` | Retain results and consider permitted cleanup/recovery; do not renew business time |
 | `completed` | Read this command's terminal outcome; check whether the overall investigation is done |
+
+Continuation describes the retained goal, not permission to ignore a returned
+error. `continue` together with `retryable=false` calls for diagnosing that
+concrete read/compatibility failure, then retrying only after relevant evidence
+or a prerequisite changes. Keep the original CON; do not busy-loop resume or
+request repeated reloads. A read failure alone proves neither runtime retirement
+nor that a submitted input was unexecuted.
 
 For a verified report whose attempted release has no exact receipt, the CLI
 observes the original receipt for five seconds, then journals one automatic

@@ -174,74 +174,6 @@ jobs:
             ${{ runner.temp }}/toolkit-integration-inputs/oracle/CascLib-LICENSE
             ${{ runner.temp }}/toolkit-integration-inputs/release/release.json
           if-no-files-found: error
-      - name: Native WGC capability and lifetime probe (test-owned window only)
-        id: wgc-probe
-        if: ${{ !cancelled() }}
-        env:
-          LYCHEEDEV_TEST_DESKTOP: '1'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $report = Join-Path $env:RUNNER_TEMP 'toolkit-wgc-probe'
-          New-Item -ItemType Directory -Force $report | Out-Null
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          if ($LASTEXITCODE -ne 0 -or -not $vsRoot) { throw 'installed MSVC toolchain not found for SDK control' }
-          $devcmd = Join-Path $vsRoot 'Common7\Tools\VsDevCmd.bat'
-          $source = Join-Path $env:GITHUB_WORKSPACE 'internal\desktop\testdata\wgc_reference.cpp'
-          $dll = Join-Path $report 'wgc_reference.dll'
-          $build = Join-Path $report 'build-reference.cmd'
-          @"
-          @echo off
-          call "$devcmd" -no_logo -arch=amd64 -host_arch=amd64
-          if errorlevel 1 exit /b %errorlevel%
-          echo WindowsSDKVersion=%WindowsSDKVersion%
-          echo VCToolsVersion=%VCToolsVersion%
-          cl /nologo /Bv /std:c++17 /EHsc /W4 /WX /LD /MD /Fo:"$report\wgc_reference.obj" /Fe:"$dll" "$source" /link runtimeobject.lib oleaut32.lib user32.lib
-          exit /b %errorlevel%
-          "@ | Set-Content -Encoding ascii $build
-          Push-Location $report
-          try {
-            & $env:ComSpec /d /s /c "`"$build`"" > (Join-Path $report 'sdk-build.log') 2>&1
-            $buildExit = $LASTEXITCODE
-          } finally {
-            Pop-Location
-          }
-          Get-Content (Join-Path $report 'sdk-build.log')
-          if ($buildExit -ne 0) { throw 'Windows SDK reference adapter build failed' }
-          [ordered]@{
-            commit = (git rev-parse HEAD).Trim()
-            sourceSHA256 = (Get-FileHash $source -Algorithm SHA256).Hash.ToLowerInvariant()
-            dllSHA256 = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
-            buildLogSHA256 = (Get-FileHash (Join-Path $report 'sdk-build.log') -Algorithm SHA256).Hash.ToLowerInvariant()
-          } | ConvertTo-Json | Set-Content (Join-Path $report 'sdk-identity.json')
-          $env:LYCHEEDEV_TEST_WGC_REFERENCE_DLL = $dll
-          $events = Join-Path $report 'go-test.jsonl'
-          go test -json -p=1 -parallel=1 -count=1 -timeout=1m ./internal/desktop -run '^TestWGCLifetimeBetweenSessions$' > $events 2> (Join-Path $report 'stderr.log')
-          $testExit = $LASTEXITCODE
-          $records = Get-Content $events | ForEach-Object { $_ | ConvertFrom-Json }
-          $passed = @($records | Where-Object { $_.Test -eq 'TestWGCLifetimeBetweenSessions' -and $_.Action -eq 'pass' }).Count -eq 1
-          $packagePassed = @($records | Where-Object { -not $_.Test -and $_.Action -eq 'pass' }).Count -eq 1
-          $rejected = @($records | Where-Object { $_.Action -eq 'fail' -or $_.Action -eq 'skip' }).Count -gt 0
-          $verified = $testExit -eq 0 -and $passed -and $packagePassed -and -not $rejected
-          [ordered]@{
-            scope = 'test-owned Win32 fixture; WGC session lifetime, no game or external PID'
-            commit = (git rev-parse HEAD).Trim()
-            exitCode = $testExit
-            state = $(if ($verified) { 'passed' } else { 'failed' })
-            note = 'A failure remains explicit; inspect raw events to distinguish host capability from a regression.'
-          } | ConvertTo-Json | Set-Content (Join-Path $report 'result.json')
-          if (-not $verified) {
-            Get-Content (Join-Path $report 'stderr.log')
-            Get-Content $events
-            throw 'native WGC probe did not pass; see windows-wgc-probe evidence'
-          }
-      - name: Preserve native WGC probe evidence
-        if: ${{ !cancelled() && steps.wgc-probe.outcome != 'skipped' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows-wgc-probe
-          path: ${{ runner.temp }}/toolkit-wgc-probe/
-          if-no-files-found: error
       - name: Native doctor volume-boundary evidence (disk fixture, PID zero)
         if: ${{ !cancelled() }}
         run: |
@@ -438,6 +370,88 @@ jobs:
           go-version: '1.27.1'
       # Bound concurrency for filesystem-heavy managed installation and Native lifecycle tests.
       - run: go test -race -p=2 -parallel=4 -count=1 -timeout=15m ./...
+
+  windows-wgc-observation:
+    name: WGC observation (non-gating; inspect actual result)
+    # The SDK and Go calls both fail on this runner's owned windows. Keep
+    # collecting the real result without adding an interactive-desktop release gate.
+    # The test still fails; a completed observation is not verified capture.
+    # Setup, malformed evidence and artifact failures remain hard failures.
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Normalize TMP to the long runner temp path
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.1'
+      - name: Native WGC capability and lifetime probe (test-owned window only)
+        id: wgc-probe
+        if: ${{ !cancelled() }}
+        env:
+          LYCHEEDEV_TEST_DESKTOP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $report = Join-Path $env:RUNNER_TEMP 'toolkit-wgc-probe'
+          New-Item -ItemType Directory -Force $report | Out-Null
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $vsRoot) { throw 'installed MSVC toolchain not found for SDK control' }
+          $devcmd = Join-Path $vsRoot 'Common7\Tools\VsDevCmd.bat'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'internal\desktop\testdata\wgc_reference.cpp'
+          $dll = Join-Path $report 'wgc_reference.dll'
+          $build = Join-Path $report 'build-reference.cmd'
+          @"
+          @echo off
+          call "$devcmd" -no_logo -arch=amd64 -host_arch=amd64
+          if errorlevel 1 exit /b %errorlevel%
+          echo WindowsSDKVersion=%WindowsSDKVersion%
+          echo VCToolsVersion=%VCToolsVersion%
+          cl /nologo /Bv /std:c++17 /EHsc /W4 /WX /LD /MD /Fo:"$report\wgc_reference.obj" /Fe:"$dll" "$source" /link runtimeobject.lib oleaut32.lib user32.lib
+          exit /b %errorlevel%
+          "@ | Set-Content -Encoding ascii $build
+          Push-Location $report
+          try {
+            & $env:ComSpec /d /s /c "`"$build`"" > (Join-Path $report 'sdk-build.log') 2>&1
+            $buildExit = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+          Get-Content (Join-Path $report 'sdk-build.log')
+          if ($buildExit -ne 0) { throw 'Windows SDK reference adapter build failed' }
+          [ordered]@{
+            commit = (git rev-parse HEAD).Trim()
+            sourceSHA256 = (Get-FileHash $source -Algorithm SHA256).Hash.ToLowerInvariant()
+            dllSHA256 = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+            buildLogSHA256 = (Get-FileHash (Join-Path $report 'sdk-build.log') -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json | Set-Content (Join-Path $report 'sdk-identity.json')
+          $env:LYCHEEDEV_TEST_WGC_REFERENCE_DLL = $dll
+          $events = Join-Path $report 'go-test.jsonl'
+          go test -json -p=1 -parallel=1 -count=1 -timeout=1m ./internal/desktop -run '^TestWGCLifetimeBetweenSessions$' > $events 2> (Join-Path $report 'stderr.log')
+          $testExit = $LASTEXITCODE
+          node tools/wgc-observation.mjs $events $testExit ((git rev-parse HEAD).Trim()) (Join-Path $report 'result.json')
+          if ($LASTEXITCODE -ne 0) { throw 'native WGC observation evidence invalid' }
+          if ($testExit -ne 0) {
+            Get-Content (Join-Path $report 'stderr.log')
+            Get-Content $events
+          }
+      - name: Preserve native WGC probe evidence
+        if: ${{ !cancelled() && steps.wgc-probe.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-wgc-probe
+          path: ${{ runner.temp }}/toolkit-wgc-probe/
+          if-no-files-found: error
 
   ci-required:
     # §2/§3: this aggregation always runs and rejects every non-success result;

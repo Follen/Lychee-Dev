@@ -136,14 +136,18 @@ test('PR CI prepares pinned integration inputs before its single measured suite 
 });
 
 test('WGC probe is bounded to its own fixture and failures remain visible with raw evidence', () => {
-  const probe = ci.slice(ci.indexOf('      - name: Native WGC capability'), ci.indexOf('      - name: Native doctor volume-boundary'));
+  const observation = ci.slice(ci.indexOf('  windows-wgc-observation:\n'), ci.indexOf('  ci-required:\n'));
+  const probe = observation.slice(observation.indexOf('      - name: Native WGC capability'));
+  assert.match(observation, /name: WGC observation \(non-gating; inspect actual result\)/);
+  assert.doesNotMatch(observation, /continue-on-error/);
+  assert.match(observation, /node tools\/wgc-observation.mjs \$events \$testExit/);
+  assert.match(observation, /throw 'native WGC observation evidence invalid'/);
+  assert.doesNotMatch(ci.slice(ci.indexOf('  ci-required:\n')), /- windows-wgc-observation/);
+  assert.doesNotMatch(ci.slice(ci.indexOf('  windows-contract:\n'), ci.indexOf('  windows-process:\n')), /wgc-probe|LYCHEEDEV_TEST_DESKTOP/);
   assert.match(probe, /LYCHEEDEV_TEST_DESKTOP: '1'/);
   assert.equal((ci.match(/LYCHEEDEV_TEST_DESKTOP/g) ?? []).length, 1);
   assert.doesNotMatch(probe, /continue-on-error|LYCHEEDEV_TEST_CAPTURE_PID|LYCHEEDEV_LIVE/);
   assert.match(probe, /-count=1 -timeout=1m \.\/internal\/desktop -run '\^TestWGCLifetimeBetweenSessions\$'/);
-  assert.match(probe, /\$testExit -eq 0 -and \$passed -and \$packagePassed -and -not \$rejected/);
-  assert.match(probe, /throw 'native WGC probe did not pass/);
-  assert.match(probe, /exitCode = \$testExit/);
   assert.match(probe, /WindowsSDKVersion=%WindowsSDKVersion%/);
   assert.match(probe, /cl \/nologo \/Bv \/std:c\+\+17/);
   assert.match(probe, /LYCHEEDEV_TEST_WGC_REFERENCE_DLL = \$dll/);
