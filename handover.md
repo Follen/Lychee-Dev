@@ -414,6 +414,18 @@ Source逻辑operation现在有Definition/References/Type答案及受封装的sco
 
 尚未接256生命周期退休。后续必须分清fixedGo admitted/attempted batch计数与completed证据；Go在执行前/请求批次层累计且失败退休，不能以partial的0completed令session永久存活，也不能为限额伪报执行。需要按真实plan预准入、超256先退analysis/要求full snapshot、恰256响应后退analysis，保broker现有idle/lifetime合同及独立实际生命周期验证。
 
+### ec2 完整产品组成功与真实 native session 初验
+
+固定ec2a09b/run38637995018产品job116108268721终态success；artifact11930054873 ZIP SHA256 94a6052d8e411e05e1975292404de13a190d1c92823f02af0401a3294ba05ecc下载后核445份封存日志hash。315项Rust通过、2项ignore，包含Mailbox A/B/C与共享边界121、slot maintenance17、combined/rollback/removal组；sealed EXE SHA256 3f02ef9910372a24c5a6c554434719240d96cfebc0ec2a1a5d0ad80d51931411。全仓static CLI、真实doctor、luac重建及精确source候选/许可证装配均完成。
+
+真实multi-CLI native session集成首次执行成功（29.64s），覆盖同快照复用、关闭退休、取消/期限与坏帧等原fixture；取消响应样本68ms、期限样本818ms仅该场景观测。session owned receipt确认exit0/root/tree/handles/readers完整回收/active0。此证据尚待另一个独立视角复核，且不是完整4036语义、256新准入、实际Skill使用或性能通过；后续journal/Hotfix/consumer提交不继承该树运行结果。
+
+复核发现CI过滤器native_research::tests实际0测试通过，不能记为XML研究fixtures通过；独立plan组6项确实运行。立即合并为真实native_research::模块过滤器，覆盖plan、projection、load_context、reply_assembly各模块而不重复计数。新过滤器实际执行仍待下一精确树；保留原零测试证据，不改旧结果为通过。
+
+### CI YAML 准入错误修复
+
+复核发现1d0eaec、be99829、0b26b9a的产品workflow在进入runner前即失败：新hotfix::过滤器后的空格使未引号run标量含冒号分隔，被YAML拒绝。这三树产品测试完全未运行，不能把已推送或静态审查当CI通过。现将含该形式的命令改block scalar并用本地YAML解析器实际解析完整三job工作流；新native_research::过滤器也同样保护。等待GitHub精确新树确认调度和实际测试，不掩盖原准入失败。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
