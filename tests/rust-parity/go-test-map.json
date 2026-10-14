@@ -1106,5 +1106,67 @@
     "behavioralPasses": 0,
     "notApplicableExclusions": 0,
     "denominatorNote": "Reference counts describe this document only; unmapped functions in referenced files and all other inventory files remain unreviewed."
-  }
+  },
+  "implementationFollowups": [
+    {
+      "dateUTC": "2026-10-14",
+      "rustParentCommit": "aa86ef86003cc2e4f203bcb8f85de88f321ef25e",
+      "scope": "Installation catalog, bounded root selection, delivery/public envelope and Live input-scope deduplication",
+      "state": "mapped-unrun",
+      "goEvidence": [
+        {
+          "path": "internal/records/installation_test.go",
+          "sha256": "8a5553e233728538bfe34cd82248a897543281eb9842ed7633b2170a2d858a33"
+        },
+        {
+          "path": "internal/records/catalog_test.go",
+          "sha256": "f63f59d50dc25013a43d86eafc85371fc13ef6aa93ce343246aedae74ae94949"
+        },
+        {
+          "path": "internal/command/delivery_test.go",
+          "sha256": "c62f183aaa231d71df620282e4aab6a5ab8d0db9188d35b2baa4b10da78ab0e4"
+        },
+        {
+          "path": "internal/selection/client_test.go",
+          "sha256": "0937ef9cbec8313cf8c4958b3c0b0309ea12b880f76aa8a5b84af5db758959b8"
+        }
+      ],
+      "rustEvidence": [
+        {
+          "path": "crates/lycheedev-core/src/client.rs",
+          "sha256": "bb1694eb93ec8d097d6df8775319f85a71a2983552437f98dca5a21d45248dcf"
+        },
+        {
+          "path": "crates/lycheedev-core/src/installation_selection.rs",
+          "sha256": "2967fa60df2e17bf3429f370547f7d617e4b95b3edf5819f3f8bd7ad921858cc"
+        },
+        {
+          "path": "crates/lycheedev-delivery/src/lib.rs",
+          "sha256": "2556163262112f875f1b33a223c56f35edefbe36bd2a88dc3b875b217fb6a93f"
+        },
+        {
+          "path": "crates/lycheedev-live/src/passive/tests.rs",
+          "sha256": "41a92ffb94490879340d85779863ba5a1f07efbb0227dfd722c99dd1dc9fa484"
+        },
+        {
+          "path": "crates/lycheedev-cli/src/main.rs",
+          "sha256": "c2f270147093e3afd6e574183a3f4c6b1091643ce4b2429f3ac11dabf389d16e"
+        }
+      ],
+      "scenarios": [
+        "root versus exact-client Titan selection; metadata-backed family/slot, known-folder/executable admission and 256-entry bounds",
+        "unknown/foreign observed product issues, ambiguous-before-conflict ordering, explicit product zero-I/O validation",
+        "full issues.reason and observedProductCode goldens including test-track precedence and bare clientText sentinel",
+        "catalog inactive/unknown rows, required lowercase keys/product tokens and exact metadata error classes",
+        "Go public DTO without internal enrichment; UNC display; Live input-scope deduplication",
+        "addon status/install/remove with valid arguments: missing/conflict/ambiguity query-stage and installationSelection/requestedProduct envelope",
+        "Delivery required arguments and resume rules before identity I/O"
+      ],
+      "limits": [
+        "Independent static review closes reported findings only; no Rust test executed for these changes yet.",
+        "Original mapping rows remain historical hash-identified review evidence; this followup does not retroactively change their execution state.",
+        "No coverage percentage or complete mapping of all359 Go test files is claimed."
+      ]
+    }
+  ]
 }

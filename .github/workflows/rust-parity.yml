@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: rust-parity-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve the current owned build and terminal evidence; newer batches queue.
+  cancel-in-progress: false
 
 jobs:
   windows-static-parity:
@@ -61,7 +62,7 @@ jobs:
     # Deliberately no needs: static parity gaps must not suppress real builds.
     if: github.ref == 'refs/heads/rust-refactor'
     runs-on: windows-2025
-    timeout-minutes: 65
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -105,6 +106,18 @@ jobs:
       - name: Run client metadata filesystem fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-client-fixtures --one-shot -- test --locked --offline -p lycheedev-core --lib client::tests -j 1
+      - name: Run bounded installation selection fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-installation-selection --one-shot -- test --locked --offline -p lycheedev-core --lib installation_selection::tests -j 1
+      - name: Run Delivery selection fixtures without installing addons
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-delivery-selection --one-shot -- test --locked --offline -p lycheedev-delivery --lib selection_tests -j 1
+      - name: Run fake-window passive discovery fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-passive-fixtures --one-shot -- test --locked --offline -p lycheedev-live --lib passive::tests -j 1
+      - name: Run public installation error envelope fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-installation-envelopes --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::installation_ -j 1
       - name: Run CLI contract metadata and arity unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-cli-contract --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev contract::tests -j 1

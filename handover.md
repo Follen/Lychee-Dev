@@ -218,6 +218,14 @@ Windows新增独立windows-product-foundation job，无needs静态差分门槛�
 
 本次最小修复只规范化Windows跨接口比较中的ctime/权限表示；path/path及handle/handle仍比较完整字段，跨接口保留真实dev/ino/类型/大小/mtime/nlink/attributes/birthtime，差异诊断有界。目录扫描改用fresh path.lstat。作者42项完整Linux准备测试与新增immutable .exe/utime单项通过（共43），独立审核者6项平台stat模拟回归通过；实际Windows重跑待该修复commit。修复文件从隔离stage发布，正在运行的旧Linux库check保持原recipe不被改动；两者证据不可混用。
 
+### 共享安装选择层、公开DTO与诊断合同
+
+新增core installation_selection：固定Go的一层game-root/精确client发现与选择，先有界枚举最多257项判256上限再读候选元数据；marker/knownfolder+exe、排序、partial observedProductCode、missing/ambiguous/product-mismatch/conflict及诊断context均按Go。Delivery三个安装消费者接同一受控selector，公开client DTO仅Go字段；Live按自己的Go固定目录发现语义共享DTO和完整folders，不擅自扩大扫描。统一纯UNC显示转换，IO仍使用原extended路径。
+
+独立复核实际发现并修复三项：全命令安装错误的query/selection stage投影；issues.reason的Go原文、bare clientText sentinel和test-track判定优先级；Live按输入scope去重，保留Go root与唯一knownchild的两条观察。新增原因/observed黄金表、clientText边界、公开envelope与DTO/取消/范围fixture。CLI场景补足Go要求的release/output参数，并实际补齐Delivery必需参数/resume前置检查，避免不合法参数误走安装IO。测试映射附加固定Go测试文件和当前Rust文件hash，不改历史执行状态。
+
+本批Rust测试仍not_run，rustfmt语法解析和scoped diff检查通过，已做独立静态审查；Windows CI将增加限定selection/Delivery/假窗口passive/公开error envelope测试。当前aa86ef86的真实Windows执行只包含之前快照：公开Emmy准备、Node测试和locked fetch通过，Python fixture仍有失败待日志调查，workspace实际编译进行中；不能将它归为本批产品通过。CI不再自动取消正在执行的旧批次，新批排队，保留进程回收与终态证据。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

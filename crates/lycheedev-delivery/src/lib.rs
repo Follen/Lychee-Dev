@@ -25,9 +25,7 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     match inv.command.as_str() {
         "update" => update::dispatch(inv),
         "addon remove" => {
-            let client = lycheedev_core::client::inspect(std::path::Path::new(
-                inv.required("--installation")?,
-            ))?;
+            let client = selected_client(inv)?;
             let target = lycheedev_core::client::addon_destination(&client)?;
             Ok(Outcome::new(removal::addon(
                 &target,
@@ -35,9 +33,7 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             )?))
         }
         "addon install" => {
-            let client = lycheedev_core::client::inspect(std::path::Path::new(
-                inv.required("--installation")?,
-            ))?;
+            let client = selected_client(inv)?;
             let target = lycheedev_core::client::addon_destination(&client)?;
             let guard = lycheedev_core::coordination::InstallationGuard::acquire(&target)?;
             guard.require_idle()?;
@@ -109,12 +105,10 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
                         "addon status requires exactly one selector",
                     ));
                 }
-                let client = lycheedev_core::client::inspect(std::path::Path::new(
-                    inv.required("--installation")?,
-                ))?;
+                let client = selected_client(inv)?;
                 let target = lycheedev_core::client::addon_destination(&client)?;
                 let installation = installation::inspect(&target, "addon")?;
-                let mut result = serde_json::json!({"client":client,"installation":installation});
+                let mut result = serde_json::json!({"client":lycheedev_core::installation_selection::Client::from(&client),"installation":installation});
                 if target
                     .parent()
                     .unwrap()
@@ -157,5 +151,94 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             "requested delivery handler has not yet been migrated",
             3,
         )),
+    }
+}
+
+fn selected_client(inv: &Invocation) -> Result<lycheedev_core::client::ClientInstallation> {
+    lycheedev_core::installation_selection::select_with(
+        std::path::Path::new(inv.required("--installation")?),
+        "",
+        &mut lycheedev_core::installation_selection::InvocationMetadata(&inv.control),
+    )
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    use std::{collections::BTreeMap, fs, path::PathBuf, sync::atomic::Ordering};
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "lychee-delivery-selection-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let client = root.join("_classic_titan_");
+            fs::create_dir_all(client.join("Interface/AddOns")).unwrap();
+            fs::write(client.join(".flavor.info"), "wow_classic_titan").unwrap();
+            fs::write(client.join("version.txt"), "3.80.2.69874").unwrap();
+            Self(root)
+        }
+        fn invocation(&self, command: &str) -> Invocation {
+            Invocation {
+                command: command.into(),
+                positional: None,
+                flags: BTreeMap::from([(
+                    "--installation".into(),
+                    self.0.to_string_lossy().into_owned(),
+                )]),
+                home: self.0.join("absent-home"),
+                cwd: self.0.clone(),
+                control: Default::default(),
+            }
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn addon_status_selects_root_or_client_with_only_go_public_client_fields() {
+        let fixture = Fixture::new();
+        let mut inv = fixture.invocation("addon status");
+        let root = dispatch(&inv).unwrap().data;
+        inv.flags.insert(
+            "--installation".into(),
+            fixture
+                .0
+                .join("_classic_titan_")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let exact = dispatch(&inv).unwrap().data;
+        assert_eq!(root, exact);
+        assert_eq!(root["client"]["product"], "titan");
+        assert_eq!(root["client"].as_object().unwrap().len(), 8);
+        assert_eq!(root["installation"]["state"], "absent");
+        assert!(!inv.home.exists());
+    }
+    #[test]
+    fn all_three_delivery_consumers_obey_invocation_cancellation_before_writes() {
+        let fixture = Fixture::new();
+        for command in ["addon status", "addon install", "addon remove"] {
+            let inv = fixture.invocation(command);
+            inv.control.cancel_handle().store(true, Ordering::Release);
+            assert_eq!(
+                dispatch(&inv).unwrap_err().code,
+                "command.cancelled",
+                "{command}"
+            );
+        }
+        assert!(
+            !fixture
+                .0
+                .join("_classic_titan_/Interface/AddOns/Lychee Dev")
+                .exists()
+        );
     }
 }

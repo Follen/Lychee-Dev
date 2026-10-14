@@ -231,8 +231,33 @@ pub struct ClientInstallation {
     pub toc: String,
     pub identity_source: String,
 }
+/// Convert a canonical Windows path for public display, preserving UNC roots.
+/// Filesystem handles continue to use the original extended path internally.
+pub fn display_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(drive) = value.strip_prefix(r"\\?\") {
+        let bytes = drive.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'\\'
+        {
+            drive.into()
+        } else {
+            value.into_owned()
+        }
+    } else {
+        value.into_owned()
+    }
+}
+
 fn identity_error(message: &str) -> ToolkitError {
     ToolkitError::new("selection.client_identity", message, 4)
+}
+fn bare_identity_error() -> ToolkitError {
+    identity_error("selection.client_identity")
 }
 pub fn addon_destination(client: &ClientInstallation) -> Result<std::path::PathBuf> {
     let root = Path::new(&client.directory);
@@ -259,7 +284,9 @@ fn metadata_text_error(name: &str, limit: bool, message: &str) -> ToolkitError {
             if limit { 3 } else { 4 },
         )
     } else {
-        identity_error(message)
+        // Go clientText returns the sentinel without additional prose for
+        // non-regular files, byte bounds and invalid UTF-8.
+        bare_identity_error()
     }
 }
 fn text(
@@ -281,7 +308,7 @@ fn text(
     let info = io(control, || file.metadata())?;
     use std::os::windows::fs::MetadataExt;
     if info.file_attributes() & 0x400 != 0 {
-        return Err(identity_error("metadata handle is a reparse point"));
+        return Err(bare_identity_error());
     }
     if !info.is_file() {
         return Err(metadata_text_error(
@@ -328,7 +355,7 @@ fn text(
         ));
     }
     if info.len() != raw.len() as u64 {
-        return Err(identity_error("metadata changed while reading"));
+        return Err(bare_identity_error());
     }
     root.verify_controlled(&mut MetadataFiles(&mut *control))?;
     if name == ".build.info" && raw.contains(&0) {
@@ -363,9 +390,9 @@ fn flavor(
             .filter(|word| word.starts_with("wow"));
         let code = matches
             .next()
-            .ok_or_else(|| identity_error("invalid flavor metadata"))?;
+            .ok_or_else(|| identity_error(&format!("invalid {name}")))?;
         if matches.next().is_some() {
-            return Err(identity_error("ambiguous flavor metadata"));
+            return Err(identity_error(&format!("invalid {name}")));
         }
         return Ok(Some((code.into(), name.into())));
     }
@@ -410,6 +437,7 @@ struct ClientIdentity {
 }
 // selection.InspectClient at fixed Go 3.2.0. Selection evidence precedence
 // belongs here; records.inspectExactClient's catalog-consistency gate is below.
+#[cfg(test)]
 fn resolve_identity(
     folder: &str,
     flavor: Option<(String, String)>,
@@ -417,8 +445,19 @@ fn resolve_identity(
     active: &[ClientBuild],
     control: &mut impl MetadataControl,
 ) -> Result<ClientIdentity> {
+    resolve_identity_observed(folder, flavor, version, active, control, &mut String::new())
+}
+fn resolve_identity_observed(
+    folder: &str,
+    flavor: Option<(String, String)>,
+    version: &str,
+    active: &[ClientBuild],
+    control: &mut impl MetadataControl,
+    observed: &mut String,
+) -> Result<ClientIdentity> {
     control.check()?;
     let (mut code, mut source) = flavor.unwrap_or_default();
+    *observed = code.clone();
     let flavor_name = source.clone();
     let slot = if matches!(code.as_str(), "wow_classic_beta" | "wow_cn_beta") {
         std::mem::take(&mut code)
@@ -427,11 +466,20 @@ fn resolve_identity(
     };
     let mut version = version.to_owned();
     if !version.is_empty() && !identity_build(&version) {
-        return Err(identity_error("version.txt requires exact full build"));
+        return Err(identity_error("invalid version.txt"));
     }
     if code.is_empty() && !version.is_empty() {
-        let profile =
-            version_profile(&version).ok_or_else(|| identity_error("unsupported build"))?;
+        // Go diagnoses an unsupported reused test track before the generic
+        // unsupported-build fallback, including otherwise unknown series.
+        let profile = version_profile(&version);
+        if (folder.eq_ignore_ascii_case("_classic_beta_")
+            || folder.eq_ignore_ascii_case("_cn_beta_")
+            || slot == "wow_cn_beta")
+            && !version.starts_with("1.60.1.")
+        {
+            return Err(identity_error("unsupported test track"));
+        }
+        let profile = profile.ok_or_else(|| identity_error("unsupported build"))?;
         code = family_code(profile).into();
         source = "version.txt".into();
     }
@@ -452,7 +500,9 @@ fn resolve_identity(
             }
         }
         if code.is_empty() {
-            return Err(identity_error("unsupported build for slot"));
+            return Err(identity_error(&format!(
+                "unsupported build for slot {slot:?}"
+            )));
         }
     }
     if code.is_empty() {
@@ -463,9 +513,12 @@ fn resolve_identity(
         }
         source = "folder".into();
     }
+    if observed.is_empty() {
+        *observed = code.clone();
+    }
     let profile = family_profiles()
         .find(|profile| family_code(profile) == code)
-        .ok_or_else(|| identity_error("unsupported product metadata"))?;
+        .ok_or_else(|| identity_error(&format!("unsupported product {code:?}")))?;
     if version.is_empty() {
         for candidate in active {
             control.check()?;
@@ -635,6 +688,21 @@ pub fn inspect_with(
     directory: &Path,
     control: &mut impl MetadataControl,
 ) -> Result<ClientInstallation> {
+    inspect_observed_with(directory, control).map_err(|(error, _)| error)
+}
+/// Preserve Go's partial identity privately, without adding fields to public errors.
+pub(crate) fn inspect_observed_with(
+    directory: &Path,
+    control: &mut impl MetadataControl,
+) -> std::result::Result<ClientInstallation, (ToolkitError, String)> {
+    let mut observed = String::new();
+    inspect_inner(directory, control, &mut observed).map_err(|error| (error, observed))
+}
+fn inspect_inner(
+    directory: &Path,
+    control: &mut impl MetadataControl,
+    observed: &mut String,
+) -> Result<ClientInstallation> {
     control.check()?;
     if directory.as_os_str().len() > 32768 {
         return Err(identity_error("client directory exceeds bound"));
@@ -662,13 +730,18 @@ pub fn inspect_with(
         Vec::new()
     };
     let flavor = flavor(&root, control)?;
+    *observed = flavor
+        .as_ref()
+        .map(|(code, _)| code.clone())
+        .unwrap_or_default();
     let version = text(&root, "version.txt", 4096, control)?;
     let folder = root
         .path()
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    let identity = resolve_identity(folder, flavor, &version, &active, control)?;
+    let identity = resolve_identity_observed(folder, flavor, &version, &active, control, observed)?;
+    *observed = identity.product_code.clone();
     validate_installation_catalog(&identity, &active)?;
     let profile = identity.profile;
     let delivery = catalog_product(&identity.catalog_product)
@@ -692,11 +765,7 @@ pub fn inspect_with(
         ..MetadataCost::default()
     })?;
     let result = ClientInstallation {
-        directory: root
-            .path()
-            .to_string_lossy()
-            .trim_start_matches("\\\\?\\")
-            .into(),
+        directory: display_path(root.path()),
         product: profile.family.into(),
         product_code: identity.product_code,
         catalog_product: identity.catalog_product,
@@ -726,6 +795,20 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn public_path_spelling_preserves_unc_roots_and_only_strips_drive_prefixes() {
+        for (input, expected) in [
+            (r"\\?\C:\Games\WoW", r"C:\Games\WoW"),
+            (r"\\?\UNC\server\share\WoW", r"\\server\share\WoW"),
+            (r"\\server\share\WoW", r"\\server\share\WoW"),
+            (r"C:\Games\WoW", r"C:\Games\WoW"),
+            (r"relative\WoW", r"relative\WoW"),
+            (r"\\?\Volume{fixture}\WoW", r"\\?\Volume{fixture}\WoW"),
+            (r"\\.\pipe\fixture", r"\\.\pipe\fixture"),
+        ] {
+            assert_eq!(display_path(Path::new(input)), expected, "{input}");
+        }
+    }
     #[test]
     fn catalog_schema_matches_go_records_even_for_inactive_rows() {
         const HEADER: &str =
@@ -925,12 +1008,21 @@ mod tests {
         let fixture = Fixture::new();
         let path = fixture.client("renamed", "wow_classic_beta");
         fs::write(path.join("version.txt"), vec![b'1'; 4097]).unwrap();
-        assert!(inspect_with(&path, &mut Meter::default()).is_err());
+        assert_eq!(
+            inspect_with(&path, &mut Meter::default()).unwrap_err().code,
+            "selection.client_identity"
+        );
         fs::remove_file(path.join("version.txt")).unwrap();
         fs::write(fixture.0.join(".build.info"), vec![b'1'; (1 << 20) + 1]).unwrap();
-        assert!(inspect_with(&path, &mut Meter::default()).is_err());
+        assert_eq!(
+            inspect_with(&path, &mut Meter::default()).unwrap_err().code,
+            "records.metadata_limit"
+        );
         fs::write(fixture.0.join(".build.info"), "x|".repeat(129)).unwrap();
-        assert!(inspect_with(&path, &mut Meter::default()).is_err());
+        assert_eq!(
+            inspect_with(&path, &mut Meter::default()).unwrap_err().code,
+            "records.invalid_metadata"
+        );
     }
     #[test]
     fn controlled_multichunk_read_has_no_request_larger_than_64k() {

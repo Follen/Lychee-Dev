@@ -273,6 +273,22 @@ fn catalog_command(command: &str) -> bool {
             | "data encounter get"
     )
 }
+// Project selection and installation discovery contribute independent context.
+// Preserve the more specific handler diagnostic when adding project defaults.
+fn merge_error_context(error: &mut ToolkitError, defaults: Value) {
+    if !error.details.is_object() {
+        error.details = json!({});
+    }
+    if !error.details["__commandContext"].is_object() {
+        error.details["__commandContext"] = json!({});
+    }
+    let context = error.details["__commandContext"].as_object_mut().unwrap();
+    if let Some(defaults) = defaults.as_object() {
+        for (key, value) in defaults {
+            context.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
+}
 fn dispatch_catalog(inv: &Invocation) -> Result<Outcome> {
     let mut selected = inv.clone();
     let project = lycheedev_core::selection::resolve_optional_project(inv)?;
@@ -300,14 +316,33 @@ fn dispatch_catalog(inv: &Invocation) -> Result<Outcome> {
         }
         Err(mut error) => {
             if context.get("project").is_some() {
-                if !error.details.is_object() {
-                    error.details = json!({});
-                }
-                error.details["__commandContext"] = context;
+                merge_error_context(&mut error, context);
             }
             Err(error)
         }
     }
+}
+fn validate_delivery_arguments(inv: &Invocation) -> Result<()> {
+    let present = |name| inv.flag(name).is_some_and(|value| !value.is_empty());
+    let install = match inv.command.as_str() { "addon install" => Some(("addon", "--installation")), "skill install" => Some(("skill", "--path")), _ => None };
+    if let Some((component, selector)) = install {
+        if !present(selector) || (!inv.flag_bool("--resume") && !present("--release"))
+            || (inv.flag_bool("--resume") && (!present("--output") || present("--release"))) {
+            return Err(ToolkitError::arguments(format!("{component} install requires {selector} and --release, or --resume with --output and no --release")));
+        }
+    }
+    let remove = match inv.command.as_str() { "addon remove" => Some(("addon", "--installation")), "skill remove" => Some(("skill", "--path")), _ => None };
+    if let Some((component, selector)) = remove {
+        if !present(selector) || !present("--output") { return Err(ToolkitError::arguments(format!("{component} remove requires {selector} and --output"))); }
+    }
+    if inv.command == "addon status" && present("--installation") && present("--path") {
+        return Err(ToolkitError::arguments("addon status accepts --installation or --path, not both"));
+    }
+    if matches!(inv.command.as_str(), "addon status" | "skill status")
+        && !(inv.command == "addon status" && present("--installation")) && !present("--path") {
+        return Err(ToolkitError::arguments("installation status requires --path"));
+    }
+    Ok(())
 }
 fn dispatch(inv: &Invocation) -> Result<Outcome> {
     if inv.flag_bool("--help") {
@@ -354,6 +389,7 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
         value
             if value.starts_with("addon ") || value.starts_with("skill ") || value == "update" =>
         {
+            validate_delivery_arguments(inv)?;
             lycheedev_delivery::dispatch(inv)
         }
         value if value.starts_with("project ") => lycheedev_core::selection::dispatch_project(inv),
@@ -968,6 +1004,12 @@ fn operation_seconds(inv: &Invocation) -> Result<u64> {
     Ok(180)
 }
 fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
+    // Go entry.queryFault projects installation selection errors for every
+    // command, including addon handlers, rather than only catalog queries.
+    if matches!(error.code.as_str(), "selection.installation_missing" | "selection.installation_ambiguous" | "selection.installation_product_mismatch" | "selection.installation_metadata_conflict") {
+        if !error.details.is_object() { error.details = json!({}); }
+        error.details["stage"] = json!(if inv.command == "target resolve" { "selection" } else { "query" });
+    }
     // Frozen Go's selected-content byte boundary is a query failure. Keep the
     // diagnostic inside Data, and project the observed public asset envelope.
     if matches!(inv.command.as_str(), "asset inspect" | "asset export")
@@ -1276,7 +1318,74 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn installation_error_context_survives_project_context_merge() {
+        let selection = json!({"directory":"fixture", "candidates":[], "issues":[]});
+        let mut error = ToolkitError::new("selection.installation_missing", "missing", 3)
+            .with_details(json!({"__commandContext":{"installationSelection":selection,"requestedProduct":"titan"}}));
+        merge_error_context(
+            &mut error,
+            json!({"project":"fixture-project", "snapshot":"PIN"}),
+        );
+        assert_eq!(
+            error.details["__commandContext"],
+            json!({"installationSelection":selection,"requestedProduct":"titan","project":"fixture-project","snapshot":"PIN"})
+        );
+        let envelope = envelope(&Err(error));
+        assert_eq!(envelope["context"]["installationSelection"], selection);
+        assert_eq!(envelope["context"]["requestedProduct"], "titan");
+        assert!(envelope["error"].get("details").is_none());
+    }
     use super::*;
+    #[test]
+    fn installation_delivery_required_arguments_precede_identity_io() {
+        for (words, message) in [
+            (vec!["addon", "install", "--installation", "absent-fixture"], "addon install requires --installation and --release, or --resume with --output and no --release"),
+            (vec!["addon", "install", "--installation", "absent-fixture", "--resume", "--release", "release", "--output", "archive"], "addon install requires --installation and --release, or --resume with --output and no --release"),
+            (vec!["addon", "remove", "--installation", "absent-fixture"], "addon remove requires --installation and --output"),
+            (vec!["skill", "install", "--path", "absent-fixture"], "skill install requires --path and --release, or --resume with --output and no --release"),
+            (vec!["skill", "remove", "--path", "absent-fixture"], "skill remove requires --path and --output"),
+            (vec!["addon", "status"], "installation status requires --path"),
+            (vec!["skill", "status"], "installation status requires --path"),
+        ] {
+            let inv = parse(&args(&words)).unwrap();
+            let error = dispatch(&inv).unwrap_err();
+            assert_eq!((error.code.as_str(), error.exit_code, error.message.as_str()), ("command.invalid_arguments", 2, message));
+            assert!(error.details.get("__commandContext").is_none());
+        }
+    }
+    #[test]
+    fn installation_addon_errors_keep_go_query_stage_and_discovery_context() {
+        struct Fixture(std::path::PathBuf);
+        impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let fixture = Fixture(std::env::temp_dir().join(format!("lychee-addon-selection-envelope-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
+        std::fs::create_dir(&fixture.0).unwrap();
+        for (scenario, code, exit) in [("missing", "selection.installation_missing", 3), ("conflict", "selection.installation_metadata_conflict", 4), ("ambiguous", "selection.installation_ambiguous", 2)] {
+            let root = fixture.0.join(scenario);
+            if scenario != "missing" {
+                std::fs::create_dir(&root).unwrap();
+                for name in if scenario == "ambiguous" { vec!["one", "two"] } else { vec!["one"] } {
+                    let client = root.join(name);
+                    std::fs::create_dir(&client).unwrap();
+                    std::fs::write(client.join(".flavor.info"), if scenario == "conflict" { "wow_unknown" } else { "wow_classic_titan" }).unwrap();
+                    std::fs::write(client.join("version.txt"), "3.80.2.70000").unwrap();
+                }
+            }
+            for verb in ["status", "install", "remove"] {
+                let mut arguments = args(&["addon", verb, "--installation", root.to_str().unwrap(), "--format", "json"]);
+                if verb == "install" { arguments.extend(args(&["--release", fixture.0.join("release").to_str().unwrap()])); }
+                if verb == "remove" { arguments.extend(args(&["--output", fixture.0.join("archive").to_str().unwrap()])); }
+                let inv = parse(&arguments).unwrap();
+                let error = command_fault(&inv, dispatch(&inv).unwrap_err());
+                assert_eq!((error.code.as_str(), error.exit_code), (code, exit));
+                let value = envelope(&Err(error));
+                assert_eq!(value["error"]["stage"], "query");
+                assert!(value["context"]["installationSelection"].is_object());
+                assert_eq!(value["context"]["requestedProduct"], "");
+                assert!(value["error"].get("details").is_none());
+            }
+        }
+    }
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
     }

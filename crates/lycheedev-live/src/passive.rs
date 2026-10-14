@@ -1,9 +1,9 @@
 //! Read-only discovery. Its source exposes window metadata, never a native target.
 use lycheedev_core::{
-    Invocation, Result, ToolkitError,
-    client::{self, ClientInstallation, MetadataControl, MetadataCost},
+    Invocation, Result, ToolkitError, client,
     control::OperationControl,
     coordination::ClaimRegistry,
+    installation_selection::{self, InvocationMetadata},
     storage,
 };
 use lycheedev_windows::inventory::Window;
@@ -14,15 +14,6 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
-
-const CLIENT_FOLDERS: &[&str] = &[
-    "_retail_",
-    "_classic_",
-    "_classic_titan_",
-    "_classic_beta_",
-    "_cn_beta_",
-    "_forever_",
-];
 
 /// Both native and fixture sources enter exactly the same discovery pipeline.
 pub trait Source {
@@ -39,41 +30,7 @@ impl Source for WindowsSource {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Client {
-    pub directory: String,
-    pub product: String,
-    pub product_code: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub catalog_product: String,
-    pub full_build: String,
-    pub interface: u32,
-    pub toc: String,
-    pub identity_source: String,
-}
-impl From<ClientInstallation> for Client {
-    fn from(value: ClientInstallation) -> Self {
-        Self {
-            directory: value.directory,
-            product: value.product,
-            product_code: value.product_code,
-            // Go publishes the launcher slot only when it is distinct from a
-            // stable product flavor. Core additionally retains it for all clients.
-            catalog_product: if ["wow_classic_beta", "wow_cn_beta"]
-                .contains(&value.catalog_product.as_str())
-            {
-                value.catalog_product
-            } else {
-                String::new()
-            },
-            full_build: value.full_build,
-            interface: value.interface,
-            toc: value.toc,
-            identity_source: value.identity_source,
-        }
-    }
-}
+pub use lycheedev_core::installation_selection::Client;
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowIdentity {
@@ -127,30 +84,22 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 fn reason(error: &ToolkitError) -> String {
-    if error.code == error.message || error.code == "external.io" {
+    if error.code == error.message
+        || error.code == "external.io"
+        || error.message.starts_with(&format!("{}:", error.code))
+    {
         error.message.clone()
     } else {
         error.to_string()
     }
 }
 
-struct Metadata<'a>(&'a OperationControl);
-impl MetadataControl for Metadata<'_> {
-    fn check(&mut self) -> Result<()> {
-        self.0.check()
-    }
-    fn charge(&mut self, _: MetadataCost) -> Result<()> {
-        self.0.check()
-    }
-}
 fn inspect(directory: &Path, control: &OperationControl) -> Result<Client> {
-    client::inspect_with(directory, &mut Metadata(control)).map(Into::into)
+    installation_selection::select_with(directory, "", &mut InvocationMetadata(control))
+        .map(Into::into)
 }
 fn path_key(path: &Path) -> String {
-    fs::canonicalize(path)
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .trim_start_matches("\\\\?\\")
+    client::display_path(&fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
         .to_lowercase()
 }
 fn failure(code: &str) -> ToolkitError {
@@ -265,7 +214,7 @@ fn discover_inner(inv: &Invocation, source: &impl Source) -> Result<Report> {
     if let Some(root) = inv.flag("--installation").filter(|root| !root.is_empty()) {
         directories.push(PathBuf::from(root));
         directories.extend(
-            CLIENT_FOLDERS
+            client::client_folders()
                 .iter()
                 .map(|folder| Path::new(root).join(folder)),
         );
@@ -274,16 +223,18 @@ fn discover_inner(inv: &Invocation, source: &impl Source) -> Result<Report> {
     let mut seen = BTreeSet::new();
     for directory in directories {
         control.check()?;
-        if seen.contains(&path_key(&directory)) {
+        let input_key = path_key(&directory);
+        if seen.contains(&input_key) {
             continue;
         }
         let inspected = inspect(&directory, control);
         control.check()?;
         if let Ok(client) = inspected {
+            // Fixed Go deduplicates the input scope, not the selected client.
+            // A sole client selected from its root and again from its known
+            // folder therefore remains two installation observations.
+            seen.insert(input_key);
             let key = path_key(Path::new(&client.directory));
-            if !seen.insert(key.clone()) {
-                continue;
-            }
             let state = if running.contains(&key) {
                 "running"
             } else {
@@ -376,11 +327,7 @@ fn ownership(
         Ok(metadata) => {
             if !metadata.is_file()
                 || metadata.file_type().is_symlink()
-                || path_key(&marker)
-                    != marker
-                        .to_string_lossy()
-                        .trim_start_matches("\\\\?\\")
-                        .to_lowercase()
+                || path_key(&marker) != client::display_path(&marker).to_lowercase()
             {
                 return Err(failure("journal.redirected_window_owner"));
             }

@@ -378,3 +378,82 @@ fn catalog_scan_keeps_approved_cn_product_distinct() {
         |item| item.client.product == "forever" && item.client.catalog_product == "wow_cn_beta"
     ));
 }
+
+#[test]
+fn passive_known_folders_include_era_and_anniversary_without_public_enrichment() {
+    let fixture = Fixture::new();
+    for (folder, flavor, version) in [
+        ("_classic_era_", "wow_classic_era", "1.15.9.1"),
+        ("_anniversary_", "wow_anniversary", "2.5.6.1"),
+    ] {
+        let path = fixture.client(folder);
+        fs::write(path.join(".flavor.info"), flavor).unwrap();
+        fs::write(path.join("version.txt"), version).unwrap();
+    }
+    // An ambiguous root is skipped, then Go's fixed folder list finds both.
+    // Unrelated malformed markers remain an issue for root selection, not an
+    // error that drops the independent valid fixed-folder observations.
+    let broken = fixture.client("unrelated");
+    fs::write(broken.join(".flavor.info"), "invalid").unwrap();
+    let mut inv = fixture.inv();
+    inv.flags.insert(
+        "--installation".into(),
+        fixture.0.to_string_lossy().into_owned(),
+    );
+    let report = serde_json::to_value(discover(&inv, &Fake::new(vec![])).unwrap()).unwrap();
+    let installations = report["installations"].as_array().unwrap();
+    assert_eq!(installations.len(), 2);
+    assert!(
+        installations
+            .iter()
+            .any(|entry| entry["client"]["product"] == "classic-era")
+    );
+    assert!(
+        installations
+            .iter()
+            .any(|entry| entry["client"]["product"] == "anniversary")
+    );
+    for entry in installations {
+        assert_eq!(entry["client"].as_object().unwrap().len(), 8);
+        for name in ["displayName", "channel", "metadataBranch", "interfaceKnown"] {
+            assert!(entry["client"].get(name).is_none());
+        }
+    }
+}
+
+#[test]
+fn passive_root_add_preserves_go_single_renamed_client_selection() {
+    let fixture = Fixture::new();
+    let client = fixture.client("renamed-client");
+    let mut inv = fixture.inv();
+    inv.flags.insert(
+        "--installation".into(),
+        fixture.0.to_string_lossy().into_owned(),
+    );
+    let report = discover(&inv, &Fake::new(vec![])).unwrap();
+    assert_eq!(report.installations.len(), 1);
+    assert_eq!(
+        path_key(Path::new(&report.installations[0].client.directory)),
+        path_key(&client)
+    );
+}
+
+#[test]
+fn passive_root_and_known_child_preserve_go_scope_deduplication() {
+    let fixture = Fixture::new();
+    let client = fixture.client("_retail_");
+    let mut inv = fixture.inv();
+    inv.flags.insert(
+        "--installation".into(),
+        fixture.0.to_string_lossy().into_owned(),
+    );
+    let report = discover(&inv, &Fake::new(vec![])).unwrap();
+    assert_eq!(report.installations.len(), 2);
+    for entry in report.installations {
+        assert_eq!(
+            path_key(Path::new(&entry.client.directory)),
+            path_key(&client)
+        );
+        assert_eq!(entry.state, "installed");
+    }
+}
