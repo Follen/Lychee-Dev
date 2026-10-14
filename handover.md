@@ -508,6 +508,14 @@ post-semantic检查现在要求两个实际native任务和末尾同pin查询均�
 
 同时补workspace serde_json的raw_value feature：已推admission整数原文解码消费RawValue，该类型在锁定1.0.151中受此feature控制。仅打开已有锁定依赖功能，无版本/锁文件变化；独立核上游本地源码cfg及Cargo单行差异。此前包含admission的新树尚未实际编译，不能称本地编译已验证。
 
+### 完整 Retail native / 真实 IPC 验收接线
+
+新增8文件验收控制器，固定原始archive认证全部4049文件/4036 Lua-XML-TOC文档/32,269,051B，独立XML字节tokenizer重新推导1091XML的4018个映射及坐标/digest，不引用历史计数冒充新运行。完整material原文、独立API Type模型绑定、普通refs/context及跨CLI retained cold/warm/identity改变/reopen均按实际计划与执行回答验；context精确原声明/逐snippet文件hash和编号正文，depth0不误要求relations。只保留同输入已执行但partial的真实证据，不能让未执行summary或伪造complete蒙混。
+
+quota、idle、lifetime分别使用真实IPC连续attempted操作和60/600秒实际生命周期，不预置计数；Windows pipe peer持同管道/进程句柄，核OS PID/创建时间/映像/锁定EXE。每组同已封存EXE/package/source身份，独立owned Job与scratch；nested prerequisite失败/超时停止后续launch，交外层Job证明退役再cleanup。四组上限20/10/2.5/12分钟，合44.5；CI产品job120分钟容纳已有测试，各组互不短路并保留失败证据。
+
+独立审核修复XML自洽漏检、context原文坐标不足、嵌套fatal传播与receipt伪complete问题；从原archive/生产typed序列化/实际scope规则复核，最终8文件/14依赖无漂移，83/83 Node独立通过。receipt SHA256 372773d30187b63cc087196be5a5ce68293f0e6825a7202872d7e0de9496d3ef。Windows/PowerShell/完整native产品运行仍 NOT_RUN，首次由此CI接线执行；这不是Go性能对照或四阶段审计通过。identity变化用隔离本地README后继commit，不能称第二个真实上游版本已验收。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

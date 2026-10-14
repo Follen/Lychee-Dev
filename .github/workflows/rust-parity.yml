@@ -49,6 +49,8 @@ jobs:
         run: node --test tests/rust-source-full-corpus/runner.test.mjs
       - name: Test independent real Skill acceptance assertions
         run: node --test tests/rust-skill-usage/runner.test.mjs
+      - name: Test full native and real IPC acceptance assertions
+        run: node --test tests/rust-source-native-acceptance/runner.test.mjs tests/rust-source-native-acceptance/session-ipc.test.mjs
       - name: Check exact Go addon resources and delivery templates
         run: node --test tests/rust-parity/addon-delivery-contract.test.mjs
       - name: Test unsafe inventory and enforce owned business guards
@@ -76,7 +78,8 @@ jobs:
     # Deliberately no needs: static parity gaps must not suppress real builds.
     if: github.ref == 'refs/heads/rust-refactor'
     runs-on: windows-2025
-    timeout-minutes: 90
+    # Existing product groups plus four independently bounded native groups (44.5m total).
+    timeout-minutes: 120
     defaults:
       run:
         shell: pwsh
@@ -283,6 +286,18 @@ jobs:
       - name: Exercise packaged Skill through actual fixed-source CLI tasks
         if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' }}
         run: node tools/rust-skill-usage.mjs .tmp/ci-cli-artifact/artifact.json .tmp/ci-source-candidate/report.json
+      - name: Exercise complete fixed Retail native semantic and retained session
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' }}
+        run: node tools/rust-source-native-acceptance.mjs .tmp/ci-cli-artifact/artifact.json .tmp/ci-source-candidate/report.json full
+      - name: Exercise real native IPC attempted-operation quota
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' }}
+        run: node tools/rust-source-native-acceptance.mjs .tmp/ci-cli-artifact/artifact.json .tmp/ci-source-candidate/report.json quota
+      - name: Exercise real native IPC idle retirement
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' }}
+        run: node tools/rust-source-native-acceptance.mjs .tmp/ci-cli-artifact/artifact.json .tmp/ci-source-candidate/report.json idle
+      - name: Exercise real native IPC lifetime retirement
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' }}
+        run: node tools/rust-source-native-acceptance.mjs .tmp/ci-cli-artifact/artifact.json .tmp/ci-source-candidate/report.json lifetime
       - name: Preserve each controlled command receipt and logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
