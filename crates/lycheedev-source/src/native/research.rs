@@ -19,8 +19,6 @@ impl PreparedSnapshot {
         let mut plan=ResearchPlan::new(self.inputs.identity_sha256(),query,self.owner.clone());
         let named_xml=query.symbol.path.to_ascii_lowercase().ends_with(".xml")&&!query.symbol.category.starts_with("xml-");
         let mut named_scopes=BTreeMap::new();
-        let mut xml_owner_programs=BTreeMap::new();
-        let mut xml_object_elements=None;
         if named_xml {
             for (file,script) in &origins.scripts {
                 self.control.check()?;self.inputs.charge(1)?;
@@ -87,43 +85,7 @@ impl PreparedSnapshot {
                     if !named_scopes.contains_key(&self.inputs.corpus.files[file].path){continue;}
                 } else if inline.is_some() {
                     match origins.planner_script_eligibility(&query.symbol,&self.inputs.corpus.files[file].path,||self.inputs.charge(1))? {
-                        Some(true)=>{
-                            let script=inline.expect("inline script");
-                            let mut definition=false;
-                            for program in &origins.programs {for action in program.actions(){self.inputs.charge(1)?;
-                                if let crate::xml_load::Action::Definition{name,origin,..}=action
-                                    &&name==&query.symbol.name&&origins.matches_origin(&query.symbol,origin){definition=true;}
-                            }}
-                            if definition {
-                                // A template's enclosing span is only a candidate.
-                                // Its nearest object ancestor must own the script;
-                                // named and unnamed child frames are separate owners.
-                                if !xml_owner_programs.contains_key(&script.path){
-                                    let raw=origins.documents.get(&script.path).ok_or_else(||input_error("XML original missing"))?;
-                                    let parsed=crate::xml_program::extract_production(&script.path,raw.as_bytes()).map_err(|error|input_error(&error))?;
-                                    self.control.check()?;self.inputs.charge(parsed.occurrences.len().saturating_add(1))?;
-                                    xml_owner_programs.insert(script.path.clone(),parsed);
-                                }
-                                let parsed=&xml_owner_programs[&script.path];
-                                if parsed.raw_sha256!=script.xml_sha256{return Err(input_error("XML owner source differs"));}
-                                if xml_object_elements.is_none(){xml_object_elements=Some(crate::xml_program::catalog().map_err(|error|input_error(&error))?.object_elements());}
-                                let objects=xml_object_elements.as_ref().expect("object catalog");
-                                let mut node=parsed.occurrences.iter().find(|node|node.raw==script.element);
-                                let mut owner=None;
-                                while let Some(current)=node {
-                                    self.inputs.charge(parsed.occurrences.len().saturating_add(1))?;
-                                    let parent=current.parent.map(|id|&parsed.occurrences[id]);
-                                    let object=objects.contains(&current.tag)||current.kind=="object_declaration"||current.attributes.contains_key("intrinsic")
-                                        ||parent.is_some_and(|parent|parent.tag=="Frames")
-                                        ||parsed.occurrences.iter().any(|child|child.parent==Some(current.ordinal)&&child.tag=="Scripts");
-                                    if object {owner=Some(current);break;}node=parent;
-                                }
-                                let Some(owner)=owner else{plan.unavailable("xml_script_owner_unavailable");continue;};
-                                let raw=&origins.documents[&script.path];
-                                let line=1+raw.as_bytes()[..owner.raw.start].iter().filter(|byte|**byte==b'\n').count();
-                                if script.path!=query.symbol.path||line!=query.symbol.line||owner.attributes.get("name").is_none_or(|name|name.value!=query.symbol.name){continue;}
-                            }
-                        }, Some(false)=>continue,
+                        Some(true)=>{}, Some(false)=>continue,
                         None=>{plan.unavailable("xml_script_owner_unavailable");continue;},
                     }
                 }

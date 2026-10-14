@@ -9,7 +9,7 @@ use std::{collections::BTreeMap,path::PathBuf};
 pub(crate) mod plan;
 mod xml;
 pub(crate) use xml::XmlResearch;
-pub const RESEARCH_RULES:&str="source-native-research-v6-api-types-and-semantic-admission";
+pub const RESEARCH_RULES:&str="source-native-research-v7-xml-script-ancestry";
 #[derive(Clone,Serialize,Deserialize)]
 pub struct LoadEvidence { pub manifest:String,pub ordered:Vec<String>,pub issues:Vec<Value> }
 #[derive(Clone,Serialize,Deserialize)]
@@ -449,6 +449,7 @@ mod projection_tests {
             let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
             let operations=evidence["plan"]["operations"].as_array().unwrap();
             assert_eq!(operations.len(),1,"{name}: {evidence}");
+            assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"{name}: {evidence}");
             assert_eq!(operations[0]["kind"],"definition");
             assert_eq!(operations[0]["target"]["position"]["path"],"Templates.xml");
             assert_eq!(operations[0]["target"]["position"]["coveringRange"]["start"]["line"],3);
@@ -471,8 +472,74 @@ mod projection_tests {
                 api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
             let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
             let operations=evidence["plan"]["operations"].as_array().unwrap();assert_eq!(operations.len(),1,"{evidence}");
+            assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"{evidence}");
             let site=&operations[0]["target"]["site"];let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
             assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Own");
+        }
+    }
+
+    #[test]
+    fn virtual_template_same_line_names_keep_exact_declaration_origin() {
+        let xml="<Ui><Frame name=\"A\" virtual=\"true\"><Scripts><OnLoad>Own()</OnLoad></Scripts><Frames><Frame name=\"A\"><Scripts><OnLoad>Child(); Child()</OnLoad></Scripts></Frame></Frames></Frame><Frame name=\"A\"><Scripts><OnLoad>Sibling(); Sibling()</OnLoad></Scripts></Frame></Ui>";
+        let facts=crate::facts::xml(xml.as_bytes());
+        let declaration=&facts.declarations[0];
+        assert_eq!(declaration.name,"A");
+        let query=planned_query("A","Templates.xml",declaration.line,declaration.end_line,&declaration.category,"outgoing");
+        let control=OperationControl::default();
+        let session=ResearchSession::prepare(SnapshotRequest{
+            files:BTreeMap::new(),load_documents:BTreeMap::from([("Main.toc".into(),"Templates.xml\n".into()),("Templates.xml".into(),xml.into())]),
+            environment_documents:BTreeMap::new(),source:json!({"repository":"same-line-template-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+        let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
+        let operations=evidence["plan"]["operations"].as_array().unwrap();
+        assert_eq!(operations.len(),1,"{evidence}");
+        assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"{evidence}");
+        let site=&operations[0]["target"]["site"];
+        let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
+        assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Own");
+    }
+
+    #[test]
+    fn template_plan_authenticates_script_links_and_utf16_entity_positions() {
+        for attribute in ["virtual", "intrinsic"] {
+            let xml=format!("\u{feff}<Ui>\r\n<Frame name=\"Template\" {attribute}=\"true\">\r\n<Scripts><OnLoad>local label = \"🙂\"; Targ&#101;t(self)</OnLoad></Scripts>\r\n<Frames><Frame><Scripts><OnLoad>Child(); Child()</OnLoad></Scripts></Frame></Frames>\r\n</Frame><Frame name=\"Sibling\"><Scripts><OnLoad>Other(); Other()</OnLoad></Scripts></Frame><Script>Top(); Top()</Script>\r\n</Ui>");
+            let parsed=crate::xml_program::extract_production("Templates.xml",xml.as_bytes()).unwrap();
+            let handler=parsed.occurrences.iter().find(|node|node.script==Some(0)).unwrap();
+            let scripts=&parsed.occurrences[handler.parent.unwrap()];
+            let owner=&parsed.occurrences[scripts.parent.unwrap()];
+            assert_eq!(&xml[handler.raw.start..handler.raw.end],"<OnLoad>");
+            assert_eq!(&xml[owner.raw.start..owner.raw.end],format!("<Frame name=\"Template\" {attribute}=\"true\">"));
+            assert!(owner.raw.end<parsed.scripts[0].element.start,"an opening-tag span cannot enclose the handler");
+            assert!(handler.raw.end<parsed.scripts[0].element.end,"the script link, not equal spans, authenticates the occurrence");
+            let facts=crate::facts::xml(xml.as_bytes());
+            let declaration=facts.declarations.iter().find(|item|item.name=="Template").unwrap();
+            let query=planned_query("Template","Templates.xml",declaration.line,declaration.end_line,&declaration.category,"outgoing");
+            let control=OperationControl::default();
+            let session=ResearchSession::prepare(SnapshotRequest{
+                files:BTreeMap::new(),load_documents:BTreeMap::from([("Main.toc".into(),"Templates.xml\n".into()),("Templates.xml".into(),xml.clone())]),
+                environment_documents:BTreeMap::new(),source:json!({"repository":"template-entity-test","product":"retail"}),
+                luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+                api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+            let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
+            let operations=evidence["plan"]["operations"].as_array().unwrap();
+            assert_eq!(operations.len(),1,"{attribute}: {evidence}");
+            assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"child/sibling/top-level ambiguity must be excluded before scanning: {evidence}");
+            assert_eq!(evidence["plan"]["outgoing_truncated"],false);
+            let target=&operations[0]["target"];
+            let site=&target["site"];
+            let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
+            assert!(source.starts_with("return function(self, ...)\n"));
+            assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Target");
+            let position=&target["position"];
+            assert_eq!(position["path"],"Templates.xml");
+            assert_eq!(position["coveringRange"],json!({"start":{"line":2,"character":37},"end":{"line":2,"character":48}}));
+            assert_eq!(position["generatedRange"],json!({"start":{"line":1,"character":20},"end":{"line":1,"character":26}}));
+            assert_eq!(position["positionAccuracy"],"covering");
+            let covering=&position["sourceMap"]["covering"];
+            assert_eq!(&xml[covering["start"].as_u64().unwrap() as usize..covering["end"].as_u64().unwrap() as usize],"Targ&#101;t");
+            assert_eq!(target["file_sha256"],storage::sha256(source.as_bytes()));
+            assert_eq!(position["xmlContentHash"],storage::sha256(xml.as_bytes()));
         }
     }
 

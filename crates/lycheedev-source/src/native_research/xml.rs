@@ -10,15 +10,30 @@ pub(crate) struct XmlResearch {
     pub programs:Vec<Arc<xml_load::Program>>,
     pub gaps:Vec<Value>,
     owners:BTreeMap<String,Vec<(String,xml_load::XmlOrigin)>>,
+    declaration_owners:BTreeMap<String,xml_load::XmlOrigin>,
 }
 impl XmlResearch {
     pub fn prepare(files:&mut BTreeMap<String,String>,documents:BTreeMap<String,String>,plans:&[LoadEvidence],source:&Value,control:&OperationControl)->Result<Self>{
-        let mut scripts=BTreeMap::new();let mut gaps=Vec::new();
+        let mut scripts=BTreeMap::new();let mut gaps=Vec::new();let mut declaration_owners=BTreeMap::new();
+        let mut objects=None;
         for(path,text)in &documents{
             control.check()?;
             if !path.to_ascii_lowercase().ends_with(".xml"){continue;}
-            match xml_inline::extract(path,text.as_bytes()){
-                Ok(extracted)=>for script in extracted{files.insert(script.key.clone(),String::from_utf8(script.source.clone()).expect("extracted UTF8"));scripts.insert(script.key.clone(),script);},
+            // Keep the exact occurrence -> script -> nearest object relation
+            // from the same production parse used to generate admitted Lua.
+            // Query planning must not reparse XML with a fresh local timeout.
+            let parsed=crate::xml_program::extract_production(path,text.as_bytes())
+                .map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4));
+            control.check()?;
+            match parsed{
+                Ok(program)=>match xml_inline::scripts(&program,text.as_bytes()){
+                    Ok(extracted)=>{
+                        if objects.is_none(){objects=Some(crate::xml_program::catalog().map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4))?.object_elements());}
+                        declaration_owners.extend(Self::declaration_owners(&program,objects.as_ref().expect("object catalog"),control)?);
+                        for script in extracted{files.insert(script.key.clone(),String::from_utf8(script.source.clone()).expect("extracted UTF8"));scripts.insert(script.key.clone(),script);}
+                    },
+                    Err(error)=>gaps.push(json!({"code":error.code,"detail":error.message,"path":path})),
+                },
                 Err(error)=>gaps.push(json!({"code":error.code,"detail":error.message,"path":path})),
             }
         }
@@ -38,7 +53,28 @@ impl XmlResearch {
             let objects=program.actions().iter().filter_map(|action|if let xml_load::Action::Object{instance,origin,name:Some(name),..}=action{Some((instance,(name,origin)))}else{None}).collect::<BTreeMap<_,_>>();
             for action in program.actions(){if let xml_load::Action::Handler{instance,target:xml_load::HandlerTarget::Inline{file},..}=action&&let Some((name,origin))=objects.get(instance){owners.entry(file.clone()).or_default().push(((*name).clone(),(*origin).clone()));}}
         }
-        Ok(Self{documents,scripts,programs,gaps,owners})
+        Ok(Self{documents,scripts,programs,gaps,owners,declaration_owners})
+    }
+    /// Ui occurrence spans authenticate opening tags, not enclosing elements.
+    /// The extractor's ordinal links establish ancestry for named and unnamed
+    /// objects without comparing those spans to complete script elements.
+    fn declaration_owners(program:&crate::xml_program::XmlProgram,objects:&std::collections::BTreeSet<String>,control:&OperationControl)->Result<BTreeMap<String,xml_load::XmlOrigin>>{
+        let mut script_parents=std::collections::BTreeSet::new();
+        for node in &program.occurrences{control.check()?;if node.tag=="Scripts"&&let Some(parent)=node.parent{script_parents.insert(parent);}}
+        let mut nearest:Vec<Option<Span>>=Vec::with_capacity(program.occurrences.len());
+        let mut owners=BTreeMap::new();
+        for node in &program.occurrences{
+            control.check()?;
+            let parent=node.parent.map(|id|&program.occurrences[id]);
+            let object=objects.contains(&node.tag)||node.kind=="object_declaration"||node.attributes.contains_key("intrinsic")
+                ||parent.is_some_and(|parent|parent.tag=="Frames")||script_parents.contains(&node.ordinal);
+            let owner=if object{Some(node.raw)}else{node.parent.and_then(|id|nearest[id])};
+            nearest.push(owner);
+            if let Some(id)=node.script&&program.scripts[id].kind=="handler"&&let Some(bytes)=owner{
+                owners.insert(format!("{}/__inline_{id}.lua",program.path),xml_load::XmlOrigin{path:program.path.clone(),sha256:program.raw_sha256.clone(),bytes});
+            }
+        }
+        Ok(owners)
     }
     pub fn mapping_manifests(&self)->Vec<Value>{self.scripts.values().map(xml_inline::Script::mapping_manifest).collect()}
     pub fn identity(&self,control:&OperationControl)->Result<Value>{self.identity_with_rules(xml_load::RULES,xml_inline::SOURCE_MAP_RULES,control)}
@@ -72,28 +108,29 @@ impl XmlResearch {
     pub fn may_contain_outgoing(&self,symbol:&index::Symbol,file:&str)->bool{
         self.original_path(file)==symbol.path||self.owns_file(symbol,file)
     }
-    /// Decide script membership before scanning it or charging an outgoing
-    /// operation. Same-path candidates are not proof of object ownership.
+    /// Decide membership before scanning or charging an outgoing operation.
+    /// A template uses the exact nearest-object origin retained at preparation;
+    /// an instance may also own handlers inherited from another XML document.
     pub(crate) fn planner_script_eligibility(&self,symbol:&index::Symbol,file:&str,mut step:impl FnMut()->Result<()>)->Result<Option<bool>> {
-        let Some(script)=self.scripts.get(file) else {return Ok(None)};
-        if let Some(owners)=self.owners.get(file){for(name,origin)in owners{
-            step()?;
-            if name==&symbol.name&&self.matches_origin(symbol,origin){return Ok(Some(true));}
-        }}
-        let mut known=false;
+        if !self.scripts.contains_key(file){return Ok(None);}
+        let mut known=false;let mut definition=false;let mut definition_owned=false;
         for program in &self.programs {for action in program.actions(){
             step()?;
             match action {
                 xml_load::Action::Object{name:Some(name),origin,..} if name==&symbol.name&&self.matches_origin(symbol,origin)=>{known=true;},
                 xml_load::Action::Definition{name,origin,..} if name==&symbol.name&&self.matches_origin(symbol,origin)=>{
-                    known=true;
-                    // A virtual template has no runtime instance, but its exact
-                    // declaration span authenticates its own inline body.
-                    if origin.path==script.path&&origin.sha256==script.xml_sha256
-                        &&origin.bytes.start<=script.element.start&&origin.bytes.end>=script.element.end {return Ok(Some(true));}
+                    known=true;definition=true;
+                    // Exact path/hash/opening-tag identity excludes nested and
+                    // sibling objects even when their names and lines coincide.
+                    definition_owned|=self.declaration_owners.get(file)==Some(origin);
                 },
                 _=>{},
             }
+        }}
+        if definition{return Ok(Some(definition_owned));}
+        if let Some(owners)=self.owners.get(file){for(name,origin)in owners{
+            step()?;
+            if name==&symbol.name&&self.matches_origin(symbol,origin){return Ok(Some(true));}
         }}
         Ok(known.then_some(false))
     }
@@ -164,6 +201,14 @@ fn hash_sequence<T:Serialize>(header:&Value,items:impl IntoIterator<Item=T>,cont
 mod tests{
     use super::*;
     #[test]
+    fn declaration_owner_walk_keeps_original_cancellation(){
+        let program=crate::xml_program::extract_production("Frame.xml",b"<Ui><Frame name=\"A\" virtual=\"true\"><Scripts><OnLoad>Own()</OnLoad></Scripts></Frame></Ui>").unwrap();
+        let objects=crate::xml_program::catalog().unwrap().object_elements();
+        let control=OperationControl::default();
+        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(XmlResearch::declaration_owners(&program,&objects,&control).unwrap_err().code,"command.cancelled");
+    }
+    #[test]
     fn full_scale_xml_identity_is_compact_and_invalidates_each_material(){
         let control=OperationControl::default();
         let catalog=crate::xml_program::catalog().unwrap();
@@ -179,7 +224,7 @@ mod tests{
             documents.insert(path,raw);
         }
         for ordinal in 0..394{documents.insert(format!("Interface/AddOns/Blizzard_Identity/Manifest{ordinal}.toc"),format!("Frames{}.xml\n",ordinal%1091));}
-        let mut xml=XmlResearch{documents,scripts,programs:vec![],gaps:vec![],owners:BTreeMap::new()};
+        let mut xml=XmlResearch{documents,scripts,programs:vec![],gaps:vec![],owners:BTreeMap::new(),declaration_owners:BTreeMap::new()};
         assert_eq!(xml.documents.len(),1485);assert_eq!(xml.scripts.len(),4018);
         let old_documents=xml.documents.iter().map(|(path,text)|(path,storage::sha256(text.as_bytes()))).collect::<BTreeMap<_,_>>();
         assert!(serde_json::to_vec(&old_documents).unwrap().len()>65536,"fixture must reproduce the original identity cap failure");

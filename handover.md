@@ -538,6 +538,12 @@ Skill此旧树27项原始22pass/5fail：真实batch新通过，refs/context/sess
 
 独立复审发现并修复跨owner活跃日志借用及输出目录重叠两项边界；8/8 Node独立通过，workflow仅上传成功快照，不扩大权限、不含凭证或用户数据。实际Windows早期artifact尚未运行；完整终态artifact保留原流程，早期快照不代替最终证据。
 
+### Source XML handler 真实失败修复候选
+
+418c2ef 的两个实际失败保留原断言与日志。修复准备期 script → 最近对象的真实声明身份：按原文件 path/hash/开标签 span 匹配，排除顶层 Script、具名/匿名子对象和兄弟对象，保留跨文件模板继承；移除查询期重复 XML 解析。RESEARCH_RULES 升至 v7，使受影响的 material/cache/cursor 身份失效，不沿用旧计划。
+
+三文件独立复审无本批阻断；原两项失败断言不弱化，新增三项回归覆盖同名同线对象、BOM/CRLF/emoji/entity/UTF-16 与取消。独立 Expat 拓扑/坐标检查、rustfmt 解析、diff 检查通过。receipt SHA256 6a420d7e7dea8f063e30d23c2c983dfdfb549a9cae63f00867a540f6dfde55c7。Rust/Windows 新候选测试仍 NOT_RUN，既有 native_research:: CI 将执行；不能把计划正确等同实际语义查询通过。prepare 同步解析取消粒度和同名同线多个 Definition 的上游选择歧义仍待后续处理。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
