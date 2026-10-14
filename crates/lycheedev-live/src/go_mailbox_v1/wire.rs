@@ -1,12 +1,11 @@
 use super::{ContractError, Result};
+pub use lycheedev_core::mailbox::{Token, ZERO_TOKEN, checksum, parse_token};
 
 pub const HEADER_BYTES: usize = 80;
 pub const TRAILER_BYTES: usize = 40;
 pub const MAX_PAYLOAD: usize = 512 << 10;
 pub const MAGIC: &[u8; 8] = b"LYCMEM06";
 pub const TRAILER: &[u8; 8] = b"LYCEND06";
-pub type Token = [u8; 16];
-pub const ZERO_TOKEN: Token = [0; 16];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -50,32 +49,6 @@ pub struct Record<'a> {
     pub payload: &'a [u8],
 }
 
-pub fn parse_token(text: &str) -> Result<Token> {
-    if text.len() != 32
-        || !text
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-    {
-        return Err(ContractError("live.channel_token_invalid"));
-    }
-    let mut token = ZERO_TOKEN;
-    hex::decode_to_slice(text, &mut token)
-        .map_err(|_| ContractError("live.channel_token_invalid"))?;
-    Ok(token)
-}
-
-pub fn checksum(bytes: &[u8]) -> u32 {
-    let (mut lo, mut hi) = (1u32, 0u32);
-    for chunk in bytes.chunks(5552) {
-        for &byte in chunk {
-            lo += u32::from(byte);
-            hi += lo;
-        }
-        lo %= 65521;
-        hi %= 65521;
-    }
-    (hi << 16) | lo
-}
 fn u32_at(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(bytes[at..at + 4].try_into().expect("checked header size"))
 }

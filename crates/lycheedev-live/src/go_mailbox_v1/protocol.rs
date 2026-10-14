@@ -1,4 +1,5 @@
 use super::*;
+pub use lycheedev_core::mailbox::ExpectedEnvelope;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -152,32 +153,6 @@ impl Receipt {
     }
 }
 
-/// Exact envelope fields consumed by receipt and INPUT correlation. The slot
-/// payload writer, transaction lifecycle and journal are separate migration work.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct ExpectedEnvelope {
-    pub schema: String,
-    pub index: i32,
-    pub start_slot: i32,
-    pub runtime: String,
-    pub owner: String,
-    pub fence: u64,
-    pub nonce: String,
-    pub ticket: String,
-    pub action: String,
-    pub guid: String,
-    pub build: String,
-}
-impl ExpectedEnvelope {
-    pub fn slot_start(&self) -> i32 {
-        if self.start_slot > 0 {
-            self.start_slot
-        } else {
-            self.index
-        }
-    }
-}
 pub fn decode_publication_receipt(record: &Record<'_>) -> Result<Receipt> {
     let invalid = ContractError("live.channel_receipt_record_invalid");
     let h = &record.header;

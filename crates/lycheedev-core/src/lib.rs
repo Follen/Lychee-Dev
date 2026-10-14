@@ -9,6 +9,7 @@ pub mod coordination;
 pub mod doctor;
 pub mod evidence;
 pub mod installation_selection;
+pub mod mailbox;
 pub mod metadata;
 pub mod process;
 pub mod selection;

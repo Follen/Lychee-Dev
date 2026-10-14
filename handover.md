@@ -350,6 +350,10 @@ luac失败后的只读run38633376782核定cl/link精确文件与有效Microsoft�
 
 Windows产品CI现将在新pin下重新编译CLI，重建luac并验证精确当前sourceDigest的未发布候选包/许可证闭包，然后真正执行原先ignored的多CLI native session/缓存/关闭/取消/坏帧场景，使用独立保存的fixture目录与owned controller。配置已写，实际候选装配及真实session仍NOT_RUN；其他差分/测试失败不短路这些独立组，不能把包构建等同业务收敛。
 
+### Live / Delivery 共用正式信封边界
+
+将已审的SlotEnvelope、ExpectedEnvelope、token/checksum、ContractError与Lua payload生成器唯一实现抽取至lycheedev_core::mailbox，Live原公开路径全部re-export同类型/函数，原生memory reader与状态机路由留Live。Delivery将依core复用，不形成delivery→live依赖或复制第二种信封。独立复核迁移实现逐字一致、JSON/default/omitempty/Lua转义与边界无变化，7个core加1个Live身份fixture已写，现接独立Windows测试组；运行NOT_RUN。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

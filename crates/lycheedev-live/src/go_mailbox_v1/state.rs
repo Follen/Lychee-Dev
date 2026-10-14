@@ -2,10 +2,10 @@
 //! Oracle: channel/{driver,state,input,budget,request,runtime_replacement}.go
 //! at 3057a9666ab078270b63c7f06de748069b0d1f4b.
 use super::{
-    ContractError, ExpectedEnvelope, Identity, InputDiagnostic, InputObservation, InputOutcome,
-    MAX_EXACT_INTEGER, MAX_PAYLOAD, Receipt, Result, SCHEMA, SLOT_COUNT, ZERO_TOKEN, checksum,
-    parse_token,
+    ContractError, Identity, InputDiagnostic, InputObservation, InputOutcome, MAX_EXACT_INTEGER,
+    MAX_PAYLOAD, Receipt, Result, SCHEMA, SLOT_COUNT, ZERO_TOKEN, checksum, parse_token,
 };
+pub use lycheedev_core::mailbox::SlotEnvelope;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -30,80 +30,6 @@ fn no(b: &bool) -> bool {
 }
 fn bad() -> ContractError {
     ContractError("live.channel_journal_invalid")
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct SlotEnvelope {
-    pub schema: String,
-    pub index: i32,
-    #[serde(skip_serializing_if = "zero_i32")]
-    pub start_slot: i32,
-    pub runtime: String,
-    pub owner: String,
-    pub fence: u64,
-    pub nonce: String,
-    pub ticket: String,
-    pub action: String,
-    pub guid: String,
-    pub build: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub code: String,
-    #[serde(skip_serializing_if = "zero_i32")]
-    pub code_bytes: i32,
-    #[serde(skip_serializing_if = "zero_u32")]
-    pub code_checksum: u32,
-    #[serde(skip_serializing_if = "zero_i32")]
-    pub budget: i32,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub challenge: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub prepared_nonce: String,
-    #[serde(skip_serializing_if = "zero_u32")]
-    pub report_bytes: u32,
-    #[serde(skip_serializing_if = "zero_u32")]
-    pub report_checksum: u32,
-}
-impl SlotEnvelope {
-    /// Go SlotPayload's static admission, not action or input authorization.
-    pub fn validate(&self) -> Result<()> {
-        if self.schema != SCHEMA
-            || !(1..=SLOT_COUNT).contains(&self.index)
-            || self.start_slot < 0
-            || self.start_slot > self.index
-            || self.code.len() > 262144
-            || self.fence == 0
-            || self.fence > MAX_EXACT_INTEGER
-        {
-            return Err(ContractError("bridge.invalid_slot_envelope"));
-        }
-        for value in [&self.runtime, &self.owner, &self.nonce, &self.ticket] {
-            parse_token(value).map_err(|_| ContractError("bridge.invalid_slot_token"))?;
-        }
-        Ok(())
-    }
-    pub fn expected(&self) -> ExpectedEnvelope {
-        ExpectedEnvelope {
-            schema: self.schema.clone(),
-            index: self.index,
-            start_slot: self.start_slot,
-            runtime: self.runtime.clone(),
-            owner: self.owner.clone(),
-            fence: self.fence,
-            nonce: self.nonce.clone(),
-            ticket: self.ticket.clone(),
-            action: self.action.clone(),
-            guid: self.guid.clone(),
-            build: self.build.clone(),
-        }
-    }
-    pub fn slot_start(&self) -> i32 {
-        if self.start_slot > 0 {
-            self.start_slot
-        } else {
-            self.index
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
