@@ -560,6 +560,12 @@ Skill此旧树27项原始22pass/5fail：真实batch新通过，refs/context/sess
 
 明确未解决：公开CLI通用JSON序列化仍会把负零输出为-0.0，而固定Go为-0；本批仅保证所改Hotfix归档/计量设计，不宣称完整CLI字节等价。后续必须统一公共数值编码并回归，不能登记为新兼容例外。
 
+### 剩余范围与现行测试迁移
+
+todo新增按“已有组件/未接默认生产路径/待原生实测/性能与全仓审计未完成”排列的模块工作队列，具体证据仍以本handover为准，不用测试数量估算完成百分比。当前默认Live仍未切换正式reader/backend/CON Driver；activation、doctor/reload fallback、完整Data effective/remote和公共JSON来源语义、最终包与同机Go性能对照均须完成。
+
+前置消费者审查已确认额外21 addon文件仍被旧native_e2e、Rust TOC动态Lua测试、递归打包和install-smoke消费，不能直接删簇制造差分绿灯。当前部分同名Lua测试仍断言旧memory-slot-v3/input.v3，缺固定Go的bootstrap/input_mailbox/focus等正式测试；应先移植正式Go测试和仍有独立价值的安装/事务/未知不重放集成边界，再清理旧消费者。此调查不算四阶段第三阶段收敛，正式四阶段尚未开始。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

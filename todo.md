@@ -13,6 +13,42 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 
 - [x] Push the reviewed documentation to rust-refactor and create/reuse its own draft PR (#14); subsequent authorized code batches update that same PR promptly, without waiting for all validation or opening one PR per batch.
 
+## Current module work queue (derived from handover; no percentage claims)
+
+This is an execution view, not a second evidence authority. A component being implemented or independently source-reviewed does not check its complete parity box. Exact run/commit/hash evidence and limitations remain in handover.md.
+
+### Implemented components with some native evidence
+
+- [ ] Foundation: retain reproducible public Emmy reconstruction and official Windows build; finish independent corresponding-source rebuilds and complete clean package acceptance.
+- [ ] Source: retain fixed full Retail static import/query and real multi-CLI session evidence; validate newly repaired XML owner plans and source batch on the next exact candidate. Complete full Retail native analysis/refs/context/flow, real quota/idle/lifetime, cancellation, identity changes, readable source locations and independent Source evaluator.
+- [ ] Data: retain installation/catalog/relations and named Hotfix components; validate corrected numeric archive/field budgets, new capture dependencies and scan checkpoint/resume on the exact Windows candidate. Finish effective SQL, remote provider, remaining DB2/CASC/CDN/assets boundaries and all fixed-Go test mapping.
+- [ ] Delivery: retain formal 500-slot publication, journal and maintenance/rollback components; finish integrated runtime receipt/retirement, old200 upgrade, disabled/empty-map, shared-installation and complete package/install smoke on the final candidate.
+- [ ] Skill/CLI: retain Go-based payload, real packaged CLI task runner and command registration fixes; close actual describe differences and complete all arguments/errors/JSONL/business output equivalence. Public number formatting must distinguish typed floats from raw JSON tokens. Re-run the independent actual Skill flow after the current semantic fixes.
+
+### Implemented or in progress, still not the default production path
+
+- [ ] Formal Live: finish trusted EXE qualification plus runtime RIP/Lua reader, original budget/control, structured firstReadFailure and checked close. Review fixed-Go Unicode path identity rather than Windows Ordinal assumptions.
+- [ ] Formal input: execute the reviewed full-identity two-key engine and owned-window tests; integrate fresh INPUT authorization, publication lease held across Invoke, Reload release ordering and 100ms exchange spacing.
+- [ ] Native backend: connect formal reader/input/delivery to Backend and RuntimeRetirementBackend, exact receipt/trace/cleanup, original deadlines and two fresh retirement samples.
+- [ ] Default Live lifecycle: connect CON admission/durable journal/history to Driver, public status/resume/execute/report/disconnect and result projection; unknown outcome must never replay business input.
+- [ ] Activation/doctor: implement prepared/waiting_manual_reload/runtime_selected/cancelled flow, Bootstrap cross-checks, read-only fresh-input doctor and explicit fix/reload fallback without hidden replay or unsafe activation.
+- [ ] Replace old default Live/Transport only after formal integration and synthetic process/window failure/restart tests cover the public route.
+
+### Native execution and corpus acceptance still required
+
+- [ ] Obtain terminal Windows evidence for each new frozen candidate; verify selected Rust test groups execute nonzero matching tests and preserve failures. Early describe failure must not short-circuit unrelated product groups.
+- [ ] Port the fixed Go formal Lua/addon test suite and missing bootstrap/input_mailbox/focus cases. Current same-named legacy Lua tests are not evidence for Mailbox v1.
+- [ ] Migrate valuable legacy native_e2e installation/transaction/unknown-result tests to the formal protocol before removing their extra addon/TOC consumers.
+- [ ] Audit dynamic TOC, build/include, tool, package, feature and test consumers before removing 21 extra addon files, optical/WGC/LuaLS/old protocol branches or superseded guidance.
+- [ ] Finish corresponding-source, npm install/upgrade/uninstall/restore, official addon-only package closure and exact final candidate validation.
+- [ ] Run independent Source and Skill quality acceptance against actual CLI outputs; do not replace semantic evidence with checker-test counts.
+
+### Performance and repository-wide convergence remain unmeasured/open
+
+- [ ] Establish same-machine fixed-Go and Rust equivalent outputs for every B01–B07 path; independent cold/warm >=20 repeats, raw timings and excluded waits. Current isolated timings do not prove Rust <=30% of Go.
+- [ ] Complete all F01–F13/P01–P14 functional rows before the four sequential whole-repository audit loops. Per-batch independent reviews do not count as Stage 1–4 convergence.
+- [ ] Keep user/game cooperation H01–H09 at handover's end and unfilled until real execution; do not hold unrelated automated work for them.
+
 ## 1. Reproducible foundation (no user interaction)
 
 - [ ] Pin Go release executable/source hashes; export complete describe/help/CLI/Skill/addon oracle.
