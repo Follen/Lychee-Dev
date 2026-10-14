@@ -222,7 +222,25 @@ pub fn load_pinned(home: &Path, id: &str) -> Result<PinnedSet> {
     }
     Ok(pin)
 }
-pub fn pin_selection(home: &Path, mut spec: SelectionSpec) -> Result<PinnedSet> {
+pub fn pin_selection(home: &Path, spec: SelectionSpec) -> Result<PinnedSet> {
+    pin_selection_inner(home, spec, None)
+}
+/// Publish a derived selection with the invoking operation's cancellation and deadline.
+pub fn pin_selection_controlled(
+    home: &Path,
+    spec: SelectionSpec,
+    control: &crate::control::OperationControl,
+) -> Result<PinnedSet> {
+    pin_selection_inner(home, spec, Some(control))
+}
+fn pin_selection_inner(
+    home: &Path,
+    mut spec: SelectionSpec,
+    control: Option<&crate::control::OperationControl>,
+) -> Result<PinnedSet> {
+    if let Some(control) = control {
+        control.check()?;
+    }
     if let Some(change) = spec.changes.as_mut()
         && let Ok(time) = chrono::DateTime::parse_from_rfc3339(&change.fetched_at)
     {
@@ -262,7 +280,16 @@ pub fn pin_selection(home: &Path, mut spec: SelectionSpec) -> Result<PinnedSet> 
         spec,
     };
     pin.id = identity(&pin)?;
-    Metadata::open(home, true)?.put(&format!("pin/{}", pin.id), &pin, None)?;
+    if let Some(control) = control {
+        control.check()?;
+    }
+    let mut metadata = Metadata::open(home, true)?;
+    let key = format!("pin/{}", pin.id);
+    if let Some(control) = control {
+        metadata.put_controlled(&key, &pin, None, control)?;
+    } else {
+        metadata.put(&key, &pin, None)?;
+    }
     Ok(pin)
 }
 pub fn find_project(start: &Path) -> Result<PathBuf> {

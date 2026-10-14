@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 // XFTH layout contracts ported from Lychee Dev's MIT wowdata-derived reader.
-use crate::fault;
+use crate::{
+    fault,
+    resource::{Budget, Cost},
+    schema,
+};
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+mod local;
+pub(crate) use local::dispatch;
 use lycheedev_core::Result;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +47,10 @@ pub struct CacheEntry {
     pub payload_offset: u64,
     pub payload_bytes: usize,
     pub payload_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<BTreeMap<String, Value>>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub decode_state: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +82,7 @@ fn walk<F: FnMut(CacheEntry) -> Result<()>>(
     raw: &[u8],
     start: usize,
     layout: u32,
+    budget: Option<&Budget>,
     mut yield_entry: F,
 ) -> Result<()> {
     let width = match layout {
@@ -80,6 +93,7 @@ fn walk<F: FnMut(CacheEntry) -> Result<()>>(
     let mut offset = start;
     let mut index = 0;
     while offset < raw.len() {
+        charge(budget, Cost::work(1))?;
         if index >= 8_000_000 {
             return Err(fault("records.hotfix_limit", 3, "XFTH record limit"));
         }
@@ -149,6 +163,8 @@ fn walk<F: FnMut(CacheEntry) -> Result<()>>(
             payload_offset: (offset + width) as u64,
             payload_bytes: size as usize,
             payload_hex: String::new(),
+            fields: None,
+            decode_state: String::new(),
         })?;
         index += 1;
         offset += width + size as usize;
@@ -163,6 +179,14 @@ fn matches(f: &CacheFilter, e: &CacheEntry) -> bool {
         && f.status.is_none_or(|v| e.status == v)
 }
 pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
+    inspect_budgeted(raw, filter, None)
+}
+pub fn inspect_budgeted(
+    raw: &[u8],
+    filter: CacheFilter,
+    budget: Option<&Budget>,
+) -> Result<CachePage> {
+    check(budget)?;
     if !(1..=200).contains(&filter.limit) || raw.len() > 512 << 20 {
         return Err(fault("records.hotfix_limit", 3, "XFTH input/page budget"));
     }
@@ -191,12 +215,14 @@ pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
     }
     let mut layout = version;
     if version == 8 && raw.len() > start {
-        let a = walk(raw, start, 8, |_| Ok(()));
-        let b = walk(raw, start, 7, |_| Ok(()));
-        if a.as_ref().is_err_and(|e| e.code == "records.hotfix_limit")
-            || b.as_ref().is_err_and(|e| e.code == "records.hotfix_limit")
-        {
-            return Err(fault("records.hotfix_limit", 3, "XFTH record budget"));
+        let a = walk(raw, start, 8, budget, |_| Ok(()));
+        let b = walk(raw, start, 7, budget, |_| Ok(()));
+        for result in [&a, &b] {
+            if let Err(error) = result {
+                if error.code != "records.hotfix_format" {
+                    return Err(error.clone());
+                }
+            }
         }
         match (a.is_ok(), b.is_ok()) {
             (true, false) => {}
@@ -211,11 +237,15 @@ pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
             "XFTH layout carries no region",
         ));
     }
+    charge(
+        budget,
+        Cost::retained(filter.limit * size_of::<CacheEntry>()),
+    )?;
     let mut page = CachePage {
         version,
         record_layout: layout,
         filter: filter.clone(),
-        entries: vec![],
+        entries: Vec::with_capacity(filter.limit),
         scanned: 0,
         matched: 0,
         selected_push: None,
@@ -224,7 +254,7 @@ pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
         truncated: false,
     };
     if filter.latest {
-        walk(raw, start, layout, |e| {
+        walk(raw, start, layout, budget, |e| {
             page.scanned += 1;
             if matches(&filter, &e) && page.selected_push.is_none_or(|p| e.push > p) {
                 page.selected_push = Some(e.push);
@@ -237,7 +267,7 @@ pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
         }
     }
     let mut payload_bytes = 0;
-    walk(raw, start, layout, |mut e| {
+    walk(raw, start, layout, budget, |mut e| {
         if !filter.latest {
             page.scanned += 1;
         }
@@ -257,7 +287,16 @@ pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
         }
         payload_bytes += e.payload_bytes;
         let bytes = &raw[e.payload_offset as usize..e.payload_offset as usize + e.payload_bytes];
-        e.payload_hex = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        charge(budget, Cost::retained(bytes.len() * 2))?;
+        e.payload_hex = String::with_capacity(bytes.len() * 2);
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for chunk in bytes.chunks(65536) {
+            charge(budget, Cost::work(chunk.len()))?;
+            for &byte in chunk {
+                e.payload_hex.push(HEX[(byte >> 4) as usize] as char);
+                e.payload_hex.push(HEX[(byte & 15) as usize] as char);
+            }
+        }
         page.entries.push(e);
         Ok(())
     })?;
@@ -265,6 +304,312 @@ pub fn inspect(raw: &[u8], filter: CacheFilter) -> Result<CachePage> {
         page.next_index = page.entries.last().map(|e| e.index);
     }
     page.complete = filter.after_index.is_none() && !page.truncated;
+    Ok(page)
+}
+
+fn check(budget: Option<&Budget>) -> Result<()> {
+    budget.map_or(Ok(()), Budget::check)
+}
+fn charge(budget: Option<&Budget>, cost: Cost) -> Result<()> {
+    budget.map_or(Ok(()), |budget| budget.charge(cost))
+}
+fn fields_error() -> lycheedev_core::ToolkitError {
+    fault(
+        "records.hotfix_fields",
+        4,
+        "Invalid sequential hotfix fields",
+    )
+}
+fn limit_error() -> lycheedev_core::ToolkitError {
+    fault("records.hotfix_limit", 3, "Hotfix field or payload limit")
+}
+
+// Rust 1.99 alloc::collections::btree: each non-root node has >=5
+// entries; nodes have 11 key/value slots and <=12 child pointers. The
+// 16 slots +128 bytes bound includes headers/alignment and spare nodes
+// during splitting. Charge nodes once, not an entire node per field.
+fn tree_bytes<K, V>(entries: usize) -> usize {
+    (entries.div_ceil(5) + 2) * (16 * size_of::<(K, V)>() + 128)
+}
+
+/// Fixed Go cache_fields.go: XFTH sequential values, never WDC bitpacking.
+/// Every byte must be consumed; failure returns no partial field map.
+pub fn decode_fields(
+    raw: &[u8],
+    record_id: u32,
+    definition: &schema::Definition,
+    budget: Option<&Budget>,
+) -> Result<BTreeMap<String, Value>> {
+    check(budget)?;
+    if raw.len() > 8 << 20 || definition.fields.len() > 4096 {
+        return Err(limit_error());
+    }
+    if definition.fields.is_empty() {
+        return Err(fields_error());
+    }
+    // Duplicate-name validation borrows names and is temporary; its tree
+    // allocation must not accumulate as retained memory across page records.
+    let names_allocation = budget
+        .map(|budget| budget.reserve_retained(tree_bytes::<&str, ()>(definition.fields.len())))
+        .transpose()?;
+    let mut names = BTreeSet::new();
+    let mut cells = 0u64;
+    let mut identities = 0;
+    for field in &definition.fields {
+        charge(budget, Cost::work(field.name.len().saturating_add(1)))?;
+        if field.name.is_empty()
+            || !names.insert(field.name.as_str())
+            || field.elements == 0
+            || (!field.array && field.elements != 1)
+        {
+            return Err(fields_error());
+        }
+        cells += u64::from(field.elements);
+        if cells > 65536 {
+            return Err(limit_error());
+        }
+        match field.kind.as_str() {
+            "int" if matches!(field.bits, 8 | 16 | 32 | 64) => {}
+            "float" if field.bits == 32 => {}
+            "string" | "locstring" => {}
+            _ => return Err(fields_error()),
+        }
+        if field.identity {
+            identities += 1;
+            if identities > 1 || field.array || field.kind != "int" {
+                return Err(fields_error());
+            }
+        }
+        if !field.inline
+            && (field.kind != "int" || field.array || (!field.identity && !field.relation))
+        {
+            return Err(fields_error());
+        }
+    }
+    drop(names);
+    drop(names_allocation);
+    let node_bytes = tree_bytes::<String, Value>(definition.fields.len());
+    let map_allocation = budget
+        .map(|budget| budget.reserve_retained(node_bytes))
+        .transpose()?;
+    let mut result = BTreeMap::new();
+    let mut offset = 0usize;
+    let mut text_remaining = 1usize << 20;
+    for field in &definition.fields {
+        charge(budget, Cost::retained(field.name.len()))?;
+        let value = if field.identity && !field.inline {
+            if field.signed {
+                let value = i64::from(record_id as i32);
+                if field.bits < 64
+                    && (value < -(1i64 << (field.bits - 1))
+                        || value > (1i64 << (field.bits - 1)) - 1)
+                {
+                    return Err(fields_error());
+                }
+                Value::from(value)
+            } else {
+                if field.bits < 64 && u64::from(record_id) >= 1u64 << field.bits {
+                    return Err(fields_error());
+                }
+                Value::from(record_id)
+            }
+        } else {
+            let values_allocation = budget
+                .map(|budget| budget.reserve_retained(field.elements as usize * size_of::<Value>()))
+                .transpose()?;
+            let mut values = Vec::with_capacity(field.elements as usize);
+            for _ in 0..field.elements {
+                charge(budget, Cost::work(1))?;
+                let value = if matches!(field.kind.as_str(), "string" | "locstring") {
+                    let available = &raw[offset..];
+                    let bound = available.len().min(text_remaining + 1);
+                    let mut end = None;
+                    for (index, chunk) in available[..bound].chunks(65536).enumerate() {
+                        charge(budget, Cost::work(chunk.len()))?;
+                        if let Some(found) = chunk.iter().position(|&byte| byte == 0) {
+                            end = Some(index * 65536 + found);
+                            break;
+                        }
+                    }
+                    let end = end.ok_or_else(|| {
+                        if available.len() > text_remaining {
+                            limit_error()
+                        } else {
+                            fields_error()
+                        }
+                    })?;
+                    let value =
+                        std::str::from_utf8(&available[..end]).map_err(|_| fields_error())?;
+                    charge(budget, Cost::retained(end))?;
+                    offset += end + 1;
+                    text_remaining -= end;
+                    Value::String(value.to_owned())
+                } else {
+                    let width = usize::from(field.bits / 8);
+                    let part = raw.get(offset..offset + width).ok_or_else(fields_error)?;
+                    let mut value = 0u64;
+                    for (index, &byte) in part.iter().enumerate() {
+                        value |= u64::from(byte) << (8 * index);
+                    }
+                    offset += width;
+                    if field.kind == "float" {
+                        let value = f64::from(f32::from_bits(value as u32));
+                        if !value.is_finite() {
+                            return Err(fields_error());
+                        }
+                        Value::from(value)
+                    } else if field.signed {
+                        let shift = 64 - field.bits;
+                        Value::from(((value << shift) as i64) >> shift)
+                    } else {
+                        Value::from(value)
+                    }
+                };
+                if field.identity
+                    && ((field.signed && value.as_i64() != Some(i64::from(record_id as i32)))
+                        || (!field.signed && value.as_u64() != Some(u64::from(record_id))))
+                {
+                    return Err(fields_error());
+                }
+                values.push(value);
+            }
+            if field.array {
+                if let Some(allocation) = values_allocation {
+                    allocation.commit();
+                }
+                Value::Array(values)
+            } else {
+                values.pop().ok_or_else(fields_error)?
+            }
+        };
+        result.insert(field.name.clone(), value);
+    }
+    if offset != raw.len() {
+        return Err(fields_error());
+    }
+    check(budget)?;
+    if let Some(allocation) = map_allocation {
+        allocation.commit();
+    }
+    Ok(result)
+}
+
+// encoding/json uses shortest float64 digits, omits an integral .0, and
+// switches to scientific form outside [1e-6, 1e21). Payload float32 values
+// have already been promoted exactly to float64, as in Go's decoder.
+struct GoFieldsFormatter;
+impl serde_json::ser::Formatter for GoFieldsFormatter {
+    fn write_f64<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        value: f64,
+    ) -> std::io::Result<()> {
+        let absolute = value.abs();
+        if absolute != 0.0 && !(1e-6..1e21).contains(&absolute) {
+            let text = format!("{value:e}");
+            let (mantissa, exponent) = text.split_once('e').expect("scientific float");
+            writer.write_all(mantissa.as_bytes())?;
+            writer.write_all(b"e")?;
+            if !exponent.starts_with('-') {
+                writer.write_all(b"+")?;
+            }
+            writer.write_all(exponent.as_bytes())
+        } else {
+            write!(writer, "{value}")
+        }
+    }
+    fn write_string_fragment<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        fragment: &str,
+    ) -> std::io::Result<()> {
+        serde_json::ser::Formatter::write_string_fragment(
+            &mut crate::capture::GoCaptureFormatter,
+            writer,
+            fragment,
+        )
+    }
+}
+
+// Go's fields budget counts encoding/json's escaped representation, including
+// HTML and U+2028/U+2029. Stream-count it without allocating a second field map.
+fn fields_json_size(fields: &BTreeMap<String, Value>, budget: &Budget) -> Result<usize> {
+    struct Counter<'a> {
+        budget: &'a Budget,
+        bytes: usize,
+        error: Option<lycheedev_core::ToolkitError>,
+    }
+    impl std::io::Write for Counter<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if let Err(error) = self
+                .budget
+                .charge(Cost::work(bytes.len().saturating_add(1)))
+            {
+                self.error = Some(error);
+                return Err(std::io::Error::other("hotfix JSON accounting stopped"));
+            }
+            self.bytes += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Counter {
+        budget,
+        bytes: 0,
+        error: None,
+    };
+    let result = fields.serialize(&mut serde_json::Serializer::with_formatter(
+        &mut count,
+        GoFieldsFormatter,
+    ));
+    if let Err(error) = result {
+        return Err(count.error.unwrap_or_else(|| error.into()));
+    }
+    Ok(count.bytes)
+}
+pub fn decode_page(
+    raw: &[u8],
+    mut page: CachePage,
+    definition: &schema::Definition,
+    budget: &Budget,
+) -> Result<CachePage> {
+    let mut fields_bytes = 0usize;
+    // Only publish the staged page after every selected payload validates.
+    for entry in &mut page.entries {
+        budget.check()?;
+        entry.fields = None;
+        entry.decode_state = if entry.payload_bytes == 0 {
+            "no_payload"
+        } else if (page.record_layout >= 7 && entry.status != 1)
+            || (page.record_layout < 7 && entry.status == 0)
+        {
+            "not_valid"
+        } else {
+            "decoded"
+        }
+        .into();
+        if entry.decode_state != "decoded" {
+            continue;
+        }
+        let start = usize::try_from(entry.payload_offset).map_err(|_| fields_error())?;
+        let end = start
+            .checked_add(entry.payload_bytes)
+            .ok_or_else(fields_error)?;
+        let fields = decode_fields(
+            raw.get(start..end).ok_or_else(fields_error)?,
+            entry.record_id,
+            definition,
+            Some(budget),
+        )?;
+        let bytes = fields_json_size(&fields, budget)?;
+        if bytes > (8 << 20) - fields_bytes {
+            return Err(limit_error());
+        }
+        fields_bytes += bytes;
+        entry.fields = Some(fields);
+    }
     Ok(page)
 }
 
@@ -358,5 +703,52 @@ mod tests {
             .record_layout,
             7
         );
+    }
+}
+
+#[cfg(test)]
+mod fields_number_tests {
+    use super::*;
+    #[test]
+    fn scalar_decode_retains_only_result_tree_and_owned_names() {
+        let definition =
+            schema::Document::parse(b"COLUMNS\nint A\nint B\n\nBUILD 12.1.0.69875\nA<u8>\nB<u8>\n")
+                .unwrap()
+                .select("12.1.0.69875", "")
+                .unwrap();
+        let budget = Budget::new(
+            Cost::defaults(),
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let fields = decode_fields(&[1, 2], 0, &definition, Some(&budget)).unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(
+            budget.snapshot().unwrap().retained_bytes,
+            (tree_bytes::<String, Value>(2) + 2) as u64
+        );
+    }
+
+    #[test]
+    fn go_json_float_digits_and_exponent_thresholds() {
+        for (number, expected) in [
+            (1.0, "1"),
+            (-0.0, "-0"),
+            (1e-6, "0.000001"),
+            (1e-7, "1e-7"),
+            (1e20, "100000000000000000000"),
+            (1e21, "1e+21"),
+            (f64::from(0.1f32), "0.10000000149011612"),
+            (f64::from(f32::MAX), "3.4028234663852886e+38"),
+        ] {
+            let mut bytes = Vec::new();
+            Value::from(number)
+                .serialize(&mut serde_json::Serializer::with_formatter(
+                    &mut bytes,
+                    GoFieldsFormatter,
+                ))
+                .unwrap();
+            assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
+        }
     }
 }

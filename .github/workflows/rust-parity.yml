@@ -198,6 +198,15 @@ jobs:
       - name: Run local Data domain fixtures independently
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-data-domain --one-shot -- test --locked --offline -p lycheedev-data --test local_domain_parity -j 1
+      - name: Run named Hotfix table and ChangesPin fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-hotfix-table --one-shot -- test --locked --offline -p lycheedev-data --test hotfix_table_parity -j 1
+      - name: Run typed Hotfix budget and field encoding fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-hotfix-decode --one-shot -- test --locked --offline -p lycheedev-data --lib hotfix:: -j 1
+      - name: Run SQLite lock cancellation and rollback fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-metadata-cancel --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::tests -j 1
       - name: Run target cancellation before symbolic resolution
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1

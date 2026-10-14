@@ -86,6 +86,90 @@ impl Metadata {
         let raw = serde_json::to_vec(value)?;
         self.put_serialized(key, &raw, expected, || Ok(()))
     }
+    /// Cancellation-aware publication. SQLite never sleeps inside an attempt:
+    /// lock contention is retried with a stop check before every statement,
+    /// including COMMIT. Dropping a stopped transaction rolls it back.
+    pub fn put_controlled<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        expected: Option<i64>,
+        control: &crate::control::OperationControl,
+    ) -> Result<()> {
+        self.put_controlled_observed(key, value, expected, control, || {})
+    }
+    fn put_controlled_observed<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        expected: Option<i64>,
+        control: &crate::control::OperationControl,
+        mut on_busy: impl FnMut(),
+    ) -> Result<()> {
+        control.check()?;
+        let raw = serde_json::to_vec(value)?;
+        if raw.len() > 1_048_576 {
+            return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
+        }
+        self.connection.busy_timeout(std::time::Duration::ZERO)?;
+        let result = (|| {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut transaction = checked_sql(control, until, &mut on_busy, || {
+                rusqlite::Transaction::new_unchecked(
+                    &self.connection,
+                    rusqlite::TransactionBehavior::Immediate,
+                )
+            })?;
+            let existing: Option<(i64, bool)> = checked_sql(control, until, &mut on_busy, || {
+                transaction
+                    .query_row(
+                        "SELECT generation,value=?2 FROM documents WHERE key=?1",
+                        params![key, &raw],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+            })?;
+            match existing {
+                Some((generation, _)) if expected == Some(generation) => {
+                    checked_sql(control, until, &mut on_busy, || {
+                        transaction.execute(
+                            "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
+                            params![key, &raw],
+                        )
+                    })?;
+                }
+                Some((_, true)) if expected.is_none() => return control.check(),
+                None if expected.is_none() => {
+                    checked_sql(control, until, &mut on_busy, || {
+                        transaction.execute(
+                            "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                            params![key, &raw],
+                        )
+                    })?;
+                }
+                _ => {
+                    return Err(ToolkitError::new(
+                        "vault.generation_conflict",
+                        "document changed or disappeared",
+                        4,
+                    ));
+                }
+            }
+            // Transaction::commit consumes the guard on SQLITE_BUSY. Keep it
+            // alive for controlled retries, and disarm only after COMMIT wins.
+            checked_sql(control, until, &mut on_busy, || {
+                transaction.execute_batch("COMMIT")
+            })?;
+            transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+            Ok(())
+        })();
+        let restore = self
+            .connection
+            .busy_timeout(std::time::Duration::from_secs(5));
+        result?;
+        restore?;
+        Ok(())
+    }
     /// The caller owns already serialized JSON. Keep insertion, replacement and
     /// byte-identical idempotence in the same transaction as `put`.
     pub(crate) fn put_serialized(
@@ -265,5 +349,104 @@ impl Metadata {
         }
         transaction.commit()?;
         Ok(value)
+    }
+}
+
+fn checked_sql<T>(
+    control: &crate::control::OperationControl,
+    until: std::time::Instant,
+    on_busy: &mut impl FnMut(),
+    mut execute: impl FnMut() -> rusqlite::Result<T>,
+) -> Result<T> {
+    loop {
+        control.check()?;
+        match execute() {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                control.check()?;
+                let busy = matches!(&error, rusqlite::Error::SqliteFailure(inner, _)
+                    if matches!(inner.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked));
+                if !busy || std::time::Instant::now() >= until {
+                    return Err(error.into());
+                }
+                on_busy();
+                control.check()?;
+                std::thread::sleep(
+                    std::time::Duration::from_millis(5).min(
+                        control
+                            .deadline()
+                            .saturating_duration_since(std::time::Instant::now()),
+                    ),
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod controlled_tests {
+    use super::*;
+    use crate::control::{OperationControl, TrackedCancellation};
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn controlled_pin_document_rolls_back_when_cancelled_during_sqlite_lock_wait() {
+        // Test both BEGIN contention and a reader blocking COMMIT. The busy
+        // observer establishes the precise blocked state, without sleep races.
+        for commit_blocked in [false, true] {
+            let path = std::env::temp_dir().join(format!(
+                "lychee-controlled-pin-{}-{}-{}",
+                std::process::id(),
+                commit_blocked,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+            crate::workspace::initialize(&path).unwrap();
+            let mut metadata = Metadata::open(&path, true).unwrap();
+            metadata.put("seed", &true, None).unwrap();
+            let blocker = Connection::open(path.join("state/toolkit.sqlite")).unwrap();
+            if commit_blocked {
+                blocker
+                    .execute_batch("BEGIN; SELECT * FROM documents;")
+                    .unwrap();
+            } else {
+                blocker.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            }
+            let cancel = TrackedCancellation::new();
+            let control =
+                OperationControl::tracked(Instant::now() + Duration::from_secs(10), cancel.clone());
+            let (blocked_tx, blocked_rx) = mpsc::channel();
+            let (resume_tx, resume_rx) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let mut first = true;
+                metadata.put_controlled_observed("pin/test", &true, None, &control, || {
+                    if first {
+                        first = false;
+                        blocked_tx.send(()).unwrap();
+                        resume_rx.recv().unwrap();
+                    }
+                })
+            });
+            blocked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            cancel.cancel();
+            // Release the backend only after cancellation has linearized.
+            blocker.execute_batch("ROLLBACK").unwrap();
+            resume_tx.send(()).unwrap();
+            assert_eq!(worker.join().unwrap().unwrap_err().exit_code, 7);
+            let mut metadata = Metadata::open(&path, true).unwrap();
+            assert_eq!(metadata.generation("pin/test").unwrap(), None);
+            metadata
+                .put_controlled("pin/test", &true, None, &OperationControl::default())
+                .unwrap();
+            assert_eq!(metadata.generation("pin/test").unwrap(), Some(1));
+            drop(metadata);
+            drop(blocker);
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
 }

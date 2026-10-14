@@ -394,6 +394,12 @@ Windows新增consume File所有权的最小close_file安全接口，仅一次Clo
 
 Delivery测试fixture的PID+timestamp非独占目录存在并发碰撞风险；本批增加进程内序号与create_dir独占、强制相同timestamp的删除隔离回归，并保留原业务断言和分阶段错误定位。独立差分复核仅测试模块修改，3项selection fixture运行NOT_RUN；这是可证明隔离风险修复，不把原os2根因称为已经复现。
 
+### Named Hotfix 本地表解码与受控 ChangesPin
+
+Data dbcache named table现在按固定DBD顺序解码uint64、合法UTF8、有限float、inline/noninline ID、relation/数组；保留decoded/no_payload/not_valid、v1–9布局、完整尾部验证和物理/最新/after-index分页。校验cache/table/region既有ChangesPin身份，选中payload错误先于capture/pin。scan、remote provider、SQL effective和core capture dependency retention仍未完成，provenance不冒称可阻止删除依赖。
+
+独立复审修复三类真实问题：合法大cache不再受默认metadata128MiB错误截断；字段JSON按Go浮点数字与转义计量；ChangesPin贯穿原control到SQLite BEGIN/COMMIT有界重试，取消后rollback而非迟到提交。计量曾把临时集合/scalar Vec累计为保留内存，现按固定Rust1.99节点保守上界及真实生命周期计量，不提高retained上限，补4096字段×200记录/1MiB raw允许页和32×65536 float边界。12项integration、额外typed预算/数字unit及BEGIN/COMMIT锁取消回归已编写，独立静态复审全部所查finding关闭，实际Rust运行NOT_RUN；现分组接Windows CI。外围Metadata::open旧锁等待未改，不声称整个pipeline严格实时取消或Data全量收敛。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
