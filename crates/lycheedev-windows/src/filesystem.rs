@@ -22,6 +22,151 @@ pub fn durable_replace(source: &Path, destination: &Path) -> crate::Result<()> {
     }
 }
 
+/// Move one file or directory without replacing a racing destination. This is
+/// the fixed Go publication boundary: same-volume MoveFileExW with write-through
+/// and no COPY_ALLOWED or REPLACE_EXISTING flags.
+pub fn durable_move_noreplace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fn wide(path: &Path) -> std::io::Result<Vec<u16>> {
+        if !path.is_absolute() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "durable move requires absolute paths",
+            ));
+        }
+        let mut units: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if units.contains(&0) || units.len() >= 32767 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "durable move path contains NUL or exceeds Windows path bound",
+            ));
+        }
+        units.push(0);
+        Ok(units)
+    }
+    let source = wide(source)?;
+    let destination = wide(destination)?;
+    // SAFETY: Both independently owned UTF-16 vectors contain exactly one final
+    // NUL and no interior NUL. Their pointers remain live and immutable for this
+    // synchronous system-ABI call; Windows retains neither pointer. No handle
+    // or borrowed buffer crosses threads. Omitting REPLACE_EXISTING makes the
+    // kernel's destination check atomic with the move, including file targets.
+    unsafe {
+        MoveFileExW(
+            PCWSTR(source.as_ptr()),
+            PCWSTR(destination.as_ptr()),
+            MOVEFILE_WRITE_THROUGH,
+        )
+        .map_err(|error| std::io::Error::from_raw_os_error((error.code().0 as u32 & 0xffff) as i32))
+    }
+}
+
+#[cfg(test)]
+mod durable_move_tests {
+    use super::*;
+    use std::{fs, path::PathBuf};
+    struct Temp(PathBuf);
+    impl Temp {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "lycheedev-durable-move-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(fs::canonicalize(path).unwrap())
+        }
+    }
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn moves_file_and_directory_without_replacing_existing_destination() {
+        let temp = Temp::new();
+        for directory in [false, true] {
+            let source = temp.0.join(if directory { "directory" } else { "file" });
+            let destination = temp.0.join(if directory {
+                "directory-out"
+            } else {
+                "file-out"
+            });
+            if directory {
+                fs::create_dir(&source).unwrap();
+                fs::write(source.join("data"), b"owned").unwrap();
+            } else {
+                fs::write(&source, b"owned").unwrap();
+            }
+            durable_move_noreplace(&source, &destination).unwrap();
+            assert!(!source.exists());
+            assert_eq!(
+                fs::read(if directory {
+                    destination.join("data")
+                } else {
+                    destination.clone()
+                })
+                .unwrap(),
+                b"owned"
+            );
+            if directory {
+                fs::create_dir(&source).unwrap();
+            } else {
+                fs::write(&source, b"new owner").unwrap();
+            }
+            assert!(durable_move_noreplace(&source, &destination).is_err());
+            assert!(source.exists());
+            assert_eq!(
+                fs::read(if directory {
+                    destination.join("data")
+                } else {
+                    destination
+                })
+                .unwrap(),
+                b"owned"
+            );
+        }
+    }
+    #[test]
+    fn destination_appearing_after_admission_is_not_overwritten() {
+        let temp = Temp::new();
+        let source = temp.0.join("source");
+        let destination = temp.0.join("marker");
+        fs::write(&source, b"our marker").unwrap();
+        assert!(!destination.exists());
+        fs::write(&destination, b"competing marker").unwrap();
+        assert!(durable_move_noreplace(&source, &destination).is_err());
+        assert_eq!(fs::read(&source).unwrap(), b"our marker");
+        assert_eq!(fs::read(&destination).unwrap(), b"competing marker");
+    }
+    #[test]
+    fn rejects_relative_and_nul_paths_before_any_move() {
+        use std::os::windows::ffi::OsStringExt;
+        let temp = Temp::new();
+        let source = temp.0.join("source");
+        let destination = temp.0.join("destination");
+        fs::write(&source, b"retained").unwrap();
+        assert_eq!(
+            durable_move_noreplace(Path::new("relative"), &destination)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        let mut wide: Vec<u16> = destination.as_os_str().encode_wide().collect();
+        wide.push(0);
+        wide.extend("suffix".encode_utf16());
+        let nul = PathBuf::from(std::ffi::OsString::from_wide(&wide));
+        assert_eq!(
+            durable_move_noreplace(&source, &nul).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert_eq!(fs::read(source).unwrap(), b"retained");
+        assert!(!destination.exists());
+    }
+}
+
 /// Read the system directory from Windows, without trusting environment variables.
 /// The result owns its UTF-16 path; no OS buffer or pointer escapes the call.
 pub fn system_directory() -> std::io::Result<std::path::PathBuf> {

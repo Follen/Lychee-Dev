@@ -188,17 +188,21 @@ fn pending_claim_survives_process_id_reuse_and_blocks_maintenance() {
 #[test]
 fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     let temp = Temp::new();
-    let modules: Vec<_> = (1..=slots::COUNT)
-        .map(|slot| json!({"slot":slot}))
+    let files: Vec<_> = (1..=slots::COUNT)
+        .map(|_| json!({"payloadHash":"", "consumed":false}))
         .collect();
-    storage::atomic_json(&temp.0.join(".lycheedev-slots.json"),&json!({"schema":"lycheedev.slots.v4","version":VERSION,"state":"installing","transport":slots::TRANSPORT,"slotCount":slots::COUNT,"generation":1,"modules":modules})).unwrap();
+    storage::atomic_json(
+        &temp.0.join(".lycheedev-slots.json"),
+        &json!({"schema":slots::SCHEMA,"version":VERSION,"state":"installing","files":files}),
+    )
+    .unwrap();
     let first = slots::directory(&temp.0, 1);
     fs::create_dir(&first).unwrap();
     let files = slots::files(1, VERSION);
     fs::write(first.join(&files[0].0), &files[0].1).unwrap();
     slots::install(&temp.0, VERSION).unwrap();
-    let mut pool = slots::inspect(&temp.0, VERSION).unwrap();
-    assert_eq!(pool["modules"].as_array().unwrap().len(), 500);
+    let pool = slots::inspect(&temp.0, VERSION).unwrap();
+    assert_eq!(pool["files"].as_array().unwrap().len(), 500);
     assert!(
         slots::directory(&temp.0, 500)
             .join("Lychee Dev Slot 500.toc")
@@ -212,27 +216,12 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     let target = temp.0.join("Lychee Dev");
     deploy::fresh(&root, &target, "addon", VERSION).unwrap();
     let identity = installation::verify_clean(&target, VERSION, slots::TRANSPORT, 500).unwrap();
-    let old_hash = pool["modules"][0]["payloadHash"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let publication = b"LycheeDevSlotEnvelope = { schema = 'immutable-fixture' }\n";
-    let digest = storage::sha256(publication);
-    pool["modules"][0]["pendingHash"] = json!(digest);
-    storage::atomic_json(&temp.0.join(".lycheedev-slots.json"), &pool).unwrap();
-    fs::write(first.join("Payload.lua"), publication).unwrap();
-    assert_eq!(
-        slots::publish(&identity, 1, Some(&old_hash), b"different publication")
-            .err()
-            .unwrap()
-            .exit_code,
-        6
-    );
-    slots::publish(&identity, 1, Some(&old_hash), publication).unwrap();
-    slots::publish(&identity, 1, Some(&old_hash), publication).unwrap();
-    pool = slots::inspect(&temp.0, VERSION).unwrap();
-    assert!(pool["modules"][0].get("pendingHash").is_none());
-    assert_eq!(pool["modules"][0]["payloadHash"], digest);
+    let before = fs::read(temp.0.join(slots::MARKER)).unwrap();
+    let payload_before = fs::read(first.join("Payload.lua")).unwrap();
+    let error = slots::publish(&identity, 1, None, b"arbitrary historical bytes").unwrap_err();
+    assert_eq!(error.code, "live.mailbox_v1_migration_incomplete");
+    assert_eq!(fs::read(temp.0.join(slots::MARKER)).unwrap(), before);
+    assert_eq!(fs::read(first.join("Payload.lua")).unwrap(), payload_before);
     let recovery = Temp::new();
     let slot_archive = recovery.0.join("addon-archive.slots");
     fs::create_dir(&slot_archive).unwrap();
@@ -242,7 +231,7 @@ fn interrupted_500_slot_generation_finishes_only_owned_expected_bytes() {
     let slot_archive = fs::canonicalize(&slot_archive).unwrap();
     let receipt = installation::inspect(&target, "addon").unwrap()["receipt"].clone();
     let journal = recovery.0.join("addon-archive.removal.json");
-    storage::atomic_json(&journal,&json!({"schema":"lycheedev.addon-removal.v2","parent":parent,"target":target,"archive":archive,"slotArchive":slot_archive,"pool":pool,"receipt":receipt,"controls":[]})).unwrap();
+    storage::atomic_json(&journal,&json!({"schema":"lycheedev.addon-removal.v1","parent":parent,"archive":archive,"pool":pool,"receipt":receipt})).unwrap();
     fs::rename(
         slots::directory(&temp.0, 1),
         slots::directory(&slot_archive, 1),
@@ -292,14 +281,20 @@ fn managed_200_slot_pool_migrates_to_500_and_does_not_erase_unknown_reservations
     storage::atomic_json(&temp.0.join(".lycheedev-slots.json"), &pool).unwrap();
     assert_eq!(
         slots::install(&temp.0, VERSION).err().unwrap().code,
-        "delivery.slot_reserved"
+        "delivery.installation_conflict"
     );
     assert!(!slots::directory(&temp.0, 201).exists());
     pool["files"][0].as_object_mut().unwrap().remove("nonce");
     storage::atomic_json(&temp.0.join(".lycheedev-slots.json"), &pool).unwrap();
     slots::install(&temp.0, VERSION).unwrap();
-    assert_eq!(slots::inspect(&temp.0, VERSION).unwrap()["slotCount"], 500);
-    assert!(temp.0.join(".lycheedev-slots.migration-v4.json").exists());
+    assert_eq!(
+        slots::inspect(&temp.0, VERSION).unwrap()["files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        500
+    );
+    assert!(!temp.0.join(".lycheedev-slots.migration-v4.json").exists());
 }
 
 #[test]

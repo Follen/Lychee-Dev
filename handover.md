@@ -368,6 +368,14 @@ C新增持久预算、reload/continuation、candidate bind→supersede、opaque 
 
 11项新计划fixture已编写，独立静态复核所查finding关闭；Windows新增计划及既有native研究准备组实际运行，当前NOT_RUN。输出明确planned_not_executed/executedSemanticBatches:null；尚未接实际操作consumer或256累计退休。XML内命名Lua函数、真实索引符号的virtual-template路径仍需补验，手写end_line fixture不作真实symbol路径证明。当前基础不得冒称全部XML计划/语义完成，也不继承71180b3静态全仓通过。
 
+### 正式槽池与卸载维护状态对齐进入 Windows 验证
+
+Delivery维护改正式v3/files、256KiB manifest、旧64/200→500形状/精确旧TOC、marker内migration.v3/v4恢复、完整文件预检、Consumed/退役保护、冲突exit3及removal.v1。独立多轮审查修复了大小写/重复JSON/null/数组复用造成预约被忽略、取消后仍写、卸载rename覆盖竞争目标、Windows普通/verbatim/UNC身份误拒，以及私有removal资源int64输入顺序。intent链按Go宽松顺序解码，正式安装marker的unknown/duplicate严格守卫未放宽。
+
+必要Windows最小safe封装使用MoveFileExW仅WRITE_THROUGH且不替换目标，保持UTF16生命周期/NUL/绝对路径校验；业务crate仍forbid unsafe。受控atomic writer复用原实现，在写块/sync后最终发布前检查原control。新增真实文件/取消/目标竞争/Go形状恢复fixture及相应独立CI组，Node静态4项与独立复核通过，Rust/Windows运行NOT_RUN。UNC当前仅纯身份fixture，没有真实share测试；checked file-close错误传播仍为后续durable journal所需边界，不把Drop说成已检查close。
+
+旧任意bytes publish明确失败关闭，正式SlotEnvelope publish/verify/confirm/retire下一批复用已抽取core合同；当前maintenance不是完整发送链。21个额外addon文件未删，仍待真实消费者迁移。上述candidate尚未证明全安装/卸载/崩溃恢复等价。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

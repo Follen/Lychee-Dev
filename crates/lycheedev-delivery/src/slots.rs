@@ -1,12 +1,279 @@
-use lycheedev_core::{Result, ToolkitError, storage};
-use serde_json::{Value, json};
+//! Managed slot installation metadata follows the fixed Go 3.2.0 contract.
+//! Old metadata is readable only for maintenance; it never authorizes business input.
+use lycheedev_core::{Result, ToolkitError, control::OperationControl, storage};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 pub const COUNT: u16 = 500;
 pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
 pub const INTERFACES: &str = "120100, 50504, 38002, 16001, 11509, 20506";
+pub const SCHEMA: &str = "lycheedev.slots.v3";
+pub const MARKER: &str = ".lycheedev-slots.json";
+const PREVIOUS: &str = "lycheedev.slots.v2";
+const LEGACY: &str = "lycheedev.slots.v1";
+const MIGRATION: &str = "lycheedev.slots.migration.v4";
+const PREVIOUS_MIGRATION: &str = "lycheedev.slots.migration.v3";
+const MANIFEST_LIMIT: usize = 256 << 10;
+const STATIC_LIMIT: usize = 16 << 10;
+const PAYLOAD_LIMIT: usize = 2 << 20;
+const INERT: &[u8] = b"LycheeDevSlotEnvelope = nil\n";
+const PREVIOUS_INTERFACES: &str = "120100, 50504, 38002, 16001";
+const PREVIOUS_MAILBOX_INTERFACES: &str = "120100, 50504, 38002, 16001, 11509";
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotFile {
+    pub payload_hash: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub pending_hash: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub nonce: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub runtime: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub consumer: String,
+    pub consumed: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub retired_runtime: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub retired_process: bool,
+}
+impl SlotFile {
+    pub(crate) fn unresolved(&self) -> bool {
+        !self.pending_hash.is_empty()
+            || !self.nonce.is_empty()
+                && !self.consumed
+                && self.retired_runtime.is_empty()
+                && !self.retired_process
+    }
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotPool {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source_schema: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub pending_version: String,
+    pub schema: String,
+    pub version: String,
+    pub state: String,
+    pub files: Vec<SlotFile>,
+}
+// Go's encoding/json applies fields in input order, case-insensitively. Null
+// scalars leave their existing value unchanged. Derive/map-first decoding can
+// silently erase a reservation ("Nonce":"...","nonce":null), so retain the
+// sequence and seed existing slice elements exactly as Go does.
+pub(crate) fn field_name(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '\u{017f}' => 's', // Unicode simple-fold equivalence with ASCII S.
+            '\u{212a}' => 'k', // Unicode simple-fold equivalence with ASCII K.
+            ch => ch.to_ascii_lowercase(),
+        })
+        .collect()
+}
+pub(crate) fn scalar<'de, A, T>(map: &mut A, value: &mut T) -> std::result::Result<(), A::Error>
+where
+    A: serde::de::MapAccess<'de>,
+    T: Deserialize<'de>,
+{
+    if let Some(next) = map.next_value::<Option<T>>()? {
+        *value = next;
+    }
+    Ok(())
+}
+struct FileSeed<'a>(&'a mut SlotFile);
+impl<'de> serde::de::DeserializeSeed<'de> for FileSeed<'_> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> std::result::Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+impl<'de> serde::de::Visitor<'de> for FileSeed<'_> {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a slot file object or null")
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<(), E> {
+        Ok(())
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(
+        self,
+        mut map: A,
+    ) -> std::result::Result<(), A::Error> {
+        while let Some(key) = map.next_key::<String>()? {
+            match field_name(&key).as_str() {
+                "payloadhash" => scalar(&mut map, &mut self.0.payload_hash)?,
+                "pendinghash" => scalar(&mut map, &mut self.0.pending_hash)?,
+                "nonce" => scalar(&mut map, &mut self.0.nonce)?,
+                "runtime" => scalar(&mut map, &mut self.0.runtime)?,
+                "consumer" => scalar(&mut map, &mut self.0.consumer)?,
+                "consumed" => scalar(&mut map, &mut self.0.consumed)?,
+                "retiredruntime" => scalar(&mut map, &mut self.0.retired_runtime)?,
+                "retiredprocess" => scalar(&mut map, &mut self.0.retired_process)?,
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+impl<'de> Deserialize<'de> for SlotFile {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let mut value = Self::default();
+        serde::de::DeserializeSeed::deserialize(FileSeed(&mut value), deserializer)?;
+        Ok(value)
+    }
+}
+struct FilesSeed<'a>(&'a mut Vec<SlotFile>, &'a mut usize);
+impl<'de> serde::de::DeserializeSeed<'de> for FilesSeed<'_> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> std::result::Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+impl<'de> serde::de::Visitor<'de> for FilesSeed<'_> {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a slot file array or null")
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<(), E> {
+        self.0.clear();
+        *self.1 = 0;
+        Ok(())
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        mut sequence: A,
+    ) -> std::result::Result<(), A::Error> {
+        let mut index = 0;
+        loop {
+            if index < self.0.len() {
+                if sequence
+                    .next_element_seed(FileSeed(&mut self.0[index]))?
+                    .is_none()
+                {
+                    break;
+                }
+            } else {
+                let mut value = SlotFile::default();
+                if sequence.next_element_seed(FileSeed(&mut value))?.is_none() {
+                    break;
+                }
+                self.0.push(value);
+            }
+            index += 1;
+        }
+        // A nonempty Go slice reuses its backing elements even after a
+        // preceding duplicate array shortened len. Keep them until the whole
+        // object is decoded; null and [] sever that reuse.
+        if index == 0 {
+            self.0.clear();
+        }
+        *self.1 = index;
+        Ok(())
+    }
+}
+pub(crate) struct PoolSeed<'a>(pub &'a mut SlotPool, pub &'a mut usize);
+impl<'de> serde::de::DeserializeSeed<'de> for PoolSeed<'_> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> std::result::Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+impl<'de> serde::de::Visitor<'de> for PoolSeed<'_> {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a slot pool object or null")
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<(), E> {
+        Ok(())
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(
+        self,
+        mut map: A,
+    ) -> std::result::Result<(), A::Error> {
+        while let Some(key) = map.next_key::<String>()? {
+            match field_name(&key).as_str() {
+                "sourceschema" => scalar(&mut map, &mut self.0.source_schema)?,
+                "pendingversion" => scalar(&mut map, &mut self.0.pending_version)?,
+                "schema" => scalar(&mut map, &mut self.0.schema)?,
+                "version" => scalar(&mut map, &mut self.0.version)?,
+                "state" => scalar(&mut map, &mut self.0.state)?,
+                "files" => map.next_value_seed(FilesSeed(&mut self.0.files, self.1))?,
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+impl<'de> Deserialize<'de> for SlotPool {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let mut value = Self::default();
+        let mut file_length = 0;
+        deserializer.deserialize_any(PoolSeed(&mut value, &mut file_length))?;
+        value.files.truncate(file_length);
+        Ok(value)
+    }
+}
+
+impl SlotPool {
+    pub(crate) fn valid_shape(&self) -> bool {
+        if self.version.is_empty() {
+            return false;
+        }
+        let count = self.files.len();
+        let source_count = |schema: &str| match schema {
+            SCHEMA => count == COUNT as usize || count == 200,
+            PREVIOUS => count == 200,
+            LEGACY => count == 64,
+            _ => false,
+        };
+        match self.schema.as_str() {
+            SCHEMA => source_count(SCHEMA) && self.source_schema.is_empty(),
+            PREVIOUS | LEGACY => {
+                source_count(&self.schema) && self.state == "ready" && self.source_schema.is_empty()
+            }
+            MIGRATION | PREVIOUS_MIGRATION => {
+                self.state == "upgrading"
+                    && !self.pending_version.is_empty()
+                    && source_count(&self.source_schema)
+            }
+            _ => false,
+        }
+    }
+}
+fn invalid(message: impl Into<String>) -> ToolkitError {
+    ToolkitError::new("delivery.invalid_installation", message, 4)
+}
+fn conflict(message: impl Into<String>) -> ToolkitError {
+    ToolkitError::new("delivery.installation_conflict", message, 3)
+}
 pub fn directory(parent: &Path, index: u16) -> PathBuf {
     parent.join(format!("Lychee Dev Slot {index:02}"))
 }
@@ -24,583 +291,453 @@ pub fn files(index: u16, version: &str) -> [(String, Vec<u8>); 3] {
         ("Payload.lua".into(), b"LycheeDevSlotEnvelope = nil\n".to_vec()),
     ]
 }
-
-pub fn install(parent: &Path, version: &str) -> Result<Value> {
-    let marker = parent.join(".lycheedev-slots.json");
-    let migration = parent.join(".lycheedev-slots.migration-v4.json");
-    storage::guard_path(parent, &marker)?;
-    storage::guard_path(parent, &migration)?;
-    if migration.exists() {
-        if completed_previous_migration(parent, version)? {
-            let raw = fs::read(&migration)?;
-            let digest = storage::sha256(&raw);
-            let history = parent.join(".lycheedev-slots.history");
-            storage::guard_path(parent, &history)?;
-            fs::create_dir_all(&history)?;
-            let archive = history.join(format!("{digest}.json"));
-            storage::guard_path(parent, &archive)?;
-            if archive.exists() {
-                if fs::read(&archive)? != raw {
-                    return Err(ToolkitError::invalid("previous migration history differs"));
-                }
-                fs::remove_file(&migration)?;
-            } else {
-                fs::rename(&migration, &archive)?;
-            }
+pub(crate) fn static_files(index: u16, version: &str, schema: &str) -> [(String, Vec<u8>); 2] {
+    let [mut toc, loader, _] = files(index, version);
+    if schema == LEGACY || schema == PREVIOUS {
+        let transport = if schema == LEGACY {
+            "memory-slot-v1"
         } else {
-            return migrate(parent, version);
-        }
+            "memory-slot-v2"
+        };
+        toc.1 = String::from_utf8(toc.1)
+            .expect("generated ASCII slot TOC")
+            .replace(INTERFACES, PREVIOUS_INTERFACES)
+            .replace(TRANSPORT, transport)
+            .into_bytes();
     }
-    let mut pool = if marker.exists() {
-        let value: Value = storage::read_json(&marker)?;
-        if value["schema"] != "lycheedev.slots.v4" || value["version"] != version {
-            return migrate(parent, version);
-        }
-        value
-    } else {
-        for index in 1..=COUNT {
-            if directory(parent, index).exists() {
-                return Err(ToolkitError::new(
-                    "delivery.slot_conflict",
-                    "unowned slot directory exists",
-                    4,
-                ));
-            }
-        }
-        let value = json!({"schema":"lycheedev.slots.v4","version":version,"state":"installing","transport":TRANSPORT,"slotCount":COUNT,"generation":1,"modules":expected_modules(version)});
-        storage::atomic_json(&marker, &value)?;
-        value
+    [toc, loader]
+}
+pub(crate) fn static_matches(name: &str, actual: &[u8], want: &[u8]) -> bool {
+    if actual == want {
+        return true;
+    }
+    if !name.ends_with(".toc") {
+        return false;
+    }
+    let Ok(want) = std::str::from_utf8(want) else {
+        return false;
     };
-    if pool["state"] == "ready" {
-        inspect(parent, version)?;
-        return Ok(pool);
-    }
-    let mut modules = vec![];
-    for index in 1..=COUNT {
-        let target = directory(parent, index);
-        let expected = files(index, version);
-        if target.exists() {
-            storage::guard_path(parent, &target)?;
-            for (name, want) in &expected {
-                if target.join(name).exists() {
-                    if fs::read(target.join(name))? != *want {
-                        return Err(ToolkitError::new(
-                            "delivery.slot_conflict",
-                            format!("slot {index} contains unowned or modified bytes"),
-                            4,
-                        ));
-                    }
-                } else {
-                    storage::atomic_write(&target.join(name), want)?;
-                }
-            }
-            if fs::read_dir(&target)?.count() != 3 {
-                return Err(ToolkitError::new(
-                    "delivery.slot_conflict",
-                    "unlisted slot files",
-                    4,
-                ));
-            }
-        } else {
-            fs::create_dir(&target)?;
-            for (name, bytes) in &expected {
-                storage::atomic_write(&target.join(name), bytes)?;
+    for interfaces in [INTERFACES, PREVIOUS_MAILBOX_INTERFACES, PREVIOUS_INTERFACES] {
+        let toc = want.replacen(
+            &format!("## Interface: {INTERFACES}\n"),
+            &format!("## Interface: {interfaces}\n"),
+            1,
+        );
+        if actual == toc.as_bytes() {
+            return true;
+        }
+        for retired in ["memory-slot-v3", "lycheedev-mailbox-v1"] {
+            let old = toc.replacen(
+                &format!("## X-Lychee-Transport: {TRANSPORT}\n"),
+                &format!("## X-Lychee-Transport: {retired}\n"),
+                1,
+            );
+            if actual == old.as_bytes() {
+                return true;
             }
         }
-        modules.push(json!({"slot":index,"files":expected.iter().map(|(name,bytes)|json!({"path":name,"bytes":bytes.len(),"sha256":storage::sha256(bytes)})).collect::<Vec<_>>(),"payloadHash":storage::sha256(b"LycheeDevSlotEnvelope = nil\n")}));
     }
-    pool["modules"] = json!(modules);
-    pool["state"] = json!("ready");
-    storage::atomic_json(&marker, &pool)?;
-    inspect(parent, version)?;
+    false
+}
+pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() || metadata.len() > limit as u64 {
+        return Err(invalid("slot member is not a bounded regular file"));
+    }
+    storage::guard_path(
+        path.parent()
+            .ok_or_else(|| invalid("slot member has no parent"))?,
+        path,
+    )?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    fs::File::open(path)?
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(invalid("slot member exceeds byte limit"));
+    }
+    Ok(bytes)
+}
+fn absent(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error.into()),
+    }
+}
+fn plain_directory(parent: &Path, path: &Path) -> Result<()> {
+    storage::guard_path(parent, path)?;
+    if !fs::symlink_metadata(path)?.file_type().is_dir() {
+        return Err(invalid("redirected or non-directory slot"));
+    }
+    Ok(())
+}
+fn exact_members(path: &Path) -> Result<()> {
+    // Stop at the fourth entry instead of allowing an unbounded foreign tree.
+    let entries = fs::read_dir(path)?
+        .take(4)
+        .collect::<std::io::Result<Vec<_>>>()?;
+    if entries.len() != 3 {
+        return Err(invalid("unexpected slot files"));
+    }
+    Ok(())
+}
+pub(crate) fn read_pool(parent: &Path) -> Result<SlotPool> {
+    let marker = parent.join(MARKER);
+    storage::guard_path(parent, &marker)?;
+    let pool: SlotPool = serde_json::from_slice(&read_bounded(&marker, MANIFEST_LIMIT)?)
+        .map_err(|error| invalid(error.to_string()))?;
+    if !pool.valid_shape() {
+        return Err(invalid("slot inventory shape differs"));
+    }
     Ok(pool)
 }
-fn expected_modules(version: &str) -> Vec<Value> {
-    (1..=COUNT).map(|slot|json!({"slot":slot,"files":files(slot,version).iter().map(|(name,bytes)|json!({"path":name,"bytes":bytes.len(),"sha256":storage::sha256(bytes)})).collect::<Vec<_>>(),"payloadHash":storage::sha256(b"LycheeDevSlotEnvelope = nil\n")})).collect()
-}
-fn old_static(index: u16, version: &str, transport: &str) -> [(String, Vec<u8>); 2] {
-    let name = format!("Lychee Dev Slot {index:02}");
-    [(format!("{name}.toc"),format!("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot {index:02}\n## Version: {version}\n## LoadOnDemand: 1\n## X-Lychee-Slot: {index}\n## X-Lychee-Transport: {transport}\nPayload.lua\nLoader.lua\n").into_bytes()),("Loader.lua".into(),format!("local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.SlotRuntime then ns.SlotRuntime.Receive({index}, envelope) end\n").into_bytes())]
-}
-fn completed_previous_migration(parent: &Path, version: &str) -> Result<bool> {
-    let journal = parent.join(".lycheedev-slots.migration-v4.json");
-    storage::guard_path(parent, &journal)?;
-    if fs::metadata(&journal)?.len() > 4 << 20 {
-        return Err(ToolkitError::invalid("migration journal exceeds 4 MiB"));
+fn save_pool(parent: &Path, pool: &SlotPool, control: &OperationControl) -> Result<()> {
+    control.check()?;
+    let bytes = serde_json::to_vec_pretty(pool)?;
+    if bytes.len() > MANIFEST_LIMIT {
+        return Err(invalid("slot manifest exceeds 256 KiB"));
     }
-    let intent: Value = storage::read_json(&journal)?;
-    if intent["schema"] != "lycheedev.slots.migration.v4"
-        || intent["parent"] != serde_json::to_value(fs::canonicalize(parent)?)?
-    {
-        return Err(ToolkitError::invalid("previous migration identity differs"));
-    }
-    let previous = intent["version"]
-        .as_str()
-        .ok_or_else(|| ToolkitError::invalid("previous migration version missing"))?;
-    if previous == version {
-        return Ok(false);
-    }
-    let pool = inspect(parent, previous)?;
-    if pool["generation"].as_u64()
-        != intent["source"]["generation"]
-            .as_u64()
-            .unwrap_or(0)
-            .checked_add(1)
-    {
-        return Err(ToolkitError::invalid(
-            "previous migration completion generation differs",
-        ));
-    }
-    if pool["modules"].as_array().unwrap().iter().any(|module| {
-        module["pendingHash"]
-            .as_str()
-            .is_some_and(|value| !value.is_empty())
-            || module["nonce"]
-                .as_str()
-                .is_some_and(|value| !value.is_empty())
-                && module["retiredRuntime"].as_str().unwrap_or("").is_empty()
-                && module["retiredProcess"] != true
-    }) {
-        return Err(ToolkitError::new(
-            "delivery.slot_reserved",
-            "previous completed migration still has unresolved runtime ownership",
-            6,
-        ));
-    }
-    Ok(true)
-}
-pub fn preflight(parent: &Path, version: &str) -> Result<()> {
-    let marker = parent.join(".lycheedev-slots.json");
+    let marker = parent.join(MARKER);
     storage::guard_path(parent, &marker)?;
-    if !marker.exists() {
-        for index in 1..=COUNT {
-            if directory(parent, index).exists() {
-                return Err(ToolkitError::new(
-                    "delivery.slot_conflict",
-                    "unowned slot directory exists",
-                    4,
-                ));
-            }
-        }
-        return Ok(());
+    storage::atomic_write_controlled(&marker, &bytes, control)
+}
+fn check_idle(pool: &SlotPool) -> Result<()> {
+    if pool.files.iter().any(SlotFile::unresolved) {
+        return Err(conflict("slot reservation is unresolved"));
     }
-    if parent.join(".lycheedev-slots.migration-v4.json").exists() {
-        completed_previous_migration(parent, version)?;
-        return Ok(());
-    }
-    let pool: Value = storage::read_json(&marker)?;
-    if pool["schema"] == "lycheedev.slots.v4" && pool["version"] != version {
-        let old_version = pool["version"]
-            .as_str()
-            .ok_or_else(|| ToolkitError::invalid("old v4 slot version missing"))?;
-        inspect(parent, old_version)?;
-        for module in pool["modules"].as_array().unwrap() {
-            if module["pendingHash"]
-                .as_str()
-                .is_some_and(|value| !value.is_empty())
-                || module["nonce"]
-                    .as_str()
-                    .is_some_and(|value| !value.is_empty())
-                    && module["retiredRuntime"].as_str().unwrap_or("").is_empty()
-                    && module["retiredProcess"] != true
-            {
-                return Err(ToolkitError::new(
-                    "delivery.slot_reserved",
-                    "previous v4 publication/runtime must be explicitly retired before upgrade",
-                    6,
-                ));
-            }
-        }
-        return Ok(());
-    }
-    if pool["schema"] == "lycheedev.slots.v4" && pool["version"] == version {
-        if pool["state"] == "ready" {
-            inspect(parent, version)?;
-        }
-        return Ok(());
-    }
-    let schema = pool["schema"].as_str().unwrap_or("");
-    if ![
-        "lycheedev.slots.v1",
-        "lycheedev.slots.v2",
-        "lycheedev.slots.v3",
-    ]
-    .contains(&schema)
-        || pool["state"] != "ready"
-    {
-        return Err(ToolkitError::new(
-            "delivery.slot_migration_required",
-            "unsupported or unfinished old slot inventory",
-            6,
+    Ok(())
+}
+pub(crate) fn inspect_pool(
+    parent: &Path,
+    pool: &SlotPool,
+    version: &str,
+    control: &OperationControl,
+) -> Result<()> {
+    if pool.state != "ready" || pool.version != version {
+        return Err(invalid(
+            "slot inventory is not ready for the selected version",
         ));
     }
-    let entries = pool["files"]
-        .as_array()
-        .ok_or_else(|| ToolkitError::invalid("old slot inventory missing"))?;
-    if entries.is_empty() || entries.len() > COUNT as usize {
-        return Err(ToolkitError::invalid("old slot count exceeds bounds"));
-    }
-    let transport = if schema.ends_with("v1") {
-        "memory-slot-v1"
-    } else if schema.ends_with("v2") {
-        "memory-slot-v2"
-    } else {
-        "memory-slot-v3"
-    };
-    let old_version = pool["version"]
-        .as_str()
-        .ok_or_else(|| ToolkitError::invalid("old version missing"))?;
-    for (index, entry) in entries.iter().enumerate() {
-        let slot = (index + 1) as u16;
-        let target = directory(parent, slot);
-        storage::guard_path(parent, &target)?;
-        if entry["pendingHash"].as_str().is_some_and(|v| !v.is_empty())
-            || entry["nonce"].as_str().is_some_and(|v| !v.is_empty())
-                && entry["retiredRuntime"].as_str().unwrap_or("").is_empty()
-                && entry["retiredProcess"] != true
-        {
-            return Err(ToolkitError::new(
-                "delivery.slot_reserved",
-                "old runtime must be explicitly retired",
-                6,
-            ));
-        }
-        for (name, bytes) in old_static(slot, old_version, transport) {
-            let path = target.join(name);
-            storage::guard_path(parent, &path)?;
-            if fs::read(path)? != bytes {
-                return Err(ToolkitError::new(
-                    "delivery.slot_conflict",
-                    "old static slot bytes differ",
-                    4,
-                ));
+    for (index, entry) in pool.files.iter().enumerate() {
+        control.check()?;
+        let target = directory(parent, (index + 1) as u16);
+        plain_directory(parent, &target)?;
+        exact_members(&target)?;
+        for (name, want) in static_files((index + 1) as u16, version, &pool.schema) {
+            if !static_matches(
+                &name,
+                &read_bounded(&target.join(&name), STATIC_LIMIT)?,
+                &want,
+            ) {
+                return Err(invalid("slot static file changed"));
             }
         }
-        let payload = target.join("Payload.lua");
-        storage::guard_path(parent, &payload)?;
-        if storage::sha256(&fs::read(payload)?) != entry["payloadHash"].as_str().unwrap_or("")
-            || fs::read_dir(&target)?.count() != 3
-        {
-            return Err(ToolkitError::new(
-                "delivery.slot_conflict",
-                "old payload or inventory differs",
-                4,
-            ));
-        }
-    }
-    for slot in entries.len() as u16 + 1..=COUNT {
-        if directory(parent, slot).exists() {
-            return Err(ToolkitError::new(
-                "delivery.slot_conflict",
-                "new slot destination is occupied",
-                4,
-            ));
+        let digest = storage::sha256(&read_bounded(&target.join("Payload.lua"), PAYLOAD_LIMIT)?);
+        if digest != entry.payload_hash && digest != entry.pending_hash {
+            return Err(invalid("slot payload drift"));
         }
     }
     Ok(())
 }
-fn migrate(parent: &Path, version: &str) -> Result<Value> {
-    let marker = parent.join(".lycheedev-slots.json");
-    let journal = parent.join(".lycheedev-slots.migration-v4.json");
-    storage::guard_path(parent, &marker)?;
-    storage::guard_path(parent, &journal)?;
-    let intent: Value = if journal.exists() {
-        storage::guard_path(parent, &journal)?;
-        storage::read_json(&journal)?
-    } else {
-        preflight(parent, version)?;
-        let source: Value = storage::read_json(&marker)?;
-        let old_schema = source["schema"].as_str().unwrap_or("");
-        if ![
-            "lycheedev.slots.v1",
-            "lycheedev.slots.v2",
-            "lycheedev.slots.v3",
-            "lycheedev.slots.v4",
-        ]
-        .contains(&old_schema)
-            || source["state"] != "ready"
-        {
-            return Err(ToolkitError::new(
-                "delivery.slot_migration_required",
-                "unsupported or unfinished source slot inventory",
-                6,
-            ));
+fn no_extension(parent: &Path, count: usize) -> Result<()> {
+    for index in count + 1..=COUNT as usize {
+        if !absent(&directory(parent, index as u16))? {
+            return Err(invalid(format!("unmanaged slot {index}")));
         }
-        let old_count = if old_schema == "lycheedev.slots.v4" {
-            source["modules"].as_array().map(Vec::len)
-        } else {
-            source["files"].as_array().map(Vec::len)
-        }
-        .ok_or_else(|| ToolkitError::invalid("source slot inventory missing"))?;
-        if old_count == 0 || old_count > COUNT as usize {
-            return Err(ToolkitError::invalid("source slot count out of range"));
-        }
-        let mut originals = vec![];
-        for index in 1..=COUNT {
-            let target = directory(parent, index);
-            if index as usize <= old_count {
-                storage::guard_path(parent, &target)?;
-                let entry = if old_schema == "lycheedev.slots.v4" {
-                    &source["modules"][index as usize - 1]
-                } else {
-                    &source["files"][index as usize - 1]
-                };
-                if entry["pendingHash"].as_str().is_some_and(|v| !v.is_empty())
-                    || entry["nonce"].as_str().is_some_and(|v| !v.is_empty())
-                        && entry["retiredRuntime"].as_str().unwrap_or("").is_empty()
-                        && entry["retiredProcess"] != true
-                {
-                    return Err(ToolkitError::new(
-                        "delivery.slot_reserved",
-                        "old runtime ownership must be explicitly retired before migration",
-                        6,
-                    ));
-                }
-                let name = format!("Lychee Dev Slot {index:02}.toc");
-                let names = [name.as_str(), "Loader.lua", "Payload.lua"];
-                let mut records = vec![];
-                for name in names {
-                    let path = target.join(name);
-                    storage::guard_path(parent, &path)?;
-                    let bytes = fs::read(path)?;
-                    if name == "Payload.lua"
-                        && storage::sha256(&bytes) != entry["payloadHash"].as_str().unwrap_or("")
-                    {
-                        return Err(ToolkitError::new(
-                            "delivery.slot_conflict",
-                            "source payload differs",
-                            4,
-                        ));
-                    }
-                    if name.ends_with(".toc") {
-                        let toc = String::from_utf8(bytes.clone())
-                            .map_err(|e| ToolkitError::invalid(e.to_string()))?;
-                        let transport = if old_schema.ends_with("v1") {
-                            "memory-slot-v1"
-                        } else if old_schema.ends_with("v2") {
-                            "memory-slot-v2"
-                        } else if old_schema.ends_with("v3") {
-                            "memory-slot-v3"
-                        } else {
-                            TRANSPORT
-                        };
-                        if !toc.contains(&format!("## X-Lychee-Slot: {index}\n"))
-                            || !toc.contains(&format!("## X-Lychee-Transport: {transport}\n"))
-                        {
-                            return Err(ToolkitError::new(
-                                "delivery.slot_conflict",
-                                "source static TOC identity differs",
-                                4,
-                            ));
-                        }
-                    }
-                    records.push(json!({"path":name,"sha256":storage::sha256(&bytes)}));
-                }
-                if fs::read_dir(&target)?.count() != 3 {
-                    return Err(ToolkitError::new(
-                        "delivery.slot_conflict",
-                        "unlisted source slot files",
-                        4,
-                    ));
-                }
-                originals.push(json!({"slot":index,"files":records}));
-            } else if target.exists() {
-                return Err(ToolkitError::new(
-                    "delivery.slot_conflict",
-                    "new slot target is already occupied",
-                    4,
-                ));
-            }
-        }
-        let intent = json!({"schema":"lycheedev.slots.migration.v4","parent":fs::canonicalize(parent)?,"version":version,"source":source,"sourceHash":storage::sha256(&fs::read(&marker)?),"originals":originals,"state":"prepared"});
-        storage::atomic_json(&journal, &intent)?;
-        intent
+    }
+    Ok(())
+}
+struct Replacement {
+    path: PathBuf,
+    bytes: Vec<u8>,
+}
+struct UpgradePlan {
+    directories: Vec<PathBuf>,
+    writes: Vec<Replacement>,
+}
+fn upgrade_plan(
+    parent: &Path,
+    pool: &SlotPool,
+    version: &str,
+    control: &OperationControl,
+) -> Result<UpgradePlan> {
+    if pool.state != "upgrading" || pool.pending_version != version {
+        return Err(conflict("slot migration intent targets another version"));
+    }
+    check_idle(pool)?;
+    let mut plan = UpgradePlan {
+        directories: vec![],
+        writes: vec![],
     };
-    if intent["schema"] != "lycheedev.slots.migration.v4"
-        || intent["version"] != version
-        || intent["parent"] != serde_json::to_value(fs::canonicalize(parent)?)?
-    {
-        return Err(ToolkitError::invalid(
-            "migration intent differs from explicit destination",
-        ));
-    }
-    let current: Value = storage::read_json(&marker)?;
-    if current["schema"] == "lycheedev.slots.v4"
-        && current["version"] == version
-        && current["state"] == "ready"
-    {
-        return inspect(parent, version);
-    }
-    if storage::sha256(&fs::read(&marker)?) != intent["sourceHash"].as_str().unwrap_or("") {
-        return Err(ToolkitError::new(
-            "delivery.slot_conflict",
-            "source slot manifest changed",
-            4,
-        ));
-    }
     for index in 1..=COUNT {
+        control.check()?;
         let target = directory(parent, index);
-        if !target.exists() {
-            fs::create_dir(&target)?;
+        let existing = usize::from(index) <= pool.files.len();
+        let missing = absent(&target)?;
+        if missing && existing {
+            return Err(invalid("existing migration slot is missing"));
         }
-        storage::guard_path(parent, &target)?;
-        for (name, want) in files(index, version) {
+        if missing {
+            plan.directories.push(target.clone());
+        } else {
+            plain_directory(parent, &target)?;
+        }
+        let desired = files(index, version);
+        let previous = static_files(index, &pool.version, &pool.source_schema);
+        let legacy_target = static_files(index, version, &pool.source_schema);
+        if !missing {
+            let entries = fs::read_dir(&target)?
+                .take(4)
+                .collect::<std::io::Result<Vec<_>>>()?;
+            if entries.len() > 3
+                || existing && entries.len() != 3
+                || entries.iter().any(|entry| {
+                    !desired
+                        .iter()
+                        .any(|(name, _)| entry.file_name() == name.as_str())
+                })
+            {
+                return Err(invalid("migration slot contains unexpected files"));
+            }
+        }
+        for (name, want) in desired {
             let path = target.join(&name);
-            if path.exists() {
-                storage::guard_path(parent, &path)?;
-                let bytes = fs::read(&path)?;
-                let old = intent["originals"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|v| v["slot"] == index)
-                    .and_then(|v| v["files"].as_array())
-                    .and_then(|records| records.iter().find(|v| v["path"] == name))
-                    .and_then(|v| v["sha256"].as_str());
-                if bytes != want && old != Some(storage::sha256(&bytes).as_str()) {
-                    return Err(ToolkitError::new(
-                        "delivery.slot_conflict",
-                        "partially migrated slot has modified bytes",
-                        4,
-                    ));
+            if absent(&path)? && !existing {
+                plan.writes.push(Replacement { path, bytes: want });
+                continue;
+            }
+            let payload = name == "Payload.lua";
+            let actual = read_bounded(&path, if payload { PAYLOAD_LIMIT } else { STATIC_LIMIT })?;
+            if actual == want {
+                continue;
+            }
+            let allowed = if !existing {
+                false
+            } else if payload {
+                storage::sha256(&actual) == pool.files[usize::from(index) - 1].payload_hash
+            } else {
+                let old = previous.iter().find(|(key, _)| key == &name).unwrap();
+                let legacy = legacy_target.iter().find(|(key, _)| key == &name).unwrap();
+                static_matches(&name, &actual, &old.1) || static_matches(&name, &actual, &legacy.1)
+            };
+            if !allowed {
+                return Err(invalid("migration found unowned or changed slot bytes"));
+            }
+            plan.writes.push(Replacement { path, bytes: want });
+        }
+    }
+    Ok(plan)
+}
+/// Read-only maintenance admission; no existing or extension bytes are adopted.
+pub fn preflight(parent: &Path, version: &str) -> Result<()> {
+    preflight_controlled(parent, version, &OperationControl::default())
+}
+pub fn preflight_controlled(
+    parent: &Path,
+    version: &str,
+    control: &OperationControl,
+) -> Result<()> {
+    control.check()?;
+    if absent(&parent.join(MARKER))? {
+        return no_extension(parent, 0);
+    }
+    let mut pool = read_pool(parent)?;
+    if pool.state == "upgrading" {
+        return upgrade_plan(parent, &pool, version, control).map(|_| ());
+    }
+    if pool.state == "installing" && pool.schema == SCHEMA {
+        return Ok(());
+    }
+    inspect_pool(parent, &pool, &pool.version, control)?;
+    let mut needs_upgrade =
+        pool.schema != SCHEMA || pool.version != version || pool.files.len() != COUNT as usize;
+    if !needs_upgrade {
+        for index in 1..=COUNT {
+            for (name, expected) in static_files(index, version, SCHEMA) {
+                control.check()?;
+                if read_bounded(&directory(parent, index).join(name), STATIC_LIMIT)? != expected {
+                    needs_upgrade = true;
+                    break;
                 }
             }
-            storage::atomic_write(&path, &want)?;
-        }
-        if fs::read_dir(&target)?.count() != 3 {
-            return Err(ToolkitError::invalid("unlisted migration files"));
+            if needs_upgrade {
+                break;
+            }
         }
     }
-    let generation = intent["source"]["generation"].as_u64().unwrap_or(0) + 1;
-    let pool = json!({"schema":"lycheedev.slots.v4","version":version,"state":"ready","transport":TRANSPORT,"slotCount":COUNT,"generation":generation,"modules":expected_modules(version)});
-    storage::atomic_json(&marker, &pool)?;
-    inspect(parent, version)?;
-    Ok(pool)
+    if needs_upgrade {
+        check_idle(&pool)?;
+        no_extension(parent, pool.files.len())?;
+        pool.source_schema = pool.schema;
+        pool.schema = MIGRATION.into();
+        pool.state = "upgrading".into();
+        pool.pending_version = version.into();
+        upgrade_plan(parent, &pool, version, control)?;
+    }
+    Ok(())
+}
+pub fn install(parent: &Path, version: &str) -> Result<Value> {
+    install_controlled(parent, version, &OperationControl::default())
+}
+pub fn install_controlled(
+    parent: &Path,
+    version: &str,
+    control: &OperationControl,
+) -> Result<Value> {
+    control.check()?;
+    if version.is_empty() {
+        return Err(invalid("slot version is empty"));
+    }
+    let mut pool = if absent(&parent.join(MARKER))? {
+        no_extension(parent, 0)?;
+        let pool = SlotPool {
+            schema: SCHEMA.into(),
+            version: version.into(),
+            state: "installing".into(),
+            files: vec![SlotFile::default(); COUNT as usize],
+            ..SlotPool::default()
+        };
+        save_pool(parent, &pool, control)?;
+        pool
+    } else {
+        read_pool(parent)?
+    };
+    if pool.state == "upgrading"
+        || pool.state == "ready"
+            && (pool.version != version
+                || pool.schema != SCHEMA
+                || pool.files.len() != COUNT as usize)
+    {
+        return upgrade(parent, pool, version, control);
+    }
+    if pool.state != "ready" && pool.state != "installing" {
+        return Err(invalid("unfinished slot inventory"));
+    }
+    for index in 1..=pool.files.len() {
+        control.check()?;
+        let target = directory(parent, index as u16);
+        fs::create_dir_all(&target)?;
+        plain_directory(parent, &target)?;
+        for (name, want) in static_files(index as u16, &pool.version, &pool.schema) {
+            let path = target.join(&name);
+            if absent(&path)? && pool.state == "installing" {
+                storage::atomic_write_controlled(&path, &want, control)?;
+            } else {
+                let actual = read_bounded(&path, STATIC_LIMIT)?;
+                if actual != want {
+                    if pool.state == "ready" && static_matches(&name, &actual, &want) {
+                        return upgrade(parent, pool, version, control);
+                    }
+                    return Err(invalid("modified slot static file"));
+                }
+            }
+        }
+        let payload = target.join("Payload.lua");
+        let actual = if absent(&payload)? && pool.state == "installing" {
+            storage::atomic_write_controlled(&payload, INERT, control)?;
+            INERT.to_vec()
+        } else {
+            read_bounded(&payload, PAYLOAD_LIMIT)?
+        };
+        let entry = &mut pool.files[index - 1];
+        let expected = if entry.payload_hash.is_empty() {
+            storage::sha256(INERT)
+        } else {
+            entry.payload_hash.clone()
+        };
+        if storage::sha256(&actual) != expected {
+            return Err(invalid("slot payload drift"));
+        }
+        entry.payload_hash = expected;
+        exact_members(&target)?;
+    }
+    pool.state = "ready".into();
+    save_pool(parent, &pool, control)?;
+    if pool.schema != SCHEMA || pool.version != version || pool.files.len() != COUNT as usize {
+        return upgrade(parent, pool, version, control);
+    }
+    Ok(serde_json::to_value(pool)?)
+}
+fn upgrade(
+    parent: &Path,
+    mut pool: SlotPool,
+    version: &str,
+    control: &OperationControl,
+) -> Result<Value> {
+    if pool.state == "ready" {
+        inspect_pool(parent, &pool, &pool.version, control)?;
+        check_idle(&pool)?;
+        no_extension(parent, pool.files.len())?;
+        pool.source_schema = pool.schema;
+        pool.schema = MIGRATION.into();
+        pool.state = "upgrading".into();
+        pool.pending_version = version.into();
+        save_pool(parent, &pool, control)?;
+    }
+    if pool.state != "upgrading" || pool.pending_version != version {
+        return Err(conflict("slot migration intent targets another version"));
+    }
+    if pool.schema == PREVIOUS_MIGRATION {
+        pool.schema = MIGRATION.into();
+        save_pool(parent, &pool, control)?;
+    }
+    let plan = upgrade_plan(parent, &pool, version, control)?;
+    // Every byte is admitted before the first replacement, including resumed
+    // mixed-static and partially created extension directories.
+    for directory in plan.directories {
+        control.check()?;
+        fs::create_dir(&directory)?;
+        plain_directory(parent, &directory)?;
+    }
+    for write in plan.writes {
+        control.check()?;
+        storage::atomic_write_controlled(&write.path, &write.bytes, control)?;
+    }
+    pool = SlotPool {
+        schema: SCHEMA.into(),
+        version: version.into(),
+        state: "ready".into(),
+        files: vec![
+            SlotFile {
+                payload_hash: storage::sha256(INERT),
+                ..SlotFile::default()
+            };
+            COUNT as usize
+        ],
+        ..SlotPool::default()
+    };
+    save_pool(parent, &pool, control)?;
+    Ok(serde_json::to_value(pool)?)
 }
 pub fn inspect(parent: &Path, version: &str) -> Result<Value> {
-    let marker = parent.join(".lycheedev-slots.json");
-    storage::guard_path(parent, &marker)?;
-    let pool: Value = storage::read_json(&marker)?;
-    if pool["schema"] != "lycheedev.slots.v4"
-        || pool["version"] != version
-        || pool["state"] != "ready"
-        || pool["transport"] != TRANSPORT
-        || pool["slotCount"] != COUNT
-        || pool["modules"]
-            .as_array()
-            .is_none_or(|m| m.len() != COUNT as usize)
-    {
-        return Err(ToolkitError::new(
-            "delivery.slot_inventory_mismatch",
-            "slot inventory identity differs",
-            4,
-        ));
-    }
-    for (index, module) in pool["modules"].as_array().unwrap().iter().enumerate() {
-        let slot = (index + 1) as u16;
-        if module["slot"] != slot {
-            return Err(ToolkitError::invalid("slot index differs"));
-        }
-        let target = directory(parent, slot);
-        storage::guard_path(parent, &target)?;
-        for (name, want) in files(slot, version) {
-            let path = target.join(&name);
-            storage::guard_path(parent, &path)?;
-            if name == "Payload.lua" {
-                let actual = storage::sha256(&fs::read(path)?);
-                if actual != module["payloadHash"].as_str().unwrap_or("")
-                    && module["pendingHash"].as_str() != Some(actual.as_str())
-                {
-                    return Err(ToolkitError::new(
-                        "delivery.slot_payload_changed",
-                        "published payload differs from manifest",
-                        4,
-                    ));
-                }
-            } else if fs::read(path)? != want {
-                return Err(ToolkitError::new(
-                    "delivery.slot_inventory_mismatch",
-                    "slot static file changed",
-                    4,
-                ));
-            }
-        }
-        if fs::read_dir(target)?.count() != 3 {
-            return Err(ToolkitError::invalid("unlisted slot files"));
-        }
-    }
-    Ok(pool)
+    inspect_controlled(parent, version, &OperationControl::default())
 }
+pub fn inspect_controlled(
+    parent: &Path,
+    version: &str,
+    control: &OperationControl,
+) -> Result<Value> {
+    control.check()?;
+    let pool = read_pool(parent)?;
+    if pool.schema != SCHEMA || pool.files.len() != COUNT as usize {
+        return Err(invalid("business requires the current 500-slot inventory"));
+    }
+    inspect_pool(parent, &pool, version, control)?;
+    Ok(serde_json::to_value(pool)?)
+}
+/// The historical byte-only API cannot establish the formal consumer/runtime/
+/// nonce/envelope publication contract. Keep it fail-closed until that typed
+/// business API and its caller are migrated; never feed arbitrary bytes to v1.
 pub fn publish(
-    identity: &crate::installation::VerifiedInstallation,
-    index: u16,
-    expected_sha256: Option<&str>,
-    bytes: &[u8],
+    _identity: &crate::installation::VerifiedInstallation,
+    _index: u16,
+    _expected_sha256: Option<&str>,
+    _bytes: &[u8],
 ) -> Result<()> {
-    if !(1..=COUNT).contains(&index) || bytes.len() > 2 << 20 {
-        return Err(ToolkitError::invalid("slot or payload exceeds bounds"));
-    }
-    let parent = identity.canonical_path.parent().unwrap();
-    let _guard = crate::deploy::installation_lock(&identity.canonical_path)?;
-    if storage::sha256(&fs::read(
-        identity.canonical_path.join(crate::installation::MARKER),
-    )?) != identity.manifest_sha256
-    {
-        return Err(ToolkitError::new(
-            "delivery.installation_changed",
-            "managed receipt changed",
-            4,
-        ));
-    }
-    let mut pool = inspect(parent, lycheedev_core::VERSION)?;
-    if pool["generation"] != identity.generation {
-        return Err(ToolkitError::new(
-            "delivery.slot_generation_changed",
-            "slot pool changed",
-            4,
-        ));
-    }
-    let module = &mut pool["modules"][index as usize - 1];
-    let current = module["payloadHash"].as_str().unwrap_or("").to_owned();
-    let digest = storage::sha256(bytes);
-    if let Some(pending) = module["pendingHash"].as_str()
-        && pending != digest
-    {
-        return Err(ToolkitError::new(
-            "delivery.slot_publication_pending",
-            "different immutable publication still owns this slot",
-            6,
-        )
-        .with_details(json!({"slot":index,"pendingHash":pending})));
-    }
-    if expected_sha256.is_some_and(|digest| digest != current) {
-        if current == digest && module.get("pendingHash").is_none() {
-            return Ok(());
-        }
-        return Err(ToolkitError::new(
-            "delivery.slot_payload_changed",
-            "slot expected digest differs",
-            4,
-        ));
-    }
-    module["pendingHash"] = json!(digest);
-    storage::atomic_json(&parent.join(".lycheedev-slots.json"), &pool)?;
-    let target = directory(parent, index).join("Payload.lua");
-    let actual = storage::sha256(&fs::read(&target)?);
-    if actual != digest {
-        if actual != current {
-            return Err(ToolkitError::new(
-                "delivery.slot_payload_changed",
-                "slot changed outside its exact publication intent",
-                4,
-            ));
-        }
-        storage::atomic_write(&target, bytes)?;
-    }
-    pool["modules"][index as usize - 1]["payloadHash"] = json!(digest);
-    pool["modules"][index as usize - 1]
-        .as_object_mut()
-        .unwrap()
-        .remove("pendingHash");
-    storage::atomic_json(&parent.join(".lycheedev-slots.json"), &pool)
+    Err(ToolkitError::new(
+        "live.mailbox_v1_migration_incomplete",
+        "typed mailbox protocol v1 publication is not connected",
+        3,
+    ))
 }

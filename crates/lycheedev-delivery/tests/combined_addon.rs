@@ -59,9 +59,15 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     )
     .unwrap();
     assert_eq!(original["version"], "3.0.2");
-    assert_eq!(slots::inspect(&parent, "3.0.2").unwrap()["slotCount"], 500);
+    assert_eq!(
+        slots::inspect(&parent, "3.0.2").unwrap()["files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        500
+    );
     let mut pool = slots::inspect(&parent, "3.0.2").unwrap();
-    pool["modules"][0]["nonce"] = json!("unresolved owner");
+    pool["files"][0]["nonce"] = json!("unresolved owner");
     storage::atomic_json(&parent.join(".lycheedev-slots.json"), &pool).unwrap();
     assert_eq!(
         addon_transaction::apply(
@@ -77,16 +83,18 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         )
         .unwrap_err()
         .exit_code,
-        6
+        3
     );
     assert_eq!(
         fs::read(target.join("Bridge/SlotRuntime.lua")).unwrap(),
         b"-- fixture old runtime\n"
     );
     assert!(!archive.exists());
-    pool["modules"][0].as_object_mut().unwrap().remove("nonce");
+    pool["files"][0].as_object_mut().unwrap().remove("nonce");
     storage::atomic_json(&parent.join(".lycheedev-slots.json"), &pool).unwrap();
-    let loader = slots::directory(&parent, 1).join("Loader.lua");
+    // Go only replaces changed bytes. The loader is version-independent;
+    // hold the versioned TOC to create the same main-before-slots cutpoint.
+    let loader = slots::directory(&parent, 1).join("Lychee Dev Slot 01.toc");
     let held = fs::OpenOptions::new()
         .read(true)
         .share_mode(1)
@@ -172,7 +180,10 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     )
     .unwrap();
     assert_eq!(result["receipt"]["version"], "3.1.2");
-    assert_eq!(slots::inspect(&parent, "3.1.2").unwrap()["generation"], 2);
+    assert_eq!(
+        slots::inspect(&parent, "3.1.2").unwrap()["schema"],
+        slots::SCHEMA
+    );
     let after: serde_json::Value = storage::read_json(&journal).unwrap();
     assert_eq!(after["phase"], "complete");
     assert_eq!(
@@ -191,8 +202,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         result
     );
     assert!(archive.join("previous/Bridge/SlotRuntime.lua").exists());
-    let old_migration = fs::read(parent.join(".lycheedev-slots.migration-v4.json")).unwrap();
-    let old_digest = storage::sha256(&old_migration);
+    assert!(!parent.join(".lycheedev-slots.migration-v4.json").exists());
     let third = temp.0.join("third");
     let archive2 = temp.0.join("archive2");
     candidate(&third, "3.1.3", b"-- fixture third runtime\n");
@@ -209,16 +219,12 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     )
     .unwrap();
     assert_eq!(third_result["receipt"]["version"], "3.1.3");
-    assert_eq!(slots::inspect(&parent, "3.1.3").unwrap()["generation"], 3);
-    assert_eq!(
-        fs::read(
-            parent
-                .join(".lycheedev-slots.history")
-                .join(format!("{old_digest}.json"))
-        )
-        .unwrap(),
-        old_migration
-    );
+    let final_pool = slots::inspect(&parent, "3.1.3").unwrap();
+    assert_eq!(final_pool["schema"], slots::SCHEMA);
+    assert!(final_pool.get("pendingVersion").is_none());
+    assert!(final_pool.get("sourceSchema").is_none());
+    assert!(final_pool.get("generation").is_none());
+    assert!(!parent.join(".lycheedev-slots.migration-v4.json").exists());
     assert_eq!(
         fs::read(archive2.join("previous/Bridge/SlotRuntime.lua")).unwrap(),
         b"-- fixture new runtime\n"

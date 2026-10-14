@@ -27,9 +27,10 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         "addon remove" => {
             let client = selected_client(inv)?;
             let target = lycheedev_core::client::addon_destination(&client)?;
-            Ok(Outcome::new(removal::addon(
+            Ok(Outcome::new(removal::addon_controlled(
                 &target,
                 std::path::Path::new(inv.required("--output")?),
+                &inv.control,
             )?))
         }
         "addon install" => {
@@ -120,7 +121,7 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
                         .unwrap_or(lycheedev_core::VERSION);
                     result["slots"] = match slots::inspect(target.parent().unwrap(), version) {
                         Ok(pool) => {
-                            serde_json::json!({"state":"managed","count":pool["modules"].as_array().map(Vec::len).unwrap_or(0),"pending":pool["modules"].as_array().map(|modules|modules.iter().filter(|m|m.get("pendingHash").is_some()).count()).unwrap_or(0)})
+                            serde_json::json!({"state":"managed","count":pool["files"].as_array().map(Vec::len).unwrap_or(0),"pending":pool["files"].as_array().map(|files|files.iter().filter(|m|m["pendingHash"].as_str().is_some_and(|hash| !hash.is_empty())).count()).unwrap_or(0)})
                         }
                         Err(error) => {
                             serde_json::json!({"state":"incomplete","count":0,"pending":0,"detail":error.message})

@@ -95,7 +95,18 @@ pub fn verify_clean(
     protocol: &str,
     slots: u16,
 ) -> Result<VerifiedInstallation> {
+    verify_clean_controlled(path, release, protocol, slots, &Default::default())
+}
+pub fn verify_clean_controlled(
+    path: &Path,
+    release: &str,
+    protocol: &str,
+    slots: u16,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<VerifiedInstallation> {
+    control.check()?;
     let result = inspect(path, "addon")?;
+    control.check()?;
     if result["state"] != "managed" || result["receipt"]["version"] != release {
         return Err(ToolkitError::new(
             "delivery.installation_not_clean",
@@ -110,25 +121,19 @@ pub fn verify_clean(
             3,
         ));
     }
-    let manifest = path
-        .parent()
-        .ok_or_else(|| ToolkitError::invalid("addon has no parent"))?
-        .join(".lycheedev-slots.json");
-    let pool: Value = storage::read_json(&manifest)?;
-    crate::slots::inspect(path.parent().unwrap(), release)?;
-    if pool["schema"] != "lycheedev.slots.v4"
-        || pool["transport"] != protocol
-        || pool["slotCount"] != slots
-    {
-        return Err(ToolkitError::new(
-            "delivery.slot_inventory_mismatch",
-            "slot inventory requires explicit managed upgrade",
-            3,
-        ));
-    }
+    crate::slots::inspect_controlled(
+        path.parent()
+            .ok_or_else(|| ToolkitError::invalid("addon has no parent"))?,
+        release,
+        control,
+    )?;
+    control.check()?;
     Ok(VerifiedInstallation {
         canonical_path: fs::canonicalize(path)?,
         manifest_sha256: storage::sha256(&fs::read(path.join(MARKER))?),
-        generation: pool["generation"].as_u64().unwrap_or(1),
+        // Compatibility field for the disabled historical driver. Formal Go
+        // slot metadata has no synthetic generation counter. New business
+        // adapters must bind the exact receipt and runtime/consumer instead.
+        generation: 1,
     })
 }

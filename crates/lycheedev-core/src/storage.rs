@@ -2,7 +2,7 @@ use crate::{Result, ToolkitError};
 // Business providers use the shared mechanism layer, rather than adding their
 // own Win32 publication path or a direct platform dependency.
 pub use lycheedev_windows::filesystem::destination::{FileControl, FileCost};
-pub use lycheedev_windows::filesystem::{Destination, Directory};
+pub use lycheedev_windows::filesystem::{Destination, Directory, durable_move_noreplace};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
@@ -155,12 +155,30 @@ pub fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     atomic_write(path, &serde_json::to_vec_pretty(value)?)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_write_with_check(path, bytes, || Ok(()))
+}
+/// Publish with the caller's original cancellation/deadline, including after
+/// staging and sync but before the durable atomic replacement.
+pub fn atomic_write_controlled(
+    path: &Path,
+    bytes: &[u8],
+    control: &crate::control::OperationControl,
+) -> Result<()> {
+    atomic_write_with_check(path, bytes, || control.check())
+}
+fn atomic_write_with_check(
+    path: &Path,
+    bytes: &[u8],
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    check()?;
     let parent = path
         .parent()
         .ok_or_else(|| ToolkitError::invalid("destination has no parent"))?;
     fs::create_dir_all(parent)?;
     let mut selected = None;
     for _ in 0..64 {
+        check()?;
         let temporary = parent.join(format!(
             ".lycheedev-{}-{}-{}.tmp",
             std::process::id(),
@@ -191,8 +209,12 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         )
     })?;
     let result = (|| {
-        file.write_all(bytes)?;
+        for chunk in bytes.chunks(64 << 10) {
+            check()?;
+            file.write_all(chunk)?;
+        }
         file.sync_all()?;
+        check()?;
         drop(file);
         lycheedev_windows::durable_replace(&temporary, path)
             .map_err(|e| ToolkitError::new("vault.publish", e, 5))?;
@@ -283,5 +305,42 @@ impl ExclusiveLock {
 impl Drop for ExclusiveLock {
     fn drop(&mut self) {
         let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
+
+#[cfg(test)]
+mod controlled_publication_tests {
+    use super::*;
+    #[test]
+    fn cancellation_after_stage_sync_before_publish_preserves_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "lycheedev-controlled-publish-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("marker.json");
+        fs::write(&path, b"original").unwrap();
+        let control = crate::control::OperationControl::default();
+        let mut checks = 0;
+        let error = atomic_write_with_check(&path, b"replacement", || {
+            checks += 1;
+            // Entry, staging admission, one block, then after sync. Cancel at
+            // that final boundary; cancelling only at entry misses the race.
+            if checks == 4 {
+                control.cancel_handle().store(true, Ordering::Release);
+            }
+            control.check()
+        })
+        .unwrap_err();
+        assert_eq!(checks, 4);
+        assert_eq!(error.code, "command.cancelled");
+        assert_eq!(error.exit_code, 7);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
     }
 }

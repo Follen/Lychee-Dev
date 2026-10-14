@@ -164,7 +164,11 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                     3,
                 ));
             }
-            slots::preflight(target.parent().unwrap(), request.version)?;
+            slots::preflight_controlled(
+                target.parent().unwrap(),
+                request.version,
+                request.control,
+            )?;
             let previous = installation::inspect(&target, "addon")?;
             if !["managed", "absent"].contains(&previous["state"].as_str().unwrap_or(""))
                 || previous["state"] == "managed"
@@ -188,7 +192,11 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
             };
             fs::create_dir_all(path.parent().unwrap())?;
             storage::guard_path(path.parent().unwrap(), &path)?;
-            storage::atomic_json(&path, &record)?;
+            storage::atomic_write_controlled(
+                &path,
+                &serde_json::to_vec_pretty(&record)?,
+                request.control,
+            )?;
             (path, record)
         }
     } else {
@@ -242,7 +250,13 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
     let wanted = serde_json::to_value(&record.wanted)?;
     let advance = (|| -> Result<()> {
         if record.phase == "complete" {
-            installation::verify_clean(&target, request.version, slots::TRANSPORT, slots::COUNT)?;
+            installation::verify_clean_controlled(
+                &target,
+                request.version,
+                slots::TRANSPORT,
+                slots::COUNT,
+                request.control,
+            )?;
             return Ok(());
         }
         if record.phase == "prepared" {
@@ -284,7 +298,11 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                 ));
             }
             record.phase = "main".into();
-            storage::atomic_json(&path, &record)?;
+            storage::atomic_write_controlled(
+                &path,
+                &serde_json::to_vec_pretty(&record)?,
+                request.control,
+            )?;
         }
         if record.phase == "main" {
             request.control.check()?;
@@ -296,14 +314,28 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                     4,
                 ));
             }
-            slots::install(target.parent().unwrap(), request.version)?;
+            slots::install_controlled(target.parent().unwrap(), request.version, request.control)?;
             record.phase = "slots".into();
-            storage::atomic_json(&path, &record)?;
+            storage::atomic_write_controlled(
+                &path,
+                &serde_json::to_vec_pretty(&record)?,
+                request.control,
+            )?;
         }
         request.control.check()?;
-        installation::verify_clean(&target, request.version, slots::TRANSPORT, slots::COUNT)?;
+        installation::verify_clean_controlled(
+            &target,
+            request.version,
+            slots::TRANSPORT,
+            slots::COUNT,
+            request.control,
+        )?;
         record.phase = "complete".into();
-        storage::atomic_json(&path, &record)?;
+        storage::atomic_write_controlled(
+            &path,
+            &serde_json::to_vec_pretty(&record)?,
+            request.control,
+        )?;
         Ok(())
     })();
     if let Err(error) = advance {

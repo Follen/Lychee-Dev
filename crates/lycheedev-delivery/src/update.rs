@@ -192,7 +192,7 @@ pub fn managed_with_control(
             let path = lycheedev_core::client::addon_destination(&client)?;
             let guard = InstallationGuard::acquire(&path)?;
             guard.require_idle()?;
-            slots::preflight(path.parent().unwrap(), version)?;
+            slots::preflight_controlled(path.parent().unwrap(), version, control)?;
             (Some(client), path)
         } else {
             if target
