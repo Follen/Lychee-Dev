@@ -36,6 +36,7 @@ MAX_PATCHES = 16
 MAX_PATH_BYTES = 1024
 MAX_DEPTH = 32
 PREPARE_SECONDS = 300
+WINDOWS = os.name == 'nt'
 HEX = re.compile(r'^[0-9a-f]{64}$')
 HUNK = re.compile(rb'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: [^\r\n]*)?\n$')
 
@@ -53,10 +54,33 @@ def is_reparse(info):
     return stat.S_ISLNK(info.st_mode) or bool(getattr(info, 'st_file_attributes', 0) & 0x400)
 
 
+def stat_fields(info, *, cross_view=False):
+    fields = {name: getattr(info, name, None) for name in (
+        'st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns',
+        'st_ctime_ns', 'st_nlink', 'st_file_attributes', 'st_birthtime_ns')}
+    if cross_view and WINDOWS:
+        # CPython 3.12 Windows path stat exposes birthtime as ctime, while
+        # fstat exposes ChangeTime. Path stat also derives executable bits
+        # from the filename. Neither difference denotes file mutation.
+        # Full same-view snapshots below still retain ctime and permissions.
+        fields.pop('st_ctime_ns')
+        fields['st_mode'] = stat.S_IFMT(info.st_mode)
+    return fields
+
+
 def stamp(info):
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
-            info.st_mtime_ns, info.st_ctime_ns, info.st_nlink,
-            getattr(info, 'st_file_attributes', 0))
+    return tuple(stat_fields(info).values())
+
+
+def assert_stat_equal(before, after, phase, *, cross_view=False):
+    left = stat_fields(before, cross_view=cross_view)
+    right = stat_fields(after, cross_view=cross_view)
+    differences = {key: {'before': left[key], 'after': right[key]}
+                   for key in left if left[key] != right[key]}
+    if differences:
+        # Fixed field names and numeric stat values keep diagnostics bounded.
+        raise ValueError('emmy.file_changed: ' + json.dumps(
+            {'phase': phase, 'differences': differences}, separators=(',', ':')))
 
 
 def check_ancestors(path):
@@ -118,11 +142,11 @@ def open_regular(path, limit, *, expected_size=None):
     flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, 'rb') as stream:
-        if stamp(os.fstat(stream.fileno())) != stamp(before):
-            raise ValueError('emmy.file_changed')
+        opened = os.fstat(stream.fileno())
+        assert_stat_equal(before, opened, 'path_to_handle', cross_view=True)
         yield stream, before
-        if stamp(os.fstat(stream.fileno())) != stamp(before) or stamp(path.lstat()) != stamp(before):
-            raise ValueError('emmy.file_changed')
+        assert_stat_equal(opened, os.fstat(stream.fileno()), 'handle_after_read')
+        assert_stat_equal(before, path.lstat(), 'path_after_read')
 
 
 def read_regular(path, limit, *, expected_size=None, collect=False, deadline=None):
@@ -188,7 +212,9 @@ def inventory(root, expected=None, *, deadline=None):
                 path = current / entry.name
                 name = portable_path(path.relative_to(root).as_posix())
                 claim_path(name, aliases)
-                info = entry.stat(follow_symlinks=False)
+                # Windows DirEntry.stat caches FindFirstFile data, whose
+                # inode/device/link-count are zero. Query the path instead.
+                info = path.lstat()
                 if is_reparse(info):
                     raise ValueError('emmy.symlink_in_tree')
                 if stat.S_ISDIR(info.st_mode):

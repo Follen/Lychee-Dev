@@ -212,6 +212,12 @@ source query默认limit由10修为固定Go的50，显式1..200边界保留；新
 
 Windows新增独立windows-product-foundation job，无needs静态差分门槛：官方Rust1.99、固定recipe下载/校验、Node/Python自身测试、受控locked fetch、workspace all-target check、client metadata/CLI contract/Source query参数unit fixtures。各执行组在依赖准备成功后独立继续，保留真实失败和每次receipt/log；不运行游戏、真实输入或整个Live integration。已做YAML/命令路径/筛选/权限独立静态复核，实际hosted结果等待此批精确commit；不得把配置存在叫测试通过。
 
+### Windows首次执行与准备器平台修复
+
+精确commit2f42f1e的run38618178216/job116038552475实际安装Rust1.99 MSVC成功，但Python3.12.10准备器在首次读取files.json时误报emmy.file_changed；Cargo未开始，产物测试均未运行。该失败发生在scratch创建前，完整job日志保留，不能说已有构建receipt或产品通过。独立比对CPython源码确认Windows path stat的ctime=创建时间与fstat ChangeTime不同，path stat还按文件名补可执行位；DirEntry.stat则可能提供零dev/ino/nlink。
+
+本次最小修复只规范化Windows跨接口比较中的ctime/权限表示；path/path及handle/handle仍比较完整字段，跨接口保留真实dev/ino/类型/大小/mtime/nlink/attributes/birthtime，差异诊断有界。目录扫描改用fresh path.lstat。作者42项完整Linux准备测试与新增immutable .exe/utime单项通过（共43），独立审核者6项平台stat模拟回归通过；实际Windows重跑待该修复commit。修复文件从隔离stage发布，正在运行的旧Linux库check保持原recipe不被改动；两者证据不可混用。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

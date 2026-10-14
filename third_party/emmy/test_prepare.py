@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 import os
 import stat
+from types import SimpleNamespace
 
 SPEC = importlib.util.spec_from_file_location('prepare_emmy', Path(__file__).with_name('prepare.py'))
 prep = importlib.util.module_from_spec(SPEC)
@@ -57,6 +58,15 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual((self.destination / 'a.txt').read_bytes(), b'new\n')
         self.archive.unlink()
         prep.prepare(self.archive, self.destination, check_only=True)
+
+    def test_immutable_executable_filename_with_changed_metadata(self):
+        # On Windows .exe derives path permission bits; utime makes the
+        # handle ChangeTime differ from the path's legacy creation ctime.
+        target = self.root / 'immutable.exe'
+        target.write_bytes(b'content')
+        os.utime(target, ns=(1000000000000000000, 1000000000000000000))
+        checksum, _ = prep.read_regular(target, 100)
+        self.assertEqual(checksum, prep.digest(b'content'))
 
     def test_archive_tamper_is_rejected(self):
         self.archive.write_bytes(b'bad')
@@ -318,6 +328,62 @@ class PrepareTests(unittest.TestCase):
         patch = b'--- /dev/null\n+++ b/a\n@@ -0,0 +1 @@\n+12345\n'
         with mock.patch.object(prep, 'MAX_FILE_BYTES', 4), self.assertRaisesRegex(ValueError, 'patch_budget'):
             prep.apply_patch(self.destination, patch)
+
+class StatViewTests(unittest.TestCase):
+    @staticmethod
+    def info(**changes):
+        fields = {'st_dev': 123, 'st_ino': 456, 'st_mode': stat.S_IFREG | 0o666,
+                  'st_size': 100, 'st_mtime_ns': 200, 'st_ctime_ns': 300,
+                  'st_nlink': 1, 'st_file_attributes': 32, 'st_birthtime_ns': 300}
+        fields.update(changes)
+        return SimpleNamespace(**fields)
+
+    def test_windows_distinct_ctime_and_filename_permissions(self):
+        path = self.info(st_mode=stat.S_IFREG | 0o777)
+        handle = self.info(st_ctime_ns=400)
+        with mock.patch.object(prep, 'WINDOWS', True):
+            prep.assert_stat_equal(path, handle, 'path_to_handle', cross_view=True)
+            prep.assert_stat_equal(path, path, 'path_after_read')
+            prep.assert_stat_equal(handle, handle, 'handle_after_read')
+
+    def test_windows_same_view_changes_are_not_masked(self):
+        for field, value in [('st_ctime_ns', 999), ('st_mode', stat.S_IFREG | 0o444)]:
+            with self.subTest(field=field), mock.patch.object(prep, 'WINDOWS', True), self.assertRaisesRegex(ValueError, field):
+                prep.assert_stat_equal(self.info(), self.info(**{field: value}), 'handle_after_read')
+
+    def test_windows_cross_view_identity_size_time_type_links_attributes(self):
+        for field, value in [('st_dev', 999), ('st_ino', 999), ('st_size', 999),
+                             ('st_mtime_ns', 999), ('st_birthtime_ns', 999),
+                             ('st_nlink', 2), ('st_file_attributes', 0x400),
+                             ('st_mode', stat.S_IFDIR | 0o777)]:
+            with self.subTest(field=field), mock.patch.object(prep, 'WINDOWS', True), self.assertRaisesRegex(ValueError, field):
+                prep.assert_stat_equal(self.info(), self.info(**{field: value}), 'path_to_handle', cross_view=True)
+
+    def test_posix_cross_view_retains_ctime_and_permissions(self):
+        for field, value in [('st_ctime_ns', 999), ('st_mode', stat.S_IFREG | 0o444)]:
+            with self.subTest(field=field), mock.patch.object(prep, 'WINDOWS', False), self.assertRaisesRegex(ValueError, field):
+                prep.assert_stat_equal(self.info(), self.info(**{field: value}), 'path_to_handle', cross_view=True)
+
+    def test_diagnostics_include_phase_and_differing_numeric_fields(self):
+        with self.assertRaisesRegex(ValueError, 'emmy.file_changed') as caught:
+            prep.assert_stat_equal(self.info(), self.info(st_size=999), 'path_to_handle')
+        detail = json.loads(str(caught.exception).split(': ', 1)[1])
+        self.assertEqual(detail, {'phase': 'path_to_handle', 'differences': {'st_size': {'before': 100, 'after': 999}}})
+
+    def test_inventory_ignores_windows_findfirstfile_cached_stat(self):
+        with prep.ManagedScratch({}, ['python3', 'windows-direntry-fixture']) as job:
+            root = job.directory / 'source'
+            root.mkdir()
+            (root / 'a').write_bytes(b'a')
+            # Windows DirEntry metadata has zero dev/ino/nlink. The scanner
+            # must never use it for identity or link-count authorization.
+            entry = SimpleNamespace(name='a', stat=mock.Mock(side_effect=AssertionError('cached Windows stat must not be used')))
+            scan = mock.MagicMock()
+            scan.__enter__.return_value = iter([entry])
+            with mock.patch.object(prep.os, 'scandir', return_value=scan):
+                self.assertEqual(prep.inventory(root), [{'path': 'a', 'bytes': 1, 'sha256': prep.digest(b'a')}])
+            entry.stat.assert_not_called()
+
 
 class ScratchTests(unittest.TestCase):
     def helper_result(self, terminal):
