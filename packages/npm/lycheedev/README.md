@@ -1,23 +1,33 @@
 # Lychee Dev Toolkit
 
-用于魔兽世界插件开发的原生 Go CLI：Source 调查、DB2/SQL、Hotfix、资源导出和游戏内 Live 验证。
+魔兽世界插件开发工具：查源码、读取 DB2/SQL 和 Hotfix、导出资源，以及通过配套 addon 执行实机 Lua 探针。
 
-[项目文档](https://github.com/Follen/Lychee-Dev#readme) · [开发基线](https://github.com/Follen/Lychee-Dev/blob/main/Design.md) · [更新记录](https://github.com/Follen/Lychee-Dev/blob/main/Changelog.md)
+[项目文档](https://github.com/Follen/Lychee-Dev#readme) · [设计](https://github.com/Follen/Lychee-Dev/blob/main/Design.md) · [更新记录](https://github.com/Follen/Lychee-Dev/blob/main/Changelog.md)
 
-需要 Windows amd64 和 Node.js 22.14.0 及以上。启动器没有运行时 npm 依赖，不下载替代可执行文件。
+## 安装
 
-    npm install --global lycheedev@next --ignore-scripts
-    lycheedev version --format json
-    lycheedev describe --format json
+需要 Windows amd64 和 Node.js 22.14.0 或以上。
 
-包内包含原生 CLI、addon、Agent Skill、LuaLS 工具资源、发行清单与许可文件。npm 安装不会自动部署游戏插件或 Skill；组件安装与升级通过 CLI 显式执行。
+```powershell
+npm install --global lycheedev@next --ignore-scripts
+lycheedev version --format json
+lycheedev describe --format json
+```
 
-    $release = Join-Path (npm root -g) 'lycheedev'
-    lycheedev addon install --release $release --installation 'D:/Game/World of Warcraft/_retail_'
-    lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
+启动器没有运行时 npm 依赖。包内包含原生 CLI、addon、Agent Skill、LuaLS 工具资源、发行清单和许可文件。
 
-仓库当前文档以 3.2.0 开发基线为准，可能领先于本包。以 version 和 describe 确认已安装版本的能力；Live 需要配套的受管插件与运行时。
+## 部署组件
 
-Source、Data 和 Assets 无需启动游戏。Live 使用固定客户端和持久连接，恢复时保留原 project、CON、request 及预算。当前协议与已验证产品范围以对应版本文档为准。
+安装 npm 包后，按需要部署游戏插件和 Skill：
 
-项目采用 MIT；第三方许可见包内 LICENSE 和 THIRD_PARTY_NOTICES。
+```powershell
+$release = Join-Path (npm root -g) 'lycheedev'
+lycheedev addon install --release $release --installation 'D:/Game/World of Warcraft/_retail_'
+lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
+```
+
+Source、Data 和 Assets 无需启动游戏。Live 需要运行中的客户端和配套受管插件；恢复时保留原 project、CON、request 与预算。
+
+仓库采用 3.2.0 开发基线，可能领先于本包。以已安装版本的 `version`、`describe` 和 `--help` 确认能力。
+
+项目代码采用 MIT，第三方组件声明见包内 LICENSE 与 THIRD_PARTY_NOTICES。

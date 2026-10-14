@@ -50,4 +50,8 @@ Check tools/version.mjs --check and the Skill contract when their inputs change.
 
 Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; preserve latest at 2.5.1 unless the user explicitly changes that policy. Published artifacts are immutable.
 
-Temporary work belongs in ignored .tmp. Keep reusable tests in tests/ and current documentation concise. Do not delete .lycheedev, another task's worktree, or another task's changes as repository hygiene.
+Temporary work belongs in ignored .tmp/<task>/ and is removed when the task ends. Keep reusable tests in tests/ and current documentation concise; do not create permanent run diaries or archive copies for routine work.
+
+Before cleanup, distinguish active .lycheedev projects from completed experiments and inspect worktree changes and ignored files. Remove only targets covered by the user's cleanup scope, using checked absolute paths and git worktree remove where applicable. Preserve explicitly retained worktrees; .worktrees/rust-refactor is currently retained. Do not discard unrelated edits or unresolved recovery records.
+
+For documentation-only hygiene, check links, referenced paths and affected packaging contracts. Do not rerun full Go or real-client suites when no executable behavior changed.

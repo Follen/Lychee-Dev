@@ -2,89 +2,90 @@
 
 <img src="addon/Media/Logo.png" width="80" alt="Lychee Dev" />
 
-用于魔兽世界插件开发的 Go CLI、游戏内 Lua 工作台和 Agent Skill。把源码调查、游戏数据、资源导出和实机验证放在同一套工具里。
+魔兽世界插件开发工具：一个 Go CLI、一套游戏内 Lua 工作台，以及配套 Agent Skill。用于查源码、读游戏数据、导出资源和验证真实客户端行为。
 
-[设计](Design.md) · [更新记录](Changelog.md) · [待办与验证范围](todo.md) · [Live 协议](docs/live-protocol.md) · [开发与发布](docs/development.md)
+[设计](Design.md) · [Live 协议](docs/live-protocol.md) · [开发指南](docs/development.md) · [更新记录](Changelog.md) · [待办与验证范围](todo.md)
 
-**当前文档以 3.2.0 开发基线为准。** 版本源仍为 3.1.2，3.2.0 尚未发布；从 npm 安装的版本不自动等于仓库当前代码。
+**当前仓库采用 3.2.0 开发基线，尚未发布 3.2.0。** 发行版本以 [release/version.json](release/version.json) 为准，目前仍为 3.1.2。
 
-## 能做什么
+## 功能
 
-| 入口 | 能力 |
+| 入口 | 用途 |
 | --- | --- |
-| Source | 固定 Blizzard UI 或第三方插件的 Git 提交，检索 Lua/XML/TOC，查询定义、引用、上下文和秘密值流；支持批量请求 |
-| Data | 固定产品、地区和构建，从本地 CASC 或远端 CDN 读取 DB2，执行只读 SQL，查询法术、物品和其他关联记录 |
-| Assets / Hotfix | 搜索和导出资源，转换支持的图片格式，按明确来源读取 Hotfix |
-| Live | 通过 500 个 LoD 槽和 Mailbox 执行有预算的 Lua 探针，核实报告、清理资源并恢复中断 |
-| 工作台 | 游戏内输入 /dev，使用 Run、Diagnostics、Inspector、Events、Function Trace 等工具 |
-| Agent Skill | 按问题选择调查路径，保留固定引用、原连接和请求，按真实验证范围报告结果 |
+| Source | 固定 Git 提交，搜索 Lua/XML/TOC，查定义、引用、上下文和数据流；支持批量请求 |
+| Data | 从本地 CASC 或远端 CDN 读取固定构建的 DB2，执行只读 SQL，查关联记录 |
+| Hotfix / Assets | 按固定来源查 Hotfix、搜索资源和导出支持的文件格式 |
+| Live | 向选定客户端执行有预算的 Lua 探针，读取报告，完成释放、重载和中断恢复 |
+| 游戏内工作台 | 输入 `/dev` 使用 Run、Diagnostics、Inspector、Events、Function Trace |
+| Agent Skill | 按任务选择工具，保留来源、连接和请求，报告实际验证范围 |
 
-Source、Data 和 Assets 不需要启动游戏。Live 需要 Windows amd64、运行中的客户端，以及已加载的配套受管插件。
+Source、Data 和 Assets 不需要启动游戏。Live 需要 Windows amd64、已进入角色的客户端及配套受管插件。
 
-## 产品
+## 支持的产品
 
-| CLI product | 客户端目录 | Source 分支 |
+| 产品 | CLI product | 常见客户端目录 |
 | --- | --- | --- |
-| retail | _retail_ | live |
-| classic | _classic_ | classic |
-| classic-era | _classic_era_ | classic_era |
-| titan | _classic_titan_ | classic_titan |
-| forever-asia-beta | _classic_beta_ | forever |
-| forever-cn-beta | _cn_beta_ | forever |
-| anniversary | _anniversary_ | classic_anniversary |
+| 正式服 | `retail` | `_retail_` |
+| 怀旧服 | `classic` | `_classic_` |
+| 经典旧世 | `classic-era` | `_classic_era_` |
+| 时光服 | `titan` | `_classic_titan_` |
+| 无限亚服测试服 | `forever-asia-beta` | `_classic_beta_` |
+| 无限国服测试服 | `forever-cn-beta` | `_cn_beta_` |
+| 周年服 | `anniversary` | `_anniversary_` |
 
-两个无限测试服共享 forever 源码分支，但 Data 的产品、地区和构建配置独立。目录用于发现候选，实际身份取自安装元数据。
+目录用于发现安装，产品身份取自客户端元数据。两个无限测试服共享上游 `forever` 源码分支，数据产品、地区和构建配置分别固定。完整映射见 [设计](Design.md)。
 
-七产品已完成源码同步、本地/CDN 数据抽样读取，以及当前 Live 协议的容量轮换与释放后续跑；Retail 另完成双实例验证。Addon 包含周年服 20506 配置和独立事件目录。亚服更新到 1.60.1.70374 后，现有 CLI 无需新增固定 RVA 或 hash 适配，即完成定位、执行和容量测试。具体范围见 [todo.md](todo.md)。
+七产品均完成 Source 同步、本地/CDN 数据抽样，以及当前协议的 500 槽容量轮换和释放后续跑；Retail 另完成同安装双实例测试。通过范围及未完成场景见 [todo.md](todo.md)。
 
-## 从仓库运行当前基线
+## 使用当前仓库
 
-需要 Git、Go 1.27.1；Node.js 22.14.0 及以上用于 npm 启动器和维护脚本。
+开发环境：Windows amd64、Git、Go 1.27.1、Node.js 22.14.0 或以上。
 
-    go build -o .tmp/lycheedev.exe ./cmd/lycheedev
-    ./.tmp/lycheedev.exe version --format json
-    ./.tmp/lycheedev.exe describe --format json
+```powershell
+go build -o .tmp/lycheedev.exe ./cmd/lycheedev
+./.tmp/lycheedev.exe version --format json
+./.tmp/lycheedev.exe describe --format json
+```
 
-describe 是命令和参数的唯一目录。需要具体用法时，使用相应命令的 --help；不要照搬旧版本命令。
+`describe` 是当前 CLI 的命令与参数目录；具体命令使用 `--help`。开发版插件需通过配套 stage 和受管安装部署，步骤见 [开发指南](docs/development.md)。
 
-## 使用已发布 npm 包
+## 使用 npm 发行包
 
-    npm install --global lycheedev@next --ignore-scripts
-    lycheedev version --format json
-    lycheedev describe --format json
+```powershell
+npm install --global lycheedev@next --ignore-scripts
+lycheedev version --format json
+lycheedev describe --format json
+```
 
-npm 包包含原生 Windows 可执行文件、插件、Skill 和发行清单。安装 npm 包不会自动修改游戏目录或部署 Skill。
+包内包含原生 CLI、addon、Skill、LuaLS 工具资源和发行清单。安装 npm 包后，按目标路径部署组件：
 
-PowerShell 中可从已安装发行包部署：
+```powershell
+$release = Join-Path (npm root -g) 'lycheedev'
+lycheedev addon install --release $release --installation 'D:/Game/World of Warcraft/_retail_'
+lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
+```
 
-    $release = Join-Path (npm root -g) 'lycheedev'
-    lycheedev addon install --release $release --installation 'D:/Game/World of Warcraft/_retail_'
-    lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.agents/skills/lycheedev')
+仓库文档可能领先于 npm 包，以已安装版本的 `version` 和 `describe` 为准。升级与恢复见 [安装指南](skills/lycheedev/references/installation.md)。
 
-已有安装的升级与恢复按 [安装指南](skills/lycheedev/references/installation.md) 执行。开发版 Live 需要与 CLI 配套的受管发行包，不能通过覆盖复制 addon 目录绕过安装清单。
+## Live
 
-## Live 的工作方式
+协议名称为 **Lycheedev mailbox protocol v1**。
 
-当前协议名称统一为 **Lycheedev mailbox protocol v1**。
+CLI 在运行时通过指令特征和 RIP 相对位移找到 Lua 根，沿 Lua state → globals → Mailbox 读取。500 个 LoD 槽承载指令，正式快捷键触发执行与重载：
 
-- CLI 通过运行时指令特征和 RIP 相对位移找到 Lua 根，再沿 Lua state → globals → Mailbox 读取。
-- 500 个 LoD 槽承载输入信封，独立快捷键负责执行和重载。
-- 默认执行键为 Ctrl+Alt+F12，重载键为 Ctrl+Alt+F11；CLI 使用 Mailbox 公布的实际有效绑定。
-- 普通编辑框透传这两个动作，保留文字、光标和焦点。Native Live 不发送 Esc 或聊天文字。
-- 每个进程有独立连接；共享安装的多实例通过槽预约协调。
-- 读取期间快照变化会在原期限内重读。已提交或结果未知的输入不会因恢复而重复发送。
-- 玩家按住修饰键时等待松开；已核实报告的释放回执持续缺失时，自动重载完成清理，保留原报告。
+| 动作 | 默认绑定 |
+| --- | --- |
+| 执行 CLI 指令 | Ctrl+Alt+F12 |
+| 重载插件 | Ctrl+Alt+F11 |
 
-首次安装或连接异常先用 live doctor。doctor 默认只读；--fix 复用受管安装和原连接恢复。插件尚未加载、没有可验证 INPUT 时，需要在指定客户端手动重载一次。完整规则见 [协议](docs/live-protocol.md)。
+实际键位由新鲜的 Mailbox INPUT 公布。普通编辑框选择性透传这两个动作，保留文字和焦点；CLI 发送输入前等待玩家松开相关实体按键。
 
-## 给 Agent
+每个客户端进程有独立连接，共享安装通过槽预约协调。中断沿原连接和请求恢复；报告核实与资源清理分别记录。已提交但结果未知的输入不会重放。
 
-使用仓库内的 [lycheedev Skill](skills/lycheedev/SKILL.md)。先读取实际命令合同，再选择 Source、Data、Assets 或 Live；跨调用保留 pin、project、CON 和 request。
+首次连接或异常先运行 `live doctor`；需要修复时用 `live doctor --fix`。首次安装尚无可验证 INPUT 时，需要在指定客户端手动重载一次。详细规则见 [Live 协议](docs/live-protocol.md)。
 
-缺失密钥、部分数据、语义分析边界和未运行的实机项目应如实报告。静态检查、fixture 通过和实机通过是不同事实。
+## 开发与许可
 
-## 参与开发
+Agent 从 [lycheedev Skill](skills/lycheedev/SKILL.md) 开始。代码结构和合同见 [Design.md](Design.md)，测试与发布见 [开发指南](docs/development.md)。
 
-代码结构、接口合同和 UI 原则见 [Design.md](Design.md)；构建、测试、临时产物和发布流程见 [开发文档](docs/development.md)。
-
-项目代码采用 [MIT](LICENSE)。第三方许可及来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+项目代码采用 [MIT](LICENSE)。第三方组件、游戏元数据和素材说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

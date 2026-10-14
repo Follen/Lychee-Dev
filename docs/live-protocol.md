@@ -1,7 +1,7 @@
 # Lycheedev mailbox protocol v1
 
 本协议定义 3.2.0 开发基线中 Go CLI 与游戏内 Lua addon 的 Native Live 行为。
-它替代旧的 Native 光学输入、三键接收器、Esc 焦点恢复和聊天命令重载方案。
+实现位于 `internal/bridge`、`internal/live/channel`、`internal/live/memory` 与 `addon/Bridge`。
 协议名称、schema 字段、transport 字段及槽 TOC 中的传输名称均使用同一个字面值：
 **Lycheedev mailbox protocol v1**。
 
@@ -171,7 +171,7 @@ submitted 仅证明消息已入队。缺失 outcome 或未知执行结果都不�
 安装更新作用于共享磁盘文件；每个运行实例是否加载新版本必须独立验证。
 doctor --fix 只对选定进程执行恢复；维护锁和原占用继续约束共享目录升级。
 
-## 8. 支持范围与验收
+## 8. 支持范围
 
 交付目录和 Addon profile 均包含 Retail、Classic、Classic Era、Titan、两种 Forever beta 与 Anniversary 七产品；不能由 Source/Data 可用推断 Live 实机验收已通过。
 产品差异归入 Compat、产品目录和运行时定位配方；两个 Beta 的源码 track 都是 forever，

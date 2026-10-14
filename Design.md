@@ -1,109 +1,94 @@
-# Lychee Dev Toolkit — 3.2.0 设计基线
+# Lychee Dev Toolkit 设计
 
-本文件描述当前实现。3.2.0 是开发基线名称，发行版本仍由 release/version.json 决定。变更摘要见 [Changelog.md](Changelog.md)，尚未完成的工作见 [todo.md](todo.md)。
+本文描述 3.2.0 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
-## 1. 产品与边界
+## 组成与职责
 
-一个 Go CLI、一套 Lua addon、一个 Agent Skill 和一个 npm 分发包共同交付。Windows amd64 是当前发行平台。Rust 重写不在当前计划中。
+产品交付 Go CLI、Lua addon、Agent Skill 和 npm 包，平台为 Windows amd64。Source、Data 和资源调查独立于游戏进程；Live 负责实际客户端执行和观察。
 
-源码与数据调查可以独立运行；只有游戏内观察和执行需要 Live。所有跨调用查询都使用固定来源，显式区分来源身份、结果完整性、业务成功与资源清理。
-
-## 2. 模块职责
-
-| 路径 | 职责 |
+| 模块 | 职责 |
 | --- | --- |
-| cmd/lycheedev、internal/command | 入口、命令合同、参数解析、模块错误到结果和退出码的映射 |
-| internal/selection | 产品目录、安装识别、固定 Source/Data/Changes pin、项目引用 |
-| internal/codebase | Git 源码、索引、搜索、关系、上下文、LuaLS 及有界数据流 |
-| internal/records | CASC/CDN、DB2、SQL、Hotfix、关联记录和资源解码 |
-| internal/live/channel、internal/live/memory | Native 连接状态机、日志恢复、运行时定位和只读 Mailbox |
-| internal/bridge | Go/Lua 共享记录、信封和协议类型 |
-| internal/delivery | 受管插件/Skill 安装、升级恢复、500 槽发布与迁移 |
-| internal/desktop | 固定窗口输入与 WGC 捕获 |
-| internal/evidence、internal/vault | 证据、完整性、缓存、预算与持久化 |
-| addon/Core、addon/Bridge、addon/Modules、addon/UI | 启动、兼容、协议、工作台模块与共享控件 |
-| skills/lycheedev、packages/npm/lycheedev | 调查编排和发行资源 |
+| `cmd/lycheedev`、`internal/command` | 命令合同、参数解析、选择与编排、结果和退出码 |
+| `internal/selection` | 产品目录、安装身份、Source/Data/Changes pin |
+| `internal/codebase` | Git 快照、索引、搜索、关系、上下文、LuaLS 和有界数据流 |
+| `internal/records` | CASC/CDN、DB2/SQL、Hotfix、关联记录和资源导出 |
+| `internal/live/channel`、`internal/live/memory` | Native 连接、恢复日志、运行时定位和 Mailbox 读取 |
+| `internal/bridge` | Go/Lua 共享信封、记录和协议类型 |
+| `internal/delivery` | 受管安装、升级、槽发布与迁移 |
+| `internal/desktop` | 固定窗口输入和 WGC 捕获 |
+| `internal/evidence`、`internal/vault` | 证据、缓存、预算和持久化 |
+| `addon/` | 启动、兼容层、Live bridge、工作台与共享 UI |
+| `skills/lycheedev/`、`packages/npm/lycheedev/` | 调查编排、启动器和发行资源 |
 
-业务状态属于负责该功能的模块。CLI 负责选择和编排，不在命令层复制协议。客户端差异集中在 Compat、ClientGate 和产品/运行时配方目录。
+业务状态由对应模块维护，命令层调用现有合同。客户端差异集中在产品目录、Compat、ClientGate、生成目录和运行时定位配方。
 
-## 3. 产品、安装与来源
+## 产品与来源
 
-internal/selection/products.go 定义七个交付产品；源码家族和交付轨道分别建模。
+`internal/selection/products.go` 定义交付产品。Source 家族和数据交付轨道分开建模。
 
-| product | Launcher/CDN 产品键 | 目录 | Source ref |
-| --- | --- | --- | --- |
-| retail | wow | _retail_ | live |
-| classic | wow_classic | _classic_ | classic |
-| classic-era | wow_classic_era | _classic_era_ | classic_era |
-| titan | wow_classic_titan | _classic_titan_ | classic_titan |
-| forever-asia-beta | wow_classic_beta | _classic_beta_ | forever |
-| forever-cn-beta | wow_cn_beta | _cn_beta_ | forever |
-| anniversary | wow_anniversary | _anniversary_ | classic_anniversary |
+| CLI product | Launcher/CDN 键 | 客户端目录 | Source ref | Interface |
+| --- | --- | --- | --- | --- |
+| retail | wow | _retail_ | live | 120100 |
+| classic | wow_classic | _classic_ | classic | 50504 |
+| classic-era | wow_classic_era | _classic_era_ | classic_era | 11509 |
+| titan | wow_classic_titan | _classic_titan_ | classic_titan | 38002 |
+| forever-asia-beta | wow_classic_beta | _classic_beta_ | forever | 16001 |
+| forever-cn-beta | wow_cn_beta | _cn_beta_ | forever | 16001 |
+| anniversary | wow_anniversary | _anniversary_ | classic_anniversary | 20506 |
 
-目录不是身份。读取可用的 .flavor.info、version.txt、.build.info 与配置内容；明确选中的客户端不能跳到兄弟目录。
+安装身份从 `.flavor.info`、`version.txt`、`.build.info` 等元数据解析；明确选中的客户端路径保持原选择。两个 Forever beta 共享源码家族，但独立固定地区、产品和构建配置。
 
-两个 Forever beta 可以共享 Source 家族 pin，但不共用区域 Data pin。相同 build 字符串不等于相同 BuildConfig。DataPin 固定产品、build、BuildConfig、CDNConfig、地区、locale 和 DBD 来源。
+Data pin 固定 product、build、BuildConfig、CDNConfig、region、locale 和 DBD 来源。同版本号不代表相同内容。主 addon 与 500 个 LoD 槽采用一致的多 Interface 声明，声明更新通过受管安装迁移。
 
-Addon 当前具有 Retail 120100、Classic 50504、Era 11509、Titan 38002、Forever 16001、Anniversary 20506 六个运行时 profile。周年服采用 2.5.6.70006 对应的 classic_anniversary 源码提交 2cfec7c00f0f24762d5ca35a4beb1e93c0cde328，生成独立的 1483 项事件目录；实机 GetBuildInfo 已确认 Interface 20506，探针已确认事件目录加载。主插件与 500 个 LoD 槽使用相同的多 Interface 声明，旧声明通过受管安装迁移。产品目录、API 基线和实机验收分别维护。
+周年服 API 基线为 `classic_anniversary` 提交 `2cfec7c00f0f24762d5ca35a4beb1e93c0cde328`（2.5.6.70006），具有独立的 1483 项事件目录。其他客户端基线保留在对应生成文件和运行时目录中。
 
-## 4. Source
+## Source
 
-source sync 固定仓库和 commit；index 生成可校验的结构事实。query、refs、context、flow 和 diff 在固定快照上工作。第三方源码的 API 环境也必须固定，不由当前安装目录隐式决定。
+`source sync` 固定仓库与提交，index 生成结构事实；query、refs、context、flow 和 diff 在固定快照上运行。第三方 addon 的 API 环境同样固定，避免读取时隐式换成另一个客户端。
 
-精确查询依次使用 exact、prefix、索引文本和正文；已命中高层时不再扫描低层。名称、路径和关系查找共用认证元数据，声明索引按需创建。初次读取仍验证完整快照。
+精确查询按 exact、prefix、索引文本、正文的顺序查找。已命中时停止向低层扫描；声明索引按需生成，请求内复用查找表、Git 文档与 API 环境。
 
-source batch 在一个请求中共享快照、查找表、Git batch、文档缓存、API 环境和 LuaLS worker：
+`source batch` 接收至多 64 KiB 的文件，包含 1–32 项 query、refs 或 context。整批共享 90 秒期限和请求级 LuaLS worker，保留输入顺序；每项各自返回 coverage、complete、truncated 和 cursor。部分条目失败不能被当作整批成功。显式 `session-reuse` 才复用跨请求 worker。
 
-- 请求文件最多 64 KiB，1–32 个条目，每项是 query、refs 或 context。
-- 整批共享既有 90 秒截止时间，每项独立返回 coverage、truncated、complete 和 cursor。
-- 结果保留输入顺序与 ID；某项失败时不把前半批报告为成功交付。
-- 默认 worker 在请求结束时回收；显式 session-reuse 才复用持久 worker。
+语义结果注明引擎及覆盖范围。`static-only` 保留静态证据；未知调用和条件传播不能证明 secret 值使用安全。
 
-语义结果说明所用引擎和覆盖范围。static-only 保留静态证据；秘密值传播的未知边和条件不能被解释为污染安全证明。
+## Data、Hotfix 与资源
 
-## 5. Data、Hotfix 与资源
+远端读取从指定产品和地区的 versions/cdns 固定配置；`--build` 精确匹配，CN 使用国服版本服务。来源缺失时返回缺口，不切到其他地区或产品。
 
-远端解析使用指定产品的 versions/cdns 清单并固定配置；--build 是精确条件。CN 使用国服版本服务，其余地区使用对应地区服务。地区缺失不能自动改用其他地区或产品。
+本地 CASC 按 pin 选择配置、索引和内容，优先读取 EKey 对应桶并验证完整键、代次和校验和。远端归档最多并发八项，按清单顺序确定结果，共享网络与内存预算；大索引使用稀疏读取。
 
-本地读取匹配已固定 pin 的 CASC 元数据，根目录按产品选择配置行；明确客户端路径保持原选择。缺文件、缺密钥、定义不匹配均返回具体缺口，不隐式切换 CDN。
+DB2、SQL、关联记录和资源导出共用固定数据身份。Hotfix 记录 provider、build、locale、过滤及分页范围。缺密钥、缺定义、截断或部分解码显式返回；原始内容和派生资源分别记录完整性。
 
-CDN 归档查找最多并发八个，按清单顺序判定结果，并共享网络/内存预算。小索引可合并读取，大索引保持稀疏访问。本地索引优先读取 EKey 对应桶，仍核验完整 EKey、索引代次与校验和。
+## Native Live
 
-DB2、SQL、关联记录和资源共用固定数据身份。Hotfix 保留 provider、build、locale、分页和过滤范围。缺密钥不等于空表；一页结果不等于完整表；原始内容与派生资源分别记录完整性。
+完整合同为 [Lycheedev mailbox protocol v1](docs/live-protocol.md)。
 
-## 6. Native Live
+**读取路径：** 运行时指令特征 → RIP 相对目标 → Lua state → globals → 命名 Mailbox。CLI 只读游戏内存，每次核验路径和发布对象。Native Live 不使用私有堆扫描、光学输入或聊天命令。
 
-详细合同见 [Lycheedev mailbox protocol v1](docs/live-protocol.md)。
+Forever 扫描主模块 `.text` 的可读区间，保留短读前缀，对剩余部分按页有界补读。所有命中先解析 RIP，再按目标根去重并验证 Lua/Mailbox；多个有效根报告歧义。扫描缺口与读取失败写入覆盖证据，部分覆盖下成功定位不代表全范围唯一。
 
-CLI 只读进程内存。运行时指令特征匹配和 RIP 相对解析得到 Lua 根，沿命名对象读取 Mailbox。每次读取核验指令、指针路径和发布对象；不扫描私有堆，不把旧地址当成当前输入许可。
+**输入路径：** 500 个不可重用的 LoD 槽承载信封；正式执行键触发 prepare → challenge → commit，独立重载键负责切换运行时。普通编辑框透传两个有效绑定，CLI 使用新鲜 INPUT 授权输入，不发送 Esc 或聊天文字。玩家按住相关实体键时等待松开。
 
-Forever 根扫描按主模块 `.text` 可读区间进行，保留短读前缀并按页补读未返回部分。多个命中先解析 RIP、按根去重，再验证 Lua/Mailbox；移除固定 Forever hash 的定位捷径。覆盖证据保留不可读缺口，部分扫描成功不等于全范围唯一。
+**身份与竞争：** 先固定 installation、PID、进程创建时间、HWND、build 和 product，再绑定 GUID、runtime、owner、fence。每个进程独立连接；共享安装使用短发布锁和持久槽预约，等待执行或回执时不占发布锁。
 
-输入通过 500 个不可重用的 LoD 槽和两个正式快捷键实现。prepare → challenge → commit 后执行业务，HEAD/BODY 确认报告，confirm/release 完成结果与资源清理。容量不足时独立重载并继续原请求。
+**结果与恢复：** HEAD/BODY 验证报告，confirm/release 完成确认与清理。reportState、report.ok 和 cleanup 分别表示字节已核实、业务成功和资源释放。输入意图先落盘，恢复沿原 project/CON/request 与期限继续，submitted/uncertain 输入不重放。
 
-目标固定 installation、PID、进程创建时间、HWND、build 和产品；绑定后增加 GUID、runtime、owner、fence。共享安装采用短发布锁和持久槽预约，业务等待不占发布锁。
+容量不足时重载并在新 runtime 继续原请求。报告已核实且 release 回执缺失超过 5 秒时，在原期限内允许一次独立重载清理；保留原报告，验证旧 runtime 退役后才记为清理完成。短暂读取变化在原调用内重读，不延长持久预算。
 
-输入先持久化 intent，后记录 not_sent、submitted 或 uncertain。恢复沿原 project/CON/request 继续，期限不重置；已提交或不确定输入不重放。瞬时 path_changed 在原调用中重读；仅已提交重载阶段等待暂时为空的 Lua 根或字符串布局。
+`live doctor` 只读检查，`--fix` 复用受管安装和原连接。首次没有兼容且新鲜的 INPUT 时，保留目标等待一次手动重载。
 
-reportState、report.ok、cleanup 表示不同事实。报告已核实但清理未完成时，报告仍可用，同时保留清理义务。
+## Addon 与工作台
 
-已发送 release 的精确回执持续缺失 5 秒时，CLI 在原操作期限内自动走一次重载清理。保留报告和原事务，不重发 release 或业务；只有旧 runtime 退役得到验证后才完成清理。实体修饰键按住时推迟发送，不强制松开玩家按键；发送成功入队仍不等于插件执行成功。
+未启用的业务功能不创建 frame、事件、hook、timer 或 OnUpdate。最小启动核拥有正式绑定和独立启动诊断，注册完成后不保留空闲采样；bridge 启用后才运行 INPUT 采样与编辑框透传。
 
-## 7. Addon 与工作台
+INPUT 采样框架独立于 UIParent，使挂机展示隐藏主 UI 时仍可更新状态。登录、加载、战斗以及 protected、forbidden、密码、secure text、secret 值边界仍须检查。
 
-未启用的业务功能不创建 frame、事件、hook、计时器或 OnUpdate。独立启动核注册正式绑定和启动诊断；注册完成后不保留空闲事件和计时器。启用 bridge 后的 INPUT 采样与普通 EditBox 透传是明确例外，停用时撤销。
+共享样式位于 `addon/UI/Theme.lua`，字体使用客户端字体；工作台不改写 Blizzard 对象来实现自身样式。中英文 locale 同步维护。
 
-INPUT 采样框架不依附 UIParent，挂机界面隐藏主 UI 时仍可发布输入状态；登录、加载、战斗及受限焦点检查保持有效。
+## CLI 与持久化
 
-受保护、forbidden、密码、secure text 和 secret 值属于边界。战斗和不可安全观察的输入状态不能授权机器输入。所有客户端分支集中在兼容层或生成目录。
-
-UI 使用 addon/UI/Theme.lua 的共享变量：深灰背景、浅色正文、荔枝红强调色；控件圆角 8、面板圆角 12、间距 6/10/16/24、图标点击区 32。字体使用客户端 STANDARD_TEXT_FONT。工作台不改动 Blizzard 对象来实现自身样式。中英文 locale 同步维护。
-
-## 8. CLI、持久化和证据
-
-internal/command/command_contract.go 同时生成 parser、help、describe 和 Skill 命令参考，不维护另一份手写命令目录。
-
-结果使用 lycheedev.result.v1。JSONL 只有合法 end 帧和 exit 0 才表示输出完成。截断、部分覆盖、缓存来源和未完成清理均显式返回。
+`internal/command/command_contract.go` 同时驱动 parser、help、describe 和 Skill 命令参考。结果使用 `lycheedev.result.v1`；JSONL 以合法 end 帧和 exit 0 表示输出完成。
 
 | 退出码 | 含义 |
 | --- | --- |
@@ -116,6 +101,4 @@ internal/command/command_contract.go 同时生成 parser、help、describe 和 S
 | 7 | 取消 |
 | 8 | 内部错误 |
 
-项目引用与运行记录保存在 .lycheedev，跨进程占用使用明确的锁和租约。缓存可以清理，未解决请求的日志不能当作缓存删除。既有旧版本用户数据不自动导入。
-
-源码 pin、命令参数和结果只记录复现需要的信息。常规开发不提交逐次运行的日志、内存快照、截图或整套发行副本；维护正式测试和当前状态即可。
+项目引用与恢复日志位于 `.lycheedev`，缓存与未完成请求分别管理。缺失来源、覆盖缺口和待清理状态必须保留。实机视觉证据使用 WGC，fixture 结果与真实客户端结果分别记录。

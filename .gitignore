@@ -9,8 +9,6 @@ __pycache__/
 
 # npm package build output
 node_modules/
-packages/cli/vendor/
-packages/cli/*.tgz
 
 # Native toolkit build output
 /lycheedev
@@ -21,7 +19,7 @@ packages/npm/lycheedev/payload/
 packages/npm/lycheedev/release.json
 packages/npm/lycheedev/*.tgz
 
-# Local working artifacts and evidence (never shipped)
+# Temporary outputs; remove completed task artifacts instead of accumulating them
 .tmp/
 .lycheedev/
 

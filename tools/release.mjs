@@ -1,5 +1,5 @@
 // Release assembly, sealing and release-gate checks for the lycheedev package
-// (docs/toolkit/release-2.0.2.md, regression REL-01..14 / PKG-01..08).
+// Current workflow and source/license contract: docs/development.md.
 // Subcommands are driven by .github/workflows/toolkit-release.yml and
 // toolkit-ci.yml. Nothing here publishes, tags, or mutates tracked sources.
 //
@@ -283,7 +283,7 @@ export function exportSourceIndex(destination, sourceRepository = repository) {
 }
 
 /**
- * Licensing closure (implementation-status.md): `git archive` of the exact
+ * Corresponding source (docs/licensing.md): `git archive` of the exact
  * commit + `go mod vendor` output + go.mod/go.sum + notices, provably buildable
  * offline, hashed into SHA256SUMS and the external sealed manifest.
  */

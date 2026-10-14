@@ -9,8 +9,6 @@ __pycache__/
 
 # npm package build output
 node_modules/
-packages/cli/vendor/
-packages/cli/*.tgz
 
 # Native toolkit build output
 /lycheedev
@@ -49,4 +47,8 @@ eggs/
 pip-wheel-metadata/
 wheels/
 # ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
-# 自定义规则写在下方（本行提示可删除）
+# Local task data and checkouts are excluded from indexing.
+.tmp/
+.lycheedev/
+/.worktrees/
+/.claude/worktrees/
