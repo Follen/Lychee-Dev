@@ -240,6 +240,13 @@ jobs:
       - name: Run formal Go mailbox v1 pure fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-mailbox-v1 --one-shot -- test --locked --offline -p lycheedev-live --lib go_mailbox_v1 -j 1
+      - name: Run formal mailbox input engine and identity fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-mailbox-input-unit --one-shot -- test --locked --offline -p lycheedev-windows --lib mailbox_input:: -j 1
+      - name: Run owned Windows mailbox input window fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-mailbox-input-window --one-shot -- test --locked --offline -p lycheedev-windows --test mailbox_input_fixture -j 1
       - name: Run production mailbox lookup and binding fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-mailbox-lookup --one-shot -- test --locked --offline -p lycheedev-live --test mailbox_lookup -j 1
