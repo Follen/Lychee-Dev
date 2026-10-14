@@ -1,5 +1,5 @@
 //! Selected named-field Lua lookup only. Public Mailbox supplies observations, never authority.
-use crate::locator::Layout;
+use crate::{go_mailbox_v1 as v1, locator::Layout};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 pub type Result<T> = std::result::Result<T, String>;
@@ -25,78 +25,61 @@ pub struct Record {
     pub checksum: u32,
     pub payload: Vec<u8>,
 }
-pub fn checksum(b: &[u8]) -> u32 {
-    let (mut lo, mut hi) = (1u32, 0u32);
-    for chunk in b.chunks(5552) {
-        for v in chunk {
-            lo += *v as u32;
-            hi += lo;
-        }
-        lo %= 65521;
-        hi %= 65521;
-    }
-    (hi << 16) | lo
+/// Existing consumers share the one fixed Go v3.2.0 wire codec. No 07 fallback.
+pub fn checksum(bytes: &[u8]) -> u32 {
+    v1::checksum(bytes)
 }
 pub fn encode(record: &Record) -> Result<Vec<u8>> {
-    if record.payload.len() > 524288 {
-        return Err("wire.payload_budget".into());
-    }
-    let mut h = b"LYCMEM07".to_vec();
-    for t in [&record.nonce, &record.runtime, &record.ticket] {
-        let v = hex::decode(t).map_err(|_| "wire.token")?;
-        if v.len() != 16 {
-            return Err("wire.token".into());
-        }
-        h.extend(v);
-    }
-    h.extend([record.kind, record.state, 0, 0]);
-    h.extend(record.sequence.to_le_bytes());
-    h.extend((record.payload.len() as u32).to_le_bytes());
-    h.extend(checksum(&record.payload).to_le_bytes());
-    h.extend(80u32.to_le_bytes());
-    h.extend(checksum(&h).to_le_bytes());
-    h.extend(&record.payload);
-    h.extend(b"LYCEND07");
-    h.extend(hex::decode(&record.nonce).unwrap());
-    h.extend(hex::decode(&record.runtime).unwrap());
-    Ok(h)
+    let header = v1::Header {
+        nonce: v1::parse_token(&record.nonce).map_err(|e| e.to_string())?,
+        runtime: v1::parse_token(&record.runtime).map_err(|e| e.to_string())?,
+        ticket: v1::parse_token(&record.ticket).map_err(|e| e.to_string())?,
+        kind: v1::Kind::try_from(record.kind).map_err(|e| e.to_string())?,
+        state: record.state,
+        sequence: record.sequence,
+        length: 0,
+        checksum: 0,
+    };
+    v1::encode_record(header, &record.payload).map_err(|e| e.to_string())
 }
 pub fn decode(bytes: &[u8]) -> Result<Record> {
-    if bytes.len() < 120
-        || bytes.len() > 524408
-        || &bytes[..8] != b"LYCMEM07"
-        || u32at(bytes, 72)? != 80
-        || checksum(&bytes[..76]) != u32at(bytes, 76)?
-    {
-        return Err("wire.header".into());
-    }
-    let len = u32at(bytes, 64)? as usize;
-    if len + 120 != bytes.len()
-        || &bytes[80 + len..88 + len] != b"LYCEND07"
-        || bytes[8..40] != bytes[88 + len..120 + len]
-        || checksum(&bytes[80..80 + len]) != u32at(bytes, 68)?
-    {
-        return Err("wire.integrity".into());
-    }
-    if !(1..=5).contains(&bytes[56]) || bytes[58] != 0 || bytes[59] != 0 {
-        return Err("wire.kind".into());
-    }
+    let record = v1::decode_record(bytes).map_err(|e| e.to_string())?;
     Ok(Record {
         address: 0,
-        nonce: hex::encode(&bytes[8..24]),
-        runtime: hex::encode(&bytes[24..40]),
-        ticket: hex::encode(&bytes[40..56]),
-        kind: bytes[56],
-        state: bytes[57],
-        sequence: u32at(bytes, 60)?,
-        checksum: u32at(bytes, 68)?,
-        payload: bytes[80..80 + len].to_vec(),
+        nonce: hex::encode(record.header.nonce),
+        runtime: hex::encode(record.header.runtime),
+        ticket: hex::encode(record.header.ticket),
+        kind: record.header.kind as u8,
+        state: record.header.state,
+        sequence: record.header.sequence,
+        checksum: record.header.checksum,
+        payload: record.payload.to_vec(),
     })
 }
-fn u32at(b: &[u8], at: usize) -> Result<u32> {
-    Ok(u32::from_le_bytes(
-        b.get(at..at + 4).ok_or("wire.short")?.try_into().unwrap(),
-    ))
+impl Record {
+    /// Borrow a previously decoded record for the fixed-release correlators.
+    /// Rechecks bounded payload integrity, never publication or input authority.
+    pub fn contract(&self) -> Result<v1::Record<'_>> {
+        if self.payload.len() > v1::MAX_PAYLOAD
+            || self.state == 0
+            || self.checksum != checksum(&self.payload)
+        {
+            return Err("bridge.memory_body_invalid".into());
+        }
+        Ok(v1::Record {
+            header: v1::Header {
+                nonce: v1::parse_token(&self.nonce).map_err(|e| e.to_string())?,
+                runtime: v1::parse_token(&self.runtime).map_err(|e| e.to_string())?,
+                ticket: v1::parse_token(&self.ticket).map_err(|e| e.to_string())?,
+                kind: v1::Kind::try_from(self.kind).map_err(|e| e.to_string())?,
+                state: self.state,
+                sequence: self.sequence,
+                length: self.payload.len() as u32,
+                checksum: self.checksum,
+            },
+            payload: &self.payload,
+        })
+    }
 }
 fn ptr(b: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(b[at..at + 8].try_into().unwrap())
@@ -121,6 +104,7 @@ struct Access<'a, M: Memory> {
     guards: Vec<(u64, Vec<u8>, bool)>,
     calls: u16,
     bytes: usize,
+    read_failed: bool,
 }
 impl<M: Memory> Access<'_, M> {
     fn read(&mut self, address: u64, size: usize, module: bool, guard: bool) -> Result<Vec<u8>> {
@@ -134,7 +118,10 @@ impl<M: Memory> Access<'_, M> {
         self.bytes += size;
         self.memory.charge(size as u64, size as u64)?;
         let mut bytes = vec![0; size];
-        self.memory.read(address, &mut bytes, module)?;
+        if let Err(error) = self.memory.read(address, &mut bytes, module) {
+            self.read_failed = true;
+            return Err(error);
+        }
         if guard {
             self.memory.charge(size as u64 + 128, size as u64)?;
             self.guards.push((address, bytes.clone(), module));
@@ -157,7 +144,13 @@ impl<M: Memory> Access<'_, M> {
     fn string(&mut self, address: u64, max: usize) -> Result<Vec<u8>> {
         let h = self.read(address, 32, false, false)?;
         let n = ptr(&h, 24) as usize;
-        if h[16] != 4 || n > max {
+        if h[16] != 4
+            || n > max
+            || address
+                .checked_add(32)
+                .and_then(|p| p.checked_add(n as u64))
+                .is_none()
+        {
             return Err("mailbox.string_layout".into());
         }
         self.guard(address + 16, &h[16..17])?;
@@ -167,18 +160,40 @@ impl<M: Memory> Access<'_, M> {
         }
         self.read(address + 32, n, false, true)
     }
-    fn record_string(&mut self, address: u64, max: usize) -> Result<Vec<u8>> {
+    fn record_string(&mut self, address: u64, selector: &v1::Selector) -> Result<Option<Record>> {
         let h = self.read(address, 32, false, false)?;
-        let n = ptr(&h, 24) as usize;
-        if h[16] != 4 || n < 120 || n > max {
+        let n = ptr(&h, 24);
+        let max = selector.body.map_or(16 << 10, |b| b.length as usize) + 120;
+        if h[16] != 4
+            || n < 120
+            || n > max as u64
+            || address
+                .checked_add(32)
+                .and_then(|p| p.checked_add(n))
+                .is_none()
+        {
             return Err("mailbox.record_length".into());
         }
         self.guard(address + 16, &h[16..17])?;
-        self.guard(address + 20, &h[20..32])?;
-        let bytes = self.read(address + 32, n, false, false)?;
-        self.guard(address + 32, &bytes[..80])?;
-        self.guard(address + 32 + n as u64 - 40, &bytes[n - 40..])?;
-        Ok(bytes)
+        self.guard(address + 24, &h[24..32])?;
+        let first = self.read(address + 32, v1::HEADER_BYTES, false, false)?;
+        let header =
+            v1::decode_header(&first).map_err(|e| format!("mailbox.record_invalid: {e}"))?;
+        // Match exact static HEAD predicates before allocating/reading BODY.
+        if !selector.matches(&header) {
+            return Ok(None);
+        }
+        if v1::HEADER_BYTES + header.length as usize + v1::TRAILER_BYTES != n as usize {
+            return Err("mailbox.record_identity".into());
+        }
+        let bytes = self.read(address + 32, n as usize, false, false)?;
+        if bytes[..v1::HEADER_BYTES] != first {
+            return Err("mailbox.record_changed".into());
+        }
+        self.memory.charge(header.length as u64 + 256, n * 4)?;
+        let mut record = decode(&bytes).map_err(|e| format!("mailbox.record_invalid: {e}"))?;
+        record.address = address + 32;
+        Ok(Some(record))
     }
     #[allow(
         clippy::manual_is_multiple_of,
@@ -228,7 +243,11 @@ impl<M: Memory> Access<'_, M> {
             self.guard(at + 48, &b[48..56])?;
             at = ptr(&b, 48);
         }
-        Err("mailbox.collision_budget".into())
+        if at == 0 {
+            Ok((0, 0))
+        } else {
+            Err("mailbox.collision_budget".into())
+        }
     }
     fn table(&mut self, parent: u64, name: &str) -> Result<u64> {
         let (v, t) = self.lookup(parent, name)?;
@@ -242,8 +261,17 @@ impl<M: Memory> Access<'_, M> {
 pub enum Selector {
     Identity,
     Input,
-    Receipt { nonce: String },
-    Body { head: Record },
+    /// Read-only startup diagnostics; never authorizes input.
+    Bootstrap,
+    Receipt {
+        nonce: String,
+    },
+    Confirmation {
+        nonce: String,
+    },
+    Body {
+        head: Record,
+    },
 }
 pub struct Reader<'a, M: Memory> {
     pub memory: &'a M,
@@ -265,13 +293,23 @@ impl<M: Memory> Reader<'_, M> {
         admission.admits_layout(&self.layout)?;
         self.lookup_admitted(selector)
     }
+    /// Additional caller predicates run only after the full Lua path/identity
+    /// guard. They cannot authorize old bytes or suppress a changed publication.
+    pub fn lookup_with_accept(
+        &self,
+        selector: &Selector,
+        accept: impl FnOnce(&Record) -> bool,
+    ) -> Result<Option<Record>> {
+        let record = self.lookup(selector)?;
+        let accepted = record.filter(accept);
+        // An Accept callback cannot suppress cancellation/selected-identity loss.
+        self.memory.verify()?;
+        Ok(accepted)
+    }
     fn lookup_admitted(&self, selector: &Selector) -> Result<Option<Record>> {
         self.memory.verify()?;
-        // Caller-owned selector strings/JSON cannot create unbounded work before
-        // the first path read. A head is only an observation; authentication is
-        // still the protocol caller's responsibility.
-        let head_json = match selector {
-            Selector::Receipt { nonce } => {
+        let body = match selector {
+            Selector::Receipt { nonce } | Selector::Confirmation { nonce } => {
                 if !token(nonce) {
                     return Err("mailbox.receipt_nonce".into());
                 }
@@ -290,23 +328,78 @@ impl<M: Memory> Reader<'_, M> {
                     head.payload.len() as u64 * 128 + 4096,
                     head.payload.len() as u64 * 4,
                 )?;
-                Some(
-                    serde_json::from_slice::<serde_json::Value>(&head.payload)
-                        .map_err(|_| "mailbox.body_head")?,
-                )
+                let contract = head.contract().map_err(|_| "mailbox.body_head")?;
+                let receipt =
+                    v1::decode_publication_receipt(&contract).map_err(|_| "mailbox.body_head")?;
+                if receipt.state != "reported" || receipt.report_bytes as usize > v1::MAX_PAYLOAD {
+                    return Err("mailbox.body_head".into());
+                }
+                Some(v1::BodyQualification {
+                    length: receipt.report_bytes,
+                    checksum: receipt.report_checksum,
+                })
             }
             _ => None,
         };
-        let mut a = Access {
+        let mut access = Access {
             memory: self.memory,
             layout: &self.layout,
             guards: Vec::new(),
             calls: 0,
             bytes: 0,
+            read_failed: false,
         };
+        let mut guards_checked = false;
+        let result = self
+            .lookup_access(selector, body, &mut access)
+            .and_then(|record| {
+                guards_checked = true;
+                access.verify()?;
+                Ok(record)
+            });
+        match result {
+            Ok(record) => Ok(record),
+            Err(error) => {
+                // Recheck only the captured prefix. A changed path can explain
+                // a retired object, but cannot hide cancellation or identity
+                // loss found during that recheck or at the error-return boundary.
+                let recheck = if !guards_checked
+                    && (access.read_failed
+                        || error.starts_with("mailbox.")
+                        || error.starts_with("memory.mailbox_incompatible:"))
+                    && error != "mailbox.path_changed"
+                {
+                    access.verify().err()
+                } else {
+                    None
+                };
+                let final_failure = self.memory.verify().err();
+                if recheck.as_deref() == Some("mailbox.path_changed") && final_failure.is_none() {
+                    return Err("mailbox.path_changed".into());
+                }
+                let mut cause = error;
+                for secondary in [recheck, final_failure].into_iter().flatten() {
+                    if !cause.lines().any(|line| line == secondary) {
+                        cause.push('\n');
+                        cause.push_str(&secondary);
+                    }
+                }
+                Err(cause)
+            }
+        }
+    }
+    fn lookup_access(
+        &self,
+        selector: &Selector,
+        body: Option<v1::BodyQualification>,
+        a: &mut Access<'_, M>,
+    ) -> Result<Option<Record>> {
         let root = a.read(self.root, 8, true, true)?;
         let state = ptr(&root, 0);
-        if state == 0 || state.checked_add(self.layout.state_globals + 24).is_none() {
+        if state == 0 {
+            return Err("mailbox.lua_state_null".into());
+        }
+        if state.checked_add(self.layout.state_globals + 24).is_none() {
             return Err("mailbox.state_address".into());
         }
         if a.read(state + 16, 1, false, true)? != [8] {
@@ -319,27 +412,39 @@ impl<M: Memory> Reader<'_, M> {
         a.guard(state + self.layout.state_globals, &globals[..10])?;
         let (ns, ns_tag) = a.lookup(ptr(&globals, 0), "LycheeDevInternal")?;
         if ns_tag == 0 {
-            a.verify()?;
             return Ok(None);
         }
         if ns_tag != 5 {
             return Err("mailbox.namespace_type".into());
         }
-        let (mb, mb_tag) = a.lookup(ns, "Mailbox")?;
+        let mailbox_field = if matches!(selector, Selector::Bootstrap) {
+            "BootstrapMailbox"
+        } else {
+            "Mailbox"
+        };
+        let (mb, mb_tag) = a.lookup(ns, mailbox_field)?;
         if mb_tag == 0 {
-            a.verify()?;
             return Ok(None);
         }
         if mb_tag != 5 {
             return Err("mailbox.publication_type".into());
         }
-        for (name, want) in [
-            ("schema", crate::MAILBOX_SCHEMA),
-            ("release", self.release.as_str()),
-        ] {
+        for (name, want) in [("schema", v1::SCHEMA), ("release", self.release.as_str())] {
             let (v, t) = a.lookup(mb, name)?;
-            if t != 4 || a.string(v, 64)? != want.as_bytes() {
+            if t != 4 {
                 return Err(format!("mailbox.identity:{name}"));
+            }
+            let actual = a.string(v, 64)?;
+            if actual != want.as_bytes() {
+                if name == "schema"
+                    && actual == v1::PREVIOUS_SCHEMA.as_bytes()
+                    && matches!(selector, Selector::Identity | Selector::Input)
+                {
+                    continue; // Read-only activation evidence, never old business records.
+                }
+                return Err(format!(
+                    "memory.mailbox_incompatible: mailbox_{name}_mismatch"
+                ));
             }
         }
         let (rt, t) = a.lookup(mb, "runtime")?;
@@ -350,26 +455,42 @@ impl<M: Memory> Reader<'_, M> {
         if !token(&runtime) {
             return Err("mailbox.runtime".into());
         }
-        let (field, key, maximum) = match selector {
-            Selector::Identity => ("identity", None, 16384),
-            Selector::Input => ("input", None, 16384),
-            Selector::Receipt { nonce } => ("receipts", Some(nonce.as_str()), 16384),
+        let runtime_bytes = v1::parse_token(&runtime).map_err(|_| "mailbox.runtime")?;
+        let mut wire = v1::Selector {
+            kind: v1::Kind::Identity,
+            nonce: v1::ZERO_TOKEN,
+            runtime: v1::ZERO_TOKEN,
+            ticket: v1::ZERO_TOKEN,
+            body,
+        };
+        let (field, key) = match selector {
+            Selector::Identity => ("identity", None),
+            Selector::Input => {
+                wire.kind = v1::Kind::Input;
+                ("input", None)
+            }
+            Selector::Bootstrap => {
+                wire.kind = v1::Kind::Bootstrap;
+                ("bootstrap", None)
+            }
+            Selector::Receipt { nonce } | Selector::Confirmation { nonce } => {
+                wire.kind = if matches!(selector, Selector::Confirmation { .. }) {
+                    v1::Kind::Confirmation
+                } else {
+                    v1::Kind::Receipt
+                };
+                wire.nonce = v1::parse_token(nonce).map_err(|_| "mailbox.receipt_nonce")?;
+                ("receipts", Some(nonce.as_str()))
+            }
             Selector::Body { head } => {
-                if head.runtime != runtime || head.kind != 2 {
-                    return Err("mailbox.body_head".into());
+                if head.runtime != runtime {
+                    return Ok(None);
                 }
-                let h = head_json.as_ref().ok_or("mailbox.body_head")?;
-                if h["state"] != "reported"
-                    || h["ticket"] != head.ticket
-                    || h["nonce"] != head.nonce
-                {
-                    return Err("mailbox.body_head".into());
-                }
-                let max = h["reportBytes"].as_u64().ok_or("mailbox.body_length")? as usize;
-                if max > 524288 {
-                    return Err("mailbox.body_length".into());
-                }
-                ("bodies", Some(head.ticket.as_str()), max)
+                wire.kind = v1::Kind::Body;
+                wire.runtime = runtime_bytes;
+                wire.nonce = v1::parse_token(&head.nonce).map_err(|_| "mailbox.body_head")?;
+                wire.ticket = v1::parse_token(&head.ticket).map_err(|_| "mailbox.body_head")?;
+                ("bodies", Some(head.ticket.as_str()))
             }
         };
         let (v, t) = if let Some(key) = key {
@@ -379,44 +500,19 @@ impl<M: Memory> Reader<'_, M> {
             a.lookup(mb, field)?
         };
         if t == 0 {
-            a.verify()?;
             return Ok(None);
         }
         if t != 4 {
             return Err("mailbox.record_type".into());
         }
-        let bytes = a.record_string(v, maximum + 120)?;
-        self.memory
-            .charge(bytes.len() as u64 + 256, bytes.len() as u64 * 4)?;
-        let mut r = decode(&bytes)?;
-        r.address = v + 32;
-        if r.runtime != runtime {
-            return Err("mailbox.stale_record".into());
+        let record = a.record_string(v, &wire)?;
+        if record.as_ref().is_some_and(|r| r.runtime != runtime) {
+            return Err("mailbox.record_identity".into());
         }
-        match selector {
-            Selector::Identity if r.kind != 1 => return Err("mailbox.record_kind".into()),
-            Selector::Input if r.kind != 4 => return Err("mailbox.record_kind".into()),
-            Selector::Receipt { .. } if r.kind != 2 => return Err("mailbox.record_kind".into()),
-            Selector::Receipt { nonce } if &r.nonce != nonce => {
-                return Err("mailbox.receipt_nonce".into());
-            }
-            Selector::Body { head } => {
-                let h = head_json.as_ref().ok_or("mailbox.body_head")?;
-                if r.kind != 3
-                    || r.nonce != head.nonce
-                    || r.ticket != head.ticket
-                    || r.payload.len() != maximum
-                    || h["reportChecksum"].as_u64() != Some(r.checksum as u64)
-                {
-                    return Err("mailbox.body_identity".into());
-                }
-            }
-            _ => {}
-        }
-        a.verify()?;
-        Ok(Some(r))
+        Ok(record)
     }
 }
+
 fn token(value: &str) -> bool {
     value.len() == 32
         && value
@@ -459,7 +555,7 @@ mod tests {
             payload: vec![],
         };
         let mut b = encode(&r).unwrap();
-        b[7] = b'6';
+        b[7] = b'7';
         assert!(decode(&b).is_err());
     }
 }

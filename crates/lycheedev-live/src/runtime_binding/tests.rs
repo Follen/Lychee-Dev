@@ -160,9 +160,9 @@ impl Fixture {
     fn publication_payload(&mut self, payload: &[u8], expected_release: &str) {
         let r = Record {
             address: 0,
-            nonce: "1".repeat(32),
+            nonce: "0".repeat(32),
             runtime: "2".repeat(32),
-            ticket: "3".repeat(32),
+            ticket: "0".repeat(32),
             kind: 1,
             state: 1,
             sequence: 1,
@@ -170,7 +170,7 @@ impl Fixture {
             payload: payload.to_vec(),
         };
         let record = self.string(&mailbox::encode(&r).unwrap());
-        let schema = self.string(crate::MAILBOX_SCHEMA.as_bytes());
+        let schema = self.string(crate::go_mailbox_v1::SCHEMA.as_bytes());
         let release = self.string(expected_release.as_bytes());
         let runtime = self.string(r.runtime.as_bytes());
         let mailbox = self.table(&[
@@ -264,7 +264,7 @@ mod observation {
     use serde_json::{Value, json};
 
     fn identity() -> Value {
-        json!({"schema":"lycheedev.slot.identity.v3","runtime":"2".repeat(32),
+        json!({"schema":crate::go_mailbox_v1::SCHEMA,"runtime":"2".repeat(32),"nextSlot":1,"inputState":crate::go_mailbox_v1::SCHEMA,
             "guid":"Player-1-ABC","character":"测试角色","realm":"测试 realm", "product":"forever",
             "build":"1.60.1.70338","release":lycheedev_core::VERSION,"slots":500,"inventory":500})
     }
@@ -418,12 +418,25 @@ mod observation {
     #[test]
     fn activation_only_identity_is_observation_without_input_authority() {
         let mut payload = identity();
-        payload["activationOnly"] = true.into();
-        payload["inventory"] = 0.into();
+        payload["schema"] = crate::go_mailbox_v1::LEGACY_IDENTITY_SCHEMA.into();
+        payload["inputState"] = crate::go_mailbox_v1::LEGACY_HYBRID_SCHEMA.into();
+        payload["slots"] = 200.into();
+        payload["inventory"] = 200.into();
         let (fixture, dropped) = observation_fixture(Some(&payload));
         let observed = observe(fixture, RuntimeLimits::defaults()).unwrap();
         assert!(observed.identity.activation_only);
-        assert_eq!(observed.identity.inventory, 0);
+        assert_eq!(observed.identity.inventory, Some(200));
+        assert_eq!(
+            observed.identity.compatibility,
+            "manual_activation_required"
+        );
+        assert_eq!(
+            observed.identity.diagnostic_codes,
+            [
+                "memory.mailbox_incompatible",
+                "live.channel_legacy_identity_requires_activation"
+            ]
+        );
         assert_eq!(
             serde_json::to_value(&observed).unwrap()["authority"],
             "observation_only"
@@ -431,12 +444,34 @@ mod observation {
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }
     #[test]
+    fn current_capacity_does_not_invent_loaded_inventory_or_input_authority() {
+        for inventory in [None, Some(0), Some(200), Some(500)] {
+            let mut payload = identity();
+            if let Some(count) = inventory {
+                payload["inventory"] = json!(count);
+            } else {
+                payload.as_object_mut().unwrap().remove("inventory");
+            }
+            let (fixture, dropped) = observation_fixture(Some(&payload));
+            let observed = observe(fixture, RuntimeLimits::defaults()).unwrap();
+            assert_eq!(observed.identity.slots, 500);
+            assert_eq!(observed.identity.inventory, inventory);
+            assert_eq!(observed.identity.compatibility, "current");
+            assert!(!observed.identity.activation_only);
+            assert_eq!(
+                serde_json::to_value(&observed).unwrap()["authority"],
+                "observation_only"
+            );
+            assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        }
+    }
+    #[test]
     fn identity_disagreements_fail_after_real_named_lookup_and_release_reader() {
         for (field, value, cause) in [
             (
                 "runtime",
                 json!("3".repeat(32)),
-                "live.runtime_identity_runtime",
+                "live.channel_identity_record_invalid",
             ),
             ("product", json!("cn-beta"), "live.runtime_identity_product"),
             (
@@ -444,15 +479,23 @@ mod observation {
                 json!("1.60.1.70124"),
                 "live.runtime_identity_build",
             ),
-            ("release", json!("wrong"), "live.runtime_identity_release"),
+            (
+                "release",
+                json!("wrong"),
+                "live.channel_identity_record_invalid",
+            ),
             (
                 "schema",
                 json!("identity.v4"),
-                "live.runtime_identity_schema",
+                "live.channel_identity_record_invalid",
             ),
-            ("guid", json!(""), "live.runtime_identity_actor"),
-            ("inventory", json!(0), "live.runtime_identity_inventory"),
-            ("slots", json!(64), "live.runtime_identity_inventory"),
+            ("guid", json!(""), "live.channel_identity_record_invalid"),
+            (
+                "inventory",
+                json!(501),
+                "live.channel_identity_record_invalid",
+            ),
+            ("slots", json!(64), "live.channel_identity_record_invalid"),
         ] {
             let mut payload = identity();
             payload[field] = value;
@@ -470,7 +513,7 @@ mod observation {
             observe(fixture, RuntimeLimits::defaults())
                 .unwrap_err()
                 .cause
-                .starts_with("live.runtime_identity_invalid:")
+                .starts_with("live.channel_identity_record_invalid")
         );
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }
@@ -517,7 +560,7 @@ mod observation {
         let (mut fixture, dropped) = observation_fixture(None);
         fixture.publication_payload(&serde_json::to_vec(&identity()).unwrap(), "other-release");
         let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(failure.cause, "mailbox.identity:release");
+        assert_eq!(failure.cause, "memory.mailbox_incompatible: mailbox_release_mismatch");
         assert_eq!(failure.stage, "lookup");
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }

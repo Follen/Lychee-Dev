@@ -280,6 +280,12 @@ doctor改真实内置样本经native worker分析并检查resolved调用/源码�
 
 native session本批独立复核：60s idle请求中停表、固定600s lifetime限制在途、5s握手且不延长saved idle、原取消token、空缓存状态idle；新增3个确定性单测，更新两个真实CLI fixture预期。Rust运行NOT_RUN；完整真实session fixture需要已核发行包，本批不会把ignore算通过。256 semantic batch worker退休映射、>90s wire deadline拒绝、坏帧只退handler、精确Go状态JSON仍未齐，继续后续实现。
 
+### 正式 Mailbox v1 生产只读路径接线
+
+现有mailbox reader已委托正式06 codec，真实Lua schema-only map、Bootstrap独立namespace、Confirmation4/INPUT5、BODY精确静态头先验、路径guard之后Accept、正式identity与optional inventory、旧200升级诊断已接入。stale二键样本仅能力证据，decode_input仍要求fresh。25纯合同与19 mailbox_lookup fixture、binding观察fixture尚NOT_RUN，CI新增独立组。
+
+独立审核两次发现guard复核错误可能吞取消/身份变化，分别覆盖原lookup失败及完整record成功后guard变更，均已修复并补拒绝Accept回归；旧release错误断言也按Go joined incompatible修正。当前native::open无RootRule仍locator_not_finalized，有显式旧RootRule则临时migration_incomplete防混协议发送。旧WindowsChannel/四槽driver尚未迁移，不称完整Live可用；下一步按固定Go typed state/journal、写事务、恢复期限拆分，最后替换临时阻断接正式输入。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

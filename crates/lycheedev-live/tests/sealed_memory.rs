@@ -99,7 +99,7 @@ impl Heap {
             namespace_node: 0,
         };
         let wire = h.string(&mailbox::encode(record).unwrap());
-        let schema = h.string(b"lycheedev.mailbox.v2");
+        let schema = h.string(lycheedev_live::go_mailbox_v1::SCHEMA.as_bytes());
         let release = h.string(b"3.1.2");
         let runtime = h.string(record.runtime.as_bytes());
         let receipts = h.table(vec![(&record.nonce, wire, 4)]).0;

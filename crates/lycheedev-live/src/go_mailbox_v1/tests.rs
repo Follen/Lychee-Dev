@@ -694,10 +694,12 @@ fn go_mailbox_v1_dto_optional_fields_and_raw_bounds_match_go() {
     let value = serde_json::to_value(with_report).unwrap();
     assert_eq!(value["reportBytes"], 9);
     assert_eq!(value["reportChecksum"], 17);
-    assert!(serde_json::to_value(input())
-        .unwrap()
-        .get("inputAttempt")
-        .is_none());
+    assert!(
+        serde_json::to_value(input())
+            .unwrap()
+            .get("inputAttempt")
+            .is_none()
+    );
     let mut d = diagnostic();
     d.sample_millis = 1;
     let mut value = serde_json::to_value(input()).unwrap();
@@ -790,4 +792,42 @@ fn go_mailbox_v1_old_wire_names_rejected_even_with_valid_header_checksum() {
             Err(ContractError("bridge.memory_body_invalid"))
         );
     }
+}
+
+#[test]
+fn go_mailbox_v1_stale_two_key_upgrade_is_capability_only() {
+    let mut observation = input();
+    observation.schema = PREVIOUS_SCHEMA.into();
+    observation.sample_millis = 200;
+    let wire = input_wire(&observation, None);
+    let record = decode_record(&wire).unwrap();
+    let mut e = envelope();
+    e.action = "reload".into();
+    e.index = 400;
+    let inspected = inspect_input(&record, &e, 0, 1400).unwrap();
+    assert_eq!(inspected.freshness, InputFreshness::Stale);
+    assert!(inspected.has_two_key_reload_capability());
+    assert_eq!(inspected.observation.observed_at_millis, 0);
+    assert_eq!(
+        decode_input(&record, &e, 0, 1400),
+        Err(ContractError("live.channel_input_state_stale"))
+    );
+    assert!(!may_prepare_again(None));
+    e.action = "commit".into();
+    assert_eq!(
+        inspect_input(&record, &e, 0, 1400),
+        Err(ContractError("live.channel_input_state_invalid"))
+    );
+    observation.bindings = Some(InputBindings {
+        wake: "ALT-CTRL-F12".into(),
+        submit: "ALT-CTRL-SHIFT-F12".into(),
+        close: "ALT-CTRL-[".into(),
+        reload: String::new(),
+    });
+    let wire = input_wire(&observation, None);
+    e.action = "reload".into();
+    assert_eq!(
+        inspect_input(&decode_record(&wire).unwrap(), &e, 0, 1400),
+        Err(ContractError("live.channel_input_state_invalid"))
+    );
 }

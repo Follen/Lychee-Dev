@@ -12,6 +12,9 @@ struct Fixture {
     root: u64,
     namespace_value: u64,
     record_data: u64,
+    mailbox_nodes: BTreeMap<String, u64>,
+    namespace_nodes: BTreeMap<String, u64>,
+    retire_record: Cell<bool>,
     mutate: Cell<bool>,
     calls: Cell<u32>,
 }
@@ -23,6 +26,9 @@ impl Fixture {
             root: 0x1000,
             namespace_value: 0,
             record_data: 0,
+            mailbox_nodes: BTreeMap::new(),
+            namespace_nodes: BTreeMap::new(),
+            retire_record: Cell::new(false),
             mutate: Cell::new(false),
             calls: Cell::new(0),
         }
@@ -81,33 +87,59 @@ impl Fixture {
         header[40..48].copy_from_slice(&node_base.to_le_bytes());
         (self.alloc(header), locations)
     }
+    fn schema_only_map(&mut self) -> u64 {
+        let value = self.string(lycheedev_live::go_mailbox_v1::SCHEMA.as_bytes());
+        let key = self.string(b"schema");
+        let mut node = vec![0; 56];
+        node[..8].copy_from_slice(&value.to_le_bytes());
+        node[8] = 4;
+        node[24..32].copy_from_slice(&key.to_le_bytes());
+        node[32] = 4;
+        let address = self.alloc(node);
+        let mut table = vec![0; 72];
+        table[16] = 5;
+        table[19] = 0;
+        table[40..48].copy_from_slice(&address.to_le_bytes());
+        table[48..56].copy_from_slice(&(address + 56).to_le_bytes());
+        self.alloc(table)
+    }
+    fn replace_pointer(&mut self, at: u64, value: u64) {
+        let (base, bytes) = self.bytes.get_mut().range_mut(..=at).next_back().unwrap();
+        let offset = (at - base) as usize;
+        bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
     fn publication(&mut self, record: &Record, body: Option<&Record>) {
         let wire = mailbox::encode(record).unwrap();
         let str = self.string(&wire);
         self.record_data = str + 32;
-        let schema = self.string(b"lycheedev.mailbox.v2");
+        let schema = self.string(lycheedev_live::go_mailbox_v1::SCHEMA.as_bytes());
         let release = self.string(b"3.1.2");
         let rt = self.string(record.runtime.as_bytes());
-        let receipts = self.table(vec![(&record.nonce, str, 4)]).0;
+        let receipts = self
+            .table(vec![("schema", schema, 4), (&record.nonce, str, 4)])
+            .0;
         let bodies = if let Some(body) = body {
             let wire = mailbox::encode(body).unwrap();
             let str = self.string(&wire);
-            self.table(vec![(&body.ticket, str, 4)]).0
+            self.table(vec![("schema", schema, 4), (&body.ticket, str, 4)])
+                .0
         } else {
-            self.table(vec![]).0
+            self.schema_only_map()
         };
-        let mb = self
-            .table(vec![
-                ("schema", schema, 4),
-                ("release", release, 4),
-                ("runtime", rt, 4),
-                ("input", str, 4),
-                ("identity", str, 4),
-                ("receipts", receipts, 5),
-                ("bodies", bodies, 5),
-            ])
-            .0;
-        let ns = self.table(vec![("Mailbox", mb, 5)]).0;
+        let (mb, mailbox_nodes) = self.table(vec![
+            ("schema", schema, 4),
+            ("release", release, 4),
+            ("runtime", rt, 4),
+            ("input", str, 4),
+            ("identity", str, 4),
+            ("bootstrap", str, 4),
+            ("receipts", receipts, 5),
+            ("bodies", bodies, 5),
+        ]);
+        self.mailbox_nodes = mailbox_nodes;
+        let (ns, namespace_nodes) =
+            self.table(vec![("Mailbox", mb, 5), ("BootstrapMailbox", mb, 5)]);
+        self.namespace_nodes = namespace_nodes;
         let (globals, keys) = self.table(vec![("LycheeDevInternal", ns, 5)]);
         self.namespace_value = keys["LycheeDevInternal"];
         let mut state = vec![0; 0x90 + 24];
@@ -145,6 +177,15 @@ impl Memory for Fixture {
     }
     fn read(&self, address: u64, out: &mut [u8], _: bool) -> mailbox::Result<()> {
         self.calls.set(self.calls.get() + 1);
+        if address == self.record_data && self.retire_record.replace(false) {
+            let mut bytes = self.bytes.borrow_mut();
+            let (base, b) = bytes
+                .range_mut(..=self.namespace_value)
+                .next_back()
+                .unwrap();
+            b[(self.namespace_value - *base) as usize + 9] = 1;
+            return Err("fixture.short".into());
+        }
         let bytes = self.bytes.borrow();
         let (base, b) = bytes
             .range(..=address)
@@ -187,15 +228,28 @@ fn record(kind: u8, payload: Vec<u8>) -> Record {
         runtime: "2".repeat(32),
         ticket: "3".repeat(32),
         kind,
-        state: 1,
+        state: if kind == 3 { 3 } else { 1 },
         sequence: 1,
         checksum: mailbox::checksum(&payload),
         payload,
     }
 }
+fn head(body: &Record, report_bytes: u32) -> Record {
+    record(
+        2,
+        serde_json::to_vec(&serde_json::json!({
+            "schema":lycheedev_live::go_mailbox_v1::SCHEMA,"runtime":body.runtime,
+            "slots":500,"nextSlot":2,"guid":"g","character":"c","realm":"r",
+            "build":"b","product":"retail","release":"3.1.2",
+            "state":"reported","action":"commit","ticket":body.ticket,"nonce":body.nonce,
+            "reportBytes":report_bytes,"reportChecksum":body.checksum
+        }))
+        .unwrap(),
+    )
+}
 #[test]
 fn complete_named_lookup_no_heap_scan() {
-    let r = record(4, b"input".to_vec());
+    let r = record(5, b"input".to_vec());
     let mut f = Fixture::new();
     f.publication(&r, None);
     assert_eq!(
@@ -210,7 +264,7 @@ fn complete_named_lookup_no_heap_scan() {
 }
 #[test]
 fn path_mutation_discards_sample() {
-    let r = record(4, b"input".to_vec());
+    let r = record(5, b"input".to_vec());
     let mut f = Fixture::new();
     f.publication(&r, None);
     f.mutate.set(true);
@@ -221,7 +275,7 @@ fn path_mutation_discards_sample() {
 }
 #[test]
 fn secret_value_rejected_before_pointer_use() {
-    let r = record(4, b"input".to_vec());
+    let r = record(5, b"input".to_vec());
     let mut f = Fixture::new();
     f.publication(&r, None);
     let (base, b) = f
@@ -239,7 +293,7 @@ fn secret_value_rejected_before_pointer_use() {
 #[test]
 fn exact_body_head_and_maximum_budget() {
     let body = record(3, vec![b'x'; 524288]);
-    let head=record(2,serde_json::to_vec(&serde_json::json!({"state":"reported","ticket":body.ticket,"nonce":body.nonce,"reportBytes":body.payload.len(),"reportChecksum":body.checksum})).unwrap());
+    let head = head(&body, body.payload.len() as u32);
     let mut f = Fixture::new();
     f.publication(&head, Some(&body));
     let observed = f
@@ -262,14 +316,14 @@ fn exact_body_head_and_maximum_budget() {
 #[test]
 fn wrong_head_length_fails() {
     let body = record(3, b"result".to_vec());
-    let head=record(2,serde_json::to_vec(&serde_json::json!({"state":"reported","ticket":body.ticket,"nonce":body.nonce,"reportBytes":5,"reportChecksum":body.checksum})).unwrap());
+    let head = head(&body, 5);
     let mut f = Fixture::new();
     f.publication(&head, Some(&body));
     assert!(f.reader().lookup(&Selector::Body { head }).is_err());
 }
 #[test]
 fn corrupt_state_pointer_fails_without_overflow() {
-    let r = record(4, b"input".to_vec());
+    let r = record(5, b"input".to_vec());
     let mut f = Fixture::new();
     f.publication(&r, None);
     f.bytes
@@ -282,7 +336,7 @@ fn corrupt_state_pointer_fails_without_overflow() {
 }
 #[test]
 fn unsupported_globals_layout_is_not_inherited() {
-    let r = record(4, b"input".to_vec());
+    let r = record(5, b"input".to_vec());
     let mut f = Fixture::new();
     f.publication(&r, None);
     let mut reader = f.reader();
@@ -319,7 +373,7 @@ impl Memory for BudgetedFixture {
 impl BudgetedFixture {
     fn new(limits: lycheedev_windows::process::RuntimeLimits) -> Self {
         let mut fixture = Fixture::new();
-        fixture.publication(&record(4, b"input".to_vec()), None);
+        fixture.publication(&record(5, b"input".to_vec()), None);
         Self {
             fixture,
             budget: RefCell::new(
@@ -397,8 +451,307 @@ fn a_valid_wire_record_of_another_kind_cannot_supply_input_state() {
     f.publication(&record(1, b"identity".to_vec()), None);
     // Place this valid identity wire in the named input field as an adversarial
     // publication; the fixture publishes the same string for both fields.
-    assert_eq!(
-        f.reader().lookup(&Selector::Input).unwrap_err(),
-        "mailbox.record_kind"
+    assert!(f.reader().lookup(&Selector::Input).unwrap().is_none());
+}
+
+#[test]
+fn schema_only_lua_maps_preserve_exact_missing_keys() {
+    let body = record(3, b"".to_vec());
+    let head = head(&body, 0);
+    for field in ["receipts", "bodies"] {
+        let mut fixture = Fixture::new();
+        fixture.publication(&head, Some(&body));
+        let map = fixture.schema_only_map();
+        fixture.replace_pointer(fixture.mailbox_nodes[field], map);
+        let selector = if field == "receipts" {
+            Selector::Receipt {
+                nonce: head.nonce.clone(),
+            }
+        } else {
+            Selector::Body { head: head.clone() }
+        };
+        assert!(fixture.reader().lookup(&selector).unwrap().is_none());
+        assert!(fixture.calls.get() < 512);
+    }
+}
+#[test]
+fn empty_body_is_a_record_but_missing_body_is_not() {
+    let body = record(3, Vec::new());
+    let head = head(&body, 0);
+    let mut fixture = Fixture::new();
+    fixture.publication(&head, Some(&body));
+    let observed = fixture
+        .reader()
+        .lookup(&Selector::Body { head: head.clone() })
+        .unwrap()
+        .unwrap();
+    assert!(observed.payload.is_empty());
+    assert_eq!(observed.checksum, 1);
+    let map = fixture.schema_only_map();
+    fixture.replace_pointer(fixture.mailbox_nodes["bodies"], map);
+    assert!(
+        fixture
+            .reader()
+            .lookup(&Selector::Body { head })
+            .unwrap()
+            .is_none()
     );
+}
+#[test]
+fn accept_is_never_called_before_path_guard_or_for_missing_token() {
+    let r = record(5, b"input".to_vec());
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    fixture.mutate.set(true);
+    let calls = Cell::new(0);
+    let result = fixture.reader().lookup_with_accept(&Selector::Input, |_| {
+        calls.set(calls.get() + 1);
+        true
+    });
+    assert_eq!(result.unwrap_err(), "mailbox.path_changed");
+    assert_eq!(calls.get(), 0);
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    assert!(
+        fixture
+            .reader()
+            .lookup_with_accept(&Selector::Input, |_| {
+                calls.set(calls.get() + 1);
+                false
+            })
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(calls.get(), 1);
+    assert!(
+        fixture
+            .reader()
+            .lookup_with_accept(
+                &Selector::Receipt {
+                    nonce: "9".repeat(32)
+                },
+                |_| {
+                    calls.set(calls.get() + 1);
+                    true
+                }
+            )
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(calls.get(), 1);
+}
+#[test]
+fn retired_record_short_read_rechecks_only_captured_path() {
+    let r = record(5, b"input".to_vec());
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    fixture.retire_record.set(true);
+    assert_eq!(
+        fixture.reader().lookup(&Selector::Input).unwrap_err(),
+        "mailbox.path_changed"
+    );
+    assert!(fixture.calls.get() < 512);
+}
+#[test]
+fn bootstrap_uses_separate_namespace_and_confirmation_uses_kind_four() {
+    let r = record(6, b"bootstrap diagnostic".to_vec());
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    fixture.replace_pointer(fixture.namespace_nodes["Mailbox"], u64::MAX);
+    assert_eq!(
+        fixture
+            .reader()
+            .lookup(&Selector::Bootstrap)
+            .unwrap()
+            .unwrap()
+            .kind,
+        6
+    );
+    assert!(fixture.reader().lookup(&Selector::Identity).is_err());
+    let r = record(4, b"confirmation".to_vec());
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    assert_eq!(
+        fixture
+            .reader()
+            .lookup(&Selector::Confirmation {
+                nonce: r.nonce.clone()
+            })
+            .unwrap()
+            .unwrap()
+            .kind,
+        4
+    );
+    assert!(
+        fixture
+            .reader()
+            .lookup(&Selector::Receipt { nonce: r.nonce })
+            .unwrap()
+            .is_none()
+    );
+}
+#[test]
+fn previous_publication_schema_is_only_identity_or_input_evidence() {
+    for kind in [1, 5] {
+        let r = record(kind, b"old upgrade evidence".to_vec());
+        let mut fixture = Fixture::new();
+        fixture.publication(&r, None);
+        let schema = fixture.string(lycheedev_live::go_mailbox_v1::PREVIOUS_SCHEMA.as_bytes());
+        fixture.replace_pointer(fixture.mailbox_nodes["schema"], schema);
+        let selector = if kind == 1 {
+            Selector::Identity
+        } else {
+            Selector::Input
+        };
+        assert!(fixture.reader().lookup(&selector).unwrap().is_some());
+        let error = fixture
+            .reader()
+            .lookup(&Selector::Receipt { nonce: r.nonce })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "memory.mailbox_incompatible: mailbox_schema_mismatch"
+        );
+    }
+}
+
+struct FailureDuringGuard {
+    fixture: Fixture,
+    failed: Cell<bool>,
+    malformed: bool,
+    cause: &'static str,
+}
+impl Memory for FailureDuringGuard {
+    fn verify(&self) -> mailbox::Result<()> {
+        if self.failed.get() {
+            Err(self.cause.into())
+        } else {
+            Ok(())
+        }
+    }
+    fn read(&self, address: u64, out: &mut [u8], module: bool) -> mailbox::Result<()> {
+        if self.failed.get() {
+            return Err(self.cause.into());
+        }
+        if !self.malformed && address == self.fixture.record_data {
+            self.failed.set(true);
+            return Err("fixture.short".into());
+        }
+        self.fixture.read(address, out, module)?;
+        if self.malformed && address == self.fixture.record_data - 32 {
+            out[16] = 0;
+            self.failed.set(true);
+        }
+        Ok(())
+    }
+}
+#[test]
+fn original_failure_cannot_hide_guard_cancellation_deadline_or_identity_loss() {
+    for cause in [
+        "memory.runtime_cancelled",
+        "memory.runtime_deadline",
+        "memory.process_identity_changed",
+    ] {
+        for malformed in [false, true] {
+            let mut fixture = Fixture::new();
+            fixture.publication(&record(5, b"input".to_vec()), None);
+            let failed = FailureDuringGuard {
+                fixture,
+                failed: Cell::new(false),
+                malformed,
+                cause,
+            };
+            let original = failed.fixture.reader();
+            let reader = Reader {
+                memory: &failed,
+                root: original.root,
+                layout: original.layout,
+                module_hash: original.module_hash,
+                release: original.release,
+            };
+            let error = reader.lookup(&Selector::Input).unwrap_err();
+            assert!(error.contains(cause), "{error}");
+            assert!(
+                error.contains(if malformed {
+                    "mailbox.record_length"
+                } else {
+                    "fixture.short"
+                }),
+                "{error}"
+            );
+            assert!(!error.contains("mailbox.path_changed"), "{error}");
+        }
+    }
+}
+
+struct CompleteThenGuardFailure {
+    fixture: Fixture,
+    complete_record_read: Cell<bool>,
+    guard_changed: Cell<bool>,
+    cause: &'static str,
+}
+impl Memory for CompleteThenGuardFailure {
+    fn verify(&self) -> mailbox::Result<()> {
+        if self.guard_changed.get() {
+            Err(self.cause.into())
+        } else {
+            Ok(())
+        }
+    }
+    fn read(&self, address: u64, out: &mut [u8], module: bool) -> mailbox::Result<()> {
+        self.fixture.read(address, out, module)?;
+        if address == self.fixture.record_data && out.len() > 80 {
+            self.complete_record_read.set(true);
+        }
+        // The complete record succeeds. Only its subsequent path guard sees
+        // both a changed parent publication and loss of cancel/identity validity.
+        if self.complete_record_read.get()
+            && address == self.fixture.namespace_value
+            && out.len() == 10
+        {
+            out[9] ^= 1;
+            self.guard_changed.set(true);
+        }
+        Ok(())
+    }
+}
+#[test]
+fn complete_record_guard_change_cannot_hide_cancellation_deadline_or_identity_loss() {
+    for cause in [
+        "memory.runtime_cancelled",
+        "memory.runtime_deadline",
+        "memory.process_identity_changed",
+    ] {
+        let mut fixture = Fixture::new();
+        fixture.publication(&record(5, b"complete input record".to_vec()), None);
+        let failure = CompleteThenGuardFailure {
+            fixture,
+            complete_record_read: Cell::new(false),
+            guard_changed: Cell::new(false),
+            cause,
+        };
+        let original = failure.fixture.reader();
+        let reader = Reader {
+            memory: &failure,
+            root: original.root,
+            layout: original.layout,
+            module_hash: original.module_hash,
+            release: original.release,
+        };
+        let accept_calls = Cell::new(0);
+        let error = reader
+            .lookup_with_accept(&Selector::Input, |_| {
+                accept_calls.set(accept_calls.get() + 1);
+                true
+            })
+            .unwrap_err();
+        assert!(failure.complete_record_read.get());
+        assert!(failure.guard_changed.get());
+        assert_eq!(accept_calls.get(), 0);
+        assert!(
+            error.lines().any(|line| line == "mailbox.path_changed"),
+            "{error}"
+        );
+        assert!(error.lines().any(|line| line == cause), "{error}");
+    }
 }

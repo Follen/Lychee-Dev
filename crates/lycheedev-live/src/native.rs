@@ -119,42 +119,33 @@ impl<M: ManagedInstallation + Clone + 'static> Services for WindowsServices<M> {
                     .lookup(&crate::mailbox::Selector::Identity)
                     .map_err(|e| ToolkitError::new("live.identity_unavailable", e, 3))?
                 {
-                    let info: serde_json::Value = serde_json::from_slice(&record.payload)?;
-                    if info["schema"] != "lycheedev.slot.identity.v3"
-                        || (info["inventory"] != 500 && info["activationOnly"] != true)
-                    {
-                        return Err(ToolkitError::new(
-                            "live.runtime_inventory",
-                            "matching v4 runtime and real 500-slot inventory are required",
-                            3,
-                        ));
-                    }
-                    target.actor = info["guid"]
-                        .as_str()
-                        .ok_or_else(|| ToolkitError::invalid("actor identity missing"))?
-                        .into();
-                    target.build = info["build"]
-                        .as_str()
-                        .ok_or_else(|| ToolkitError::invalid("build identity missing"))?
-                        .into();
-                    target.runtime = record.runtime;
+                    let borrowed = record
+                        .contract()
+                        .map_err(|e| ToolkitError::new("live.identity_unavailable", e, 3))?;
+                    let publication =
+                        crate::go_mailbox_v1::decode_identity(&borrowed, lycheedev_core::VERSION)
+                            .map_err(|e| ToolkitError::new(e.0, e.to_string(), 3))?;
+                    // Discovery includes upgrade-only identities. Services::open
+                    // still rejects the old driver; this grants no input.
+                    let info = publication.identity();
+                    target.actor = info.guid.clone();
+                    target.build = info.build.clone();
+                    target.runtime = info.runtime.clone();
                     let local = lycheedev_core::client::inspect(directory)?;
-                    if info["product"] != local.product || target.build != local.full_build {
+                    if info.product != local.product || target.build != local.full_build {
                         return Err(ToolkitError::new(
                             "live.local_identity_changed",
                             "observed runtime product/full build differs from bounded local client metadata",
                             3,
                         ));
                     }
-                    if inv.flag("--character").is_some_and(|name| {
-                        info["character"]
-                            .as_str()
-                            .is_none_or(|v| v.to_lowercase() != name.to_lowercase())
-                    }) || inv.flag("--realm").is_some_and(|realm| {
-                        info["realm"]
-                            .as_str()
-                            .is_none_or(|v| v.to_lowercase() != realm.to_lowercase())
-                    }) {
+                    if inv
+                        .flag("--character")
+                        .is_some_and(|name| info.character.to_lowercase() != name.to_lowercase())
+                        || inv
+                            .flag("--realm")
+                            .is_some_and(|realm| info.realm.to_lowercase() != realm.to_lowercase())
+                    {
                         continue;
                     }
                     if let Some(pin) = &pinned
@@ -175,22 +166,22 @@ impl<M: ManagedInstallation + Clone + 'static> Services for WindowsServices<M> {
         Ok(out)
     }
     fn open(&self, target: &Target, _: Option<&Session>) -> Result<Box<dyn Transport>> {
+        self.control.check()?;
         target
             .window
             .verify()
             .map_err(|e| ToolkitError::new("desktop.identity_changed", e, 3))?;
         // This precedes every publication or input, including first activation.
         let rule=self.roots.iter().find(|r|r.accepts_hash(&target.module_sha256)).ok_or_else(||ToolkitError::new("live.locator_not_finalized","no statically finalized root method and exact-hash Lua layout are bundled for the selected binary",3).with_details(serde_json::json!({"moduleSha256":target.module_sha256,"required":["finalizedRootMethod","typedReaderBinding","exactHashLuaLayout"],"inputSent":false})))?;
-        let channel = crate::windows_channel::WindowsChannel::open(
-            target.clone(),
-            self.managed.clone(),
-            rule,
-            self.control.clone(),
-        )
-        .map_err(|e| ToolkitError::new("live.native_channel", e, 3))?;
-        Ok(Box::new(
-            crate::transport::NativeTransport::new(channel, 0)
-                .map_err(|e| ToolkitError::new("live.route", e, 4))?,
-        ))
+        // Temporary migration boundary: a caller-supplied legacy RootRule must
+        // not connect the newly migrated v1 reader to the old four-slot driver.
+        // Replace this boundary with the complete fixed-Go v1 driver, including
+        // its journal/input gates, in the driver migration slice.
+        let _ = rule;
+        Err(ToolkitError::new(
+            "live.migration_incomplete",
+            "read-only Mailbox v1 observation is available; the fixed-release transaction and input driver is not yet connected",
+            3,
+        ).with_details(serde_json::json!({"inputSent":false,"authority":"observation_only"})))
     }
 }

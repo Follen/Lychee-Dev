@@ -154,15 +154,56 @@ impl InputObservation {
     }
 }
 
-/// Qualifies a sample's data only. Native publication rechecks, selected target,
-/// current physical-key state, input intent and user authorization remain gates.
-/// A successful return can still be blocked; inspect input_blocked separately.
+/// A structurally valid sample may be stale. Keep its two-key capability
+/// evidence for read-only upgrade inspection, without granting input authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputFreshness {
+    Current,
+    Stale,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputInspection {
+    pub observation: InputObservation,
+    pub freshness: InputFreshness,
+}
+impl InputInspection {
+    /// Go activationInputCapability's narrow evidence check. Still no permission
+    /// to send reload: a new fresh sample and native/input gates are required.
+    pub fn has_two_key_reload_capability(&self) -> bool {
+        self.observation.valid_bindings()
+            && self
+                .observation
+                .bindings
+                .as_ref()
+                .is_some_and(|b| !b.reload.is_empty())
+    }
+}
+
+/// Freshness-requiring wrapper for existing consumers. For upgrade capability
+/// inspection use inspect_input so a stale sample is not mistaken for absence.
 pub fn decode_input(
     record: &Record<'_>,
     e: &ExpectedEnvelope,
     after: i64,
     now: i64,
 ) -> Result<InputObservation> {
+    let inspected = inspect_input(record, e, after, now)?;
+    if inspected.freshness == InputFreshness::Stale {
+        Err(ContractError("live.channel_input_state_stale"))
+    } else {
+        Ok(inspected.observation)
+    }
+}
+
+/// Qualifies sample data only. Native publication rechecks, selected target,
+/// current physical-key state, persisted intent and user authorization remain
+/// separate gates. Current samples can still report input_blocked=true.
+pub fn inspect_input(
+    record: &Record<'_>,
+    e: &ExpectedEnvelope,
+    after: i64,
+    now: i64,
+) -> Result<InputInspection> {
     let invalid = ContractError("live.channel_input_state_invalid");
     let h = &record.header;
     if record.payload.len() > 2048
@@ -199,11 +240,16 @@ pub fn decode_input(
     if sample < 0 || sample > i128::from(now) + 100 {
         return Err(ContractError("live.channel_input_clock_invalid"));
     }
-    if sample < i128::from(after) + 100 || sample < i128::from(now) - 500 {
-        return Err(ContractError("live.channel_input_state_stale"));
-    }
-    s.observed_at_millis = now;
-    Ok(s)
+    let freshness = if sample < i128::from(after) + 100 || sample < i128::from(now) - 500 {
+        InputFreshness::Stale
+    } else {
+        s.observed_at_millis = now;
+        InputFreshness::Current
+    };
+    Ok(InputInspection {
+        observation: s,
+        freshness,
+    })
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

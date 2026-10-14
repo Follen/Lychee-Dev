@@ -439,7 +439,9 @@ impl Channel for FilesChannel {
                 }
                 body
             }
-            Selector::Input => None,
+            // Historical four-slot fixture has no formal v1 startup/confirmation
+            // publication adapter; do not fabricate support for those kinds.
+            Selector::Bootstrap | Selector::Confirmation { .. } | Selector::Input => None,
         })
     }
     fn publish(&mut self, slot: u16, b: &[u8]) -> std::result::Result<(), String> {

@@ -13,7 +13,7 @@ use lycheedev_windows::{
     WindowIdentity,
     process::{RuntimeBudget, RuntimeCost, RuntimeLimits, RuntimeUsage},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,8 +60,12 @@ pub struct RuntimeIdentityObservation {
     pub product: String,
     pub build: String,
     pub release: String,
-    pub inventory: u16,
-    pub slots: u16,
+    /// Observed loaded-slot inventory when published; absence is not zero.
+    pub inventory: Option<i32>,
+    pub slots: i32,
+    pub compatibility: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub diagnostic_codes: Vec<&'static str>,
     pub activation_only: bool,
     pub record_sequence: u32,
 }
@@ -188,61 +192,41 @@ pub(crate) fn observe_with<R: ObservationReader>(
     })
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IdentityPayload {
-    schema: String,
-    runtime: String,
-    guid: String,
-    character: String,
-    realm: String,
-    product: String,
-    build: String,
-    release: String,
-    inventory: u16,
-    slots: u16,
-    // Enabled Identity() omits this field; the bootstrap publication sets true.
-    #[serde(default)]
-    activation_only: bool,
-}
 fn decode_identity(
     record: Record,
     description: &RuntimeBindingDescription,
     budget: &mut RuntimeBudget,
 ) -> std::result::Result<RuntimeIdentityObservation, String> {
-    // The named Identity reader has already enforced the 16 KiB record bound,
-    // wire kind/runtime/integrity and Lua path stability. Account only this layer.
+    use crate::go_mailbox_v1::{self as protocol, IdentityPublication};
+    // Named lookup has already verified wire and path. The same cumulative
+    // request ledger accounts this bounded JSON decoding separately.
     budget.charge(RuntimeCost {
         allocation_bytes: record.payload.len() as u64 * 8
-            + std::mem::size_of::<IdentityPayload>() as u64,
+            + std::mem::size_of::<protocol::Identity>() as u64,
         work_units: record.payload.len() as u64 * 4 + 256,
         ..RuntimeCost::default()
     })?;
-    let value: IdentityPayload = serde_json::from_slice(&record.payload)
-        .map_err(|error| format!("live.runtime_identity_invalid: {error}"))?;
-    if value.schema != "lycheedev.slot.identity.v3" {
-        return Err("live.runtime_identity_schema".into());
-    }
-    if value.runtime != record.runtime {
-        return Err("live.runtime_identity_runtime".into());
-    }
+    let borrowed = record.contract()?;
+    let publication = protocol::decode_identity(&borrowed, &description.expected_release)
+        .map_err(|e| e.to_string())?;
+    let (value, compatibility, activation_only, diagnostic_codes) = match publication {
+        IdentityPublication::Current(i) => (i, "current", false, Vec::new()),
+        IdentityPublication::UpgradeCapability(i) => (i, "read_only_upgrade", true, Vec::new()),
+        IdentityPublication::ManualActivationRequired(i) => (
+            i,
+            "manual_activation_required",
+            true,
+            vec![
+                "memory.mailbox_incompatible",
+                "live.channel_legacy_identity_requires_activation",
+            ],
+        ),
+    };
     if value.product != description.client.product {
         return Err("live.runtime_identity_product".into());
     }
     if value.build != description.client.full_build {
         return Err("live.runtime_identity_build".into());
-    }
-    if value.release != description.expected_release {
-        return Err("live.runtime_identity_release".into());
-    }
-    if value.guid.is_empty() {
-        return Err("live.runtime_identity_actor".into());
-    }
-    if value.slots != crate::SLOT_COUNT
-        || (!value.activation_only && value.inventory != crate::SLOT_COUNT)
-        || (value.activation_only && value.inventory != 0 && value.inventory != crate::SLOT_COUNT)
-    {
-        return Err("live.runtime_identity_inventory".into());
     }
     budget.check()?;
     Ok(RuntimeIdentityObservation {
@@ -255,7 +239,9 @@ fn decode_identity(
         release: value.release,
         inventory: value.inventory,
         slots: value.slots,
-        activation_only: value.activation_only,
+        compatibility,
+        diagnostic_codes,
+        activation_only,
         record_sequence: record.sequence,
     })
 }
