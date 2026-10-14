@@ -247,6 +247,21 @@ pub fn addon_destination(client: &ClientInstallation) -> Result<std::path::PathB
     }
     Ok(target)
 }
+fn metadata_text_error(name: &str, limit: bool, message: &str) -> ToolkitError {
+    if name == ".build.info" {
+        ToolkitError::new(
+            if limit {
+                "records.metadata_limit"
+            } else {
+                "records.invalid_metadata"
+            },
+            message,
+            if limit { 3 } else { 4 },
+        )
+    } else {
+        identity_error(message)
+    }
+}
 fn text(
     root: &Directory,
     name: &str,
@@ -268,11 +283,18 @@ fn text(
     if info.file_attributes() & 0x400 != 0 {
         return Err(identity_error("metadata handle is a reparse point"));
     }
-    if !info.is_file() || info.len() > maximum as u64 {
-        return Err(ToolkitError::new(
-            "selection.client_identity",
-            "identity file is not bounded regular text",
-            4,
+    if !info.is_file() {
+        return Err(metadata_text_error(
+            name,
+            false,
+            "identity file is not regular text",
+        ));
+    }
+    if info.len() > maximum as u64 {
+        return Err(metadata_text_error(
+            name,
+            true,
+            "identity text exceeds byte bound",
         ));
     }
     control.charge(MetadataCost {
@@ -298,21 +320,31 @@ fn text(
         used += count;
     }
     raw.truncate(used);
+    if raw.len() > maximum {
+        return Err(metadata_text_error(
+            name,
+            true,
+            "identity text exceeds byte bound",
+        ));
+    }
     if info.len() != raw.len() as u64 {
         return Err(identity_error("metadata changed while reading"));
     }
     root.verify_controlled(&mut MetadataFiles(&mut *control))?;
-    if raw.len() > maximum || name == ".build.info" && raw.contains(&0) {
-        return Err(identity_error(
-            "identity text exceeds bounds or contains NUL",
-        ));
+    if name == ".build.info" && raw.contains(&0) {
+        return Err(metadata_text_error(name, false, "catalog contains NUL"));
     }
-    let value = String::from_utf8(raw).map_err(|_| identity_error("identity text is not UTF-8"))?;
-    Ok(value
-        .strip_prefix('\u{feff}')
-        .unwrap_or(&value)
-        .trim()
-        .into())
+    let value = String::from_utf8(raw)
+        .map_err(|_| metadata_text_error(name, false, "identity text is not UTF-8"))?;
+    let value = value.strip_prefix('\u{feff}').unwrap_or(&value);
+    // Preserve the catalog's line structure; a header plus newline is valid
+    // even when it contains no rows (records.installedRows at fixed Go).
+    Ok(if name == ".build.info" {
+        value
+    } else {
+        value.trim()
+    }
+    .into())
 }
 fn flavor(
     root: &Directory,
@@ -490,28 +522,45 @@ fn catalog_builds(raw: &str, control: &mut impl MetadataControl) -> Result<Vec<C
         work_units: raw.len() as u64 * 64 + 65536,
         ..MetadataCost::default()
     })?;
+    if !raw.contains('\n') {
+        return Err(metadata_text_error(
+            ".build.info",
+            false,
+            "build catalog requires header and row boundary",
+        ));
+    }
     let mut lines = raw.lines();
     let header: Vec<_> = lines
         .next()
-        .ok_or_else(|| identity_error("empty build catalog"))?
+        .ok_or_else(|| metadata_text_error(".build.info", false, "empty build catalog"))?
         .split('|')
         .take(129)
         .collect();
     if header.len() > 128 {
-        return Err(identity_error("build catalog exceeds column budget"));
+        return Err(metadata_text_error(
+            ".build.info",
+            true,
+            "build catalog exceeds column budget",
+        ));
     }
     let mut columns = BTreeMap::new();
     for (i, field) in header.iter().enumerate() {
         let name = field.split('!').next().unwrap_or("").trim();
         if name.is_empty() || columns.insert(name, i).is_some() {
-            return Err(identity_error(
+            return Err(metadata_text_error(
+                ".build.info",
+                false,
                 "build catalog has duplicate or empty columns",
             ));
         }
     }
-    for required in ["Product", "Version", "Active"] {
+    for required in ["Product", "Version", "Build Key", "CDN Key", "Active"] {
         if !columns.contains_key(required) {
-            return Err(identity_error("build catalog identity columns are missing"));
+            return Err(metadata_text_error(
+                ".build.info",
+                false,
+                "build catalog identity columns are missing",
+            ));
         }
     }
     let mut selected = Vec::new();
@@ -524,15 +573,45 @@ fn catalog_builds(raw: &str, control: &mut impl MetadataControl) -> Result<Vec<C
         }
         rows += 1;
         if rows > 4096 {
-            return Err(identity_error("build catalog exceeds row budget"));
+            return Err(metadata_text_error(
+                ".build.info",
+                true,
+                "build catalog exceeds row budget",
+            ));
         }
         let values: Vec<_> = line.split('|').take(129).collect();
         if values.len() != header.len() {
-            return Err(identity_error("build catalog row shape differs"));
+            return Err(metadata_text_error(
+                ".build.info",
+                false,
+                "build catalog row shape differs",
+            ));
         }
         let get = |name: &str| values[columns[name]].trim();
-        if !matches!(get("Active"), "0" | "1") || !identity_build(get("Version")) {
-            return Err(identity_error("invalid build catalog identity"));
+        let product = get("Product");
+        let valid_product = !product.is_empty()
+            && product.len() <= 128
+            && product
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+        let valid_key = |key: &str| {
+            key.len() == 32
+                && key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        };
+        // Validate inactive and unknown-product rows too, as Go records does.
+        if !matches!(get("Active"), "0" | "1")
+            || !identity_build(get("Version"))
+            || !valid_product
+            || !valid_key(get("Build Key"))
+            || !valid_key(get("CDN Key"))
+        {
+            return Err(metadata_text_error(
+                ".build.info",
+                false,
+                "invalid build catalog identity",
+            ));
         }
         if get("Active") != "1" {
             continue;
@@ -647,6 +726,82 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn catalog_schema_matches_go_records_even_for_inactive_rows() {
+        const HEADER: &str =
+            "Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\n";
+        const KEY: &str = "0123456789abcdef0123456789abcdef";
+        let parse = |row: &str| catalog_builds(&format!("{HEADER}{row}"), &mut Unmetered);
+        assert!(parse("").unwrap().is_empty());
+        assert!(catalog_builds(HEADER.trim_end(), &mut Unmetered).is_err());
+        for active in ["0", "1"] {
+            let row = |product: &str, build: &str, key: &str| {
+                format!("{product}|{build}|{key}|{KEY}|{active}\n")
+            };
+            assert_eq!(
+                parse(&row("unknown_product", "12.1.0.69875", KEY))
+                    .unwrap()
+                    .len(),
+                usize::from(active == "1")
+            );
+            for product in ["", "WoW", "wow-test", "wow/evil", "中文"] {
+                assert!(parse(&row(product, "12.1.0.69875", KEY)).is_err());
+            }
+            for key in [
+                "",
+                "not-md5",
+                "0123456789ABCDEF0123456789ABCDEF",
+                "0123456789abcdef0123456789abcdeg",
+            ] {
+                assert!(parse(&row("wow", "12.1.0.69875", key)).is_err());
+            }
+            for build in ["12.1.0", "12.1.0.+1", "12.1.0.4294967296", "12.1.x.1"] {
+                assert!(parse(&row("wow", build, KEY)).is_err());
+            }
+            assert!(parse(&row(&"x".repeat(128), "12.1.0.1", KEY)).is_ok());
+            assert!(parse(&row(&"x".repeat(129), "12.1.0.1", KEY)).is_err());
+        }
+        for raw in [
+            "Product|Product|Version|Build Key|CDN Key|Active\n",
+            "Product|Version|Active\nwow|12.1.0.1|1\n",
+        ] {
+            assert!(catalog_builds(raw, &mut Unmetered).is_err());
+        }
+        let invalid = parse(&format!("wow|12.1.0.1|{KEY}|{KEY}|maybe\n")).unwrap_err();
+        assert_eq!(
+            (invalid.code.as_str(), invalid.exit_code),
+            ("records.invalid_metadata", 4)
+        );
+        let columns = format!(
+            "{}\n",
+            (0..129)
+                .map(|n| format!("Column{n}"))
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+        let exceeded = catalog_builds(&columns, &mut Unmetered).unwrap_err();
+        assert_eq!(
+            (exceeded.code.as_str(), exceeded.exit_code),
+            ("records.metadata_limit", 3)
+        );
+        let rows = format!(
+            "{HEADER}{}",
+            format!("wow|12.1.0.1|{KEY}|{KEY}|0\n").repeat(4097)
+        );
+        let exceeded = catalog_builds(&rows, &mut Unmetered).unwrap_err();
+        assert_eq!(
+            (exceeded.code.as_str(), exceeded.exit_code),
+            ("records.metadata_limit", 3)
+        );
+        for (limit, code, exit) in [
+            (false, "records.invalid_metadata", 4),
+            (true, "records.metadata_limit", 3),
+        ] {
+            let error = metadata_text_error(".build.info", limit, "fixture");
+            assert_eq!((error.code.as_str(), error.exit_code), (code, exit));
+        }
+        assert!(parse(&format!("wow|12.1.0.1|{KEY}|{KEY}\n")).is_err());
+    }
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
@@ -673,9 +828,17 @@ mod tests {
             path
         }
         fn catalog(&self, rows: &str) {
+            let rows = rows
+                .lines()
+                .map(|row| {
+                    format!(
+                        "{row}|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\n"
+                    )
+                })
+                .collect::<String>();
             fs::write(
                 self.0.join(".build.info"),
-                format!("Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0\n{rows}"),
+                format!("Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0|Build Key!HEX:16|CDN Key!HEX:16\n{rows}"),
             )
             .unwrap();
         }

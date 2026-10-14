@@ -196,6 +196,12 @@ source query默认limit由10修为固定Go的50，显式1..200边界保留；新
 
 公开Emmy新补丁已实际通过一次库级cargo check，不等于旧私有修改版复原或产品测试通过。新依赖身份/对应源码工具正接受独立审查；发现并正在修复空目录影响include_dir!但未计入identity、recipe runner失败状态及完整recipe前后验证、准备遍历有界性等问题。全部修复及回归封存前不得宣称可复建验收通过。
 
+### 安装catalog校验后续修复（独立静态复核）
+
+补齐固定Go records的Product token（非空、≤128、小写字母/数字/下划线）、Build/CDN Key（32位小写hex），inactive/未知产品行也先验证；保留有换行的空catalog。独立审查指出原错误码不等价后，格式/UTF8/NUL统一records.invalid_metadata/4，列/行/字节上限为records.metadata_limit/3，并增加精确断言。更新core与Live两个受影响fixture，包括CN API family为forever而区域slot仍wow_cn_beta。独立审核已复看源码，rustfmt/diff通过，Rust测试仍未运行；24项Node合同/oracle测试及unsafe守卫重新运行通过。
+
+审核同时发现另批消费者缺口，已列入继续实施：Delivery尚直接inspect精确client，缺Go完整game-root有界Discover/Select；addon status直接序列化内部安装结构，额外公开displayName/channel/metadataBranch/interfaceKnown。应共享Go形状DTO并保留内部身份字段，不能把旧passive固定目录扫描或Data旧flavor parser当完整实现。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -359,7 +359,7 @@ fn catalog_scan_keeps_approved_cn_product_distinct() {
         fs::create_dir(&path).unwrap();
         fs::write(path.join(".flavor.info"), product).unwrap();
     }
-    fs::write(fixture.0.join(".build.info"), "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0\nus|1|1.60.1.70338|wow_classic_beta\ncn|1|1.60.1.70338|wow_cn_beta\n").unwrap();
+    fs::write(fixture.0.join(".build.info"), "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0|Build Key!HEX:16|CDN Key!HEX:16\nus|1|1.60.1.70338|wow_classic_beta|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\ncn|1|1.60.1.70338|wow_cn_beta|0123456789abcdef0123456789abcdef|fedcba9876543210fedcba9876543210\n").unwrap();
     let mut inv = fixture.inv();
     inv.flags.insert(
         "--installation".into(),
@@ -375,6 +375,6 @@ fn catalog_scan_keeps_approved_cn_product_distinct() {
                 && item.client.catalog_product == "wow_classic_beta")
     );
     assert!(report.installations.iter().any(
-        |item| item.client.product == "cn-beta" && item.client.catalog_product == "wow_cn_beta"
+        |item| item.client.product == "forever" && item.client.catalog_product == "wow_cn_beta"
     ));
 }
