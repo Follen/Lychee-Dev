@@ -4,7 +4,7 @@
 
 ## 接手入口
 
-- 仓库：[Follen/Lychee-Dev](https://github.com/Follen/Lychee-Dev)。交接分支为 `codex/fix-3.2.0`，PR 标题为 `fix-3.2.0`，目标分支为 `main`；以该 PR 的最新 head 为准。
+- 仓库：[Follen/Lychee-Dev](https://github.com/Follen/Lychee-Dev)。交接 PR 为 [#13 · fix-3.2.0](https://github.com/Follen/Lychee-Dev/pull/13)，当前为草稿；分支 `codex/fix-3.2.0`，目标 `main`，以该 PR 的最新 head 为准。
 - 起点为 `1f7b5977bd509422128d7c14bc8c4aeabb1ca07f`。本分支收纳其后的当前代码基线、清理、修复、审计报告和交接约定。
 - 本轮交付是可继续开发的基线。前一批 42 项确认问题已修复；追加两轮审计新发现的 **13 项确认问题尚未修复**，另有 **3 项候选**。下一项实现工作从这些待办开始。
 - `3.2.0` 是本次开发基线及 PR 名称；[release/version.json](release/version.json) 仍为 `3.1.2`。[npm 渠道](release/npm-channel.json) 仍为 `next`，保留 `latest=2.5.1`。没有合并、发行或修改已发布包。
