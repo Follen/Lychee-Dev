@@ -252,6 +252,14 @@ Data 两层消费者现共享固定Go安装身份：target需要真实client选�
 
 另加受控构建封存真实CLI exe，以及校验精确artifact后独立owned-process执行version/help/describe并保存原始输出和receipt。此入口用于接续独立Source/Skill真实使用，当前仅配置/静态验证，不是产品运行通过；没有游戏、安装或业务执行。嵌套Emmy job显式RUSTUP_TOOLCHAIN=1.99.0，防upstream更近的stable工具链文件覆盖根目录pin。
 
+### 正式 Mailbox v1 首批可独立测试边界
+
+新增go_mailbox_v1模块，按固定Go实现LYCMEM06/kind1–6有界wire、two-read HEAD/BODY校验、Identity/Receipt、500槽与旧200仅手动激活识别、INPUT readiness/绑定/时钟、可选DISABLED诊断及unknown不重放判定。24项纯fixture与逐项固定Go测试/消费者映射已写入；实际Rust测试NOT_RUN，由Windows独立限定组执行。
+
+独立审核发现并修复三项公开JSON差异：inputAttempt在序列化/日志重读中保留且不恢复host freshness，Receipt零report字段omitempty，旧InputOutcome缺atMillis/messagesQueued为0且unknown时间不授重放。补充旧04/05/07有效checksum wire拒绝、BODY状态/序列边界。新增serde_json raw_value feature用于保留原始诊断字节限额，不新增依赖。rustfmt/scoped diff通过，局部复审无新增阻断；没有将首批谓词称完整协议通过。
+
+该模块尚未替换生产消费者，默认Live仍有locator/input接线缺口。下一批按README逐层替换mailbox decode、native read-only Identity/INPUT与driver；必须保留Selector.Accept次序、二键stale能力证据和joined错误分类。逻辑公开map fixture不等于Lua内存遍历通过；真实游戏/输入仍留最后配合清单。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

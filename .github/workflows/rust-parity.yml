@@ -127,6 +127,9 @@ jobs:
       - name: Run Source query admission unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-query-default --one-shot -- test --locked --offline -p lycheedev-source --lib public_query_defaults -j 1
+      - name: Run formal Go mailbox v1 pure fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-mailbox-v1 --one-shot -- test --locked --offline -p lycheedev-live --lib go_mailbox_v1 -j 1
       - name: Run real local Data installation and catalog fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-data-installation --one-shot -- test --locked --offline -p lycheedev-data --test installed_parity --test local_domain_parity -j 1

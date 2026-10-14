@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Unified native lifecycle, bounded route ledger and independent static locator.
 pub mod binding;
+pub mod go_mailbox_v1;
 pub mod host;
 pub mod journal;
 pub mod lifecycle;
