@@ -1,0 +1,80 @@
+{
+  "schema": "lycheedev.skill-usage-workflow.v1",
+  "goContract": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "requiredSkillFiles": [
+    "SKILL.md",
+    "agents/openai.yaml",
+    "references/addon-validation.md",
+    "references/asset-export.md",
+    "references/commands.md",
+    "references/data-hotfix.md",
+    "references/data-investigation.md",
+    "references/data-query-recipes.md",
+    "references/data-recovery.md",
+    "references/data-tables.md",
+    "references/data-targets.md",
+    "references/error-diagnosis.md",
+    "references/installation.md",
+    "references/live-investigation.md",
+    "references/live-probes.md",
+    "references/live-recovery.md",
+    "references/live-startup.md",
+    "references/runtime-investigations.md",
+    "references/source-preparation.md",
+    "references/source-relations.md",
+    "references/source-research.md",
+    "references/source-value-flow.md",
+    "scripts/lycheedev.mjs"
+  ],
+  "prompts": [
+    {
+      "id": "timer-api",
+      "text": "请查固定 Retail 源码里的 C_Timer.After 参数与 secret 参数约束，给出准确原始位置并说明静态证据的范围。不要在游戏里执行。"
+    },
+    {
+      "id": "action-callers",
+      "text": "继续查看同一固定版本 GetActionButtonForID 的实现及调用者，保留 symbolId、原始位置与未解析边界。"
+    },
+    {
+      "id": "empty-large-recovery",
+      "text": "同一固定源码中搜索“冷却”；不足时按 Skill 检查主题和搜索词，以 Cooldown 做有界检索并继续一页。遇到错误时保留原 pin，恢复后继续。"
+    }
+  ],
+  "apiOriginalWindow": {
+    "repository": "wow-ui-source",
+    "commit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+    "archiveSHA256": "d4d6e468636d6205d94b912fd96ac469b66ae606e6422d7e3849afbff7a376df",
+    "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/UITimerDocumentation.lua",
+    "firstLine": 10,
+    "lastLine": 21,
+    "count": 12,
+    "totalLines": 81,
+    "fullFileSHA256": "72b5d79e91b3d8185cff68e5a6cd91498cb3aecd8ea6809a84e4d0edc805bc4c",
+    "textSHA256": "e20df7e8a9e30988ebc68f92cd2715db42915d4beecb1faf371cc7a669e3ca12",
+    "text": "\t\t{\n\t\t\tName = \"After\",\n\t\t\tType = \"Function\",\n\t\t\tSecretArguments = \"AllowedWhenUntainted\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"seconds\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"callback\", Type = \"TimerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n",
+    "declarationLines": [
+      10,
+      20
+    ],
+    "argumentLines": [
+      17,
+      18
+    ],
+    "secretArgumentsLine": 13
+  },
+  "nativeCallsite": {
+    "path": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+    "line": 141,
+    "kind": "call",
+    "target": "GetActionButtonForID",
+    "sourceText": "\tlocal button = GetActionButtonForID(id);",
+    "fullFileSHA256": "54fb5625a5e8aa343cbbc0be805b23e2b3b329011e792448e6b732a4bebd8cba",
+    "site": {
+      "file": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+      "start": 3940,
+      "end": 3960
+    },
+    "siteText": "GetActionButtonForID",
+    "scope": "Native original use token. Incoming native source labels describe the reference expression; structural caller identity ActionButtonDown remains separately checked."
+  }
+}

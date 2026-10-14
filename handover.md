@@ -376,6 +376,12 @@ Delivery维护改正式v3/files、256KiB manifest、旧64/200→500形状/精确
 
 旧任意bytes publish明确失败关闭，正式SlotEnvelope publish/verify/confirm/retire下一批复用已抽取core合同；当前maintenance不是完整发送链。21个额外addon文件未删，仍待真实消费者迁移。上述candidate尚未证明全安装/卸载/崩溃恢复等价。
 
+### 独立 Skill 实际工作流验收入口
+
+新增独立验收器先认证固定Go的完整23文件Skill，再经真实prefix发现、包launcher和封存EXE执行固定Retail的代表性API/实现查询、原文定位、静态及普通native refs/context、中文/分页/错误恢复与batch。prefix为明确隔离的解析fixture，不冒称npm安装验证。缺失batch记required失败，仍保留其他实际案例；超时/进程失败后不再启动命令，owned Job证明全树回收后才清scratch，完整日志和身份封存。
+
+独立审查发现并修复两处验收假绿：API正文必须与已认证archive精确10–21行逐byte一致；native不得由空元数据stub或静态同址关系满足，需实际引擎/输入身份/one-shot退休及精确调用点native依据，仍接受诚实partial。17项Node检查器回归已独立复跑通过；这不是Windows Skill实际使用通过。新增Windows真实工作流在候选包成功后独立执行，不被其他组失败短路；当前实际执行NOT_RUN，后续须独立核原始产物。完整Source语义、生命周期、Go性能差分与Data/Live全流程仍另列。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
