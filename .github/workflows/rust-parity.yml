@@ -141,6 +141,9 @@ jobs:
       - name: Run exact Go removal intent and cancellation fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-removal --one-shot -- test --locked --offline -p lycheedev-delivery --lib removal::tests -j 1
+      - name: Run Windows checked file ownership and close fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-checked-close --one-shot -- test --locked --offline -p lycheedev-windows --lib filesystem::close_file_tests -j 1
       - name: Run Windows no-replace durable move fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-durable-move --one-shot -- test --locked --offline -p lycheedev-windows --lib filesystem::durable_move_tests -j 1

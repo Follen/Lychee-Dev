@@ -382,6 +382,10 @@ Delivery维护改正式v3/files、256KiB manifest、旧64/200→500形状/精确
 
 独立审查发现并修复两处验收假绿：API正文必须与已认证archive精确10–21行逐byte一致；native不得由空元数据stub或静态同址关系满足，需实际引擎/输入身份/one-shot退休及精确调用点native依据，仍接受诚实partial。17项Node检查器回归已独立复跑通过；这不是Windows Skill实际使用通过。新增Windows真实工作流在候选包成功后独立执行，不被其他组失败短路；当前实际执行NOT_RUN，后续须独立核原始产物。完整Source语义、生命周期、Go性能差分与Data/Live全流程仍另列。
 
+### 持久发布 checked-close 边界
+
+Windows新增consume File所有权的最小close_file安全接口，仅一次CloseHandle且传播错误，不重建或重试已消费handle。core受控atomic writer顺序为sync→原control→checked close→原control→durable replace；关闭失败或关闭期间取消均不发布。独立源码审核已核所有权和首个错误传播，新增独占句柄/duplicate所有权、注入关闭错误与关闭期间取消四项fixture，Windows运行NOT_RUN。错误注入是在正常关闭后返回错误，不冒称实测内核CloseHandle失败；现有遗留Drop未被宣称可检查关闭。durable journal将复用此接口，尚未接生产。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

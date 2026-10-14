@@ -22,6 +22,76 @@ pub fn durable_replace(source: &Path, destination: &Path) -> crate::Result<()> {
     }
 }
 
+/// Consume an owned File and report the kernel close result. Unlike File::drop,
+/// this boundary must be checked before treating a staged write as publishable.
+/// The caller must not retain or retry the raw handle after this consumes it.
+pub fn close_file(file: std::fs::File) -> std::io::Result<()> {
+    use std::os::windows::io::IntoRawHandle;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    let handle = HANDLE(file.into_raw_handle());
+    // SAFETY: IntoRawHandle transfers this File's sole ownership of this handle
+    // and suppresses its destructor. CloseHandle receives the same valid Win32
+    // file handle exactly once. No pointer/buffer or borrow escapes, and this
+    // function neither shares, reconstructs nor retries the handle on error:
+    // its post-close state must never be guessed from a failed close result.
+    unsafe { CloseHandle(handle) }
+        .map_err(|error| std::io::Error::from_raw_os_error((error.code().0 as u32 & 0xffff) as i32))
+}
+
+#[cfg(test)]
+mod close_file_tests {
+    use super::*;
+    use std::{fs, os::windows::fs::OpenOptionsExt, path::PathBuf};
+    struct Temp(PathBuf);
+    impl Temp {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "lycheedev-close-file-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn file(&self) -> std::fs::File {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .share_mode(0)
+                .open(self.0.join("owned"))
+                .unwrap()
+        }
+    }
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn checked_close_releases_the_owned_exclusive_file() {
+        let temp = Temp::new();
+        let file = temp.file();
+        let path = temp.0.join("owned");
+        assert!(fs::remove_file(&path).is_err());
+        close_file(file).unwrap();
+        fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn checked_close_does_not_close_an_independently_owned_duplicate() {
+        let temp = Temp::new();
+        let file = temp.file();
+        let duplicate = file.try_clone().unwrap();
+        let path = temp.0.join("owned");
+        close_file(file).unwrap();
+        assert!(fs::remove_file(&path).is_err());
+        close_file(duplicate).unwrap();
+        fs::remove_file(path).unwrap();
+    }
+}
+
 /// Move one file or directory without replacing a racing destination. This is
 /// the fixed Go publication boundary: same-volume MoveFileExW with write-through
 /// and no COPY_ALLOWED or REPLACE_EXISTING flags.

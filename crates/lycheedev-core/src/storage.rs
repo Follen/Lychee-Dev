@@ -169,7 +169,20 @@ pub fn atomic_write_controlled(
 fn atomic_write_with_check(
     path: &Path,
     bytes: &[u8],
+    check: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    atomic_write_with_check_and_close(
+        path,
+        bytes,
+        check,
+        lycheedev_windows::filesystem::close_file,
+    )
+}
+fn atomic_write_with_check_and_close(
+    path: &Path,
+    bytes: &[u8],
     mut check: impl FnMut() -> Result<()>,
+    close: impl FnOnce(File) -> std::io::Result<()>,
 ) -> Result<()> {
     check()?;
     let parent = path
@@ -215,7 +228,8 @@ fn atomic_write_with_check(
         }
         file.sync_all()?;
         check()?;
-        drop(file);
+        close(file)?;
+        check()?;
         lycheedev_windows::durable_replace(&temporary, path)
             .map_err(|e| ToolkitError::new("vault.publish", e, 5))?;
         Ok(())
@@ -338,6 +352,70 @@ mod controlled_publication_tests {
         .unwrap_err();
         assert_eq!(checks, 4);
         assert_eq!(error.code, "command.cancelled");
+        assert_eq!(error.exit_code, 7);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn checked_close_failure_never_publishes_the_staged_bytes() {
+        let root = std::env::temp_dir().join(format!(
+            "lycheedev-close-failure-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("marker.json");
+        fs::write(&path, b"original").unwrap();
+        let mut closes = 0;
+        let error = atomic_write_with_check_and_close(
+            &path,
+            b"replacement",
+            || Ok(()),
+            |file| {
+                closes += 1;
+                // Close the real fixture handle, then inject the error outcome. No
+                // invalid handle, leak or unsafe fabricated File is needed.
+                lycheedev_windows::filesystem::close_file(file)?;
+                Err(std::io::Error::from_raw_os_error(5))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(closes, 1);
+        assert_eq!(error.code, "external.io");
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn cancellation_while_closing_is_rechecked_before_publication() {
+        let root = std::env::temp_dir().join(format!(
+            "lycheedev-close-cancel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("marker.json");
+        fs::write(&path, b"original").unwrap();
+        let control = crate::control::OperationControl::default();
+        let error = atomic_write_with_check_and_close(
+            &path,
+            b"replacement",
+            || control.check(),
+            |file| {
+                lycheedev_windows::filesystem::close_file(file)?;
+                control.cancel_handle().store(true, Ordering::Release);
+                Ok(())
+            },
+        )
+        .unwrap_err();
         assert_eq!(error.exit_code, 7);
         assert_eq!(fs::read(&path).unwrap(), b"original");
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
