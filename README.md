@@ -52,7 +52,7 @@ go build -o .tmp/lycheedev.exe ./cmd/lycheedev
 ## 使用 npm 发行包
 
 ```powershell
-npm install --global lycheedev@next --ignore-scripts
+npm install --global lycheedev@latest --ignore-scripts
 lycheedev version --format json
 lycheedev describe --format json
 ```

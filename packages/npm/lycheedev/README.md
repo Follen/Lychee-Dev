@@ -9,7 +9,7 @@
 需要 Windows amd64 和 Node.js 22.14.0 或以上。
 
 ```powershell
-npm install --global lycheedev@next --ignore-scripts
+npm install --global lycheedev@latest --ignore-scripts
 lycheedev version --format json
 lycheedev describe --format json
 ```
@@ -28,6 +28,6 @@ lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.
 
 Source、Data 和 Assets 无需启动游戏。Live 需要运行中的客户端和配套受管插件；恢复时保留原 project、CON、request 与预算。
 
-仓库采用 3.2.0 开发基线，可能领先于本包。以已安装版本的 `version`、`describe` 和 `--help` 确认能力。
+本包版本为 3.2.0，通过 `latest` 渠道发布。以已安装版本的 `version`、`describe` 和 `--help` 确认能力。
 
 项目代码采用 MIT，第三方组件声明见包内 LICENSE 与 THIRD_PARTY_NOTICES。
