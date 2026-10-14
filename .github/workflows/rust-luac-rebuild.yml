@@ -27,7 +27,10 @@ jobs:
         with:
           node-version: '24'
       - name: Test reconstruction and packaging admission
-        run: node --test tools/luac.test.mjs tools/rust-package-smoke.test.mjs tools/rust-owned-process.test.mjs
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp | Out-Null
+          node --test tools/luac.test.mjs tools/rust-package-smoke.test.mjs tools/rust-owned-process.test.mjs
+          exit $LASTEXITCODE
       - name: First fixed official source build
         id: first
         run: node tools/luac.mjs build .tmp/ci-luac-a --msvc-version 14.51.36231 --sdk-version 10.0.26100.0
@@ -47,6 +50,7 @@ jobs:
             .tmp/ci-luac-a
             .tmp/ci-luac-b
             .tmp/rust-disk/evidence
+            .tmp/rust-process-test-*
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

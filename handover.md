@@ -338,6 +338,10 @@ luac失败后的只读run38633376782核定cl/link精确文件与有效Microsoft�
 
 本批导出进入Windows all-target/现有Mailbox测试组，实际运行NOT_RUN，没有持久化writer/正式Windows输入/生产driver消费者。C恢复仍独立审核，已发现自动reload预算clone丢失Go共享goal的lastObserved/exhausted语义，必须修并回归后才接生产；B恢复入口目前只生成intent，不能称完整恢复通过。Delivery正式publish共享DTO边界待移至core无循环依赖，不复制第二套信封。
 
+### cl 支持第二轮 CI 准备缺口
+
+57fa401/run38634308510在新增Windows runner测试入口因clean checkout尚无.tmp目录而9项ENOENT，编译未开始；不是cl/helper新准入实际失败。修复流程显式创建测试容器目录，并上传故障注入process-test证据。保留该失败历史，下一轮仍需真实全部负例与双编译通过，不将Linux条件skip当Windows通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
