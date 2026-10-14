@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -161,5 +162,49 @@ func TestUpdateRejectsChangedAndContainedTargets(t *testing.T) {
 				t.Fatalf("failed preflight wrote state: %v", err)
 			}
 		})
+	}
+}
+
+func TestUpdateDiscoverySkipsRemovedButKeepsInterruptedReplacement(t *testing.T) {
+	source, target, archive, version := upgradeFixture(t)
+	state := t.TempDir()
+	targetInfo := UpdateTarget{Component: "skill", Path: target}
+	raw, _ := json.Marshal([]UpdateTarget{targetInfo})
+	if err := os.WriteFile(filepath.Join(state, "targets.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	found, err := DiscoverUpdateTargets(context.Background(), state)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("installed: %v %v", found, err)
+	}
+	removed := filepath.Join(t.TempDir(), "removed")
+	if _, err := RemoveInstallation(context.Background(), target, removed, "skill"); err != nil {
+		t.Fatal(err)
+	}
+	found, err = DiscoverUpdateTargets(context.Background(), state)
+	if err != nil || len(found) != 0 {
+		t.Fatalf("removed target rediscovered: %v %v", found, err)
+	}
+	// Explicit selection remains able to reinstall the absent target.
+	if _, err := UpdateManaged(context.Background(), source, version, state, []UpdateTarget{targetInfo}, false); err != nil {
+		t.Fatal(err)
+	}
+	// A journal which already moved the old installation remains discoverable.
+	recovery := filepath.Join(filepath.Dir(filepath.Dir(target)), ".lycheedev-updates", "replace-fixture")
+	if err := os.MkdirAll(filepath.Dir(recovery), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpgradeInstallation(context.Background(), source, target, archive, "skill", version); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(archive, recovery); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(target, filepath.Join(recovery, "next")); err != nil {
+		t.Fatal(err)
+	}
+	found, err = DiscoverUpdateTargets(context.Background(), state)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("pending replacement lost: %v %v", found, err)
 	}
 }

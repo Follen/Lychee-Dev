@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/buildinfo"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/selection"
@@ -45,9 +44,6 @@ func Release(t *testing.T, variant string) string {
 		"addon/Core/Start.lua":      []byte("local name, ns = ...\n"),
 		"addon/Core/ClientGate.lua": []byte("local name, ns = ...\n"),
 	}
-	if variant == "queue" {
-		files["addon/Bridge/Definitions.lua"], _ = bridge.EncodeProbeQueue(nil)
-	}
 	if variant == "slot-runtime" {
 		files["addon/Bridge/SlotRuntime.lua"] = []byte("local name, ns = ...\n")
 	}
@@ -58,9 +54,6 @@ func Release(t *testing.T, variant string) string {
 		interfaces = append(interfaces, fmt.Sprint(baseline.Interface))
 	}
 	toc := fmt.Sprintf("## Interface: %s\n## Version: %s\n## SavedVariables: LycheeToolkitDB\nCore\\ClientGate.lua\nCore\\Start.lua\n", strings.Join(interfaces, ", "), Version)
-	if variant == "queue" {
-		toc += "Bridge/Definitions.lua\n"
-	}
 	if variant == "slot-runtime" {
 		toc += "Bridge/SlotRuntime.lua\n"
 	}

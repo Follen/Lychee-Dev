@@ -10,7 +10,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 	"golang.org/x/sys/windows"
-	"sync/atomic"
 	"time"
 )
 
@@ -28,71 +27,24 @@ func (n *Native) ObserveInput(ctx context.Context, e bridge.SlotEnvelope, after 
 	if err := n.Guard(ctx); err != nil {
 		return InputObservation{}, err
 	}
-	return n.observeInputFrom(ctx, n.Process, e, after, uptimeMillis, time.Now)
+	return n.observeInputFrom(ctx, e, after, uptimeMillis, time.Now)
 }
 
-func (n *Native) observeInputFrom(ctx context.Context, source memory.Source, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
+func (n *Native) observeInputFrom(ctx context.Context, e bridge.SlotEnvelope, after int64, uptime func() int64, clock func() time.Time) (InputObservation, error) {
 	runtime, _ := tokenBytes(e.Runtime)
-	selector := memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}
-	var stale atomic.Bool
-	accept := func(r memory.Record, recent bool) bool {
-		now := uptime()
-		s, err := inputObservation(r, e, after, now)
-		if errors.Is(err, errInputStateStale) {
-			stale.Store(true)
-			// A recent sample may stop discovery, but cannot authorize input.
-			// Never let the same retained record repeatedly hide newer records.
-			return recent && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis)
-		}
-		return err == nil
-	}
-	selector.Accept = func(r memory.Record) bool { return accept(r, false) }
-	key := inputSampleKey(e, after)
-	finish := func(records []memory.Record, recent bool) (InputObservation, error) {
-		now := uptime()
-		s, err := inputAfterLookup(records, e, after, now)
-		if err == nil {
-			n.inputWait.reset()
-			return s, nil
-		}
-		if recent && len(records) > 0 {
-			// inputAfterLookup intentionally discards stale results. Decode with
-			// the same validator again to retain only a bounded scheduling hint.
-			s, invalid := inputObservation(records[0], e, after, now)
-			if errors.Is(invalid, errInputStateStale) && s.SampleMillis >= now-inputRecentHintMillis && (n.inputHintRuntime != e.Runtime || s.SampleMillis > n.inputHintMillis) {
-				n.inputHintRuntime, n.inputHintMillis = e.Runtime, s.SampleMillis
-				return InputObservation{}, ErrInputObservationStale
-			}
-			return InputObservation{}, ErrPending
-		}
-		if errors.Is(err, ErrInputObservationStale) && !n.inputWait.stale(key, clock()) {
-			return InputObservation{}, ErrPending
-		}
-		return s, err
-	}
-	// A native mailbox read always resolves the current publication. The hints
-	// branch below is retained only for synthetic scanner test adapters.
-	if n.Hints != nil && len(n.Hints.Entries) > 0 {
-		found, err := n.findPath(ctx, source, selector, true, true)
-		if err != nil && !((errors.Is(err, context.DeadlineExceeded) || errors.Is(err, memory.ErrNearbyBudget)) && ctx.Err() == nil) {
-			return InputObservation{}, err
-		}
-		if len(found.Records) > 0 {
-			return finish(found.Records, false)
-		}
-		if stale.Load() && n.inputWait.stale(key, clock()) || n.inputWait.waiting(key, clock()) {
-			return InputObservation{}, ErrInputObservationStale
-		}
-	}
-	selector.Accept = func(r memory.Record) bool { return accept(r, true) }
-	found, err := n.findPath(ctx, source, selector, true, false)
+	found, err := n.Find(ctx, memory.Selector{Runtime: runtime, Nonce: runtime, Kind: bridge.MemoryInputState}, true)
 	if err != nil {
 		return InputObservation{}, err
 	}
-	if len(found.Records) == 0 && stale.Load() && n.Hints != nil && n.inputWait.stale(key, clock()) {
-		return InputObservation{}, ErrInputObservationStale
+	sample, err := inputAfterLookup(found.Records, e, after, uptime())
+	if err == nil {
+		n.inputWait.reset()
+		return sample, nil
 	}
-	return finish(found.Records, true)
+	if errors.Is(err, ErrInputObservationStale) && !n.inputWait.stale(inputSampleKey(e, after), clock()) {
+		return InputObservation{}, ErrPending
+	}
+	return sample, err
 }
 
 // Input performs one already-journaled effect. No loop, journal callback or

@@ -137,3 +137,18 @@ func TestRemoteTargetOfflineNeedsObservation(t *testing.T) {
 		t.Fatal(result, code)
 	}
 }
+
+func TestNamedTargetUnavailableBuildUsesSelectionEnvironmentExit(t *testing.T) {
+	client := testkit.Client(t, "flavor")
+	home := filepath.Join(t.TempDir(), "workspace")
+	if r, c := invoke(t, "init", "--home", home, "--format=json"); c != 0 {
+		t.Fatal(r, c)
+	}
+	if r, c := invoke(t, "target", "add", "unavailable", "--product", "retail", "--region", "us", "--locale", "enUS", "--installation", client, "--build", "12.1.0.99999", "--home", home, "--format=json"); c != 0 {
+		t.Fatal(r, c)
+	}
+	r, c := invoke(t, "target", "resolve", "--target", "unavailable", "--offline", "--home", home, "--format=json")
+	if c != 3 || r.OK || r.Error == nil || r.Error.Code != "selection.target_build_unavailable" {
+		t.Fatalf("code=%d response=%+v error=%+v", c, r, r.Error)
+	}
+}

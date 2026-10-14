@@ -303,6 +303,9 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 	}
 	for i := siteOffset; i < len(unique); i++ {
 		site := unique[i]
+		if i != siteOffset {
+			lineOffset, byteOffset = 0, 0
+		}
 		if len(result.Snippets) >= limit {
 			result.Truncated = true
 			result.NextCursor = encodeContextCursor(cursorKey, relationCursor, i, lineOffset, byteOffset)

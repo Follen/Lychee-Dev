@@ -328,7 +328,18 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 	if err != nil {
 		return Reading[DB2StreamSummary]{}, err
 	}
-	return withNavigator(ctx, root, snapshot, query, func(nav *navigator) (Reading[DB2StreamSummary], error) {
+	started, writeFailed := false, false
+	output := yield
+	yield = func(frame StreamFrame) error {
+		err := output(frame)
+		if err != nil {
+			writeFailed = true
+		} else if frame.Frame == StreamFrameBegin {
+			started = true
+		}
+		return err
+	}
+	reading, err := withNavigator(ctx, root, snapshot, query, func(nav *navigator) (Reading[DB2StreamSummary], error) {
 		t, err := nav.open(ctx, name)
 		if err != nil {
 			return Reading[DB2StreamSummary]{}, err
@@ -360,7 +371,6 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 			return Reading[DB2StreamSummary]{}, err
 		}
 		count := 0
-		var failure *StreamError
 		extra := false
 		walkErr := t.view.ScanWithIDs(ctx, int64(t.provenance.LogicalRows)*4, rowTextBytes, func(id uint32, row map[string]any) error {
 			if filterField != "" && !filterMatches(row[filterField], filterValue) {
@@ -379,11 +389,6 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 			return yield(StreamFrame{Frame: StreamFrameRecord, Record: &record})
 		})
 		if walkErr != nil && !errors.Is(walkErr, errWalkStop) {
-			code := stableErrorCode(walkErr)
-			failure = &StreamError{Code: code, Message: walkErr.Error()}
-			if err := yield(StreamFrame{Frame: StreamFrameError, Error: failure}); err != nil {
-				return Reading[DB2StreamSummary]{}, err
-			}
 			return Reading[DB2StreamSummary]{}, walkErr
 		}
 		if extra {
@@ -394,9 +399,6 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 			Partial: contextFrame.Partial, PartialReasons: contextFrame.PartialReasons,
 			Count: count, Complete: contextFrame.Complete, Truncated: contextFrame.Truncated,
 			TruncationReason: contextFrame.TruncationReason,
-		}
-		if err := yield(StreamFrame{Frame: StreamFrameEnd, End: &end}); err != nil {
-			return Reading[DB2StreamSummary]{}, err
 		}
 		result := DB2StreamSummary{
 			Table: t.provenance.Identity.Name, Mode: "stream", Limit: request.Limit,
@@ -411,8 +413,16 @@ func StreamDataRows(ctx context.Context, root, snapshot, name string, query File
 		if err != nil {
 			return Reading[DB2StreamSummary]{}, err
 		}
+		if err := yield(StreamFrame{Frame: StreamFrameEnd, End: &end}); err != nil {
+			return Reading[DB2StreamSummary]{}, err
+		}
 		return Reading[DB2StreamSummary]{Result: result, Captures: []evidence.CaptureRef{capture}}, nil
 	})
+	if err != nil && started && !writeFailed {
+		frameErr := output(StreamFrame{Frame: StreamFrameError, Error: &StreamError{Code: stableErrorCode(err), Message: err.Error()}})
+		err = errors.Join(err, frameErr)
+	}
+	return reading, err
 }
 
 // requireField validates a caller-named field against the bound schema.
@@ -425,7 +435,7 @@ func requireField(t *preparedTable, name string, numericOnly bool) error {
 		if field.Name != name {
 			continue
 		}
-		if numericOnly && field.Kind != "int" {
+		if numericOnly && (field.Kind != "int" || field.Array) {
 			return fmt.Errorf("%w: %s is %s", ErrFieldType, name, field.Kind)
 		}
 		return nil
@@ -532,6 +542,7 @@ func withNavigator[T any](ctx context.Context, root, snapshot string, query File
 		}
 		defer admission.Close()
 		query.admitted = true
+		query.downloadWorkers = admission.DownloadWorkers
 		nav, err := openNavigator(ctx, store, metadata, snapshot, query)
 		if err != nil {
 			return Reading[T]{}, err

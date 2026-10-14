@@ -300,7 +300,7 @@ function inspector.SearchValue(value, query, limit, maxDepth)
     end
 
     local function AddMatch(key, childValue, path)
-        if type(key) ~= "string" or IsSecret(key) then
+        if type(key) ~= "string" or IsSecret(key) or IsSecret(childValue) then
             return
         end
         local lowerKey = key:lower()
@@ -310,14 +310,22 @@ function inspector.SearchValue(value, query, limit, maxDepth)
         end
         matchCount = matchCount + 1
         local bucket = lowerKey == query and exact or (matchStart == 1 and prefixes or contains)
-        if #exact + #prefixes + #contains < limit and not IsSecret(childValue) then
-            bucket[#bucket + 1] = {
+        local position = #bucket + 1
+        for index = 1, #bucket do
+            if key < bucket[index].key or (key == bucket[index].key and path < bucket[index].path) then
+                position = index
+                break
+            end
+        end
+        if position <= limit then
+            table.insert(bucket, position, {
                 key = key,
                 path = path,
                 value = childValue,
                 valueType = type(childValue),
                 preview = SafePreview(childValue),
-            }
+            })
+            if #bucket > limit then bucket[#bucket] = nil end
         end
     end
 
@@ -366,8 +374,6 @@ function inspector.SearchValue(value, query, limit, maxDepth)
             end
         end
     end
-    table.sort(prefixes, function(left, right) return left.key < right.key end)
-    table.sort(contains, function(left, right) return left.key < right.key end)
     local results = {}
     local function Append(bucket)
         for index = 1, #bucket do

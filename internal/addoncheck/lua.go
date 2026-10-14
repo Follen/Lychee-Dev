@@ -46,9 +46,13 @@ type syntaxWalker struct {
 	apiRoots  []*ast.TableExpr
 }
 
-func (w *syntaxWalker) declare(name, category string, line, end int, signature string) {
+func (w *syntaxWalker) declare(name, category string, line, end int, signature string, scope ...string) {
 	if name != "" {
-		w.facts.Declarations = append(w.facts.Declarations, Declaration{Name: name, Category: category, Line: line, EndLine: end, Signature: signature})
+		decl := Declaration{Name: name, Category: category, Line: line, EndLine: end, Signature: signature}
+		if len(scope) > 0 {
+			decl.Scope = scope[0]
+		}
+		w.facts.Declarations = append(w.facts.Declarations, decl)
 	}
 }
 func (w *syntaxWalker) signature(line int) string {
@@ -71,12 +75,12 @@ func (w *syntaxWalker) statements(nodes []ast.Stmt, scope string) {
 			if n.Name.Receiver != nil {
 				name = accessName(n.Name.Receiver) + ":" + n.Name.Method
 			}
-			w.declare(name, "function", n.Line(), n.LastLine(), w.signature(n.Line()))
+			w.declare(name, "function", n.Line(), n.LastLine(), w.signature(n.Line()), scope)
 			w.statements(n.Func.Stmts, name)
 		case *ast.LocalAssignStmt:
 			for i, expr := range n.Exprs {
 				if fn, ok := expr.(*ast.FunctionExpr); ok && i < len(n.Names) {
-					w.declare(n.Names[i], "local-function", n.Line(), n.LastLine(), w.signature(n.Line()))
+					w.declare(n.Names[i], "local-function", n.Line(), n.LastLine(), w.signature(n.Line()), scope)
 					w.statements(fn.Stmts, n.Names[i])
 				} else {
 					w.expression(expr, scope)
@@ -92,11 +96,11 @@ func (w *syntaxWalker) statements(nodes []ast.Stmt, scope string) {
 					name = accessName(n.Lhs[i])
 				}
 				if fn, ok := expr.(*ast.FunctionExpr); ok && name != "" {
-					w.declare(name, "function", n.Line(), n.LastLine(), w.signature(n.Line()))
+					w.declare(name, "function", n.Line(), n.LastLine(), w.signature(n.Line()), scope)
 					w.statements(fn.Stmts, name)
 				} else {
 					if call, ok := expr.(*ast.FuncCallExpr); ok && invocationName(call) == "CreateFromMixins" && name != "" {
-						w.declare(name, "mixin", n.Line(), n.LastLine(), w.signature(n.Line()))
+						w.declare(name, "mixin", n.Line(), n.LastLine(), w.signature(n.Line()), scope)
 						for _, base := range call.Args {
 							if parent := accessName(base); parent != "" {
 								w.link(name, parent, "inherits", "inferred", n.Line())

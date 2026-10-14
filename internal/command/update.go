@@ -67,7 +67,7 @@ func updateToolkit(ctx context.Context, opts Options) (any, error, int) {
 		targets = append(targets, delivery.UpdateTarget{Component: "addon", Path: path})
 	}
 	if len(targets) == 0 && opts.file == "" {
-		targets, err = delivery.ReadUpdateTargets(state)
+		targets, err = delivery.DiscoverUpdateTargets(ctx, state)
 		if err != nil {
 			return nil, err, 4
 		}

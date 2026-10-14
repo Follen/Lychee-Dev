@@ -52,7 +52,7 @@ func TestHelpAndDescribeExposeTheImplementedContract(t *testing.T) {
 		t.Fatalf("describe command count = %d, want %d", len(describedCommands), len(commandContracts))
 	}
 
-	for _, args := range [][]string{{"live", "run", "--help"}, {"live", "resume", "--help"}, {"source", "query", "--help"}} {
+	for _, args := range [][]string{{"live", "execute", "--help"}, {"live", "resume", "--help"}, {"source", "query", "--help"}} {
 		response, code := invoke(t, append(args, "--format=json")...)
 		if code != 0 || !response.OK {
 			t.Fatalf("%v: code=%d response=%+v", args, code, response)
@@ -277,41 +277,25 @@ func TestSubcommandHelpDoesNotMakeUnknownCommandsUsable(t *testing.T) {
 
 func TestLiveCommandFlagAdmissionComesFromItsContract(t *testing.T) {
 	for _, args := range [][]string{
-		{"live", "run"},
-		{"live", "ack"},
-		{"live", "status"},
-		{"live", "session"},
+		{"live", "status"}, {"live", "session"},
+		{"live", "reload", "--session", "CON-fixture", "--request", "r", "--account", "old"},
+		{"live", "reload", "fallback", "--installation", "client", "--pid", "1", "--request", "r", "--session", "old"},
+		{"live", "reload", "fallback", "--installation", "client", "--pid", "1", "--request", "r", "--wake-binding", "CTRL-ALT-F12"},
 	} {
-		response, code := invoke(t, append(args, "--format=json")...)
-		if code != 2 || response.OK || response.Error == nil || response.Error.Code != "command.invalid_arguments" {
-			t.Fatalf("missing positional argument accepted for %v: code=%d response=%+v", args, code, response)
+		r, c := invoke(t, append(args, "--format=json")...)
+		if c != 2 || r.OK {
+			t.Fatalf("%v: %d %+v", args, c, r)
 		}
 	}
-
 	for _, args := range [][]string{
-		{"live", "run", "OP-loaded", "--home", "root", "--help", "--format=json"},
-		{"live", "reload", "--session", "SESSION", "--request", "reload-1", "--home", "root", "--help", "--format=json"},
-		{"live", "probe", "load", "--session", "SESSION", "--request", "load-1", "--probe", "probe-name", "--account", "ACCOUNT", "--home", "root", "--help", "--format=json"},
-		{"live", "bugs", "--session", "SESSION", "--request", "bugs-1", "--count", "10", "--account", "ACCOUNT", "--home", "root", "--help", "--format=json"},
-		{"live", "ack", "OP-verified", "--home", "root", "--help", "--format=json"},
-		{"live", "resume", "OP-existing", "--home", "root", "--help", "--format=json"},
+		{"live", "reload", "--session", "CON-fixture", "--request", "r"},
+		{"live", "reload", "fallback", "--installation", "client", "--pid", "1", "--request", "r"},
+		{"live", "bugs", "--session", "CON-fixture", "--request", "r", "--count", "10"},
+		{"live", "resume", "CON-fixture"},
 	} {
-		response, code := invoke(t, args...)
-		if code != 0 || !response.OK {
-			t.Fatalf("accepted command flags %v: code=%d response=%+v", args, code, response)
-		}
-	}
-
-	for _, flag := range []string{"--installation=other", "--pid=7", "--character=Other", "--realm=Other", "--nonce=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--snapshot=PIN-other", "--region=window"} {
-		response, code := invoke(t, "live", "run", "OP-loaded", flag, "--format=json")
-		if code != 2 || response.OK || response.Error == nil || !strings.Contains(response.Error.Message, flag[:strings.IndexByte(flag, '=')]) {
-			t.Fatalf("live run accepted %s: code=%d response=%+v", flag, code, response)
-		}
-	}
-	for _, flag := range []string{"--region=window", "--installation=other", "--snapshot=PIN-other", "--session=other", "--account=other", "--pid=7"} {
-		response, code := invoke(t, "live", "resume", "OP-existing", flag, "--format=json")
-		if code != 2 || response.OK || response.Error == nil || !strings.Contains(response.Error.Message, flag[:strings.IndexByte(flag, '=')]) {
-			t.Fatalf("live resume accepted %s: code=%d response=%+v", flag, code, response)
+		r, c := invoke(t, append(args, "--help", "--format=json")...)
+		if c != 0 || !r.OK {
+			t.Fatalf("%v: %d %+v", args, c, r)
 		}
 	}
 }

@@ -179,10 +179,6 @@ func (f *mailboxFixture) Verify(ctx context.Context) error {
 	}
 	return nil
 }
-func (f *mailboxFixture) Regions(context.Context) ([]Region, error) {
-	f.regions++
-	return nil, errors.New("fixture.region_enumeration_forbidden")
-}
 func (f *mailboxFixture) Read(ctx context.Context, address uint64, b []byte) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err

@@ -12,6 +12,7 @@ local records = {}
 local head, count = 0, 0
 local activePath
 local enabled = false
+local recording = false
 local changedCallback
 local startedAt = 0
 local combatShutdownRegistered = false
@@ -57,8 +58,8 @@ local function FormatArgument(value)
     return #text > MAX_ARGUMENT_BYTES and (text:sub(1, MAX_ARGUMENT_BYTES) .. "...") or text
 end
 
-local function OnCall(path, ...)
-    if not enabled or activePath ~= path or ns.Safety.IsCombatBlocked() then
+local function RecordCall(path, ...)
+    if ns.Safety.IsCombatBlocked() then
         return
     end
     local suppliedCount = select("#", ...)
@@ -79,6 +80,20 @@ local function OnCall(path, ...)
     count = math.min(count + 1, MAX_RECORDS)
     if changedCallback then
         changedCallback(records[head])
+    end
+end
+
+local function OnCall(path, ...)
+    if not enabled or activePath ~= path or recording then
+        return
+    end
+    -- Combat checks, timestamps, argument formatting and observers can call the
+    -- traced function. Secure post-hooks reenter, so guard before any of them.
+    recording = true
+    local ok, message = pcall(RecordCall, path, ...)
+    recording = false
+    if not ok then
+        error(message, 0)
     end
 end
 

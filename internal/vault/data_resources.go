@@ -28,9 +28,11 @@ const (
 )
 
 type DataResources struct {
-	once   sync.Once
-	leases []*Lease
-	err    error
+	// DownloadWorkers is this query's share of the workspace download cap.
+	DownloadWorkers int
+	once            sync.Once
+	leases          []*Lease
+	err             error
 }
 
 func (r *DataResources) Close() error {
@@ -73,6 +75,10 @@ func (s *Store) AcquireDataResources(ctx context.Context, policy DataResourcePol
 	slots := dataResourceSlots
 	if cfg.Download.Workers == 1 {
 		slots = 1
+	}
+	out.DownloadWorkers = 8
+	if cfg.Download.Workers > 0 {
+		out.DownloadWorkers = min(8, max(1, cfg.Download.Workers/slots))
 	}
 	if policy == DataMeasurement {
 		for i := 0; i < dataResourceSlots; i++ {

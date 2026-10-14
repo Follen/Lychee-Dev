@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { takeLock } from '../packages/npm/lycheedev/bin/update.mjs';
+const moduleURL = new URL('../packages/npm/lycheedev/bin/update.mjs', import.meta.url).href;
+test('OS update lock is exclusive and interrupted reclamation releases it', {skip:process.platform!=='win32'}, async t => {
+ const directory=mkdtempSync(join(tmpdir(),'update-lock-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const dead=spawnSync(process.execPath,['-e','console.log(process.pid)'],{encoding:'utf8'});
+ writeFileSync(join(directory,'lock.json'),JSON.stringify({pid:Number(dead.stdout.trim())}));
+ writeFileSync(join(directory,'reclaim.lock'),'');
+ writeFileSync(join(directory,'transaction.json'),'pinned transaction and targets');
+ const child=spawn(process.execPath,['--input-type=module','-e',`import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module'; const write=fs.writeFileSync; fs.writeFileSync=(path,...args)=>{ if(String(path).endsWith('lock.json.next')) {process.stdout.write('reclaim checkpoint'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0); } return write(path,...args); };syncBuiltinESMExports(); const {takeLock}=await import(${JSON.stringify(moduleURL)}); await takeLock(process.argv[1]);`,directory],{stdio:['ignore','pipe','pipe'],windowsHide:true});
+ t.after(()=>child.kill());
+ await Promise.race([once(child.stdout,'data'),once(child,'exit').then(([code])=>{throw new Error('lock child exited '+code)})]);
+ await assert.rejects(takeLock(directory),/update.busy/);
+ const closed=once(child,'exit');child.kill();await closed;
+ const unlock=await takeLock(directory);
+ assert.equal(readFileSync(join(directory,'transaction.json'),'utf8'),'pinned transaction and targets');
+ await assert.rejects(takeLock(directory),/update.busy/);
+ unlock();
+});

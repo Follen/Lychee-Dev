@@ -45,6 +45,8 @@ ns.L = {
     CLEAR_HISTORY = "清空历史",
     ENTER_LUA = "请输入要运行的 Lua 代码。",
     COMPILE_ERROR = "编译错误：\n",
+    RESULT_FORMAT_ERROR = "结果格式化失败（代码已执行）：\n",
+    HISTORY_DATABASE_NEWER = "运行历史来自更新版本，暂不可读写。",
     RUNTIME_ERROR = "运行错误：\n",
     COMPLETED_NO_OUTPUT = "运行完成（没有输出）。",
 

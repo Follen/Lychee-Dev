@@ -97,7 +97,7 @@ func TestWagoHotfixMultiPageWithIdentityKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Records) != 4 || !result.Complete || result.Truncated {
+	if len(result.Records) != 4 || !result.Complete || !result.Coverage.FullQueryComplete || result.Truncated {
 		t.Fatalf("records = %d complete = %v truncated = %v", len(result.Records), result.Complete, result.Truncated)
 	}
 	if result.Coverage.StartPage != 1 || result.Coverage.EndPage != 2 || result.Coverage.LastPage != 2 || result.Coverage.Total != 4 {
@@ -200,8 +200,14 @@ func TestWagoHotfixMaxPagesBoundIsExplicit(t *testing.T) {
 	if len(next.Records) != 1 || next.Records[0].RecordID != 57 {
 		t.Fatalf("resumed records = %+v", next.Records)
 	}
-	if !next.Complete {
+	if !next.Complete || !next.Coverage.Complete || next.Coverage.FullQueryComplete {
 		t.Fatalf("resumed coverage = %+v", next.Coverage)
+	}
+	explicit := wagoTestQuery()
+	explicit.Page = 2
+	tail, err := provider.QueryHotfix(context.Background(), explicit)
+	if err != nil || !tail.Coverage.Complete || tail.Coverage.FullQueryComplete {
+		t.Fatalf("explicit tail coverage = %+v, %v", tail.Coverage, err)
 	}
 }
 

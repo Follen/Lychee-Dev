@@ -212,7 +212,7 @@ func (d *Driver) next(ctx context.Context) error {
 	if err == nil && closing {
 		return errProgress
 	}
-	if errors.Is(err, ErrCleanupReloadRequired) {
+	if errors.Is(err, ErrCleanupReloadRequired) || errors.Is(err, ErrReloadRequired) {
 		return errProgress
 	}
 	return err

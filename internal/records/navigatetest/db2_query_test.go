@@ -3,6 +3,8 @@ package navigatetest
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/records"
@@ -65,6 +67,14 @@ func sampleRows() [][]any {
 		{int64(2927), "rooting ATTACK II", "", int64(10), int64(127), uint64(8), []int64{3, 4}, float32(-0.5), uint64(100)},
 		{int64(2928), "Rooting Attack III", "third", int64(0), int64(0), uint64(9), []int64{5, 6}, float32(0.25), uint64(200)},
 		{int64(3000), "Healing Wave", "fourth", int64(42), int64(7), uint64(8), []int64{7, 8}, float32(2), uint64(100)},
+	}
+}
+
+func TestForeignKeyRejectsIntegerArrays(t *testing.T) {
+	fx := newFixture(t, []fixtureTable{sampleTable(sampleRows())})
+	_, err := records.InspectDataForeignKey(context.Background(), fx.workspace, fx.pin.ID, "Sample", fixtureQuery(), records.DB2ForeignKeyRequest{Field: "Flags", Value: 1, Limit: 10})
+	if !errors.Is(err, records.ErrFieldType) {
+		t.Fatalf("array foreign key: %v", err)
 	}
 }
 
@@ -356,6 +366,61 @@ func TestStreamErrorFrameEndsStreamWithoutEnd(t *testing.T) {
 		if frame.Frame == "end" {
 			t.Fatal("a failed stream must not emit an end frame")
 		}
+	}
+}
+
+func TestStreamFinalizationFailureHasErrorWithoutEnd(t *testing.T) {
+	for _, mode := range []string{"source", "archive"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newFixture(t, []fixtureTable{sampleTable(sampleRows())})
+			query := fixtureQuery()
+			installation := ""
+			if mode == "source" {
+				installation = fixtureInstallation(t, fx)
+				query.CDN, query.Installation = false, installation
+			}
+			frames := []records.StreamFrame{}
+			_, err := records.StreamDataRows(context.Background(), fx.workspace, fx.pin.ID, "Sample", query, records.DB2StreamRequest{Limit: 10}, func(frame records.StreamFrame) error {
+				frames = append(frames, frame)
+				if frame.Frame == records.StreamFrameRecord && frame.Record.Index == 3 {
+					if mode == "source" {
+						path := filepath.Join(installation, ".build.info")
+						f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+						if err != nil {
+							t.Fatal(err)
+						}
+						_, err = f.WriteString("\nchanged\n")
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err = f.Close(); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						// Only our empty fixture staging directory is replaced.
+						path := filepath.Join(fx.workspace, "tmp")
+						if err := os.Remove(path); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(path, []byte("blocked"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				return nil
+			})
+			if err == nil {
+				t.Fatal("finalization failure was ignored")
+			}
+			if len(frames) == 0 || frames[len(frames)-1].Frame != records.StreamFrameError {
+				t.Fatalf("missing final error: %+v; %v", frames, err)
+			}
+			for _, frame := range frames {
+				if frame.Frame == records.StreamFrameEnd {
+					t.Fatal("end preceded failed finalization")
+				}
+			}
+		})
 	}
 }
 

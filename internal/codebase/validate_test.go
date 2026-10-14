@@ -70,6 +70,56 @@ func issueCodes(diagnostics []ValidationDiagnostic) map[string]int {
 	return counts
 }
 
+func TestValidateTOCDoesNotProveAbsenceAcrossIndexGaps(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	files := evidenceTree("120100")
+	files["Interface/AddOns/Blizzard_APIDocumentationGenerated/Large.lua"] = `return {Type="System",Name="C_Missing",Namespace="C_Missing",Functions={{Type="Function",Name="Do"}},Events={{Type="Event",Name="OnMissing",LiteralName="MISSING_TICK"}}}`
+	writeAddonFiles(t, root, files)
+	large, err := os.OpenFile(filepath.Join(root, "Interface/AddOns/Blizzard_APIDocumentationGenerated/Large.lua"), os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := large.Truncate(maxSourceBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := large.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := vault.Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addon := t.TempDir()
+	writeAddonFiles(t, addon, map[string]string{"Test.toc": "## Interface: 120100\nMain.lua\n", "Main.lua": "C_Good.Do()\nC_Missing.Do()\nframe:RegisterEvent('MISSING_TICK')\n"})
+	got, err := ValidateSourceTOC(ctx, store.Root(), indexed.Snapshot.ID, AddonInput{Root: addon, Manifest: "Test.toc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Result.Valid || len(got.Result.Unresolved) < 2 {
+		t.Fatalf("gap became hard absence: %+v", got.Result)
+	}
+	if got.Capture.Complete {
+		t.Fatal("incomplete source coverage produced complete capture")
+	}
+	found := false
+	for _, fact := range got.Result.Facts {
+		if fact.Name == "C_Good.Do" && fact.Exists {
+			found = true
+		}
+		if fact.Name == "MISSING_TICK" || fact.Name == "C_Missing.Do" {
+			t.Fatalf("false absence fact: %+v", fact)
+		}
+	}
+	if !found {
+		t.Fatal("positive evidence lost")
+	}
+}
+
 func TestValidateTOCOrderedClosureWithBOMCRLFAndBackslashes(t *testing.T) {
 	addon := map[string]string{
 		"Addon.toc":          "\ufeff## Interface: 120100\r\n# ignored\r\nXML\\Root.xml\r\nDirect.lua\r\n",

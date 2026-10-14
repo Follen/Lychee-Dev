@@ -114,13 +114,6 @@ test('a Python file fails verification', async t => {
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/automation\.py/);
 });
 
-test('a task block in Definitions.lua fails verification', async t => {
-  const { buffer } = await fixtureZip(t, entries => {
-    entries.set('Lychee Dev/Bridge/Definitions.lua',
-      Buffer.from('local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n  {id="local"},\n}}\n'));
-  });
-  assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Bridge\/Definitions\.lua/);
-});
 
 test('an incomplete Interface declaration fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => {
@@ -164,4 +157,11 @@ test('missing Media fails verification', async t => {
     for (const name of [...entries.keys()]) if (name.startsWith('Lychee Dev/Media/')) entries.delete(name);
   });
   assertViolation(verifyAddonZip(buffer), /Lychee Dev\/Media\//);
+});
+
+test('addon ZIP includes the same project license and notices as npm', async t => {
+ const {entries}=collectAddonZipEntries(repo);
+ for(const name of ['LICENSE','THIRD_PARTY_NOTICES']) assert.deepEqual(entries.get(`Lychee Dev/${name}`),readFileSync(join(repo,'packages/npm/lycheedev',name)));
+ const {buffer}=await fixtureZip(t,files=>files.delete('Lychee Dev/LICENSE'));
+ assertViolation(verifyAddonZip(buffer),/missing license/);
 });

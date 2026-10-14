@@ -58,7 +58,7 @@ func TestCDNRefreshDuringConfigurationPreparation(t *testing.T) {
 		}
 		return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
 	})}
-	c := &cdnFiles{ctx: ctx, store: f.store, metadata: f.metadata, client: client}
+	c := &cdnFiles{downloadWorkers: 8, ctx: ctx, store: f.store, metadata: f.metadata, client: client}
 	meta, err := c.prepare(pin)
 	if err != nil || refreshes != 1 || meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
 		t.Fatalf("config recovery: %+v %v refreshes=%d", meta, err, refreshes)
@@ -92,7 +92,7 @@ func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
 		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
 		buildURL:   {status: 200, body: build}, f.configURL: {status: 200, body: cdn},
 	}
-	c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+	c := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
 	pin := selection.DataPin{Product: "forever", Region: "us", Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
 	meta, err := c.prepare(pin)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestCDNRefreshStaleRouteOnceWithoutRetargeting(t *testing.T) {
 			b := f.transport.responses[f.buildURL].body
 			d := f.transport.responses[f.configURL].body
 			pin := selection.DataPin{Product: "retail", Region: "cn", Language: "zhCN", FullBuild: "12.1.0.69875", BuildConfig: md5TestKey(b), CDNConfig: md5TestKey(d), DefinitionCommit: definitionsTestCommit}
-			c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+			c := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
 			if _, err := c.prepare(pin); err != nil {
 				t.Fatal(err)
 			}
@@ -168,7 +168,7 @@ func TestCDNRefreshStaleRouteOnceWithoutRetargeting(t *testing.T) {
 				if err != nil || !bytes.Equal(got, encoded) {
 					t.Fatalf("wrong content: %v", err)
 				}
-				fresh := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: c.client, offline: true}
+				fresh := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: c.client, offline: true}
 				meta, err := fresh.prepare(pin)
 				if err != nil || fresh.route.Hosts[0] != "new.example.test" || meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
 					t.Fatalf("refreshed route/pin not retained: %+v %v", meta, err)
@@ -317,7 +317,7 @@ func newCDNFilesOnStoreTest(t *testing.T, store *vault.Store, transport http.Rou
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = metadata.Close() })
-	return &cdnFiles{
+	return &cdnFiles{downloadWorkers: 8,
 		ctx:      ctx,
 		store:    store,
 		metadata: metadata,
@@ -371,7 +371,7 @@ func TestCDNFilesOpenLooseHeaderlessBLTEAndOfflineCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer offlineMetadata.Close()
-	offlineFiles := &cdnFiles{
+	offlineFiles := &cdnFiles{downloadWorkers: 8,
 		ctx:      context.Background(),
 		store:    files.store,
 		metadata: offlineMetadata,

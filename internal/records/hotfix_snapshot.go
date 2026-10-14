@@ -165,14 +165,15 @@ func (s SnapshotHotfix) QueryHotfix(ctx context.Context, q HotfixQuery) (RemoteH
 		Locale:    q.Locale,
 		// A snapshot may lag the server; only a live cache file attests that its
 		// own full data set was covered, never server-side coverage.
-		Complete:     s.Provider == dbcacheProviderName && page.Complete,
-		Truncated:    page.Truncated,
-		Scanned:      int(page.Scanned),
-		Matched:      int(page.Matched),
-		Returned:     len(records),
-		SelectedPush: page.SelectedPush,
-		CapturedAt:   &capturedAt,
-		Ref:          digest,
+		Complete:          s.Provider == dbcacheProviderName && page.Complete,
+		FullQueryComplete: s.Provider == dbcacheProviderName && page.Complete && cursor == nil,
+		Truncated:         page.Truncated,
+		Scanned:           int(page.Scanned),
+		Matched:           int(page.Matched),
+		Returned:          len(records),
+		SelectedPush:      page.SelectedPush,
+		CapturedAt:        &capturedAt,
+		Ref:               digest,
 	}
 	if page.Truncated {
 		coverage.TruncationReason = "limit"

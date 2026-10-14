@@ -2,8 +2,6 @@ package live
 
 import (
 	"context"
-	"errors"
-	"github.com/follenfang/lycheedev/internal/bridge"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,7 +9,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"image"
 )
 
 // Installation states distinguish installed-but-not-running targets from
@@ -41,7 +38,6 @@ type Candidate struct {
 	ReceiptKind        string                       `json:"receiptKind,omitempty"`
 	ReceiptBuild       string                       `json:"receiptBuild,omitempty"`
 	GUID               string                       `json:"-"`
-	PriorReady         bridge.Signal                `json:"-"`
 }
 
 type InstallationCandidate struct {
@@ -66,18 +62,11 @@ type DiscoveryRequest struct {
 	Passive      bool
 }
 
-// DiscoverCandidates scans known roots for supported installations and probes
-// each running game window once with a fixed identity trigger, one window at a
-// time. Per-window failures stay isolated and busy windows are never typed
-// into. Identity marking is the only game action performed here.
+// DiscoverCandidates passively lists installations, fixed window identities and ownership.
+// It never captures a window or submits game input.
 func DiscoverCandidates(ctx context.Context, root string, request DiscoveryRequest) (CandidateReport, error) {
 	io := nativeIO()
 	io.root = root
-	var err error
-	io.bindings, err = requestedReceiverBindings(request.WakeBinding)
-	if err != nil {
-		return CandidateReport{}, err
-	}
 	return discoverCandidates(ctx, root, request, io)
 }
 
@@ -127,40 +116,7 @@ func discoverCandidates(ctx context.Context, root string, request DiscoveryReque
 			report.Candidates = append(report.Candidates, candidate)
 			continue
 		}
-		if request.Passive {
-			candidate.State, candidate.NotReadyReason = "unobserved", "passive_discovery"
-			report.Candidates = append(report.Candidates, candidate)
-			continue
-		}
-		observation, err := probeIdentity(ctx, ClientWindow{Client: client, Window: window}, image.Rectangle{}, false, io)
-		candidate.Capture = observation.Capture
-		candidate.RuntimeRelease = observation.Signal.Release
-		candidate.BootstrapAttemptID = observation.BootstrapAttemptID
-		if err != nil {
-			// No correlated receipt within the bounded window: addon missing,
-			// black screen or input not delivered all land here.
-			candidate.State, candidate.Reason = CandidateUnreadable, err.Error()
-			candidate.ReceiptKind, candidate.ReceiptBuild = observation.Signal.Kind, observation.Signal.Build
-			var mismatch *bridge.RuntimeReleaseMismatch
-			if errors.As(err, &mismatch) {
-				candidate.State = "runtime_mismatch"
-				candidate.Character, candidate.Realm = observation.Signal.Character, observation.Signal.Realm
-				candidate.InputReady, candidate.NotReadyReason = observation.Signal.InputReady, observation.Signal.InputReason
-			}
-			report.Candidates = append(report.Candidates, candidate)
-			continue
-		}
-		switch observation.Signal.ActorState {
-		case "ok":
-			candidate.State = CandidateIdentified
-			candidate.Character, candidate.Realm, candidate.GUID = observation.Signal.Character, observation.Signal.Realm, observation.Signal.GUID
-		case "no_actor":
-			candidate.State = CandidateNoActor
-		default:
-			candidate.State = CandidateActorRestricted
-		}
-		candidate.InputReady = observation.Signal.InputReady
-		candidate.NotReadyReason = observation.Signal.InputReason
+		candidate.State, candidate.NotReadyReason = "unobserved", "passive_discovery"
 		report.Candidates = append(report.Candidates, candidate)
 	}
 	report.Installations = discoverInstallations(ctx, request.Roots, runningDirs, running, io)

@@ -142,17 +142,6 @@ function ns.CreateAutomationPage(parent)
         end, "secondary")
     clearButton:SetPoint("BOTTOMLEFT", 14, 14)
 
-    local hideNoticeButton, showNoticeButton
-    if not ns.SlotRuntime then
-        hideNoticeButton = W.CreateButton(page, 118, L.AUTO_HIDE_NOTICE, "secondary")
-        hideNoticeButton:SetPoint("BOTTOMRIGHT", -14, 14)
-        showNoticeButton = W.CreateButton(page, 128, L.AUTO_SHOW_NOTICE, "secondary")
-        showNoticeButton:SetPoint("RIGHT", hideNoticeButton, "LEFT", -8, 0)
-    end
-
-    local executeButton = W.CreateButton(page, 96, L.AUTO_EXECUTE, "primary")
-    executeButton:SetPoint("TOPRIGHT", -14, -84)
-
     local listPanel = W.CreatePanel(page, colors.editor[1], colors.editor[2], colors.editor[3], 1)
     listPanel:SetPoint("TOPLEFT", 14, -84)
     listPanel:SetPoint("BOTTOMLEFT", 14, 64)
@@ -254,8 +243,6 @@ function ns.CreateAutomationPage(parent)
         errorValue:SetText(hasRecord
             and ShownText(record.actionError or record.probeError or record.errorCode, L.NOT_AVAILABLE) or "")
 
-        W.SetButtonEnabled(executeButton, hasRecord and record.transport~="memory-slot" and (record.status == "queued" or record.status == "loaded"))
-        if showNoticeButton then W.SetButtonEnabled(showNoticeButton, hasRecord and record.receipt ~= nil) end
         W.SetButtonEnabled(viewReportButton, hasRecord)
         W.SetButtonEnabled(detailsButton, hasRecord)
     end
@@ -382,42 +369,6 @@ function ns.CreateAutomationPage(parent)
         page:Refresh()
     end
 
-    executeButton:SetScript("OnClick", function()
-        if ns.Safety.IsCombatBlocked() then
-            ns.Safety.PrintBlocked()
-            return
-        end
-        if not selectedRequestId then
-            return
-        end
-        -- The one execute path: ProbeQueue.Load + ProbeRunner.Dispatch, the
-        -- exact calls the /dev bridge load/run verbs make. Failures surface as
-        -- their bridge error codes; nothing is invented here.
-        local _, failure = view.Execute(selectedRequestId)
-        local record = view.GetRecord(selectedRequestId)
-        if record then
-            -- Transient action error for the detail pane; the row status stays
-            -- the derived bridge status refreshed below.
-            record.actionError = failure
-        end
-        Refresh()
-    end)
-
-    if showNoticeButton then showNoticeButton:SetScript("OnClick", function()
-        if ns.Safety.IsCombatBlocked() then
-            ns.Safety.PrintBlocked()
-            return
-        end
-        if selectedRequestId then
-            view.ShowNotice(selectedRequestId)
-        end
-    end) end
-
-    -- Hiding the notice is teardown and must stay available in every state.
-    if hideNoticeButton then hideNoticeButton:SetScript("OnClick", function()
-        view.HideNotice()
-    end) end
-
     viewReportButton:SetScript("OnClick", function()
         metadata:Hide();reportArea:Show()
         detailsButton:SetActive(false)
@@ -441,9 +392,6 @@ function ns.CreateAutomationPage(parent)
     page.codeValue = codeValue
     page.timeValue = timeValue
     page.errorValue = errorValue
-    page.executeButton = executeButton
-    page.showNoticeButton = showNoticeButton
-    page.hideNoticeButton = hideNoticeButton
     page.viewReportButton = viewReportButton
     page.clearButton = clearButton
     page.detailsButton,page.metadata=detailsButton,metadata
@@ -475,9 +423,7 @@ local definition = {
     suspend = function()
     end,
     shutdown = function()
-        if ns.AutomationView then
-            ns.AutomationView.HideNotice()
-        end
+
     end,
 }
 

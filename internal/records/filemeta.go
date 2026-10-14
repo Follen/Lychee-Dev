@@ -92,6 +92,7 @@ func InspectFileExistence(ctx context.Context, root, snapshot string, request Fi
 	}
 	defer admission.Close()
 	request.File.admitted = true
+	request.File.downloadWorkers = admission.DownloadWorkers
 	reading, err := PrepareListfile(ctx, root, request.Listfile)
 	if err != nil {
 		return FileExistenceReading{}, err
@@ -248,6 +249,7 @@ func lookupRootEntries(ctx context.Context, s *vault.Store, pin selection.DataPi
 		}
 		defer admission.Close()
 		query.admitted = true
+		query.downloadWorkers = admission.DownloadWorkers
 	}
 	reader := OpenReader(s)
 	src, err := prepareFileSource(ctx, s, pin, query)
@@ -343,6 +345,7 @@ func InspectFileEncoding(ctx context.Context, root, snapshot string, request Fil
 		}
 		defer admission.Close()
 		query.admitted = true
+		query.downloadWorkers = admission.DownloadWorkers
 		query.FileDataID = request.FileDataID
 		reader := OpenReader(s)
 		src, err := prepareFileSource(ctx, s, pin, query)

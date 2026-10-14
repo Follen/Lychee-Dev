@@ -68,6 +68,7 @@ type TOCValidation struct {
 	Diagnostics    []ValidationDiagnostic `json:"diagnostics"`
 	Unresolved     []UnresolvedItem       `json:"unresolved"`
 	Coverage       Coverage               `json:"coverage"`
+	SourceCoverage SourceCoverage         `json:"sourceCoverage"`
 	Facts          []ValidationFact       `json:"facts"`
 }
 
@@ -102,11 +103,12 @@ func (b *Browser) ValidateTOC(ctx context.Context, pin selection.SourcePin, snap
 			}
 		}
 	}
-	db, _, err := b.openIndex(ctx, pin)
+	db, summary, err := b.openIndex(ctx, pin)
 	if err != nil {
 		return result, err
 	}
 	defer db.Close()
+	result.SourceCoverage = summary.Coverage()
 	var usages []ReferenceUsage
 	unresolved := []UnresolvedItem{}
 	for _, doc := range load.Documents {

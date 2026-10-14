@@ -141,6 +141,34 @@ func TestLockProjectValidatesProductAndFixedPinHash(t *testing.T) {
 	}
 }
 
+func TestProjectAcceptsForeverFamilySourceAndRegionalData(t *testing.T) {
+	ctx := context.Background()
+	store := testWorkspace(t)
+	for _, product := range []string{"forever-asia-beta", "forever-cn-beta"} {
+		pin, err := vault.WriteMetadata(ctx, store.Root(), func(_ *vault.Store, m *vault.Metadata) (PinnedSet, error) {
+			return OpenPinner(m).PinSelection(ctx, SelectionSpec{Source: &SourcePin{Repository: "wow-ui-source", Product: "forever", RequestedRef: "refs/heads/forever", ExactCommit: strings.Repeat("a", 40), ParserRevision: "source-v1"}, Data: &DataPin{Product: product, Region: "cn", Language: "zhCN", FullBuild: "1.60.1.70338", BuildConfig: strings.Repeat("b", 32), CDNConfig: strings.Repeat("c", 32), DefinitionCommit: strings.Repeat("d", 40)}})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if _, err := InitializeProject(ctx, dir, product); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LockProject(ctx, store.Root(), dir, pin.ID); err != nil {
+			t.Fatal(product, err)
+		}
+		got, err := InspectProject(ctx, dir)
+		if err != nil || got.Lock.Selection.ID != pin.ID {
+			t.Fatalf("status: %+v %v", got, err)
+		}
+		selected, err := ResolveIntent(ctx, store.Root(), IntentRequest{Project: dir})
+		if err != nil || selected.Pin.ID != pin.ID {
+			t.Fatalf("selection: %+v %v", selected, err)
+		}
+	}
+}
+
 func TestLockProjectReplacesValidPreviousLockAfterDeclarationEdit(t *testing.T) {
 	ctx := context.Background()
 	workspace := testWorkspace(t)

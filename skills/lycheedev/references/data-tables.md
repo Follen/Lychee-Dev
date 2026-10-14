@@ -107,6 +107,10 @@ its CLI-owned session shares preparation without changing pin or source. Avoid
 issuing many simultaneous queries to force parallel downloads. Heavy queries
 share workspace admission (at most two ordinary queries; one when download
 workers is configured to 1), and waiting can consume the command's deadline.
+`config set --download-workers 0` uses up to eight downloads per query. A value
+of 1 admits one query with one download; values of 2 or more reserve at most two
+queries, each with `min(8, floor(workers / 2))` downloads, so their combined
+download count does not exceed the explicit workspace limit.
 
 For parameterized lookups, flags, explicit Hotfix overlays and query diagnostics,
 read [data-query-recipes.md](data-query-recipes.md). The `meta` catalog exposes

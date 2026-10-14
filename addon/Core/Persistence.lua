@@ -24,7 +24,7 @@ local function validate(value)
         if issecretvalue and issecretvalue(enabled) then return nil, "state_invalid_option" end
         if enabled ~= nil and type(enabled) ~= "boolean" then return nil, "state_invalid_option" end
     end
-    if value.exports ~= nil then
+    if value.exports ~= nil and (value.exports.version == nil or value.exports.version == 1) then
         local nextId = value.exports.nextId
         if issecretvalue and issecretvalue(nextId) then return nil, "state_invalid_exports" end
         if nextId ~= nil and (type(nextId) ~= "number" or nextId < 0 or nextId % 1 ~= 0) then

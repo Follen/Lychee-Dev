@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// MirrorHealth is the read model of `source check` mirror health. It compares
+// MirrorHealth is the source mirror health read model used by doctor. It compares
 // the local mirror head of one product branch with the remote head that
 // `git ls-remote` reports, without fetching.
 type MirrorHealth struct {

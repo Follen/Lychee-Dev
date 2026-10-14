@@ -72,7 +72,7 @@ func TestSnapshotHotfixQueriesExplicitFile(t *testing.T) {
 	}
 	sum := sha256.Sum256(raw)
 	digest := hex.EncodeToString(sum[:])
-	if result.Coverage.Ref != digest || !result.Coverage.Complete || result.Coverage.Provider != "dbcache" {
+	if result.Coverage.Ref != digest || !result.Coverage.Complete || !result.Coverage.FullQueryComplete || result.Coverage.Provider != "dbcache" {
 		t.Fatalf("coverage = %+v", result.Coverage)
 	}
 	info, err := os.Stat(path)
@@ -239,6 +239,12 @@ func TestSnapshotHotfixLatestBatchAndCursor(t *testing.T) {
 	}
 	if len(next.Records) != 1 || next.Records[0].RecordID == first.Records[0].RecordID {
 		t.Fatalf("resumed window = %+v", next.Records)
+	}
+	lastQuery := windowed
+	lastQuery.Cursor = next.NextCursor
+	last, err := source.QueryHotfix(context.Background(), lastQuery)
+	if err != nil || last.Truncated || last.Coverage.Complete || last.Coverage.FullQueryComplete {
+		t.Fatalf("resumed final coverage = %+v, %v", last.Coverage, err)
 	}
 
 	// The cursor binds to immutable bytes: a rewritten snapshot is refused.

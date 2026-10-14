@@ -61,17 +61,19 @@ func (c *Checker) InspectAddon(ctx context.Context, input AddonInput) (LoadAsses
 	if c.store == nil {
 		return LoadAssessment{}, errors.New("codebase.archive_required")
 	}
-	return inspectLoad(ctx, input, c.store)
+	return InspectLoad(ctx, input, c.store, maxSourceBytes)
 }
 
 // InspectLocalLoad checks the same bounded load graph without creating a
 // workspace or archiving content. Document digests are observations only;
 // Archived remains false and compatibility is not asserted.
 func InspectLocalLoad(ctx context.Context, input AddonInput) (LoadAssessment, error) {
-	return inspectLoad(ctx, input, nil)
+	return InspectLoad(ctx, input, nil, maxSourceBytes)
 }
 
-func inspectLoad(ctx context.Context, input AddonInput, store *vault.Store) (LoadAssessment, error) {
+// InspectLoad shares the parser and ordered closure walker between installation
+// validation and source research, with each caller's existing document budget.
+func InspectLoad(ctx context.Context, input AddonInput, store *vault.Store, documentBytes int64) (LoadAssessment, error) {
 	result := LoadAssessment{Documents: []LoadedDocument{}, Steps: []LoadStep{}, Issues: []ValidationIssue{}, LoadValid: true}
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -86,7 +88,7 @@ func inspectLoad(ctx context.Context, input AddonInput, store *vault.Store) (Loa
 	}
 	defer root.Close()
 	result.Root = abs
-	w := closureWalk{ctx: ctx, root: root, store: store, result: &result, seen: map[string]bool{}, active: map[string]bool{}, directories: map[string][]os.DirEntry{}}
+	w := closureWalk{ctx: ctx, root: root, store: store, result: &result, documentBytes: documentBytes, seen: map[string]bool{}, active: map[string]bool{}, directories: map[string][]os.DirEntry{}}
 	manifest, err := w.resolve("", input.Manifest)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -111,6 +113,7 @@ type closureWalk struct {
 	seen, active   map[string]bool
 	directories    map[string][]os.DirEntry
 	totalBytes     int64
+	documentBytes  int64
 	visitedEntries int
 	references     int
 }
@@ -233,14 +236,14 @@ func (w *closureWalk) load(name, from string, line, depth int, kind string, mani
 		w.issue("error", "load_unreadable", from, line, name, err.Error())
 		return nil
 	}
-	data, readErr := io.ReadAll(io.LimitReader(f, maxSourceBytes+1))
+	data, readErr := io.ReadAll(io.LimitReader(f, w.documentBytes+1))
 	closeErr := f.Close()
 	if readErr != nil || closeErr != nil {
 		w.issue("error", "load_unreadable", from, line, name, fmt.Sprint(errors.Join(readErr, closeErr)))
 		return nil
 	}
 	w.totalBytes += int64(len(data))
-	if len(data) > maxSourceBytes || w.totalBytes > 64<<20 {
+	if int64(len(data)) > w.documentBytes || w.totalBytes > 64<<20 {
 		return errors.New("codebase.closure_byte_budget")
 	}
 	facts, err := AnalyzeDocument(w.ctx, name, data)
@@ -251,7 +254,7 @@ func (w *closureWalk) load(name, from string, line, depth int, kind string, mani
 	digest := sha256.Sum256(data)
 	blob := vault.BlobRef{SHA256: hex.EncodeToString(digest[:]), Bytes: int64(len(data))}
 	if w.store != nil {
-		blob, err = w.store.PublishBlob(w.ctx, vault.BlobInput{Reader: bytes.NewReader(data), MaxBytes: maxSourceBytes, ExpectedSHA256: blob.SHA256})
+		blob, err = w.store.PublishBlob(w.ctx, vault.BlobInput{Reader: bytes.NewReader(data), MaxBytes: w.documentBytes, ExpectedSHA256: blob.SHA256})
 		if err != nil {
 			return err
 		}

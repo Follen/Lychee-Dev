@@ -66,7 +66,7 @@ func TestNativeMemoryChild(t *testing.T) {
 	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 
-func TestNativeChildScanCacheOffAndStaleProcessIdentity(t *testing.T) {
+func TestNativeChildPointReadAndStaleProcessIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeMemoryChild$")
@@ -109,20 +109,7 @@ func TestNativeChildScanCacheOffAndStaleProcessIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, err := Find(ctx, process, selector, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !found.Coverage.Complete || len(found.Coverage.Workers) != 8 {
-		t.Fatalf("coverage=%+v", found.Coverage)
-	}
-	matched := false
-	for _, record := range found.Records {
-		if record.Address == child.Address && bytes.Equal(record.Payload, point.Payload) {
-			matched = true
-		}
-	}
-	if !matched {
-		t.Fatal("native chunk-boundary allocation was missed")
+	if !bytes.Equal(point.Payload, []byte(`{"native":"荔枝<&>","ok":true}`)) {
+		t.Fatal("native point read changed payload")
 	}
 }

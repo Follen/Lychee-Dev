@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -78,6 +79,9 @@ func ResolveTarget(ctx context.Context, root, key string, options ResolveOptions
 	config, err := LookupTarget(ctx, root, key)
 	if err != nil {
 		return ResolvedTarget{}, err
+	}
+	if config.Source == TargetSourceInstallation && !filepath.IsAbs(config.Installation) {
+		return ResolvedTarget{}, fmt.Errorf("%w: target %s has an old relative installation path; replace it with an explicit installation path", ErrTargetFormat, config.Name)
 	}
 	definitions := options.Definitions
 	if definitions == "" {

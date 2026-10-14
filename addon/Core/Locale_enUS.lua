@@ -50,6 +50,8 @@ local english = {
     CLEAR_HISTORY = "Clear History",
     ENTER_LUA = "Enter Lua code to run.",
     COMPILE_ERROR = "Compile error:\n",
+    RESULT_FORMAT_ERROR = "Result formatting failed (code already executed):\n",
+    HISTORY_DATABASE_NEWER = "Run history uses a newer version and is unavailable for reading or writing.",
     RUNTIME_ERROR = "Runtime error:\n",
     COMPLETED_NO_OUTPUT = "Completed with no output.",
 

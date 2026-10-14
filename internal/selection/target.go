@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -129,6 +130,13 @@ func PutTarget(ctx context.Context, root string, config TargetConfig, options St
 	if err := config.Validate(); err != nil {
 		return TargetConfig{}, err
 	}
+	if config.Source == TargetSourceInstallation {
+		absolute, err := filepath.Abs(config.Installation)
+		if err != nil {
+			return TargetConfig{}, err
+		}
+		config.Installation = absolute
+	}
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return TargetConfig{}, err
@@ -213,6 +221,23 @@ func matchTarget(configs []TargetConfig, key string) (TargetConfig, error) {
 	if key == "" {
 		return TargetConfig{}, ErrTargetMissing
 	}
+	for _, config := range configs {
+		if config.Name == key {
+			return config, nil
+		}
+	}
+	var exact []TargetConfig
+	for _, config := range configs {
+		if strings.EqualFold(config.Name, key) {
+			exact = append(exact, config)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0], nil
+	}
+	if len(exact) > 1 {
+		return TargetConfig{}, fmt.Errorf("%w: %s", ErrTargetAmbiguous, key)
+	}
 	matches := make([]string, 0, 1)
 	lower := strings.ToLower(key)
 	for _, config := range configs {
@@ -233,19 +258,6 @@ func matchTarget(configs []TargetConfig, key string) (TargetConfig, error) {
 		return TargetConfig{}, fmt.Errorf("%w: %s", ErrTargetMissing, key)
 	default:
 		sort.Strings(matches)
-		exact := false
-		for _, name := range matches {
-			if strings.ToLower(name) == lower {
-				exact = true
-			}
-		}
-		if exact {
-			for _, config := range configs {
-				if strings.ToLower(config.Name) == lower {
-					return config, nil
-				}
-			}
-		}
 		return TargetConfig{}, fmt.Errorf("%w: %s matches %s", ErrTargetAmbiguous, key, strings.Join(matches, ", "))
 	}
 }

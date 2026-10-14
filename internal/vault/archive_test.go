@@ -33,6 +33,36 @@ func digestOf(t *testing.T, path string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func TestArchiveConcurrentPlansAdoptOriginalJournal(t *testing.T) {
+	for _, stop := range []string{"", "move"} {
+		t.Run(stop, func(t *testing.T) {
+			ctx := context.Background()
+			root := filepath.Join(t.TempDir(), "home")
+			writeSentinel(t, filepath.Join(root, "sentinel"), "original")
+			first, err := PlanFreshInitialize(ctx, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second := first
+			second.ArchivePath += "-other"
+			if _, err := runArchive(ctx, first, stop); err != nil && !errors.Is(err, errArchiveInterrupt) {
+				t.Fatal(err)
+			}
+			got, err := runArchive(ctx, second, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Plan.ArchivePath != first.ArchivePath {
+				t.Fatalf("lost original archive: %+v", got.Plan)
+			}
+			journal, err := ArchiveJournal(root)
+			if err != nil || journal.ArchivePath != first.ArchivePath {
+				t.Fatalf("journal: %+v %v", journal, err)
+			}
+		})
+	}
+}
+
 // legacyHomeFixture plants sentinel data in every legacy layout in scope for
 // detection. Nothing in the new toolkit may read, copy or change it.
 func legacyHomeFixture(t *testing.T) (string, string, map[string]string) {

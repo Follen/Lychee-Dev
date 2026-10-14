@@ -191,6 +191,7 @@ local function BuildRunPage(parent)
         selectedHistoryIndex = index
         local code = IsSecret(entry.code) and "" or (entry.code or "")
         inputPanel.editBox:SetText(code)
+        page.resultCode = code
         SetResult(entry.result or "")
         local valueTree = historyTrees[entry] or entry.tree
         if IsSecret(valueTree) then
@@ -269,9 +270,14 @@ local function BuildRunPage(parent)
         rail.content:SetHeight(math.max(1, #history * rail.rowHeight))
         rail.scroll:UpdateScrollChildRect()
         rail.empty:SetShown(#history == 0)
+        if not ns.Stores.History.IsWritable() then
+            rail.empty:SetText(L.HISTORY_DATABASE_NEWER)
+        end
+        Widgets.SetButtonEnabled(clearHistoryButton, ns.Stores.History.IsWritable())
     end
 
     local function ApplyRunOutcome(succeeded, resultText, normalizedCode, valueTree, storedTree)
+        page.resultCode = normalizedCode
         SetResult(resultText)
         treeView:SetTree(valueTree)
         SetResultMode(valueTree and "tree" or "text")
@@ -407,7 +413,7 @@ Workbench.RegisterExportHook{
             return nil
         end
         return "run_result", L.RESULT, page:GetResultText(), {
-            code = page.inputPanel.editBox:GetText(),
+            code = page.resultCode,
         }
     end,
 }

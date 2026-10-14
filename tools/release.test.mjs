@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags, exportSourceIndex,
+  verifyRegistryReadbackCommand, auditTgz, classifyRegistry, distTagFor, parseOptions, parseTag, parseVcsIdentity, policyFor, registryStateCommand, REPOSITORY_URL, TARGETS, verifySourceInputs, validateNpmChannel, verifyNpmChannelTags, exportSourceIndex,
 } from './release.mjs';
 import { readTarGz } from './tar.mjs';
 import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './luals.mjs';
@@ -129,7 +129,7 @@ test('source index export preserves all LF blobs beyond Windows MAX_PATH without
   assert.equal(git(['config', '--local', '--get', 'core.autocrlf']).trim(), 'true');
 });
 
-test('source index export matches git archive attributes and keeps research evidence only in Git', t => {
+test('source index export matches indexed git archive attributes', t => {
   const root = mkdtempSync(join(tmpdir(), 'lycheedev-source-boundary-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repo = join(root, 'repo');
@@ -142,12 +142,12 @@ test('source index export matches git archive attributes and keeps research evid
   git(['init', '--quiet']);
   git(['config', 'core.longpaths', 'false']);
   git(['config', 'core.autocrlf', 'true']);
-  const journal = 'docs/toolkit/research/lua-mailbox-titan-69874/current-candidate/pressure/.lycheedev/live/connections/CON-9108c86a801af51807c3a031a123846f.jsonl.history/1a9906078a5cdc7f768a7e1bf737150e72534c57402b942cd9087282711dfe68.jsonl';
+  const journal = 'local-fixture/raw.txt';
   const directoryOnlyEvidence = 'directory-only/nested/evidence.json';
   const evidence = Buffer.from('original raw journal\r\nretained in Git\r\n');
   const files = new Map([
     ['.gitattributes', Buffer.concat([readFileSync(new URL('../.gitattributes', import.meta.url)),
-      Buffer.from('\ndirectory-only export-ignore\ndirectory-only/nested/evidence.json -export-ignore\n')])],
+      Buffer.from('\nlocal-fixture/** -text export-ignore\ndirectory-only export-ignore\ndirectory-only/nested/evidence.json -export-ignore\n')])],
     ['cmd/lycheedev/main.go', Buffer.from('package main\n// product source\n')],
     ['addon/Lychee Dev.toc', Buffer.from('## Title: Lychee Dev\n')],
     ['skills/lycheedev/SKILL.md', Buffer.from('# Lychee Dev\n')],
@@ -156,7 +156,7 @@ test('source index export matches git archive attributes and keeps research evid
     ['THIRD_PARTY_NOTICES.md', Buffer.from('source notices\n')],
     ['packages/npm/lycheedev/LICENSE', Buffer.from('package license\n')],
     ['packages/npm/lycheedev/THIRD_PARTY_NOTICES', Buffer.from('package notices\n')],
-    ['docs/toolkit/release-3.1.0.md', Buffer.from('release acceptance summary\n')],
+    ['docs/development.md', Buffer.from('current development guide\n')],
     [journal, evidence],
     [directoryOnlyEvidence, Buffer.from('directory-pruned investigation\n')],
   ]);
@@ -403,11 +403,11 @@ test('PKG-05/REL-08: extra, banned, missing and tampered content all fail closed
   }).violations.join(), /dependencies must be empty/);
   assert.match(mutate(base(), entries => {
     entries.push({
-      name: 'package/payload/addon/Bridge/Definitions.lua',
-      bytes: Buffer.from('local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n  {id=1},\n}}\n'),
+      name: 'package/payload/addon/local-task.lua',
+      bytes: Buffer.from('return \"unlisted task\"'),
       mode: 0o644,
     });
-  }).violations.join(), /task blocks/);
+  }).violations.join(), /not in release.json resources/);
 });
 
 test('the audit binds commit and version of the assembly (REL-01/05)', () => {
@@ -425,4 +425,15 @@ test('a missing LICENSE fails with the license decision pending error', t => {
   const audit = auditTgz(entries, { version: '2.0.0', expectedCommit: 'a'.repeat(40), sourceRoot: root });
   assert.equal(audit.ok, false);
   assert.match(audit.violations.join(), /license decision pending/);
+});
+
+test('registry signatures cannot substitute for provenance metadata', t => {
+ const root=mkdtempSync(join(tmpdir(),'registry-provenance-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const tgz=join(root,'package.tgz'),view=join(root,'view.json'),bytes=Buffer.from('pinned tarball');writeFileSync(tgz,bytes);
+ const record={name:'lycheedev',version:'3.1.2',repository:{url:REPOSITORY_URL},dist:{integrity:`sha512-${createHash('sha512').update(bytes).digest('base64')}`,signatures:[{keyid:'registry-key',sig:'registry-signature'}]}};
+ const check=()=>{writeFileSync(view,JSON.stringify(record));return verifyRegistryReadbackCommand(['--name','lycheedev','--version','3.1.2','--tgz',tgz,'--view',view]);};
+ assert.equal(check().ok,false);assert.equal(check().attestations,undefined);
+ record.dist.attestations={url:'https://registry.npmjs.org/-/npm/v1/attestations/lycheedev@3.1.2',provenance:{predicateType:'https://slsa.dev/provenance/v1'}};
+ assert.equal(check().ok,true);assert.deepEqual(check().signatures,record.dist.signatures);
+ record.dist.integrity='sha512-wrong';assert.equal(check().ok,false);
 });

@@ -97,24 +97,27 @@ function ns.Execute(code)
     local packed = Pack(pcall(chunk))
     local succeeded = packed[1]
 
-    if not succeeded then
-        AddOutput(output, L.RUNTIME_ERROR .. tostring(packed[2]))
-        return false, table.concat(output.parts), code
+    local formatted, liveTree, storedTree = pcall(function()
+        if not succeeded then
+            AddOutput(output, L.RUNTIME_ERROR .. tostring(packed[2]))
+            return
+        end
+        local values = { n = packed.n - 1 }
+        for index = 2, packed.n do values[index - 1] = packed[index] end
+        if values.n > 0 then AddOutput(output, ns.Serializer.SerializeValues(values)) end
+        if #output.parts == 0 then AddOutput(output, L.COMPLETED_NO_OUTPUT) end
+        return ns.Inspector.CreateLiveTree(values), ns.Inspector.CreateStoredTree(values)
+    end)
+    if not formatted then
+        -- The chunk already ran. Formatting is a separate boundary and must
+        -- never replay it or stringify another untrusted error object.
+        local diagnostic = L.RESULT_FORMAT_ERROR
+        if type(liveTree) == "string" and not (issecretvalue and issecretvalue(liveTree)) then
+            diagnostic = diagnostic .. liveTree:sub(1, 512)
+        end
+        local captured = table.concat(output.parts)
+        local remaining = math.max(0, MAX_CAPTURE_BYTES - #diagnostic - 1)
+        return false, captured:sub(1, remaining) .. "\n" .. diagnostic, code
     end
-
-    local values = { n = packed.n - 1 }
-    for index = 2, packed.n do
-        values[index - 1] = packed[index]
-    end
-
-    if values.n > 0 then
-        AddOutput(output, ns.Serializer.SerializeValues(values))
-    end
-
-    if #output.parts == 0 then
-        AddOutput(output, L.COMPLETED_NO_OUTPUT)
-    end
-
-    return true, table.concat(output.parts), code,
-        ns.Inspector.CreateLiveTree(values), ns.Inspector.CreateStoredTree(values)
+    return succeeded, table.concat(output.parts), code, liveTree, storedTree
 end

@@ -205,14 +205,14 @@ func LoadProjectSelection(ctx context.Context, workspace, directory string) (Pro
 }
 
 func pinProduct(pin PinnedSet) string {
-	if pin.Source != nil {
-		return pin.Source.Product
-	}
 	if pin.Data != nil {
 		return pin.Data.Product
 	}
 	if pin.Changes != nil {
 		return pin.Changes.Product
+	}
+	if pin.Source != nil {
+		return pin.Source.Product
 	}
 	return ""
 }

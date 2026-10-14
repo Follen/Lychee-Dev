@@ -370,6 +370,17 @@ func (d *Driver) Run(ctx context.Context) error {
 			}
 			r, err := d.advance(ctx)
 			if err != nil {
+				var rejected *RejectedError
+				if errors.As(err, &rejected) && rejected.Reason == "slot_capacity" {
+					// The exact prepare nonce was rejected before compilation or
+					// execution. Consume it once and carry the original request
+					// and deadline across an automatic runtime reload.
+					d.State.Reload = &ReloadAttempt{Request: "capacity-" + op.ID, From: d.State.Identity.Runtime, Phase: "intent", RecoveryBudget: op.RecoveryBudget, Automatic: true}
+					if finishErr := d.finishTransaction(ctx); finishErr != nil {
+						return finishErr
+					}
+					return ErrReloadRequired
+				}
 				return err
 			}
 			if (r.State != "prepared" && r.State != "reported") || len(r.Challenge) != 32 {

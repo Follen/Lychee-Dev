@@ -188,3 +188,36 @@ end
 local ok,reason=ns.SlotRuntime.Wake()
 assert(not ok and reason=="slot_exhausted" and emptyLoads==500)
 assert(not ns.SlotRuntime.IsActive() and ns.InputState.Snapshot():find('"nextSlot":501',1,true))
+
+-- Closing an async job cancels its timer/guards and makes queued callbacks inert.
+Env.LoadAddon("Bridge/SlotRuntime.lua",ns)
+local timers,guardFrames,late,cleaned,collecting={},{},nil,0,0
+local createFrame=CreateFrame
+CreateFrame=function(...)
+    local frame=createFrame(...);guardFrames[#guardFrames+1]=frame;return frame
+end
+C_Timer.NewTimer=function(_,callback)
+    local timer={callback=callback,cancelled=false,Cancel=function(self)self.cancelled=true end}
+    timers[#timers+1]=timer;return timer
+end
+ns.ActivityView.Collecting=function()collecting=collecting+1 end
+_G.captureAsync=function(api)
+    assert(api:Async(10))
+    assert(api:Guard(function()return true end,{"PLAYER_REGEN_DISABLED"},"combat"))
+    assert(api:OnCleanup(function()cleaned=cleaned+1 end))
+    late=assert(api:Callback(function()error("late business callback ran")end))
+end
+assert(ns.SlotRuntime.Start())
+runtime=ns.Mailbox.runtime;e.runtime=runtime;e.ticket=string.rep("8",32)
+dispatch("bind",1)
+e.code="local api=...; captureAsync(api)";e.codeBytes=#e.code;e.codeChecksum=ns.MemoryProtocol.Checksum(e.code)
+dispatch("prepare",2);e.preparedNonce=e.nonce;e.challenge=ns.SlotRuntime.Snapshot().operations[e.ticket].challenge
+dispatch("commit",3)
+assert(ns.SlotRuntime.Snapshot().operations[e.ticket].state=="running")
+state.options.bridgeEnabled=false;ns.InputState.Stop();ns.SlotRuntime.Close()
+assert(cleaned==1,"bridge close did not run async cleanup")
+for _,timer in ipairs(timers) do assert(timer.cancelled,"bridge close retained a timer");timer.callback() end
+assert(not late() and collecting==0,"late completion restarted activity")
+for _,frame in ipairs(guardFrames) do assert(not frame.scripts.OnEvent,"bridge close retained guard events") end
+assert(ns.SlotRuntime.Snapshot().operations[e.ticket].body:find("probe_cancelled",1,true),"cancellation report lost")
+CreateFrame=createFrame;_G.captureAsync=nil

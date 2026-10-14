@@ -5,42 +5,16 @@
 package addon_test
 
 import (
-	"fmt"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
 
-func luaRuntime(t *testing.T) string {
-	t.Helper()
-	names := []string{"lua5.1", "lua51", "lua"}
-	explicit := os.Getenv("LYCHEEDEV_LUA51")
-	if explicit != "" {
-		names = []string{explicit}
-	}
-	var failures []string
-	for _, name := range names {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			failures = append(failures, err.Error())
-			continue
-		}
-		output, err := exec.Command(path, "-v").CombinedOutput()
-		if err == nil && regexp.MustCompile(`^Lua 5\.1\.[0-9]+(?:\s|$)`).Match(output) {
-			return path
-		}
-		failures = append(failures, fmt.Sprintf("%s: %v: %s", path, err, output))
-	}
-	if explicit != "" || os.Getenv("LYCHEEDEV_REQUIRE_LUA51") == "1" {
-		t.Fatalf("required Lua 5.1 unavailable: %v", failures)
-	}
-	t.Skipf("optional local Lua 5.1 unavailable: %v", failures)
-	return ""
-}
+func luaRuntime(t *testing.T) string { t.Helper(); return testkit.Lua51(t) }
 
 // TestWorkbenchLuaSuites runs every t_*.lua suite under every client profile.
 func TestWorkbenchLuaSuites(t *testing.T) {
@@ -92,7 +66,7 @@ func TestUnifiedTOCContract(t *testing.T) {
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	var loads []string
 	for _, line := range lines {
-		line = strings.TrimRight(line, "")
+		line = strings.TrimRight(line, "\r")
 		if line == "" || strings.HasPrefix(line, "##") || strings.HasPrefix(line, "#") {
 			continue
 		}

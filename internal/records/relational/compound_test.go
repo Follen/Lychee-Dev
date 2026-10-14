@@ -12,6 +12,7 @@ func TestCompoundQueries(t *testing.T) {
 		sql  string
 		want [][]any
 	}{
+		{"SELECT ID, ID FROM a WHERE ID=1 UNION ALL SELECT ID, ID FROM a WHERE ID=2", [][]any{{int64(1), int64(1)}, {int64(2), int64(2)}}},
 		{"WITH picked AS (SELECT ID, Name FROM a WHERE ID<3) SELECT Name FROM picked ORDER BY ID", [][]any{{"one"}, {"two"}}},
 		{"WITH picked AS (SELECT ID FROM a WHERE ID<3), counted AS (SELECT COUNT(*) AS n FROM picked) SELECT n FROM counted", [][]any{{int64(2)}}},
 		{"SELECT p.Name FROM (SELECT ID,Name FROM a WHERE ID=2) p", [][]any{{"two"}}},
@@ -31,6 +32,7 @@ func TestCompoundQueries(t *testing.T) {
 
 func TestCTEShadowAndForwardReference(t *testing.T) {
 	for _, sql := range []string{
+		"SELECT ID, ID FROM a UNION ALL SELECT ID, ID FROM b ORDER BY ID",
 		"WITH a AS (SELECT ID FROM a) SELECT ID FROM a",
 		"WITH x AS (SELECT ID FROM y), y AS (SELECT ID FROM a) SELECT ID FROM x",
 		"SELECT ID FROM a UNION ALL SELECT ID,Name FROM b",

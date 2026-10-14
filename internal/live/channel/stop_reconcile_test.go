@@ -357,3 +357,49 @@ func TestContinueSecondRuntimeChangePreservesOriginalRecovery(t *testing.T) {
 		}
 	}
 }
+
+func TestRejectedPrepareCapacityConsumesNonceAndKeepsRequest(t *testing.T) {
+	d, p := stopReconcileFixture(t)
+	ctx := context.Background()
+	d.State.Identity.NextSlot = 485
+	if err := d.PrepareRequest(ctx, "mixed-compiles", "return 1", 5, "opaque"); err != nil {
+		t.Fatal(err)
+	}
+	op := *d.State.Operation
+	if err := d.begin(ctx, "prepare", op.Ticket, func(e *bridge.SlotEnvelope) {
+		e.Code = op.Code
+		e.CodeBytes = len(op.Code)
+		e.CodeChecksum = adler32.Checksum([]byte(op.Code))
+		e.Budget = op.Budget
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tx := d.State.Transaction
+	e := tx.Envelope
+	i := d.State.Identity
+	i.Schema = bridge.SlotSchema
+	i.NextSlot = 486
+	i.Owner = d.State.Owner
+	i.Fence = 1
+	tx.Phase = "received"
+	tx.Receipt = &Receipt{Identity: i, Nonce: e.Nonce, Ticket: e.Ticket, Action: "prepare", State: "rejected", Reason: "slot_capacity"}
+	if err := d.Run(ctx); !errors.Is(err, ErrReloadRequired) {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(d.Log, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d = reloaded
+	if d.State.Transaction != nil || d.State.Reload == nil || !d.State.Reload.Automatic || d.State.Operation.ID != op.ID || d.State.Operation.Ticket != op.Ticket || d.State.Operation.RecoveryBudget.DeadlineMS != op.RecoveryBudget.DeadlineMS {
+		t.Fatal("capacity lost original request or retained rejected exchange")
+	}
+	p.current.Runtime = strings.Repeat("2", 32)
+	p.current.NextSlot = 1
+	if err := stopReconcileContinue(d); !errors.Is(err, ErrPending) {
+		t.Fatal(err)
+	}
+	if d.State.Reload.Phase != "complete" || d.State.Transaction == nil || d.State.Transaction.Envelope.Action != "prepare" || d.State.Transaction.Envelope.Nonce == e.Nonce {
+		t.Fatal("capacity did not resume original business after new runtime")
+	}
+}

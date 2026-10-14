@@ -155,6 +155,7 @@ local function guardedWake()
 end
 local function close()
     releaseInput()
+    if engine then engine.Close() end
     ns.InputProtection.Cancel()
     if ns.InputState then ns.InputState.Refresh() end
 end

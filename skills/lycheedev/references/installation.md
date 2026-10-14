@@ -114,8 +114,8 @@ readiness.
 An inert older managed installation can be replaced using its installation
 receipt. This is filesystem migration, not protocol compatibility: the 3.1 driver
 rejects old wire, native identities and channel-v1 journals, including 64-slot
-connections. Preserve those records and unresolved reservations for recovery with
-their matching older CLI in the owning task. Do not ask the new driver to resume
+connections. Preserve those records and unresolved reservations for diagnosis in
+the owning task. Do not ask the new driver to resume
 them, rewrite their schema or delete their claims to permit installation. With multiple
 instances, activate and verify each authorized PID after the shared installation
 is updated. If the runtime reports `restart_required` because newly installed
@@ -125,3 +125,9 @@ If the authorized task includes using the running client, follow
 bridge session when the addon is not running; do not require that session as
 the prerequisite for its own first activation. Installation alone does not
 authorize a game restart or a switch of character.
+
+The saved update inventory remembers discovery locations. Default `update`
+selects locations still installed and original targets with an interrupted
+replacement journal; removing a managed target does not request its later
+reinstallation. Explicit `--path`, `--installation`, and a retained npm
+transaction continue to select their exact targets, including absent ones.

@@ -153,7 +153,6 @@ bridge is enabled. Focus and draft text stay intact. Current INPUT publishes
 `escapeLimit=0`; no Esc is needed. Password, secure text, protected or forbidden
 editors return `input_focus_unavailable`; retain the CON and wait for the user to
 leave that field. Combat, loading and stale evidence never authorize keys.
-Old upgrade journals retain their original bounded Esc counts; do not reset them.
 Held Ctrl, Alt, Shift, either Win key or a key in the selected chord delays input
 until release. The CLI never forces the user's physical keys up. A user can
 still interrupt a chord after that check; only the addon receipt confirms execution.
@@ -204,8 +203,7 @@ do not fix them by copying an RVA, scanning memory or looping reloads.
 `waiting: shared_publication` is shared-file contention inside one installation,
 not proof of a lost connection. Native 3.2 development requires the Mailbox wire,
 identity and 500-slot pool; it rejects older native connection identities.
-Retain incompatible evidence for its matching older CLI rather than applying
-the new driver to it. The current 500-slot allocator can skip another
+Retain incompatible evidence for diagnosis; current drivers cannot execute old-wire journals. The current 500-slot allocator can skip another
 owner's reservations for a new exchange only before publication or input. The
 runtime skips empty/foreign slots and stops at the first envelope for itself;
 it does not skip its own pending work. Once published, submitted or uncertain,
@@ -242,7 +240,7 @@ rollback stops automatic work; an unseen offline clock change cannot be detected
 
 Current native writes use channel-v2 and activation-v3 with the current Mailbox
 identity. Older native wire/identity journals are rejected before driving or
-budget migration; preserve them for diagnosis with their matching release.
+budget migration; preserve them for read-only diagnosis.
 An older artifact serialization within a compatible connection is a different
 case and does not establish old-wire compatibility. A CLI wait timeout or
 interruption ends the host call, not the game-side probe or its cleanup.

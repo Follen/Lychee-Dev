@@ -11,8 +11,8 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-// This opt-in acceptance uses a sealed local release and its installed native
-// executable. CI cannot manufacture the Windows LuaLS payload or fetch it.
+// Release CI supplies the assembled local release and its packaged executable.
+// Local runs may select the same verified payload through these environment variables.
 func TestPackagedSourceSemanticCLIWhenAvailable(t *testing.T) {
 	releaseRoot := os.Getenv("LYCHEEDEV_SOURCE_PACKAGE_RELEASE_ROOT")
 	binary := os.Getenv("LYCHEEDEV_SOURCE_PACKAGE_BINARY")

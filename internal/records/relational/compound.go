@@ -2,6 +2,7 @@ package relational
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -97,8 +98,11 @@ func executeQuery(e *evaluation, query *retrieval, resolve Resolver, parent *que
 	final := &retrieval{order: tail.order, limit: tail.limit, offset: tail.offset}
 	fields := make([]field, len(combined.Columns))
 	for i, name := range combined.Columns {
-		fields[i] = field{name: name}
-		final.outputs = append(final.outputs, projection{value: &term{kind: "column", value: name}})
+		// Keep display names, but bind our internal projection to its exact
+		// ordinal. User ORDER BY remains subject to name ambiguity checks.
+		qualifier := strconv.Itoa(i)
+		fields[i] = field{qualifier: qualifier, name: name}
+		final.outputs = append(final.outputs, projection{value: &term{kind: "column", qualifier: qualifier, value: name}})
 	}
 	result, err := executeRows(e, final, fields, func(yield func([]any) error) error { return resultSource(combined).Scan(e.ctx, yield) })
 	if err != nil {

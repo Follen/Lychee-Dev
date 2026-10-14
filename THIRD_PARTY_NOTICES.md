@@ -16,18 +16,6 @@ Bundled Microsoft Visual C++ runtime DLLs retain Microsoft's redistribution
 terms, as recorded in the npm notices. Those DLLs are not covered by LuaLS's MIT
 license.
 
-## luaqrcode
-
-`addon/Bridge/MatrixSymbol.lua` adapts
-[speedata/luaqrcode](https://github.com/speedata/luaqrcode), copyright Patrick
-Gundlach and contributors. The full BSD-3-Clause notice remains in that source
-file and the npm notices.
-
-The adaptation originated in `add-on/Libs/AutomationQR.lua` at Lychee commit
-`41af9cb616dcb7a9e604619a4fc0ad6c8d6d8210`. Current changes provide lazy
-initialization, a bounded private interface and a 16×16 nibble XOR table.
-Retaining this codec does not make it the Native Live input transport.
-
 ## Go dependencies
 
 Versions and integrity are pinned in [go.mod](go.mod) and [go.sum](go.sum).
@@ -37,18 +25,14 @@ Distributed notices cover the following components and their applicable licenses
 | --- | --- |
 | Microsoft/go-winio | MIT |
 | HugoSmits86/nativewebp | MIT |
-| makiuchi-d/gozxing | MIT and the upstream ZXing Apache-2.0 license |
 | yuin/gopher-lua | MIT |
 | dustin/go-humanize, mattn/go-isatty, ncruces/go-strftime | MIT |
 | remyoudompheng/bigfft | BSD-3-Clause |
-| golang.org/x/exp, image, sys, text, xerrors | BSD-3-Clause |
+| golang.org/x/exp, image, sys | BSD-3-Clause |
 | modernc.org/libc, mathutil, memory | BSD-3-Clause and applicable bundled notices |
 | modernc.org/sqlite | BSD-3-Clause; SQLite core is public domain |
 
-`golang.org/x/image` is used by ordinary nativewebp builds, and
-`golang.org/x/text` by gozxing. Their attribution applies to the native binary,
-as well as tests. The release source bundle and dependency inventory are
-generated from the actual build.
+`golang.org/x/image` is used by ordinary nativewebp builds. The release source bundle and dependency inventory are generated from the actual build.
 
 The Lua 5.1.5 test interpreter is built from the official Lua source under its
 MIT license and is not distributed as a product component. Test-only fixtures

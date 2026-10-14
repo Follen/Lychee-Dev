@@ -116,60 +116,60 @@ func readBrokerFrame(reader io.Reader, value any, maximum int) error {
 	return nil
 }
 
-func connectSourceBroker(ctx context.Context, home, release string, start bool) (net.Conn, string, error) {
+func connectSourceBroker(ctx context.Context, home, release string, start bool) (net.Conn, brokerHello, error) {
 	var err error
 	home, err = filepath.EvalSymlinks(home)
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	home, err = filepath.Abs(home)
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	release, err = filepath.EvalSymlinks(release)
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	release, err = filepath.Abs(release)
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	endpoint, _, _, err := luals.BrokerScope(home)
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	identity, err := brokerIdentity(home, release)
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	connect := func() (net.Conn, error) { return luals.DialBrokerPipe(ctx, endpoint) }
 	conn, err := connect()
 	if err != nil && os.IsNotExist(err) && start {
 		launch, lockErr := vault.AcquireLease(ctx, filepath.Join(home, "locks"), "source:v1:broker-launch")
 		if lockErr != nil {
-			return nil, "", lockErr
+			return nil, brokerHello{}, lockErr
 		}
 		defer launch.Close()
 		conn, err = connect()
 		if err != nil && os.IsNotExist(err) {
 			var token [32]byte
 			if _, err = rand.Read(token[:]); err != nil {
-				return nil, "", err
+				return nil, brokerHello{}, err
 			}
 			started, _, e := luals.BrokerProcessIdentity(uint32(os.Getpid()))
 			if e != nil {
-				return nil, "", e
+				return nil, brokerHello{}, e
 			}
 			exe, e := os.Executable()
 			if e != nil {
-				return nil, "", e
+				return nil, brokerHello{}, e
 			}
 			exe, e = filepath.Abs(exe)
 			if e != nil {
-				return nil, "", e
+				return nil, brokerHello{}, e
 			}
 			if e = luals.StartBroker(exe, []string{"--internal-luals-broker", home, release, strconv.Itoa(os.Getpid()), strconv.FormatUint(started, 10), hex.EncodeToString(token[:])}); e != nil {
-				return nil, "", e
+				return nil, brokerHello{}, e
 			}
 			startup := time.NewTimer(5 * time.Second)
 			defer startup.Stop()
@@ -179,23 +179,23 @@ func connectSourceBroker(ctx context.Context, home, release string, start bool) 
 					break
 				}
 				if !os.IsNotExist(err) {
-					return nil, "", err
+					return nil, brokerHello{}, err
 				}
 				delay := time.NewTimer(25 * time.Millisecond)
 				select {
 				case <-ctx.Done():
 					delay.Stop()
-					return nil, "", ctx.Err()
+					return nil, brokerHello{}, ctx.Err()
 				case <-startup.C:
 					delay.Stop()
-					return nil, "", fmt.Errorf("%w: broker startup unavailable", luals.ErrUnavailable)
+					return nil, brokerHello{}, fmt.Errorf("%w: broker startup unavailable", luals.ErrUnavailable)
 				case <-delay.C:
 				}
 			}
 		}
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	stopHello := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stopHello()
@@ -219,18 +219,18 @@ func connectSourceBroker(ctx context.Context, home, release string, start bool) 
 	}
 	if err != nil {
 		conn.Close()
-		return nil, "", err
+		return nil, brokerHello{}, err
 	}
 	if ctx.Err() != nil {
 		conn.Close()
-		return nil, "", ctx.Err()
+		return nil, brokerHello{}, ctx.Err()
 	}
-	return conn, identity, nil
+	return conn, hello, nil
 }
 
 func sourceBrokerAnalyzer(home, release, environmentSnapshot string) codebase.SemanticAnalyzer {
 	return func(ctx context.Context, pin selection.SourcePin, recordsHash string, env environment.Manifest, queries []luals.Query) (luals.Analysis, error) {
-		conn, identity, err := connectSourceBroker(ctx, home, release, true)
+		conn, peer, err := connectSourceBroker(ctx, home, release, true)
 		if err != nil {
 			return luals.Analysis{}, err
 		}
@@ -238,7 +238,7 @@ func sourceBrokerAnalyzer(home, release, environmentSnapshot string) codebase.Se
 		stop := context.AfterFunc(ctx, func() { conn.Close() })
 		defer stop()
 		deadline, _ := ctx.Deadline()
-		req := brokerRequest{Wire: luals.BrokerWire, Identity: identity, Action: "analyze", Deadline: deadline, Pin: pin, RecordsHash: recordsHash, EnvironmentSnapshot: environmentSnapshot, Environment: env, Batches: luals.SplitQueries(queries)}
+		req := brokerRequest{Wire: luals.BrokerWire, Identity: peer.Identity, Action: "analyze", Deadline: deadline, Pin: pin, RecordsHash: recordsHash, EnvironmentSnapshot: environmentSnapshot, Environment: env, Batches: luals.SplitQueries(queries)}
 		if err = writeBrokerFrame(conn, req, brokerRequestBytes); err != nil {
 			return luals.Analysis{}, err
 		}
@@ -259,6 +259,10 @@ func sourceBrokerAnalyzer(home, release, environmentSnapshot string) codebase.Se
 // SourceBrokerMain is an internal process entry, outside the user command
 // directory. A launch ticket and the live launching process must both match.
 func SourceBrokerMain(ctx context.Context, args []string) int {
+	return sourceBrokerMain(ctx, args, luals.ListenBrokerPipe)
+}
+
+func sourceBrokerMain(ctx context.Context, args []string, listen func(string, string) (net.Listener, error)) int {
 	if len(args) != 6 || args[0] != "--internal-luals-broker" || args[5] == "" || len(args[5]) != 64 || os.Getenv("LYCHEEDEV_BROKER_START") != args[5] {
 		return 2
 	}
@@ -324,7 +328,7 @@ func SourceBrokerMain(ctx context.Context, args []string) int {
 	if err != nil {
 		return 3
 	}
-	listener, err := luals.ListenBrokerPipe(endpoint, sddl)
+	listener, err := listen(endpoint, sddl)
 	if err != nil {
 		return 3
 	}
@@ -535,7 +539,7 @@ func SourceBrokerMain(ctx context.Context, args []string) int {
 // retireSourceBroker is read-only when no endpoint exists. It never launches a
 // broker, kills a PID, or releases a lease belonging to an unknown owner.
 func retireSourceBroker(ctx context.Context, home, release string) error {
-	conn, identity, err := connectSourceBroker(ctx, home, release, false)
+	conn, peer, err := connectSourceBroker(ctx, home, release, false)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -547,7 +551,7 @@ func retireSourceBroker(ctx context.Context, home, release string) error {
 	if deadline.IsZero() {
 		deadline = time.Now().Add(5 * time.Second)
 	}
-	if err = writeBrokerFrame(conn, brokerRequest{Wire: luals.BrokerWire, Identity: identity, Action: "retire", Deadline: deadline}, brokerRequestBytes); err != nil {
+	if err = writeBrokerFrame(conn, brokerRequest{Wire: luals.BrokerWire, Identity: peer.Identity, Action: "retire", Deadline: deadline}, brokerRequestBytes); err != nil {
 		return err
 	}
 	var response brokerResponse
@@ -557,7 +561,7 @@ func retireSourceBroker(ctx context.Context, home, release string) error {
 	if response.State != "closed" {
 		return errors.New("broker retirement not confirmed")
 	}
-	return nil
+	return luals.WaitBrokerExit(ctx, peer.PID, peer.Started)
 }
 
 func runSourceSession(ctx context.Context, route string, opts Options, response *Envelope) (int, error) {
@@ -573,10 +577,12 @@ func runSourceSession(ctx context.Context, route string, opts Options, response 
 	}
 	if route == "source session close" {
 		err = retireSourceBroker(bounded, home, runtime.ReleaseRoot())
-		response.Result = map[string]any{"state": "closed"}
+		if err == nil {
+			response.Result = map[string]any{"state": "closed"}
+		}
 		return 0, err
 	}
-	conn, identity, err := connectSourceBroker(bounded, home, runtime.ReleaseRoot(), false)
+	conn, peer, err := connectSourceBroker(bounded, home, runtime.ReleaseRoot(), false)
 	if err != nil {
 		if os.IsNotExist(err) {
 			response.Result = map[string]any{"state": "closed"}
@@ -586,7 +592,7 @@ func runSourceSession(ctx context.Context, route string, opts Options, response 
 	}
 	defer conn.Close()
 	deadline, _ := bounded.Deadline()
-	if err = writeBrokerFrame(conn, brokerRequest{Wire: luals.BrokerWire, Identity: identity, Action: "status", Deadline: deadline}, brokerRequestBytes); err != nil {
+	if err = writeBrokerFrame(conn, brokerRequest{Wire: luals.BrokerWire, Identity: peer.Identity, Action: "status", Deadline: deadline}, brokerRequestBytes); err != nil {
 		return 0, err
 	}
 	var result brokerResponse
@@ -722,7 +728,7 @@ func retireSourceBrokerIfPresent(ctx context.Context, home string) error {
 	if response.State != "closed" {
 		return luals.ErrFailed
 	}
-	return nil
+	return luals.WaitBrokerExit(bounded, hello.PID, hello.Started)
 }
 
 type sourceBrokerTask struct {

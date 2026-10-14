@@ -212,13 +212,6 @@ func booleanState(value any) (int, error) {
 	}
 	return 0, ErrType
 }
-func booleanValue(state int) any {
-	if state < 0 {
-		return nil
-	}
-	return state == 1
-}
-
 func scalarUnary(operation string, value any) (any, error) {
 	input, err := canonicalScalar(value)
 	if err != nil {

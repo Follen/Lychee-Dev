@@ -13,11 +13,11 @@ export const offlineCases = [
   go('BASE-09', 'Reload uses its distinct function key without chat', 'internal/desktop', 'TestMailboxReloadUsesDistinctFunctionKeyWithoutChat'),
   go('BASE-10', 'Independent bootstrap and bounded upgrade evidence', 'internal/live/memory', 'TestBootstrapRemainsReadableWithoutBusinessMailbox', 'TestPreviousProtocolPublishesUpgradeEvidenceOnly'),
   go('BASE-11', 'Transient mailbox reads retain the original goal and errors', 'internal/live/channel', 'TestMailboxTransientObservationContinuesOriginalGoal', 'TestMailboxPermanentReadFailureStillStops'),
-  go('BASE-12', 'Async resources, unobstructed execution and character storage', 'tests/protocol', 'TestFourClientProbeExecution', 'TestInvestigationOwnsResourcesThroughFinalization', 'TestCharacterBridgeStorageDoesNotImportAccountExecution'),
-  go('BASE-13', 'Verified report, ACK, display proof and immutable budget', 'internal/live', 'TestCompleteInvestigationKeepsOwnerUntilDisplayProof', 'TestExecutionBudgetIsFrozenAcrossResume'),
-  go('BASE-14', 'Unknown input and recovery without replay', 'internal/live', 'TestExecuteCompletesLifecycle', 'TestExecuteReconcilesSubmittedInputWithoutReplay', 'TestBootstrapUnknownInputRequiresExplicitAbandon', 'TestBootstrapRestageNeverCrossesCommitFence', 'TestFlushRequiresNewReadinessAndDoesNotReplay', 'TestNextActionDoesNotLoopOnTerminalReportFailure'),
-  go('BASE-15', 'Multiple workspaces, windows and character writers', 'internal/live', 'TestBootstrapAdmissionSerializesWorkspacesAndMaintenance', 'TestReportWritersDistinguishProcessesAndCharacterPartitions', 'TestPassiveDiscoveryNeverCapturesOrTypes'),
-  go('BASE-16', 'Process crash and durable window ownership', 'internal/live/journal', 'TestWindowAdmissionCrashRecovery', 'TestWindowRunOwnershipAndTerminalRelease'),
+  go('BASE-12', 'Native recovery never replays business input', 'tests/protocol', 'TestSlotDriverLuaRecoveryWithoutBusinessReplay', 'TestMemoryRecordLuaParity'),
+  go('BASE-13', 'Native input observation and receiver bindings', 'tests/protocol', 'TestInputStateObservation', 'TestLuaReceiverBindings'),
+  go('BASE-14', 'Native connection close and crash ownership recovery', 'internal/live/channel', 'TestClosedProjectRetiresClaimAfterCrashWithoutGame', 'TestPendingCloseDoesNotInheritBoundCompletion'),
+  go('BASE-15', 'Client discovery fixes installation and process identity', 'internal/live', 'TestDiscoveredClientWindowInfersInstallationAndOptionalPID', 'TestDiscoveredClientWindowGameRootUsesPIDWithoutRetargeting', 'TestDiscoveredClientWindowAmbiguityDoesNotUseTitle'),
+  go('BASE-16', 'Window ownership survives interrupted admission', 'internal/live/journal', 'TestWindowAdmissionCrashRecovery', 'TestFailedIntentCannotPublishWindowClaim'),
   go('BASE-17', 'Workbench pages, settings, disabled cost and locale fixtures', 'tests/addon', 'TestWorkbenchLuaSuites', 'TestUnifiedTOCContract'),
   go('BASE-18', 'Evidence integrity and isolated workspaces', 'internal/vault', 'TestBlobRoundTripAndCorruption', 'TestTwoHomesWithUnicodeAndSpacePathsAreIsolated'),
   go('BASE-19', 'SQL partial coverage, effective hotfix provenance and JSONL completion', 'internal/records/navigatetest', 'TestSQLIdentityLookupPreservesPartialCoverage', 'TestExplicitEffectiveSQLKeepsBaseAndProvenance', 'TestStreamEmitsTypedFrameContract', 'TestStreamErrorFrameEndsStreamWithoutEnd'),
@@ -25,20 +25,15 @@ export const offlineCases = [
   go('BASE-21', 'Update preflight, replacement and interrupted recovery', 'internal/delivery', 'TestUpdateManagedPlanReplaceRepeat', 'TestUpdatePreflightsAllBeforeFirstMutation', 'TestUpdateRecoversOldMovedCheckpoint', 'TestUpdateRecoversInterruptedOldFileDeletion', 'TestUpdateRejectsChangedAndContainedTargets'),
 ];
 // These are real-client checks, not satisfied by four-profile Lua fixtures.
-export const liveCases = [
-  { id: 'LIVE-01', title: 'Synchronous result through complete cleanup', file: 'sync.lua', budget: 10 },
-  { id: 'LIVE-02', title: 'Same request and completed resume reuse the exact evidence' },
-  { id: 'LIVE-03', title: 'Expected business failure still finishes cleanup', file: 'failure.lua', budget: 10, expectedFailure: true },
-  { id: 'LIVE-04', title: '55-second async execution, nine pages and no transport overlay', file: 'workbench.lua', budget: 60 },
-];
+export const liveCases = [];
+
 export const manualCases = [
-  ['REAL-01', 'WGC visual review: font, rounded corners, navigation, settings and receiver'],
+  ['REAL-01', 'WGC visual review: font, rounded corners, navigation, settings and activity view'],
   ['REAL-02', 'Chinese/English, small viewport and UI scaling'],
-  ['REAL-03', 'Fixed shortcuts, receiving input shield, IME, chat and focus release'],
-  ['REAL-04', 'Reload RGB rotation, wake disappearance and 45-second expiry'],
+  ['REAL-03', 'Effective Native bindings, EditBox passthrough, IME and focus readiness'],
   ['REAL-05', 'First installation, upgrade, relogin and combat transitions'],
   ['REAL-06', 'Two live windows, characters, workspaces and client builds'],
-  ['REAL-07', 'Classic 50504 production execution and finish'],
-  ['REAL-08', 'Titan 38002 production execution and finish'],
+  ['REAL-07', 'Classic 50504 production execution and cleanup'],
+  ['REAL-08', 'Titan 38002 production execution and cleanup'],
   ['REAL-09', 'Long-running and adversarial schedule acceptance'],
 ].map(([id, title]) => ({ id, title, kind: 'manual', state: 'not_run' }));

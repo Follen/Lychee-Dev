@@ -248,12 +248,15 @@ func deploymentGuard(ctx context.Context, target live.ClientWindow) error {
 	return nil
 }
 func (p *Project) native(ctx context.Context, target live.ClientWindow, cache bool) (*Native, error) {
+	return p.nativeVersion(ctx, target, cache, buildinfo.Version)
+}
+func (p *Project) nativeVersion(ctx context.Context, target live.ClientWindow, cache bool, version string) (*Native, error) {
 	key := fmt.Sprintf("%d-%d.json", target.Window.ProcessID, target.Window.ProcessStartedAt)
 	id, err := token()
 	if err != nil {
 		return nil, err
 	}
-	n, err := OpenNative(ctx, target.Window, filepath.Join(target.Client.Directory, "Interface", "AddOns"), buildinfo.Version, p.path("cache", key), cache)
+	n, err := OpenNative(ctx, target.Window, filepath.Join(target.Client.Directory, "Interface", "AddOns"), version, p.path("cache", key), cache)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +264,15 @@ func (p *Project) native(ctx context.Context, target live.ClientWindow, cache bo
 	return n, nil
 }
 func claimGuard(target live.ClientWindow, parent string, owner journal.WindowOwner) func(context.Context) error {
+	return connectionGuard(target, parent, owner, false)
+}
+func connectionGuard(target live.ClientWindow, parent string, owner journal.WindowOwner, repair bool) func(context.Context) error {
 	return func(ctx context.Context) error {
-		if err := deploymentGuard(ctx, target); err != nil {
+		guard := deploymentGuard
+		if repair {
+			guard = live.ConfirmClientWindow
+		}
+		if err := guard(ctx, target); err != nil {
 			return err
 		}
 		actual, busy, err := journal.InspectWindowOwner(ctx, parent, owner.Resource)
@@ -379,7 +389,10 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	return present(d), err
 }
 
-func (p *Project) drive(ctx context.Context, id string, cache bool, action func(*Driver) error) (result ProjectResult, err error) {
+func (p *Project) drive(ctx context.Context, id string, cache bool, action func(*Driver) error) (ProjectResult, error) {
+	return p.driveMode(ctx, id, cache, false, action)
+}
+func (p *Project) driveMode(ctx context.Context, id string, cache, repair bool, action func(*Driver) error) (result ProjectResult, err error) {
 	meta, err := p.metadata(id)
 	if err != nil {
 		return ProjectResult{}, err
@@ -391,7 +404,11 @@ func (p *Project) drive(ctx context.Context, id string, cache bool, action func(
 	if d.State.Closed {
 		return present(d), ErrClosed
 	}
-	native, err := p.native(ctx, meta.Target, cache)
+	version := buildinfo.Version
+	if repair {
+		version = d.State.Identity.Release
+	}
+	native, err := p.nativeVersion(ctx, meta.Target, cache, version)
 	if err != nil {
 		return present(d), err
 	}
@@ -421,7 +438,7 @@ func (p *Project) drive(ctx context.Context, id string, cache bool, action func(
 	if d.State.Closed {
 		return present(d), ErrClosed
 	}
-	native.Guard = claimGuard(meta.Target, native.Parent, meta.Owner)
+	native.Guard = connectionGuard(meta.Target, native.Parent, meta.Owner, repair)
 	if err = native.Guard(ctx); err != nil {
 		return present(d), err
 	}
@@ -548,6 +565,16 @@ func (p *Project) retire(ctx context.Context, id string, result ProjectResult) (
 	return result, journal.RetireConnectionWindow(ctx, parent, meta.Owner)
 }
 func (p *Project) Disconnect(ctx context.Context, id string, cache bool) (ProjectResult, error) {
+	return p.disconnectMode(ctx, id, cache, false)
+}
+
+// CloseForRepair closes the original owned runtime before replacing a damaged or
+// older installation. Its runtime release and journal remain authoritative; it
+// never resumes a business request before recording the close intent.
+func (p *Project) CloseForRepair(ctx context.Context, id string, cache bool) (ProjectResult, error) {
+	return p.disconnectMode(ctx, id, cache, true)
+}
+func (p *Project) disconnectMode(ctx context.Context, id string, cache, repair bool) (ProjectResult, error) {
 	state, err := p.Status(id)
 	if errors.Is(err, journal.ErrMemoryTornTail) {
 		if repairErr := p.recoverTail(ctx, id); repairErr != nil {
@@ -577,7 +604,7 @@ func (p *Project) Disconnect(ctx context.Context, id string, cache bool) (Projec
 	if ended != "" {
 		return p.disconnectEnded(ctx, id, meta)
 	}
-	return p.drive(ctx, id, cache, func(d *Driver) error {
+	return p.driveMode(ctx, id, cache, repair, func(d *Driver) error {
 		if err := d.RequestClose(ctx); err != nil {
 			return err
 		}

@@ -258,3 +258,19 @@ func TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory(t
 		t.Fatal("historical lookup modified current request", err)
 	}
 }
+
+func TestRepairCloseRetiresOriginalClosedConnection(t *testing.T) {
+	p, d, meta, parent := projectFixture(t)
+	d.State.Bound = false
+	d.State.Closed = true
+	if err := d.Save(context.Background(), "connection_closed"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := p.CloseForRepair(context.Background(), d.State.ID, false)
+	if err != nil || !result.Closed || result.Identity.Release != "2.5.1" {
+		t.Fatalf("old release closure: %+v %v", result, err)
+	}
+	if _, busy, err := journal.InspectWindowOwner(context.Background(), parent, meta.Owner.Resource); err != nil || busy {
+		t.Fatal("repair retained original ownership", err)
+	}
+}

@@ -10,7 +10,7 @@
 | --- | --- |
 | `cmd/lycheedev`、`internal/command` | 命令合同、参数解析、选择与编排、结果和退出码 |
 | `internal/selection` | 产品目录、安装身份、Source/Data/Changes pin |
-| `internal/codebase` | Git 快照、索引、搜索、关系、上下文、LuaLS 和有界数据流 |
+| `internal/codebase`、`internal/addoncheck` | Git 快照、索引、搜索、关系、上下文、LuaLS，以及独立的 addon 静态解析与 API 审查 |
 | `internal/records` | CASC/CDN、DB2/SQL、Hotfix、关联记录和资源导出 |
 | `internal/live/channel`、`internal/live/memory` | Native 连接、恢复日志、运行时定位和 Mailbox 读取 |
 | `internal/bridge` | Go/Lua 共享信封、记录和协议类型 |
@@ -56,9 +56,11 @@ Data pin 固定 product、build、BuildConfig、CDNConfig、region、locale 和 
 
 远端读取从指定产品和地区的 versions/cdns 固定配置；`--build` 精确匹配，CN 使用国服版本服务。来源缺失时返回缺口，不切到其他地区或产品。
 
-本地 CASC 按 pin 选择配置、索引和内容，优先读取 EKey 对应桶并验证完整键、代次和校验和。远端归档最多并发八项，按清单顺序确定结果，共享网络与内存预算；大索引使用稀疏读取。
+本地 CASC 按 pin 选择配置、索引和内容，优先读取 EKey 对应桶并验证完整键、代次和校验和。远端归档每查询默认最多并发八项，显式 download.workers 限制同工作区获准查询的总下载并发；按清单顺序确定结果，共享网络与内存预算，大索引使用稀疏读取。
 
 DB2、SQL、关联记录和资源导出共用固定数据身份。Hotfix 记录 provider、build、locale、过滤及分页范围。缺密钥、缺定义、截断或部分解码显式返回；原始内容和派生资源分别记录完整性。
+
+Wago 的 coverage.complete 表示当前窗口耗尽，本地 snapshot 保留完整快照语义；统一的 fullQueryComplete 表示从第一页无 cursor 开始并完整到末尾。完整本地缓存查询不代表完整服务端覆盖。DB2 JSONL 先完成来源复核与归档，再发唯一 end；后置失败发 error，不发成功 end。
 
 ## Native Live
 
@@ -77,6 +79,8 @@ Forever 扫描主模块 `.text` 的可读区间，保留短读前缀，对剩余
 容量不足时重载并在新 runtime 继续原请求。报告已核实且 release 回执缺失超过 5 秒时，在原期限内允许一次独立重载清理；保留原报告，验证旧 runtime 退役后才记为清理完成。短暂读取变化在原调用内重读，不延长持久预算。
 
 `live doctor` 只读检查，`--fix` 复用受管安装和原连接。首次没有兼容且新鲜的 INPUT 时，保留目标等待一次手动重载。
+
+旧窗口队列、光学/QR 和 SavedVariables 执行驱动已退役；OP/BTP 历史记录保留查看、取消及必要处置，不恢复执行。当前执行、重载和错误调查要求 Native CON。
 
 ## Addon 与工作台
 
@@ -102,3 +106,5 @@ INPUT 采样框架独立于 UIParent，使挂机展示隐藏主 UI 时仍可更�
 | 8 | 内部错误 |
 
 项目引用与恢复日志位于 `.lycheedev`，缓存与未完成请求分别管理。缺失来源、覆盖缺口和待清理状态必须保留。实机视觉证据使用 WGC，fixture 结果与真实客户端结果分别记录。
+
+受管升级先在独立准备目录生成完整 next 与 journal，再发布恢复目录。更新库存记录发现位置；默认更新现存安装和中断 replacement 的原目标，显式路径仍可重新安装已移除的目标。npm 更新使用 Windows 系统命名管道互斥，退出或崩溃释放锁。

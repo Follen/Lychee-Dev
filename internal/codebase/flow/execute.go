@@ -290,14 +290,6 @@ func joinValues(left, right value, file string, line int, kind string) value {
 	return trace(right, Step{Path: file, Line: line, Kind: kind, State: "unknown"})
 }
 
-func expressionHasSecret(expr ast.Expr, vars map[string]value) bool {
-	name := expressionName(expr)
-	if item, ok := vars[name]; ok {
-		return item.state == "secret" || item.state == "possible"
-	}
-	return false
-}
-
 func (a *analyzer) guardName(fn *function, condition ast.Expr) (string, bool, bool) {
 	if a.shadowedGuard {
 		a.boundary(fn.file, condition.Line(), "shadowed_guard", "issecretvalue is locally or globally rebound")

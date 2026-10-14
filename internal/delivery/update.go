@@ -63,6 +63,47 @@ func ReadUpdateTargets(state string) ([]UpdateTarget, error) {
 	return targets, nil
 }
 
+// DiscoverUpdateTargets treats the inventory as remembered locations, not a
+// standing request to reinstall removed targets. A retained replacement journal
+// still selects its original target when a crash has moved the installed tree.
+func DiscoverUpdateTargets(ctx context.Context, state string) ([]UpdateTarget, error) {
+	targets, err := ReadUpdateTargets(state)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]UpdateTarget, 0, len(targets))
+	for _, target := range targets {
+		directory := target.Path
+		if target.Component == "addon" {
+			directory = AddonDirectory(directory)
+		}
+		current, err := InspectInstallation(ctx, directory, target.Component)
+		if err != nil {
+			return nil, err
+		}
+		if current.State != "absent" {
+			result = append(result, target)
+			continue
+		}
+		paths, err := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(directory)), ".lycheedev-updates", "replace-*", "replacement.json"))
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range paths {
+			raw, err := readSlotFile(path, 1<<20)
+			if err != nil {
+				return nil, err
+			}
+			var record replacementRecord
+			if json.Unmarshal(raw, &record) == nil && record.Schema == "lycheedev.replacement.v1" && strings.EqualFold(record.Target, directory) && record.Next.Component == target.Component {
+				result = append(result, target)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 // UpdateManaged checks every selected target before changing the first one.
 // Each replacement uses the existing locked, resumable installer. Successful
 // replacements discard their verified old tree; interrupted replacements retain

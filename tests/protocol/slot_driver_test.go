@@ -86,9 +86,6 @@ func (p *slotPeer) Consumed(context.Context, bridge.SlotEnvelope) error { return
 type recordSource struct{ bytes []byte }
 
 func (s recordSource) Verify(context.Context) error { return nil }
-func (s recordSource) Regions(context.Context) ([]memory.Region, error) {
-	return []memory.Region{{Range: memory.Range{Start: 4096, End: 4096 + uint64(len(s.bytes))}, Private: true, Committed: true, Readable: true}}, nil
-}
 func (s recordSource) Read(_ context.Context, address uint64, b []byte) (int, error) {
 	if address < 4096 || address-4096 >= uint64(len(s.bytes)) {
 		return 0, io.EOF
@@ -104,19 +101,22 @@ func (p *slotPeer) Find(ctx context.Context, s memory.Selector, first bool) (mem
 	if err != nil {
 		return memory.LookupResult{}, err
 	}
-	var data []byte
+	result := memory.LookupResult{Coverage: memory.Coverage{Complete: true}}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return memory.LookupResult{}, err
+			return result, err
 		}
-		data = append(data, b...)
-		data = append(data, make([]byte, 31)...)
+		record, err := memory.ReadRecord(ctx, recordSource{b}, 4096, s)
+		if err != nil {
+			continue
+		}
+		result.Records = append(result.Records, record)
+		if first {
+			break
+		}
 	}
-	if len(data) == 0 {
-		return memory.LookupResult{}, nil
-	}
-	return memory.Find(ctx, recordSource{data}, s, nil, first)
+	return result, nil
 }
 func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 	for _, fault := range []string{"", "bind", "prepare", "commit", "confirm", "release", "reload_bind", "compile_error", "cleanup_error"} {

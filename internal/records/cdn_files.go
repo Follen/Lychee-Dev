@@ -36,14 +36,15 @@ type cdnFiles struct {
 	routeRefreshed               bool
 	budget                       *resource.Budget
 	stats                        *DecodedCacheStats
+	downloadWorkers              int
 }
 
-func prepareCDNFiles(ctx context.Context, store *vault.Store, pin selection.DataPin, offline bool, budgets ...*resource.Budget) (*cdnFiles, BuildMetadata, error) {
+func prepareCDNFiles(ctx context.Context, store *vault.Store, pin selection.DataPin, offline bool, downloadWorkers int, budgets ...*resource.Budget) (*cdnFiles, BuildMetadata, error) {
 	m, err := store.OpenMetadata(ctx)
 	if err != nil {
 		return nil, BuildMetadata{}, err
 	}
-	c := &cdnFiles{ctx: ctx, store: store, metadata: m, client: &http.Client{Timeout: 30 * time.Second}, offline: offline}
+	c := &cdnFiles{ctx: ctx, store: store, metadata: m, client: &http.Client{Timeout: 30 * time.Second}, offline: offline, downloadWorkers: downloadWorkers}
 	if len(budgets) > 0 {
 		c.budget = budgets[0]
 	}
@@ -376,7 +377,7 @@ func (c *cdnFiles) locate(key string, size int64) (cdnSpan, error) {
 	// the footer identity and authenticated TOC establish the index's identity.
 	width := 1
 	if c.budget != nil && !c.offline {
-		width = 8
+		width = c.downloadWorkers
 	}
 	for start := 0; start < len(archives); start += width {
 		batch := archives[start:min(start+width, len(archives))]

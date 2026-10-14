@@ -44,7 +44,7 @@ node --test packages/npm/lycheedev/test/launcher.test.mjs
 | `internal/` | 命令、Source、Data、Live 状态机、安装与持久化 |
 | `tests/addon/`、`tests/protocol/` | Lua 5.1、禁用成本、客户端 profile 和跨语言协议 |
 | `tests/process/` | 原生进程、发布与竞争 |
-| `tests/parity/`、`tests/fixtures/` | 语义对照、最小 fixture 和来源 |
+| `tests/fixtures/`、`internal/command/*oracle*` | 最小 fixture、来源和公共 CLI 语义对照 |
 | `tests/dbcd/`、`tests/data-regression/` | 外部数据对照 |
 | `tools/*.test.mjs`、npm `test/` | 构建、包装、启动器、升级与发布合同 |
 
@@ -66,8 +66,8 @@ stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `l
 
 ## 仓库卫生
 
-- 根目录保留 README、Design、Changelog、todo 和 AGENTS；`docs/` 保留当前协议、开发和许可说明。
-- Skill 参考、测试用法、fixture 来源及第三方许可随对应代码保留。历史设计通过 Git 查阅，不再复制工作流水或交接日志。
+- 根目录保留 README、Design、Changelog、todo、AGENTS 和 [handover.md](../handover.md)；`docs/` 保留当前协议、开发、许可说明及用户要求的审计报告。
+- Skill 参考、测试用法、fixture 来源及第三方许可随对应代码保留。历史设计通过 Git 查阅；handover.md 只维护当前交接状态，按 AGENTS.md 约定更新，不追加逐轮工作流水。
 - 临时二进制、stage、截图和实验放在 `.tmp/<task>/`，任务结束后清理。Git 忽略不等于已经清理。
 - `.lycheedev` 包含来源引用和恢复记录。先区分活动项目与已结束实验，确认连接已关闭再按用户授权清理。
 - 清理 worktree 前核对分支、改动和忽略文件；使用 `git worktree remove` 同步移除登记。明确保留的工作树不纳入清理。
@@ -81,5 +81,7 @@ stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `l
 `release/npm-channel.json` 固定发行渠道；当前政策是发布到 `next`，保留 `latest` 为 2.5.1，改变渠道须有用户明确授权。
 
 发布使用 `.github/workflows/toolkit-release.yml`：固定干净提交，取得所需 CI 结果，校验许可和源码，构建 Windows 包及 corresponding source，完成重建比较、摘要封存和隔离安装；随后 OIDC 发布、回读 registry，再创建 GitHub Release。
+
+组装阶段用已固定的 LuaLS runtime 运行九项真实 runtime、Source、跨 CLI broker 与安装包语义测试，包括受控关闭后的进程退出和重新查询；任一缺失、跳过或失败都阻止后续发布。registry 回读分别检查包 integrity 和 provenance 元数据，registry signatures 不能代替 provenance；元数据存在检查不声称完成其密码学验证。
 
 已发布包不可修改。提交、推送 main 与发布 npm 分别确认，自动 CI 不代表真实游戏验收。

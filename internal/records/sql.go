@@ -103,6 +103,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		}
 		defer admission.Close()
 		files.admitted = true
+		files.downloadWorkers = admission.DownloadWorkers
 		// Reserve the executor's independently enforced memory limit inside
 		// the whole-query retained budget before any source is prepared.
 		if err := files.budget.Charge(resource.Cost{RetainedBytes: 64 << 20}); err != nil {

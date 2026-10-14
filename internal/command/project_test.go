@@ -97,7 +97,7 @@ func TestProjectDiscoveryAndExplicitSnapshotPrecedence(t *testing.T) {
 func TestProjectHelpAndUnlockedDoNotOpenWorkspace(t *testing.T) {
 	directory := t.TempDir()
 	root := filepath.Join(t.TempDir(), "uncreated")
-	for _, route := range [][]string{{"source", "query"}, {"data", "db2"}, {"data", "sql"}, {"data", "hotfix"}, {"asset", "inspect"}, {"live", "bind"}} {
+	for _, route := range [][]string{{"source", "query"}, {"data", "db2"}, {"data", "sql"}, {"data", "hotfix"}, {"asset", "inspect"}, {"live", "connect"}} {
 		result, code := invoke(t, append(route, "--project", directory, "--home", root, "--help", "--format=json")...)
 		if code != 0 || !result.OK {
 			t.Fatal(route, result, code)

@@ -40,29 +40,6 @@ func BuildSourceIndex(ctx context.Context, root, snapshot string) (IndexSummary,
 	return OpenBrowser(s).IndexSource(ctx, pin)
 }
 
-type SourceSearch struct {
-	Result  SymbolMatches
-	Capture evidence.CaptureRef
-}
-
-func SearchSource(ctx context.Context, root, snapshot, term string, limit int) (SourceSearch, error) {
-	var result SourceSearch
-	pin, err := pinnedSource(ctx, root, snapshot)
-	if err != nil {
-		return result, err
-	}
-	s, err := vault.OpenStore(root)
-	if err != nil {
-		return result, err
-	}
-	result.Result, err = OpenBrowser(s).FindSymbols(ctx, pin, term, limit)
-	if err != nil {
-		return result, err
-	}
-	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Index.Complete && !result.Result.Truncated, result.Result.Truncated, evidence.Provenance{Kind: "source-query", Locator: term, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
-	return result, err
-}
-
 func InspectSource(ctx context.Context, root, snapshot string, query SpanQuery) (SourceReading, error) {
 	var result SourceReading
 	pin, err := pinnedSource(ctx, root, snapshot)

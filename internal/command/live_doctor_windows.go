@@ -84,24 +84,19 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 	}
 	needsInstall := deployment.State != "managed" || deployment.Version != buildinfo.Version || deployment.Slots == nil || deployment.Slots.Count != bridge.SlotCount || (deployment.Slots.State != "managed" && deployment.Slots.State != "pending")
 	if report.Owner != nil {
-		// Connect resolves ownership and resumes only this project's exact target.
-		// It never takes another project's PID or mutates its installation.
-		var result channel.ProjectResult
-		var err error
-		if opts.session != "" {
-			result, err = project.Resume(ctx, opts.session, !opts.noCache)
-		} else {
-			result, err = project.Connect(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, !opts.noCache)
+		if opts.session != "" && opts.session != report.Owner.OperationID {
+			return channel.ProjectResult{}, errors.New("live.channel_owner_mismatch: repair must use the original CON")
 		}
-		if err != nil || (!needsInstall && opts.release == "") {
-			return result, err
+		if !needsInstall && opts.release == "" {
+			return project.Resume(ctx, report.Owner.OperationID, !opts.noCache)
 		}
-		// Finish the existing connection before replacing its managed files. Any
-		// unresolved input or cleanup remains on that same CON and stops repair.
-		if result, err = project.Disconnect(ctx, result.Session, !opts.noCache); err != nil {
+		// Close the original connection without resuming pending business. Older
+		// managed files are accepted only by this repair-specific cleanup path.
+		if result, err := project.CloseForRepair(ctx, report.Owner.OperationID, !opts.noCache); err != nil {
 			return result, err
 		}
 	}
+
 	if needsInstall || opts.release != "" {
 		release := opts.release
 		if release == "" {

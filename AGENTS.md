@@ -14,6 +14,15 @@ Read these current documents:
 
 Do not recreate historical design ledgers or use Git history as current acceptance.
 
+## Multi-agent handover
+
+- Read [handover.md](handover.md) before starting or taking over repository work. It is the shared current task state; the architecture and contracts remain in the documents listed above.
+- Keep one concise, current snapshot: branch/PR, completed changes, open issue IDs, task owners and file boundaries, validation actually performed, blockers, and the next concrete action. Update it at assignment changes, completed implementation/validation, and handoff; replace stale entries instead of appending a run diary.
+- The coordinating agent maintains the shared handover. Workers report their owned changes and evidence to the coordinator; avoid concurrent edits to this file and coordinate any overlapping product files before editing them.
+- Preserve the distinction between confirmed defects, candidates, implemented fixes, offline verification, real-client verification, and published work. Link detailed findings instead of copying the full audit into the handover.
+- Handover records context, not additional authorization or approval gates. Follow the current user's scope and existing repository rules; do not infer permission to merge, publish, operate a game, or discard another agent's changes from a handover entry.
+- Store reusable tests with the code and completed-task temporary material under the existing cleanup policy. Do not put secrets, full logs, machine-local artifacts, or unverified success claims in handover.md.
+
 ## Working rules
 
 Follow the user's task scope. Reuse the current branch/worktree; do not create repositories, worktrees or PRs just to satisfy a workflow. Preserve unrelated edits. Do not commit or push without task authorization.

@@ -6,9 +6,11 @@
 //
 // Usage: node tools/live-stage.mjs --out <directory> [--commit <40-hex>]
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { prepareStageOutput, stageMarker } from './stage-output.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -22,9 +24,6 @@ const version = JSON.parse(readFileSync(join(repository, 'release/version.json')
 const commit = (option('--commit') ?? '0'.repeat(40)).toLowerCase();
 if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('live-stage.invalid_commit');
 
-// A release root must never carry local probe task blocks. Mirrors the release
-// contract: the shipped queue is always the canonical empty literal.
-const EMPTY_PROBE_QUEUE = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function walkFiles(root, prefix = '') {
@@ -37,13 +36,14 @@ function walkFiles(root, prefix = '') {
   return files;
 }
 
-const absolute = resolve(out);
-rmSync(absolute, { recursive: true, force: true });
+const absolute = prepareStageOutput(out, repository);
+mkdirSync(absolute, { recursive: true });
+writeFileSync(join(absolute, stageMarker), JSON.stringify({ schema: 'lycheedev.live-stage.v1' }));
 const resources = [];
 for (const [source, prefix] of [[join(repository, 'addon'), 'addon'], [join(repository, 'skills/lycheedev'), 'skill']]) {
   for (const file of walkFiles(source)) {
     const name = `${prefix}/${file.name}`;
-    const content = name === 'addon/Bridge/Definitions.lua' ? Buffer.from(EMPTY_PROBE_QUEUE) : readFileSync(file.path);
+    const content = readFileSync(file.path);
     const destination = join(absolute, 'payload', ...name.split('/'));
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, content);

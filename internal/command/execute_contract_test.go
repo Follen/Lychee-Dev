@@ -1,8 +1,6 @@
 package command
 
 import (
-	"errors"
-	"github.com/follenfang/lycheedev/internal/live"
 	"testing"
 )
 
@@ -41,14 +39,5 @@ func TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess(t *testin
 	response, exit := invoke(t, "live", "execute", "--help", "--format=json")
 	if exit != 0 || !response.OK {
 		t.Fatal(response, exit)
-	}
-	for _, entry := range []struct {
-		err  error
-		exit int
-	}{{live.ErrBusinessFailed, 5}, {live.ErrInvestigationPending, 6}, {live.ErrReportWriterAmbiguous, 3}} {
-		exit, _, ok := queryFault(errors.Join(errors.New("detail"), entry.err))
-		if !ok || exit != entry.exit {
-			t.Fatal(entry, exit, ok)
-		}
 	}
 }

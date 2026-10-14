@@ -30,6 +30,48 @@ func TestParseLSRemoteHeadShapes(t *testing.T) {
 	}
 }
 
+func TestPrepareSourceMaintainsProductTrackingRef(t *testing.T) {
+	ctx := context.Background()
+	home, b, _ := workspaceFixture(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	first := bareRepositoryAt(t, remote, "live", "first")
+	original := repositoryCatalog
+	repositoryCatalog = []RepositorySpec{{Key: "wow-ui-source", URL: remote, Tracks: map[string]string{"retail": "live"}}}
+	t.Cleanup(func() { repositoryCatalog = original })
+	// The production catalog remains HTTPS-only; enable local fixture transport
+	// in this test's already-created mirror.
+	if _, err := gitBytes(ctx, b.mirror("wow-ui-source"), 1024, "config", "protocol.file.allow", "always"); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := b.PrepareSource(ctx, "wow-ui-source", "retail", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	health, err := CheckMirrorHealth(ctx, home, repositoryCatalog[0], "retail", true)
+	if err != nil || !health.Initialized || health.LocalCommit != first {
+		t.Fatalf("after sync: %+v %v", health, err)
+	}
+	second := bareRepositoryAt(t, remote, "live", "second")
+	health, err = CheckMirrorHealth(ctx, home, repositoryCatalog[0], "retail", false)
+	if err != nil || !health.UpdateAvailable || health.RemoteCommit != second {
+		t.Fatalf("remote movement: %+v %v", health, err)
+	}
+	if _, err := b.PrepareSource(ctx, "wow-ui-source", "retail", second); err != nil {
+		t.Fatal(err)
+	}
+	health, err = CheckMirrorHealth(ctx, home, repositoryCatalog[0], "retail", true)
+	if err != nil || health.LocalCommit != first {
+		t.Fatalf("explicit commit moved tracked branch: %+v %v", health, err)
+	}
+	if _, err := b.PrepareSource(ctx, "wow-ui-source", "retail", ""); err != nil {
+		t.Fatal(err)
+	}
+	old, err := gitBytes(ctx, b.mirror("wow-ui-source"), 128, "rev-parse", "refs/pins/"+pin.ExactCommit)
+	if err != nil || strings.TrimSpace(string(old)) != first {
+		t.Fatalf("immutable pin changed: %q %v", old, err)
+	}
+}
+
 // bareRepositoryAt creates a minimal bare repository with one branch commit.
 // Fixed author timestamps make equal inputs produce equal commit ids.
 func bareRepositoryAt(t *testing.T, dir, branch, message string) string {

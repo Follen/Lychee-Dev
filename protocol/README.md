@@ -4,4 +4,4 @@
 
 当前 Native Live 合同是 [Lycheedev mailbox protocol v1](../docs/live-protocol.md)。其信封和内存记录实现分别位于 internal/bridge、internal/live/channel 与 addon/Bridge，交叉验证位于 tests/protocol 和 tests/addon。
 
-现存 signal、receipt、queue 等样本还覆盖兼容解析器。保留这些样本不表示 Native Live 使用 QR、聊天输入或 SavedVariables 传输。新增协议样本必须由生产编解码路径验证，不能把一次实机运行的完整日志当作 fixture。
+现存 signal schema 与样本用于历史报告解析验证。旧 QR receipt 和 receiver wire golden 已随执行路径退役。新增协议样本必须由生产编解码路径验证，不能把一次实机运行的完整日志当作 fixture。

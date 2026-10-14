@@ -4,12 +4,12 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { synchronizeVersion, versionedLuaFixtures, versionedSignalSamples } from './version.mjs';
+import { synchronizeVersion } from './version.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // The addon ships one flat multi-interface manifest; there are no per-client
 // TOC variants to synchronize.
-const targets = ['internal/buildinfo/version.go', 'packages/npm/lycheedev/package.json', 'packages/npm/lycheedev/package-lock.json', 'addon/Core/Runtime.lua', 'addon/Lychee Dev.toc', ...versionedLuaFixtures, ...versionedSignalSamples, 'tests/addon/env.lua', 'tests/addon/t_about.lua'];
+const targets = ['internal/buildinfo/version.go', 'packages/npm/lycheedev/package.json', 'packages/npm/lycheedev/package-lock.json', 'addon/Core/Runtime.lua', 'addon/Lychee Dev.toc', 'tests/addon/env.lua', 'tests/addon/t_about.lua'];
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'lycheedev-version-'));
   t.after(() => rmSync(root, { recursive: true }));

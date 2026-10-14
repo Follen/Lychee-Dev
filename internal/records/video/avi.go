@@ -141,6 +141,9 @@ func ParseAVI(data []byte, limits Limits) (*Container, error) {
 		}
 		pos = chunk.next(fileSize)
 	}
+	if pos != fileSize {
+		return nil, ErrContainerTruncated
+	}
 	if moviStart < 0 {
 		return nil, ErrMoviMissing
 	}
@@ -218,6 +221,9 @@ func (c *Container) scanHeaderList(data []byte, pos, end int64, depth int) error
 		}
 		pos = chunk.next(end)
 	}
+	if pos != end {
+		return ErrContainerTruncated
+	}
 	return nil
 }
 
@@ -231,58 +237,80 @@ func (c *Container) enumerateFrames(data []byte, start, end int64, limits Limits
 	}
 	timestamp := 0.0
 	var keptBytes int64
-	pos := start
-	for pos+8 <= end {
-		chunk, err := readChunkHeader(data, pos, end)
-		if err != nil {
-			return err
+	var walk func(int64, int64, int) error
+	walk = func(pos, end int64, depth int) error {
+		if depth > headerListMaxDepth {
+			return ErrContainerFormat
 		}
-		if chunk.id != "00dc" && chunk.id != "00db" {
-			pos = chunk.next(end)
-			continue
-		}
-		if chunk.size > limits.MaxFrameBytes {
-			return ErrFrameLimit
-		}
-		c.EnumeratedFrames++
-		c.EnumeratedBytes += chunk.size
-		if c.Truncated {
-			// Only counting the remainder after a visible truncation.
-			pos = chunk.next(end)
-			continue
-		}
-		reason := ""
-		if len(c.Frames) >= limits.MaxFrames {
-			reason = "frame_limit"
-		} else if keptBytes+chunk.size > limits.MaxTotalBytes {
-			reason = "byte_limit"
-		}
-		if reason != "" {
-			if !limits.AllowPartial {
+		for pos+8 <= end {
+			chunk, err := readChunkHeader(data, pos, end)
+			if err != nil {
+				return err
+			}
+			if chunk.id == "LIST" {
+				if chunk.size < 4 {
+					return ErrContainerFormat
+				}
+				if string(data[pos+8:pos+12]) != "rec " {
+					return ErrContainerFormat
+				}
+				if err := walk(pos+12, chunk.end, depth+1); err != nil {
+					return err
+				}
+				pos = chunk.next(end)
+				continue
+			}
+			if chunk.id != "00dc" && chunk.id != "00db" {
+				pos = chunk.next(end)
+				continue
+			}
+			if chunk.size > limits.MaxFrameBytes {
 				return ErrFrameLimit
 			}
-			c.Truncated = true
-			c.TruncationReason = reason
+			c.EnumeratedFrames++
+			c.EnumeratedBytes += chunk.size
+			if c.Truncated {
+				// Only counting the remainder after a visible truncation.
+				pos = chunk.next(end)
+				continue
+			}
+			reason := ""
+			if len(c.Frames) >= limits.MaxFrames {
+				reason = "frame_limit"
+			} else if keptBytes+chunk.size > limits.MaxTotalBytes {
+				reason = "byte_limit"
+			}
+			if reason != "" {
+				if !limits.AllowPartial {
+					return ErrFrameLimit
+				}
+				c.Truncated = true
+				c.TruncationReason = reason
+				pos = chunk.next(end)
+				continue
+			}
+			payload := data[pos+8 : chunk.end]
+			frame := Frame{
+				Type:      "key",
+				Timestamp: timestamp,
+				Duration:  frameDuration,
+				Size:      int(chunk.size),
+				Chunk:     chunk.id,
+				Offset:    pos + 8,
+				Payload:   payload,
+				SubFrames: SuperframeSizes(payload),
+			}
+			c.Frames = append(c.Frames, frame)
+			keptBytes += chunk.size
+			timestamp += frameDuration
 			pos = chunk.next(end)
-			continue
 		}
-		payload := data[pos+8 : chunk.end]
-		frame := Frame{
-			Type:      "key",
-			Timestamp: timestamp,
-			Duration:  frameDuration,
-			Size:      int(chunk.size),
-			Chunk:     chunk.id,
-			Offset:    pos + 8,
-			Payload:   payload,
-			SubFrames: SuperframeSizes(payload),
+		if pos != end {
+			return ErrContainerTruncated
 		}
-		c.Frames = append(c.Frames, frame)
-		keptBytes += chunk.size
-		timestamp += frameDuration
-		pos = chunk.next(end)
+		return nil
 	}
-	return nil
+	return walk(start, end, 0)
 }
 
 // SuperframeSizes reports the VP9 sub-frame byte sizes when the payload ends

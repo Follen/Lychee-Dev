@@ -94,6 +94,11 @@ func (a *Archive) CommitCapture(ctx context.Context, draft CaptureDraft) (Captur
 	if draft.Provenance.Kind == "" || draft.Provenance.Locator == "" || draft.MediaType == "" || draft.Complete && draft.Truncated {
 		return CaptureRef{}, errors.New("evidence.invalid_capture")
 	}
+	ctx, release, err := a.metadata.AcquireWriteLease(ctx)
+	if err != nil {
+		return CaptureRef{}, err
+	}
+	defer release()
 	blob, err := a.store.PublishBlob(ctx, vault.BlobInput{Reader: draft.Reader, MaxBytes: draft.MaxBytes})
 	if err != nil {
 		return CaptureRef{}, err
@@ -215,6 +220,11 @@ func (a *Archive) ListCaptures(ctx context.Context, after string, limit int) ([]
 // KeepCapture records an explicit retention decision beside the immutable
 // capture manifest. Repeating the command is idempotent.
 func (a *Archive) KeepCapture(ctx context.Context, id string) (KeepResult, error) {
+	ctx, release, err := a.metadata.AcquireWriteLease(ctx)
+	if err != nil {
+		return KeepResult{}, err
+	}
+	defer release()
 	ref, err := a.InspectCapture(ctx, id)
 	if err != nil {
 		return KeepResult{}, err
@@ -255,6 +265,11 @@ func (a *Archive) KeepCapture(ctx context.Context, id string) (KeepResult, error
 // in the same metadata transaction, and deletes the blob only when no other
 // capture manifest shares it.
 func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, error) {
+	ctx, release, err := a.metadata.AcquireWriteLease(ctx)
+	if err != nil {
+		return RemoveResult{CaptureID: id}, err
+	}
+	defer release()
 	ref, err := a.InspectCapture(ctx, id)
 	if err != nil {
 		return RemoveResult{CaptureID: id}, err

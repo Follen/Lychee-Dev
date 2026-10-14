@@ -69,7 +69,7 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(
       const forwarded = args.filter((arg, index) => arg !== '--format' && !arg.startsWith('--format=') && args[index - 1] !== '--format');
       // Keep native argument validation authoritative, including output format.
       if (!['json', 'jsonl', 'text'].includes(format) || args.filter(arg => arg === '--format' || arg.startsWith('--format=')).length > 1) throw Object.assign(new Error('update.invalid_format'), { exit: 2 });
-      result = update(root, forwarded, nativePath);
+      result = await update(root, forwarded, nativePath);
       if (format === 'jsonl') {
         process.stdout.write(`${JSON.stringify({ type: 'begin', schema: result.envelope.schema })}\n`);
         if (result.envelope.ok) process.stdout.write(`${JSON.stringify({ type: 'record', result: result.envelope.result })}\n${JSON.stringify({ type: 'end', envelope: result.envelope })}\n`);

@@ -49,8 +49,8 @@ need [installation](installation.md) diagnosis, not an overlay copy.
 | restart_required / incomplete loaded inventory | Restart that selected client within scope; repeated reloads do not discover missing folders |
 | Combat, restricted editor, stale INPUT | Preserve the CON and wait for the reported condition to change |
 
-When updating a selected PID that already has a connection, fix first completes
-its recovery and disconnects before replacing files. Unresolved input or another
+When updating a selected PID that already has a connection, fix closes the original CON through the repair path before replacing files.
+This path accepts clean prior managed files for cleanup and never starts pending business. Unresolved input or another
 instance’s claim can block the shared-directory update; retain the original IDs.
 Each process sharing the installation must load and verify the new runtime
 independently. One PID’s successful reload never activates another PID.

@@ -13,6 +13,8 @@
 - 支持固定构建的本地 CASC 和远端 CDN 读取；修正兄弟目录误选、同版本号 beta 混用及缓存身份问题。
 - 优化本地索引桶选择、远端归档索引读取，以及 Source 精确查询、关系定位和文档缓存。
 - 新增 `source batch`，在同一快照与预算内复用 Git、API 和 LuaLS 环境。
+- 分离 addon 静态解析与 Source 浏览职责；修复 tracked ref、正文搜索、Context 分页、TOC 覆盖缺口、UNION 重复列和 AVI 嵌套记录问题，显式区分 Hotfix 窗口结束与完整查询覆盖。
+- DB2 JSONL 在来源复核与归档后发送 end；错误退出保留 error 帧。工作区 download.workers 约束实际下载并发。
 
 ### Live 与 addon
 
@@ -24,10 +26,14 @@
 - 修复 INPUT 指针变化导致读取提前退出，以及 UIParent 隐藏导致 INPUT 采样停止的问题。
 - 发送前等待实体修饰键释放；报告已核实但 release 回执缺失时，在原期限内重载清理并保留报告。
 - 修复旧三键/二键运行时的升级能力判断，以及未确认 bind 的原连接关闭恢复。
+- 退役旧窗口队列、光学/QR、SavedVariables 执行驱动及其命令入口；历史 OP/BTP 仅保留查看、取消和必要处置，当前执行要求 Native CON。
 
 ### 验证与维护
 
 - 七产品完成当前协议的容量轮换与释放后续跑；Retail 完成同安装双实例及读取恢复测试。
 - Forever Asia 更新至 1.60.1.70374 后，原 CLI 无需新增固定 RVA 或 hash 适配即可完成测试。
 - 以当前实现重建项目文档，移除旧实验、测试流水和临时发行副本。
+- 修复受管升级中断准备、旧槽卸载、默认更新库存、npm 更新锁及混合 PATH 启动器选择；addon ZIP 随包携带项目许可与第三方声明。
+- Source broker 关闭等待已核验的原进程退出，避免关闭回包早于 listener 和租约清理导致紧接请求失败。
+- 发行组装接入九项真实 LuaLS/Source/broker/安装包语义测试，并分别检查 registry integrity 与 provenance 元数据。
 - 校验与剩余场景集中记录在 [todo.md](todo.md)，开发和清理规则见 [开发指南](docs/development.md)。

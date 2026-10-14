@@ -26,6 +26,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     local sequence,count,cursor=0,0,1
     local consumed,operations,receipts={},{},{}
     local descriptor
+    local closing=false
     -- Passive copies only. Public maps must never alias protocol state: callers
     -- may inspect or overwrite them without changing nonce/owner decisions.
     local mailbox,mailboxReceipts,mailboxBodies
@@ -89,17 +90,18 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     local function finish(op,ok,value,metadata)
         if op.state~="running" then return nil,"slot_not_running" end
         op.resourcesReleased=not metadata or metadata.resourcesReleased~=false
-        local text,reason=encode({ok=ok,result=ok and value or nil,error=not ok and value or nil,
-            resourcesReleased=op.resourcesReleased,logs=metadata and metadata.logs or nil},524288)
+        local report={ok=ok,resourcesReleased=op.resourcesReleased,logs=metadata and metadata.logs or nil}
+        if ok then report.result=value else report.error=value end
+        local text,reason=encode(report,524288)
         if not text then ok=false;text=assert(encode({ok=false,error=type(reason)=="string" and reason or "report_encoding_failed"},16384)) end
         -- Store body and outcome before constructing its public response.
         op.payload=text;op.bytes=#text;op.checksum=wire.Checksum(text)
         op.body=assert(wire.Encode(op.envelope.nonce,adapter.runtime,op.envelope.ticket,3,3,op.sequence,text))
         if mailboxBodies then rawset(mailboxBodies,op.envelope.ticket,op.body) end
-        op.state="reported";op.ok=ok
+        op.state="reported";op.ok=ok;op.execution=nil
         observe(op)
         local record,value=publish(op.envelope,"reported",{reportBytes=op.bytes,reportChecksum=op.checksum,challenge=op.challenge})
-        if adapter.activity then adapter.activity("collecting",op.envelope.ticket) end
+        if adapter.activity and not closing then adapter.activity("collecting",op.envelope.ticket) end
         return record,value
     end
     local function reject(e,reason)
@@ -164,7 +166,8 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
             local record,value=publish(e,"accepted")
             if adapter.releaseInput then adapter.releaseInput() end
             if adapter.activity then adapter.activity("running",e.ticket) end
-            local ok,reason=pcall(adapter.execute,op.fn,op.envelope.budget,function(ok,result,metadata)return finish(op,ok,result,metadata)end)
+            local ok,execution=pcall(adapter.execute,op.fn,op.envelope.budget,function(ok,result,metadata)return finish(op,ok,result,metadata)end)
+            if ok and op.state=="running" then op.execution=execution end
             if not ok and op.state=="running" then finish(op,false,"probe_executor_error") end
             return record,value
         elseif e.action=="confirm" then
@@ -192,6 +195,18 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         return reject(e,"slot_action_invalid")
     end
     function api.NextSlot()return nextSlot()end
+    function api.Close()
+        closing=true
+        if active and active.state=="running" and active.execution then
+            active.execution:Cancel()
+            active.execution=nil
+        end
+        if pending then
+            local op=pending;pending=nil;active=op;op.state="running"
+            finish(op,false,"probe_cancelled")
+        end
+        closing=false
+    end
     function api.InputIdentity()
         local a=actor();if not a then return nil end
         return {runtime=adapter.runtime,owner=owner or "",fence=fence or 0,nextSlot=nextSlot(),

@@ -24,12 +24,17 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	if c.manifest.FixtureRoot != "" {
 		return c.fixtureBodyCandidates(ctx, text, topic, limit)
 	}
+	if err := c.loadPaths(ctx); err != nil {
+		return nil, false, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	args := []string{"grep", "-n", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--"}
 	// Apply the same topic restriction before Git's bounded output is filled.
 	// icase matches bodyTopicPath for uppercase source extensions as well.
 	switch topic {
+	case "":
+		args = append(args, ":(glob,icase)**/*.lua", ":(glob,icase)**/*.xml", ":(glob,icase)**/*.toc")
 	case "lua", "xml", "toc":
 		args = append(args, ":(glob,icase)**/*."+topic)
 	case "api":
@@ -61,6 +66,9 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 		}
 		name, rest, ok := strings.Cut(remainder, ":")
 		if !ok || !sourcePath(name) || !bodyTopicPath(topic, name) {
+			continue
+		}
+		if _, indexed := c.documents[name]; !indexed {
 			continue
 		}
 		number, snippet, ok := strings.Cut(rest, ":")
@@ -112,9 +120,9 @@ func bodyTopicPath(topic, name string) bool {
 	lower := strings.ToLower(name)
 	switch topic {
 	case "":
-		return true
+		return strings.HasSuffix(lower, ".lua") || strings.HasSuffix(lower, ".xml") || strings.HasSuffix(lower, ".toc")
 	case "api":
-		return strings.Contains(lower, "/blizzard_apidocumentationgenerated/")
+		return strings.Contains(lower, "/blizzard_apidocumentationgenerated/") && bodyTopicPath("", name)
 	case "lua", "xml", "toc":
 		return strings.HasSuffix(lower, "."+topic)
 	default:

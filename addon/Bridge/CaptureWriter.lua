@@ -139,122 +139,13 @@ local function digestBytes(text)
     return string.format("%04x%04x", high, low)
 end
 
--- Every signal is drawn into a QR symbol, so its size decides whether the host
--- can sample the module grid at all. A retained session already proved the actor
--- and the build, so repeating them in each receipt only spends modules: the host
--- fills them back from its baseline and still refuses a value that contradicts
--- it. Identity, reset and cleared markers are the exception, because they
--- establish or re-establish the actor.
---
--- The session nonce is different and must NOT be dropped blindly: the ready and
--- loaded receipts are what establish it, so the host has nothing to fill from
--- until one of them has been read. Only the receipts that echo an
--- already-established session may omit it.
-local WIRE_FIELDS = {
-    schema = true, kind = true, sessionNonce = true, requestId = true,
-    release = true, product = true, build = true,
-    reloadNonce = true, cleanupNonce = true, probeNonce = true,
-    actorState = true, inputReason = true, sequence = true, runtimeEpoch = true,
-    inputReady = true, codeBytes = true, codeAdler32 = true,
-    reportBytes = true, reportAdler32 = true,
-    receiverNonce = true, attemptId = true, bodyBytes = true,
-    bodyAdler32 = true, commitNonce = true, accepted = true, errorCode = true,
-    wakeBinding = true, submitBinding = true, closeBinding = true,
-    priorSessionSequence = true, priorSessionEpoch = true, receiverProtocol = true,
-    reportScope = true,
-    workState = true, codeSHA256 = true, receipt = true, resourcesReleased = true,
-}
-local WIRE_MARKER_FIELDS = { character = true, realm = true, guid = true }
--- A standalone ready can establish a read-only live bind without a preceding
--- identity probe. Keep its actor on the wire; paired readiness is compacted
--- only after the host already owns a request-scoped session.
-local WIRE_MARKERS = { identity = true, reset = true, cleared = true, ready = true,
-    receiver_ready = true, receiver_staged = true, receiver_commit_ready = true,
-    receiver_accepted = true, receiver_rejected = true,
-    receiver_cancelled = true, receiver_timeout = true,
-    report_error = true, checkpoint = true }
--- Kinds whose session nonce is redundant because the session provably exists on
--- the host already: they answer a request the host itself created for that
--- nonce, and the host compares the nonce it filled in.
-local WIRE_ECHOES_SESSION = { reported = true, acknowledged = true, cancelled = true }
-
--- wireDocument projects a signal onto its transmitted form. Fields outside the
--- profile are dropped rather than rejected: the projection is what the host
--- compares against the archived receipt, so an unlisted field simply stops
--- matching and never lets a caller believe a value was carried when it was not.
-local function wireDocument(value)
-    rejectRestricted(value)
-    if type(value) ~= "table" or getmetatable(value) ~= nil then
-        return value
-    end
-    rejectRestricted(value.schema)
-    if value.schema ~= "lycheedev.signal.v1" then return value end
-    rejectRestricted(value.kind)
-    local marker = WIRE_MARKERS[value.kind] == true
-    local echoes = WIRE_ECHOES_SESSION[value.kind] == true
-    local filtered = {}
-    for key, child in pairs(value) do
-        rejectRestricted(key)
-        local carried = WIRE_FIELDS[key] or (marker and WIRE_MARKER_FIELDS[key])
-        if carried and not (key == "sessionNonce" and echoes) then
-            filtered[key] = child
-        end
-    end
-    return filtered
-end
-
 ns.CaptureWriter = {
     Encode = function(value, limit)
-        if issecretvalue and issecretvalue(limit) then return nil, "report_invalid_budget" end
-        limit = limit or MAX_REPORT_BYTES
-        if type(limit) ~= "number" or limit < 1 or limit > MAX_REPORT_BYTES or limit % 1 ~= 0 then
-            return nil, "report_invalid_budget"
-        end
-        local ok, result = pcall(encodeDocument, value, limit)
-        if not ok then return nil, result end
-        -- Every encoded value is the exact UTF-8 JSON text that is both drawn
-        -- into the QR symbol and stored in SavedVariables. Transport
-        -- compression is not applied here: a raw DEFLATE stream is not valid
-        -- UTF-8, and SavedVariables must stay valid UTF-8 for the host to read
-        -- any of the toolkit state at all.
-        return result
-    end,
-    -- EncodeSignal is the only entry point that produces a machine-readable
-    -- receipt. Encode stays byte-exact for whatever a caller passes. A rejected
-    -- projection reports the exact offending field so a caller can tell an
-    -- unrecognized field from a malformed value.
-    EncodeSignal = function(value, limit)
-        local ok, projected = pcall(wireDocument, value)
-        if not ok then
-            if type(projected) == "string" and #projected > 0 and #projected <= 128 then
-                return nil, projected
-            end
-            return nil, "report_invalid_document"
-        end
-        local encoded, failure = ns.CaptureWriter.Encode(projected, limit)
-        return encoded, failure, encoded and projected or nil
-    end,
-    -- Optical-only envelope: the stored receipt stays byte-exact. Readiness is
-    -- a fresh, independently sequenced observation of the same session. The
-    -- host expands this tuple into a second signal, never into report content.
-    EncodeReceiptPair = function(receipt, ready)
-        local ok, suffix = pcall(function()
-            rejectRestricted(receipt); rejectRestricted(ready)
-            if type(receipt) ~= "string" or #receipt > 2048 or not isUTF8(receipt)
-                or type(ready) ~= "table" or getmetatable(ready) then error("receipt_invalid_pair", 0) end
-            -- Traverse before branching, including any secret-valued fields.
-            encodeDocument(ready, 4096)
-            if ready.kind ~= "ready" or ready.inputReady ~= true or ready.requestId ~= ""
-                or type(ready.sessionNonce) ~= "string" or #ready.sessionNonce ~= 32
-                or not string.match(ready.sessionNonce, "^[0-9a-f]+$")
-                or type(ready.sequence) ~= "number" or type(ready.runtimeEpoch) ~= "number" then
-                error("receipt_invalid_pair", 0)
-            end
-            return encodeDocument({ready.sessionNonce, ready.sequence, ready.runtimeEpoch}, 256)
-        end)
-        if not ok then return nil, "receipt_invalid_pair" end
-        local result = '{"schema":"lycheedev.receipt.v1","receipt":' .. receipt .. ',"ready":' .. suffix .. '}'
-        if #result > 4096 then return nil, "receipt_invalid_pair" end
+        if issecretvalue and issecretvalue(limit) then return nil,"report_invalid_budget" end
+        limit=limit or MAX_REPORT_BYTES
+        if type(limit)~="number" or limit<1 or limit>MAX_REPORT_BYTES or limit%1~=0 then return nil,"report_invalid_budget" end
+        local ok,result=pcall(encodeDocument,value,limit)
+        if not ok then return nil,result end
         return result
     end,
     DigestBytes = digestBytes,

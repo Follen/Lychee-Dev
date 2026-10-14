@@ -63,6 +63,14 @@ type InputAttempt struct {
 // perform is the sole journal boundary for connected physical input. An intent
 // without an outcome is uncertain after restart; it is never inferred unsent.
 func (d *Driver) perform(ctx context.Context, exchange, runtime string, action InputAction) (InputOutcome, error) {
+	previous := d.State.Input
+	if previous != nil && previous.Exchange == exchange && previous.Runtime == runtime && previous.Kind == action.Kind && previous.Outcome != nil && previous.Outcome.Disposition == "not_sent" && previous.Outcome.MessagesQueued == 0 {
+		// Repeated native key blockers can outlive one log segment. Preserve the
+		// complete known-zero history before recording another retry intent.
+		if err := d.checkpointLog(ctx); err != nil {
+			return InputOutcome{}, err
+		}
+	}
 	id, err := token()
 	if err != nil {
 		return InputOutcome{}, err

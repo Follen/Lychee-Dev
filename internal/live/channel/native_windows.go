@@ -19,22 +19,24 @@ import (
 )
 
 type Native struct {
-	Target                               desktop.WindowIdentity
-	Parent, Version, Consumer, CacheFile string
-	Guard                                func(context.Context) error
-	Process                              *memory.Process
-	Mailbox                              *memory.MailboxReader
-	Hints                                *memory.Hints
-	Publication                          *vault.Lease
-	Lookups                              []memory.LookupResult
-	TraceDir                             string
-	traceSequence                        int
-	traces                               []lookupTrace
-	hintsDirty                           bool
-	inputWait                            inputSampleWait
-	inputHintRuntime                     string
-	inputHintMillis                      int64
-	inputAttemptProbe                    receiptAttemptProbe
+	Target                    desktop.WindowIdentity
+	Parent, Version, Consumer string
+	Guard                     func(context.Context) error
+	Process                   *memory.Process
+	Mailbox                   mailboxLookup
+	Publication               *vault.Lease
+	Lookups                   []memory.LookupResult
+	TraceDir                  string
+	traceSequence             int
+	traces                    []lookupTrace
+	tracesOmitted             int
+	inputWait                 inputSampleWait
+	inputAttemptProbe         receiptAttemptProbe
+}
+
+type mailboxLookup interface {
+	Lookup(context.Context, memory.Selector) (memory.LookupResult, error)
+	Binding() memory.LuaRootBinding
 }
 
 const observationLimit = 256
@@ -58,12 +60,12 @@ func (n *Native) Observe(ctx context.Context, q ObservationQuery) (Observation, 
 	return n.inputAttemptProbe.observe(ctx, n, q, observation, err, uptimeMillis())
 }
 
-func OpenNative(ctx context.Context, target desktop.WindowIdentity, parent, version, cacheFile string, cache bool) (*Native, error) {
+func OpenNative(ctx context.Context, target desktop.WindowIdentity, parent, version, _ string, _ bool) (*Native, error) {
 	process, err := memory.Open(target.ProcessID, target.ProcessStartedAt, target.Executable)
 	if err != nil {
 		return nil, err
 	}
-	n := &Native{Target: target, Parent: parent, Version: version, Process: process, CacheFile: cacheFile, Consumer: fmt.Sprintf("%d/%d", target.ProcessID, target.ProcessStartedAt)}
+	n := &Native{Target: target, Parent: parent, Version: version, Process: process, Consumer: fmt.Sprintf("%d/%d", target.ProcessID, target.ProcessStartedAt)}
 	module, err := process.MainModule(ctx)
 	if err != nil {
 		_ = process.Close()
@@ -98,46 +100,26 @@ func (n *Native) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), diagnosticFlushBudget)
 	defer cancel()
 	err = errors.Join(err, n.flushTraces(ctx, writeProjectJSON))
-	if n.Hints != nil && n.hintsDirty {
-		_ = n.Hints.Save(ctx, n.CacheFile) // Disposable cache, one write per command.
-		n.hintsDirty = false
-	}
+
 	return err
 }
-func (n *Native) Find(ctx context.Context, s memory.Selector, first bool) (memory.LookupResult, error) {
-	return n.find(ctx, n.Process, s, first)
-}
-
-func (n *Native) find(ctx context.Context, source memory.Source, s memory.Selector, first bool) (memory.LookupResult, error) {
-	return n.findPath(ctx, source, s, first, false)
-}
-
-func (n *Native) findPath(ctx context.Context, source memory.Source, s memory.Selector, first, nearby bool) (memory.LookupResult, error) {
-	if n.TraceDir != "" && n.traceSequence >= observationLimit {
-		return memory.LookupResult{}, errors.New("live.channel_observation_budget")
-	}
-	var found memory.LookupResult
-	var err error
-	if n.Mailbox != nil {
-		found, err = n.Mailbox.Lookup(ctx, s)
-		if errors.Is(err, memory.ErrMailboxUnavailable) {
-			err = fmt.Errorf("live.channel_mailbox_unavailable: %w", err)
-		}
-	} else if n.Process != nil {
+func (n *Native) Find(ctx context.Context, s memory.Selector, _ bool) (memory.LookupResult, error) {
+	if n.Mailbox == nil {
 		return memory.LookupResult{}, errors.New("live.channel_mailbox_required")
-	} else if nearby {
-		found, err = memory.FindNearby(ctx, source, s, n.Hints)
-	} else {
-		found, err = memory.Find(ctx, source, s, n.Hints, first)
 	}
-	n.hintsDirty = n.Hints != nil
+	found, err := n.Mailbox.Lookup(ctx, s)
+	if errors.Is(err, memory.ErrMailboxUnavailable) {
+		err = fmt.Errorf("live.channel_mailbox_unavailable: %w", err)
+	}
 	// Coverage/latency persist in host evidence without duplicating large bodies.
 	evidence := found
 	evidence.Records = nil
 	if len(n.Lookups) < observationLimit {
 		n.Lookups = append(n.Lookups, evidence)
 	}
-	if n.TraceDir != "" {
+	if n.TraceDir != "" && n.traceSequence >= observationLimit {
+		n.tracesOmitted++
+	} else if n.TraceDir != "" {
 		n.traceSequence++
 		trace := lookupTrace{Nonce: hex.EncodeToString(s.Nonce[:]), Runtime: hex.EncodeToString(s.Runtime[:]), Ticket: hex.EncodeToString(s.Ticket[:]), Kind: s.Kind, Matches: len(found.Records), Lookup: evidence, sequence: n.traceSequence}
 		if err != nil {
@@ -176,6 +158,17 @@ func (n *Native) flushTraces(ctx context.Context, write func(context.Context, st
 			return fmt.Errorf("%w: %s: %w", ErrTraceFlush, file, err)
 		}
 		completed++
+	}
+	if n.tracesOmitted > 0 {
+		summary := struct {
+			Observations int  `json:"observations"`
+			Retained     int  `json:"retained"`
+			Omitted      int  `json:"omitted"`
+			Truncated    bool `json:"truncated"`
+		}{n.traceSequence + n.tracesOmitted, n.traceSequence, n.tracesOmitted, true}
+		if err := write(ctx, filepath.Join(n.TraceDir, "summary.json"), summary); err != nil {
+			return errors.Join(ErrTraceFlush, err)
+		}
 	}
 	return nil
 }

@@ -103,6 +103,47 @@ func TestLoadedPathRejectsSuffixCollisionAndTraversal(t *testing.T) {
 	}
 }
 
+func TestContextByteContinuationResetsOffsetForNextSite(t *testing.T) {
+	for _, otherFile := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same", true: "other"}[otherFile], func(t *testing.T) {
+			files := map[string]string{"Main.lua": "function Foo()\n  local value = 123456789\n  return value\nend\n"}
+			if otherFile {
+				files["Other.lua"] = "-- before\nFoo()\n-- after\n"
+			} else {
+				files["Main.lua"] += "\nFoo()\n-- after\n"
+			}
+			b, pin := indexedSearchFixture(t, files)
+			query := ContextQuery{Symbol: "Foo", Depth: 1, Limit: 1, MaxBytes: 23, MaxLines: 100}
+			texts := map[string]string{}
+			for page := 0; page < 30; page++ {
+				got, err := b.Context(context.Background(), "PIN-TEST", pin, query, ResearchOptions{})
+				if err != nil {
+					t.Fatalf("page %d: %v", page, err)
+				}
+				for _, snippet := range got.Snippets {
+					texts[snippet.Path+"/"+snippet.Basis] += snippet.Text
+				}
+				query.Cursor = got.NextCursor
+				if query.Cursor == "" {
+					break
+				}
+			}
+			if query.Cursor != "" {
+				t.Fatal("pagination did not finish")
+			}
+			full, err := b.Context(context.Background(), "PIN-TEST", pin, ContextQuery{Symbol: "Foo", Depth: 1, Limit: 20, MaxBytes: 4096, MaxLines: 100}, ResearchOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, snippet := range full.Snippets {
+				if strings.ReplaceAll(texts[snippet.Path+"/"+snippet.Basis], "\n", "") != strings.ReplaceAll(snippet.Text, "\n", "") {
+					t.Fatalf("lost snippet %s/%s: got %q want %q", snippet.Path, snippet.Basis, texts[snippet.Path+"/"+snippet.Basis], snippet.Text)
+				}
+			}
+		})
+	}
+}
+
 func TestContextFlowUsesVersionedGeneratedMetadata(t *testing.T) {
 	ctx := context.Background()
 	fixture := t.TempDir()

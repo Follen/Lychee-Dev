@@ -14,5 +14,6 @@ func ListenBrokerPipe(string, string) (net.Listener, error)    { return nil, Err
 func DialBrokerPipe(context.Context, string) (net.Conn, error) { return nil, ErrUnavailable }
 func VerifyBrokerPeer(net.Conn, uint32, uint64, string) error  { return ErrUnavailable }
 func BrokerProcessIdentity(uint32) (uint64, string, error)     { return 0, "", ErrUnavailable }
+func WaitBrokerExit(context.Context, uint32, uint64) error     { return ErrUnavailable }
 func StartBroker(string, []string) error                       { return ErrUnavailable }
 func OwnBrokerJob() (func(), error)                            { return nil, ErrUnavailable }

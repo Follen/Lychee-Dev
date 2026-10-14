@@ -70,3 +70,37 @@ func TestProbeRegistryRejectsInvalidAndCorruptSelectors(t *testing.T) {
 		t.Fatalf("missing selector = %v", err)
 	}
 }
+
+func TestProbeListLimitCountsActiveNames(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if _, err := vault.Initialize(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b", "z"} {
+		if _, err := PutProbe(ctx, root, name, []byte("return true")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := RemoveProbe(ctx, root, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveProbe(ctx, root, "b"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := ListProbes(ctx, root, false, 1)
+	if err != nil || len(list.Items) != 1 || list.Items[0].Name != "z" {
+		t.Fatalf("active page: %+v %v", list, err)
+	}
+	list, err = ListProbes(ctx, root, true, 1)
+	if err != nil || len(list.Items) != 1 || list.Items[0].Name != "a" || list.Items[0].Active {
+		t.Fatalf("tombstone page: %+v %v", list, err)
+	}
+	if _, err := RemoveProbe(ctx, root, "z"); err != nil {
+		t.Fatal(err)
+	}
+	list, err = ListProbes(ctx, root, false, 1)
+	if err != nil || len(list.Items) != 0 {
+		t.Fatalf("all removed: %+v %v", list, err)
+	}
+}

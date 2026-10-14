@@ -3,19 +3,14 @@
 package desktop
 
 import (
-	"context"
 	"fmt"
 	"image"
-	"os"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf16"
 	"unsafe"
 
-	"github.com/makiuchi-d/gozxing"
-	"github.com/makiuchi-d/gozxing/qrcode"
 	"golang.org/x/sys/windows"
 )
 
@@ -180,85 +175,4 @@ func openFixtureWindow(t *testing.T, picture image.Image) *fixtureWindow {
 		}
 	})
 	return f
-}
-
-func TestBackgroundInputOwnWindow(t *testing.T) {
-	f := openFixtureWindow(t, image.NewNRGBA(image.Rect(0, 0, 120, 80)))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	const command = "/dev 中文 😀"
-	receipt, err := QueueCommand(ctx, f.identity, command)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !receipt.SubmissionComplete {
-		t.Fatal(receipt)
-	}
-	var chars []uint16
-	downs, ups := 0, 0
-	for i := 0; i < receipt.MessagesQueued; i++ {
-		select {
-		case packet := <-f.packets:
-			switch packet.message {
-			case 0x100:
-				downs++
-				if packet.value != 13 || packet.bits&0xffff != 1 || packet.bits&(1<<31) != 0 {
-					t.Fatalf("keydown: %+v", packet)
-				}
-			case 0x101:
-				ups++
-				if packet.bits&(1<<30|1<<31) != (1<<30 | 1<<31) {
-					t.Fatalf("keyup: %+v", packet)
-				}
-			case 0x102:
-				if packet.value != 13 {
-					chars = append(chars, uint16(packet.value))
-				} else {
-					i--
-				}
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	}
-	if string(utf16.Decode(chars)) != command || downs != 2 || ups != 2 {
-		t.Fatalf("decoded=%q down=%d up=%d", string(utf16.Decode(chars)), downs, ups)
-	}
-}
-
-func TestWGCQRCodeOwnWindow(t *testing.T) {
-	if os.Getenv("LYCHEEDEV_TEST_DESKTOP") != "1" {
-		t.Skip("requires an interactive desktop for native WGC")
-	}
-	const payload = `{"schema":"fixture","text":"WGC 中文"}`
-	bitmap, err := qrcode.NewQRCodeWriter().Encode(payload, gozxing.BarcodeFormat_QR_CODE, 600, 600, map[gozxing.EncodeHintType]interface{}{gozxing.EncodeHintType_CHARACTER_SET: "UTF-8"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := openFixtureWindow(t, bitmap)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	stream, err := CaptureFrames(ctx, f.identity, image.Rect(0, 0, 600, 600))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stream.Close()
-	for {
-		frame, err := stream.Next(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		texts, err := DecodeSymbols(frame)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, text := range texts {
-			// DecodeSymbols returns the transmitted bytes re-spelled as
-			// ISO-8859-1 text; BytesFromSymbolText is the exact payload.
-			if string(BytesFromSymbolText(text)) == payload {
-				t.Log("native WGC ROI decoded exact UTF-8 fixture bytes")
-				return
-			}
-		}
-	}
 }

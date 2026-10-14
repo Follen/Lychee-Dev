@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"os"
@@ -16,25 +15,12 @@ import (
 )
 
 func TestAddonReleaseManifestContracts(t *testing.T) {
-	for _, variant := range []string{"valid", "valid-queue", "bad-queue", "nonempty-queue", "valid-xml", "xml-missing", "xml-cycle", "xml-malformed", "lua-invalid", "wrong-interface", "incomplete-interface", "wrong-version", "legacy-storage", "duplicate-header", "missing-load", "escape-load", "duplicate-load", "empty-load"} {
+	for _, variant := range []string{"valid", "valid-xml", "xml-missing", "xml-cycle", "xml-malformed", "lua-invalid", "wrong-interface", "incomplete-interface", "wrong-version", "legacy-storage", "duplicate-header", "missing-load", "escape-load", "duplicate-load", "empty-load"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
 			release := delivery.Release{Schema: "lycheedev.release.v1", Version: "2.0.0-dev", Commit: strings.Repeat("a", 40), Binaries: map[string]delivery.Resource{"windows-amd64": {Path: "native/windows-amd64/lycheedev.exe", Bytes: 1, SHA256: strings.Repeat("a", 64)}}}
 			files := map[string]string{"skill/SKILL.md": "skill fixture", "addon/Core/Start.lua": "local name, ns = ...\n", "addon/Core/ClientGate.lua": "local name, ns = ...\n"}
-			if strings.HasSuffix(variant, "-queue") {
-				var definitions []bridge.ProbeDefinition
-				if variant == "nonempty-queue" {
-					definitions = []bridge.ProbeDefinition{{RequestID: "OP-local", Release: "2.0.0-dev", SessionNonce: strings.Repeat("a", 32), ReloadNonce: strings.Repeat("b", 32), Character: "Paladin", Realm: "Realm", GUID: "Player-1-123", Product: "retail", Build: "12.1.0.12345", Code: "return 1"}}
-				}
-				source, err := bridge.EncodeProbeQueue(definitions)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if variant == "bad-queue" {
-					source = append(source, []byte("print('not literal')")...)
-				}
-				files["addon/Bridge/Definitions.lua"] = string(source)
-			}
+
 			recursive := variant == "valid-xml" || strings.HasPrefix(variant, "xml-") || variant == "lua-invalid"
 			if recursive {
 				files["addon/UI/Root.xml"] = `<Ui><Include file="Nested.xml" /></Ui>`

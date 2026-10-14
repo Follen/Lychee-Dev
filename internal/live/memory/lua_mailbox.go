@@ -442,9 +442,18 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	if value.tag != 4 {
 		return out, mailboxError("record_type")
 	}
+	// The named field may move while its previous immutable string is reclaimed.
+	// A definite path change supersedes a failure to read that retired object;
+	// a stable path preserves the original layout/read failure.
+	recordFailure := func(cause error) error {
+		if verifyErr := a.verify(ctx); errors.Is(verifyErr, ErrMailboxPathChanged) {
+			return verifyErr
+		}
+		return errors.Join(cause, ctx.Err())
+	}
 	h, readErr := a.read(ctx, value.pointer, 32, false)
 	if readErr != nil {
-		return out, readErr
+		return out, recordFailure(readErr)
 	}
 	length := binary.LittleEndian.Uint64(h[24:32])
 	maximum := uint64(16<<10) + bridge.MemoryHeaderBytes + bridge.MemoryTrailerBytes
@@ -452,7 +461,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		maximum = uint64(selector.BodyLength) + bridge.MemoryHeaderBytes + bridge.MemoryTrailerBytes
 	}
 	if h[16] != 4 || length < bridge.MemoryHeaderBytes+bridge.MemoryTrailerBytes || length > maximum || value.pointer > ^uint64(0)-32-length {
-		return out, mailboxError("record_string_length")
+		return out, recordFailure(mailboxError("record_string_length"))
 	}
 	a.guard(value.pointer+16, h[16:17], false)
 	a.guard(value.pointer+24, h[24:32], false)
@@ -469,10 +478,10 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 			err = a.verify(ctx)
 			return out, err
 		}
-		return out, errors.Join(mailboxError("record_invalid: "+readErr.Error()), a.readError)
+		return out, recordFailure(errors.Join(mailboxError("record_invalid: "+readErr.Error()), a.readError))
 	}
 	if uint64(len(record.Payload))+bridge.MemoryHeaderBytes+bridge.MemoryTrailerBytes != length || record.Header.Runtime != currentRuntime {
-		return out, mailboxError("record_identity")
+		return out, recordFailure(mailboxError("record_identity"))
 	}
 	if err = a.verify(ctx); err != nil {
 		return out, err
@@ -490,9 +499,6 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 type luaRecordSource struct{ a *luaAccess }
 
 func (s *luaRecordSource) Verify(ctx context.Context) error { return s.a.reader.source.Verify(ctx) }
-func (*luaRecordSource) Regions(context.Context) ([]Region, error) {
-	return nil, mailboxError("region_enumeration_forbidden")
-}
 func (s *luaRecordSource) Read(ctx context.Context, address uint64, b []byte) (int, error) {
 	v, err := s.a.read(ctx, address, len(b), false)
 	if err != nil {

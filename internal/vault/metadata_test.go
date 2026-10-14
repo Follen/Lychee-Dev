@@ -103,3 +103,34 @@ func TestMetadataFutureSchemaNotDowngraded(t *testing.T) {
 		t.Fatalf("future schema: %v", err)
 	}
 }
+
+func TestDeletedGenerationCannotAuthorizeReplacement(t *testing.T) {
+	ctx := context.Background()
+	s, err := Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	change := Mutation{Key: "target/one", Value: json.RawMessage(`true`)}
+	if err := m.CommitDocuments(ctx, change); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := m.ReadDocument(ctx, change.Key)
+	if err := m.DeleteDocuments(ctx, Deletion{Key: old.Key, ExpectedGeneration: old.Generation}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CommitDocuments(ctx, change); err != nil {
+		t.Fatal(err)
+	}
+	change.ExpectedGeneration = old.Generation
+	if err := m.CommitDocuments(ctx, change); !errors.Is(err, ErrGeneration) {
+		t.Fatalf("stale replace: %v", err)
+	}
+	if err := m.DeleteDocuments(ctx, Deletion{Key: old.Key, ExpectedGeneration: old.Generation}); !errors.Is(err, ErrGeneration) {
+		t.Fatalf("stale delete: %v", err)
+	}
+}

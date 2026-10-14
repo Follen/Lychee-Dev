@@ -10,8 +10,7 @@ lycheedev live probe put --name <name> --file <probe.lua> --format json
 ```
 
 Names are mutable selectors; retain the returned immutable PRB revision. Use it
-with native execute. Old queue-oriented atomic commands belong to legacy records
-and are not the transport for CON connections.
+with native execute. The CLI owns slot publication, confirmation and cleanup.
 
 ```text
 lycheedev live execute --project <project-directory> --session <CON-id> --probe <PRB-revision> --request <stable-key> --budget-seconds 35 --policy observation --wait-seconds 120 --format json

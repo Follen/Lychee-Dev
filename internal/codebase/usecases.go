@@ -133,7 +133,8 @@ func ValidateSourceTOC(ctx context.Context, root, snapshot string, input AddonIn
 	if err != nil {
 		return result, err
 	}
-	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Valid, false, evidence.Provenance{Kind: "addon-validate", Locator: input.Root + "/" + input.Manifest, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
+	complete := result.Result.Valid && result.Result.Coverage.Unresolved == 0 && result.Result.SourceCoverage.Complete
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, complete, false, evidence.Provenance{Kind: "addon-validate", Locator: input.Root + "/" + input.Manifest, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
 	return result, err
 }
 
@@ -193,7 +194,11 @@ func ValidateSourceMatrix(ctx context.Context, root, matrixFile string, resolve 
 		targets = append(targets, value)
 	}
 	result.Result = MergeMatrix(filepath.Clean(addonRoot), targets)
-	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Valid, false, evidence.Provenance{Kind: "addon-matrix-validate", Locator: matrixFile})
+	complete := result.Result.Valid
+	for _, target := range targets {
+		complete = complete && target.Coverage.Unresolved == 0 && target.SourceCoverage.Complete
+	}
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, complete, false, evidence.Provenance{Kind: "addon-matrix-validate", Locator: matrixFile})
 	return result, err
 }
 

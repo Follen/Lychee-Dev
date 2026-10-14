@@ -254,7 +254,7 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 
 func allowsTransition(kind, from, to, status string) bool {
 	if from == "abandoning" || to == "abandoning" || to == "abandoned" {
-		return (kind == "probe" || kind == "faults") && ((from == "load_requested" || from == "loaded" || from == "dispatch_requested" || from == "reported" || from == "flush_requested" || from == "persisted" || from == "verified" || from == "ack_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned") ||
+		return (kind == "probe" || kind == "faults") && ((from == "prepared" || from == "load_requested" || from == "loaded" || from == "dispatch_requested" || from == "reported" || from == "flush_requested" || from == "persisted" || from == "verified" || from == "ack_requested" || from == "acknowledged") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned") ||
 			kind == "reload" && ((from == "prepared" || from == "reload_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
 	}
 	if to == "cleaned" {

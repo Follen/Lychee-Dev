@@ -73,6 +73,11 @@ func (b *Browser) PrepareSource(ctx context.Context, key, product, reference str
 	if _, err := gitBytes(ctx, directory, 1024, "update-ref", "refs/pins/"+commit, commit); err != nil {
 		return zero, err
 	}
+	if reference == "refs/heads/"+branch {
+		if _, err := gitBytes(ctx, directory, 1024, "update-ref", reference, commit); err != nil {
+			return zero, err
+		}
+	}
 	if created {
 		if err := os.Rename(directory, destination); err != nil {
 			return zero, err
