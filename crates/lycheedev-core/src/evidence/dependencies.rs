@@ -7,10 +7,104 @@ use crate::{
     metadata::{Document, TransactionReader},
 };
 use serde::{
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor},
 };
 use std::{borrow::Cow, fmt, path::Path};
+
+/// A signed Go JSON integer decoded from its original number token.
+/// RawValue preserves -0 and rejects floating/exponent spellings rather than
+/// rounding them. It also prevents JSON objects masquerading as serde's
+/// internal arbitrary-precision number representation from becoming numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GoSignedInteger(pub i64);
+impl<'de> Deserialize<'de> for GoSignedInteger {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+        let token = raw.get();
+        let digits = token.strip_prefix('-').unwrap_or(token);
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(serde::de::Error::custom(
+                "expected a signed Go integer token",
+            ));
+        }
+        token
+            .parse::<i64>()
+            .map(Self)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Permissive embedded capture decoding for fixed-Go historical payloads.
+/// This is a wire representation, not authenticated evidence. Reading a
+/// checkpoint still requires validating its outer manifest and dependencies.
+/// Repeated objects merge in input order through `deserialize_in_place`.
+#[derive(Default)]
+pub struct GoCaptureDecode(EmbeddedCapture);
+impl GoCaptureDecode {
+    pub fn id(&self) -> &str {
+        &self.0.id
+    }
+    pub fn data_build(&self) -> &str {
+        &self.0.provenance.data_build
+    }
+}
+impl<'de> Deserialize<'de> for GoCaptureDecode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let mut value = Self::default();
+        Self::deserialize_in_place(deserializer, &mut value)?;
+        Ok(value)
+    }
+    fn deserialize_in_place<D: Deserializer<'de>>(
+        deserializer: D,
+        place: &mut Self,
+    ) -> std::result::Result<(), D::Error> {
+        ObjectSeed(&mut place.0).deserialize(deserializer)
+    }
+}
+impl Serialize for GoCaptureDecode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire<'a> {
+            schema: &'a str,
+            id: &'a str,
+            blob: &'a EmbeddedBlob,
+            media_type: &'a str,
+            provenance: &'a EmbeddedProvenance,
+            complete: bool,
+            truncated: bool,
+            captured_at: &'a str,
+            #[serde(skip_serializing_if = "<[String]>::is_empty")]
+            dependencies: &'a [String],
+        }
+        Wire {
+            schema: &self.0.schema,
+            id: &self.0.id,
+            blob: &self.0.blob,
+            media_type: &self.0.media_type,
+            provenance: &self.0.provenance,
+            complete: self.0.complete,
+            truncated: self.0.truncated,
+            captured_at: self.0.captured_at.canonical.as_deref().ok_or_else(|| {
+                <S::Error as serde::ser::Error>::custom(
+                    "capture timestamp offset cannot be marshaled by Go",
+                )
+            })?,
+            dependencies: self.0.dependencies.values(),
+        }
+        .serialize(serializer)
+    }
+}
+/// Normalize only JSON string tokens with Go's historical reader rules.
+/// Callers must bound input bytes and account for at most 3x scratch allocation.
+/// Original bytes and capture identities must never be replaced by this view.
+pub fn normalize_go_json_strings<'a>(
+    raw: &'a [u8],
+    control: &OperationControl,
+) -> Result<Cow<'a, [u8]>> {
+    normalize_go_strings(raw, control)
+}
 
 pub(super) fn deserialize_dependencies<'de, D: Deserializer<'de>>(
     deserializer: D,
@@ -466,7 +560,7 @@ impl GoObject for EmbeddedCapture {
         }
     }
 }
-#[derive(Default)]
+#[derive(Default, Serialize)]
 struct EmbeddedBlob {
     sha256: String,
     bytes: i64,
@@ -479,21 +573,32 @@ impl GoObject for EmbeddedBlob {
     ) -> std::result::Result<(), A::Error> {
         match key {
             "sha256" => scalar(map, &mut self.sha256),
-            "bytes" => scalar(map, &mut self.bytes),
+            "bytes" => {
+                if let Some(next) = map.next_value::<Option<GoSignedInteger>>()? {
+                    self.bytes = next.0;
+                }
+                Ok(())
+            }
             _ => ignore(map),
         }
     }
 }
-#[derive(Default)]
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EmbeddedProvenance {
     kind: String,
     locator: String,
     snapshot: String,
     operation_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     source_commit: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     base_snapshot: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     base_source_commit: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     data_build: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     session: String,
 }
 impl EmbeddedProvenance {

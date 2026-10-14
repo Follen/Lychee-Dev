@@ -25,6 +25,7 @@ pub use budgeted::{
     CaptureAccounting, CaptureHeader, commit_capture_budgeted,
     commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
 };
+pub use dependencies::{GoCaptureDecode, GoSignedInteger, normalize_go_json_strings};
 pub fn blob_path(home: &Path, digest: &str) -> Result<PathBuf> {
     if !valid_digest(digest, 64) {
         return Err(ToolkitError::new(

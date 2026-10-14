@@ -516,6 +516,14 @@ quota、idle、lifetime分别使用真实IPC连续attempted操作和60/600秒实
 
 独立审核修复XML自洽漏检、context原文坐标不足、嵌套fatal传播与receipt伪complete问题；从原archive/生产typed序列化/实际scope规则复核，最终8文件/14依赖无漂移，83/83 Node独立通过。receipt SHA256 372773d30187b63cc087196be5a5ce68293f0e6825a7202872d7e0de9496d3ef。Windows/PowerShell/完整native产品运行仍 NOT_RUN，首次由此CI接线执行；这不是Go性能对照或四阶段审计通过。identity变化用隔离本地README后继commit，不能称第二个真实上游版本已验收。
 
+### Hotfix scan 检查点与恢复
+
+新增固定Go scan路由：每次至多1000页、累计10000页，逐页复用named table读取、同原control/deadline与依赖capture；检查点成功持久化后才替换恢复点，错误/取消保留最后可用结果，完成的历史重放仍先核source/pages存在。历史JSON字段大小写/重复对象/null合并与请求身份匹配保留；新增RawValue有符号词法保MaxBytes/Limit中间负值后覆盖、拒溢出/浮点/指数/伪number对象，Push按i32、blob.bytes同Go int64，四处-0合法。此共用修正保留原capture依赖整组测试，不删除旧回归。
+
+scan依赖校验的临时解析reservation在前一对象全部销毁后释放，512MiB活内存上限不变；metadata累计10,621,026,304B/work84,162,904,064推导自10001个至多1MiB文档，峰值25,169,920B，累计收费不清零，其他producer默认记账不变。10001依赖fixture只测账本生命周期，不能称真实大规模磁盘事务/性能已过。
+
+两个既有Data auras/summons handler补广告注册，23 Data/Asset命令集合无重复。9文件两轮独审原数值P2已关闭，28项新Rust回归（15unit/11integration/2registry）均NOT_RUN，现接Windows；rustfmt/diff及11个JSON测试模板静态检查通过。receipt SHA256 4a312dd5fd6dd3c23367e44ecc9844cfcff0f07f28a7222d496113ab52931212。正在跑的418 named-table和typed-budget组已失败，终态日志待取并优先修复，本批不能覆盖或倒填它们。remote provider/SQL effective/完整Data与性能仍未完成。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

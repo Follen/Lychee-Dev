@@ -30,6 +30,19 @@ pub trait CaptureAccounting {
     fn check(&self) -> Result<()>;
     fn admit_allocation(&self, bytes: usize) -> Result<()>;
     fn admit_work(&self, units: usize) -> Result<()>;
+    /// Admit one dependency's raw/typed/identity scratch before its read.
+    /// Calls are sequential: the prior dependency's raw bytes and parsed value
+    /// have been dropped before the next admission. An implementation may keep
+    /// one reservation until that next call or the accounting scope's drop.
+    /// The default retains the existing conservative cumulative accounting.
+    fn admit_dependency(&self, bytes: usize) -> Result<()> {
+        self.admit_allocation(
+            bytes
+                .saturating_mul(24)
+                .saturating_add(VALUE_STRUCTURE_BYTES),
+        )?;
+        self.admit_work(bytes.saturating_mul(8))
+    }
 }
 
 pub struct CaptureHeader<'a> {
@@ -396,12 +409,7 @@ pub fn commit_capture_budgeted_with_dependencies(
             check(control, meter)?;
             // Includes raw bytes, decoded strings/arrays, the identity clone
             // and Go-escaped identity buffers. The document is at most 1 MiB.
-            meter.admit_allocation(
-                length
-                    .saturating_mul(24)
-                    .saturating_add(VALUE_STRUCTURE_BYTES),
-            )?;
-            meter.admit_work(length.saturating_mul(8))
+            meter.admit_dependency(length)
         },
         |key, raw| {
             check(control, meter)?;

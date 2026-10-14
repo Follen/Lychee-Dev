@@ -242,6 +242,12 @@ jobs:
       - name: Run named Hotfix table and ChangesPin fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-hotfix-table --one-shot -- test --locked --offline -p lycheedev-data --test hotfix_table_parity -j 1
+      - name: Run durable Hotfix scan checkpoint and resume fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-hotfix-scan --one-shot -- test --locked --offline -p lycheedev-data --test hotfix_scan_parity -j 1
+      - name: Run Data advertised command surface fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-data-registry --one-shot -- test --locked --offline -p lycheedev-data --lib command_surface_tests -j 1
       - name: Run typed Hotfix budget and field encoding fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

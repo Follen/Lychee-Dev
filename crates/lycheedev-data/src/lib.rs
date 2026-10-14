@@ -44,6 +44,8 @@ pub fn commands() -> &'static [&'static str] {
         "data db2 foreign-key",
         "data db2 stream",
         "data spell info",
+        "data spell auras",
+        "data spell summons",
         "data item get",
         "data item models",
         "data item geosets",
@@ -61,6 +63,12 @@ pub fn commands() -> &'static [&'static str] {
 }
 
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if inv.command == "data hotfix"
+        && inv.flag_bool("--scan")
+        && inv.flag("--source") != Some("dbcache")
+    {
+        return Err(ToolkitError::arguments("--scan requires --source dbcache"));
+    }
     if matches!(
         inv.command.as_str(),
         "asset search" | "asset export" | "asset demux"
@@ -107,4 +115,55 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             inv.command
         ),
     ))
+}
+
+#[cfg(test)]
+mod command_surface_tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    #[test]
+    fn registered_data_asset_paths_match_the_fixed_go_catalog() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/rust-parity/go-3.2.0.manifest.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            oracle["oracle"]["commit"],
+            "3057a9666ab078270b63c7f06de748069b0d1f4b"
+        );
+        let expected: BTreeSet<_> = oracle["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|command| command["path"].as_str().unwrap())
+            .filter(|path| path.starts_with("data ") || path.starts_with("asset "))
+            .collect();
+        let registered: BTreeSet<_> = commands().iter().copied().collect();
+        assert_eq!(
+            registered.len(),
+            commands().len(),
+            "no duplicate registration"
+        );
+        assert_eq!(registered, expected);
+    }
+
+    #[test]
+    fn registered_aura_and_summon_paths_reach_the_existing_handler() {
+        for command in ["data spell auras", "data spell summons"] {
+            assert!(commands().contains(&command));
+            let inv = Invocation {
+                command: command.into(),
+                positional: None,
+                flags: BTreeMap::new(),
+                home: std::path::PathBuf::new(),
+                cwd: std::path::PathBuf::new(),
+                control: Default::default(),
+            };
+            let error = dispatch(&inv).unwrap_err();
+            assert_eq!(error.code, "command.invalid_arguments");
+            assert_eq!(error.message, format!("{command} requires --spell-id"));
+            assert_eq!(error.exit_code, 2);
+        }
+    }
 }

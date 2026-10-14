@@ -8,7 +8,16 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod local;
-pub(crate) use local::dispatch;
+mod scan;
+pub(crate) fn dispatch(
+    inv: &lycheedev_core::Invocation,
+) -> lycheedev_core::Result<lycheedev_core::Outcome> {
+    if inv.flag_bool("--scan") {
+        scan::dispatch(inv)
+    } else {
+        local::dispatch(inv)
+    }
+}
 use lycheedev_core::Result;
 use serde::{Deserialize, Serialize};
 
