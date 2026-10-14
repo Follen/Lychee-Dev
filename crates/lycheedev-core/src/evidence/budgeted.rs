@@ -73,6 +73,8 @@ struct CaptureDocument<'a> {
     complete: bool,
     truncated: bool,
     captured_at: String,
+    #[serde(skip_serializing_if = "<[&str]>::is_empty")]
+    dependencies: &'a [&'a str],
 }
 
 struct MeteredWriter<'a, W, M> {
@@ -134,6 +136,10 @@ fn serialize<W: Write, M: CaptureAccounting>(
         check(writer.control, writer.meter)?;
         writer.meter.admit_work(text.len())?;
     }
+    for dependency in value.dependencies {
+        check(writer.control, writer.meter)?;
+        writer.meter.admit_work(dependency.len())?;
+    }
     let result = value.serialize(&mut serde_json::Serializer::with_formatter(
         &mut *writer,
         formatter,
@@ -188,6 +194,7 @@ struct PreparedCapture {
 fn prepare(
     blob: &BlobRef,
     header: CaptureHeader<'_>,
+    dependencies: &[&str],
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<PreparedCapture> {
@@ -214,6 +221,7 @@ fn prepare(
         complete: header.complete,
         truncated: header.truncated,
         captured_at: storage::utc_now(),
+        dependencies,
     };
     let mut counter = MeteredWriter {
         sink: io::sink(),
@@ -263,7 +271,13 @@ fn prepare(
 
     // Build the public Value before inserting any capture document. No budget
     // admission, serialization or fallible Value construction follows commit.
-    meter.admit_allocation(length + VALUE_STRUCTURE_BYTES)?;
+    meter.admit_allocation(
+        length
+            + VALUE_STRUCTURE_BYTES
+            + dependencies
+                .len()
+                .saturating_mul(std::mem::size_of::<Value>()),
+    )?;
     meter.admit_work(length)?;
     check(control, meter)?;
     let value = serde_json::to_value(capture)?;
@@ -299,6 +313,20 @@ pub fn commit_capture_budgeted(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
+    commit_capture_budgeted_with_dependencies(home, input, &[], control, meter)
+}
+
+/// The dependency slice is borrowed only for this call. Its ordered values are
+/// part of the immutable identity; empty dependencies preserve the old encoding.
+/// References are revalidated under the removal transaction before any body
+/// publication, so a producer cannot publish a dangling owner after a gap.
+pub fn commit_capture_budgeted_with_dependencies(
+    home: &Path,
+    input: CaptureInput<'_>,
+    dependencies: &[&str],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
     check(control, meter)?;
     let header = CaptureHeader {
         media_type: input.media_type,
@@ -324,25 +352,68 @@ pub fn commit_capture_budgeted(
         sha256: bounded::digest_bytes(input.bytes, Some(control))?,
         bytes: input.bytes.len() as u64,
     };
-    let prepared = prepare(&reference, header, control, meter)?;
+    let prepared = prepare(&reference, header, dependencies, control, meter)?;
     let _home = Directory::open_shared(home)?;
     workspace::open(home)?;
     let _guard = storage::ExclusiveLock::resource(
         &home.join("locks"),
         &format!("blob:{}", reference.sha256),
     )?;
-    // This second body pass either publishes new bytes or scans the existing
-    // immutable blob. Its admission is independent of the digest pass above.
-    check(control, meter)?;
-    meter.admit_work(body_work)?;
-    bounded::publish_locked(
-        home,
-        input.bytes,
-        input.maximum_bytes,
-        reference.sha256,
-        Some(control),
+    let publish = || {
+        check(control, meter)?;
+        meter.admit_work(body_work)?;
+        bounded::publish_locked(
+            home,
+            input.bytes,
+            input.maximum_bytes,
+            reference.sha256,
+            Some(control),
+        )?;
+        Ok(())
+    };
+    if dependencies.is_empty() {
+        publish()?;
+        return persist(home, prepared, control, meter);
+    }
+    meter.admit_allocation(
+        dependencies
+            .len()
+            .saturating_mul(std::mem::size_of::<String>()),
     )?;
-    persist(home, prepared, control, meter)
+    let mut references = Vec::with_capacity(dependencies.len());
+    for id in dependencies {
+        check(control, meter)?;
+        meter.admit_allocation("capture/".len() + id.len())?;
+        references.push(format!("capture/{id}"));
+    }
+    Metadata::open(home, true)?.put_serialized_referencing(
+        &prepared.key,
+        &prepared.document,
+        &references,
+        control,
+        || check(control, meter),
+        |length| {
+            check(control, meter)?;
+            // Includes raw bytes, decoded strings/arrays, the identity clone
+            // and Go-escaped identity buffers. The document is at most 1 MiB.
+            meter.admit_allocation(
+                length
+                    .saturating_mul(24)
+                    .saturating_add(VALUE_STRUCTURE_BYTES),
+            )?;
+            meter.admit_work(length.saturating_mul(8))
+        },
+        |key, raw| {
+            check(control, meter)?;
+            let capture: super::CaptureRef = serde_json::from_slice(raw)?;
+            super::validate_capture(
+                &capture,
+                key.strip_prefix("capture/").expect("capture reference"),
+            )
+        },
+        publish,
+    )?;
+    Ok(prepared.value)
 }
 
 /// Uses the held verified blob; no body copy, reopen or SHA256 scan is added.
@@ -352,7 +423,7 @@ pub fn commit_verified_capture_budgeted(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
-    let prepared = prepare(blob.reference(), header, control, meter)?;
+    let prepared = prepare(blob.reference(), header, &[], control, meter)?;
     let _guard = storage::ExclusiveLock::resource(
         &blob.home.join("locks"),
         &format!("blob:{}", blob.reference().sha256),
@@ -393,6 +464,7 @@ mod tests {
             complete: true,
             truncated: false,
             captured_at: "2026-10-13T00:00:00Z".into(),
+            dependencies: Vec::new(),
         };
         let expected = "CAP-0a6dcaebb636641e87100a48d4aaf5047a8dd14eb11e6e2b6de8ee5be8d4c9f5";
         assert_eq!(super::super::capture_identity(&capture).unwrap(), expected);
@@ -405,6 +477,7 @@ mod tests {
             complete: capture.complete,
             truncated: capture.truncated,
             captured_at: capture.captured_at.clone(),
+            dependencies: &[],
         };
         let control = OperationControl::default();
         let mut writer = MeteredWriter {
@@ -423,5 +496,59 @@ mod tests {
                 .unwrap()
                 .contains("\\u003ctag\\u003e\\u0026界🙂\\u2028\\u2029")
         );
+    }
+
+    #[test]
+    fn dependency_identity_preserves_fixed_go_field_and_slice_order() {
+        let dependencies = vec![
+            format!("CAP-{}", "b".repeat(64)),
+            format!("CAP-{}", "c".repeat(64)),
+            format!("CAP-{}", "b".repeat(64)),
+        ];
+        let capture = super::super::CaptureRef {
+            schema: "lycheedev.capture.v1".into(),
+            id: String::new(),
+            blob: BlobRef {
+                sha256: "a".repeat(64),
+                bytes: 3,
+            },
+            media_type: "text/plain".into(),
+            provenance: serde_json::from_value(
+                serde_json::json!({"kind":"fixture","locator":"owner"}),
+            )
+            .unwrap(),
+            complete: true,
+            truncated: false,
+            captured_at: "2026-10-13T00:00:00Z".into(),
+            dependencies,
+        };
+        // SHA256 of the explicit Go archive.go CaptureRef field order, with
+        // dependencies last; ordered duplicates are retained, never sorted.
+        let expected = "CAP-656e3ba1eecd10de6981b8a01d668b1c4f4fb361aa9a8f4b9bb8c842dc64cc5a";
+        assert_eq!(super::super::capture_identity(&capture).unwrap(), expected);
+        let dependencies: Vec<_> = capture.dependencies.iter().map(String::as_str).collect();
+        let document = CaptureDocument {
+            schema: "lycheedev.capture.v1",
+            id: "",
+            blob: &capture.blob,
+            media_type: &capture.media_type,
+            provenance: capture.provenance.clone(),
+            complete: capture.complete,
+            truncated: capture.truncated,
+            captured_at: capture.captured_at.clone(),
+            dependencies: &dependencies,
+        };
+        let control = OperationControl::default();
+        let mut writer = MeteredWriter {
+            sink: Vec::new(),
+            control: &control,
+            meter: &Meter,
+            length: 0,
+            maximum: usize::MAX,
+            failure: None,
+        };
+        serialize(&document, &mut writer, IdentityFormatter).unwrap();
+        assert_eq!(writer.sink, storage::identity_json(&capture).unwrap());
+        assert_eq!(format!("CAP-{}", storage::sha256(&writer.sink)), expected);
     }
 }

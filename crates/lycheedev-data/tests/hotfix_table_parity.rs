@@ -693,3 +693,80 @@ fn named_hotfix_maximum_scalar_schema_page_releases_temporary_allocations() {
     assert_eq!(fixture.count("capture/"), 2);
     assert_eq!(fixture.count("pin/"), 2);
 }
+
+#[test]
+fn named_hotfix_current_and_legacy_pages_retain_cache_through_archived_continuation() {
+    // Fixed Go records/capture_dependencies_test.go::
+    // TestHotfixOrdinaryPagesProtectSourceAndContinue, with named DBD decoding.
+    for legacy in [false, true] {
+        let fixture = Fixture::new(&cache(
+            9,
+            &[(42, 1, 1, b"first\0"), (43, 1, 1, b"second\0")],
+        ));
+        let mut inv = fixture.inv();
+        inv.flags.insert("--limit".into(), "1".into());
+        let first = lycheedev_data::dispatch(&inv).unwrap();
+        let source_id = first.data["source"]["id"].as_str().unwrap().to_owned();
+        let current = first.provenance[1].clone();
+        assert_eq!(current["dependencies"], json!([source_id]));
+        let mut owner = current.clone();
+        if legacy {
+            let bytes = evidence::read_blob(&fixture.home, &current["blob"], 32 << 20).unwrap();
+            owner = evidence::commit_capture(
+                &fixture.home,
+                &bytes,
+                "application/json",
+                current["provenance"].clone(),
+                current["complete"].as_bool().unwrap(),
+                current["truncated"].as_bool().unwrap(),
+            )
+            .unwrap();
+            assert!(owner.get("dependencies").is_none());
+            evidence::remove_capture(&fixture.home, current["id"].as_str().unwrap()).unwrap();
+        }
+        let original = evidence::read_blob(&fixture.home, &owner["blob"], 32 << 20).unwrap();
+        let error = evidence::remove_capture(&fixture.home, &source_id).unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.exit_code),
+            ("evidence.capture_referenced", 3)
+        );
+        inv.flags.remove("--dbcache");
+        inv.flags.insert("--from".into(), source_id.clone());
+        inv.flags.insert(
+            "--snapshot".into(),
+            first.data["snapshot"].as_str().unwrap().into(),
+        );
+        inv.flags.insert(
+            "--after-index".into(),
+            first.data["page"]["nextIndex"].to_string(),
+        );
+        let second = lycheedev_data::dispatch(&inv).unwrap();
+        assert_eq!(second.data["source"]["id"], source_id);
+        assert_eq!(second.provenance[1]["dependencies"], json!([source_id]));
+        assert_eq!(
+            second.data["page"]["entries"][0]["fields"]["Name"],
+            "second"
+        );
+        assert_eq!(
+            evidence::read_capture(&fixture.home, owner["id"].as_str().unwrap()).unwrap(),
+            owner
+        );
+        assert_eq!(
+            evidence::read_blob(&fixture.home, &owner["blob"], 32 << 20).unwrap(),
+            original
+        );
+        evidence::remove_capture(&fixture.home, owner["id"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            evidence::remove_capture(&fixture.home, &source_id)
+                .unwrap_err()
+                .code,
+            "evidence.capture_referenced"
+        );
+        evidence::remove_capture(&fixture.home, second.provenance[1]["id"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(
+            evidence::remove_capture(&fixture.home, &source_id).unwrap()["blobRemoved"],
+            true
+        );
+    }
+}

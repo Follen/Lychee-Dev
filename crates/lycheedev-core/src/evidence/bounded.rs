@@ -277,6 +277,7 @@ pub fn commit_verified_capture(
         blob: blob.reference().clone(), media_type: media_type.into(),
         provenance: serde_json::from_value(provenance)?, complete, truncated,
         captured_at: storage::utc_now(),
+        dependencies: Vec::new(),
     };
     capture.id = capture_identity(&capture)?;
     Metadata::open(&blob.home, true)?.put(&format!("capture/{}", capture.id), &capture, None)?;
@@ -447,6 +448,7 @@ pub(super) fn commit_internal(
         complete: input.complete,
         truncated: input.truncated,
         captured_at: storage::utc_now(),
+        dependencies: Vec::new(),
     };
     capture.id = capture_identity(&capture)?;
     check(control)?;

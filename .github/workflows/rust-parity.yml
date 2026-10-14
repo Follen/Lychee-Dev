@@ -230,6 +230,13 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-hotfix-decode --one-shot -- test --locked --offline -p lycheedev-data --lib hotfix:: -j 1
+      - name: Run immutable capture dependency transaction fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-capture-dependencies --one-shot -- test --locked --offline -p lycheedev-core --test capture_dependencies -j 1
+      - name: Run capture identity and Go consumer compatibility fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-capture-identity --one-shot -- test --locked --offline -p lycheedev-core --lib evidence:: -j 1
       - name: Run SQLite lock cancellation and rollback fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-metadata-cancel --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::tests -j 1

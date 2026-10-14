@@ -464,6 +464,12 @@ API Type现在由独立认证environment原文重建definitions.lua和唯一mapp
 
 run38639615054/product116122379218 于 2026-10-14 22:19:54 UTC 结束：all-target、独立产品组、完整 Retail 静态 Source、真实多 CLI native session 成功；Skill 实际 27 项中 21 成功、6 失败。失败均为该快照 describe 缺少 refs/context/batch/session status，未跳过或放宽必需命令；因此产品 job 整体失败。19cb15 后库存已有修复，仍须新树真实复跑，不能倒填旧证据。artifact11933365203，ZIP SHA256 76bcee97302414b06b6c6ace682d17c4c7e6ee0169544b0444564590912c01cb 已下载认证；独立 artifact 内容复核待完成。静态差分仍失败，Emmy 组成功；不宣称完整协议/性能或四阶段收敛。
 
+### Capture 依赖与同事务删除保护
+
+新增有序不可变 capture dependencies；同一 SQLite 写事务先核依赖再发布 blob/manifest，空依赖保留既有身份字节。named Hotfix 页引用 source capture，继续页也保留依赖。删除检查用借用当前写事务的原始 manifest reader，保留大小写字段顺序、重复对象/null 合并、原始时间转义及被覆盖的字面 capture 引用，不经 Value 排序后误漏消费者。Go 时间和无效 Unicode 的受控投影保留原始 blob/hash，不改写证据字节。
+
+三轮独立复审关闭时间/Unicode/字段严格度及原始顺序 P1，8文件receipt SHA256 68de154999537fd4638b8d311b652003636084e0e52aba098fc498dc5b5f7fb1。24项新Rust测试全部 NOT_RUN，现分组接 Windows；直接 SQL 原始JSON fixture避免测试本身丢顺序。非capture文档仍用旧Value扫描，其被覆盖字面引用和转义并不等价Go raw扫描；旧64MiB scan限额、Metadata::open等待、archive恢复/幂等错误边界未在本批解决，不能称archive全等价。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

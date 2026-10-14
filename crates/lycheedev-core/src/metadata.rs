@@ -12,6 +12,32 @@ pub struct Document {
     pub generation: i64,
     pub value: serde_json::Value,
 }
+/// Read exact document bytes while the caller's write transaction is held.
+/// Kept separate from public Document so existing JSON-value consumers retain
+/// their API and do not pay for a second retained copy of every scanned row.
+pub(crate) struct TransactionReader<'a> {
+    connection: &'a Connection,
+    control: &'a crate::control::OperationControl,
+}
+impl TransactionReader<'_> {
+    pub(crate) fn read_raw(&self, key: &str) -> Result<Vec<u8>> {
+        self.control.check()?;
+        let raw: Option<Vec<u8>> = self
+            .connection
+            .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        self.control.check()?;
+        raw.ok_or_else(|| {
+            ToolkitError::new(
+                "vault.record_missing",
+                format!("document {key} does not exist"),
+                3,
+            )
+        })
+    }
+}
 impl Metadata {
     pub fn open(home: &Path, write: bool) -> Result<Self> {
         crate::workspace::open(home)?;
@@ -226,6 +252,108 @@ impl Metadata {
         transaction.commit()?;
         Ok(())
     }
+    /// Validate immutable references and publish their owner under the same
+    /// SQLite write transaction used by checked removal. Admission precedes
+    /// each reference allocation; publication cannot run on a missing or
+    /// invalid reference. The original control bounds BEGIN and COMMIT waits.
+    pub(crate) fn put_serialized_referencing(
+        &mut self,
+        key: &str,
+        raw: &[u8],
+        references: &[String],
+        control: &crate::control::OperationControl,
+        mut check: impl FnMut() -> Result<()>,
+        mut admit_reference: impl FnMut(usize) -> Result<()>,
+        mut validate_reference: impl FnMut(&str, &[u8]) -> Result<()>,
+        publish: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        check()?;
+        if raw.len() > 1_048_576 {
+            return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
+        }
+        self.connection.busy_timeout(std::time::Duration::ZERO)?;
+        let result = (|| {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut transaction = checked_sql(control, until, &mut || {}, || {
+                rusqlite::Transaction::new_unchecked(
+                    &self.connection,
+                    rusqlite::TransactionBehavior::Immediate,
+                )
+            })?;
+            for reference in references {
+                check()?;
+                let length: Option<usize> = checked_sql(control, until, &mut || {}, || {
+                    transaction
+                        .query_row(
+                            "SELECT length(value) FROM documents WHERE key=?1",
+                            [reference],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                })?;
+                let length = length.ok_or_else(|| {
+                    ToolkitError::new(
+                        "vault.record_missing",
+                        format!("document {reference} does not exist"),
+                        3,
+                    )
+                })?;
+                admit_reference(length)?;
+                check()?;
+                let document: Vec<u8> = checked_sql(control, until, &mut || {}, || {
+                    transaction.query_row(
+                        "SELECT value FROM documents WHERE key=?1",
+                        [reference],
+                        |row| row.get(0),
+                    )
+                })?;
+                validate_reference(reference, &document)?;
+            }
+            check()?;
+            publish()?;
+            check()?;
+            let existing: Option<bool> = checked_sql(control, until, &mut || {}, || {
+                transaction
+                    .query_row(
+                        "SELECT value=?2 FROM documents WHERE key=?1",
+                        params![key, raw],
+                        |row| row.get(0),
+                    )
+                    .optional()
+            })?;
+            match existing {
+                Some(true) => return check(),
+                Some(false) => {
+                    return Err(ToolkitError::new(
+                        "vault.generation_conflict",
+                        "immutable document already differs",
+                        4,
+                    ));
+                }
+                None => {
+                    check()?;
+                    checked_sql(control, until, &mut || {}, || {
+                        transaction.execute(
+                            "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                            params![key, raw],
+                        )
+                    })?;
+                }
+            }
+            check()?;
+            checked_sql(control, until, &mut || {}, || {
+                transaction.execute_batch("COMMIT")
+            })?;
+            transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+            Ok(())
+        })();
+        let restore = self
+            .connection
+            .busy_timeout(std::time::Duration::from_secs(5));
+        result?;
+        restore?;
+        Ok(())
+    }
     pub fn list<T: DeserializeOwned>(&self, prefix: &str, limit: usize) -> Result<Vec<T>> {
         let mut statement = self.connection.prepare(
             "SELECT value FROM documents WHERE key>=?1 AND key<?2 ORDER BY key LIMIT ?3",
@@ -285,69 +413,136 @@ impl Metadata {
         expected: &[(String, i64)],
         validate: impl FnOnce(&[Document]) -> Result<(T, Option<(String, serde_json::Value)>)>,
     ) -> Result<T> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let (count, bytes): (i64, i64) = transaction.query_row(
-            "SELECT count(*),coalesce(sum(length(value)),0) FROM documents",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if count > 100000 || bytes > 64 << 20 {
-            return Err(ToolkitError::new(
-                "evidence.reference_scan_limit",
-                "reference scan exceeds 100000 documents or 64 MiB",
-                4,
-            ));
-        }
-        let mut documents = vec![];
-        {
-            let mut statement =
-                transaction.prepare("SELECT key,generation,value FROM documents ORDER BY key")?;
-            let rows = statement.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Vec<u8>>(2)?,
-                ))
+        self.delete_checked_record_controlled(
+            keys,
+            expected,
+            &crate::control::OperationControl::default(),
+            validate,
+        )
+    }
+    pub(crate) fn delete_checked_controlled<T>(
+        &mut self,
+        keys: &[String],
+        expected: &[(String, i64)],
+        control: &crate::control::OperationControl,
+        validate: impl FnOnce(&[Document], &TransactionReader<'_>) -> Result<T>,
+    ) -> Result<T> {
+        self.delete_checked_record_controlled_with_raw(
+            keys,
+            expected,
+            control,
+            |documents, reader| Ok((validate(documents, reader)?, None)),
+        )
+    }
+    pub(crate) fn delete_checked_record_controlled<T>(
+        &mut self,
+        keys: &[String],
+        expected: &[(String, i64)],
+        control: &crate::control::OperationControl,
+        validate: impl FnOnce(&[Document]) -> Result<(T, Option<(String, serde_json::Value)>)>,
+    ) -> Result<T> {
+        self.delete_checked_record_controlled_with_raw(keys, expected, control, |documents, _| {
+            validate(documents)
+        })
+    }
+    pub(crate) fn delete_checked_record_controlled_with_raw<T>(
+        &mut self,
+        keys: &[String],
+        expected: &[(String, i64)],
+        control: &crate::control::OperationControl,
+        validate: impl FnOnce(
+            &[Document],
+            &TransactionReader<'_>,
+        ) -> Result<(T, Option<(String, serde_json::Value)>)>,
+    ) -> Result<T> {
+        control.check()?;
+        self.connection.busy_timeout(std::time::Duration::ZERO)?;
+        let result = (|| {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut transaction = checked_sql(control, until, &mut || {}, || {
+                rusqlite::Transaction::new_unchecked(
+                    &self.connection,
+                    rusqlite::TransactionBehavior::Immediate,
+                )
             })?;
-            for row in rows {
-                let (key, generation, raw) = row?;
-                documents.push(Document {
-                    key,
-                    generation,
-                    value: serde_json::from_slice(&raw)?,
-                });
-            }
-        }
-        for (key, generation) in expected {
-            if documents
-                .iter()
-                .find(|doc| &doc.key == key)
-                .is_none_or(|doc| doc.generation != *generation)
-            {
+            let (count, bytes): (i64, i64) = transaction.query_row(
+                "SELECT count(*),coalesce(sum(length(value)),0) FROM documents",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if count > 100000 || bytes > 64 << 20 {
                 return Err(ToolkitError::new(
-                    "vault.generation_conflict",
-                    "document changed before checked deletion",
+                    "evidence.reference_scan_limit",
+                    "reference scan exceeds 100000 documents or 64 MiB",
                     4,
                 ));
             }
-        }
-        let (value, recovery) = validate(&documents)?;
-        if let Some((key, record)) = recovery {
-            let raw = serde_json::to_vec(&record)?;
-            if raw.len() > 1_048_576 {
-                return Err(ToolkitError::invalid("recovery document exceeds 1 MiB"));
+            let mut documents = vec![];
+            {
+                let mut statement = transaction
+                    .prepare("SELECT key,generation,value FROM documents ORDER BY key")?;
+                let rows = statement.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                })?;
+                for row in rows {
+                    control.check()?;
+                    let (key, generation, raw) = row?;
+                    documents.push(Document {
+                        key,
+                        generation,
+                        value: serde_json::from_slice(&raw)?,
+                    });
+                }
             }
-            transaction.execute(
-                "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
-                params![key, raw],
-            )?;
-        }
-        for key in keys {
-            transaction.execute("DELETE FROM documents WHERE key=?1", [key])?;
-        }
-        transaction.commit()?;
+            for (key, generation) in expected {
+                if documents
+                    .iter()
+                    .find(|doc| &doc.key == key)
+                    .is_none_or(|doc| doc.generation != *generation)
+                {
+                    return Err(ToolkitError::new(
+                        "vault.generation_conflict",
+                        "document changed before checked deletion",
+                        4,
+                    ));
+                }
+            }
+            control.check()?;
+            let reader = TransactionReader {
+                connection: &transaction,
+                control,
+            };
+            let (value, recovery) = validate(&documents, &reader)?;
+            control.check()?;
+            if let Some((key, record)) = recovery {
+                let raw = serde_json::to_vec(&record)?;
+                if raw.len() > 1_048_576 {
+                    return Err(ToolkitError::invalid("recovery document exceeds 1 MiB"));
+                }
+                transaction.execute(
+                    "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                    params![key, raw],
+                )?;
+            }
+            for key in keys {
+                control.check()?;
+                transaction.execute("DELETE FROM documents WHERE key=?1", [key])?;
+            }
+            checked_sql(control, until, &mut || {}, || {
+                transaction.execute_batch("COMMIT")
+            })?;
+            transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+            Ok(value)
+        })();
+        let restore = self
+            .connection
+            .busy_timeout(std::time::Duration::from_secs(5));
+        let value = result?;
+        restore?;
         Ok(value)
     }
 }
@@ -448,5 +643,131 @@ mod controlled_tests {
             drop(blocker);
             std::fs::remove_dir_all(path).unwrap();
         }
+    }
+
+    #[test]
+    fn dependency_transaction_stops_at_begin_and_commit_and_preserves_reference() {
+        // A held writer prevents BEGIN; a held reader prevents COMMIT. Neither
+        // lock is released until the original control has actually stopped.
+        for commit_blocked in [false, true] {
+            let path = std::env::temp_dir().join(format!(
+                "lychee-capture-transaction-{}-{}-{}",
+                std::process::id(),
+                commit_blocked,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&path).unwrap();
+            crate::workspace::initialize(&path).unwrap();
+            let mut metadata = Metadata::open(&path, true).unwrap();
+            metadata
+                .put("capture/source", &serde_json::json!({"id":"source"}), None)
+                .unwrap();
+            let blocker = Connection::open(path.join("state/toolkit.sqlite")).unwrap();
+            blocker
+                .execute_batch(if commit_blocked {
+                    "BEGIN; SELECT * FROM documents;"
+                } else {
+                    "BEGIN IMMEDIATE;"
+                })
+                .unwrap();
+            let control =
+                OperationControl::uncancelable(Instant::now() + Duration::from_millis(60));
+            let published = std::cell::Cell::new(false);
+            let error = metadata
+                .put_serialized_referencing(
+                    "capture/owner",
+                    br#"{"dependencies":["source"]}"#,
+                    &["capture/source".into()],
+                    &control,
+                    || control.check(),
+                    |_| Ok(()),
+                    |key, raw| {
+                        assert_eq!(key, "capture/source");
+                        assert_eq!(
+                            serde_json::from_slice::<serde_json::Value>(raw).unwrap()["id"],
+                            "source"
+                        );
+                        Ok(())
+                    },
+                    || {
+                        published.set(true);
+                        Ok(())
+                    },
+                )
+                .unwrap_err();
+            assert_eq!(
+                (error.code.as_str(), error.exit_code),
+                ("command.deadline", 5)
+            );
+            assert_eq!(published.get(), commit_blocked);
+            blocker.execute_batch("ROLLBACK").unwrap();
+            assert_eq!(metadata.generation("capture/owner").unwrap(), None);
+            assert_eq!(metadata.generation("capture/source").unwrap(), Some(1));
+            // A failed controlled operation restores the connection and leaves
+            // the original source available to a subsequent normal operation.
+            metadata
+                .put_serialized_referencing(
+                    "capture/owner",
+                    br#"{"dependencies":["source"]}"#,
+                    &["capture/source".into()],
+                    &OperationControl::default(),
+                    || Ok(()),
+                    |_| Ok(()),
+                    |_, _| Ok(()),
+                    || Ok(()),
+                )
+                .unwrap();
+            assert_eq!(metadata.generation("capture/owner").unwrap(), Some(1));
+            drop(metadata);
+            drop(blocker);
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn dependency_transaction_cancellation_after_publication_rolls_back_manifest() {
+        let path = std::env::temp_dir().join(format!(
+            "lychee-capture-cancel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        crate::workspace::initialize(&path).unwrap();
+        let mut metadata = Metadata::open(&path, true).unwrap();
+        metadata.put("capture/source", &true, None).unwrap();
+        let cancellation = TrackedCancellation::new();
+        let control = OperationControl::tracked(
+            Instant::now() + Duration::from_secs(10),
+            cancellation.clone(),
+        );
+        let error = metadata
+            .put_serialized_referencing(
+                "capture/owner",
+                br#"{"dependencies":["source"]}"#,
+                &["capture/source".into()],
+                &control,
+                || control.check(),
+                |_| Ok(()),
+                |_, _| Ok(()),
+                || {
+                    cancellation.cancel();
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.exit_code),
+            ("command.cancelled", 7)
+        );
+        assert_eq!(metadata.generation("capture/owner").unwrap(), None);
+        assert_eq!(metadata.generation("capture/source").unwrap(), Some(1));
+        drop(metadata);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }

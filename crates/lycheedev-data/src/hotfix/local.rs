@@ -522,7 +522,10 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     let encoded = capture::json_bytes(&body, &budget, 32 << 20, limit)?;
     budget.charge(Cost::retained(encoded.len().saturating_mul(16)))?;
     let result: Value = serde_json::from_slice(&encoded)?;
-    let result_capture = evidence::commit_capture_budgeted(
+    let source_id = source["id"]
+        .as_str()
+        .ok_or_else(|| identity("Source capture lacks identity"))?;
+    let result_capture = evidence::commit_capture_budgeted_with_dependencies(
         &inv.home,
         evidence::CaptureInput {
             bytes: &encoded,
@@ -532,6 +535,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
             complete,
             truncated,
         },
+        &[source_id],
         &inv.control,
         &budget,
     )?;
