@@ -576,6 +576,14 @@ r3另补正常open/bind错误和显式NativeReader finish/close的唯一process 
 
 仅静态rustfmt/diff/Go模板与映射/unsafe inventory通过，全部本批Rust/Windows实际NOT_RUN。CI新增runtime_root、process::runtime_及自有进程runtime_module三个独立组，已有formal Mailbox/binding组覆盖reader其他回归；实际收据必须确认非零匹配数。此批还没有默认CLI/backend/input/journal整体接线，不称Live可用、实机验收或性能达标。
 
+### 正式 Windows backend 接线组件
+
+新增 NativeBackend 实现正式 Backend/RuntimeRetirementBackend，组合可信NativeReader、typed PublicationLease、完整MailboxWindow及双动作发送，不使用旧Transport。observe_input生成私有一次性fresh witness，Invoke精确发布资格和同一短lease跨整次发送，Reload检查后先checked-close再发送；保留原控制/期限、100ms交换间隔、Go的2秒stale grace、至多15秒退役与间隔1100ms双fresh样本。trace保留256条/10秒flush并精确Go字段；进程关闭和当前操作错误合并。它是可接默认业务的正式适配组件，不等于默认CLI已切换。
+
+独审修复恢复watermark合法10100样本被严格相等误拒、FakeSender首post前guard失败假计非零、trace外层字段大小写；最终7文件/4依赖/2前置freeze及23固定Go源码/test身份复核无新增可行动finding。freeze SHA256 661e797863f4b42de0ee1f70d18d3ea9794ad8d01dae89c1d63427913ccad5e1（冻结时记复审待完，随后独立终态已完成）。34项Rust回归仅声明，rustfmt/TOML静态通过，编译/Windows全部NOT_RUN；现接入已有go_mailbox_v1测试组执行。
+
+明确新发现待修：Delivery PublicationLease在构造过程中取得维护锁后发生错误，及wait_lock成功后遇取消，仍可能仅Drop而不回传checked-close失败。backend只能显式关闭已经返回的lease，无法修未返回资源；此构造cleanup作为独立批处理，不能借本批审核关闭。完整CON/public CLI、activation/doctor与自有进程Lua端到端仍待接。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

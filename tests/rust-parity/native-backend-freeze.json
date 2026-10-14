@@ -1,0 +1,129 @@
+{
+  "schema": "lycheedev.native-backend-freeze.v1",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "createdAt": "2026-10-14T23:41:55.636042+00:00",
+  "baseHead": "5a0e3edd228a14dc3a9bb76b5eeb986188158d36",
+  "meaning": "Exact owner-file bytes, not compile/runtime validation; receipt does not self-hash.",
+  "snapshot": "/tmp/lycheedev-native-backend-review-r1",
+  "files": [
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "bytes": 35039,
+      "sha256": "47177561a7f66ef5d628666389bdbac352a2a3e431cda38d3b104b3a6120ca6b"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs",
+      "bytes": 8491,
+      "sha256": "1ad164ed4f1c1ec8a41985c4bf3919cfce4d38af685416430c8680900b75e589"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "bytes": 40657,
+      "sha256": "5f7ff234e343e99c32df629be6779478ba31f139e7792286f7d39095314a6cf8"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace.rs",
+      "bytes": 8512,
+      "sha256": "3f303fe3f1f6cec4f3e2e2119af2214677c8d18617ff28bc6da0f82d915ddb21"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace_tests.rs",
+      "bytes": 5970,
+      "sha256": "aa96615c0b2aa44e2ce14d61ece7b90933be22a07320da777fd1e94e5600e01b"
+    },
+    {
+      "path": "crates/lycheedev-live/Cargo.toml",
+      "bytes": 516,
+      "sha256": "df1e3caa6a0e4bebe441483a3ddab212b002e2442aeb97ee922836baf0d0b533"
+    },
+    {
+      "path": "tests/rust-parity/native-backend-test-map.json",
+      "bytes": 24399,
+      "sha256": "8b4b01d7e9f0d5d681f402fd4d21b9995cd6ab6135dc9c2a02723aa62186270f"
+    }
+  ],
+  "dependencyFilesRead": [
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs",
+      "bytes": 8088,
+      "sha256": "2ac55d9837a706d20ac573ac94aad4fa522229f0ef63e75569673a369030bd96"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 25977,
+      "sha256": "8e70f8912c142dc71cc16f0f9d36e9ae93e4cafb58eb13ca1ba9140bbec3ba9a"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input.rs",
+      "bytes": 11049,
+      "sha256": "8a507f7677eb452ee6641122f3eef6eb2860a817007239e8c99e4cc3baef6d90"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/engine.rs",
+      "bytes": 11348,
+      "sha256": "c30b795828bf2489e7a15e159221c46421cee7f09fd11180fb36609b8fdbefd3"
+    }
+  ],
+  "dependencyReceipts": [
+    {
+      "path": "tests/rust-parity/runtime-reader-freeze.json",
+      "bytes": 8948,
+      "sha256": "32ba5e3c00e9adbd01a44ccc2796fd038d601ff964bcf07971d44616956350c1"
+    },
+    {
+      "path": "tests/rust-parity/mailbox-input-freeze.json",
+      "bytes": 6468,
+      "sha256": "7d2dbe76e3cb4f4e3cecb91da4d385fe3b81ac96e22396e5d662fa8061df5325"
+    }
+  ],
+  "execution": "NOT_RUN",
+  "staticChecks": [
+    "rustfmt edition2024 recursive parse/check: PASS",
+    "scoped git diff --check: PASS",
+    "fixed Git-object Go source/test references and current Rust test names/hashes: PASS",
+    "owned module explicitly forbid unsafe; no unsafe block or old Transport reference"
+  ],
+  "independentReview": {
+    "status": "fixes_applied; final frozen re-review pending",
+    "findings": [
+      {
+        "priority": "P2",
+        "finding": "Witness after equality rejected actual Driver recovered-watermark future boundary",
+        "fix": "Allow action.after>=witness.after; final named INPUT decode enforces tightened threshold; actual Driver submit_input integration test covers10000/10100 intent ordering."
+      },
+      {
+        "priority": "P2",
+        "finding": "FakeSender could classify guard failure before first post as nonzero",
+        "fix": "Explicit admission then post guards increment actual model posted count only after guard; pre-first-post cancellation fixture."
+      },
+      {
+        "priority": "compatibility",
+        "finding": "Trace six outer fields used camelCase rather than fixed Go default capitalized names",
+        "fix": "Explicit serde names Nonce/Runtime/Ticket/Kind/Matches/Lookup; dedicated JSON-key fixture."
+      }
+    ]
+  },
+  "authorSelfChecks": [
+    "Stale grace within2s marks stale; expiry falls back plain pending to allow discovery, exact fixedGo semantics.",
+    "Guard/acquire/trace IO failures retain simultaneous cancellation independently.",
+    "Explicit process checked-close precedes one independent10s bounded trace flush; errors all joined."
+  ],
+  "notSatisfied": [
+    "Module export deliberately left for parent integration.",
+    "No CLI/default backend switch.",
+    "No Rust type-check/test execution, Go differential execution, Windows synthetic execution, actual game or performance evidence.",
+    "Delivery partial-acquire/wait_lock checked-close error gap remains separate parent-owned fix; this wrapper cannot close a lease not returned by constructor."
+  ],
+  "forbiddenActionsNotRun": [
+    "cargo",
+    "rustc",
+    "Go/product tests",
+    "game",
+    "user desktop",
+    "commit",
+    "push",
+    "publish",
+    "release",
+    "merge"
+  ]
+}

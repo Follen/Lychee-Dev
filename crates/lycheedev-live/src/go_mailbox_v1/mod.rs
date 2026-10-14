@@ -7,6 +7,7 @@ pub mod admission;
 pub mod driver;
 pub mod durable_journal;
 pub mod native_reader;
+pub mod native_backend;
 pub mod slot_allocation;
 pub mod transactions;
 pub mod recovery;
