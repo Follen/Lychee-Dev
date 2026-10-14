@@ -72,6 +72,31 @@ impl XmlResearch {
     pub fn may_contain_outgoing(&self,symbol:&index::Symbol,file:&str)->bool{
         self.original_path(file)==symbol.path||self.owns_file(symbol,file)
     }
+    /// Decide script membership before scanning it or charging an outgoing
+    /// operation. Same-path candidates are not proof of object ownership.
+    pub(crate) fn planner_script_eligibility(&self,symbol:&index::Symbol,file:&str,mut step:impl FnMut()->Result<()>)->Result<Option<bool>> {
+        let Some(script)=self.scripts.get(file) else {return Ok(None)};
+        if let Some(owners)=self.owners.get(file){for(name,origin)in owners{
+            step()?;
+            if name==&symbol.name&&self.matches_origin(symbol,origin){return Ok(Some(true));}
+        }}
+        let mut known=false;
+        for program in &self.programs {for action in program.actions(){
+            step()?;
+            match action {
+                xml_load::Action::Object{name:Some(name),origin,..} if name==&symbol.name&&self.matches_origin(symbol,origin)=>{known=true;},
+                xml_load::Action::Definition{name,origin,..} if name==&symbol.name&&self.matches_origin(symbol,origin)=>{
+                    known=true;
+                    // A virtual template has no runtime instance, but its exact
+                    // declaration span authenticates its own inline body.
+                    if origin.path==script.path&&origin.sha256==script.xml_sha256
+                        &&origin.bytes.start<=script.element.start&&origin.bytes.end>=script.element.end {return Ok(Some(true));}
+                },
+                _=>{},
+            }
+        }}
+        Ok(known.then_some(false))
+    }
     pub fn matches_location(&self,prepared:&PreparedSnapshot,symbol:&index::Symbol,site:&Site)->Result<bool>{
         if self.original_path(&site.file)!=symbol.path{return Ok(false);}
         let(_,line)=self.line(prepared,site)?;Ok(line==symbol.line)

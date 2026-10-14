@@ -148,6 +148,12 @@ jobs:
       - name: Run native session lifecycle unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-session-lifecycle --one-shot -- test --locked --offline -p lycheedev-source --lib native_session::tests -j 1
+      - name: Run authenticated native research planning unit fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-source-plan --one-shot -- test --locked --offline -p lycheedev-source --lib native_research::plan::tests -j 1
+      - name: Run native research input and XML preparation fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-source-research --one-shot -- test --locked --offline -p lycheedev-source --lib native_research::tests -j 1
       - name: Run Source query admission unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-query-default --one-shot -- test --locked --offline -p lycheedev-source --lib public_query_defaults -j 1

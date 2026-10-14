@@ -1,0 +1,261 @@
+//! Logical semantic work, before XML occurrence expansion. These are plans,
+//! not completed batches; session retirement must count execution separately.
+#![forbid(unsafe_code)]
+use crate::{environment, index, native::{Site, digest}};
+use lycheedev_core::{Result, ToolkitError};
+use serde::Serialize;
+use serde_json::Value;
+use std::sync::Arc;
+
+pub(crate) const BATCH_QUERIES: usize = 128;
+pub(crate) const OUTGOING_QUERIES: usize = 128;
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct AuthenticatedSite {
+    pub(crate) site: Site,
+    pub(crate) file_sha256: String,
+    pub(crate) position: Value,
+    pub(crate) material: Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", content = "target", rename_all = "snake_case")]
+pub(crate) enum LogicalOperation {
+    References(AuthenticatedSite),
+    Type(AuthenticatedSite),
+    Definition(AuthenticatedSite),
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ResearchPlan {
+    schema: &'static str,
+    source_identity: String,
+    query_identity: String,
+    operations: Vec<LogicalOperation>,
+    batch_sizes: Vec<usize>,
+    unavailable: Vec<&'static str>,
+    outgoing_truncated: bool,
+    scanner_diagnostics: Vec<Value>,
+    scanner_diagnostics_omitted: usize,
+    #[serde(skip)]
+    owner: Arc<()>,
+}
+impl ResearchPlan {
+    pub(crate) fn new(source_identity: &str, query: &impl Serialize, owner: Arc<()>) -> Self {
+        Self {
+            schema: "lycheedev.native-semantic-plan.v1",
+            source_identity: source_identity.into(),
+            query_identity: digest(query),
+            operations: Vec::new(), batch_sizes: Vec::new(), unavailable: Vec::new(),
+            outgoing_truncated: false, scanner_diagnostics:Vec::new(), scanner_diagnostics_omitted:0, owner,
+        }
+    }
+    pub(crate) fn incoming(&mut self, site: AuthenticatedSite) {
+        self.operations.push(LogicalOperation::References(site.clone()));
+        self.operations.push(LogicalOperation::Type(site));
+    }
+    pub(crate) fn definition_full(&self) -> bool {
+        self.operations.iter().filter(|op| matches!(op, LogicalOperation::Definition(_))).count() >= OUTGOING_QUERIES
+    }
+    pub(crate) fn truncate_outgoing(&mut self) {
+        self.outgoing_truncated = true;
+        self.unavailable("outgoing_operation_limit");
+    }
+    pub(crate) fn definition(&mut self, site: AuthenticatedSite) {
+        if self.definition_full() { self.truncate_outgoing(); }
+        else { self.operations.push(LogicalOperation::Definition(site)); }
+    }
+    pub(crate) fn unavailable(&mut self, reason: &'static str) {
+        if !self.unavailable.contains(&reason) { self.unavailable.push(reason); }
+    }
+    pub(crate) fn scan_facts(&mut self,text:&str,path:&str,control:&lycheedev_core::control::OperationControl)->Result<crate::facts::Facts> {
+        control.check()?;
+        let facts=crate::facts::lua(text.as_bytes(),false);
+        // Deadline/cancellation wins over a local scanner diagnostic.
+        control.check()?;
+        if !facts.diagnostics.is_empty(){self.unavailable("structural_scanner_incomplete");}
+        for note in &facts.diagnostics {
+            control.check()?;
+            if self.scanner_diagnostics.len()<32 {
+                self.scanner_diagnostics.push(serde_json::json!({"path":path,"line":note.line,"message":note.message}));
+            } else {self.scanner_diagnostics_omitted=self.scanner_diagnostics_omitted.saturating_add(1);}
+        }
+        Ok(facts)
+    }
+    pub(crate) fn finish(mut self) -> Self {
+        self.batch_sizes = self.operations.chunks(BATCH_QUERIES).map(<[_]>::len).collect();
+        self
+    }
+    pub(crate) fn validate(&self, identity: &str, query: &impl Serialize, owner: &Arc<()>) -> Result<()> {
+        if self.source_identity != identity || self.query_identity != digest(query) || !Arc::ptr_eq(&self.owner, owner) {
+            return Err(ToolkitError::new("source.native_plan_identity", "semantic plan belongs to another source, query or request", 4));
+        }
+        Ok(())
+    }
+    pub(crate) fn evidence(&self) -> Value {
+        // Do not present a planned operation count as executed semantic work.
+        serde_json::json!({"state":"planned_not_executed", "plan":self})
+    }
+}
+
+/// Rebuild the existing environment emitter from the exact admitted originals.
+/// A caller's mapping list or generated coordinate is never a trust root.
+pub(crate) struct VerifiedApiDefinitions {
+    definitions: String,
+    mappings: Vec<environment::Mapping>,
+    manifest: environment::Manifest,
+}
+impl VerifiedApiDefinitions {
+    pub(crate) fn rebuild(files: &std::collections::BTreeMap<String,String>, api: &[environment::ApiRecord], manifest: Option<&environment::Manifest>, control: &lycheedev_core::control::OperationControl) -> Result<Option<Self>> {
+        let Some(manifest)=manifest else {
+            if !files.is_empty() {return Err(invalid_environment("environment originals have no manifest"));}
+            return Ok(None)
+        };
+        let limits=environment::Limits::default();
+        let mut documents=std::collections::BTreeMap::new();let mut total=0usize;
+        for (path,text) in files {
+            control.check()?;
+            let lower=path.to_ascii_lowercase();
+            if !crate::git::source_path(path) || !lower.contains("/blizzard_apidocumentationgenerated/") || !lower.ends_with(".lua") {
+                return Err(invalid_environment("environment original path is outside the API document set"));
+            }
+            total=total.checked_add(text.len()).ok_or_else(|| invalid_environment("API input byte overflow"))?;
+            if documents.len()>=limits.documents || text.len()>limits.file_bytes || total>limits.total_bytes {
+                return Err(invalid_environment("API reconstruction exceeds environment limits"));
+            }
+            documents.insert(path.clone(),text.as_bytes().to_vec());
+        }
+        let rebuilt=environment::build(manifest.identity.clone(),&documents,limits,control)?;
+        if serde_json::to_value(&rebuilt.manifest)?!=serde_json::to_value(manifest)?
+            || serde_json::to_value(&rebuilt.facts)?!=serde_json::to_value(api)? {
+            return Err(invalid_environment("API manifest or facts differ from admitted original source"));
+        }
+        Ok(Some(Self {definitions:rebuilt.definitions,mappings:rebuilt.mappings,manifest:rebuilt.manifest}))
+    }
+    pub(crate) fn target(&self,symbol:&index::Symbol)->Result<Option<AuthenticatedSite>> {
+        if symbol.category!="api-function" {return Ok(None);}
+        let mut mappings=self.mappings.iter().filter(|mapping|mapping.kind=="function"&&mapping.callable==symbol.name
+            &&mapping.source_path==symbol.path&&mapping.source_line>=symbol.line&&mapping.source_line<=symbol.end_line.max(symbol.line));
+        let Some(mapping)=mappings.next() else {return Ok(None)};
+        if mappings.next().is_some(){return Ok(None);}
+        let start=crate::xml_inline::source_map::utf16_offset(&self.definitions,mapping.generated_line,mapping.generated_utf16_column)
+            .map_err(|_|invalid_environment("generated API mapping is outside verified definitions"))?;
+        let name=symbol.name.rsplit(['.', ':']).next().unwrap_or("");
+        let end=start.checked_add(name.len()).ok_or_else(||invalid_environment("generated API range overflow"))?;
+        if name.is_empty() || self.definitions.get(start..end)!=Some(name) {
+            return Err(invalid_environment("generated API mapping does not identify its callable"));
+        }
+        let range=start..end;
+        let position=crate::xml_inline::source_map::utf16_range(&self.definitions,crate::xml_inline::source_map::Span::new(range.start,range.end))
+            .map_err(|_|invalid_environment("generated API coordinate is outside verified definitions"))?;
+        let serialized=serde_json::to_value(&position)?;
+        if serialized["start"]["line"].as_u64()!=Some(mapping.generated_line as u64)
+            ||serialized["start"]["character"].as_u64()!=Some(mapping.generated_utf16_column as u64) {
+            return Err(invalid_environment("generated API mapping disagrees with original definitions"));
+        }
+        Ok(Some(AuthenticatedSite {
+            site:Site{file:"@native/api-definitions.lua".into(),start:range.start as u32,end:range.end as u32},
+            file_sha256:self.manifest.definitions_sha256.clone(),position:serialized,
+            material:serde_json::json!({"kind":"api_definition","mapping":mapping,"manifest":self.manifest}),
+        }))
+    }
+}
+fn invalid_environment(message:&str)->ToolkitError {ToolkitError::new("source.native_plan_environment",message,4)}
+
+/// Go's query plan requires a unique spelling on the selected original line.
+/// Return original UTF-8 bytes; UTF-16/XML coordinates are independently mapped
+/// by the admitted Source snapshot, never accepted from a wire caller.
+pub(crate) fn unique_name_range(text: &str, line: usize, name: &str) -> Option<std::ops::Range<usize>> {
+    let name = name.rsplit(['.', ':']).next()?;
+    if name.is_empty() || !name.bytes().enumerate().all(|(i, c)| c == b'_' || c.is_ascii_alphabetic() || i > 0 && c.is_ascii_digit()) { return None; }
+    let mut offset = 0;
+    for (i, part) in text.split('\n').enumerate() {
+        if i + 1 == line {
+            let start = part.find(name)?;
+            if part[start + name.len()..].contains(name) { return None; }
+            return Some(offset + start..offset + start + name.len());
+        }
+        offset += part.len() + 1;
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn site(n: u32) -> AuthenticatedSite {
+        AuthenticatedSite { site: Site { file:"probe.lua".into(), start:n, end:n+1 }, file_sha256:"a".repeat(64), position:serde_json::json!({"bytes":{"start":n,"end":n+1}}), material:serde_json::json!({"kind":"source"}) }
+    }
+    #[test]
+    fn references_type_and_128_definitions_split_128_then_2() {
+        let owner=Arc::new(());
+        let mut plan=ResearchPlan::new("source", &"both", owner.clone());
+        plan.incoming(site(0));
+        for n in 1..=128 { plan.definition(site(n)); }
+        let plan=plan.finish();
+        assert_eq!(plan.batch_sizes, [128,2]);
+        assert_eq!(plan.operations.len(),130);
+        assert!(matches!(plan.operations[0], LogicalOperation::References(_)));
+        assert!(matches!(plan.operations[1], LogicalOperation::Type(_)));
+        plan.validate("source", &"both", &owner).unwrap();
+    }
+    #[test]
+    fn zero_work_and_outgoing_limit_are_explicit() {
+        assert!(ResearchPlan::new("source", &"none", Arc::new(())).finish().batch_sizes.is_empty());
+        let mut plan=ResearchPlan::new("source", &"outgoing", Arc::new(()));
+        for n in 0..130 { plan.definition(site(n)); }
+        let plan=plan.finish();
+        assert_eq!(plan.batch_sizes,[128]);
+        assert!(plan.outgoing_truncated);
+        assert_eq!(plan.unavailable,["outgoing_operation_limit"]);
+    }
+    #[test]
+    fn plan_is_bound_to_exact_source_query_and_request_owner() {
+        let owner=Arc::new(());
+        let plan=ResearchPlan::new("source", &"query", owner.clone()).finish();
+        assert!(plan.validate("changed", &"query", &owner).is_err());
+        assert!(plan.validate("source", &"changed", &owner).is_err());
+        assert!(plan.validate("source", &"query", &Arc::new(())).is_err());
+    }
+    #[test]
+    fn api_definition_mapping_requires_rebuilt_source_and_unique_match() {
+        let path="Interface/AddOns/Blizzard_APIDocumentationGenerated/TimerDocumentation.lua";
+        let text="local API={Name=\"Test\",Type=\"System\",Namespace=\"C_Test\",Functions={{Name=\"Test\",Type=\"Function\"}}}\nAPIDocumentation:AddDocumentationTable(API)\n";
+        let control=lycheedev_core::control::OperationControl::default();
+        let api=environment::build(environment::Identity{repository:"wow-ui-source".into(),commit:"a".repeat(40),client:"retail".into(),dependency_commits:Default::default(),generator_version:environment::GENERATOR.into()},
+            &std::collections::BTreeMap::from([(path.into(),text.as_bytes().to_vec())]),environment::Limits::default(),&control).unwrap();
+        let files=std::collections::BTreeMap::from([(path.into(),text.into())]);
+        let mut verified=VerifiedApiDefinitions::rebuild(&files,&api.facts,Some(&api.manifest),&control).unwrap().unwrap();
+        let symbol=index::Symbol{id:String::new(),kind:"declaration".into(),name:"C_Test.Test".into(),target:String::new(),category:"api-function".into(),confidence:String::new(),path:path.into(),line:1,end_line:1,signature:String::new(),scope:String::new(),ordinal:0};
+        assert!(verified.target(&symbol).unwrap().is_some());
+        verified.mappings.push(verified.mappings[0].clone());
+        assert!(verified.target(&symbol).unwrap().is_none());
+        let changed=std::collections::BTreeMap::from([(path.into(),text.replace("Test","Later"))]);
+        assert!(VerifiedApiDefinitions::rebuild(&changed,&api.facts,Some(&api.manifest),&control).is_err());
+        let mut false_manifest=api.manifest.clone();false_manifest.definitions_sha256="b".repeat(64);
+        assert!(VerifiedApiDefinitions::rebuild(&files,&api.facts,Some(&false_manifest),&control).is_err());
+    }
+
+    #[test]
+    fn scanner_depth_budget_is_visible_and_cancellation_has_priority() {
+        let text=format!("{}Target(){}", "do ".repeat(300), " end".repeat(300));
+        let control=lycheedev_core::control::OperationControl::default();
+        let mut plan=ResearchPlan::new("source",&"query",Arc::new(()));
+        let facts=plan.scan_facts(&text,"deep.lua",&control).unwrap();
+        assert!(facts.diagnostics.iter().any(|note|note.message=="source_ast_depth_limit"));
+        assert!(plan.unavailable.contains(&"structural_scanner_incomplete"));
+        assert!(!plan.scanner_diagnostics.is_empty());
+        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(plan.scan_facts(&text,"deep.lua",&control).err().unwrap().code,"command.cancelled");
+    }
+
+    #[test]
+    fn original_byte_coordinates_preserve_bom_unicode_and_ambiguity() {
+        let text="\u{feff}-- 😀\r\nfunction Obj:Target()\r\n Target(); Target()\r\nend";
+        let range=unique_name_range(text,2,"Obj:Target").unwrap();
+        assert_eq!(&text[range],"Target");
+        assert!(unique_name_range(text,3,"Target").is_none());
+        assert!(unique_name_range(text,0,"Target").is_none());
+        assert!(unique_name_range(text,2,"x['Target']").is_none());
+    }
+}

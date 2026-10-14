@@ -362,6 +362,12 @@ C新增持久预算、reload/continuation、candidate bind→supersede、opaque 
 
 38项C与5项新core测试、原测试均已写，静态独审关闭所查finding，运行NOT_RUN，现导出并接Windows组。生产console/Invocation仍需tracked取消接线，native backend只读token边界、durable journal writer、正式Delivery发布及默认host输入仍未接通，不能据此称完整Live可用或启动四阶段最终审计。
 
+### Native Source 真实逻辑操作规划基础（尚非执行批次）
+
+新增References/Type/Definition逻辑operation计划与128切批、原始来源hash/精确UTF16位置/请求owner认证；图准备与规划沿同一request预算，不能reset后继续无限工作。独立多轮审查已修普通Lua嵌套caller污染、128之后继续多余扫描、API唯一mapping/短名碰撞、独立environment原文与source混同、XML继承/兄弟owner资格顺序，以及受限scanner空/部分结果伪完整。环境原文独立传输并从明确env pin认证，材料规则v4使旧缓存失效，不绕验证。
+
+11项新计划fixture已编写，独立静态复核所查finding关闭；Windows新增计划及既有native研究准备组实际运行，当前NOT_RUN。输出明确planned_not_executed/executedSemanticBatches:null；尚未接实际操作consumer或256累计退休。XML内命名Lua函数、真实索引符号的virtual-template路径仍需补验，手写end_line fixture不作真实symbol路径证明。当前基础不得冒称全部XML计划/语义完成，也不继承71180b3静态全仓通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

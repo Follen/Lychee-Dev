@@ -10,6 +10,104 @@ impl PreparedSnapshot {
         self.control=control.clone();self.owner=Arc::new(());Ok(())
     }
 
+    /// Plan from admitted original bytes and Emmy syntax identities. No caller
+    /// supplied coordinates, batch totals or source hashes are trusted here.
+    pub(crate) fn plan_research_operations(&self, query:&crate::native_research::QueryRequest, origins:&crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>)->lycheedev_core::Result<crate::native_research::plan::ResearchPlan> {
+        use crate::native_research::plan::{ResearchPlan,unique_name_range};
+        self.control.check()?;
+        if !["incoming","outgoing","both"].contains(&query.direction.as_str()) {return Err(input_error("invalid native relation direction"));}
+        let mut plan=ResearchPlan::new(self.inputs.identity_sha256(),query,self.owner.clone());
+        if query.direction!="outgoing" && query.symbol.category.starts_with("api-") {
+            if let Some(target)=api.map(|api|api.target(&query.symbol)).transpose()?.flatten() {plan.incoming(target);}
+            else {plan.unavailable("incoming_unique_api_definition_mapping_unavailable");}
+        } else if query.direction!="outgoing" {
+            let target=if let Some(&file)=self.inputs.corpus.index.get(&query.symbol.path) {
+                let text=self.inputs.original(&query.symbol.path)?;
+                if let Some(range)=unique_name_range(text,query.symbol.line,&query.symbol.name) {
+                    let syntax=public_result(self.file_syntax(file),&self.control)?;
+                    self.inputs.charge(syntax.references.len().saturating_add(syntax.calls.len()).saturating_add(1))?;
+                    let mut sites=syntax.references.iter().map(|item|item.site.public(&self.inputs))
+                        .chain(self.syntax.declarations.iter().filter(|item|item.site.file==file).map(|item|item.site.public(&self.inputs)))
+                        .filter(|site|site.start as usize<=range.start && site.end as usize>=range.end)
+                        .collect::<Vec<_>>();
+                    // The smallest authenticated expression containing the
+                    // exact spelling is the target; duplicate records agree.
+                    sites.sort_by_key(|site|(site.end-site.start,site.start));sites.dedup();
+                    sites.first().cloned()
+                } else { None }
+            } else { None };
+            if let Some(site)=target {plan.incoming(self.research_authenticated_site(site,origins)?);}
+            else {plan.unavailable("incoming_original_syntax_position_unavailable");}
+        }
+        if query.direction!="incoming" {
+            'files: for file in 0..self.inputs.corpus.files.len() {
+                self.control.check()?;self.inputs.charge(1)?;
+                if !origins.may_contain_outgoing(&query.symbol,&self.inputs.corpus.files[file].path){continue;}
+                let original=self.inputs.original(&self.inputs.corpus.files[file].path)?;
+                // The same business scanner used by the source index assigns
+                // each edge to its nearest named/anonymous caller. A containing
+                // line interval alone would incorrectly charge nested callers.
+                let inline=origins.scripts.get(&self.inputs.corpus.files[file].path);
+                if inline.is_some() {
+                    match origins.planner_script_eligibility(&query.symbol,&self.inputs.corpus.files[file].path,||self.inputs.charge(1))? {
+                        Some(true)=>{}, Some(false)=>continue,
+                        None=>{plan.unavailable("xml_script_owner_unavailable");continue;},
+                    }
+                }
+                let (scan_text,body_offset)=if let Some(script)=inline {
+                    let body=script.body_text();
+                    // Authenticate the exact decoded body inside the admitted
+                    // generated source; never compare its line numbers to XML.
+                    let Some(start)=original.find(body).filter(|start|original.rfind(body)==Some(*start)) else {
+                        plan.unavailable("xml_decoded_body_position_unavailable");continue;
+                    };
+                    (body,start)
+                } else {(original,0)};
+                let facts=plan.scan_facts(scan_text,&self.inputs.corpus.files[file].path,&self.control)?;
+                self.inputs.charge(facts.relationships.len().saturating_add(1))?;
+                let syntax=public_result(self.file_syntax(file),&self.control)?;
+                self.inputs.charge(syntax.references.len().saturating_add(syntax.calls.len()).saturating_add(1))?;
+                for edge in &facts.relationships {
+                    self.control.check()?;self.inputs.charge(1)?;
+                    if edge.category!="call" {continue;}
+                    if inline.is_some() {
+                        // Scan the decoded body without its synthetic anonymous
+                        // wrapper. Root-body calls belong to the authenticated
+                        // XML owner; nested named/anonymous functions do not.
+                        if edge.from!="<file>" {continue;}
+                    } else if edge.from!=query.symbol.name||edge.line<query.symbol.line||edge.line>query.symbol.end_line.max(query.symbol.line) {continue;}
+                    // Match Go: the first further eligible edge proves the cut;
+                    // do not resolve/authenticate all remaining sites to count it.
+                    if plan.definition_full(){plan.truncate_outgoing();break 'files;}
+                    let Some(range)=unique_name_range(scan_text,edge.line,&edge.to) else {
+                        plan.unavailable("outgoing_original_syntax_position_ambiguous");continue;
+                    };
+                    let range=range.start+body_offset..range.end+body_offset;
+                    let mut candidates=syntax.calls.iter().map(|call|call.callee.public(&self.inputs))
+                        .filter(|site|site.start as usize<=range.start&&site.end as usize>=range.end);
+                    let Some(site)=candidates.next() else {plan.unavailable("outgoing_original_syntax_position_unavailable");continue;};
+                    if candidates.next().is_some(){plan.unavailable("outgoing_original_syntax_position_ambiguous");continue;}
+                    if !origins.within(self,&query.symbol,&site)? {continue;}
+                    plan.definition(self.research_authenticated_site(site,origins)?);
+                }
+            }
+        }
+        self.control.check()?;
+        Ok(plan.finish())
+    }
+    fn research_authenticated_site(&self,site:Site,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<crate::native_research::plan::AuthenticatedSite> {
+        site.text(&self.inputs)?;self.inputs.charge(1)?;
+        let file=self.inputs.file(&site.file).map_err(|message|input_error(&message))?;
+        let sha=file.identity["sha256"].as_str().ok_or_else(||input_error("admitted source identity missing"))?;
+        Ok(crate::native_research::plan::AuthenticatedSite{position:origins.position(self,&site)?,site,file_sha256:sha.into(),material:json!({"kind":"source"})})
+    }
+    pub(crate) fn validate_research_plan(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest)->lycheedev_core::Result<()> {
+        self.control.check()?;plan.validate(self.inputs.identity_sha256(),query,&self.owner)
+    }
+    pub(crate) fn research_steps(&self)->usize {
+        self.inputs.shared_steps.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub(crate) fn research_relations(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<Value> {
         self.control.check()?;
         let target=self.syntax.declarations.iter().filter(|decl|decl.name==symbol.name.rsplit(['.',':']).next().unwrap_or(&symbol.name)

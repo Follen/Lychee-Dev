@@ -6,14 +6,16 @@ use serde_json::{Value,json};
 use sha2::{Digest,Sha256};
 use std::{collections::BTreeMap,path::PathBuf};
 
+pub(crate) mod plan;
 mod xml;
 pub(crate) use xml::XmlResearch;
-pub const RESEARCH_RULES:&str="source-native-research-v3-load-context";
+pub const RESEARCH_RULES:&str="source-native-research-v4-independent-environment-plan";
 #[derive(Clone,Serialize,Deserialize)]
 pub struct LoadEvidence { pub manifest:String,pub ordered:Vec<String>,pub issues:Vec<Value> }
 #[derive(Clone,Serialize,Deserialize)]
 pub struct SnapshotRequest {
-    pub files:BTreeMap<String,String>,pub load_documents:BTreeMap<String,String>,pub source:Value,pub luac:LuacIdentity,
+    pub files:BTreeMap<String,String>,pub load_documents:BTreeMap<String,String>,
+    pub environment_documents:BTreeMap<String,String>,pub source:Value,pub luac:LuacIdentity,
     pub api:Vec<environment::ApiRecord>,pub environment_manifest:Option<environment::Manifest>,
     pub load_plans:Vec<LoadEvidence>,pub input_gaps:Vec<Value>,
 }
@@ -37,7 +39,7 @@ impl SnapshotRequest {
 }
 struct ResearchMetadata {
     api:Vec<environment::ApiRecord>,environment_manifest:Option<environment::Manifest>,
-    load_plans:Vec<LoadEvidence>,input_gaps:Vec<Value>,
+    load_plans:Vec<LoadEvidence>,input_gaps:Vec<Value>,api_definitions:Option<plan::VerifiedApiDefinitions>,
 }
 pub struct ResearchSession {snapshot:ResearchMetadata,prepared:PreparedSnapshot,xml:XmlResearch}
 impl ResearchSession {
@@ -46,7 +48,8 @@ impl ResearchSession {
     }
     pub fn prepare_observed(snapshot:SnapshotRequest,control:&OperationControl,observer:impl FnMut(&'static str))->Result<Self> {
         control.check()?;
-        let SnapshotRequest{mut files,load_documents,source,luac,api,environment_manifest,load_plans,input_gaps}=snapshot;
+        let SnapshotRequest{mut files,load_documents,environment_documents,source,luac,api,environment_manifest,load_plans,input_gaps}=snapshot;
+        let api_definitions=plan::VerifiedApiDefinitions::rebuild(&environment_documents,&api,environment_manifest.as_ref(),control)?;
         let xml=XmlResearch::prepare(&mut files,load_documents,&load_plans,&source,control)?;
         let xml_identity=xml.identity(control)?;
         let host=api_environment(&api,environment_manifest.as_ref(),control)?;
@@ -59,7 +62,7 @@ impl ResearchSession {
         let mut config=emmylua_code_analysis::Emmyrc::default();config.runtime.version=emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
         let inputs=SourceInputs::admit(SourceInputSpec{files,workspace_root:PathBuf::from("C:/lycheedev/pinned-source-research"),source_identity:json!({"source":source,"environment":environment_manifest,"researchRules":RESEARCH_RULES,"xml":xml_identity}),phase:"unknown".into(),ordered_occurrences:vec![],config,host,luac,limits:SourceLimits::research()},control)?;
         let prepared=prepare_observed(inputs,control,observer)?;
-        Ok(Self{snapshot:ResearchMetadata{api,environment_manifest,load_plans,input_gaps},prepared,xml})
+        Ok(Self{snapshot:ResearchMetadata{api,environment_manifest,load_plans,input_gaps,api_definitions},prepared,xml})
     }
     pub fn query(&mut self,query:QueryRequest,control:&OperationControl)->Result<Value> {
         self.query_observed(query,control,|_|{})
@@ -68,6 +71,9 @@ impl ResearchSession {
         self.prepared.begin_research_request(control)?;
         observer("query_inputs_renewed");
         if !["incoming","outgoing","both"].contains(&query.direction.as_str()){return Err(ToolkitError::arguments("invalid native relation direction"));}
+        let semantic_plan=self.prepared.plan_research_operations(&query,&self.xml,self.snapshot.api_definitions.as_ref())?;
+        let planning_steps=self.prepared.research_steps();
+        observer("query_operations_planned");
         let programs=self.xml.programs.iter().filter(|program|program.documents.contains_key(&query.symbol.path)).collect::<Vec<_>>();
         let mut gaps=self.snapshot.input_gaps.clone();gaps.extend(self.xml.gaps.clone());
         for plan in &self.snapshot.load_plans{if plan.ordered.contains(&query.symbol.path)||programs.iter().any(|program|program.manifest==plan.manifest){for issue in &plan.issues{let mut issue=issue.clone();issue["manifest"]=json!(plan.manifest);gaps.push(issue);}}}
@@ -152,6 +158,9 @@ impl ResearchSession {
         output["analysis"]["apiDeclarationCount"]=json!(self.snapshot.api.len());
         output["analysis"]["cacheHit"]=json!(false);
         if has_gaps{output["analysis"]["state"]=json!("partial");}
+        self.prepared.validate_research_plan(&semantic_plan,&query)?;
+        output["semanticPlan"]=semantic_plan.evidence();
+        output["semanticPlan"]["resourceAccounting"]=json!({"planningSteps":planning_steps,"totalSharedSteps":self.prepared.research_steps(),"budgetReset":"once_before_planning","executedSemanticBatches":null});
         observer("query_reply_assembled");
         Ok(output)
     }
@@ -264,8 +273,16 @@ pub(crate) fn snapshot_material(inv:&lycheedev_core::Invocation,pin:&lycheedev_c
         walk_load(&doc.path,&inputs,&mut std::collections::BTreeSet::new(),&mut plan,&inv.control)?;plans.push(plan);
     }} Ok(()) })?;
     drop(paths);
+    let environment_documents=if let Some(environment)=environment {
+        let identity=&environment.manifest.identity;
+        let environment_pin=lycheedev_core::selection::SourcePin{repository:identity.repository.clone(),product:identity.client.clone(),requested_ref:identity.commit.clone(),exact_commit:identity.commit.clone(),parser_revision:"source-v1".into()};
+        environment::documents_from_pin(&inv.home,&environment_pin,&inv.control)?.into_iter().map(|(path,bytes)|{
+            let text=String::from_utf8(bytes).map_err(|_|ToolkitError::new("codebase.source_integrity","environment document is not UTF8",4))?;
+            Ok((path,text))
+        }).collect::<Result<BTreeMap<_,_>>>()?
+    } else {BTreeMap::new()};
     let manifest=runtime.manifest();
-    Ok((SnapshotRequest{files,load_documents,source,luac:LuacIdentity{version:manifest.version.clone(),platform:manifest.platform.clone(),executable_sha256:manifest.sha256.clone(),executable_bytes:manifest.bytes},api:environment.map(|environment|environment.facts.clone()).unwrap_or_default(),environment_manifest:environment.map(|environment|environment.manifest.clone()),load_plans:plans,input_gaps:gaps},facts))
+    Ok((SnapshotRequest{files,load_documents,environment_documents,source,luac:LuacIdentity{version:manifest.version.clone(),platform:manifest.platform.clone(),executable_sha256:manifest.sha256.clone(),executable_bytes:manifest.bytes},api:environment.map(|environment|environment.facts.clone()).unwrap_or_default(),environment_manifest:environment.map(|environment|environment.manifest.clone()),load_plans:plans,input_gaps:gaps},facts))
 }
 struct LoadInputs<'a>{loads:&'a BTreeMap<String,Vec<&'a index::LoadFact>>,files:&'a BTreeMap<String,String>,documents:&'a BTreeMap<String,String>,context:&'a crate::xml_load::LoadContext,paths:&'a crate::xml_load::LoadPaths<'a>}
 fn walk_load(path:&str,inputs:&LoadInputs<'_>,active:&mut std::collections::BTreeSet<String>,plan:&mut LoadEvidence,control:&OperationControl)->Result<()> {
@@ -308,6 +325,145 @@ pub fn one_shot(inv:&lycheedev_core::Invocation,request:WorkerRequest)->Result<V
 mod projection_tests {
     use super::*;
 
+    fn planner_fixture(files:BTreeMap<String,String>,environment_documents:BTreeMap<String,String>,api:Option<environment::Environment>)->ResearchSession {
+        let control=OperationControl::default();
+        ResearchSession::prepare(SnapshotRequest{files,load_documents:BTreeMap::new(),environment_documents,source:json!({"repository":"planner-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:api.as_ref().map(|api|api.facts.clone()).unwrap_or_default(),environment_manifest:api.map(|api|api.manifest),
+            load_plans:vec![],input_gaps:vec![]},&control).unwrap()
+    }
+    fn planned_query(name:&str,path:&str,line:usize,end_line:usize,category:&str,direction:&str)->QueryRequest {
+        QueryRequest{symbol:index::Symbol{id:String::new(),kind:"declaration".into(),name:name.into(),target:String::new(),category:category.into(),confidence:String::new(),path:path.into(),line,end_line,signature:String::new(),scope:String::new(),ordinal:0},direction:direction.into()}
+    }
+    #[test]
+    fn outgoing_plan_excludes_nested_callers_and_stops_at_first_cut_edge() {
+        let nested=(0..130).map(|n|format!(" nested{n}()\n")).collect::<String>();
+        let outer=(0..128).map(|n|format!(" outer{n}()\n")).collect::<String>();
+        let text=format!("function Outer()\n local function Inner()\n{nested} end\n{outer} tail(); tail()\nend\n");
+        let query=planned_query("Outer","logic.lua",1,text.lines().count(),"function","outgoing");
+        let session=planner_fixture(BTreeMap::from([("logic.lua".into(),text)]),BTreeMap::new(),None);
+        let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
+        assert_eq!(evidence["plan"]["batch_sizes"],json!([128]));
+        assert_eq!(evidence["plan"]["outgoing_truncated"],true);
+        assert_eq!(evidence["plan"]["unavailable"],json!(["outgoing_operation_limit"]),"the post-limit ambiguous tail must not be resolved");
+        for operation in evidence["plan"]["operations"].as_array().unwrap() {
+            let site:&Value=&operation["target"]["site"];
+            let source=session.prepared.inputs().original("logic.lua").unwrap();
+            let text=&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize];
+            assert!(text.starts_with("outer"),"nested caller stole a parent operation: {text}");
+        }
+    }
+    #[test]
+    fn api_plan_uses_rebuilt_unique_definition_mapping_not_table_start_spelling() {
+        let path="Interface/AddOns/Blizzard_APIDocumentationGenerated/TimerDocumentation.lua";
+        let text="local API = {\n Name = \"Timer\",\n Type = \"System\",\n Namespace = \"C_Timer\",\n Functions = {\n  {\n   Name = \"After\",\n   Type = \"Function\",\n  },\n },\n}\nAPIDocumentation:AddDocumentationTable(API)\n";
+        let identity=environment::Identity{repository:"wow-ui-source".into(),commit:"a".repeat(40),client:"retail".into(),dependency_commits:BTreeMap::new(),generator_version:environment::GENERATOR.into()};
+        let api=environment::build(identity,&BTreeMap::from([(path.into(),text.as_bytes().to_vec())]),environment::Limits::default(),&OperationControl::default()).unwrap();
+        let record=api.facts.iter().find(|record|record.name=="C_Timer.After").unwrap();
+        assert_eq!(text.lines().nth(record.line-1).unwrap().trim(),"{");
+        let query=planned_query("C_Timer.After",path,record.line,record.end_line,"api-function","incoming");
+        let definitions_sha=api.manifest.definitions_sha256.clone();
+        let session=planner_fixture(BTreeMap::from([("addon.lua".into(),"function Addon() C_Timer.After() end".into())]),BTreeMap::from([(path.into(),text.into())]),Some(api));
+        assert!(session.prepared.inputs().original(path).is_err(),"environment originals must not be overlaid onto addon source");
+        let ordinary=planned_query("Addon","addon.lua",1,1,"function","outgoing");
+        let ordinary_plan=session.prepared.plan_research_operations(&ordinary,&session.xml,session.snapshot.api_definitions.as_ref()).unwrap().evidence();
+        assert_eq!(ordinary_plan["plan"]["batch_sizes"],json!([1]),"independent environment must not break ordinary addon research");
+        let evidence=session.prepared.plan_research_operations(&query,&session.xml,session.snapshot.api_definitions.as_ref()).unwrap().evidence();
+        assert_eq!(evidence["plan"]["batch_sizes"],json!([2]));
+        assert_eq!(evidence["plan"]["operations"][0]["kind"],"references");
+        assert_eq!(evidence["plan"]["operations"][1]["kind"],"type");
+        assert_eq!(evidence["plan"]["operations"][0]["target"]["file_sha256"],definitions_sha);
+        assert_eq!(evidence["plan"]["operations"][0]["target"]["material"]["mapping"]["callable"],"C_Timer.After");
+        assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn inherited_xml_handler_plan_uses_owner_and_original_source_map() {
+        let control=OperationControl::default();
+        let documents=BTreeMap::from([
+            ("Main.toc".into(),"Templates.xml\nObjects.xml\n".into()),
+            ("Templates.xml".into(),"<Ui>\n<Frame name=\"Template\" virtual=\"true\"><Scripts><OnLoad>\nlocal function Inner() Hidden(self) end\nTarget(self)\n</OnLoad></Scripts></Frame>\n</Ui>".into()),
+            ("Objects.xml".into(),"<Ui>\n<Frame name=\"Actual\" inherits=\"Template\"/>\n</Ui>".into()),
+        ]);
+        let session=ResearchSession::prepare(SnapshotRequest{
+            files:BTreeMap::new(),load_documents:documents,environment_documents:BTreeMap::new(),source:json!({"repository":"xml-plan-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:vec![],environment_manifest:None,
+            load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+        for (name,path,end_line) in [("Actual","Objects.xml",2),("Template","Templates.xml",6)] {
+            let query=planned_query(name,path,2,end_line,"xml-frame","outgoing");
+            let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
+            let operations=evidence["plan"]["operations"].as_array().unwrap();
+            assert_eq!(operations.len(),1,"{name}: {evidence}");
+            assert_eq!(operations[0]["kind"],"definition");
+            assert_eq!(operations[0]["target"]["position"]["path"],"Templates.xml");
+            assert_eq!(operations[0]["target"]["position"]["coveringRange"]["start"]["line"],4);
+            let site=&operations[0]["target"]["site"];
+            let original=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
+            assert_eq!(&original[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Target");
+        }
+    }
+
+    #[test]
+    fn sibling_xml_handlers_cannot_truncate_or_contaminate_selected_owner() {
+        for (count,same_line,sibling) in [(128,false,"Other()"),(1,true,"Foo(); Foo()")]{
+            let body=(0..count).map(|n|format!(" own{n}()\n")).collect::<String>();
+            let (xml,line)=if same_line {
+                ("<Ui><Frame name=\"A\"><Scripts><OnLoad>own0()</OnLoad></Scripts></Frame><Frame name=\"B\"><Scripts><OnLoad>Foo(); Foo()</OnLoad></Scripts></Frame></Ui>".to_owned(),1)
+            } else {
+                (format!("<Ui>\n<Frame name=\"A\"><Scripts><OnLoad>\n{body}</OnLoad></Scripts></Frame>\n<Frame name=\"B\"><Scripts><OnLoad>{sibling}</OnLoad></Scripts></Frame>\n</Ui>"),2)
+            };
+            let control=OperationControl::default();
+            let session=ResearchSession::prepare(SnapshotRequest{
+                files:BTreeMap::new(),load_documents:BTreeMap::from([("Main.toc".into(),"Objects.xml\n".into()),("Objects.xml".into(),xml)]),environment_documents:BTreeMap::new(),source:json!({"repository":"sibling-plan-test","product":"retail"}),
+                luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+                api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+            let query=planned_query("A","Objects.xml",line,line,"xml-frame","outgoing");
+            let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
+            assert_eq!(evidence["plan"]["operations"].as_array().unwrap().len(),count,"{evidence}");
+            assert_eq!(evidence["plan"]["outgoing_truncated"],false,"unrelated B cannot cut A");
+            assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"unrelated B cannot add ambiguity: {evidence}");
+        }
+    }
+
+    #[test]
+    fn semantic_plan_authenticates_operations_and_shares_graph_budget() {
+        let control=OperationControl::default();
+        let text=format!("function Caller()\n{}end\n",(0..128).map(|n|format!(" f{n}()\n")).collect::<String>());
+        let source_sha=storage::sha256(text.as_bytes());
+        let snapshot=SnapshotRequest{
+            environment_documents:BTreeMap::new(),
+            files:BTreeMap::from([("logic.lua".into(),text)]),
+            load_documents:BTreeMap::from([("Main.toc".into(),"logic.lua\n".into())]),
+            source:json!({"repository":"semantic-plan-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:vec![],environment_manifest:None,
+            load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec!["logic.lua".into()],issues:vec![]}],input_gaps:vec![],
+        };
+        let mut session=ResearchSession::prepare(snapshot,&control).unwrap();
+        let query=QueryRequest{symbol:index::Symbol{id:String::new(),kind:"declaration".into(),name:"Caller".into(),target:String::new(),category:"function".into(),confidence:String::new(),path:"logic.lua".into(),line:1,end_line:130,signature:String::new(),scope:String::new(),ordinal:0},direction:"both".into()};
+        session.prepared.begin_research_request(&control).unwrap();
+        let plan=session.prepared.plan_research_operations(&query,&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
+        let evidence=plan.evidence();
+        assert_eq!(evidence["state"],"planned_not_executed");
+        assert_eq!(evidence["plan"]["batch_sizes"],json!([128,2]));
+        let operations=evidence["plan"]["operations"].as_array().unwrap();
+        assert_eq!(operations.len(),130);
+        for operation in operations {
+            assert_eq!(operation["target"]["file_sha256"],source_sha);
+            let site=&operation["target"]["site"];
+            assert_eq!(site["file"],"logic.lua");
+            assert!(site["end"].as_u64().unwrap()>site["start"].as_u64().unwrap());
+        }
+        let planned_steps=session.prepared.research_steps();
+        assert!(planned_steps>0);
+        let _graph=session.prepared.build_xml_plan("planned-budget",session.xml.programs[0].clone(),None,&control).unwrap();
+        assert!(session.prepared.research_steps()>planned_steps,"graph construction must retain planning charges");
+        session.prepared.validate_research_plan(&plan,&query).unwrap();
+        session.prepared.begin_research_request(&control).unwrap();
+        assert!(session.prepared.validate_research_plan(&plan,&query).is_err(),"a second renewal invalidates the old request plan");
+    }
+
     #[test]
     fn indexed_projection_preserves_eager_rows_and_cross_xml_owners() {
         let control=OperationControl::default();
@@ -321,6 +477,7 @@ mod projection_tests {
             ("Objects.xml".into(),"<Ui>\r\n<Frame name=\"Actual\" inherits=\"Template\" mixin=\"Mixin\"/>\r\n</Ui>\r\n".into()),
         ]);
         let snapshot=SnapshotRequest{
+            environment_documents:BTreeMap::new(),
             files,load_documents:documents,source:json!({"repository":"projection-test","product":"retail"}),
             luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
             api:vec![],environment_manifest:None,

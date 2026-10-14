@@ -694,6 +694,7 @@ fn emmy_doctor_request() -> Result<lycheedev_source::native_research::WorkerRequ
     let luac: lycheedev_source::luac::Manifest = serde_json::from_value(pinned["runtime"].clone())?;
     Ok(WorkerRequest {
         snapshot: SnapshotRequest {
+            environment_documents: BTreeMap::new(),
             files: BTreeMap::from([(EMMY_DOCTOR_FILE.into(), EMMY_DOCTOR_SOURCE.into())]),
             load_documents: BTreeMap::from([(
                 EMMY_DOCTOR_MANIFEST.into(),

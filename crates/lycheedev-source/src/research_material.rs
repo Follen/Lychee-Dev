@@ -156,6 +156,20 @@ fn admit(
     {
         return Err(integrity("Cached research material identity differs"));
     }
+    let env_limits = environment::Limits::default();
+    let env_docs = &material.snapshot.environment_documents;
+    if env_docs.len() > env_limits.documents || env_docs.values().any(|text| text.len() > env_limits.file_bytes)
+        || env_docs.values().try_fold(0usize, |sum,text| sum.checked_add(text.len())).is_none_or(|bytes| bytes > env_limits.total_bytes)
+        || material.snapshot.environment_manifest.is_none() && !env_docs.is_empty() {
+        return Err(integrity("Cached independent environment originals exceed admission"));
+    }
+    for path in env_docs.keys() {
+        inv.control.check()?;
+        let path_lower=path.to_ascii_lowercase();
+        if !crate::git::source_path(path) || !path_lower.contains("/blizzard_apidocumentationgenerated/") || !path_lower.ends_with(".lua") {
+            return Err(integrity("Cached independent environment document path differs"));
+        }
+    }
     let limits = native::SourceLimits::research();
     let files = &material.snapshot.files;
     if files.len()+material.snapshot.load_documents.len() > limits.files
@@ -337,6 +351,7 @@ mod tests {
         };
         let identity = json!({"source":source,"luac":{"version":luac.version,"platform":luac.platform,"sha256":luac.executable_sha256,"bytes":luac.executable_bytes}});
         let snapshot = native_research::SnapshotRequest {
+            environment_documents: BTreeMap::new(),
                 load_documents:BTreeMap::from([("Main.toc".into(),"Entry.lua\nOther.xml\n".into()),("Other.xml".into(),"<Ui><Script>local x = 1 &lt; 2</Script></Ui>".into())]),
             files: BTreeMap::from([("Entry.lua".into(), text.into())]),
             source,
