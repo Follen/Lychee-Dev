@@ -1437,3 +1437,29 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 - 冻结924文件 aggregate `dcae36da3ad5bc001f5c4ac91bd50b5e098b9784ce91a5247787aa921f30aaeb`；与R21仅两个Windows retirement文件不同。完整Lua必需Linux命令 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 已实际结束：2576 test/subtest pass、3既有平台fail、28skip，30包pass、command1包fail、4无测试；build/vet通过，起终924文件SHA无变化。三个失败仍仅LiveConnectArgumentAdmission、ExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess及SourceResearchThroughCLI，不冒称Linux全套通过。
 - 新鲜审计者已逐字抽取当前Windows retirement函数与完整正式retirement/closing-reload回归，并验证真正的到期→保存中断→Load→公共wrapper链；114事件pass/0fail/0skip。精确旧R21实现仍只在真实链及3个终态正例失败，8个排除/proof/取消控制通过。Windows原生执行待推送后的精确head CI，不以抽取或交叉编译代替。
 - R22最终独立复核无新增可操作离线缺陷。消费者114事件、race 69事件、相邻Go/Lua 31事件及Node 13项全部通过；924文件和aggregate起终一致，无产品写入。覆盖真实消费者、saved proof/身份/取消/原期限、Skill兼容指引和WGC证据边界。此结论限冻结树的离线可确认范围；Windows原生、当前覆盖/skip待精确提交CI，七项客户端与WGC单列实测结果仍空白。
+
+
+### R22 交付与精确提交验证
+
+- 本批25文件已提交并推送 `a60e294f4d1fb8bba680827f3a8e32d8d16d06d9`，tree `7b10efc4bcd477ac6388792dbd10aba49c8aabdb`；远端CAS receipt、fetch与本地index tree一致。PR13保持draft，版本与发行渠道未变。
+- [精确head Windows CI38562152610](https://github.com/Follen/Lychee-Dev/actions/runs/38562152610)现已完成，五项必需作业与ci-required全部success。独立WGC观察作业已完成，但底层capture仍为**failed/exit1**；[artifact11892222252](https://github.com/Follen/Lychee-Dev/actions/runs/38562152610/artifacts/11892222252)下载SHA256 `0376036f2109860287b4549306cf382412481a498203bf58db790ffeeab3fbbf`核对一致，result commit等于a60e294f。没有把非门禁作业success当作WGC通过，七客户端及后续交互Windows复验结果仍空白。
+- Windows/amd64 Go1.27.1完整Lua必需主套件实际2893 test/subtest pass、2628叶节点pass、265容器pass、0fail、20skip；当前R16/R19/R20/R21正式存储/恢复/读取测试全部实际运行。16项固定公开集成及其子测试全通过；race、跨进程、addon与package通过。
+- [覆盖artifact11892198497](https://github.com/Follen/Lychee-Dev/actions/runs/38562152610/artifacts/11892198497)下载SHA256 `166cfca49b34fc3747d33a4e191ffab04e400c23ad857fd2ddad59a1f89e962b`核对一致，testedCommit/tree精确等于a60e294f/7b10efc4。原profile/events输入hash一致，独立按位置OR合并711916个重复block行得到22965唯一block，**24753/32099语句=77.1146%**。atomic跨包cmd/internal（排除testkit），./...测试选择，原命令和身份在artifact；不包含Lua/Node语句、不自动instrument CLI子进程、不代表业务或游戏覆盖。
+- skip仍20：9个helper入口由父测试执行；11个真可选项分别3desktop、1客户端read-only、4安装/index/图像原材料、2原runtime replay、1宿主8.3能力。WGC主套件skip与独立观察failed分别保留；没有把未跑写成通过。当前名称与原因如下。
+
+
+| 当前skip测试 | 实际原因/独立覆盖 |
+| --- | --- |
+| TestInstallationWorker、TestUpgradeWorker、TestAdmissionCrashHelper、TestWindowOwnerProcessHelper、TestWindowRunProcessHelper | 子进程helper入口；对应父回归实际执行 |
+| TestNativeModuleProtectionChild、TestNativeModuleMappedChild、TestNativeMemoryChild、TestSourceBrokerGateHelperProcess | 子进程入口；对应父回归实际执行 |
+| TestCaptureItemForExplicitProcess、TestCaptureFramesForExplicitProcess | 未提供明确授权的进程ID，不能选择用户/游戏进程来消skip |
+| TestWGCLifetimeBetweenSessions | 主套件不启用交互桌面；已在独立自建窗口观察实际执行，capture failed/exit1，不计主profile通过 |
+| TestClientWindowLiveReadOnly | 缺明确live只读目标 |
+| TestInstalledAssetCommand、TestInstalledBuildMetadata | 缺指定安装/product/build真实资料 |
+| TestInstalledIndexReadOnly | 缺指定原local-index样本 |
+| TestImageExportRealSample | 缺指定icon.blp/png/webp原样本 |
+| TestLuaMailboxRootRecipeOriginalRuntimeDump | 缺原runtime dump manifest |
+| TestLuaMailboxRootRecipeCapturedRuntimeHeader | 缺capture header、原dump manifest及hash匹配exe |
+| TestInstallationLeaseShortPathSpelling | 当前卷未启用8.3短文件名；未为测试修改宿主策略 |
+
+本批关闭可离线循环：R22独立复核无新增可操作问题，当前原生验证通过。R20现场根因仍未确认，七项客户端整合与WGC特定Windows复验均保留所需环境/步骤/预期，未执行的实际结果留空；不要求立即开游戏。
