@@ -529,7 +529,7 @@ jobs:
         # No NPM_TOKEN / NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC
         # token for short-lived registry credentials; provenance is generated
         # automatically for the public repository. The version-bound channel
-        # policy routes this release to next without ever moving latest.
+        # manifest selects the explicitly authorized npm dist-tag.
         run: |
           set -e
           npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz" --access public --tag "$PUBLISH_DIST_TAG"

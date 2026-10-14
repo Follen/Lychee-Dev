@@ -61,15 +61,20 @@ export function policyFor(version) {
   };
 }
 
-/** Strict version-bound exception; future releases must review channel policy. */
+/** Version-bound channel policy, including optional protection of latest. */
 export function validateNpmChannel(value, version) {
   const stable = /^\d+\.\d+\.\d+$/;
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.keys(value).sort().join(',') !== 'distTag,preserveLatest,schema,version' ||
-      value.schema !== 'lycheedev.npm-channel.v1' || value.distTag !== 'next' ||
-      typeof value.version !== 'string' || typeof value.preserveLatest !== 'string' ||
-      !stable.test(value.version) || !stable.test(value.preserveLatest) ||
-      value.version === value.preserveLatest || (version !== undefined && value.version !== version)) {
+      value.schema !== 'lycheedev.npm-channel.v1' ||
+      typeof value.version !== 'string' || !stable.test(value.version) ||
+      (version !== undefined && value.version !== version)) {
+    throw new Error('release.invalid_npm_channel');
+  }
+  const fields = Object.keys(value).sort().join(',');
+  if (value.distTag === 'latest' ? fields !== 'distTag,schema,version' :
+      value.distTag !== 'next' || fields !== 'distTag,preserveLatest,schema,version' ||
+      typeof value.preserveLatest !== 'string' || !stable.test(value.preserveLatest) ||
+      value.version === value.preserveLatest) {
     throw new Error('release.invalid_npm_channel');
   }
   return value;
@@ -83,7 +88,9 @@ export function verifyNpmChannelTags(tags, channel, version, distTag, phase) {
   validateNpmChannel(channel, version);
   if (distTag !== channel.distTag || !['before', 'after'].includes(phase) ||
       !tags || typeof tags !== 'object' || Array.isArray(tags) ||
-      tags.latest !== channel.preserveLatest || (phase === 'after' && tags[distTag] !== version)) {
+      typeof tags.latest !== 'string' ||
+      (channel.distTag === 'next' && tags.latest !== channel.preserveLatest) ||
+      (phase === 'after' && tags[distTag] !== version)) {
     throw new Error('release.npm_channel_mismatch');
   }
   return {ok:true, version, distTag, latest:tags.latest, phase};

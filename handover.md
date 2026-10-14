@@ -2,10 +2,10 @@
 
 ## 分支与交付
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)：`codex/fix-3.2.0` → `main`，保持草稿。本轮R29产品代码`e17f0759f9145383fdbb67b2ef6ecd021aa4802f`，tree `0b7948d0ede0abafa830ec8086f5a6b81d78d304`；7项实机及当前协议连接故障已完成，代码和结果通过同一PR交付。
+- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)已按用户授权合入`main`，合并提交`22043f9faa081549338990b38474db4172704d0d`。本地`3.2.0`、`codex/fix-3.2.0`和远端修复分支已删除，全部提交由main保留。R29产品代码`e17f0759f9145383fdbb67b2ef6ecd021aa4802f`；7项实机、当前协议连接故障及追加容量轮换均已完成。
 - `71d645ec`的[Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586)五项必需作业与汇总全部通过；该结果不代表本轮工作区。原生覆盖24349/31245=77.9293%，0fail、17skip的口径与明细见审计报告。
 - [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并，只移植必要Definitions冷读预算修复。R23无消费者WGC删除、R24–R26用户要求的三轮清理及R27整合已完成，不扩展新一轮全仓审计。
-- 发行源3.1.2、渠道next、latest=2.5.1保持；3.2.0为开发基线。不合并、不发布。没有修改Lychee Talent或全局npm安装。
+- 用户已明确授权发布3.2.0，并将npm `latest`直接指向3.2.0。发行源和渠道已更新；当前在main准备版本提交及固定标签发布流水线，npm发布尚未完成。没有修改Lychee Talent或全局npm安装。
 
 ## 当前实现与分工
 
@@ -39,7 +39,14 @@
 ## 验证与下一步
 
 - 本轮Go build/vet及完整Lua必需Go套件通过：本地Windows/amd64、Go1.27.1、Lua5.1.5、包并发2、测试并发4、包时限20分钟，2886事件/2620叶节点pass、0fail、42skip、无未完成测试。skip包含helper及本地缺少的公开/原始资料、LuaLS集成和符号链接权限，不借用旧CI结果补算；此前中止的运行不计通过。
-- 版本检查通过，版本源仍为3.1.2。没有修改命令目录或Skill输入，不扩展无关验收。
+- R29验证时版本源为3.1.2；本次发行同步将CLI、addon、npm和测试版本统一为3.2.0，并扩展渠道校验以支持授权的latest。命令目录和Skill输入不变。
+- 3.2.0准备检查：build/vet、buildinfo与addon测试通过；Node工具及启动器92pass、0fail、1skip（本地未提供固定LuaLS archive）；版本、Skill合同/生成命令与发行源码输入检查通过。固定发行提交的完整Lua必需Go、真实LuaLS和打包验证由发布流水线执行，未提前计为通过。
 - 本地CLI确认为`e17f0759`、workspaceDirty=false；同提交78项开发资源受管update成功，用户完成默认option重载。空回执对照、bind/数值报告/release/disconnect及最终doctor均通过；当前无需用户继续操作。
-- 下一步：推送同一PR并记录新head的CI状态；远端新CI尚未核验，不把旧CI或本地42skip写成新head全通过。后续只有新失败或明确未完成场景才补验。
+- 当前文档head `ab037808` 已推同一PR；[Windows CI38603173292](https://github.com/Follen/Lychee-Dev/actions/runs/38603173292)的contract、race、process、addon、package及ci-required全部成功，PR说明已同步。本地42skip与CI环境结果仍分开记，不推测新覆盖率或skip计数。
 - 私人现场日志只留在本地，不上传公共PR。按用户既有要求保留全部剩余忽略材料、原ZIP和恢复记录；不得清理其他任务或保留的`.worktrees/rust-refactor`。原R20/R22部分临时负对照日志已删除的历史限制仍见审计报告，不能补造。
+
+## 用户追加：500槽容量一轮与发布
+
+- 同一Retail进程、e17f0759受管安装完成125次完整请求：prepare/commit/confirm/release各125次，共500次业务槽交换；另有2次bind、1次unbind和1次自动reload。504次输入交换各提交一次。容量轮换在两个runtime间完成，不称同一runtime逐一执行500个物理槽。
+- 125份报告全部verified、资源released、清理complete；500个数值/十进制文本比较通过。16份当前/历史journal包含4120条业务事件（另15条checkpoint），连接已正常关闭，最终doctor全绿、无owner、0预约。
+- 下一步：完成3.2.0版本和渠道检查，推送main及v3.2.0标签，通过既有发布流水线发布到latest，回读registry和GitHub Release。保留用户要求留下的材料及rust-refactor工作树。

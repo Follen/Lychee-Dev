@@ -17,20 +17,38 @@ import { luaRuntime, generateGoIdentity, runtimeFiles, stageLuaLS } from './lual
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
-test('current release channel never moves latest and rejects stale policy',()=>{
+test('current release publishes to latest and verifies registry read-back',()=>{
   const channel=JSON.parse(readFileSync(new URL('../release/npm-channel.json',import.meta.url),'utf8'));
   const {version}=JSON.parse(readFileSync(new URL('../release/version.json',import.meta.url),'utf8'));
   assert.equal(channel.version,version);
-  assert.equal(channel.preserveLatest,'2.5.1');
-  assert.equal(distTagFor(version),'next');
+  assert.equal(distTagFor(version),'latest');
   assert.equal(distTagFor('2.5.1'),'latest');
   assert.equal(validateNpmChannel(channel,version),channel);
-  for(const bad of [null,[],{...channel,extra:true},{...channel,distTag:'latest'},
+  for(const bad of [null,[],{...channel,extra:true},{...channel,distTag:'next'},
     {...channel,preserveLatest:version},{...channel,version:version+'-dev'},
     {...channel,schema:'unknown'},{...channel,preserveLatest:251}]) {
     assert.throws(()=>validateNpmChannel(bad,version),/invalid_npm_channel/);
   }
   assert.throws(()=>validateNpmChannel(channel,'0.0.0'),/invalid_npm_channel/);
+  assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:'3.1.2'},channel,version,'latest','before').ok);
+  assert.ok(verifyNpmChannelTags({latest:version,next:'3.1.2'},channel,version,'latest','before').ok);
+  assert.ok(verifyNpmChannelTags({latest:version,next:'3.1.2'},channel,version,'latest','after').ok);
+  for(const [tags,tag,phase] of [
+    [{latest:'2.5.1',next:version},'latest','after'],
+    [{latest:version},'next','before'],
+    [{},'latest','before'],[null,'latest','before'],
+    [{latest:version},'latest','invalid'],
+  ]) assert.throws(()=>verifyNpmChannelTags(tags,channel,version,tag,phase),/npm_channel_mismatch/);
+});
+
+test('next channel preserves the explicitly protected latest version',()=>{
+  const version='3.1.2';
+  const channel={schema:'lycheedev.npm-channel.v1',version,distTag:'next',preserveLatest:'2.5.1'};
+  assert.equal(validateNpmChannel(channel,version),channel);
+  for(const bad of [{...channel,preserveLatest:version},{...channel,preserveLatest:251},
+    {...channel,distTag:'unknown'},{...channel,extra:true}]) {
+    assert.throws(()=>validateNpmChannel(bad,version),/invalid_npm_channel/);
+  }
   assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:'0.0.0'},channel,version,'next','before').ok);
   assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:version},channel,version,'next','after').ok);
   for(const [tags,tag,phase] of [
