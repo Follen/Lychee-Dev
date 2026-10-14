@@ -488,6 +488,18 @@ run38639615054/product116122379218 于 2026-10-14 22:19:54 UTC 结束：all-targ
 
 sealed CLI build与version/help/describe smoke已移到all-target之后、长事务/全仓测试之前，保持独立失败记录、不短路其余组。当前smoke仅验可执行及基本形状；严格实际describe逐项合同差分仍在下一批实现，未提前声称该门槛存在。正在运行的418快照仍含这次广告缺口，其结果保留不回填。
 
+### 默认 Live 生产接线的剩余关键路径
+
+最新独立源码调查确认：CLI仍进入旧host/lifecycle/live-v2日志/memory-slot-v4，不能把正式Driver适配成旧Transport来宣称对齐。正式CON admission/journal与typed publication已具备，但未被默认入口消费。runtime_root仍旧3.1双recipe/exact块读/原pattern第二命中即歧义，runtime_binding旧四build白名单不能代表七产品；Go3.2需要第三ForeverContext/CN recipe、短读前缀+页补读/不跨gap、按有效root去重与当前Lua路径验证、8192次等预算、窄path_changed/reload可恢复分类。该reader批正在实施，输入权仍未授予。
+
+后续生产门槛还包括：同一受锁EXE完整受控hash/PE定位字段对照的不可伪造layout能力；正式Selector/Accept前后identity/control guard；Windows双键40ms节奏、ALT WM_SYSKEYDOWN/context位、额外物理modifier检查、独立有界仅自有按键释放与uptime；Backend真正消费PublicationLease、fresh INPUT和非持久地址witness；Project完整历史请求/unknown不重放/结果投影/精确process-end退休；Activation与Bootstrap/read-only Doctor及fix。不能移除locator_not_finalized错误就称接线完成。runtime reader→输入/backend→Project/Doctor→CLI切换按共享文件单写实施；最终用自有Windows子进程/窗口跑CLI→真实RIP/Lua→slot→chord→receipt/report→新CLI resume，游戏验证继续最后。
+
+### 实际 describe 早期合同差分
+
+新增sealed EXE的独立 --contract smoke：执行真实describe，对固定Go84项命令逐字段/flags顺序/命令顺序比较；rawExactMatch保留全部差异，acceptedContractMatch仅允许已授权的两条完整Emmy摘要替换，其他缺失/多出/metadata变化仍exit1。原stdout/stderr、cli-contract.json、cli-smoke.json在seal前保存；未知回收不cleanup。早期步骤失败不短路后续独立产品组，普通smoke/doctor语义保留。此工具落地前只跑Node检查器，不能称实际EXE差分已跑。
+
+静态arity/advertised适配器已重新独立审查：contract.rs生产前5112字节与固定5d0cac6387c79ab4eb3bbb91279886316fad48bf逐字一致，旧wholefile gate失配来自Rust测试改动；更新精确全文件hash而非放宽识别。全115flag类型匹配，缺live doctor等实际差异仍报告，21addon extras未隐藏。作者49/49 Node检查通过；82/84广告观察属于当时含未提交Data两注册的dirty输入，其candidateSources记录实际hash，不冒称远端f0c的80/84。freeze receipt SHA256 43bd465053392ec8ad3d79e36efd85190fb2df05cd6832f6348351442aed5ae2。 独立复审49/49 Node与额外420逐命令变异拒绝均通过，所查5文件及CI接线无阻断；实际Windows --contract仍NOT_RUN。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

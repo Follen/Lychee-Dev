@@ -15,7 +15,10 @@ const PINNED_HASHES = Object.freeze({
   commands: 'b56c73427279a89196dcdebc720827e4eb4bc79f55f0d76f7561d49f69eed9fa',
   products: 'a3fbfc49221c2e9ea5eeba175ab18e6c3c2ee0d02ea31750b3b25d45f996423b',
 });
-export const RUST_FILTER_HASH = '16a76dcf23c836b6137b6971e3e53c7ac7974247bc6734c9d5237113f01fbeb8';
+// Reviewed 2026-10-14: name/takes_value/all/implemented are byte-identical to
+// 5d0cac6; only contract.rs's Rust tests changed for Source batch/Emmy metadata.
+// Keep the whole-file guard: even test-only edits require a fresh review.
+export const RUST_FILTER_HASH = '2efa2ea5aa913603f6becb2bee612279d10433c5c349d5fe3b5552baf419e891';
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 

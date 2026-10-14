@@ -6,7 +6,7 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
-  GO_COMMIT, LIMITS, lex, parseLiteral, parseRegistrations, extractRustProducts,
+  GO_COMMIT, LIMITS, RUST_FILTER_HASH, RUST_FILES, sha256, lex, parseLiteral, parseRegistrations, extractRustProducts,
   extractSourceTracks, extractPinnedGo, extractAdvertised, extractArities, buildFixture, compare,
   validateCommands, diffByKey, readBounded, addonInventory,
 } from './oracle.mjs';
@@ -138,6 +138,68 @@ test('explicit arity differences fail independently of help prose', () => {
   delete candidate.arities['--format'];
   assert.throws(() => compare(oracle, candidate), /unmapped Rust flag arity/);
   assert.equal(extractArities(Buffer.from('changed source')), null);
+});
+
+test('reviewed containing source is exact and every frozen Go flag has matching explicit arity', () => {
+  const source = readBounded(root, RUST_FILES.filter);
+  assert.equal(sha256(source), RUST_FILTER_HASH, 'contract.rs changed; review both semantic adapters');
+  const arities = extractArities(source);
+  const expected = Object.create(null);
+  for (const command of buildFixture(root).commands) for (const flag of command.parserFlags) {
+    if (Object.hasOwn(expected, flag.name)) assert.equal(expected[flag.name], flag.value, `${flag.name} has conflicting Go arities`);
+    expected[flag.name] = flag.value;
+    assert.equal(arities[flag.name], flag.value, `${command.path}: ${flag.name}`);
+  }
+  assert.equal(Object.keys(expected).length, 115);
+  assert.deepEqual(arities, expected, 'extra or missing match arms require review');
+});
+
+test('reviewed advertised adapter preserves builtins, ordered family routing and inventory intersection', () => {
+  const registrations = {
+    source: ['source approved', 'registered only'],
+    data: ['data approved', 'asset approved'],
+    live: ['live approved'],
+    delivery: ['addon approved', 'skill approved', 'update', 'update extra'],
+    workspace: ['target approved', 'source', 'data', 'asset', 'live', 'addon', 'skill',
+      'source wrong-family', 'data wrong-family', 'asset wrong-family', 'live wrong-family', 'addon wrong-family', 'skill wrong-family'],
+    evidence: ['evidence approved'],
+    cache: ['cache approved'],
+  };
+  const texts = { filter: readBounded(root, RUST_FILES.filter) };
+  for (const [key, names] of Object.entries(registrations)) {
+    texts[key] = Buffer.from(`pub fn commands() -> &'static [&'static str] { &[${names.map(JSON.stringify).join(',')}] }`);
+  }
+  const accepted = ['version', 'describe', 'project init', 'project status', 'project lock', 'target available',
+    'source approved', 'data approved', 'asset approved', 'live approved', 'addon approved', 'skill approved', 'update',
+    'target approved', 'evidence approved', 'cache approved', 'source', 'data', 'asset', 'live', 'addon', 'skill'];
+  const rejected = ['source wrong-family', 'data wrong-family', 'asset wrong-family', 'live wrong-family',
+    'addon wrong-family', 'skill wrong-family', 'update extra', 'not registered'];
+  const inventory = [...accepted, ...rejected].reverse().map(path => definition(path));
+  const result = extractAdvertised(inventory, texts);
+  assert.equal(result.state, 'static-extracted');
+  assert.deepEqual(result.commands.map(c => c.path), [...accepted].reverse());
+  assert.deepEqual(result.registrations, registrations);
+  // `update` is routed to Delivery, not an unconditional builtin.
+  texts.delivery = Buffer.from('pub fn commands() { &[] }');
+  assert.ok(!extractAdvertised(inventory, texts).commands.some(c => c.path === 'update'));
+});
+
+test('arity, advertised, and test-only source mutations all invalidate both hash-locked adapters', () => {
+  const source = readBounded(root, RUST_FILES.filter).toString('utf8');
+  const mutations = [
+    source.replace('"--wait-seconds" => true,', '"--wait-seconds" => false,'),
+    source.replace('"target available" => true,', '"target available" => false,'),
+    source.replace('assert_eq!(seen.len(), 115);', 'assert_eq!(seen.len(), 114);'),
+    `${source}\n// unreviewed trailing edit\n`,
+  ];
+  for (const changed of mutations) {
+    assert.notEqual(changed, source, 'mutation must actually alter the source');
+    const filter = Buffer.from(changed);
+    assert.equal(extractArities(filter), null);
+    const result = extractAdvertised([definition()], { filter });
+    assert.equal(result.state, 'unverified');
+    assert.equal(result.commands, null);
+  }
 });
 
 test('Rust Unicode scalar literals decode without reinterpreting escaped backslashes', () => {
