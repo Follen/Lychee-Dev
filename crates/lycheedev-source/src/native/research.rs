@@ -189,11 +189,14 @@ impl PreparedSnapshot {
     pub(crate) fn validate_research_plan(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest)->lycheedev_core::Result<()> {
         self.control.check()?;plan.validate(self.inputs.identity_sha256(),query,&self.owner)
     }
+    pub(crate) fn carry_research_steps(&self,spent:usize,control:&OperationControl)->lycheedev_core::Result<()> {
+        require_same_control(&self.control,control)?;self.inputs.charge(spent)
+    }
     pub(crate) fn research_steps(&self)->usize {
         self.inputs.shared_steps.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub(crate) fn execute_research_operations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,api:&[crate::environment::ApiRecord])->lycheedev_core::Result<ResearchScopeCompletion> {
+    pub(crate) fn execute_research_operations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>)->lycheedev_core::Result<ResearchScopeCompletion> {
         use crate::native_research::plan::LogicalOperation;
         self.validate_research_plan(plan,query)?;
         let mut answers=Vec::with_capacity(plan.operations().len());
@@ -223,10 +226,8 @@ impl PreparedSnapshot {
                         json!({"kind":"definition","state":if known{"known"}else{"partial"},"result":result})
                     },
                     LogicalOperation::Type(_) if target.material["kind"]=="api_definition"=>{
-                        let matches=api.iter().filter(|record|record.kind=="function"&&record.name==query.symbol.name&&record.path==query.symbol.path
-                            &&record.line>=query.symbol.line&&record.line<=query.symbol.end_line.max(query.symbol.line)).collect::<Vec<_>>();
-                        if let [record]=matches.as_slice(){json!({"kind":"type","state":"known_declaration","result":{"type":"function","descriptor":record,"sourceExecution":false,"bindingSelection":"not_asserted"}})}
-                        else{json!({"kind":"type","state":"unavailable","reason":"unique_authenticated_api_descriptor_unavailable"})}
+                        if let Some(api)=api {api.semantic_type(target,self.inputs.host.bindings(),&self.control,||self.inputs.charge(1))?}
+                        else{json!({"kind":"type","state":"unavailable","executed":false,"reason":"authenticated_api_type_model_unavailable"})}
                     },
                     LogicalOperation::Type(_)=>{
                         if let Some(graph)=graph {
@@ -242,7 +243,7 @@ impl PreparedSnapshot {
                         } else {json!({"kind":"type","state":"unavailable","reason":"no_execution_scope_for_selected_type"})}
                     },
                 };
-                let executed=graph.is_some()&&!matches!(operation,LogicalOperation::Type(target) if target.material["kind"]=="api_definition");
+                let executed=if matches!(operation,LogicalOperation::Type(target) if target.material["kind"]=="api_definition") {answer["executed"].as_bool().unwrap_or(false)}else{graph.is_some()};
                 answer["executed"]=json!(executed);
                 answer["operationIdentity"]=json!(digest(operation));
                 answer["batch"]=json!(batch);answer["operation"]=json!(answers.len());

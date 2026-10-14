@@ -31,6 +31,20 @@ const REPLY_RESERVE: Duration = Duration::from_millis(500);
 const OWNER_IDLE: Duration = Duration::from_secs(60);
 const OWNER_LIFETIME: Duration = Duration::from_secs(600);
 const REQUEST_LIMIT: Duration = Duration::from_secs(90);
+const SEMANTIC_BATCH_LIMIT: usize = 256;
+
+#[derive(Default)]
+struct SemanticAdmission { batches:usize }
+impl SemanticAdmission {
+    fn admit(&mut self,requested:usize)->Result<bool> {
+        if requested>2{return Err(fault("Native logical request exceeds two semantic batches"));}
+        let total=self.batches.checked_add(requested).ok_or_else(||fault("Native semantic admission overflow"))?;
+        if total>SEMANTIC_BATCH_LIMIT{return Ok(false);}
+        self.batches=total;Ok(true)
+    }
+    fn exhausted(&self)->bool{self.batches>=SEMANTIC_BATCH_LIMIT}
+}
+
 
 fn request_wire_deadline(now_unix_ms: u64, remaining: Duration) -> u64 {
     now_unix_ms.saturating_add(remaining.min(REQUEST_LIMIT).as_millis() as u64)
@@ -140,7 +154,82 @@ struct Identity {
 struct Cached {
     key: String,
     analysis: ResearchSession,
+    admission: SemanticAdmission,
 }
+fn execute_cached_query(cached:&mut Option<Cached>,work:Option<WorkerRequest>,reuse:Option<CachedQuery>,control:&OperationControl,owner_pid:u32,record:impl Fn(&str,Option<&ToolkitError>))->Result<Value> {
+    let result = (|| -> Result<Value> {
+        control.check()?;
+        let identity_only = reuse.is_some();
+        let mut retained_snapshot=None;
+        let (query, mut hit) = if let Some(reuse) = reuse {
+            if cached.as_ref().is_none_or(|value| value.key != reuse.key) {
+                // This handshake does not prepare or run a query.
+                // The caller sends the full input after a miss.
+                return Err(ToolkitError::new(
+                    "source.native_snapshot_missing",
+                    "Native Source snapshot is not cached",
+                    3,
+                ));
+            }
+            (reuse.query, true)
+        } else {
+            let WorkerRequest { snapshot, query } =
+                work.ok_or_else(|| fault("Native query request missing"))?;
+            // Only the independently hashed received snapshot can
+            // establish a cache entry; a caller key never does.
+            let key = snapshot.cache_key(&control)?;
+            let hit = cached.as_ref().is_some_and(|value| value.key == key);
+            if !hit {
+                *cached = None;
+                record("preparing", None);
+                *cached = Some(Cached {
+                    key,
+                    admission:SemanticAdmission::default(),
+                    analysis: ResearchSession::prepare_observed(
+                        snapshot,
+                        &control,
+                        |phase| record(phase, None),
+                    )?,
+                });
+            } else {
+                retained_snapshot=Some((key,snapshot));
+            }
+            (query, hit)
+        };
+        record("planning",None);
+        let mut planned=cached.as_mut().expect("prepared Source snapshot").analysis.plan_query(query.clone(),&control)?;
+        let requested=planned.batch_count();
+        if !cached.as_mut().expect("prepared Source snapshot").admission.admit(requested)? {
+            // No semantic operation has run. Retire the old analysis
+            // before asking for material or rebuilding exactly once.
+            let spent=planned.planning_steps();drop(planned);drop(cached.take());
+            let Some((key,snapshot))=retained_snapshot.take() else {
+                return Err(ToolkitError::new("source.native_snapshot_missing","Native Source semantic batch quota retired the cached snapshot",3));
+            };
+            record("quota_repreparing",None);
+            let mut replacement=ResearchSession::prepare_observed(snapshot,&control,|phase|record(phase,None))?;
+            planned=replacement.plan_replacement_query(query,spent,&control)?;
+            if planned.batch_count()!=requested{return Err(fault("Replacement semantic plan changed its batch count"));}
+            let mut admission=SemanticAdmission::default();
+            if !admission.admit(requested)?{return Err(fault("Fresh native analysis rejected bounded semantic plan"));}
+            *cached=Some(Cached{key,analysis:replacement,admission});hit=false;
+        }
+        drop(retained_snapshot);
+        let admitted=cached.as_ref().expect("admitted snapshot").admission.batches;
+        record("querying", None);
+        // Charge attempted work before execution. Partial or failed
+        // completion cannot keep a hot worker alive indefinitely.
+        let executed=cached.as_mut().expect("admitted snapshot").analysis.execute_planned_observed(planned,&control,|phase|record(phase,None))?;
+        let mut value=executed.value;
+        value["analysis"]["cacheHit"] = json!(hit);
+        value["nativeSession"] = json!({"workerPid":owner_pid,"cacheHit":hit,"snapshotTransfer":if identity_only{"identity_only"}else{"full"},"batches":admitted,"admittedSemanticBatches":requested,"analysisRetired":admitted>=SEMANTIC_BATCH_LIMIT});
+        control.check()?;
+        Ok(value)
+    })();
+    if result.is_err()||cached.as_ref().is_some_and(|value|value.admission.exhausted()){*cached=None;}
+    result
+}
+
 #[derive(Serialize, Deserialize)]
 struct StartupIntent {
     identity: String,
@@ -591,10 +680,8 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                 Action::Status => write_frame(
                     &mut stream,
                     &Response {
-                        value: Some(session_status(
-                            cached.as_ref().map(|value| value.key.as_str()),
-                            own.identity().pid,
-                        )),
+                        value: Some({let mut status=session_status(cached.as_ref().map(|value|value.key.as_str()),own.identity().pid);
+                            status["batches"]=json!(cached.as_ref().map_or(0,|value|value.admission.batches));status}),
                         error: None,
                     },
                     RESPONSE_BYTES,
@@ -647,61 +734,11 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                         );
                     };
                     record("processing", None);
-                    let result = (|| -> Result<Value> {
-                        control.check()?;
-                        let identity_only = reuse.is_some();
-                        let (query, hit) = if let Some(reuse) = reuse {
-                            if cached.as_ref().is_none_or(|value| value.key != reuse.key) {
-                                // This handshake does not prepare or run a query.
-                                // The caller sends the full input after a miss.
-                                return Err(ToolkitError::new(
-                                    "source.native_snapshot_missing",
-                                    "Native Source snapshot is not cached",
-                                    3,
-                                ));
-                            }
-                            (reuse.query, true)
-                        } else {
-                            let WorkerRequest { snapshot, query } =
-                                work.ok_or_else(|| fault("Native query request missing"))?;
-                            // Only the independently hashed received snapshot can
-                            // establish a cache entry; a caller key never does.
-                            let key = snapshot.cache_key(&control)?;
-                            let hit = cached.as_ref().is_some_and(|value| value.key == key);
-                            if !hit {
-                                cached = None;
-                                record("preparing", None);
-                                cached = Some(Cached {
-                                    key,
-                                    analysis: ResearchSession::prepare_observed(
-                                        snapshot,
-                                        &control,
-                                        |phase| record(phase, None),
-                                    )?,
-                                });
-                            } else {
-                                drop(snapshot);
-                            }
-                            (query, hit)
-                        };
-                        record("querying", None);
-                        let mut value = cached
-                            .as_mut()
-                            .expect("prepared Source snapshot")
-                            .analysis
-                            .query_observed(query, &control, |phase| record(phase, None))?;
-                        value["analysis"]["cacheHit"] = json!(hit);
-                        value["nativeSession"] = json!({"workerPid":own.identity().pid,"cacheHit":hit,"snapshotTransfer":if identity_only{"identity_only"}else{"full"}});
-                        control.check()?;
-                        Ok(value)
-                    })();
+                    let result=execute_cached_query(&mut cached,work,reuse,&control,own.identity().pid,&record);
                     observer_stop.store(true, Ordering::Release);
                     read_cancel.store(true, Ordering::Release);
                     if handle.join().is_err() {
                         return Err(fault("Source request observer failed"));
-                    }
-                    if result.is_err() {
-                        cached = None;
                     }
                     record("replying", result.as_ref().err());
                     let response = match result {
@@ -892,5 +929,63 @@ mod tests {
         assert_eq!(deadline.code, "command.deadline");
         assert_eq!(deadline.details["originalError"], "external.io");
         assert_eq!(deadline.details["ownerRetirementError"], denied);
+    }
+}
+
+#[cfg(test)]
+mod semantic_admission_tests {
+    use super::*;
+    fn material()->crate::native_research::SnapshotRequest {
+        crate::native_research::SnapshotRequest{files:BTreeMap::from([("a.lua".into(),format!("function Caller()\n{}end\n",(0..128).map(|n|format!(" missing{n}()\n")).collect::<String>()))]),load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),source:json!({"repository":"quota-fixture","product":"retail"}),
+            luac:crate::native::LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]}
+    }
+    fn query(direction:&str)->QueryRequest {
+        QueryRequest{symbol:crate::index::Symbol{id:String::new(),kind:"declaration".into(),name:"Caller".into(),target:String::new(),category:"function".into(),confidence:String::new(),path:"a.lua".into(),line:1,end_line:130,signature:String::new(),scope:String::new(),ordinal:0},direction:direction.into()}
+    }
+    #[test]
+    fn cached_partial_queries_reach_quota_retire_analysis_and_allow_full_resend() {
+        let control=OperationControl::default();let snapshot=material();let key=snapshot.cache_key(&control).unwrap();let mut cached=None;
+        let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        assert_eq!(value["semanticExecution"]["receipt"]["completed_batches"],0);assert_eq!(value["nativeSession"]["batches"],1);
+        cached.as_mut().unwrap().admission.batches=254;
+        for total in [255,256]{let value=execute_cached_query(&mut cached,None,Some(CachedQuery{key:key.clone(),query:query("incoming")}),&control,42,|_,_|{}).unwrap();assert_eq!(value["nativeSession"]["batches"],total);}
+        assert!(cached.is_none());assert_eq!(session_status(None,42)["ownerPid"],42);assert_eq!(session_status(None,42)["workerPid"],0);
+        assert_eq!(execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("incoming")}),&control,42,|_,_|{}).unwrap_err().code,"source.native_snapshot_missing");
+        let fresh=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();assert_eq!(fresh["nativeSession"]["batches"],1);assert_eq!(fresh["nativeSession"]["cacheHit"],false);
+    }
+    #[test]
+    fn overflow_retires_before_execution_and_full_input_rebuilds_once() {
+        let control=OperationControl::default();let snapshot=material();let key=snapshot.cache_key(&control).unwrap();let mut cached=None;
+        execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        cached.as_mut().unwrap().admission.batches=255;
+        let phases=std::cell::RefCell::new(Vec::new());
+        let error=execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("both")}),&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap_err();
+        assert_eq!(error.code,"source.native_snapshot_missing");assert!(cached.is_none());assert!(!phases.borrow().iter().any(|phase|phase=="querying"));
+        execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();cached.as_mut().unwrap().admission.batches=255;phases.borrow_mut().clear();
+        let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("both")}),None,&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap();
+        assert_eq!(value["nativeSession"]["batches"],2);assert_eq!(value["nativeSession"]["cacheHit"],false);assert_eq!(phases.borrow().iter().filter(|phase|*phase=="quota_repreparing").count(),1);assert_eq!(phases.borrow().iter().filter(|phase|*phase=="querying").count(),1);
+        assert_eq!(cached.as_ref().unwrap().analysis.request_control().deadline(),control.deadline());
+    }
+    #[test]
+    fn execution_failure_after_admission_retires_cached_analysis() {
+        let control=OperationControl::default();let mut cached=None;
+        let cancel=control.cancel_handle();let error=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:material(),query:query("incoming")}),None,&control,42,|phase,_|{if phase=="querying"{cancel.store(true,Ordering::Release);}}).unwrap_err();
+        assert_eq!(error.code,"command.cancelled");assert!(cached.is_none());
+    }
+    #[test]
+    fn attempted_batches_retire_at_256_and_overflow_is_not_admitted() {
+        let mut quota=SemanticAdmission::default();
+        for _ in 0..127{assert!(quota.admit(2).unwrap());}
+        assert_eq!(quota.batches,254);assert!(quota.admit(2).unwrap());assert!(quota.exhausted());
+        assert!(!quota.admit(1).unwrap());assert_eq!(quota.batches,256);
+        let mut quota=SemanticAdmission{batches:255};assert!(!quota.admit(2).unwrap());assert_eq!(quota.batches,255);
+        assert!(quota.admit(1).unwrap());assert!(quota.exhausted());
+    }
+    #[test]
+    fn partial_completion_does_not_refund_admission_and_zero_plan_is_not_one() {
+        let mut quota=SemanticAdmission::default();assert!(quota.admit(0).unwrap());assert_eq!(quota.batches,0);
+        for _ in 0..256 {assert!(quota.admit(1).unwrap());/* completed batches may be zero */}
+        assert!(quota.exhausted());assert!(quota.admit(3).is_err());
+        let retired=SemanticAdmission::default();assert_eq!(retired.batches,0);
     }
 }

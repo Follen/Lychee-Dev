@@ -9,7 +9,7 @@ use std::{collections::BTreeMap,path::PathBuf};
 pub(crate) mod plan;
 mod xml;
 pub(crate) use xml::XmlResearch;
-pub const RESEARCH_RULES:&str="source-native-research-v5-executed-logical-operations";
+pub const RESEARCH_RULES:&str="source-native-research-v6-api-types-and-semantic-admission";
 #[derive(Clone,Serialize,Deserialize)]
 pub struct LoadEvidence { pub manifest:String,pub ordered:Vec<String>,pub issues:Vec<Value> }
 #[derive(Clone,Serialize,Deserialize)]
@@ -43,9 +43,14 @@ struct ResearchMetadata {
 }
 pub struct ResearchSession {snapshot:ResearchMetadata,prepared:PreparedSnapshot,xml:XmlResearch}
 pub(crate) struct ResearchRequestPlan {query:QueryRequest,semantic_plan:plan::ResearchPlan,planning_steps:usize}
-impl ResearchRequestPlan {pub(crate) fn batch_count(&self)->usize{self.semantic_plan.batch_count()}}
+impl ResearchRequestPlan {
+    pub(crate) fn batch_count(&self)->usize{self.semantic_plan.batch_count()}
+    pub(crate) fn planning_steps(&self)->usize{self.planning_steps}
+}
 pub(crate) struct ExecutedResearch {pub(crate) value:Value,pub(crate) receipt:plan::ExecutionReceipt}
 impl ResearchSession {
+    #[cfg(test)]
+    pub(crate) fn request_control(&self)->&OperationControl{self.prepared.operation_control()}
     pub fn prepare(snapshot:SnapshotRequest,control:&OperationControl)->Result<Self> {
         Self::prepare_observed(snapshot,control,|_|{})
     }
@@ -77,6 +82,15 @@ impl ResearchSession {
     }
     pub(crate) fn plan_query(&mut self,query:QueryRequest,control:&OperationControl)->Result<ResearchRequestPlan> {
         self.prepared.begin_research_request(control)?;
+        self.plan_current_query(query)
+    }
+    /// One bounded replacement after quota retirement. The original absolute
+    /// control and all already-spent planning work survive; no request renewal.
+    pub(crate) fn plan_replacement_query(&mut self,query:QueryRequest,spent:usize,control:&OperationControl)->Result<ResearchRequestPlan> {
+        self.prepared.carry_research_steps(spent,control)?;
+        self.plan_current_query(query)
+    }
+    fn plan_current_query(&self,query:QueryRequest)->Result<ResearchRequestPlan> {
         if !["incoming","outgoing","both"].contains(&query.direction.as_str()){return Err(ToolkitError::arguments("invalid native relation direction"));}
         let semantic_plan=self.prepared.plan_research_operations(&query,&self.xml,self.snapshot.api_definitions.as_ref())?;
         let planning_steps=self.prepared.research_steps();
@@ -127,7 +141,7 @@ impl ResearchSession {
                     Ok(graph)=>graph,Err(error)=>{control.check()?;execution.unavailable_scope(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));gaps.push(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));continue;}
                 }}else{loaded.take().expect("load-only graph")};
                 observer("query_execute_operations");
-                let answers=self.prepared.execute_research_operations(&semantic_plan,&query,Some(&graph),&self.xml,&self.snapshot.api)?;
+                let answers=self.prepared.execute_research_operations(&semantic_plan,&query,Some(&graph),&self.xml,self.snapshot.api_definitions.as_ref())?;
                 execution.scope(json!({"manifest":program.manifest,"snapshot":graph.snapshot_key}),answers)?;
                 observer("query_project");
                 let mut result=self.prepared.research_relations(&query.symbol,&query.direction,Some(&graph),&self.xml)?;
@@ -144,7 +158,7 @@ impl ResearchSession {
         if programs.is_empty(){
             gaps.push(json!({"code":"load_order_unknown","detail":"no TOC/XML program contains the selected declaration"}));
             observer("query_execute_operations");
-            let answers=self.prepared.execute_research_operations(&semantic_plan,&query,None,&self.xml,&self.snapshot.api)?;
+            let answers=self.prepared.execute_research_operations(&semantic_plan,&query,None,&self.xml,self.snapshot.api_definitions.as_ref())?;
             execution.scope(json!({"kind":"unknown_load_order"}),answers)?;
             observer("query_project");
             let mut result=self.prepared.research_relations(&query.symbol,&query.direction,None,&self.xml)?;
@@ -397,17 +411,18 @@ mod projection_tests {
         assert_eq!(evidence["plan"]["operations"][0]["target"]["file_sha256"],definitions_sha);
         assert_eq!(evidence["plan"]["operations"][0]["target"]["material"]["mapping"]["callable"],"C_Timer.After");
         assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty());
-        // Even with an actual execution graph, declaration metadata alone is
-        // not a native Type operation and cannot complete this semantic batch.
+        // A real Emmy Type query on the authenticated environment definition
+        // must carry bound coverage, independently of mutable source globals.
         // Clone the admitted request control; do not refresh its deadline or budget.
         let control=session.prepared.operation_control().clone();
         let program=crate::xml_load::Program::from_sources("Main.toc",[("Main.toc",b"addon.lua\n".as_slice()),("addon.lua",session.prepared.inputs().original("addon.lua").unwrap().as_bytes())],&control).unwrap();
         let graph=session.prepared.build_xml_plan("api-metadata-credit",std::sync::Arc::new(program),None,&control).unwrap();
         let plan=session.prepared.plan_research_operations(&query,&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
-        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,&session.snapshot.api).unwrap();
+        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
         let mut execution=plan::ResearchExecution::new(&plan);execution.scope(json!({"kind":"actual_graph"}),completion).unwrap();
-        let (evidence,receipt)=execution.finish();assert_eq!(receipt.completed_batches,0);assert_eq!(receipt.unexecuted_operations,1);
-        assert_eq!(evidence["answers"][0]["operations"][1]["state"],"known_declaration");assert_eq!(evidence["answers"][0]["operations"][1]["executed"],false);
+        let (evidence,receipt)=execution.finish();assert_eq!(receipt.completed_batches,1);assert_eq!(receipt.unexecuted_operations,0);
+        assert_eq!(evidence["answers"][0]["operations"][1]["state"],"known");assert_eq!(evidence["answers"][0]["operations"][1]["executed"],true);
+        assert!(evidence["answers"][0]["operations"][1]["result"]["coverage"].as_array().unwrap().iter().any(|row|row["state"]=="bound"));
     }
 
     #[test]
@@ -483,6 +498,16 @@ mod projection_tests {
         let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
         assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Target");
         assert_eq!(operations[2]["target"]["position"]["coveringRange"]["start"]["line"],4);
+    }
+
+    #[test]
+    fn quota_replacement_planning_keeps_original_control_and_spent_steps() {
+        let mut session=planner_fixture(BTreeMap::from([("logic.lua".into(),"function Caller() Missing() end".into())]),BTreeMap::new(),None);
+        let control=session.request_control().clone();let before=session.prepared.research_steps();
+        let planned=session.plan_replacement_query(planned_query("Caller","logic.lua",1,1,"function","outgoing"),123,&control).unwrap();
+        assert!(planned.planning_steps()>=before+123);assert_eq!(session.request_control().deadline(),control.deadline());
+        assert!(std::sync::Arc::ptr_eq(&session.request_control().cancel_handle(),&control.cancel_handle()));
+        let stale=OperationControl::default();assert!(session.plan_replacement_query(planned_query("Caller","logic.lua",1,1,"function","outgoing"),1,&stale).is_err());
     }
 
     #[test]
@@ -565,13 +590,13 @@ mod projection_tests {
         let _graph=session.prepared.build_xml_plan("planned-budget",session.xml.programs[0].clone(),None,&control).unwrap();
         assert!(session.prepared.research_steps()>planned_steps,"graph construction must retain planning charges");
         session.prepared.validate_research_plan(&plan,&query).unwrap();
-        let answers=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,&session.snapshot.api).unwrap();
+        let answers=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
         let (answers,performed)=answers.consume(&plan).unwrap();
         assert!(performed.iter().all(|done|*done));
         assert_eq!(answers.len(),130);
         assert_eq!(answers[127]["batch"],0);assert_eq!(answers[128]["batch"],1);assert_eq!(answers[129]["batch"],1);
         assert_eq!(answers[129]["kind"],"definition");assert!(answers[129]["result"]["site"].is_object());
-        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,&session.snapshot.api).unwrap();
+        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
         let mut execution=plan::ResearchExecution::new(&plan);execution.scope(json!({"snapshot":_graph.snapshot_key}),completion).unwrap();
         let (_,receipt)=execution.finish();assert_eq!(receipt.completed_batches,2);
         session.prepared.begin_research_request(&control).unwrap();

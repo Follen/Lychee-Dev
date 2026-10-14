@@ -164,6 +164,8 @@ pub(crate) struct VerifiedApiDefinitions {
     definitions: String,
     mappings: Vec<environment::Mapping>,
     manifest: environment::Manifest,
+    analysis:emmylua_code_analysis::EmmyLuaAnalysis,
+    file_id:emmylua_code_analysis::FileId,
 }
 impl VerifiedApiDefinitions {
     pub(crate) fn rebuild(files: &std::collections::BTreeMap<String,String>, api: &[environment::ApiRecord], manifest: Option<&environment::Manifest>, control: &lycheedev_core::control::OperationControl) -> Result<Option<Self>> {
@@ -190,7 +192,67 @@ impl VerifiedApiDefinitions {
             || serde_json::to_value(&rebuilt.facts)?!=serde_json::to_value(api)? {
             return Err(invalid_environment("API manifest or facts differ from admitted original source"));
         }
-        Ok(Some(Self {definitions:rebuilt.definitions,mappings:rebuilt.mappings,manifest:rebuilt.manifest}))
+        let mut analysis=emmylua_code_analysis::EmmyLuaAnalysis::new();
+        let mut config=emmylua_code_analysis::Emmyrc::default();config.runtime.version=emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
+        analysis.update_config(Arc::new(config));
+        let root=std::path::PathBuf::from("C:/lycheedev/authenticated-environment-types");analysis.add_main_workspace(root.clone());
+        let ids=analysis.update_files_by_path_shared_checked(vec![(root.join("definitions.lua"),Some(Arc::<str>::from(rebuilt.definitions.as_str())))],||control.check())?;
+        let file_id=*ids.first().ok_or_else(||invalid_environment("API semantic input missing"))?;
+        if ids.len()!=1||analysis.db.get_file_text(file_id)!=Some(rebuilt.definitions.as_str())
+            ||!analysis.semantic_model(file_id).parse_errors().unwrap_or_default().is_empty(){return Err(invalid_environment("API semantic input differs or fails parsing"));}
+        Ok(Some(Self {definitions:rebuilt.definitions,mappings:rebuilt.mappings,manifest:rebuilt.manifest,analysis,file_id}))
+    }
+    /// Query the authenticated environment declaration in a separate Emmy model.
+    /// This is declaration semantics, never a claim about mutable source globals.
+    pub(crate) fn semantic_type(&self,target:&AuthenticatedSite,bindings:&[crate::native::HostBinding],control:&lycheedev_core::control::OperationControl,mut step:impl FnMut()->Result<()>)->Result<Value> {
+        use emmylua_code_analysis::binding_context::{BindingContext,BindingDecision,BindingSite,BoundValue,SelectedValue,BindingSession,EnvironmentCallable};
+        use emmylua_parser::{LuaAstNode,LuaExpr};
+        control.check()?;
+        if target.file_sha256!=self.manifest.definitions_sha256||target.material["manifest"]!=serde_json::to_value(&self.manifest)? {return Err(invalid_environment("API Type target belongs to another environment"));}
+        let mapping:environment::Mapping=serde_json::from_value(target.material["mapping"].clone())?;
+        let mut matches=0usize;
+        for admitted in &self.mappings {step()?;if serde_json::to_value(admitted)?==target.material["mapping"]{matches+=1;}}
+        let start=crate::xml_inline::source_map::utf16_offset(&self.definitions,mapping.generated_line,mapping.generated_utf16_column).map_err(|_|invalid_environment("API Type coordinate outside verified definitions"))?;
+        let name=mapping.callable.rsplit(['.',':']).next().unwrap_or("");
+        let end=start.checked_add(name.len()).ok_or_else(||invalid_environment("API Type coordinate overflow"))?;
+        let position=crate::xml_inline::source_map::utf16_range(&self.definitions,crate::xml_inline::source_map::Span::new(start,end)).map_err(|_|invalid_environment("API Type range outside verified definitions"))?;
+        if matches!=1||target.site.file!="@native/api-definitions.lua"||target.site.start as usize!=start||target.site.end as usize!=end
+            ||self.definitions.get(start..end)!=Some(name)||serde_json::to_value(position)?!=target.position{return Err(invalid_environment("API Type mapping or site differs from authenticated definition"));}
+        let mut candidates=bindings.iter().filter(|binding|binding.name()==mapping.callable);
+        let binding=candidates.next();
+        let descriptor=if candidates.next().is_none(){binding.and_then(|binding|binding.native_descriptor())}else{None};
+        let Some(descriptor)=descriptor else{return Ok(serde_json::json!({"kind":"type","state":"unavailable","executed":false,"reason":"authenticated_native_api_binding_unavailable"}));};
+        let binding=binding.expect("descriptor binding");
+        if binding.descriptor().is_none_or(|record|record["path"]!=mapping.source_path||record["line"]!=mapping.source_line){return Err(invalid_environment("API Type host origin differs from unique mapping"));}
+        let model=self.analysis.semantic_model(self.file_id);
+        let root=model.syntax_tree().ok_or_else(||invalid_environment("API semantic tree missing"))?.get_red_root();
+        let mut selected=None;
+        for node in root.descendants(){control.check()?;step()?;
+            if let Some(expr)=LuaExpr::cast(node) {
+                let range=expr.get_range();let start:u32=range.start().into();let end:u32=range.end().into();
+                if start<=target.site.start&&end>=target.site.end&&selected.as_ref().is_none_or(|(length,_)|end-start<*length){selected=Some((end-start,expr.get_syntax_id()));}
+            }
+        }
+        let Some((_,syntax))=selected else{return Ok(serde_json::json!({"kind":"type","state":"unavailable","executed":false,"reason":"authenticated_api_syntax_target_unavailable"}));};
+        let site=BindingSite{file_id:self.file_id,syntax};
+        struct DeclarationContext { identity:String,site:BindingSite,descriptor:Arc<EnvironmentCallable>,control:lycheedev_core::control::OperationControl }
+        impl BindingContext for DeclarationContext {
+            fn identity(&self)->&str{&self.identity}
+            fn resolve(&self,site:BindingSite)->BindingDecision<BoundValue>{
+                if let Err(error)=self.control.check(){return BindingDecision::Unavailable{proof:self.identity.clone(),reason:error.code};}
+                if site!=self.site{return BindingDecision::Unavailable{proof:self.identity.clone(),reason:"outside_authenticated_api_type_target".into()};}
+                BindingDecision::Bound(BoundValue{identity:self.identity.clone(),proof:self.identity.clone(),value:SelectedValue::EnvironmentCallable(self.descriptor.clone())})
+            }
+        }
+        let identity=digest(&(target,binding.identity(),"authenticated-api-type-v1"));
+        let session=BindingSession::new(Arc::new(DeclarationContext{identity:identity.clone(),site,descriptor:descriptor.clone(),control:control.clone()}));
+        let model=self.analysis.semantic_model_with_context(self.file_id,session.clone());
+        step()?;let inferred=model.type_of_expr(syntax);control.check()?;
+        let coverage=session.coverage();
+        let known=matches!(&inferred,emmylua_code_analysis::LuaType::DocFunction(_))&&coverage.iter().any(|row|row.site==site&&row.state=="bound");
+        let coverage=coverage.iter().map(|row|serde_json::json!({"operation":row.operation,"state":row.state,"proof":row.proof,"reason":row.reason})).collect::<Vec<_>>();
+        Ok(serde_json::json!({"kind":"type","state":if known{"known"}else{"unavailable"},"executed":true,
+            "result":{"type":emmylua_code_analysis::humanize_semantic_type_detailed(&model,&inferred),"coverage":coverage,"binding":binding,"queryIdentity":identity,"target":target,"bindingSelection":"authenticated_environment_declaration","sourceExecution":false}}))
     }
     pub(crate) fn target(&self,symbol:&index::Symbol)->Result<Option<AuthenticatedSite>> {
         if symbol.category!="api-function" {return Ok(None);}
@@ -302,6 +364,28 @@ mod tests {
         assert!(VerifiedApiDefinitions::rebuild(&changed,&api.facts,Some(&api.manifest),&control).is_err());
         let mut false_manifest=api.manifest.clone();false_manifest.definitions_sha256="b".repeat(64);
         assert!(VerifiedApiDefinitions::rebuild(&files,&api.facts,Some(&false_manifest),&control).is_err());
+    }
+
+    #[test]
+    fn api_type_query_uses_managed_inference_and_rejects_foreign_targets() {
+        for type_name in ["number","UnsupportedNominal"] {
+            let path="Interface/AddOns/Blizzard_APIDocumentationGenerated/TestDocumentation.lua";
+            let text=format!("local API={{Name=\"Test\",Type=\"System\",Namespace=\"C_Test\",Functions={{{{Name=\"Test\",Type=\"Function\",Arguments={{{{Name=\"value\",Type=\"{type_name}\"}}}}}}}}}}\nAPIDocumentation:AddDocumentationTable(API)\n");
+            let control=lycheedev_core::control::OperationControl::default();
+            let api=environment::build(environment::Identity{repository:"wow-ui-source".into(),commit:"a".repeat(40),client:"retail".into(),dependency_commits:Default::default(),generator_version:environment::GENERATOR.into()},&std::collections::BTreeMap::from([(path.into(),text.as_bytes().to_vec())]),environment::Limits::default(),&control).unwrap();
+            let files=std::collections::BTreeMap::from([(path.into(),text)]);
+            let verified=VerifiedApiDefinitions::rebuild(&files,&api.facts,Some(&api.manifest),&control).unwrap().unwrap();
+            let record=api.facts.iter().find(|item|item.name=="C_Test.Test").unwrap();
+            let symbol=index::Symbol{id:String::new(),kind:"declaration".into(),name:record.name.clone(),target:String::new(),category:"api-function".into(),confidence:String::new(),path:path.into(),line:record.line,end_line:record.end_line,signature:String::new(),scope:String::new(),ordinal:0};
+            let target=verified.target(&symbol).unwrap().unwrap();
+            let host=crate::native_research::api_environment(&api.facts,Some(&api.manifest),&control).unwrap();
+            let answer=verified.semantic_type(&target,host.bindings(),&control,||Ok(())).unwrap();
+            assert_eq!(answer["executed"],true);assert_eq!(answer["state"],if type_name=="number"{"known"}else{"unavailable"},"{answer}");
+            assert!(!answer["result"]["coverage"].as_array().unwrap().is_empty());
+            let missing=verified.semantic_type(&target,&[],&control,||Ok(())).unwrap();assert_eq!(missing["executed"],false);
+            let mut foreign=target.clone();foreign.site.start+=1;assert!(verified.semantic_type(&foreign,host.bindings(),&control,||Ok(())).is_err());
+            control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);assert_eq!(verified.semantic_type(&target,host.bindings(),&control,||Ok(())).unwrap_err().code,"command.cancelled");
+        }
     }
 
     #[test]

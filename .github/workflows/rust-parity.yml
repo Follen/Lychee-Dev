@@ -179,7 +179,8 @@ jobs:
         run: node tools/rust-cargo.mjs --owner ci-doctor-release --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::doctor_release_ -j 1
       - name: Run native session lifecycle unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-session-lifecycle --one-shot -- test --locked --offline -p lycheedev-source --lib native_session::tests -j 1
+        run: |
+          node tools/rust-cargo.mjs --owner ci-session-lifecycle --one-shot -- test --locked --offline -p lycheedev-source --lib native_session:: -j 1
       - name: Run native research plans projections and XML preparation fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         # Actual modules are plan::tests, projection_tests, load_context_tests

@@ -446,6 +446,14 @@ Windows新增callback注册guard供CLI连接core TrackedCancellation而不反向
 
 11项新core/Windows fixture含确定性退出/取消竞态已编写，独立源码复审所查finding闭合，Rust/Windows实际NOT_RUN；现接CI。CLI正常invocation、broker、helper及Source serve仍有旧token接线，当前仅API基础，不声称正常Ctrl+C已经保留取消时间戳；后续接线须继续保原deadline与生命周期，不从raw AtomicBool伪造历史时点。
 
+### API 真正 Type 推导及 session admitted 配额
+
+API Type现在由独立认证environment原文重建definitions.lua和唯一mapping，建立独立Emmy模型，核精确UTF16/site/host来源后调用managed semantic_model_with_context→type_of_expr及bound coverage。source模型不覆盖/替代环境原定义；未绑定为not_executed，实际推导Unknown为executed/unavailable，不把descriptor或unknown称已知function。
+
+生产cached-query采用同request一次plan→admitted/attempted批累计→execute，completed仅证据不决定限额。255+2执行前先退分析；identity-only回snapshot_missing，full输入最多一次同control重建且继承planning steps；恰256及处理错误退analysis，broker原60秒idle/600秒life保留。独立源码复核未发现本批阻断；新增5项配额fixture中3项走实际生产helper，预置254/255边界，不能称已跑256次真实IPC/多CLI。
+
+本批Rust运行NOT_RUN。独立审核指出新semantic_admission_tests不被旧native_session::tests过滤器覆盖，现扩为native_session::整体并用block scalar实际解析YAML。真实完整IPC额度轮转、0-batch helper与来源shadow/full Retail semantic/session实测仍需补，不把上一ec2的小fixture复用为这次通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
