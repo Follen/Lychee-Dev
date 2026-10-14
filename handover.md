@@ -38,7 +38,7 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 | --- | --- | --- |
 | workspace | 根 Cargo.toml 声明 cli/core/data/delivery/live/source/windows 七crate | 按Go3.2逐业务核对；提交落后不等于每个语义未实现 |
 | Source引擎 | `crates/lycheedev-source/Cargo.toml` 默认emmy-prototype，真实链接emmylua_code_analysis/parser；`src/native/host.rs`、`host_runtime.rs`、`session.rs`等已有worker/session实现 | 保留直接库架构，差分业务并关闭生命周期/资源/完整输入问题；不能称其仍只是LuaLS壳 |
-| Source复建 | 同manifest依赖被忽略的`.tmp/rust-source-binding-context-01/upstream`修改版；版本=0.30.0 | tracked checkout缺完整依赖字节，先恢复来源+补丁+许可+哈希，再干净重建；不声称用户本地依赖丢失 |
+| Source复建 | 同manifest依赖被忽略的`.tmp/rust-source-binding-context-01/upstream`修改版；版本=0.30.0 | tracked checkout缺原修改版完整字节；已核验公开upstream基底，可按用户新授权移植最小必要补丁并作为新来源重新证明等价/复建；不声称恢复了旧字节或用户本地丢失 |
 | Source完整分析 | [历史host/runtime进度](docs/toolkit/rust-host-and-runtime-progress-2026-10-12.md)记载多轮Retail失败和分项通过；最后Retail19只记录正在运行 | `unverified`；无Retail19成功结论，不据历史unit通过宣称完整cold/warm/query/context/close通过 |
 | Source旧链 | feature条件下旧LuaLS链尚在；luac5.1与tree-sitter有独立验证/结构职责 | 审核调用、feature、测试与包消费者后再删真正死代码；不按名称一刀切 |
 | Live默认路径 | `crates/lycheedev-live/src/native.rs`无匹配RootRule返回live.locator_not_finalized；`runtime_observation.rs`明确ObservationOnly | 新runtime/RIP观察尚未构成默认可输入连接；默认接线与freshness/identity/授权完整闭环待迁移 |
@@ -52,7 +52,7 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 ## 4. 分阶段迁移与退出条件
 
 1. **冻结oracle和盘点。** 下载/构建对应Go发布产物并核对commit/sha256；导出describe/help、默认值、输出schema、退出码、Skill和addon清单。建立逐命令矩阵，每项链接源码/fixture/结果。差分不得改变main或Go工作树。
-2. **复建Rust依赖。** 找回Emmy修改版确切源码、上游revision、补丁/许可证；固定工具链、Cargo.lock及对应源码。隔离两套fresh Cargo home顺序离线重建，保持现有磁盘配额/进程所有权。无法复建即阻断候选结论，不盲目换上游版本。
+2. **复建Rust依赖。** 优先实际获取已验证公开Emmy upstream固定commit，核验archive/tree/许可证，按所需API/语义差分决定直接复用或实施最小可review补丁。用户已明确允许这条新依赖重建路线；不能把原私有目录缺失作为全任务长期阻塞，也不能把新补丁伪称历史原字节还原。保留新来源/补丁/测试身份，更新旧custody假设而不伪造原manifest哈希。固定工具链、Cargo.lock和对应源码后，隔离两套fresh Cargo home顺序离线重建，遵守配额/所有权。
 3. **保留基础并先自动差分。** core/selection/project/evidence/delivery、parser/CLI/Skill、Source、Data分别建立正常/错误/恢复golden。逐模块决定保留、适配、替换或补齐；保留首次失败和修复后结果。
 4. **完整Live协议迁移。** 先导入固定Go Lua/协议fixture与模型故障集，再接runtime/RIP默认host、输入、日志和恢复。复用同一addon，先离线再Windows自有子进程/合成窗口，不操作游戏。
 5. **清理与一致性。** 删除经证实无消费者的旧LuaLS/WGC/光学/旧协议或其他死代码，修正已失效文档入口；每批有引用审计、替代覆盖和受影响回归。历史证据保留，不清用户数据或未登记缓存。
@@ -137,6 +137,10 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 
 每轮登记stage/round、被审commit或tree、独立审视范围、finding、修复commit、验证命令/产物/结果和复审结论。修复后旧树的无问题结论不能转给新树。停止条件是已覆盖约定范围、已知可行动finding闭环且独立复审未产生新可行动项，有证据支持；不宣称数学意义零bug。需要用户/实机确认的例外只登记到本文最后，保持未验证，不等待它们才推进其他可独立工作，也不将其算通过。发现跨阶段新问题时补修与受影响复审，不为遵守形式顺序掩盖已知缺陷。
 
+### Source全仓固定真实输入验收
+
+不得仅用小fixture验收。复用历史Retail分支固定commit `31c7f7b9cc79e56c986b365c06a6afbcf3c9177b` 的完整Gethe/wow-ui-source输入：历史记录为4036文档（2551 Lua、1091 XML、394 TOC；32,269,051B），完整XML处理还记录4018 inline maps/sourceFiles6569。重新获取后核对真实清单和内容，不把历史计数当新扫描结果。完整导入/索引/分析后实际执行代表性查询、正确文件/符号/行/源码定位、refs/context/flow、cold/warm、持续session、关闭及资源释放，与固定Go同输入差分。保留全量加载闭包/映射和原预算；旧Retail08部分连续成功与Retail19“运行中”均不能替代当前候选全仓通过。若用户另指定具体分支，另固定其精确commit并新增全仓矩阵，不隐式换输入。
+
 ### 独立Source与Skill实际任务质量验收
 
 Source与Skill分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用固定Go3.2.0合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
@@ -148,6 +152,14 @@ Source与Skill分别安排新的独立代理，不能由实现者自评通过，
 ## 10. 本次交付与验证记录
 
 本次范围：README双语、DESIGN、todo、handover、AGENTS优先级与旧文档历史标记。没有产品代码/配置/依赖/发行修改。Go tag与Rust调查HEAD已核对；文档链接、大小写冲突、唯一handover、diff范围和空白检查在提交前执行。首批文档提交`69827626bff23649898527c7a39200bf1dc5d93c`已推送，独立[草稿PR #14](https://github.com/Follen/Lychee-Dev/pull/14)已创建，后续批次复用该PR；PR同时包含旧Rust snapshot，不能将其全部差异归成本次新实现。产品测试全部not_run，性能未测，真实客户端未接触。
+
+后续只读调查已核实公开Emmy upstream `08b0873962e83bb8307e9a81052e3f41578fbc78` archive SHA256 `ae529a06b551dbb301744bea2b58ba94cb3e30340f63a8c83f9335be9086fdb7`，848文件/8,382,174B与历史基底一致。这只证明原公开基底，不证明缺失修改版或原custody字节可复原；新移植需独立身份和验证。
+
+### 首批CLI实现（非完整等价）
+
+固定Go源码独立复核后，CLI main.rs补describe formats/development、命令自身help旗标、format预扫描及token/route错误优先级、空值/重复/不支持参数文案，加入crate级forbid(unsafe_code)。新增4组单元测试，尚未执行：受控cargo入口在编译前被缺失的旧source-identity.json阻断。Rust1.99 rustfmt语法解析及diff空白检查通过，不等同编译/测试通过。未新增缺失命令或声称handler等价；typed numeric完整错误优先级另待差分。公开upstream新依赖身份接入后必须回跑本批测试。
+
+工具链已找到并复用Rust/Cargo1.99.0 Linux；未新增安装。固定Retail源码已实际下载，PAX commit匹配31c7f7b，4036 Lua/XML/TOC及32,269,051B均已重验；这只是输入准备，不是Source分析成功。
 
 ## 11. 最后执行：需要实际配合的测试清单
 

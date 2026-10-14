@@ -17,13 +17,14 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 
 - [ ] Pin Go release executable/source hashes; export complete describe/help/CLI/Skill/addon oracle.
 - [ ] Inventory each current Rust implementation against F01–F13: retain/adapt/replace/missing/unverified with source and test evidence.
-- [ ] Recover and pin exact modified Emmy dependency source, patches and licenses; no moving upstream substitution.
+- [ ] Use the verified fixed public Emmy upstream as the recovery base; compare consumed APIs, port minimal necessary patches as a NEW dependency with explicit provenance/license/tests rather than pretending to reproduce missing private bytes. Reconcile old custody assumptions honestly.
 - [ ] Validate clean build, locked toolchain/dependencies and two independent offline corresponding-source rebuilds within owned cache limits.
 
 ## 2. Full business parity (offline first)
 
 - [ ] Differential CLI/parser/envelopes/JSONL/exit codes, selection/products/pins/projects/evidence and budgets.
 - [ ] Keep native Emmy worker/session; close full Source/validation/batch/flow/cache/crash/deadline/cleanup gaps without reducing inputs or checks.
+- [ ] Import and analyze the entire fixed Retail31c7f7b corpus (all Lua/XML/TOC and inline maps), run representative file/symbol/line/source queries, refs/context/flow, cold/warm/persistent session and resource cleanup against Go; small fixtures and historical Retail19 are not acceptance.
 - [ ] Complete Data DB2/SQL effective/table/scan Hotfix/providers/CASC/CDN/assets/relations and error paths.
 - [ ] Reuse the released addon; reconcile installation/500-slot/upgrade/rollback/modified-file protection.
 - [ ] Reuse the fixed Go3.2.0 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.

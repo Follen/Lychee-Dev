@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod contract;
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, VERSION};
 use serde_json::{Value, json};
@@ -12,11 +14,105 @@ fn home(flags: &BTreeMap<String, String>) -> PathBuf {
             PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join(".lycheedev")
         })
 }
+// Go v3.2.0 scans the complete argv for output encoding before any other
+// admission check. The last occurrence wins even when the flag is repeated.
+fn requested_format(args: &[String]) -> &str {
+    let mut format = "text";
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--format" {
+            if let Some(value) = args.get(index + 1) {
+                format = value;
+            }
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            format = value;
+        }
+    }
+    format
+}
+fn valid_format(format: &str) -> bool {
+    ["text", "json", "jsonl"].contains(&format)
+}
+fn unsupported_route_flag(command: &str, flag: &str) -> ToolkitError {
+    let route = if command.is_empty() { "the command" } else { command };
+    ToolkitError::arguments(format!(
+        "{flag} is not supported by {route}; use {route} --help"
+    ))
+}
 fn parse(args: &[String]) -> Result<Invocation> {
+    if !valid_format(requested_format(args)) {
+        return Err(ToolkitError::arguments(
+            "format must be text, json, or jsonl",
+        ));
+    }
+    let all = contract::all();
+    // Collect words before checking values, as the fixed Go parser does. This
+    // preserves unknown-token priority and lets route admission precede values.
+    let mut words = vec![];
+    let mut index = 0;
+    while index < args.len() {
+        let token = &args[index];
+        if token == "-h" || token == "--help" {
+            index += 1;
+            continue;
+        }
+        if token.starts_with('-') {
+            let (key, inline) = token
+                .split_once('=')
+                .map(|(key, _)| (key, true))
+                .unwrap_or((token.as_str(), false));
+            let spec = all
+                .iter()
+                .flat_map(|d| d.flags.iter())
+                .find(|f| f.name() == key)
+                .ok_or_else(|| ToolkitError::arguments(format!("unknown flag {key}")))?;
+            if !spec.takes_value() && inline {
+                return Err(ToolkitError::arguments(format!("unknown flag {key}")));
+            }
+            if spec.takes_value() && !inline && index + 1 < args.len() {
+                index += 1;
+            }
+        } else {
+            words.push(token.clone());
+        }
+        index += 1;
+    }
+    let definition = all
+        .iter()
+        .filter(|d| {
+            words.starts_with(
+                &d.path
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .max_by_key(|d| d.path.split_whitespace().count());
+    if definition.is_none() && !words.is_empty() {
+        return Err(ToolkitError::arguments(format!(
+            "unknown command {:?}; use --help",
+            words.join(" ")
+        )));
+    }
+    let help = args.iter().any(|arg| arg == "--help" || arg == "-h");
+    let (command, positional) = if let Some(def) = definition {
+        let count = def.path.split_whitespace().count();
+        if words.len() > count + usize::from(!def.arguments.is_empty()) {
+            return Err(ToolkitError::arguments(format!(
+                "unexpected argument {:?}", words[count]
+            )));
+        }
+        if !def.arguments.is_empty() && words.len() == count && !help {
+            return Err(ToolkitError::arguments(format!(
+                "missing required argument {}",
+                def.arguments[0]
+            )));
+        }
+        (def.path.clone(), words.get(count).cloned())
+    } else {
+        (String::new(), None)
+    };
     let mut flags = BTreeMap::new();
     let mut flag_order = Vec::new();
-    let mut words = vec![];
-    let all = contract::all();
     let mut index = 0;
     while index < args.len() {
         let token = &args[index];
@@ -32,8 +128,20 @@ fn parse(args: &[String]) -> Result<Invocation> {
                 .flat_map(|d| d.flags.iter())
                 .find(|f| f.name() == key)
                 .ok_or_else(|| ToolkitError::arguments(format!("unknown flag {key}")))?;
+            let accepted = definition.map_or_else(
+                || ["--home", "--format"].contains(&key),
+                |def| def.flags.iter().any(|flag| flag.name() == key),
+            );
+            if !accepted {
+                return Err(unsupported_route_flag(&command, key));
+            }
+            let repeatable = command == "update" && ["--path", "--installation"].contains(&key)
+                || command == "data sql" && key == "--param";
+            if flags.contains_key(key) && !repeatable {
+                return Err(ToolkitError::arguments(format!("repeated flag {key}")));
+            }
             let value = if spec.takes_value() {
-                match inline {
+                let value = match inline {
                     Some(v) => v.to_owned(),
                     None => {
                         index += 1;
@@ -44,18 +152,16 @@ fn parse(args: &[String]) -> Result<Invocation> {
                                 ToolkitError::arguments(format!("missing value for {key}"))
                             })?
                     }
+                };
+                if value.is_empty() {
+                    return Err(ToolkitError::arguments(format!("empty value for {key}")));
                 }
+                value
             } else {
-                if inline.is_some() {
-                    return Err(ToolkitError::arguments(format!("{key} takes no value")));
-                }
                 "true".into()
             };
             flag_order.push((key.to_owned(), value.clone()));
             if let Some(previous) = flags.insert(key.into(), value.clone()) {
-                if !["--path", "--installation", "--param"].contains(&key) {
-                    return Err(ToolkitError::arguments(format!("duplicate flag {key}")));
-                }
                 let store = format!("__repeat:{key}");
                 let mut values: Vec<String> = flags
                     .get(&store)
@@ -70,72 +176,14 @@ fn parse(args: &[String]) -> Result<Invocation> {
                 values.push(value);
                 flags.insert(store, serde_json::to_string(&values)?);
             }
-        } else {
-            words.push(token.clone());
         }
         index += 1;
     }
     if words.is_empty() {
         flags.insert("--help".into(), "true".into());
     }
-    let definition = all
-        .iter()
-        .filter(|d| {
-            words.starts_with(
-                &d.path
-                    .split_whitespace()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .max_by_key(|d| d.path.split_whitespace().count());
-    if definition.is_none() && !words.is_empty() {
-        return Err(ToolkitError::arguments(format!(
-            "unknown command {}",
-            words.join(" ")
-        )));
-    }
-    let (command, positional) = if let Some(def) = definition {
-        let count = def.path.split_whitespace().count();
-        if words.len() > count + usize::from(!def.arguments.is_empty()) {
-            return Err(ToolkitError::arguments("unexpected positional argument"));
-        }
-        for flag in flags.keys() {
-            if let Some(name) = flag.strip_prefix("__repeat:") {
-                if !(def.path == "update" && ["--path", "--installation"].contains(&name)
-                    || def.path == "data sql" && name == "--param")
-                {
-                    return Err(ToolkitError::arguments(format!("duplicate flag {name}")));
-                }
-                continue;
-            }
-            if flag != "--help" && !def.flags.iter().any(|f| f.name() == flag) {
-                return Err(ToolkitError::arguments(format!(
-                    "{} does not accept {flag}",
-                    def.path
-                )));
-            }
-        }
-        if !def.arguments.is_empty() && words.len() == count && !flags.contains_key("--help") {
-            return Err(ToolkitError::arguments(format!(
-                "missing required argument {}",
-                def.arguments[0]
-            )));
-        }
-        (def.path.clone(), words.get(count).cloned())
-    } else {
-        (String::new(), None)
-    };
-    if let Some(format) = flags.get("--format")
-        && !["text", "json", "jsonl"].contains(&format.as_str())
-    {
-        return Err(ToolkitError::arguments(
-            "format must be text, json, or jsonl",
-        ));
-    }
-    // The frozen public parser completes token/route validation before rejecting
-    // typed Data IDs. Keep this in parse (and its context empty), while a later
-    // unknown/unsupported flag retains priority over an empty or malformed ID.
+    // Existing typed-value validation stays in parse, with empty error context.
+    // Full typed-option precedence is a separate parity audit from token admission.
     for (key, value) in &flag_order {
         let key = key.as_str();
         let typed_id = [
@@ -267,9 +315,15 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
             .into_iter()
             .filter(|d| inv.command.is_empty() || d.path == inv.command)
             .collect();
-        return Ok(Outcome::new(
-            json!({"commands":commands,"flags":["--home <root>","--format text|json|jsonl","--help"]}),
-        ));
+        let mut flags = if inv.command.is_empty() {
+            vec!["--home <root>".to_owned(), "--format text|json|jsonl".to_owned()]
+        } else {
+            commands.first().map(|definition| {
+                definition.flags.iter().map(|flag| flag.0.clone()).collect()
+            }).unwrap_or_default()
+        };
+        flags.push("--help".to_owned());
+        return Ok(Outcome::new(json!({"commands":commands,"flags":flags})));
     }
     if catalog_command(&inv.command) {
         return dispatch_catalog(inv);
@@ -278,7 +332,11 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
         "version" => Ok(Outcome::new(
             json!({"version":VERSION,"rust":env!("LYCHEEDEV_RUST_VERSION"),"platform":format!("{}/{}",std::env::consts::OS,if std::env::consts::ARCH=="x86_64"{"amd64"}else{std::env::consts::ARCH}),"commit":env!("LYCHEEDEV_BUILD_COMMIT"),"workspaceDirty":env!("LYCHEEDEV_BUILD_DIRTY")=="true"}),
         )),
-        "describe" => Ok(Outcome::new(json!({"commands":contract::implemented()}))),
+        "describe" => Ok(Outcome::new(json!({
+            "commands":contract::implemented(),
+            "formats":["text", "json", "jsonl"],
+            "development":VERSION.contains('-')
+        }))),
         "target resolve" => dispatch_target(inv),
         "target available" => dispatch_available(inv),
         "doctor" => dispatch_doctor(inv),
@@ -1182,19 +1240,8 @@ fn main() {
             }
         }
     }
-    let mut format = "text";
-    for (index, arg) in args.iter().enumerate() {
-        if arg == "--format" {
-            if let Some(value) = args.get(index + 1) {
-                format = value;
-            }
-        } else if let Some(value) = arg.strip_prefix("--format=") {
-            format = value;
-        }
-    }
-    if !["text", "json", "jsonl"].contains(&format) {
-        format = "json";
-    }
+    let requested = requested_format(&args);
+    let format = if valid_format(requested) { requested } else { "json" };
     let mut stdout = std::io::stdout().lock();
     let mut yielded = false;
     let result = parsed.as_ref().map_err(Clone::clone).and_then(|inv| {
@@ -1232,6 +1279,79 @@ mod tests {
     use super::*;
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
+    }
+    #[test]
+    fn describe_includes_frozen_format_and_development_metadata() {
+        let inv = parse(&args(&["describe", "--format", "json"])).unwrap();
+        let outcome = dispatch(&inv).unwrap();
+        assert_eq!(outcome.data["formats"], json!(["text", "json", "jsonl"]));
+        assert_eq!(outcome.data["development"], VERSION.contains('-'));
+        assert_eq!(
+            outcome.data["commands"],
+            serde_json::to_value(contract::implemented()).unwrap()
+        );
+    }
+    #[test]
+    fn help_lists_each_implemented_commands_own_flags() {
+        for definition in contract::implemented() {
+            let mut input: Vec<String> = definition.path.split_whitespace().map(str::to_owned).collect();
+            input.push("--help".to_owned());
+            let outcome = dispatch(&parse(&input).unwrap()).unwrap();
+            let mut flags: Vec<String> = definition.flags.iter().map(|flag| flag.0.clone()).collect();
+            flags.push("--help".to_owned());
+            assert_eq!(outcome.data["flags"], json!(flags), "{}", definition.path);
+            assert_eq!(outcome.data["commands"], json!([definition]));
+        }
+        let outcome = dispatch(&parse(&args(&["--help"])).unwrap()).unwrap();
+        assert_eq!(
+            outcome.data["flags"],
+            json!(["--home <root>", "--format text|json|jsonl", "--help"])
+        );
+    }
+    #[test]
+    fn frozen_token_admission_errors_and_precedence() {
+        for (input, expected) in [
+            (vec!["version", "--home="], "empty value for --home"),
+            (vec!["version", "--home", ""], "empty value for --home"),
+            (vec!["source", "inspect", "--path="], "empty value for --path"),
+            (vec!["version", "--home", "a", "--home", "b"], "repeated flag --home"),
+            (vec!["version", "--home", "a", "--home"], "repeated flag --home"),
+            (vec!["version", "--home", "a", "--home="], "repeated flag --home"),
+            (vec!["version", "--format=json", "--format=text"], "repeated flag --format"),
+            (vec!["live", "instances", "--passive", "--passive"], "repeated flag --passive"),
+            (vec!["live", "instances", "--passive=false"], "unknown flag --passive"),
+            (vec!["source", "inspect", "--path", "a", "--path", "b"], "repeated flag --path"),
+            (vec!["version", "--path", "a"], "--path is not supported by version; use version --help"),
+            (vec!["version", "--path="], "--path is not supported by version; use version --help"),
+            (vec!["--path", "a"], "--path is not supported by the command; use the command --help"),
+            (vec!["version", "--path", "a", "--output", "b"], "--path is not supported by version; use version --help"),
+            (vec!["version", "--output", "b", "--path", "a"], "--output is not supported by version; use version --help"),
+            (vec!["version", "--home=", "--unknown"], "unknown flag --unknown"),
+            (vec!["version", "--unknown", "--format=invalid"], "format must be text, json, or jsonl"),
+            (vec!["version", "--home=", "--format="], "format must be text, json, or jsonl"),
+            (vec!["version", "--format=json", "--format=invalid"], "format must be text, json, or jsonl"),
+            (vec!["version", "--format=invalid", "--format=json"], "repeated flag --format"),
+            (vec!["evidence", "show", "--home="], "missing required argument <capture-id>"),
+        ] {
+            let error = parse(&args(&input)).unwrap_err();
+            assert_eq!(error.message, expected, "{input:?}");
+            assert_eq!(error.exit_code, 2, "{input:?}");
+        }
+        // Help aliases are intentionally repeatable in the fixed Go parser.
+        assert!(parse(&args(&["version", "--help", "-h", "--help"])).is_ok());
+    }
+    #[test]
+    fn output_encoding_prescan_uses_last_occurrence_even_for_errors() {
+        for (input, expected) in [
+            (vec!["--unknown", "--format", "jsonl"], "jsonl"),
+            (vec!["--format=json", "--format=text"], "text"),
+            (vec!["--format=jsonl", "--format"], "jsonl"),
+            (vec!["--format=json", "--format="], ""),
+            (vec!["--format", "--help"], "--help"),
+            (vec!["version"], "text"),
+        ] {
+            assert_eq!(requested_format(&args(&input)), expected);
+        }
     }
     #[test]
     fn passive_instances_public_parser_and_report_do_not_enter_target_selection() {
@@ -1448,7 +1568,7 @@ mod tests {
         assert_eq!(error.exit_code, 2);
     }
     #[test]
-    fn unknown_and_route_flags_keep_priority_over_typed_data_id_validation() {
+    fn unknown_flags_precede_empty_values_but_route_flags_follow_argument_order() {
         for (path, flag) in [
             ("data spell auras", "--spell-id"),
             ("data item get", "--item-id"),
@@ -1469,12 +1589,12 @@ mod tests {
             input.pop();
             assert_eq!(
                 parse(&input).unwrap_err().message,
-                format!("invalid {flag}")
+                format!("empty value for {flag}")
             );
             input.extend(["--output".into(), "unused".into()]);
             assert_eq!(
                 parse(&input).unwrap_err().message,
-                format!("{path} does not accept --output")
+                format!("empty value for {flag}")
             );
         }
     }
