@@ -19,7 +19,7 @@
 - [ ] 补齐七产品的干净首次安装、重新登录和完整升级实机矩阵。
 - [x] e17f0759追加一轮500次业务槽交换：125份verified/released报告、1次自动容量reload及重连、504次输入交换无重复；500个数值比较通过，最终disconnect与doctor确认无owner、0预约。
 - [ ] 补齐战斗、受限编辑框和最小化窗口等真实阻塞场景；现有离线测试不能替代这些验收。
-- [ ] 已获 3.2.0 发布到 `latest` 的授权；版本和渠道已更新，待发布流水线完成 CI、打包、隔离安装、registry 回读与 GitHub Release。
+- [x] 3.2.0已发布到 `latest`：固定提交3057a966的[发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)完成CI、打包、Windows隔离安装、registry回读与[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)。本机全局CLI及受管Skill均已升级并核验版本。
 
 ## 已验证范围
 

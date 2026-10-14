@@ -5,7 +5,7 @@
 - [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)已按用户授权合入`main`，合并提交`22043f9faa081549338990b38474db4172704d0d`。本地`3.2.0`、`codex/fix-3.2.0`和远端修复分支已删除，全部提交由main保留。R29产品代码`e17f0759f9145383fdbb67b2ef6ecd021aa4802f`；7项实机、当前协议连接故障及追加容量轮换均已完成。
 - `71d645ec`的[Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586)五项必需作业与汇总全部通过；该结果不代表本轮工作区。原生覆盖24349/31245=77.9293%，0fail、17skip的口径与明细见审计报告。
 - [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并，只移植必要Definitions冷读预算修复。R23无消费者WGC删除、R24–R26用户要求的三轮清理及R27整合已完成，不扩展新一轮全仓审计。
-- 用户已明确授权发布3.2.0，并将npm `latest`直接指向3.2.0，发布后升级本机全局npm安装。发行源和渠道已更新；首轮发布在npm上传前停止以同步包内安装说明的`@latest`，待固定新提交重新发布。没有修改Lychee Talent。
+- 3.2.0已按用户授权发布到npm `latest`，`next`仍为3.1.2。发行标签`v3.2.0`固定提交`3057a9666ab078270b63c7f06de748069b0d1f4b`；[发布流水线38608441597](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)全部成功，[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)六项产物齐全。本机全局CLI和现有受管Skill均已升级3.2.0；没有修改Lychee Talent。
 
 ## 当前实现与分工
 
@@ -20,7 +20,7 @@
 - 固定同一Retail 12.1.0.69933进程、创建身份和窗口，使用本地CLI及受管500槽安装。用户按当前客户端的角色GUID启用了500个槽并保存设置；当前bridge已恢复on。
 - 当前版本失败已区分两件事：Slot 01禁用导致INPUT回调load_failed且未Receive；空回执查询另在`record.receipts.entry.node`被MEM_MAPPED区域准入拒绝，56字节请求、0字节实际读取、guard稳定。
 - 用户重载后的全新、无owner、NextSlot=1运行时，不发布槽、不发键，仅查询未执行nonce的命名回执，同样复现2161B/116calls的稳定拒绝。修复版在同一进程的新runtime、相同条件和同一只读helper下，结果为2236B/123calls、complete=true、0记录、无firstReadFailure。空表问题独立于禁用槽和提交输入；未放宽MEM_PRIVATE准入。
-- 失败CON凭新鲜替代runtime证据关闭；两条成功CON均完成verified报告、released清理及正常disconnect。本轮三条CON均closed，最终doctor全绿、安装无owner、无槽预约。用户完成bridge off后的reload，已销毁Trace hook和Objects临时快照；最后默认option重载后又完成修复版完整交易。
+- 失败CON凭新鲜替代runtime证据关闭；三条成功CON（含追加容量轮换）均完成verified报告、released清理及正常disconnect。本轮四条CON均closed，最终doctor全绿、安装无owner、无槽预约。用户完成bridge off后的reload，已销毁Trace hook和Objects临时快照；最后默认option重载后又完成修复版完整交易。
 
 ## 7项实机结果
 
@@ -40,13 +40,14 @@
 
 - 本轮Go build/vet及完整Lua必需Go套件通过：本地Windows/amd64、Go1.27.1、Lua5.1.5、包并发2、测试并发4、包时限20分钟，2886事件/2620叶节点pass、0fail、42skip、无未完成测试。skip包含helper及本地缺少的公开/原始资料、LuaLS集成和符号链接权限，不借用旧CI结果补算；此前中止的运行不计通过。
 - R29验证时版本源为3.1.2；本次发行同步将CLI、addon、npm和测试版本统一为3.2.0，并扩展渠道校验以支持授权的latest。命令目录和Skill输入不变。
-- 3.2.0准备检查：build/vet、buildinfo与addon测试通过；Node工具及启动器92pass、0fail、1skip（本地未提供固定LuaLS archive）；版本、Skill合同/生成命令与发行源码输入检查通过。14a8cf2的发布流水线38606807522已通过完整Lua必需Go、race、process、addon、package及正式组装和包内真实LuaLS测试；其后为修正包内安装文案主动取消，未发布npm。仅文档变化不重复本地Go/实机检查，新固定标签仍经过既有发布流程。
-- 本地CLI确认为`e17f0759`、workspaceDirty=false；同提交78项开发资源受管update成功，用户完成默认option重载。空回执对照、bind/数值报告/release/disconnect及最终doctor均通过；当前无需用户继续操作。
-- 当前文档head `ab037808` 已推同一PR；[Windows CI38603173292](https://github.com/Follen/Lychee-Dev/actions/runs/38603173292)的contract、race、process、addon、package及ci-required全部成功，PR说明已同步。本地42skip与CI环境结果仍分开记，不推测新覆盖率或skip计数。
+- 3.2.0准备检查：build/vet、buildinfo与addon测试通过；Node工具及启动器92pass、0fail、1skip（本地未提供固定LuaLS archive）；版本、Skill合同/生成命令与发行源码输入检查通过。最终3057a966发布流水线的完整Lua必需Go、race、process、addon、package、真实LuaLS、源码重建、正式包Windows运行检查、摘要校验和registry回读全部成功。首轮仅为修正包内安装文案在上传前取消，不算发布。
+- R29实机CLI为`e17f0759`、workspaceDirty=false；同提交78项开发资源受管update成功。空回执对照、bind/数值报告/release/disconnect及最终doctor均通过；游戏安装仍保留该已验证候选，本次npm安装没有重载游戏。
+- PR合并前head `ab037808` 的[Windows CI38603173292](https://github.com/Follen/Lychee-Dev/actions/runs/38603173292)全部成功；本地42skip与CI环境结果仍分开记，不推测新覆盖率或skip计数。
+- 本机通过npm安装已发布3.2.0；PATH实际启动器返回Windows/amd64、commit3057a966、workspaceDirty=false。配套Skill通过受管update同步完成，后续新Agent上下文使用新版说明。registry独立回读确认latest=3.2.0、包integrity和provenance元数据存在；不声称完成provenance密码学验证。
 - 私人现场日志只留在本地，不上传公共PR。按用户既有要求保留全部剩余忽略材料、原ZIP和恢复记录；不得清理其他任务或保留的`.worktrees/rust-refactor`。原R20/R22部分临时负对照日志已删除的历史限制仍见审计报告，不能补造。
 
 ## 用户追加：500槽容量一轮与发布
 
 - 同一Retail进程、e17f0759受管安装完成125次完整请求：prepare/commit/confirm/release各125次，共500次业务槽交换；另有2次bind、1次unbind和1次自动reload。504次输入交换各提交一次。容量轮换在两个runtime间完成，不称同一runtime逐一执行500个物理槽。
 - 125份报告全部verified、资源released、清理complete；500个数值/十进制文本比较通过。16份当前/历史journal包含4120条业务事件（另15条checkpoint），连接已正常关闭，最终doctor全绿、无owner、0预约。
-- 下一步：完成3.2.0版本和渠道检查，推送main及v3.2.0标签，通过既有发布流水线发布到latest，回读registry和GitHub Release。保留用户要求留下的材料及rust-refactor工作树。
+- 合并、相关分支清理、3.2.0发布及本机CLI/Skill升级均完成。保留用户要求留下的材料及rust-refactor工作树；其余跨产品场景仍按todo.md列出的范围待办。
