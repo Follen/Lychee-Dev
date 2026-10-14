@@ -183,6 +183,38 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $report = Join-Path $env:RUNNER_TEMP 'toolkit-wgc-probe'
           New-Item -ItemType Directory -Force $report | Out-Null
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $vsRoot) { throw 'installed MSVC toolchain not found for SDK control' }
+          $devcmd = Join-Path $vsRoot 'Common7\Tools\VsDevCmd.bat'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'internal\desktop\testdata\wgc_reference.cpp'
+          $dll = Join-Path $report 'wgc_reference.dll'
+          $build = Join-Path $report 'build-reference.cmd'
+          @"
+          @echo off
+          call "$devcmd" -no_logo -arch=amd64 -host_arch=amd64
+          if errorlevel 1 exit /b %errorlevel%
+          echo WindowsSDKVersion=%WindowsSDKVersion%
+          echo VCToolsVersion=%VCToolsVersion%
+          cl /nologo /Bv /std:c++17 /EHsc /W4 /WX /LD /MD /Fo:"$report\wgc_reference.obj" /Fe:"$dll" "$source" /link runtimeobject.lib oleaut32.lib user32.lib
+          exit /b %errorlevel%
+          "@ | Set-Content -Encoding ascii $build
+          Push-Location $report
+          try {
+            & $env:ComSpec /d /s /c "`"$build`"" > (Join-Path $report 'sdk-build.log') 2>&1
+            $buildExit = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+          Get-Content (Join-Path $report 'sdk-build.log')
+          if ($buildExit -ne 0) { throw 'Windows SDK reference adapter build failed' }
+          [ordered]@{
+            commit = (git rev-parse HEAD).Trim()
+            sourceSHA256 = (Get-FileHash $source -Algorithm SHA256).Hash.ToLowerInvariant()
+            dllSHA256 = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+            buildLogSHA256 = (Get-FileHash (Join-Path $report 'sdk-build.log') -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json | Set-Content (Join-Path $report 'sdk-identity.json')
+          $env:LYCHEEDEV_TEST_WGC_REFERENCE_DLL = $dll
           $events = Join-Path $report 'go-test.jsonl'
           go test -json -p=1 -parallel=1 -count=1 -timeout=1m ./internal/desktop -run '^TestWGCLifetimeBetweenSessions$' > $events 2> (Join-Path $report 'stderr.log')
           $testExit = $LASTEXITCODE

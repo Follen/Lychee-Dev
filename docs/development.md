@@ -31,7 +31,7 @@ Windows CI 在同一次完整 Go 套件中收集 atomic 语句覆盖，不另跑
 
 PR 的 Windows contract 作业通过 `tools/ci-inputs.mjs prepare` 准备公开固定输入：复用现有 LuaLS archive 校验、开发 stage/原生 binary 身份验证，固定 Gethe Retail/Forever 源码与 API 文档、生产定义生成器及既有 CascLib oracle builder，并启用固定 WoWDBDefs 测试。准备结果通过 GitHub 环境文件供同一次完整套件消费；`verify` 必须看到全部指定顶层及子测试实际通过，不能用父节点 pass 掩盖子项 skip。`windows-integration-inputs` 保存 commit/hash、compiler、release 与生成覆盖说明，生成器的 partial-type 覆盖仍如实保留。
 
-WGC 宿主探针单独运行现有自建窗口 lifetime 测试，环境变量只作用于该步骤，不选取用户或游戏进程。`windows-wgc-probe` 保存原始事件、退出码及结果；失败保持可见，先区分宿主图形能力与产品回归。真实客户端、原 runtime dump、固定安装/图像样本和8.3卷能力仍各自记录，不能仅为消除 skip 修改宿主策略或替换原始证据。
+WGC 宿主探针单独运行现有自建窗口 lifetime 测试，环境变量只作用于该步骤，不选取用户或游戏进程。`windows-wgc-probe` 保存原始事件、退出码及结果。诊断时仅用runner预装的MSVC/Windows SDK编译`internal/desktop/testdata/wgc_reference.cpp`，记录compiler/SDK及source/DLL hash；`LYCHEEDEV_TEST_WGC_REFERENCE_DLL`只给同一测试进程，比较其确切自建HWND的Go与SDK调用，及时保留原生restricted error，不是产品依赖或发布binary。失败保持可见，先区分宿主图形能力与产品回归。真实客户端、原 runtime dump、固定安装/图像样本和8.3卷能力仍各自记录，不能仅为消除 skip 修改宿主策略或替换原始证据。
 
 版本、Skill、构建工具或启动器有相关变化时执行对应检查：
 

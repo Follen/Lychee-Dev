@@ -144,6 +144,14 @@ test('WGC probe is bounded to its own fixture and failures remain visible with r
   assert.match(probe, /\$testExit -eq 0 -and \$passed -and \$packagePassed -and -not \$rejected/);
   assert.match(probe, /throw 'native WGC probe did not pass/);
   assert.match(probe, /exitCode = \$testExit/);
+  assert.match(probe, /WindowsSDKVersion=%WindowsSDKVersion%/);
+  assert.match(probe, /cl \/nologo \/Bv \/std:c\+\+17/);
+  assert.match(probe, /LYCHEEDEV_TEST_WGC_REFERENCE_DLL = \$dll/);
+  assert.match(probe, /Push-Location \$report/);
+  assert.match(probe, /Pop-Location/);
+  assert.match(probe, /sourceSHA256/);
+  assert.match(probe, /dllSHA256/);
+  assert.match(probe, /sdk-identity\.json/);
   assert.match(probe, /name: windows-wgc-probe/);
   assert.match(probe, /steps\.wgc-probe\.outcome != 'skipped'/);
 });

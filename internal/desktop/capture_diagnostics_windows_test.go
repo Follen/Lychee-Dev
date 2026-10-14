@@ -138,16 +138,11 @@ func logWGCCaptureItemControls(t *testing.T, original WindowIdentity) {
 		return
 	}
 	defer finishRuntime.Call()
+	reference := loadWGCReference(t)
 	for _, target := range []struct {
 		name     string
 		identity WindowIdentity
 	}{{"original fixture, later item-only attempt", original}, {"unowned overlapped control, item-only attempt", control.identity}} {
-		item, size, err := openCaptureItem(uintptr(target.identity.Handle))
-		if err != nil {
-			t.Logf("WGC diagnostic %s HWND=%d: %v", target.name, target.identity.Handle, err)
-		} else {
-			item.release()
-			t.Logf("WGC diagnostic %s HWND=%d extent=%dx%d (does not validate frame capture or lifetime)", target.name, target.identity.Handle, size.Width, size.Height)
-		}
+		logWGCCaptureItemComparison(t, target.name, target.identity, reference)
 	}
 }

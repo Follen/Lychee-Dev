@@ -4,7 +4,7 @@
 
 ## 分支、授权与状态
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)，`codex/fix-3.2.0` → `main`，保持草稿。最新已推送CI输入批次 `ebde90ed`（tree `fee83999`），[本批原生CI](https://github.com/Follen/Lychee-Dev/actions/runs/38549548276)的contract失败：broker两子项编排冲突、独立WGC probe失败；其余四作业通过，R12测试编排修正及WGC诊断已冻结、整测中。产品修复R9 `ef9b0113`（tree `b05c5ce7`）的[该head Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38547831499)六作业全部通过，阶段Go覆盖74.2544%。此前R8 `7566493c`六作业全通过，阶段Go覆盖73.9475%，不能外推为新head结果。
+- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)，`codex/fix-3.2.0` → `main`，保持草稿。最新已推送R12测试修正/诊断 `787eff3b`（tree `f58ea9ca`），[该head原生CI](https://github.com/Follen/Lychee-Dev/actions/runs/38551956825)完整Go及16项集成通过，77.0095%阶段语句覆盖；仅独立WGC probe/汇总仍失败，R14继续定位。此前CI输入批次 `ebde90ed`（tree `fee83999`）的[本批原生CI](https://github.com/Follen/Lychee-Dev/actions/runs/38549548276)的contract失败：broker两子项编排冲突、独立WGC probe失败；其余四作业通过，R12测试编排修正及WGC诊断已推送，整套Linux2506pass/3既有平台fail/28skip，build/vet通过。产品修复R9 `ef9b0113`（tree `b05c5ce7`）的[该head Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38547831499)六作业全部通过，阶段Go覆盖74.2544%。此前R8 `7566493c`六作业全通过，阶段Go覆盖73.9475%，不能外推为新head结果。
 - [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并；必要Definitions预算修复及正式回归在`ef9b0113`。旧地区槽位移植违反现行legacy合同，未移植，不是整批cherry-pick。
 - R3/R4 的 13 项及 R5 的 5 项已交付；R6 又确认并实施 4 项新事项。R4-01 crash 分支和 D-06 清理残留沿用原 ID，不重复计数。前一批 42 项保留为基线，候选不当作确认问题。
 - 追加任务：至少 R5/R6/R7 三轮，各由不同的新审计者检查架构、bug、死代码、Skill 编排及有明确收益、可验证的架构优化；持续审计→修复→验证→推送，直到独立复审不再发现可离线修复项。仅实机的新问题记录复验，不代替用户操作。
@@ -59,7 +59,7 @@ R8 的普通 Hotfix/资产依赖、Bundle取消、R4-C01宿主修复及两处冗
 | R3-C01 候选 | 固定真实 SpellMisc DB2/DBD/DifficultyID 多匹配资料；比较全表、导航和领域合同，证据冲突才升级 | |
 | R3-C03 候选 | 先明确 instances 项目归属语义；用隔离 Windows owner fixture 对照展示与实际连接消费者，不能把被动字段当阻断 | |
 | R4-C01 已确认，代码已修复 | Windows 双真实卷、隔离 release/client/project；同卷对照后跨卷跑默认 archive，PID=0；预期磁盘升级/旧树归档后在安全激活边界停止 | R7 CI 同卷通过；跨卷 Rel 失败，旧树完整、无 archive；R8双真实卷默认/显式及同卷对照通过 |
-| LuaLS/broker/打包 Source 公开输入 | Windows固定LuaLS、匹配release/CLI和docs；运行正式集成，预期引用/关闭/取消/隔离及安装语义通过 | ebde90ed引用/取消/隔离/打包通过；broker关闭两个子项因测试单实例竞争失败，R12-01修正中 |
+| LuaLS/broker/打包 Source 公开输入 | Windows固定LuaLS、匹配release/CLI和docs；运行正式集成，预期引用/关闭/取消/隔离及安装语义通过 | 787eff3b全部16项required公开集成通过，含broker关闭两子项；R12-01原生已验证 |
 | 真实安装/index/图像及原runtime replay缺材料 | 取得匹配hash/build的获准原始资料后运行正式replay；预期身份、字节、解码和根证据吻合，不把合成fixture当原始输入。公开API/DBD/CascLib已在ebde90ed实际通过，不再列缺材料 | |
 | WGC自建窗口失败，原因候选R12-C01 | Windows runner；记录session/桌面/WGC能力、原窗口及标准顶层窗口对照；预期在支持环境完成10次采帧/释放且无delegate残留 | ebde90ed原窗口CreateForWindow返回0x80070057；尚不能定性宿主或产品 |
 | Live read-only 可选覆盖缺口 | 后续授权的Windows/WoW固定目标；只读测试核对身份/窗口，不扩大输入许可 | |
@@ -67,6 +67,6 @@ R8 的普通 Hotfix/资产依赖、Bundle取消、R4-C01宿主修复及两处冗
 ## 下一步
 
 1. `ef9b0113`原生六CI通过、74.2544%阶段覆盖率已交付；下一批16项公开输入/WGC宿主验证后重测，不将阶段值当最终业务覆盖。
-2. R12测试singleton lease修正及WGC失败后安全诊断已实现、904文件冻结；完整Lua必需套件运行中，新鲜R13独立复审中。协调者负责workflow/tools/文档及原生重跑；WGC尚无定性，不把交叉编译当实机。R9/必要PR12移植与文档已推送，R10已完成且本轮范围无其他可操作离线修复。当前独立CI准备组负责workflow及tools验证helper，16项公开LuaLS/API/DBD/CascLib输入准备已完成并冻结，固定文档/DBD本地通过；全新R11已完成，901文件起终SHA吻合，该检查范围无其他可操作离线修复；ebde90ed原生已执行，16项旧skip均进入测试；broker编排冲突与WGC自建窗口失败转R12，未把失败运行75.9013%当最终结果；协调者独占文档。按新head重测，不等用户游戏。
+2. R12测试lease原生已通过，R13/R14在相应冻结范围无已确认离线产品缺陷。当前R15 SDK同进程对照906文件冻结、独立复审已完成；R16高风险回归隔离发现bootstrap回收失败恢复缺陷R16-01，修正中；R17-01用户实际Source外搜/猜raw案例由Skill专组只写Skill目录。三批不混淆验证，协调者独占共享文档。协调者负责workflow/tools/文档及原生重跑；WGC宿主已证实可见交互桌面且IsSupported=true，两自建窗口仍CreateForWindow失败，R14继续针对native调用核实；尚无具体定性。R9/必要PR12移植与文档已推送，R10已完成且本轮范围无其他可操作离线修复。当前独立CI准备组负责workflow及tools验证helper，16项公开LuaLS/API/DBD/CascLib输入准备已完成并冻结，固定文档/DBD本地通过；全新R11已完成，901文件起终SHA吻合，该检查范围无其他可操作离线修复；ebde90ed原生已执行，16项旧skip均进入测试；broker编排冲突与WGC自建窗口失败转R12，未把失败运行75.9013%当最终结果；协调者独占文档。按新head重测，不等用户游戏。
 3. 冗余专项已清理两个重复输入；R9额外删除只服务退役解析器的测试，不删除仍有独立边界/故障/跨进程/平台价值的覆盖。阶段值73.9475%仅对应R8，最终修复后重测；业务场景单列。
 4. 暂存材料只在忽略的 `.tmp/pr13/`，任务结束后按已核实绝对路径清理本轮产物；不触碰用户项目、未解决恢复记录或保留的 Rust worktree。

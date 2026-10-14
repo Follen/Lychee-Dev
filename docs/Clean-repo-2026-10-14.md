@@ -1299,3 +1299,53 @@ R9 `ef9b0113` 的Windows CI38547831499现六作业全部success。Go产品语句
 
 
 R12修正/诊断树904文件冻结aggregate `bd962ee611d60876f16d05daaefee5e3cd91b325663a186dc164d0494fffd210`，parentebde90ed；完整指定Lua必需Go套件已启动，另由全新R13审计者独立核验实际scope/cleanup/ABI/证据合同。诊断未运行前不把R12-C01定为环境限制，复审未完成不预填通过。
+
+
+R12已推送`787eff3b4fdb5c49ef5da4164e684c569ca0e1e0`（tree `f58ea9ca57cbaaadecadab61e6506bab582a089d`），[新原生CI38551956825](https://github.com/Follen/Lychee-Dev/actions/runs/38551956825)运行中。该冻结代码build/vet通过；实际完整Lua必需Linux套件2506 pass/3既有平台fail/28skip，30包pass/command1包fail/4包无测试，无新增失败。Windows交叉编译不充原生通过；WGC原因和R13结论尚待结果。
+
+
+## R13：R12固定修正树独立复审完成
+
+- 新审计者起终核对904文件及aggregate bd962ee6均一致，发布后787eff3b与审查代码吻合。独立复核测试gate实际logon scope/独立key、两集成child/session退出先于gate释放、EOF证据，以及跨进程不同home回归。当前回归证明互斥和cleanup后可用；cleanup回调具体顺序另外是静态核对，未称作mutation验证。
+- 对Microsoft SDK/API独立核对WGC statics/interop ABI、只读宿主信息及失败后自建标准窗口对照，未发现错槽/参数或越界操作；原失败不被诊断成功替代。该范围未发现其他可操作离线修复项。
+- 新原生CI仍须确认R12-01实际通过，并取得R12-C01宿主证据。当前diagnostic hard-fail会传播至required contract，但不意味着现行发行合同新增了必须具备交互桌面的要求；依实际诊断作最小后续处理，不提前归因或静默skip。
+
+
+### R12 原生重跑实际结果（787eff3b）
+
+- CI38551956825完整Go及全部16项required公开集成通过，race/process/addon/package通过；仅独立WGC probe与汇总失败。R12-01两关闭子项和新跨进程gate父测试均通过，生产broker合同不变。
+- Go主套件2800事件pass/0fail/20skip，叶节点2545pass/0fail/20skip；新增`TestSourceBrokerGateHelperProcess`的顶层skip对应父回归真实pass。因此20skip中9个helper，11项真实未跑：3个desktop诊断、1个客户端read-only、4个原安装/index/图像资料、2个原runtime replay、1个8.3卷能力。16个原公开输入缺口已全部实际执行通过，不能把额外helper入口误算为回退。
+- 24737/32122=77.0095%为此精确head主套件Go语句覆盖；[artifact11886584881](https://github.com/Follen/Lychee-Dev/actions/runs/38551956825/artifacts/11886584881)，实际merge729e5813的tree f58ea9ca与head相同。主套件通过和独立WGC失败分别记账，整CI尚非全绿。
+- [WGC原生artifact11886739257](https://github.com/Follen/Lychee-Dev/actions/runs/38551956825/artifacts/11886739257)：session2、WinSta0、WSF_VISIBLE=true、Default/UOI_IO=true；DWM=true、IsSupported=true均S_OK，原窗口和标准控制窗口均可见、未最小化/遮蔽、affinity0且尺寸有效，但两者CreateForWindow均0x80070057。这排除了此前“缺交互桌面”的无证据归因；尚不能定性产品或具体宿主限制。继续R14针对真实Go/native调用的独立定位，不改成静默skip。
+
+
+## R14：WGC真实调用边界独立定位
+
+- 新审计者独立核对SDK接口、当前Go 1.27.1 Windows-target escape analysis及真实日志：nativeInterface.call带uintptrescapes且不可inline，item/size/factory/HSTRING输出均上堆；实际GUID、槽位、参数及locked MTA生命周期未发现错误。不存在已证实的移动栈指针修复依据，也无官方合同支持一概禁止同进程HWND。
+- 缺口是失败时线程本地restricted error及独立SDK调用结果。现有helper在返回前Release，不能假称事后诊断拿到原始error。下一最小验证由测试内同线程直接复用原factory/call路径，在失败后任何COM Release之前获取细节，再同进程/同MTA/同一个已知自建HWND调用SDK-typed小型DLL。仅辨别调用边界，不发送输入或操作游戏。
+
+## R15：SDK对照验证准备与独立复审
+
+- 新增仅测试的SDK/WRL adapter及Go result-layout正式回归：固定3660-byte结果、版本/IID核验、仅本进程窗口，COM/BSTR均释放；Go与SDK均清除陈旧error后立即读取当前失败细节，buffer原长度保留截断事实。原lifetime失败仍不变，对照成功不代替frame/lifetime通过。
+- 仅复用runner预装MSVC/Windows SDK，编译日志、SDK/VC版本、source/DLL/hash随同原始WGCartifact保留；无下载安装、无产品依赖/发布内容或策略更改。Windows Go交叉build/vet、Linux desktop、import合同、workflow正式10项及YAML检查通过；本地无MSVC，原生C++编译和运行待新CI。
+- 本批906文件冻结aggregate `f6529b24f2a1ebe2db02c8f85f73655a3e5a9a35b31fb28f8c2224d4f767acd5`（审查期间仅workflow及其正式测试增加显式临时工作目录，避免编译器默认旁产物污染checkout；其余904文件保持原SHA），parent787eff3b，新鲜R15审计者复核ABI/cleanup/PowerShell编排。原生未执行前不填写通过；SDK若同样失败只证明该runner/这两个fixture的官方API边界，不扩展为产品平台限制。
+
+## R16：用户追加高风险覆盖补强（独立下一批）
+
+- 基于787eff3b实际未覆盖块及现有测试去重，隔离准备5个独立边界：Bundle完成stage后的目标抢占；archive已rename而journal仍planned；DeleteDocuments中途失败的文档与删除世代回滚；RecoverBinding拒绝bootstrap/Consumed失败后的原nonce恢复；finishRecovery报告保存失败后的原ticket/期限保全。只保留能证明新增边界的正式回归与负对照，不为百分比改产品合同。
+- 当前仅在忽略的overlay中开发，不混入WGC固定树；实现、负对照、整合原生及最终覆盖均待后续实际结果。
+
+
+R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机、COM/BSTR释放及PowerShell/cmd编排无新增确认问题。起点906文件吻合；终点只包含声明的2文件临时cwd修正，其余904未变，修正aggregate全匹配。正式workflow10项通过；MSVC/native运行仍待CI，不预填通过。
+
+### R16-01 · 已确认 · bootstrap拒绝后的槽回收失败无法沿原连接继续
+
+- 新正式回归在787eff3b负对照复现：RecoverBinding验证并持久化精确slot_runtime_changed bootstrap拒绝后，若Consumed失败，transaction保持received；Load后实际Project→Continue路径直接重报拒绝，既不能完成回收/新绑定，也不能在closing分支关闭。wait.go仅input_attempted可进入原恢复入口，已核对真实消费者，不是任意错误状态假设。
+- 下一隔离批次修正中：只消费已核实精确拒绝的原nonce，重试原槽回收，不重发不确定输入；之后依原closing意图退出或新challenge。修复/正式正反对照/原生结果待补。其他拟补存储/报告边界目前通过，不按用例数增加bug数。
+
+## R17：用户实际Skill源码调查案例
+
+### R17-01 · 已确认指引缺口 · 可用Source调查仍外搜/猜raw路径
+
+- 用户实际案例明确指定$lycheedev且Source可用，却额外搜GitHub并猜中404的raw路径，未增加有效证据、绕过固定版本调查。当前主Skill/source references未统一规定默认固定Source、空结果自查和外部例外的证据界线。
+- 专项实施中，仅LycheeDev Skill目录：复用已有发现/固定版本/query/inspect，refs/context按需；无结果先核模式/关键词/版本/覆盖；只读工具返回或已核实路径；真实缺来源/版本/能力或用户明确要求才转外部并标缺口/证据身份。已足够证据直接回答，不增加审批、强制步骤或重复验证。修订后用该案例和例外行为独立复核、正式Skill/生成目录检查，再提交同PR。未修改Lychee Talent或连接游戏。
