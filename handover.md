@@ -454,6 +454,16 @@ API Type现在由独立认证environment原文重建definitions.lua和唯一mapp
 
 本批Rust运行NOT_RUN。独立审核指出新semantic_admission_tests不被旧native_session::tests过滤器覆盖，现扩为native_session::整体并用block scalar实际解析YAML。真实完整IPC额度轮转、0-batch helper与来源shadow/full Retail semantic/session实测仍需补，不把上一ec2的小fixture复用为这次通过。
 
+### 正常 CLI 有序取消与 Source 完整 scope 接线
+
+正常 invocation 在预算建立前注册 TrackedCancellation callback，保留参数错误优先级和 version/help 豁免，guard 保持到输出结束。Emmy doctor 使用 ordered child；one-shot Source 现在通过完整 OperationControl 子 scope 等待实际进程，保留父取消、原 deadline 和 first cause，而非只轮询子 AtomicBool。Complete 路径在 spawn 前与收齐事件后检查实际 scope；Legacy 保持原边界。原 Job、管道、退出等待和 terminate/reap 实现共享，未另造清理机制。
+
+独立复审关闭两项 scope 检查遗漏，三文件哈希冻结核验通过；5 CLI + 7 Source 新测试实际 NOT_RUN，已分组接 Windows CI。Node metadata 5/5、diff 检查通过。此批不代表所有 legacy broker/helper/session token 路径已改完。
+
+### 首次真实 Skill 流程终态（6cbd61b 历史快照）
+
+run38639615054/product116122379218 于 2026-10-14 22:19:54 UTC 结束：all-target、独立产品组、完整 Retail 静态 Source、真实多 CLI native session 成功；Skill 实际 27 项中 21 成功、6 失败。失败均为该快照 describe 缺少 refs/context/batch/session status，未跳过或放宽必需命令；因此产品 job 整体失败。19cb15 后库存已有修复，仍须新树真实复跑，不能倒填旧证据。artifact11933365203，ZIP SHA256 76bcee97302414b06b6c6ace682d17c4c7e6ee0169544b0444564590912c01cb 已下载认证；独立 artifact 内容复核待完成。静态差分仍失败，Emmy 组成功；不宣称完整协议/性能或四阶段收敛。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -349,7 +349,7 @@ pub fn one_shot(inv:&lycheedev_core::Invocation,request:WorkerRequest)->Result<V
     let bytes=serde_json::to_vec(&request)?;
     if bytes.len()>768<<20{return Err(ToolkitError::new("source.native_budget","native research input exceeds transport budget",3));}
     let mut command=std::process::Command::new(std::env::current_exe()?);command.arg("--source-native-worker");
-    let output=crate::process::run_controlled(command,32<<20,inv.control.remaining()?.min(std::time::Duration::from_secs(180)),Some(bytes),Some(inv.control.token()))?;
+    let output=crate::process::run_with_operation_control(command,32<<20,inv.control.remaining()?.min(std::time::Duration::from_secs(180)),Some(bytes),&inv.control)?;
     inv.control.check()?;
     if output.status!=0{return Err(ToolkitError::new("source.native_worker_failed",String::from_utf8_lossy(&output.stderr).into_owned(),5));}
     let mut result:Value=serde_json::from_slice(&output.stdout)?;

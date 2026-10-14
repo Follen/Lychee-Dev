@@ -800,10 +800,9 @@ fn emmy_doctor_check_with(
 ) -> Result<Value> {
     inv.control.check()?;
     let mut probe = inv.clone();
-    probe.control = inv.control.child(
+    probe.control = inv.control.ordered_child(
         std::time::Instant::now() + std::time::Duration::from_secs(EMMY_DOCTOR_EXECUTION_SECONDS),
-        inv.control.cancel_handle(),
-    );
+    )?;
     let observed = (|| -> Result<Value> {
         let value = run(&probe, emmy_doctor_request()?)?;
         probe.control.check()?;
@@ -1197,6 +1196,43 @@ fn operation_seconds(inv: &Invocation) -> Result<u64> {
     }
     Ok(180)
 }
+/// The normal CLI entry's one cancellation scope. Keep registration before
+/// budget validation so its existing error priority and guard lifetime remain
+/// unchanged. The installer may signal before the control is constructed.
+fn install_invocation_control<G>(
+    parsed: &mut Result<Invocation>,
+    install: impl FnOnce(lycheedev_core::control::TrackedCancellation) -> std::result::Result<G, String>,
+) -> Option<G> {
+    let Ok(inv) = parsed else {
+        return None;
+    };
+    if ["", "version", "describe"].contains(&inv.command.as_str()) || inv.flag_bool("--help") {
+        return None;
+    }
+    let cancellation = lycheedev_core::control::TrackedCancellation::new();
+    let handler = match install(cancellation.clone()) {
+        Ok(handler) => handler,
+        Err(message) => {
+            *parsed = Err(ToolkitError::new("windows.console_unavailable", message, 3));
+            return None;
+        }
+    };
+    let seconds = match operation_seconds(inv) {
+        Ok(seconds) => seconds,
+        Err(error) => {
+            *parsed = Err(error);
+            return None;
+        }
+    };
+    if seconds == 0 {
+        return None;
+    }
+    inv.control = lycheedev_core::control::OperationControl::tracked(
+        std::time::Instant::now() + std::time::Duration::from_secs(seconds),
+        cancellation,
+    );
+    Some(handler)
+}
 fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     // Go entry.queryFault projects installation selection errors for every
     // command, including addon handlers, rather than only catalog queries.
@@ -1459,36 +1495,9 @@ fn main() {
         std::process::exit(result.err().map(|error| error.exit_code).unwrap_or(0));
     }
     let mut parsed = parse(&args);
-    let mut console = None;
-    if let Ok(inv) = &mut parsed
-        && !["", "version", "describe"].contains(&inv.command.as_str())
-        && !inv.flag_bool("--help")
-    {
-        match lycheedev_windows::cancellation::ConsoleCancellation::install() {
-            Ok(handler) => {
-                let seconds = match operation_seconds(inv) {
-                    Ok(seconds) => seconds,
-                    Err(error) => {
-                        parsed = Err(error);
-                        0
-                    }
-                };
-                if seconds == 0 {
-                    drop(handler);
-                } else {
-                    let inv = parsed.as_mut().expect("validated invocation");
-                    inv.control = lycheedev_core::control::OperationControl::new(
-                        std::time::Instant::now() + std::time::Duration::from_secs(seconds),
-                        handler.token(),
-                    );
-                    console = Some(handler);
-                }
-            }
-            Err(message) => {
-                parsed = Err(ToolkitError::new("windows.console_unavailable", message, 3))
-            }
-        }
-    }
+    let console = install_invocation_control(&mut parsed, |signal| {
+        lycheedev_windows::cancellation::ConsoleCancellation::install_callback(move || signal.cancel())
+    });
     let requested = requested_format(&args);
     let format = if valid_format(requested) { requested } else { "json" };
     let mut stdout = std::io::stdout().lock();
@@ -1575,6 +1584,106 @@ mod tests {
         assert!(envelope["error"].get("details").is_none());
     }
     use super::*;
+    struct InvocationConsoleFixture {
+        signal: lycheedev_core::control::TrackedCancellation,
+        alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl Drop for InvocationConsoleFixture {
+        fn drop(&mut self) {
+            self.alive.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+    #[test]
+    fn normal_invocation_control_preserves_ordered_ancestry_and_guard_lifetime() {
+        use lycheedev_core::control::StopCause;
+        use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+        let mut parsed = parse(&args(&["live", "execute", "--wait-seconds", "600"]));
+        let original = parsed.as_ref().unwrap().control.clone();
+        let alive = Arc::new(AtomicBool::new(true));
+        let before = Instant::now();
+        let guard = install_invocation_control(&mut parsed, |signal| {
+            Ok(InvocationConsoleFixture { signal, alive: alive.clone() })
+        }).unwrap();
+        let after = Instant::now();
+        let inv = parsed.as_ref().unwrap();
+        assert!(!inv.control.same_scope(&original));
+        assert!(inv.control.deadline() >= before + Duration::from_secs(660));
+        assert!(inv.control.deadline() <= after + Duration::from_secs(660));
+        assert_eq!(inv.control.stop_cause().unwrap(), None);
+        let child = inv.control.ordered_child(inv.control.deadline()).unwrap();
+        let child_signal = child.tracked_cancel_handle().unwrap();
+        assert!(!inv.control.is_cancelled());
+        assert!(!child.is_cancelled());
+        assert!(alive.load(Ordering::Acquire));
+        guard.signal.cancel();
+        assert!(inv.control.is_cancelled());
+        assert!(child.is_cancelled());
+        assert!(!child_signal.is_cancelled());
+        assert_eq!(inv.control.stop_cause().unwrap(), Some(StopCause::Cancelled));
+        assert_eq!(child.stop_cause().unwrap(), Some(StopCause::Cancelled));
+        let result = Err(inv.control.check().unwrap_err());
+        let mut output = Vec::new();
+        render_with_context(&mut output, "json", &result, Some(inv)).unwrap();
+        assert!(alive.load(Ordering::Acquire), "guard must survive result rendering");
+        drop(guard);
+        assert!(!alive.load(Ordering::Acquire));
+    }
+    #[test]
+    fn normal_invocation_control_keeps_signal_received_during_install() {
+        use lycheedev_core::control::StopCause;
+        let mut parsed = parse(&args(&["doctor"]));
+        let guard = install_invocation_control(&mut parsed, |signal| {
+            signal.cancel();
+            Ok(signal)
+        }).unwrap();
+        let control = &parsed.as_ref().unwrap().control;
+        assert!(guard.is_cancelled());
+        assert_eq!(control.stop_cause().unwrap(), Some(StopCause::Cancelled));
+        assert_eq!(control.check().unwrap_err().code, "command.cancelled");
+    }
+    #[test]
+    fn normal_invocation_control_preserves_error_priority_and_releases_failed_guard() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let words = args(&["live", "execute", "--wait-seconds", "-1"]);
+        let mut parsed = parse(&words);
+        let expected = operation_seconds(parsed.as_ref().unwrap()).unwrap_err();
+        let alive = Arc::new(AtomicBool::new(false));
+        let mut installed = false;
+        assert!(install_invocation_control(&mut parsed, |signal| {
+            installed = true;
+            alive.store(true, Ordering::Release);
+            Ok(InvocationConsoleFixture { signal, alive: alive.clone() })
+        }).is_none());
+        assert!(installed);
+        assert!(!alive.load(Ordering::Acquire));
+        let error = parsed.unwrap_err();
+        assert_eq!(error.code, expected.code);
+        assert_eq!(error.message, expected.message);
+        assert_eq!(error.exit_code, expected.exit_code);
+        let mut parsed = parse(&words);
+        assert!(install_invocation_control::<()>(&mut parsed, |_| {
+            Err("fixture.console_install_failed".into())
+        }).is_none());
+        let error = parsed.unwrap_err();
+        assert_eq!(error.code, "windows.console_unavailable");
+        assert_eq!(error.message, "fixture.console_install_failed");
+        assert_eq!(error.exit_code, 3);
+    }
+    #[test]
+    fn normal_invocation_control_skips_information_help_and_parse_errors() {
+        for words in [vec![], vec!["version"], vec!["describe"], vec!["doctor", "--help"], vec!["not-a-command"]] {
+            let mut parsed = parse(&args(&words));
+            let before = parsed.as_ref().ok().map(|inv| inv.control.clone());
+            assert!(install_invocation_control::<()>(&mut parsed, |_| {
+                panic!("information/help/parse failure must not install a handler")
+            }).is_none());
+            if let Some(before) = before {
+                assert!(parsed.as_ref().unwrap().control.same_scope(&before));
+            } else {
+                assert!(parsed.is_err());
+            }
+        }
+    }
     #[test]
     fn installation_delivery_required_arguments_precede_identity_io() {
         for (words, message) in [
@@ -1832,12 +1941,14 @@ mod tests {
     #[test]
     fn emmy_doctor_probe_is_bounded_and_distinguishes_unchecked_tools() {
         let mut inv = parse(&args(&["doctor"])).unwrap();
-        inv.control = lycheedev_core::control::OperationControl::new(
+        inv.control = lycheedev_core::control::OperationControl::uncancelable(
             std::time::Instant::now() + std::time::Duration::from_secs(1),
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
         let check = emmy_doctor_check_with(&inv, |probe, request| {
             assert_eq!(probe.control.deadline(), inv.control.deadline());
+            assert!(!probe.control.same_scope(&inv.control));
+            assert_eq!(probe.control.stop_cause().unwrap(), None);
+            assert_eq!(inv.control.stop_cause().unwrap(), None);
             assert!(
                 probe.control.remaining().unwrap()
                     <= std::time::Duration::from_secs(EMMY_DOCTOR_EXECUTION_SECONDS)
@@ -1909,12 +2020,14 @@ mod tests {
     }
     #[test]
     fn emmy_doctor_preserves_caller_cancel_and_deadline() {
-        use std::sync::atomic::Ordering;
+        use lycheedev_core::control::StopCause;
         let inv = parse(&args(&["doctor"])).unwrap();
+        let signal = inv.control.tracked_cancel_handle().unwrap();
         let error = emmy_doctor_check_with(&inv, |probe, _| {
-            inv.control.cancel_handle().store(true, Ordering::Release);
-            // The process polls this same token while blocking in the worker.
-            assert!(probe.control.token().load(Ordering::Acquire));
+            signal.cancel();
+            assert!(probe.control.is_cancelled());
+            assert_eq!(probe.control.stop_cause().unwrap(), Some(StopCause::Cancelled));
+            assert_eq!(inv.control.stop_cause().unwrap(), Some(StopCause::Cancelled));
             Ok(emmy_doctor_reply_fixture())
         })
         .unwrap_err();
@@ -1936,6 +2049,17 @@ mod tests {
                 .code,
             "command.deadline"
         );
+    }
+    #[test]
+    fn emmy_doctor_rejects_an_unordered_internal_control_before_worker_start() {
+        // The normal CLI constructs a tracked control. This deliberately
+        // violates the internal helper's invariant, not a public CLI mode.
+        let inv = parse(&args(&["doctor"])).unwrap();
+        let _raw = inv.control.cancel_handle();
+        let error = emmy_doctor_check_with(&inv, |_, _| {
+            panic!("an unordered internal control must not start the doctor worker")
+        }).unwrap_err();
+        assert_eq!(error.code, "control.cancellation_order_unavailable");
     }
     #[test]
     fn describe_includes_frozen_format_and_development_metadata() {
