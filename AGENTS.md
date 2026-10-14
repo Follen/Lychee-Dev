@@ -40,8 +40,9 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
 - Preserve historical test/failure evidence and distinguish implemented,
   historical-pass/fail, unverified, blocked and not_run. Prove absent consumers
   before deleting dead code; don't assume luac/tree-sitter are obsolete because
-  LuaLS is replaced. Recover exact modified Emmy dependency bytes before claiming
-  a clean checkout is reproducible.
+  LuaLS is replaced. Recover exact modified Emmy bytes or publish a separately identified, fixed-public-
+  upstream reconstruction with reviewed patches and full custody tests before
+  claiming a clean checkout is reproducible. Never call new bytes the old fork.
 - Existing disk/process ownership and evidence-retention rules below continue
   where compatible. Historical release/channel values are not current release
   permission. Product tests are not claimed for a documentation-only change;

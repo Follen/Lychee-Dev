@@ -188,6 +188,14 @@ WindowsCI新增同静态守卫/自测。rustfmt解析和diff检查通过；产�
 
 `tests/rust-parity/go-test-map.json`新增首批22行证据映射：33个固定Go函数/18个hash固定文件→26个Rust测试引用，2 mapped-unrun、17 partial、3 uncovered，另有6组恢复/事务/取消/空map/槽迁移优先项。全为未运行/部分/未覆盖，无behavioral-pass，行数不是覆盖率。它是记录文件hash的审查快照，之后代码改变需重审。该映射实际找出metadata version-only/优先级差异，后续修复正在按Go准确合同处理，不能把Rust额外严格行为自行定义为兼容例外。
 
+### 安装身份优先级与Source query默认值修复
+
+固定Go selection与records是两层合同：先按首个非空flavor文件、version、受catalog支持的已知目录解析身份，再由安装消费者检查同canonical product/实际slot的catalog build冲突。本批分开实现两层，修复version-only安装、首文件优先级、区域slot、parent-only launcher catalog及canonical ProductCode/CatalogProduct/identitySource；新增30个文件场景、20个纯解析/安装边界场景及序列化/计量断言。仍有明确后续缺口：catalog BuildKey/CDNKey和product token校验未对齐；不宣称完整安装元数据等价。测试仅rustfmt解析/diff检查通过，产品Rust测试未运行（受控构建正在被新Emmy依赖测试占用；未抢占lease）。
+
+source query默认limit由10修为固定Go的50，显式1..200边界保留；新增默认/显式/非法参数回归，未执行Rust测试。此项不代表Source查询结果质量或全仓分析通过。
+
+公开Emmy新补丁已实际通过一次库级cargo check，不等于旧私有修改版复原或产品测试通过。新依赖身份/对应源码工具正接受独立审查；发现并正在修复空目录影响include_dir!但未计入identity、recipe runner失败状态及完整recipe前后验证、准备遍历有界性等问题。全部修复及回归封存前不得宣称可复建验收通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

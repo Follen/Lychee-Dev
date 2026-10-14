@@ -20,6 +20,7 @@ pub mod native;
 pub mod native_research;
 #[cfg(feature = "emmy-prototype")]
 pub mod native_semantic;
+pub mod native_session;
 mod process;
 pub mod prune;
 mod query_store;
@@ -28,12 +29,11 @@ pub mod relations;
 mod research_material;
 pub mod semantic;
 pub mod session;
-pub mod native_session;
 pub mod validate;
 pub mod xml_inline;
-pub mod xml_program;
 #[cfg(feature = "emmy-prototype")]
 pub mod xml_load;
+pub mod xml_program;
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError};
 #[derive(Default)]
 pub struct SourceTools<'a> {
@@ -52,6 +52,11 @@ pub fn commands() -> &'static [&'static str] {
         "source prune",
         "source validate",
     ]
+}
+
+// Go 3.2.0 parseOptions defaults source query to 50, with an explicit 1..=200 bound.
+fn query_limit(inv: &Invocation) -> Result<usize> {
+    inv.usize_flag("--limit", 50, 1, 200)
 }
 
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
@@ -265,7 +270,7 @@ pub fn dispatch_with_services(
                         inv.argument()?,
                         inv.flag("--mode").unwrap_or(""),
                         inv.flag("--topic").unwrap_or(""),
-                        inv.usize_flag("--limit", 10, 1, 200)?,
+                        query_limit(inv)?,
                         inv.flag("--cursor").unwrap_or(""),
                     )?,
                     _ => {
@@ -321,4 +326,29 @@ pub fn dispatch_with_services(
         exit_code: 3,
         details: serde_json::Value::Null,
     })
+}
+
+#[cfg(test)]
+mod public_query_defaults {
+    use super::*;
+    #[test]
+    fn query_default_and_explicit_limits_match_fixed_go() {
+        let mut inv = Invocation {
+            command: "source query".into(),
+            positional: Some("Frame".into()),
+            flags: Default::default(),
+            home: Default::default(),
+            cwd: Default::default(),
+            control: Default::default(),
+        };
+        assert_eq!(query_limit(&inv).unwrap(), 50);
+        for (value, expected) in [("1", 1), ("10", 10), ("50", 50), ("200", 200)] {
+            inv.flags.insert("--limit".into(), value.into());
+            assert_eq!(query_limit(&inv).unwrap(), expected);
+        }
+        for value in ["0", "201", "-1", "", "not-an-integer"] {
+            inv.flags.insert("--limit".into(), value.into());
+            assert_eq!(query_limit(&inv).unwrap_err().exit_code, 2);
+        }
+    }
 }

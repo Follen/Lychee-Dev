@@ -1,4 +1,4 @@
-//! Explicit flavor/build identity; directory names and equal builds never select a product.
+//! Flavor or supported version evidence identifies a family; only explicit slots select regional tracks.
 #![forbid(unsafe_code)]
 use crate::{Result, ToolkitError, selection::valid_build, storage};
 use lycheedev_windows::filesystem::destination::{Directory, FileControl, FileCost};
@@ -65,6 +65,7 @@ fn exists(directory: &Directory, name: &str, control: &mut impl MetadataControl)
 }
 
 /// Delivery identity is separate from the shared UI/API source family.
+#[derive(Debug)]
 pub struct Product {
     pub id: &'static str,
     pub family: &'static str,
@@ -301,50 +302,189 @@ fn text(
         return Err(identity_error("metadata changed while reading"));
     }
     root.verify_controlled(&mut MetadataFiles(&mut *control))?;
-    if raw.len() > maximum || raw.contains(&0) {
+    if raw.len() > maximum || name == ".build.info" && raw.contains(&0) {
         return Err(identity_error(
             "identity text exceeds bounds or contains NUL",
         ));
     }
-    Ok(String::from_utf8(raw)
-        .map_err(|e| ToolkitError::invalid(e.to_string()))?
-        .trim_start_matches('\u{feff}')
+    let value = String::from_utf8(raw).map_err(|_| identity_error("identity text is not UTF-8"))?;
+    Ok(value
+        .strip_prefix('\u{feff}')
+        .unwrap_or(&value)
         .trim()
         .into())
 }
-fn flavor(root: &Directory, control: &mut impl MetadataControl) -> Result<(String, String)> {
-    let mut selected: Option<(String, String)> = None;
+fn flavor(
+    root: &Directory,
+    control: &mut impl MetadataControl,
+) -> Result<Option<(String, String)>> {
     for name in [".flavor.info", "flavor.info"] {
         let value = text(root, name, 4096, control)?;
         if value.is_empty() {
             continue;
         }
-        let mut lines = value.lines();
-        let first = lines.next().unwrap_or("").trim();
-        let code = if first == "Product Flavor!STRING:0" {
-            lines.next().unwrap_or("").trim()
-        } else {
-            first
-        };
-        if lines.next().is_some() || catalog_product(code).is_none() {
-            return Err(identity_error(
-                "flavor metadata is missing, ambiguous or unsupported",
-            ));
+        // Go's ASCII-word regexp is \bwow[a-z0-9_]*\b after lowercasing.
+        // The first nonempty file is authoritative; do not even read the next.
+        let lower = value.to_lowercase();
+        let mut matches = lower
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .filter(|word| word.starts_with("wow"));
+        let code = matches
+            .next()
+            .ok_or_else(|| identity_error("invalid flavor metadata"))?;
+        if matches.next().is_some() {
+            return Err(identity_error("ambiguous flavor metadata"));
         }
-        if selected.as_ref().is_some_and(|(old, _)| old != code) {
-            return Err(identity_error("flavor metadata files disagree"));
+        return Ok(Some((code.into(), name.into())));
+    }
+    Ok(None)
+}
+
+fn identity_build(build: &str) -> bool {
+    valid_build(build)
+        && build
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+}
+fn family_profiles() -> impl Iterator<Item = &'static Product> {
+    PRODUCTS
+        .iter()
+        .filter(|profile| !profile.reused_slot)
+        .chain(std::iter::once(&LEGACY_FOREVER))
+}
+fn version_profile(version: &str) -> Option<&'static Product> {
+    family_profiles().find(|profile| version.starts_with(&format!("{}.", profile.series)))
+}
+fn family_code(profile: &Product) -> &'static str {
+    if profile.family == "forever" {
+        "wow_forever"
+    } else {
+        profile.catalog_product
+    }
+}
+#[derive(Debug)]
+struct ClientBuild {
+    product_code: String,
+    full_build: String,
+    branch: String,
+}
+#[derive(Debug)]
+struct ClientIdentity {
+    profile: &'static Product,
+    product_code: String,
+    catalog_product: String,
+    full_build: String,
+    source: String,
+}
+// selection.InspectClient at fixed Go 3.2.0. Selection evidence precedence
+// belongs here; records.inspectExactClient's catalog-consistency gate is below.
+fn resolve_identity(
+    folder: &str,
+    flavor: Option<(String, String)>,
+    version: &str,
+    active: &[ClientBuild],
+    control: &mut impl MetadataControl,
+) -> Result<ClientIdentity> {
+    control.check()?;
+    let (mut code, mut source) = flavor.unwrap_or_default();
+    let flavor_name = source.clone();
+    let slot = if matches!(code.as_str(), "wow_classic_beta" | "wow_cn_beta") {
+        std::mem::take(&mut code)
+    } else {
+        String::new()
+    };
+    let mut version = version.to_owned();
+    if !version.is_empty() && !identity_build(&version) {
+        return Err(identity_error("version.txt requires exact full build"));
+    }
+    if code.is_empty() && !version.is_empty() {
+        let profile =
+            version_profile(&version).ok_or_else(|| identity_error("unsupported build"))?;
+        code = family_code(profile).into();
+        source = "version.txt".into();
+    }
+    if code.is_empty() && version.is_empty() && !slot.is_empty() {
+        for candidate in active {
+            control.check()?;
+            if candidate.product_code != slot {
+                continue;
+            }
+            if let Some(profile) = version_profile(&candidate.full_build) {
+                let candidate_code = family_code(profile);
+                if !code.is_empty() && code != candidate_code {
+                    return Err(identity_error("ambiguous active builds"));
+                }
+                code = candidate_code.into();
+                version = candidate.full_build.clone();
+                source = format!("{flavor_name}+build-catalog");
+            }
         }
-        if selected.is_none() {
-            selected = Some((code.into(), name.into()));
+        if code.is_empty() {
+            return Err(identity_error("unsupported build for slot"));
         }
     }
-    selected.ok_or_else(|| identity_error("explicit flavor metadata is required"))
+    if code.is_empty() {
+        if let Some(profile) =
+            family_profiles().find(|profile| folder.eq_ignore_ascii_case(profile.folder))
+        {
+            code = family_code(profile).into();
+        }
+        source = "folder".into();
+    }
+    let profile = family_profiles()
+        .find(|profile| family_code(profile) == code)
+        .ok_or_else(|| identity_error("unsupported product metadata"))?;
+    if version.is_empty() {
+        for candidate in active {
+            control.check()?;
+            if candidate.product_code != code && candidate.product_code != slot {
+                continue;
+            }
+            if !version.is_empty() && version != candidate.full_build {
+                return Err(identity_error("ambiguous active builds"));
+            }
+            version = candidate.full_build.clone();
+        }
+    }
+    if !identity_build(&version) || !version.starts_with(&format!("{}.", profile.series)) {
+        return Err(identity_error("missing or unsupported product/build pair"));
+    }
+    if (folder.eq_ignore_ascii_case("_classic_beta_")
+        || folder.eq_ignore_ascii_case("_cn_beta_")
+        || slot == "wow_cn_beta")
+        && !version.starts_with("1.60.1.")
+    {
+        return Err(identity_error("unsupported test track"));
+    }
+    Ok(ClientIdentity {
+        profile,
+        product_code: code,
+        catalog_product: slot,
+        full_build: version,
+        source,
+    })
 }
-fn catalog_identity(
-    raw: &str,
-    code: &str,
-    control: &mut impl MetadataControl,
-) -> Result<(String, String)> {
+fn validate_installation_catalog(identity: &ClientIdentity, active: &[ClientBuild]) -> Result<()> {
+    // Go records.inspectExactClient checks the canonical product and its data
+    // slot after selection. Never borrow the other regional slot as evidence.
+    let slot = if identity.catalog_product.is_empty() {
+        identity.profile.catalog_product
+    } else {
+        &identity.catalog_product
+    };
+    if active.iter().any(|candidate| {
+        (candidate.product_code == identity.product_code || candidate.product_code == slot)
+            && candidate.full_build != identity.full_build
+    }) {
+        return Err(ToolkitError::new(
+            "selection.installation_metadata_conflict",
+            "active launcher metadata contradicts selected client build",
+            4,
+        ));
+    }
+    Ok(())
+}
+fn catalog_builds(raw: &str, control: &mut impl MetadataControl) -> Result<Vec<ClientBuild>> {
     control.charge(MetadataCost {
         allocation_bytes: raw.len() as u64 * 64 + 65536,
         work_units: raw.len() as u64 * 64 + 65536,
@@ -374,7 +514,7 @@ fn catalog_identity(
             return Err(identity_error("build catalog identity columns are missing"));
         }
     }
-    let mut selected = None;
+    let mut selected = Vec::new();
     let mut rows = 0usize;
     for line in lines {
         control.check()?;
@@ -391,33 +531,23 @@ fn catalog_identity(
             return Err(identity_error("build catalog row shape differs"));
         }
         let get = |name: &str| values[columns[name]].trim();
-        if !matches!(get("Active"), "0" | "1") || !valid_build(get("Version")) {
+        if !matches!(get("Active"), "0" | "1") || !identity_build(get("Version")) {
             return Err(identity_error("invalid build catalog identity"));
         }
-        if get("Active") != "1" || get("Product") != code {
+        if get("Active") != "1" {
             continue;
         }
         let branch = columns
             .get("Branch")
             .map(|&i| values[i].trim())
             .unwrap_or("");
-        if branch.len() > 64
-            || !branch
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-        {
-            return Err(identity_error("invalid publishing metadata branch"));
-        }
-        if selected
-            .replace((get("Version").into(), branch.into()))
-            .is_some()
-        {
-            return Err(identity_error(
-                "multiple active rows for exact flavor product",
-            ));
-        }
+        selected.push(ClientBuild {
+            product_code: get("Product").into(),
+            full_build: get("Version").into(),
+            branch: branch.into(),
+        });
     }
-    selected.ok_or_else(|| identity_error("no active build row matches exact flavor product"))
+    Ok(selected)
 }
 pub fn inspect(directory: &Path) -> Result<ClientInstallation> {
     inspect_with(directory, &mut Unmetered)
@@ -431,56 +561,52 @@ pub fn inspect_with(
         return Err(identity_error("client directory exceeds bound"));
     }
     let root = Directory::open_controlled(directory, &mut MetadataFiles(&mut *control))?;
-    let (code, mut source) = flavor(&root, control)?;
-    let profile =
-        catalog_product(&code).ok_or_else(|| identity_error("unsupported product metadata"))?;
-    let version = text(&root, "version.txt", 4096, control)?;
-    if !version.is_empty() && !valid_build(&version) {
-        return Err(ToolkitError::new(
-            "selection.client_identity",
-            "version.txt requires exact full build",
-            4,
-        ));
-    }
     control.charge(MetadataCost {
         allocation_bytes: 262144,
         work_units: 65536,
         ..MetadataCost::default()
     })?;
-    let parent;
-    let catalog_root = if exists(&root, ".build.info", control)? {
-        Some(&root)
-    } else {
-        parent = root
-            .path()
-            .parent()
-            .map(|path| Directory::open_controlled(path, &mut MetadataFiles(&mut *control)))
-            .transpose()?;
-        match parent.as_ref() {
-            Some(parent) if exists(parent, ".build.info", control)? => Some(parent),
-            _ => None,
-        }
+    // records.inspectExactClient always reads the selected client's parent.
+    // A catalog placed inside that client cannot override launcher evidence.
+    let parent = root
+        .path()
+        .parent()
+        .map(|path| Directory::open_controlled(path, &mut MetadataFiles(&mut *control)))
+        .transpose()?;
+    let catalog_root = match parent.as_ref() {
+        Some(parent) if exists(parent, ".build.info", control)? => Some(parent),
+        _ => None,
     };
-    let (build, branch) = if let Some(parent) = catalog_root {
-        let raw = text(parent, ".build.info", 1 << 20, control)?;
-        let (build, branch) = catalog_identity(&raw, &code, control)?;
-        if !version.is_empty() && version != build {
-            return Err(identity_error(
-                "version.txt contradicts exact flavor catalog row",
-            ));
-        }
-        source.push_str("+.build.info");
-        (build, branch)
+    let active = if let Some(parent) = catalog_root {
+        catalog_builds(&text(parent, ".build.info", 1 << 20, control)?, control)?
     } else {
-        (version, String::new())
+        Vec::new()
     };
-    if !build.starts_with(&format!("{}.", profile.series)) {
-        return Err(ToolkitError::new(
-            "selection.client_identity",
-            "missing or contradictory product/build identity",
-            4,
-        ));
-    }
+    let flavor = flavor(&root, control)?;
+    let version = text(&root, "version.txt", 4096, control)?;
+    let folder = root
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let identity = resolve_identity(folder, flavor, &version, &active, control)?;
+    validate_installation_catalog(&identity, &active)?;
+    let profile = identity.profile;
+    let delivery = catalog_product(&identity.catalog_product)
+        .filter(|delivery| delivery.family == profile.family)
+        .unwrap_or(profile);
+    let catalog_code = if identity.catalog_product.is_empty() {
+        &identity.product_code
+    } else {
+        &identity.catalog_product
+    };
+    let branch = active
+        .iter()
+        .find(|candidate| {
+            candidate.product_code == *catalog_code && candidate.full_build == identity.full_build
+        })
+        .map(|candidate| candidate.branch.clone())
+        .unwrap_or_default();
     control.charge(MetadataCost {
         allocation_bytes: 131072,
         work_units: 32768,
@@ -493,24 +619,16 @@ pub fn inspect_with(
             .trim_start_matches("\\\\?\\")
             .into(),
         product: profile.family.into(),
-        product_code: if profile.family == "forever" {
-            "wow_forever".into()
-        } else {
-            code.clone()
-        },
-        catalog_product: if profile.reused_slot && code != "wow_forever" {
-            code
-        } else {
-            String::new()
-        },
-        display_name: profile.display_name.into(),
-        channel: profile.channel.into(),
+        product_code: identity.product_code,
+        catalog_product: identity.catalog_product,
+        display_name: delivery.display_name.into(),
+        channel: delivery.channel.into(),
         metadata_branch: branch,
-        full_build: build,
+        full_build: identity.full_build,
         interface: profile.interface.unwrap_or(0),
         interface_known: profile.interface.is_some(),
         toc: "Lychee Dev.toc".into(),
-        identity_source: source,
+        identity_source: identity.source,
     };
     root.verify_controlled(&mut MetadataFiles(&mut *control))?;
     if let Some(catalog) = catalog_root {
@@ -772,7 +890,7 @@ mod tests {
         assert_eq!(client_data_product(&cn), "forever-cn-beta");
         assert!(!client_matches_product(&asia, "forever-cn-beta"));
         assert!(!client_matches_product(&cn, "forever-asia-beta"));
-        assert_eq!(cn.identity_source, ".flavor.info+.build.info");
+        assert_eq!(cn.identity_source, ".flavor.info+build-catalog");
         let value = serde_json::to_value(&asia).unwrap();
         assert!(
             value.get("region").is_none(),
@@ -780,7 +898,7 @@ mod tests {
         );
     }
     #[test]
-    fn beta_missing_wrong_duplicate_and_conflicting_identity_refuse() {
+    fn beta_catalog_and_flavor_precedence_preserve_installation_consistency() {
         let fixture = Fixture::new();
         let cn = fixture.client("_cn_beta_", "wow_cn_beta");
         assert!(inspect(&cn).is_err());
@@ -790,15 +908,9 @@ mod tests {
             "equal build from another product cannot supply identity"
         );
         fixture.catalog(&format!("{CN}{CN}"));
-        assert!(
-            inspect(&cn).is_err(),
-            "identical duplicate active rows remain ambiguous"
-        );
+        assert_eq!(inspect(&cn).unwrap().full_build, "1.60.1.70338");
         fixture.catalog(&format!("{CN}us|1|1.60.1.70338|wow_cn_beta\n"));
-        assert!(
-            inspect(&cn).is_err(),
-            "a second publishing branch cannot be silently chosen"
-        );
+        assert_eq!(inspect(&cn).unwrap().catalog_product, "wow_cn_beta");
         fixture.catalog(&format!("{CN}cn|1|1.60.1.70339|wow_cn_beta\n"));
         assert!(inspect(&cn).is_err());
         fixture.catalog(CN);
@@ -806,7 +918,7 @@ mod tests {
         assert!(inspect(&cn).is_err());
         fs::remove_file(cn.join("version.txt")).unwrap();
         fs::write(cn.join("flavor.info"), "wow_classic_beta").unwrap();
-        assert!(inspect(&cn).is_err());
+        assert_eq!(inspect(&cn).unwrap().catalog_product, "wow_cn_beta");
         fs::remove_file(cn.join("flavor.info")).unwrap();
         fs::write(
             cn.join(".flavor.info"),
@@ -814,13 +926,6 @@ mod tests {
         )
         .unwrap();
         assert!(inspect(&cn).is_err());
-        let unknown = fixture.0.join("_beta_");
-        fs::create_dir_all(&unknown).unwrap();
-        fs::write(unknown.join("version.txt"), "1.60.1.70338").unwrap();
-        assert!(
-            inspect(&unknown).is_err(),
-            "folder and build are not a product selector"
-        );
     }
     #[test]
     fn exact_products_and_source_family_do_not_conflate_delivery_tracks() {
@@ -863,5 +968,762 @@ mod tests {
         let path = fixture.client("_cn_beta_", "wow_forever");
         fs::write(path.join("version.txt"), "1.60.1.70338").unwrap();
         assert_eq!(client_data_product(&inspect(&path).unwrap()), "forever");
+    }
+
+    // Port of TestClientEvidencePrecedence at fixed Go 3.2.0 commit
+    // 3057a9666ab078270b63c7f06de748069b0d1f4b, through the installation wrapper.
+    // Additional cases cover metadata-backed folder fallback and the records
+    // layer's contradiction gate; pure selection precedence is tested separately.
+    #[test]
+    fn go_320_client_evidence_precedence() {
+        struct Case {
+            name: &'static str,
+            folder: &'static str,
+            flavor: &'static str,
+            version: &'static str,
+            rows: &'static str,
+            want: Option<(&'static str, &'static str)>,
+        }
+        let cases = [
+            Case {
+                name: "retail catalog",
+                folder: "_retail_",
+                flavor: "wow",
+                version: "",
+                rows: "us|1|12.1.0.69875|wow\n",
+                want: Some(("retail", "retail")),
+            },
+            Case {
+                name: "anniversary catalog",
+                folder: "_anniversary_",
+                flavor: "wow_anniversary",
+                version: "",
+                rows: "us|1|2.5.6.70006|wow_anniversary\n",
+                want: Some(("anniversary", "anniversary")),
+            },
+            Case {
+                name: "anniversary version",
+                folder: "custom",
+                flavor: "wow_anniversary",
+                version: "2.5.6.70006",
+                rows: "",
+                want: Some(("anniversary", "anniversary")),
+            },
+            Case {
+                name: "legacy Forever in reused slot",
+                folder: "_classic_beta_",
+                flavor: "wow_forever",
+                version: "1.60.1.69893",
+                rows: "",
+                want: Some(("forever", "forever")),
+            },
+            Case {
+                name: "slot resolved by catalog",
+                folder: "_classic_beta_",
+                flavor: "wow_classic_beta",
+                version: "",
+                rows: "us|1|1.60.1.70009|wow_classic_beta\n",
+                want: Some(("forever", "forever-asia-beta")),
+            },
+            Case {
+                name: "slot wrong series",
+                folder: "_classic_beta_",
+                flavor: "wow_classic_beta",
+                version: "",
+                rows: "us|1|5.5.4.69934|wow_classic_beta\n",
+                want: None,
+            },
+            Case {
+                name: "CN slot catalog",
+                folder: "_cn_beta_",
+                flavor: "wow_cn_beta",
+                version: "",
+                rows: "cn|1|1.60.1.70245|wow_cn_beta\nus|1|1.60.1.70124|wow_classic_beta\n",
+                want: Some(("forever", "forever-cn-beta")),
+            },
+            Case {
+                name: "CN slot version",
+                folder: "_cn_beta_",
+                flavor: "wow_cn_beta",
+                version: "1.60.1.70245",
+                rows: "",
+                want: Some(("forever", "forever-cn-beta")),
+            },
+            Case {
+                name: "CN slot wrong series",
+                folder: "_cn_beta_",
+                flavor: "wow_cn_beta",
+                version: "",
+                rows: "cn|1|5.5.4.69934|wow_cn_beta\n",
+                want: None,
+            },
+            Case {
+                name: "renamed CN slot wrong series",
+                folder: "custom",
+                flavor: "wow_cn_beta",
+                version: "5.5.4.69934",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "CN cannot borrow international build",
+                folder: "_cn_beta_",
+                flavor: "wow_cn_beta",
+                version: "",
+                rows: "us|1|1.60.1.70124|wow_classic_beta\n",
+                want: None,
+            },
+            Case {
+                name: "CN folder alone is not identity",
+                folder: "_cn_beta_",
+                flavor: "",
+                version: "",
+                rows: "cn|1|1.60.1.70245|wow_cn_beta\n",
+                want: None,
+            },
+            Case {
+                name: "version before folder",
+                folder: "_classic_beta_",
+                flavor: "",
+                version: "1.60.1.69893",
+                rows: "",
+                want: Some(("forever", "forever")),
+            },
+            Case {
+                name: "product before folder",
+                folder: "custom",
+                flavor: "wow_classic_titan",
+                version: "3.80.2.12345",
+                rows: "",
+                want: Some(("titan", "titan")),
+            },
+            Case {
+                name: "unknown product no fallback",
+                folder: "_retail_",
+                flavor: "wow_beta",
+                version: "12.1.0.69875",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "contradictory product build",
+                folder: "_retail_",
+                flavor: "wow",
+                version: "1.60.1.69893",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "MoP test slot",
+                folder: "_classic_beta_",
+                flavor: "",
+                version: "5.5.4.69585",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "unidentified reused slot",
+                folder: "_classic_beta_",
+                flavor: "",
+                version: "",
+                rows: "us|1|1.60.1.69893|wow_forever\n",
+                want: None,
+            },
+            Case {
+                name: "ambiguous catalog",
+                folder: "_retail_",
+                flavor: "wow",
+                version: "",
+                rows: "us|1|12.1.0.1|wow\nus|1|12.1.0.2|wow\n",
+                want: None,
+            },
+            Case {
+                name: "missing build",
+                folder: "_retail_",
+                flavor: "wow",
+                version: "",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "unsupported series",
+                folder: "_retail_",
+                flavor: "wow",
+                version: "12.2.0.12345",
+                rows: "",
+                want: None,
+            },
+            // Additional boundaries of the version-only path.
+            Case {
+                name: "renamed legacy version",
+                folder: "custom",
+                flavor: "",
+                version: "1.60.1.70338",
+                rows: "",
+                want: Some(("forever", "forever")),
+            },
+            Case {
+                name: "CN folder does not assign region",
+                folder: "_cn_beta_",
+                flavor: "",
+                version: "1.60.1.70338",
+                rows: CN,
+                want: Some(("forever", "forever")),
+            },
+            Case {
+                name: "equal beta builds do not assign region",
+                folder: "custom",
+                flavor: "",
+                version: "1.60.1.70338",
+                rows: "us|1|1.60.1.70338|wow_classic_beta\ncn|1|1.60.1.70338|wow_cn_beta\n",
+                want: Some(("forever", "forever")),
+            },
+            Case {
+                name: "local version needs no unrelated catalog row",
+                folder: "custom",
+                flavor: "wow_cn_beta",
+                version: "1.60.1.70338",
+                rows: ASIA,
+                want: Some(("forever", "forever-cn-beta")),
+            },
+            Case {
+                name: "regular folder and exact catalog supply identity",
+                folder: "_retail_",
+                flavor: "",
+                version: "",
+                rows: "us|1|12.1.0.69875|wow\n",
+                want: Some(("retail", "retail")),
+            },
+            Case {
+                name: "unsupported version cannot use folder",
+                folder: "_retail_",
+                flavor: "",
+                version: "12.2.0.12345",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "malformed version cannot use folder",
+                folder: "_retail_",
+                flavor: "",
+                version: "12.1.0",
+                rows: "",
+                want: None,
+            },
+            Case {
+                name: "version-only exact catalog conflict",
+                folder: "custom",
+                flavor: "",
+                version: "1.60.1.70338",
+                rows: "us|1|1.60.1.70339|wow_forever\n",
+                want: None,
+            },
+            Case {
+                name: "version-only identical catalog duplicates",
+                folder: "custom",
+                flavor: "",
+                version: "1.60.1.70338",
+                rows: "us|1|1.60.1.70338|wow_forever\nus|1|1.60.1.70338|wow_forever\n",
+                want: Some(("forever", "forever")),
+            },
+        ];
+        for case in cases {
+            let fixture = Fixture::new();
+            let path = fixture.0.join(case.folder);
+            fs::create_dir(&path).unwrap();
+            if !case.flavor.is_empty() {
+                fs::write(
+                    path.join(".flavor.info"),
+                    format!("Product Flavor!STRING:0\n{}\n", case.flavor),
+                )
+                .unwrap();
+            }
+            if !case.version.is_empty() {
+                fs::write(path.join("version.txt"), case.version).unwrap();
+            }
+            if !case.rows.is_empty() {
+                fixture.catalog(case.rows);
+            }
+            let observed = inspect(&path);
+            if let Some((family, delivery)) = case.want {
+                let observed = observed.unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+                assert_eq!(observed.product, family, "{}", case.name);
+                assert_eq!(client_data_product(&observed), delivery, "{}", case.name);
+                assert!(
+                    observed.interface_known && observed.interface > 0,
+                    "{}",
+                    case.name
+                );
+                assert!(!observed.toc.is_empty(), "{}", case.name);
+                assert!(client_matches_product(&observed, family), "{}", case.name);
+                assert!(client_matches_product(&observed, delivery), "{}", case.name);
+                if delivery == "forever" {
+                    assert_eq!(observed.product_code, "wow_forever", "{}", case.name);
+                    assert!(observed.catalog_product.is_empty(), "{}", case.name);
+                    assert!(observed.channel.is_empty(), "{}", case.name);
+                    assert!(
+                        !client_matches_product(&observed, "forever-asia-beta"),
+                        "{}",
+                        case.name
+                    );
+                    assert!(
+                        !client_matches_product(&observed, "forever-cn-beta"),
+                        "{}",
+                        case.name
+                    );
+                }
+                let slot = if matches!(case.flavor, "wow_classic_beta" | "wow_cn_beta") {
+                    case.flavor
+                } else {
+                    ""
+                };
+                let source = if case.flavor.is_empty() && case.version.is_empty() {
+                    "folder"
+                } else if !slot.is_empty() && case.version.is_empty() {
+                    ".flavor.info+build-catalog"
+                } else if case.flavor.is_empty() || !slot.is_empty() {
+                    "version.txt"
+                } else {
+                    ".flavor.info"
+                };
+                let serialized = serde_json::to_value(&observed).unwrap();
+                assert_eq!(
+                    serialized["productCode"],
+                    family_code(product(family).unwrap()),
+                    "{}",
+                    case.name
+                );
+                assert_eq!(serialized["identitySource"], source, "{}", case.name);
+                if slot.is_empty() {
+                    assert!(serialized.get("catalogProduct").is_none(), "{}", case.name);
+                } else {
+                    assert_eq!(serialized["catalogProduct"], slot, "{}", case.name);
+                }
+            } else {
+                assert_eq!(
+                    observed.unwrap_err().code,
+                    if case.name == "version-only exact catalog conflict" {
+                        "selection.installation_metadata_conflict"
+                    } else {
+                        "selection.client_identity"
+                    },
+                    "{}",
+                    case.name
+                );
+            }
+        }
+    }
+    #[test]
+    fn version_only_families_and_empty_flavor_fallback_remain_bounded() {
+        for profile in PRODUCTS
+            .iter()
+            .filter(|profile| !profile.reused_slot)
+            .chain(std::iter::once(&LEGACY_FOREVER))
+        {
+            let fixture = Fixture::new();
+            let path = fixture.0.join("custom");
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join(".flavor.info"), "\u{feff}\n ").unwrap();
+            fs::write(path.join("flavor.info"), "\n").unwrap();
+            fs::write(
+                path.join("version.txt"),
+                format!("{}.70338", profile.series),
+            )
+            .unwrap();
+            let mut meter = Meter::default();
+            let observed = inspect_with(&path, &mut meter).unwrap();
+            assert_eq!(observed.product, profile.family);
+            assert_eq!(client_data_product(&observed), profile.id);
+            assert_eq!(observed.identity_source, "version.txt");
+            assert!(meter.cost.read_calls > 0);
+            assert!(meter.reads.iter().all(|bytes| *bytes <= 65536));
+            meter.deny_read = true;
+            assert_eq!(
+                inspect_with(&path, &mut meter).unwrap_err().message,
+                "fixture.read_budget"
+            );
+        }
+        let fixture = Fixture::new();
+        let path = fixture.client("custom", "wow_cn_beta");
+        fs::write(path.join("version.txt"), "1.60.1.70338").unwrap();
+        fs::write(path.join("flavor.info"), "wow_classic_beta").unwrap();
+        assert_eq!(inspect(&path).unwrap().catalog_product, "wow_cn_beta");
+        fs::write(path.join(".flavor.info"), "").unwrap();
+        fs::write(path.join("flavor.info"), "wow_beta").unwrap();
+        assert!(
+            inspect(&path).is_err(),
+            "unknown alternate flavor must not fall back to version"
+        );
+        fs::remove_file(path.join("flavor.info")).unwrap();
+        fs::write(path.join("version.txt"), vec![b'1'; 4097]).unwrap();
+        assert!(inspect_with(&path, &mut Meter::default()).is_err());
+    }
+
+    #[test]
+    fn selection_precedence_and_installation_consistency_are_distinct_go_layers() {
+        struct Case {
+            name: &'static str,
+            folder: &'static str,
+            flavor: &'static str,
+            version: &'static str,
+            builds: &'static [(&'static str, &'static str)],
+            // family, canonical code, observed slot, build, identity source
+            want: Option<(
+                &'static str,
+                &'static str,
+                &'static str,
+                &'static str,
+                &'static str,
+            )>,
+            installation_ok: bool,
+        }
+        let cases = [
+            Case {
+                name: "local version outranks matching catalog for selection",
+                folder: "custom",
+                flavor: "wow",
+                version: "12.1.0.1",
+                builds: &[("wow", "12.1.0.2")],
+                want: Some(("retail", "wow", "", "12.1.0.1", ".flavor.info")),
+                installation_ok: false,
+            },
+            Case {
+                name: "slot version outranks matching catalog for selection",
+                folder: "custom",
+                flavor: "wow_cn_beta",
+                version: "1.60.1.1",
+                builds: &[("wow_cn_beta", "1.60.1.2")],
+                want: Some((
+                    "forever",
+                    "wow_forever",
+                    "wow_cn_beta",
+                    "1.60.1.1",
+                    "version.txt",
+                )),
+                installation_ok: false,
+            },
+            Case {
+                name: "legacy version checks default data slot at installation",
+                folder: "custom",
+                flavor: "",
+                version: "1.60.1.1",
+                builds: &[("wow_classic_beta", "1.60.1.2")],
+                want: Some(("forever", "wow_forever", "", "1.60.1.1", "version.txt")),
+                installation_ok: false,
+            },
+            Case {
+                name: "CN version never borrows Asia row",
+                folder: "custom",
+                flavor: "wow_cn_beta",
+                version: "1.60.1.1",
+                builds: &[("wow_classic_beta", "1.60.1.2")],
+                want: Some((
+                    "forever",
+                    "wow_forever",
+                    "wow_cn_beta",
+                    "1.60.1.1",
+                    "version.txt",
+                )),
+                installation_ok: true,
+            },
+            Case {
+                name: "same-family slot rows select last before installation check",
+                folder: "custom",
+                flavor: "wow_classic_beta",
+                version: "",
+                builds: &[
+                    ("wow_classic_beta", "1.60.1.1"),
+                    ("wow_classic_beta", "1.60.1.2"),
+                ],
+                want: Some((
+                    "forever",
+                    "wow_forever",
+                    "wow_classic_beta",
+                    "1.60.1.2",
+                    ".flavor.info+build-catalog",
+                )),
+                installation_ok: false,
+            },
+            Case {
+                name: "identical slot rows allowed",
+                folder: "custom",
+                flavor: "wow_classic_beta",
+                version: "",
+                builds: &[
+                    ("wow_classic_beta", "1.60.1.1"),
+                    ("wow_classic_beta", "1.60.1.1"),
+                ],
+                want: Some((
+                    "forever",
+                    "wow_forever",
+                    "wow_classic_beta",
+                    "1.60.1.1",
+                    ".flavor.info+build-catalog",
+                )),
+                installation_ok: true,
+            },
+            Case {
+                name: "different-family slot rows ambiguous",
+                folder: "custom",
+                flavor: "wow_classic_beta",
+                version: "",
+                builds: &[
+                    ("wow_classic_beta", "1.60.1.1"),
+                    ("wow_classic_beta", "5.5.4.1"),
+                ],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "renamed Asia slot resolves Classic by version",
+                folder: "custom",
+                flavor: "wow_classic_beta",
+                version: "5.5.4.1",
+                builds: &[],
+                want: Some((
+                    "classic",
+                    "wow_classic",
+                    "wow_classic_beta",
+                    "5.5.4.1",
+                    "version.txt",
+                )),
+                installation_ok: true,
+            },
+            Case {
+                name: "renamed Asia slot resolves Classic by catalog",
+                folder: "custom",
+                flavor: "wow_classic_beta",
+                version: "",
+                builds: &[("wow_classic_beta", "5.5.4.1")],
+                want: Some((
+                    "classic",
+                    "wow_classic",
+                    "wow_classic_beta",
+                    "5.5.4.1",
+                    ".flavor.info+build-catalog",
+                )),
+                installation_ok: true,
+            },
+            Case {
+                name: "renamed CN slot still requires Forever",
+                folder: "custom",
+                flavor: "wow_cn_beta",
+                version: "5.5.4.1",
+                builds: &[],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "known beta folder still requires Forever",
+                folder: "_classic_beta_",
+                flavor: "wow_classic",
+                version: "5.5.4.1",
+                builds: &[],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "identical regular rows allowed",
+                folder: "custom",
+                flavor: "wow",
+                version: "",
+                builds: &[("wow", "12.1.0.1"), ("wow", "12.1.0.1")],
+                want: Some(("retail", "wow", "", "12.1.0.1", ".flavor.info")),
+                installation_ok: true,
+            },
+            Case {
+                name: "different regular builds ambiguous",
+                folder: "custom",
+                flavor: "wow",
+                version: "",
+                builds: &[("wow", "12.1.0.1"), ("wow", "12.1.0.2")],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "known folder with exact active build",
+                folder: "_ReTaIl_",
+                flavor: "",
+                version: "",
+                builds: &[("wow", "12.1.0.1")],
+                want: Some(("retail", "wow", "", "12.1.0.1", "folder")),
+                installation_ok: true,
+            },
+            Case {
+                name: "legacy folder with exact active build",
+                folder: "_forever_",
+                flavor: "",
+                version: "",
+                builds: &[("wow_forever", "1.60.1.1")],
+                want: Some(("forever", "wow_forever", "", "1.60.1.1", "folder")),
+                installation_ok: true,
+            },
+            Case {
+                name: "legacy folder cannot borrow beta slot",
+                folder: "_forever_",
+                flavor: "",
+                version: "",
+                builds: &[("wow_classic_beta", "1.60.1.1")],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "arbitrary folder cannot choose catalog identity",
+                folder: "custom",
+                flavor: "",
+                version: "",
+                builds: &[("wow", "12.1.0.1")],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "known folder requires a build",
+                folder: "_retail_",
+                flavor: "",
+                version: "",
+                builds: &[],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "unknown explicit product cannot fall back to folder",
+                folder: "_retail_",
+                flavor: "wow_beta",
+                version: "",
+                builds: &[("wow", "12.1.0.1")],
+                want: None,
+                installation_ok: false,
+            },
+            Case {
+                name: "plus sign is not a Go build digit",
+                folder: "custom",
+                flavor: "wow",
+                version: "12.1.0.+1",
+                builds: &[],
+                want: None,
+                installation_ok: false,
+            },
+        ];
+        for case in cases {
+            let active: Vec<_> = case
+                .builds
+                .iter()
+                .map(|&(product, build)| ClientBuild {
+                    product_code: product.into(),
+                    full_build: build.into(),
+                    branch: String::new(),
+                })
+                .collect();
+            let flavor =
+                (!case.flavor.is_empty()).then(|| (case.flavor.into(), ".flavor.info".into()));
+            let result =
+                resolve_identity(case.folder, flavor, case.version, &active, &mut Unmetered);
+            if let Some((family, code, slot, build, source)) = case.want {
+                let identity = result.unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+                assert_eq!(
+                    (
+                        identity.profile.family,
+                        identity.product_code.as_str(),
+                        identity.catalog_product.as_str(),
+                        identity.full_build.as_str(),
+                        identity.source.as_str()
+                    ),
+                    (family, code, slot, build, source),
+                    "{}",
+                    case.name
+                );
+                let installation = validate_installation_catalog(&identity, &active);
+                assert_eq!(installation.is_ok(), case.installation_ok, "{}", case.name);
+                if !case.installation_ok {
+                    assert_eq!(
+                        installation.unwrap_err().code,
+                        "selection.installation_metadata_conflict",
+                        "{}",
+                        case.name
+                    );
+                }
+            } else {
+                assert_eq!(
+                    result.unwrap_err().code,
+                    "selection.client_identity",
+                    "{}",
+                    case.name
+                );
+            }
+        }
+    }
+    #[test]
+    fn first_nonempty_flavor_uses_go_word_matching_and_does_not_read_lower_priority_file() {
+        for value in [
+            "wow",
+            "WOW",
+            "Product Flavor!STRING:0\nWoW\n",
+            "label: wow; ignored prose",
+            "wow-other",
+            "\0wow\0",
+            "éwowé",
+        ] {
+            let fixture = Fixture::new();
+            let path = fixture.client("custom", "wow");
+            fs::write(path.join(".flavor.info"), value).unwrap();
+            fs::write(path.join("version.txt"), "12.1.0.1").unwrap();
+            fs::create_dir(path.join("flavor.info")).unwrap();
+            let observed = inspect(&path).unwrap();
+            assert_eq!(observed.product_code, "wow", "{value:?}");
+            assert_eq!(observed.identity_source, ".flavor.info", "{value:?}");
+        }
+        for value in [
+            "notwow",
+            "_wow",
+            "wow wow",
+            "wow_cn_beta wow_classic_beta",
+            "no identity",
+        ] {
+            let fixture = Fixture::new();
+            let path = fixture.client("_retail_", "wow");
+            fs::write(path.join(".flavor.info"), value).unwrap();
+            fs::write(path.join("flavor.info"), "wow").unwrap();
+            fs::write(path.join("version.txt"), "12.1.0.1").unwrap();
+            assert_eq!(
+                inspect(&path).unwrap_err().code,
+                "selection.client_identity",
+                "{value:?}"
+            );
+        }
+        let fixture = Fixture::new();
+        let path = fixture.client("custom", "wow");
+        fs::write(path.join(".flavor.info"), "\u{feff}\n ").unwrap();
+        fs::write(path.join("flavor.info"), "WoW_CN_BETA").unwrap();
+        fixture.catalog(CN);
+        let observed = inspect(&path).unwrap();
+        assert_eq!(observed.product_code, "wow_forever");
+        assert_eq!(observed.catalog_product, "wow_cn_beta");
+        assert_eq!(observed.identity_source, "flavor.info+build-catalog");
+    }
+    #[test]
+    fn parent_catalog_is_authoritative_and_folder_fallback_requires_exact_active_build() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("_retail_");
+        fs::create_dir(&path).unwrap();
+        fixture.catalog("us|1|12.1.0.1|wow\n");
+        fs::write(
+            path.join(".build.info"),
+            "malformed local catalog must not replace parent",
+        )
+        .unwrap();
+        let observed = inspect(&path).unwrap();
+        assert_eq!(observed.product_code, "wow");
+        assert_eq!(observed.full_build, "12.1.0.1");
+        assert_eq!(observed.identity_source, "folder");
+        fixture.catalog("us|0|12.1.0.1|wow\n");
+        assert_eq!(
+            inspect(&path).unwrap_err().code,
+            "selection.client_identity"
+        );
+        fs::remove_file(fixture.0.join(".build.info")).unwrap();
+        assert_eq!(
+            inspect(&path).unwrap_err().code,
+            "selection.client_identity"
+        );
     }
 }
