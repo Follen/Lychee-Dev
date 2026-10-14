@@ -1,0 +1,52 @@
+name: Rust parity foundation (Windows)
+
+# This branch has not converged with main; push coverage must not depend on a
+# mergeable pull-request merge ref. No publishing, secrets or game interaction.
+on:
+  push:
+    branches: [rust-refactor]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-static-parity:
+    if: github.ref == 'refs/heads/rust-refactor'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Verify immutable Go oracle object
+        run: |
+          git cat-file -e '3057a9666ab078270b63c7f06de748069b0d1f4b^{commit}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test the differential runner (not product parity)
+        run: node --test tests/rust-parity/oracle.test.mjs
+      - name: Authenticate source-derived fixture
+        run: node tests/rust-parity/run.mjs --verify-fixture
+      - name: Report actual parity gaps without allowlisting them
+        run: |
+          node tests/rust-parity/run.mjs --json | Out-File -Encoding utf8 rust-parity-report.json
+          exit $LASTEXITCODE
+      - name: Preserve parity report even when the candidate differs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rust-static-parity-${{ github.sha }}
+          path: rust-parity-report.json
+          if-no-files-found: warn
+          retention-days: 14

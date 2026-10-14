@@ -8,6 +8,10 @@ Go release `3057a9666ab078270b63c7f06de748069b0d1f4b` (v3.2.0) defines observabl
 
 The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
 
+### Idiomatic Rust, equivalent external behavior
+
+Do not translate Go line by line. Preserve the external contract while using Rust ownership/borrowing to reduce unnecessary copying, enums/type-state where they prevent invalid transitions, Result for explicit errors, RAII for owned resources and bounded safe concurrency where measurements justify it. Prefer clear concrete abstractions over gratuitous generic frameworks. Review lifecycle/cancellation/drop ordering and thread ownership as architecture, not style-only concerns. These choices do not relax unsafe boundaries or replace measured performance evidence.
+
 ## 2. Boundaries and ownership
 
 | Rust boundary | Responsibilities | Go reference at fixed release |
