@@ -635,6 +635,153 @@ fn go_integral_float_pages_use_go_encoded_fields_limit() {
 }
 
 #[test]
+fn go_fractional_float_fields_cap_accepts_exact_limit_and_rejects_one_more_byte() {
+    // 31 arrays of 65535 binary32 1.5 values leave room for one string.
+    // Go JSON {"Pad":"","Values":[...]} is 21 + 4*cells bytes per row.
+    // Both raw payloads stay below 8 MiB; only encoded fields cross the cap.
+    const ROWS: usize = 31;
+    const CELLS: usize = 65535;
+    const LIMIT: usize = 8 << 20;
+    const PADDING: usize = LIMIT - ROWS * (21 + 4 * CELLS);
+    let d =
+        definition("COLUMNS\nfloat Values\nstring Pad\n\nBUILD 12.1.0.69875\nValues[65535]\nPad\n");
+    // Pad uses the final cell in the unchanged 65536-cell schema allowance.
+    let floats = 1.5f32.to_le_bytes().repeat(CELLS);
+    for extra in [0, 1] {
+        let padding = PADDING + extra;
+        let mut first = floats.clone();
+        first.resize(first.len() + padding, b'a');
+        first.push(0);
+        let mut rest = floats.clone();
+        rest.push(0);
+        let entries: Vec<_> = (0..ROWS)
+            .map(|id| {
+                (
+                    id as u32,
+                    1,
+                    1,
+                    if id == 0 { &first[..] } else { &rest[..] },
+                )
+            })
+            .collect();
+        assert!(first.len() + (ROWS - 1) * rest.len() < LIMIT);
+        let raw = cache(9, &entries);
+        let page = hotfix::inspect(
+            &raw,
+            CacheFilter {
+                build: 69875,
+                limit: ROWS,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = hotfix::decode_page(&raw, page, &d, &budget());
+        if extra == 0 {
+            let page = result.unwrap();
+            assert_eq!(page.entries.len(), ROWS);
+            assert_eq!(
+                page.entries[ROWS - 1].fields.as_ref().unwrap()["Values"][CELLS - 1],
+                1.5
+            );
+        } else {
+            assert_eq!(result.unwrap_err().code, "records.hotfix_limit");
+        }
+    }
+}
+
+#[test]
+fn named_hotfix_capture_keeps_go_bytes_and_public_numbers_keep_precision() {
+    let values = [
+        1f32,
+        0.0,
+        -0.0,
+        0.1,
+        1e-6,
+        1e-7,
+        1e20,
+        1e21,
+        f32::from_bits(1),
+        f32::MAX,
+    ];
+    let mut payload = u64::MAX.to_le_bytes().to_vec();
+    payload.extend((-0.0f32).to_le_bytes());
+    for value in values {
+        payload.extend(value.to_le_bytes());
+    }
+    payload.extend("<>&\u{2028}\u{2029}-0\0".as_bytes());
+    let fixture = Fixture::new(&cache(9, &[(42, 1, 1, &payload)]));
+    fixture.definition(
+        "COLUMNS\nint Wide\nfloat Zero\nfloat Values\nstring Label\n\nBUILD 12.1.0.69875\nWide<u64>\nZero\nValues[10]\nLabel\n",
+        false,
+    );
+    let result = lycheedev_data::dispatch(&fixture.inv()).unwrap();
+    let expected_values = "[1,0,-0,0.10000000149011612,9.999999974752427e-7,1.0000000116860974e-7,100000002004087730000,1.0000000200408773e+21,1.401298464324817e-45,3.4028234663852886e+38]";
+    let fields = &result.data["page"]["entries"][0]["fields"];
+    // Generic Value must retain the sign. Its public constructor spells this
+    // value -0.0, while the Go-format archive below must contain exact -0.
+    assert_eq!(
+        serde_json::to_string(&fields["Values"]).unwrap(),
+        expected_values.replacen(",-0,", ",-0.0,", 1)
+    );
+    assert_eq!(fields["Wide"].as_u64(), Some(u64::MAX));
+    assert!(fields["Zero"].as_f64().unwrap().is_sign_negative());
+    assert!(fields["Values"][1].as_f64().unwrap().is_sign_positive());
+    assert!(fields["Values"][2].as_f64().unwrap().is_sign_negative());
+    assert_eq!(fields["Label"], "<>&\u{2028}\u{2029}-0");
+    let expected_fields = format!(
+        r#""fields":{{"Label":"\u003c\u003e\u0026\u2028\u2029-0","Values":{expected_values},"Wide":18446744073709551615,"Zero":-0}}"#
+    );
+    let encoded =
+        evidence::read_blob(&fixture.home, &result.provenance[1]["blob"], 32 << 20).unwrap();
+    assert!(
+        std::str::from_utf8(&encoded)
+            .unwrap()
+            .contains(&expected_fields),
+        "the archived capture must use the same Go encoding as the fields quota"
+    );
+    // Read original number tokens: generic Value loses lexical -0, and
+    // serde_json's optional fast typed-float parser is not a precision oracle.
+    // Rust's correctly rounded parser verifies the actual archived digits.
+    #[derive(serde::Deserialize)]
+    struct Fields {
+        #[serde(rename = "Values")]
+        values: Vec<Box<serde_json::value::RawValue>>,
+        #[serde(rename = "Zero")]
+        zero: Box<serde_json::value::RawValue>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Row {
+        fields: Fields,
+    }
+    #[derive(serde::Deserialize)]
+    struct Page {
+        entries: Vec<Row>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ResultBody {
+        page: Page,
+    }
+    let archived: ResultBody = serde_json::from_slice(&encoded).unwrap();
+    assert!(
+        archived.page.entries[0]
+            .fields
+            .zero
+            .get()
+            .parse::<f64>()
+            .unwrap()
+            .is_sign_negative()
+    );
+    for (index, token) in archived.page.entries[0].fields.values.iter().enumerate() {
+        let number = token.get().parse::<f64>().unwrap();
+        assert_eq!(number.to_bits(), f64::from(values[index]).to_bits());
+        assert_eq!(
+            fields["Values"][index].as_f64().unwrap().to_bits(),
+            number.to_bits()
+        );
+    }
+}
+
+#[test]
 fn named_hotfix_above_default_metadata_capacity_remains_valid() {
     // A large unselected physical record is still fully framed and archived;
     // the selected table's exact DBD costs must not steal the input allowance.

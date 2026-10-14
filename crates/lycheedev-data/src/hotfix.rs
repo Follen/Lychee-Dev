@@ -508,6 +508,31 @@ pub fn decode_fields(
 // have already been promoted exactly to float64, as in Go's decoder.
 struct GoFieldsFormatter;
 impl serde_json::ser::Formatter for GoFieldsFormatter {
+    fn write_number_str<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        value: &str,
+    ) -> std::io::Result<()> {
+        // With serde_json's workspace-wide arbitrary_precision feature, even
+        // Number::from_f64 serializes through this hook, not write_f64. Only
+        // floating-point lexemes may make the binary64 round trip: converting
+        // integer fields here would round values such as u64::MAX.
+        if value.bytes().any(|byte| matches!(byte, b'.' | b'e' | b'E')) {
+            let number = value
+                .parse::<f64>()
+                .ok()
+                .filter(|number| number.is_finite())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Hotfix float is not finite binary64",
+                    )
+                })?;
+            self.write_f64(writer, number)
+        } else {
+            writer.write_all(value.as_bytes())
+        }
+    }
     fn write_f64<W: ?Sized + std::io::Write>(
         &mut self,
         writer: &mut W,
@@ -741,6 +766,7 @@ mod fields_number_tests {
     #[test]
     fn go_json_float_digits_and_exponent_thresholds() {
         for (number, expected) in [
+            (0.0, "0"),
             (1.0, "1"),
             (-0.0, "-0"),
             (1e-6, "0.000001"),
@@ -748,6 +774,9 @@ mod fields_number_tests {
             (1e20, "100000000000000000000"),
             (1e21, "1e+21"),
             (f64::from(0.1f32), "0.10000000149011612"),
+            (f64::from(1e-6f32), "9.999999974752427e-7"),
+            (f64::from(1e20f32), "100000002004087730000"),
+            (f64::from(f32::from_bits(1)), "1.401298464324817e-45"),
             (f64::from(f32::MAX), "3.4028234663852886e+38"),
         ] {
             let mut bytes = Vec::new();
@@ -758,6 +787,70 @@ mod fields_number_tests {
                 ))
                 .unwrap();
             assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
+            // Typed f64 and Value::Number use different serializer hooks when
+            // arbitrary_precision is enabled; both must keep Go's spelling.
+            bytes.clear();
+            number
+                .serialize(&mut serde_json::Serializer::with_formatter(
+                    &mut bytes,
+                    GoFieldsFormatter,
+                ))
+                .unwrap();
+            assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn go_fields_count_matches_bounded_bytes_without_rounding_integers() {
+        let fields = BTreeMap::from([
+            (
+                "Array".into(),
+                Value::Array(vec![
+                    Value::from(-0.0),
+                    Value::from(1.0),
+                    Value::from(f64::from(0.1f32)),
+                    Value::from(1e21),
+                ]),
+            ),
+            ("Signed".into(), Value::from(i64::MIN)),
+            ("Text".into(), Value::from("<>&\u{2028}\u{2029}\"\\\0")),
+            ("Unsigned".into(), Value::from(u64::MAX)),
+            ("Wide".into(), Value::from(9_007_199_254_740_993u64)),
+        ]);
+        let expected = br#"{"Array":[-0,1,0.10000000149011612,1e+21],"Signed":-9223372036854775808,"Text":"\u003c\u003e\u0026\u2028\u2029\"\\\u0000","Unsigned":18446744073709551615,"Wide":9007199254740993}"#;
+        let budget = Budget::new(
+            Cost::defaults(),
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        assert_eq!(fields_json_size(&fields, &budget).unwrap(), expected.len());
+        assert_eq!(
+            crate::capture::json_bytes_with_formatter(
+                &fields,
+                &budget,
+                expected.len(),
+                limit_error,
+                GoFieldsFormatter,
+            )
+            .unwrap(),
+            expected
+        );
+        assert_eq!(
+            crate::capture::json_bytes_with_formatter(
+                &fields,
+                &budget,
+                expected.len() - 1,
+                limit_error,
+                GoFieldsFormatter,
+            )
+            .unwrap_err()
+            .code,
+            "records.hotfix_limit"
+        );
+        // The optional formatter must not change unrelated capture producers.
+        assert_eq!(
+            crate::capture::json_bytes(&fields, &budget, 4096, limit_error).unwrap(),
+            serde_json::to_vec(&fields).unwrap()
+        );
     }
 }

@@ -552,6 +552,14 @@ Skill此旧树27项原始22pass/5fail：真实batch新通过，refs/context/sess
 
 22项Rust测试声明仍 NOT_RUN，CI新增独立engine/identity与自有窗口fixture组，均无需游戏或用户机器。真实跨进程abandoned mutex、游戏输入和完整默认CLI接线未验收；Go交换间100ms、fresh INPUT witness、PublicationLease由后续正式backend统一接入。本批不能称生产Live已可用。
 
+### Hotfix 实际浮点编码失败修复候选
+
+418c2ef 的两个真实失败共享根因：serde_json arbitrary_precision 的 Number 走 write_number_str，旧 Go formatter 仅覆盖 write_f64，导致1.0被计量/归档为1.0而非Go的1。现两个hook共享Go数值编码，fields预算和capture归档使用同一formatter；整数字面量不经f64，保留u64::MAX及2^53+1。通用capture默认CompactFormatter路径不变。归档解析的-0由原decoded fields恢复公开Value符号，合法字段形状只有标量/一层数组。
+
+四文件新独审无可确认P0/P1/P2，原两项失败测试及断言不变；新增8MiB精确允许/+1拒绝、双hook、归档原token/公开精度/负零测试。r2只将新增测试的f64恢复改为RawValue原token.parse，避免Serde无float_roundtrip配置导致测试自身1ULP误差，不改预期位值。独立Python核验编码边界8,388,608/8,388,609及10个数值token通过。receipt SHA256 8db722aa1ec9bbb24971f2a7b34fbc3e3af0727b444f8dab39ab4d50bfbeaf2e；Rust/Windows原失败与新增回归仍NOT_RUN，下一候选执行后才能认定修复。
+
+明确未解决：公开CLI通用JSON序列化仍会把负零输出为-0.0，而固定Go为-0；本批仅保证所改Hotfix归档/计量设计，不宣称完整CLI字节等价。后续必须统一公共数值编码并回归，不能登记为新兼容例外。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

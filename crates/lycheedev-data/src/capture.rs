@@ -107,6 +107,22 @@ pub(crate) fn json_bytes(
     maximum: usize,
     limit: fn() -> ToolkitError,
 ) -> Result<Vec<u8>> {
+    json_bytes_with_formatter(
+        value,
+        budget,
+        maximum,
+        limit,
+        serde_json::ser::CompactFormatter,
+    )
+}
+
+pub(crate) fn json_bytes_with_formatter(
+    value: &impl Serialize,
+    budget: &Budget,
+    maximum: usize,
+    limit: fn() -> ToolkitError,
+    formatter: impl serde_json::ser::Formatter,
+) -> Result<Vec<u8>> {
     let mut writer = Buffer {
         bytes: Vec::new(),
         allocation: None,
@@ -115,7 +131,10 @@ pub(crate) fn json_bytes(
         budget,
         error: None,
     };
-    if let Err(error) = serde_json::to_writer(&mut writer, value) {
+    if let Err(error) = value.serialize(&mut serde_json::Serializer::with_formatter(
+        &mut writer,
+        formatter,
+    )) {
         return Err(writer.error.unwrap_or_else(|| error.into()));
     }
     budget.check()?;

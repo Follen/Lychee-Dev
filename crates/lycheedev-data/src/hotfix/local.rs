@@ -316,6 +316,67 @@ fn hotfix_limits(maximum: usize) -> Cost {
     }
 }
 
+// arbitrary_precision's generic Value parser treats the Go JSON token -0 as
+// an integer and loses its sign. Recover only already-decoded field zeros;
+// never rewrite strings, integer fields or bytes in the immutable capture.
+// Value's public float constructor stores -0.0, which preserves the binary64
+// sign in the public result even though its ordinary JSON spelling is longer.
+fn restore_field_zero_signs(
+    page: &super::CachePage,
+    result: &mut Value,
+    budget: &Budget,
+) -> Result<()> {
+    fn mismatch() -> ToolkitError {
+        fault("records.internal", 8, "Hotfix result field shape changed")
+    }
+    fn scalar(original: &Value, result: &mut Value, budget: &Budget) -> Result<()> {
+        budget.charge(Cost::work(1))?;
+        if original
+            .as_f64()
+            .is_some_and(|number| number == 0.0 && number.is_sign_negative())
+        {
+            if result.as_f64() != Some(0.0) {
+                return Err(mismatch());
+            }
+            budget.charge(Cost::retained(4))?;
+            *result = Value::from(-0.0);
+        }
+        Ok(())
+    }
+    let rows = result
+        .get_mut("page")
+        .and_then(|page| page.get_mut("entries"))
+        .and_then(Value::as_array_mut)
+        .filter(|rows| rows.len() == page.entries.len())
+        .ok_or_else(mismatch)?;
+    for (entry, row) in page.entries.iter().zip(rows) {
+        budget.check()?;
+        let Some(fields) = &entry.fields else {
+            continue;
+        };
+        let output = row
+            .get_mut("fields")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(mismatch)?;
+        for (name, original) in fields {
+            budget.charge(Cost::work(name.len().saturating_add(1)))?;
+            let output = output.get_mut(name).ok_or_else(mismatch)?;
+            if let Value::Array(values) = original {
+                let output = output
+                    .as_array_mut()
+                    .filter(|output| output.len() == values.len())
+                    .ok_or_else(mismatch)?;
+                for (original, output) in values.iter().zip(output) {
+                    scalar(original, output, budget)?;
+                }
+            } else {
+                scalar(original, output, budget)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     inv.control.check()?;
     let snapshot = inv.required("--snapshot")?;
@@ -519,9 +580,21 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         sources: named.as_ref().map(|(bundle, _)| bundle),
         definition: named.as_ref().map(|(_, definition)| definition),
     };
-    let encoded = capture::json_bytes(&body, &budget, 32 << 20, limit)?;
+    // Counted fields and archived bytes must use the same Go encoding,
+    // including arbitrary-precision Number values. A count-only formatter
+    // would admit the right page but still archive different floats (1.0
+    // instead of 1). The public Value projection preserves number semantics;
+    // its negative-zero spelling remains -0.0 as explained above.
+    let encoded = capture::json_bytes_with_formatter(
+        &body,
+        &budget,
+        32 << 20,
+        limit,
+        super::GoFieldsFormatter,
+    )?;
     budget.charge(Cost::retained(encoded.len().saturating_mul(16)))?;
-    let result: Value = serde_json::from_slice(&encoded)?;
+    let mut result: Value = serde_json::from_slice(&encoded)?;
+    restore_field_zero_signs(&page, &mut result, &budget)?;
     let source_id = source["id"]
         .as_str()
         .ok_or_else(|| identity("Source capture lacks identity"))?;
