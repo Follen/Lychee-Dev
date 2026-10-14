@@ -26,6 +26,7 @@ type slotPeer struct {
 	current bridge.SlotEnvelope
 	fault   string
 	sends   int
+	millis  int64
 	driver  *channel.Driver
 }
 
@@ -65,15 +66,18 @@ func (p *slotPeer) Input(_ context.Context, a channel.InputAction) (channel.Inpu
 		return channel.InputOutcome{Disposition: "not_sent"}, errors.New("unexpected simulated input")
 	}
 	err := p.send()
-	out := channel.InputOutcome{Disposition: "submitted", MessagesQueued: 1}
+	p.millis++
+	out := channel.InputOutcome{Disposition: "submitted", MessagesQueued: 1, AtMillis: p.millis}
 	if err != nil {
 		out.Disposition = "uncertain"
 	}
 	return out, err
 }
-func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (channel.InputObservation, error) {
+func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, after int64, _ string) (channel.InputObservation, error) {
 	blocked := false
-	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
+	// Model a fresh sample on the same monotonic host clock as Input outcomes.
+	p.millis = max(p.millis+100, after+100)
+	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: p.millis, ObservedAtMillis: p.millis, InputBlocked: &blocked}, nil
 }
 func (p *slotPeer) RuntimeCandidate(context.Context, channel.Identity) (*channel.Identity, error) {
 	return nil, nil

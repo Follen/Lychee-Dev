@@ -78,7 +78,10 @@ local function encodeDocument(value, limit)
             end
             if child % 1 == 0 and math.abs(child) <= 9007199254740991 then
                 append(string.format("%.0f", child))
-            else append(tostring(child)) end
+            else
+                -- Lua 5.1 tostring rounds to fewer than binary64's required digits.
+                append(string.format("%.17g", child))
+            end
         elseif kind == "table" then
             if getmetatable(child) then error("report_metatable", 0) end
             if seen[child] then error("report_cycle", 0) end

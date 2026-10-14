@@ -161,10 +161,6 @@ assert(emptyId == nil and emptyError == L.EXPORT_EMPTY, "empty export was accept
 local hugeId, hugeError = Exports.Add("run_result", "huge", string.rep("x", 16 * 1024 * 1024 + 1))
 assert(hugeId == nil and hugeError == L.EXPORT_TOO_LARGE, "oversized record was accepted")
 
--- The fit precheck reserves headroom for later automation failure reports.
-assert(Exports.CanFit(1024, 0), "small record does not fit")
-assert(not Exports.CanFit(16 * 1024 * 1024, 1024), "reserved budget is not enforced")
-
 -- A fresh session keeps the records but none of the session-only state.
 local durableId = Exports.Add("run_result", "durable", "durable body")
 local ns2 = Env.LoadWorkbench()

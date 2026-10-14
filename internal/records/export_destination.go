@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/follenfang/lycheedev/internal/vault"
 )
 
 var ErrExportPath = errors.New("records.export_path")
@@ -49,6 +52,18 @@ func openExportDestination(output string, overwrite bool) (*exportDestination, e
 }
 
 func (d *exportDestination) Close() error { return d.root.Close() }
+
+// acquireExportLease serializes a multi-file publication by its canonical file
+// or directory destination. Callers derive the path from openExportDestination
+// so relative paths and parent symlinks share the same OS lock across homes.
+// Keep the lease files beside the destination, outside a demux artifact set.
+func acquireExportLease(ctx context.Context, canonicalPath, kind string) (*vault.Lease, error) {
+	resource := filepath.Base(canonicalPath)
+	if runtime.GOOS == "windows" {
+		resource = strings.ToLower(resource)
+	}
+	return vault.AcquireLease(ctx, filepath.Join(filepath.Dir(canonicalPath), ".lycheedev-locks"), kind+":"+resource)
+}
 
 func (d *exportDestination) check() error {
 	info, err := d.root.Lstat(d.name)

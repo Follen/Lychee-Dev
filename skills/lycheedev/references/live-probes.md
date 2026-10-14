@@ -123,8 +123,9 @@ with an Agent-chosen duration no longer than the remaining probe budget; there
 is no separate five-second cap. Use
 `probe:ReleaseInput()` immediately after the exclusive actions; the remainder
 of an async probe runs normally. Completion and errors release before user
-cleanup. The hard deadline, combat, leaving the world or Ctrl+Alt+[ release the
-shield and fail the active probe rather than silently continuing unprotected.
+cleanup. The hard deadline, combat, leaving the world or runtime cancellation release
+the shield and fail the active probe rather than silently continuing unprotected.
+There is no separate input-protection cancel binding.
 Use `probe:IsInputProtected()` to observe this probe's lease. Late callbacks and
 old lease timers cannot resume a finished probe or release a newer lease.
 
@@ -132,10 +133,11 @@ This is an in-game input shield, not an OS-wide lock, protection from disconnect
 or a source of secure hardware-action authority. Keep checking scene prerequisites
 even while protected. Use bounded Lua: a blocked synchronous Lua callback cannot
 be preempted by a Lua timer. Slot loading protects only its short dispatch burst
-(two-second safety deadline) and releases before business entry. Fixed reload
-retains the host's serialized, bounded input transaction; it must work even when
-the addon is not loaded, so an in-game takeover indicator is not guaranteed for
-that fallback. Never hold a game shield while scanning memory or awaiting reload.
+(two-second safety deadline) and releases before business entry. Reload retains the host's serialized, bounded input transaction and requires
+compatible fresh INPUT with the actual reload binding. If no compatible runtime
+is loaded, follow [live startup](live-startup.md) and ask for one manual reload;
+do not send an unverified key. Never hold a game shield while scanning memory
+or awaiting reload.
 
 Combat lockdown and secret values are trust boundaries. Check them before
 comparison, formatting or branching. Record unavailable and truncated values

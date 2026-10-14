@@ -29,9 +29,10 @@ func (b *pendingBackend) Input(context.Context, InputAction) (InputOutcome, erro
 	b.sends++
 	return InputOutcome{Disposition: "submitted", MessagesQueued: 1}, nil
 }
-func (b *pendingBackend) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (InputObservation, error) {
+func (b *pendingBackend) ObserveInput(_ context.Context, e bridge.SlotEnvelope, after int64, _ string) (InputObservation, error) {
 	ready := false
-	return InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready}, nil
+	now := max(after, 1000)
+	return InputObservation{Schema: InputSchema, Bindings: primaryInputBindings(), Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &ready, SampleMillis: now + 100, ObservedAtMillis: now}, nil
 }
 func (*pendingBackend) RuntimeCandidate(context.Context, Identity) (*Identity, error) {
 	return nil, nil

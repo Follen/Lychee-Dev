@@ -505,18 +505,6 @@ function Exports.GetProtectedCount()
     return protectedExportCount
 end
 
-function Exports.Protect(id)
-    local root = EnsureState()
-    if not root or exportsWritesBlocked or type(id) ~= "string" or not root.exports.records[id] then
-        return false
-    end
-    if not protectedExports[id] then
-        protectedExports[id] = true
-        protectedExportCount = protectedExportCount + 1
-    end
-    return true
-end
-
 -- Records the flush of one record to disk: it leaves the pending and protected
 -- sets and becomes ordinary saved data.
 function Exports.MarkSaved(id)
@@ -582,40 +570,6 @@ function Exports.Clear()
         end
     end
     return removed
-end
-
--- Precheck that a new record fits after pruning protected records aside;
--- reserved bytes keep headroom for failure reports.
-function Exports.CanFit(byteCount, reserve)
-    local root = EnsureState()
-    if not root or exportsWritesBlocked then
-        return false
-    end
-    byteCount = tonumber(byteCount) or 0
-    local budget = MAX_EXPORT_BYTES - math.max(0, tonumber(reserve) or 0)
-    if byteCount > budget then
-        return false
-    end
-    local projectedBytes = exportBytes + byteCount
-    local projectedCount = #root.exports.order + 1
-    if projectedBytes <= budget and projectedCount <= MAX_EXPORT_RECORDS then
-        return true
-    end
-    local order = root.exports.order
-    for index = #order, 1, -1 do
-        local id = order[index]
-        if not protectedExports[id] then
-            local entry = root.exports.records[id]
-            if entry then
-                projectedBytes = projectedBytes - GetExportEntryBytes(entry)
-                projectedCount = projectedCount - 1
-                if projectedBytes <= budget and projectedCount <= MAX_EXPORT_RECORDS then
-                    return true
-                end
-            end
-        end
-    end
-    return false
 end
 
 ns.Stores = {

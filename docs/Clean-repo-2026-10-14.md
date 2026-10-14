@@ -927,8 +927,66 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 | 轮次 | 基线 | 状态 | 当前结果 |
 | --- | --- | --- | --- |
-| R5 | `81ccdd5`，R3/R4 修复已通过 Windows CI | 独立审计中 | 待证据核实，不预先宣称无问题 |
+| R5 | `81ccdd5` 产品代码；文档 head `f7f2239` | 审计及离线修复完成，新 head Windows CI 待运行 | 5 项新确认（2 bug、1 架构优化、1 Skill 合同、1 死代码）；R4-01、D-06 残留沿用原 ID |
 | R6 | R5 后的最新修复提交 | 待启动，另一个审计者 | |
 | R7 | R6 后的最新修复提交 | 待启动，另一个审计者 | |
 
 新发现的仅实机问题只记录前置、最小复验步骤、预期与空白实机结果，不操作游戏、不作无离线证据的修复；已有 R3/R4 实机待办保持上方状态。
+
+### R5 复核：R4-01 缺失 outcome 的 crash 恢复残留
+
+- 状态：代码已修复，正式 channel/journal 回归通过；沿用 R4-01，不重复计入新缺陷。
+- 在真实 Connect/Load/原 receipt/PrepareRequest/Run 路径中，前次输入 intent 的样本为 900ms，实际输入为 1000ms，effect 后 outcome 尚未保存即 crash。原 receipt 恢复不重放，但下一 prepare 仍以旧样本 900 为 after，接受 1050ms 样本，仅晚于实际输入 50ms。
+- 旧代码 fixture 观察到 inputs=2、after=[0,900,1100]；没有游戏输入。修复以当前经生产 decoder 核验的 INPUT 宿主 uptime 建立一次持久 `RecoveryAfterMillis` 上界，等到上界 +100ms；不把旧 pre-input 样本冒充输入时间。
+- 正式 `input_cadence_test.go` 覆盖 bind/prepare/commit effect 后 crash、旧 journal、多次 Load、实际输入 +50ms 与恢复上界 +99/+100ms、not_sent 与新 runtime；原请求/CON/ticket/期限不变，原五个输入 nonce 各执行一次。channel/journal 全包及定向回归通过，Windows 交叉编译只计编译。
+- 实机状态继续随 R4-01 留为待实机验证，实际结果：
+
+
+### R5-01 · 中 · 有限浮点报告在 Lua 编码时静默丢失精度
+
+- 状态：代码已修复，生产 Go↔Lua 报告回归通过；离线修复不依赖游戏环境。
+- 触发：`CaptureWriter` 的非安全整数分支使用 Lua 5.1 `tostring`，只保留有限有效位；例如 `100000000000000.125` 变为 `1e+14`，`9007199254740992` 变为 `9007199254741000`。完整 Driver Connect → PrepareRequest → Run → Load 路径将错误数值当作有效完整报告持久化。
+- 修复：仅将有限数值 fallback 改为 `string.format("%.17g", value)`，保留安全整数文本、secret/nonfinite 拒绝和既有大小预算；不改协议形状。
+- 正式回归：`tests/protocol/numeric_report_test.go` 使用生产 Lua writer/slot 协议与 Go Driver，逐位比较正负数、边界值、次正规数、最大有限值和负零；同时核验 journal 恢复、完成后不重放与解绑。`tests/protocol/writer.lua` 检查精确预算和错误出口。30 个数值逐位相等；旧 writer 的同一路径在 16 个值上失败，证明回归覆盖原缺陷。
+- 客户端整合待实机验证：使用匹配 CLI/addon、固定 PID/原 CON，运行只返回上述数值和 `%.17g` 对照字符串的无副作用探针，预期报告数值与文本一致、完成清理并断开。实机结果：
+
+### R5-02 · 中 · 并发视频导出均成功却混配帧与 manifest
+
+- 状态：代码已修复，records/evidence/vault 正式回归及定向 race ×3 通过；不依赖游戏环境。
+- 触发：两个不同 home 对同一个输出目录执行 `data asset demux --overwrite`。A 写完帧后暂停，B 写完帧和 manifest 并成功，A 再写 manifest 并成功；最终 manifest 的 SHA 对应 A，而实际帧来自 B，两个调用均返回 complete。
+- 修复：对规范化后的输出目录复用 vault OS lease，覆盖最终冲突复核、全部帧发布和最后 manifest 发布；同目录别名和不同 home 共用锁。锁文件留在目录外的父级，不混入导出产物。
+- 相关 SQL CSV 使用同一小型 destination lease 辅助入口，保留原 `sql-csv` 锁身份与合同。不扩大失败/崩溃中途部分发布的合同。
+- 正式回归覆盖跨进程/不同 home、路径别名、等待取消、no-overwrite、进程退出释放与最终帧/manifest 字节一致性。
+
+### R5-03 · 低 · 视频帧重复发布 blob，产生额外完整写入与同步
+
+- 状态：代码已优化，正式 staging 计量、capture 一致性与定向 race 回归通过；收益可离线计量。
+- 证据：每帧先 `PublishBlob`，随后 `CommitCapture` 又发布相同字节；双帧真实 Demux 路径观察到 6 次发布、2616 staging bytes，所需仅源文件、两帧和 manifest 共 4 次、2436 bytes。重复路径还产生额外 hash、同步及校验。
+- 修复：保留单一 `CommitCapture` 发布入口，以返回的已核验 `capture.Blob` 派生 manifest 的 Blob/SHA256。保留捕获 ID、来源、帧预算和字节完整性，不增设缓存或新持久层。
+- 正式 `TestDemuxAssetStagesEachCaptureBlobOnce` 在现有 context 边界观察 staging 文件，不增加生产计数器：双帧只生成 4 个 blob stage，字节数精确等于 source+frames+manifest；旧代码负对照为 6 个 stage，多写 180 字节。另核验帧 capture/blob/manifest 与实际输出一致，不依赖临时 overlay。
+
+### R5-04 · 中 · Skill 承诺已退役取消键及无 INPUT 的自动 reload
+
+- 状态：说明已修正；Skill 84 命令/220 引用/0 违规及生成目录检查通过，已有 input-protection 六 profile 和 addon 全包通过。
+- 证据：`skills/lycheedev/references/live-probes.md` 仍说 Ctrl+Alt+[ 释放输入保护，并称 addon 未加载也必须 fixed reload。当前 Native 仅 wake/reload 两键；正式 `t_input_protection.lua` 明确验证 ALT-CTRL-[ 不会释放保护，协议第 4 节要求无兼容 INPUT 时手动 reload。
+- 修复：说明明确 `probe:ReleaseInput()`、完成/错误清理、deadline、战斗、离开世界和 runtime cancellation 的释放路径；没有额外取消绑定。自动 reload 仍需新鲜兼容 INPUT/实际绑定，无兼容运行时按 live-startup 请求手动 reload。未恢复旧快捷键或盲发降级。
+- “addon 未加载 fixed reload”也是前文文档清理未落地残留，合并处理，不再次计算为基线修复。
+
+### R5-05 · 低 · Stores 导出层无生产调用的独立辅助函数
+
+- 状态：代码已清理，含 Stores/records UI/Run/locale 的 addon 全包回归通过。
+- 证据：`Exports.Protect` 全仓无调用；`Exports.CanFit` 仅有两个自检，没有生产、文档或 Skill 消费者。当前唯一生产 `Exports.Add` 调用来自 UI/Export，不使用这两项。
+- 修复：只删除这两个孤立 helper 及两条 CanFit 自检（46 行实现、4 行测试）。保留 pending/saved UI、既有 protect 数据路径、future-schema 写保护和真实预算/持久化测试；没有按“测试调用少”删整个模块。
+
+### R5 复核：D-06 注释锚点自检残留
+
+- 状态：残留已清理，addon 全包回归通过；沿用 D-06，不新增计数。
+- 前文声称删除的 `TestLocaleFilesAnchorMarker` 实际仍存在。本次删除仅用于后续代理插入注释的断言；保留 `t_locale.lua` 的双语 key 对齐、回退和格式化行为回归。
+
+
+### R5 验证与审计覆盖
+
+- 定向修复验证：build/vet、channel/journal、protocol、addon、records 子树/evidence/vault 均通过；demux 和 SQL export 并发 race 各重复三次通过。数值/并发导出/blob staging 的旧代码负对照均实际失败，正式测试已覆盖触发路径。
+- 受影响 Node 18 项：15 通过、3 个 Windows launcher 专属跳过，未计为通过。版本、Skill（84 命令/220 引用/0 违规）及生成命令目录通过。整合 build/vet 通过；Lua 必需完整 Go 套件实际执行为 30 包通过、command 1 包失败、4 包无测试，2420 test/subtest pass、3 fail、28 skip。失败仅为同样的基线 Linux Native admission 两项和 Source prune/LuaLS broker 一项，无新增失败；未称 Linux 全套通过。新 head Windows CI 待提交后运行。
+- 独立审计还抽查了 CLI 准入/JSONL/取消、Source 查询/分页/batch/恢复、SQL/DB2/Hotfix/capture、Native 回执/期限、addon 工作台、受管安装/npm 事务及 Skill 跨文档合同。没有把薄适配器、大文件或合法 partial 失败当作重写依据；未发现其他已确认的新项，不构成全状态零缺陷证明。
+- R3-C01、R3-C03、R4-C01 未取得新增领域/消费者/双 Windows 卷证据，保持候选；本轮没有新增只能靠游戏才能确认的缺陷，R5-01 客户端整合和既有实机项结果仍留空。

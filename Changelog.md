@@ -17,6 +17,7 @@
 - DB2 JSONL 在来源复核与归档后发送 end；错误退出保留 error 帧。工作区 download.workers 约束实际下载并发。
 
 - 修复 Hotfix pending 来源删除、精确 SymbolID flow、Source inspect 覆盖和跨进程 SQL CSV/manifest 一致性。
+- 视频 demux 按目标目录串行发布帧与 manifest，复用 capture 的已核验 blob，消除重复帧写入。
 
 ### Live 与 addon
 
@@ -31,6 +32,7 @@
 - 退役旧窗口队列、光学/QR、SavedVariables 执行驱动及其命令入口；历史 OP/BTP 仅保留查看、取消和必要处置，当前执行要求 Native CON。
 
 - 修复跨交易 INPUT 采样间隔、Trace 目标错误、战斗拾取关闭、默认 bridge 状态与对象流式错误处理。
+- 缺失输入 outcome 的恢复先持久化保守时间上界，保持原请求且不重放；报告编码保留有限 binary64 数值精度。
 
 ### 验证与维护
 

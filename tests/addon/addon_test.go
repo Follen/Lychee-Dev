@@ -107,18 +107,3 @@ func TestUnifiedTOCContract(t *testing.T) {
 		t.Fatalf("expected all six event catalogs, found %d", catalogs)
 	}
 }
-
-// TestLocaleFilesAnchorMarker keeps the locale insertion anchor available for
-// later page agents.
-func TestLocaleFilesAnchorMarker(t *testing.T) {
-	for _, name := range []string{"Core/Locale.lua", "Core/Locale_enUS.lua"} {
-		data, err := os.ReadFile(filepath.Join("..", "..", "addon", filepath.FromSlash(name)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "-- LOCALE:END") {
-			t.Fatalf("%s: missing the -- LOCALE:END marker", name)
-		}
-	}
-
-}

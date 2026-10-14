@@ -35,6 +35,25 @@ assert(text == '{"a":[true,3,"quote\\\""],"z":"line\\n"}', text)
 assert(writer.Encode({}) == "{}")
 assert(writer.Encode({"first", "second"}) == '["first","second"]')
 assert(writer.Encode({only = "value"}) == '{"only":"value"}')
+-- Binary64 values must survive the JSON decimal representation unchanged.
+for _, value in ipairs({
+    1.2345678901234567, 100000000000000.125, 9007199254740992,
+    1.7976931348623157e308, 2.2250738585072014e-308, 4.9406564584124654e-324,
+}) do
+    for _, sign in ipairs({1, -1}) do
+        local number = value * sign
+        local encoded = assert(writer.Encode(number))
+        assert(tonumber(encoded) == number, "numeric precision lost: " .. encoded)
+        assert(writer.Encode(number, #encoded) == encoded)
+        expectError(number, "report_byte_limit", #encoded - 1)
+    end
+end
+assert(writer.Encode(0) == "0")
+assert(writer.Encode(1) == "1")
+assert(writer.Encode(-1) == "-1")
+assert(writer.Encode(0.5) == "0.5")
+assert(writer.Encode(9007199254740991) == "9007199254740991")
+assert(writer.Encode(-9007199254740991) == "-9007199254740991")
 assert(writer.DigestBytes("Wikipedia") == "11e60398")
 assert(writer.DigestBytes("") == "00000001")
 
@@ -70,6 +89,7 @@ expectError({[string.char(255)] = true}, "report_invalid_utf8")
 assert(writer.Encode(string.rep("a", 10), 11) == nil)
 assert(writer.Encode(string.rep("a", 10), 12) == '"aaaaaaaaaa"')
 expectError(math.huge, "report_nonfinite_number")
+expectError(-math.huge, "report_nonfinite_number")
 expectError(0 / 0, "report_nonfinite_number")
 expectError({}, "report_invalid_budget", 0)
 expectError({}, "report_invalid_budget", checksumLimit + 1)
@@ -89,6 +109,10 @@ expectError({[secret] = true}, "report_secret_value")
 local digestOK, digestError = pcall(writer.DigestBytes, secret)
 assert(not digestOK and digestError == "report_secret_value")
 expectError({}, "report_invalid_budget", secret)
+issecretvalue = nil
+
+issecretvalue = function(value) return value == 1.2345678901234567 end
+expectError(1.2345678901234567, "report_secret_value")
 issecretvalue = nil
 
 

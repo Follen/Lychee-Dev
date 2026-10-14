@@ -34,6 +34,9 @@ type InputObservation struct {
 	EscapeLimit     int              `json:"escapeLimit"`
 	Address         uint64           `json:"-"`
 	InputDiagnostic *InputDiagnostic `json:"inputAttempt,omitempty"`
+	// Host uptime of this verified current INPUT read, never supplied by the
+	// addon or restored from an old journal's pre-input observation.
+	ObservedAtMillis int64 `json:"-"`
 }
 
 type InputAction struct {
@@ -57,11 +60,14 @@ type InputAttempt struct {
 	Kind     string `json:"kind"`
 	// Preserve the prior runtime input watermark even if this attempt proves
 	// not_sent before the native transport can provide a timestamp.
-	AfterMillis     int64             `json:"afterMillis,omitempty"`
-	EscapeAttempts  int               `json:"escapeAttempts,omitempty"`
-	Observation     *InputObservation `json:"observation,omitempty"`
-	Outcome         *InputOutcome     `json:"outcome,omitempty"`
-	AfterDiagnostic *InputDiagnostic  `json:"afterDiagnostic,omitempty"`
+	AfterMillis int64 `json:"afterMillis,omitempty"`
+	// A post-input observation bounds an unknown submission time after crash
+	// recovery. Persist it once; polling must not move the cadence window.
+	RecoveryAfterMillis int64             `json:"recoveryAfterMillis,omitempty"`
+	EscapeAttempts      int               `json:"escapeAttempts,omitempty"`
+	Observation         *InputObservation `json:"observation,omitempty"`
+	Outcome             *InputOutcome     `json:"outcome,omitempty"`
+	AfterDiagnostic     *InputDiagnostic  `json:"afterDiagnostic,omitempty"`
 }
 
 // perform is the sole journal boundary for connected physical input. An intent
@@ -119,21 +125,23 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 		return runtimeRetirementPending()
 	}
 	var after int64
-	if previous := d.State.Input; previous != nil && previous.Runtime == runtime {
+	recoverTime := false
+	previous := d.State.Input
+	if previous != nil && previous.Runtime == runtime {
 		if previous.Exchange == exchange && previous.Kind == desired && (previous.Outcome == nil || previous.Outcome.Disposition != "not_sent") {
 			return nil
 		}
 		// Cadence belongs to the runtime, not a nonce. finishTransaction keeps
 		// Input, so adjacent prepare/commit/confirm exchanges and resumed logs
 		// must all wait for a sample taken at least 100ms after the last input.
-		after = previous.AfterMillis
+		after = max(previous.AfterMillis, previous.RecoveryAfterMillis)
 		if previous.Outcome != nil {
 			after = max(after, previous.Outcome.AtMillis)
-		} else if previous.Observation != nil {
-			// A missing outcome may only advance from a newer observation,
-			// never from the same pre-input sample restored from the journal.
-			after = max(after, previous.Observation.SampleMillis)
 		}
+		// A saved pre-input sample or a previous exchange's watermark cannot
+		// bound when this attempt sent input. A missing/zero-time outcome must
+		// first acquire a current host-uptime bound, without inventing an outcome.
+		recoverTime = previous.RecoveryAfterMillis == 0 && (previous.Outcome == nil || previous.Outcome.Disposition != "not_sent" && previous.Outcome.AtMillis == 0)
 	}
 	s, err := d.Backend.ObserveInput(ctx, envelope, after, d.State.Identity.InputState)
 	if err != nil {
@@ -150,6 +158,24 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 	if *s.InputBlocked {
 		d.Waiting = s.Reason
 		return ErrPending
+	}
+	if recoverTime {
+		if s.ObservedAtMillis <= 0 {
+			d.Waiting = "input_observation_unavailable"
+			return ErrPending
+		}
+		// Normal continuation has already observed the original receipt. This
+		// later verified INPUT read is therefore a conservative upper bound on
+		// that input, including journals written before this field existed.
+		previous.RecoveryAfterMillis = s.ObservedAtMillis
+		after = max(after, previous.RecoveryAfterMillis)
+		if err := d.Save(ctx, "input_time_recovered"); err != nil {
+			return err
+		}
+		if s.SampleMillis < after+100 {
+			d.Waiting = "input_observation_stale"
+			return ErrInputObservationStale
+		}
 	}
 	out, err := d.perform(ctx, exchange, runtime, InputAction{Kind: desired, Envelope: envelope, Observation: &s, Capability: d.State.Identity.InputState, AfterMillis: after})
 	if out.Disposition == "not_sent" {
@@ -191,6 +217,7 @@ func inputObservation(r memory.Record, e bridge.SlotEnvelope, after, now int64) 
 	if s.SampleMillis < after+100 || s.SampleMillis < now-500 {
 		return s, errInputStateStale
 	}
+	s.ObservedAtMillis = now
 	return s, nil
 }
 

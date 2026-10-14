@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
@@ -127,11 +126,7 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 	if err != nil {
 		return QueryCSVExport{}, err
 	}
-	resource := dataDestination.name
-	if runtime.GOOS == "windows" {
-		resource = strings.ToLower(resource)
-	}
-	lease, err := vault.AcquireLease(ctx, filepath.Join(filepath.Dir(dataDestination.path), ".lycheedev-locks"), "sql-csv:"+resource)
+	lease, err := acquireExportLease(ctx, dataDestination.path, "sql-csv")
 	if err != nil {
 		return QueryCSVExport{}, err
 	}
