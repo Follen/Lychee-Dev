@@ -13,6 +13,7 @@
 - 支持固定构建的本地 CASC 和远端 CDN 读取；修正兄弟目录误选、同版本号 beta 混用及缓存身份问题。
 - 优化本地索引桶选择、远端归档索引读取，以及 Source 精确查询、关系定位和文档缓存。
 - `source diff` 对两端固定版本自动准备缺失索引，与已有查询按需准备合同一致。
+- Skill 的 WoW 源码/API 调查默认复用固定 Source；空结果先核查询与覆盖，不猜 GitHub raw 路径。外部检索限真实缺口或明确请求并区分证据来源，已有充分证据不重复准备。
 - 新增 `source batch`，在同一快照与预算内复用 Git、API 和 LuaLS 环境。
 - 分离 addon 静态解析与 Source 浏览职责；修复 tracked ref、正文搜索、Context 分页、TOC 覆盖缺口、UNION 重复列和 AVI 嵌套记录问题，显式区分 Hotfix 窗口结束与完整查询覆盖。
 - DB2 JSONL 在来源复核与归档后发送 end；错误退出保留 error 帧。工作区 download.workers 约束实际下载并发。

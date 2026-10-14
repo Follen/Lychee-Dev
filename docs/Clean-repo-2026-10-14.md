@@ -1349,3 +1349,23 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 
 - 用户实际案例明确指定$lycheedev且Source可用，却额外搜GitHub并猜中404的raw路径，未增加有效证据、绕过固定版本调查。当前主Skill/source references未统一规定默认固定Source、空结果自查和外部例外的证据界线。
 - 专项实施中，仅LycheeDev Skill目录：复用已有发现/固定版本/query/inspect，refs/context按需；无结果先核模式/关键词/版本/覆盖；只读工具返回或已核实路径；真实缺来源/版本/能力或用户明确要求才转外部并标缺口/证据身份。已足够证据直接回答，不增加审批、强制步骤或重复验证。修订后用该案例和例外行为独立复核、正式Skill/生成目录检查，再提交同PR。未修改Lychee Talent或连接游戏。
+
+
+### R17-01 实施与验证完成
+
+- 修改仅三份Skill文件：`skills/lycheedev/SKILL.md`用单一入口引用规则；`references/source-research.md`集中定义默认发现缺失来源/固定revision/query或inspect、refs/context按需，以及空结果核模式/topic/关键词/版本/coverage、禁止猜raw路径、明确外部例外；`references/source-preparation.md`把命名release的tag/ref发现收敛到同一规则，不把source list未列tag误当版本不存在。
+- 同时去掉无条件target show/inspect式重复步骤：复用匹配pin、已返回路径和留存证据，足够即答。不新增审批、mandatory命令序列或版本替代；真正缺tag发现能力仍可用已核实外部元数据，再回source sync，证据与版本分开标明。
+- Skill合同21文件、84命令、225引用、0违规；生成命令目录check、version check（3.1.2未变）、既有Skill合同测试2/2及diff检查通过。无CLI/API行为变化，不为纯指引重跑完整Go。未修改Lychee Talent、未连接游戏。
+
+## R18：Skill源码路由独立场景复核
+
+- 全新审计者只读检查三文件及source相关引用；起终SHA相同。17个决策场景覆盖用户实际可用Source仍GitHub/raw404案例、空查询/错误模式与topic/关键词/版本/coverage、足够证据/已返回路径、缺LuaLS但静态证据足够、真实来源/版本/能力缺口、用户明确外搜及命名tag发现例外。
+- 本冻结范围无新增可操作冲突，无隐藏外搜回退、重复审批或强制步骤；生成命令目录未改。是文档规范与场景决策独立复核，不是实际模型执行轨迹重放，不保证未来每次执行必然遵守，也不声称已部署到用户环境。
+
+### R16 当前实施状态（未包含在本次Skill提交）
+
+- 六文件已从隔离验证复制到正式目录并冻结：evidence/bundle_publication_test.go，vault/archive_recovery_test.go、metadata_rollback_test.go，live/channel/recovery_boundary_test.go、driver.go、observations.go。实际回归依赖正式helper，不依赖临时overlay/fixture。
+- R16-01已修正：复用原精确bootstrap拒绝的持久证据及旧nonce完成回收，再按原closing意图关闭或新challenge。退役前不可生成新输入，旧receipt暂态消失不阻断已核验恢复。
+- 新确认R16-02：Consumed取消前提前写入Bound/operation stage/cleanup/Reload，使recordBlocker把逻辑已推进、旧transaction未退役一起落盘；重载后跳过原回收，非幂等commit后续确认停滞。最小修复将8处既有逻辑迁移集中到finishTransaction的内部callback，先Consumed成功再迁移/清transaction/原Save，不加新状态框架。
+- 六个新顶层测试覆盖5个独立边界；18个回收子场景分别覆盖9种逻辑分支的回收前取消和回收后journal保存失败。旧实现11个叶节点负对照失败（2bootstrap+9取消），9个保存失败对照本就通过；四个定点故障mutation在预期数据保全断言失败，不按新增测试数增加bug数。
+- Linux三受影响包364事件pass/0fail/0skip，六新测试race×3共90pass；build/vet与Windows测试交叉编译通过，正式文件无overlay定向重跑通过。完整Lua必需套件和全新R19独立复核进行中；未推送、未执行新head原生，不填写最终覆盖或客户端通过。
