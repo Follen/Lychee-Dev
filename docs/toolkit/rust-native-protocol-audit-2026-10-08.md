@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Native 协议独立审计（2026-10-08）
 
 状态：**完整协议未通过；已完成冻结 v0 与 v1/P0 独立审查，P0 仅固定可信 binding 内的 nonce 抗历史观察重放有限通过。** 旧 A03 已在真实 Lua 5.1 复现，v0 新鲜度与 v1 APPLY 因果缺口另有模型反例；均不表示新协议通过。本文不是协议设计，也不批准现有 EXECUTE/SETTLE 为最终方案。

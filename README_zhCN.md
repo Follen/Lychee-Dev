@@ -1,198 +1,36 @@
-<div align="center">
-  <img src="addon/Media/Logo.png" width="88" alt="Lychee Dev" />
-  <h1>Lychee Dev Toolkit</h1>
-  <p><strong>从 WoW 源码、游戏数据，到可验证的游戏内结果。</strong></p>
-  <p>为魔兽世界插件开发提供原生 CLI、游戏内工作台与 Agent skill。</p>
+# Lychee Dev Toolkit · Rust 迁移
 
-[![npm](https://img.shields.io/npm/v/lycheedev?color=ef6b78&label=npm)](https://www.npmjs.com/package/lycheedev)
-[![CI](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-ci.yml/badge.svg?branch=main)](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-ci.yml)
-[![Release](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-release.yml/badge.svg)](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-release.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-52a788)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows_amd64-0078d4?logo=windows)](#环境要求)
-[![Node](https://img.shields.io/badge/node-%E2%89%A522.14.0-417e38?logo=nodedotjs&logoColor=white)](#安装)
-[![Runtime dependencies](https://img.shields.io/badge/npm_runtime_dependencies-0-52a788)](packages/npm/lycheedev/package.json)
-[![Agent skill](https://img.shields.io/badge/Agent_skill-included-8563bd)](#给-agent)
+[English](README.md)
 
-[English](README.md) · **简体中文**
+`rust-refactor` 是**尚未完成的 Rust 实现**，目标行为与正式 Go 3.2.0 一致，不是新发行版，也不表示功能或性能已经通过验收。
 
-[给开发者](#给开发者) · [给 Agent](#给-agent) · [安装](#安装) · [参与开发](#参与开发) · [回归证据](docs/toolkit/business-regression-2026-09-26.md)
-</div>
+## 唯一目标与固定基线
 
----
+基线为 **v3.2.0**，发布 tag 解析后的精确提交 **`3057a9666ab078270b63c7f06de748069b0d1f4b`**（[发行源码](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/README.md)）。不得用滚动 main、Go 3.1.2、任意开发二进制或之后的修复替代。
 
-## 给开发者
+以 Go 3.2.0 定行为，复用已有 Rust 成果；逐模块差分决定保留、替换、补齐，不一律从零重写，也不因旧 Rust 协议已存在而继续沿用。
 
-查找暴雪 API 的定义和调用位置，查询法术与物品背后的数据，导出贴图，再到真实客户端调查插件行为。Lychee Dev 将这些工作放进同一个工作空间，保留固定源码提交、明确的游戏 Build 和原始证据。
+仅改变宿主实现语言与 Source 引擎：**Rust + EmmyLua 直接分析库/native worker/session，替代 LuaLS**。其余全部业务、同一份 Lua addon、CLI、版本化 Skill、交付及完整 **Lycheedev mailbox protocol v1** 都要与固定正式版本等价。
 
-**源码、数据与资源工作流不需要在线游戏，也不依赖游戏插件。** 需要游戏内调查时，再安装工作台。
+性能目标是每条必需路径的**可控耗时减少至少 70%，Rust ≤ Go 的 30%**。同机器、同数据、等价结果与校验，cold/warm 分开独立重复；下载及不可控外部等待单列。尚无本次测量证明达标，禁止删功能、少校验或缩小输入取巧。
 
-### 能做什么
+## 文档入口
 
-| 工作流 | 具体功能 | 典型问题 |
-| --- | --- | --- |
-| **源码研究** | 固定暴雪 UI 或插件 Git 版本；检索 Lua/XML/TOC 和正文；查看定义、有界引用与上下文、比较版本。包内附带验真的 LuaLS；秘密值传播结果保留条件和未知边界 | 这个 API 在哪里使用？不同客户端改了什么？ |
-| **插件验证** | 检查 TOC/XML 加载链、语法、源码名称引用；按明确配置验证多个客户端 | 是否漏了加载文件？Interface 声明是否匹配？ |
-| **DB2 与 SQL** | 类型化 schema/记录、字段搜索、外键筛选、分页、JSONL 流、只读 SQL 和 CSV 导出 | 哪些记录符合这个条件？ |
-| **游戏业务数据** | 法术引用、光环和召唤；物品模型、geoset 和纹理；生物 display/模型；副本遭遇；住宅装饰 | 这个 ID 关联了哪些数据和资源？ |
-| **Hotfix** | 显式选择 Wago、本地 DBCache 或 Raidbots 输入；筛选、有界分页与结果归档 | 这个来源对指定 Build 和范围报告了什么变化？ |
-| **资源工具** | 社区 listfile 搜索；本地 CASC/CDN 检查；原始文件导出；BLP2 转 PNG/无损 WebP；有界 VP9 AVI 解复用 | 找到这个图标，并导出真实像素。 |
-| **游戏内工作台** | `/dev` 的 Run、诊断、对象检查、事件、函数追踪和导出工具 | 检查对象、观察事件，或调查插件错误。 |
-| **游戏自动化** | 识别客户端、执行有界 Lua 探针、验证并保存报告、自动收尾；恢复中断操作 | 在指定角色上完成检查并带回结果。 |
-| **证据与项目** | 固定项目引用、归档 capture、校验与打包；明确的缓存预算和清理 | 能否复现这个结论、检查原始依据？ |
+- [handover.md](handover.md)：当前决策、状态、证据与缺口的唯一事实来源；需要用户或实机配合的测试全部在最后一节。
+- [DESIGN.md](DESIGN.md)：从上述事实来源派生的目标架构和兼容规则。
+- [todo.md](todo.md)：有顺序的执行及验收清单，不另写竞争的状态叙述。
+- [固定 Go 协议](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/live-protocol.md)：完整线协议、恢复、输入和诊断合同。
 
+旧 `docs/toolkit/` 计划与测试报告保留为历史证据；旧 Go 3.1.2 目标、50%性能门槛、四槽 exact-COMMIT 重设计及旧输入假设均不能覆盖本次目标。
 
-### 环境要求
+## 当前代码与构建边界
 
-- **Windows 10/11 x64**。发行产品仅支持 Windows amd64。
-- npm 分发需要 **Node.js ≥22.14.0**；CLI 本体是 Go 原生程序，也可从 [Releases](https://github.com/Follen/Lychee-Dev/releases) 获取原生 ZIP。
-- 源码准备需要 **Git**；数据工作流按所选来源需要本地游戏文件或网络。
-- 游戏内调查需要运行并已登录的客户端，以及已加载的插件。
+`crates/` 已有 cli、core、source、data、live、delivery、windows 七个 crate。Source 默认 `emmy-prototype`，真实直接链接 EmmyLua 分析库，其依赖仍指向被忽略的 `.tmp/rust-source-binding-context-01/upstream` 修改版目录。Git checkout 尚不包含完整依赖字节，必须先恢复、固定对应源码和补丁清单才能证明可复建；这不等于用户本地文件丢失。
 
-| 客户端 | Interface 基线 | 验收范围 |
-| --- | --- | --- |
-| 正式服 Retail | `120100` | 支持矩阵 |
-| Classic / 熊猫人 | `50504` | 支持矩阵 |
-| Titan / 时光服 | `38002` | 支持矩阵 |
-| Forever / 无限服 | `16001` | 保留实验路径；有有限实测记录，不属于完整验收矩阵 |
+目前不能宣传干净 checkout 可构建、完整 Source 成功、Live 已就绪或可替换发行包。具体缺口见 handover。交付平台仍为 Windows amd64；Source/Data/资源调查不依赖运行游戏，真实客户端只用于最后的 Live 验收。
 
-客户端身份来自安装元数据和 Build 证据，不能只看目录名。具体基线与验证边界见[实施状态](docs/toolkit/implementation-status.md)。
+## 本次范围
 
-### 安装
+首批提交仅文档，用户随后已授权全量实施本计划；仍不发送游戏输入、不发布、不合入 main。每批更新同一独立草稿 PR，实现后按 handover 执行四阶段串行循环审计。先做离线与可自动执行的 Windows 检查，需要用户、真实游戏或特定交互机器配合的测试放最后。历史失败和产物必须保留；死代码须完成引用、feature、打包与回归核查后再删。
 
-PowerShell：
-
-```powershell
-npm install --global lycheedev
-lycheedev version --format json
-lycheedev describe --format json
-```
-
-npm 包包含 CLI、插件和 skill 资源；安装 npm 包**不会自动部署**游戏插件或 skill：
-
-```powershell
-$release = Join-Path (npm root -g) 'lycheedev'
-$client = 'D:\Game\World of Warcraft\_retail_'  # 改成你的客户端目录
-$skill = Join-Path $env:USERPROFILE '.agents\skills\lycheedev'
-
-lycheedev addon install --release $release --installation $client
-lycheedev skill install --release $release --path $skill
-```
-
-后续用一个命令更新 CLI、随包 LuaLS、Skill 和受管游戏插件：
-
-```powershell
-lycheedev update --plan --format json
-lycheedev update
-```
-
-自定义目录或离线客户端用 `--path <Skill目录>` / `--installation <客户端目录>` 指定，均可重复；显式指定后关闭自动发现。更新器会记住目标、检查文件归属、恢复中断的替换，验证成功后清理旧文件；本地修改或未受管副本会报告冲突。恢复流程和原生发行包用法见 [更新说明](skills/lycheedev/references/installation.md)。文件更新后，游戏仍需 reload，已有 Agent 也需要新的上下文才能加载新版 Skill。
-
-安装后在客户端加载插件，用 `/dev` 打开工作台。磁盘安装成功不代表运行中的游戏已经加载新版。
-
-### 研究一个 API
-
-首次使用源码命令前，先初始化工作区：
-
-```powershell
-lycheedev init
-$source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
-$sourcePin = $source.result.id
-$matches = lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json | ConvertFrom-Json
-$symbol = $matches.result.results | Where-Object { $_.symbolId } | Select-Object -First 1
-lycheedev source context --snapshot $sourcePin --symbol-id $symbol.symbolId --format json
-```
-
-分支只解析一次，后续沿用返回的不可变 pin。query/context 会自动准备所需源码映射；按路径和作用域确认候选后再传递 `symbolId`，需要调用及引用关系时用 `source refs`。研究历史版本时传入精确 commit 或完整 tag ref；用 `source inspect` 读取原始行，用 `source diff --from <pin-a> --to <pin-b>` 比较版本。
-
-### 查询真实游戏数据
-
-```powershell
-# 按调查目标选择地区与语言。
-$target = lycheedev target resolve --installation $client --region cn --locale zhCN --format json | ConvertFrom-Json
-$dataPin = $target.result.id
-lycheedev data db2 schema ChrClasses --snapshot $dataPin --installation $client --format json
-lycheedev data sql --snapshot $dataPin --installation $client --sql 'SELECT ID, Name_lang FROM ChrClasses LIMIT 5' --format json
-```
-
-将 `--installation` 换成 `--cdn` 可显式选择远程数据。`--offline` 只复用已校验的缓存，缺失时失败，不会偷偷换成其他 Build。
-
-### 从记录导出图标
-
-```powershell
-$classes = lycheedev data db2 --snapshot $dataPin --installation $client --table ChrClasses --limit 1 --format json | ConvertFrom-Json
-$iconId = $classes.result.page.rows[0].IconFileDataID
-lycheedev asset export --snapshot $dataPin --installation $client --file-id $iconId --encoding png --output '.\class-icon.png' --format json
-```
-
-`asset search` 按名称、文本或扩展名查候选文件 ID，`asset inspect` 校验选定的 CASC 内容。导出时明确选择 `raw`、`png` 或 `webp`，文件名后缀不会自动决定编码。
-
-> **验证边界。** 部分表和资源含有 CLI 无法取得密钥的加密区段，读取受阻不等于空表。Hotfix 分页可能不完整，静态验证也不能证明运行时或污染安全。[业务回归报告](docs/toolkit/business-regression-2026-09-26.md) 分别记录真实输入、fixture 覆盖和受阻项目。
-
-## 给 Agent
-
-安装 [lycheedev skill](skills/lycheedev/SKILL.md) 后即可发现这些工作流，默认启用自动触发。skill 负责选择调查路线；原生 CLI 负责传输、持久化、完整性检查和恢复。
-
-可以这样提问：
-
-- “在固定的正式服源码中找到这个 API 的定义和调用位置。”
-- “查询这个 Build 的法术记录，保留缺失字段，并导出结果。”
-- “找到这张贴图，导出 PNG，并附上来源身份。”
-- “在这个角色上执行有界探针，保存已验证报告并完成收尾。”
-
-### 发现、固定、执行、收口
-
-1. 用 `lycheedev describe --format json` 查询当前已安装 CLI 的实际能力，只读取相关的 [skill 参考](skills/lycheedev/references/commands.md)。
-2. 只解析任务所需的源码或数据身份，相关调用复用同一个 pin；不能将精确版本替换为 `latest`。
-3. 游戏输入必须处于授权范围内，并绑定选定窗口与角色。中断后保留 operation ID。
-4. 阅读结果、capture、warning 与完整性字段；完成已授权操作后再给最终答复。
-
-### 请求落盘，自动收尾
-
-开发分支采用原生内存输出与 64 个按需加载输入槽位，需要配套的 CLI 和受管插件；npm 已发布版本可能仍使用此前的传输方式。已验证范围见[实施与实机记录](docs/toolkit/live-memory-slot-implementation-2026-09-28.md)。
-
-```text
-连接 → execute → 验证并保存报告 → 释放结果 → disconnect
-          │                         ↑
-          └──── resume 同一连接 ─────┘
-```
-
-始终使用同一个 `--project` 目录并保留 `CON-...` 连接 ID。`live execute` 负责提交、读取、结果落盘和释放；稳定的 `--request` 键保证已完成请求的重试只读取证据，同一个键不能偷偷换脚本。中断后用 `live resume` 从 `.lycheedev/live` 继续。调查结束调用 `live disconnect`，释放该进程的独占连接。
-
-| 证据 | 可以说明什么 |
-| --- | --- |
-| 按键已发送、荔枝跳动、reload 色块出现 | 活动提示，不能证明当前结果有效 |
-| `reportState: verified` | 报告已验证并保存，但可能仍需收尾 |
-| `cleanup: complete`、`complete: true` | 当前操作的报告与收尾均已完成 |
-| `live disconnect` 后连接关闭 | 游戏内所有权和宿主连接占用均已释放 |
-| 合法 JSONL `end` 帧且退出码为 0 | 数据流按所报告的范围完成 |
-
-pending 保留原 nonce 和请求。明确标为 `--policy observation` 的只读探针可以在验证运行时变化后自动重试，同一个操作下保留新的 attempt；默认 `opaque` 不会重放可能已经执行的副作用。槽位不足时只在安全边界自动 reload，旧内存和地址缓存不能作为就绪证明。记录丢失或损坏会明确报告。详见 [live 编排](skills/lycheedev/references/live-investigation.md)。
-
-CLI 结果采用 `lycheedev.result.v1`。退出码区分参数错误（`2`）、能力限制（`3`）、无效输入（`4`）、外部失败（`5`）、待恢复（`6`）、取消（`7`）和内部错误（`8`）；即使成功，也必须查看范围和完整性。
-
-## 参与开发
-
-```powershell
-go build ./...
-go vet ./...
-$env:LYCHEEDEV_REQUIRE_LUA51 = '1'
-go test -parallel=4 -count=1 ./...
-node --test tools/*.test.mjs
-node tools/version.mjs --check
-node tools/skill-contract.mjs
-```
-
-Lua 测试需要 Lua 5.1；`node tests/tools/build-lua.mjs` 可构建固定版本的解释器。Windows CI 同时检查进程锁、安装与分发行为和数据竞争，不替代真实游戏验收。
-
-| 模块 | 位置 |
-| --- | --- |
-| CLI 与模块 | [`cmd/lycheedev/`](cmd/lycheedev/) · [`internal/`](internal/) |
-| 游戏工作台与桥接 | [`addon/`](addon/) |
-| Agent 工作流 | [`skills/lycheedev/`](skills/lycheedev/) |
-| npm 分发 | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
-| 合同与验证 | [设计](docs/toolkit/design.md) · [状态](docs/toolkit/implementation-status.md) · [回归矩阵](docs/toolkit/regression.md) |
-| 发行 | [发布合同](docs/toolkit/release-3.0.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
-
-## 许可
-
-Lychee Dev Toolkit 采用 [MIT 许可](LICENSE)。第三方依赖的许可与署名见[第三方说明](THIRD_PARTY_NOTICES.md)。
+正式安装说明见[固定 Go README](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/README.md)，不得把 npm 安装说成安装本分支未完成的 Rust 候选。旧 README 和工作台 UI 设计保留在 [docs/history](docs/history/)。

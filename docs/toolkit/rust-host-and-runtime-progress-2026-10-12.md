@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # 2026-10-12：Host 事实、Beta 身份与运行时扫描
 
 状态：进行中。总任务入口为 [完整目标/验收](rust-refactor-goal-acceptance-2026-10-12.md)。本页仅记录本批受测范围，不代表 Source、Live、Data 全量完成；后续改动需要绑定新的受测产物。

@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Lychee Dev Toolkit 2.0 回归测试方案
 
 2026-10-08 激活取消回归：`live disconnect` 可结束尚未发出输入、没有普通连接日志的

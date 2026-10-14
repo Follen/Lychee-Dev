@@ -1,198 +1,36 @@
-<div align="center">
-  <img src="addon/Media/Logo.png" width="88" alt="Lychee Dev" />
-  <h1>Lychee Dev Toolkit</h1>
-  <p><strong>From WoW source code to game data to a verified in-game answer.</strong></p>
-  <p>A native CLI, an in-game workbench, and an Agent skill for World of Warcraft addon development.</p>
+# Lychee Dev Toolkit · Rust migration
 
-[![npm](https://img.shields.io/npm/v/lycheedev?color=ef6b78&label=npm)](https://www.npmjs.com/package/lycheedev)
-[![CI](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-ci.yml/badge.svg?branch=main)](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-ci.yml)
-[![Release](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-release.yml/badge.svg)](https://github.com/Follen/Lychee-Dev/actions/workflows/toolkit-release.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-52a788)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows_amd64-0078d4?logo=windows)](#requirements)
-[![Node](https://img.shields.io/badge/node-%E2%89%A522.14.0-417e38?logo=nodedotjs&logoColor=white)](#install)
-[![Runtime dependencies](https://img.shields.io/badge/npm_runtime_dependencies-0-52a788)](packages/npm/lycheedev/package.json)
-[![Agent skill](https://img.shields.io/badge/Agent_skill-included-8563bd)](#for-agents)
+[简体中文](README_zhCN.md)
 
-**English** · [简体中文](README_zhCN.md)
+This branch, `rust-refactor`, is an **unfinished Rust implementation of the released Go 3.2.0 product contract**. It is not a release or a claim of functional/performance parity.
 
-[For developers](#for-developers) · [For Agents](#for-agents) · [Install](#install) · [Development](#development) · [Regression evidence](docs/toolkit/business-regression-2026-09-26.md)
-</div>
+## Goal and fixed baseline
 
----
+The behavioral oracle is **v3.2.0**, peeled release commit **`3057a9666ab078270b63c7f06de748069b0d1f4b`** ([release source](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/README.md)). Do not use a moving `main`, Go 3.1.2, an arbitrary development binary, or later fixes as the oracle.
 
-## For developers
+Reuse the existing Rust work where differential evidence supports it. Keep, replace or complete each module against Go 3.2.0; do not start over indiscriminately or preserve an obsolete Rust protocol merely because it already exists.
 
-Find where Blizzard defines an API, query the records behind a spell or item, export a texture, and investigate your addon in the running client. Lychee Dev brings these tasks into one workspace with fixed source commits, explicit game builds, and saved evidence.
+Only the host implementation language and Source analysis engine change: Rust plus **EmmyLua's direct analysis libraries, native worker and session ownership**, replacing LuaLS. All other business behavior, the same Lua addon, public CLI, versioned Skill, delivery and complete **Lycheedev mailbox protocol v1** remain equivalent to the pinned release.
 
-**Source, data, and asset workflows do not require a running game or the addon.** Install the in-game workbench when you need live investigation.
+Performance acceptance means at least **70% less controllable elapsed time: Rust ≤ 30% of Go** on every agreed required path, with equivalent results on the same machine/data. Download time and uncontrollable external waiting are reported separately. Cold/warm samples are independent. This is a target, not a measured result.
 
-### What you can do
+## Read these first
 
-| Workflow | Capabilities | Typical question |
-| --- | --- | --- |
-| **Source research** | Pin Blizzard UI or addon Git revisions; search Lua/XML/TOC and text; inspect definitions; follow bounded references and context; compare versions. The package includes verified LuaLS for semantic requests; secret-value flow reports conditions and unknown edges | Where is this API used, and what changed between clients? |
-| **Addon validation** | Check the TOC/XML load closure, syntax and source-name references; run an explicit client matrix | Does this addon have missing load files or incompatible interface declarations? |
-| **DB2 & SQL** | Typed schemas and rows, field search, foreign-key selection, pagination, JSONL streams, read-only SQL and CSV export | Which records match this condition? |
-| **Game records** | Spell references, auras and summons; item models, geosets and textures; creature displays/models; encounters; housing decor | What data and assets are associated with this ID? |
-| **Hotfixes** | Explicit Wago, local DBCache and Raidbots inputs; filtering, bounded pagination and captured results | What does this provider report for this build and scope? |
-| **Assets** | Community listfile search; local CASC or CDN inspection; raw export; BLP2 → PNG/lossless WebP; bounded VP9 AVI demux | Find this icon and export its actual pixels. |
-| **In-game workbench** | `/dev` Run, Diagnostics, Object Inspector, Events, Function Trace and export tools | Inspect this object, observe an event, or investigate an addon error. |
-| **Live automation** | Identify a client, load a bounded Lua probe, verify its report, acknowledge it and clear the receipt; recover interrupted operations | Run this check on the selected character and bring back the result. |
-| **Evidence & projects** | Fixed project references, archived captures, verification and bundles; explicit cache budgets and cleanup | Can I reproduce this answer and inspect its original evidence? |
+- [handover.md](handover.md): the only current migration status/decision/evidence source; human-assisted tests are its final section.
+- [DESIGN.md](DESIGN.md): target architecture and compatibility rules, derived from that authority.
+- [todo.md](todo.md): ordered implementation/acceptance checklist, no independent status narrative.
+- [Pinned Go protocol](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/live-protocol.md): the full wire, recovery, input and diagnostic contract.
 
+Older `docs/toolkit/` plans and test reports are historical evidence. Their Go 3.1.2 goals, 50% threshold, four-slot exact-COMMIT redesign and old input assumptions do not override this migration.
 
-### Requirements
+## Current implementation and build boundary
 
-- **Windows 10/11 x64.** Windows amd64 is the only shipped product platform.
-- **Node.js ≥22.14.0** for npm distribution; the CLI itself is native Go. Native ZIPs are also available in [Releases](https://github.com/Follen/Lychee-Dev/releases).
-- **Git** for source preparation. Local game data or network access is needed for the selected data source.
-- A running, logged-in client and the installed addon for live investigation.
+Seven crates exist under `crates/`: cli, core, source, data, live, delivery and windows. Source defaults to `emmy-prototype` and links the EmmyLua analysis libraries directly. Its dependency paths currently refer to an ignored `.tmp/rust-source-binding-context-01/upstream` tree. The tracked checkout alone does not contain that modified dependency's complete bytes; a reproducible build requires recovering and pinning its source and patch inventory first. This does not imply the owner's local dependency files are lost.
 
-| Client | Interface baseline | Acceptance scope |
-| --- | --- | --- |
-| Retail | `120100` | Supported matrix |
-| Classic / Mists | `50504` | Supported matrix |
-| Titan / 时光服 | `38002` | Supported matrix |
-| Forever / 无限服 | `16001` | Retained experimental path; limited recorded observations, outside full acceptance |
+Do not advertise a clean checkout build, full Source success, Live readiness, or a validated replacement package yet. See the exact gaps in handover. Windows amd64 remains the product platform. Source/Data/assets do not require a running game. A running selected client is needed only for the final Live acceptance.
 
-Client identity comes from installation metadata and build evidence, not the folder name. See [verified status](docs/toolkit/implementation-status.md) for the exact baselines and limits.
+## Work policy
 
-### Install
+This first change is documentation only; the user subsequently authorized full implementation of the plan. No game input, publication or main merge is authorized. Implementation proceeds through offline tests and automated Windows checks first; tests needing the user, a real game, or a specific interactive machine run last. Each authorized batch updates the same dedicated draft PR. After implementation, perform the four sequential convergent audit stages specified in handover. Preserve historical failures and artifacts, and delete dead code only after call-site, feature, package and regression evidence proves it is unused.
 
-PowerShell:
-
-```powershell
-npm install --global lycheedev
-lycheedev version --format json
-lycheedev describe --format json
-```
-
-The package includes the CLI, addon and skill payloads. npm installation does **not** deploy the addon or skill automatically:
-
-```powershell
-$release = Join-Path (npm root -g) 'lycheedev'
-$client = 'D:\Game\World of Warcraft\_retail_'  # use your client directory
-$skill = Join-Path $env:USERPROFILE '.agents\skills\lycheedev'
-
-lycheedev addon install --release $release --installation $client
-lycheedev skill install --release $release --path $skill
-```
-
-For later updates, use the same command for the CLI, bundled LuaLS, Skill and managed addons:
-
-```powershell
-lycheedev update --plan --format json
-lycheedev update
-```
-
-Use repeated `--path <skill-directory>` / `--installation <client-directory>` to select custom or offline targets; explicit targets disable automatic discovery. The updater remembers them, checks file ownership, resumes interrupted replacements and removes old managed files after verification. Edited or unmanaged copies are reported as conflicts. See the [update workflow](skills/lycheedev/references/installation.md) for recovery and native archives.
-
-Load the addon in the client after installation. Open `/dev` to use the workbench. A successful disk installation does not prove the running client has loaded that version.
-
-### Research an API
-
-Initialize the workspace once before the first source request:
-
-```powershell
-lycheedev init
-$source = lycheedev source sync --source wow-ui-source --product retail --ref refs/heads/live --format json | ConvertFrom-Json
-$sourcePin = $source.result.id
-$matches = lycheedev source query C_Spell.GetSpellInfo --snapshot $sourcePin --mode precise --topic api --limit 10 --format json | ConvertFrom-Json
-$symbol = $matches.result.results | Where-Object { $_.symbolId } | Select-Object -First 1
-lycheedev source context --snapshot $sourcePin --symbol-id $symbol.symbolId --format json
-```
-
-The branch is resolved once; subsequent commands reuse the returned immutable pin. Query and context prepare their needed source mapping. Choose a result by its path and scope before using its `symbolId`; `source refs` follows its calls and references. To investigate a historical release, supply its exact commit or full tag ref. Use `source inspect` for the original lines and `source diff --from <pin-a> --to <pin-b>` for revision comparisons.
-
-### Query real game data
-
-```powershell
-# Choose the region and locale appropriate to your investigation.
-$target = lycheedev target resolve --installation $client --region us --locale enUS --format json | ConvertFrom-Json
-$dataPin = $target.result.id
-lycheedev data db2 schema ChrClasses --snapshot $dataPin --installation $client --format json
-lycheedev data sql --snapshot $dataPin --installation $client --sql 'SELECT ID, Name_lang FROM ChrClasses LIMIT 5' --format json
-```
-
-Use `--cdn` instead of `--installation` to select remote content explicitly. `--offline` uses verified cached content and fails when it is missing; it never substitutes another build.
-
-### Export an icon from a record
-
-```powershell
-$classes = lycheedev data db2 --snapshot $dataPin --installation $client --table ChrClasses --limit 1 --format json | ConvertFrom-Json
-$iconId = $classes.result.page.rows[0].IconFileDataID
-lycheedev asset export --snapshot $dataPin --installation $client --file-id $iconId --encoding png --output '.\class-icon.png' --format json
-```
-
-`asset search` finds candidate file IDs by name, text or extension. `asset inspect` verifies the selected CASC content. Choose `raw`, `png` or `webp` explicitly when exporting; the filename extension does not select an encoder.
-
-> **Know the limits.** Some tables/assets contain encrypted sections whose keys are unavailable to the CLI. A blocked read is not an empty table. Hotfix pages can be incomplete; static validation is not proof of runtime or taint safety. The [business regression report](docs/toolkit/business-regression-2026-09-26.md) separates real-input results, fixture coverage and blocked cases.
-
-## For Agents
-
-Install the [lycheedev skill](skills/lycheedev/SKILL.md) to make the workflows discoverable. Its automatic invocation policy is enabled. The skill routes source, data, asset and live questions; the native CLI owns transport, persistence, integrity and recovery.
-
-Examples of requests:
-
-- “Find the declaration and callers of this API in the pinned Retail source.”
-- “Query these spell records for this build; preserve missing fields and export the result.”
-- “Find this texture and export it as PNG with its source identity.”
-- “On this character, run a bounded probe, preserve the verified report and finish cleanup.”
-
-### Discover, pin, execute, finish
-
-1. Use `lycheedev describe --format json` for the actual installed command surface. Read only the relevant [skill reference](skills/lycheedev/references/commands.md).
-2. Resolve the source/data identity needed by the task; carry the same pin through related calls. Do not silently replace an exact reference with `latest`.
-3. Keep live input within authorization and bind it to the selected window and character. Preserve operation IDs after interruption.
-4. Read the result, captures, warnings and completion fields. Finish the authorized operation before delivering the final answer.
-
-### Durable requests, automatic cleanup
-
-The development branch uses native memory output and 64 load-on-demand input slots. It requires the matching CLI and managed addon; the released npm version may still expose the preceding transport. See the [implementation and real-client results](docs/toolkit/live-memory-slot-implementation-2026-09-28.md) for verified coverage.
-
-```text
-connect → execute → verify and save report → release → disconnect
-             │                                ↑
-             └──── resume the same connection ─┘
-```
-
-Use one `--project` directory and retain the `CON-...` connection ID. `live execute` owns submission, collection, durable result storage and release. A stable `--request` key makes completed retries read-only; changed code under the same key is rejected. `live resume` continues interrupted work from `.lycheedev/live`. Call `live disconnect` when the investigation ends to release the connection's exclusive ownership of the game process.
-
-| Evidence | What it establishes |
-| --- | --- |
-| A sent key, bouncing Lychee, or reload color patch | Activity only; not proof of a current result |
-| `reportState: verified` | A validated report is saved locally; cleanup may still be pending |
-| `cleanup: complete`, `complete: true` | The operation's result and cleanup are complete |
-| A closed connection after `live disconnect` | Game ownership and the host connection claim are released |
-| JSONL with a legal `end` frame and exit 0 | The stream completed according to its reported scope |
-
-Pending work keeps the original nonce and request. Read-only probes explicitly marked `--policy observation` can restart after a verified runtime change, with a new attempt recorded under the same operation. The default `opaque` policy never repeats potentially executed effects. Slot capacity reloads happen at a safe boundary; stale memory and address hints cannot establish readiness. Missing or damaged evidence is reported explicitly. See [live orchestration](skills/lycheedev/references/live-investigation.md).
-
-CLI results use `lycheedev.result.v1`. Exit codes distinguish argument errors (`2`), capability limits (`3`), invalid input (`4`), external failure (`5`), pending (`6`), cancellation (`7`) and internal failure (`8`). Success still requires checking scope and completeness.
-
-## Development
-
-```powershell
-go build ./...
-go vet ./...
-$env:LYCHEEDEV_REQUIRE_LUA51 = '1'
-go test -parallel=4 -count=1 ./...
-node --test tools/*.test.mjs
-node tools/version.mjs --check
-node tools/skill-contract.mjs
-```
-
-Lua suites require Lua 5.1; `node tests/tools/build-lua.mjs` builds the pinned interpreter. The Windows CI also checks process locks, installation/package behavior and races. It does not impersonate a real game acceptance run.
-
-| Area | Source |
-| --- | --- |
-| CLI and modules | [`cmd/lycheedev/`](cmd/lycheedev/) · [`internal/`](internal/) |
-| Game workbench and bridge | [`addon/`](addon/) |
-| Agent workflow | [`skills/lycheedev/`](skills/lycheedev/) |
-| npm distribution | [`packages/npm/lycheedev/`](packages/npm/lycheedev/) |
-| Contracts and verification | [Design](docs/toolkit/design.md) · [Status](docs/toolkit/implementation-status.md) · [Regression matrix](docs/toolkit/regression.md) |
-| Release | [Release contract](docs/toolkit/release-3.0.0.md) · [GitHub Releases](https://github.com/Follen/Lychee-Dev/releases) |
-
-## License
-
-Lychee Dev Toolkit is licensed under [MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for dependency licenses and attribution.
+Released installation instructions belong to the [pinned Go README](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/README.md). This branch must not present an npm install as installation of the unfinished Rust candidate. Prior branch README and UI design text are preserved in [docs/history](docs/history/).

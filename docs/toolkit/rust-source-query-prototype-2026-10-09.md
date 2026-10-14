@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Source query facade: fixed prototype evidence
 
 Status: optional direct-library prototype, verified on the fixed cases below.

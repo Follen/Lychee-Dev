@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Toolkit 2.0 实施状态
 
 2026-10-08 用户授权发布 PR #11 修复并更新本机 addon，补丁候选为 **3.1.2**，

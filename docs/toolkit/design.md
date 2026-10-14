@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Lychee Dev Toolkit 2.0 设计方案
 
 2026-10-12 Rust 重构候选的 Mailbox 定位按 [总方案 §7](rust-refactor-plan-2026-10-08.md#7-mailbox-运行时指令定位与-lua-路径读取)：参考 Go `v3.1.0`，在指定进程的运行时代码中匹配指令特征、解析有符号 RIP 位移，动态求出 Lua 根 RVA，再从 `module base + Lua 根 RVA` 沿 `Lua state → globals → LycheeDevInternal → Mailbox` 读取。停止私有堆暴扫及 hints/附近搜索回退；新定位入口不读取或哈希磁盘 EXE，不沿用固定数值 RVA。`3.1.0` 是参考实现版本，不改变产品版本或发行渠道；本修订不表示 Rust 生产通道或实机验收已完成。

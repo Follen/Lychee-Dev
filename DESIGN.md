@@ -1,114 +1,51 @@
-# Lychee Dev 工作台设计规范
+# Rust migration design
 
-日期：2026-09-28。模式：Operate。适用：WoW Lua Frame API 工作台及 Agent 活动指示。
-本文是唯一的 UI 设计规范；行为与传输合同以 `docs/toolkit/design.md` 为准。
+Current decision/status authority: [handover.md](handover.md). This file specifies the target, not completion. Keep this exact uppercase filename; do not add `Design.md` alongside it on case-insensitive Windows filesystems. The former workbench-only design is preserved in [history](docs/history/workbench-ui-design-2026-09-28.md).
 
-## 设计来源
+## 1. Contract and migration strategy
 
-沿用 Lychee 的近黑底、暖白正文、荔枝红强调、短滑块和留白层级。
-参考同仓相邻项目 `../Lychee/addon/Lychee/UI/Components.lua`、`ResultList.lua`。
-控件由本插件自包含实现，不依赖另一插件运行，也不照搬搜索面板的尺寸。
-工作台的目标是让开发者看清代码、执行结果和调查证据；装饰不能掩盖状态。
+Go release `3057a9666ab078270b63c7f06de748069b0d1f4b` (v3.2.0) defines observable behavior. Compare each existing Rust module with that immutable oracle and classify it as retain / adapt / replace / missing / unverified. Retain code only with evidence for the current contract, not its age, number of tests or registration in `describe`. The Rust snapshot is an implementation starting point, not a second behavioral oracle.
 
-## 外壳与布局
+The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
 
-- 默认窗口 960×660 UI 逻辑单位，四角半径 12；侧栏 152，页面画布 800。
-- 侧栏只有运行、对象、事件、追踪、诊断、落盘记录、自动化、关于八个入口。
-- 不提供设置页、设置按钮或快捷键编辑入口。现存减少动效偏好继续尊重。
-- 页面上方依次是标题、用途说明、工具栏，底部保留操作区。右上角只放关闭。
-- 运行页历史栏 176 宽，与编辑器顶边、结果区底边对齐；历史面板使用字段底色，不能与窗口融成空洞。
-- 字段与按钮统一 36 高，相邻操作间隔 8。分组间隔 16–24；留白用于表达关系。
-- 小视口限制外窗边界，侧栏纵向滚动、内容支持横向访问；禁止靠缩小文字适配。
-- 二级内容可以替换正文并用“返回”恢复原页，但不能用它重建已移除的设置入口。
+## 2. Boundaries and ownership
 
-## 共享色板
-
-颜色只能从 `addon/UI/Theme.lua` 取值，不允许页面复制另一套蓝灰色。
-
-| Token | RGB | 用途 |
+| Rust boundary | Responsibilities | Go reference at fixed release |
 | --- | --- | --- |
-| window | .055, .055, .063 | 外窗与画布 |
-| sidebar | .075, .073, .078 | 导航区 |
-| field | .085, .085, .095 | 编辑器、报告及列表容器 |
-| listSelected | .135, .125, .140 | 自动化列表柔和选中底面 |
-| surfaceHover | .125, .123, .130 | 悬停 |
-| surfaceSelected | .175, .170, .180 | 明确可辨的选中状态 |
-| action | .145, .125, .135 | 操作按钮常态底面 |
-| text | .940, .932, .910 | 标题、正文及可操作文字 |
-| textMuted | .710, .705, .690 | 说明、普通状态摘要 |
-| textDim | .590, .580, .590 | 次级元数据 |
-| accent | .835, .235, .285 | 品牌、滑块与选中标记 |
-| accentHover | .950, .350, .400 | 主要动作文字及强调反馈 |
-| disabled | .400, .400, .420 | 不可操作内容 |
-| success | .310, .690, .455 | 已证实的成功 |
-| warning | .880, .645, .250 | 运行、等待或受限 |
-| danger | .895, .300, .315 | 已证实的失败或中断 |
+| cli | Contract table, parsing/help/describe, orchestration, envelopes, JSONL, exit codes | internal/command |
+| core | Selection/pins, project state, deadlines, evidence/cache ownership and atomic persistence | internal/selection, evidence, vault |
+| source | Snapshots, load closure, static facts, semantic queries, validation and native worker/session lifecycle | internal/codebase, internal/addoncheck |
+| data | CASC/CDN, DB2/SQL, Hotfix, relations and asset conversion/export | internal/records |
+| live | Journaled connections/requests, exact receipts, reports, cleanup and recovery | internal/live/channel, internal/bridge |
+| windows | Runtime instruction/RIP root lookup, guarded Lua reads, target identity and input | internal/live/memory, internal/desktop |
+| delivery | Same addon payload, 500 slots, managed receipts, upgrade/uninstall, package and Skill | internal/delivery, addon, skills, packages |
 
-无渐变、发光、装饰分隔线和蓝色次级标题。成功/失败必须同时有文字，不能只靠颜色。
+Crate placement is not a new external interface. Shared addon reuse means no alternate Rust-only envelope, schema, binding or state machine. First compare the branch addon bytes with the release; restore equivalent released behavior where divergent, retaining the release's Compat/product catalog boundaries.
 
-## 字体与表面
+## 3. Source: preserve and finish the direct-library path
 
-使用当前客户端 STANDARD_TEXT_FONT，无描边、无阴影。品牌 22、页标题 18、区标题及正文 16、控件 14、元数据 13。
-代码保留换行、缩进和选择复制能力。长报告滚动或明确截断，不静默省略证据。
-外窗圆角 12，控件/字段圆角 8。列表、编辑器、树形与文本报告使用同一字段底色。
-常态字段不画灰框；只有可编辑字段获得键盘焦点时出现荔枝红边线。
-页面打开和切换不能自动抢键盘焦点；编辑由用户点击字段开始，避免吞掉 Agent 的确认快捷键。
+Keep `emmylua_code_analysis` / `emmylua_parser` linked into the native worker. CLI/worker/session ownership remains explicit: bounded requests, fixed inputs, deadlines, cache identity/invalidation, crash/cancellation containment, cleanup and resource release. The worker may be a mode of the same executable; a subprocess is not proof of LuaLS or LSP. Never execute studied Lua or repository configuration.
 
-## 按钮与输入
+Recover exact modified dependency bytes and licenses; pin upstream revision/archive hashes, patch inventory and corresponding source. A version string alone is insufficient. Clean rebuild and offline corresponding-source checks must precede product claims.
 
-所有真正的操作按钮都有中性底面，不能把“搜索”“刷新”“清空日志”做成漂浮的标签。
-主次动作共用高度、圆角、内边距和按压反馈：主动作使用红色文字，次动作使用暖白文字。
-禁用按钮保留轮廓层级但使用 disabled 文字，不因悬停恢复强调，也不能执行。
-透明 ghost 仅用于未选中的视图/范围切换；选中项使用 surfaceSelected，不与操作按钮混用。
-危险操作保留现有确认流程，确认态用 danger；视觉调整不得改变实际权限或执行次数。
+Separate engine internals from business facts: query/definitions/refs/calls/context/flow, XML/TOC closure, batch ordering and errors, static-only fallback, complete/coverage/truncated/cursor and uncertainty must match the release's business contract. Revisit existing long-running Retail failures without silently widening deadlines, quotas or reducing source closure. Legacy LuaLS feature code is a removal candidate only after feature/call/package audits; luac 5.1 validation and tree-sitter structural work have separate responsibilities and are not automatically dead.
 
-## 列表与滚动条
+## 4. Live: implement the complete released state machine
 
-参考 Lychee 的短红滑块：3 宽、24–48 高、12 宽命中区域，无底轨、无箭头。
-无溢出时隐藏。原生 Slider 负责拖拽，不增加闲置 OnUpdate；滚轮与拖拽共享同一滚动值。
-滑块必须能到达内容首尾，小轨道不允许滑块比轨道更高。
+The canonical specification is [Go 3.2.0 docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/live-protocol.md), alongside its Lua/Go implementation and tests at that commit. Protocol literal: `Lycheedev mailbox protocol v1`. Import/port complete cases into a Rust/Lua differential fixture suite; do not substitute the branch's old RUN/RECEIVED exact-COMMIT design.
 
-自动化条目正文 60 高，步长 64，条目间留 4 的间隔；常态透明，共享完整列表底面。
-不能用交替黑色矩形或高亮灰块把列表切成条纹。悬停和选中使用 6 圆角、2 内缩的柔和底色；
-选中再加内缩的 18 高短红标记，不贴容器边。标题与结果在同一行，时间独占下一行，
-不重复任务类型。行复用、滚动索引和内容总高度使用同一步长。
-其他列表共用相同选中/悬停色，保留各自适合内容的行高；不堆装饰线。
+Read-only memory lookup uses current mapped runtime instructions and RIP-derived roots, guarded current Lua paths and publication validation. Observation-only results do not authorize keys. Input requires exact target/actor/runtime/owner/fence, fresh INPUT, actual two bindings and revalidation immediately before sending. Native input is bounded PostMessage to the fixed HWND; no Esc, Enter, chat typing, focus stealing or blind fallback.
 
-## 页面内容
+Persist intent before input, preserve submitted/uncertain outcomes, exact request/ticket/report identity and original deadlines through resume. Reports, business success and cleanup are distinct. Cleanup recovery, upgrade compatibility, BootstrapMailbox diagnostics, missing outcomes, publication races and multi-instance shared-install locking are acceptance requirements, not later optional hardening. Full case matrix lives in handover.
 
-| 页面 | 约束 |
-| --- | --- |
-| 运行 | 历史区域完整可见；输入、执行工具栏、结果标题、结果区分层；树/文本是视图切换 |
-| 对象 | 路径、检查、搜索、选择界面对象同一工具栏；动作有统一按钮外观 |
-| 事件 | 搜索与监听同一行；未选中事件时不空占大块区域；状态真实反映监听 |
-| 追踪 | 函数路径、清空日志、开始/停止追踪对齐；日志与参数并列 |
-| 诊断 | 会话范围、搜索、刷新统一层级；错误数量用暖灰，错误态才用危险色 |
-| 落盘记录 | 记录列表与详情并列；容量和清理留在页脚，与关闭窗口分开 |
-| 自动化 | 主状态显示执行成功/失败/运行/中断；收取状态在任务详情，不能出现红色“已确认”作为执行结果 |
-| 关于 | 展示项目与依赖事实；不展示冗余“战斗保护”说明行 |
+## 5. Performance design and evidence
 
-自动化历史是只读证据：内存通道记录不提供重放；不再创建旧二维码的“重新显示通知/隐藏通知”按钮。
-报告是否已收取与脚本是否成功是两个事实，不能用 ACK 代替业务结果。
+Optimize reuse, indexing, allocation, bounded parallelism and native worker/session costs only after equivalent output and validation are established. The per-path target is controllable Rust elapsed ≤ 0.30 × Go. Define paired phase boundaries before measurement. Network downloads and uncontrollable external waiting are excluded from the ratio but remain visible in raw wall-clock evidence; local parsing, validation, persistence, cleanup and controllable scheduling remain included.
 
-## Agent 指示
+Record independent cold and warm repetitions, interleave Go/Rust on the same machine and inputs, and preserve raw timings, median, p95, CPU, peak memory and I/O. No cross-path average can hide a failing path. Incomplete, failed or unmeasured paths are not passes. The plan's exact collection/report protocol is in handover.
 
-原生内存 + 64 槽位通道不显示二维码、输入面板或倒计时。
-槽位调用固定 Ctrl+Alt+F12。调用前从内存读取新鲜的 `inputBlocked` 状态；
-普通编辑框占焦点时，一次发一个 Esc，再读取新状态，直到焦点释放。
-Esc 可以触发原界面的关闭或取消；不直接操作其他插件的编辑框、文字或光标。
-此过程不新增色块。战斗、不可观测状态或过期采样不能授权输入；
-不得将“键已发送”当作槽位已执行。
-荔枝活动标志留在屏幕左上角；普通异步执行显示“Agent 运行中”，不锁键鼠。
-短输入保护及显式独占阶段显示“Agent 接管中”。保护释放后立即恢复普通运行状态；全部结束后隐藏。
-保护期限遵守任务剩余执行预算；失败、取消、完成及中断必须释放，不能为动效延迟。
-reload 单色 RGB 顺序提示只提供时序观察，45 秒到期或唤醒后停止；不能作为目标身份或成功执行证据。
+## 6. Cleanup and delivery
 
-## 生命周期与验收
+Inventory dead code/doc candidates; prove absence of production/feature/test/package consumers, identify replacement coverage, then remove in reviewable batches. Preserve immutable historical evidence in git/history and label superseded documents. Do not delete caches/evidence/user data opportunistically. Follow existing owned-process/disk admission tooling.
 
-控件延迟创建、有限复用；不增加闲置轮询。减少动效时直接落到终态，隐藏时清掉视觉驱动。
-界面文案在中英文 Locale 中成对维护；移除说明不移除战斗/secret 等底层安全边界。
-
-每次共享控件修订检查八页、空/非空列表、成功/失败、禁用/悬停、滚动首尾、小视口及焦点。
-离线用 Lua 5.1 测试行为和布局合同；真实 WoW 视觉必须用 WGC 保留改前/改后证据。
-不能把 Fixture 或单一 Classic 中文客户端的通过描述成全部客户端、语言和缩放验收。
-本轮审计与实际范围见 `docs/toolkit/workbench-audit-2026-09-28.md`。
+Windows amd64 Rust executable, the same addon, generated CLI/Skill references, launcher, licenses and corresponding source must refer to one sealed candidate. Test install/upgrade/rollback/modified-file protection without games first. The first commit remains documentation-only; full implementation is subsequently authorized. Each batch updates the same draft PR. After implementation, execute handover’s four serial audit/fix/verify/review loops to convergence, recording fixed-tree evidence and human-dependent exceptions. Release/publication and main merge require separate authorization.

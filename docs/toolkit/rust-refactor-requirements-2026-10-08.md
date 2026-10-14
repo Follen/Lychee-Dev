@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Current Rust refactor requirements
 
 Authority: the user-edited goal objective read on 2026-10-09 from attachment b9a17cce-74f2-4b37-ad7a-15a753205b0f. This replaces the earlier goal, including its Source engine requirement. Source must be designed from business contracts; EmmyLua Analyzer Rust direct-library integration is the first candidate to validate. LuaLS, LSP, broker structure and tree-sitter are not mandatory. Main and child agent model requirement is GPT-6 Astra / high. Existing evidence remains bound to its own artifact and scope.

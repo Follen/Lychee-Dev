@@ -2,7 +2,47 @@
 
 Guidance for agents working in this repository.
 
-## Current Rust refactor authority (2026-10-08)
+## Current Rust migration authority (2026-10-14)
+
+Read `handover.md` first: it is the sole current decision/status/evidence source.
+`DESIGN.md` derives the target architecture and `todo.md` is the ordered checklist.
+Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create a
+`handoff` document or competing handover. All older guidance below and in
+`docs/toolkit/` is historical where it conflicts with this section.
+
+- Behavioral oracle: released Go v3.2.0, peeled commit
+  `3057a9666ab078270b63c7f06de748069b0d1f4b`, not moving main or Go v3.1.2.
+- Reuse existing Rust code when differential evidence supports it; decide
+  retain/adapt/replace per module. Do not restart indiscriminately.
+- Only host language and Source engine change: Rust with EmmyLua direct analysis
+  libraries/native worker/session replacing LuaLS. All business behavior, the
+  same addon, CLI, Skill and complete `Lycheedev mailbox protocol v1`, including
+  input/recovery/diagnostics, must match the fixed Go release. Old Rust exact
+  COMMIT/four-slot redesigns and old input versions are not current authority.
+- Performance target: controllable elapsed Rust <= 30% of Go (at least 70% less),
+  excluding separately recorded downloads and uncontrollable external waits.
+  Same machine/data and equivalent results/checks; independent cold/warm repeats
+  and per-path evidence. No unmeasured guarantee or reduced functionality/checks.
+- The first delivery is documentation-only; subsequent full implementation is
+  now authorized. Do not operate games, publish, merge main or change other
+  projects/Go PR #13. Push each authorized batch promptly to the same dedicated
+  Rust draft PR, updating handover. After implementation, complete its four
+  sequential audit/fix/verify/independent-review loops to convergence; record
+  exact trees and evidence, never promise mathematical zero bugs.
+- Run independent offline and automated Windows checks before tests requiring
+  user/game/specific interactive-machine cooperation. Keep all such tests in
+  the final section of handover.md. Windows-only does not mean game-dependent.
+- Preserve historical test/failure evidence and distinguish implemented,
+  historical-pass/fail, unverified, blocked and not_run. Prove absent consumers
+  before deleting dead code; don't assume luac/tree-sitter are obsolete because
+  LuaLS is replaced. Recover exact modified Emmy dependency bytes before claiming
+  a clean checkout is reproducible.
+- Existing disk/process ownership and evidence-retention rules below continue
+  where compatible. Historical release/channel values are not current release
+  permission. Product tests are not claimed for a documentation-only change;
+  validate Markdown links, casing, scope and diff instead.
+
+## Historical Rust refactor authority (2026-10-08; superseded)
 
 For this worktree's Rust refactor, the user's revised requirements in
 `docs/toolkit/rust-refactor-requirements-2026-10-08.md` take precedence over the

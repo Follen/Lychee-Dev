@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # 200 槽与共享安装的前向分配
 
 本页是 native CON 槽位部分的当前合同，替代旧 64 槽文档中的固定 nextSlot 发布规则。

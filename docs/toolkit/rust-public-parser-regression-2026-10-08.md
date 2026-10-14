@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # 公开命令解析差分回归（2026-10-08）
 
 这是完整 89 条命令清单上的**解析拒绝场景**记录，不是完整业务验收。原始失败保留；源代码修复和公开产物复验分别记账。

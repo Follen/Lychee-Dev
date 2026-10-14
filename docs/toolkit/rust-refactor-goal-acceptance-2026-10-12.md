@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Rust 全量重构：执行目标与验收入口
 
 日期：2026-10-12。状态：进行中，未完成。工作树：`.worktrees/rust-refactor`。终点是同一份封存的 Windows amd64 候选通过全部必需验收，可替换冻结 Go v3.1.2；分项原型、命令注册和测试数量不代表完成。

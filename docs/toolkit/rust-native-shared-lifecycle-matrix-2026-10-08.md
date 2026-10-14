@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Native P3 共享生命周期原型与待运行矩阵
 
 状态：**prepared / not_run**。本批只修改 `protocol/native-lifecycle-prototype/` 与本页；Root 的 Source 原件、符号封存与正常 Retail 查询仍持有编译/重负载窗口。没有新增 crate 测试入口、修改 Cargo/release/vendor、运行 Cargo/Lua/OS fixture、发送游戏输入、提交、推送或发布。既有四槽与两槽的封存结果保持其原受测范围。

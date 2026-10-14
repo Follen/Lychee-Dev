@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Rust 候选兼容性决定
 
 依据：[用户修订目标](rust-refactor-requirements-2026-10-08.md)。冻结 Go v3.1.2 的 89 条公开命令仍是完整业务及参数清单；下列明确差异不能推广成其他业务的删减许可。

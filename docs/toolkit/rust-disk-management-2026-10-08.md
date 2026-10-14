@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Rust 重构期间的磁盘与进程管理
 
 日期：2026-10-08。范围仅为当前 `.worktrees/rust-refactor`；这是实施记录，不代表 Rust 全量重构或发行验收已经完成。

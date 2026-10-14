@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Native 两槽比较候选（2026-10-08）
 
 状态：准备比较，不是定稿。四槽 exact COMMIT 保持原稿与受测源码；其机制是可验证对照，不是技术下限或既定最优。下一受控窗口先执行已经准备的四槽 Rust 原型，再进入本稿的有限增量；不因两槽目标丢弃首次失败或放宽 B1、冷启动、私钥边界、500槽、业务等价及最终实机要求。

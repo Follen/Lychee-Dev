@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Rust 重构：Core、CLI、Delivery 与发行进度
 
 工作树：`.worktrees/rust-refactor`，Go 对照基线 `v3.1.2 / 9d3d3598b8bac7efabf0b937df30508075eaa841`。

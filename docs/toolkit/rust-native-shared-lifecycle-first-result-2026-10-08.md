@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Native P3 首次 Rust/Lua 共享矩阵结果
 
 Root 执行的首次 governed Cargo 窗口实际终态 0：`native_shared_lifecycle_prototype` 一个联合测试，1 passed / 0 failed / 0 ignored，31.50s。受测代码为两/四槽共用的 Rust `Driver::advance`、真实 Lua51 私有 business receiver，以及 once-loader、clock、owned-resource 模型。**这是原矩阵范围通过，不是完整协议通过**。

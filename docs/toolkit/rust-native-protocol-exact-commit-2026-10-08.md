@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Native exact COMMIT：授权发布点原型（2026-10-08）
 
 状态：独立增量候选，未接产品。v0/v1/P0 文档及证据保持原样；B1 用户决定仍待答复。本文不把受控原型证明扩大成 Windows 队列、冷启动或游戏验收。

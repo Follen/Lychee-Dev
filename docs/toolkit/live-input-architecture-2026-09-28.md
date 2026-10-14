@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Live 控制架构复审：统一决策与输入证据
 
 2026-09-29 后续目标见[三色块、内存优化与代码清理方案](live-hybrid-architecture-2026-09-29.md)。

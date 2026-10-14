@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # Native Live 协议候选：单一 Mailbox 与统一推进（2026-10-08）
 
 状态：**设计候选，未定稿；不得据此开展大范围替换。** 本文不是旧 EXECUTE/SETTLE 的改名，也不是实现通过记录。消息、参数和槽位布局是供反例验证的完整候选；标为阻断的假设尚未解决。静态阅读、模型、真实 Lua 5.1、Windows 原型、最终游戏验收分别记录，不互相替代。

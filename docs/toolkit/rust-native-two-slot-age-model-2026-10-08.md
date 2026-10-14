@@ -1,3 +1,5 @@
+> Historical reference for the Rust migration (2026-10-14): current decisions, baseline and acceptance status are in [handover.md](../../handover.md). This document preserves its original scope and evidence; conflicting requirements, protocol designs, performance targets and release instructions are superseded. Historical test results are not current-candidate passes.
+
 # 两槽候选：认证状态年龄的独立反例（2026-10-08）
 
 状态：Root 已执行独立谓词模型；仅检验“认证 Mailbox + 有界年龄”能证明什么。**没有否定全部两槽方案，没有批准四槽为下限，没有关闭完整协议审计。** 两槽、四槽均继续受完整总目标和未回答的 B1 语义问题约束。
