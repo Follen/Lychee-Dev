@@ -342,6 +342,14 @@ luac失败后的只读run38633376782核定cl/link精确文件与有效Microsoft�
 
 57fa401/run38634308510在新增Windows runner测试入口因clean checkout尚无.tmp目录而9项ENOENT，编译未开始；不是cl/helper新准入实际失败。修复流程显式创建测试容器目录，并上传故障注入process-test证据。保留该失败历史，下一轮仍需真实全部负例与双编译通过，不将Linux条件skip当Windows通过。
 
+### Lua 编译器候选独立证据通过并固定新身份
+
+0d6b8ab/run38634722358/job116094827790真实双目录重建与7语法案例成功；artifact11927578038 ZIP SHA256 d774fcb89dc970594da26b7a283c9fa20502104c4052e29dba694648c1d91352。独立验收者重新核147文件、完整a/b manifest、86 sealed日志、15进程receipt、精确签名工具身份、两编译root0及helper/全树回收；AMD64仅kernel32.dll且无delay imports，源码COPYRIGHT与LICENSE逐byte一致，3项语法负例exit1为正确拒绝。
+
+据此将release/tools/luac.json整份更新为新可复建候选：EXE SHA256 5aa1605bfea56e6c2961c6b4b0f845a699b43f9b3666dd64f50289c3952d441b、491008B，MSVC14.51.36231/SDK10.0.26100.0；原64cd0d82/487424B旧身份保留Git历史，绝不声称恢复旧字节。这仅同一宿主固定工具链双重建，不等于跨宿主或完整Source通过。
+
+Windows产品CI现将在新pin下重新编译CLI，重建luac并验证精确当前sourceDigest的未发布候选包/许可证闭包，然后真正执行原先ignored的多CLI native session/缓存/关闭/取消/坏帧场景，使用独立保存的fixture目录与owned controller。配置已写，实际候选装配及真实session仍NOT_RUN；其他差分/测试失败不短路这些独立组，不能把包构建等同业务收敛。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

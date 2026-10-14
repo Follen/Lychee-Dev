@@ -182,6 +182,24 @@ jobs:
       - name: Execute fixed full Retail Source import and public CLI cases
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
         run: node tools/rust-source-full-corpus.mjs .tmp/ci-cli-artifact/artifact.json
+      - name: Rebuild the independently verified Lua compiler identity
+        id: candidate_luac
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
+        run: node tools/luac.mjs build .tmp/ci-package-luac
+      - name: Assemble an unpublished exact-source candidate with licenses
+        id: candidate_package
+        if: ${{ !cancelled() && steps.candidate_luac.outcome == 'success' && steps.cli_binary.outcome == 'success' }}
+        run: node tools/rust-package-smoke.mjs .tmp/ci-source-candidate .tmp/ci-package-luac --artifact .tmp/ci-cli-artifact/artifact.json --assembly-only
+      - name: Exercise real multi-CLI native session and failure cleanup
+        if: ${{ !cancelled() && steps.candidate_package.outcome == 'success' }}
+        run: |
+          $env:LYCHEEDEV_SOURCE_NATIVE_RELEASE = (Resolve-Path .tmp/ci-source-candidate/package).Path
+          $env:LYCHEEDEV_SOURCE_NATIVE_KEEP_FIXTURE = '1'
+          New-Item -ItemType Directory -Force -Path .tmp/ci-source-native-temp | Out-Null
+          $env:TEMP = (Resolve-Path .tmp/ci-source-native-temp).Path
+          $env:TMP = $env:TEMP
+          node tools/rust-cargo.mjs --owner ci-native-session --one-shot -- test --locked --offline -p lycheedev-cli --test source_native_session_public -j 1 -- --ignored --nocapture
+          exit $LASTEXITCODE
       - name: Preserve each controlled command receipt and logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -191,6 +209,9 @@ jobs:
             .tmp/rust-disk/evidence/
             .tmp/rust-process-test-*/
             .tmp/ci-cli-artifact/
+            .tmp/ci-package-luac/
+            .tmp/ci-source-candidate/
+            .tmp/ci-source-native-temp/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
