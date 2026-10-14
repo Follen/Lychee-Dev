@@ -386,6 +386,14 @@ Delivery维护改正式v3/files、256KiB manifest、旧64/200→500形状/精确
 
 Windows新增consume File所有权的最小close_file安全接口，仅一次CloseHandle且传播错误，不重建或重试已消费handle。core受控atomic writer顺序为sync→原control→checked close→原control→durable replace；关闭失败或关闭期间取消均不发布。独立源码审核已核所有权和首个错误传播，新增独占句柄/duplicate所有权、注入关闭错误与关闭期间取消四项fixture，Windows运行NOT_RUN。错误注入是在正常关闭后返回错误，不冒称实测内核CloseHandle失败；现有遗留Drop未被宣称可检查关闭。durable journal将复用此接口，尚未接生产。
 
+### 0d6 产品真实回归结果与保留失败
+
+0d6b8ab/run38634722276产品job116096315251终态failure；artifact11929632102 ZIP SHA256 329c09ae3c126164b8e064c61e92727520332be40ab8109f1727ea39eec08afc已下载，307份封存日志hash逐一验证。成功组214项Rust通过、失败组另1项通过、2项人工条件ignore；正式Mailbox A+B组82项实际通过，receipt证实root/tree/handles/readers完整回收与active0。all-target、sealed CLI、doctor及全仓21项static验收通过；该树未含C、共享core提取、新维护和新语义计划，不能转借通过。
+
+三组失败照实保留：首个owned-process fixture的PowerShell wrapper在约76秒超时，尚未产生child receipt，不称树已回收；Delivery status在根选择后返回external.io/os2，原日志不足以证明并行fixture碰撞；combined addon在183.40秒耗尽原180秒deadline。旧slot migration无control且全部1500文件重复持久写，ec2已保全量验证/只写变化文件并传原control，尚待精确新树实测；不通过增加产品deadline掩盖。其他独立组没有被这些失败短路，旧失败与未回收fixture保留于artifact。
+
+Delivery测试fixture的PID+timestamp非独占目录存在并发碰撞风险；本批增加进程内序号与create_dir独占、强制相同timestamp的删除隔离回归，并保留原业务断言和分阶段错误定位。独立差分复核仅测试模块修改，3项selection fixture运行NOT_RUN；这是可证明隔离风险修复，不把原os2根因称为已经复现。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

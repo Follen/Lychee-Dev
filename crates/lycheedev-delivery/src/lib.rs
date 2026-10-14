@@ -166,23 +166,68 @@ fn selected_client(inv: &Invocation) -> Result<lycheedev_core::client::ClientIns
 #[cfg(test)]
 mod selection_tests {
     use super::*;
-    use std::{collections::BTreeMap, fs, path::PathBuf, sync::atomic::Ordering};
+    use std::{
+        collections::BTreeMap,
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "lychee-delivery-selection-{}-{}",
-                std::process::id(),
+            Self::with_timestamp(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()
+                    .as_nanos(),
+            )
+        }
+        fn with_timestamp(timestamp: u128) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "lychee-delivery-selection-{}-{timestamp}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            let client = root.join("_classic_titan_");
+            // The clock is not a uniqueness guarantee between parallel tests.
+            // Own the root exclusively before any later Drop can remove it.
+            fs::create_dir(&root).unwrap();
+            let fixture = Self(root);
+            let client = fixture.0.join("_classic_titan_");
             fs::create_dir_all(client.join("Interface/AddOns")).unwrap();
             fs::write(client.join(".flavor.info"), "wow_classic_titan").unwrap();
             fs::write(client.join("version.txt"), "3.80.2.69874").unwrap();
-            Self(root)
+            fixture
+        }
+        fn addon_status(&self, inv: &Invocation, selector: &str) -> serde_json::Value {
+            // Keep the public dispatch assertion, but first identify which
+            // read-only boundary fails if CI reports an uncontextualized OS error.
+            let client = selected_client(inv).unwrap_or_else(|error| {
+                panic!("{selector}: select client under {:?}: {error:?}", self.0)
+            });
+            let target =
+                lycheedev_core::client::addon_destination(&client).unwrap_or_else(|error| {
+                    panic!(
+                        "{selector}: resolve addon target for {}: {error:?}",
+                        client.directory
+                    )
+                });
+            let installation = installation::inspect(&target, "addon").unwrap_or_else(|error| {
+                panic!("{selector}: inspect addon at {target:?}: {error:?}")
+            });
+            let result = dispatch(inv)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{selector}: dispatch addon status under {:?}: {error:?}",
+                        self.0
+                    )
+                })
+                .data;
+            assert_eq!(
+                result["installation"], installation,
+                "{selector}: dispatch installation"
+            );
+            result
         }
         fn invocation(&self, command: &str) -> Invocation {
             Invocation {
@@ -207,7 +252,7 @@ mod selection_tests {
     fn addon_status_selects_root_or_client_with_only_go_public_client_fields() {
         let fixture = Fixture::new();
         let mut inv = fixture.invocation("addon status");
-        let root = dispatch(&inv).unwrap().data;
+        let root = fixture.addon_status(&inv, "game root");
         inv.flags.insert(
             "--installation".into(),
             fixture
@@ -216,7 +261,7 @@ mod selection_tests {
                 .to_string_lossy()
                 .into_owned(),
         );
-        let exact = dispatch(&inv).unwrap().data;
+        let exact = fixture.addon_status(&inv, "exact client");
         assert_eq!(root, exact);
         assert_eq!(root["client"]["product"], "titan");
         // Go selection.ClientInstallation omits catalogProduct for ordinary slots.
@@ -241,6 +286,26 @@ mod selection_tests {
             .collect()
         );
         assert_eq!(root["installation"]["state"], "absent");
+        assert!(!inv.home.exists());
+    }
+    #[test]
+    fn selection_fixtures_with_identical_timestamps_own_independent_roots() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        // Force the clock collision rather than hoping concurrent threads hit it.
+        let first = Fixture::with_timestamp(timestamp);
+        let second = Fixture::with_timestamp(timestamp);
+        assert_ne!(first.0, second.0);
+        let first_path = first.0.clone();
+        drop(first);
+        assert!(!first_path.exists());
+        assert!(second.0.is_dir());
+        let inv = second.invocation("addon status");
+        let result = second.addon_status(&inv, "surviving same-timestamp fixture");
+        assert_eq!(result["client"]["product"], "titan");
+        assert_eq!(result["installation"]["state"], "absent");
         assert!(!inv.home.exists());
     }
     #[test]
