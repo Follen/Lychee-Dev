@@ -6,7 +6,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFil
 import {dirname, delimiter, join, resolve} from 'node:path';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
-import {assertApiAnswer, assertBoundedCoverage, assertNativeEvidence, commandFlags, inventory, inventoryHash, jsonFile, sha256, within} from './assertions.mjs';
+import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, POST_SEMANTIC_REQUIREMENTS, sha256, within} from './assertions.mjs';
 import {assertAnchor, assertEnvelope, assertPageContinuation, assertQuery, assertStaticCall} from '../rust-source-full-corpus/assertions.mjs';
 
 const [packageArg, scratchArg, evidenceArg, packageSHA256, ...extra] = process.argv.slice(2);
@@ -57,13 +57,8 @@ function invoke(caseId, args, {expectedExit = 0, timeout = 210000, phase = 'loca
   assert.equal(run.signal, null, 'no process signal');
   return {result, envelope, observation};
 }
-function check(caseId, work) {
-  const time = performance.now();
-  if (fatalProcessFailure) report.checks.push({caseId, state: 'not_run', reason: 'Prior process/controller budget failure requires outer Job retirement; no further child launched'});
-  else {
-    try { report.checks.push({caseId, state: 'passed', ...work(), wallMillis: performance.now() - time}); }
-    catch (error) { report.checks.push({caseId, state: 'failed', reason: error.message, wallMillis: performance.now() - time}); }
-  }
+function check(caseId, work, {requires = []} = {}) {
+  report.checks.push(evaluateWorkflowCheck({caseId, work, requires, priorChecks: report.checks, fatalProcessFailure}));
   save();
 }
 function supported(path, flags = []) { assert(directory, 'installed command directory unavailable'); return commandFlags(directory, path, flags); }
@@ -75,9 +70,7 @@ function queried(caseId, anchor, topic) {
 }
 function relationArgs(command, semantic = false) {
   supported(`source ${command}`, ['--snapshot', '--symbol-id', '--limit']); assert(action, 'returned action symbol identity unavailable');
-  // The ordinary context page includes native and structural rows. A bounded
-  // 50-row page preserves the original line-141 native callsite for checking.
-  const args = fixed(['source', command, '--symbol-id', action.row.symbolId, '--limit', command === 'refs' ? '25' : semantic ? '50' : '5']);
+  const args = fixed(['source', command, '--symbol-id', action.row.symbolId, '--limit', command === 'refs' ? '25' : '5']);
   if (command === 'refs') args.push('--direction', 'incoming');
   else args.push('--depth', '0', '--max-lines', '80', '--max-bytes', '16384');
   if (!semantic) args.push('--static-only');
@@ -188,11 +181,14 @@ try {
     return {coverage: result.coverage, native: nativeSummary(native), complete: result.complete, truncated: result.truncated};
   });
   check('ordinary-native-context', () => {
-    const {result} = invoke('context-native', relationArgs('context', true)); checkRelationIdentity(result); const native = assertNativeEvidence(result, oracle, workflow.nativeCallsite);
-    assert(result.snippets?.some(row => row.path === action.row.path && row.text?.includes(oracle.anchors[0].declarationLine)));
+    const {result} = invoke('context-native', relationArgs('context', true)); checkRelationIdentity(result); const native = assertNativeContext(result, oracle);
     return {coverage: result.coverage, native: nativeSummary(native), complete: result.complete, truncated: result.truncated};
   });
-  check('post-semantic-source-read-still-usable', () => { const again = queried('query-final', oracle.anchors[2], 'api'); assert.equal(again.row.symbolId, api?.row.symbolId); });
+  // This independent fixed-source read is useful even when native capabilities
+  // are missing. It proves post-semantic usability only after both actual native
+  // calls completed and their evidence checks passed, which the next check gates.
+  check('final-same-pin-api-query', () => { const again = queried('query-final', oracle.anchors[2], 'api'); assert.equal(again.row.symbolId, api?.row.symbolId); return {pin, symbolId: again.row.symbolId}; });
+  check('post-semantic-source-read-still-usable', () => ({verifiedChecks: [...POST_SEMANTIC_REQUIREMENTS]}), {requires: POST_SEMANTIC_REQUIREMENTS});
   check('no-opt-in-session-left-behind', () => {
     supported('source session status'); const {result} = invoke('session-status', ['source', 'session', 'status']); assert.equal(result.state, 'closed', 'ordinary one-shot calls must not retain a session');
     return {state: result.state, backend: result.backend};

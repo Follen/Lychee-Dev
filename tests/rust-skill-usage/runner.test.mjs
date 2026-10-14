@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import os from 'node:os';
-import {assertApiAnswer, assertBoundedCoverage, assertNativeEvidence, commandFlags, inventory, inventoryHash, jsonFile, sha256, verifyCandidate, within} from './assertions.mjs';
+import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, nativeOperationDigest, nativePlanDigest, POST_SEMANTIC_REQUIREMENTS, sha256, verifyCandidate, within} from './assertions.mjs';
 
 const workflow = jsonFile(new URL('./workflow.json', import.meta.url));
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
@@ -148,6 +148,125 @@ test('native metadata plus structural-only rows cannot impersonate native-origin
   ];
   for (const mutate of mutations) { const row = nativeResult(); mutate(row); assert.throws(() => verifyNative(row)); }
 });
+function nativeContextResult() {
+  const result = nativeResult(), anchor = oracle.anchors[0];
+  result.relations = [];
+  result.snippets = [{path: anchor.path, firstLine: 97, lastLine: 107, contentHash: anchor.sha256, basis: 'definition',
+    text: anchor.text.replace(/\n+$/, '').split('\n').map((line, index) => `${97 + index}: ${line}`).join('\n')}];
+  const target = {site: {file: anchor.path, start: 2915, end: 2935}, file_sha256: anchor.sha256,
+    position: {path: anchor.path, range: {start: {line: 96, character: 9}, end: {line: 96, character: 29}},
+      coveringRange: {start: {line: 96, character: 9}, end: {line: 96, character: 29}}, bytes: {start: 2915, end: 2935}, positionAccuracy: 'utf16-character'}, material: {kind: 'source'}};
+  const plan = {schema: 'lycheedev.native-semantic-plan.v1', source_identity: result.nativeResearch.inputIdentity, query_identity: 'b'.repeat(64),
+    operations: [{kind: 'references', target}, {kind: 'type', target: structuredClone(target)}], batch_sizes: [2], unavailable: [], outgoing_truncated: false, scanner_diagnostics: [], scanner_diagnostics_omitted: 0};
+  result.nativeResearch.semanticPlan = {state: 'execution_incomplete', plan, resourceAccounting: {executedSemanticBatches: 0}};
+  result.nativeResearch.semanticExecution = {schema: 'lycheedev.native-semantic-execution.v1',
+    receipt: {planned_batches: 1, completed_batches: 0, scopes: 1, unavailable_scopes: 0, uncertain_answers: 2, unexecuted_operations: 1, plan_identity: nativePlanDigest(plan)},
+    answers: [{scope: {kind: 'synthetic-checker-scope'}, operations: [
+      {operation: 0, batch: 0, kind: 'references', operationIdentity: nativeOperationDigest(plan.operations[0]), state: 'partial', executed: true,
+        result: {relationsSHA256: 'c'.repeat(64), relationCount: 1, analysis: structuredClone(result.nativeResearch.analysis)}},
+      {operation: 1, batch: 0, kind: 'type', operationIdentity: nativeOperationDigest(plan.operations[1]), state: 'unavailable', executed: false},
+    ]}]};
+  return result;
+}
+function refreshContextPlanIdentities(context) {
+  const plan = context.nativeResearch.semanticPlan.plan, execution = context.nativeResearch.semanticExecution;
+  execution.receipt.plan_identity = nativePlanDigest(plan);
+  for (const scope of execution.answers) for (const [index, answer] of (scope.operations ?? []).entries()) answer.operationIdentity = nativeOperationDigest(plan.operations[index]);
+}
+test('real native depth-zero context requires exact definition evidence without requiring refs traversal', () => {
+  const context = nativeContextResult();
+  assertNativeContext(context, oracle);
+  assert.throws(() => verifyNative(context), /callsite/, 'refs still requires native callsite rows');
+  const mixed = nativeContextResult(); mixed.relations = nativeResult().relations;
+  assert.throws(() => assertNativeContext(mixed, oracle), /depth-zero/, 'depth-zero context cannot be replaced by a refs page');
+});
+test('depth-zero native context rejects static substitution, unretired execution and altered original snippets', () => {
+  for (const mutate of [
+    row => { delete row.nativeResearch; }, row => { row.nativeResearch.lifecycle.retired = false; },
+    row => { row.nativeResearch.analysis.inputIdentity = 'b'.repeat(64); }, row => { row.semanticRuntime.engine = 'static'; },
+    row => { row.snippets = []; }, row => { row.snippets[0].path = 'wrong.lua'; }, row => { row.snippets[0].firstLine = 98; },
+    row => { row.snippets[0].lastLine = 108; }, row => { row.snippets[0].contentHash = '0'.repeat(64); },
+    row => { row.snippets[0].basis = 'relation:call'; }, row => { row.snippets[0].text = oracle.anchors[0].declarationLine; },
+    row => { row.snippets[0].text = row.snippets[0].text.replace('97:', '98:'); },
+  ]) { const context = nativeContextResult(); mutate(context); assert.throws(() => assertNativeContext(context, oracle)); }
+});
+test('context accepts executed references with partial type or unavailable scopes even when completed batches is zero', () => {
+  const context = nativeContextResult(), execution = context.nativeResearch.semanticExecution;
+  assert.equal(execution.receipt.completed_batches, 0);
+  assertNativeContext(context, oracle);
+  execution.answers.push({scope: {reason: 'another scope unavailable'}, state: 'unavailable', operationsExecuted: false});
+  execution.receipt.unavailable_scopes = 1;
+  assertNativeContext(context, oracle);
+});
+test('incomplete native execution cannot relabel both analyses and public coverage as complete', () => {
+  const context = nativeContextResult();
+  assertNativeContext(context, oracle);
+  assert.equal(context.nativeResearch.semanticExecution.receipt.unexecuted_operations, 1);
+  assert.equal(context.nativeResearch.semanticPlan.state, 'execution_incomplete');
+  assert.equal(context.nativeResearch.semanticExecution.receipt.completed_batches, 0);
+  context.nativeResearch.analysis.state = 'complete'; context.semanticAnalysis.state = 'complete';
+  context.coverage.semantic = 'complete'; context.complete = true;
+  assert.throws(() => assertNativeContext(context, oracle), /incomplete plan\/scope\/answers/);
+});
+test('context rejects missing plan/execution and a planned or explicitly zero-execution summary', () => {
+  const mutations = [
+    row => { delete row.nativeResearch.semanticPlan; }, row => { delete row.nativeResearch.semanticExecution; },
+    row => { row.nativeResearch.semanticPlan.state = 'planned_not_executed'; },
+    row => {
+      const execution = row.nativeResearch.semanticExecution;
+      execution.answers = [{scope: {reason: 'never started'}, state: 'unavailable', operationsExecuted: false}];
+      Object.assign(execution.receipt, {scopes: 0, unavailable_scopes: 1, uncertain_answers: 0, unexecuted_operations: 0});
+    },
+    row => {
+      const execution = row.nativeResearch.semanticExecution;
+      execution.answers[0].operations[0].executed = false; execution.receipt.unexecuted_operations = 2;
+    },
+  ];
+  for (const mutate of mutations) { const context = nativeContextResult(); mutate(context); assert.throws(() => assertNativeContext(context, oracle)); }
+});
+test('context execution binds plan schemas, actual inputs, ordered operations and receipt totals', () => {
+  for (const mutate of [
+    row => { row.nativeResearch.semanticPlan.plan.schema = 'wrong'; }, row => { row.nativeResearch.semanticExecution.schema = 'wrong'; },
+    row => { row.nativeResearch.semanticPlan.plan.source_identity = 'd'.repeat(64); refreshContextPlanIdentities(row); },
+    row => { row.nativeResearch.semanticPlan.plan.operations = []; }, row => { row.nativeResearch.semanticPlan.plan.batch_sizes = [1]; },
+    row => { row.nativeResearch.semanticExecution.receipt.plan_identity = 'd'.repeat(64); },
+    row => { row.nativeResearch.semanticExecution.receipt.planned_batches = 2; },
+    row => { row.nativeResearch.semanticExecution.receipt.completed_batches = 1; },
+    row => { row.nativeResearch.semanticExecution.receipt.scopes = 2; }, row => { row.nativeResearch.semanticExecution.receipt.uncertain_answers = 0; },
+    row => { row.nativeResearch.semanticExecution.receipt.unexecuted_operations = 0; },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations.pop(); },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].operation = 1; },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].batch = 1; },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].kind = 'type'; },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].operationIdentity = 'e'.repeat(64); },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].result.relationsSHA256 = ''; },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].result.relationCount = -1; },
+    row => { row.nativeResearch.semanticExecution.answers[0].operations[0].result.analysis.inputIdentity = 'e'.repeat(64); },
+  ]) { const context = nativeContextResult(); mutate(context); assert.throws(() => assertNativeContext(context, oracle)); }
+});
+test('self-consistent operation hashes cannot retarget the authenticated selected declaration', () => {
+  for (const mutate of [
+    target => { target.site.start++; }, target => { target.site.end++; }, target => { target.site.file = 'other.lua'; },
+    target => { target.file_sha256 = 'd'.repeat(64); }, target => { target.position.range.start.line = 97; },
+    target => { target.position.coveringRange.start.character = 10; }, target => { target.position.bytes.start++; },
+    target => { target.material.kind = 'api_definition'; },
+  ]) {
+    const context = nativeContextResult(); mutate(context.nativeResearch.semanticPlan.plan.operations[0].target);
+    refreshContextPlanIdentities(context); assert.throws(() => assertNativeContext(context, oracle));
+  }
+});
+test('typed plan hashes are independent of output JSON key order and differ from sorted struct JSON', () => {
+  const plan = nativeContextResult().nativeResearch.semanticPlan.plan;
+  const sort = value => Array.isArray(value) ? value.map(sort) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sort(value[key])])) : value;
+  // Independently recomputed with Python OrderedDict from the Rust struct field
+  // declarations; these are checker fixtures, not product execution receipts.
+  assert.equal(nativePlanDigest(plan), '179ddd49791918d300f39d8e3f8075a41c1c4347dbf32ba571f2babc87797523');
+  assert.equal(nativeOperationDigest(plan.operations[0]), '3475607b929a962729b7e29b14d1655fa7376f68820e1b83db1fbc5f9156b7a8');
+  assert.equal(nativePlanDigest(plan), nativePlanDigest(sort(plan)));
+  assert.equal(nativeOperationDigest(plan.operations[0]), nativeOperationDigest(sort(plan.operations[0])));
+  assert.notEqual(nativePlanDigest(plan), sha256(Buffer.from(JSON.stringify(sort(plan)))));
+  assert.notEqual(nativeOperationDigest(plan.operations[0]), sha256(Buffer.from(JSON.stringify(sort(plan.operations[0])))));
+});
 test('API and native-site fixture windows retain independently authenticated original identities', () => {
   const window = workflow.apiOriginalWindow;
   assert.equal(window.textSHA256, 'e20df7e8a9e30988ebc68f92cd2715db42915d4beecb1faf371cc7a669e3ca12');
@@ -169,4 +288,65 @@ test('API answer requires the exact requested 10–21 original window, not match
     {...result, text: window.text.replace('AllowedWhenUntainted', 'Allowed')}, {...result, blob: {sha256: '0'.repeat(64)}},
   ]) assert.throws(() => verify(changed));
   assert.throws(() => assertApiAnswer(result, {...row, line: 11}, oracle, window));
+});
+
+function postSemanticFixture(nativeWork) {
+  const checks = [], calls = [];
+  for (const [index, caseId] of POST_SEMANTIC_REQUIREMENTS.slice(0, 2).entries()) {
+    checks.push(evaluateWorkflowCheck({caseId, priorChecks: checks, work: () => nativeWork(index, calls)}));
+  }
+  checks.push(evaluateWorkflowCheck({caseId: 'final-same-pin-api-query', priorChecks: checks, work: () => { calls.push('query-final'); return {pin: 'PIN-fixture'}; }}));
+  const original = structuredClone(checks);
+  const dependent = evaluateWorkflowCheck({caseId: 'post-semantic-source-read-still-usable', priorChecks: checks, requires: POST_SEMANTIC_REQUIREMENTS, work: () => { calls.push('post-semantic-assertion'); return {verifiedChecks: [...POST_SEMANTIC_REQUIREMENTS]}; }});
+  assert.deepEqual(checks, original, 'dependency evaluation preserves every original failure/result');
+  checks.push(dependent);
+  return {checks, calls, dependent, overallPassed: checks.every(row => row.state === 'passed')};
+}
+test('both native calls not requested cannot turn an independent final query into post-semantic success', () => {
+  const result = postSemanticFixture(index => { throw new Error(`installed describe lacks source ${index ? 'context' : 'refs'}`); });
+  assert.deepEqual(result.calls, ['query-final']);
+  assert.equal(result.checks[2].state, 'passed', 'ordinary final same-pin query retains its own accurate success');
+  assert.equal(result.dependent.state, 'not_run');
+  assert.deepEqual(result.dependent.blockedBy, [
+    {caseId: 'ordinary-native-callers', state: 'failed', reason: 'installed describe lacks source refs'},
+    {caseId: 'ordinary-native-context', state: 'failed', reason: 'installed describe lacks source context'},
+  ]);
+  assert.equal(result.overallPassed, false);
+});
+test('one native execution or evidence failure blocks post-semantic success without swallowing it', () => {
+  const result = postSemanticFixture((index, calls) => {
+    calls.push(index ? 'context-native' : 'refs-native');
+    if (index) throw new Error('native worker failed: original retained failure');
+    return {native: {lifecycle: {mode: 'one_shot', retired: true}}};
+  });
+  assert.deepEqual(result.calls, ['refs-native', 'context-native', 'query-final']);
+  assert.equal(result.checks[0].state, 'passed'); assert.equal(result.checks[1].state, 'failed');
+  assert.equal(result.dependent.state, 'not_run');
+  assert.deepEqual(result.dependent.blockedBy, [{caseId: 'ordinary-native-context', state: 'failed', reason: 'native worker failed: original retained failure'}]);
+  assert.equal(result.overallPassed, false);
+});
+test('completed and verified native calls followed by successful fixed query admit post-semantic success', () => {
+  // Synthetic checker execution only; this test is not Windows product evidence.
+  const result = postSemanticFixture((index, calls) => {
+    calls.push(index ? 'context-native' : 'refs-native');
+    const verified = index ? assertNativeContext(nativeContextResult(), oracle) : verifyNative(nativeResult());
+    return {native: {lifecycle: verified.lifecycle, inputIdentity: verified.inputIdentity}};
+  });
+  assert.deepEqual(result.calls, ['refs-native', 'context-native', 'query-final', 'post-semantic-assertion']);
+  assert.equal(result.dependent.state, 'passed'); assert.equal(result.overallPassed, true);
+});
+test('missing, not-run or failed final-query prerequisites never execute the dependent check', () => {
+  const passed = POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'}));
+  for (const priorChecks of [[], passed.slice(0, 2), [{...passed[0], state: 'not_run', reason: 'transport retired'}, ...passed.slice(1)], [...passed.slice(0, 2), {...passed[2], state: 'failed', reason: 'query failed'}]]) {
+    let invoked = false;
+    const result = evaluateWorkflowCheck({caseId: 'post-semantic-source-read-still-usable', priorChecks, requires: POST_SEMANTIC_REQUIREMENTS, work: () => { invoked = true; }});
+    assert.equal(result.state, 'not_run'); assert.equal(invoked, false); assert(result.blockedBy.length > 0);
+  }
+});
+test('fatal transport state prohibits all check callbacks and observed business state cannot overwrite check status', () => {
+  let invoked = false;
+  const stopped = evaluateWorkflowCheck({caseId: 'final-same-pin-api-query', fatalProcessFailure: true, work: () => { invoked = true; }});
+  assert.equal(stopped.state, 'not_run'); assert.equal(invoked, false);
+  const closed = evaluateWorkflowCheck({caseId: 'release-owned-session', work: () => ({state: 'closed'})});
+  assert.equal(closed.state, 'passed'); assert.equal(closed.observedState, 'closed');
 });

@@ -42,14 +42,21 @@ byte range, 3940–3960, in ActionButton.lua.
 
 Ordinary native checks require the native engine and rules identity, consistent
 analysis/input identity and coverage, full fixed Lua input cardinality, and
-`source_owned_process` / `one_shot` / `retired=true`. They also require the exact
+`source_owned_process` / `one_shot` / `retired=true`. Refs also requires the exact
 original callsite's native basis, byte site, proof, lexical result and observations.
 Production projects native rows into the public paginated `relations` array and
 removes the duplicate `nativeResearch.relations`; the checker follows that shape.
-A structural-only row cannot satisfy this check. Honest partial/static-candidate
+A structural-only row cannot satisfy the refs check. Honest partial/static-candidate
 native facts are accepted without asserting resolved bindings or complete whole-
-repository semantics. The ordinary context page is bounded to 50 rows so the
-checked callsite remains available; its existing excerpt/depth budgets are intact.
+repository semantics. Context preserves fixed Go depth=0 and limit=5: relations
+must be empty, while the declaration snippet must exactly match authenticated
+ActionButton.lua lines 97–107, full-file hash and numbered original text. Both
+paths retain the real native execution/identity/retirement requirements.
+
+The final same-pin API query is an independent check. The separate post-semantic
+usability check requires both native calls and that final query to have passed;
+missing or failed prerequisites produce not_run with their original reasons.
+A business result's state cannot overwrite the check's passed/failed state.
 
 The batch workflow first consults actual describe. A missing command is a failed
 required capability with preserved supported answers, not an invented invocation

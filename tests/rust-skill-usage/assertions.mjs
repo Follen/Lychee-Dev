@@ -3,9 +3,33 @@ import assert from 'node:assert/strict';
 import {lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {createHash} from 'node:crypto';
+import {performance} from 'node:perf_hooks';
 import {hashFile} from '../../tools/rust-build.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+export const POST_SEMANTIC_REQUIREMENTS = Object.freeze(['ordinary-native-callers', 'ordinary-native-context', 'final-same-pin-api-query']);
+
+// Evaluate only an admitted workflow check. Prerequisite failures remain in the
+// caller's report unchanged; dependent checks neither execute nor gain a pass.
+export function evaluateWorkflowCheck({caseId, work, priorChecks = [], requires = [], fatalProcessFailure = false}) {
+  const started = performance.now();
+  const blockedBy = requires.flatMap(required => {
+    const matches = priorChecks.filter(row => row.caseId === required);
+    if (matches.length !== 1) return [{caseId: required, state: matches.length ? 'ambiguous' : 'not_run', reason: 'Required preceding check did not complete exactly once'}];
+    const check = matches[0];
+    return check.state === 'passed' ? [] : [{caseId: required, state: check.state, reason: check.reason ?? 'Required preceding check did not pass'}];
+  });
+  if (fatalProcessFailure || blockedBy.length) return {caseId, state: 'not_run', reason: fatalProcessFailure
+    ? 'Prior process/controller budget failure requires outer Job retirement; no further child launched'
+    : 'Required preceding workflow checks did not complete successfully', ...(blockedBy.length ? {blockedBy} : {}), wallMillis: performance.now() - started};
+  try {
+    const detail = work() ?? {};
+    return {...detail, ...(Object.hasOwn(detail, 'state') ? {observedState: detail.state} : {}), caseId, state: 'passed', wallMillis: performance.now() - started};
+  } catch (error) {
+    return {caseId, state: 'failed', reason: error.message, wallMillis: performance.now() - started};
+  }
+}
+
 export function within(root, name) {
   assert.equal(typeof name, 'string', 'relative file name');
   assert(name && !isAbsolute(name) && !name.includes('\\') && !name.includes(':') && !name.includes('\0'), 'safe relative file name');
@@ -101,7 +125,98 @@ export function assertBoundedCoverage(result) {
   assert(result.coverage && typeof result.coverage === 'object', 'explicit coverage');
   if (result.truncated || result.coverage.complete === false || result.coverage.semantic === 'unavailable') assert.equal(result.complete, false, 'limits cannot imply complete semantics');
 }
-export function assertNativeEvidence(result, oracle, callsite) {
+
+// Rust hashes the typed structs in declaration order, while JSON Value members
+// use serde_json's sorted map order. Hashing the parsed output object's order
+// would therefore produce a different identity. Keep these projections aligned
+// with native_research/plan.rs and native/graph.rs, not alphabetized structs.
+function rustValue(value) {
+  if (Array.isArray(value)) return value.map(rustValue);
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map(key => [key, rustValue(value[key])]));
+  if (typeof value === 'number') assert(Number.isSafeInteger(value), 'exact integer JSON evidence required for native plan identity');
+  assert(value === null || ['string', 'number', 'boolean'].includes(typeof value), 'serializable native plan value');
+  return value;
+}
+function typedOperation(operation) {
+  assert(['references', 'type', 'definition'].includes(operation?.kind), 'typed semantic operation kind');
+  const target = operation.target, site = target?.site;
+  assert(site && typeof site.file === 'string' && Number.isSafeInteger(site.start) && Number.isSafeInteger(site.end) && site.start >= 0 && site.end > site.start, 'typed source site');
+  assert.match(target.file_sha256, /^[a-f0-9]{64}$/, 'authenticated operation file identity');
+  return {kind: operation.kind, target: {site: {file: site.file, start: site.start, end: site.end}, file_sha256: target.file_sha256, position: rustValue(target.position), material: rustValue(target.material)}};
+}
+export const nativeOperationDigest = operation => sha256(Buffer.from(JSON.stringify(typedOperation(operation))));
+export function nativePlanDigest(plan) {
+  return sha256(Buffer.from(JSON.stringify({schema: plan.schema, source_identity: plan.source_identity, query_identity: plan.query_identity,
+    operations: plan.operations.map(typedOperation), batch_sizes: plan.batch_sizes, unavailable: plan.unavailable, outgoing_truncated: plan.outgoing_truncated,
+    scanner_diagnostics: rustValue(plan.scanner_diagnostics), scanner_diagnostics_omitted: plan.scanner_diagnostics_omitted})));
+}
+
+function assertContextOperationExecution(evidence, oracle) {
+  const planned = evidence.semanticPlan, plan = planned?.plan, execution = evidence.semanticExecution, receipt = execution?.receipt;
+  assert(['executed', 'execution_incomplete'].includes(planned?.state), 'context must contain execution evidence, not just a plan');
+  assert.equal(plan?.schema, 'lycheedev.native-semantic-plan.v1');
+  assert.equal(plan.source_identity, evidence.inputIdentity, 'plan belongs to actual native inputs');
+  assert.match(plan.query_identity, /^[a-f0-9]{64}$/);
+  assert(Array.isArray(plan.operations) && plan.operations.length > 0 && plan.operations.length <= 130, 'bounded nonempty native operation plan');
+  const batchSizes = Array.from({length: Math.ceil(plan.operations.length / 128)}, (_, index) => Math.min(128, plan.operations.length - index * 128));
+  assert.deepEqual(plan.batch_sizes, batchSizes, 'plan operation batches');
+  assert(Array.isArray(plan.unavailable) && plan.unavailable.every(reason => typeof reason === 'string'));
+  assert.equal(typeof plan.outgoing_truncated, 'boolean');
+  assert(Array.isArray(plan.scanner_diagnostics)); assert(Number.isSafeInteger(plan.scanner_diagnostics_omitted) && plan.scanner_diagnostics_omitted >= 0);
+  assert.equal(execution?.schema, 'lycheedev.native-semantic-execution.v1');
+  assert.equal(receipt?.plan_identity, nativePlanDigest(plan), 'receipt binds typed native plan');
+  assert.equal(receipt.planned_batches, batchSizes.length);
+  for (const field of ['completed_batches', 'scopes', 'unavailable_scopes', 'uncertain_answers', 'unexecuted_operations']) assert(Number.isSafeInteger(receipt[field]) && receipt[field] >= 0, `bounded receipt ${field}`);
+  assert(Array.isArray(execution.answers) && execution.answers.length > 0, 'native scope answers');
+  const anchor = oracle.anchors[0];
+  // Authenticated original ActionButton.lua has this exact declaration token at
+  // byte 2915..2935, one-based line 97 (UTF-16 zero-based 96:9..96:29).
+  const selected = new Set(plan.operations.flatMap((operation, index) => {
+    if (operation.kind !== 'references') return [];
+    const target = operation.target;
+    assert.deepEqual(target.site, {file: anchor.path, start: 2915, end: 2935}, 'references plan targets the selected original declaration token');
+    assert.equal(target.file_sha256, anchor.sha256, 'references plan targets authenticated original file');
+    assert.deepEqual(target.material, {kind: 'source'});
+    assert.deepEqual(target.position, {path: anchor.path, range: {start: {line: 96, character: 9}, end: {line: 96, character: 29}},
+      coveringRange: {start: {line: 96, character: 9}, end: {line: 96, character: 29}}, bytes: {start: 2915, end: 2935}, positionAccuracy: 'utf16-character'}, 'references plan original declaration coordinates');
+    return [index];
+  }));
+  assert(selected.size > 0, 'context plan includes selected declaration references operation');
+  let scopes = 0, unavailable = 0, unexecuted = 0, uncertain = 0, executedReferences = 0;
+  const completed = batchSizes.map(() => true);
+  for (const scope of execution.answers) {
+    if (scope.state === 'unavailable') {
+      assert.equal(scope.operationsExecuted, false, 'unavailable scope does not credit execution'); assert.equal(scope.operations, undefined); unavailable++; continue;
+    }
+    assert(scope.scope && typeof scope.scope === 'object', 'execution scope identity');
+    assert(Array.isArray(scope.operations) && scope.operations.length === plan.operations.length, 'scope answers correspond to every planned operation'); scopes++;
+    for (const [index, answer] of scope.operations.entries()) {
+      const operation = plan.operations[index], batch = Math.floor(index / 128);
+      assert.equal(answer.operation, index); assert.equal(answer.batch, batch); assert.equal(answer.kind, operation.kind);
+      assert.equal(answer.operationIdentity, nativeOperationDigest(operation), 'answer binds typed operation identity');
+      assert.equal(typeof answer.executed, 'boolean', 'answer states actual execution'); assert.equal(typeof answer.state, 'string');
+      if (!answer.executed) { unexecuted++; completed[batch] = false; }
+      if (!['known', 'known_declaration'].includes(answer.state)) uncertain++;
+      if (selected.has(index) && answer.executed) {
+        assert(['known', 'partial'].includes(answer.state), 'executed references retain actual answer state');
+        assert.match(answer.result?.relationsSHA256, /^[a-f0-9]{64}$/, 'actual references result digest');
+        assert(Number.isSafeInteger(answer.result.relationCount) && answer.result.relationCount >= 0, 'actual references result count');
+        const analysis = answer.result.analysis;
+        assert.equal(analysis?.engine, 'native_common_facts'); assert.equal(analysis.inputIdentity, evidence.inputIdentity);
+        assert.equal(analysis.sourceExecution, false); assert(['complete', 'partial'].includes(analysis.state));
+        assert(Number.isSafeInteger(analysis.sourceFiles) && analysis.sourceFiles >= oracle.counts['.lua']); executedReferences++;
+      }
+    }
+  }
+  assert.equal(receipt.scopes, scopes); assert.equal(receipt.unavailable_scopes, unavailable); assert.equal(receipt.unexecuted_operations, unexecuted); assert.equal(receipt.uncertain_answers, uncertain);
+  assert.equal(receipt.completed_batches, scopes > 0 && unavailable === 0 ? completed.filter(Boolean).length : 0, 'completion counts do not credit unavailable/unexecuted scopes');
+  assert.equal(planned.resourceAccounting?.executedSemanticBatches, receipt.completed_batches);
+  assert.equal(planned.state, unavailable > 0 || unexecuted > 0 ? 'execution_incomplete' : 'executed');
+  if (plan.unavailable.length || unavailable || uncertain || unexecuted) assert.equal(evidence.analysis.state, 'partial', 'incomplete plan/scope/answers cannot claim complete native analysis');
+  assert(executedReferences > 0, 'context requires an actually executed selected-declaration references answer; partial scopes remain allowed');
+}
+
+function assertNativeExecution(result, oracle) {
   assertBoundedCoverage(result);
   const evidence = result.nativeResearch;
   assert.equal(evidence?.schema, 'lycheedev.source-native-research.v1', 'ordinary semantic route must return actual native evidence');
@@ -120,10 +235,14 @@ export function assertNativeEvidence(result, oracle, callsite) {
   for (const field of ['engine', 'state', 'inputIdentity', 'sourceFiles', 'sourceExecution']) assert.deepEqual(result.semanticAnalysis?.[field], evidence.analysis[field], `outer/native analysis ${field}`);
   assert.equal(result.coverage.semantic, evidence.analysis.state, 'coverage preserves actual native state');
   if (evidence.analysis.state === 'partial') assert.equal(result.complete, false, 'partial native facts stay partial');
-  // Production intentionally removes nativeResearch.relations and projects
-  // those rows into the bounded public page. Check the native-origin row there,
-  // never an independently present static-extraction row at the same location.
   assert.equal(evidence.relations, undefined, 'native evidence does not bypass public pagination');
+  return evidence;
+}
+export function assertNativeEvidence(result, oracle, callsite) {
+  const evidence = assertNativeExecution(result, oracle);
+  // Production intentionally removes nativeResearch.relations and projects
+  // those rows into the bounded public refs page. Check the native-origin row
+  // there, never an independently present static-extraction row at that site.
   assert(Array.isArray(result.relations), 'public native relation page');
   const rows = result.relations.filter(row => ['path', 'line', 'kind', 'target'].every(key => row[key] === callsite[key]) && row.basis?.includes('native_common_source_facts'));
   assert(rows.length > 0, 'exact original callsite must have native-origin evidence');
@@ -140,6 +259,23 @@ export function assertNativeEvidence(result, oracle, callsite) {
     }
     if (row.state === 'resolved') assert(row.observations.length > 0 && row.observations.every(observation => observation.selected.state === 'known'), 'resolved call requires selected-value observations');
   }
+  return evidence;
+}
+export function assertNativeContext(result, oracle) {
+  const evidence = assertNativeExecution(result, oracle), anchor = oracle.anchors[0];
+  assertContextOperationExecution(evidence, oracle);
+  // Fixed Go context.go exposes relations only at depth > 0. This check is for
+  // our actual --depth 0 request, so empty relations must not fail native work.
+  assert.deepEqual(result.relations, [], 'depth-zero context excludes relation traversal');
+  assert(Array.isArray(result.snippets) && result.snippets.length === 1, 'depth-zero context returns the selected definition');
+  const snippet = result.snippets[0], lines = anchor.text.replace(/\n+$/, '').split('\n');
+  const expectedText = lines.map((line, index) => `${anchor.line + index}: ${line}`).join('\n');
+  assert.equal(snippet.path, anchor.path, 'context original definition path');
+  assert.equal(snippet.firstLine, anchor.line, 'context original definition first line');
+  assert.equal(snippet.lastLine, anchor.line + lines.length - 1, 'context original definition last line');
+  assert.equal(snippet.contentHash, anchor.sha256, 'context original whole-file hash');
+  assert.equal(snippet.basis, 'definition', 'context definition basis');
+  assert.equal(snippet.text, expectedText, 'context exact original numbered definition text');
   return evidence;
 }
 export function assertApiAnswer(result, row, oracle, window) {

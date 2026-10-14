@@ -500,6 +500,14 @@ sealed CLI build与version/help/describe smoke已移到all-target之后、长事
 
 静态arity/advertised适配器已重新独立审查：contract.rs生产前5112字节与固定5d0cac6387c79ab4eb3bbb91279886316fad48bf逐字一致，旧wholefile gate失配来自Rust测试改动；更新精确全文件hash而非放宽识别。全115flag类型匹配，缺live doctor等实际差异仍报告，21addon extras未隐藏。作者49/49 Node检查通过；82/84广告观察属于当时含未提交Data两注册的dirty输入，其candidateSources记录实际hash，不冒称远端f0c的80/84。freeze receipt SHA256 43bd465053392ec8ad3d79e36efd85190fb2df05cd6832f6348351442aed5ae2。 独立复审49/49 Node与额外420逐命令变异拒绝均通过，所查5文件及CI接线无阻断；实际Windows --contract仍NOT_RUN。
 
+### Skill 验收假阳性闭环与 context 真执行门槛
+
+post-semantic检查现在要求两个实际native任务和末尾同pin查询均通过；未执行/失败时not_run并保留原原因，末尾查询独立准确命名。业务state移入observedState，不能覆盖检查状态。固定Go depth0 context返回空relations，保limit5并逐字核ActionButton第97–107行/全文hash/编号正文；refs仍强制真实callsite，不为context错误要求无关关系行。
+
+独立复审进一步发现summary壳可冒充执行、未完成receipt可伪称complete，现context核生产typed字段序计划与operation摘要、索引/kind/target及真实executed references回答，绑定已认证声明[2915,2935)/UTF16 96:9–96:29；从answers重算receipt，并将plan.unavailable及不完整回答强制partial。诚实部分执行即使completed_batches=0仍允许，不混同全部scope完整。四轮限定复审的finding均闭合，最终30/30 Node独立通过；旧6c原报告字节不变，修复后实际Windows尚未运行，不算全仓四阶段审计。
+
+同时补workspace serde_json的raw_value feature：已推admission整数原文解码消费RawValue，该类型在锁定1.0.151中受此feature控制。仅打开已有锁定依赖功能，无版本/锁文件变化；独立核上游本地源码cfg及Cargo单行差异。此前包含admission的新树尚未实际编译，不能称本地编译已验证。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
