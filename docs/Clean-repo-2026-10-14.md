@@ -1082,7 +1082,7 @@ R4-C01 仍为候选：update 的跨卷 target-volume recovery 明确支持游戏
 
 ### 冗余测试专项与覆盖率顺序
 
-用户追加要求先审计并删除真正冗余测试，再计量覆盖率。独立专项已完成；不同入口、故障注入、跨进程、平台或 profile 合同没有仅因表面相似被删除。既有 D-06 注释锚点测试不重复计入本轮；新增清理见 R7-03。覆盖率尚未启动，清理回归后固定基线再分别报告 Go 语句覆盖与业务场景覆盖，记录平台、命令、范围、跳过和实机空白，不估算百分比。
+用户追加要求先审计并删除真正冗余测试，再计量覆盖率。独立专项已完成；不同入口、故障注入、跨进程、平台或 profile 合同没有仅因表面相似被删除。既有 D-06 注释锚点测试不重复计入本轮；新增清理见 R7-03。R8固定提交7566493c已启动原生计量，将分别报告 Go 语句覆盖与业务场景覆盖，记录平台、命令、范围、跳过和实机空白，不估算百分比。
 
 
 ### R7 批次实际验证
@@ -1095,7 +1095,7 @@ R4-C01 仍为候选：update 的跨卷 target-volume recovery 明确支持游戏
 
 ### R7-03 · 低 · 两处重复测试输入没有独立覆盖价值
 
-- 状态：独立专项确认后已最小删除；build/vet 和受影响正式回归通过，尚未提交。删除的是一个 Go table case 和一个 Lua 数组元素，不是两个测试函数或业务场景。
+- 状态：独立专项确认后已最小删除；build/vet 和受影响正式回归通过，已随7566493c提交。删除的是一个 Go table case 和一个 Lua 数组元素，不是两个测试函数或业务场景。
 - `internal/delivery/release_source_test.go` 中 `commit mismatch`（合法 40 位零 SHA）与保留的 `commit not release`（合法 40 位 c SHA）从相同 fixture 调用同一函数，只断言 `ErrRelease`；都仅因 `source.Commit != releaseCommit` 失败，生产没有全零特殊语义。删除前者，保留 nil/正确身份/大小写/路径/digest 等边界。
 - `tests/addon/t_locale.lua` 的 `legacyKeys` 把 `SAVE_TO_DISK` 列两次。相同 loop 对同一未改变的中英文表作相同非空断言；仅删除第二个元素，保留 suite、全部 key/placeholder/fallback 断言及六 profile。
 - 范围与保留理由：对 334 Go 文件中识别的 1,238 个普通顶层 Test 作 token 候选筛查，没有完全相同函数体组；人工核对 Source/Data/Live/export 高相似断言、Lua 生命周期/协议/locale、12 个 Node test 文件及 npm launcher/install-smoke。fixture 字节 SHA 筛查没有相同文件组。词法初筛不是完整 AST/动态子测试等价证明，也不声称未知测试全部最小化。
@@ -1111,11 +1111,11 @@ R4-C01 仍为候选：update 的跨卷 target-volume recovery 明确支持游戏
 | Data | DB2/schema/SQL 绑定和作用域、Hotfix 固定源分页、取消和原 checkpoint 恢复、capture 依赖 | 固定真实 DB2/CASC/图像领域 oracle 材料仍有可选缺口 |
 | Live 恢复 | 原 project/CON/request/期限、输入 intent/outcome、不重放、100ms cadence 与 crash 上界、owner 排他、报告与清理分离 | 当前六项客户端整合待实机，结果仍空；合成协议不证明游戏行为 |
 | 导出 | CSV/manifest/frame/capture 字节一致、预检与发布 TOCTOU、跨 home/进程锁、目标身份保护 | 仅声明已运行平台/fixture，不承诺外部程序事后修改或任意崩溃全原子 |
-| 交付/Skill | 固定发行身份、来源/归档白名单、npm/Skill launcher、真实 tgz/隔离安装、升级恢复和当前命令合同 | R4-C01 双真实卷原生 fixture 待当前批 CI，仍为候选 |
+| 交付/Skill | 固定发行身份、来源/归档白名单、npm/Skill launcher、真实 tgz/隔离安装、升级恢复和当前命令合同 | R4-C01 已确认并修复，双真实卷原生正向 fixture 正在 R8 CI |
 
 表中有测试不等于业务场景已经完整覆盖；不存在可信的“业务覆盖率百分比”分母。Go 语句比例也不会代表 Lua/Node 覆盖或实机验收。最终计量将在冗余清理后的固定基线进行，保留精确命令/平台/代码身份和 skip/fail 说明。
 
-R7 修复已推送 `f84cf0f4`，[该 Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38540889167) 已完成：process/addon/package 通过；contract/race/汇总因 R4-C01 双卷探针失败，无 race detector 报告。上述两处测试清理尚未提交。R8 独立复审基线为该相同代码树加两处清理；又复现普通 Hotfix 分页和资产归档依赖缺口，正在核实完整合同并实施，尚未达到停止条件。
+R7 修复已推送 `f84cf0f4`，[该 Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38540889167) 已完成：process/addon/package 通过；contract/race/汇总因 R4-C01 双卷探针失败，无 race detector 报告。上述两处测试清理已随后续7566493c提交。R8 独立复审基线为该相同代码树加两处清理；又复现普通 Hotfix 分页和资产归档依赖缺口，正在核实完整合同并实施，尚未达到停止条件。
 
 
 ## R8 独立复审与修复
@@ -1155,9 +1155,97 @@ R7 修复已推送 `f84cf0f4`，[该 Windows CI](https://github.com/Follen/Lyche
 
 - 冗余输入先删除并完整回归，再准备覆盖率留证。现有 Windows 完整 Go 作业改为同一次运行收集 atomic 跨包语句数据，测试选择仍 `./...`，计量仅 cmd/internal 产品包，排除 testkit；不增加第二套重复完整执行。
 - 原始 profile、test JSON、准确 tested commit/tree 与 PR head、工具链/平台/命令、实际 exit 和所有选定包终止/skip 证据将保存到 `windows-go-coverage` artifact；汇总按语句数加权，不用函数百分比平均。Go 比例不覆盖 Lua/Node 或业务场景，不设任意比例门槛。
-- 当前仅准备工具与 CI，尚未运行新覆盖率采集，不提前报告数字。R8 普通 build/vet 与完整 Lua 必需整合已执行：30 测试包通过、command 1 包仅3个既有Linux平台失败、4包无测试；2484 test/subtest pass、3 fail、28 skip，无新增失败。本批原生 CI/覆盖率将在提交后运行。
+- 已在 R8 提交7566493c启动原生覆盖率采集，不提前报告数字。R8 普通 build/vet 与完整 Lua 必需整合已执行：30 测试包通过、command 1 包仅3个既有Linux平台失败、4包无测试；2484 test/subtest pass、3 fail、28 skip，无新增失败。[本批原生 CI/覆盖率](https://github.com/Follen/Lychee-Dev/actions/runs/38544503854)正在运行。
 
 
 受影响 Node tools 全套实际76通过/6个Windows专属skip、0失败；覆盖率汇总工具的10项均通过；保留的真实整合 JSONL 与当前 go list 清单解析为 2456 pass / 3 fail / 28 skip、35 包且无事件解析错误（仅兼容性验证，不是新覆盖率测量）。没有把零语句/无 block 包臆测为 0% 或新增门槛。
 
 R9 主审已开始，产品/正式测试按固定835文件指纹复核；另有独立 Skill 试用者按用户追加要求执行真实离线 Source/Data/Live 状态机/交付任务链，游戏环节仍只记录。R9 已复现 SQL 查询 capture 产生至 CSV 归档之间的删除间隙（R9-01），尚待下一批最小修复；此项不回填为 R8 已修。独立审计尚未达到无可离线事项的停止条件。
+
+
+## R9 独立复审、Skill 实际试用与修复
+
+独立新审计者读取 R8 冻结的835个代码/测试/工作流文件（随后发布为7566493c），另由不同试用者执行真实离线任务链。确认 R9-01、R9-02 两项新问题，以及 R6-02、D-03/D-07 残留；后者沿用原ID，不按每个死符号或旧事项重复计数。未新增仅游戏可确认的缺陷，现有六项实际结果仍空。修复后需新的独立 R10，未达到停止条件。
+
+### R9-01 · 中 · SQL CSV 发布时未复核 query capture
+
+- 状态：代码已修复，正式真实producer边界测试通过，旧代码负对照失败；批次整合进行中。
+- 公开CLI先 QueryData 再 ExportQueryCSV，中间 metadata lease已释放。对真实SELECT结果正常RemoveCapture后再导出，原实现退出成功、manifest.complete=true、CSV可核验，但其中QueryCapture为record_missing。既有locator能保护发布后删除，不能覆盖发布前间隙。
+- 最小修复为CSV CaptureDraft增加query依赖，复用Archive.CommitCapture既有同lease校验，不增加锁/通用引用框架。正式测试覆盖新目标与覆盖旧pair两分支：缺查询时返回缺失错误、不发布或改写任何原CSV/manifest；正常导出后保护query，移除导出capture后可释放。
+
+### R6-02 残留：Context 复用行索引
+
+- 真实Browser.Context对1,168,118字节合法Lua返回200片段、19,740字节正文，旧实现重复整文件string/CRLF/Split，实测302,193,008字节分配、行索引构建0次。Search/Inspect已有有界索引未接到Context。
+- 代码已改用同一documentLineStarts，编号/CRLF渲染与Search/Inspect共用小helper；保留8MiB/256文件边界、原hash、line/byte cursor、UTF-8截断、CRLF/CR-CR-LF/末尾CR/空行和行数/字节上限。正式200片段测试使用宽松64MiB总分配上限，不用耗时门槛；旧实现负对照302,187,496字节并失败，新正式实测1,014,000字节、仅1次行索引，定向通过（受控fixture，不承诺真实用户耗时同比）。
+
+### D-03/D-07 残留：退役解析器与零消费者接口
+
+- 已删除bridge/persisted.go、savedstate.go及仅测该孤岛的两份测试；它们没有CLI、历史OP状态/retire、Native CON或Skill消费者。历史证据实际使用VerifyReport，保留report/signal/checkpoint/history路径与正式回归。
+- AST候选经全仓消费者/接口核对，仅删除BeginBootstrapWindow、Book.FindRequest/SetGoal、Native.RetryFirstBinding、FrameStream.CaptureArea、CacheManager.Stream、selection.TargetSummary、navigator.openOptional，以及其专用area字段/赋值、PartialTableUnavailable常量/import。保留真实WGC ROI、cache Read/Retain、CON admission/BTP处置；BeginWork/LookupRequest/CommitReport仍构造实际历史消费者需要的fixture，保留。
+- 精确13文件删除集为695行删除/2行格式调整。只测退役代码的测试随产品删除，区别于R7-03重复输入专项；没有因表面相似移除失败注入/跨进程/平台覆盖。独立overlay Linux build、Windows交叉build、剩余bridge/live/evidence行为测试和全套测试编译通过；正式批次完整行为验证正在执行。
+
+### R9-02 · 中 · Skill 的两固定 pin diff 缺少按需索引准备
+
+- 独立真实本地Git sync→diff试用：第二pin从未query/index时，按Skill运行diff退出5/index_not_ready；只为该pin执行index后，完全相同diff成功并返回一个document change。
+- Design和source-preparation/source-research约定CLI按需准备mapping、index为可选warm-up；现有EnsureIndex注释也明确避免sync→research额外往返。CompareSource遗漏这一准备，而低层CompareTrees要求已有完整索引的合同本身正常。
+- 状态：代码已修复，在metadata发布lease外复用EnsureIndex，固定两端commit、同请求cache，低层完整/兼容检查保留；正式cold→cold/warm→cold公开CLI、3种拒绝、capture provenance/verify及race×3通过。旧代码两种冷路径均失败；新home真实sync→diff→verify无需额外index通过。不以修改Skill转嫁额外步骤代替代码修复。
+
+### PR12 必要修复移植（单独记账）
+
+- PR12精确head3780b5d8的Definitions预算修复确有必要，已移植definitions.go及两项正式预算回归。冷HTTP最坏8MiB读取缓冲改ReserveScratch并释放；持久metadata/retained与热缓存相同按actual raw×4计费，失败不发布。
+- 独立A/B用132字节两文件：旧冷路径16,777,612字节、热528字节；修复冷/热均528字节，临时峰8MiB且结束归零。在128MiB总预算已占120MiB时旧实现误失败，修复成功。PR13新正式定向通过，旧定义实现负对照失败。
+- PR12地区槽位部分**不移植**：当前七产品模型已有forever-asia-beta与forever-cn-beta独立身份，availability已等价；两份现行Skill明确legacy forever远端保持亚洲发布槽，原remote_target正式cn fixture也使用亚洲槽。legacy+cn仍可调用并不能证明必须改成中国槽。初次移植曾改动该行为，R10通过当前合同与真实resolver fixture发现冲突，发布前已完整撤回，仅保留六组legacy/明确两beta×us/cn的CDN、远端、离线固定pin回归以锁定现有合同。没有改Skill来迁就非必要代码，未恢复两份旧文档。PR12在必要预算修复覆盖并推送确认后关闭。
+
+
+### R8 精确提交阶段覆盖率与原生验证结果
+
+- 阶段代码为PR head `7566493c0e0bcd92a739075107d923557ea2a14a`。Actions实际checkout merge commit `d5f0d7b975e6eceb0c2ed61bcdbb3597af27183c`；其tree `e827851dc4329e13ef2ffb0d04d6a671d3d21620` 与该head相同。R9仍在修改，以下不是最终修复树的比例。
+- Windows/amd64、Go1.27.1，固定Lua5.1.5必需模式；同一完整运行：`go test -json -p=2 -parallel=4 -count=1 -timeout=20m -covermode=atomic -coverpkg=<cmd及internal产品包，排除testkit的精确清单> -coverprofile=<runner-temp>/cover.out ./...`。完整argv与28个instrumented包的清单在identity/summary。
+- 结果：exit0，2747个test/subtest pass，0 fail，35 skip，0 incomplete。已覆盖23976/32423条Go产品语句，按语句数加权 **73.9475%**。重复块合并，不平均各包百分比；仅测试的navigatetest没有产品blocks，不虚构0%。cmd main自身4条未覆盖另记0%，不隐去。
+- 核心包：codebase72.9203%，environment81.6327%，flow78.4615%；records81.3938%，relational84.4088%，schema86.4458%；live47.4240%，channel62.0391%，journal70.4293%，memory87.6972%；evidence78.9610%，delivery80.1714%，vault76.5371%，command59.6685%。这不是业务场景覆盖百分比，也不包括Lua/Node语句或游戏验收。
+- 35个skip名称保留在summary/events，包括未配置真实LuaLS、固定API/DB2/CASC/图像/runtime输入、真实窗口/WGC、宿主8.3短路径能力，以及8个仅供子进程启动的helper入口；helper被父用例启动与顶层skip应分开理解。不得把这些都称作35项缺游戏测试，亦不把skip充成功。
+- [原始coverage artifact](https://github.com/Follen/Lychee-Dev/actions/runs/38544503854/artifacts/11883583264)含profile、事件、identity、summary、stderr；profile SHA256 `5977396ef3e4343959e0d9e291c768d20800816c320c30660ff6061e15c5c20d`，events SHA256 `5ad351430bbefb3617b5ee701986814a6d3df9ae59900ef5e96f0a2292529f94`。contract作业success；process/addon/package也通过，随后race及汇总也通过，六作业全部success。
+- R4-C01原生正向通过：[同一contract job](https://github.com/Follen/Lychee-Dev/actions/runs/38544503854/job/115787109354)真实D/C不同volume GUID，同卷对照、跨卷默认archive、跨卷显式archive均PASS；已归档旧3.1.1树、安装新3.1.2并仅在PID0安全激活边界停止。修复已获宿主验证，不再列为待游戏或宿主未执行；保留R7失败作为负对照。
+
+
+### R9 Skill 实际任务覆盖（独立试用已完成）
+
+- 独立冻结开发CLI共99次真实调用，77次exit0；其余包含特意的错误输入、跨scope cursor、缺pin、宿主能力、fixture纠正和R9-02复现，不能把调用次数当通过率。每步消费真实上步pin/symbolId/cursor/capture/文件产物，不只读Skill文本。
+- Source：实际本地Git tag/commit同步、固定版本query/原始inspect、symbolId→refs/context/batch、跨scope拒绝后纠正、显式pin覆盖冲突project且lock不变、两版本diff。Data：名称歧义/SQL稳定分页/FK/CSV/JSONL；Hotfix归档后修改原文件仍可从固定source续页、scan原checkpoint恢复及显式effective overlay；evidence verify/bundle对象读取。
+- 交付：实际Skill launcher/install/update/remove、隔离干净500-slot addon磁盘install/update、修改过的树拒绝覆盖和正常remove。全是新建隔离fixture，不是用户游戏目录或已发布Windows安装结果。
+- Live：正式channel/protocol的264个节点通过，另用新合成跨语言任务跑9场景/10节点通过，保留原CON/request/deadline、已确认报告与pending cleanup区分。Linux capability拒绝如实保留，不作为新缺陷或Windows/game通过。唯一新确认编排缺口为R9-02；轻微帮助可解摩擦未膨胀为bug。
+- 真实首次reload、战斗/受限焦点/最小化/按住修饰键、runtime退役与共享安装的复验，需要后续授权的固定Windows/WoW进程及干净受管版本；按原CON/request恢复，预期不越权输入、不重放、不删除其他owner。这些是既有待实机/可选覆盖的场景补充，不计新增确认缺陷，实际结果留空。正式Windows宿主/打包路径由本PR新CI另行证明。
+
+
+### R9 批次验证进度
+
+- 当前产品/正式测试/Skill/工作流共898文件修正后冻结，aggregate SHA256 `327283859ee3ebc7b474d4fc2853206ccdd199f4549f9381b40937e6f629229f`，parent7566493c；还未形成R9提交。新鲜R10正在对该固定树独立复审，不把旧R9的修复前审查当修复后验收。
+- build/vet、Windows amd64交叉build，19个Source/records子包/evidence/bridge/live子包/vault/selection正式包通过。Context/SQL/预算/journal定向race×3通过；bridge在该regex下无匹配测试，明确不计其race覆盖，但其完整普通包测试通过。
+- R9-02组另完成build/vet、完整codebase及公开CLI定向/race×3，源码和两端pin保持原固定身份。import合同和99个本地文档链接检查通过。修正树完整Lua必需套件已实际执行：2506 test/subtest pass、3个既有Linux fail、28 skip，30包通过/command1包失败/4包无测试；Windows必须以新提交的原生CI证明，R8覆盖率只是阶段值。
+
+
+### R10 独立复核完成
+
+- 新审计者起始核对898文件SHA全部吻合。先发现PR12旧地区别名移植与当前两份Skill/既有测试的兼容合同冲突；真实legacy forever/cn resolver在合法Asia fixture中访问CN槽而失败，证据不足以支持改变合同。发布前已撤回这部分产品变化，保留必要预算修复和新增原合同六组合回归。
+- 修正只涉及此前移植的6文件，其余892个冻结文件保持原SHA；修正树aggregate见上。Skill无需修改，正式六组合已通过；上一临时树完整Lua必需运行2507 pass/3个既有Linux fail/28 skip仅作诊断，不冒称修正树整合结果。修正树build/vet及完整指定套件已重跑：2506 pass/3个既有Linux fail/28 skip，无新增失败；六组原身份合同race×3通过。
+- 独立30000组Context新/旧差分涵盖UTF-8、CR/LF、范围、行/字节预算与cursor，均一致。AST初筛剩余GoString/MarshalJSON/heap方法有真实接口消费者，不删除。本轮其余已检查边界完成后未发现其他可操作离线修复项。终点898文件SHA与修正基线全部一致；这一结论不外推为全局零bug，也不替代新head Windows验证。新增coverage专项的16项公开输入准备单独继续。
+
+
+### R8 语句覆盖与35个skip独立专项（后续准备项）
+
+原始artifact已独立重算：23203个唯一block，696091条重复block记录按同源范围合并，23976/32423=73.9475%，未发现分母重复。2747个pass是test/subtest终态事件，其中244个为有子测试的容器；仅叶节点为2503 pass/35 skip，两者都不是独立业务场景数。`TestExtractPinnedUnitDocumentationWhenAvailable`父节点pass，但retail/forever两个子项均skip，不能称固定文档验证通过。
+
+| 数量 | R8原始skip名称与原因 | 后续安排 |
+| --- | --- | --- |
+| 8 | `TestInstallationWorker`、`TestUpgradeWorker`、`TestAdmissionCrashHelper`、`TestWindowOwnerProcessHelper`、`TestWindowRunProcessHelper`、`TestNativeModuleProtectionChild`、`TestNativeModuleMappedChild`、`TestNativeMemoryChild`：只作为子进程入口 | 10个调用它们的父测试均在原始JSON实际pass；顶层skip正常，不删helper或计作缺环境 |
+| 11 | `TestRealBrokerAcrossCLIProcesses`、`TestRealBrokerCloseWaitsForProcessCleanup`、`TestPackagedSourceSemanticCLIWhenAvailable`缺已编译CLI/verified release；`TestRealLuaLSMapsAPIReferencesAndDefinitions`、`TestRealRuntimePublicInterfaces`、`TestRealRuntimeOversizedLuaKeepsOrdinaryCoverage`、`TestRealWorkspaceSessionWarmAndCancellation`、`TestRealSessionCancelsAnInflightReadinessRequest`、`TestRealSessionEnvironmentAndConfigIsolation`缺真实LuaLS runtime；`TestRealRuntimeGeneratedEnvironment`缺runtime/docs；`TestRealRuntimeFullRetailAPIReferences`缺runtime/完整Retail源码/生成定义 | 公开固定输入可准备，其中9项已有release CI必跑流程；单独下一批前移复用，不等用户游戏 |
+| 3 | `TestBuildPinnedUnitDocs`；`TestExtractPinnedUnitDocumentationWhenAvailable/retail`、`/forever`：未配置测试已固定commit/SHA的API文档 | 公开固定文档可离线准备 |
+| 1 | `TestPinnedPublishedDefinitions`：固定WoWDBDefs网络输入未启用 | 固定commit可准备 |
+| 1 | `TestCascLibRawFixtureOracle`：fixed CascLib executable未配置 | 仓库已有provenance DB2与build-oracle脚本，准备官方固定CascLib依赖 |
+| 3 | `TestCaptureItemForExplicitProcess`、`TestCaptureFramesForExplicitProcess`缺显式授权测试PID；`TestWGCLifetimeBetweenSessions`缺交互桌面开关 | 优先尝试Windows CI的隔离自建窗口/桌面条件；无需WoW，不操作用户机器；实际不支持则单列宿主限制 |
+| 1 | `TestClientWindowLiveReadOnly`：缺显式固定客户端只读目标 | 真正客户端输入条件，后续授权任务；本次结果留空 |
+| 4 | `TestInstalledAssetCommand`、`TestInstalledBuildMetadata`、`TestInstalledIndexReadOnly`、`TestImageExportRealSample`：缺固定安装/产品/build、本地CASC index或icon.blp/png/webp样本 | 分别记录原始资料边界，不拿合成fixture伪装真实样本通过 |
+| 2 | `TestLuaMailboxRootRecipeOriginalRuntimeDump`、`TestLuaMailboxRootRecipeCapturedRuntimeHeader`：缺原dump manifest/header/匹配hash executable | 后续提供既有获准原始输入再replay，不连接或采集游戏 |
+| 1 | `TestInstallationLeaseShortPathSpelling`：runner卷禁用了8.3短文件名 | 不为减少skip修改宿主安全/卷策略，保留环境限制 |
+
+因此35项中8个是已被父测试执行的helper入口，27个是真正未跑的顶层或叶测试；其中16个可用公开固定依赖/源码补齐。覆盖率不是“合格阈值”：优先补真实LuaLS/broker取消/恢复/隔离路径（当前source_broker.go、session.go语句覆盖较低），再固定领域输入；不为百分比添加无价值重复测试。build-tag专项与主覆盖运行范围不同，主profile未加入casc_oracle tag，不冒称它已计入分母。下一批新CI结果与skip变化将按精确提交更新。

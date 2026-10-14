@@ -77,7 +77,6 @@ const (
 
 // Partial reasons (snake_case enum): honest coverage gaps short of truncation.
 const (
-	PartialTableUnavailable   = "table_unavailable"
 	PartialRelationUnresolved = "relation_unresolved"
 	PartialRelationAmbiguous  = "relation_ambiguous"
 	PartialRowMissing         = "row_missing"
@@ -248,20 +247,6 @@ func (n *navigator) open(ctx context.Context, name string) (*preparedTable, erro
 	n.opened[name] = prepared
 	n.tables = append(n.tables, provenance)
 	return prepared, nil
-}
-
-// openOptional opens a table and records an honest partial reason instead of
-// failing when it is absent; binding or decoding failures stay fatal.
-func (n *navigator) openOptional(ctx context.Context, name string) (*preparedTable, bool, error) {
-	prepared, err := n.open(ctx, name)
-	if err == nil {
-		return prepared, true, nil
-	}
-	if errors.Is(err, ErrContentMissing) || errors.Is(err, schema.ErrMissing) || errors.Is(err, ErrDefinitionUnavailable) {
-		n.addPartial(PartialTableUnavailable)
-		return nil, false, nil
-	}
-	return nil, false, err
 }
 
 func (n *navigator) link(fromTable, fromField string, fromID uint64, toKind string, toID uint64, depth int) {

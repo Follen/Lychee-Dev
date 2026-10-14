@@ -16,11 +16,7 @@ type FrameStream struct {
 	cancel context.CancelFunc
 	done   <-chan struct{}
 	once   sync.Once
-	area   image.Rectangle
 }
-
-// CaptureArea is the actual window-relative region, resolved before capture starts.
-func (s *FrameStream) CaptureArea() image.Rectangle { return s.area }
 
 // WholeWindowCapture requests an explicit whole window, distinct from the zero
 // automatic receipt region. It must be resolved against a real native extent;

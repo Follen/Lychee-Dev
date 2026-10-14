@@ -215,3 +215,74 @@ func checkQueryCSVPair(t *testing.T, root, output string, want records.QueryCSVM
 		t.Fatal(err)
 	}
 }
+
+func TestQueryCSVExportRequiresLiveQueryCapture(t *testing.T) {
+	ctx := context.Background()
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			root, snapshot, reading := queryCSVFixture(t, 1)
+			_, err := vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (bool, error) {
+				removed, err := evidence.OpenArchive(s, m).RemoveCapture(ctx, reading.Capture.ID)
+				if err == nil && !removed.ManifestRemoved {
+					t.Fatal("query was not removed")
+				}
+				return true, err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(t.TempDir(), "query.csv")
+			for _, path := range []string{output, output + ".manifest.json"} {
+				if existing {
+					if err := os.WriteFile(path, []byte("previous:"+filepath.Base(path)), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			_, err = records.ExportQueryCSV(ctx, root, snapshot, reading, output, existing)
+			if !errors.Is(err, vault.ErrMissingRecord) {
+				t.Fatalf("missing query accepted: %v", err)
+			}
+			for _, path := range []string{output, output + ".manifest.json"} {
+				raw, err := os.ReadFile(path)
+				if existing {
+					if err != nil || string(raw) != "previous:"+filepath.Base(path) {
+						t.Fatalf("previous export changed: %s %q %v", path, raw, err)
+					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("failed export published %s: %q %v", path, raw, err)
+				}
+			}
+		})
+	}
+}
+
+func TestQueryCSVExportRetainsQueryUntilExportCaptureRemoved(t *testing.T) {
+	ctx := context.Background()
+	root, snapshot, reading := queryCSVFixture(t, 1)
+	output := filepath.Join(t.TempDir(), "query.csv")
+	exported, err := records.ExportQueryCSV(ctx, root, snapshot, reading, output, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exported.Capture.Dependencies) != 1 || exported.Capture.Dependencies[0] != reading.Capture.ID {
+		t.Fatalf("missing dependency: %+v", exported.Capture)
+	}
+	_, err = vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (bool, error) {
+		archive := evidence.OpenArchive(s, m)
+		if _, err := archive.RemoveCapture(ctx, reading.Capture.ID); !errors.Is(err, evidence.ErrCaptureReferenced) {
+			t.Fatalf("query not retained: %v", err)
+		}
+		if err := archive.VerifyCapture(ctx, reading.Capture.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := archive.RemoveCapture(ctx, exported.Capture.ID); err != nil {
+			return false, err
+		}
+		removed, err := archive.RemoveCapture(ctx, reading.Capture.ID)
+		return removed.ManifestRemoved, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

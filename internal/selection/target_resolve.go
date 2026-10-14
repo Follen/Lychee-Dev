@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -206,20 +205,4 @@ func pinConflictNote(layer string, layerPin, chosen PinnedSet) string {
 	}
 	return fmt.Sprintf("%s %s (product %s) conflicts with the explicit selection %s (product %s) and was superseded",
 		layer, layerPin.ID, layerProduct, chosen.ID, chosenProduct)
-}
-
-// TargetSummary renders one configuration line for text listings.
-func TargetSummary(config TargetConfig) string {
-	parts := []string{config.Name, config.Product, config.Region, config.Locale}
-	if config.FullBuild != "" {
-		parts = append(parts, config.FullBuild)
-	}
-	parts = append(parts, config.Source)
-	if config.Installation != "" {
-		parts = append(parts, config.Installation)
-	}
-	if config.Repository != "" {
-		parts = append(parts, "repository="+config.Repository)
-	}
-	return strings.Join(parts, " ")
 }

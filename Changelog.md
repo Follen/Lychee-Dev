@@ -12,14 +12,16 @@
 - 两个 Forever beta 共享上游 `forever` 源码分支，保留各自数据地区与构建身份。
 - 支持固定构建的本地 CASC 和远端 CDN 读取；修正兄弟目录误选、同版本号 beta 混用及缓存身份问题。
 - 优化本地索引桶选择、远端归档索引读取，以及 Source 精确查询、关系定位和文档缓存。
+- `source diff` 对两端固定版本自动准备缺失索引，与已有查询按需准备合同一致。
 - 新增 `source batch`，在同一快照与预算内复用 Git、API 和 LuaLS 环境。
 - 分离 addon 静态解析与 Source 浏览职责；修复 tracked ref、正文搜索、Context 分页、TOC 覆盖缺口、UNION 重复列和 AVI 嵌套记录问题，显式区分 Hotfix 窗口结束与完整查询覆盖。
 - DB2 JSONL 在来源复核与归档后发送 end；错误退出保留 error 帧。工作区 download.workers 约束实际下载并发。
 
 - 修复 Hotfix pending 来源删除、精确 SymbolID flow、Source inspect 覆盖和跨进程 SQL CSV/manifest 一致性。
 - 视频 demux 按目标目录串行发布帧与 manifest，复用 capture 的已核验 blob，消除重复帧写入。
-- 修复 Git-backed Source 对中文等合法文件名的正文搜索；Search/Inspect 摘要复用现有行索引，避免每个结果重复切分整文件。
+- 修复 Git-backed Source 对中文等合法文件名的正文搜索；Search/Inspect/Context 摘要复用现有行索引，避免每个结果重复切分整文件。
 - Hotfix CSV 与 SQL CSV 共用目标级发布互斥和 staged 文件边界，保留原覆盖与 manifest 合同，并阻止覆盖当前工作区身份/数据。
+- 修复 SQL CSV 发布前 query capture 被删除的间隙；冷 Definitions HTTP 缓冲使用临时预算，持久 metadata 与热缓存一致按实际字节计费。
 - Hotfix 普通页/scan checkpoint 与资产导出/视频 manifest 持久保护其 capture 依赖，兼容历史记录，缺失页面不再恢复为完整成功。
 
 ### Live 与 addon

@@ -80,18 +80,23 @@ func (c *snapshotCache) numberedLines(ctx context.Context, name string, start, e
 	}
 	var out strings.Builder
 	for n := start; n <= end && n <= len(starts); n++ {
-		first, last := int(starts[n-1]), len(data)
-		if n < len(starts) {
-			last = int(starts[n]) - 1
-			// Preserve CRLF normalization before the terminal-CR trim below.
-			if last > first && data[last-1] == '\r' {
-				last--
-			}
-		}
 		if n > start {
 			out.WriteByte('\n')
 		}
-		fmt.Fprintf(&out, "%d: %s", n, strings.TrimSuffix(string(data[first:last]), "\r"))
+		out.WriteString(numberedDocumentLine(data, starts, n))
 	}
 	return out.String(), hash, nil
+}
+
+// Render only the selected line while retaining the historical CRLF and terminal
+// CR normalization shared by Search, Inspect and Context.
+func numberedDocumentLine(data []byte, starts []uint32, line int) string {
+	first, last := int(starts[line-1]), len(data)
+	if line < len(starts) {
+		last = int(starts[line]) - 1
+		if last > first && data[last-1] == '\r' {
+			last--
+		}
+	}
+	return fmt.Sprintf("%d: %s", line, strings.TrimSuffix(string(data[first:last]), "\r"))
 }

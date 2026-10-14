@@ -100,7 +100,8 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 		var commitErr error
 		capture, commitErr = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
 			Reader: bytes.NewReader(raw), MaxBytes: 32 << 20, MediaType: "text/csv; charset=utf-8", Complete: reading.Result.Complete,
-			Provenance: evidence.Provenance{Kind: "data-query-csv", Locator: reading.Capture.ID, Snapshot: snapshot},
+			Provenance:   evidence.Provenance{Kind: "data-query-csv", Locator: reading.Capture.ID, Snapshot: snapshot},
+			Dependencies: []string{reading.Capture.ID},
 		})
 		return commitErr == nil, commitErr
 	})

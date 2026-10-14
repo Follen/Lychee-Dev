@@ -105,7 +105,7 @@ func (n *frameNotice) drop() uintptr {
 }
 
 // A zero rectangle selects a bounded top-left receipt region of the resolved
-// window. CaptureArea returns its exact coordinates after native extent validation.
+// window, validated against the native extent before capture.
 func CaptureFrames(parent context.Context, target WindowIdentity, roi image.Rectangle) (*FrameStream, error) {
 	return captureFrames(parent, parent, target, roi)
 }
@@ -158,7 +158,6 @@ func captureFrames(parent, startup context.Context, target WindowIdentity, roi i
 			ready <- err
 			return
 		}
-		s.area = roi
 		ready <- nil
 		var lastCopy time.Time
 		for {

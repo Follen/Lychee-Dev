@@ -13,12 +13,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-// BeginBootstrapWindow shares the same admission scope as operations and
-// maintenance. The callback commits the local bootstrap body before publication.
-func BeginBootstrapWindow(ctx context.Context, parent string, owner WindowOwner, persist func() error) (err error) {
-	return beginScopedWindow(ctx, parent, owner, persist, "BTP-")
-}
-
 // BeginConnectionWindow publishes a durable connection claim in the SAME
 // admission namespace used by existing operations and installation maintenance.
 func BeginConnectionWindow(ctx context.Context, parent string, owner WindowOwner, persist func() error) error {

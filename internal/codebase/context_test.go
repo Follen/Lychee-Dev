@@ -211,7 +211,7 @@ func TestContextExcerptContinuesLongLineWithoutDroppingBytes(t *testing.T) {
 	line, offset := 1, 0
 	joined := ""
 	for n := 0; n < 10; n++ {
-		part, _, nextLine, nextByte, done, err := contextExcerpt(data, line, 1, offset, 5, 1)
+		part, _, nextLine, nextByte, done, err := contextExcerpt(data, []uint32{0, uint32(len(data))}, line, 1, offset, 5, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +224,7 @@ func TestContextExcerptContinuesLongLineWithoutDroppingBytes(t *testing.T) {
 	if joined != "1: abcdefghijklmnop" {
 		t.Fatalf("continuation dropped bytes: %q", joined)
 	}
-	exact, last, _, _, done, err := contextExcerpt([]byte("abc\n"), 1, 1, 0, len("1: abc"), 1)
+	exact, last, _, _, done, err := contextExcerpt([]byte("abc\n"), []uint32{0, 4}, 1, 1, 0, len("1: abc"), 1)
 	if err != nil || !done || last != 1 || exact != "1: abc" {
 		t.Fatalf("exact boundary falsely truncated: text=%q last=%d done=%v err=%v", exact, last, done, err)
 	}

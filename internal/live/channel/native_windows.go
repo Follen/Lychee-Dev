@@ -244,44 +244,6 @@ func (n *Native) Publish(ctx context.Context, e bridge.SlotEnvelope) (err error)
 	return err
 }
 
-// RetryFirstBinding is deliberately limited to a pristine pool containing only
-// this non-business bind. Even an unexpected extra wake cannot load business
-// code. General input replay needs current-slot evidence and is not allowed.
-func (n *Native) RetryFirstBinding(ctx context.Context, e bridge.SlotEnvelope, capability string) (err error) {
-	if e.Action != "bind" || e.Index != 1 || e.Code != "" {
-		return errors.New("live.channel_bootstrap_retry_unsafe")
-	}
-	if err := n.Publish(ctx, e); err != nil {
-		return err
-	}
-	if err := n.lockPublication(ctx); err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, n.unlockPublication()) }()
-	pool, err := delivery.InspectSlots(ctx, n.Parent, n.Version)
-	if err != nil {
-		return err
-	}
-	for i, slot := range pool.Files {
-		if i == 0 {
-			if slot.Nonce != e.Nonce || slot.Consumer != n.Consumer || slot.Consumed {
-				return errors.New("live.channel_bootstrap_retry_unsafe")
-			}
-		} else if slot.Nonce != "" || slot.PendingHash != "" {
-			return errors.New("live.channel_bootstrap_retry_unsafe")
-		}
-	}
-	// No scan or capture wait while holding the shared publication lease.
-	if err = n.unlockPublication(); err != nil {
-		return err
-	}
-	s, err := n.ObserveInput(ctx, e, 0, capability)
-	if err != nil {
-		return err
-	}
-	_, err = n.Input(ctx, InputAction{Kind: "invoke", Envelope: e, Observation: &s, Capability: capability})
-	return err
-}
 func (n *Native) Consumed(ctx context.Context, e bridge.SlotEnvelope) (err error) {
 	if err := n.lockPublication(ctx); err != nil {
 		return err
