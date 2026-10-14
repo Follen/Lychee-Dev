@@ -31,14 +31,17 @@ function explicitArities() {
 test('shared definitions equal pinned Go metadata and ordering', () => {
   assert.equal(fixture.oracle.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
   const expected = fixture.commands
-    .filter(({ path }) => !['live doctor', 'source batch'].includes(path))
+    .filter(({ path }) => path !== 'live doctor')
     .map(({ parserFlags, ...definition }) => definition);
-  assert.equal(expected.length, 82);
-  // Single approved Source-engine description exception; no wildcard summary
+  assert.equal(expected.length, 83);
+  // Two approved Source-engine description exceptions; no wildcard summary
   // skips, mutation of the fixed oracle, or relaxation of any other field.
   const doctor = expected.find(({ path }) => path === 'doctor');
   assert.equal(doctor.summary, 'Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check');
   doctor.summary = 'Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check';
+  const batch = expected.find(({ path }) => path === 'source batch');
+  assert.equal(batch.summary, 'Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped LuaLS session; each item retains its own cursor and coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins');
+  batch.summary = 'Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped native Emmy session; each item retains its own cursor and coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins';
   assert.deepEqual(inventory, expected);
 });
 
@@ -66,9 +69,19 @@ test('every current flag has a reviewed arity; enum and prose regressions', () =
   assert.equal(arities.get('--session-reuse'), false);
 });
 
-test('seven legacy paths and two missing handlers are absent from public inventory', () => {
+test('seven legacy paths and the remaining missing handler are absent from public inventory', () => {
   for (const path of [
     'live ack', 'live bind', 'live finish', 'live hide', 'live probe load',
-    'live reset', 'live run', 'live doctor', 'source batch',
+    'live reset', 'live run', 'live doctor',
   ]) assert.ok(!inventory.some(definition => definition.path === path), path);
+});
+
+test('batch is registered only with its concrete source handler and exact flags', () => {
+  const source = read('../../lycheedev-source/src/lib.rs');
+  assert.match(source, /pub mod batch;/);
+  assert.match(source, /"source batch" => return batch::dispatch\(inv, tools\)/);
+  const entry = inventory.find(({path}) => path === 'source batch');
+  const frozen = fixture.commands.find(({path}) => path === 'source batch');
+  assert.deepEqual(entry.flags, frozen.flags);
+  assert.equal(entry.mutates, true);
 });

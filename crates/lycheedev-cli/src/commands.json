@@ -1112,6 +1112,24 @@
     ]
   },
   {
+    "path": "source batch",
+    "summary": "Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped native Emmy session; each item retains its own cursor and coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
+    "mutates": true,
+    "arguments": [],
+    "flags": [
+      "--home <root>",
+      "--format text|json|jsonl",
+      "--project <directory>",
+      "--snapshot <pin-id>",
+      "--file <requests.json>",
+      "--environment <client-pin>",
+      "--flow",
+      "--session-reuse",
+      "--static-only",
+      "--release <release-root>"
+    ]
+  },
+  {
     "path": "source sync",
     "summary": "Fetch --source <key> --product <track> [--ref <full-ref-or-commit>] and return a fixed snapshot",
     "mutates": true,

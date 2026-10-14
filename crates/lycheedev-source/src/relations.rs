@@ -10,12 +10,30 @@ use lycheedev_core::{
     storage,
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 pub struct Reading {
     pub pin: PinnedSet,
-    pub index: Index,
+    pub index: Arc<Index>,
     pub data: Value,
-    pub environment: Option<environment::Environment>,
-    pub(crate) load_facts: Option<Vec<index::LoadFact>>,
+    pub environment: Option<Arc<environment::Environment>>,
+    pub(crate) load_facts: Option<Arc<Vec<index::LoadFact>>>,
+}
+/// One authenticated preparation shared by every item in a public batch.
+/// Immutable handles avoid rebuilding or copying the full index per item.
+pub(crate) struct PreparedResearch {
+    pub pin: PinnedSet,
+    pub index: Arc<Index>,
+    pub environment: Option<Arc<environment::Environment>>,
+    pub load_facts: Arc<Vec<index::LoadFact>>,
+    pub native_unavailable: Option<String>,
+}
+pub(crate) fn with_prepared(
+    inv: &Invocation,
+    tools: &crate::SourceTools<'_>,
+    prepared: &PreparedResearch,
+    native_response: Option<Value>,
+) -> Result<Reading> {
+    with_engine(inv, None, None, tools.luac.filter(|_| !inv.flag_bool("--static-only")), Some(prepared), native_response)
 }
 fn invalid(code: &str, message: &str) -> ToolkitError {
     ToolkitError::new(code, message, 2)
@@ -31,12 +49,12 @@ pub fn with_services(
     runtime: Option<&luals::Runtime>,
     broker: Option<&crate::session::BrokerIdentity>,
 ) -> Result<Reading> {
-    with_engine(inv,runtime,broker,None)
+    with_engine(inv,runtime,broker,None,None,None)
 }
 pub fn with_native_services(inv:&Invocation,tools:&crate::SourceTools<'_>,broker:Option<&crate::session::BrokerIdentity>)->Result<Reading>{
-    with_engine(inv,None,broker,tools.luac.filter(|_|!inv.flag_bool("--static-only")))
+    with_engine(inv,None,broker,tools.luac.filter(|_|!inv.flag_bool("--static-only")),None,None)
 }
-fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&crate::session::BrokerIdentity>,native:Option<&crate::luac::Runtime>)->Result<Reading>{
+fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&crate::session::BrokerIdentity>,native:Option<&crate::luac::Runtime>,prepared:Option<&PreparedResearch>,native_response:Option<Value>)->Result<Reading>{
     inv.control.check()?;
     if inv.flag("--snapshot").is_none()
         || inv.flag("--symbol-id").is_some() == inv.flag("--symbol").is_some()
@@ -77,12 +95,17 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             "--direction must be incoming, outgoing, or both",
         ));
     }
-    let pin = selection::resolve_pinned(inv)?;
+    let pin = match prepared { Some(shared) => shared.pin.clone(), None => selection::resolve_pinned(inv)? };
     let source = pin.source.as_ref().ok_or_else(|| {
         ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
     })?;
-    let (index, index_digest) = crate::research_material::measured("source.index", ||
-        index::build_material_with_control(&inv.home, source, &inv.control))?;
+    let (index, index_digest) = if let Some(shared) = prepared {
+        (Arc::clone(&shared.index), String::new())
+    } else {
+        let (index, digest) = crate::research_material::measured("source.index", ||
+            index::build_material_with_control(&inv.home, source, &inv.control))?;
+        (Arc::new(index), digest)
+    };
     let declarations: Vec<_> = index
         .symbols
         .iter()
@@ -102,6 +125,7 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
     let mut data = json!({"repository":source.repository,"product":source.product,"commit":source.exact_commit,"snapshot":pin.id,"relations":[],"truncated":false,"complete":false});
     let selected_environment = inv
         .flag("--environment")
+        .filter(|_| prepared.is_none())
         .map(|id| selection::load_pinned(&inv.home, id))
         .transpose()?;
     if selected_environment
@@ -122,14 +146,16 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
         } else {
             None
         });
-    let material = if declarations.len() == 1 {
+    let material = if prepared.is_none() && declarations.len() == 1 {
         native.map(|runtime| crate::research_material::load_or_build(inv, source, environment_source, &index, &index_digest, runtime)).transpose()?
     } else { None };
-    let (client_environment, mut prepared_snapshot, mut load_facts) = if let Some(material) = material {
-        (material.environment, Some(material.snapshot), Some(material.load_facts))
+    let (client_environment, mut prepared_snapshot, mut load_facts) = if let Some(shared) = prepared {
+        (shared.environment.clone(), None, Some(Arc::clone(&shared.load_facts)))
+    } else if let Some(material) = material {
+        (material.environment.map(Arc::new), Some(material.snapshot), Some(Arc::new(material.load_facts)))
     } else {
         (crate::research_material::measured("source.environment", || environment_source
-            .map(|source| environment::from_pin(&inv.home, source, &inv.control)).transpose())?, None, None)
+            .map(|source| environment::from_pin(&inv.home, source, &inv.control)).transpose())?.map(Arc::new), None, None)
     };
     let environment_state = if let Some(env) = &client_environment {
         data["environmentManifest"] = serde_json::to_value(&env.manifest)?;
@@ -170,50 +196,7 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
                 )
             })
             .unwrap_or_else(|| "static".into())};
-        let environment_key = client_environment
-            .as_ref()
-            .map(|environment| {
-                format!(
-                    "{}:{}:{}:{}",
-                    environment.manifest.input_sha256, environment.manifest.definitions_sha256,
-                    environment.manifest.facts_sha256, environment.manifest.identity.generator_version
-                )
-            })
-            .unwrap_or_else(|| environment_state.into());
-        let identity = format!(
-            "{}\0{}\0{}\0{}\0{}\0{direction}\0{limit}\0{runtime_key}\0{environment_key}\0false",
-            source.repository,
-            source.product,
-            source.exact_commit,
-            inv.flag("--symbol-id").unwrap_or(""),
-            inv.flag("--symbol").unwrap_or("")
-        );
-        let key = &storage::sha256(identity.as_bytes())[..16];
-        let offset = if let Some(cursor) = inv.flag("--cursor") {
-            let Some((found, n)) = cursor.split_once(':') else {
-                return Err(invalid(
-                    "codebase.invalid_search_cursor",
-                    "relation cursor shape differs",
-                ));
-            };
-            if found != key {
-                return Err(invalid(
-                    "codebase.invalid_search_cursor",
-                    "relation cursor belongs to a different query",
-                ));
-            }
-            n.parse::<usize>()
-                .ok()
-                .filter(|n| *n <= 10000)
-                .ok_or_else(|| {
-                    invalid(
-                        "codebase.invalid_search_cursor",
-                        "relation cursor offset exceeds bounds",
-                    )
-                })?
-        } else {
-            0
-        };
+        let (offset, key) = relation_cursor(inv, source, limit, direction, &runtime_key, client_environment.as_deref())?;
         let mut relations = Vec::new();
         let mut overflow = false;
         for edge in index
@@ -249,14 +232,18 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             relations.push(json!({"source":edge.name,"target":edge.target,"kind":edge.category,"state":state,"path":edge.path,"line":edge.line,"basis":["static-extraction"],"reason":reason}));
         }
         if let (Some(native),Some(symbol))=(native,declarations.first()) {
+            let mut response = if let Some(response) = native_response { response } else if prepared.is_some() {
+                return Err(ToolkitError::new("source.native_worker_protocol", "Batch native result is missing for the selected declaration", 4));
+            } else {
             let snapshot=if let Some(snapshot)=prepared_snapshot.take(){snapshot}else{
-                let (snapshot, facts)=crate::research_material::measured("source.snapshot", || crate::native_research::snapshot_material(inv,source,&index,client_environment.as_ref(),native))?;
-                load_facts=Some(facts);snapshot
+                let (snapshot, facts)=crate::research_material::measured("source.snapshot", || crate::native_research::snapshot_material(inv,source,&index,client_environment.as_deref(),native))?;
+                load_facts=Some(Arc::new(facts));snapshot
             };
             let request=crate::native_research::WorkerRequest{snapshot,query:crate::native_research::QueryRequest{symbol:(*symbol).clone(),direction:direction.into()}};
-            let mut response=crate::research_material::measured("source.native_analyze", || if inv.flag_bool("--session-reuse"){
+            crate::research_material::measured("source.native_analyze", || if inv.flag_bool("--session-reuse"){
                 crate::native_session::analyze(inv,request)
-            }else{crate::native_research::one_shot(inv,request)})?;
+            }else{crate::native_research::one_shot(inv,request)})?
+            };
             data["semanticRuntime"]=json!({"engine":"native-common-source","rulesVersion":crate::native_research::RESEARCH_RULES});
             data["semanticAnalysis"]=response["analysis"].clone();
             if let Some(rows)=response.as_object_mut().and_then(|value|value.remove("relations")).and_then(|value|value.as_array().cloned()){relations.extend(rows);}
@@ -268,7 +255,7 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
                 &index,
                 declarations[0],
                 direction,
-                client_environment.as_ref(),
+                client_environment.as_deref(),
                 SemanticProvider {
                     runtime,
                     broker,
@@ -291,7 +278,7 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
                     &index,
                     symbol,
                     direction,
-                    client_environment.as_ref(),
+                    client_environment.as_deref(),
                     SemanticProvider {
                         runtime,
                         environment_pin: environment_source,
@@ -367,6 +354,32 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
         environment: client_environment,
         load_facts,
     })
+}
+fn relation_cursor(
+    inv: &Invocation, source: &selection::SourcePin, limit: usize, direction: &str,
+    runtime_key: &str, environment: Option<&environment::Environment>,
+) -> Result<(usize, String)> {
+    let environment_key = environment.map(|environment| format!("{}:{}:{}:{}",
+        environment.manifest.input_sha256, environment.manifest.definitions_sha256,
+        environment.manifest.facts_sha256, environment.manifest.identity.generator_version))
+        .unwrap_or_else(|| "missing-client-pin".into());
+    let identity = format!("{}\0{}\0{}\0{}\0{}\0{direction}\0{limit}\0{runtime_key}\0{environment_key}\0false",
+        source.repository, source.product, source.exact_commit,
+        inv.flag("--symbol-id").unwrap_or(""), inv.flag("--symbol").unwrap_or(""));
+    let key = storage::sha256(identity.as_bytes())[..16].to_owned();
+    let offset = if let Some(cursor) = inv.flag("--cursor") {
+        let Some((found, n)) = cursor.split_once(':') else {
+            return Err(invalid("codebase.invalid_search_cursor", "relation cursor shape differs"));
+        };
+        if found != key { return Err(invalid("codebase.invalid_search_cursor", "relation cursor belongs to a different query")); }
+        n.parse::<usize>().ok().filter(|n| *n <= 10000).ok_or_else(|| invalid("codebase.invalid_search_cursor", "relation cursor offset exceeds bounds"))?
+    } else { 0 };
+    Ok((offset, key))
+}
+pub(crate) fn validate_prepared_cursor(inv: &Invocation, tools: &crate::SourceTools<'_>, prepared: &PreparedResearch) -> Result<()> {
+    let runtime_key = if tools.luac.is_some() && !inv.flag_bool("--static-only") { crate::native_research::RESEARCH_RULES } else { "static" };
+    relation_cursor(inv, prepared.pin.source.as_ref().expect("prepared source pin"), inv.usize_flag("--limit",50,1,200)?,
+        inv.flag("--direction").unwrap_or("both"), runtime_key, prepared.environment.as_deref()).map(|_| ())
 }
 fn position(
     inv: &Invocation,

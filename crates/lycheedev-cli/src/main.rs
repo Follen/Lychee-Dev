@@ -561,12 +561,19 @@ fn dispatch_source(inv: &Invocation) -> Result<Outcome> {
             );
         }
     }
+    // Read and validate the whole batch before release/runtime preparation;
+    // retain that exact request rather than reopening a replaceable input file.
+    let batch = (inv.command == "source batch").then(|| lycheedev_source::batch::read(inv)).transpose()?;
     let needs_tools = inv.command == "source validate"
-        || ["source refs", "source context"].contains(&inv.command.as_str())
+        || (["source refs", "source context"].contains(&inv.command.as_str())
+            || batch.as_ref().is_some_and(|request| request.needs_research()))
             && (!inv.flag_bool("--static-only") || inv.flag_bool("--flow"));
     if !needs_tools {
-        return lycheedev_source::dispatch(inv);
+        return if let Some(request) = batch {
+            lycheedev_source::batch::dispatch_request(inv, request, lycheedev_source::SourceTools::default())
+        } else { lycheedev_source::dispatch(inv) };
     }
+    let tools_result = (|| -> Result<SourceRuntimeBundle> {
     let root = inv
         .flag("--release")
         .map(PathBuf::from)
@@ -599,7 +606,25 @@ fn dispatch_source(inv: &Invocation) -> Result<Outcome> {
         }));
     }
     let release = release_result?;
-    let tools = source_runtime_bundle_from_release(&root, false, &release)?;
+    source_runtime_bundle_from_release(&root, false, &release)
+    })();
+    if let Some(request) = batch {
+        return match tools_result {
+            Ok(tools) => lycheedev_source::batch::dispatch_request(inv, request, lycheedev_source::SourceTools {
+                luac: Some(&tools.luac), luals: tools.luals.as_ref(),
+            }),
+            Err(error) => {
+                inv.control.check()?;
+                if inv.flag("--release").is_some() || lycheedev_source::batch::terminal_control_error(&error) {
+                    return Err(error);
+                }
+                // Go Runtime.Open wraps default release/resource verification
+                // failures as ErrUnavailable. Never run the invalid resource.
+                lycheedev_source::batch::dispatch_unavailable(inv, request, error)
+            }
+        };
+    }
+    let tools = tools_result?;
     lycheedev_source::dispatch_with_services(
         inv,
         lycheedev_source::SourceTools {
@@ -1152,6 +1177,7 @@ fn data_timeout_seconds(inv: &Invocation) -> Result<Option<u64>> {
     }
 }
 fn operation_seconds(inv: &Invocation) -> Result<u64> {
+    if inv.command == "source batch" { return Ok(90); }
     if inv.command == "update" {
         return Ok(600);
     }
@@ -1293,6 +1319,13 @@ fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
         error.details["__commandContext"] =
             json!({"snapshot":inv.flag("--snapshot").unwrap_or("")});
     }
+    if inv.command == "source batch" && error.code.starts_with("codebase.") {
+        if !error.details.is_object() { error.details = json!({}); }
+        error.details["stage"] = json!("query");
+        if let Some(snapshot) = inv.flag("--snapshot") {
+            error.details["__commandContext"] = json!({"snapshot":snapshot});
+        }
+    }
     match error.code.as_str() {
         "process.cancelled" | "operation.cancelled" => {
             error.code = "command.cancelled".into();
@@ -1351,6 +1384,12 @@ fn main() {
         if let Err(error) = &result {
             let _ = writeln!(std::io::stderr(), "{error}");
         }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args.first().is_some_and(|value| value == "--source-native-batch-worker") {
+        let result = if args.len() == 1 { lycheedev_source::batch::worker_stdio() }
+            else { Err(ToolkitError::arguments("private Source batch worker accepts stdin only")) };
+        if let Err(error) = &result { let _ = writeln!(std::io::stderr(), "{error}"); }
         std::process::exit(result.err().map_or(0, |error| error.exit_code));
     }
     if args

@@ -2,7 +2,7 @@
 use crate::{SourceTools, git, index, relations};
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, evidence, selection, storage};
 use serde_json::json;
-use std::collections::BTreeSet;
+use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_with_tools(inv, SourceTools::default())
 }
@@ -14,6 +14,33 @@ pub fn dispatch_with_services(
     tools: SourceTools<'_>,
     broker: Option<&crate::session::BrokerIdentity>,
 ) -> Result<Outcome> {
+    let reading = evaluate(inv, &tools, broker, None, None, &mut BTreeMap::new())?;
+    let source = reading.pin.source.as_ref().expect("resolved source");
+    let complete = reading.data["complete"] == true;
+    let capture = evidence::commit_capture(
+        &inv.home,
+        &serde_json::to_vec(&reading.data)?,
+        "application/json",
+        json!({"kind":"source-context","locator":inv.flag("--symbol-id").or(inv.flag("--symbol")).unwrap(),"snapshot":reading.pin.id,"sourceCommit":source.exact_commit}),
+        complete,
+        reading.data["truncated"] == true,
+    )?;
+    let mut result = Outcome::new(reading.data);
+    result.complete = complete;
+    result.coverage = result.data["coverage"].clone();
+    result.selection = json!({"snapshot":reading.pin.id});
+    result.provenance.push(capture);
+    Ok(result)
+}
+/// Capture-free evaluator used by a batch's single evidence transaction.
+pub(crate) fn evaluate(
+    inv: &Invocation,
+    tools: &SourceTools<'_>,
+    broker: Option<&crate::session::BrokerIdentity>,
+    prepared: Option<&relations::PreparedResearch>,
+    native_response: Option<serde_json::Value>,
+    documents: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<relations::Reading> {
     let limit = inv.usize_flag("--limit", 50, 1, 200)?;
     let max_lines = inv
         .usize_flag("--max-lines", 120, 1, 2000)
@@ -26,22 +53,11 @@ pub fn dispatch_with_services(
     let depth = inv
         .usize_flag("--depth", 1, 0, 4)
         .map_err(|_| ToolkitError::arguments("--depth must be between 0 and 4"))?;
-    let pin = selection::resolve_pinned(inv)?;
+    let pin = match prepared { Some(shared) => shared.pin.clone(), None => selection::resolve_pinned(inv)? };
     let source = pin.source.as_ref().ok_or_else(|| {
         ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
     })?;
-    let mode = if tools.luac.is_some()&&!inv.flag_bool("--static-only"){crate::native_research::RESEARCH_RULES}else{"static"};
-    let identity = format!(
-        "{}\0{}\0{}\0{}\0{}\0{limit}\0{max_bytes}\0{max_lines}\0{depth}\0{}\0{}\0{mode}",
-        source.repository,
-        source.product,
-        source.exact_commit,
-        inv.flag("--symbol-id").unwrap_or(""),
-        inv.flag("--symbol").unwrap_or(""),
-        inv.flag("--environment").unwrap_or(""),
-        inv.flag_bool("--flow")
-    );
-    let hash = storage::sha256(identity.as_bytes());
+    let hash = cursor_key(inv, tools, source, limit, max_bytes, max_lines, depth);
     let key = &hash[..16];
     let cursor = Cursor::decode(inv.flag("--cursor").unwrap_or(""), key)?;
     let mut related_inv = inv.clone();
@@ -57,8 +73,12 @@ pub fn dispatch_with_services(
     let mut reading = if inv.flag_bool("--flow") {
         related_inv.flags.remove("--flow");related_inv.flags.remove("--release");related_inv.flags.remove("--session-reuse");
         related_inv.flags.insert("--static-only".into(),"true".into());
-        relations::with_services(&related_inv,None,None)?
-    } else {relations::with_native_services(&related_inv, &tools, broker)?};
+        if let Some(shared) = prepared {
+            relations::with_prepared(&related_inv, tools, shared, None)?
+        } else { relations::with_services(&related_inv,None,None)? }
+    } else if let Some(shared) = prepared {
+        relations::with_prepared(&related_inv, tools, shared, native_response)?
+    } else {relations::with_native_services(&related_inv, tools, broker)?};
     let source = reading.pin.source.as_ref().unwrap();
     let relation_next = reading.data["nextCursor"].as_str().unwrap_or("").to_owned();
     reading.data.as_object_mut().unwrap().remove("nextCursor");
@@ -226,10 +246,21 @@ pub fn dispatch_with_services(
             );
             break;
         }
-        let (raw, _) =
-            git::blob_with_control(&inv.home, source, path, git::MAX_SOURCE_BYTES, &inv.control)?;
+        if !documents.contains_key(path) {
+            let raw = if prepared.is_some() {
+                let document = reading.index.documents.iter().find(|document| document.path == *path)
+                    .expect("site admitted from shared immutable index");
+                if document.text.is_empty() {
+                    evidence::read_blob_bounded(&inv.home, &json!({"sha256":document.sha256,"bytes":document.bytes}), git::MAX_SOURCE_BYTES, &inv.control)?
+                } else { document.text.clone() }
+            } else {
+                git::blob_with_control(&inv.home, source, path, git::MAX_SOURCE_BYTES, &inv.control)?.0
+            };
+            documents.insert(path.clone(), raw);
+        }
+        let raw = &documents[path];
         let excerpt = context_excerpt(
-            &raw,
+            raw,
             start,
             *last,
             start_byte,
@@ -292,12 +323,12 @@ pub fn dispatch_with_services(
     let load_facts=crate::research_material::measured("source.context.load_facts", || {
         match reading.load_facts.take() {
             Some(facts)=>Ok(facts),
-            None=>index::load_facts_with_control(&inv.home, source, &reading.index, &inv.control),
+            None=>index::load_facts_with_control(&inv.home, source, &reading.index, &inv.control).map(Arc::new),
         }
     })?;
     if let Some(target) = reading.data["symbol"]["path"].as_str() {
         let limit = inv.usize_flag("--limit", 50, 1, 200)?;
-        for fact in &load_facts {
+        for fact in load_facts.iter() {
             if resolve_load(&fact.path, &fact.target).as_deref() != Some(target) {
                 continue;
             }
@@ -311,7 +342,13 @@ pub fn dispatch_with_services(
     reading.data["loadEvidence"] = json!(load_evidence);
     if inv.flag_bool("--flow") {
         #[cfg(feature="emmy-prototype")]
-        {reading.data["flow"]=crate::flow::public::context_flow(inv,&reading,&tools,&load_facts)?;}
+        {
+            if let Some(reason) = prepared.and_then(|shared| shared.native_unavailable.as_ref()).filter(|_| tools.luac.is_none()) {
+                reading.data["flow"] = json!({"rules_version":crate::native::FLOW_RULES,"findings":{"rows":[],"has_more":false},"guarded":[],
+                    "gaps":[{"code":"flow.compiler_unavailable","detail":reason}],"complete":false,"input_complete":false,"analysis_complete":false,"output_complete":true,"truncated":false});
+                reading.data["coverage"]["flow"] = json!("unavailable");
+            } else { reading.data["flow"]=crate::flow::public::context_flow(inv,&reading,tools,&load_facts)?; }
+        }
         #[cfg(not(feature="emmy-prototype"))]
         {return Err(ToolkitError::new("flow.unavailable","this build does not contain the native Source engine",3));}
     }
@@ -330,20 +367,45 @@ pub fn dispatch_with_services(
     if depth == 0 || cursor.site > 0 {
         reading.data["relations"] = json!([]);
     }
-    let capture = evidence::commit_capture(
-        &inv.home,
-        &serde_json::to_vec(&reading.data)?,
-        "application/json",
-        json!({"kind":"source-context","locator":inv.flag("--symbol-id").or(inv.flag("--symbol")).unwrap(),"snapshot":reading.pin.id,"sourceCommit":source.exact_commit}),
-        complete,
-        truncated,
-    )?;
-    let mut result = Outcome::new(reading.data);
-    result.complete = complete;
-    result.coverage = result.data["coverage"].clone();
-    result.selection = json!({"snapshot":reading.pin.id});
-    result.provenance.push(capture);
-    Ok(result)
+    Ok(reading)
+}
+
+fn cursor_key(inv: &Invocation, tools: &SourceTools<'_>, source: &selection::SourcePin, limit: usize, max_bytes: usize, max_lines: usize, depth: usize) -> String {
+    let mode = if tools.luac.is_some()&&!inv.flag_bool("--static-only"){crate::native_research::RESEARCH_RULES}else{"static"};
+    let identity = format!(
+        "{}\0{}\0{}\0{}\0{}\0{limit}\0{max_bytes}\0{max_lines}\0{depth}\0{}\0{}\0{mode}",
+        source.repository,
+        source.product,
+        source.exact_commit,
+        inv.flag("--symbol-id").unwrap_or(""),
+        inv.flag("--symbol").unwrap_or(""),
+        inv.flag("--environment").unwrap_or(""),
+        inv.flag_bool("--flow")
+    );
+    storage::sha256(identity.as_bytes())
+}
+pub(crate) fn validate_prepared_cursor(inv: &Invocation, tools: &SourceTools<'_>, prepared: &relations::PreparedResearch) -> Result<()> {
+    let key = cursor_key(inv, tools, prepared.pin.source.as_ref().expect("prepared source pin"),
+        inv.usize_flag("--limit",50,1,200)?, inv.usize_flag("--max-bytes",16<<10,1,1<<20)?,
+        inv.usize_flag("--max-lines",120,1,2000)?, inv.usize_flag("--depth",1,0,4)?);
+    let cursor = Cursor::decode(inv.flag("--cursor").unwrap_or(""), &key[..16])?;
+    let mut relation = inv.clone(); relation.flags.remove("--cursor"); relation.flags.remove("--flow");
+    relation.flags.insert("--direction".into(),"both".into());
+    if inv.flag_bool("--flow") { relation.flags.insert("--static-only".into(),"true".into()); }
+    if !cursor.relation.is_empty() { relation.flags.insert("--cursor".into(),cursor.relation); }
+    relations::validate_prepared_cursor(&relation,tools,prepared)
+}
+pub(crate) fn validate_cursor_shape(raw: &str) -> Result<()> {
+    if raw.is_empty() { return Ok(()); }
+    let key = raw.split(':').next().ok_or_else(invalid_cursor)?;
+    if key.len() != 16 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) { return Err(invalid_cursor()); }
+    let cursor = Cursor::decode(raw, key)?;
+    if !cursor.relation.is_empty() {
+        let Some((key, offset)) = cursor.relation.split_once(':') else { return Err(invalid_cursor()); };
+        if key.len() != 16 || !key.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || offset.parse::<usize>().ok().is_none_or(|value| value > 10000) { return Err(invalid_cursor()); }
+    }
+    Ok(())
 }
 fn invalid_cursor() -> ToolkitError {
     ToolkitError::new(

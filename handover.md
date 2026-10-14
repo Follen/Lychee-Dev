@@ -432,6 +432,14 @@ Delivery新增共享core信封的typed API，完整pending manifest→payload→
 
 core只抽同namespace lock-only维护lease，旧InstallationGuard注册行为不变；ExclusiveLock消费File后仅checked close一次，不先unlock、失败后不重复关闭。两锁关闭都尝试并保有序错误；原atomic writer逐byte未变。独立新上下文审核六路径，29项Delivery+3项core回归及Go场景映射源码未见本批阻断，实际Rust/Windows测试NOT_RUN，现分组接CI。尚无正式生产driver消费者，调用方仍须在业务失败也显式关闭并保留业务与close错误，不能声称物理input/receipt生命周期已完整接通。
 
+### source batch 正式命令与单请求共享研究
+
+新增固定Go的1–32项严格batch JSON/默认值/已知字段重复null与大小写行为，输入全验证后才准备，同一pin/index/environment和普通native owned worker/session，capture-free refs/context汇合单capture，各item顺序/cursor/coverage保留。query-only不准备引擎；显式reuse走既有session owner；flow仍既有独立逐context分析器，不冒称共享Emmy会话。CLI目录83项按固定Go字段与顺序核对，仅两处批准的分析器说明差异，live doctor仍未齐。
+
+独立复审修复四项：Node目录门禁旧缺失断言、Index正文/符号扫描未贯穿control、默认引擎不可用缺warning/static partial、聚合native结果预算迟到。现受控搜索/分块原文读取可停止；默认未显式release资源准入失败警告降级且不执行坏资源，显式release/取消期限保持失败；先验证原参数避免降级移除reuse后接受冲突。default/reuse逐项计量包含协议封装、超额立即停止后续求值并不capture，不构造第二份全JSON。
+
+独立metadata5+Skill检查器17项通过；14项Rust batch与既有refs_context整合回归实际NOT_RUN，现接Windows。预算fixture只证明局部owner析构/后续不求值，真实进程退休与取消/崩溃/恢复须产品运行证据。新命令让实际Skill runner可按describe执行三项batch，当前仍不能记实际Skill通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

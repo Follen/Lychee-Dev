@@ -623,16 +623,26 @@ fn build_uncached(
     }
     Ok(index)
 }
+fn check_search(control: Option<&lycheedev_core::control::OperationControl>) -> Result<()> {
+    control.map_or(Ok(()), lycheedev_core::control::OperationControl::check)
+}
 impl Index {
     fn read_document(&self, doc: &Document) -> Result<Vec<u8>> {
+        self.read_document_controlled(doc, None)
+    }
+    fn read_document_controlled(&self, doc: &Document, control: Option<&lycheedev_core::control::OperationControl>) -> Result<Vec<u8>> {
+        check_search(control)?;
         if !doc.text.is_empty() {
-            return Ok(doc.text.clone());
+            let mut bytes = Vec::with_capacity(doc.text.len());
+            for block in doc.text.chunks(64 << 10) { check_search(control)?; bytes.extend_from_slice(block); }
+            check_search(control)?;
+            return Ok(bytes);
         }
-        evidence::read_blob(
-            &self.home,
-            &json!({"sha256":doc.sha256,"bytes":doc.bytes}),
-            git::MAX_SOURCE_BYTES,
-        )
+        let blob = json!({"sha256":doc.sha256,"bytes":doc.bytes});
+        match control {
+            Some(control) => evidence::read_blob_bounded(&self.home, &blob, git::MAX_SOURCE_BYTES, control),
+            None => evidence::read_blob(&self.home, &blob, git::MAX_SOURCE_BYTES),
+        }
     }
     pub fn coverage(&self) -> Value {
         let mut v = json!({"analyzedDocuments":self.documents.len(),"skippedDocuments":self.summary["skippedDocuments"],"diagnostics":self.summary["diagnostics"],"complete":self.summary["complete"]});
@@ -670,6 +680,22 @@ impl Index {
         limit: usize,
         cursor: &str,
     ) -> Result<Value> {
+        self.search_observed(pin, snapshot, text, mode, topic, limit, cursor, None, &mut |_, _| {})
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_with_control(
+        &self, pin: &SourcePin, snapshot: &str, text: &str, mode: &str, topic: &str,
+        limit: usize, cursor: &str, control: &lycheedev_core::control::OperationControl,
+    ) -> Result<Value> {
+        self.search_observed(pin, snapshot, text, mode, topic, limit, cursor, Some(control), &mut |_, _| {})
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn search_observed(
+        &self, pin: &SourcePin, snapshot: &str, text: &str, mode: &str, topic: &str,
+        limit: usize, cursor: &str, control: Option<&lycheedev_core::control::OperationControl>,
+        observer: &mut impl FnMut(&'static str, usize),
+    ) -> Result<Value> {
+        check_search(control)?;
         let text = text.trim();
         if text.is_empty() || text.len() > 512 {
             return Err(ToolkitError::arguments(
@@ -725,7 +751,8 @@ impl Index {
         let mut full = vec![];
         let mut relations = Vec::new();
         let mut cut = false;
-        for s in &self.symbols {
+        for (number, s) in self.symbols.iter().enumerate() {
+            observer("symbol", number); check_search(control)?;
             if s.kind == "relationship" {
                 if s.name == text
                     || s.target == text
@@ -784,7 +811,8 @@ impl Index {
         if topic == "asset" {
             candidates.clear();
             let normalized = text.replace('/', "\\").to_ascii_lowercase();
-            for a in &self.assets {
+            for (number, a) in self.assets.iter().enumerate() {
+                observer("asset", number); check_search(control)?;
                 let p = a["path"].as_str().unwrap_or("");
                 let n = p.replace('/', "\\").to_ascii_lowercase();
                 if n.contains(&normalized) {
@@ -809,7 +837,8 @@ impl Index {
                 }
             }
         } else if broad || candidates.is_empty() {
-            for doc in &self.documents {
+            for (number, doc) in self.documents.iter().enumerate() {
+                observer("document", number); check_search(control)?;
                 let lower = doc.path.to_ascii_lowercase();
                 if topic == "api" && !lower.contains("/blizzard_apidocumentationgenerated/")
                     || ["lua", "xml", "toc"].contains(&topic)
@@ -817,12 +846,13 @@ impl Index {
                 {
                     continue;
                 }
-                let raw = self.read_document(doc)?;
+                let raw = self.read_document_controlled(doc, control)?;
                 loaded.insert(doc.path.clone(), raw);
                 for (i, l) in String::from_utf8_lossy(&loaded[&doc.path])
                     .split('\n')
                     .enumerate()
                 {
+                    observer("line", i); check_search(control)?;
                     if l.to_ascii_lowercase().contains(&text.to_ascii_lowercase()) {
                         candidates.push((
                             Symbol {
@@ -850,6 +880,7 @@ impl Index {
             candidates.truncate(10000);
             cut = true;
         }
+        check_search(control)?;
         candidates.sort_by(|(a, _, ar), (b, _, br)| {
             (br - penalty(role(&b.path)))
                 .cmp(&(ar - penalty(role(&a.path))))
@@ -858,6 +889,7 @@ impl Index {
                 .then(a.kind.cmp(&b.kind))
                 .then(a.name.cmp(&b.name))
         });
+        check_search(control)?;
         let mut seen = BTreeSet::new();
         candidates.retain(|(s, _, _)| {
             seen.insert(if s.id.is_empty() {
@@ -866,13 +898,15 @@ impl Index {
                 s.id.clone()
             })
         });
+        check_search(control)?;
         let more = candidates.len() > offset + limit;
         let mut results = Vec::new();
         for (s, by, rank) in candidates.iter().skip(offset).take(limit) {
+            observer("result", results.len()); check_search(control)?;
             if !loaded.contains_key(&s.path)
                 && let Some(doc) = self.documents.iter().find(|d| d.path == s.path)
             {
-                loaded.insert(s.path.clone(), self.read_document(doc)?);
+                loaded.insert(s.path.clone(), self.read_document_controlled(doc, control)?);
             }
             let raw = loaded.get(&s.path).map(Vec::as_slice).unwrap_or(&[]);
             let penalty = penalty(role(&s.path));
@@ -940,6 +974,7 @@ impl Index {
                 "check the topic, product and ref"
             ]);
         }
+        check_search(control)?;
         Ok(response)
     }
 }

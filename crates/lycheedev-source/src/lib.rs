@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 //! Immutable source research; never evaluates indexed repository programs.
+pub mod batch;
 pub mod catalog;
 pub mod closure;
 pub mod context;
@@ -48,6 +49,7 @@ pub fn commands() -> &'static [&'static str] {
         "source inspect",
         "source index",
         "source query",
+        "source batch",
         "source diff",
         "source prune",
         "source validate",
@@ -75,6 +77,7 @@ pub fn dispatch_with_services(
         "source session status" | "source session close" => {
             return native_session::dispatch(inv);
         }
+        "source batch" => return batch::dispatch(inv, tools),
         "source refs" => return refs::dispatch_with_services(inv, tools, broker),
         "source context" => return context::dispatch_with_services(inv, tools, broker),
         "source diff" => return diff::dispatch(inv),

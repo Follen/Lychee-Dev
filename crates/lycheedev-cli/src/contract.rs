@@ -174,18 +174,21 @@ mod tests {
     #[test]
     fn current_inventory_matches_fixed_go_metadata_in_order() {
         let mut expected = frozen_commands();
-        // These two handlers remain absent. Registering a definition alone
-        // must not be used to claim their behavior has been implemented.
+        // This handler remains absent. Registering a definition alone must
+        // not be used to claim its behavior has been implemented.
         expected.retain(|definition| {
             !matches!(
                 definition["path"].as_str(),
-                Some("live doctor" | "source batch")
+                Some("live doctor")
             )
         });
         for definition in &mut expected {
             definition.as_object_mut().unwrap().remove("parserFlags");
             // The only allowed doctor metadata delta is the selected Source
             // engine; keep the fixed Go fixture and all other fields exact.
+            if definition["path"] == "source batch" {
+                definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("LuaLS", "native Emmy"));
+            }
             if definition["path"] == "doctor" {
                 assert_eq!(definition["summary"], "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
                 definition["summary"] = serde_json::json!("Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
