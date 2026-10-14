@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   GO_COMMIT, LIMITS, lex, parseLiteral, parseRegistrations, extractRustProducts,
-  extractSourceTracks, extractPinnedGo, extractAdvertised, buildFixture, compare,
+  extractSourceTracks, extractPinnedGo, extractAdvertised, extractArities, buildFixture, compare,
   validateCommands, diffByKey, readBounded, addonInventory,
 } from './oracle.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -16,7 +16,7 @@ const definition = (path = 'inspect') => ({ path, summary: 'Inspect only', mutat
 function fixture() {
   const commands = [definition()];
   const oracle = { oracle: { release: 'controlled fixture', commit: GO_COMMIT }, commands, products: [{ product: 'test', family: 'test', productCode: 'wow_test', folder: '_test_', buildSeries: '1.0', reusedSlot: false }], addon: [{ path: 'addon/a.lua', bytes: 1, sha256: 'a'.repeat(64) }] };
-  const candidate = { inventory: clone(commands), advertised: { state: 'static-extracted', commands: clone(commands) }, products: [{ id: 'test', catalog_product: 'wow_test', series: '1.0' }], addon: clone(oracle.addon), sourceTracks: { test: 'test' } };
+  const candidate = { inventory: clone(commands), arities: { '--format': true, '--read-only': false }, advertised: { state: 'static-extracted', commands: clone(commands) }, products: [{ id: 'test', catalog_product: 'wow_test', series: '1.0' }], addon: clone(oracle.addon), sourceTracks: { test: 'test' } };
   return { oracle, candidate };
 }
 test('controlled exact static match passes without claiming behavioral parity', () => {
@@ -35,8 +35,8 @@ test('command metadata, arguments and flag displays each retain exact difference
   Object.assign(candidate.inventory[0], { summary: 'Changed', mutates: true, arguments: ['<new>'], flags: ['--format json', '--read-only'] });
   const result = compare(oracle, candidate);
   assert.deepEqual(result.commands.changed[0].changes.map(c => c.field), ['summary', 'mutates', 'arguments']);
-  assert.equal(result.flags.changed.length, 1); assert.equal(result.parserFlagArity.changed.length, 1);
-  assert.equal(result.parserFlagArity.changed[0].changes[0].actual[0].value, false);
+  assert.equal(result.flags.changed.length, 1);
+  assert.equal(result.parserFlagArity.state, 'pass', 'help prose must not invent arity');
 });
 test('advertised surface is distinct from complete inventory and handler proof', () => {
   const { oracle, candidate } = fixture(); candidate.advertised.commands = [];
@@ -130,4 +130,19 @@ test('manifest regenerates byte-for-byte from fixed Go objects, with shared flag
 test('CLI invalid invocation exits 2 rather than silently accepting gaps', () => {
   const result = spawnSync(process.execPath, ['tests/rust-parity/run.mjs', '--accept-gaps'], { cwd: root, encoding: 'utf8', timeout: 20000 });
   assert.equal(result.status, 2); assert.match(result.stderr, /Usage:/);
+});
+
+test('explicit arity differences fail independently of help prose', () => {
+  const { oracle, candidate } = fixture(); candidate.arities['--format'] = false;
+  assert.equal(compare(oracle, candidate).parserFlagArity.changed[0].changes[0].actual[0].value, false);
+  delete candidate.arities['--format'];
+  assert.throws(() => compare(oracle, candidate), /unmapped Rust flag arity/);
+  assert.equal(extractArities(Buffer.from('changed source')), null);
+});
+
+test('Rust Unicode scalar literals decode without reinterpreting escaped backslashes', () => {
+  assert.equal(parseLiteral('"\\u{feff}"'), '\ufeff');
+  assert.equal(parseLiteral('"\\u{1f600}"'), '😀');
+  assert.equal(parseLiteral('"\\\\u{feff}"'), '\\u{feff}');
+  for (const value of ['"\\u{d800}"', '"\\u{110000}"', '"\\u{zz}"']) assert.throws(() => parseLiteral(value));
 });

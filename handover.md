@@ -180,6 +180,14 @@ core/data/delivery/live/source五个库根已加forbid(unsafe_code)，连同前�
 
 WindowsCI新增同静态守卫/自测。rustfmt解析和diff检查通过；产品编译、wrapper的Windows运行测试仍未运行，受旧依赖身份/平台前置阻塞。未新增业务unsafe，不放松任何existing输入边界。
 
+### 命令元数据/参数arity与Go测试映射
+
+82个共有命令的元数据/顺序/flag已按固定Go对齐，7个Go不存在的旧公开入口移出commands.json，保留内部handler及有独立历史价值的生命周期测试，不假装它们已是新协议验收。live doctor/source batch仍缺；refs/context/session及auras/summons等有派发但完成证据不足的入口未擅自扩大宣传。115个flag改为明确arity，修复enum值/说明文字启发式问题。协调者审阅新的contract.rs并更新受完整hash保护的静态adapter，新增Rust Unicode scalar解析回归，24项Node oracle/CLI元数据测试实际全部通过。六项新Rust合同测试未运行。
+
+真实静态diff仍FAIL：命令/flag/arity为84对82，仅缺2、共有项差异0；实际advertised为75，缺9、无额外；addon仍60路径不同。旧Skill七入口仍待正式Skill迁移，不把当前包/Skill说成完整可用。
+
+`tests/rust-parity/go-test-map.json`新增首批22行证据映射：33个固定Go函数/18个hash固定文件→26个Rust测试引用，2 mapped-unrun、17 partial、3 uncovered，另有6组恢复/事务/取消/空map/槽迁移优先项。全为未运行/部分/未覆盖，无behavioral-pass，行数不是覆盖率。它是记录文件hash的审查快照，之后代码改变需重审。该映射实际找出metadata version-only/优先级差异，后续修复正在按Go准确合同处理，不能把Rust额外严格行为自行定义为兼容例外。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

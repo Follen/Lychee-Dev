@@ -154,3 +154,8 @@ The parity step fails when gaps remain; runner unit-test success is not product
 parity. Local initial workspace evidence is retained separately because another
 worker's uncommitted product migration was present during capture; it is not
 presented as evidence for a tests-only commit. Rerun after each relevant batch.
+
+The reviewed arity adapter now mirrors the explicit name-based Rust flag match,
+not help-string heuristics. A contract source hash change makes it unverified
+until reviewed. Rust Unicode scalar string escapes are decoded explicitly;
+unsupported syntax remains a failed extraction.

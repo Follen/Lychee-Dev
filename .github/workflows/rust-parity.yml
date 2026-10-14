@@ -35,7 +35,7 @@ jobs:
           git cat-file -e '3057a9666ab078270b63c7f06de748069b0d1f4b^{commit}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the differential runner (not product parity)
-        run: node --test tests/rust-parity/oracle.test.mjs
+        run: node --test tests/rust-parity/oracle.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs
       - name: Test unsafe inventory and enforce owned business guards
         run: |
           node --test tools/rust-unsafe-boundaries.test.mjs

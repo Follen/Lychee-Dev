@@ -40,7 +40,7 @@
       "--raidbots <DBCache.bin>",
       "--from <cache-capture-or-time>",
       "--to <time>",
-      "--product <retail|classic|titan|forever>",
+      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)",
       "--build <full-build>",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
@@ -112,26 +112,10 @@
       "--probe <name-or-revision>",
       "--request <idempotency-key>",
       "--budget-seconds <1-120>",
-      "--account <account>",
       "--project <directory>",
       "--wait-seconds <1-600> (default 120)",
       "--no-cache",
       "--policy <opaque|observation> (default opaque)"
-    ]
-  },
-  {
-    "path": "live probe load",
-    "summary": "Load one immutable probe revision with a declared 1..120 second execution budget: --session <session-id> --probe <name-or-revision> --request <idempotency-key> --budget-seconds <1-120> [--account <account>]",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--session <session-id>",
-      "--probe <name-or-revision>",
-      "--request <idempotency-key>",
-      "--budget-seconds <1-120>",
-      "--account <account>"
     ]
   },
   {
@@ -164,18 +148,6 @@
     "mutates": true,
     "arguments": [
       "<name>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl"
-    ]
-  },
-  {
-    "path": "live run",
-    "summary": "Execute one loaded operation and return its verified report with cleanup pending; acknowledge separately with live ack: live run <operation-id>",
-    "mutates": true,
-    "arguments": [
-      "<operation-id>"
     ],
     "flags": [
       "--home <root>",
@@ -745,12 +717,16 @@
   },
   {
     "path": "doctor",
-    "summary": "Aggregate read-only workspace, target catalog, bundled LuaLS and source-mirror health checks; the mirror check joins only when the nearest project declares a product, and exit 3 reports that at least one check found an error",
+    "summary": "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check",
     "mutates": false,
     "arguments": [],
     "flags": [
       "--home <root>",
       "--format text|json|jsonl",
+      "--installation <client>",
+      "--pid <pid>",
+      "--session <CON-id>",
+      "--project <directory>",
       "--offline"
     ]
   },
@@ -824,7 +800,7 @@
   },
   {
     "path": "live connect",
-    "summary": "Discover and freshly bind a native memory/200-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work",
+    "summary": "Discover and freshly bind a native memory/500-slot connection in the invoking project; optional snapshot constrains build; --session CON-id resumes retained work",
     "mutates": true,
     "arguments": [],
     "flags": [
@@ -839,23 +815,6 @@
       "--project <directory>",
       "--wait-seconds <1-600> (default 120)",
       "--no-cache"
-    ]
-  },
-  {
-    "path": "live reset",
-    "summary": "Unblock a stuck window whose in-game queue blocks identity after abandon or a lost receipt: [--snapshot <pin>] [--character <name>] [--realm <realm>] [--pid <pid>] [--installation <client>]; sends one fixed nonce-correlated reset trigger per unowned matching window, expects its receipt, then reconnects; disk-owned windows are never touched; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--character <name>",
-      "--realm <realm>",
-      "--pid <pid>",
-      "--installation <client>",
-      "--wake-binding <chord>"
     ]
   },
   {
@@ -875,7 +834,7 @@
   },
   {
     "path": "live reload fallback",
-    "summary": "Activate a clean managed addon and its 200 slots on an explicit installation/PID with a recorded reload using memory readiness when available (fixed bootstrap otherwise), then verify a new runtime and fresh connection; --request is idempotent",
+    "summary": "Activate a clean managed addon and its 500 slots on an explicit installation/PID using fresh Mailbox readiness for a recorded reload, or waiting for one manual reload when no current input protocol is loaded, then verify a new runtime and fresh connection; --request is idempotent",
     "mutates": true,
     "arguments": [],
     "flags": [
@@ -884,35 +843,9 @@
       "--installation <client>",
       "--pid <pid>",
       "--request <idempotency-key>",
-      "--session <prior-session>",
-      "--wake-binding <chord>",
       "--project <directory>",
       "--wait-seconds <1-600> (default 120)",
       "--no-cache"
-    ]
-  },
-  {
-    "path": "live ack",
-    "summary": "Acknowledge one verified operation, retire only its exact queue entry and release its window ownership without forcing another reload: live ack <operation-id>",
-    "mutates": true,
-    "arguments": [
-      "<operation-id>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl"
-    ]
-  },
-  {
-    "path": "live finish",
-    "summary": "Acknowledge one verified operation and verify its receipt display is cleared; retry the same operation to finish pending display cleanup: live finish <operation-id>",
-    "mutates": true,
-    "arguments": [
-      "<operation-id>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl"
     ]
   },
   {
@@ -926,39 +859,9 @@
       "--session <session-id>",
       "--request <idempotency-key>",
       "--count <1-100>",
-      "--account <account>",
       "--project <directory>",
       "--wait-seconds <1-600> (default 120)",
       "--no-cache"
-    ]
-  },
-  {
-    "path": "live hide",
-    "summary": "Dismiss the displayed bridge receipt on the selected client after its evidence is archived: --session <session-id>; refuses windows owned by in-flight operations and verifies the clear from valid frames",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--session <session-id>"
-    ]
-  },
-  {
-    "path": "live bind",
-    "summary": "Observe /dev connect in the selected game, verify effective receiver bindings with one read-only identity transaction, and save a connection: --snapshot <pin>; optional --wake-binding for a custom first-contact wake; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--installation <client>",
-      "--pid <pid>",
-      "--snapshot <pin>",
-      "--character <name>",
-      "--realm <realm>",
-      "--capture-area <window|x,y,width,height>",
-      "--wake-binding <chord>"
     ]
   },
   {
@@ -972,7 +875,7 @@
       "--file <selection.json>",
       "--target <name>",
       "--installation <game-root-or-client>",
-      "--product <retail|classic|titan|forever>",
+      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)",
       "--build <full-build>",
       "--definitions <commit-or-full-ref>",
       "--region <us|eu|cn|kr|tw>",
@@ -1013,7 +916,7 @@
     "flags": [
       "--home <root>",
       "--format text|json|jsonl",
-      "--product <retail|classic|titan|forever>",
+      "--product <retail|classic|classic-era|titan|forever-asia-beta|forever-cn-beta|anniversary> (legacy: forever)",
       "--region <us|eu|cn|kr|tw>",
       "--locale <locale>",
       "--build <full-build>",
@@ -1061,7 +964,7 @@
   },
   {
     "path": "live resume",
-    "summary": "Recover the exact operation or BTP bootstrap attempt; revalidate identity and never repeat unknown input",
+    "summary": "Recover the original Native CON connection and request; revalidate identity and never repeat unknown input",
     "mutates": true,
     "arguments": [
       "<operation-id>"
@@ -1076,7 +979,7 @@
   },
   {
     "path": "live cancel",
-    "summary": "Cancel only a prepared operation before queue publication or game input: live cancel <operation-id>; later stages require live resume for safe cleanup",
+    "summary": "Cancel a prepared historical OP record without game input; use live abandon to terminate later historical recovery",
     "mutates": true,
     "arguments": [
       "<operation-id>"

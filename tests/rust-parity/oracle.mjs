@@ -15,12 +15,31 @@ const PINNED_HASHES = Object.freeze({
   commands: 'b56c73427279a89196dcdebc720827e4eb4bc79f55f0d76f7561d49f69eed9fa',
   products: 'a3fbfc49221c2e9ea5eeba175ab18e6c3c2ee0d02ea31750b3b25d45f996423b',
 });
-export const RUST_FILTER_HASH = '83870b9e4f52723d857a65d64c27eebefe4ca8cb4e053756da639a24b51ec0ad';
+export const RUST_FILTER_HASH = '16a76dcf23c836b6137b6971e3e53c7ac7974247bc6734c9d5237113f01fbeb8';
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
 // Small bounded lexer, not a Go/Rust interpreter. Comments cannot supply tokens.
-// Only JSON-compatible quoted strings are decoded; unsupported escape syntax fails.
+// JSON-compatible strings plus explicit Rust Unicode scalar escapes are decoded;
+// unsupported escape syntax fails. Escaped backslashes remain literal.
+function quotedString(raw) {
+  let normalized = '"';
+  for (let i = 1; i < raw.length - 1; i++) {
+    if (raw[i] !== '\\') { normalized += raw[i]; continue; }
+    if (raw[i + 1] === 'u' && raw[i + 2] === '{') {
+      const end = raw.indexOf('}', i + 3);
+      const digits = raw.slice(i + 3, end);
+      assert(end >= 0 && /^[0-9a-fA-F]{1,6}$/.test(digits), 'invalid Rust Unicode escape');
+      const value = Number.parseInt(digits, 16);
+      assert(value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff), 'invalid Unicode scalar');
+      normalized += JSON.stringify(String.fromCodePoint(value)).slice(1, -1);
+      i = end;
+    } else {
+      normalized += raw[i] + (raw[++i] ?? '');
+    }
+  }
+  return JSON.parse(normalized + '"');
+}
 export function lex(source) {
   assert(Buffer.byteLength(source) <= LIMITS.fileBytes, 'source exceeds byte limit');
   const result = [];
@@ -42,7 +61,7 @@ export function lex(source) {
         i++;
       }
       assert(i < source.length, 'unterminated string');
-      token = { string: JSON.parse(source.slice(start, ++i)) };
+      token = { string: quotedString(source.slice(start, ++i)) };
     } else {
       const word = /^[A-Za-z_][A-Za-z_0-9]*|^[0-9]+/.exec(source.slice(i));
       token = word ? word[0] : source[i];
@@ -281,6 +300,23 @@ export function extractAdvertised(inventory, texts) {
   });
   return { state: 'static-extracted', commands, registrations, behavior: 'unverified: registration does not establish handler correctness or availability' };
 }
+// The whole containing source is authenticated before this narrow match adapter.
+export function extractArities(source) {
+  if (sha256(source) !== RUST_FILTER_HASH) return null;
+  const text = source.toString('utf8');
+  const body = text.match(/pub fn takes_value\(&self\) -> bool \{[\s\S]*?match self\.name\(\) \{([\s\S]*?)\n        \}/)?.[1];
+  assert(body, 'explicit arity implementation missing');
+  const pattern = /((?:\s*"--[a-z-]+"\s*\|?)+)\s*=>\s*(?:\{\s*(false|true)\s*\}|(false|true)),?/g;
+  const arms = [...body.matchAll(pattern)];
+  assert(arms.length === 2, 'explicit arity arms changed');
+  const result = Object.create(null);
+  for (const [, names, braced, plain] of arms) for (const [, name] of names.matchAll(/"(--[a-z-]+)"/g)) {
+    assert(!Object.hasOwn(result, name), 'duplicate explicit arity');
+    result[name] = (braced ?? plain) === 'true';
+  }
+  assert(body.replace(pattern, '').trim() === 'name => panic!("flag missing explicit contract arity: {name}"),', 'unreviewed arity fallback');
+  return result;
+}
 export function extractRustProducts(source) {
   const tokens = lex(source);
   const start = locate(tokens, ['pub', 'static', 'PRODUCTS', ':', '[', 'Product', ';']);
@@ -313,7 +349,7 @@ export function loadCandidate(root) {
   const inventory = JSON.parse(texts.inventory.toString('utf8'));
   validateCommands(inventory);
   return {
-    inventory, advertised: extractAdvertised(inventory, texts), products: extractRustProducts(texts.products.toString('utf8')),
+    inventory, advertised: extractAdvertised(inventory, texts), arities: extractArities(texts.filter), products: extractRustProducts(texts.products.toString('utf8')),
     sourceTracks: extractSourceTracks(texts.sourceCatalog.toString('utf8')), addon: addonInventory(root),
     sources: Object.entries(RUST_FILES).map(([key, path]) => ({ path, bytes: texts[key].length, sha256: sha256(texts[key]) })),
   };
@@ -346,11 +382,12 @@ export function compare(oracle, candidate) {
   const commands = diffByKey(oracle.commands, candidate.inventory, 'path', ['summary', 'mutates', 'arguments']);
   const flags = diffByKey(oracle.commands, candidate.inventory, 'path', ['flags']);
   // Mirror Flag::takes_value only while its containing source is hash-locked.
-  const parserFlagArity = candidate.advertised.commands === null ? { state: 'unverified', reason: 'Rust Flag::takes_value adapter needs review' } : diffByKey(
+  const parserFlagArity = candidate.advertised.commands === null || !candidate.arities ? { state: 'unverified', reason: 'Rust Flag::takes_value adapter needs review' } : diffByKey(
     oracle.commands.map(c => ({ path: c.path, arity: c.parserFlags.map(f => ({ name: f.name, value: f.value })) })),
     candidate.inventory.map(c => ({ path: c.path, arity: c.flags.map(display => {
-      const [name, second] = display.split(/\s+/);
-      return { name, value: second !== undefined && (second.startsWith('<') || ['text|json|jsonl', 'precise|exploratory', 'csv'].includes(second)) };
+      const [name] = display.split(/\s+/);
+      assert(Object.hasOwn(candidate.arities, name), `unmapped Rust flag arity: ${name}`);
+      return { name, value: candidate.arities[name] };
     }) })), 'path', ['arity']);
   const advertised = candidate.advertised.commands === null ? candidate.advertised : diffByKey(oracle.commands, candidate.advertised.commands, 'path', []);
   const products = diffByKey(oracle.products.map(p => ({ id: p.product, catalog_product: p.productCode, series: p.buildSeries })), candidate.products, 'id', ['catalog_product', 'series']);
