@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -39,17 +41,20 @@ type CaptureDraft struct {
 	Provenance Provenance
 	Complete   bool
 	Truncated  bool
+	// Dependencies are captures whose lifetime is owned by this capture.
+	Dependencies []string
 }
 
 type CaptureRef struct {
-	Schema     string        `json:"schema"`
-	ID         string        `json:"id"`
-	Blob       vault.BlobRef `json:"blob"`
-	MediaType  string        `json:"mediaType"`
-	Provenance Provenance    `json:"provenance"`
-	Complete   bool          `json:"complete"`
-	Truncated  bool          `json:"truncated"`
-	CapturedAt time.Time     `json:"capturedAt"`
+	Schema       string        `json:"schema"`
+	ID           string        `json:"id"`
+	Blob         vault.BlobRef `json:"blob"`
+	MediaType    string        `json:"mediaType"`
+	Provenance   Provenance    `json:"provenance"`
+	Complete     bool          `json:"complete"`
+	Truncated    bool          `json:"truncated"`
+	CapturedAt   time.Time     `json:"capturedAt"`
+	Dependencies []string      `json:"dependencies,omitempty"`
 }
 
 var (
@@ -99,11 +104,19 @@ func (a *Archive) CommitCapture(ctx context.Context, draft CaptureDraft) (Captur
 		return CaptureRef{}, err
 	}
 	defer release()
+	dependencies := slices.Clone(draft.Dependencies)
+	// Validate and publish references in the same lease as removal. The page
+	// producer may have returned before this compound capture was committed.
+	for _, id := range dependencies {
+		if _, err := a.InspectCapture(ctx, id); err != nil {
+			return CaptureRef{}, err
+		}
+	}
 	blob, err := a.store.PublishBlob(ctx, vault.BlobInput{Reader: draft.Reader, MaxBytes: draft.MaxBytes})
 	if err != nil {
 		return CaptureRef{}, err
 	}
-	ref := CaptureRef{Schema: "lycheedev.capture.v1", Blob: blob, MediaType: draft.MediaType, Provenance: draft.Provenance, Complete: draft.Complete, Truncated: draft.Truncated, CapturedAt: capturedAt()}
+	ref := CaptureRef{Schema: "lycheedev.capture.v1", Blob: blob, MediaType: draft.MediaType, Provenance: draft.Provenance, Complete: draft.Complete, Truncated: draft.Truncated, CapturedAt: capturedAt(), Dependencies: dependencies}
 	identity, err := json.Marshal(ref)
 	if err != nil {
 		return CaptureRef{}, err
@@ -289,7 +302,7 @@ func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, e
 			return RemoveResult{CaptureID: id}, ErrInvalidRetention
 		}
 	}
-	if referenced, err := a.findExternalReference(ctx, id); err != nil {
+	if referenced, err := a.findExternalReference(ctx, ref); err != nil {
 		return RemoveResult{CaptureID: id}, err
 	} else if referenced {
 		return RemoveResult{CaptureID: id}, ErrCaptureReferenced
@@ -320,7 +333,8 @@ func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, e
 	return result, nil
 }
 
-func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, error) {
+func (a *Archive) findExternalReference(ctx context.Context, target CaptureRef) (bool, error) {
+	id := target.ID
 	needle := []byte("\"" + id + "\"")
 	// Existing scan captures used a capture: locator rather than the bare ID.
 	// Both forms are persistent references, including in pre-upgrade metadata.
@@ -341,6 +355,11 @@ func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, e
 			if bytes.Contains(doc.Value, needle) || bytes.Contains(doc.Value, locator) {
 				return true, nil
 			}
+			if target.Provenance.Kind == "hotfix-records" && strings.HasPrefix(doc.Key, "capture/") {
+				if referenced, err := a.legacyHotfixPageReference(ctx, doc, id); err != nil || referenced {
+					return referenced, err
+				}
+			}
 		}
 		after = docs[len(docs)-1].Key
 		if len(docs) < 1000 {
@@ -348,6 +367,30 @@ func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, e
 		}
 	}
 	return false, ErrReferenceScanLimit
+}
+
+// Older Hotfix checkpoints kept page IDs only in their bounded scan blob.
+// Read that one known representation without rewriting immutable manifests or
+// recursively interpreting arbitrary capture payloads as references.
+func (a *Archive) legacyHotfixPageReference(ctx context.Context, doc vault.Document, id string) (bool, error) {
+	var ref CaptureRef
+	if err := json.Unmarshal(doc.Value, &ref); err != nil {
+		return false, err
+	}
+	if ref.Provenance.Kind != "hotfix-scan" || len(ref.Dependencies) != 0 {
+		return false, nil
+	}
+	_, raw, err := a.FetchCapture(ctx, strings.TrimPrefix(doc.Key, "capture/"), 4<<20)
+	if err != nil {
+		return false, err
+	}
+	var scan struct {
+		Pages []string `json:"pages"`
+	}
+	if err := json.Unmarshal(raw, &scan); err != nil {
+		return false, err
+	}
+	return slices.Contains(scan.Pages, id), nil
 }
 
 func (a *Archive) blobSharedByAnotherCapture(ctx context.Context, id string, blob vault.BlobRef) (bool, error) {

@@ -31,7 +31,7 @@ func TestHotfixCSVUsesExistingSQLDestinationLease(t *testing.T) {
 	defer lease.Close()
 	result := RemoteHotfixResult{Complete: true, Records: []HotfixRecord{{ID: 17, TableName: "SpellName", Build: "70000"}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	_, err = ExportHotfixCSV(ctx, output, result)
+	_, err = ExportHotfixCSV(ctx, t.TempDir(), output, result)
 	cancel()
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Hotfix did not share SQL's destination lease: %v", err)
@@ -45,7 +45,7 @@ func TestHotfixCSVUsesExistingSQLDestinationLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Hotfix retains implicit overwrite; no new --overwrite flag is required.
-	manifest, err := ExportHotfixCSV(context.Background(), output, result)
+	manifest, err := ExportHotfixCSV(context.Background(), t.TempDir(), output, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestHotfixCSVPreflightAndCancellationPreserveExistingFiles(t *testing.T) {
 				}
 				want = ErrExportConflict
 			}
-			if _, err := ExportHotfixCSV(ctx, output, result); !errors.Is(err, want) {
+			if _, err := ExportHotfixCSV(ctx, t.TempDir(), output, result); !errors.Is(err, want) {
 				t.Fatalf("export error=%v, want %v", err, want)
 			}
 			if raw, err := os.ReadFile(output); err != nil || !bytes.Equal(raw, original) {

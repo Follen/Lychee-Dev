@@ -103,6 +103,13 @@ jobs:
           # packages while retaining each package's concurrency tests.
           go test -p=2 -parallel=4 -count=1 -timeout=20m ./...
           if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
+      - name: Native doctor volume-boundary evidence (disk fixture, PID zero)
+        if: ${{ !cancelled() }}
+        run: |
+          # Keep skip/volume GUID/failure-stage evidence visible even if the
+          # full suite failed. This does not invoke process discovery or input.
+          go test -v -count=1 -timeout=5m ./internal/command -run '^TestLiveDoctorUpgrade(CreatesDefaultArchiveParent|DefaultArchiveAcrossVolumes)$'
+          if ($LASTEXITCODE -ne 0) { throw 'doctor volume-boundary contract failed' }
       - name: Native release-shape build
         run: |
           $env:CGO_ENABLED = '0'

@@ -52,7 +52,6 @@ function ns.TreeView.Create(parent, options)
     local visibleNodes = {}
     local tree
     local selectedNode
-    local selectionChanged
     local nodeContext
     local view = { panel = panel }
 
@@ -126,9 +125,6 @@ function ns.TreeView.Create(parent, options)
 
             if node.exportable then
                 selectedNode = node
-                if selectionChanged then
-                    selectionChanged(node)
-                end
             end
             if mouseButton == "RightButton" then
                 if node.exportable and nodeContext then
@@ -162,10 +158,6 @@ function ns.TreeView.Create(parent, options)
         return selectedNode
     end
 
-    function view:SetOnSelectionChanged(callback)
-        selectionChanged = type(callback) == "function" and callback or nil
-    end
-
     function view:SetOnNodeContext(callback)
         nodeContext = type(callback) == "function" and callback or nil
     end
@@ -176,9 +168,6 @@ function ns.TreeView.Create(parent, options)
             and tree.roots[1] or nil
         scroll:SetVerticalScroll(0)
         self:Refresh()
-        if selectionChanged then
-            selectionChanged(selectedNode)
-        end
     end
 
     function view:RenderRows()

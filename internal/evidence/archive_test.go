@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -141,7 +142,7 @@ func TestCaptureCommitReusesIdenticalContentAddressedObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identical re-commit failed the insert CAS: %v", err)
 	}
-	if second != first {
+	if !reflect.DeepEqual(second, first) {
 		t.Fatalf("reuse returned a different object: %+v != %+v", second, first)
 	}
 
@@ -167,7 +168,7 @@ func TestCaptureCommitReusesIdenticalContentAddressedObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range refs {
-		if ref != first {
+		if !reflect.DeepEqual(ref, first) {
 			t.Fatalf("racer returned a different object: %+v != %+v", ref, first)
 		}
 	}

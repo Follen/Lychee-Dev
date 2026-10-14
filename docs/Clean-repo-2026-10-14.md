@@ -753,6 +753,7 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 - **本轮状态：代码已修复；离线回归和相关 race 检查通过。**
 - 修复与正式验证：新 checkpoint 使用既有裸 Capture ID 引用；删除检查同时识别历史 capture:CAP locator。正式回归：[hotfix_scan_test.go](../internal/records/hotfix_scan_test.go) 的 pending/取消、拒绝删除与原 checkpoint resume，以及 [archive_test.go](../internal/evidence/archive_test.go) 的历史 locator 生命周期。
+- R7 复审又确认 Pages 依赖与发布间隙残留，沿用本 ID；现已加入不可变 Source/Pages 依赖、历史保护和缺页恢复错误，正式回归通过，当前发布/完整验证状态见文末 R7 条目。
 
 - 证据：[hotfix_scan.go:140](../internal/records/hotfix_scan.go#L140)、[archive.go:323–343](../internal/evidence/archive.go#L323)、[公开删除入口 entry.go:773](../internal/command/entry.go#L773)。
 - 触发：Hotfix scan 分页停止并保存 pending checkpoint 后，执行 `evidence remove` 删除该 checkpoint 的原始 Source capture，再按原 snapshot/from/resume 继续。
@@ -928,8 +929,8 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 | 轮次 | 基线 | 状态 | 当前结果 |
 | --- | --- | --- | --- |
 | R5 | `81ccdd5` 产品代码；文档 head `f7f2239` | 修复已推送 `2660a4ef`，Windows CI 六作业全部通过 | 5 项新确认（2 bug、1 架构优化、1 Skill 合同、1 死代码）；R4-01、D-06 残留沿用原 ID |
-| R6 | `2660a4ef` | 4 项修复及额外测试修正完成，最终整合已验证，新 head Windows CI 待运行 | 2 个 bug、1 个可计量架构优化、1 个死代码清理 |
-| R7 | R6 后的最新修复提交 | 待启动，另一个审计者 | |
+| R6 | `2660a4ef` | 4 项修复及额外测试修正已推送 `9a02522f`，Windows CI 六作业全部通过 | 2 个 bug、1 个可计量架构优化、1 个死代码清理 |
+| R7 | `9a02522f` | 2 项新确认及 R3-03 残留已修复，离线整合完成，当前批待原生 CI | R4-C01 仅新增安全原生双卷 fixture，未执行前仍为候选 |
 
 新发现的仅实机问题只记录前置、最小复验步骤、预期与空白实机结果，不操作游戏、不作无离线证据的修复；已有 R3/R4 实机待办保持上方状态。
 
@@ -1028,7 +1029,7 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 - 审计抽查 Source search/context/batch/line index，Data export/Hotfix/DB2，Native INPUT/report/recovery、probe 生命周期，受管替换/npm 更新及 Skill source/data/live/recovery 合同。只有上述 4 项得到确认；没有新增只能依靠游戏确认的缺陷。R3-C01/R3-C03/R4-C01 未取得新证据，仍为候选。
 - Source 新旧代码负对照、codebase 全包（136 test/subtest pass；2 个真实 LuaLS/broker 可选集成缺环境 skip）及定向 race ×3 通过；Windows 未在本地冒称执行。Hotfix 真实并发已复现，正式跨进程测试、records/evidence/vault 12 包及 Hotfix/SQL race ×3 通过；addon 全包通过。代码批次 build/vet 通过，首次完整 Lua 必需 Go 整合已执行：29 包通过、2 包失败、4 包无测试；2438 test/subtest pass、4 fail、28 skip。除既有3个Linux平台失败，当时出现容量重载请求/期限保持测试失败（`TestAutomaticCapacityReloadContinuesOriginalRequest`）；后续已确认并修正单测计时条件，未发现对应生产缺陷，诊断负对照和最终完整重跑结果见下节。
-- Skill 合同 84 命令/220 引用/0 违规及生成命令检查通过，本批没有改 Skill/命令目录或发行版本输入。本次提交包含 R6 全部修复及额外测试修正；R5 `2660a4ef` 绿色 CI 不能替代本批的新 head 验证，推送后另跑 Windows CI。
+- Skill 合同 84 命令/220 引用/0 违规及生成命令检查通过，本批没有改 Skill/命令目录或发行版本输入。本次提交包含 R6 全部修复及额外测试修正；R5 `2660a4ef` 绿色 CI 不能替代本批的新 head 验证，[`9a02522f` 的 Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38536137573) 六作业全部通过：contract（Lua 必需完整 Go）、process、addon、race、package、ci-required。
 
 
 ### R6 额外整合测试修正：容量 reload 的计时完成条件
@@ -1050,3 +1051,43 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 | API 文档与安装数据/图像/CASC oracle，可选覆盖缺口 | 固定文档、显式安装产品/build、本地 CASC index、icon.blp/png/webp、校验过的 CascLib oracle 与固定 DB2 definitions | 按对应测试环境变量选定固定资料，分别运行 environment/flow/records/archive/navigatetest/schema 测试 | 固定身份/原始字节/解码/导出与各 oracle 断言一致；不把缺样本 skip 当作通过或已确认 bug | |
 | 原 runtime dump/header replay，可选覆盖缺口 | 已有、获准使用的原始 dump manifest/header/匹配 executable 及 hash；不采集新游戏数据 | 配置正式 memory replay 测试的固定输入，验证 root recipe 和捕获 header 对照 | 根定位证据及身份与固定原始数据吻合；合成 memory fixture 不代替原始 replay | |
 | Live read-only 可选覆盖缺口 | 后续明确授权的 Windows/WoW 固定 PID/创建时间/HWND 和对应受管版本 | 只在后续本机任务运行显式只读目标测试，核实身份和可读窗口；不借此扩大输入许可 | 原身份/只读窗口信息正确；本次未执行，不要求现在启动游戏 | |
+
+
+### R7 独立复审与正在实施项
+
+基线为 `9a02522f`。另一位新审计者覆盖 Source 搜索/上下文/缓存，Data 查询/导出/Hotfix，Live 恢复与输入，addon 生命周期及 Skill 编排。确认下列两项新事项和 R3-03 残留；没有新增仅游戏可确认的缺陷。R7 仍发现可离线修复项，因此修复验证后必须继续新的独立 R8，不以达到三轮为停止条件。
+
+#### R7-01 · 高 · Hotfix CSV 输出可破坏当前 workspace 身份
+
+- 状态：代码已修复，公开 CLI 定向与 race ×3 回归通过；本批完整离线整合完成，当前 head Windows 验证待执行。
+- 公开 `data hotfix --source raidbots --encoding csv --output <home>/workspace.json` 在合法三条记录 fixture 上退出 0、complete=true，141 字节 CSV 替换 workspace 身份；随后 `vault.OpenStore` 返回 `vault.unsupported_workspace`。这不是外部程序事后修改或 R6 并发问题。
+- 修复：command 将已有解析 root 传给 records exporter；抽取 SQL 现有的规范化父路径 workspace 排除检查为同一小型边界，CSV 和 manifest 发布前复用。保留外部隐式覆盖、schema、编码字节和跨 home destination lease，不新增策略框架。
+- 正式 `TestDataHotfixCSVRejectsManagedWorkspaceDestinations` 通过公开 Execute 覆盖 canonical/normalized/父目录 symlink，核对拒绝码、原 marker 字节、无 sidecar、原身份仍可用，并保留外部覆盖正常成功。
+
+#### R3-03 残留 · 高 · checkpoint 的页面 capture 未受依赖保护
+
+- 状态：代码已修复，records/evidence/vault 12 包与依赖/scan race ×3 通过，完整离线整合完成；沿用原 ID，不重复计数。
+- 三条记录以 limit=1/maxPages=1 生成 pending scan；删除 Pages[0] 时 manifest/blob 都被移除。随后原 checkpoint resume 返回 complete=true/Returned=3，但首个页面 FetchCapture 为 `vault.record_missing`。既有 Source locator 修复有效，缺口在 Pages 只存于 blob，没有 metadata 依赖。
+- 修复：可选 `CaptureRef.dependencies` 纳入不可变 hash，空列表省略以保持旧 manifest 身份；Source+Pages 在与删除相同的 metadata write lease 下验证并发布。旧 hotfix-scan 仅通过已核验、4MiB 有界正文识别 Pages，不扫描任意 JSON 引用；移除全部持有 checkpoint 后依赖自然释放，不改变用户 keep 语义。
+- 正式回归及旧代码失败负对照覆盖 pending/complete、历史 checkpoint、已损坏历史恢复、Source/页面产生至 checkpoint 发布之间删除，以及 metadata 提交同租约竞争。错误保留原 checkpoint ID/原字节，不返回成功或新悬空 checkpoint。legacy manifest 身份另以旧结构独立编码回归。
+
+#### R7-02 · 低 · 两处零消费者 UI 接口及不可达 callback
+
+- 状态：代码已最小清理，addon 全包通过（34 suite × 六 profile = 204 组，无 Lua 跳过）。
+- 全仓生产/测试/文档/Skill 没有 `TreeView.SetOnSelectionChanged` 与 `Events.FocusInput` 消费者；前者是 selectionChanged 唯一赋值入口，两个 callback 分支不可达。
+- 仅删除两个方法、私有 callback 字段及分支。保留 selectedNode、高亮、测试使用的 GetSelectedNode、Object 实际使用的 SetOnNodeContext 和既有焦点事件。
+
+R4-C01 仍为候选：update 的跨卷 target-volume recovery 明确支持游戏 D:/workspace C:，补充了合同证据。将利用已有 Windows CI 的安全磁盘 fixture，验证真实不同 volume GUID、同卷对照和跨卷默认 archive；PID=0 阻止 process discovery/input。未原生运行前不升级为已确认、不填通过。R3-C01/R3-C03 无新领域/消费者证据，继续保留。
+
+
+### 冗余测试专项与覆盖率顺序
+
+用户追加要求先审计并删除真正冗余测试，再计量覆盖率。已启动独立专项，当前只读检查 Go/Lua/Node 用例和 fixture；不同入口、故障注入、跨进程、平台或 profile 合同不能仅因表面相似删除。既有 D-06 无行为价值的注释锚点测试已删除。尚未确认新的可删项，也尚未启动覆盖率计量；清理及正式回归完成后固定提交，分别报告 Go 语句覆盖与业务场景覆盖，记录平台、命令、范围、跳过和实机空白，不估算百分比。
+
+
+### R7 批次实际验证
+
+- build/vet 通过；records/evidence/vault 12 包、依赖/Hotfix scan race ×3、公开 Hotfix CLI race ×3 通过；addon 204 profile/suite 组通过。R7-01 的正式公开 CLI 测试在旧实现 canonical/normalized/parent-symlink 三项均失败，修复后三项及外部覆盖通过。R3-03 负对照与新回归见上述条目。
+- Lua 5.1 必需完整命令 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 已执行并留 JSON 结果：30 测试包通过、command 1 包仅原有 3 个 Linux 平台失败、4 包无测试；2456 test/subtest pass、3 fail、28 skip，无新增离线失败。未把 Linux 全套写为通过，缺真实/可选输入的跳过不计成功。
+- Windows doctor 双卷 fixture 已通过 Windows amd64 交叉编译与目标 vet，只计编译检查。CI 新增独立 verbose 磁盘测试步骤，即使完整套件失败仍保留实际卷身份/失败阶段/skip 证据；没有改游戏或生产行为。当前批原生验证未执行。
+- 受影响 workflow Node 结构检查 8/8、import 合同、文档本地引用与 diff 检查通过。发行版本、命令目录和 Skill 输入没有改变，未重复无变化检查。

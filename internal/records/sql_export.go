@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -57,18 +55,8 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 		return QueryCSVExport{}, err
 	}
 	defer manifestDestination.Close()
-	workspace, err := filepath.EvalSymlinks(root)
-	if err != nil {
+	if err := outsideExportWorkspace(root, dataDestination, manifestDestination); err != nil {
 		return QueryCSVExport{}, err
-	}
-	workspace, err = filepath.Abs(workspace)
-	if err != nil {
-		return QueryCSVExport{}, err
-	}
-	for _, destination := range []*exportDestination{dataDestination, manifestDestination} {
-		if relative, err := filepath.Rel(workspace, destination.path); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return QueryCSVExport{}, fmt.Errorf("%w: output must be outside the managed workspace", ErrExportPath)
-		}
 	}
 	var buffer bytes.Buffer
 	writer := csv.NewWriter(&buffer)

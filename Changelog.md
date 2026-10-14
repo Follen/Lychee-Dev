@@ -19,7 +19,8 @@
 - 修复 Hotfix pending 来源删除、精确 SymbolID flow、Source inspect 覆盖和跨进程 SQL CSV/manifest 一致性。
 - 视频 demux 按目标目录串行发布帧与 manifest，复用 capture 的已核验 blob，消除重复帧写入。
 - 修复 Git-backed Source 对中文等合法文件名的正文搜索；Search/Inspect 摘要复用现有行索引，避免每个结果重复切分整文件。
-- Hotfix CSV 与 SQL CSV 共用目标级发布互斥和 staged 文件边界，保留原覆盖与 manifest 合同。
+- Hotfix CSV 与 SQL CSV 共用目标级发布互斥和 staged 文件边界，保留原覆盖与 manifest 合同，并阻止覆盖当前工作区身份/数据。
+- Hotfix scan checkpoint 持久保护来源与页面 capture，兼容历史依赖，缺失页面不再恢复为完整成功。
 
 ### Live 与 addon
 

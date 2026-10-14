@@ -4,7 +4,7 @@
 
 ## 分支、授权与状态
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)，`codex/fix-3.2.0` → `main`，保持草稿。已推送首批产品修复 `81ccdd5` 和文档 `f7f2239`；R5 修复已推送 `2660a4ef`，Linux 整合验证已结束，[该 head Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38532230482) 六作业全部通过。
+- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)，`codex/fix-3.2.0` → `main`，保持草稿。已推送首批产品修复 `81ccdd5` 和文档 `f7f2239`；R5 `2660a4ef` Windows CI 全部通过；R6 已推送 `9a02522f`，[该 head Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38536137573) 六作业全部通过。
 - R3/R4 的 13 项及 R5 的 5 项已交付；R6 又确认并实施 4 项新事项。R4-01 crash 分支和 D-06 清理残留沿用原 ID，不重复计数。前一批 42 项保留为基线，候选不当作确认问题。
 - 追加任务：至少 R5/R6/R7 三轮，各由不同的新审计者检查架构、bug、死代码、Skill 编排及有明确收益、可验证的架构优化；持续审计→修复→验证→推送，直到独立复审不再发现可离线修复项。仅实机的新问题记录复验，不代替用户操作。
 - 本任务允许提交、推送同一分支及更新 PR，阶段性进展同时汇报。未连接用户电脑/游戏、未发键或部署游戏目录；不合并、不发布。只使用仓库 handover.md，不使用 handoff Skill。
@@ -14,25 +14,22 @@
 
 | 项目 | 当前结果 | 写入负责人 / 边界 |
 | --- | --- | --- |
-| R6-01 / R6-02 | Git 正文搜索无歧义读取 Unicode/引号/tab 文件名；Search/Inspect 复用已有有预算的行索引 | Source 组，已冻结；body_search/search/document_lines/inspect 与两份正式测试 |
-| R6-03 | Hotfix CSV 和 SQL 共用现有目标 lease/完整 stage 发布，CLI 不再自行截断两个文件 | 协调者，已冻结；command dispatch、records CSV 边界与公开 CLI/records 正式回归 |
-| R6-04 | 删除 3 个零消费者 Lua 包装函数，真实 Diagnostics/Objects 路径不变 | 协调者，已冻结；Diagnostics/ObjectInspector/Object 页面 |
-| R6 独立审计 / 文档 | 新审计者完成 4 项确认，未证明新的实机专属缺陷；协调者独占共享文档 | 审计者只读；审计、handover、todo、Changelog 由协调者维护 |
-| 已交付基线 | R3/R4 13 项及 R5-01 至 R5-05、R4-01/D-06 残留均已修复 | 逐项证据见审计；`2660a4ef` 当前 Windows CI 已全部通过 |
+| R7-01 | Hotfix CSV 阻止覆盖当前 workspace 身份；公开 CLI 定向回归通过 | 协调者：command dispatch、records export boundary/SQL 共享检查与正式测试 |
+| R3-03 残留 | Source/页面依赖同租约保护、历史依赖及缺页恢复已修复；12 包及 race ×3 通过 | Data/evidence 组：capture 依赖发布/保护、scan 恢复及正式测试；video 测试仅调整 Ref 比较 |
+| R7-02 | 两个零消费者 UI 方法及不可达 callback 已清理，Lua 全包通过 | 协调者：TreeView 与 Events 页面 |
+| R4-C01 候选 | 新合同证据支持跨卷；原生双卷磁盘 fixture 已加入，交叉编译/vet 通过，仅待原生证据 | Windows fixture 组：仅 doctor Windows 测试；尚无原生结论 |
+| 独立审计 / 文档 | R7 已完成，仍有可离线修复项；之后需要新 R8 | 审计者只读；协调者独占审计、handover、todo、Changelog |
 
-R6 产品/测试及额外计时 fixture修正已冻结；最终整合验证已完成，本次提交包含全部修复，新提交的 Windows CI 待运行。R7 尚未启动，将使用不同的新审计者在 R6 修复后代码上复审。正式测试不依赖临时审计 fixture。
+R6 `9a02522f` 六个 Windows CI 作业全部通过。R7 工作区尚未提交，不能借 R6 绿色结果宣称 R7 验证完成。正式测试不依赖临时审计 fixture。
 
 ## 实际验证与限制
 
-- 工具链：官方 SHA 校验的 Go 1.27.1、Node 24.18.1、npm 11.18.0、固定源码构建 Lua 5.1.5；`LYCHEEDEV_REQUIRE_LUA51=1` 和明确 `LYCHEEDEV_LUA51`。LuaLS 3.19.1 Windows archive bytes/SHA 已校验。
-- R6 build/vet 批次通过；codebase 全包 136 test/subtest pass、2 个真实 LuaLS/broker 可选缺环境 skip；Source 定向 race ×3 通过。公开 200 结果 Search fixture 分配从旧 302,369,464 降为 2,810,488 字节，只有一次行索引构建，内容/hash/分页一致；旧实现负对照失败。
-- R6 Hotfix 公开 CLI 跨进程/不同 home/规范化及 symlink 别名、等待 deadline 与最终 CSV/manifest 一致性通过；records/evidence/vault 12 包通过；Hotfix CLI、records/SQL 导出 race 各重复三次通过。旧 command 实现负对照失败，既有隐式覆盖/schema/原编码字节保留。
-- R6 addon 全包通过，34 suite × 六 profile = 204 组，无 Lua 跳过。Skill 84 命令/220 引用/0 违规、生成目录检查通过；本批没有改 Skill/命令目录或版本输入。
-- R6 最终整合 build/vet 通过；完整 Lua 必需 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 实际执行（JSON 留证）：30 测试包通过、command 1 包仅 3 个既有 Linux 平台失败、4 包无测试；2439 test/subtest pass、3 fail、28 skip。没有新增失败，仍不称 Linux 全套通过。
-- 首轮整合曾额外失败于容量 reload 测试，诊断证明350ms 计时完成条件不可靠，原 ID/期限不变；仅修正正式测试为实际 prepare 边界终止，并核对持久Load状态。旧HEAD负对照3/30失败，新测试30/30、400ms 延迟对照、channel/journal及race×3通过；修正后已重新执行上述完整套件。
-- 最近已完成原生 Windows 验证为 [`2660a4ef` 的 CI](https://github.com/Follen/Lychee-Dev/actions/runs/38532230482)：contract（Lua 必需完整指定 Go，31 测试包）、race、process、addon、真实 tgz/隔离安装、aggregate 六作业全部 success；不替代尚未提交的 R6 代码。
-- R5 Linux 完整套件实测 30 测试包通过、command 1 包失败、4 包无测试；2420 test/subtest pass、3 fail、28 skip。3 个失败已在接手基线复现：Native Live 参数检查两项、非 Windows LuaLS broker 的 Source prune；不抑制、不称全套通过。skip 含 helper/外部资料/真实 runtime 等，均不计通过。
-- Windows 交叉编译只计编译。真实 LuaLS/broker/安装包语义、外部 API/CASC oracle/图像样本、显式游戏安装等可选集成在此 Linux 环境仍缺输入；旧结果/跳过不冒充当前通过。R4-03 是 Windows 磁盘 fixture，不属于游戏环境限制。
+- 工具链：官方 SHA 校验 Go 1.27.1、Node 24.18.1、npm 11.18.0、固定源码构建 Lua 5.1.5；`LYCHEEDEV_REQUIRE_LUA51=1` 与明确解释器路径。LuaLS 3.19.1 Windows archive bytes/SHA 已校验，不等于原生进程运行。
+- R7 build/vet、records/evidence/vault 12 包、依赖/scan 与 Hotfix CLI race 各 ×3、addon 34 suite × 六 profile = 204 组通过。旧实现的 workspace 覆盖和来源/页面删除负对照失败，新正式回归通过。
+- R7 完整 Lua 必需命令 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 实际执行：30 测试包通过、command 1 包仅 3 个既有 Linux 平台失败、4 包无测试；2456 test/subtest pass、3 fail、28 skip。三个失败是 Native Live 参数检查两项和非 Windows LuaLS broker 的 Source prune，基线已复现；不称 Linux 全套通过。
+- 已发布 head [`9a02522f` 的 Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38536137573) 六作业全部 success：Lua 必需完整 Go、race、process、addon、真实 tgz/隔离安装、汇总。R7 未提交修改需要自己的原生 CI，R4-C01 双卷 fixture 仅交叉编译/目标 vet 通过。
+- R7 受影响 workflow Node 检查 8/8、import 合同、文档本地引用、diff 检查通过。版本/Skill/命令目录输入未变。R5/R6 的计量、旧代码负对照与额外容量 reload 计时 fixture 修正详见审计，不复制运行历史。
+- 真实 LuaLS/broker/安装包语义、外部 API/CASC oracle/图像/原 runtime 样本等可选集成仍缺输入。Windows 专属测试、交叉编译、缺环境 skip 与游戏验证分别记录，均不冒充当前通过。
 
 ## 待实机验证
 
@@ -64,6 +61,7 @@ R6 产品/测试及额外计时 fixture修正已冻结；最终整合验证已�
 
 ## 下一步
 
-1. 本批 R6 整合已完成，提交推送同一草稿 PR 后核验新 head Windows CI；失败则继续修复。
-2. R6 独立审计已完成；下一轮在其修复后代码上启动另一位新 R7 审计者；如仍有可离线项继续循环。协调者独占更新审计、todo、handover；每轮不追加流水账到本文件。
-3. 暂存材料只在忽略的 `.tmp/pr13/`，任务结束后按已核实绝对路径清理本轮产物；不触碰用户项目、未解决恢复记录或保留的 Rust worktree。
+1. 完成 R7 整合验证并提交；R4-C01 以双卷磁盘 fixture 在同一 draft PR 获取真实 Windows 结果。
+2. 提交推送 R7 后用新的独立审计者复审 R8；如仍有可离线项继续循环。协调者独占更新审计、todo、handover。
+3. 新独立专项先审计/删除无独立价值的冗余测试并正式回归，之后才对固定提交计量 Go 覆盖率；当前未计量，不给估算比例。
+4. 暂存材料只在忽略的 `.tmp/pr13/`，任务结束后按已核实绝对路径清理本轮产物；不触碰用户项目、未解决恢复记录或保留的 Rust worktree。

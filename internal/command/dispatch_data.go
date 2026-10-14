@@ -476,7 +476,7 @@ func runDataHotfixRemote(ctx context.Context, opts Options, response *Envelope, 
 		if opts.output == "" {
 			return false, 2, errors.New("data hotfix --encoding csv requires --output")
 		}
-		manifest, err := records.ExportHotfixCSV(ctx, opts.output, result)
+		manifest, err := records.ExportHotfixCSV(ctx, root, opts.output, result)
 		if err != nil {
 			return false, 0, err
 		}

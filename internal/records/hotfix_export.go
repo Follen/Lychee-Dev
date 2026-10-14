@@ -8,7 +8,7 @@ import (
 // ExportHotfixCSV preserves Hotfix's implicit overwrite policy and existing
 // manifest schema. Publish the CSV and completion manifest under one target
 // lease, shared with SQL CSV exports even when the callers use different homes.
-func ExportHotfixCSV(ctx context.Context, output string, result RemoteHotfixResult) (CSVExportManifest, error) {
+func ExportHotfixCSV(ctx context.Context, root, output string, result RemoteHotfixResult) (CSVExportManifest, error) {
 	if err := ctx.Err(); err != nil {
 		return CSVExportManifest{}, err
 	}
@@ -30,6 +30,9 @@ func ExportHotfixCSV(ctx context.Context, output string, result RemoteHotfixResu
 		return CSVExportManifest{}, err
 	}
 	defer manifestDestination.Close()
+	if err := outsideExportWorkspace(root, dataDestination, manifestDestination); err != nil {
+		return CSVExportManifest{}, err
+	}
 	if err := publishCSVPair(ctx, dataDestination, manifestDestination, csv.Bytes(), sidecar.Bytes()); err != nil {
 		return CSVExportManifest{}, err
 	}

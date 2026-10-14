@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/records"
+	"github.com/follenfang/lycheedev/internal/vault"
 )
 
 // Stop at the public cancellation boundary after CSV publication but before
@@ -221,4 +222,57 @@ func TestHotfixCSVExportHelperProcess(t *testing.T) {
 		t.Fatalf("retry: %d %s %s", code, out.String(), log.String())
 	}
 	fmt.Fprint(os.Stdout, out.String())
+}
+
+func TestDataHotfixCSVRejectsManagedWorkspaceDestinations(t *testing.T) {
+	for _, kind := range []string{"canonical", "normalized", "parent-symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			root, _, source, _ := hotfixCommandFixture(t)
+			marker := filepath.Join(root, "workspace.json")
+			original, err := os.ReadFile(marker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := vault.OpenStore(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity := store.Identity()
+			output := marker
+			if kind == "normalized" {
+				output = root + string(filepath.Separator) + "unused" + string(filepath.Separator) + ".." + string(filepath.Separator) + "workspace.json"
+			}
+			if kind == "parent-symlink" {
+				alias := filepath.Join(t.TempDir(), "alias")
+				if err := os.Symlink(root, alias); err != nil {
+					t.Skipf("directory symlink unavailable: %v", err)
+				}
+				output = filepath.Join(alias, "workspace.json")
+			}
+			response, code := invoke(t, raidbotsArgs(source, "--home", root, "--encoding", "csv", "--output", output, "--format=json")...)
+			if code != 2 || response.OK || response.Error == nil || response.Error.Code != "records.export_path" {
+				t.Fatalf("managed output accepted: code=%d response=%+v", code, response)
+			}
+			if raw, err := os.ReadFile(marker); err != nil || !bytes.Equal(raw, original) {
+				t.Fatalf("workspace identity changed: %v", err)
+			}
+			if _, err := os.Stat(marker + ".manifest.json"); !os.IsNotExist(err) {
+				t.Fatalf("sidecar published inside workspace: %v", err)
+			}
+			current, err := vault.OpenStore(root)
+			if err != nil || current.Identity() != identity {
+				t.Fatalf("workspace no longer usable: %v", err)
+			}
+			// The protected-root boundary must not disable Hotfix's normal external
+			// overwrite contract or alter the manifest's existing encoding.
+			external := filepath.Join(t.TempDir(), "hotfix.csv")
+			if err := os.WriteFile(external, []byte("replace me"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			valid, code := invoke(t, raidbotsArgs(source, "--home", root, "--encoding", "csv", "--output", external, "--format=json")...)
+			if code != 0 || !valid.OK {
+				t.Fatalf("external overwrite rejected: %d %+v", code, valid)
+			}
+		})
+	}
 }

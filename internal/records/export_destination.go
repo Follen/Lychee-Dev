@@ -53,6 +53,25 @@ func openExportDestination(output string, overwrite bool) (*exportDestination, e
 
 func (d *exportDestination) Close() error { return d.root.Close() }
 
+// Export destinations must not replace the managed workspace's identity,
+// metadata or blobs. Compare resolved parent paths, including directory aliases.
+func outsideExportWorkspace(root string, destinations ...*exportDestination) error {
+	workspace, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	workspace, err = filepath.Abs(workspace)
+	if err != nil {
+		return err
+	}
+	for _, destination := range destinations {
+		if relative, err := filepath.Rel(workspace, destination.path); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("%w: output must be outside the managed workspace", ErrExportPath)
+		}
+	}
+	return nil
+}
+
 // acquireExportLease serializes a multi-file publication by its canonical file
 // or directory destination. Callers derive the path from openExportDestination
 // so relative paths and parent symlinks share the same OS lock across homes.

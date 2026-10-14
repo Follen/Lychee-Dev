@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -275,12 +276,12 @@ func checkDemuxCaptures(t *testing.T, root string, result records.AssetDemux) {
 		t.Fatalf("manifest capture differs: %v, %v", err, marshalErr)
 	}
 	sourceRef, sourceRaw, err := archive.FetchCapture(ctx, manifest.SourceCapture, 1<<20)
-	if err != nil || sourceRef != result.Source || sha256hex(sourceRaw) != manifest.Source.SHA256 || sourceRef.Provenance.Kind != "asset-demux-source" {
+	if err != nil || !reflect.DeepEqual(sourceRef, result.Source) || sha256hex(sourceRaw) != manifest.Source.SHA256 || sourceRef.Provenance.Kind != "asset-demux-source" {
 		t.Fatalf("source capture differs: %v", err)
 	}
 	for i, frame := range manifest.Frames {
 		ref, raw, err := archive.FetchCapture(ctx, frame.Capture, 1<<20)
-		if err != nil || ref != result.Frames[i] || ref.Blob != frame.Blob || sha256hex(raw) != frame.SHA256 || len(raw) != frame.Size || ref.Provenance.Kind != "asset-demux-frame" || ref.Provenance.Locator != fmt.Sprintf("%s#frame=%d", manifest.Input, i) {
+		if err != nil || !reflect.DeepEqual(ref, result.Frames[i]) || ref.Blob != frame.Blob || sha256hex(raw) != frame.SHA256 || len(raw) != frame.Size || ref.Provenance.Kind != "asset-demux-frame" || ref.Provenance.Locator != fmt.Sprintf("%s#frame=%d", manifest.Input, i) {
 			t.Fatalf("frame %d capture differs: %v", i, err)
 		}
 	}
