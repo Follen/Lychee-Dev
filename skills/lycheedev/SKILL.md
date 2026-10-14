@@ -10,21 +10,31 @@ The CLI owns preparation, integrity checks, game transport and recovery. This
 skill chooses the investigation and interprets results; it does not implement
 a second transport or require an investigation to use every mode.
 
+This Rust migration candidate reuses the Go 3.2.0 workflow contract at
+`3057a9666ab078270b63c7f06de748069b0d1f4b`. It is not yet a complete accepted
+release. Read the [candidate boundaries](references/source-candidate.md) before
+using this candidate; a documented command or listed handler is not acceptance
+evidence. Source uses EmmyLua direct analysis libraries, native workers and
+sessions instead of LuaLS. The investigation workflow remains the same.
+
 ## Choose the next evidence
 
 Start from the question and retained state. Read one relevant entry, then its
 detail references when needed. Follow-ups such as “继续”, “已登录” or “还是卡住”
 continue the existing goal, scope and evidence.
 
+Use LycheeDev by default for WoW source/API research, following the
+[source routing and external-evidence rules](references/source-research.md#route-source-evidence).
+
 | Need | Entry |
 | --- | --- |
-| API/event constraints, implementation, callers, revision differences, stack trace, secrets or taint | [Source research](references/source-research.md); its capability check chooses the available static or semantic workflow |
+| API/event constraints, implementation, callers, revision differences, stack trace, secrets or taint | [Source research](references/source-research.md) |
 | IDs, localized names, coefficients, DB2/SQL or Hotfix records | [Data investigation](references/data-investigation.md) |
 | Locate, inspect or export an icon, texture, model or media file | [Asset export](references/asset-export.md) |
 | TOC/XML load order, syntax or client compatibility | [Addon validation](references/addon-validation.md) |
 | Behavior in the running game, or a new authorized live check | [Live investigation](references/live-investigation.md) |
 | Existing CON is pending, interrupted, closing or affected by reload/process change | [Live recovery](references/live-recovery.md) |
-| Live activation, first contact or a just-updated addon | [Live startup](references/live-startup.md) |
+| First contact, startup failure, installation activation or a just-updated addon | [Live doctor and startup](references/live-startup.md) |
 | Read errors retained by the addon provider | [Error diagnosis](references/error-diagnosis.md) |
 | Addon CPU, memory growth, stutter or repeated-operation cost | [Performance investigation](references/runtime-investigations.md) |
 | Toolkit install/update/remove, or managed addon deployment needed by the authorized task | [Installation](references/installation.md) |
@@ -40,10 +50,8 @@ evidence branch is unavailable.
 
 Invoke `lycheedev` on PATH, or `node <skill-directory>/scripts/lycheedev.mjs`.
 Use that CLI's `describe --format json` or command help for available commands
-and flags; [commands](references/commands.md) is the generated source reference.
-Read the chosen mode's examples through that directory: migration guides can
-describe later capabilities. If a path is absent, use the available evidence
-for the question and retain the specific gap; a second guide does not enable it.
+and flags; [commands](references/commands.md) retains the fixed Go target
+contract, not a claim that this candidate implements every entry.
 Resolve a version mismatch using supported capabilities. New source or an
 edited skill does not mean the installed CLI, loaded addon or agent context
 was updated. Do not silently upgrade, invent flags or use retired wowdoc/wowdata/
@@ -71,17 +79,16 @@ can cover that fresh connection after the old one is safely retired. It never
 transfers an old operation or permits replay of uncertain input. Same-build
 instances remain distinct.
 
-The CLI owns keys, memory, optical readiness, slots and journals. Follow its
+For startup or readiness failures, use `live doctor` before choosing a repair.
+Its default is read-only; `--fix` follows the task’s authorized installation and
+live scope. A returned manual reload wait needs one user action in that exact
+window, then resume the same CON. Do not simulate chat input.
+
+The CLI owns keys, Mailbox readiness, slots and journals. Native Live uses
+Lycheedev mailbox protocol v1. The same name is used in schema and transport. Follow its
 [continuation](references/live-recovery.md), retaining durable deadlines. Do not
 bypass a blocker with raw input, memory tools or claim-file edits. Native CON
 work does not use the old OP/BTP ACK/finish/hide sequence.
-
-For source questions, start with a small exact query or the known original
-location. Use match reason, scope and source spans to decide whether another
-read is needed; expand the original source when it can change the conclusion.
-Keep structural indexing, Lua 5.1 compilation and actual LuaLS navigation
-distinct. See [Source research](references/source-research.md) for these fields
-and the capability checks used during the Rust migration.
 
 ## Finish with evidence
 

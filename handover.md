@@ -260,6 +260,12 @@ Data 两层消费者现共享固定Go安装身份：target需要真实client选�
 
 该模块尚未替换生产消费者，默认Live仍有locator/input接线缺口。下一批按README逐层替换mailbox decode、native read-only Identity/INPUT与driver；必须保留Selector.Accept次序、二键stale能力证据和joined错误分类。逻辑公开map fixture不等于Lua内存遍历通过；真实游戏/输入仍留最后配合清单。
 
+### 完整 Go Skill 复用与独立声明门修复
+
+恢复固定Go全部22个Skill文件/流程，必要Emmy与候选未实现边界单独标明；打包保留完整references/launcher/agent配置，固定目标与实际candidate describe另存，未实现doctor/batch不能从目标删除。独立审核指出并修复固定commands生成器冲突、整个live/source组缺失仍假绿、Flags行未关联而漏缺参数三项；保留stale回归、整组/根命令/缺flags双入口负例。固定目标生成/检查不调用Go，实际声明检查仍读取指定CLI，二者不能互相代替。
+
+作者与独立审核者分别实跑14项Node：11通过、3Windows条件skip；固定目标84命令/313引用与生成一致检查通过。恢复Go两项Windows launcher路径回归，新增Windows CI实际执行。尚无真实Rust Skill任务质量通过，必须等封存exe实际使用独立验收；本批静态门只证明文档/声明检查能力。session规则按Go生产源码明确：60s空闲（请求中停表）、600s总lifetime、每保留分析worker256semantic batches后仅worker退役，broker可继续准备，非256条CLI请求后broker退出。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

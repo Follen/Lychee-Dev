@@ -1,56 +1,53 @@
-# Static source work in the Rust candidate
+# Rust candidate boundaries
 
-Use the exact CLI selected for the task. Read its command directory before
-choosing a profile; current migration gaps do not authorize a Go fallback,
-game input or an installation change.
-This is the bounded static branch of the Source research workflow,
-not a competing entry. That branch's examples remain conditional on this CLI's
-directory. If refs/context/session are absent, do not infer that a guide enabled
-them; explain the precise navigation gap and continue useful original reading.
+This candidate follows the fixed Go 3.2.0 Skill and complete Lycheedev mailbox
+protocol v1 contract. The ordinary [Skill entry](../SKILL.md) and
+[source research](source-research.md) are the workflow; this page records only
+migration differences and current gaps. It does not define a reduced toolkit.
 
-Reuse the supplied snapshot or matching project lock. An explicit snapshot
-wins. When the source identity is unclear, inspect it with `target show <pin>`.
-If a fixed source is missing, prepare only the explicitly needed repository,
-track and full ref or commit; do not pick a product default.
+Use the explicitly selected candidate binary and its actual `describe --format
+json` / help. Do not fall back silently to another CLI, release, source revision
+or input protocol. The checked-in [command directory](commands.md) is the fixed
+Go target with engine wording adapted, not proof of candidate availability.
+A command absent from the selected CLI, an unsupported profile, or a failed
+check remains a concrete gap. Preserve useful fixed-source evidence and the
+structured error; do not invent flags or repeatedly retry an unchanged failure.
 
-```text
-lycheedev describe --format json
-lycheedev target show <pin> --format json
-lycheedev source query <term> --snapshot <pin> --mode precise --topic api --limit 10 --format json
-lycheedev source inspect --snapshot <pin> --path <returned-path> --line <first-line> --count 30 --format json
-```
+## Engine difference
 
-For a normal API question, the exact generated declaration and its argument or
-secret constraints may be sufficient. Follow `whyMatch`, `role`, `confidence`,
-`signature` and `sourceSpan` to inspect the relevant original location. Expand
-the line range when it can change the answer. Matching text in comments or
-strings does not establish a call. Resolve duplicate names using path and
-lexical scope, preserving the symbol ID and content hash.
-`body_text`/`indexed_text` with `confidence=exact` establishes literal text;
-`whyMatch` identifies that basis. It does not establish a semantic call target.
+Rust links EmmyLua parser/analysis libraries directly. Bounded native workers
+and optional sessions own analysis, cancellation and resource retirement; there
+is no requirement to install or start LuaLS for this candidate. Structural
+mapping, Lua 5.1 `luac -p` compilation and Emmy semantic analysis remain separate
+evidence. Never execute studied Lua or repository configuration. Preserve the
+actual engine identity, source/environment pins, original locations, captures,
+coverage, truncation and unresolved edges returned by each command.
 
-Treat query coverage and truncation as separate from transport success. A
-bounded relation preview is not a complete caller list.
-An exact declaration can be fully located while an attached relation preview
-makes the overall result partial. Read `matchCoverage` and
-`relationPreviewTruncated` separately; neither partial relations nor an
-unavailable refs path invalidates an original signature that was actually read.
-Use a returned result cursor only
-with the same snapshot, term, topic and budget; request another capability only
-if it exists in the selected CLI. When a needed profile is unavailable, retain
-the useful static fact and report that precise gap. Do not infer absence from
-partial results or fabricate semantic navigation.
+## Open acceptance gaps
 
-The result's `analysis`, `structure`, `syntaxCompilation` and `semantic`
-describe different evidence. tree-sitter parses structure and static aliases;
-the bundled `luac -p` checks Lua 5.1 syntax; LuaLS navigation is semantic only
-when an actual verified server ran with a fixed client API environment.
-The candidate's incomplete environment or semantic profiles remain explicit.
+- The `live doctor` and top-level selected-target diagnostics, including repair
+  and startup recovery, still require implementation/parity evidence. Use the
+  [startup contract](live-startup.md) as the target; missing diagnostics never
+  authorize raw keys, manual claim edits or another transport.
+- `source batch` still requires the full fixed-Go request/file limits, ordered
+  query/refs/context results, shared preparation, deadlines and error behavior.
+  Its documented workflow remains required; a missing handler does not make
+  the batch contract optional or authorize a fabricated successful batch.
+- Source full-repository query, refs, context, flow, validation, worker/session
+  lifecycle and output quality are not yet accepted. Small fixtures and command
+  listings cannot establish correctness, complete coverage or performance.
+  In particular, the native session's current idle bound differs from Go's
+  required 60 seconds; lifetime/batch limits also need parity evidence.
+- An independent agent must exercise this Skill against the real candidate CLI
+  with fixed original sources and retain the actual call/output trail. The
+  author and a static reference check cannot provide that acceptance.
+- Real-game or user-assisted activation, input, recovery and client coverage
+  remain unverified and are tested only after independent offline/automated
+  Windows checks. Source success and installed slot files do not establish
+  live readiness or authorize game tests.
 
-An inspect capture completes the requested range; check first/last/total lines
-before claiming whole-file reading. `result.blob` identifies full original file
-bytes, while the CAP blob contains the inspection JSON and proof. Verify that
-CAP for capture integrity, and read further original bytes when needed.
-Finish with the concrete answer, fixed commit/path/lines and relevant
-capture. State uncertainty only when it affects the answer. Source evidence
-does not establish which revision a running client loaded.
+For source research, keep the existing snapshot and use the ordinary
+[bounded recovery](source-preparation.md#recover-without-changing-the-revision).
+A query miss is not permission to replace the pin with guessed GitHub raw URLs.
+When another capability is unavailable, report only the gap that affects the
+answer; do not discard a signature or original source location already read.

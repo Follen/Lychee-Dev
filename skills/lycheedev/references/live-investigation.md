@@ -6,16 +6,24 @@ observation establishes what happened on its selected client and conditions.
 
 Start with retained state: status/results for an existing CON, [recovery](live-recovery.md)
 for unfinished work, or select/connect below for a new task. Reuse a matching
-idle CON. Read [startup](live-startup.md) when activation or installation is needed.
+idle CON. For activation, missing readiness or installation problems, use the
+[doctor/startup workflow](live-startup.md); diagnosis itself sends no input.
 Use [retained errors](error-diagnosis.md) or [performance measurement](runtime-investigations.md)
 when they answer the question; write a [probe](live-probes.md) only for missing evidence.
 
-Native 3.1 uses a build-bound Lua root and the named public Mailbox, with a
-matching clean 200-slot installation. The CLI validates the current process,
+Lycheedev mailbox protocol v1 uses runtime instruction matching and RIP-relative
+displacement decoding to locate the Lua root and named public Mailbox, with a
+matching clean 500-slot installation. The CLI validates the current process,
 typed path, publication, owner/fence, challenge and exact result. Old native
-wire/identity is rejected. Unsupported code/layout, ambiguity or read gaps
-fail closed; they do not invoke a heap scanner or reuse another build's RVA.
-`--no-cache` follows this same path. Raw address research is a separate task.
+wire/identity is rejected. Forever scans readable module code, retains short-read
+bytes, decodes RIP targets and deduplicates roots before Lua/Mailbox validation.
+Root evidence records coverage gaps: a successful lookup with `scanComplete=false`
+does not establish uniqueness across unreadable code. Unsupported code/layout
+or unresolved root ambiguity stops discovery; it never invokes a heap scanner
+or reuses another build's RVA.
+`--no-cache` remains accepted for compatibility; both forms use this same
+current guarded lookup. Historical CLI versions require their own contract and
+implementation evidence. Raw address research is a separate task.
 
 ## Select and connect
 

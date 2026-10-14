@@ -22,12 +22,13 @@ state, original locations and coverage: confirmed semantic resolution, static
 candidates and unknown edges have different evidentiary strength. Generated API
 declarations describe a contract; they are not necessarily implementation bodies.
 
-The CLI attempts its verified bundled LuaLS when needed. For a third-party addon,
+The Rust CLI uses its pinned EmmyLua direct analysis engine when needed.
+For a third-party addon,
 add `--environment <client-pin>` when client API context matters. Preserve both
 source and environment identities; a Retail environment is not a substitute for
 Forever. `--static-only` deliberately limits evidence to structural analysis.
-Missing runtime/environment can leave usable source evidence with semantic
-coverage partial. Neither static inference nor LuaLS types prove runtime behavior.
+Missing engine/environment can leave usable source evidence with semantic
+coverage partial. Neither static inference nor Emmy-inferred types prove runtime behavior.
 
 Inspect `environmentManifest` and coverage to confirm which client definitions
 were actually used. When the research source itself is `wow-ui-source`, that
@@ -42,7 +43,7 @@ snapshot, symbol/query, environment, analysis options and budgets on continuatio
 An ending page does not erase missing earlier pages or unresolved dynamic edges.
 To change direction, depth, flow mode or excerpt budgets, start without the old
 cursor. Add `--session-reuse` only for repeated semantic work as described in
-[source-research.md](source-research.md#optional-luals-session-reuse); it does not
+[source-research.md](source-research.md#optional-native-session-reuse); it does not
 make a cursor portable or strengthen a relation's evidence state.
 
 For context, `--max-lines`, `--max-bytes`, `--limit` and `--depth` bound different

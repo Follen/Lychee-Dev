@@ -113,12 +113,13 @@ jobs:
           go build -tags lycheedev_channel_lab -o $labExecutable ./tests/channel-live
           if ($LASTEXITCODE -ne 0) { throw 'channel lab build failed' }
       - run: go run ./cmd/lycheedev describe --format json
-      - name: Skill / command-reference consistency (schema vs documented commands)
+      - name: Fixed Skill target and actual Go CLI declaration gates
         run: |
+          # Actual CLI gate remains separate; do not replace it with the target fixture.
           node tools/skill-contract.mjs
           if ($LASTEXITCODE -ne 0) { throw 'skill contract failed' }
-          node tools/skill-commands.mjs --check
-          if ($LASTEXITCODE -ne 0) { throw 'generated skill reference is stale' }
+          node tools/skill-commands.mjs --target --check
+          if ($LASTEXITCODE -ne 0) { throw 'fixed Go target skill reference is stale' }
 
   windows-process:
     runs-on: windows-2025

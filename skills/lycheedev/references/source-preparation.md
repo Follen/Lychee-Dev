@@ -9,6 +9,23 @@ not list tags; missing version text there does not mean the release is absent.
 Read the repository's own track map: do not apply a game product to every addon
 repository. A source track is not proof of installation compatibility.
 
+For `wow-ui-source`, the seven delivery products map to these Git branches:
+
+| Product | Branch |
+| --- | --- |
+| `retail` | `live` |
+| `classic` | `classic` |
+| `classic-era` | `classic_era` |
+| `titan` | `classic_titan` |
+| `forever-asia-beta`, `forever-cn-beta` | `forever` |
+| `anniversary` | `classic_anniversary` |
+
+The beta folder `_classic_beta_` does not imply the old Git branch `classic_beta`.
+The legacy family-wide `forever` source pin can accompany either beta's Data
+pin; regional source pins retain their exact delivery identity. Data build
+configurations and client runtime verification remain separate even when the
+UI source commit is shared.
+
 Initialize a new Toolkit home with `lycheedev init` before syncing; an empty
 directory alone is not a workspace. Reuse an initialized `--home` when available.
 Use that same home for preparation and subsequent pin reads; a pin ID does not
@@ -24,8 +41,12 @@ lycheedev source sync --source <catalog-key> --product <repository-track> --ref 
 commit or full `refs/heads/...` / `refs/tags/...` ref. Omission observes the selected
 track's current branch; use that only when the request allows current source.
 For a named release without an exact ref, establish its tag/commit from repository
-evidence. Ask only if that mapping remains unavailable or ambiguous. Never guess
-a tag, silently use latest, or replace an unavailable exact revision with a branch.
+evidence already retained or available through the Toolkit. If the installed CLI
+lacks the needed tag/ref discovery capability, use verified external repository
+metadata under the [source routing rules](source-research.md#route-source-evidence),
+then return the resolved ref to `source sync`. Ask only if the mapping remains
+unavailable or ambiguous. Never guess a tag, silently use latest, or replace an
+unavailable exact revision with a branch.
 
 Carry the returned fixed pin and exact commit between calls. Preserve requested
 version/tag, repository identity and parser revision; a tag is a traceable label,
@@ -46,7 +67,7 @@ when the operation needs them; raw file inspection reads fixed Git content direc
 | Missing Git, source objects or preparation failure | Address the named prerequisite and retry the same fixed source; do not manually rewrite managed worktrees |
 | Integrity failure | Preserve evidence and diagnose changed/corrupt bytes; do not bypass verification or delete caches blindly |
 | Syntax diagnostics / partial map | Inspect readable original files and retain the gaps; unparsed does not mean absent |
-| Missing LuaLS or client environment | Continue original-source research with partial semantic coverage; see [source-relations.md](source-relations.md) |
+| Missing Emmy engine or client environment | Continue original-source research with partial semantic coverage; see [source-relations.md](source-relations.md) |
 | Invalid cursor | Restore the originating command and scope to continue, or start without a cursor for the changed scope; do not merge those page sets |
 | Resource budget | Narrow to the part needed by the question; retain omitted scope, not a claim of complete investigation |
 

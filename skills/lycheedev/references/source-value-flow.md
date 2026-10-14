@@ -16,7 +16,7 @@ An API marker can establish a possible source; it alone does not prove that the
 reported call produced a secret value or that the consuming operation forbids it.
 
 Use the installed capabilities reported by `describe --format json`. Query and
-inspect can support a source-based explanation; inferred calls and LuaLS types
+inspect can support a source-based explanation; inferred calls and Emmy types
 alone are not a verified value-flow analysis. Request `source context --flow`
 only for a concrete value/operation question. Interpret returned steps,
 conditions, rule identity and unknown boundaries; do not claim a proven

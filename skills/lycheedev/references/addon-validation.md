@@ -79,8 +79,9 @@ validation fields above are not matrix fields. Matrix `valid: true` can coexist
 with unresolved coverage, so retain each target's gaps rather than declaring all
 clients complete from the aggregate result.
 
-Use `--semantic` only when LuaLS diagnostics will answer the question. The CLI
-verifies the bundled runtime before use; a missing tool is a capability gap,
+Use `--semantic` only when Emmy diagnostics will answer the question. The CLI
+uses the pinned direct analysis libraries and verified input/tool identities;
+a missing engine or required tool is a capability gap,
 not a reason to replace the fixed source. If semantic setup blocks the command,
 run the same validation without `--semantic`, `--environment` or `--release`
 to obtain the ordinary static result, retaining the semantic failure separately.
@@ -96,7 +97,7 @@ the semantic matrix, or separate single validations when distinct third-party
 source/environment pairs are required.
 Semantic results include registered captures for the
 checked inputs, generated definitions, configuration and raw report. Verify
-their IDs when preserving or comparing evidence. LuaLS diagnostics and a clean
+their IDs when preserving or comparing evidence. Emmy diagnostics and a clean
 static check do not prove secret-value safety or secure execution taint.
 Single validation with `--semantic` keeps `complete: false` by design even when
 diagnostics pass; distinguish that boundary from a concrete missing prerequisite.

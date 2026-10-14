@@ -50,7 +50,7 @@ select a candidate. Keep the owner's existing registry-channel policy separate
 from installation; an update task is not a release-promotion request.
 
 The launcher verifies the pinned package,
-checks all targets, replaces the CLI (including its bundled LuaLS), then applies
+checks all targets, replaces the CLI (including its pinned analysis engine and tools), then applies
 that release's addon and Skill through native delivery. No running native process
 holds the old executable during npm replacement. Successful replacement removes
 old managed files; interrupted transactions retain recovery data. Retry with the
@@ -96,17 +96,19 @@ running client loaded the release, that the addon is enabled, or that live
 input is available. Installation/update/removal must not be used to import old
 task definitions, queue state, bindings, or SavedVariables into a new run.
 
-The complete CLI release carries its own pinned LuaLS runtime for source
-semantics. Verify the release inventory through the normal installer and
-`doctor`; do not ask the user to install a global language server. Addon file
-installation uses the lightweight TOC/XML/Lua checker and does not require Git
-or LuaLS on the target machine.
+The Rust CLI carries pinned EmmyLua direct analysis libraries/native workers
+for source semantics, rather than a bundled LuaLS server. Verify the selected
+release inventory and actual diagnostic capabilities; the candidate diagnostics
+gap is listed in [candidate boundaries](source-candidate.md). Do not ask the
+user to install a global language server. Addon file installation uses the
+lightweight TOC/XML/Lua checker and does not require Git or a language server
+on the target machine.
 
 Before updating a managed installation, finish current operations and disconnect
 your own compatible native CON connections. The installer refuses unresolved
 ownership; do not clear a foreign project's claim. Deploy through the managed
 installer, then activate the selected process using the startup workflow. Native
-3.1 uses the named Mailbox, slot-v3 and 200 LoadOnDemand slot addons; all managed
+3.2 development uses Lycheedev mailbox protocol v1 and 500 LoadOnDemand slot addons; all managed
 files and receipts must match the selected CLI release. An installed CLI or Skill
 does not update an already running client, and a disk-only result is not live
 readiness.
@@ -114,8 +116,8 @@ readiness.
 An inert older managed installation can be replaced using its installation
 receipt. This is filesystem migration, not protocol compatibility: the 3.1 driver
 rejects old wire, native identities and channel-v1 journals, including 64-slot
-connections. Preserve those records and unresolved reservations for recovery with
-their matching older CLI in the owning task. Do not ask the new driver to resume
+connections. Preserve those records and unresolved reservations for diagnosis in
+the owning task. Do not ask the new driver to resume
 them, rewrite their schema or delete their claims to permit installation. With multiple
 instances, activate and verify each authorized PID after the shared installation
 is updated. If the runtime reports `restart_required` because newly installed
@@ -125,3 +127,9 @@ If the authorized task includes using the running client, follow
 bridge session when the addon is not running; do not require that session as
 the prerequisite for its own first activation. Installation alone does not
 authorize a game restart or a switch of character.
+
+The saved update inventory remembers discovery locations. Default `update`
+selects locations still installed and original targets with an interrupted
+replacement journal; removing a managed target does not request its later
+reinstallation. Explicit `--path`, `--installation`, and a retained npm
+transaction continue to select their exact targets, including absent ones.
