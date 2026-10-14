@@ -762,7 +762,7 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R3-04 · 中 · Windows Skill 的 npm 全局 prefix 查找无法执行
 
-- **本轮状态：代码已修复；Windows 原生回归待本次 CI，Linux 未计作通过。**
+- **本轮状态：代码已修复；Windows 原生回归已由本次 CI 通过；Linux 跳过未计作通过。**
 - 修复与正式验证：按 PATH 中 npm.cmd 位置解析 npm-cli.js，以 Node 和分离参数查询全局 prefix，不经 shell。正式回归：[skill-launcher.test.mjs](../tools/skill-launcher.test.mjs) 的自定义 prefix 不在 PATH、参数与退出码测试。
 
 - 证据：[Skill 启动器 lycheedev.mjs:26–33](../skills/lycheedev/scripts/lycheedev.mjs#L26)、[实际回退入口:45](../skills/lycheedev/scripts/lycheedev.mjs#L45)、[现有启动器测试](../tools/skill-launcher.test.mjs)。
@@ -835,7 +835,7 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R4-03 · 中 · doctor 首次升级旧版受管插件时，默认归档父目录不存在
 
-- **本轮状态：代码已修复；正式 Windows 磁盘回归待本次 CI；此缺陷不依赖游戏验证。**
+- **本轮状态：代码已修复；正式 Windows 磁盘回归已由本次 CI 通过；此缺陷不依赖游戏验证。**
 - 修复与正式验证：仅默认归档路径由 doctor 创建其管理的 repairs 父目录，不提前创建最终 archive。正式回归：[live_doctor_windows_test.go](../internal/command/live_doctor_windows_test.go) 的 TestLiveDoctorUpgradeCreatesDefaultArchiveParent，真实安装/升级后在 PID=0 的安全激活边界停止，无进程或输入操作。
 
 - 证据：[live_doctor_windows.go:112–116](../internal/command/live_doctor_windows.go#L112)、[UpgradeInstallation 的路径解析:43](../internal/delivery/upgrade.go#L43)、[installationDestination:120](../internal/delivery/install.go#L120)。
@@ -872,7 +872,7 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R4-06 · 中 · SQL 标准输入等待不受整个查询超时控制
 
-- **本轮状态：代码已修复；Linux 公共 Execute、真实继承管道、取消/期限/EOF/复用回归通过；Windows 路径待本次 CI。**
+- **本轮状态：代码已修复；Linux 公共 Execute、真实继承管道、取消/期限/EOF/复用回归通过；Windows 路径及完整 Windows Go/race 套件也通过本次 CI。**
 - 修复与正式验证：同一查询 context 控制 stdin；Unix 使用自有非阻塞描述符并还原共享标志，Windows 在固定线程取消同步/重叠 I/O 并等待取消任务退出，保留调用者 stdin。正式回归：[sql_stdin_test.go](../internal/command/sql_stdin_test.go) 同时覆盖已经写入 SQL 但未 EOF 的生产触发路径与普通文件输入；期限/取消仍返回 5/command.deadline、7/command.cancelled。
 
 - 证据：[整个查询的超时合同 command_contract.go:331](../internal/command/command_contract.go#L331)、[创建期限 entry.go:173–180](../internal/command/entry.go#L173)、[公开调用:310](../internal/command/entry.go#L310)、[阻塞读取 query.go:213–214](../internal/command/query.go#L213)。
@@ -916,6 +916,19 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 - 13 项确认问题的代码修复和正式回归已加入；旧 42 项维持基线，3 项候选保持候选，不因合成行为或平台缺失扩大定性。
 - 额外修复既有 Windows CI 打包 smoke 的失效输入：不再读取已退役的 `addon/Bridge/Definitions.lua`，改为复用当前 TOC/Bindings 资源检查；正式 Node 回归覆盖 Native Mailbox load graph。这是交付验证修复，不计入 13 项。
-- 当前代码的本地整套检查及本次提交的 Windows CI 状态见 [handover.md](../handover.md)。历史主批次/审计结果不代替本轮验证，交叉编译和跳过不计作原生运行通过。
+- 修复提交 `81ccdd5b22ddb42991b60ecba12415a4a3b24f15` 的 [Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38528396047) 全部通过：windows-contract（Lua 必需完整 Go 套件）、windows-process、windows-addon、windows-package、race、ci-required。本地结果及可选环境限制见 [handover.md](../handover.md)。历史主批次/审计结果不代替本轮验证，交叉编译和跳过不计作原生运行通过。
 - R3-01、R3-06、R4-01、R4-04、R4-07 保留“待实机验证”；上方各条目已列前置条件、最小步骤、预期，实机结果留空。本轮没有连接游戏、发送按键、部署游戏目录或操作用户电脑。
 - 只提交推送同一草稿 PR #13；不合并、不发布、不更改发行版本或 npm 标签，仍为 3.1.2 / next / latest=2.5.1。
+
+
+## 后续循环审计：R5 起
+
+按追加任务继续对架构、实际 bug、死代码、Skill 编排以及有明确收益且可验证的架构优化开展至少三轮独立复审，每轮使用不同审计者；每轮确认可离线处理的问题后实施、验证并推送同一草稿 PR，再交下一轮复审。至少三轮完成后，只有独立复审不再发现可离线修复项才结束；候选和仅需实机的项分别记录，不声称所有未知问题清零。
+
+| 轮次 | 基线 | 状态 | 当前结果 |
+| --- | --- | --- | --- |
+| R5 | `81ccdd5`，R3/R4 修复已通过 Windows CI | 独立审计中 | 待证据核实，不预先宣称无问题 |
+| R6 | R5 后的最新修复提交 | 待启动，另一个审计者 | |
+| R7 | R6 后的最新修复提交 | 待启动，另一个审计者 | |
+
+新发现的仅实机问题只记录前置、最小复验步骤、预期与空白实机结果，不操作游戏、不作无离线证据的修复；已有 R3/R4 实机待办保持上方状态。

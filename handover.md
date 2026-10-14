@@ -7,7 +7,8 @@
 - [PR #13 · fix-3.2.0](https://github.com/Follen/Lychee-Dev/pull/13)，分支 `codex/fix-3.2.0`，目标 `main`，保留草稿。
 - 本轮从最新 head `c772fc1868330a7335be9676bf3fe28af30fda9b` 接手。前一批 42 项修复保持基线，不重复全仓审计。
 - R3/R4 的 **13 项确认问题代码已修复**，已加入正式测试；**3 项候选仍为候选**。逐项证据、状态和复验见 [审计报告](docs/Clean-repo-2026-10-14.md#本轮-r3r4-修复交付)。
-- 用户授权提交、推送同一分支并更新 PR；没有合并、发布或游戏操作。本轮未连接用户电脑/游戏、未发键、未部署游戏目录。
+- 用户追加至少三轮、每轮不同审计者的架构/bug/死代码/Skill 编排复审，并包含有明确收益、可验证的架构优化；持续审计→修复→验证→提交推送，直到独立复审不再发现可离线修复项。仅实机的新问题只记录，不代替用户操作游戏。
+- 用户授权提交、推送同一分支并更新 PR，后续结果只更新 PR；没有合并、发布或游戏操作。本轮未连接用户电脑/游戏、未发键、未部署游戏目录。
 - `3.2.0` 仍是开发基线；发行源 `3.1.2`、渠道 `next`、`latest=2.5.1` 均未改变。
 
 ## 已完成代码与协作边界
@@ -29,7 +30,8 @@
 - 全仓 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 已在 Linux 执行（以 JSON 记录结果）。结果为 **30 个测试包通过、command 1 包失败**，另 4 包无测试；28 个 test/subtest skip 事件（含 5 个只供子进程调用的 helper），均未计为通过。command 的 3 项 Linux 平台失败在接手基线 overlay 上原样复现，未抑制：Native Live 参数检查两项需要 Windows；Source prune 的 LuaLS broker 在非 Windows 返回 unavailable。
 - Node tools：72 项中 66 通过、6 项 Windows 专属跳过、0 失败。合并运行 npm native launcher 时另有 1 通过、4 项因 Linux unsupported-platform 失败，不能称为 Windows 通过。
 - 版本检查仍为 3.1.2；Skill 合同 84 条命令 / 220 个引用 / 0 违规，生成命令目录与 import 合同通过。Windows command/channel 测试已交叉编译，**只计编译**。
-- Windows 原生验证：待本次提交的既有 `toolkit foundation` CI。须检查同一代码提交的 windows-contract（Lua 必需整套）、windows-process、windows-addon、windows-package、race 和 ci-required；不能沿用 c772fc18 的旧检查。旧 head 的 windows-package 因读取退役文件失败，本轮已修该 smoke。
+- **Windows 原生验证通过**：代码提交 [`81ccdd5`](https://github.com/Follen/Lychee-Dev/commit/81ccdd5b22ddb42991b60ecba12415a4a3b24f15) 的 [toolkit foundation CI](https://github.com/Follen/Lychee-Dev/actions/runs/38528396047)，windows-contract、windows-process、windows-addon、windows-package、race、ci-required 全为 success。明确设置 Lua 5.1 路径和 REQUIRED=1 的完整指定 Go 套件通过（31 个测试包）；Windows npm/doctor/stdin、OS locks、真实 tgz/隔离安装均包含其中。旧打包 smoke 阻塞已消除，不沿用旧 head 结果。
+- Windows Node tools 为 71 通过 / 1 个未提供 archive 的可选跳过；npm launcher 5 项通过。该 pinned archive 检查已在本地固定输入下通过，仍不把 Windows 跳过计为通过。
 - 固定真实 LuaLS/broker/安装包语义、外部 API 文档/CASC oracle/图像样本及显式游戏安装等可选测试未在此 Linux 环境执行；跳过不计作通过。七产品旧实机矩阵见 [todo.md](todo.md)，不扩展成本轮验收。
 
 ## 待实机验证
@@ -56,8 +58,9 @@ R3-04、R3-05、R4-02、R4-03、R4-06 的 Windows 宿主验证与上述游戏验
 
 ## 下一步与交付边界
 
-1. 本地验证已完成并如实记录；提交推送同分支，让既有 Windows CI 执行当前修改，修复本轮引入的实际失败。
-2. 确认当前提交的 Windows 检查终态，更新此交接、审计状态与草稿 PR 描述；不合并、不发布、不更改版本或 npm 标签。
-3. 后续本机任务仅处理上述五项待实机验收与既有七产品矩阵；三项候选有新合同/真实证据再定性。
+1. R3/R4 修复提交 `81ccdd5` 已推送并通过当前 Windows 全套 CI；本次文档更新只补齐其真实验证结果，不改变产品代码。PR 保留草稿。
+2. **R5 正在独立审计**，以 `81ccdd5` 产品代码为基线；R6/R7 将各换新审计者，基于前一轮修复后的最新代码。协调者继续统一维护本文件、审计报告和 todo；审计者不并发写共享文档。
+3. 将确认的离线问题和有明确收益的架构优化直接修复、加正式回归、按指南验证并推送同一 PR；至少三轮后仍有离线待修则继续，直到独立复审无新增可操作离线项。候选不当作确认缺陷，实机专属项只记复验步骤并留空结果。
+4. 新代码改变后重新验证受影响输入和完整 Lua 必需 Go 套件，核实当前代码提交 CI；不合并、不发布、不更改发行版本/npm 标签。五项现有实机待办及七产品矩阵仍留给后续本机任务。
 
 临时内容只在忽略的 `.tmp/pr13/`，结束后清理本轮产物；不触碰任何用户项目、未解决恢复记录或保留的 Rust worktree。
