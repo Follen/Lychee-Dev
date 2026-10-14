@@ -17,7 +17,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/records/relational"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
-	"image"
 	"io"
 	"os"
 	"path/filepath"
@@ -63,19 +62,14 @@ type Options struct {
 	tableHash, afterIndex                *uint32
 	dataRegion, locale, definitionRef    string
 	session                              string
-	account                              string
 	probe, request, name                 string
 	budgetSeconds                        int
 	dataTimeoutSeconds                   int
 	waitSeconds                          int
-	noCache                              bool
 	recoveryPolicy                       string
 	includeRemoved                       bool
 	pid                                  uint32
 	character, realm                     string
-	wakeBinding                          string
-	passive                              bool
-	region                               image.Rectangle
 	release                              string
 	output                               string
 	overwrite                            bool
@@ -500,7 +494,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				if err != nil {
 					break
 				}
-				request := live.DiscoveryRequest{Passive: true}
+				request := live.DiscoveryRequest{}
 				if opts.installation != "" {
 					request.Roots = []string{opts.installation}
 				}
@@ -966,9 +960,9 @@ func parseOptions(args []string) (Options, error) {
 			case "--stdin":
 				opts.stdin = true
 			case "--passive":
-				opts.passive = true
+				// Discovery is always passive; this flag selects no separate mode.
 			case "--no-cache":
-				opts.noCache = true
+				// Compatibility flag: native reads always use the same guarded lookup.
 			case "--semantic":
 				opts.semantic = true
 			case "--session-reuse":
@@ -1091,14 +1085,10 @@ func parseOptions(args []string) (Options, error) {
 			opts.ids = value
 		case "--session":
 			opts.session = value
-		case "--account":
-			opts.account = value
 		case "--probe":
 			opts.probe = value
 		case "--request":
 			opts.request = value
-		case "--wake-binding":
-			opts.wakeBinding = value
 		case "--budget-seconds":
 			n, err := strconv.Atoi(value)
 			if err != nil || n < 1 || n > 120 {
@@ -1117,27 +1107,6 @@ func parseOptions(args []string) (Options, error) {
 			opts.realm = value
 		case "--region":
 			opts.dataRegion = value
-		case "--capture-area":
-			if value == "window" {
-				opts.region = desktop.WholeWindowCapture()
-				break
-			}
-			parts := strings.Split(value, ",")
-			if len(parts) != 4 {
-				return opts, errors.New("--capture-area requires window or x,y,width,height")
-			}
-			var values [4]int
-			for i, part := range parts {
-				n, err := strconv.ParseUint(part, 10, 15)
-				if err != nil {
-					return opts, errors.New("invalid --capture-area")
-				}
-				values[i] = int(n)
-			}
-			opts.region = image.Rectangle{Min: image.Pt(values[0], values[1]), Max: image.Pt(values[0]+values[2], values[1]+values[3])}
-			if opts.region.Empty() || values[2] > 4096 || values[3] > 4096 || opts.region.Max.X > 16384 || opts.region.Max.Y > 16384 {
-				return opts, errors.New("invalid --capture-area bounds")
-			}
 		case "--locale":
 			opts.locale = value
 		case "--definitions":

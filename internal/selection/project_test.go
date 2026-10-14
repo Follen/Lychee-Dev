@@ -162,8 +162,8 @@ func TestProjectAcceptsForeverFamilySourceAndRegionalData(t *testing.T) {
 		if err != nil || got.Lock.Selection.ID != pin.ID {
 			t.Fatalf("status: %+v %v", got, err)
 		}
-		selected, err := ResolveIntent(ctx, store.Root(), IntentRequest{Project: dir})
-		if err != nil || selected.Pin.ID != pin.ID {
+		selected, err := LoadProjectSelection(ctx, store.Root(), dir)
+		if err != nil || selected.Lock == nil || selected.Lock.Selection.ID != pin.ID {
 			t.Fatalf("selection: %+v %v", selected, err)
 		}
 	}

@@ -46,8 +46,7 @@ type WagoHotfix struct {
 	Budget   HotfixFetchBudget
 }
 
-// WagoHotfixRequest is the use-case request for QueryWagoHotfix. Fallback is
-// consulted only per the documented composition rules and is always reported.
+// WagoHotfixRequest is the explicit-source request for QueryWagoHotfix.
 type WagoHotfixRequest struct {
 	Query    HotfixQuery
 	BaseURL  string
@@ -56,7 +55,6 @@ type WagoHotfixRequest struct {
 	MaxPages int
 	Budget   HotfixFetchBudget
 	Parent   string
-	Fallback *SnapshotHotfix
 }
 
 type wagoWalkPage struct {
@@ -589,8 +587,8 @@ func applyWagoDecode(records []HotfixRecord, definition schema.Definition) error
 	return nil
 }
 
-// QueryWagoHotfix runs the wago use case: optional documented fallback
-// composition, a pinned ChangePin-derived set and an archived result capture.
+// QueryWagoHotfix queries the explicit Wago source, pins its ChangePin-derived
+// set and archives the result capture.
 func QueryWagoHotfix(ctx context.Context, root string, request WagoHotfixRequest) (RemoteHotfixResult, error) {
 	provider := &WagoHotfix{
 		Root:     root,
@@ -600,11 +598,7 @@ func QueryWagoHotfix(ctx context.Context, root string, request WagoHotfixRequest
 		MaxPages: request.MaxPages,
 		Budget:   request.Budget,
 	}
-	var run HotfixProvider = provider
-	if request.Fallback != nil {
-		run = HotfixFallback{Primary: provider, Fallback: *request.Fallback}
-	}
-	result, err := run.QueryHotfix(ctx, request.Query)
+	result, err := provider.QueryHotfix(ctx, request.Query)
 	if err != nil {
 		return RemoteHotfixResult{}, err
 	}

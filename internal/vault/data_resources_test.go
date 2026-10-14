@@ -41,7 +41,7 @@ func TestDataResourcesCapacityCancellationAndMeasurement(t *testing.T) {
 	if err := second.Close(); err != nil {
 		t.Fatal(err)
 	}
-	measure, err := store.AcquireDataResources(WithDataResourcePolicy(context.Background(), DataMeasurement), DataOrdinary)
+	measure, err := store.AcquireDataResources(context.Background(), DataMeasurement)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ export const offlineCases = [
   go('BASE-14', 'Native connection close and crash ownership recovery', 'internal/live/channel', 'TestClosedProjectRetiresClaimAfterCrashWithoutGame', 'TestPendingCloseDoesNotInheritBoundCompletion'),
   go('BASE-15', 'Client discovery fixes installation and process identity', 'internal/live', 'TestDiscoveredClientWindowInfersInstallationAndOptionalPID', 'TestDiscoveredClientWindowGameRootUsesPIDWithoutRetargeting', 'TestDiscoveredClientWindowAmbiguityDoesNotUseTitle'),
   go('BASE-16', 'Window ownership survives interrupted admission', 'internal/live/journal', 'TestWindowAdmissionCrashRecovery', 'TestFailedIntentCannotPublishWindowClaim'),
-  go('BASE-17', 'Workbench pages, settings, disabled cost and locale fixtures', 'tests/addon', 'TestWorkbenchLuaSuites', 'TestUnifiedTOCContract'),
+  go('BASE-17', 'Workbench pages, native bindings, disabled cost and locale fixtures', 'tests/addon', 'TestWorkbenchLuaSuites', 'TestUnifiedTOCContract'),
   go('BASE-18', 'Evidence integrity and isolated workspaces', 'internal/vault', 'TestBlobRoundTripAndCorruption', 'TestTwoHomesWithUnicodeAndSpacePathsAreIsolated'),
   go('BASE-19', 'SQL partial coverage, effective hotfix provenance and JSONL completion', 'internal/records/navigatetest', 'TestSQLIdentityLookupPreservesPartialCoverage', 'TestExplicitEffectiveSQLKeepsBaseAndProvenance', 'TestStreamEmitsTypedFrameContract', 'TestStreamErrorFrameEndsStreamWithoutEnd'),
   go('BASE-20', 'SQL aggregation and subquery semantics', 'internal/records/relational', 'TestGroupSubqueries', 'TestAggregateInputSubqueries', 'TestSubqueryCardinality'),
@@ -28,7 +28,7 @@ export const offlineCases = [
 export const liveCases = [];
 
 export const manualCases = [
-  ['REAL-01', 'WGC visual review: font, rounded corners, navigation, settings and activity view'],
+  ['REAL-01', 'Real-client visual review: font, rounded corners, navigation, native bindings and activity view'],
   ['REAL-02', 'Chinese/English, small viewport and UI scaling'],
   ['REAL-03', 'Effective Native bindings, EditBox passthrough, IME and focus readiness'],
   ['REAL-05', 'First installation, upgrade, relogin and combat transitions'],

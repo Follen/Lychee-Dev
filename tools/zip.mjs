@@ -2,7 +2,7 @@
 // tools/release.mjs. Zero dependencies; fixed entry metadata so the same input
 // bytes produce the same archive digest. Read support covers the subset npm and
 // this writer produce (no Zip64, no encryption).
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { inflateRawSync, deflateRawSync } from 'node:zlib';
 
 const CRC_TABLE = (() => {
@@ -132,8 +132,4 @@ export function readZip(buffer) {
     result.set(name, bytes);
   }
   return result;
-}
-
-export async function readZipFile(path) {
-  return readZip(await readFile(path));
 }

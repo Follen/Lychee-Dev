@@ -3,16 +3,9 @@ package live
 import (
 	"context"
 	"errors"
-	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"path/filepath"
 )
-
-func InspectOperation(ctx context.Context, root, id string) (journal.WorkRecord, error) {
-	return vault.ReadWorkspace(ctx, root, func(s *vault.Store, m *vault.Metadata) (journal.WorkRecord, error) {
-		return journal.OpenBook(m).InspectWork(ctx, id)
-	})
-}
 
 // Serializes phases of one operation across processes. Identity validation and
 // intent CAS remain mandatory; this is not the machine-wide game-input lease.

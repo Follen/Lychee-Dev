@@ -3,7 +3,7 @@
 // MTIME so identical input always produces identical archive bytes. Read
 // support covers regular files plus the name-override headers real tar
 // variants emit (ustar prefix splits, GNU long names, PAX path overrides).
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
 const BLOCK = 512;
@@ -144,12 +144,4 @@ export function readTarGz(buffer) {
     result.set(name, Buffer.from(data));
   }
   return result;
-}
-
-/**
- * @param {string} path
- * @returns {Promise<Map<string, Buffer>>}
- */
-export async function readTarGzFile(path) {
-  return readTarGz(await readFile(path));
 }

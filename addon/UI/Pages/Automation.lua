@@ -1,11 +1,9 @@
 local ADDON_NAME, ns = ...
 
--- Automation workbench page: the in-game view and manual execute over the SAME
--- game-side probe machinery the CLI drives (design.md section 12). It lists
--- queue entries and execution history through Modules/AutomationView.lua,
--- which derives every status from ns.ProbeQueue / ns.ProbeRunner /
--- ns.ReportStore. No task registry, no /dev auto grammar and no parallel
--- executor exist here.
+-- Read-only workbench view of current Mailbox execution history.
+-- AutomationView projects AutomationHistory records; execution remains with
+-- the CLI/SlotRuntime path. No task registry, /dev auto grammar or parallel
+-- executor lives here.
 local L = ns.L
 local W = ns.Widgets
 local view = ns.AutomationView
@@ -16,9 +14,8 @@ local ROW_STRIDE = ROW_HEIGHT + ROW_GAP
 local LIST_WIDTH = 256
 local VISIBLE_ROWS = 8
 
--- Mirrors the bridge record vocabulary exposed by the bridge modules (see
--- Modules/AutomationView.lua for the derivation). An unavailable record shows
--- its raw bridge error code instead of a made-up label.
+-- Mirrors AutomationHistory records projected by Modules/AutomationView.lua.
+-- An unavailable record shows its raw bridge error code instead of a label.
 local STATUS_LABELS = {
     queued = "AUTO_STATUS_QUEUED",
     loaded = "AUTO_STATUS_LOADED",

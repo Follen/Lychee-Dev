@@ -6,7 +6,7 @@ import (
 	"context"
 )
 
-func (p *Project) Reload(ctx context.Context, id, request string, cache bool) (ProjectResult, error) {
+func (p *Project) Reload(ctx context.Context, id, request string) (ProjectResult, error) {
 	if err := ValidateRequest(request); err != nil {
 		return ProjectResult{}, err
 	}
@@ -19,7 +19,7 @@ func (p *Project) Reload(ctx context.Context, id, request string, cache bool) (P
 		return presentReload(present(&Driver{State: *prior, Log: p.log(id)}), request), nil
 	}
 	var historic *State
-	result, err := p.drive(ctx, id, cache, func(d *Driver) error {
+	result, err := p.drive(ctx, id, func(d *Driver) error {
 		// Admission can wait behind a different reload. Recheck the whole
 		// request history under the lease, not only the latest request.
 		prior, err := reloadState(p.log(id), request)

@@ -144,8 +144,7 @@ func openFixtureWindowWithStyle(t *testing.T, picture image.Image, style, extend
 			ready <- err
 			return
 		}
-		// Show behind other windows and never activate; WGC must capture even
-		// when the user's foreground application occludes this test surface.
+		// Show behind other windows without activating the input fixture.
 		userLibrary.NewProc("ShowWindow").Call(hwnd, 4)
 		userLibrary.NewProc("SetWindowPos").Call(hwnd, 1, 0, 0, 0, 0, 0x13)
 		userLibrary.NewProc("UpdateWindow").Call(hwnd)

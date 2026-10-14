@@ -20,7 +20,6 @@ const legacyIdentitySchema = "lycheedev.slot.identity.v2"
 var ErrPending = errors.New("live.channel_pending")
 var ErrPublicationPending = errors.Join(ErrPending, errors.New("live.channel_shared_publication_pending"))
 
-var ErrRuntimeChanged = errors.New("live.channel_runtime_changed")
 var ErrReloadRequired = errors.New("live.channel_reload_required")
 var ErrJournalMissing = errors.New("live.channel_journal_missing")
 var ErrCleanupReloadRequired = errors.New("live.channel_cleanup_reload_required")

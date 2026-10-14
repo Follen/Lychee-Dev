@@ -58,8 +58,6 @@ type DiscoveryRequest struct {
 	Roots        []string
 	PID          uint32
 	Installation string
-	WakeBinding  string
-	Passive      bool
 }
 
 // DiscoverCandidates passively lists installations, fixed window identities and ownership.

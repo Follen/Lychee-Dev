@@ -204,7 +204,7 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 			if fault == "compile_error" {
 				code = "return { broken ="
 			}
-			if err = d.PrepareOperation(ctx, code, 10, "observation"); err != nil {
+			if err = d.PrepareRequest(ctx, "protocol-recovery", code, 10, "observation"); err != nil {
 				t.Fatal(err)
 			}
 			if err = d.Run(ctx); err != nil {

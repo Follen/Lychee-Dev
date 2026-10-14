@@ -60,7 +60,7 @@ func (n *Native) Observe(ctx context.Context, q ObservationQuery) (Observation, 
 	return n.inputAttemptProbe.observe(ctx, n, q, observation, err, uptimeMillis())
 }
 
-func OpenNative(ctx context.Context, target desktop.WindowIdentity, parent, version, _ string, _ bool) (*Native, error) {
+func OpenNative(ctx context.Context, target desktop.WindowIdentity, parent, version string) (*Native, error) {
 	process, err := memory.Open(target.ProcessID, target.ProcessStartedAt, target.Executable)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func OpenNative(ctx context.Context, target desktop.WindowIdentity, parent, vers
 		return nil, err
 	}
 	// Address hints do not participate in this protocol. Every read resolves
-	// the current public field through the build-bound root, including cache-off.
+	// the current public field through the build-bound root.
 	return n, nil
 }
 func (n *Native) Close() error {

@@ -266,10 +266,6 @@ func (d *Driver) Connect(ctx context.Context) error {
 	return d.finishTransaction(ctx, func() { d.State.Bound = true })
 }
 
-func (d *Driver) PrepareOperation(ctx context.Context, code string, budget int, policy string) error {
-	return d.PrepareRequest(ctx, "", code, budget, policy)
-}
-
 func (d *Driver) PrepareRequest(ctx context.Context, request, code string, budget int, policy string) error {
 	if d.State.RuntimeEnd != nil {
 		return runtimeRetirementPending()

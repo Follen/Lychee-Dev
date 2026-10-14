@@ -76,7 +76,7 @@ func TestClosedProjectRetiresClaimAfterCrashWithoutGame(t *testing.T) {
 	}
 	// Deliberately skip host retirement to model a crash after the durable close.
 	for n := 0; n < 2; n++ {
-		r, err := p.Disconnect(context.Background(), d.State.ID, false)
+		r, err := p.Disconnect(context.Background(), d.State.ID)
 		if err != nil || !r.Closed {
 			t.Fatalf("%+v %v", r, err)
 		}
@@ -107,7 +107,7 @@ func TestClosingUnknownOperationDoesNotInventCompletion(t *testing.T) {
 	if err := d.Save(ctx, "connection_closed"); err != nil {
 		t.Fatal(err)
 	}
-	r, err := p.Disconnect(ctx, d.State.ID, false)
+	r, err := p.Disconnect(ctx, d.State.ID)
 	if err != nil || !r.Closed || r.Complete || r.ReportState != "unavailable" || r.OperationState != "execution_unknown" {
 		t.Fatalf("close invented business completion: %+v %v", r, err)
 	}
@@ -134,11 +134,11 @@ func TestCompletedRequestRetryNeverTouchesGameOrReplacesLaterOperation(t *testin
 		t.Fatal(err)
 	}
 	second := d.State.Operation.ID
-	r, err := p.Execute(ctx, d.State.ID, "first", "return 1", 5, "opaque", false)
+	r, err := p.Execute(ctx, d.State.ID, "first", "return 1", 5, "opaque")
 	if err != nil || !r.Complete || r.Operation != first {
 		t.Fatalf("%+v %v", r, err)
 	}
-	if _, err = p.Execute(ctx, d.State.ID, "first", "return 9", 5, "opaque", false); err == nil {
+	if _, err = p.Execute(ctx, d.State.ID, "first", "return 9", 5, "opaque"); err == nil {
 		t.Fatal("request key accepted changed code")
 	}
 	loaded, err := Load(d.Log, nil)
@@ -172,7 +172,7 @@ func TestHistoricalReloadRetryDoesNotRepeatAfterLaterReload(t *testing.T) {
 	if err := d.Save(ctx, "second_reload_verified"); err != nil {
 		t.Fatal(err)
 	}
-	r, err := p.Reload(ctx, d.State.ID, "first", false)
+	r, err := p.Reload(ctx, d.State.ID, "first")
 	if err != nil || r.Reload == nil || r.Reload.Request != "first" {
 		t.Fatalf("historical reload touched game: %+v %v", r, err)
 	}
@@ -242,7 +242,7 @@ func TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory(t
 	if err != nil || len(events) != 2 {
 		t.Fatalf("active segment: %d %v", len(events), err)
 	}
-	r, err := p.Execute(ctx, d.State.ID, "first", "return 1", 5, "opaque", false)
+	r, err := p.Execute(ctx, d.State.ID, "first", "return 1", 5, "opaque")
 	if err != nil || r.Operation != first || !r.Complete {
 		t.Fatalf("historical result: %+v %v", r, err)
 	}
@@ -250,7 +250,7 @@ func TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory(t
 	if err = os.Rename(archive, archive+".missing"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.Execute(ctx, d.State.ID, "first", "return 1", 5, "opaque", false); err == nil {
+	if _, err = p.Execute(ctx, d.State.ID, "first", "return 1", 5, "opaque"); err == nil {
 		t.Fatal("lost history allowed replay")
 	}
 	loaded, err := Load(d.Log, nil)
@@ -266,7 +266,7 @@ func TestRepairCloseRetiresOriginalClosedConnection(t *testing.T) {
 	if err := d.Save(context.Background(), "connection_closed"); err != nil {
 		t.Fatal(err)
 	}
-	result, err := p.CloseForRepair(context.Background(), d.State.ID, false)
+	result, err := p.CloseForRepair(context.Background(), d.State.ID)
 	if err != nil || !result.Closed || result.Identity.Release != "2.5.1" {
 		t.Fatalf("old release closure: %+v %v", result, err)
 	}

@@ -363,26 +363,6 @@ func SplitQueries(queries []Query) [][]Query {
 	}
 	return batches
 }
-func (r *Runtime) AnalyzeWorkspaceBatches(ctx context.Context, workspace string, definitions []byte, batches [][]Query) (Analysis, error) {
-	bounded, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	ctx = bounded
-	result := Analysis{Runtime: r.Identity, State: "partial", Results: []QueryResult{}}
-	if len(batches) > 2 {
-		return result, ErrBudget
-	}
-	for _, batch := range batches {
-		if len(batch) > 128 {
-			return result, ErrBudget
-		}
-	}
-	session, err := r.OpenWorkspaceSession(ctx, workspace, definitions)
-	if err != nil {
-		return result, err
-	}
-	defer session.Close()
-	return session.AnalyzeBatches(ctx, batches)
-}
 func (s *WorkspaceSession) AnalyzeBatches(ctx context.Context, batches [][]Query) (Analysis, error) {
 	result := Analysis{Runtime: s.runtime.Identity, State: "complete", Results: []QueryResult{}}
 	if len(batches) > 2 {

@@ -420,9 +420,6 @@ func TestSlotPool200ExpansionSameVersion(t *testing.T) {
 			if _, err := InspectSlots(ctx, parent, pool.Version); err == nil {
 				t.Fatal("200-slot installation admitted for 500-slot runtime")
 			}
-			if err := RepairSlotBootstrap(ctx, parent, pool.Version); err == nil {
-				t.Fatal("bootstrap repair admitted 200-slot installation")
-			}
 			switch mode {
 			case "partial_extension":
 				pool.SourceSchema, pool.Schema = pool.Schema, previousSlotPoolMigrationSchema

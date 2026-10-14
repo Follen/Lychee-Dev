@@ -9,7 +9,7 @@ func TestReceiverBindingsFiniteSetAndFocusedClose(t *testing.T) {
 		valid    bool
 	}{
 		{"defaults", DefaultReceiverBindings(), true},
-		{"slots", SlotReceiverBindings(), true},
+		{"historical slots", ReceiverBindings{"ALT-CTRL-F12", "ALT-CTRL-SHIFT-F12", "ALT-CTRL-["}, true},
 		{"function keys", ReceiverBindings{"ALT-CTRL-F1", "ALT-CTRL-SHIFT-F2", "ALT-CTRL-F3"}, true},
 		{"text key", ReceiverBindings{"ALT-CTRL-A", "ALT-CTRL-SHIFT-]", "ALT-CTRL-["}, false},
 		{"noncanonical", ReceiverBindings{"CTRL-ALT-F1", "ALT-CTRL-SHIFT-]", "ALT-CTRL-["}, false},

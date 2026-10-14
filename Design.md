@@ -15,7 +15,7 @@
 | `internal/live/channel`、`internal/live/memory` | Native 连接、恢复日志、运行时定位和 Mailbox 读取 |
 | `internal/bridge` | Go/Lua 共享信封、记录和协议类型 |
 | `internal/delivery` | 受管安装、升级、槽发布与迁移 |
-| `internal/desktop` | 固定窗口输入和 WGC 捕获 |
+| `internal/desktop` | 固定窗口身份、进程核验与输入 |
 | `internal/evidence`、`internal/vault` | 证据、缓存、预算和持久化 |
 | `addon/` | 启动、兼容层、Live bridge、工作台与共享 UI |
 | `skills/lycheedev/`、`packages/npm/lycheedev/` | 调查编排、启动器和发行资源 |
@@ -105,6 +105,6 @@ INPUT 采样框架独立于 UIParent，使挂机展示隐藏主 UI 时仍可更�
 | 7 | 取消 |
 | 8 | 内部错误 |
 
-项目引用与恢复日志位于 `.lycheedev`，缓存与未完成请求分别管理。缺失来源、覆盖缺口和待清理状态必须保留。实机视觉证据使用 WGC，fixture 结果与真实客户端结果分别记录。
+项目引用与恢复日志位于 `.lycheedev`，缓存与未完成请求分别管理。缺失来源、覆盖缺口和待清理状态必须保留。fixture 结果与真实客户端结果分别记录；历史归档中的图像仅保留读取与校验，不启动捕获。
 
 受管升级先在独立准备目录生成完整 next 与 journal，再发布恢复目录。更新库存记录发现位置；默认更新现存安装和中断 replacement 的原目标，显式路径仍可重新安装已移除的目标。npm 更新使用 Windows 系统命名管道互斥，退出或崩溃释放锁。

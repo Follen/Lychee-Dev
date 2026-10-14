@@ -1,4 +1,4 @@
--- Functional page activation only. Visual quality requires separate WGC review.
+-- Functional page activation only. Visual quality requires separate real-client review.
 local probe = ...
 assert(probe:Async(60))
 local ns = LycheeDevInternal
@@ -7,8 +7,7 @@ assert(ns.Persistence.Bridge() == LycheeToolkitBridgeDB, "wrong_report_scope")
 local timers, results = {}, {}
 local pages = { "runner", "objects", "events", "trace", "diagnostics", "exports", "automation", "about" }
 local function clear()
-    assert(not ns.Receiver.IsActive(), "receiver_active_during_execution")
-    assert(ns.ReceiptView.Current() == nil, "optical_overlay_during_execution")
+    assert(not ns.InputProtection.IsActive(), "input_protected_during_execution")
 end
 clear()
 assert(probe:OnCleanup(function()

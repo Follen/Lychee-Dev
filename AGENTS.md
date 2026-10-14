@@ -49,7 +49,7 @@ Use a focused change and verify its actual risks. Existing contracts belong at t
 - Persist input intent before sending. Recover the original project/CON/request and deadline. Submitted or uncertain input never licenses replay.
 - Read-only doctor diagnoses; doctor --fix uses managed installation and original connection recovery. Without compatible fresh INPUT, first activation needs one manual reload.
 - A verified report and pending cleanup are separate facts. Complete cleanup without discarding the useful report.
-- WGC supplies game-window screenshots. Offline fixtures do not prove game behavior. Keep the current product matrix honest in todo.md.
+- Offline fixtures do not prove game behavior. Keep the current product matrix honest in todo.md.
 
 ## Validation and delivery
 

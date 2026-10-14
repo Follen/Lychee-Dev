@@ -53,7 +53,7 @@ func TestActivationRejectsPriorGenerationsWithoutMigration(t *testing.T) {
 			if _, err := p.activationStatus(d.State.ID); err == nil {
 				t.Fatal("prior activation accepted by status")
 			}
-			if _, err := p.resumeActivation(ctx, d.State.ID, false); err == nil {
+			if _, err := p.resumeActivation(ctx, d.State.ID); err == nil {
 				t.Fatal("prior activation resumed")
 			}
 			after, err := os.ReadFile(p.activationPath(d.State.ID))
@@ -76,7 +76,7 @@ func TestActivationExpiredResumeStopsBeforeNative(t *testing.T) {
 	if err := writeProjectJSON(context.Background(), p.activationPath(d.State.ID), a); err != nil {
 		t.Fatal(err)
 	}
-	r, err := p.resumeActivation(context.Background(), d.State.ID, false)
+	r, err := p.resumeActivation(context.Background(), d.State.ID)
 	if !errors.Is(err, ErrBudgetExhausted) || r.Continuation.Kind != "budget_exhausted" || r.Continuation.RemainingBudgetMS == nil || *r.Continuation.RemainingBudgetMS != 0 {
 		t.Fatal(r, err)
 	}
@@ -98,7 +98,7 @@ func TestActivationActiveDriverHasStructuredContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lease.Close()
-	r, err := p.resumeActivation(ctx, d.State.ID, false)
+	r, err := p.resumeActivation(ctx, d.State.ID)
 	var blocked *BlockedError
 	if !errors.Is(err, ErrPending) || !errors.As(err, &blocked) || r.Continuation.Kind != "wait_active_driver" || r.Continuation.Blocker == nil || r.Continuation.Blocker.Consumer != d.State.ID {
 		t.Fatal(r, err)

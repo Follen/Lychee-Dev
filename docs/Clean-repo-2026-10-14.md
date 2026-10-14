@@ -1463,3 +1463,132 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 | TestInstallationLeaseShortPathSpelling | 当前卷未启用8.3短文件名；未为测试修改宿主策略 |
 
 本批关闭可离线循环：R22独立复核无新增可操作问题，当前原生验证通过。R20现场根因仍未确认，七项客户端整合与WGC特定Windows复验均保留所需环境/步骤/预期，未执行的实际结果留空；不要求立即开游戏。
+
+
+## R23：用户追问WGC必要性后的遗漏更正
+
+### R23-01 · 已确认死代码 · 无生产捕获入口仍保留WGC实现与自维持验证
+
+- 用户指出当前协议已无光学传输，要求核实WGC用途，随后明确“清了，然后审计3轮 死代码”。此前审计依据Design/AGENTS中的截图用途文字，直接进入SDK环境诊断，遗漏了最先核实当前生产消费者；把WGC列为现行产品的待验证义务不成立，现更正。
+- 精确基线3ed74d85中，CaptureFrames仅有两个桌面测试调用，CaptureFramesWithStartupTimeout无消费者；当前CLI没有截图命令或capture-area合同。entry.go遗留case在commandFlag拒绝未登记flag之后，不是独立捕获入口。Native生产入口只建立OpenLuaMailbox并Lookup；evidence bundle读取已有blob，历史display只验证已有PNG，均不启动WGC。
+- 独立交叉核实Windows标签、入口/别名/动态注册及共享符号；捕获实现还有包级windows.NewCallback初始化，不能说未调用时完全零成本。删除范围仅孤立捕获实现、专属测试/SDK fixture与观察CI/tools、失效parser状态和用途文案；共享窗口fixture、窗口身份/输入/进程与历史图像读取保留。
+- 旧SDK/Go失败仍是当时真实结果，原CI artifacts保留；删除无入口代码不等于修好截图，也不再要求用户为它完成实测。Go覆盖分母及专属skip会变化，后续按新提交重新计量，不将删死代码产生的比例变化当新增业务覆盖。
+- 本批清理及受影响回归已完成，随后按顺序开展三个全新独立死代码轮次，每轮固定树、确认问题修复后再进入下一轮。R23消费者核对不冒充这三轮之一。
+
+
+### R23-01 实施与受影响验证
+
+- 已删除审计确认的4实现+5专属Go测试+1 SDK文件、两份观察Node工具及独占CI job；原5项必需作业与汇总保持。共享window fixture仅更正文案，窗口/输入/进程代码、历史PNG与evidence storage未改。两处baseline视觉复验文字改为真实客户端检查，没有取消实际视觉验收。
+- 删除capture-area的无入口Options字段/parser/Windowsguard子句。当前词收集先通过anyFlagSpec拒绝该flag，尚未进入后续commandFlag或旧case；两种语法正式回归固定exit2/原unknown-flag错误及零workspace/native产物。首次新测试错误预期了后层错误文本，已仅修正断言，失败日志与随后通过日志分别保留，不算新增产品bug。
+- Linux build/vet通过，desktop11事件、focused command7事件、live/evidence49事件通过，后者仅1个既有客户端只读skip。Windows/amd64 build、desktop/command vet及两个真实test.exe交叉编译均通过，PE身份已核；没有宣称Windows原生执行。最终完整Lua套件与新提交原生CI待三轮审计修正后执行。
+- workflow正式9项通过；Node工具87项首轮80pass/7skip，固定LuaLS archive重新下载并核manifest SHA后，其release专项19pass/1 Windows-only skip，解决了首轮缺archive的那项skip；最终整合树Node全套仍将重跑。Skill21文件/84命令/228引用0违规，命令目录、版本3.1.2、import合同和baseline5项通过，Lua注释变更文件语法通过。
+- 第一轮R24在清理后的912文件树开始。新测试错误文字修正只改变command_contract_test.go，原freeze及更正版均留存，最终aggregate `1ce5b16899e2c40616fd11811895b9f6c0ce7b9e18e1714cf310aefeb453d953`，其余911文件相同；后续轮次不得把该初始修正或R23核对另算一轮。
+
+
+## R24：WGC清理后的第一轮全新独立死代码审计
+
+- 审计912文件v2冻结树，起终hash一致，未写产品。方法为Go AST跨平台候选枚举后逐项追踪真实CLI/内部消费者、Windows标签/动态注册/生成引用及Lua回调表；出现次数只用于线索，不等于删除依据。本轮不含R23，不提前代替后两轮。
+- 独立实际验证：84条公开CLI路由×两退役flag×inline/separate形式共336次均在词收集拒绝；隔离副本删除三个Lua私有方法后，shell/visual/object-picker-combat/probe-execution×六profile共24次通过。不是完整Go或游戏验证。
+
+| ID | 已确认最小删除组（代码已实施） | 必须保留/重接的真实合同 |
+| --- | --- | --- |
+| R24-01 | 无命令合同的--account/--wake-binding字段、赋值与不可达Windowsguard | 历史Signal.WakeBinding/ReceiverBindings；现有未知flag准入拒绝 |
+| R24-02 | filemeta的InspectFileExistence/InspectFileEncoding及独占类型/helper | ErrFileQuery仍被Reader/demux使用；filemeta_test五个跨测试fixture helper；真实asset reader/export |
+| R24-03 | Source FindSymbols、无TOC目录扫描ValidateLuaDirectory、重复ValidateSourceTOC wrapper | 索引/截断/不可变准备测试迁到当前Search；TOC缺口与capture完整性迁到AssessAddon；Browser.ValidateTOC仍为矩阵消费者 |
+| R24-04 | 无调用的RepairSlotBootstrap及专属测试 | 真实InstallAddon/UpgradeAddon；200→500迁移及旧metadata拒绝/识别 |
+| R24-05 | 孤立ResolveIntent优先级策略及独占类型/error | LoadProjectSelection、ResolveTarget；Source family/Data product及实际CLI显式pin优先合同 |
+| R24-06 | 无调用的SelectRelease及自维持测试 | available列表/region/order与真实prepare历史build unavailable回归 |
+| R24-07 | 无调用的Runtime.AnalyzeWorkspaceBatches wrapper | 实际OpenWorkspaceSession/AnalyzeBatches/SplitQueries；输入上限边界迁到活入口 |
+| R24-08 | PrepareOperation、InspectOperation、WriteJSONLErrorFrame、HotfixStatusFilter、SlotReceiverBindings薄包装 | 跨语言请求、历史abandon/cancel、JSONL错误/终态、真实status解析和历史binding验证继续测试 |
+| R24-09 | 私有Compat.GetPhysicalPixelSize、button.IsConfirmArmed、Workbench.HideTicketPopup | 已核动态page/export注册与probe公开api，三者非公开端点；armed/click/exportController实际状态保持 |
+| R24-10 | 三个无引用error sentinel与DiscoveryRequest.WakeBinding成员 | 已有字符串错误兼容分类、历史同名schema字段保留 |
+
+- 不升级为删除项：测量策略WithDataResourcePolicy/DataMeasurement是否保留测试接口尚需合同决定；target operation引用仍有真实删除阻断消费者；fixture构造器、历史reader、接口动态方法和生成事件目录有有效用途，不能仅因生产调用数少而删除。--passive仍在公开合同，不能擅自取消接受。
+- 本轮先实施上述确认片段并保留或迁移独立测试，build/vet与受影响回归完成后，再固定修正树进入R25。覆盖分母及最终skip只在实际新提交计量，不估算。
+
+
+### R24 实施与受影响验证
+
+- 十组确认片段已按边界删除；有效测试迁至Search及indexed relations、ValidateSourceMatrix/AssessAddon、LoadProjectSelection、WorkspaceSession.AnalyzeBatches、PrepareRequest、当前JSONL帧和真实status parser。五个跨文件filemeta fixture与ErrFileQuery、历史reader、窗口/输入/进程合同保留。迁移测试不以正文命中冒充索引关系，不把相同用例复跑计成新增场景。
+- Source/Data/selection/LuaLS四包正式846 test/subtest pass、12个明确环境/platform skip、0fail，vet通过；最终额外强化index关系断言后，两个索引测试及codebase vet再次通过。delivery168pass/2helper skip、desktop11pass、live20pass/1客户端skip、protocol16pass、addon206事件通过；完整addon使用必需Lua 5.1及全部profile。全局build/vet与Windows/amd64交叉构建通过，不冒称原生执行。
+- channel初次受影响套件296pass/1fail，失败为既有TestRejectedPrepareCapacityConsumesNonceAndKeepsRequest的350ms fixture完成条件，隔离5次3fail/2pass；scratch overlay复用现有capacityReloadPeer后5/5通过。原失败保留，已限定只改此测试的同步点，生产预算不变；最终该用例10/10重复通过。这不是R24十组删除项的新产品缺陷。R6修正的是NextSlot486预判容量的TestAutomaticCapacityReloadContinuesOriginalRequest；本次为485实际拒绝prepare、消费nonce后的另一既有用例，归为R6夹具残留，非重复计算产品问题。
+- 第二次channel全包中容量修正通过，但另有两个未改完成场景触发caller deadline：release恢复350ms，reload_intent5s。隔离三次release为2pass/1fail，已有5s的runtime重绑定两分支均3/3pass；不把重跑成功抹掉原失败，也不推断新的生产问题。仅将自然完成的release场景改用已有5s死锁guard，仍要求nil及完整结果/不重放断言；已有5s用例不扩大时限。此后只定向验证，完整套件在第三轮后执行。
+- 当前整合Node工具81pass/6 Windows-only skip，版本/Skill/目录/import合同通过。单独npm launcher测试在Linux实际1pass/4fail，均先触发现有windows-amd64平台拒绝而无法到达目标断言；保留为平台限制，当前原生Windows结果待提交后验证，不将其称为通过。
+- 两处测试修正后的最终定向三个重复共15事件pass、0fail/skip，channel vet通过；保留前两次全包失败，最终全套不提前标绿。R24本轮确认片段完成，进入第二轮独立复核。
+
+## R25：第二轮全新独立死代码审计
+
+- 在R23/R24修正后912文件冻结树开始，aggregate `08f430ae4b68a71810dd11faa21157d89ad18ced9a52953e8a60f07a4992ac79`；不同的新审计者追踪真实入口、平台标签、动态注册、生成引用、Skill和测试自维持孤岛。仅五份协调者状态文档不纳入冻结。此为第二轮开始身份；最终确认与后续实施结果如下。
+
+### R25 确认边界与实施
+
+- R25-01：HotfixFallback/composeHotfixResults仅由两个旧组合测试与从未赋值的Wago request.Fallback分支维持。当前CLI明确选择来源，不配置此组合。拟移除生产者及专属测试；Wago/Raidbots/local-cache独立查询、cursor身份与历史结果Sources/provenance字段保留。
+- R25-02：addoncheck.Checker/OpenChecker/InspectAddon无生产或测试消费者；当前codebase.Checker直接调用addoncheck.InspectLoad，活路径保留。
+- R25-03：environment.Span及flow.Budget.Deadline无读写，后者json忽略；实际超时由既有context承担，不改预算合同。
+- R25-04：Widgets的CreateSettingsButton/CreateToggle/CreateShortcutButton/SetButtonPrimary无当前UI消费者，仅t_fields部分旧控件断言维持。共享field、返回导航、动画和reduced-motion继续保留。
+- 四份保留的手工baseline探针仍引用已退役Receiver/ReceiptView，ui_activity还触及旧settings/executeButton；作为有文档消费者的陈旧探针核实，不整份判死删除。R25-05经真实ProbeExecution确认四份均先在Receiver缺失失败；改用当前InputProtection.IsActive，活动历史使用MEM-ticket，保持只读automation并核现行wake/reload有效绑定。Diagnostics.SnapshotRecentErrors已核由Windows live bugs生成Lua调用，明确保留。
+
+- 第二轮结束，912文件起终hash及集合完全一致；新审计者的隔离删除副本13个Go测试、30个Lua suite/profile通过。候选DataMeasurement及target-operation fixture写入保留：它们仍覆盖真实OS并发准入和持久引用删除阻断；不凭test-only调用删除有效合同。
+- R25-01/02/03已按最小片段删除，包括仅服务组合分支的HotfixProvider接口；RemoteHotfixResult.Sources/历史provenance、明确各来源和当前InspectLoad/flow期限不改。R25-04/05已删除孤立widget和专属断言，修正四份保留probe及catalog旧settings文字。
+- 正式新增t_baseline_probes.lua直接加载当前完整TOC、启动当前模块，经真实ProbeExecution执行四份文件；验证同步55、准确期望失败、八页、MEM-ticket历史、活动/details及用户自定义有效双键。四probe外来输入lease、活动丢失、绑定覆盖负例均拒绝，timers清理；测试harness仅补GetAlpha读取已有SetAlpha状态。8个受影响fixture×6profile共48/48通过，无skip，基线负对照和原文件保留；不声称实机通过。
+- 全局build/vet通过，catalog正式Node5/5通过；受影响Go四包634事件pass/6环境或平台skip、Source消费者17事件pass，均无fail；Windows/amd64交叉构建通过。固定修正树交全新R26第三轮。
+
+## R26：第三轮全新独立死代码审计
+
+- R25修正与受影响验证完成后冻结913文件，aggregate `1ed466584238d27ffec232f5909b6e1f60d58243e2a652e0572e1d62b0818961`，另一个全新审计者独立追踪生产入口/平台/动态与生成消费者，并复核前两轮删除边界。此为第三轮开始身份；最终确认与最小清理如下，完整套件/原生结果按最终实施树另记。
+
+### R26 最终确认与最小清理
+
+- 第三轮技术审计完成，913文件起终集合和hash完全一致。五组确认项如下，均以实际入口/动态消费者为依据；R23消费者复核不计入用户要求的三轮，三轮为R24、R25、R26，分别来自不同全新审计者。
+
+| ID | 确认删除边界 | 保留合同与验证 |
+| --- | --- | --- |
+| R26-01 | ActivityView空anchor函数、空调用及未用Anchor导出 | 实际frame.anchor布局、弹跳、任务反馈与输入保护保持；只改正相关过时注释 |
+| R26-02 | 中英文各109个已无消费者的旧标签、10个仅由legacy保留测试维持的条目 | 263活键、全部占位符/语言回退；核过八页titleKey、Automation闭合状态/类型映射，无拼接、持久化或Go生成locale调用 |
+| R26-03 | write-only Options.passive、DiscoveryRequest.Passive与赋值 | 公开--passive及显式parser接受保留，发现始终被动；原测试改为带/不带flag的完整Options等价及既有拒绝边界，不新增重复用例 |
+| R26-04 | readTgzFile/readZipFile无消费者wrapper及仅测试使用readTarGzFile | 四个tar断言直接读取原fixture字节后走当前readTarGz，归档格式/完整性/路径测试不删 |
+| R26-05 | WithDataResourcePolicy、私有context key及从未由当前查询设置的override分支 | DataMeasurement与实际OS准入/取消/跨进程测试保持；唯一setter测试直接传现有显式measurement参数 |
+
+- 独立隔离副本实际90项Lua（78 suite/profile和12中英文动态标签）、7项Go、23项Node全通过。没有新确认的前两轮删改回退；保留历史OP/BTP/图像字段、当前窗口/输入/进程及有意义的测试接口。此为审计副本结果，最终实施树整套/原生结果另记。
+- 当前以上五组已实施并冻结；每份语言表109条删除、263条保留赋值逐字相同，原中文/英文/国际回退值已在六profile核对，动态标签检查通过。最终build已通过，其他正式检查进行中。Automation页过时的手动执行/旧队列注释同步改成当前只读历史视图，不另算运行缺陷。
+
+## R27：三轮修正后的独立整合验收
+
+- 用户要求的三轮死代码审计R24/R25/R26均完成，确认项已实施；此处为额外新审阅者的最终整合验收，不替代或重计三轮。最终候选913文件aggregate `f6df71d30978a23f35bdd89d052fa2c839de0c0ceb96042d7d097fe4b43dc717`，核当前生产/Windows/动态消费者、历史读取、正式测试迁移及删除边界。最终完整套件和新head原生CI尚待完成，不提前称交付。
+
+### R27-01：移除当前 Native 的无效 cache 参数链
+
+- 最终独立验收起终913文件hash一致；R23–R26的生产删除边界和迁移断言未发现运行回退。审阅者另以当前Lua执行4项动态标签/locale/probe检查，均通过。
+- 确认链为Options.noCache→Windows命令/doctor→Project/activation/reload→nativeVersion→OpenNative；末端cache path/bool均为忽略参数。PID/创建时间组成的cache路径只传给此末端，实际读取始终OpenLuaMailbox/Lookup，每次核当前根与命名路径，无缓存分支。删除私有存储/传递/路径计算，保留公开--no-cache接受、命令合同及全部身份/新鲜度/恢复检查。RecordReader.Find的first参数由真实跨语言adapter消费，明确保留。
+- Skill两处reference统一说明当前flag仅兼容、带或不带均走同一路径，不再把它当性能比较变量；旧3.1.2现场必须依据旧版本合同与实现，不能套用当前语义。AutomationView注释路径同步纠正，非新增运行缺陷。
+- 此项实施中，随后固定完整树执行最终套件和原生CI，不扩大成额外全仓轮次。已完成三轮的最终预检build/vet、版本、Skill/目录/import、Node81pass/6 Windows-only skip与受影响Go均通过；这些不是R27修改后的完整结果。
+
+- R27-01最小清理已实施并冻结：13个Go文件，20处Windows测试调用仅去掉废弃实参，保留所有断言。现有正式测试文件补8条接受路由的完整Options等价及错误路由/value/重复参数拒绝；当前执行路径不变。14:59开始最终build→vet→Lua必需完整套件，针对该窄改的独立复核和Windows编译并行。
+
+### R20 现场状态更正（新增401行诊断报告）
+
+- 新报告明确两次原CON均已重新查询为closed=true、bound=false、stage=closed；均记录runtime_replacement_observed/closed。第二次手动reload后新runtime有INPUT sequence32→33。此前closing_exchange_unconfirmed/预算耗尽为历史过程，不能继续描述为“旧连接始终无法关闭”。complete=true仅表示连接终态，没有业务报告/探针执行证据，cleanup=none不算业务清理成功。
+- 当前未解决现场事实是旧3.1.2同一runtime：identity与INPUT完整读取，发布bind且input disposition=submitted后，Kind2回执查询及原CON resume --no-cache均short_read/ineligible_read、coverage.complete=false。1574 planned/scanned bytes和42 readCalls仅汇总，不是单次请求/实际字节或故障地址；Matches=0不能证明回执不存在。提交输入不等于游戏执行，不能推断接收端、按键、安装或版本回归根因。
+- 已推a60e294f中的R20-01只在失败后已记录路径guard确实变化且进程身份有效时归类path_changed；稳定短读/权限/布局/身份/取消错误仍保留。R20-03仅调整独立退役预检的相同变化分类；R19-02/R21-01处理已完成解绑后的纯终态关闭。上述有正式正反回归和Windows原生证据，但没有本次旧协议真实bind故障的匹配复现，不能保证此现场已修。
+- 此次读取的是完整401行可读诊断报告，仍不是原始69文件/50scans ZIP；报告注明原包132017字节、SHA256 `9cfaa445a617523a1557927d994fae6c1b25bfa0009fdb43e1f0286806507e54`，尚未上传。收到后先核hash及原日志/target/scans，再追具体路径节点、单次长度/地址/错误与接收端证据；缺口不阻塞其他已确认修复交付。没有连接游戏或改动业务插件。R20实机结果仍留空，总待客户端整合仍为7项。
+
+- 随后用户上传上述原ZIP；132017字节及SHA256完全吻合。新独立调查者先核ZIP路径再隔离解压，对照原始journal/target/50scans与精确3.1.2源码。当前调查中、未预填根因；原始私人路径/角色日志只作获准诊断，不上传公共PR。本次三轮清理的已冻结整测继续。
+- R27限定终审完成：913文件起终hash一致（aggregate `0c7c62a0384fad93a6fd67d21dc9b4eeb57d68e91bcbd7252f2797581b6abf31`），逐字重建13文件最小删改及20处Windows测试实参，保留repair/Find语义，无可操作缺陷。定向parser/help3、现有合同7、安全/协议54事件均pass、0fail/skip；四包Windows测试交叉编译通过。最终build/vet通过，完整套件运行中，原生CI另记。
+
+### R23–R27最终离线冻结结果
+
+- 最终913文件aggregate `0c7c62a0384fad93a6fd67d21dc9b4eeb57d68e91bcbd7252f2797581b6abf31`，完整测试起终集合/hash一致。Go1.27.1、Linux/amd64，LYCHEEDEV_REQUIRE_LUA51=1和已核Lua5.1.5路径；build/vet及diff检查通过。
+- 实际执行 `go test -json -p=2 -parallel=4 -count=1 -timeout=20m ./...`：2578 test/subtest pass（2346叶节点、232容器）、28skip、3fail；30包pass、1包fail、4无测试。三失败仅既有Windows产品准入导致的TestLiveConnectArgumentAdmission、TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess、TestSourceResearchThroughCLI，不称Linux整套通过。channel整包与完整Lua六profile本次通过，先前fixture失败证据保留。
+- 最终Skill21文件/84命令/228引用0违规、生成目录、版本3.1.2、import合同通过；Node工具81pass/6 Windows-only skip，Linux launcher平台限制仍单列。R27最后定向64事件0fail/skip、四包Windows交叉编译通过，均不替代新head原生CI。覆盖分母/skip按下一精确head原生结果更新。
+
+## R28：原始bind故障包独立只读核验
+
+- 用户新上传原包已核132017字节及所声明SHA256；69文件路径/类型/CRC安全，68项内部清单hash吻合，两journal校验链16/12事件完整、无撕裂尾部。原件只在获准私有诊断目录读取，不上传公共PR。两连接确已关闭，无业务报告/执行证明。
+- 八份Kind2失败扫描有相同42calls/1574B汇总；另三份83calls/1520B、complete=true且无match对应旧runtime选择器提前退出，不能混为读取失败。精确3.1.2源码的ineligible_read来自ReadProcessMemory之前的区域准入拒绝，不证明OS发生部分拷贝；其Mailbox模式也忽略address hint，--no-cache不改变此路径。
+- 以精确3.1.2 reader做隔离见证，稳定空哈希静态节点拒绝、同样拒绝但guard已变化、receipt字符串头拒绝三种路径均产生42calls/1574B及相同错误；83calls/1520B的runtime-mismatch对照也吻合。由此不能从汇总唯一定位节点，不能把R20-01匹配或未匹配当已知事实。
+
+### R28-C01：静态空哈希节点候选，未确认WoW现场根因
+
+- 官方Lua5.1.5真实C fixture证明空表共用文件映射只读静态节点，首个字符串插入后变私有节点；但stock Table/Node/node-offset为64/40/32，当前WoW受支持布局为72/56/40。前者不能证明目标客户端的sentinel合同。当前reader若遇稳定非private节点仍拒绝，R20-01仅有guard变化才改分类；没有据候选新增内存回退/扫描或放松身份检查。
+- 当前包缺失败单次地址/请求与返回长度、具体命名路径节点、区域State/Type/Protect和原始错误、失败前后guard字节及接收端bind处理证据。后续需在明确授权、匹配CLI/addon与固定客户端的新连接中记录首个失败读的这些最小字段；保留原输入意图/未知结果，不恢复已closed旧CON或重放submitted输入。区分静态空节点、已证明发布变化与稳定坏指针，再决定是否修复。原有7项客户端整合中的R20包含此复验，不另算已完成实机测试。
+- 必要环境：后续获准的Windows目标客户端和匹配版本诊断能力；预期：定位到唯一读节点/区域或明确仍不足，只有guard变化才允许既有有界重读，稳定坏读不被掩盖。实际复验结果：

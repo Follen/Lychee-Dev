@@ -117,9 +117,3 @@ func WriteHotfixJSONL(w io.Writer, result RemoteHotfixResult) error {
 		Warnings:    result.Warnings,
 	})
 }
-
-// WriteJSONLErrorFrame ends a failed stream explicitly instead of pretending
-// completion with an end frame.
-func WriteJSONLErrorFrame(w io.Writer, operationID string, failure JSONLError) error {
-	return WriteJSONLFrame(w, JSONLFrame{Type: JSONLFrameError, OperationID: operationID, Error: &failure})
-}

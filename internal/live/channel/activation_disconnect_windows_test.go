@@ -43,10 +43,10 @@ func TestDisconnectUnsentActivationIsDurableAndIdempotent(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, call := range []func() (ProjectResult, error){
-				func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID, false) },
+				func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID) },
 				func() (ProjectResult, error) { return p.Status(d.State.ID) },
-				func() (ProjectResult, error) { return p.Resume(ctx, d.State.ID, false) },
-				func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID, false) },
+				func() (ProjectResult, error) { return p.Resume(ctx, d.State.ID) },
+				func() (ProjectResult, error) { return p.Disconnect(ctx, d.State.ID) },
 			} {
 				r, err := call()
 				if err != nil || !r.Closed || r.Complete || r.Stage != "activation_cancelled" || r.ReportState != "unavailable" || r.Continuation.Kind != "completed" {
@@ -104,7 +104,7 @@ func TestDisconnectActivationRefusesUncertainStateAndActiveDriver(t *testing.T) 
 				t.Fatal(err)
 			}
 			before, _ := os.ReadFile(p.activationPath(d.State.ID))
-			if r, err := p.Disconnect(ctx, d.State.ID, false); err == nil || r.Closed {
+			if r, err := p.Disconnect(ctx, d.State.ID); err == nil || r.Closed {
 				t.Fatalf("unsafe cancellation: %+v %v", r, err)
 			}
 			after, _ := os.ReadFile(p.activationPath(d.State.ID))
@@ -130,7 +130,7 @@ func TestCancelledActivationRecoversRetirementWithoutTouchingNewOwner(t *testing
 	}
 	before, _ := os.ReadFile(p.activationPath(d.State.ID))
 	// Models a crash after terminal persistence but before retiring the claim.
-	if r, err := p.Resume(ctx, d.State.ID, false); err != nil || !r.Closed {
+	if r, err := p.Resume(ctx, d.State.ID); err != nil || !r.Closed {
 		t.Fatal(r, err)
 	}
 	if _, busy, err := journal.InspectWindowOwner(ctx, parent, meta.Owner.Resource); err != nil || busy {
@@ -140,10 +140,10 @@ func TestCancelledActivationRecoversRetirementWithoutTouchingNewOwner(t *testing
 	if err := journal.BeginConnectionWindow(ctx, parent, meta.Owner, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := p.Disconnect(ctx, d.State.ID, false); err != nil || !r.Closed {
+	if r, err := p.Disconnect(ctx, d.State.ID); err != nil || !r.Closed {
 		t.Fatal(r, err)
 	}
-	if r, err := p.Resume(ctx, d.State.ID, false); err != nil || !r.Closed {
+	if r, err := p.Resume(ctx, d.State.ID); err != nil || !r.Closed {
 		t.Fatal(r, err)
 	}
 	if owner, busy, err := journal.InspectWindowOwner(ctx, parent, meta.Owner.Resource); err != nil || !busy || owner != meta.Owner {

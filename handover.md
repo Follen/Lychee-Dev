@@ -2,34 +2,24 @@
 
 ## 分支与交付
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)：`codex/fix-3.2.0` → `main`，保持草稿。最新恢复/补测代码 `a60e294f` 已推送；[精确head CI38562152610](https://github.com/Follen/Lychee-Dev/actions/runs/38562152610)五项必需作业与汇总全部通过。WGC观察已完成，但capture仍为failed/exit1。
-- 本次 Skill 批次 R17-01：主 Skill、source-research、source-preparation 已修订；全新 R18 独立复核17个场景，无可操作冲突，正式合同检查通过。规则默认用固定 Source，空结果先核模式/关键词/版本/覆盖，禁止猜 raw 路径；真实能力缺口或明确外搜请求保留例外，已有充分证据直接回答。
-- 已交付 R3/R4 的13项、R5–R9确认修复与清理，前42项作为基线，不反复计数。R10–R15在各自冻结范围的独立复核结论见审计；不能替代后续产品变化的复核。
-- [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并。必要 Definitions 冷读预算修复随 `ef9b0113` 移植；旧地区槽位算法与现行 legacy 合同冲突，未移植，不是整批 cherry-pick。
-- 发行源仍 `3.1.2`，渠道 `next`、`latest=2.5.1`；`3.2.0`仅开发基线。不合并、不发布。本任务只用仓库 handover.md，未连接用户电脑/游戏、发键或部署游戏目录。
+- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)：`codex/fix-3.2.0` → `main`，保持草稿。前批已发布 `3ed74d85`；其[原生CI38563819418](https://github.com/Follen/Lychee-Dev/actions/runs/38563819418)五项必需作业和汇总通过，不能代替本次R23–R27清理树。本批代码/离线记录正交付同分支，新head原生CI待完成。
+- 已交付R3/R4的13项、R5–R9修复、R16-02/R19-02/R20/R21恢复边界及R17 Source Skill规则；R18/R22等独立复核与撤回R16-01的依据见审计。现场因果未确认，不将其他代码复现当现场根因。
+- [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并。只移植必要Definitions冷读预算修复 `ef9b0113`；旧地区槽位算法与现合同冲突，未移植。
+- 发行源3.1.2、渠道next、latest=2.5.1保持；3.2.0为开发基线。不合并、不发布。只用本仓库handover，未连接用户电脑/游戏、发键、部署游戏目录或修改Lychee Talent。
 
-## 当前工作与写入边界
+## 当前批次
 
-| 范围 | 当前状态 | 负责人 |
-| --- | --- | --- |
-| R16 高风险补测与修复 | R16-02回收完成前逻辑状态过早推进已修，R19-02成功unbind后的纯终态关闭被过期预算阻断已修；R19撤回无受支持生产路径的R16-01，改清理退役bootstrap死代码R19-01。修正树已随a60e294f推送 | 实现者仅约定 evidence/vault/channel/protocol 文件，已冻结；R21-01 wrapper组合缺口已修；R22新鲜只读复核完成，无新增可操作离线缺陷；当前Windows原生通过 |
-| R17-01 / R20-02 Skill | R17三文件已随0f26b9a7推送；R20另补startup/recovery两reference已随a60e294f推送、合同228引用0违规 | Skill 实现者只写 Skill 目录，已完成 |
-| R12-C01 WGC | 原生SDK编译与对照完成，Go/SDK两个自建窗口均0x80070057及相同即时错误。无Go特有缺陷证据、具体宿主根因未定；单列非门禁观察，保留失败和后续Windows非游戏复验 | 协调者及 desktop 专组 |
-| 整合与文档 | R22最终924文件树完整Linux套件2576pass/3既有平台fail/28skip，build/vet通过；独立复核完成无新增确认问题，a60e294f原生套件及覆盖已完成；R20仅已读取230行现场输出摘录 | 协调者独占 workflow/tools/审计/todo/handover/Changelog |
+- **R23完成**：删除无生产消费者的WGC实现、专属测试/SDK/观察CI与失效截图文案。保留窗口身份、输入、进程及历史图像读取。此前把残留当产品能力/用户实测义务属于漏审，现撤回；删除不是修好截图。
+- **用户要求的三轮已完成**：R24、R25、R26各由不同全新审计者按顺序审查修正后的冻结树，分别确认并最小清理10、5、5组；有效测试迁到现行入口。R25四份仍有消费者的baseline probe已改用当前模块并加入正式真实TOC/ProbeExecution回归。R26删除109对旧语言键，263活键及动态选择保持。
+- **R27整合验收**未发现R23–R26运行回退，另确认末端忽略的Native私有cache参数链。窄清理已完成并冻结；公开--no-cache保留兼容、当前带或不带走同一新鲜路径，旧3.1.2另核。最终build/vet及完整套件已完成，有限独立复核无可操作缺陷，不扩大全仓审计。
+- 写入边界：所有产品实现者已完成并冻结；协调者独占共享文档、提交与验证；原ZIP新调查者只读，禁止公布原始私人日志。
 
-持续审计→修复→验证→推送，直到独立复核不再发现可离线修复项。新确认问题继续处理；实机相关只保留复验步骤与空白结果，不等待用户开游戏。
+## 实际验证与下一步
 
-## 已实际完成的验证
-
-- 工具链：官方 SHA 校验 Go 1.27.1、Node 24.18.1、npm 11.18.0、Lua 5.1.5；`LYCHEEDEV_REQUIRE_LUA51=1`及明确解释器路径。
-- 最后可执行代码 `a60e294f` / tree `7b10efc4bcd477ac6388792dbd10aba49c8aabdb`：[Windows CI38562152610](https://github.com/Follen/Lychee-Dev/actions/runs/38562152610)的contract/race/process/addon/package及ci-required全部通过。完整Lua必需Go套件2893事件pass、2628叶节点pass、0fail、20skip；16项公开固定集成全通过。当前正式恢复/读取/存储边界已在Windows原生实际执行。
-- 当前Go产品语句 **24753/32099=77.1146%**；[原始profile/events/identity](https://github.com/Follen/Lychee-Dev/actions/runs/38562152610/artifacts/11892198497)下载SHA256校验、原始block独立重算及testedCommit/tree核对一致。Windows/amd64 Go1.27.1、atomic跨包cmd/internal（不含testkit）；事件数含265个容器，不能当业务场景数，比例不包含Lua/Node或游戏覆盖。
-- 当前R22冻结924文件（aggregate `dcae36da3ad5bc001f5c4ac91bd50b5e098b9784ce91a5247787aa921f30aaeb`）：build/vet通过，完整Lua必需Linux套件2576 test/subtest pass、3既有平台fail、28skip；30包pass、command1包fail、4无测试。失败只为 `TestLiveConnectArgumentAdmission`、`TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess`、`TestSourceResearchThroughCLI`，不称Linux全套通过。起终924文件SHA一致。
-- R16/R19数据保全与恢复正式边界、旧实现负对照、四项故障mutation及定向race通过；R20新增12个memory、8个Windows分类叶节点，R21新增11个Windows关闭wrapper叶节点。Windows函数逐字抽取/交叉编译原为预检，现对应正式测试已在上述精确head原生执行。撤回的R16-01合成bootstrap用例不计当前修复或覆盖。
-- R22独立复核114个consumer事件、69个race事件、31个相邻Go/Lua事件及13个Node测试通过；精确旧实现负对照仍失败，8个安全控制通过，无新增可操作离线缺陷。
-- 完整Node工具85pass/6 Windows-only skip/0fail；当前Skill21文件/84命令/228引用0违规，生成目录、版本3.1.2、import合同及文档路径检查通过。R17/R18的17场景是独立规范决策复核，不冒称真实模型重放或用户安装环境更新。
-- 当前Windows 20skip中9个子进程helper入口均有父回归执行，11个真正可选项为3 desktop、1客户端read-only、4安装/index/图像原材料、2原runtime replay、1宿主8.3能力。WGC主套件skip与独立probe失败分别记账。Go语句比例不代表Lua/Node、业务场景或游戏覆盖，CLI子进程不会自动计入instrumentation。
-- 冗余专项已删除两处无新增边界的重复输入及仅服务退役解析器的测试；保留独立失败、并发、跨进程和平台合同。当前高风险补测不追任意比例；修正后已按a60e294f重测。
+- 工具链Go1.27.1、Node24.18.1、npm11.18.0、Lua5.1.5已核，设置LYCHEEDEV_REQUIRE_LUA51=1及确切解释器路径。
+- R23–R26受影响检查已完成：全局build/vet、Windows交叉构建、各包/协议/Lua回归通过；R26最终预检Node81pass/6 Windows-only skip，版本/Skill/命令目录/import通过。两处既有channel fixture完成条件已修且定向通过，生产预算不变；此前失败日志保留。Linux npm launcher4项受既有Windows平台准入限制，不称通过。
+- R27冻结913文件起终一致（aggregate `0c7c62a0384fad93a6fd67d21dc9b4eeb57d68e91bcbd7252f2797581b6abf31`）。最终build/vet通过；完整Lua必需Linux套件2578事件pass/2346叶节点、28skip、3既有平台fail，仅TestLiveConnectArgumentAdmission、TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess、TestSourceResearchThroughCLI；30包pass，不称Linux全套通过。定向64事件0fail/skip、四Windows包测试交叉编译及有限独立终审通过。下一步推同分支并完成新head原生CI/coverage，旧结果不替代。
+- 上批精确3ed74d85原生计量24752/32099=77.1114%，2893事件/2628叶节点pass、0fail、20skip（9helper入口、11实际可选）；原始artifact与口径见审计。当前删死代码会改变分母，必须重新计量，不把比例上升当新增业务覆盖。
 
 ## 待实机验证
 
@@ -43,23 +33,22 @@
 | R4-04 | 新配置 status、off/on、保存 off 后 reload；状态与 INPUT 生命周期一致 | |
 | R4-07 | Objects 检查失败 tostring/普通错误及健康对象；无二次错误、失败明确、部分流/limited 保留 | |
 | R5-01 | 只返回高精度有限数值和 `%.17g` 对照文本；报告数值保持一致，正常清理并断开 | |
-| R20 现场因果未确认 | 后续匹配当前协议CLI/addon、隔离新CON，同进程切角色/reload后原bind无回执；有新鲜替代证据才无输入退役，暂不可读无证明时保留未知，中断后续清理且正常关闭不退化。旧3.1.2日志仅用匹配CLI诊断，当前driver不得接管 | |
+| R20 现场因果未确认 | 两原CON已关闭，原3.1.2同runtime bind读取根因仍未确认；后续匹配当前协议CLI/addon、隔离新CON，复验bind回执及同进程切角色/reload后原bind无回执；有新鲜替代证据才无输入退役，暂不可读无证明时保留未知，中断后续清理且正常关闭不退化。旧3.1.2日志仅用匹配CLI诊断，当前driver不得接管 | |
 
-本轮原6项之外新增R20现场复验1项，共7项客户端整合；WGC另列Windows非游戏验证。七产品旧矩阵见 [todo.md](todo.md)，未扩展为本轮通过。
+本轮原6项之外新增R20现场复验1项，共7项客户端整合；已确认无生产入口的WGC不再列为待验证产品能力。七产品旧矩阵见 [todo.md](todo.md)，未扩展为本轮通过。
 
 ## 候选与特定环境复验
 
 | 项目 / 当前状态 | 必要环境、最小步骤与预期 | 复验结果 |
 | --- | --- | --- |
 | R3-C01 候选 | 固定真实SpellMisc DB2/DBD/DifficultyID多匹配资料；比较全表、导航及领域合同，证据冲突才升级 | |
+| R28-C01 现场静态空节点候选 | 后续获准Windows固定目标与匹配版本诊断；新连接首个Kind2失败记录逻辑节点/单次长度/region拒绝及guard变化，预期区分静态节点/发布变化/坏指针。现原包不能唯一定位，不重放旧输入 | |
 | R3-C03 候选 | 先明确instances归属语义；隔离Windows owner fixture，对照展示与连接消费者，不把被动字段当阻断 | |
 | R4-C01 已修复/原生通过 | Windows双真实卷、隔离release/client/project、PID=0；比较同卷及跨卷默认/显式archive，旧树应保全并在安全激活边界停止 | R8 `7566493c` 双真实卷及同卷对照通过 |
 | 原安装/index/图像与runtime材料缺口 | 取得获准、匹配hash/build的原始资料后跑正式replay；身份/字节/解码/根证据应吻合，合成fixture不代替原材料 | |
-| R12-C01 WGC候选 | 交互图形Windows/Go1.27.1，无需WoW；LYCHEEDEV_TEST_DESKTOP=1运行desktop包TestWGCLifetimeBetweenSessions（-count=1 -timeout=1m），仅自建窗口。预期10次采帧/释放、delegate归零。已知Go/SDK两窗口均0x80070057；原因未定，留存SDK/原日志，不判unsupported | |
 | Live read-only可选缺口 | 后续授权Windows/WoW固定目标；只读核对身份和窗口，不扩展输入许可 | |
 
-## 下一步
+## 证据与限制
 
-1. 本轮可离线实施、正式回归、R22独立复核及Windows原生验证已完成，未发现剩余可操作离线修复项；审计、todo与PR按最后代码提交记录结果，后续文档提交不改变该测试身份。
-2. R20现场因果仍未确定，已装合同已核实，原CON/target及相关scans待用户提供；不把其他复现当现场根因。七项客户端与单列WGC只供后续获准环境复验，不要求现在启动游戏。
-3. 暂存材料仅在忽略的 `.tmp/pr13/`，任务结束按核实绝对路径清理；保留活动恢复记录及指定Rust worktree。
+- R20最新401行诊断报告确认两次CON均已通过runtime_replacement_closed关闭，旧“仍卡closing”现状已更正；核心是同runtime的bind回执Kind2持续short_read/ineligible_read。identity/INPUT完整不证明回执可读，1574字节/42调用仅汇总，不能定位根因。旧3.1.2/新Skill合同差异已确认；69文件/50scans原ZIP现已取得且SHA256吻合，69文件路径/CRC、68项内部hash、两journal校验链均通过。精确旧reader的三条不同路径可产生相同汇总，不能据此定位。静态空节点仅R28-C01候选，WoW布局/节点证据不足，无可直接修复的现场根因结论。已推R20读取变化分类和R19/R21关闭边界不等于此现场根因已修，不要求现在开游戏。
+- 全部剩余忽略材料保留，不再清理。此前部分R20/R22临时负对照原日志已删除；正式回归、版本和GitHub正式CI artifacts仍在，不能声称全证据完好或重造历史日志。

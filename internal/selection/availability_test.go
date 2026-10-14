@@ -133,27 +133,6 @@ func TestListRemoteAvailabilityRefusesOffline(t *testing.T) {
 	}
 }
 
-func TestSelectReleaseHistoricalBuildRule(t *testing.T) {
-	rows, rejected, err := ParseVersionsManifest(manifestFixture(), "cn")
-	if err != nil || rejected != 2 {
-		t.Fatalf("ParseVersionsManifest() = %v, %d, %v", rows, rejected, err)
-	}
-	current, err := SelectRelease(rows, "")
-	if err != nil || current.FullBuild != "12.1.0.69875" {
-		t.Fatalf("SelectRelease() = %v, %v", current, err)
-	}
-	historical, err := SelectRelease(rows, "12.1.0.69874")
-	if err != nil || historical.FullBuild != "12.1.0.69874" {
-		t.Fatalf("SelectRelease(historical) = %v, %v", historical, err)
-	}
-	if _, err := SelectRelease(rows, "12.1.0.60000"); !errors.Is(err, ErrTargetBuildUnavailable) {
-		t.Fatalf("missing build error = %v, want %v", err, ErrTargetBuildUnavailable)
-	}
-	if _, err := SelectRelease(nil, ""); !errors.Is(err, ErrTargetBuildUnavailable) {
-		t.Fatalf("empty catalog error = %v, want %v", err, ErrTargetBuildUnavailable)
-	}
-}
-
 func TestParseVersionsManifestRejectsMalformed(t *testing.T) {
 	if _, _, err := ParseVersionsManifest([]byte("nonsense"), "cn"); !errors.Is(err, ErrManifestFormat) {
 		t.Fatalf("error = %v, want %v", err, ErrManifestFormat)

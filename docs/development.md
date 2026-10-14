@@ -31,7 +31,7 @@ Windows CI 在同一次完整 Go 套件中收集 atomic 语句覆盖，不另跑
 
 PR 的 Windows contract 作业通过 `tools/ci-inputs.mjs prepare` 准备公开固定输入：复用现有 LuaLS archive 校验、开发 stage/原生 binary 身份验证，固定 Gethe Retail/Forever 源码与 API 文档、生产定义生成器及既有 CascLib oracle builder，并启用固定 WoWDBDefs 测试。准备结果通过 GitHub 环境文件供同一次完整套件消费；`verify` 必须看到全部指定顶层及子测试实际通过，不能用父节点 pass 掩盖子项 skip。`windows-integration-inputs` 保存 commit/hash、compiler、release 与生成覆盖说明，生成器的 partial-type 覆盖仍如实保留。
 
-WGC 宿主探针在单列 `windows-wgc-observation` 观察作业运行自建窗口 lifetime 测试，不属于五项必需离线作业的汇总门禁；环境变量仅限该步骤，不选取用户或游戏进程。测试本身的失败仍保留 exit/events 和 `state=failed`，作业摘要明确标记未验证；只有完整且一致的测试终态可作为观察结果，编译/准备、无效或缺失证据及 artifact 错误仍导致失败。`windows-wgc-probe` 保存原始事件、退出码及结果。诊断时仅用runner预装的MSVC/Windows SDK编译`internal/desktop/testdata/wgc_reference.cpp`，记录compiler/SDK及source/DLL hash；`LYCHEEDEV_TEST_WGC_REFERENCE_DLL`只给同一测试进程，比较其确切自建HWND的Go与SDK调用，及时保留原生restricted error，不是产品依赖或发布binary。Go 与官方 SDK 在现有 runner 的两个自建窗口均返回相同错误，尚不能确认具体宿主根因或产品缺陷；不因此宣称不支持平台，也不把观察作业完成当成捕获通过。真实客户端、原 runtime dump、固定安装/图像样本和8.3卷能力仍各自记录，不能仅为消除 skip 修改宿主策略或替换原始证据。
+真实客户端、原 runtime dump、固定安装/图像样本和8.3卷能力仍各自记录，不能仅为消除 skip 修改宿主策略或替换原始证据。Native Live不提供截图入口；历史归档中的图像仍可读取、校验和打包。
 
 版本、Skill、构建工具或启动器有相关变化时执行对应检查：
 
@@ -68,7 +68,7 @@ node tools/live-stage.mjs --out .tmp/live-stage --commit $commit
 
 stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `live doctor`、connect、execute、resume、reload、disconnect 操作固定客户端。具体参数读当前 `describe` 和 `--help`。
 
-每次实机任务使用明确的 project 和 PID。中断沿原 CON 恢复，保留原请求和期限；完成报告确认及连接释放后再清理项目产物。截图采用 WGC。首次无可验证 INPUT 时手动重载一次，新增槽位未被客户端发现时重启该客户端。
+每次实机任务使用明确的 project 和 PID。中断沿原 CON 恢复，保留原请求和期限；完成报告确认及连接释放后再清理项目产物。首次无可验证 INPUT 时手动重载一次，新增槽位未被客户端发现时重启该客户端。
 
 ## 仓库卫生
 

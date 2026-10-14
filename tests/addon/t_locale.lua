@@ -69,20 +69,20 @@ assert(chinese.ABOUT_CLIENT_VALUE:find("12.1", 1, true)
         and not chinese.ABOUT_CLIENT_VALUE:find("1.60.1", 1, true),
     "Chinese client summary differs from the acceptance matrix")
 
--- Every legacy key still exists under its legacy name.
-local legacyKeys = {
+-- Required labels used by the current workbench remain available in both locales.
+local requiredKeys = {
     "ADDON_TITLE", "TAB_RUNNER", "TAB_OBJECTS", "TAB_EVENTS", "TAB_TRACE",
     "TAB_DIAGNOSTICS", "TAB_EXPORTS", "TAB_AUTOMATION", "TAB_ABOUT",
     "HISTORY", "NO_HISTORY", "EMPTY_INPUT", "LUA_INPUT", "RUN", "CLEAR_INPUT",
     "RESULT", "TEXT", "TREE", "SELECT_RESULT", "SAVE_TO_DISK", "CLEAR_HISTORY",
     "ENTER_LUA", "COMPILE_ERROR", "RUNTIME_ERROR", "COMPLETED_NO_OUTPUT",
-    "COMBAT_BLOCKED", "CLOSE", "YES", "NO", "ON", "OFF", "UNKNOWN",
+    "COMBAT_BLOCKED", "CLOSE", "UNKNOWN",
     "UNKNOWN_TIME", "NOT_AVAILABLE", "READY", "COMPLETED", "FAILED",
     "FIND_EVENT", "CATALOG_COUNT", "EVENT_SEARCH_HINT", "START_MONITORING",
     "STOP_MONITORING", "MONITORING_EVENTS", "ALL_EVENTS", "PAYLOAD_PREFIX",
-    "FUNCTION_TRACE", "CALL_RECORDS", "CALL_ARGUMENTS", "TRACE_PATH",
+    "CALL_RECORDS", "CALL_ARGUMENTS", "TRACE_PATH",
     "START_TRACE", "STOP_TRACE", "EXPORT_KIND_FUNCTION_TRACE",
-    "DIAGNOSTICS", "AGENT_REPORT", "REPORT_STACK", "REPORT_LOCALS",
+    "AGENT_REPORT", "REPORT_STACK", "REPORT_LOCALS",
     "EXPORT_KIND_ERROR_LOG", "EXPORT_SAVED_TITLE", "EXPORT_TICKET",
     "EXPORT_TICKET_HELP", "RELOAD_NOW", "RELOAD_LATER",
     "CONFIRM_CLEAR_CACHE", "EXPORT_STATUS_PENDING", "EXPORT_STATUS_SAVED",
@@ -90,14 +90,14 @@ local legacyKeys = {
     "EXPORT_KIND_OBJECT_NODE", "EXPORT_KIND_EVENT_LOG",
     "SECRET_VALUE_BLOCKED", "MATCH_COUNT", "NODE_TEXT_TITLE",
     "TEXT_LIMIT_REACHED", "OBJECT_SNAPSHOT", "PICKER_PROMPT", "SEARCH",
-    "AUTO_USAGE", "AUTO_KIND_BUG", "ABOUT_TITLE", "ABOUT_DESCRIPTION",
-    "ABOUT_CLIENT", "ABOUT_COMMAND", "ABOUT_DEPENDENCY", "ABOUT_GITHUB",
-    "ABOUT_SAFETY", "TREE_TABLE_MORE", "FRAME_OVERVIEW", "FRAME_PARENT",
+    "AUTO_KIND_BUG", "ABOUT_DESCRIPTION",
+    "ABOUT_CLIENT", "ABOUT_COMMAND", "ABOUT_DEPENDENCY",
+    "TREE_TABLE_MORE", "FRAME_OVERVIEW", "FRAME_PARENT",
 }
-for index = 1, #legacyKeys do
-    local key = legacyKeys[index]
-    assert(type(chinese[key]) == "string" and chinese[key] ~= "", "legacy locale key lost: " .. key)
-    assert(type(english[key]) == "string" and english[key] ~= "", "legacy English key lost: " .. key)
+for index = 1, #requiredKeys do
+    local key = requiredKeys[index]
+    assert(type(chinese[key]) == "string" and chinese[key] ~= "", "required locale key lost: " .. key)
+    assert(type(english[key]) == "string" and english[key] ~= "", "required English key lost: " .. key)
 end
 
 print("locale parity ok")

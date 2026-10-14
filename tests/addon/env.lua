@@ -270,6 +270,10 @@ local function NewRegion(name, parent, objectType)
         self.alpha = alpha
     end
 
+    function region:GetAlpha()
+        return self.alpha or 1
+    end
+
     function region:SetRotation(rotation)
         self.rotation = rotation
     end

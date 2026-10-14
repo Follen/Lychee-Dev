@@ -53,21 +53,18 @@ func runChannelCommand(ctx context.Context, route, argument string, opts Options
 		}
 		code := fmt.Sprintf(`local snapshot, reason = LycheeDevInternal.Diagnostics.SnapshotRecentErrors(%d, "provider_storage")
 return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailable",complete=snapshot and snapshot.complete==true or false,snapshot=snapshot,error=reason}`, opts.count)
-		result, err = project.Execute(ctx, opts.session, opts.request, code, 5, "observation", !opts.noCache)
+		result, err = project.Execute(ctx, opts.session, opts.request, code, 5, "observation")
 	case "live reload fallback":
-		if opts.installation == "" || opts.pid == 0 || channel.ValidateRequest(opts.request) != nil || opts.wakeBinding != "" || opts.session != "" {
+		if opts.installation == "" || opts.pid == 0 || channel.ValidateRequest(opts.request) != nil || opts.session != "" {
 			return true, 2, errors.New("native activation requires --installation --pid --request; resume a pending CON id without new input")
 		}
-		result, err = project.Activate(ctx, channel.TargetRequest{Installation: opts.installation, PID: opts.pid}, opts.request, !opts.noCache)
+		result, err = project.Activate(ctx, channel.TargetRequest{Installation: opts.installation, PID: opts.pid}, opts.request)
 	case "live connect":
-		if opts.wakeBinding != "" || !opts.region.Empty() {
-			return true, 2, errors.New("native connections use effective Mailbox bindings and do not accept capture-area or wake-binding")
-		}
 		if opts.session != "" {
 			if opts.installation != "" || opts.pid != 0 || opts.character != "" || opts.realm != "" || opts.snapshot != "" {
 				return true, 2, errors.New("resume the retained CON session without new target selectors")
 			}
-			result, err = project.Resume(ctx, opts.session, !opts.noCache)
+			result, err = project.Resume(ctx, opts.session)
 		} else {
 			req := channel.TargetRequest{Installation: opts.installation, PID: opts.pid, Character: opts.character, Realm: opts.realm}
 			if opts.snapshot != "" {
@@ -84,7 +81,7 @@ return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailab
 				}
 				req.Build, req.Product = pin.Data.FullBuild, pin.Data.Product
 			}
-			result, err = project.Connect(ctx, req, !opts.noCache)
+			result, err = project.Connect(ctx, req)
 		}
 	case "live execute":
 		if (opts.file == "") == (opts.probe == "") || opts.budgetSeconds < 1 || opts.budgetSeconds > 120 || channel.ValidateRequest(opts.request) != nil {
@@ -109,15 +106,15 @@ return {schema="lycheedev.bugs.v1",status=snapshot and "completed" or "unavailab
 		if policy == "" {
 			policy = "opaque"
 		}
-		result, err = project.Execute(ctx, opts.session, opts.request, string(code), opts.budgetSeconds, policy, !opts.noCache)
+		result, err = project.Execute(ctx, opts.session, opts.request, string(code), opts.budgetSeconds, policy)
 	case "live status", "live session":
 		result, err = project.Status(argument)
 	case "live resume":
-		result, err = project.Resume(ctx, argument, !opts.noCache)
+		result, err = project.Resume(ctx, argument)
 	case "live disconnect":
-		result, err = project.Disconnect(ctx, argument, !opts.noCache)
+		result, err = project.Disconnect(ctx, argument)
 	case "live reload":
-		result, err = project.Reload(ctx, opts.session, opts.request, !opts.noCache)
+		result, err = project.Reload(ctx, opts.session, opts.request)
 	}
 	response.Context["project"], response.Context["transport"] = project.Root, "Lycheedev mailbox protocol v1"
 	if result.Session != "" {

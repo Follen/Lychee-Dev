@@ -34,8 +34,6 @@ type NextAction struct {
 	Reason  string   `json:"reason"`
 }
 
-var ErrBusinessFailed = errors.New("live.business_failed")
-
 func withNextAction(result Outcome) Outcome {
 	if result.Goal == "finished" && !result.Complete && result.Cleanup != "abandoned" && result.Status != "failed" {
 		result.NextAction = &NextAction{Command: "lycheedev", Args: []string{"live", "abandon", result.OperationID}, Reason: "legacy_execution_retired_explicit_host_abandon_available"}

@@ -24,7 +24,6 @@ import (
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-var ErrActivationRequired = errors.New("live.channel_activation_required")
 var ErrClosed = errors.New("live.channel_closed")
 
 type TargetRequest struct {
@@ -247,16 +246,15 @@ func deploymentGuard(ctx context.Context, target live.ClientWindow) error {
 	}
 	return nil
 }
-func (p *Project) native(ctx context.Context, target live.ClientWindow, cache bool) (*Native, error) {
-	return p.nativeVersion(ctx, target, cache, buildinfo.Version)
+func (p *Project) native(ctx context.Context, target live.ClientWindow) (*Native, error) {
+	return p.nativeVersion(ctx, target, buildinfo.Version)
 }
-func (p *Project) nativeVersion(ctx context.Context, target live.ClientWindow, cache bool, version string) (*Native, error) {
-	key := fmt.Sprintf("%d-%d.json", target.Window.ProcessID, target.Window.ProcessStartedAt)
+func (p *Project) nativeVersion(ctx context.Context, target live.ClientWindow, version string) (*Native, error) {
 	id, err := token()
 	if err != nil {
 		return nil, err
 	}
-	n, err := OpenNative(ctx, target.Window, filepath.Join(target.Client.Directory, "Interface", "AddOns"), version, p.path("cache", key), cache)
+	n, err := OpenNative(ctx, target.Window, filepath.Join(target.Client.Directory, "Interface", "AddOns"), version)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +284,7 @@ func connectionGuard(target live.ClientWindow, parent string, owner journal.Wind
 	}
 }
 
-func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool) (result ProjectResult, err error) {
+func (p *Project) Connect(ctx context.Context, request TargetRequest) (result ProjectResult, err error) {
 	if _, ok := ctx.Deadline(); !ok {
 		return ProjectResult{}, errors.New("live.channel_deadline_required")
 	}
@@ -319,12 +317,12 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 		if status.Identity.Runtime != "" && (request.Character != "" && request.Character != status.Identity.Character || request.Realm != "" && request.Realm != status.Identity.Realm) {
 			return status, errors.New("live.channel_target_mismatch")
 		}
-		return p.Resume(ctx, owner.OperationID, cache)
+		return p.Resume(ctx, owner.OperationID)
 	}
 	if err = deploymentGuard(ctx, target); err != nil {
 		return ProjectResult{}, err
 	}
-	native, err := p.native(ctx, target, cache)
+	native, err := p.native(ctx, target)
 	if err != nil {
 		return ProjectResult{}, err
 	}
@@ -342,7 +340,7 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 		if e != nil {
 			return ProjectResult{}, e
 		}
-		return p.activateTarget(ctx, target, request, "connect-"+key, "", cache)
+		return p.activateTarget(ctx, target, request, "connect-"+key, "")
 	}
 	identity := candidates[0]
 	if identity.Build != target.Client.FullBuild || identity.Product != target.Client.Product {
@@ -353,7 +351,7 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 		if e != nil {
 			return ProjectResult{}, e
 		}
-		return p.activateTarget(ctx, target, request, "connect-upgrade-"+key, "", cache)
+		return p.activateTarget(ctx, target, request, "connect-upgrade-"+key, "")
 	}
 	if identity.Inventory != nil && *identity.Inventory != identity.Slots {
 		return ProjectResult{}, errors.New("live.channel_slot_inventory_incomplete")
@@ -389,10 +387,10 @@ func (p *Project) Connect(ctx context.Context, request TargetRequest, cache bool
 	return present(d), err
 }
 
-func (p *Project) drive(ctx context.Context, id string, cache bool, action func(*Driver) error) (ProjectResult, error) {
-	return p.driveMode(ctx, id, cache, false, action)
+func (p *Project) drive(ctx context.Context, id string, action func(*Driver) error) (ProjectResult, error) {
+	return p.driveMode(ctx, id, false, action)
 }
-func (p *Project) driveMode(ctx context.Context, id string, cache, repair bool, action func(*Driver) error) (result ProjectResult, err error) {
+func (p *Project) driveMode(ctx context.Context, id string, repair bool, action func(*Driver) error) (result ProjectResult, err error) {
 	meta, err := p.metadata(id)
 	if err != nil {
 		return ProjectResult{}, err
@@ -408,7 +406,7 @@ func (p *Project) driveMode(ctx context.Context, id string, cache, repair bool, 
 	if repair {
 		version = d.State.Identity.Release
 	}
-	native, err := p.nativeVersion(ctx, meta.Target, cache, version)
+	native, err := p.nativeVersion(ctx, meta.Target, version)
 	if err != nil {
 		return present(d), err
 	}
@@ -453,7 +451,7 @@ func (p *Project) driveMode(ctx context.Context, id string, cache, repair bool, 
 	}
 	return present(d), err
 }
-func (p *Project) Resume(ctx context.Context, id string, cache bool) (ProjectResult, error) {
+func (p *Project) Resume(ctx context.Context, id string) (ProjectResult, error) {
 	if err := p.recoverTail(ctx, id); err != nil {
 		return ProjectResult{}, err
 	}
@@ -467,25 +465,25 @@ func (p *Project) Resume(ctx context.Context, id string, cache bool) (ProjectRes
 	d, err := Load(p.log(id), nil)
 	if err != nil {
 		if errors.Is(err, ErrJournalMissing) {
-			return p.resumeActivation(ctx, id, cache)
+			return p.resumeActivation(ctx, id)
 		}
 		return state, err
 	}
 	if d.State.RuntimeEnd != nil || d.State.Closing {
-		return p.drive(ctx, id, cache, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
+		return p.drive(ctx, id, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
 	}
 	if d.State.Reload != nil && d.State.Reload.Phase != "complete" {
-		return p.drive(ctx, id, cache, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
+		return p.drive(ctx, id, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
 	}
 	if d.State.Transaction == nil && state.Operation != "" && state.Complete {
 		return state, nil
 	}
 	if d.State.Transaction != nil && d.State.Transaction.Envelope.Action == "unbind" {
-		return p.Disconnect(ctx, id, cache)
+		return p.Disconnect(ctx, id)
 	}
-	return p.drive(ctx, id, cache, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
+	return p.drive(ctx, id, func(d *Driver) error { return d.continueOrRetire(ctx, d.Backend.(*Native), false) })
 }
-func (p *Project) Execute(ctx context.Context, id, request, code string, budget int, policy string, cache bool) (ProjectResult, error) {
+func (p *Project) Execute(ctx context.Context, id, request, code string, budget int, policy string) (ProjectResult, error) {
 	if err := p.recoverTail(ctx, id); err != nil {
 		return ProjectResult{}, err
 	}
@@ -503,7 +501,7 @@ func (p *Project) Execute(ctx context.Context, id, request, code string, budget 
 		return present(&Driver{State: *prior, Log: p.log(id)}), nil
 	}
 	var historic *State
-	result, err := p.drive(ctx, id, cache, func(d *Driver) error {
+	result, err := p.drive(ctx, id, func(d *Driver) error {
 		// Recheck after the driver lease: another CLI may have just completed it.
 		prior, err := requestState(p.log(id), request)
 		if err != nil {
@@ -564,17 +562,17 @@ func (p *Project) retire(ctx context.Context, id string, result ProjectResult) (
 	}
 	return result, journal.RetireConnectionWindow(ctx, parent, meta.Owner)
 }
-func (p *Project) Disconnect(ctx context.Context, id string, cache bool) (ProjectResult, error) {
-	return p.disconnectMode(ctx, id, cache, false)
+func (p *Project) Disconnect(ctx context.Context, id string) (ProjectResult, error) {
+	return p.disconnectMode(ctx, id, false)
 }
 
 // CloseForRepair closes the original owned runtime before replacing a damaged or
 // older installation. Its runtime release and journal remain authoritative; it
 // never resumes a business request before recording the close intent.
-func (p *Project) CloseForRepair(ctx context.Context, id string, cache bool) (ProjectResult, error) {
-	return p.disconnectMode(ctx, id, cache, true)
+func (p *Project) CloseForRepair(ctx context.Context, id string) (ProjectResult, error) {
+	return p.disconnectMode(ctx, id, true)
 }
-func (p *Project) disconnectMode(ctx context.Context, id string, cache, repair bool) (ProjectResult, error) {
+func (p *Project) disconnectMode(ctx context.Context, id string, repair bool) (ProjectResult, error) {
 	state, err := p.Status(id)
 	if errors.Is(err, journal.ErrMemoryTornTail) {
 		if repairErr := p.recoverTail(ctx, id); repairErr != nil {
@@ -589,7 +587,7 @@ func (p *Project) disconnectMode(ctx context.Context, id string, cache, repair b
 		return p.retire(ctx, id, state)
 	}
 	if _, err := Load(p.log(id), nil); errors.Is(err, ErrJournalMissing) {
-		return p.disconnectActivation(ctx, id, cache)
+		return p.disconnectActivation(ctx, id)
 	} else if err != nil {
 		return state, err
 	}
@@ -604,7 +602,7 @@ func (p *Project) disconnectMode(ctx context.Context, id string, cache, repair b
 	if ended != "" {
 		return p.disconnectEnded(ctx, id, meta)
 	}
-	return p.driveMode(ctx, id, cache, repair, func(d *Driver) error {
+	return p.driveMode(ctx, id, repair, func(d *Driver) error {
 		if err := d.RequestClose(ctx); err != nil {
 			return err
 		}

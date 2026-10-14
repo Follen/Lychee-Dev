@@ -89,11 +89,11 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 			return channel.ProjectResult{}, errors.New("live.channel_owner_mismatch: repair must use the original CON")
 		}
 		if !needsInstall && opts.release == "" {
-			return project.Resume(ctx, report.Owner.OperationID, !opts.noCache)
+			return project.Resume(ctx, report.Owner.OperationID)
 		}
 		// Close the original connection without resuming pending business. Older
 		// managed files are accepted only by this repair-specific cleanup path.
-		if result, err := project.CloseForRepair(ctx, report.Owner.OperationID, !opts.noCache); err != nil {
+		if result, err := project.CloseForRepair(ctx, report.Owner.OperationID); err != nil {
 			return result, err
 		}
 	}
@@ -134,12 +134,12 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 		if key == "" {
 			key = "doctor-" + time.Now().UTC().Format("20060102T150405.000000000")
 		}
-		return project.Activate(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, key, !opts.noCache)
+		return project.Activate(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, key)
 	}
 	if opts.session != "" {
-		return project.Resume(ctx, opts.session, !opts.noCache)
+		return project.Resume(ctx, opts.session)
 	}
-	return project.Connect(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, !opts.noCache)
+	return project.Connect(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID})
 }
 func bundledDoctorRelease() string {
 	exe, err := os.Executable()

@@ -102,63 +102,6 @@ func slotStaticMatches(name string, actual, want []byte) bool {
 	return false
 }
 
-// RepairSlotBootstrap updates recognized prior TOC declarations and removes
-// the exact pre-release dependency declaration.
-// Payloads, reservations and loaders are preserved. Call under the installation
-// publication lease; a client must refresh its addon catalog before retrying.
-// The loader is passive unless the main runtime explicitly expects this slot.
-func RepairSlotBootstrap(ctx context.Context, parent, version string) error {
-	pool, err := readSlotPool(parent)
-	if err != nil {
-		return err
-	}
-	if pool.Schema != slotPoolSchema || len(pool.Files) != bridge.SlotCount || pool.State != "ready" || pool.Version != version {
-		return ErrInstallation
-	}
-	type replacement struct {
-		path string
-		data []byte
-	}
-	var changes []replacement
-	for i, entry := range pool.Files {
-		dir := SlotDirectory(parent, i+1)
-		if err = plainSlotDirectory(dir); err != nil {
-			return err
-		}
-		if err = exactSlotFileCount(dir); err != nil {
-			return err
-		}
-		for name, want := range slotStaticForSchema(i+1, version, pool.Schema) {
-			path := filepath.Join(dir, name)
-			actual, e := readSlotFile(path, 16384)
-			if e != nil {
-				return e
-			}
-			if bytes.Equal(actual, want) {
-				continue
-			}
-			withoutDependency := bytes.Replace(actual, []byte("## LoadOnDemand: 1\n## Dependencies: Lychee Dev\n"), []byte("## LoadOnDemand: 1\n"), 1)
-			if !strings.HasSuffix(name, ".toc") || !slotStaticMatches(name, withoutDependency, want) {
-				return ErrInstallation
-			}
-			changes = append(changes, replacement{path, want})
-		}
-		payload, e := readSlotFile(filepath.Join(dir, "Payload.lua"), 2<<20)
-		if e != nil {
-			return e
-		}
-		if slotDigest(payload) != entry.PayloadHash || entry.PendingHash != "" {
-			return ErrInstallation
-		}
-	}
-	for _, change := range changes {
-		if err = vault.ReplaceFile(ctx, change.path, change.data); err != nil {
-			return err
-		}
-	}
-	_, err = InspectSlots(ctx, parent, version)
-	return err
-}
 func readSlotPool(parent string) (SlotPool, error) {
 	var pool SlotPool
 	b, err := readSlotFile(filepath.Join(parent, slotMarker), slotPoolManifestLimit)

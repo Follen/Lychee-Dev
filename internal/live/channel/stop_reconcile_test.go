@@ -430,8 +430,11 @@ func TestRejectedPrepareCapacityConsumesNonceAndKeepsRequest(t *testing.T) {
 	}
 	p.current.Runtime = strings.Repeat("2", 32)
 	p.current.NextSlot = 1
-	if err := stopReconcileContinue(d); !errors.Is(err, ErrPending) {
-		t.Fatal(err)
+	continuation, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	d.Backend = &capacityReloadPeer{stopReconcilePeer: p, cancel: cancel}
+	if err := d.Continue(continuation); !errors.Is(err, ErrPending) || !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("did not reach resumed prepare publication: err=%v reload=%+v transaction=%+v", err, d.State.Reload, d.State.Transaction)
 	}
 	if d.State.Reload.Phase != "complete" || d.State.Transaction == nil || d.State.Transaction.Envelope.Action != "prepare" || d.State.Transaction.Envelope.Nonce == e.Nonce {
 		t.Fatal("capacity did not resume original business after new runtime")

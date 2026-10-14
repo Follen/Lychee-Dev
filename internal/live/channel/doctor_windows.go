@@ -131,9 +131,9 @@ func (p *Project) Doctor(ctx context.Context, request TargetRequest, session str
 	} else {
 		r.add("live.ownership", "ok", "unclaimed", "")
 	}
-	// A diagnostic uses the same runtime root and bounded reader, without trace or
-	// address-cache writes. A snapshot never grants permission to send input.
-	n, err := OpenNative(ctx, target.Window, parent, buildinfo.Version, "", false)
+	// A diagnostic uses the same runtime root and bounded reader, without trace
+	// writes. A snapshot never grants permission to send input.
+	n, err := OpenNative(ctx, target.Window, parent, buildinfo.Version)
 	if err != nil {
 		r.add("live.memory", "error", err.Error(), "verify the running build and its runtime locator")
 		return

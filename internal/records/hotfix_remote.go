@@ -94,15 +94,6 @@ func (q HotfixQuery) Validate() error {
 	return nil
 }
 
-// HotfixStatusFilter validates a raw --status value in 0..255.
-func HotfixStatusFilter(value int) (*uint8, error) {
-	if value < 0 || value > 255 {
-		return nil, fmt.Errorf("%w: status must be 0..255", ErrHotfixQuery)
-	}
-	status := uint8(value)
-	return &status, nil
-}
-
 // ParseHotfixTime accepts RFC3339 or the source-native "2006-01-02 15:04:05"
 // layout. Nothing else is guessed.
 func ParseHotfixTime(value string) (time.Time, error) {
@@ -237,12 +228,6 @@ type RemoteHotfixResult struct {
 	Complete   bool                 `json:"complete"`
 	Truncated  bool                 `json:"truncated"`
 	NextCursor string               `json:"nextCursor,omitempty"`
-}
-
-// HotfixProvider runs one shared query against one explicit source. Providers
-// never fall back to another source by themselves.
-type HotfixProvider interface {
-	QueryHotfix(ctx context.Context, query HotfixQuery) (RemoteHotfixResult, error)
 }
 
 // HotfixCursorPage pins one remote page by its request identity and response

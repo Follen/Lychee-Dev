@@ -84,7 +84,9 @@ func TestLegacyRetirementPreservesIntentAndEvidence(t *testing.T) {
 					t.Fatalf("lost report or invented game cleanup: %+v", result)
 				}
 			}
-			after, err := InspectOperation(ctx, root, record.OperationID)
+			after, err := vault.ReadWorkspace(ctx, root, func(_ *vault.Store, metadata *vault.Metadata) (journal.WorkRecord, error) {
+				return journal.OpenBook(metadata).InspectWork(ctx, record.OperationID)
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

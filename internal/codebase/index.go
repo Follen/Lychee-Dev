@@ -12,7 +12,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -735,54 +734,8 @@ type SymbolMatch struct {
 	EndLine    int    `json:"endLine"`
 	Signature  string `json:"signature,omitempty"`
 }
-type SymbolMatches struct {
-	Index     IndexSummary  `json:"index"`
-	Matches   []SymbolMatch `json:"matches"`
-	Truncated bool          `json:"truncated"`
-}
 
 func stableSymbolID(pin selection.SourcePin, s SymbolMatch) string {
 	h := sha256.Sum256([]byte(pin.Repository + "\x00" + pin.ExactCommit + "\x00" + s.Path + "\x00" + fmt.Sprint(s.Line) + "\x00" + fmt.Sprint(s.EndLine) + "\x00" + s.Name + "\x00" + s.Category + "\x00" + s.Scope + "\x00" + fmt.Sprint(s.Ordinal)))
 	return "SYM-" + hex.EncodeToString(h[:16])
-}
-func (b *Browser) FindSymbols(ctx context.Context, pin selection.SourcePin, term string, limit int) (SymbolMatches, error) {
-	ctx, closeQuery := sourceQueryContext(ctx)
-	defer closeQuery()
-
-	result := SymbolMatches{Matches: []SymbolMatch{}}
-	if term == "" || len(term) > 512 || limit < 1 || limit > 200 {
-		return result, errors.New("codebase.invalid_symbol_query")
-	}
-	cache, summary, err := b.openIndex(ctx, pin)
-	if err != nil {
-		return result, err
-	}
-	defer cache.Close()
-	result.Index = summary
-	var matches []SymbolMatch
-	err = cache.scanSelected(ctx, func(e recordOffset) bool { return e.Kind == "symbol" && (e.Name == term || e.Target == term) }, func(r sourceRecord) error {
-		if r.Kind == "symbol" && r.Symbol != nil && (r.Symbol.Name == term || r.Symbol.Target == term) {
-			matches = append(matches, *r.Symbol)
-		}
-		return nil
-	}, recordLookupKey{recordName, term}, recordLookupKey{recordTarget, term})
-	if err != nil {
-		return result, err
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		a, z := matches[i], matches[j]
-		if a.Kind != z.Kind {
-			return a.Kind < z.Kind
-		}
-		if a.Path != z.Path {
-			return a.Path < z.Path
-		}
-		if a.Line != z.Line {
-			return a.Line < z.Line
-		}
-		return a.Name < z.Name
-	})
-	result.Truncated = len(matches) > limit
-	result.Matches = matches[:min(limit, len(matches))]
-	return result, nil
 }

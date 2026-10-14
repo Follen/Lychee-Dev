@@ -130,7 +130,6 @@ func TestLiveConnectArgumentAdmission(t *testing.T) {
 		{"live", "connect", "--wait-seconds", "0", "--format=json"},
 		{"live", "connect", "--snapshot", "PIN-missing", "--character", "bad\nname", "--format=json"},
 		{"live", "connect", "--snapshot", "PIN-missing", "--pid", "0", "--format=json"},
-		{"live", "connect", "--snapshot", "PIN-missing", "--capture-area", "1,2,3", "--format=json"},
 		{"live", "connect", "--snapshot", "PIN-missing", "--nonce", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--format=json"},
 	} {
 		if result, code := invoke(t, args...); code != 2 || result.OK {
@@ -154,6 +153,48 @@ func TestLiveConnectArgumentAdmission(t *testing.T) {
 	for _, flag := range []string{"--session=S", "--snapshot=P", "--capture-area=window", "--installation=D", "--pid=1", "--character=C", "--realm=R"} {
 		if result, code := invoke(t, "version", flag, "--format=json"); code != 2 || result.OK {
 			t.Fatal("ignored connect flag", flag)
+		}
+	}
+}
+
+func TestLiveConnectRejectsRetiredFlagsBeforeNativeWork(t *testing.T) {
+	for _, flag := range [][]string{
+		{"--capture-area=window"},
+		{"--capture-area", "0,0,160,120"},
+		{"--account", "old"},
+		{"--wake-binding=CTRL-ALT-F12"},
+	} {
+		t.Run(strings.Join(flag, " "), func(t *testing.T) {
+			missing := filepath.Join(t.TempDir(), "absent")
+			args := []string{"live", "connect", "--home", missing, "--project", missing}
+			args = append(args, flag...)
+			result, code := invoke(t, append(args, "--format=json")...)
+			if code != 2 || result.OK || result.OperationID != "" || result.Result != nil || len(result.Captures) != 0 {
+				t.Fatalf("retired option reached native work: code=%d response=%+v", code, result)
+			}
+			if result.Error == nil || result.Error.Code != "command.invalid_arguments" || result.Error.Message != "unknown flag "+strings.SplitN(flag[0], "=", 2)[0] {
+				t.Fatalf("retired option bypassed the command contract: %+v", result.Error)
+			}
+			if _, err := os.Stat(missing); !os.IsNotExist(err) {
+				t.Fatalf("retired option initialized workspace: %v", err)
+			}
+		})
+	}
+}
+
+func TestHotfixStatusOptionRange(t *testing.T) {
+	for _, value := range []struct {
+		text string
+		want int
+	}{{"0", 0}, {"1", 1}, {"255", 255}} {
+		opts, err := parseOptions([]string{"data", "hotfix", "--status", value.text})
+		if err != nil || !opts.statusSet || opts.status != value.want {
+			t.Fatalf("status %s: value=%d set=%v err=%v", value.text, opts.status, opts.statusSet, err)
+		}
+	}
+	for _, value := range []string{"-1", "256", "invalid"} {
+		if _, err := parseOptions([]string{"data", "hotfix", "--status", value}); err == nil || err.Error() != "--status must be between 0 and 255" {
+			t.Fatalf("status %s: %v", value, err)
 		}
 	}
 }

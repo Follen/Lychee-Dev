@@ -96,7 +96,8 @@ func TestMissingReleaseReceiptRecoversVerifiedResultWithoutReplay(t *testing.T) 
 		t.Fatal("uncertain reload was repeated", err)
 	}
 	p.current.Runtime, p.current.NextSlot = strings.Repeat("2", 32), 1
-	if err := stopReconcileContinue(d); err != nil {
+	// Continue must finish naturally; this timeout is only a deadlock guard.
+	if err := stopReconcileContinueFor(d, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	got := d.State.Operation

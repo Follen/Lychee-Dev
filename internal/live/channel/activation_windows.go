@@ -36,7 +36,7 @@ func (p *Project) activationPath(id string) string {
 
 // Activate uses observed input for a loaded current runtime. Without that
 // capability it retains the exact target and waits for one manual reload.
-func (p *Project) Activate(ctx context.Context, request TargetRequest, key string, cache bool) (ProjectResult, error) {
+func (p *Project) Activate(ctx context.Context, request TargetRequest, key string) (ProjectResult, error) {
 	if err := ValidateRequest(key); err != nil {
 		return ProjectResult{}, err
 	}
@@ -56,15 +56,15 @@ func (p *Project) Activate(ctx context.Context, request TargetRequest, key strin
 		ID string `json:"id"`
 	}
 	if err = readProjectJSON(index, &ref, 4096); err == nil {
-		return p.Resume(ctx, ref.ID, cache)
+		return p.Resume(ctx, ref.ID)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return ProjectResult{}, err
 	}
 	// Ownership arbitration below handles a crash before the convenience index.
-	return p.activateTarget(ctx, target, request, key, index, cache)
+	return p.activateTarget(ctx, target, request, key, index)
 }
 
-func (p *Project) activateTarget(ctx context.Context, target live.ClientWindow, request TargetRequest, key, index string, cache bool) (ProjectResult, error) {
+func (p *Project) activateTarget(ctx context.Context, target live.ClientWindow, request TargetRequest, key, index string) (ProjectResult, error) {
 	parent := filepath.Join(target.Client.Directory, "Interface", "AddOns")
 	resource := fmt.Sprintf("window/%d/%d/%d", target.Window.ProcessID, target.Window.ProcessStartedAt, target.Window.Handle)
 	if owner, busy, err := journal.InspectWindowOwner(ctx, parent, resource); err != nil {
@@ -77,7 +77,7 @@ func (p *Project) activateTarget(ctx context.Context, target live.ClientWindow, 
 		if err = readProjectJSON(p.activationPath(owner.OperationID), &a, 16384); err != nil || a.Request != key {
 			return ProjectResult{}, &journal.WindowOccupied{Owner: owner}
 		}
-		return p.Resume(ctx, owner.OperationID, cache)
+		return p.Resume(ctx, owner.OperationID)
 	}
 	id, err := token()
 	if err != nil {
@@ -103,7 +103,7 @@ func (p *Project) activateTarget(ctx context.Context, target live.ClientWindow, 
 	if err != nil {
 		return ProjectResult{}, err
 	}
-	return p.resumeActivation(ctx, id, cache)
+	return p.resumeActivation(ctx, id)
 }
 
 func (p *Project) activationStatus(id string) (ProjectResult, error) {
@@ -198,7 +198,7 @@ func (p *Project) finishActivationBudget(ctx context.Context, id string, a *acti
 	return err
 }
 
-func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (r ProjectResult, err error) {
+func (p *Project) resumeActivation(ctx context.Context, id string) (r ProjectResult, err error) {
 	// Ordering is intentional: diagnostic IO must neither consume the final
 	// authority-budget observation nor keep another driver out of the window.
 	var finalizeBudget, releaseDriver, closeDiagnostics func() error
@@ -241,7 +241,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 			return present(d), e
 		}
 		lease = nil
-		return p.Resume(ctx, id, cache)
+		return p.Resume(ctx, id)
 	} else if !errors.Is(e, ErrJournalMissing) {
 		return r, e
 	}
@@ -285,7 +285,7 @@ func (p *Project) resumeActivation(ctx context.Context, id string, cache bool) (
 	if a.Phase == "runtime_selected" {
 		return r, ErrJournalMissing
 	}
-	n, err := p.native(ctx, meta.Target, cache)
+	n, err := p.native(ctx, meta.Target)
 	if err != nil {
 		return r, err
 	}
@@ -416,7 +416,7 @@ func (a activation) inputFree() bool {
 	return a.InputStep == 0 && (a.Outcome == nil || a.Outcome.Disposition == "not_sent" && a.Outcome.MessagesQueued == 0)
 }
 
-func (p *Project) disconnectActivation(ctx context.Context, id string, cache bool) (r ProjectResult, err error) {
+func (p *Project) disconnectActivation(ctx context.Context, id string) (r ProjectResult, err error) {
 	r, err = p.activationStatus(id)
 	if err != nil {
 		return r, err
@@ -445,7 +445,7 @@ func (p *Project) disconnectActivation(ctx context.Context, id string, cache boo
 			return r, err
 		}
 		lease = nil
-		return p.Disconnect(ctx, id, cache)
+		return p.Disconnect(ctx, id)
 	} else if !errors.Is(e, ErrJournalMissing) {
 		return r, e
 	}

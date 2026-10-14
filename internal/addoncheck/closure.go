@@ -50,19 +50,6 @@ type LoadAssessment struct {
 	LoadValid             bool              `json:"loadValid"`
 	CompatibilityComplete bool              `json:"compatibilityComplete"`
 }
-type Checker struct{ store *vault.Store }
-
-func OpenChecker(store *vault.Store) *Checker { return &Checker{store: store} }
-
-// InspectAddon constructs an ordered, bounded local load graph and archives
-// exactly the bytes analyzed. Compatibility against a pinned game source is a
-// separate stage; LoadValid never claims that APIs or protected calls are safe.
-func (c *Checker) InspectAddon(ctx context.Context, input AddonInput) (LoadAssessment, error) {
-	if c.store == nil {
-		return LoadAssessment{}, errors.New("codebase.archive_required")
-	}
-	return InspectLoad(ctx, input, c.store, maxSourceBytes)
-}
 
 // InspectLocalLoad checks the same bounded load graph without creating a
 // workspace or archiving content. Document digests are observations only;

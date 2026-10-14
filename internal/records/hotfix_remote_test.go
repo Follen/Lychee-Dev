@@ -40,20 +40,6 @@ func TestHotfixQueryValidationEdges(t *testing.T) {
 	}
 }
 
-func TestHotfixStatusFilterRange(t *testing.T) {
-	for _, value := range []int{0, 1, 255} {
-		status, err := records.HotfixStatusFilter(value)
-		if err != nil || status == nil || int(*status) != value {
-			t.Fatalf("status %d = %v err = %v", value, status, err)
-		}
-	}
-	for _, value := range []int{-1, 256, 1000} {
-		if status, err := records.HotfixStatusFilter(value); err == nil || status != nil {
-			t.Fatalf("status %d accepted: %v", value, status)
-		}
-	}
-}
-
 func TestParseHotfixTimeFormats(t *testing.T) {
 	rfc, err := records.ParseHotfixTime("2026-08-05T22:09:07Z")
 	if err != nil || rfc.Year() != 2026 {
