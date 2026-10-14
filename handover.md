@@ -524,6 +524,20 @@ scan依赖校验的临时解析reservation在前一对象全部销毁后释放�
 
 两个既有Data auras/summons handler补广告注册，23 Data/Asset命令集合无重复。9文件两轮独审原数值P2已关闭，28项新Rust回归（15unit/11integration/2registry）均NOT_RUN，现接Windows；rustfmt/diff及11个JSON测试模板静态检查通过。receipt SHA256 4a312dd5fd6dd3c23367e44ecc9844cfcff0f07f28a7222d496113ab52931212。正在跑的418 named-table和typed-budget组已失败，终态日志待取并优先修复，本批不能覆盖或倒填它们。remote provider/SQL effective/完整Data与性能仍未完成。
 
+### 418c2ef Windows 终态：新产品组与明确失败
+
+run38645225374/product116135835948整体失败；artifact11934043350 ZIP SHA256 b61b42d3297dd4d17e6ddd54ef2eceb5b4e200967cc96f66897261705fe2b915已下载，572份sealedLogs逐项hash全部吻合。EXE SHA256 84acfd02cae72af870321a61bd09b3574e7b478e157f63d37922484d141132f2。按各受控Cargo命令结果计445次通过断言执行/4失败/6ignored（非去重覆盖率，失败组内pass也不等于整组通过）。其中source batch14、正式Mailbox/journal148、typed slot publication29、native session12以及SQLite锁取消组实际成功；full Retail静态21检查和真实多CLI小fixture session成功，不冒称完整Retail semantic通过。
+
+明确失败：native research组22pass/2fail/2ignore，两个虚拟模板handler计划期望1实际0；已定位开标签span与完整handler span混用，待修。named Hotfix组11pass/1fail，整数浮点页误触records.hotfix_limit；typed Hotfix组5pass/1fail，Go应编码1却返回1.0，待修共享根因。后两Cargo exit101后仍有vctip子进程，按既有仅成功root允许辅助进程特例策略转强制回收；root/tree/handles/readers均回收、active0，但整组失败，不能抹去forced或放宽helper遮盖产品错误。
+
+Skill此旧树27项原始22pass/5fail：真实batch新通过，refs/context/session status五项仍因未广告而未发出；f0c才补这些注册。旧post-semantic标签限制仍适用，de321才修checker，不回填本次。完整产物复核记录SHA256 f7d3aba9697acad971fdf97eec5e70e32eb6a5139d74cc616e6188fe77b0ae6e；这只是本次日志/命令逐项复核，不是全产品或四阶段收敛。
+
+### 早期稳定诊断产物
+
+真实GitHub job运行中日志下载返回404，因此在早期build/describe步骤后新增独立技术证据快照上传，后续长测继续。仅采用sealedAt且handlesReaped=true的receipt和本owner目录内逐hash吻合的sealedLogs；不读取活跃组日志、不借其他owner、不写原evidence。验证后的Buffer一次物化到全新独立目录，单文件16MiB/累计64MiB/2000文件；原文件不被清理或改写。失败但已回收组保留，未封存组明确skip；校验失败不上传新快照。
+
+独立复审发现并修复跨owner活跃日志借用及输出目录重叠两项边界；8/8 Node独立通过，workflow仅上传成功快照，不扩大权限、不含凭证或用户数据。实际Windows早期artifact尚未运行；完整终态artifact保留原流程，早期快照不代替最终证据。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
