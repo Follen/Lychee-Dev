@@ -429,3 +429,292 @@ fn unicode_directory_budget_or_encoding_failure_publishes_nothing() {
         "memory.runtime_image_encoding"
     );
 }
+
+#[test]
+fn code_prefix_only_authenticates_success_or_partial_copy_within_requested_span() {
+    assert_eq!(qualified_code_prefix(7, 8, true, false).unwrap(), 7);
+    assert_eq!(qualified_code_prefix(7, 8, false, true).unwrap(), 7);
+    assert_eq!(qualified_code_prefix(7, 8, false, false).unwrap(), 0);
+    assert_eq!(
+        qualified_code_prefix(9, 8, true, false).unwrap_err(),
+        "memory.runtime_invalid_read_count"
+    );
+}
+#[test]
+fn temporary_scopes_keep_original_ledger_and_all_nested_cancellations() {
+    let parent = Arc::new(AtomicBool::new(false));
+    let first = Arc::new(AtomicBool::new(false));
+    let second = Arc::new(AtomicBool::new(false));
+    let mut b = RuntimeBudget::with_control(
+        RuntimeLimits::defaults(),
+        Instant::now() + Duration::from_secs(10),
+        ExternalControl(parent.clone()),
+    )
+    .unwrap();
+    let id = b.request_id();
+    b.with_control_scope_factory(
+        0,
+        || ExternalControl(first.clone()),
+        |b| {
+            b.charge(RuntimeCost::read(3)).unwrap();
+            b.with_control_scope_factory(
+                0,
+                || ExternalControl(second.clone()),
+                |b| {
+                    first.store(true, Ordering::Release);
+                    assert_eq!(b.check().unwrap_err(), "fixture.parent_cancelled");
+                    assert_eq!(b.request_id(), id);
+                },
+            )
+            .unwrap();
+        },
+    )
+    .unwrap();
+    assert_eq!(b.usage().requested_bytes, 3);
+    assert_eq!(b.request_id(), id);
+    assert!(b.check().is_ok());
+    parent.store(true, Ordering::Release);
+    assert_eq!(b.check().unwrap_err(), "fixture.parent_cancelled");
+}
+#[test]
+fn temporary_scope_factory_is_not_called_after_admission_failure() {
+    let mut b = budget(RuntimeLimits {
+        allocation_bytes: 0,
+        ..RuntimeLimits::defaults()
+    });
+    let called = std::cell::Cell::new(false);
+    let result = b.with_control_scope_factory(
+        100,
+        || {
+            called.set(true);
+            ExternalControl(Arc::new(AtomicBool::new(false)))
+        },
+        |_| (),
+    );
+    assert_eq!(result.unwrap_err(), "memory.runtime_budget:allocations");
+    assert!(!called.get());
+    assert!(b.scoped_controls.is_empty());
+}
+
+#[test]
+fn runtime_read_diagnostic_retains_only_original_ineligible_region_and_native_error() {
+    let mut attempt = ReadAttempt::default();
+    let observed = region(0x1000, 0x3000);
+    attempt.queried(observed);
+    let failure = attempt.fail("fixture.region".into());
+    assert_eq!(failure.reason, "region_ineligible");
+    assert_eq!(
+        failure.region,
+        Some((observed.kind, observed.state, observed.protection))
+    );
+    assert!(!failure.io_attempted);
+    let mut attempt = ReadAttempt::default();
+    attempt.queried(observed);
+    attempt.eligible();
+    attempt.io_attempted = true;
+    attempt.returned_bytes = 7;
+    attempt.native_error(&Err(windows::core::Error::from_hresult(
+        windows::core::HRESULT(0x8007012bu32 as i32),
+    )));
+    let failure = attempt.fail("fixture.partial".into());
+    assert_eq!(failure.reason, "native_read_failed");
+    assert_eq!(failure.returned_bytes, 7);
+    assert_eq!(failure.native_error_code, Some(299));
+    assert_eq!(failure.region, None);
+}
+
+#[test]
+fn runtime_adapter_qualifies_only_acquired_prefix_when_unread_suffix_changes_protection() {
+    let mut first = segment(0x1000, 0x2000);
+    first.region.protection = PAGE_EXECUTE_READ.0;
+    let mut suffix = segment(0x2000, 0x3000);
+    suffix.region.protection = PAGE_EXECUTE_READ.0;
+    let issued = [first, suffix];
+    let mut changed_suffix = suffix.region;
+    changed_suffix.protection = PAGE_NOACCESS.0;
+    let mut queried = Vec::new();
+    // This is the same post-RPM helper called by read_code_prefix, after a
+    // two-page attempt returned one page. The suffix query would fail guards.
+    verify_code_prefix(&issued, &issued, 0x1000, 4096, 0x1000, 0x3000, 2, |at| {
+        queried.push(at);
+        Ok(if at < 0x2000 {
+            first.region
+        } else {
+            changed_suffix
+        })
+    })
+    .unwrap();
+    assert_eq!(queried, vec![0x1000]);
+    let cause = check_segment(
+        &issued,
+        changed_suffix,
+        0x2000,
+        0x3000,
+        0x1000,
+        0x3000,
+        RuntimeReadKind::Code,
+    )
+    .unwrap_err();
+    assert!(unread_code_gap(&cause)); // unread page is a sparse gap, not bytes
+    assert!(!unread_code_gap("memory.runtime_cancelled"));
+    assert!(!unread_code_gap("memory.runtime_process_reused"));
+    let mut changed_prefix = first.region;
+    changed_prefix.protection = PAGE_NOACCESS.0;
+    assert_eq!(
+        verify_code_prefix(&issued, &issued, 0x1000, 4096, 0x1000, 0x3000, 2, |_| Ok(
+            changed_prefix
+        ))
+        .unwrap_err(),
+        "memory.runtime_mapping_changed"
+    );
+    verify_code_prefix(&issued, &issued, 0x1000, 0, 0x1000, 0x3000, 2, |_| {
+        panic!("no returned bytes to qualify")
+    })
+    .unwrap();
+}
+
+#[test]
+fn runtime_query_failure_captures_original_win32_code_before_any_rpm() {
+    let mut b = budget(RuntimeLimits::defaults());
+    let mut attempt = ReadAttempt::default();
+    let calls = std::cell::Cell::new(0);
+    let error = query_with(0x1000, 4096, &mut b, Some(&mut attempt), |_| {
+        calls.set(calls.get() + 1);
+        (
+            0,
+            Some(windows::core::Error::from_hresult(
+                windows::core::HRESULT::from_win32(5),
+            )),
+        )
+    })
+    .unwrap_err();
+    let failure = attempt.fail(error);
+    assert_eq!(failure.reason, "region_query_failed");
+    assert_eq!(failure.native_error_code, Some(5));
+    assert_eq!(failure.returned_bytes, 0);
+    assert!(!failure.io_attempted);
+    assert_eq!(failure.region, None);
+    assert_eq!(
+        (calls.get(), b.usage().query_calls, b.usage().read_calls),
+        (1, 1, 0)
+    );
+}
+
+#[test]
+fn runtime_formal_work_absolute_cap_is_finite_and_defaults_are_unchanged() {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut limits = RuntimeLimits::defaults();
+    assert_eq!(limits.work_units, 1 << 30);
+    limits.work_units = 32 << 30;
+    assert!(RuntimeBudget::new(limits, deadline, Arc::new(AtomicBool::new(false))).is_ok());
+    limits.work_units += 1;
+    assert_eq!(
+        RuntimeBudget::new(limits, deadline, Arc::new(AtomicBool::new(false)))
+            .err()
+            .unwrap(),
+        "memory.runtime_budget_options"
+    );
+}
+
+#[test]
+fn checked_close_consumes_owner_once_even_when_close_reports_failure() {
+    struct Owner<'a>(&'a std::cell::Cell<usize>);
+    impl Drop for Owner<'_> {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    for fails in [false, true] {
+        let drops = std::cell::Cell::new(0);
+        let closes = std::cell::Cell::new(0);
+        let result = consume_close(
+            Owner(&drops),
+            |_| HANDLE::default(),
+            |_| {
+                closes.set(closes.get() + 1);
+                if fails {
+                    Err("fixture.close_failed".into())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(result.is_err(), fails);
+        assert_eq!(closes.get(), 1);
+        assert_eq!(drops.get(), 0); // RAII path was disarmed before the attempt
+    }
+}
+
+#[test]
+fn failed_module_issuance_explicitly_closes_owned_current_process_handle() {
+    let process = Process::open(std::process::id()).unwrap();
+    let closes = CHECKED_CLOSE_CALLS.with(|calls| calls.get());
+    let window = WindowIdentity {
+        process: process.identity.clone(),
+        hwnd: 0,
+    };
+    let mut b = budget(RuntimeLimits::defaults());
+    let failure = RuntimeModule::from_process(process, window, &mut b)
+        .err()
+        .unwrap();
+    assert_eq!(failure, "memory.runtime_process_reused");
+    // Per-thread hook is inside the real CloseHandle boundary, not a simulated
+    // destructor. No stale raw-handle query can race another test's handle reuse.
+    assert_eq!(CHECKED_CLOSE_CALLS.with(|calls| calls.get()), closes + 1);
+}
+
+#[test]
+fn runtime_close_join_keeps_primary_close_and_control_causes() {
+    assert_eq!(
+        join_runtime_causes(
+            "fixture.read_failed".into(),
+            Err(
+                "memory.runtime_process_close: hresult=0x80070006\nmemory.runtime_cancelled".into()
+            )
+        ),
+        "fixture.read_failed\nmemory.runtime_process_close: hresult=0x80070006\nmemory.runtime_cancelled"
+    );
+    assert_eq!(
+        join_runtime_causes(
+            "memory.runtime_cancelled".into(),
+            Err("memory.runtime_cancelled".into())
+        ),
+        "memory.runtime_cancelled"
+    );
+}
+
+#[test]
+fn module_identity_uses_fixed_go_path_fold_with_bounded_original_control() {
+    let mut b = budget(RuntimeLimits::defaults());
+    for (a, z, expected) in [
+        ("C:\\K\\Wow.exe", "c:\\K\\WOW.EXE", true),
+        ("C:\\S\\wow.exe", "C:\\ſ\\wow.exe", true),
+        ("ß", "ẞ", true),
+        ("ß", "SS", false),
+        ("İ", "i", false),
+        ("é", "e\u{301}", false),
+    ] {
+        let a: Vec<_> = a.encode_utf16().collect();
+        let z: Vec<_> = z.encode_utf16().collect();
+        let used = b.usage();
+        assert_eq!(equal_fold_image_path(&a, &z, &mut b).unwrap(), expected);
+        assert_eq!(b.usage().os_call_units, used.os_call_units);
+        assert_eq!(
+            b.usage().work_units - used.work_units,
+            (a.len() + z.len()) as u64 * 16
+        );
+    }
+    assert!(equal_fold_image_path(&[0xd800], &[0xfffd], &mut b).unwrap());
+    let cancelled = Arc::new(AtomicBool::new(true));
+    let mut stopped = RuntimeBudget::new(
+        RuntimeLimits::defaults(),
+        Instant::now() + Duration::from_secs(5),
+        cancelled,
+    )
+    .unwrap();
+    assert_eq!(
+        equal_fold_image_path(&[b'a' as u16], &[b'A' as u16], &mut stopped).unwrap_err(),
+        "memory.runtime_cancelled"
+    );
+    assert_eq!(stopped.usage(), RuntimeCost::default());
+}

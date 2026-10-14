@@ -100,6 +100,42 @@ static PROFILES: &[CatalogProfile] = &[
     },
 ];
 
+// The fixed Go reader validates this ABI on every named path. These profiles
+// bind source-reviewed layout semantics to an observed recipe, not a build/hash
+// allowlist. The digest is the fixed Go lua_mailbox.go byte digest, not any of
+// the historical four-client runtime acceptance artifacts above.
+const FORMAL_LAYOUT_SOURCE: &str =
+    "ee1c7d473cc54257baed4622a212d29ad7f1f168a48d0a92cd0052e8931289f6";
+static FORMAL_PROFILES: &[CatalogProfile] = &[
+    CatalogProfile {
+        product: "",
+        catalog_product: "",
+        channel: "",
+        full_build: "",
+        recipe: RecipeId::Retail,
+        profile: "go-3.2.0-lua-mailbox-rip-v1",
+        evidence_sha256: FORMAL_LAYOUT_SOURCE,
+    },
+    CatalogProfile {
+        product: "",
+        catalog_product: "",
+        channel: "",
+        full_build: "",
+        recipe: RecipeId::Forever,
+        profile: "go-3.2.0-lua-mailbox-runscript-v1",
+        evidence_sha256: FORMAL_LAYOUT_SOURCE,
+    },
+    CatalogProfile {
+        product: "",
+        catalog_product: "",
+        channel: "",
+        full_build: "",
+        recipe: RecipeId::ForeverContext,
+        profile: "go-3.2.0-lua-mailbox-context-v1",
+        evidence_sha256: FORMAL_LAYOUT_SOURCE,
+    },
+];
+
 /// Opaque, compile-catalog-issued ABI permission. It cannot be deserialized,
 /// default-constructed or issued by importing flags, layouts or EXE digests.
 pub struct RuntimeLayoutAdmission {
@@ -167,11 +203,8 @@ impl RuntimeLayoutAdmission {
         budget: &mut RuntimeBudget,
     ) -> Result<Self> {
         let client = fresh_client(module, budget)?;
-        if PROFILES.len() > 1024 {
-            return Err("reader.runtime_catalog_budget".into());
-        }
-        budget.charge(RuntimeCost::work(PROFILES.len() as u64 * 512 + 1024))?;
-        let mut admission = Self::select_from(&client, recipe, PROFILES)?;
+        budget.charge(RuntimeCost::work(FORMAL_PROFILES.len() as u64 * 512 + 1024))?;
+        let mut admission = Self::select_formal(&client, recipe)?;
         budget.charge(RuntimeCost::allocation(std::mem::size_of::<
             RuntimeModuleIdentity,
         >()))?;
@@ -186,6 +219,38 @@ impl RuntimeLayoutAdmission {
         recipe: RecipeId,
         profiles: &'static [CatalogProfile],
     ) -> Result<Self> {
+        Self::check_client(client)?;
+        let observed_slot = if client.catalog_product.is_empty() {
+            client.product_code.as_str()
+        } else {
+            client.catalog_product.as_str()
+        };
+        let mut matches = profiles.iter().filter(|p| {
+            p.product == client.product
+                && p.catalog_product == observed_slot
+                && p.channel == client.channel
+                && p.full_build == client.full_build
+                && p.recipe == recipe
+        });
+        let profile = matches.next().ok_or("reader.runtime_layout_unsupported")?;
+        if matches.next().is_some()
+            || profile.profile.is_empty()
+            || profile.profile.len() > 128
+            || profile.evidence_sha256.len() != 64
+            || !profile
+                .evidence_sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !profile.evidence_sha256.bytes().any(|b| b != b'0')
+        {
+            return Err("reader.runtime_catalog_invalid".into());
+        }
+        Ok(Self {
+            profile,
+            scope: None,
+        })
+    }
+    fn check_client(client: &ClientInstallation) -> Result<()> {
         // The API family may be shared, but ABI admission remains tied to the
         // exact observed delivery slot. No regional catalog evidence is borrowed.
         let known = client::product(client::client_data_product(client))
@@ -208,11 +273,6 @@ impl RuntimeLayoutAdmission {
         {
             return Err("reader.runtime_client_identity".into());
         }
-        let observed_slot = if client.catalog_product.is_empty() {
-            client.product_code.as_str()
-        } else {
-            client.catalog_product.as_str()
-        };
         let mut components = client.full_build.split('.');
         for _ in 0..4 {
             let part = components.next().ok_or("reader.runtime_client_identity")?;
@@ -223,26 +283,22 @@ impl RuntimeLayoutAdmission {
         if components.next().is_some() {
             return Err("reader.runtime_client_identity".into());
         }
-        let mut matches = profiles.iter().filter(|p| {
-            p.product == client.product
-                && p.catalog_product == observed_slot
-                && p.channel == client.channel
-                && p.full_build == client.full_build
-                && p.recipe == recipe
-        });
-        let profile = matches.next().ok_or("reader.runtime_layout_unsupported")?;
-        if matches.next().is_some()
-            || profile.profile.is_empty()
-            || profile.profile.len() > 128
-            || profile.evidence_sha256.len() != 64
-            || !profile
-                .evidence_sha256
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            || !profile.evidence_sha256.bytes().any(|b| b != b'0')
+        Ok(())
+    }
+    fn select_formal(client: &ClientInstallation, recipe: RecipeId) -> Result<Self> {
+        Self::check_client(client)?;
+        let observed = client::product(client::client_data_product(client))
+            .ok_or("reader.runtime_client_identity")?;
+        if !client::PRODUCTS
+            .iter()
+            .any(|product| product.id == observed.id)
         {
-            return Err("reader.runtime_catalog_invalid".into());
+            return Err("reader.runtime_layout_unsupported".into());
         }
+        let profile = FORMAL_PROFILES
+            .iter()
+            .find(|p| p.recipe == recipe)
+            .ok_or("reader.runtime_layout_unsupported")?;
         Ok(Self {
             profile,
             scope: None,
@@ -294,6 +350,7 @@ pub struct RuntimeBindingFailure {
     /// Original ledger's last observed usage. A foreign replacement ledger
     /// never replaces the binding's retained counters.
     pub usage: RuntimeUsage,
+    pub first_read_failure: Option<crate::mailbox::ReadFailure>,
 }
 impl std::fmt::Display for RuntimeBindingFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -323,6 +380,11 @@ pub struct RuntimeModuleDescription {
 pub struct RuntimeCoverage {
     pub recipe: Option<RecipeId>,
     pub pattern_hits: u64,
+    pub rejected_matches: u64,
+    pub root_candidates: u64,
+    pub text_bytes: u64,
+    pub gaps: crate::runtime_root::RootGaps,
+    pub read_failures: u64,
     pub header_bytes: u64,
     pub scanned_bytes: u64,
     pub module_read_calls: u64,
@@ -336,6 +398,11 @@ impl From<&RootEvidence> for RuntimeCoverage {
         Self {
             recipe: value.recipe,
             pattern_hits: value.pattern_hits,
+            rejected_matches: value.rejected_matches,
+            root_candidates: value.root_candidates,
+            text_bytes: value.text_bytes,
+            gaps: value.gaps.clone(),
+            read_failures: value.read_failures,
             header_bytes: value.header_bytes,
             scanned_bytes: value.scanned_bytes,
             module_read_calls: value.module_read_calls,
@@ -387,6 +454,12 @@ fn description_cost(client: &ClientInstallation, release: &str) -> RuntimeCost {
 // Private seam exercises orchestration without allowing external Memory
 // implementations to mint an OS-bound reader or an ABI admission.
 trait Source {
+    fn close(self, budget: &RuntimeBudget) -> Result<()>
+    where
+        Self: Sized,
+    {
+        budget.check()
+    }
     fn root(&self) -> u64;
     fn evidence(&self) -> &RootEvidence;
     fn verify_scope(
@@ -403,6 +476,16 @@ trait Source {
         module: bool,
         budget: &mut RuntimeBudget,
     ) -> Result<()>;
+    fn read_diagnostic(
+        &self,
+        address: u64,
+        bytes: &mut [u8],
+        module: bool,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        self.read(address, bytes, module, budget)
+            .map_err(crate::mailbox::ReadError::unknown)
+    }
 }
 struct OsSource {
     module: RuntimeModule,
@@ -410,6 +493,9 @@ struct OsSource {
     latest: RootEvidence,
 }
 impl Source for OsSource {
+    fn close(self, budget: &RuntimeBudget) -> Result<()> {
+        self.module.close(budget)
+    }
     fn root(&self) -> u64 {
         self.root.root_address()
     }
@@ -451,20 +537,116 @@ impl Source for OsSource {
         module: bool,
         budget: &mut RuntimeBudget,
     ) -> Result<()> {
-        if module {
-            if address != self.root.root_address() || bytes.len() != 8 {
-                return Err("reader.runtime_root_range".into());
+        self.read_diagnostic(address, bytes, module, budget)
+            .map_err(|failure| failure.cause)
+    }
+    fn read_diagnostic(
+        &self,
+        address: u64,
+        bytes: &mut [u8],
+        module: bool,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        runtime_read_diagnostic(&self.module, &self.root, address, bytes, module, budget)
+    }
+}
+
+fn runtime_read_diagnostic(
+    module: &RuntimeModule,
+    root: &RootBinding,
+    address: u64,
+    bytes: &mut [u8],
+    is_module: bool,
+    budget: &mut RuntimeBudget,
+) -> std::result::Result<(), crate::mailbox::ReadError> {
+    let result = if is_module {
+        if address != root.root_address() || bytes.len() != 8 {
+            return Err(crate::mailbox::ReadError::unknown(
+                "reader.runtime_root_range".into(),
+            ));
+        }
+        module.read_exact_observed(
+            root.root_rva(),
+            bytes,
+            RuntimeReadKind::WritableData,
+            budget,
+        )
+    } else {
+        module.read_private_observed(address, bytes, budget)
+    };
+    result.map_err(Into::into)
+}
+/// A temporary borrowing view probes candidate paths without reopening the
+/// process or minting a module/root identity. It uses the same request ledger.
+struct CandidateSource<'a> {
+    module: &'a RuntimeModule,
+    root: &'a mut RootBinding,
+    latest: RootEvidence,
+}
+impl Source for CandidateSource<'_> {
+    fn root(&self) -> u64 {
+        self.root.root_address()
+    }
+    fn evidence(&self) -> &RootEvidence {
+        &self.latest
+    }
+    fn verify_scope(
+        &self,
+        admission: &RuntimeLayoutAdmission,
+        budget: &mut RuntimeBudget,
+    ) -> Result<()> {
+        let scope = admission
+            .scope
+            .as_ref()
+            .ok_or("reader.runtime_scope_missing")?;
+        check_scope_identity(Some(&scope.module), self.module.identity())?;
+        let current = fresh_client(self.module, budget)?;
+        check_client_identity(&current, &scope.client, budget)
+    }
+    fn revalidate(&mut self, budget: &mut RuntimeBudget) -> Result<()> {
+        match self.root.revalidate(self.module, budget) {
+            Ok(evidence) => {
+                self.latest = evidence;
+                Ok(())
             }
-            self.module.read_exact(
-                self.root.root_rva(),
-                bytes,
-                RuntimeReadKind::WritableData,
-                budget,
-            )
-        } else {
-            self.module.read_private_exact(address, bytes, budget)
+            Err(failure) => {
+                self.latest = *failure.evidence;
+                Err(failure.cause)
+            }
         }
     }
+    fn verify(&self, budget: &mut RuntimeBudget) -> Result<()> {
+        self.module.verify(budget)
+    }
+    fn read(
+        &self,
+        address: u64,
+        bytes: &mut [u8],
+        module: bool,
+        budget: &mut RuntimeBudget,
+    ) -> Result<()> {
+        self.read_diagnostic(address, bytes, module, budget)
+            .map_err(|failure| failure.cause)
+    }
+    fn read_diagnostic(
+        &self,
+        address: u64,
+        bytes: &mut [u8],
+        module: bool,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        runtime_read_diagnostic(self.module, self.root, address, bytes, module, budget)
+    }
+}
+enum LookupSelector<'a> {
+    Legacy(&'a Selector),
+    Formal(&'a crate::go_mailbox_v1::Selector),
+}
+fn transient_publication(cause: &str) -> bool {
+    matches!(
+        cause,
+        "mailbox.path_changed" | "mailbox.lua_state_null" | "mailbox.string_layout"
+    )
 }
 
 struct Bound<S> {
@@ -517,6 +699,7 @@ impl<S: Source> Bound<S> {
             cause,
             stage,
             root: Box::new(self.source.evidence().clone()),
+            first_read_failure: self.source.evidence().first_read_failure.clone(),
             usage: if budget.request_id() == self.request {
                 budget.usage()
             } else {
@@ -548,12 +731,14 @@ impl<S: Source> Bound<S> {
             budget.check()
         })();
         if let Err(cause) = checked {
-            return Err(RuntimeBindingFailure {
+            let failure = RuntimeBindingFailure {
                 cause,
                 stage: "bind",
                 root: Box::new(source.evidence().clone()),
                 usage: budget.usage(),
-            });
+                first_read_failure: source.evidence().first_read_failure.clone(),
+            };
+            return Err(join_close_failure(failure, source.close(budget)));
         }
         Ok(Self {
             source,
@@ -569,10 +754,27 @@ impl<S: Source> Bound<S> {
         selector: &Selector,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
+        self.lookup_selected(LookupSelector::Legacy(selector), None, budget)
+    }
+    fn lookup_formal(
+        &mut self,
+        selector: &crate::go_mailbox_v1::Selector,
+        accept: Option<&mut dyn FnMut(&Record) -> bool>,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
+        self.lookup_selected(LookupSelector::Formal(selector), accept, budget)
+    }
+    fn lookup_selected(
+        &mut self,
+        selector: LookupSelector<'_>,
+        mut accept: Option<&mut dyn FnMut(&Record) -> bool>,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
         if let Some(cause) = &self.poisoned {
             return Err(self.failure(cause.clone(), "poisoned", budget));
         }
         let mut stage = "before_lookup";
+        let mut first_read_failure = None;
         let result = (|| {
             if budget.request_id() != self.request {
                 return Err("reader.runtime_budget_identity".into());
@@ -587,32 +789,88 @@ impl<S: Source> Bound<S> {
                 ..RuntimeCost::default()
             })?;
             stage = "lookup";
-            let record = {
+            let read = {
                 let memory = LookupMemory {
                     source: &self.source,
                     budget: RefCell::new(&mut *budget),
                 };
-                Reader {
+                let reader = Reader {
                     memory: &memory,
                     root: self.source.root(),
                     layout: self.admission.layout(),
                     module_hash: String::new(),
                     release: self.release.clone(),
-                }
-                .lookup_runtime(selector, &self.admission)?
+                };
+                let read = match selector {
+                    LookupSelector::Legacy(selector) => reader
+                        .lookup_runtime(selector, &self.admission)
+                        .map_err(crate::mailbox::LookupFailure::from),
+                    LookupSelector::Formal(selector) => {
+                        reader.lookup_runtime_formal(selector, &self.admission, None)
+                    }
+                };
+                read.map_err(|failure| {
+                    first_read_failure = failure.first_read_failure;
+                    failure.cause
+                })
             };
-            stage = "after_lookup";
-            self.source.revalidate(budget)?;
-            self.source.verify_scope(&self.admission, budget)?;
+            if read.is_ok() {
+                stage = "after_lookup";
+            }
+            // Failure is not an exit from qualification: the Lua path can race
+            // simultaneously with the outer recipe/metadata. Recheck every
+            // original scope under this ledger, retain the original read facts,
+            // and join independent faults so a mixed failure is never transient.
+            let mut checked = read;
+            for guard in [
+                self.source.revalidate(budget),
+                self.source.verify_scope(&self.admission, budget),
+                budget.check(),
+            ] {
+                if let Err(next) = guard {
+                    // Even if the original read failed, this independent outer
+                    // failure must abort candidate selection rather than merely
+                    // rank this Lua root as malformed.
+                    stage = "after_lookup";
+                    checked = Err(match checked {
+                        Ok(_) => next,
+                        Err(mut cause) => {
+                            for leaf in next.lines() {
+                                if !cause.lines().any(|existing| existing == leaf) {
+                                    cause.push('\n');
+                                    cause.push_str(leaf);
+                                }
+                            }
+                            cause
+                        }
+                    });
+                }
+            }
+            let record = checked?;
+            // The caller sees bytes only after BOTH the Lua path and outer
+            // runtime recipe/metadata guards. Accept cannot suppress control.
+            let accepted =
+                record.filter(|record| accept.as_mut().is_none_or(|predicate| predicate(record)));
+            stage = "after_accept";
+            self.source.verify(budget)?;
             budget.check()?;
-            Ok(record)
+            Ok(accepted)
         })();
         if budget.request_id() == self.request {
             self.last_usage = budget.usage();
         }
         result.map_err(|cause: String| {
-            self.poisoned = Some(cause.clone());
-            self.failure(cause, stage, budget)
+            // A public-path race/null/retired string clears this read, not the
+            // held module/root. The driver alone decides whether the current
+            // transaction may retry (null/string only after submitted reload).
+            // Mixed errors, changed metadata/recipe, OS faults and control stops
+            // remain poisoned. No automatic scan or budget replacement occurs.
+            if !transient_publication(&cause) {
+                self.poisoned = Some(cause.clone());
+            }
+            let mut failure = self.failure(cause, stage, budget);
+            failure.first_read_failure = first_read_failure.or(failure.first_read_failure);
+            failure
         })
     }
 }
@@ -627,6 +885,15 @@ impl<S: Source> Memory for LookupMemory<'_, S> {
     fn read(&self, address: u64, bytes: &mut [u8], module: bool) -> Result<()> {
         self.source
             .read(address, bytes, module, &mut self.budget.borrow_mut())
+    }
+    fn read_diagnostic(
+        &self,
+        address: u64,
+        bytes: &mut [u8],
+        module: bool,
+    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        self.source
+            .read_diagnostic(address, bytes, module, &mut self.budget.borrow_mut())
     }
     fn charge(&self, allocation_bytes: u64, work_units: u64) -> Result<()> {
         self.budget.borrow_mut().charge(RuntimeCost {
@@ -645,6 +912,11 @@ pub struct RuntimeBoundMemory {
     bound: Bound<OsSource>,
 }
 impl RuntimeBoundMemory {
+    /// Explicit owned process cleanup. Closing is prepaid and cannot be skipped
+    /// because the request's original control expired or its budget was spent.
+    pub fn close(self, budget: &RuntimeBudget) -> Result<()> {
+        self.bound.source.close(budget)
+    }
     /// Recheck this held scope and copy descriptive facts under its original
     /// ledger. This DTO cannot reconstruct a module, root or input capability.
     pub fn description(
@@ -686,32 +958,140 @@ impl RuntimeBoundMemory {
         release: &str,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Self, RuntimeBindingFailure> {
+        Self::open_selected(window, release, budget, false)
+    }
+
+    /// Formal reader constructor: the controlled, fully hashed EXE/PE layout
+    /// is mandatory and stays retained by the selected root capability.
+    pub fn open_formal(
+        window: lycheedev_windows::WindowIdentity,
+        release: &str,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<Self, RuntimeBindingFailure> {
+        Self::open_selected(window, release, budget, true)
+    }
+
+    fn open_selected(
+        window: lycheedev_windows::WindowIdentity,
+        release: &str,
+        budget: &mut RuntimeBudget,
+        trusted: bool,
+    ) -> std::result::Result<Self, RuntimeBindingFailure> {
         let module =
             RuntimeModule::open(window, budget).map_err(|cause| RuntimeBindingFailure {
                 cause,
                 stage: "module",
                 root: Box::default(),
                 usage: budget.usage(),
+                first_read_failure: None,
             })?;
-        let root = crate::runtime_root::RuntimeRootRecipe::resolve(&module, budget).map_err(
-            |failure| RuntimeBindingFailure {
+        let prepared = (|| {
+            let resolved = if trusted {
+                let layout =
+                    module
+                        .verify_image_layout(budget)
+                        .map_err(|cause| RuntimeBindingFailure {
+                            cause,
+                            stage: "trusted_image",
+                            root: Box::default(),
+                            usage: budget.usage(),
+                            first_read_failure: None,
+                        })?;
+                crate::runtime_root::RuntimeRootRecipe::candidates_with_layout(
+                    &module, layout, budget,
+                )
+            } else {
+                crate::runtime_root::RuntimeRootRecipe::candidates(&module, budget)
+            };
+            let mut roots = resolved.map_err(|failure| RuntimeBindingFailure {
                 cause: failure.cause,
                 stage: "root",
+                first_read_failure: failure.evidence.first_read_failure.clone(),
                 root: failure.evidence,
                 usage: budget.usage(),
-            },
-        )?;
-        let recipe = root.evidence().recipe.expect("resolved root has a recipe");
-        let admission =
-            RuntimeLayoutAdmission::select(&module, recipe, budget).map_err(|cause| {
-                RuntimeBindingFailure {
-                    cause,
-                    stage: "layout",
-                    root: Box::new(root.evidence().clone()),
-                    usage: budget.usage(),
-                }
             })?;
-        Self::bind(module, root, admission, release, budget)
+            let mut selected = 0;
+            if roots.len() > 1 {
+                budget
+                    .charge(RuntimeCost::allocation(
+                        roots.len() * std::mem::size_of::<std::result::Result<bool, String>>(),
+                    ))
+                    .map_err(|cause| RuntimeBindingFailure {
+                        cause,
+                        stage: "root_selection",
+                        root: Box::new(roots[0].evidence().clone()),
+                        usage: budget.usage(),
+                        first_read_failure: None,
+                    })?;
+                let mut observations = Vec::with_capacity(roots.len());
+                for root in &mut roots {
+                    let recipe = root.evidence().recipe.expect("resolved root has a recipe");
+                    let admission = RuntimeLayoutAdmission::select(&module, recipe, budget)
+                        .map_err(|cause| RuntimeBindingFailure {
+                            cause,
+                            stage: "layout",
+                            root: Box::new(root.evidence().clone()),
+                            usage: budget.usage(),
+                            first_read_failure: None,
+                        })?;
+                    let latest = root.evidence().clone();
+                    let source = CandidateSource {
+                        module: &module,
+                        root,
+                        latest,
+                    };
+                    let selector = crate::go_mailbox_v1::Selector {
+                        kind: crate::go_mailbox_v1::Kind::Identity,
+                        nonce: crate::go_mailbox_v1::ZERO_TOKEN,
+                        runtime: crate::go_mailbox_v1::ZERO_TOKEN,
+                        ticket: crate::go_mailbox_v1::ZERO_TOKEN,
+                        body: None,
+                    };
+                    let result = Bound::bind(source, admission, release, budget)
+                        .and_then(|mut bound| bound.lookup_formal(&selector, None, budget));
+                    match result {
+                        Ok(record) => observations.push(Ok(record.is_some())),
+                        Err(failure) => {
+                            // Fixed Go aborts a moving path/control immediately;
+                            // another candidate cannot turn either into absence.
+                            if failure.stage != "lookup"
+                                || failure.cause == "mailbox.path_changed"
+                                || fatal_lookup_cause(&failure.cause)
+                                || budget.check().is_err()
+                            {
+                                return Err(failure);
+                            }
+                            observations.push(Err(failure.cause));
+                        }
+                    }
+                }
+                selected =
+                    choose_observed_root(&observations).map_err(|cause| RuntimeBindingFailure {
+                        cause,
+                        stage: "root_selection",
+                        root: Box::new(roots[0].evidence().clone()),
+                        usage: budget.usage(),
+                        first_read_failure: None,
+                    })?;
+            }
+            let root = roots.remove(selected);
+            let recipe = root.evidence().recipe.expect("resolved root has a recipe");
+            let admission =
+                RuntimeLayoutAdmission::select(&module, recipe, budget).map_err(|cause| {
+                    RuntimeBindingFailure {
+                        cause,
+                        stage: "layout",
+                        root: Box::new(root.evidence().clone()),
+                        usage: budget.usage(),
+                        first_read_failure: None,
+                    }
+                })?;
+            Ok((root, admission))
+        })();
+        match prepared {
+            Ok((root, admission)) => Self::bind(module, root, admission, release, budget),
+            Err(failure) => Err(join_close_failure(failure, module.close(budget))),
+        }
     }
 
     pub fn bind(
@@ -722,23 +1102,27 @@ impl RuntimeBoundMemory {
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<Self, RuntimeBindingFailure> {
         if root.identity() != module.identity() {
-            return Err(RuntimeBindingFailure {
+            let failure = RuntimeBindingFailure {
                 cause: "reader.runtime_module_identity".into(),
                 stage: "bind",
                 root: Box::new(root.evidence().clone()),
                 usage: budget.usage(),
-            });
+                first_read_failure: None,
+            };
+            return Err(join_close_failure(failure, module.close(budget)));
         }
         if let Err(cause) = check_scope_identity(
             admission.scope.as_ref().map(|s| &s.module),
             module.identity(),
         ) {
-            return Err(RuntimeBindingFailure {
+            let failure = RuntimeBindingFailure {
                 cause,
                 stage: "bind",
                 root: Box::new(root.evidence().clone()),
                 usage: budget.usage(),
-            });
+                first_read_failure: None,
+            };
+            return Err(join_close_failure(failure, module.close(budget)));
         }
         let latest = root.evidence().clone();
         Bound::bind(
@@ -760,6 +1144,14 @@ impl RuntimeBoundMemory {
     ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
         self.bound.lookup(selector, budget)
     }
+    pub fn lookup_formal(
+        &mut self,
+        selector: &crate::go_mailbox_v1::Selector,
+        accept: Option<&mut dyn FnMut(&Record) -> bool>,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<Option<Record>, RuntimeBindingFailure> {
+        self.bound.lookup_formal(selector, accept, budget)
+    }
     pub fn root_evidence(&self) -> &RootEvidence {
         self.bound.source.root.evidence()
     }
@@ -771,6 +1163,75 @@ impl RuntimeBoundMemory {
     pub fn profile_id(&self) -> &'static str {
         self.bound.admission.profile_id()
     }
+}
+
+fn join_close_failure(
+    mut failure: RuntimeBindingFailure,
+    close: Result<()>,
+) -> RuntimeBindingFailure {
+    if let Err(cause) = close {
+        for leaf in cause.lines() {
+            if !failure.cause.lines().any(|existing| existing == leaf) {
+                failure.cause.push('\n');
+                failure.cause.push_str(leaf);
+            }
+        }
+    }
+    failure
+}
+
+fn fatal_lookup_cause(cause: &str) -> bool {
+    cause.lines().any(|line| {
+        line.starts_with("process.")
+            || line.starts_with("window.")
+            || line.starts_with("reader.runtime_")
+            || line.starts_with("root.")
+            || line.starts_with("memory.runtime_budget")
+            || matches!(
+                line,
+                "memory.runtime_cancelled"
+                    | "memory.runtime_deadline"
+                    | "command.cancelled"
+                    | "command.deadline"
+            )
+    })
+}
+fn choose_observed_root(observations: &[std::result::Result<bool, String>]) -> Result<usize> {
+    let mut best = 0;
+    let mut selected = 0;
+    let mut count = 0;
+    let mut failures = Vec::new();
+    for (index, observation) in observations.iter().enumerate() {
+        let score = match observation {
+            Ok(true) => 2,
+            Ok(false) => 1,
+            Err(cause)
+                if cause.starts_with("memory.mailbox_incompatible:") && !cause.contains('\n') =>
+            {
+                2
+            }
+            Err(cause) => {
+                failures.push(cause.as_str());
+                continue;
+            }
+        };
+        if score > best {
+            best = score;
+            selected = index;
+            count = 1;
+        } else if score == best {
+            count += 1;
+        }
+    }
+    if count != 1 {
+        let mut cause = "root.ambiguous_or_unverified_lua_roots".to_string();
+        for failure in failures {
+            cause.push('\n');
+            cause.push_str(failure);
+        }
+        return Err(cause);
+    }
+    Ok(selected)
 }
 
 #[cfg(test)]

@@ -6,12 +6,100 @@ pub type Result<T> = std::result::Result<T, String>;
 pub trait Memory {
     fn verify(&self) -> Result<()>;
     fn read(&self, address: u64, bytes: &mut [u8], module: bool) -> Result<()>;
+    /// Actual source facts, captured by the original read only. A generic exact
+    /// reader cannot invent a native returned-byte count or OS error code.
+    fn read_diagnostic(
+        &self,
+        address: u64,
+        bytes: &mut [u8],
+        module: bool,
+    ) -> std::result::Result<(), ReadError> {
+        self.read(address, bytes, module)
+            .map_err(ReadError::unknown)
+    }
     /// Runtime adapters charge the same request ledger used by root discovery
     /// and OS reads. Historical in-memory fixtures retain their local limits.
     fn charge(&self, _allocation_bytes: u64, _work_units: u64) -> Result<()> {
         Ok(())
     }
 }
+#[derive(Debug, Clone)]
+pub struct ReadError {
+    pub cause: String,
+    pub returned_bytes: Option<usize>,
+    pub reason: &'static str,
+    pub io_attempted: Option<bool>,
+    pub native_error_code: Option<u32>,
+    pub region: Option<ReadRegion>,
+}
+impl ReadError {
+    pub fn unknown(cause: String) -> Self {
+        Self {
+            cause,
+            returned_bytes: None,
+            reason: "short_read",
+            io_attempted: None,
+            native_error_code: None,
+            region: None,
+        }
+    }
+}
+impl From<lycheedev_windows::process::RuntimeReadFailure> for ReadError {
+    fn from(failure: lycheedev_windows::process::RuntimeReadFailure) -> Self {
+        Self {
+            cause: failure.cause,
+            returned_bytes: Some(failure.returned_bytes),
+            reason: failure.reason,
+            io_attempted: Some(failure.io_attempted),
+            native_error_code: failure.native_error_code,
+            region: failure.region.map(|(kind, state, protect)| ReadRegion {
+                kind,
+                state,
+                protect,
+            }),
+        }
+    }
+}
+/// Bounded logical diagnostics. No address, payload, nonce, or extra read.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadFailure {
+    pub path: String,
+    pub requested_bytes: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returned_bytes: Option<usize>,
+    pub source: &'static str,
+    pub reason: &'static str,
+    pub guard_recheck: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "ioAttempted")]
+    pub io_attempted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_error_code: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<ReadRegion>,
+}
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct ReadRegion {
+    #[serde(rename = "type")]
+    pub kind: u32,
+    pub state: u32,
+    pub protect: u32,
+}
+#[derive(Debug, Clone)]
+pub struct LookupFailure {
+    pub cause: String,
+    pub first_read_failure: Option<ReadFailure>,
+}
+impl From<String> for LookupFailure {
+    fn from(cause: String) -> Self {
+        Self {
+            cause,
+            first_read_failure: None,
+        }
+    }
+}
+pub type LookupResult = std::result::Result<Option<Record>, LookupFailure>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Record {
     #[serde(skip)]
@@ -105,22 +193,92 @@ struct Access<'a, M: Memory> {
     calls: u16,
     bytes: usize,
     read_failed: bool,
+    first_failure: Option<ReadFailure>,
 }
 impl<M: Memory> Access<'_, M> {
-    fn read(&mut self, address: u64, size: usize, module: bool, guard: bool) -> Result<Vec<u8>> {
-        if address == 0 || address.checked_add(size as u64).is_none() {
+    fn note_failure(&mut self, path: &str, size: usize, module: bool, details: &ReadError) {
+        if self.first_failure.is_none() {
+            self.first_failure = Some(ReadFailure {
+                path: path.into(),
+                requested_bytes: size,
+                returned_bytes: details.returned_bytes,
+                source: if module { "module" } else { "private" },
+                reason: details.reason,
+                guard_recheck: "not_run",
+                io_attempted: details.io_attempted,
+                native_error_code: details.native_error_code,
+                region: details.region,
+            });
+        }
+    }
+    fn note_guard(&mut self, state: &'static str) {
+        if let Some(f) = &mut self.first_failure {
+            f.guard_recheck = state;
+        }
+    }
+    fn read(
+        &mut self,
+        address: u64,
+        size: usize,
+        module: bool,
+        guard: bool,
+        path: &str,
+    ) -> Result<Vec<u8>> {
+        if address == 0 || size == 0 || address.checked_add(size as u64).is_none() {
+            self.note_failure(
+                path,
+                size,
+                module,
+                &ReadError {
+                    cause: String::new(),
+                    returned_bytes: Some(0),
+                    reason: "address",
+                    io_attempted: Some(false),
+                    native_error_code: None,
+                    region: None,
+                },
+            );
             return Err("mailbox.address".into());
         }
         if self.calls >= 512 || self.bytes + size > 1 << 20 {
+            self.note_failure(
+                path,
+                size,
+                module,
+                &ReadError {
+                    cause: String::new(),
+                    returned_bytes: Some(0),
+                    reason: "read_budget",
+                    io_attempted: Some(false),
+                    native_error_code: None,
+                    region: None,
+                },
+            );
             return Err("mailbox.budget".into());
         }
         self.calls += 1;
         self.bytes += size;
-        self.memory.charge(size as u64, size as u64)?;
+        if let Err(cause) = self.memory.charge(size as u64 + 256, size as u64) {
+            self.note_failure(
+                path,
+                size,
+                module,
+                &ReadError {
+                    cause: String::new(),
+                    returned_bytes: Some(0),
+                    reason: "read_budget",
+                    io_attempted: Some(false),
+                    native_error_code: None,
+                    region: None,
+                },
+            );
+            return Err(cause);
+        }
         let mut bytes = vec![0; size];
-        if let Err(error) = self.memory.read(address, &mut bytes, module) {
+        if let Err(error) = self.memory.read_diagnostic(address, &mut bytes, module) {
             self.read_failed = true;
-            return Err(error);
+            self.note_failure(path, size, module, &error);
+            return Err(error.cause);
         }
         if guard {
             self.memory.charge(size as u64 + 128, size as u64)?;
@@ -134,15 +292,44 @@ impl<M: Memory> Access<'_, M> {
         Ok(())
     }
     fn verify(&mut self) -> Result<()> {
-        for (address, bytes, module) in std::mem::take(&mut self.guards) {
-            if self.read(address, bytes.len(), module, false)? != bytes {
+        let guards = std::mem::take(&mut self.guards);
+        let empty = guards.is_empty();
+        for (address, bytes, module) in guards {
+            let current = match self.read(address, bytes.len(), module, false, "guard_recheck") {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.note_guard("read_failed");
+                    return Err(error);
+                }
+            };
+            if current != bytes {
+                self.note_guard("path_changed");
                 return Err("mailbox.path_changed".into());
             }
         }
-        self.memory.verify()
+        if let Err(error) = self.memory.verify() {
+            self.note_guard(
+                if error.lines().any(|line| {
+                    matches!(
+                        line,
+                        "memory.runtime_cancelled"
+                            | "memory.runtime_deadline"
+                            | "command.cancelled"
+                            | "command.deadline"
+                    )
+                }) {
+                    "cancelled"
+                } else {
+                    "identity_failed"
+                },
+            );
+            return Err(error);
+        }
+        self.note_guard(if empty { "no_guards" } else { "stable" });
+        Ok(())
     }
-    fn string(&mut self, address: u64, max: usize) -> Result<Vec<u8>> {
-        let h = self.read(address, 32, false, false)?;
+    fn string(&mut self, address: u64, max: usize, path: &str) -> Result<Vec<u8>> {
+        let h = self.read(address, 32, false, false, &format!("{path}.header"))?;
         let n = ptr(&h, 24) as usize;
         if h[16] != 4
             || n > max
@@ -158,12 +345,16 @@ impl<M: Memory> Access<'_, M> {
         if n == 0 {
             return Ok(Vec::new());
         }
-        self.read(address + 32, n, false, true)
+        self.read(address + 32, n, false, true, &format!("{path}.bytes"))
     }
     fn record_string(&mut self, address: u64, selector: &v1::Selector) -> Result<Option<Record>> {
-        let h = self.read(address, 32, false, false)?;
+        let h = self.read(address, 32, false, false, "record.string_header")?;
         let n = ptr(&h, 24);
-        let max = selector.body.map_or(16 << 10, |b| b.length as usize) + 120;
+        let max = if selector.kind == v1::Kind::Body {
+            selector.body.map_or(0, |body| body.length as usize)
+        } else {
+            16 << 10
+        } + 120;
         if h[16] != 4
             || n < 120
             || n > max as u64
@@ -176,7 +367,13 @@ impl<M: Memory> Access<'_, M> {
         }
         self.guard(address + 16, &h[16..17])?;
         self.guard(address + 24, &h[24..32])?;
-        let first = self.read(address + 32, v1::HEADER_BYTES, false, false)?;
+        let first = self.read(
+            address + 32,
+            v1::HEADER_BYTES,
+            false,
+            false,
+            "record.wire_header",
+        )?;
         let header =
             v1::decode_header(&first).map_err(|e| format!("mailbox.record_invalid: {e}"))?;
         // Match exact static HEAD predicates before allocating/reading BODY.
@@ -186,7 +383,7 @@ impl<M: Memory> Access<'_, M> {
         if v1::HEADER_BYTES + header.length as usize + v1::TRAILER_BYTES != n as usize {
             return Err("mailbox.record_identity".into());
         }
-        let bytes = self.read(address + 32, n as usize, false, false)?;
+        let bytes = self.read(address + 32, n as usize, false, false, "record.wire_bytes")?;
         if bytes[..v1::HEADER_BYTES] != first {
             return Err("mailbox.record_changed".into());
         }
@@ -199,8 +396,8 @@ impl<M: Memory> Access<'_, M> {
         clippy::manual_is_multiple_of,
         reason = "integer is_multiple_of requires Rust newer than the 1.85 MSRV"
     )]
-    fn lookup(&mut self, table: u64, key: &str) -> Result<(u64, u8)> {
-        let h = self.read(table, 72, false, false)?;
+    fn lookup(&mut self, table: u64, key: &str, path: &str) -> Result<(u64, u8)> {
+        let h = self.read(table, 72, false, false, &format!("{path}.table"))?;
         if h[16] != 5 || h[19] > 20 {
             return Err("mailbox.table_layout".into());
         }
@@ -226,13 +423,13 @@ impl<M: Memory> Access<'_, M> {
             if !seen.insert(at) {
                 return Err("mailbox.collision_chain".into());
             }
-            let b = self.read(at, 56, false, false)?;
+            let b = self.read(at, 56, false, false, &format!("{path}.node"))?;
             self.guard(at + 24, &b[24..34])?;
             if b[32] == 4 {
                 if b[33] != 0 {
                     return Err("mailbox.secret_key".into());
                 }
-                if self.string(ptr(&b, 24), 256)? == key.as_bytes() {
+                if self.string(ptr(&b, 24), 256, &format!("{path}.key"))? == key.as_bytes() {
                     if b[9] != 0 {
                         return Err("mailbox.secret_value".into());
                     }
@@ -250,7 +447,7 @@ impl<M: Memory> Access<'_, M> {
         }
     }
     fn table(&mut self, parent: u64, name: &str) -> Result<u64> {
-        let (v, t) = self.lookup(parent, name)?;
+        let (v, t) = self.lookup(parent, name, &format!("record.{name}"))?;
         if t != 5 {
             return Err(format!("mailbox.table_missing:{name}"));
         }
@@ -292,6 +489,29 @@ impl<M: Memory> Reader<'_, M> {
     ) -> Result<Option<Record>> {
         admission.admits_layout(&self.layout)?;
         self.lookup_admitted(selector)
+    }
+    pub(crate) fn lookup_runtime_formal(
+        &self,
+        selector: &v1::Selector,
+        admission: &crate::runtime_binding::RuntimeLayoutAdmission,
+        accept: Option<&mut dyn FnMut(&Record) -> bool>,
+    ) -> LookupResult {
+        admission
+            .admits_layout(&self.layout)
+            .map_err(LookupFailure::from)?;
+        self.lookup_formal_admitted(selector, accept)
+    }
+    /// Fixed-Go selectors use the same named traversal. BODY authority comes
+    /// from the caller's exact verified HEAD, never a fabricated receipt.
+    pub fn lookup_formal(
+        &self,
+        selector: &v1::Selector,
+        accept: Option<&mut dyn FnMut(&Record) -> bool>,
+    ) -> LookupResult {
+        self.layout
+            .admit(&self.module_hash)
+            .map_err(LookupFailure::from)?;
+        self.lookup_formal_admitted(selector, accept)
     }
     /// Additional caller predicates run only after the full Lua path/identity
     /// guard. They cannot authorize old bytes or suppress a changed publication.
@@ -341,6 +561,58 @@ impl<M: Memory> Reader<'_, M> {
             }
             _ => None,
         };
+        let mut formal = v1::Selector {
+            kind: v1::Kind::Identity,
+            nonce: v1::ZERO_TOKEN,
+            runtime: v1::ZERO_TOKEN,
+            ticket: v1::ZERO_TOKEN,
+            body,
+        };
+        match selector {
+            Selector::Identity => {}
+            Selector::Input => formal.kind = v1::Kind::Input,
+            Selector::Bootstrap => formal.kind = v1::Kind::Bootstrap,
+            Selector::Receipt { nonce } | Selector::Confirmation { nonce } => {
+                formal.kind = if matches!(selector, Selector::Confirmation { .. }) {
+                    v1::Kind::Confirmation
+                } else {
+                    v1::Kind::Receipt
+                };
+                formal.nonce = v1::parse_token(nonce).map_err(|_| "mailbox.receipt_nonce")?;
+            }
+            Selector::Body { head } => {
+                formal.kind = v1::Kind::Body;
+                formal.nonce = v1::parse_token(&head.nonce).map_err(|_| "mailbox.body_head")?;
+                formal.runtime = v1::parse_token(&head.runtime).map_err(|_| "mailbox.body_head")?;
+                formal.ticket = v1::parse_token(&head.ticket).map_err(|_| "mailbox.body_head")?;
+            }
+        }
+        self.lookup_formal_admitted(&formal, None)
+            .map_err(|failure| failure.cause)
+    }
+    fn lookup_formal_admitted(
+        &self,
+        selector: &v1::Selector,
+        mut accept: Option<&mut dyn FnMut(&Record) -> bool>,
+    ) -> LookupResult {
+        self.memory.verify().map_err(LookupFailure::from)?;
+        // Reject incomplete BODY qualification and empty receipt nonces before
+        // any Lua/private read. Tokens are bounded binary values by construction.
+        if matches!(selector.kind, v1::Kind::Receipt | v1::Kind::Confirmation)
+            && selector.nonce == v1::ZERO_TOKEN
+        {
+            return Err("mailbox.receipt_nonce".to_string().into());
+        }
+        if selector.kind == v1::Kind::Body
+            && (selector
+                .body
+                .is_none_or(|b| b.length as usize > v1::MAX_PAYLOAD)
+                || selector.nonce == v1::ZERO_TOKEN
+                || selector.runtime == v1::ZERO_TOKEN
+                || selector.ticket == v1::ZERO_TOKEN)
+        {
+            return Err("mailbox.body_authorization".to_string().into());
+        }
         let mut access = Access {
             memory: self.memory,
             layout: &self.layout,
@@ -348,17 +620,26 @@ impl<M: Memory> Reader<'_, M> {
             calls: 0,
             bytes: 0,
             read_failed: false,
+            first_failure: None,
         };
         let mut guards_checked = false;
         let result = self
-            .lookup_access(selector, body, &mut access)
+            .lookup_access(selector, &mut access)
             .and_then(|record| {
                 guards_checked = true;
                 access.verify()?;
                 Ok(record)
             });
         match result {
-            Ok(record) => Ok(record),
+            Ok(record) => {
+                let accepted = record
+                    .filter(|record| accept.as_mut().is_none_or(|predicate| predicate(record)));
+                self.memory.verify().map_err(|cause| LookupFailure {
+                    cause,
+                    first_read_failure: access.first_failure,
+                })?;
+                Ok(accepted)
+            }
             Err(error) => {
                 // Recheck only the captured prefix. A changed path can explain
                 // a retired object, but cannot hide cancellation or identity
@@ -375,7 +656,10 @@ impl<M: Memory> Reader<'_, M> {
                 };
                 let final_failure = self.memory.verify().err();
                 if recheck.as_deref() == Some("mailbox.path_changed") && final_failure.is_none() {
-                    return Err("mailbox.path_changed".into());
+                    return Err(LookupFailure {
+                        cause: "mailbox.path_changed".into(),
+                        first_read_failure: access.first_failure,
+                    });
                 }
                 let mut cause = error;
                 for secondary in [recheck, final_failure].into_iter().flatten() {
@@ -384,17 +668,19 @@ impl<M: Memory> Reader<'_, M> {
                         cause.push_str(&secondary);
                     }
                 }
-                Err(cause)
+                Err(LookupFailure {
+                    cause,
+                    first_read_failure: access.first_failure,
+                })
             }
         }
     }
     fn lookup_access(
         &self,
-        selector: &Selector,
-        body: Option<v1::BodyQualification>,
+        selector: &v1::Selector,
         a: &mut Access<'_, M>,
     ) -> Result<Option<Record>> {
-        let root = a.read(self.root, 8, true, true)?;
+        let root = a.read(self.root, 8, true, true, "root.state")?;
         let state = ptr(&root, 0);
         if state == 0 {
             return Err("mailbox.lua_state_null".into());
@@ -402,27 +688,33 @@ impl<M: Memory> Reader<'_, M> {
         if state.checked_add(self.layout.state_globals + 24).is_none() {
             return Err("mailbox.state_address".into());
         }
-        if a.read(state + 16, 1, false, true)? != [8] {
+        if a.read(state + 16, 1, false, true, "state.tag")? != [8] {
             return Err("mailbox.thread_tag".into());
         }
-        let globals = a.read(state + self.layout.state_globals, 24, false, false)?;
+        let globals = a.read(
+            state + self.layout.state_globals,
+            24,
+            false,
+            false,
+            "state.globals",
+        )?;
         if globals[8] != 5 || globals[9] != 0 {
             return Err("mailbox.globals".into());
         }
         a.guard(state + self.layout.state_globals, &globals[..10])?;
-        let (ns, ns_tag) = a.lookup(ptr(&globals, 0), "LycheeDevInternal")?;
+        let (ns, ns_tag) = a.lookup(ptr(&globals, 0), "LycheeDevInternal", "namespace")?;
         if ns_tag == 0 {
             return Ok(None);
         }
         if ns_tag != 5 {
             return Err("mailbox.namespace_type".into());
         }
-        let mailbox_field = if matches!(selector, Selector::Bootstrap) {
+        let mailbox_field = if selector.kind == v1::Kind::Bootstrap {
             "BootstrapMailbox"
         } else {
             "Mailbox"
         };
-        let (mb, mb_tag) = a.lookup(ns, mailbox_field)?;
+        let (mb, mb_tag) = a.lookup(ns, mailbox_field, "mailbox")?;
         if mb_tag == 0 {
             return Ok(None);
         }
@@ -430,15 +722,15 @@ impl<M: Memory> Reader<'_, M> {
             return Err("mailbox.publication_type".into());
         }
         for (name, want) in [("schema", v1::SCHEMA), ("release", self.release.as_str())] {
-            let (v, t) = a.lookup(mb, name)?;
+            let (v, t) = a.lookup(mb, name, &format!("mailbox.{name}"))?;
             if t != 4 {
                 return Err(format!("mailbox.identity:{name}"));
             }
-            let actual = a.string(v, 64)?;
+            let actual = a.string(v, 64, &format!("mailbox.{name}.value"))?;
             if actual != want.as_bytes() {
                 if name == "schema"
                     && actual == v1::PREVIOUS_SCHEMA.as_bytes()
-                    && matches!(selector, Selector::Identity | Selector::Input)
+                    && matches!(selector.kind, v1::Kind::Identity | v1::Kind::Input)
                 {
                     continue; // Read-only activation evidence, never old business records.
                 }
@@ -447,57 +739,38 @@ impl<M: Memory> Reader<'_, M> {
                 ));
             }
         }
-        let (rt, t) = a.lookup(mb, "runtime")?;
+        let (rt, t) = a.lookup(mb, "runtime", "mailbox.runtime")?;
         if t != 4 {
             return Err("mailbox.runtime".into());
         }
-        let runtime = String::from_utf8(a.string(rt, 32)?).map_err(|_| "mailbox.runtime")?;
+        let runtime = String::from_utf8(a.string(rt, 32, "mailbox.runtime.value")?)
+            .map_err(|_| "mailbox.runtime")?;
         if !token(&runtime) {
             return Err("mailbox.runtime".into());
         }
         let runtime_bytes = v1::parse_token(&runtime).map_err(|_| "mailbox.runtime")?;
-        let mut wire = v1::Selector {
-            kind: v1::Kind::Identity,
-            nonce: v1::ZERO_TOKEN,
-            runtime: v1::ZERO_TOKEN,
-            ticket: v1::ZERO_TOKEN,
-            body,
-        };
-        let (field, key) = match selector {
-            Selector::Identity => ("identity", None),
-            Selector::Input => {
-                wire.kind = v1::Kind::Input;
-                ("input", None)
+        if selector.runtime != v1::ZERO_TOKEN && selector.runtime != runtime_bytes {
+            return Ok(None);
+        }
+        let key;
+        let (field, lookup_key) = match selector.kind {
+            v1::Kind::Identity => ("identity", None),
+            v1::Kind::Input => ("input", None),
+            v1::Kind::Bootstrap => ("bootstrap", None),
+            v1::Kind::Receipt | v1::Kind::Confirmation => {
+                key = hex::encode(selector.nonce);
+                ("receipts", Some(key.as_str()))
             }
-            Selector::Bootstrap => {
-                wire.kind = v1::Kind::Bootstrap;
-                ("bootstrap", None)
-            }
-            Selector::Receipt { nonce } | Selector::Confirmation { nonce } => {
-                wire.kind = if matches!(selector, Selector::Confirmation { .. }) {
-                    v1::Kind::Confirmation
-                } else {
-                    v1::Kind::Receipt
-                };
-                wire.nonce = v1::parse_token(nonce).map_err(|_| "mailbox.receipt_nonce")?;
-                ("receipts", Some(nonce.as_str()))
-            }
-            Selector::Body { head } => {
-                if head.runtime != runtime {
-                    return Ok(None);
-                }
-                wire.kind = v1::Kind::Body;
-                wire.runtime = runtime_bytes;
-                wire.nonce = v1::parse_token(&head.nonce).map_err(|_| "mailbox.body_head")?;
-                wire.ticket = v1::parse_token(&head.ticket).map_err(|_| "mailbox.body_head")?;
-                ("bodies", Some(head.ticket.as_str()))
+            v1::Kind::Body => {
+                key = hex::encode(selector.ticket);
+                ("bodies", Some(key.as_str()))
             }
         };
-        let (v, t) = if let Some(key) = key {
+        let (v, t) = if let Some(key) = lookup_key {
             let map = a.table(mb, field)?;
-            a.lookup(map, key)?
+            a.lookup(map, key, &format!("record.{field}.entry"))?
         } else {
-            a.lookup(mb, field)?
+            a.lookup(mb, field, &format!("record.{field}"))?
         };
         if t == 0 {
             return Ok(None);
@@ -505,7 +778,7 @@ impl<M: Memory> Reader<'_, M> {
         if t != 4 {
             return Err("mailbox.record_type".into());
         }
-        let record = a.record_string(v, &wire)?;
+        let record = a.record_string(v, selector)?;
         if record.as_ref().is_some_and(|r| r.runtime != runtime) {
             return Err("mailbox.record_identity".into());
         }

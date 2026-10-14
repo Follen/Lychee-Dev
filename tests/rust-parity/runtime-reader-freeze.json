@@ -1,0 +1,169 @@
+{
+  "schema": "lycheedev.runtime-reader-freeze.v1",
+  "created_at": "2026-10-14T23:33:57.097469+00:00",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "base_head": "cb71a232962990ad01c2353f78df9e2a8a0eec8e",
+  "status": "frozen_for_independent_source_review; all Rust/Go/Windows tests NOT_RUN",
+  "files": [
+    {
+      "path": "crates/lycheedev-live/src/runtime_root.rs",
+      "bytes": 41989,
+      "sha256": "966553e418e69751cac77b06663b0ddaec16cd2dd83d9a7c6f6d4b7191650eb6"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_root/tests.rs",
+      "bytes": 38654,
+      "sha256": "fd8edf4bb1860e6f6661936daa1811cf0ec7c94ddc5592aa3f1eb6deae616613"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_binding.rs",
+      "bytes": 45701,
+      "sha256": "284acc45d5340f2dcd2c88e00ada5e46e477500a8399b215e0c671eaa3022d4e"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_binding/tests.rs",
+      "bytes": 53532,
+      "sha256": "361d1231e8ac1c5669a521dbdfabb82385732204038fc8df12c65185f8fa03ed"
+    },
+    {
+      "path": "crates/lycheedev-live/src/mailbox.rs",
+      "bytes": 30314,
+      "sha256": "232d35440bee4acdd8a233c3823bfc5470f5e13b57b8e1194a7ed61a760ef4f9"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+      "bytes": 32105,
+      "sha256": "997263e309bdf36a963b0e882835a4e4172b4c97419a5f6a1d0aaa2f51260752"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "bytes": 2143,
+      "sha256": "9d76f57ad3e23a2c70a7b8319b4c66e90882eccbf214b0500b2d9db67e2e5f18"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs",
+      "bytes": 8088,
+      "sha256": "2ac55d9837a706d20ac573ac94aad4fa522229f0ef63e75569673a369030bd96"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs",
+      "bytes": 8694,
+      "sha256": "a0508ec6607081d3396e2dc2558f825c89f56225b4a94c015b9de0c81f264534"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process.rs",
+      "bytes": 43081,
+      "sha256": "a27cc5ef4c0954984507b71d54ba40bc6d4acd1ddeac9d5f9255607253e2b3d9"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_module.rs",
+      "bytes": 53927,
+      "sha256": "390fcbeb050c9f9c091fdfb89d3a1b856f299a42c1546485cf503d7f784b00e1"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+      "bytes": 22749,
+      "sha256": "69b0d1383b93a5192ee566be439a9a3143dc1719091d06a2a9cc516ca276ca21"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/runtime_module.rs",
+      "bytes": 17582,
+      "sha256": "16353935d37291d286cd7b6832eb656c8234f0736c6373a091849d8e7ad45cae"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_image.rs",
+      "bytes": 20457,
+      "sha256": "8bf3ff301edbc1420d5bba90ec0ca5a57fe579999802fb45aa6e02e7d3d5ea5d"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_image/tests.rs",
+      "bytes": 19294,
+      "sha256": "cbc9da9bda45b8a60f686929802936e3832eb2181da6d1d4cdd42715394170cc"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input.rs",
+      "bytes": 11049,
+      "sha256": "8a507f7677eb452ee6641122f3eef6eb2860a817007239e8c99e4cc3baef6d90"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/equal_fold.rs",
+      "bytes": 2691,
+      "sha256": "39947f046f2b372d9c00cc3c4d034cf1737455867cea699c2e7821bbe84051a9"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/equal_fold_data.rs",
+      "bytes": 39587,
+      "sha256": "e474990232cd2f59245987171cee4d7bc417e5d6a04ffa881e77425ffff85ef2"
+    },
+    {
+      "path": "tests/rust-parity/runtime-reader-test-map.json",
+      "bytes": 18612,
+      "sha256": "b15d167d6372bea9e0ed8d492b4f578bbde0999872442d57b1815cc10a915230"
+    }
+  ],
+  "snapshot": "/tmp/lycheedev-runtime-reader-review-r3",
+  "trusted_layout_custody": "EXE is held read-sharing-only throughout complete hash, fixed PE parse and current runtime comparison. Explicit checked close occurs before issuance; original/close/control errors are joined. The retained Arc owns metadata only, not a file handle. Same module issuance/path/runtime locating guards rechecked without disk rehash.",
+  "budget": {
+    "ordinary_defaults_unchanged": true,
+    "formal_requested_bytes": 1073741824,
+    "formal_read_calls": 32768,
+    "formal_work_units": 34359738368,
+    "hash_upper_bound": "512MiB EXE + 1-byte EOF; same RuntimeBudget and original deadline/cancel",
+    "root_local_caps": "text128MiB; header1MiB; read_calls8192; requested_bytes2MiB+256MiB+4096; raw_matches4096; distinct_roots16",
+    "request_derivation": "512MiB+1 + disk headers<=1MiB + root local request<=258MiB+4096 <1GiB; remaining shared with candidate guards/Lua reads, never reset",
+    "read_derivation": "scanner8192 + hash<=513 at full chunks + PE/runtime initial guards32 + 16*(512 Lua reads + 54 root/layout recheck reads) + final bind18 + next lookup512+36 =18359, below32768. Original shared deadline/control and local per-lookup/root limits remain; no fresh budget or repeated charge on admission.",
+    "absolute_work_cap": 34359738368,
+    "work_derivation": "at most128MiB successful code plus <=57 bytes tail/read; per-byte leading test + worst three pattern lengths58+49+49, RPM copy/zero<=2x requested, SHA512MiB; <32Gi nominal units. Every admission still checks original deadline/cancel. Guards/metadata work uses same ledger; this is a bound rationale, not measured equivalence/performance.",
+    "unchanged_caps": [
+      "os_call_units2000000",
+      "query_calls400000",
+      "allocation_bytes512MiB"
+    ]
+  },
+  "static_checks": {
+    "rustfmt": "targeted edition2024 parse/check; mod.rs ordering preserved from baseline and excluded from formatting",
+    "whitespace": "scoped git diff --check",
+    "patterns": "all3 instruction templates exact fixed-Go byte match",
+    "unsafe_inventory": "source-token inventory no violations; not macro-expansion or runtime proof"
+  },
+  "previous_freeze_sha256": "759e715f35d0b45de350dc40a9b68d4db541b3853511e57829b76f6614cf18d0",
+  "review_fixes": [
+    {
+      "finding": "R3 process close was Drop-only",
+      "change": "NativeReader::close consumes and checked-closes once; finish<T> joins current operation/read failure with cleanup/control. RuntimeModule open post-open errors and RuntimeBoundMemory root/layout/candidate/bind failures close explicitly. Open prepays4 OS units for OpenProcess/GetLastError and CloseHandle/GetLastError. Cleanup never charges a fresh budget or skips on control; Drop is disarmed before close, no retry/double-close."
+    },
+    {
+      "finding": "R3 Windows ordinal folding differed from fixed-Go identity",
+      "change": "Both runtime_module main-image comparison and runtime_image retained-path verification share existing pinned Go1.27.1 Unicode17 UTF16 SimpleFold routine via crate-only export. Same input routine/table unchanged except visibility; counted OS paths bounded32768 units each, replacement RuneError semantics preserved, no full fold or normalization. CPU work16 per UTF16 unit and original control before/after replace OS comparison. Prior image review does not cover this new delta."
+    },
+    {
+      "finding": "P1 formal work rejected by constructor",
+      "change": "Absolute permitted cap32Gi equals formal limit; ordinary defaults unchanged; test constructs runtime_budget(native_limits), debits worst-case costs, checks same request/deadline and cancellation."
+    },
+    {
+      "finding": "P1 partial prefix qualified against unread suffix",
+      "change": "Runtime adapter postguard covers actual returned prefix only; no-read changed mapping eligibility yields zero-prefix gap after original identity/control verification; returned-prefix mapping changes stay fatal. Shared production postguard helper fault fixture exercises changed suffix and changed prefix."
+    },
+    {
+      "finding": "P2 lookup errors skipped outer guards",
+      "change": "Both success and failure run recipe, metadata, and control postchecks under same ledger. Original lookup error/firstReadFailure retained; independent faults joined; outer-fault stage stops candidate selection and poisons mixed transient failures."
+    },
+    {
+      "finding": "P2 query errno lost",
+      "change": "Original VirtualQueryEx result feeds typed Win32 code through query_with/query_observed into ReadAttempt, no extra query or display parsing. Fixture verifies one query, no RPM, native code5."
+    },
+    {
+      "finding": "P2 unrelated BODY field changed non-BODY bounds",
+      "change": "Only Kind::Body uses qualified length; non-BODY fixed16KiB. Fixtures cover irrelevant zero length and attempted expansion."
+    }
+  ],
+  "forbidden_actions_not_run": [
+    "cargo",
+    "rustc",
+    "Go/product tests",
+    "games",
+    "user desktop",
+    "push",
+    "CLI/default backend switching"
+  ]
+}

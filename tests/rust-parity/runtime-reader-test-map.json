@@ -1,0 +1,360 @@
+{
+  "schema": "lycheedev.runtime-reader-test-map.v1",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "mappings": [
+    {
+      "id": "checked_process_cleanup",
+      "go_source": "internal/live/memory/process_windows.go",
+      "go_sha256": "1591f7038b889fb84552f393a87782abe8ddc9d5586908460504c48bf1e0bb25",
+      "go_tests": [],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+          "tests": [
+            "checked_close_consumes_owner_once_even_when_close_reports_failure",
+            "failed_module_issuance_explicitly_closes_owned_current_process_handle",
+            "runtime_close_join_keeps_primary_close_and_control_causes"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-windows/tests/runtime_module.rs",
+          "tests": [
+            "explicit_module_close_is_prepaid_and_runs_after_cancellation_or_exhaustion"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/src/runtime_binding/tests.rs",
+          "tests": [
+            "binding_cleanup_retains_original_diagnostics_and_all_close_failures",
+            "failed_binding_closes_its_owned_source_once_and_preserves_both_errors"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs",
+          "tests": [
+            "native_reader_finish_always_closes_and_preserves_operation_cleanup_and_control_errors"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "fixed_go_path_identity",
+      "go_source": "internal/live/memory/module_windows.go",
+      "go_sha256": "8b1b72efcb278c9ccd30a96f7315a6f7902e6c7338309741a51b5048a7f1de54",
+      "go_tests": [],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+          "tests": [
+            "module_identity_uses_fixed_go_path_fold_with_bounded_original_control"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-windows/src/process/runtime_image/tests.rs",
+          "tests": [
+            "trusted_image_path_uses_shared_fixed_go_fold_without_ordinal_os_comparison"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-windows/src/mailbox_input/equal_fold.rs",
+          "tests": [
+            "fixed_go_simple_folds_match_unicode_special_orbits_without_normalizing",
+            "invalid_utf16_matches_go_rune_error_and_generated_table_is_canonical"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "sparse_scan",
+      "go_source": "internal/live/memory/lua_root_scan_test.go",
+      "go_sha256": "289b053007a14d0beb33b3773a60cce6ae30a4b0c9ee150f299a077ecc5b673a",
+      "go_tests": [
+        "TestForeverCapturedAnchorsUseReadableSpansWithoutHashAllowlist",
+        "TestLuaRootScanPreservesShortReadPrefixAndNeverBridgesGap",
+        "TestLuaRootScanCrossesAdjacentReadableRegionsAndRecoversZeroRead",
+        "TestLuaMailboxValidatesDistinctRIPRootsBeforeSelecting"
+      ],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-live/src/runtime_root/tests.rs",
+          "tests": [
+            "go320_valid_distinct_roots_are_ambiguous_but_invalid_raw_hits_are_rejected",
+            "go320_late_invalid_hit_is_counted_without_overriding_valid_root",
+            "go320_sparse_short_prefix_is_kept_and_only_unread_suffix_retried",
+            "go320_sparse_scan_never_stitches_an_anchor_across_unknown_bytes",
+            "go320_sparse_adjacent_spans_keep_tail_and_zero_large_read_recovers_pages",
+            "go320_multiple_call_sites_and_templates_deduplicate_one_rip_root",
+            "go320_sparse_read_limit_and_candidate_limit_are_hard_and_retain_coverage",
+            "go320_pattern_match_budget_is_separate_from_deduplicated_roots",
+            "go320_one_failed_page_is_not_retried_indefinitely"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/src/runtime_binding/tests.rs",
+          "tests": [
+            "go320_root_selection_prefers_actual_or_upgrade_mailbox_and_rejects_ties",
+            "go320_candidate_selection_uses_actual_named_lua_observations"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "recipes_trusted_layout",
+      "go_source": "internal/live/memory/lua_mailbox_recipe_test.go",
+      "go_sha256": "6e78d5dd755349c52e02846828196f5a500f105d93d0ba212afdc4fd34b94c41",
+      "go_tests": [
+        "TestLuaMailboxForeverCN70338RuntimeAnchor",
+        "TestLuaMailboxForeverContextRecipeMigration",
+        "TestLuaMailboxForeverRecipeUnknownMigrationAndCrossTemplateAmbiguity",
+        "TestLuaMailboxRootRecipeRuntimePEAndASLR",
+        "TestLuaMailboxRootRecipeUsesTrustedLayoutForProtectedRuntimeHeader",
+        "TestLuaMailboxRootRecipeRequiresIssuedLayoutAndExactRuntimeMetadata",
+        "TestLuaRootImageLayoutIgnoresUnrelatedCOFFSymbols",
+        "TestLuaRootImageLayoutRejectsInvalidFixedHeaders"
+      ],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-live/src/runtime_root/tests.rs",
+          "tests": [
+            "both_templates_derive_negative_rip_roots_under_aslr_and_protected_headers",
+            "current_positive_displacements_move_the_root_without_any_known_rva",
+            "instruction_crossing_a_one_mib_chunk_boundary_is_counted_once",
+            "zero_raw_hits_retains_complete_search_coverage_without_a_binding",
+            "go320_valid_distinct_roots_are_ambiguous_but_invalid_raw_hits_are_rejected",
+            "go320_late_invalid_hit_is_counted_without_overriding_valid_root",
+            "each_rip_operand_uses_its_actual_one_four_or_eight_byte_width",
+            "signed_rip_overflow_module_range_alignment_and_target_permissions_are_independent",
+            "forever_repeated_getter_calls_must_have_one_target",
+            "os_geometry_is_required_even_when_runtime_headers_look_plausible",
+            "malformed_locating_headers_and_sections_never_begin_a_text_scan",
+            "anchor_root_header_and_process_races_do_not_issue_a_binding",
+            "source_failures_and_incomplete_code_reads_remain_fatal_without_salvage",
+            "revalidation_does_not_rescan_or_cache_heap_addresses",
+            "failed_revalidation_is_poisoned_and_fresh_resolution_keeps_original_budget",
+            "a_different_module_instance_or_new_budget_cannot_reuse_a_binding",
+            "global_read_allocation_and_cpu_budgets_preserve_partial_evidence",
+            "cancelled_expired_and_during_read_control_never_produces_a_binding",
+            "a_real_source_fault_cannot_be_reclassified_by_simultaneous_cancellation",
+            "deadline_overrun_on_successful_read_is_preserved_without_retry",
+            "go320_sparse_short_prefix_is_kept_and_only_unread_suffix_retried",
+            "go320_sparse_scan_never_stitches_an_anchor_across_unknown_bytes",
+            "go320_sparse_adjacent_spans_keep_tail_and_zero_large_read_recovers_pages",
+            "go320_multiple_call_sites_and_templates_deduplicate_one_rip_root",
+            "go320_sparse_read_limit_and_candidate_limit_are_hard_and_retain_coverage",
+            "go320_transient_root_slot_change_does_not_poison_recipe_or_rescan",
+            "go320_pattern_match_budget_is_separate_from_deduplicated_roots",
+            "go320_one_failed_page_is_not_retried_indefinitely",
+            "go320_root_recipe_failure_retains_original_read_facts_without_diagnostic_io",
+            "shared_gap_evidence_clones_without_copying_or_mutating_scan_storage"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-windows/src/process/runtime_image/tests.rs",
+          "tests": [
+            "fixed_pe_layout_and_exact_seven_locating_guards",
+            "unrelated_disk_coff_symbols_raw_offsets_and_directories_are_never_followed",
+            "transformed_unrelated_runtime_machine_and_optional_fields_are_not_authority",
+            "every_runtime_locating_group_must_match_issued_disk_bytes",
+            "malformed_fixed_disk_headers_never_issue_a_layout",
+            "disk_pe_requires_exact_os_image_size_and_bounded_text",
+            "complete_hash_accounts_overlay_and_short_reads_without_hashing_disk_code_as_runtime",
+            "hash_rejects_empty_truncated_growing_and_no_progress_sources",
+            "cancellation_and_exhausted_limits_prevent_io_and_do_not_replace_control",
+            "io_and_control_errors_survive_together_and_success_after_cancel_is_rejected",
+            "primary_close_and_control_failures_are_all_retained",
+            "owned_regular_file_is_locked_against_write_delete_and_released_on_all_result_paths",
+            "empty_and_non_pe_owned_files_cannot_supply_layout_proof",
+            "os_issued_self_executable_layout_is_bound_to_exact_module_issuance_and_request",
+            "trusted_image_path_uses_shared_fixed_go_fold_without_ordinal_os_comparison"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "publication_recovery",
+      "go_source": "internal/live/memory/lua_mailbox_publication_test.go",
+      "go_sha256": "7183e56ad8dee4ca02bcd0886ca29e6eec8c9d4f447594e712ba66e2457c1f35",
+      "go_tests": [
+        "TestLuaMailboxChangedInputDiscardsSnapshotThenReadsNewPublication",
+        "TestLuaMailboxRecipeGuardChangeIsNotPublicationRetry",
+        "TestLuaMailboxReplacedInvalidRecordReportsPathChange"
+      ],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-live/src/runtime_root/tests.rs",
+          "tests": [
+            "go320_transient_root_slot_change_does_not_poison_recipe_or_rescan"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/src/runtime_binding/tests.rs",
+          "tests": [
+            "bind_guard_failure_preserves_partial_root_evidence_and_cause",
+            "go320_formal_accept_runs_after_outer_root_guard_and_cannot_hide_cancellation",
+            "go320_transient_named_path_can_recover_without_new_binding_or_budget",
+            "go320_state_null_is_observation_and_does_not_decide_driver_retry_policy",
+            "failed_lookup_joins_independent_outer_recipe_and_metadata_changes_without_retry",
+            "failed_lookup_retains_original_read_detail_and_cancellation_at_outer_guard_boundary"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+          "tests": [
+            "global_allocation_budget_includes_path_guards_and_is_not_reset_by_lookup",
+            "guard_allocation_failure_discards_observation_before_following_root",
+            "accept_is_never_called_before_path_guard_or_for_missing_token",
+            "original_failure_cannot_hide_guard_cancellation_deadline_or_identity_loss",
+            "complete_record_guard_change_cannot_hide_cancellation_deadline_or_identity_loss",
+            "formal_selector_checks_runtime_before_record_bytes_and_accept_after_guards"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs",
+          "tests": [
+            "go_mailbox_v1_native_reader_keeps_independent_fault_and_cancel",
+            "go_mailbox_v1_native_reader_only_classifies_exact_transient_leaves"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "first_read_diagnostics",
+      "go_source": "internal/live/memory/lua_mailbox_diagnostics_test.go",
+      "go_sha256": "049a2de95a12d9cd559cccdc012e2dc031543907b5308838a749e95d9c895c84",
+      "go_tests": [
+        "TestMailboxFirstReadFailureRetainsBoundedLogicalEvidence",
+        "TestMailboxFirstReadFailurePrecedesFailedGuard"
+      ],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-live/src/runtime_root/tests.rs",
+          "tests": [
+            "go320_root_recipe_failure_retains_original_read_facts_without_diagnostic_io"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+          "tests": [
+            "first_read_failure_retains_original_logical_path_and_never_adds_a_diagnostic_scan"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+          "tests": [
+            "runtime_read_diagnostic_retains_only_original_ineligible_region_and_native_error",
+            "runtime_query_failure_captures_original_win32_code_before_any_rpm"
+          ]
+        },
+        {
+          "file": "crates/lycheedev-windows/tests/runtime_module.rs",
+          "tests": [
+            "os_read_diagnostics_capture_original_admission_without_extra_io_or_addresses"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "qualified_body",
+      "go_source": "internal/live/memory/records_test.go",
+      "go_sha256": "d97ca80f15c94a20d93bf194a3fa0757c18c26490cce18ddcceb45eb900023a0",
+      "go_tests": [
+        "TestBodyRequiresExactHeadAuthorization",
+        "TestBodyStaticHeaderRejectedBeforePayloadRead"
+      ],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+          "tests": [
+            "formal_body_selector_uses_exact_head_qualification_without_a_synthetic_receipt",
+            "formal_selector_checks_runtime_before_record_bytes_and_accept_after_guards",
+            "non_body_selector_ignores_unrelated_body_qualification_for_length_limit",
+            "non_body_qualification_cannot_expand_fixed_sixteen_kib_record_limit"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    },
+    {
+      "id": "schema_map_metadata",
+      "go_source": "internal/live/memory/lua_mailbox_map_metadata_test.go",
+      "go_sha256": "1def69787a39703282c0a49daa0d52b29db06b8bd093bafe8637b090175deedd",
+      "go_tests": [
+        "TestMailboxSchemaOnlyMapsKeepMissingRecordsComplete"
+      ],
+      "rust_fixtures": [
+        {
+          "file": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+          "tests": [
+            "schema_only_lua_maps_preserve_exact_missing_keys"
+          ]
+        }
+      ],
+      "status": "NOT_RUN; source mapping only, not equivalence evidence"
+    }
+  ],
+  "additional_rust_safety_fixtures": {
+    "crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs": [
+      "go_mailbox_v1_native_reader_retains_one_ledger_across_named_reads",
+      "go_mailbox_v1_native_reader_checks_current_child_inside_original_budget",
+      "go_mailbox_v1_native_reader_keeps_independent_fault_and_cancel",
+      "go_mailbox_v1_native_reader_only_classifies_exact_transient_leaves",
+      "go_mailbox_v1_formal_limits_include_trusted_image_and_keep_other_caps",
+      "native_reader_finish_always_closes_and_preserves_operation_cleanup_and_control_errors"
+    ],
+    "crates/lycheedev-windows/src/process/runtime_module/tests.rs": [
+      "shared_budget_admission_is_atomic_and_never_refunds",
+      "all_budget_dimensions_reject_without_charging_other_dimensions",
+      "cancellation_and_deadline_do_no_work_but_cannot_replace_an_os_failure",
+      "current_mapping_splits_preserve_allocation_identity_and_intersections",
+      "an_expanded_mapping_cannot_authorize_an_issued_hole",
+      "mapping_mutation_external_allocation_private_guard_and_uncommitted_are_denied",
+      "mapped_module_pieces_are_permitted_but_code_and_root_roles_stay_distinct",
+      "private_point_ranges_are_bounded_and_cannot_alias_the_module",
+      "private_point_mapping_requires_one_readable_nonexecutable_allocation",
+      "private_point_post_guard_covers_splits_and_rejects_changed_allocation_or_protection",
+      "retained_control_observes_changes_but_preserves_original_os_failure",
+      "control_factory_cannot_allocate_before_budget_admission",
+      "unicode_image_directory_has_one_precharged_owned_buffer",
+      "unicode_directory_budget_or_encoding_failure_publishes_nothing",
+      "code_prefix_only_authenticates_success_or_partial_copy_within_requested_span",
+      "temporary_scopes_keep_original_ledger_and_all_nested_cancellations",
+      "temporary_scope_factory_is_not_called_after_admission_failure",
+      "runtime_read_diagnostic_retains_only_original_ineligible_region_and_native_error",
+      "runtime_adapter_qualifies_only_acquired_prefix_when_unread_suffix_changes_protection",
+      "runtime_query_failure_captures_original_win32_code_before_any_rpm",
+      "runtime_formal_work_absolute_cap_is_finite_and_defaults_are_unchanged",
+      "checked_close_consumes_owner_once_even_when_close_reports_failure",
+      "failed_module_issuance_explicitly_closes_owned_current_process_handle",
+      "runtime_close_join_keeps_primary_close_and_control_causes",
+      "module_identity_uses_fixed_go_path_fold_with_bounded_original_control"
+    ],
+    "crates/lycheedev-windows/tests/runtime_module.rs": [
+      "os_issued_module_reads_current_headers_and_accounts_exactly_one_rpm",
+      "arbitrary_rvas_empty_and_oversize_reads_cannot_expand_the_capability",
+      "byte_budget_preflight_precedes_allocations_and_any_new_os_work",
+      "cancellation_deadline_and_a_fresh_budget_do_not_read_or_publish_bytes",
+      "closed_window_and_wrong_creation_identity_fail_before_rpm",
+      "executable_pages_do_not_grant_writable_root_slot_authority",
+      "private_point_read_crosses_only_requested_pages_and_accounts_one_rpm",
+      "private_point_read_rejects_guard_noaccess_execute_and_module_bytes_without_prefix",
+      "private_point_preflight_identity_budget_and_cancellation_never_publish_bytes",
+      "private_point_read_discards_staging_when_final_module_guard_exhausts_budget",
+      "image_directory_comes_from_selected_os_module_and_original_request",
+      "os_issued_code_prefix_reads_only_selected_mapped_code_with_original_ledger",
+      "os_read_diagnostics_capture_original_admission_without_extra_io_or_addresses",
+      "explicit_module_close_is_prepaid_and_runs_after_cancellation_or_exhaustion"
+    ]
+  },
+  "remaining": [
+    "CLI/default host/backend integration and full project/publication/input/journal path are outside this batch.",
+    "C driver decides exact transient retry policy; adapter never replays unknown input.",
+    "No Windows/Cargo/Go/product tests or benchmark run.",
+    "Trusted layout and root adapter have source fixtures; no real game or captured runtime dump was exercised."
+  ]
+}

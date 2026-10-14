@@ -1,8 +1,9 @@
 use crate::Result;
 mod runtime_module;
 pub use runtime_module::{
-    RuntimeBudget, RuntimeControl, RuntimeCost, RuntimeLimits, RuntimeModule,
-    RuntimeModuleIdentity, RuntimeReadKind, RuntimeUsage,
+    RuntimeBudget, RuntimeControl, RuntimeCost, RuntimeImageGuard, RuntimeImageLayout,
+    RuntimeImageSection, RuntimeLimits, RuntimeModule, RuntimeModuleIdentity, RuntimeReadFailure,
+    RuntimeReadKind, RuntimeUsage,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

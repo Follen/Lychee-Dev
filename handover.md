@@ -566,6 +566,16 @@ todo新增按“已有组件/未接默认生产路径/待原生实测/性能与�
 
 前置消费者审查已确认额外21 addon文件仍被旧native_e2e、Rust TOC动态Lua测试、递归打包和install-smoke消费，不能直接删簇制造差分绿灯。当前部分同名Lua测试仍断言旧memory-slot-v3/input.v3，缺固定Go的bootstrap/input_mailbox/focus等正式测试；应先移植正式Go测试和仍有独立价值的安装/事务/未知不重放集成边界，再清理旧消费者。此调查不算四阶段第三阶段收敛，正式四阶段尚未开始。
 
+### 正式 runtime reader 与可信 EXE 候选
+
+新增正式 NativeReader：固定Go三类RIP指令模板、稀疏代码prefix与分页恢复、最多16候选/4096原始match，同一LuaReader完成正式selector和外层recipe/layout资格后才接受；只对规定的纯瞬态错误恢复，不重置原ledger/deadline。可信EXE在read-sharing-only锁定句柄上完成完整SHA/PE32+AMD64资格与runtime定位guards，明确checked-close后才签发不可伪造metadata资格；Arc保留metadata，不谎称持有文件锁。
+
+独审五项真实finding已逐项修复并复审：formal 32Gi work限额与构造器一致、postguard仅核实际返回prefix且未读suffix可有界恢复、lookup失败也复核外层recipe/metadata/control并保留firstReadFailure、VirtualQueryEx原错误码结构化透传、非BODY固定16KiB不受无关body.length污染。专用累计1GiB requested/32768 read calls/32Gi work不改变普通默认预算；推导覆盖初始扫描/16候选/首次lookup组合18359次read，后续继续累计不能无限重试，数值推导不是性能通过。
+
+r3另补正常open/bind错误和显式NativeReader finish/close的唯一process owner checked-close，不因取消/预算停止清理，原错误/close/control聚合且不二次close。正式module/image两路径改用输入批固定Go1.27.1 Unicode17 UTF16 SimpleFold，避免WindowsOrdinal与Go特殊轨道不等价；原input算法/表未变，仅crate内共享可见性。r3 19文件freeze SHA256 32ba5e3c00e9adbd01a44ccc2796fd038d601ff964bcf07971d44616956350c1，独立增量复审无新增可行动finding。
+
+仅静态rustfmt/diff/Go模板与映射/unsafe inventory通过，全部本批Rust/Windows实际NOT_RUN。CI新增runtime_root、process::runtime_及自有进程runtime_module三个独立组，已有formal Mailbox/binding组覆盖reader其他回归；实际收据必须确认非零匹配数。此批还没有默认CLI/backend/input/journal整体接线，不称Live可用、实机验收或性能达标。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

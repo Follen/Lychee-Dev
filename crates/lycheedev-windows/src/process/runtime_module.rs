@@ -1,6 +1,7 @@
-//! OS-issued main-module reads for runtime instruction recipes. No file is
-//! opened, read or hashed. This capability is separate from the historical
-//! disk-backed ModulePlan and from private-heap discovery.
+//! OS-issued main-module reads for runtime instruction recipes. Opening this
+//! capability performs no disk read. The explicit verify_image_layout issuer
+//! additionally locks/hashes its EXE under the same request ledger. Both remain
+//! separate from historical ModulePlan and private-heap discovery.
 use super::{Handle, Process, ProcessIdentity, WindowIdentity, readable};
 use crate::Result;
 use std::{
@@ -13,7 +14,6 @@ use std::{
 };
 use windows::Win32::{
     Foundation::*,
-    Globalization::{CSTR_EQUAL, CompareStringOrdinal},
     System::{
         Diagnostics::Debug::ReadProcessMemory,
         Memory::*,
@@ -26,6 +26,10 @@ use windows::Win32::{
     },
     UI::WindowsAndMessaging::*,
 };
+
+#[path = "runtime_image.rs"]
+mod runtime_image;
+pub use runtime_image::{RuntimeImageGuard, RuntimeImageLayout, RuntimeImageSection};
 
 const MAX_MODULE: u64 = 512 << 20;
 const MAX_READ: usize = 1 << 20;
@@ -108,6 +112,7 @@ pub struct RuntimeBudget {
     deadline: Instant,
     cancel: Option<Arc<AtomicBool>>,
     control: Option<Box<dyn RuntimeControl>>,
+    scoped_controls: Vec<Box<dyn RuntimeControl>>,
 }
 impl RuntimeBudget {
     pub fn new(limits: RuntimeLimits, deadline: Instant, cancel: Arc<AtomicBool>) -> Result<Self> {
@@ -149,7 +154,7 @@ impl RuntimeBudget {
             || limits.read_calls > 1_000_000
             || limits.requested_bytes > 128 << 30
             || limits.allocation_bytes > 2 << 30
-            || limits.work_units > 8 << 30
+            || limits.work_units > 32 << 30
         {
             return Err("memory.runtime_budget_options".into());
         }
@@ -160,6 +165,7 @@ impl RuntimeBudget {
             deadline,
             cancel,
             control: None,
+            scoped_controls: Vec::new(),
         })
     }
     pub fn usage(&self) -> RuntimeUsage {
@@ -175,6 +181,9 @@ impl RuntimeBudget {
         if let Some(control) = &self.control {
             control.check()?;
         }
+        for control in &self.scoped_controls {
+            control.check()?;
+        }
         if self
             .cancel
             .as_ref()
@@ -187,6 +196,43 @@ impl RuntimeBudget {
         }
         Ok(())
     }
+    /// Apply a caller's narrower operation scope without replacing this
+    /// capability's original identity, deadline, ancestors or cumulative ledger.
+    /// The factory's retained storage is charged before it is cloned/boxed.
+    /// A panic leaves the narrow scope installed (fail closed); normal return
+    /// restores only the previous extra scope. The callback must check its own
+    /// result boundary, as the module/reader methods already do.
+    pub fn with_control_scope_factory<C: RuntimeControl + 'static, T>(
+        &mut self,
+        retained_bytes: usize,
+        create: impl FnOnce() -> C,
+        run: impl FnOnce(&mut Self) -> T,
+    ) -> Result<T> {
+        self.check()?;
+        if self.scoped_controls.len() >= 64 {
+            return Err("memory.runtime_control_depth".into());
+        }
+        let growth = if self.scoped_controls.len() == self.scoped_controls.capacity() {
+            size_of::<Box<dyn RuntimeControl>>()
+        } else {
+            0
+        };
+        let allocation = size_of::<C>()
+            .checked_add(retained_bytes)
+            .and_then(|n| n.checked_add(growth))
+            .ok_or("memory.runtime_control_allocation")?;
+        self.charge(RuntimeCost::allocation(allocation))?;
+        let control = create();
+        control.check()?;
+        if growth != 0 {
+            self.scoped_controls.reserve_exact(1);
+        }
+        self.scoped_controls.push(Box::new(control));
+        let result = run(self);
+        self.scoped_controls.pop();
+        Ok(result)
+    }
+
     fn admitted(&self, cost: RuntimeCost) -> Result<RuntimeUsage> {
         self.check()?;
         let mut next = self.used;
@@ -258,7 +304,8 @@ pub enum RuntimeReadKind {
 }
 
 /// Descriptive identity is not a read capability. Its fields and issuance nonce
-/// are private; only RuntimeModule can issue one. No executable digest is used.
+/// are private; only RuntimeModule can issue one. The optional trusted EXE
+/// layout binds to this exact issuance; a digest alone cannot recreate it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeModuleIdentity {
     serial: u64,
@@ -303,6 +350,171 @@ struct Segment {
     eligible: bool,
 }
 
+/// Facts retained from one existing module/private read, with no diagnostic IO.
+#[derive(Debug)]
+pub struct RuntimeReadFailure {
+    pub cause: String,
+    pub returned_bytes: usize,
+    pub reason: &'static str,
+    pub io_attempted: bool,
+    pub native_error_code: Option<u32>,
+    /// Original queried (Type, State, Protect), present only when ineligible.
+    pub region: Option<(u32, u32, u32)>,
+}
+struct ReadAttempt {
+    returned_bytes: usize,
+    reason: &'static str,
+    io_attempted: bool,
+    native_error_code: Option<u32>,
+    region: Option<(u32, u32, u32)>,
+}
+impl Default for ReadAttempt {
+    fn default() -> Self {
+        Self {
+            returned_bytes: 0,
+            reason: "read_admission",
+            io_attempted: false,
+            native_error_code: None,
+            region: None,
+        }
+    }
+}
+impl ReadAttempt {
+    fn fail(self, cause: String) -> RuntimeReadFailure {
+        RuntimeReadFailure {
+            cause,
+            returned_bytes: self.returned_bytes,
+            reason: self.reason,
+            io_attempted: self.io_attempted,
+            native_error_code: self.native_error_code,
+            region: self.region,
+        }
+    }
+    fn native_error(&mut self, result: &std::result::Result<(), windows::core::Error>) {
+        if result.is_err() {
+            self.reason = "native_read_failed";
+        }
+        self.native_error_code = result.as_ref().err().and_then(win32_error_code);
+    }
+    fn queried(&mut self, region: Region) {
+        self.reason = "region_ineligible";
+        self.region = Some((region.kind, region.state, region.protection));
+    }
+    fn eligible(&mut self) {
+        self.reason = "read_admission";
+        self.region = None;
+    }
+}
+
+fn win32_error_code(error: &windows::core::Error) -> Option<u32> {
+    let code = error.code().0 as u32;
+    (code & 0xffff0000 == 0x80070000).then_some(code & 0xffff)
+}
+fn unread_code_gap(cause: &str) -> bool {
+    matches!(
+        cause,
+        "memory.runtime_mapping_changed"
+            | "memory.runtime_mapping_hole"
+            | "memory.runtime_mapping_role"
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn verify_code_prefix(
+    issued: &[Segment],
+    before: &[Segment],
+    start: u64,
+    received: usize,
+    base: u64,
+    module_end: u64,
+    max_queries: usize,
+    mut query: impl FnMut(u64) -> Result<Region>,
+) -> Result<()> {
+    let end = start
+        .checked_add(received as u64)
+        .ok_or("memory.runtime_read_range")?;
+    let mut at = start;
+    let mut queries = 0;
+    while at < end {
+        if queries == max_queries {
+            return Err("memory.runtime_mapping_budget".into());
+        }
+        let current = query(at)?;
+        let original = check_segment(
+            issued,
+            current,
+            at,
+            end,
+            base,
+            module_end,
+            RuntimeReadKind::Code,
+        )?;
+        let previous = check_segment(
+            before,
+            current,
+            at,
+            end,
+            base,
+            module_end,
+            RuntimeReadKind::Code,
+        )?;
+        at = original.min(previous);
+        queries += 1;
+    }
+    Ok(())
+}
+
+fn join_runtime_causes(mut first: String, next: Result<()>) -> String {
+    if let Err(next) = next {
+        for leaf in next.lines() {
+            if !first.lines().any(|prior| prior == leaf) {
+                first.push('\n');
+                first.push_str(leaf);
+            }
+        }
+    }
+    first
+}
+// Disarm the owner's Drop before the checked close attempt. Failure never
+// authorizes a second close: Windows may already have consumed/reused a handle.
+fn consume_close<T>(
+    owner: T,
+    token: impl FnOnce(&T) -> HANDLE,
+    close: impl FnOnce(HANDLE) -> Result<()>,
+) -> Result<()> {
+    let raw = token(&owner);
+    std::mem::forget(owner);
+    close(raw)
+}
+#[cfg(test)]
+thread_local! { static CHECKED_CLOSE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+fn close_handle(handle: Handle, budget: &RuntimeBudget) -> Result<()> {
+    let before = budget.check();
+    let close = consume_close(
+        handle,
+        |handle| handle.0,
+        |raw| {
+            #[cfg(test)]
+            CHECKED_CLOSE_CALLS.with(|calls| calls.set(calls.get() + 1));
+            // SAFETY: raw belongs to the consumed unique read-only process owner.
+            // Its Drop has been disarmed before this synchronous close, and no
+            // reference to its Process or RuntimeModule remains usable afterward.
+            unsafe { CloseHandle(raw) }
+                .map_err(|error| os_error("memory.runtime_process_close", error))
+        },
+    );
+    let after = budget.check();
+    let mut result = close;
+    for check in [before, after] {
+        if let Err(next) = check {
+            result = Err(match result {
+                Ok(()) => next,
+                Err(first) => join_runtime_causes(first, Err(next)),
+            });
+        }
+    }
+    result
+}
+
 /// Owns the held read-only process. The only constructor inventories the OS main
 /// module; there is no constructor from caller-supplied base, size or mappings.
 pub struct RuntimeModule {
@@ -319,7 +531,8 @@ impl RuntimeModule {
             return Err("memory.runtime_identity_required".into());
         }
         budget.charge(RuntimeCost {
-            os_call_units: 3,
+            // OpenProcess/GetLastError + reserved CloseHandle/GetLastError.
+            os_call_units: 4,
             ..RuntimeCost::default()
         })?;
         let opened = unsafe {
@@ -331,7 +544,13 @@ impl RuntimeModule {
         }
         .map(Handle)
         .map_err(|e| os_error("process.open", e));
-        let handle = budget.finish(opened)?;
+        let handle = match opened {
+            Ok(handle) => handle,
+            Err(cause) => return Err(join_runtime_causes(cause, budget.check())),
+        };
+        if let Err(cause) = budget.check() {
+            return Err(join_runtime_causes(cause, close_handle(handle, budget)));
+        }
         let process = Process {
             handle,
             identity: window.process.clone(),
@@ -345,68 +564,93 @@ impl RuntimeModule {
         window: WindowIdentity,
         budget: &mut RuntimeBudget,
     ) -> Result<Self> {
-        if process.identity != window.process || window.hwnd == 0 {
-            return Err("memory.runtime_process_reused".into());
-        }
-        verify_window(&process, &window, budget)?;
-        let architecture = architecture(&process, budget)?;
-        budget.charge(RuntimeCost::os())?;
-        let mut info = SYSTEM_INFO::default();
-        unsafe {
-            GetNativeSystemInfo(&mut info);
-        }
-        budget.finish(Ok(()))?;
-        let page = info.dwPageSize as u64;
-        if !(4096..=65536).contains(&page) || !page.is_power_of_two() {
-            return Err("memory.runtime_page_size".into());
-        }
-        let (base, size) = inventory(&process, budget)?;
-        if base == 0
-            || size == 0
-            || size > MAX_MODULE
-            || base % page != 0
-            || size % page != 0
-            || base.checked_add(size).is_none()
-            || base + size - 1 > info.lpMaximumApplicationAddress as u64
-        {
-            return Err("memory.runtime_module_range".into());
-        }
-        confirm_main_image(&process, base, budget)?;
-        let capacity = (size / page) as usize;
-        budget.charge(RuntimeCost::allocation(capacity * size_of::<Segment>()))?;
-        let mut segments = Vec::with_capacity(capacity);
-        let mut at = base;
-        while at < base + size {
-            if segments.len() == capacity {
-                return Err("memory.runtime_mapping_budget".into());
+        let mut held = Some(process);
+        let prepared = (|| {
+            let process = held.as_ref().expect("owned opening process");
+            if process.identity != window.process || window.hwnd == 0 {
+                return Err("memory.runtime_process_reused".into());
             }
-            let region = query(&process, at, page, budget)?;
-            let end = region.end.min(base + size);
-            segments.push(Segment {
-                start: at,
-                end,
-                eligible: eligible(region, base, base + size),
-                region,
-            });
-            at = end;
+            verify_window(&process, &window, budget)?;
+            let architecture = architecture(&process, budget)?;
+            budget.charge(RuntimeCost::os())?;
+            let mut info = SYSTEM_INFO::default();
+            unsafe {
+                GetNativeSystemInfo(&mut info);
+            }
+            budget.finish(Ok(()))?;
+            let page = info.dwPageSize as u64;
+            if !(4096..=65536).contains(&page) || !page.is_power_of_two() {
+                return Err("memory.runtime_page_size".into());
+            }
+            let (base, size) = inventory(&process, budget)?;
+            if base == 0
+                || size == 0
+                || size > MAX_MODULE
+                || base % page != 0
+                || size % page != 0
+                || base.checked_add(size).is_none()
+                || base + size - 1 > info.lpMaximumApplicationAddress as u64
+            {
+                return Err("memory.runtime_module_range".into());
+            }
+            confirm_main_image(&process, base, budget)?;
+            let capacity = (size / page) as usize;
+            budget.charge(RuntimeCost::allocation(capacity * size_of::<Segment>()))?;
+            let mut segments = Vec::with_capacity(capacity);
+            let mut at = base;
+            while at < base + size {
+                if segments.len() == capacity {
+                    return Err("memory.runtime_mapping_budget".into());
+                }
+                let region = query(&process, at, page, budget)?;
+                let end = region.end.min(base + size);
+                segments.push(Segment {
+                    start: at,
+                    end,
+                    eligible: eligible(region, base, base + size),
+                    region,
+                });
+                at = end;
+            }
+            let serial = scope_id()?;
+            let module = Self {
+                process: held.take().expect("process transferred once"),
+                identity: RuntimeModuleIdentity {
+                    serial,
+                    request: budget.id,
+                    window,
+                    base,
+                    size,
+                    architecture,
+                },
+                page_bytes: page,
+                address_minimum: info.lpMinimumApplicationAddress as u64,
+                address_maximum: info.lpMaximumApplicationAddress as u64,
+                segments,
+            };
+            if let Err(cause) = module.verify(budget) {
+                return Err(join_runtime_causes(cause, module.close(budget)));
+            }
+            Ok(module)
+        })();
+        match prepared {
+            Ok(module) => Ok(module),
+            Err(cause) => Err(match held.take() {
+                Some(process) => join_runtime_causes(cause, close_handle(process.handle, budget)),
+                None => cause, // ownership already transferred and explicitly closed
+            }),
         }
-        let module = Self {
-            process,
-            identity: RuntimeModuleIdentity {
-                serial: scope_id()?,
-                request: budget.id,
-                window,
-                base,
-                size,
-                architecture,
-            },
-            page_bytes: page,
-            address_minimum: info.lpMinimumApplicationAddress as u64,
-            address_maximum: info.lpMaximumApplicationAddress as u64,
-            segments,
-        };
-        module.verify(budget)?;
-        Ok(module)
+    }
+    /// Consume the held process, attempting its pre-reserved CloseHandle exactly
+    /// once even after cancellation/deadline/budget exhaustion. No verification
+    /// IO or retry is performed during cleanup. Drop remains only panic fallback.
+    pub fn close(self, budget: &RuntimeBudget) -> Result<()> {
+        let before = self.check_budget(budget);
+        let closed = close_handle(self.process.handle, budget);
+        match before {
+            Ok(()) => closed,
+            Err(cause) => Err(join_runtime_causes(cause, closed)),
+        }
     }
     pub fn identity(&self) -> &RuntimeModuleIdentity {
         &self.identity
@@ -449,6 +693,28 @@ impl RuntimeModule {
         kind: RuntimeReadKind,
         budget: &mut RuntimeBudget,
     ) -> Result<()> {
+        self.read_exact_observed(rva, into, kind, budget)
+            .map_err(|failure| failure.cause)
+    }
+    pub fn read_exact_observed(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        kind: RuntimeReadKind,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), RuntimeReadFailure> {
+        let mut attempt = ReadAttempt::default();
+        self.read_exact_inner(rva, into, kind, budget, &mut attempt)
+            .map_err(|cause| attempt.fail(cause))
+    }
+    fn read_exact_inner(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        kind: RuntimeReadKind,
+        budget: &mut RuntimeBudget,
+        attempt: &mut ReadAttempt,
+    ) -> Result<()> {
         self.check_budget(budget)?;
         if into.is_empty()
             || into.len() > MAX_READ
@@ -476,7 +742,10 @@ impl RuntimeModule {
             if before.len() == pages {
                 return Err("memory.runtime_mapping_budget".into());
             }
-            let current = query(&self.process, at, self.page_bytes, budget)?;
+            attempt.reason = "region_query_failed";
+            let current =
+                query_observed(&self.process, at, self.page_bytes, budget, Some(attempt))?;
+            attempt.queried(current);
             let next = check_segment(
                 &self.segments,
                 current,
@@ -486,6 +755,7 @@ impl RuntimeModule {
                 self.identity.base + self.identity.size,
                 kind,
             )?;
+            attempt.eligible();
             before.push(Segment {
                 start: at,
                 end: next,
@@ -498,7 +768,11 @@ impl RuntimeModule {
         let mut staged = vec![0; into.len()];
         budget.charge(RuntimeCost::read(into.len()))?;
         let mut count = 0;
-        let result = unsafe {
+        attempt.io_attempted = true;
+        attempt.reason = "short_read";
+        // SAFETY: the held read-only handle and all mapped spans were verified;
+        // staged owns len writable bytes and outlives this synchronous RPM call.
+        let raw = unsafe {
             ReadProcessMemory(
                 self.process.handle.0,
                 start as *const _,
@@ -506,13 +780,16 @@ impl RuntimeModule {
                 staged.len(),
                 Some(&mut count),
             )
-        }
-        .map_err(|e| os_error("memory.runtime_read", e));
+        };
+        attempt.returned_bytes = count;
+        attempt.native_error(&raw);
+        let result = raw.map_err(|e| os_error("memory.runtime_read", e));
         // Preserve the actual RPM error even if it also overran control.
         budget.finish(result)?;
         if count != into.len() {
             return Err("memory.runtime_short_read".into());
         }
+        attempt.reason = "post_read_guard";
         let mut at = start;
         let mut queries = 0;
         while at < end {
@@ -546,6 +823,155 @@ impl RuntimeModule {
         Ok(())
     }
 
+    /// Ordered readable/executable spans from this OS-issued module plan. The
+    /// recipe intersects them with its independently validated text section.
+    /// No private-memory region is enumerated and no caller range expands it.
+    pub fn code_readable_spans(
+        &self,
+        start: u64,
+        end: u64,
+        budget: &mut RuntimeBudget,
+    ) -> Result<Vec<(u64, u64)>> {
+        self.check_budget(budget)?;
+        if start >= end || end > self.identity.size {
+            return Err("memory.runtime_read_range".into());
+        }
+        self.verify(budget)?;
+        budget.charge(RuntimeCost::allocation(
+            self.segments.len() * size_of::<(u64, u64)>(),
+        ))?;
+        let mut spans: Vec<(u64, u64)> = Vec::with_capacity(self.segments.len());
+        for segment in &self.segments {
+            budget.charge(RuntimeCost::work(1))?;
+            if !segment.eligible || !matches!(segment.region.protection & 0xff, 0x20 | 0x40 | 0x80)
+            {
+                continue;
+            }
+            let first = segment.start.saturating_sub(self.identity.base).max(start);
+            let last = segment.end.saturating_sub(self.identity.base).min(end);
+            if first >= last {
+                continue;
+            }
+            if let Some(previous) = spans.last_mut() {
+                if previous.1 == first {
+                    previous.1 = last;
+                    continue;
+                }
+            }
+            spans.push((first, last));
+        }
+        self.verify(budget)?;
+        Ok(spans)
+    }
+
+    /// One bounded code RPM, retaining an actual short prefix only after all
+    /// original/current mapping and process/window guards pass. Ordinary RPM
+    /// failures or unread-span eligibility changes are sparse observations;
+    /// returned-prefix mapping, identity, control and budget failures remain
+    /// fatal and expose no bytes. The bool
+    /// reports a failed/short RPM independently of its usable prefix length.
+    pub fn read_code_prefix(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        budget: &mut RuntimeBudget,
+    ) -> Result<(usize, bool)> {
+        self.check_budget(budget)?;
+        if into.is_empty()
+            || into.len() > MAX_READ
+            || rva > self.identity.size
+            || into.len() as u64 > self.identity.size - rva
+        {
+            return Err("memory.runtime_read_range".into());
+        }
+        let start = self.identity.base + rva;
+        let end = start + into.len() as u64;
+        let pages =
+            (start % self.page_bytes + into.len() as u64).div_ceil(self.page_bytes) as usize;
+        budget.admitted(RuntimeCost {
+            allocation_bytes: (into.len() + pages * size_of::<Segment>()) as u64,
+            query_calls: 2,
+            work_units: into.len() as u64 * 2 + pages as u64 * 32,
+            ..RuntimeCost::read(into.len())
+        })?;
+        budget.charge(RuntimeCost::work(into.len() as u64 * 2 + pages as u64 * 32))?;
+        self.verify(budget)?;
+        budget.charge(RuntimeCost::allocation(pages * size_of::<Segment>()))?;
+        let mut before = Vec::with_capacity(pages);
+        let mut at = start;
+        while at < end {
+            if before.len() == pages {
+                return Err("memory.runtime_mapping_budget".into());
+            }
+            let current = query(&self.process, at, self.page_bytes, budget)?;
+            let next = match check_segment(
+                &self.segments,
+                current,
+                at,
+                end,
+                self.identity.base,
+                self.identity.base + self.identity.size,
+                RuntimeReadKind::Code,
+            ) {
+                Ok(next) => next,
+                Err(cause) if unread_code_gap(&cause) => {
+                    // Nothing was returned from this unread span. Its changed
+                    // eligibility is a sparse gap, never permission to expose
+                    // bytes. Identity/control failures remain fatal.
+                    self.verify(budget)?;
+                    budget.check()?;
+                    return Ok((0, true));
+                }
+                Err(cause) => return Err(cause),
+            };
+            before.push(Segment {
+                start: at,
+                end: next,
+                region: current,
+                eligible: true,
+            });
+            at = next;
+        }
+        budget.charge(RuntimeCost::allocation(into.len()))?;
+        let mut staged = vec![0; into.len()];
+        budget.charge(RuntimeCost::read(into.len()))?;
+        let mut count = 0;
+        // SAFETY: the read-only process handle is held by self. start/end are
+        // confined to its sealed mapped module, all current spans were checked,
+        // and staged owns exactly len writable bytes until this synchronous call
+        // finishes. No target pointer is dereferenced in this process.
+        let result = unsafe {
+            ReadProcessMemory(
+                self.process.handle.0,
+                start as *const _,
+                staged.as_mut_ptr() as *mut _,
+                staged.len(),
+                Some(&mut count),
+            )
+        };
+        let partial = result.as_ref().err().is_some_and(|error| {
+            error.code() == windows::core::HRESULT::from_win32(ERROR_PARTIAL_COPY.0)
+        });
+        let received = qualified_code_prefix(count, into.len(), result.is_ok(), partial)?;
+        let failed = result.is_err() || received != into.len();
+        // Only acquired bytes need post-read eligibility; an unread suffix
+        // may have changed protection and is handled by the sparse page pass.
+        verify_code_prefix(
+            &self.segments,
+            &before,
+            start,
+            received,
+            self.identity.base,
+            self.identity.base + self.identity.size,
+            pages,
+            |at| query(&self.process, at, self.page_bytes, budget),
+        )?;
+        self.verify(budget)?;
+        budget.check()?;
+        into[..received].copy_from_slice(&staged[..received]);
+        Ok((received, failed))
+    }
+
     /// Read one already selected private-memory range, never enumerate the heap.
     /// The range is bounded to 1 MiB and one current private allocation. Every
     /// intersecting mapping must stay committed, readable and non-executable.
@@ -556,6 +982,26 @@ impl RuntimeModule {
         address: u64,
         into: &mut [u8],
         budget: &mut RuntimeBudget,
+    ) -> Result<()> {
+        self.read_private_observed(address, into, budget)
+            .map_err(|failure| failure.cause)
+    }
+    pub fn read_private_observed(
+        &self,
+        address: u64,
+        into: &mut [u8],
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), RuntimeReadFailure> {
+        let mut attempt = ReadAttempt::default();
+        self.read_private_inner(address, into, budget, &mut attempt)
+            .map_err(|cause| attempt.fail(cause))
+    }
+    fn read_private_inner(
+        &self,
+        address: u64,
+        into: &mut [u8],
+        budget: &mut RuntimeBudget,
+        attempt: &mut ReadAttempt,
     ) -> Result<()> {
         self.check_budget(budget)?;
         let (end, pages) = private_range(
@@ -586,7 +1032,10 @@ impl RuntimeModule {
             if before.len() == pages {
                 return Err("memory.runtime_private_mapping_budget".into());
             }
-            let current = query(&self.process, at, self.page_bytes, budget)?;
+            attempt.reason = "region_query_failed";
+            let current =
+                query_observed(&self.process, at, self.page_bytes, budget, Some(attempt))?;
+            attempt.queried(current);
             let next = private_piece(
                 current,
                 at,
@@ -596,6 +1045,7 @@ impl RuntimeModule {
                 allocation,
             )?;
             allocation = Some(current.allocation);
+            attempt.eligible();
             before.push(Segment {
                 start: at,
                 end: next,
@@ -608,7 +1058,12 @@ impl RuntimeModule {
         let mut staged = vec![0; into.len()];
         budget.charge(RuntimeCost::read(into.len()))?;
         let mut count = 0;
-        let result = unsafe {
+        attempt.io_attempted = true;
+        attempt.reason = "short_read";
+        // SAFETY: this selected range was verified in one private allocation;
+        // staged owns len writable bytes and the read-only handle stays alive
+        // throughout this synchronous call. The target pointer is never local.
+        let raw = unsafe {
             ReadProcessMemory(
                 self.process.handle.0,
                 address as *const _,
@@ -616,12 +1071,15 @@ impl RuntimeModule {
                 staged.len(),
                 Some(&mut count),
             )
-        }
-        .map_err(|e| os_error("memory.runtime_private_read", e));
+        };
+        attempt.returned_bytes = count;
+        attempt.native_error(&raw);
+        let result = raw.map_err(|e| os_error("memory.runtime_private_read", e));
         budget.finish(result)?;
         if count != into.len() {
             return Err("memory.runtime_private_short_read".into());
         }
+        attempt.reason = "post_read_guard";
         let mut at = address;
         let mut queries = 0;
         while at < end {
@@ -643,6 +1101,19 @@ impl RuntimeModule {
         into.copy_from_slice(&staged);
         Ok(())
     }
+}
+
+fn qualified_code_prefix(
+    count: usize,
+    requested: usize,
+    succeeded: bool,
+    partial_copy: bool,
+) -> Result<usize> {
+    if count > requested {
+        return Err("memory.runtime_invalid_read_count".into());
+    }
+    // An unrelated OS failure cannot authenticate its claimed output bytes.
+    Ok(if succeeded || partial_copy { count } else { 0 })
 }
 
 fn image_directory_from_wide(
@@ -880,6 +1351,20 @@ fn inventory(process: &Process, budget: &mut RuntimeBudget) -> Result<(u64, u64)
     }
     Ok((info.lpBaseOfDll as u64, info.SizeOfImage as u64))
 }
+/// Same fixed-Go SimpleFold routine as selected input identity. These are
+/// counted OS UTF-16 paths (no terminator); invalid units become RuneError, with
+/// no normalization/full fold. At most 32768 units per path and <=16 work units
+/// per unit cover decode plus binary search in the pinned <2048-entry table.
+fn equal_fold_image_path(left: &[u16], right: &[u16], budget: &mut RuntimeBudget) -> Result<bool> {
+    if left.len() > 32768 || right.len() > 32768 {
+        return Err("memory.runtime_image_name".into());
+    }
+    budget.charge(RuntimeCost::work((left.len() + right.len()) as u64 * 16))?;
+    let equal = crate::mailbox_input::equal_fold_utf16(left, right);
+    budget.check()?;
+    Ok(equal)
+}
+
 fn confirm_main_image(
     process: &Process,
     base: u64,
@@ -924,21 +1409,13 @@ fn confirm_main_image(
         Ok(())
     };
     budget.finish(result)?;
-    budget.charge(RuntimeCost::os())?;
-    let equal = unsafe {
-        CompareStringOrdinal(
-            &image[..length as usize],
-            &module[..module_length as usize],
-            true,
-        )
-    };
-    budget.finish(if equal == CSTR_EQUAL {
+    let equal = equal_fold_image_path(
+        &image[..length as usize],
+        &module[..module_length as usize],
+        budget,
+    )?;
+    budget.finish(if equal {
         Ok(())
-    } else if equal.0 == 0 {
-        Err(os_error(
-            "process.module_name_compare",
-            windows::core::Error::from_thread(),
-        ))
     } else {
         Err("memory.runtime_main_module_identity".into())
     })?;
@@ -946,24 +1423,53 @@ fn confirm_main_image(
     Ok(image)
 }
 fn query(process: &Process, at: u64, page: u64, budget: &mut RuntimeBudget) -> Result<Region> {
+    query_observed(process, at, page, budget, None)
+}
+fn query_observed(
+    process: &Process,
+    at: u64,
+    page: u64,
+    budget: &mut RuntimeBudget,
+    attempt: Option<&mut ReadAttempt>,
+) -> Result<Region> {
+    query_with(at, page, budget, attempt, |info| {
+        // SAFETY: the process owns a held read-only handle; info is one writable
+        // initialized structure alive for this synchronous call. at is only a
+        // remote address, never a locally dereferenced pointer.
+        let count = unsafe {
+            VirtualQueryEx(
+                process.handle.0,
+                Some(at as *const _),
+                info,
+                size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        let error = (count == 0).then(windows::core::Error::from_thread);
+        (count, error)
+    })
+}
+fn query_with(
+    at: u64,
+    page: u64,
+    budget: &mut RuntimeBudget,
+    attempt: Option<&mut ReadAttempt>,
+    call: impl FnOnce(&mut MEMORY_BASIC_INFORMATION) -> (usize, Option<windows::core::Error>),
+) -> Result<Region> {
     budget.charge(RuntimeCost {
         query_calls: 1,
         ..RuntimeCost::os()
     })?;
     let mut info = MEMORY_BASIC_INFORMATION::default();
-    let count = unsafe {
-        VirtualQueryEx(
-            process.handle.0,
-            Some(at as *const _),
-            &mut info,
-            size_of::<MEMORY_BASIC_INFORMATION>(),
-        )
-    };
+    let (count, error) = call(&mut info);
     let result = if count == 0 {
-        Err(os_error(
-            "memory.runtime_query",
-            windows::core::Error::from_thread(),
-        ))
+        if let Some(attempt) = attempt {
+            attempt.reason = "region_query_failed";
+            attempt.native_error_code = error.as_ref().and_then(win32_error_code);
+        }
+        Err(match error {
+            Some(error) => os_error("memory.runtime_query", error),
+            None => "memory.runtime_query_failed_without_error".into(),
+        })
     } else if count != size_of::<MEMORY_BASIC_INFORMATION>() {
         Err("memory.runtime_query_size".into())
     } else {

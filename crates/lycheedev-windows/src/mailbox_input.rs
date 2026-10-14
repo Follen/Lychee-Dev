@@ -13,6 +13,7 @@ pub use engine::{
     CLEANUP_LIMIT, INPUT_LIMIT, InputError, InputFailure, InputReceipt, KEY_CADENCE, MailboxAction,
     MailboxBindings, MailboxControl,
 };
+pub(crate) use equal_fold::equal_fold_utf16;
 use std::{
     marker::PhantomData,
     os::windows::ffi::OsStrExt,

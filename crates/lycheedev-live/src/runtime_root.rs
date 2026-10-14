@@ -6,24 +6,29 @@
 //! authenticity, atomic process snapshot or permission to send input. The Lua
 //! reader must independently validate its profile and every current object path.
 use lycheedev_windows::process::{
-    RuntimeBudget, RuntimeCost, RuntimeModule, RuntimeModuleIdentity, RuntimeReadKind,
+    RuntimeBudget, RuntimeCost, RuntimeImageLayout, RuntimeModule, RuntimeModuleIdentity,
+    RuntimeReadKind,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::{ops::Deref, sync::Arc};
 
 const HEADER_LIMIT: u64 = 1 << 20;
 const TEXT_LIMIT: u64 = 128 << 20;
 const CHUNK: usize = 1 << 20;
-const READ_LIMIT: u64 = 2048;
-const TOTAL_BYTES: u64 = 2 * HEADER_LIMIT + TEXT_LIMIT + 4096;
+const READ_LIMIT: u64 = 8192;
+const MAX_GAPS: usize = READ_LIMIT as usize + 2;
+const TOTAL_BYTES: u64 = 2 * HEADER_LIMIT + 2 * TEXT_LIMIT + 4096;
 const READ: u32 = 0x40000000;
 const WRITE: u32 = 0x80000000;
 const EXECUTE: u32 = 0x20000000;
 
-// Go v3.1.0 (9edc06b4591264eaac68e34575bc02f750ffe758), runtime-code recipes.
+// Fixed Go v3.2.0 (3057a9666ab078270b63c7f06de748069b0d1f4b), runtime-code recipes.
 // Historical exact-hash/known-anchor shortcuts deliberately do not enter here.
 const RETAIL_PATTERN: &str = "48 8b 3d ?? ?? ?? ?? 48 8b 1d ?? ?? ?? ?? 48 8b cf 44 8b 05 ?? ?? ?? ?? 48 8b d3 e8 ?? ?? ?? ?? 8b 05 ?? ?? ?? ?? 83 c0 01 89 05 ?? ?? ?? ?? 74 ?? 83 3d ?? ?? ?? ?? 00 75 ??";
 const FOREVER_PATTERN: &str = "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ?? 48 8b cb 4c 8b 38 e8 ?? ?? ?? ?? 49 8b d7 48 8b cb 44 8b 40 08 e8 ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ??";
+
+const FOREVER_CONTEXT_PATTERN: &str = "48 8b 1d ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ?? 48 8b cb 48 8b 28 e8 ?? ?? ?? ?? 48 8b d5 48 8b cb 44 8b 40 08 e8 ?? ?? ?? ?? 48 8b cb e8 ?? ?? ?? ??";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum RecipeId {
@@ -31,6 +36,8 @@ pub enum RecipeId {
     Retail,
     #[serde(rename = "forever-lua-state-root-runscript-rip-v1")]
     Forever,
+    #[serde(rename = "forever-lua-state-context-rip-v1")]
+    ForeverContext,
 }
 #[derive(Clone, Copy)]
 struct Operand {
@@ -146,12 +153,13 @@ impl RecipeId {
         match self {
             Self::Retail => RETAIL_PATTERN,
             Self::Forever => FOREVER_PATTERN,
+            Self::ForeverContext => FOREVER_CONTEXT_PATTERN,
         }
     }
     fn operands(self) -> &'static [Operand] {
         match self {
             Self::Retail => RETAIL_OPERANDS,
-            Self::Forever => FOREVER_OPERANDS,
+            Self::Forever | Self::ForeverContext => FOREVER_OPERANDS,
         }
     }
 }
@@ -163,6 +171,13 @@ impl RecipeId {
 pub struct RootEvidence {
     pub recipe: Option<RecipeId>,
     pub pattern_hits: u64,
+    pub rejected_matches: u64,
+    pub root_candidates: u64,
+    pub text_bytes: u64,
+    pub gaps: RootGaps,
+    pub read_failures: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_read_failure: Option<crate::mailbox::ReadFailure>,
     pub anchor_rva: Option<u64>,
     pub root_rva: Option<u64>,
     pub anchor_sha256: Option<String>,
@@ -171,12 +186,52 @@ pub struct RootEvidence {
     /// comparisons exhausted the entire domain. A failed block is not atomic.
     pub scanned_bytes: u64,
     pub module_read_calls: u64,
+    /// Successfully received bytes. Requested bytes remain independently charged.
     pub module_read_bytes: u64,
+    pub module_read_requested_bytes: u64,
     pub full_text_pass: bool,
     pub stable_guards: bool,
     /// Always false: neither code nor the heap is an atomic OS snapshot.
     pub atomic: bool,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootGap {
+    pub start: u64,
+    pub end: u64,
+    pub reason: &'static str,
+}
+/// Immutable shared scan diagnostics once a candidate is issued. Cloning an
+/// error/coverage DTO never re-allocates a potentially large gap ledger after a
+/// request has exhausted its budget. Only the unshared scanner can mutate it.
+#[derive(Clone, Debug, Default)]
+pub struct RootGaps(Option<Arc<Vec<RootGap>>>);
+impl Deref for RootGaps {
+    type Target = [RootGap];
+    fn deref(&self) -> &[RootGap] {
+        self.0.as_deref().map_or(&[], Vec::as_slice)
+    }
+}
+impl Serialize for RootGaps {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        self.deref().serialize(serializer)
+    }
+}
+impl PartialEq<Vec<RootGap>> for RootGaps {
+    fn eq(&self, other: &Vec<RootGap>) -> bool {
+        self.deref() == other.as_slice()
+    }
+}
+impl RootGaps {
+    fn scanner(&mut self) -> &mut Vec<RootGap> {
+        Arc::get_mut(self.0.as_mut().expect("scan gap ledger reserved"))
+            .expect("only unissued scanner mutates gaps")
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RootFailure {
     pub cause: String,
@@ -210,6 +265,36 @@ trait Source {
         kind: RuntimeReadKind,
         budget: &mut RuntimeBudget,
     ) -> Result<()>;
+    fn read_diagnostic(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        kind: RuntimeReadKind,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        self.read(rva, into, kind, budget)
+            .map_err(crate::mailbox::ReadError::unknown)
+    }
+    fn readable_spans(
+        &self,
+        start: u64,
+        end: u64,
+        budget: &mut RuntimeBudget,
+    ) -> Result<Vec<(u64, u64)>> {
+        budget.charge(RuntimeCost::allocation(std::mem::size_of::<(u64, u64)>()))?;
+        Ok(vec![(start, end)])
+    }
+    /// A short prefix is usable only after the source's identity/mapping guards.
+    /// The boolean records an ordinary read failure even if bytes were returned.
+    fn read_some(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        budget: &mut RuntimeBudget,
+    ) -> Result<(usize, bool)> {
+        self.read(rva, into, RuntimeReadKind::Code, budget)?;
+        Ok((into.len(), false))
+    }
 }
 impl Source for RuntimeModule {
     type Identity = RuntimeModuleIdentity;
@@ -235,6 +320,32 @@ impl Source for RuntimeModule {
     ) -> Result<()> {
         self.read_exact(rva, into, kind, budget)
     }
+    fn read_diagnostic(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        kind: RuntimeReadKind,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<(), crate::mailbox::ReadError> {
+        self.read_exact_observed(rva, into, kind, budget)
+            .map_err(Into::into)
+    }
+    fn readable_spans(
+        &self,
+        start: u64,
+        end: u64,
+        budget: &mut RuntimeBudget,
+    ) -> Result<Vec<(u64, u64)>> {
+        self.code_readable_spans(start, end, budget)
+    }
+    fn read_some(
+        &self,
+        rva: u64,
+        into: &mut [u8],
+        budget: &mut RuntimeBudget,
+    ) -> Result<(usize, bool)> {
+        self.read_code_prefix(rva, into, budget)
+    }
 }
 #[derive(Clone, Copy, Debug)]
 struct Section {
@@ -243,14 +354,22 @@ struct Section {
     flags: u32,
     text: bool,
 }
+#[derive(Clone)]
 struct HeaderGuard {
     rva: u64,
     bytes: Vec<u8>,
 }
+#[derive(Clone)]
 struct Image {
     sections: Vec<Section>,
     text: Section,
     headers: Vec<HeaderGuard>,
+}
+struct Candidate {
+    recipe: RecipeId,
+    anchor: u64,
+    root: u64,
+    code: Vec<u8>,
 }
 struct Proof<I> {
     identity: I,
@@ -265,12 +384,14 @@ struct Proof<I> {
     poisoned: Option<String>,
 }
 
-/// Issued only after a complete first runtime text pass and stable guards. It
+/// Issued after one bounded runtime text pass and stable guards. Gaps remain
+/// explicit: a readable-span match does not claim a complete scan. It
 /// retains no Lua-state/object pointer or root-slot contents. A failed recheck
 /// permanently invalidates this binding; a fresh resolution must use the same
 /// remaining request budget. No implicit re-scan or private-heap fallback exists.
 pub struct RootBinding {
     proof: Proof<RuntimeModuleIdentity>,
+    trusted_image: Option<Arc<RuntimeImageLayout>>,
 }
 impl RootBinding {
     pub fn root_rva(&self) -> u64 {
@@ -285,6 +406,11 @@ impl RootBinding {
     pub fn evidence(&self) -> &RootEvidence {
         &self.proof.evidence
     }
+    pub fn executable_sha256(&self) -> Option<&str> {
+        self.trusted_image
+            .as_ref()
+            .map(|layout| layout.executable_sha256())
+    }
     /// Checks the same capability, current anchor/RIP, root stability and locating
     /// metadata. This is an anchor recheck, not a new proof of whole-code-domain
     /// uniqueness. The Mailbox reader must also guard its root/path across lookup.
@@ -293,6 +419,17 @@ impl RootBinding {
         module: &RuntimeModule,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<RootEvidence, RootFailure> {
+        if self.proof.poisoned.is_none() {
+            if let Some(layout) = &self.trusted_image {
+                if let Err(cause) = layout.verify(module, budget) {
+                    self.proof.poisoned = Some(cause.clone());
+                    return Err(RootFailure {
+                        cause,
+                        evidence: Box::default(),
+                    });
+                }
+            }
+        }
         revalidate(&mut self.proof, module, budget)
     }
 }
@@ -302,7 +439,84 @@ impl RuntimeRootRecipe {
         module: &RuntimeModule,
         budget: &mut RuntimeBudget,
     ) -> std::result::Result<RootBinding, RootFailure> {
-        resolve(module, budget).map(|proof| RootBinding { proof })
+        resolve(module, budget).map(|proof| RootBinding {
+            proof,
+            trusted_image: None,
+        })
+    }
+    /// Only the named Lua reader may choose among distinct guarded roots. No
+    /// numeric address or caller-authored layout can mint these capabilities.
+    pub(crate) fn candidates(
+        module: &RuntimeModule,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<Vec<RootBinding>, RootFailure> {
+        resolve_candidates(module, budget).map(|proofs| {
+            proofs
+                .into_iter()
+                .map(|proof| RootBinding {
+                    proof,
+                    trusted_image: None,
+                })
+                .collect()
+        })
+    }
+    /// Formal native-reader issuance. The held opaque layout comes only from
+    /// this module's controlled EXE hash/PE verification, and supplies trusted
+    /// locating metadata rather than reparsing mutable runtime header bounds.
+    pub(crate) fn candidates_with_layout(
+        module: &RuntimeModule,
+        layout: RuntimeImageLayout,
+        budget: &mut RuntimeBudget,
+    ) -> std::result::Result<Vec<RootBinding>, RootFailure> {
+        let prepare = (|| {
+            layout.verify(module, budget)?;
+            let bytes = layout.sections().len() * std::mem::size_of::<Section>()
+                + layout.guards().len() * std::mem::size_of::<HeaderGuard>()
+                + layout
+                    .guards()
+                    .iter()
+                    .map(|guard| guard.bytes().len())
+                    .sum::<usize>()
+                + std::mem::size_of::<RuntimeImageLayout>()
+                + 2 * std::mem::size_of::<usize>()
+                + 16 * std::mem::size_of::<RootBinding>();
+            budget.charge(RuntimeCost {
+                allocation_bytes: bytes as u64,
+                work_units: bytes as u64,
+                ..RuntimeCost::default()
+            })?;
+            let section = |value: &lycheedev_windows::process::RuntimeImageSection| Section {
+                start: value.start(),
+                end: value.end(),
+                flags: value.flags(),
+                text: value.is_text(),
+            };
+            Ok(Image {
+                sections: layout.sections().iter().map(section).collect(),
+                text: section(layout.text()),
+                headers: layout
+                    .guards()
+                    .iter()
+                    .map(|guard| HeaderGuard {
+                        rva: guard.rva(),
+                        bytes: guard.bytes().to_vec(),
+                    })
+                    .collect(),
+            })
+        })();
+        let image = prepare.map_err(|cause| RootFailure {
+            cause,
+            evidence: Box::default(),
+        })?;
+        let proofs = resolve_candidates_with_image(module, budget, Some(image))?;
+        let trusted_image = Arc::new(layout);
+        Ok(proofs
+            .into_iter()
+            .map(|proof| RootBinding {
+                proof,
+                trusted_image: Some(Arc::clone(&trusted_image)),
+            })
+            .collect())
     }
 }
 
@@ -328,20 +542,41 @@ impl<S: Source> Access<'_, S> {
             return Err("root.read_range".into());
         }
         if self.evidence.module_read_calls >= READ_LIMIT
-            || into.len() as u64 > TOTAL_BYTES - self.evidence.module_read_bytes
+            || into.len() as u64 > TOTAL_BYTES - self.evidence.module_read_requested_bytes
         {
             return Err("root.read_budget".into());
         }
         self.evidence.module_read_calls += 1;
+        self.evidence.module_read_requested_bytes += into.len() as u64;
+        if let Err(failure) = self.source.read_diagnostic(rva, into, kind, self.budget) {
+            if self.evidence.first_read_failure.is_none() {
+                self.evidence.first_read_failure = Some(crate::mailbox::ReadFailure {
+                    path: match kind {
+                        RuntimeReadKind::Code => "root.recipe",
+                        RuntimeReadKind::WritableData => "root.state",
+                        RuntimeReadKind::Metadata => "root.metadata",
+                    }
+                    .into(),
+                    requested_bytes: into.len(),
+                    returned_bytes: failure.returned_bytes,
+                    source: "module",
+                    reason: failure.reason,
+                    guard_recheck: "not_run",
+                    io_attempted: failure.io_attempted,
+                    native_error_code: failure.native_error_code,
+                    region: failure.region,
+                });
+            }
+            return Err(failure.cause);
+        }
         self.evidence.module_read_bytes += into.len() as u64;
-        self.source.read(rva, into, kind, self.budget)?;
         self.budget.check()
     }
     fn read(&mut self, rva: u64, size: usize, kind: RuntimeReadKind) -> Result<Vec<u8>> {
         if size > CHUNK {
             return Err("root.read_range".into());
         }
-        self.budget.charge(RuntimeCost::allocation(size))?;
+        self.budget.charge(RuntimeCost::allocation(size + 256))?;
         let mut out = vec![0; size];
         self.read_into(rva, &mut out, kind)?;
         Ok(out)
@@ -453,69 +688,244 @@ impl<S: Source> Access<'_, S> {
             })
             .collect()
     }
-    fn scan(&mut self, image: &Image) -> Result<(RecipeId, u64, Vec<u8>)> {
+    fn gap(&mut self, start: u64, end: u64, reason: &'static str) -> Result<()> {
+        if start >= end {
+            return Ok(());
+        }
+        if let Some(last) = self.evidence.gaps.scanner().last_mut() {
+            if last.end == start && last.reason == reason {
+                last.end = end;
+                return Ok(());
+            }
+        }
+        // Every gap follows one source span or a bounded read attempt.
+        if self.evidence.gaps.len() >= MAX_GAPS {
+            return Err("root.gap_budget".into());
+        }
+        self.evidence
+            .gaps
+            .scanner()
+            .push(RootGap { start, end, reason });
+        Ok(())
+    }
+    fn scan(&mut self, image: &Image) -> Result<Vec<Candidate>> {
+        self.evidence.text_bytes = image.text.end - image.text.start;
+        // Reserve error-path evidence before reading. Recording a fatal gap
+        // must never replace the original source fault with a late cancellation
+        // or allocation-budget error.
+        self.budget.charge(RuntimeCost::allocation(
+            MAX_GAPS * std::mem::size_of::<RootGap>()
+                + std::mem::size_of::<Vec<RootGap>>()
+                + 2 * std::mem::size_of::<usize>(),
+        ))?;
+        self.evidence.gaps = RootGaps(Some(Arc::new(Vec::with_capacity(MAX_GAPS))));
         let recipes = [
             (RecipeId::Retail, self.pattern(RecipeId::Retail)?),
             (RecipeId::Forever, self.pattern(RecipeId::Forever)?),
+            (
+                RecipeId::ForeverContext,
+                self.pattern(RecipeId::ForeverContext)?,
+            ),
         ];
         let longest = recipes.iter().map(|(_, p)| p.len()).max().unwrap();
-        self.budget
-            .charge(RuntimeCost::allocation(CHUNK + longest - 1))?;
+        self.budget.charge(RuntimeCost::allocation(
+            CHUNK + longest - 1 + 16 * std::mem::size_of::<Candidate>(),
+        ))?;
         let mut buffer = vec![0; CHUNK + longest - 1];
-        let mut selected = None;
+        let mut candidates = Vec::with_capacity(16);
+        let spans = self
+            .source
+            .readable_spans(image.text.start, image.text.end, self.budget)?;
         let mut tail = 0;
-        let mut rva = image.text.start;
+        let mut tail_end = 0;
+        let mut cursor = image.text.start;
         let mut comparisons = 0u32;
-        while rva < image.text.end {
-            let size = (image.text.end - rva).min(CHUNK as u64) as usize;
-            self.read_into(rva, &mut buffer[tail..tail + size], RuntimeReadKind::Code)?;
-            self.evidence.scanned_bytes += size as u64;
-            let combined = tail + size;
-            for at in 0..combined {
-                for (recipe, pattern) in &recipes {
-                    if at + pattern.len() > combined
-                        || rva > image.text.start && at + pattern.len() <= tail
-                    {
-                        continue;
-                    }
-                    let mut matches = true;
-                    for (expected, value) in pattern.iter().zip(&buffer[at..]) {
-                        // Reserve a finite batch before comparisons. Unused work
-                        // reservations remain charged, and control is checked at
-                        // most 4096 byte comparisons apart.
-                        if comparisons == 0 {
-                            self.budget.charge(RuntimeCost::work(4096))?;
-                            comparisons = 4096;
-                        }
-                        comparisons -= 1;
-                        if expected.is_some_and(|v| v != *value) {
-                            matches = false;
-                            break;
-                        }
-                    }
-                    if !matches {
-                        continue;
-                    }
-                    self.evidence.pattern_hits += 1;
-                    // Raw hits compete before any RIP filtering, across both
-                    // templates. An invalid second hit still proves ambiguity.
-                    if self.evidence.pattern_hits > 1 {
-                        return Err("root.ambiguous_anchor".into());
-                    }
-                    let anchor = rva - tail as u64 + at as u64;
-                    self.evidence.recipe = Some(*recipe);
-                    self.evidence.anchor_rva = Some(anchor);
-                    self.budget.charge(RuntimeCost::allocation(pattern.len()))?;
-                    selected = Some((*recipe, anchor, buffer[at..at + pattern.len()].to_vec()));
-                }
+        for (start, end) in spans {
+            if start < cursor || start >= end || start < image.text.start || end > image.text.end {
+                return Err("root.readable_spans".into());
             }
-            tail = (longest - 1).min(combined);
-            buffer.copy_within(combined - tail..combined, 0);
-            rva += size as u64;
+            if cursor < start {
+                self.gap(cursor, start, "unreadable_mapping")?;
+                tail = 0;
+            }
+            let mut at = start;
+            while at < end {
+                let limit = (at + CHUNK as u64).min(end);
+                let count = match self.scan_read(
+                    image,
+                    &recipes,
+                    at,
+                    limit,
+                    &mut buffer,
+                    &mut tail,
+                    &mut tail_end,
+                    &mut comparisons,
+                    &mut candidates,
+                ) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.gap(at, image.text.end, "scan_stopped")?;
+                        return Err(e);
+                    }
+                };
+                let mut retry = at + count as u64;
+                while retry < limit {
+                    let next = ((retry / 4096 + 1) * 4096).min(limit);
+                    if count == 0 && retry == at && next == limit {
+                        self.gap(retry, next, "module_read_failed")?;
+                        tail = 0;
+                        break;
+                    }
+                    let got = match self.scan_read(
+                        image,
+                        &recipes,
+                        retry,
+                        next,
+                        &mut buffer,
+                        &mut tail,
+                        &mut tail_end,
+                        &mut comparisons,
+                        &mut candidates,
+                    ) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            self.gap(retry, image.text.end, "scan_stopped")?;
+                            return Err(e);
+                        }
+                    };
+                    if retry + (got as u64) < next {
+                        self.gap(retry + got as u64, next, "module_read_failed")?;
+                        tail = 0;
+                    }
+                    retry = next;
+                }
+                at = limit;
+            }
+            cursor = end;
+        }
+        self.gap(cursor, image.text.end, "unreadable_mapping")?;
+        self.budget.check()?;
+        self.evidence.full_text_pass = self.evidence.gaps.is_empty()
+            && self.evidence.scanned_bytes == self.evidence.text_bytes;
+        Ok(candidates)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn scan_read(
+        &mut self,
+        image: &Image,
+        recipes: &[(RecipeId, Vec<Option<u8>>)],
+        at: u64,
+        end: u64,
+        buffer: &mut [u8],
+        tail: &mut usize,
+        tail_end: &mut u64,
+        comparisons: &mut u32,
+        candidates: &mut Vec<Candidate>,
+    ) -> Result<usize> {
+        self.budget.check()?;
+        let requested = usize::try_from(end - at).map_err(|_| "root.read_range")?;
+        if requested == 0 || requested > CHUNK || end > self.geometry.size {
+            return Err("root.read_range".into());
+        }
+        if self.evidence.module_read_calls >= READ_LIMIT
+            || requested as u64 > TOTAL_BYTES - self.evidence.module_read_requested_bytes
+        {
+            return Err("root.read_budget".into());
+        }
+        if at != *tail_end {
+            *tail = 0;
+        }
+        self.evidence.module_read_calls += 1;
+        self.evidence.module_read_requested_bytes += requested as u64;
+        let read = self
+            .source
+            .read_some(at, &mut buffer[*tail..*tail + requested], self.budget);
+        let (received, failed) = match read {
+            Ok(value) => value,
+            Err(e) => {
+                self.evidence.read_failures += 1;
+                return Err(e);
+            }
+        };
+        if received > requested {
+            return Err("root.invalid_read_count".into());
+        }
+        self.evidence.module_read_bytes += received as u64;
+        if failed || received != requested {
+            self.evidence.read_failures += 1;
         }
         self.budget.check()?;
-        self.evidence.full_text_pass = true;
-        selected.ok_or_else(|| "root.anchor_missing".into())
+        if received == 0 {
+            return Ok(0);
+        }
+        self.evidence.scanned_bytes += received as u64;
+        let combined = *tail + received;
+        let start = at - *tail as u64;
+        for index in 0..combined {
+            if *comparisons == 0 {
+                self.budget.charge(RuntimeCost::work(4096))?;
+                *comparisons = 4096;
+            }
+            *comparisons -= 1;
+            if buffer[index] != 0x48 {
+                continue;
+            }
+            for (recipe, pattern) in recipes {
+                if index + pattern.len() > combined || start + (index + pattern.len()) as u64 <= at
+                {
+                    continue;
+                }
+                self.budget
+                    .charge(RuntimeCost::work(pattern.len() as u64))?;
+                if !pattern
+                    .iter()
+                    .zip(&buffer[index..])
+                    .all(|(expected, byte)| expected.is_none_or(|value| value == *byte))
+                {
+                    continue;
+                }
+                self.evidence.pattern_hits += 1;
+                if self.evidence.pattern_hits > 4096 {
+                    return Err("root.pattern_match_budget".into());
+                }
+                let anchor = start + index as u64;
+                self.budget.charge(RuntimeCost::work(
+                    (recipe.operands().len() * image.sections.len()) as u64,
+                ))?;
+                let root = match target(
+                    anchor,
+                    &buffer[index..index + pattern.len()],
+                    self.geometry.size,
+                    &image.sections,
+                    *recipe,
+                ) {
+                    Ok(root) => root,
+                    Err(_) => {
+                        self.evidence.rejected_matches += 1;
+                        continue;
+                    }
+                };
+                if candidates.iter().any(|candidate| candidate.root == root) {
+                    continue;
+                }
+                if candidates.len() >= 16 {
+                    return Err("root.root_candidate_budget".into());
+                }
+                self.budget.charge(RuntimeCost::allocation(pattern.len()))?;
+                candidates.push(Candidate {
+                    recipe: *recipe,
+                    anchor,
+                    root,
+                    code: buffer[index..index + pattern.len()].to_vec(),
+                });
+                self.evidence.root_candidates = candidates.len() as u64;
+            }
+        }
+        let keep = (recipes.iter().map(|(_, p)| p.len()).max().unwrap() - 1).min(combined);
+        buffer.copy_within(combined - keep..combined, 0);
+        *tail = keep;
+        *tail_end = at + received as u64;
+        Ok(received)
     }
     fn stable(&mut self, image: &Image, anchor: u64, code: &[u8], root: u64) -> Result<()> {
         let before = self.read(root, 8, RuntimeReadKind::WritableData)?;
@@ -613,6 +1023,31 @@ fn resolve<S: Source>(
     source: &S,
     budget: &mut RuntimeBudget,
 ) -> std::result::Result<Proof<S::Identity>, RootFailure> {
+    let mut candidates = resolve_candidates(source, budget)?;
+    if candidates.len() != 1 {
+        return Err(RootFailure {
+            cause: "root.ambiguous_root".into(),
+            evidence: Box::new(
+                candidates
+                    .first()
+                    .map(|p| p.evidence.clone())
+                    .unwrap_or_default(),
+            ),
+        });
+    }
+    Ok(candidates.remove(0))
+}
+fn resolve_candidates<S: Source>(
+    source: &S,
+    budget: &mut RuntimeBudget,
+) -> std::result::Result<Vec<Proof<S::Identity>>, RootFailure> {
+    resolve_candidates_with_image(source, budget, None)
+}
+fn resolve_candidates_with_image<S: Source>(
+    source: &S,
+    budget: &mut RuntimeBudget,
+    image: Option<Image>,
+) -> std::result::Result<Vec<Proof<S::Identity>>, RootFailure> {
     let mut access = Access {
         source,
         geometry: source.geometry(),
@@ -623,32 +1058,64 @@ fn resolve<S: Source>(
         access.verify()?;
         geometry(access.geometry)?;
         let identity = source.identity();
-        let image = access.image()?;
-        let (recipe, anchor, code) = access.scan(&image)?;
-        access.budget.charge(RuntimeCost::work(
-            (recipe.operands().len() * image.sections.len()) as u64,
-        ))?;
-        let root = target(anchor, &code, access.geometry.size, &image.sections, recipe)?;
-        access.evidence.root_rva = Some(root);
-        access.stable(&image, anchor, &code, root)?;
-        if identity != source.identity() || access.geometry != source.geometry() {
-            return Err("root.module_changed".into());
+        let image = match image {
+            Some(image) => image,
+            None => access.image()?,
+        };
+        let candidates = access.scan(&image)?;
+        if candidates.is_empty() {
+            return Err("root.anchor_missing".into());
         }
-        access.budget.charge(RuntimeCost::allocation(256))?;
-        access.budget.charge(RuntimeCost::work(code.len() as u64))?;
-        access.evidence.anchor_sha256 = Some(hex::encode(Sha256::digest(&code)));
-        Ok(Proof {
-            identity,
-            request: access.budget.request_id(),
-            geometry: access.geometry,
-            image,
-            recipe,
-            anchor,
-            anchor_bytes: code,
-            root,
-            evidence: access.evidence.clone(),
-            poisoned: None,
-        })
+        access.budget.charge(RuntimeCost::allocation(
+            candidates.len() * std::mem::size_of::<Proof<S::Identity>>(),
+        ))?;
+        let mut proofs = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            let Candidate {
+                recipe,
+                anchor,
+                root,
+                code,
+            } = candidate;
+            access.evidence.recipe = Some(recipe);
+            access.evidence.anchor_rva = Some(anchor);
+            access.evidence.root_rva = Some(root);
+            access.evidence.stable_guards = false;
+            access.stable(&image, anchor, &code, root)?;
+            if identity != source.identity() || access.geometry != source.geometry() {
+                return Err("root.module_changed".into());
+            }
+            let clone_bytes = image.sections.len() * std::mem::size_of::<Section>()
+                + image.headers.len() * std::mem::size_of::<HeaderGuard>()
+                + image.headers.iter().map(|h| h.bytes.len()).sum::<usize>()
+                + 256;
+            access.budget.charge(RuntimeCost::allocation(clone_bytes))?;
+            access
+                .budget
+                .charge(RuntimeCost::work(code.len() as u64 + clone_bytes as u64))?;
+            access.evidence.anchor_sha256 = Some(hex::encode(Sha256::digest(&code)));
+            proofs.push(Proof {
+                identity: identity.clone(),
+                request: access.budget.request_id(),
+                geometry: access.geometry,
+                image: image.clone(),
+                recipe,
+                anchor,
+                anchor_bytes: code,
+                root,
+                evidence: access.evidence.clone(),
+                poisoned: None,
+            });
+        }
+        // Every candidate reports the whole scan and all candidate guard work.
+        for proof in &mut proofs {
+            proof.evidence.module_read_calls = access.evidence.module_read_calls;
+            proof.evidence.module_read_bytes = access.evidence.module_read_bytes;
+            proof.evidence.module_read_requested_bytes =
+                access.evidence.module_read_requested_bytes;
+            proof.evidence.header_bytes = access.evidence.header_bytes;
+        }
+        Ok(proofs)
     })();
     result.map_err(|cause| RootFailure {
         cause,
@@ -711,7 +1178,14 @@ fn revalidate<S: Source>(
     match result {
         Ok(()) => Ok(access.evidence),
         Err(cause) => {
-            proof.poisoned.get_or_insert_with(|| cause.clone());
+            let cause = if cause == "root.slot_changed" {
+                "mailbox.path_changed".to_string()
+            } else {
+                cause
+            };
+            if cause != "mailbox.path_changed" {
+                proof.poisoned.get_or_insert_with(|| cause.clone());
+            }
             Err(RootFailure {
                 cause,
                 evidence: Box::new(access.evidence),

@@ -55,6 +55,9 @@ struct Fixture {
     fail_validation: usize,
     read_calls: Cell<usize>,
     fail_read: Cell<bool>,
+    cancel_on_read: Option<Arc<AtomicBool>>,
+    close_calls: Option<Arc<AtomicUsize>>,
+    close_error: Option<&'static str>,
     tear_root: Cell<bool>,
     scope_checks: Cell<usize>,
     change_scope_at: usize,
@@ -76,6 +79,9 @@ impl Fixture {
             fail_validation: usize::MAX,
             read_calls: Cell::new(0),
             fail_read: Cell::new(false),
+            cancel_on_read: None,
+            close_calls: None,
+            close_error: None,
             tear_root: Cell::new(false),
             scope_checks: Cell::new(0),
             change_scope_at: usize::MAX,
@@ -192,6 +198,15 @@ impl Drop for Fixture {
     }
 }
 impl Source for Fixture {
+    fn close(self, budget: &RuntimeBudget) -> Result<()> {
+        if let Some(calls) = &self.close_calls {
+            calls.fetch_add(1, Ordering::SeqCst);
+        }
+        match self.close_error {
+            Some(cause) => Err(cause.into()),
+            None => budget.check(),
+        }
+    }
     fn root(&self) -> u64 {
         0x1000
     }
@@ -232,6 +247,9 @@ impl Source for Fixture {
             ..RuntimeCost::default()
         })?;
         self.read_calls.set(self.read_calls.get() + 1);
+        if let Some(cancel) = &self.cancel_on_read {
+            cancel.store(true, Ordering::Release);
+        }
         if self.fail_read.get() {
             return Err("fixture.os_partial_copy:299".into());
         }
@@ -345,6 +363,7 @@ mod observation {
                     stage: "module",
                     root: Box::new(fixture.evidence.clone()),
                     usage: budget.usage(),
+                    first_read_failure: None,
                 })?;
             Bound::bind(fixture, admission(), lycheedev_core::VERSION, budget)
         })
@@ -560,7 +579,10 @@ mod observation {
         let (mut fixture, dropped) = observation_fixture(None);
         fixture.publication_payload(&serde_json::to_vec(&identity()).unwrap(), "other-release");
         let failure = observe(fixture, RuntimeLimits::defaults()).unwrap_err();
-        assert_eq!(failure.cause, "memory.mailbox_incompatible: mailbox_release_mismatch");
+        assert_eq!(
+            failure.cause,
+            "memory.mailbox_incompatible: mailbox_release_mismatch"
+        );
         assert_eq!(failure.stage, "lookup");
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }
@@ -887,7 +909,7 @@ fn os_read_failure_keeps_exact_cause_and_never_retries() {
     assert_eq!(e.cause, "fixture.os_partial_copy:299");
     assert_eq!(e.stage, "lookup");
     assert_eq!(e.usage.read_calls, 1);
-    assert_eq!(reader.source.validations, 2);
+    assert_eq!(reader.source.validations, 3);
     reader.source.fail_read.set(false);
     assert!(reader.lookup(&Selector::Identity, &mut b).is_err());
     assert_eq!(reader.source.read_calls.get(), 1);
@@ -1131,4 +1153,324 @@ fn api_family_never_substitutes_for_exact_regional_abi_evidence() {
             "reader.runtime_client_identity"
         );
     }
+}
+
+fn formal_identity_selector() -> crate::go_mailbox_v1::Selector {
+    use crate::go_mailbox_v1::{Kind, Selector, ZERO_TOKEN};
+    Selector {
+        kind: Kind::Identity,
+        nonce: ZERO_TOKEN,
+        runtime: ZERO_TOKEN,
+        ticket: ZERO_TOKEN,
+        body: None,
+    }
+}
+#[test]
+fn go320_formal_abi_follows_all_seven_exact_product_slots_without_old_build_allowlist() {
+    for product in &client::PRODUCTS {
+        let mut c = client();
+        c.product = product.family.into();
+        c.product_code = if product.family == "forever" {
+            "wow_forever"
+        } else {
+            product.catalog_product
+        }
+        .into();
+        c.catalog_product = if product.id != product.family {
+            product.catalog_product
+        } else {
+            ""
+        }
+        .into();
+        c.channel = product.channel.into();
+        c.full_build = format!("{}.99999", product.series);
+        for recipe in [
+            RecipeId::Retail,
+            RecipeId::Forever,
+            RecipeId::ForeverContext,
+        ] {
+            let admitted = RuntimeLayoutAdmission::select_formal(&c, recipe).unwrap();
+            assert_eq!(admitted.evidence_sha256(), FORMAL_LAYOUT_SOURCE);
+            admitted.admits_layout(&admitted.layout()).unwrap();
+        }
+        c.product_code = "unrelated".into();
+        assert!(RuntimeLayoutAdmission::select_formal(&c, RecipeId::Retail).is_err());
+    }
+}
+#[test]
+fn go320_root_selection_prefers_actual_or_upgrade_mailbox_and_rejects_ties() {
+    assert_eq!(choose_observed_root(&[Ok(false), Ok(true)]).unwrap(), 1);
+    assert_eq!(
+        choose_observed_root(&[Err("mailbox.thread_tag".into()), Ok(false)]).unwrap(),
+        1
+    );
+    assert_eq!(
+        choose_observed_root(&[
+            Ok(false),
+            Err("memory.mailbox_incompatible: mailbox_schema_mismatch".into())
+        ])
+        .unwrap(),
+        1
+    );
+    assert!(choose_observed_root(&[Ok(true), Ok(true)]).is_err());
+    assert!(choose_observed_root(&[Ok(false), Ok(false)]).is_err());
+    assert!(
+        choose_observed_root(&[
+            Err("mailbox.thread_tag".into()),
+            Err("mailbox.globals".into())
+        ])
+        .unwrap_err()
+        .contains("mailbox.globals")
+    );
+    assert!(fatal_lookup_cause("mailbox.path_changed\nwindow.reused"));
+    assert!(fatal_lookup_cause(
+        "memory.mailbox_incompatible: mailbox_schema_mismatch\nmemory.runtime_cancelled"
+    ));
+}
+#[test]
+fn go320_formal_accept_runs_after_outer_root_guard_and_cannot_hide_cancellation() {
+    let mut f = Fixture::new();
+    f.publication();
+    f.fail_validation = 3;
+    let mut b = budget();
+    let mut reader = bound(f, &mut b);
+    let calls = Cell::new(0);
+    let mut accept = |_: &Record| {
+        calls.set(calls.get() + 1);
+        true
+    };
+    assert_eq!(
+        reader
+            .lookup_formal(&formal_identity_selector(), Some(&mut accept), &mut b)
+            .unwrap_err()
+            .cause,
+        "fixture.anchor_changed"
+    );
+    assert_eq!(calls.get(), 0);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut b = RuntimeBudget::new(
+        RuntimeLimits::defaults(),
+        Instant::now() + Duration::from_secs(10),
+        cancel.clone(),
+    )
+    .unwrap();
+    let mut f = Fixture::new();
+    f.publication();
+    let mut reader = bound(f, &mut b);
+    let mut accept = |_: &Record| {
+        cancel.store(true, Ordering::Release);
+        false
+    };
+    assert_eq!(
+        reader
+            .lookup_formal(&formal_identity_selector(), Some(&mut accept), &mut b)
+            .unwrap_err()
+            .cause,
+        "memory.runtime_cancelled"
+    );
+}
+#[test]
+fn go320_transient_named_path_can_recover_without_new_binding_or_budget() {
+    let f = Fixture::new();
+    f.tear_root.set(true);
+    let mut b = budget();
+    let mut reader = bound(f, &mut b);
+    assert_eq!(
+        reader
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
+            .unwrap_err()
+            .cause,
+        "mailbox.path_changed"
+    );
+    let used = b.usage();
+    reader.source.tear_root.set(false);
+    assert!(
+        reader
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
+            .unwrap()
+            .is_none()
+    );
+    assert!(b.usage().read_calls > used.read_calls);
+    assert!(reader.poisoned.is_none());
+}
+#[test]
+fn go320_state_null_is_observation_and_does_not_decide_driver_retry_policy() {
+    let mut f = Fixture::new();
+    f.bytes.insert(0x1000, 0u64.to_le_bytes().to_vec());
+    let mut b = budget();
+    let mut reader = bound(f, &mut b);
+    assert_eq!(
+        reader
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
+            .unwrap_err()
+            .cause,
+        "mailbox.lua_state_null"
+    );
+    reader.source.publication();
+    assert!(
+        reader
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn go320_generic_forever_identity_cannot_replace_a_selected_regional_slot() {
+    let mut legacy = client();
+    legacy.catalog_product.clear();
+    legacy.channel.clear();
+    assert_eq!(
+        RuntimeLayoutAdmission::select_formal(&legacy, RecipeId::ForeverContext)
+            .err()
+            .unwrap(),
+        "reader.runtime_layout_unsupported"
+    );
+}
+#[test]
+fn go320_candidate_selection_uses_actual_named_lua_observations() {
+    let mut b = budget();
+    let absent = Fixture::new();
+    let mut present = Fixture::new();
+    present.publication();
+    let mut malformed = Fixture::new();
+    malformed.bytes.insert(0x1000, 0u64.to_le_bytes().to_vec());
+    let observations: Vec<_> = [absent, present, malformed]
+        .into_iter()
+        .map(|fixture| {
+            let mut reader = bound(fixture, &mut b);
+            reader
+                .lookup_formal(&formal_identity_selector(), None, &mut b)
+                .map(|record| record.is_some())
+                .map_err(|failure| failure.cause)
+        })
+        .collect();
+    assert_eq!(choose_observed_root(&observations).unwrap(), 1);
+    assert!(b.usage().read_calls > 10);
+}
+
+#[test]
+fn failed_lookup_joins_independent_outer_recipe_and_metadata_changes_without_retry() {
+    for fail_read in [false, true] {
+        let mut f = Fixture::new();
+        f.tear_root.set(!fail_read);
+        f.fail_read.set(fail_read);
+        f.fail_validation = 3; // bind, before lookup, mandatory error-return recheck
+        f.change_scope_at = 3;
+        let mut b = budget();
+        let mut reader = bound(f, &mut b);
+        let request = b.request_id();
+        let failure = reader
+            .lookup_formal(&formal_identity_selector(), None, &mut b)
+            .unwrap_err();
+        let original = if fail_read {
+            "fixture.os_partial_copy:299"
+        } else {
+            "mailbox.path_changed"
+        };
+        assert_eq!(failure.cause.lines().next(), Some(original));
+        assert!(failure.cause.contains("fixture.anchor_changed"));
+        assert!(failure.cause.contains("reader.runtime_metadata_changed"));
+        assert_eq!(failure.stage, "after_lookup");
+        assert_eq!(reader.source.validations, 3);
+        assert_eq!(reader.source.scope_checks.get(), 3);
+        assert_eq!(b.request_id(), request);
+        assert!(!transient_publication(&failure.cause));
+        if fail_read {
+            let first = failure.first_read_failure.unwrap();
+            assert_eq!(first.path, "root.state");
+            assert_eq!(first.source, "module");
+        }
+        let reads = reader.source.read_calls.get();
+        assert_eq!(
+            reader
+                .lookup_formal(&formal_identity_selector(), None, &mut b)
+                .unwrap_err()
+                .stage,
+            "poisoned"
+        );
+        assert_eq!(reader.source.read_calls.get(), reads);
+    }
+}
+
+#[test]
+fn failed_lookup_retains_original_read_detail_and_cancellation_at_outer_guard_boundary() {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut b = RuntimeBudget::new(
+        RuntimeLimits::defaults(),
+        Instant::now() + Duration::from_secs(10),
+        cancel.clone(),
+    )
+    .unwrap();
+    let mut f = Fixture::new();
+    f.fail_read.set(true);
+    f.cancel_on_read = Some(cancel);
+    let mut reader = bound(f, &mut b);
+    let failure = reader
+        .lookup_formal(&formal_identity_selector(), None, &mut b)
+        .unwrap_err();
+    assert_eq!(
+        failure.cause.lines().next(),
+        Some("fixture.os_partial_copy:299")
+    );
+    assert!(failure.cause.contains("memory.runtime_cancelled"));
+    assert_eq!(failure.first_read_failure.unwrap().path, "root.state");
+    assert!(reader.poisoned.is_some());
+}
+
+#[test]
+fn binding_cleanup_retains_original_diagnostics_and_all_close_failures() {
+    let detail = mailbox::ReadFailure {
+        path: "record.wire_header".into(),
+        requested_bytes: 80,
+        returned_bytes: Some(7),
+        source: "private",
+        reason: "native_read_failed",
+        guard_recheck: "verified",
+        io_attempted: Some(true),
+        native_error_code: Some(299),
+        region: None,
+    };
+    let failure = RuntimeBindingFailure {
+        cause: "fixture.read_failed".into(),
+        stage: "lookup",
+        root: Box::default(),
+        usage: RuntimeCost::default(),
+        first_read_failure: Some(detail.clone()),
+    };
+    let failure = join_close_failure(
+        failure,
+        Err("memory.runtime_process_close: fixture\nmemory.runtime_cancelled".into()),
+    );
+    assert_eq!(
+        failure.cause.lines().collect::<Vec<_>>(),
+        vec![
+            "fixture.read_failed",
+            "memory.runtime_process_close: fixture",
+            "memory.runtime_cancelled"
+        ]
+    );
+    assert_eq!(failure.first_read_failure, Some(detail));
+    assert_eq!(failure.stage, "lookup");
+}
+
+#[test]
+fn failed_binding_closes_its_owned_source_once_and_preserves_both_errors() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut source = Fixture::new();
+    source.fail_validation = 1;
+    source.close_calls = Some(calls.clone());
+    source.close_error = Some("fixture.checked_close_failed");
+    source.dropped = Some(drops.clone());
+    let mut b = budget();
+    let failure = Bound::bind(source, admission(), "3.1.2", &mut b)
+        .err()
+        .unwrap();
+    assert_eq!(
+        failure.cause,
+        "fixture.anchor_changed\nfixture.checked_close_failed"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
 }

@@ -250,6 +250,17 @@ jobs:
       - name: Run production mailbox lookup and binding fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-mailbox-lookup --one-shot -- test --locked --offline -p lycheedev-live --test mailbox_lookup -j 1
+      - name: Run formal RIP recipes and sparse root fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-formal-runtime-root --one-shot -- test --locked --offline -p lycheedev-live --lib runtime_root:: -j 1
+      - name: Run trusted runtime module and EXE qualification fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-trusted-runtime --one-shot -- test --locked --offline -p lycheedev-windows --lib process::runtime_ -j 1
+      - name: Run owned Windows runtime memory fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-runtime-memory --one-shot -- test --locked --offline -p lycheedev-windows --test runtime_module -j 1
       - name: Run bound runtime observation fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-runtime-observation --one-shot -- test --locked --offline -p lycheedev-live --lib runtime_binding::tests -j 1

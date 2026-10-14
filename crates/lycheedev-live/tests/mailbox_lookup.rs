@@ -424,7 +424,9 @@ fn global_allocation_budget_includes_path_guards_and_is_not_reset_by_lookup() {
 #[test]
 fn guard_allocation_failure_discards_observation_before_following_root() {
     let mut limits = lycheedev_windows::process::RuntimeCost::defaults();
-    limits.allocation_bytes = 8;
+    // Eight root bytes plus the fixed logical-failure evidence reservation;
+    // the following guard copy is deliberately not admitted.
+    limits.allocation_bytes = 8 + 256;
     let f = BudgetedFixture::new(limits);
     assert!(f.lookup().is_err());
     assert_eq!(f.fixture.calls.get(), 1);
@@ -754,4 +756,219 @@ fn complete_record_guard_change_cannot_hide_cancellation_deadline_or_identity_lo
         );
         assert!(error.lines().any(|line| line == cause), "{error}");
     }
+}
+
+fn formal_selector(
+    kind: lycheedev_live::go_mailbox_v1::Kind,
+    record: &Record,
+) -> lycheedev_live::go_mailbox_v1::Selector {
+    use lycheedev_live::go_mailbox_v1::{Selector, parse_token};
+    Selector {
+        kind,
+        nonce: parse_token(&record.nonce).unwrap(),
+        runtime: parse_token(&record.runtime).unwrap(),
+        ticket: parse_token(&record.ticket).unwrap(),
+        body: None,
+    }
+}
+#[test]
+fn formal_body_selector_uses_exact_head_qualification_without_a_synthetic_receipt() {
+    use lycheedev_live::go_mailbox_v1::{BodyQualification, Kind};
+    let body = record(3, b"{\"ok\":true}".to_vec());
+    let h = head(&body, body.payload.len() as u32);
+    let mut fixture = Fixture::new();
+    fixture.publication(&h, Some(&body));
+    let mut selector = formal_selector(Kind::Body, &body);
+    selector.body = Some(BodyQualification {
+        length: body.payload.len() as u32,
+        checksum: body.checksum,
+    });
+    assert_eq!(
+        fixture
+            .reader()
+            .lookup_formal(&selector, None)
+            .unwrap()
+            .unwrap()
+            .payload,
+        body.payload
+    );
+    selector.body.as_mut().unwrap().checksum ^= 1;
+    assert!(
+        fixture
+            .reader()
+            .lookup_formal(&selector, None)
+            .unwrap()
+            .is_none()
+    );
+    selector.body = None;
+    let before = fixture.calls.get();
+    assert_eq!(
+        fixture
+            .reader()
+            .lookup_formal(&selector, None)
+            .unwrap_err()
+            .cause,
+        "mailbox.body_authorization"
+    );
+    assert_eq!(fixture.calls.get(), before);
+}
+#[test]
+fn formal_selector_checks_runtime_before_record_bytes_and_accept_after_guards() {
+    use lycheedev_live::go_mailbox_v1::Kind;
+    let r = record(5, b"input".to_vec());
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    let mut selector = formal_selector(Kind::Input, &r);
+    selector.runtime = [9; 16];
+    let called = Cell::new(0);
+    let mut accept = |_: &Record| {
+        called.set(called.get() + 1);
+        true
+    };
+    assert!(
+        fixture
+            .reader()
+            .lookup_formal(&selector, Some(&mut accept))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(called.get(), 0);
+    selector.runtime = lycheedev_live::go_mailbox_v1::parse_token(&r.runtime).unwrap();
+    fixture.mutate.set(true);
+    assert_eq!(
+        fixture
+            .reader()
+            .lookup_formal(&selector, Some(&mut accept))
+            .unwrap_err()
+            .cause,
+        "mailbox.path_changed"
+    );
+    assert_eq!(called.get(), 0);
+}
+struct DiagnosticRead<'a> {
+    fixture: &'a Fixture,
+    failed: Cell<bool>,
+    fail_guard: bool,
+}
+impl Memory for DiagnosticRead<'_> {
+    fn verify(&self) -> mailbox::Result<()> {
+        Ok(())
+    }
+    fn read(&self, at: u64, bytes: &mut [u8], module: bool) -> mailbox::Result<()> {
+        self.fixture.read(at, bytes, module)
+    }
+    fn read_diagnostic(
+        &self,
+        at: u64,
+        bytes: &mut [u8],
+        module: bool,
+    ) -> std::result::Result<(), mailbox::ReadError> {
+        if at == self.fixture.record_data || self.failed.get() && self.fail_guard {
+            let first = !self.failed.replace(true);
+            return Err(mailbox::ReadError {
+                cause: if first {
+                    "fixture.partial_read"
+                } else {
+                    "fixture.guard_read"
+                }
+                .into(),
+                returned_bytes: Some(if first { 7 } else { 0 }),
+                reason: "short_read",
+                io_attempted: Some(true),
+                native_error_code: Some(299),
+                region: None,
+            });
+        }
+        self.fixture
+            .read(at, bytes, module)
+            .map_err(mailbox::ReadError::unknown)
+    }
+}
+#[test]
+fn first_read_failure_retains_original_logical_path_and_never_adds_a_diagnostic_scan() {
+    use lycheedev_live::go_mailbox_v1::Kind;
+    for fail_guard in [false, true] {
+        let r = record(5, b"input".to_vec());
+        let mut fixture = Fixture::new();
+        fixture.publication(&r, None);
+        let memory = DiagnosticRead {
+            fixture: &fixture,
+            failed: Cell::new(false),
+            fail_guard,
+        };
+        let old = fixture.reader();
+        let reader = Reader {
+            memory: &memory,
+            root: old.root,
+            layout: old.layout,
+            module_hash: old.module_hash,
+            release: old.release,
+        };
+        let failure = reader
+            .lookup_formal(&formal_selector(Kind::Input, &r), None)
+            .unwrap_err();
+        let detail = failure.first_read_failure.unwrap();
+        assert_eq!(detail.path, "record.wire_header");
+        assert_eq!(detail.requested_bytes, 80);
+        assert_eq!(detail.returned_bytes, Some(7));
+        assert_eq!(detail.native_error_code, Some(299));
+        assert_eq!(
+            detail.guard_recheck,
+            if fail_guard { "read_failed" } else { "stable" }
+        );
+        assert!(failure.cause.contains("fixture.partial_read"));
+        if fail_guard {
+            assert!(failure.cause.contains("fixture.guard_read"));
+        }
+        let json = serde_json::to_string(&detail).unwrap();
+        for forbidden in ["address", "nonce", "payload", &r.nonce, &r.runtime] {
+            assert!(!json.contains(forbidden));
+        }
+        assert!(fixture.calls.get() < 512);
+    }
+}
+
+#[test]
+fn non_body_selector_ignores_unrelated_body_qualification_for_length_limit() {
+    use lycheedev_live::go_mailbox_v1::{BodyQualification, Kind};
+    for kind in [Kind::Identity, Kind::Input] {
+        let r = record(kind as u8, b"nonempty publication".to_vec());
+        let mut fixture = Fixture::new();
+        fixture.publication(&r, None);
+        let mut selector = formal_selector(kind, &r);
+        selector.body = Some(BodyQualification {
+            length: 0,
+            checksum: 0,
+        });
+        assert_eq!(
+            fixture
+                .reader()
+                .lookup_formal(&selector, None)
+                .unwrap()
+                .unwrap()
+                .payload,
+            r.payload
+        );
+    }
+}
+
+#[test]
+fn non_body_qualification_cannot_expand_fixed_sixteen_kib_record_limit() {
+    use lycheedev_live::go_mailbox_v1::{BodyQualification, Kind};
+    let r = record(Kind::Input as u8, vec![b'x'; (16 << 10) + 1]);
+    let mut fixture = Fixture::new();
+    fixture.publication(&r, None);
+    let mut selector = formal_selector(Kind::Input, &r);
+    selector.body = Some(BodyQualification {
+        length: 524288,
+        checksum: 0,
+    });
+    assert_eq!(
+        fixture
+            .reader()
+            .lookup_formal(&selector, None)
+            .unwrap_err()
+            .cause,
+        "mailbox.record_length"
+    );
 }

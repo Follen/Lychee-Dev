@@ -444,3 +444,74 @@ fn image_directory_comes_from_selected_os_module_and_original_request() {
     );
     assert_eq!(foreign.usage(), RuntimeCost::default());
 }
+
+#[test]
+fn os_issued_code_prefix_reads_only_selected_mapped_code_with_original_ledger() {
+    let window = Window::new();
+    let (mut budget, _) = budget(RuntimeLimits::defaults());
+    let module = RuntimeModule::open(window.identity(), &mut budget).unwrap();
+    let spans = module
+        .code_readable_spans(0, module.identity().size(), &mut budget)
+        .unwrap();
+    assert!(!spans.is_empty());
+    assert!(spans.windows(2).all(|pair| pair[0].1 < pair[1].0));
+    let (start, end) = spans[0];
+    assert!(end - start >= 16);
+    let mut exact = [0; 16];
+    module
+        .read_exact(start, &mut exact, RuntimeReadKind::Code, &mut budget)
+        .unwrap();
+    let mut prefix = [0xa5; 16];
+    let used = budget.usage();
+    assert_eq!(
+        module
+            .read_code_prefix(start, &mut prefix, &mut budget)
+            .unwrap(),
+        (16, false)
+    );
+    assert_eq!(prefix, exact);
+    assert_eq!(budget.usage().read_calls - used.read_calls, 1);
+    assert_eq!(budget.usage().requested_bytes - used.requested_bytes, 16);
+}
+#[test]
+fn os_read_diagnostics_capture_original_admission_without_extra_io_or_addresses() {
+    let window = Window::new();
+    let (mut budget, _) = budget(RuntimeLimits::defaults());
+    let module = RuntimeModule::open(window.identity(), &mut budget).unwrap();
+    let used = budget.usage();
+    let mut bytes = [0xa5; 8];
+    let failure = module
+        .read_private_observed(0, &mut bytes, &mut budget)
+        .unwrap_err();
+    assert!(!failure.io_attempted);
+    assert_eq!(failure.returned_bytes, 0);
+    assert_eq!(failure.native_error_code, None);
+    assert_eq!(failure.cause, "memory.runtime_private_range");
+    assert_eq!(budget.usage(), used);
+    assert_eq!(bytes, [0xa5; 8]);
+}
+
+#[test]
+fn explicit_module_close_is_prepaid_and_runs_after_cancellation_or_exhaustion() {
+    for cancelled in [false, true] {
+        let window = Window::new();
+        let limits = RuntimeLimits::defaults();
+        let (mut budget, cancel) = budget(limits);
+        let module = RuntimeModule::open(window.identity(), &mut budget).unwrap();
+        budget
+            .charge(RuntimeCost {
+                read_calls: limits.read_calls - budget.usage().read_calls,
+                ..RuntimeCost::default()
+            })
+            .unwrap();
+        let usage = budget.usage();
+        cancel.store(cancelled, Ordering::Release);
+        let result = module.close(&budget);
+        if cancelled {
+            assert_eq!(result.unwrap_err(), "memory.runtime_cancelled");
+        } else {
+            result.unwrap();
+        }
+        assert_eq!(budget.usage(), usage); // no late debit can suppress cleanup
+    }
+}
