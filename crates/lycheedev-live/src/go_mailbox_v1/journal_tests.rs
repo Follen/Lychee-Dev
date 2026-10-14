@@ -174,3 +174,84 @@ fn go_mailbox_v1_journal_fixed_oracle_preimages_hashes_and_complete_chain() {
         golden["checksums"][1].as_str().unwrap()
     );
 }
+
+#[derive(Default)]
+struct SaveJournal {
+    appends: Vec<(String, State)>,
+}
+impl StateJournal for SaveJournal {
+    fn append(
+        &mut self,
+        control: &OperationControl,
+        event: &str,
+        state: &State,
+    ) -> ChannelResult<()> {
+        check_control(control)?;
+        self.appends.push((event.into(), state.clone()));
+        Ok(())
+    }
+    fn historical_request(
+        &mut self,
+        _: &OperationControl,
+        _: &str,
+    ) -> ChannelResult<Option<State>> {
+        panic!("save-only fixture must not inspect history")
+    }
+    fn write_result(&mut self, _: &OperationControl, _: &Operation) -> ChannelResult<()> {
+        panic!("save-only fixture must not write a result")
+    }
+    fn checkpoint(&mut self, _: &OperationControl, _: &mut State, _: bool) -> ChannelResult<()> {
+        panic!("save-only fixture must not rotate history")
+    }
+}
+
+#[test]
+fn go_mailbox_v1_journal_cancelled_save_preserves_go_progress_before_append() {
+    let mut s = state();
+    s.schema = "lycheedev.channel.v1".into();
+    s.progress_version = 41;
+    let mut journal = SaveJournal::default();
+    let cancelled = OperationControl::default();
+    cancelled
+        .cancel_handle()
+        .store(true, std::sync::atomic::Ordering::Release);
+    assert_eq!(
+        save_state(&mut journal, &cancelled, &mut s, "input_attempted"),
+        Err(super::super::observations::ChannelError::Cancelled)
+    );
+    assert_eq!(s.schema, CHANNEL_SCHEMA);
+    assert_eq!(s.progress_version, 42);
+    assert!(journal.appends.is_empty());
+    // The caller's independent bounded timeout-fact flush keeps the failed
+    // business save's version; it does not claim that an earlier append occurred.
+    save_state(
+        &mut journal,
+        &OperationControl::default(),
+        &mut s,
+        "budget_observed",
+    )
+    .unwrap();
+    assert_eq!(journal.appends.len(), 1);
+    assert_eq!(journal.appends[0].1.progress_version, 42);
+}
+
+#[test]
+fn go_mailbox_v1_journal_cancelled_budget_and_blocker_saves_never_advance_progress() {
+    for event in ["budget_observed", "budget_migrated", "blocker_observed"] {
+        let mut s = state();
+        s.progress_version = 41;
+        let mut journal = SaveJournal::default();
+        let cancelled = OperationControl::default();
+        cancelled
+            .cancel_handle()
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(
+            save_state(&mut journal, &cancelled, &mut s, event),
+            Err(super::super::observations::ChannelError::Cancelled)
+        );
+        assert_eq!(s.progress_version, 41, "{event}");
+        assert!(journal.appends.is_empty());
+        save_state(&mut journal, &OperationControl::default(), &mut s, event).unwrap();
+        assert_eq!(journal.appends[0].1.progress_version, 41, "{event}");
+    }
+}

@@ -3,6 +3,9 @@
 //! Oracle: `3057a9666ab078270b63c7f06de748069b0d1f4b`.
 //! These decoders do not establish publication stability, process identity,
 //! readiness or permission to send input. Native integration remains separate.
+pub mod driver;
+pub mod slot_allocation;
+pub mod transactions;
 pub mod journal;
 pub mod observations;
 pub mod state;

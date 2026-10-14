@@ -52,7 +52,6 @@ pub fn save_state(
     state: &mut State,
     event: &str,
 ) -> ChannelResult<()> {
-    check_control(control)?;
     if state.schema == "lycheedev.channel.v1" {
         state.schema = super::state::CHANNEL_SCHEMA.into();
     }
@@ -66,6 +65,10 @@ pub fn save_state(
             .ok_or(ContractError("live.channel_progress_overflow"))?;
     }
     state.validate()?;
+    // Fixed Go Save migrates/advances/validates before its first cancellable
+    // snapshot write. A later bounded budget flush must retain that progress,
+    // without incrementing it again or permitting an unsaved external effect.
+    check_control(control)?;
     journal.append(control, event, state)
 }
 #[derive(Debug, Clone)]

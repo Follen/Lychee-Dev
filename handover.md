@@ -332,6 +332,12 @@ luac首轮真实Windows run38632703141/artifact11927375965（ZIP SHA256 8082b69a
 
 luac失败后的只读run38633376782核定cl/link精确文件与有效Microsoft签名。新增独立msvcCompile准入与cargoBuild互斥，固定cl/link/helper身份并持文件锁，只接受本次固定C编译shape，拒绝response/替换工具/隐式参数；仅root成功且剩余均为准确已核本Job helper才允许定向退休。原Cargo分支、既有Cargo/helper pins与C# Job/退休核心逐字节不变，未知子进程仍失败。隔离stage纯Node10通过/9Windows skip，独立静态审核关闭；真实cl双重建及新Windows负例尚NOT_RUN。本地冻结support旧字节不用于证明新树测试，通过远端精确候选CI验证。
 
+### 正式 Mailbox 事务驱动 B 进入独立编译验收
+
+新增可注入backend/journal/clock/token的Connect/Prepare/Run/Disconnect状态机、prepare→challenge→commit→HEAD/BODY→confirm→durable原始result→release完整业务链，500槽分配边界、unknown不重放、intent先保存、exact receipt先保存再Consumed、输入事实独立3秒有界flush、release缺回执5秒后保存cleanup reload intent。33项pure fake测试已写，独立静态审核修复preappend取消误poison阻断sticky预算flush、畸形challenge消费/错误顺序，以及A Save按Go先递增进度后检查取消的次序（另2回归）。append已进入后的不确定错误仍强制重新读取日志，不能凭错误码猜无写入。
+
+本批导出进入Windows all-target/现有Mailbox测试组，实际运行NOT_RUN，没有持久化writer/正式Windows输入/生产driver消费者。C恢复仍独立审核，已发现自动reload预算clone丢失Go共享goal的lastObserved/exhausted语义，必须修并回归后才接生产；B恢复入口目前只生成intent，不能称完整恢复通过。Delivery正式publish共享DTO边界待移至core无循环依赖，不复制第二套信封。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
