@@ -85,3 +85,17 @@ test('batch is registered only with its concrete source handler and exact flags'
   assert.deepEqual(entry.flags, frozen.flags);
   assert.equal(entry.mutates, true);
 });
+
+
+test('Source registry exposes the existing refs context and session handlers to describe', () => {
+  const implementation = read('../../lycheedev-source/src/lib.rs');
+  const registry = implementation.match(/pub fn commands\(\) -> &'static \[&'static str\] \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(registry, 'recognizable Source registry');
+  const actual = [...registry.matchAll(/"(source [^"]+)"/g)].map(match => match[1]);
+  const expected = fixture.commands.filter(({path}) => path.startsWith('source ')).map(({path}) => path);
+  assert.equal(new Set(actual).size, actual.length);
+  assert.deepEqual([...actual].sort(), expected.sort());
+  for (const name of ['source refs', 'source context', 'source session status', 'source session close']) {
+    assert.ok(implementation.slice(implementation.indexOf('pub fn dispatch_with_services')).includes(`"${name}"`));
+  }
+});

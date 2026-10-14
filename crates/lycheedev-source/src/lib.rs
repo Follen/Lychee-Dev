@@ -50,6 +50,10 @@ pub fn commands() -> &'static [&'static str] {
         "source index",
         "source query",
         "source batch",
+        "source refs",
+        "source context",
+        "source session status",
+        "source session close",
         "source diff",
         "source prune",
         "source validate",
@@ -353,5 +357,37 @@ mod public_query_defaults {
             inv.flags.insert("--limit".into(), value.into());
             assert_eq!(query_limit(&inv).unwrap_err().exit_code, 2);
         }
+    }
+}
+
+#[cfg(test)]
+mod public_command_registry {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn implemented_source_commands_cover_fixed_go_inventory() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/rust-parity/go-3.2.0.manifest.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            oracle["oracle"]["commit"],
+            "3057a9666ab078270b63c7f06de748069b0d1f4b"
+        );
+        let expected: BTreeSet<_> = oracle["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry["path"].as_str())
+            .filter(|path| path.starts_with("source "))
+            .collect();
+        let actual: BTreeSet<_> = commands().iter().copied().collect();
+        assert_eq!(
+            actual.len(),
+            commands().len(),
+            "duplicate Source registration"
+        );
+        assert_eq!(actual, expected);
     }
 }

@@ -476,6 +476,18 @@ run38639615054/product116122379218 于 2026-10-14 22:19:54 UTC 结束：all-targ
 
 独审发现并修复 quoted u64 前导正号误接受、interface:-0误拒绝，以及跨安装同token的target check-then-replace竞态；复审所查finding闭合。29个测试声明含子进程helper及Unix-only项，全部 NOT_RUN，已有go_mailbox_v1整组Windows过滤器覆盖新模块。真实进程exit崩溃切点fixture保留磁盘证据，但未执行不能称crash验证通过；AppendClosed注入也不冒称真实OS close失败。默认CLI仍接旧host/session/runtime，当前仅正式持久化与准入基础，后续须完整接新driver/runtime/input/doctor。
 
+### 6cbd61b 实际 Skill 产物独立复核
+
+独立复核逐字核验112包文件/105resources、25候选Skill文件中全部23固定Go必需文件、6runner输入、52sealedLogs、22实际命令和11capture；EXE SHA256 5bd7f80fc6c90c9e7da4151e37373699bf00d7b458e83022738248185d9ac5be，包93dd15beeb28aa04b86e6718640957027ed0df081fb876b0614256c252b1d643，368输入sourceDigest aad3ba8ea083019c6703c8fdd1657619a3c456618e654d93248012646cbeeb3b。固定archive重算4049文件/4036文档及Git root2368890bcb80a4abc8fe2ced2d0be95dcb5b71c6吻合；API第10–21行和ActionButton第97–108行原文、查询坐标、分页offset0→3及3个exit2错误后同pin查询均有真实证据。
+
+原始21 passed/6 failed保留，但一项成功名称过强：post-semantic-source-read-still-usable仅为末尾API查询；此前所有semantic任务因缺能力未发出，不能称语义后恢复。必须修runner前置条件，历史该项只认可末尾同pin查询。六失败中refs/context/session status五项是已有handler未广告，batch一项当时确实未实现；不是只补广告即可验收。中文字面零结果不证明自然语言理解；部分分页不证明全部结果；public session close未执行，只有outer Windows Job全树回收/active0与scratch retired实证。isolated prefix→Skill launcher→package launcher→EXE已跑，不是npm安装验收。
+
+### Source 真实广告注册修复与早期 CLI smoke
+
+补充纠正19cb的覆盖：其新增batch及完整定义表，但source::commands仍漏refs/context/session status/close四个已有dispatch路由；describe会过滤它们。本批精确补注册并加固定Go全部Source集合/重复检查回归，metadata Node 6/6实际通过，独立源码/CI顺序审核无阻断。新Rust回归 NOT_RUN；不能据注册完整宣称这些业务实际通过。
+
+sealed CLI build与version/help/describe smoke已移到all-target之后、长事务/全仓测试之前，保持独立失败记录、不短路其余组。当前smoke仅验可执行及基本形状；严格实际describe逐项合同差分仍在下一批实现，未提前声称该门槛存在。正在运行的418快照仍含这次广告缺口，其结果保留不回填。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
