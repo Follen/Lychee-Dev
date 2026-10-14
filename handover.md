@@ -226,6 +226,14 @@ Windows新增独立windows-product-foundation job，无needs静态差分门槛�
 
 本批Rust测试仍not_run，rustfmt语法解析和scoped diff检查通过，已做独立静态审查；Windows CI将增加限定selection/Delivery/假窗口passive/公开error envelope测试。当前aa86ef86的真实Windows执行只包含之前快照：公开Emmy准备、Node测试和locked fetch通过，Python fixture仍有失败待日志调查，workspace实际编译进行中；不能将它归为本批产品通过。CI不再自动取消正在执行的旧批次，新批排队，保留进程回收与终态证据。
 
+### 首次真实Windows产品单测结果与剩余构建门槛
+
+aa86ef86/run38618929588 artifact11922486642（ZIP SHA256 ffbc206b02ef5413747aa6e41001f5831c0a939945243d00302468da674f561c）已下载逐命令核验：metadata17/17、CLI合同6/6、Source默认limit1/1实际通过，三次Cargo exit0；这些仅属于aa86快照，不是后续07df安装选择或全Source验收。默认产品crate已编译至CLI并运行这些单测。all-target Cargo exit101，Source历史example有ObjectOrigin类型与binding_decision缺方法两项错误，待适配。
+
+四组受控命令仍整体FAIL：宿主VS Enterprise14.51.36231的vctip.exe不符合旧Community14.50精确helper策略，owner按未知残留进程强制回收，均tree/root/handles已回收但不得把强制回收当完整受控成功。保持门槛，新增独立只读Windows工具身份观察job，先采集exact path/hash/bytes/version/有效签名供审核；不会按路径名或自动发现就放行helper。
+
+Python准备43测试中1失败/1平台条件skip：即时同尺寸写入并不保证Windows可观测时间戳变化。本次仅改fixture为真实内容写入加显式不同mtime并断言确已变化，另加真实长度变化case；生产guard不放松。44项Linux准备回归通过，实际Windows待重跑。该test文件从隔离stage发布；云exec服务断连导致正在运行的独立Emmy测试无可信终态，普通lease/证据保留，不根据新PID namespace中看不见进程就清锁。后续新语义的真实运行安排独立Windows host，不借更换本地target绕lease。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

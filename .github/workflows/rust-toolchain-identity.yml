@@ -1,0 +1,51 @@
+name: Rust Windows toolchain identity observation
+
+# Read-only evidence for explicit review of owned-process helper identities.
+# This job never updates an allowlist or executes the observed helper.
+on:
+  push:
+    branches: [rust-refactor]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  observe-installed-tools:
+    if: github.ref == 'refs/heads/rust-refactor'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Observe Cargo launcher and exact hosted MSVC helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargo = (Get-Command cargo.exe -CommandType Application).Source
+          $relative = 'Microsoft Visual Studio/18/Enterprise/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/vctip.exe'
+          $helper = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $relative
+          $item = Get-Item -LiteralPath $helper
+          if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'helper reparse point' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $helper
+          if ($signature.Status -ne 'Valid') { throw "invalid helper signature: $($signature.Status)" }
+          $record = [ordered]@{
+            schema = 'lycheedev.ci-tool-identity-observation.v1'
+            candidateCommit = '${{ github.sha }}'
+            cargoSHA256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $cargo).Hash.ToLowerInvariant()
+            helper = [ordered]@{
+              kind = 'msvc-vctip'
+              programFilesPath = $relative
+              bytes = $item.Length
+              sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $helper).Hash.ToLowerInvariant()
+              fileVersion = $item.VersionInfo.FileVersion
+              signatureStatus = [string]$signature.Status
+              signerSubject = $signature.SignerCertificate.Subject
+              signerThumbprint = $signature.SignerCertificate.Thumbprint
+            }
+          }
+          $record | ConvertTo-Json -Depth 5 | Tee-Object -FilePath toolchain-identities.json
+      - name: Preserve observed identity for explicit review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rust-toolchain-identities-${{ github.sha }}
+          path: toolchain-identities.json
+          if-no-files-found: warn
+          retention-days: 14

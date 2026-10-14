@@ -183,6 +183,20 @@ class PrepareTests(unittest.TestCase):
             with prep.open_regular(path, 10) as (stream, before):
                 self.assertEqual(stream.read(), b'one')
                 path.write_bytes(b'two')
+                # A same-size immediate write need not advance observable
+                # Windows timestamps. Make the real metadata mutation explicit
+                # instead of relying on filesystem clock resolution or sleeps.
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+                self.assertNotEqual(path.lstat().st_mtime_ns, before.st_mtime_ns)
+
+    def test_same_file_size_changed_during_read_rejected(self):
+        path = self.root / 'racy-size'
+        path.write_bytes(b'one')
+        with self.assertRaisesRegex(ValueError, 'file_changed'):
+            with prep.open_regular(path, 10) as (stream, before):
+                self.assertEqual(stream.read(), b'one')
+                path.write_bytes(b'longer')
+                self.assertNotEqual(path.lstat().st_size, before.st_size)
 
     def test_file_changed_after_inventory_read_rejected(self):
         self.destination.mkdir()
@@ -192,6 +206,9 @@ class PrepareTests(unittest.TestCase):
         def change(path, *args, **kwargs):
             result = original(path, *args, **kwargs)
             Path(path).write_bytes(b'new\n')
+            before = result[1]
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+            self.assertNotEqual(Path(path).lstat().st_mtime_ns, before.st_mtime_ns)
             return result
         with mock.patch.object(prep, 'read_regular', change), self.assertRaisesRegex(ValueError, 'tree_changed'):
             prep.inventory(self.destination)
