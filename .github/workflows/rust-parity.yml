@@ -36,6 +36,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the differential runner (not product parity)
         run: node --test tests/rust-parity/oracle.test.mjs
+      - name: Test unsafe inventory and enforce owned business guards
+        run: |
+          node --test tools/rust-unsafe-boundaries.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/rust-unsafe-boundaries.mjs --check
+          exit $LASTEXITCODE
       - name: Authenticate source-derived fixture
         run: node tests/rust-parity/run.mjs --verify-fixture
       - name: Report actual parity gaps without allowlisting them

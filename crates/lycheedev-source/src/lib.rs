@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Immutable source research; never evaluates indexed repository programs.
 pub mod catalog;
 pub mod closure;

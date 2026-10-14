@@ -11,15 +11,8 @@ struct SystemConsoleImage {
 }
 
 fn system_console_image() -> SystemConsoleImage {
-    use std::os::windows::{ffi::OsStringExt, fs::OpenOptionsExt};
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetSystemDirectoryW(buffer: *mut u16, size: u32) -> u32;
-    }
-    let mut buffer = vec![0u16; 32768];
-    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
-    assert!(length > 0 && (length as usize) < buffer.len());
-    let directory = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length as usize]));
+    use std::os::windows::fs::OpenOptionsExt;
+    let directory = lycheedev_windows::filesystem::system_directory().unwrap();
     let path = ordinary_path(directory.join("conhost.exe").canonicalize().unwrap());
     let mut held = fs::OpenOptions::new()
         .read(true)

@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Authenticated game data formats and bounded queries.
 pub mod assets;
 pub mod availability;

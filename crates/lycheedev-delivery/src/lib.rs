@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Managed installation and release verification. Live receives an adapter at the entry point.
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError};
 pub mod addon_transaction;

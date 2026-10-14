@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Shared contracts and durable mechanisms. Business crates do not depend on one another.
 pub mod archive;
 pub mod availability;

@@ -174,6 +174,12 @@ Source与Skill分别安排新的独立代理，不能由实现者自评通过，
 
 协调者独立核对固定Go products/pins合同并运行静态oracle：产品7/7精确字段对齐，整体仍FAIL（命令/flags/addon等缺口仍在）。新增正反向pin、持久化、七目录/schema、元数据和ABI隔离fixture；rustfmt与diff检查通过，Rust运行测试仍因旧custody/Windows条件blocked、未运行。Source-family行为的静态报告保持unverified，不能拿catalog7/7当行为通过。
 
+### unsafe策略首批落地
+
+core/data/delivery/live/source五个库根已加forbid(unsafe_code)，连同前批CLI共六个自有业务crate根守卫。Source单元fixture唯一Win32 FFI调用移至Windows filesystem最小有界安全wrapper，新增ABI/缓冲区生命周期与独占线程说明及Windows单元测试。静态检查区分注释/字符串、unsafe代码/属性/extern/impl和汇编，六项检查器自测由协调者独立重跑通过，当前扫描记193个unsafe构造+1处汇编宏、分布30个Windows边界/fixture文件；这些仍待逐处安全审计，不因inventory检查通过获豁免，第三方依赖也未审计。
+
+WindowsCI新增同静态守卫/自测。rustfmt解析和diff检查通过；产品编译、wrapper的Windows运行测试仍未运行，受旧依赖身份/平台前置阻塞。未新增业务unsafe，不放松任何existing输入边界。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

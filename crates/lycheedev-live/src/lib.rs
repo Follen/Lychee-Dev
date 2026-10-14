@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Unified native lifecycle, bounded route ledger and independent static locator.
 pub mod binding;
 pub mod host;
