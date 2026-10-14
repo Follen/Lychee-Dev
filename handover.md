@@ -316,6 +316,14 @@ Delivery两处安装/更新门槛改正式SlotRuntime，保留release清单/hash
 
 本批仅wire准入，exchange仍受原调用期限（可180秒）约束，不宣称端到端硬90秒或全部Go非法帧都已覆盖。60s实际idle、真实连接fixture、256 semantic batch退休与完整Go状态仍各自待验；Rust运行NOT_RUN，已有生命周期CI组将跑新增单测，完整真实session待重建候选包。
 
+### Mailbox typed state / observation / journal 合同进入编译验收
+
+新增正式channel.v2状态、事务/操作/输入attempt/恢复预算/退役证明DTO、二元事实加错误观察接口，以及只提供租约拥有者接口的journal snapshot/hydrate、结果原字节base64与原始JSON hashchain。22项pure fixture已编写，独立两轮发现并修复joined typed cause丢失、Observation事实与错误不能并存、SlotAvailable→Blocked→Pending及publication cause的精确unwrap/optional-timeout语义。
+
+日志新增固定Go独立标准库生成器与两个完整前驱链黄金（HTML、U+2028/29、原始1.00/-0.0/1e+02）；Python交叉hash核验通过，官方Go1.27.1独立Windows流程会实际生成比对。当前导出进入现有all-target与go_mailbox_v1组，Rust与Go实际运行NOT_RUN。没有durable filesystem writer，尚未接Windows事务/input；B事务和C恢复独立实施中，不称协议端到端已齐。
+
+luac首轮真实Windows run38632703141/artifact11927375965（ZIP SHA256 8082b69a0e80578918c51cc5ccb825b0c9c52919580f782dd81cdc67dd674a53）13工具测试通过，cl自身exit0，但vctip子进程未自然退出，普通Job严格回收并失败。已保留完整证据，第二构建/7例实际检查未运行；将按已验证cl与helper精确身份作最小独立支持，不冒用cargoBuild或将失败产物更新pin。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

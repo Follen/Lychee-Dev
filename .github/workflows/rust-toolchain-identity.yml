@@ -25,11 +25,28 @@ jobs:
           if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'helper reparse point' }
           $signature = Get-AuthenticodeSignature -LiteralPath $helper
           if ($signature.Status -ne 'Valid') { throw "invalid helper signature: $($signature.Status)" }
+          $compilerTools = @('cl.exe', 'link.exe') | ForEach-Object {
+            $toolPath = Join-Path (Split-Path -Parent $helper) $_
+            $tool = Get-Item -LiteralPath $toolPath
+            if (($tool.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'compiler reparse point' }
+            $signed = Get-AuthenticodeSignature -LiteralPath $toolPath
+            if ($signed.Status -ne 'Valid') { throw "invalid compiler signature: $toolPath" }
+            [ordered]@{
+              programFilesPath = $relative.Replace('vctip.exe', $_)
+              bytes = $tool.Length
+              sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $toolPath).Hash.ToLowerInvariant()
+              fileVersion = $tool.VersionInfo.FileVersion
+              signatureStatus = [string]$signed.Status
+              signerSubject = $signed.SignerCertificate.Subject
+              signerThumbprint = $signed.SignerCertificate.Thumbprint
+            }
+          }
           $record = [ordered]@{
             schema = 'lycheedev.ci-tool-identity-observation.v1'
             candidateCommit = '${{ github.sha }}'
             cargoSHA256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $cargo).Hash.ToLowerInvariant()
             installedSDKVersions = @(Get-ChildItem -LiteralPath (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/Include') -Directory | ForEach-Object { $_.Name } | Sort-Object)
+            compilerTools = @($compilerTools)
             helper = [ordered]@{
               kind = 'msvc-vctip'
               programFilesPath = $relative

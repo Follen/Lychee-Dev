@@ -1,0 +1,17 @@
+{
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "source": "internal/live/journal/memory_log.go:MemoryEvent,memoryEventHash",
+  "preimages": [
+    "{\"sequence\":1,\"previous\":\"\",\"kind\":\"connect\\u003c\\u0026\\u003e\\u2028\\u2029\",\"data\":{\"z\":1.00,\"a\":\"\\u003c\\u0026\\u003e\\u2028\\u2029\",\"escaped\":\"\\u003c\"},\"checksum\":\"\"}",
+    "{\"sequence\":2,\"previous\":\"a319d5a606c7c02fa6560c7b532ffe3ed6125da260e4a26f8dc6ebd2fce27def\",\"kind\":\"budget_observed\",\"data\":{\"n\":-0.0,\"nested\":{\"b\":1e+02,\"a\":\"\\u003c\\u0026\\u003e\"}},\"checksum\":\"\"}"
+  ],
+  "checksums": [
+    "a319d5a606c7c02fa6560c7b532ffe3ed6125da260e4a26f8dc6ebd2fce27def",
+    "868391a4969186d7a011fbab98fdd9768e1dabc8171088c0f9afae973bc45cb4"
+  ],
+  "lines": [
+    "{\"sequence\":1,\"previous\":\"\",\"kind\":\"connect\\u003c\\u0026\\u003e\\u2028\\u2029\",\"data\":{\"z\":1.00,\"a\":\"\\u003c\\u0026\\u003e\\u2028\\u2029\",\"escaped\":\"\\u003c\"},\"checksum\":\"a319d5a606c7c02fa6560c7b532ffe3ed6125da260e4a26f8dc6ebd2fce27def\"}\n",
+    "{\"sequence\":2,\"previous\":\"a319d5a606c7c02fa6560c7b532ffe3ed6125da260e4a26f8dc6ebd2fce27def\",\"kind\":\"budget_observed\",\"data\":{\"n\":-0.0,\"nested\":{\"b\":1e+02,\"a\":\"\\u003c\\u0026\\u003e\"}},\"checksum\":\"868391a4969186d7a011fbab98fdd9768e1dabc8171088c0f9afae973bc45cb4\"}\n"
+  ],
+  "chain": "{\"sequence\":1,\"previous\":\"\",\"kind\":\"connect\\u003c\\u0026\\u003e\\u2028\\u2029\",\"data\":{\"z\":1.00,\"a\":\"\\u003c\\u0026\\u003e\\u2028\\u2029\",\"escaped\":\"\\u003c\"},\"checksum\":\"a319d5a606c7c02fa6560c7b532ffe3ed6125da260e4a26f8dc6ebd2fce27def\"}\n{\"sequence\":2,\"previous\":\"a319d5a606c7c02fa6560c7b532ffe3ed6125da260e4a26f8dc6ebd2fce27def\",\"kind\":\"budget_observed\",\"data\":{\"n\":-0.0,\"nested\":{\"b\":1e+02,\"a\":\"\\u003c\\u0026\\u003e\"}},\"checksum\":\"868391a4969186d7a011fbab98fdd9768e1dabc8171088c0f9afae973bc45cb4\"}\n"
+}
