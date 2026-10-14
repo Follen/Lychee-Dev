@@ -1,0 +1,52 @@
+name: Rust pinned Lua compiler reconstruction
+on:
+  push:
+    branches: [rust-refactor]
+    paths:
+      - tools/luac*
+      - tools/rust-luac-rebuild-check.mjs
+      - tools/rust-owned-process*
+      - release/tools/luac.json
+      - .github/workflows/rust-luac-rebuild.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reconstruct-candidate:
+    if: github.ref == 'refs/heads/rust-refactor'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Test reconstruction and packaging admission
+        run: node --test tools/luac.test.mjs tools/rust-package-smoke.test.mjs
+      - name: First fixed official source build
+        id: first
+        run: node tools/luac.mjs build .tmp/ci-luac-a --msvc-version 14.51.36231 --sdk-version 10.0.26100.0
+      - name: Independent second build directory
+        id: second
+        if: ${{ !cancelled() && steps.first.outcome == 'success' }}
+        run: node tools/luac.mjs build .tmp/ci-luac-b --source-archive .tmp/ci-luac-a/lua-5.1.5.tar.gz --msvc-version 14.51.36231 --sdk-version 10.0.26100.0
+      - name: Compare bytes imports license and actual language behavior
+        if: ${{ !cancelled() && steps.second.outcome == 'success' }}
+        run: node tools/rust-luac-rebuild-check.mjs .tmp/ci-luac-a .tmp/ci-luac-b
+      - name: Preserve candidate and exact process receipts without updating pin
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rust-luac-reconstruction-${{ github.sha }}
+          path: |
+            .tmp/ci-luac-a
+            .tmp/ci-luac-b
+            .tmp/rust-disk/evidence
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

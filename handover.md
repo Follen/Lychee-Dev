@@ -302,6 +302,14 @@ Delivery两处安装/更新门槛改正式SlotRuntime，保留release清单/hash
 
 全仓验收者另发现真实native session启动回归：idle状态workerPid0，startup却仍拿它比owner child PID。已改为Status绑定认证Hello.pid，startup再绑定持有child.id，idle/ready形状一致性检查；增加缺/错owner与worker冒充拒绝fixture，以及close→新Helper cold start/new identity/full transfer/实际exit0公测。独立复核关闭；Rust运行NOT_RUN，公测仍需候选release。后续90s和256 semantic批映射继续。
 
+### Windows 产品基础全绿与候选 luac 重建入口
+
+固定4c93953/run38629743958产品job116078018491成功：102项Rust回归通过、2项需真实客户端ignore；all-target check、真实CLI构建、version/help/describe和隔离home Emmy doctor通过。artifact11926168194 ZIP SHA256 e37ffc9699292b71066fb0eefc5ccb8fe1978c81f9f23f7ddac474da028a5fa9；EXE SHA256 e79c5a755c9576e8bea690fd7748fe547dafc53dc2085af58bf5557d42c3e7c1。下载后核17个产品Cargo command exit0及22个owned-process成功receipt，root/tree/handles/readers全回收、active0；另存runner故障注入receipt的预期非零不混入产品结果。真实doctor只证明内置解析/定位及one-shot退休；裸EXE缺发行资源的release.integrity保留warn，不称完整包通过。此证据不覆盖之后8c/f083的新Live/addon/full-corpus。
+
+候选工具现在严格选择明确MSVC14.51.36231/SDK10.0.26100.0，不自动选择latest，清除隐式编译/链接参数；普通cl Job不借Cargo helper豁免。13项Node工具回归经作者和独立复跑通过。新增独立Windows流程从已固定官方Lua5.1.5源码构建两个独立目录，对比完整manifest/EXE/许可证、系统imports，并实际执行7个Lua5.1语法正负案例。实际重建NOT_RUN，结果仅候选，不自动更新旧luac pin。若helper未退出，保留失败receipt并失败，不能删检查过关。
+
+候选包装只复用与当前sourceDigest完全相同的sealed EXE，换luac pin后必须重新编译。assembly-only仍生成受控许可证闭包，但不会将装配称Source/session通过；后续须先独立核双重建证据，再提交新pin、重编产品并执行完整语义/持久会话验收。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -1,27 +1,71 @@
 // Build-time preparation only. npm and Source never download or execute a PATH compiler.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { beginScratch, contained } from './rust-disk.mjs';
+import { ownedSpawnSync } from './rust-owned-process.mjs';
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const luaSource = { url: 'https://www.lua.org/ftp/lua-5.1.5.tar.gz', sha256: '2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333' };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-function run(command, args, cwd, env = process.env) {
-  const result = spawnSync(command, args, { cwd, env, shell: false, windowsHide: true, encoding: 'utf8', timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
-  if (result.error || result.status !== 0) throw new Error(`luac.build_failed: ${command}: ${result.error || result.status}\n${result.stdout}\n${result.stderr}`);
-  return result.stdout + result.stderr;
+export function fixedToolchain(value) {
+  if (value?.family !== 'msvc' || !/^\d+\.\d+\.\d+$/.test(value.version ?? '') || !/^\d+\.\d+\.\d+\.\d+$/.test(value.sdkVersion ?? '')) throw new Error('luac.invalid_fixed_toolchain');
+  return { family: 'msvc', version: value.version, sdkVersion: value.sdkVersion };
 }
-function lastVersion(directory, accept = () => true) { return readdirSync(directory).filter(name => /^\d+(\.\d+)+$/.test(name) && accept(name)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1); }
-function compiler() {
+export function parseBuildOptions(argv) {
+  const [command, ...args] = argv, positional = [], options = {}, seen = new Set();
+  if (command !== 'build') throw new Error('usage: node tools/luac.mjs build <new-directory> [source-archive] [--msvc-version <exact> --sdk-version <exact>] [--write-identity]');
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith('--')) { positional.push(arg); continue; }
+    if (!['--source-archive', '--msvc-version', '--sdk-version', '--write-identity'].includes(arg)) throw new Error(`luac.unknown_option: ${arg}`);
+    if (seen.has(arg)) throw new Error(`luac.duplicate_option: ${arg}`);
+    seen.add(arg);
+    if (arg === '--write-identity') options.writeIdentity = true;
+    else { const value = args[++i]; if (!value || value.startsWith('--')) throw new Error(`luac.option_value_missing: ${arg}`); options[arg] = value; }
+  }
+  if (!positional[0] || positional.length > 2) throw new Error('luac.invalid_positionals');
+  if (positional[1] && options['--source-archive']) throw new Error('luac.duplicate_source_archive');
+  if (seen.has('--msvc-version') !== seen.has('--sdk-version')) throw new Error('luac.toolchain_pair_required');
+  return { output: positional[0], sourceArchive: positional[1] ?? options['--source-archive'], writeIdentity: options.writeIdentity ?? false,
+    ...(seen.has('--msvc-version') ? { toolchain: fixedToolchain({ family: 'msvc', version: options['--msvc-version'], sdkVersion: options['--sdk-version'] }) } : {}) };
+}
+// Search installed products for the exact requested toolchain, never latest or PATH.
+// A different installed version is not a substitute for missing pinned tools.
+export function selectCompiler(installations, requested, environment = process.env, exists = existsSync) {
+  const { version, sdkVersion } = fixedToolchain(requested);
+  const matches = [...new Set(installations)].filter(installation => ['cl.exe', 'link.exe'].every(name => exists(join(installation, 'VC/Tools/MSVC', version, 'bin/Hostx64/x64', name))));
+  if (!matches.length) throw new Error(`luac.msvc_missing: ${version}`);
+  if (matches.length !== 1) throw new Error(`luac.msvc_ambiguous: ${version}`);
+  const tools = join(matches[0], 'VC/Tools/MSVC', version), bin = join(tools, 'bin/Hostx64/x64');
+  const sdk = join(environment['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Windows Kits/10');
+  const required = [join(tools, 'include/vcruntime.h'), join(tools, 'lib/x64/libcmt.lib'), join(tools, 'lib/x64/libvcruntime.lib'),
+    ...['ucrt/errno.h', 'shared/sdkddkver.h', 'um/windows.h', 'winrt/winstring.h'].map(name => join(sdk, 'Include', sdkVersion, name)),
+    join(sdk, 'Lib', sdkVersion, 'ucrt/x64/libucrt.lib'), join(sdk, 'Lib', sdkVersion, 'um/x64/kernel32.lib')];
+  if (required.some(path => !exists(path))) throw new Error(`luac.toolchain_incomplete: MSVC ${version}, SDK ${sdkVersion}`);
+  const env = Object.fromEntries(Object.entries(environment).filter(([name]) => !['PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'CL', '_CL_', 'LINK', '_LINK_'].includes(name.toUpperCase())));
+  const inheritedPath = Object.entries(environment).find(([name]) => name.toUpperCase() === 'PATH')?.[1] ?? '';
+  return { executable: join(bin, 'cl.exe'), linker: join(bin, 'link.exe'), version, sdkVersion,
+    env: { ...env, PATH: `${bin};${inheritedPath}`, INCLUDE: [join(tools, 'include'), ...['ucrt', 'shared', 'um', 'winrt'].map(name => join(sdk, 'Include', sdkVersion, name))].join(';'), LIB: [join(tools, 'lib/x64'), ...['ucrt', 'um'].map(name => join(sdk, 'Lib', sdkVersion, name, 'x64'))].join(';') } };
+}
+function compiler(requested, run) {
   const locator = join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Microsoft Visual Studio/Installer/vswhere.exe');
-  const installation = run(locator, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], repository).trim();
-  if (!installation) throw new Error('luac.msvc_missing');
-  const tools = join(installation, 'VC/Tools/MSVC'); const version = lastVersion(tools); if (!version) throw new Error('luac.msvc_missing');
-  const sdk = join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Windows Kits/10'); const sdkVersion = lastVersion(join(sdk, 'Include'), name => existsSync(join(sdk, 'Include', name, 'ucrt/errno.h')) && existsSync(join(sdk, 'Lib', name, 'ucrt/x64/libucrt.lib'))); if (!sdkVersion) throw new Error('luac.sdk_missing');
-  const bin = join(tools, version, 'bin/Hostx64/x64');
-  return { executable: join(bin, 'cl.exe'), version, sdkVersion,
-    env: { ...process.env, PATH: `${bin};${process.env.PATH}`, INCLUDE: [join(tools, version, 'include'), ...['ucrt', 'shared', 'um', 'winrt'].map(name => join(sdk, 'Include', sdkVersion, name))].join(';'), LIB: [join(tools, version, 'lib/x64'), ...['ucrt', 'um'].map(name => join(sdk, 'Lib', sdkVersion, name, 'x64'))].join(';') } };
+  const installations = run(locator, ['-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], repository).trim().split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+  return selectCompiler(installations, requested);
+}
+function regularBytes(path, maximum) {
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maximum) throw new Error('luac.file_budget_or_shape');
+  const bytes = readFileSync(path);
+  if (bytes.length !== stat.size) throw new Error('luac.file_changed');
+  return bytes;
+}
+async function downloadSource() {
+  const response = await fetch(luaSource.url, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok || !response.body) throw new Error(`luac.source_download: ${response.status}`);
+  const parts = []; let length = 0;
+  for await (const part of response.body) { length += part.length; if (length > 1024 * 1024) throw new Error('luac.source_budget'); parts.push(part); }
+  return Buffer.concat(parts);
 }
 export function peImports(bytes) {
   if (bytes.length < 256 || bytes.toString('ascii', 0, 2) !== 'MZ') throw new Error('luac.pe_invalid');
@@ -38,28 +82,55 @@ export function peImports(bytes) {
   throw new Error('luac.pe_import_limit');
 }
 export function verifySystemImports(bytes) { const imports = peImports(bytes); for (const name of imports) if (!['kernel32.dll', 'advapi32.dll', 'user32.dll', 'ntdll.dll'].includes(name) && !name.startsWith('api-ms-win-core-')) throw new Error(`luac.external_runtime_dependency: ${name}`); return imports; }
-export async function buildLuac(output, { sourceArchive, writeIdentity = false } = {}) {
+export async function buildLuac(output, { sourceArchive, writeIdentity = false, toolchain: requested } = {}) {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('luac.windows_amd64_required');
-  const root = resolve(output); mkdirSync(root); // Never adopt or erase an existing build directory.
-  let source = sourceArchive ? readFileSync(sourceArchive) : Buffer.from(await (await fetch(luaSource.url, { signal: AbortSignal.timeout(30000) })).arrayBuffer());
-  if (source.length > 1024 * 1024 || hash(source) !== luaSource.sha256) throw new Error('luac.source_integrity');
-  writeFileSync(join(root, 'lua-5.1.5.tar.gz'), source, { flag: 'wx' });
-  run('tar', ['-xzf', join(root, 'lua-5.1.5.tar.gz'), '-C', root], root);
-  const sourceRoot = join(root, 'lua-5.1.5/src'), toolchain = compiler();
-  const sources = readdirSync(sourceRoot).filter(name => name.endsWith('.c') && name !== 'lua.c').sort();
-  if (!sources.includes('luac.c') || !sources.includes('print.c') || !sources.includes('lvm.c')) throw new Error('luac.source_incomplete');
-  const executable = join(root, 'luac.exe');
-  const compilerVersion = run(toolchain.executable, ['/Bv', '/nologo', '/c', '/TC', 'luac.c', '/Fo:identity.obj'], sourceRoot, toolchain.env);
-  const args = ['/nologo', '/O2', '/MT', '/Brepro', '/TC', `/Fe:${executable}`, ...sources, '/link', '/Brepro', '/INCREMENTAL:NO', '/OPT:REF', '/OPT:ICF'];
-  run(toolchain.executable, args, sourceRoot, toolchain.env);
-  const bytes = readFileSync(executable), imports = verifySystemImports(bytes), version = run(executable, ['-v'], root).trim();
-  if (!version.startsWith('Lua 5.1.5')) throw new Error('luac.runtime_version');
-  const license = readFileSync(join(root, 'lua-5.1.5/COPYRIGHT')); writeFileSync(join(root, 'LICENSE'), license, { flag: 'wx' });
-  const manifest = { schema: 'lycheedev.luac-build.v1', runtime: { schema: 'lycheedev.luac-runtime.v1', version: '5.1.5', platform: 'windows-amd64', executable: 'luac.exe', sha256: hash(bytes), bytes: bytes.length, license: 'LICENSE', licenseSHA256: hash(license) }, source: { ...luaSource, archive: 'lua-5.1.5.tar.gz', bytes: source.length }, toolchain: { family: 'msvc', version: toolchain.version, sdkVersion: toolchain.sdkVersion }, arguments: ['/O2', '/MT', '/Brepro', '/TC', '/link', '/Brepro', '/INCREMENTAL:NO', '/OPT:REF', '/OPT:ICF'], imports };
-  writeFileSync(join(root, 'runtime.json'), JSON.stringify(manifest.runtime, null, 2) + '\n', { flag: 'wx' });
-  writeFileSync(join(root, 'build-report.json'), JSON.stringify({ manifest, compilerVersion, sourceRoot, executable }, null, 2) + '\n', { flag: 'wx' });
-  if (writeIdentity) writeFileSync(join(repository, 'release/tools/luac.json'), JSON.stringify(manifest, null, 2) + '\n');
-  return manifest;
+  const root = contained(repository, resolve(output));
+  const pinnedBytes = readFileSync(join(repository, 'release/tools/luac.json'));
+  const selected = fixedToolchain(requested ?? JSON.parse(pinnedBytes).toolchain);
+  const job = beginScratch(repository, 'luac-build', { command: process.argv, inputs: { sourceSHA256: luaSource.sha256, priorIdentitySHA256: hash(pinnedBytes), toolchain: selected }, admissionOptions: { requiredBytes: 32 << 20, scratchReserveBytes: 32 << 20 } });
+  const logs = []; let state = 'failed', handlesReaped = true, sequence = 0;
+  function run(command, args, cwd, env = process.env) {
+    handlesReaped = false;
+    // This is an ordinary compiler Job. Never label cl.exe as a Cargo build to
+    // borrow Cargo's reviewed helper admission. Any surviving helper fails.
+    const result = ownedSpawnSync(command, args, { cwd, env, evidence: job.evidence, timeout: 120000, cargoBuild: false });
+    handlesReaped = result.handlesReaped === true; logs.push(...result.logs);
+    const record = join(job.evidence, `command-${sequence++}.json`);
+    writeFileSync(record, JSON.stringify({ command, args, cwd, exit: result.status, error: result.error?.message, handlesReaped }, null, 2) + '\n'); logs.push(record);
+    if (!handlesReaped || result.error || result.status !== 0) throw new Error(`luac.build_failed: ${command}: ${result.error?.message ?? result.status}`);
+    return Buffer.concat([result.stdout ?? Buffer.alloc(0), result.stderr ?? Buffer.alloc(0)]).toString('utf8');
+  }
+  try {
+    mkdirSync(root); // Never adopt or erase an existing output directory.
+    const source = sourceArchive ? regularBytes(sourceArchive, 1024 * 1024) : await downloadSource();
+    if (hash(source) !== luaSource.sha256) throw new Error('luac.source_integrity');
+    writeFileSync(join(root, 'lua-5.1.5.tar.gz'), source, { flag: 'wx' });
+    run('tar', ['-xzf', join(root, 'lua-5.1.5.tar.gz'), '-C', job.directory], job.directory);
+    const sourceRoot = join(job.directory, 'lua-5.1.5/src'), toolchain = compiler(selected, run);
+    const toolFiles = [toolchain.executable, toolchain.linker].map(path => { const bytes = regularBytes(path, 64 << 20); return { path, bytes: bytes.length, sha256: hash(bytes) }; });
+    const sources = readdirSync(sourceRoot).filter(name => name.endsWith('.c') && name !== 'lua.c').sort();
+    if (!sources.includes('luac.c') || !sources.includes('print.c') || !sources.includes('lvm.c')) throw new Error('luac.source_incomplete');
+    const executable = join(root, 'luac.exe');
+    const arguments_ = ['/Bv', '/O2', '/MT', '/Brepro', '/TC', '/link', '/Brepro', '/INCREMENTAL:NO', '/OPT:REF', '/OPT:ICF'];
+    const args = ['/nologo', ...arguments_.slice(0, 5), `/Fe:${executable}`, ...sources, ...arguments_.slice(5)];
+    const compilerVersion = run(toolchain.executable, args, sourceRoot, toolchain.env);
+    for (const tool of toolFiles) if (hash(regularBytes(tool.path, 64 << 20)) !== tool.sha256) throw new Error('luac.toolchain_changed');
+    const bytes = regularBytes(executable, 16 << 20), imports = verifySystemImports(bytes), version = run(executable, ['-v'], root).trim();
+    if (!version.startsWith('Lua 5.1.5')) throw new Error('luac.runtime_version');
+    const license = regularBytes(join(job.directory, 'lua-5.1.5/COPYRIGHT'), 1 << 20); writeFileSync(join(root, 'LICENSE'), license, { flag: 'wx' });
+    const manifest = { schema: 'lycheedev.luac-build.v1', runtime: { schema: 'lycheedev.luac-runtime.v1', version: '5.1.5', platform: 'windows-amd64', executable: 'luac.exe', sha256: hash(bytes), bytes: bytes.length, license: 'LICENSE', licenseSHA256: hash(license) }, source: { ...luaSource, archive: 'lua-5.1.5.tar.gz', bytes: source.length }, toolchain: selected, arguments: arguments_, imports };
+    writeFileSync(join(root, 'runtime.json'), JSON.stringify(manifest.runtime, null, 2) + '\n', { flag: 'wx' });
+    const report = join(root, 'build-report.json');
+    writeFileSync(report, JSON.stringify({ manifest, compilerVersion, toolFiles, sourceRoot, executable, buildEvidence: job.receipt, priorIdentitySHA256: hash(pinnedBytes), matchesPriorRuntime: JSON.stringify(manifest.runtime) === JSON.stringify(JSON.parse(pinnedBytes).runtime) }, null, 2) + '\n', { flag: 'wx' }); logs.push(report);
+    if (writeIdentity) writeFileSync(join(repository, 'release/tools/luac.json'), JSON.stringify(manifest, null, 2) + '\n');
+    state = 'succeeded'; return manifest;
+  } catch (error) {
+    const failure = join(job.evidence, 'failure.json'); writeFileSync(failure, JSON.stringify({ error: error.message, output: root, toolchain: selected }, null, 2) + '\n'); logs.push(failure);
+    throw Object.assign(error, { buildEvidence: job.receipt });
+  } finally {
+    job.seal({ state: handlesReaped ? state : 'interrupted', handlesReaped, logs });
+    if (handlesReaped) job.cleanup();
+  }
 }
 export function stageLuac(stage, resources, root) {
   const expected = JSON.parse(readFileSync(join(repository, 'release/tools/luac.json'))), actual = JSON.parse(readFileSync(join(root, 'runtime.json')));
@@ -72,6 +143,6 @@ export function stageLuac(stage, resources, root) {
   resources.sort((a,b) => a.path.localeCompare(b.path));
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [command, output, archive, write] = process.argv.slice(2); if (command !== 'build' || !output) throw new Error('usage: node tools/luac.mjs build <new-directory> [source-archive] [--write-identity]');
-  console.log(JSON.stringify(await buildLuac(output, { sourceArchive: archive === '--write-identity' ? undefined : archive, writeIdentity: write === '--write-identity' || archive === '--write-identity' })));
+  const { output, ...options } = parseBuildOptions(process.argv.slice(2));
+  console.log(JSON.stringify(await buildLuac(output, options)));
 }
