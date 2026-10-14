@@ -365,13 +365,34 @@ APIDocumentation:AddDocumentationTable(API)
     assert_eq!(worker_exit, 0);
     let after = cli(&home, &["source", "session", "status"]);
     assert_eq!(after["result"]["state"], "closed");
+    // A new uncached symbol forces the real cold-start handshake again after
+    // verified close. The owner must be admitted while its analysis is idle;
+    // workerPid is legitimately zero in the startup Status response.
+    let reopened = cli(&home, &[
+        "source", "refs", "--snapshot", &first_pin.id, "--symbol", "Helper",
+        "--direction", "outgoing", "--session-reuse", "--release", release.to_str().unwrap(),
+    ]);
+    let reopened_native = &reopened["result"]["nativeResearch"];
+    assert_eq!(reopened_native["analysis"]["cacheHit"], false);
+    assert_eq!(reopened_native["nativeSession"]["snapshotTransfer"], "full");
+    let reopened_pid = reopened_native["nativeSession"]["workerPid"].as_u64().unwrap() as u32;
+    let reopened_owner = lycheedev_windows::Process::open(reopened_pid).unwrap();
+    assert_ne!((reopened_pid, reopened_owner.identity().created), (pid, created));
+    let reopened_status = cli(&home, &["source", "session", "status"]);
+    assert_eq!(reopened_status["result"]["ownerPid"], reopened_pid);
+    assert_eq!(reopened_status["result"]["state"], "ready");
+    let reopened_closed = cli(&home, &["source", "session", "close"]);
+    assert_eq!(reopened_closed["result"]["state"], "closed");
+    assert_eq!(reopened_owner.wait_exit(Instant::now() + Duration::from_secs(5), &AtomicBool::new(false)).unwrap(), 0);
+    let final_status = cli(&home, &["source", "session", "status"]);
+    assert_eq!(final_status["result"]["state"], "closed");
     if std::env::var_os("LYCHEEDEV_SOURCE_NATIVE_KEEP_FIXTURE").is_some() {
         let worker_request = root.join("worker-request.json");
         fs::write(&worker_request, serde_json::to_vec(&request).unwrap()).unwrap();
         fs::write(root.join("report.json"), serde_json::to_vec_pretty(&json!({"home":home,"pin":first_pin,"changedPin":second_pin,
             "release":release,"cli":env!("CARGO_BIN_EXE_lycheedev"),"workerRequestPath":worker_request,
             "workerPid":pid,"workerCreated":created,"workerExit":worker_exit,"before":before,"refs":refs,"context":context,
-            "status":status,"changed":changed,"faults":faults,"recovered":recovered,"closed":closed,"after":after})).unwrap()).unwrap();
+            "status":status,"changed":changed,"faults":faults,"recovered":recovered,"closed":closed,"after":after,"reopened":reopened,"reopenedStatus":reopened_status,"reopenedClosed":reopened_closed,"finalStatus":final_status})).unwrap()).unwrap();
         println!("{}", root.display());
     }
 }

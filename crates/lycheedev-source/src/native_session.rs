@@ -58,6 +58,25 @@ fn session_status(cached_key: Option<&str>, owner_pid: u32) -> Value {
         "backend":"native", "workerPid":if cached_key.is_some(){owner_pid}else{0},
         "ownerPid":owner_pid, "cachedSnapshot":cached_key})
 }
+/// The owner exists before it has an analysis worker. Bind readiness to the
+/// owner identity, never to workerPid (which is zero in the valid idle state).
+fn verify_status_owner(status: &Value, expected_owner: u32) -> Result<()> {
+    let owner = u64::from(expected_owner);
+    let coherent = match status["state"].as_str() {
+        Some("idle") => status["workerPid"].as_u64() == Some(0)
+            && status["cachedSnapshot"].is_null(),
+        Some("ready") => status["workerPid"].as_u64() == Some(owner)
+            && status["cachedSnapshot"].as_str().is_some(),
+        _ => false,
+    };
+    if status["ownerPid"].as_u64() != Some(owner)
+        || status["backend"] != "native" || !coherent
+    {
+        return Err(fault("Native Source status differs from the expected owner"));
+    }
+    Ok(())
+}
+
 fn reply_reserve(deadline: Instant) -> Duration {
     REPLY_RESERVE.min(deadline.saturating_duration_since(Instant::now()) / 4)
 }
@@ -286,6 +305,10 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
     if let Some(error) = response.error {
         return Err(error);
     }
+    if matches!(request.action, Action::Status) {
+        let status = response.value.as_ref().ok_or_else(|| fault("Native Source status is missing"))?;
+        verify_status_owner(status, hello.pid)?;
+    }
     Ok(response.value)
 }
 
@@ -370,11 +393,7 @@ pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
                 return Err(fault("Native Source owner exited during startup"));
             }
             if let Some(status) = exchange(inv, &current, &request(inv, Action::Status, None)?)? {
-                if status["workerPid"].as_u64() != Some(u64::from(child.id())) {
-                    return Err(fault(
-                        "Native Source startup responded from a different owner",
-                    ));
-                }
+                verify_status_owner(&status, child.id())?;
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -745,6 +764,30 @@ mod tests {
         cancelled.store(true, Ordering::Release);
         assert!(transport_token.load(Ordering::Acquire));
         assert_eq!(request.check().unwrap_err().code, "command.cancelled");
+    }
+
+    #[test]
+    fn startup_status_frame_accepts_idle_owner_and_rejects_worker_pid_substitution() {
+        // Exercise the same frame codec and validator as exchange/startup. A
+        // new owner has no prepared analysis until the first query is sent.
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &Response {
+            value: Some(session_status(None, 42)), error: None,
+        }, RESPONSE_BYTES).unwrap();
+        let response: Response = read_frame(&mut std::io::Cursor::new(wire), RESPONSE_BYTES).unwrap();
+        let status = response.value.unwrap();
+        assert_eq!(status["workerPid"], 0);
+        verify_status_owner(&status, 42).unwrap();
+        assert!(verify_status_owner(&status, 43).is_err());
+        let mut substituted = session_status(Some("snapshot"), 42);
+        substituted["ownerPid"] = json!(43);
+        assert!(verify_status_owner(&substituted, 42).is_err());
+        substituted.as_object_mut().unwrap().remove("ownerPid");
+        assert!(verify_status_owner(&substituted, 42).is_err());
+        let mut malformed = status;
+        malformed["workerPid"] = json!(42);
+        assert!(verify_status_owner(&malformed, 42).is_err());
+        verify_status_owner(&session_status(Some("snapshot"), 42), 42).unwrap();
     }
 
     #[test]

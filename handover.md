@@ -294,6 +294,14 @@ Delivery两处安装/更新门槛改正式SlotRuntime，保留release清单/hash
 
 审查另发现静态oracle的Rust lexer把raw Windows路径与合法\0当JSON escape而exit2。本批修raw delimiter匹配和NUL escape，新增6回归；30项Node通过，固定oracle SHA不变。实际报告恢复exit1正常差分：products7/7，缺live doctor/source batch和必要doctor summary差异、21 addon extras如实保留，未verified的arity/advertised不改为pass。
 
+### 固定4036文档全仓实际CLI验收入口与启动握手修复
+
+独立Source验收者新增真实CLI runner：消费封存EXE，在独占scratch home经正常source sync固定Gethe31c7f7b9cc79e56c986b365c06a6afbcf3c9177b；逐Git blob SHA1及SHA256/path/size双digest对独立archive oracle，核全部4049文件及4036文档/32,269,051B。约25个实际CLI案例覆盖derived-cold/warm全仓索引、原文/符号/API位置、中文字面无结果、分页/无结果/错误恢复、static refs/context。独立审核纠正API table行10与Name原文行11区别、call种类/caller/行141，以及超时后not_run口径。11项runner自测、独立真实archive重验及外层故障模拟通过；Windows产品执行待本提交，不能把runner自测当Source通过。
+
+语义/flow/session/Go差分与20次独立cold/warm性能另列后续。普通native研究仍要求已验证release/luac identity，flow/validate会真实执行luac；官方Go3.2 ZIP已核commit3057但不含Rust所需luac，不能将其冒作Rust候选包。正在复用既有官方Lua源码构建/候选打包工具重建精确可复现新身份，保留现有验证而非删掉门槛。
+
+全仓验收者另发现真实native session启动回归：idle状态workerPid0，startup却仍拿它比owner child PID。已改为Status绑定认证Hello.pid，startup再绑定持有child.id，idle/ready形状一致性检查；增加缺/错owner与worker冒充拒绝fixture，以及close→新Helper cold start/new identity/full transfer/实际exit0公测。独立复核关闭；Rust运行NOT_RUN，公测仍需候选release。后续90s和256 semantic批映射继续。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

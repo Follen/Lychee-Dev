@@ -29,6 +29,7 @@ jobs:
             schema = 'lycheedev.ci-tool-identity-observation.v1'
             candidateCommit = '${{ github.sha }}'
             cargoSHA256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $cargo).Hash.ToLowerInvariant()
+            installedSDKVersions = @(Get-ChildItem -LiteralPath (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/Include') -Directory | ForEach-Object { $_.Name } | Sort-Object)
             helper = [ordered]@{
               kind = 'msvc-vctip'
               programFilesPath = $relative
