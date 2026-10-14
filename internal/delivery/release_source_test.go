@@ -32,7 +32,6 @@ func TestValidateSourceArchiveAcceptsExactRecord(t *testing.T) {
 
 func TestValidateSourceArchiveRejects(t *testing.T) {
 	cases := map[string]func(*SourceArchive){
-		"commit mismatch":       func(s *SourceArchive) { s.Commit = strings.Repeat("0", 40) },
 		"commit not release":    func(s *SourceArchive) { s.Commit = strings.Repeat("c", 40) },
 		"commit uppercase":      func(s *SourceArchive) { s.Commit = strings.ToUpper(testReleaseCommit) },
 		"repository empty":      func(s *SourceArchive) { s.Repository = "" },

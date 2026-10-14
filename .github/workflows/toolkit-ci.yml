@@ -98,17 +98,67 @@ jobs:
           path: ${{ runner.temp }}/toolkit-lua51/build-report.json
           if-no-files-found: error
       - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
+        id: go-suite
+        env:
+          COVERAGE_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          # The 500-slot installation suites verify more files. Bound concurrent
-          # packages while retaining each package's concurrency tests.
-          go test -p=2 -parallel=4 -count=1 -timeout=20m ./...
-          if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
+          # Instrument this same full-suite run, rather than duplicating it for
+          # coverage. Lua/Node/business scenarios are not Go statement coverage.
+          $ErrorActionPreference = 'Stop'
+          $report = Join-Path $env:RUNNER_TEMP 'toolkit-go-coverage'
+          New-Item -ItemType Directory -Force $report | Out-Null
+          $module = (go list -m).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'go module identity failed' }
+          $listed = @(go list -f '{{.ImportPath}}|{{if or .TestGoFiles .XTestGoFiles}}true{{else}}false{{end}}' ./...)
+          if ($LASTEXITCODE -ne 0) { throw 'go package selection failed' }
+          $packages = @($listed | ForEach-Object {
+            $fields = $_ -split '\|'
+            $path = $fields[0]
+            $helper = $path -eq "$module/internal/testkit"
+            [ordered]@{
+              importPath = $path
+              hasTests = $fields[1] -eq 'true'
+              helper = $helper
+              instrumented = (-not $helper) -and ($path.StartsWith("$module/internal/") -or $path.StartsWith("$module/cmd/"))
+            }
+          })
+          $scope = ($packages | Where-Object { $_.instrumented } | ForEach-Object { $_.importPath }) -join ','
+          $profile = Join-Path $report 'cover.out'
+          $events = Join-Path $report 'go-test.jsonl'
+          $command = @('test', '-json', '-p=2', '-parallel=4', '-count=1', '-timeout=20m', '-covermode=atomic', "-coverpkg=$scope", "-coverprofile=$profile", './...')
+          & go @command > $events 2> (Join-Path $report 'stderr.log')
+          $testExit = $LASTEXITCODE
+          $identity = [ordered]@{
+            testedCommit = (git rev-parse HEAD).Trim()
+            testedTree = (git rev-parse 'HEAD^{tree}').Trim()
+            requestedPrHead = $env:COVERAGE_PR_HEAD
+            goVersion = (go version).Trim()
+            goos = (go env GOOS).Trim()
+            goarch = (go env GOARCH).Trim()
+            command = @('go') + $command
+            exitCode = $testExit
+            packages = $packages
+          }
+          $identity | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $report 'identity.json')
+          if ($testExit -ne 0) {
+            Get-Content (Join-Path $report 'stderr.log')
+            Get-Content $events -Tail 80
+          }
+          node tools/go-coverage.mjs --profile $profile --events $events --identity (Join-Path $report 'identity.json') --out (Join-Path $report 'summary.json')
+          if ($LASTEXITCODE -ne 0 -or $testExit -ne 0) { throw 'go test or coverage evidence failed' }
+      - name: Preserve exact Go coverage evidence
+        if: ${{ !cancelled() && steps.go-suite.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-go-coverage
+          path: ${{ runner.temp }}/toolkit-go-coverage/
+          if-no-files-found: error
       - name: Native doctor volume-boundary evidence (disk fixture, PID zero)
         if: ${{ !cancelled() }}
         run: |
           # Keep skip/volume GUID/failure-stage evidence visible even if the
           # full suite failed. This does not invoke process discovery or input.
-          go test -v -count=1 -timeout=5m ./internal/command -run '^TestLiveDoctorUpgrade(CreatesDefaultArchiveParent|DefaultArchiveAcrossVolumes)$'
+          go test -v -count=1 -timeout=5m ./internal/command -run '^TestLiveDoctorUpgrade(CreatesDefaultArchiveParent|DefaultArchiveAcrossVolumes|PreservesExplicitArchive)$'
           if ($LASTEXITCODE -ne 0) { throw 'doctor volume-boundary contract failed' }
       - name: Native release-shape build
         run: |

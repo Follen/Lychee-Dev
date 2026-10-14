@@ -20,7 +20,7 @@
 - 视频 demux 按目标目录串行发布帧与 manifest，复用 capture 的已核验 blob，消除重复帧写入。
 - 修复 Git-backed Source 对中文等合法文件名的正文搜索；Search/Inspect 摘要复用现有行索引，避免每个结果重复切分整文件。
 - Hotfix CSV 与 SQL CSV 共用目标级发布互斥和 staged 文件边界，保留原覆盖与 manifest 合同，并阻止覆盖当前工作区身份/数据。
-- Hotfix scan checkpoint 持久保护来源与页面 capture，兼容历史依赖，缺失页面不再恢复为完整成功。
+- Hotfix 普通页/scan checkpoint 与资产导出/视频 manifest 持久保护其 capture 依赖，兼容历史记录，缺失页面不再恢复为完整成功。
 
 ### Live 与 addon
 
@@ -46,4 +46,6 @@
 - Source broker 关闭等待已核验的原进程退出，避免关闭回包早于 listener 和租约清理导致紧接请求失败。
 - 发行组装接入九项真实 LuaLS/Source/broker/安装包语义测试，并分别检查 registry integrity 与 provenance 元数据。
 - 修复 game-root 更新恢复身份、doctor 默认归档父目录、SQL stdin 查询期限和 Windows Skill 自定义 npm prefix 查找。
+- evidence bundle 在 ZIP 阶段取消后不再发布最终文件，保留正常无覆盖的原子发布合同。
+- doctor 的跨卷默认归档移至目标侧；同卷项目归档和显式 output 保持，旧恢复档案不被替换。
 - 校验与剩余场景集中记录在 [todo.md](todo.md)，开发和清理规则见 [开发指南](docs/development.md)。

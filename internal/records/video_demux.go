@@ -298,13 +298,7 @@ func demuxAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, root, sn
 	if err != nil {
 		return AssetDemux{}, err
 	}
-	capture, err := evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-		Reader: bytes.NewReader(encoded), MaxBytes: 16 << 20, MediaType: "application/json", Complete: manifest.Complete,
-		Truncated: manifest.Truncated,
-		Provenance: evidence.Provenance{
-			Kind: "asset-demux-manifest", Locator: manifest.Input, Snapshot: snapshot, DataBuild: build,
-		},
-	})
+	capture, err := commitDemuxManifest(ctx, s, m, manifest, encoded, build)
 	if err != nil {
 		return AssetDemux{}, err
 	}
@@ -339,6 +333,31 @@ func demuxAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, root, sn
 	demux.Published = append(demux.Published, manifestPath)
 	demux.Manifest = manifest
 	return demux, nil
+}
+
+// A legal 16 MiB demux manifest can name more frame captures than fit in a
+// 1 MiB metadata document. Keep their existing typed payload references, rather
+// than duplicating them into CaptureRef.Dependencies. The archive recognizes
+// these references on removal; validation and publication share its write lease.
+func commitDemuxManifest(ctx context.Context, s *vault.Store, m *vault.Metadata, manifest AssetDemuxManifest, encoded []byte, build string) (evidence.CaptureRef, error) {
+	ctx, release, err := m.AcquireWriteLease(ctx)
+	if err != nil {
+		return evidence.CaptureRef{}, err
+	}
+	defer release()
+	archive := evidence.OpenArchive(s, m)
+	for _, frame := range manifest.Frames {
+		if _, err := archive.InspectCapture(ctx, frame.Capture); err != nil {
+			return evidence.CaptureRef{}, err
+		}
+	}
+	return archive.CommitCapture(ctx, evidence.CaptureDraft{
+		Reader: bytes.NewReader(encoded), MaxBytes: 16 << 20, MediaType: "application/json", Complete: manifest.Complete,
+		Truncated: manifest.Truncated, Dependencies: []string{manifest.SourceCapture},
+		Provenance: evidence.Provenance{
+			Kind: "asset-demux-manifest", Locator: manifest.Input, Snapshot: manifest.Snapshot, DataBuild: build,
+		},
+	})
 }
 
 // demuxSource reads and evidences the full input container from the selected

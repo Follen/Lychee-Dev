@@ -27,6 +27,8 @@ go test -p=2 -parallel=4 -count=1 -timeout=20m ./...
 
 限制并发是为了避免 500 槽安装测试的大量文件操作互相拖慢。20 分钟为测试包时限，不改变产品预算。
 
+Windows CI 在同一次完整 Go 套件中收集 atomic 语句覆盖，不另跑一套重复测试；计量包为 `cmd/...` 和 `internal/...`（不含 `internal/testkit`），测试选择仍为 `./...`。`windows-go-coverage` artifact 保留原始 coverprofile、JSON 测试事件、准确 checkout commit/tree、PR head、工具链/平台/命令及加权汇总。`tools/go-coverage.mjs` 拒绝缺失的包终止证据，失败/skip 不冒充测试通过；PR 的 merge checkout 与分支 head 分别记录。Go 比例不代表 Lua/Node 或业务场景/实机覆盖，也不设任意比例门槛。
+
 版本、Skill、构建工具或启动器有相关变化时执行对应检查：
 
 ```powershell

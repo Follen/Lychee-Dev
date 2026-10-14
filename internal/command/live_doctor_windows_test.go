@@ -56,7 +56,13 @@ func TestDoctorUsesLiveChecksOnlyForAnExplicitTarget(t *testing.T) {
 }
 
 func TestLiveDoctorUpgradeCreatesDefaultArchiveParent(t *testing.T) {
-	testLiveDoctorDefaultArchiveUpgrade(t, testkit.Client(t, "flavor"), t.TempDir())
+	project := t.TempDir()
+	testLiveDoctorArchiveUpgrade(t, testkit.Client(t, "flavor"), project, filepath.Join(project, ".lycheedev", "live", "repairs"), "")
+}
+
+func TestLiveDoctorUpgradePreservesExplicitArchive(t *testing.T) {
+	parent := t.TempDir()
+	testLiveDoctorArchiveUpgrade(t, testkit.Client(t, "flavor"), t.TempDir(), parent, filepath.Join(parent, "chosen-repair"))
 }
 
 // This is a native disk-only test, not a game integration test. Distinct drive
@@ -66,7 +72,7 @@ func TestLiveDoctorUpgradeDefaultArchiveAcrossVolumes(t *testing.T) {
 	if len(roots) < 2 {
 		t.Skipf("cross-volume doctor requires two existing writable Windows volumes with distinct GUIDs; discovered %d (see volume diagnostics)", len(roots))
 	}
-	run := func(t *testing.T, projectVolume, clientVolume string, sameVolume bool) {
+	run := func(t *testing.T, projectVolume, clientVolume string, sameVolume, explicitArchive bool) {
 		t.Helper()
 		project, err := os.MkdirTemp(projectVolume, "project-")
 		if err != nil {
@@ -85,15 +91,30 @@ func TestLiveDoctorUpgradeDefaultArchiveAcrossVolumes(t *testing.T) {
 		if projectErr != nil || clientErr != nil || (projectGUID == clientGUID) != sameVolume {
 			t.Fatalf("fixture volume mismatch: sameVolume=%t project=%q (%v) client=%q (%v)", sameVolume, projectGUID, projectErr, clientGUID, clientErr)
 		}
-		testLiveDoctorDefaultArchiveUpgrade(t, client, project)
+		// Expectations come from the fixture's assigned volume case, not from the
+		// production archive-selection logic or its filepath.VolumeName check.
+		parent := filepath.Join(project, ".lycheedev", "live", "repairs")
+		if !sameVolume {
+			parent = filepath.Join(client, "Interface", ".lycheedev-repairs")
+		}
+		output := ""
+		if explicitArchive {
+			parent = filepath.Join(clientRoot, "chosen-archives")
+			if err := os.Mkdir(parent, 0700); err != nil {
+				t.Fatal(err)
+			}
+			output = filepath.Join(parent, "chosen-repair")
+		}
+		testLiveDoctorArchiveUpgrade(t, client, project, parent, output)
 	}
-	if !t.Run("same_volume_control", func(t *testing.T) { run(t, roots[0], roots[0], true) }) {
+	if !t.Run("same_volume_control", func(t *testing.T) { run(t, roots[0], roots[0], true, false) }) {
 		t.Fatal("same-volume control failed; cross-volume result would not isolate the volume boundary")
 	}
-	t.Run("cross_volume_default_archive", func(t *testing.T) { run(t, roots[0], roots[1], false) })
+	t.Run("cross_volume_default_archive", func(t *testing.T) { run(t, roots[0], roots[1], false, false) })
+	t.Run("cross_volume_explicit_archive", func(t *testing.T) { run(t, roots[0], roots[1], false, true) })
 }
 
-func testLiveDoctorDefaultArchiveUpgrade(t *testing.T, client, projectDirectory string) {
+func testLiveDoctorArchiveUpgrade(t *testing.T, client, projectDirectory, parent, output string) {
 	t.Helper()
 	ctx := context.Background()
 	oldRelease := testkit.Release(t, "")
@@ -143,9 +164,10 @@ func testLiveDoctorDefaultArchiveUpgrade(t *testing.T, client, projectDirectory 
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := filepath.Join(project.Root, ".lycheedev", "live", "repairs")
-	if _, err := os.Stat(parent); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("fixture already contains repairs parent: %v", err)
+	if output == "" {
+		if _, err := os.Stat(parent); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("fixture already contains repairs parent: %v", err)
+		}
 	}
 	// A zero PID stops Activate before process discovery or input. The real
 	// doctor repair branch must complete the disk upgrade before reaching it.
@@ -159,7 +181,8 @@ func testLiveDoctorDefaultArchiveUpgrade(t *testing.T, client, projectDirectory 
 		project.Root, projectGUID, projectVolumeErr, client, clientGUID, clientVolumeErr, report.Target.Window.ProcessID)
 	rel, relErr := filepath.Rel(strings.ToLower(filepath.Dir(delivery.AddonDirectory(client))), strings.ToLower(filepath.Join(parent, "probe")))
 	t.Logf("native archive/discovery Rel: relative=%q error=%v", rel, relErr)
-	_, repairErr := fixLiveDoctor(ctx, project, Options{release: testkit.Release(t, "")}, report)
+	opts := Options{release: testkit.Release(t, ""), output: output}
+	_, repairErr := fixLiveDoctor(ctx, project, opts, report)
 
 	// Inspect before asserting the activation boundary so a native failure still
 	// reports whether the original tree, staged replacement and archive survive.
@@ -182,7 +205,7 @@ func testLiveDoctorDefaultArchiveUpgrade(t *testing.T, client, projectDirectory 
 	if repairErr != nil && repairErr.Error() == "live.channel_explicit_target_required" {
 		stage = "safe activation boundary reached"
 	}
-	t.Logf("observed stage=%q; default archive parent error=%v; entries=%v; glob error=%v", stage, parentErr, archives, archiveErr)
+	t.Logf("observed stage=%q; expected archive parent=%q error=%v; entries=%v; glob error=%v", stage, parent, parentErr, archives, archiveErr)
 	for _, archive := range archives {
 		raw, readErr := os.ReadFile(filepath.Join(archive, "replacement.json"))
 		var journal struct {
@@ -205,7 +228,7 @@ func testLiveDoctorDefaultArchiveUpgrade(t *testing.T, client, projectDirectory 
 		t.Errorf("upgrade did not publish: state=%q receipt=(%s) error=%v", current.State, liveDoctorReceiptSummary(current.Receipt), currentErr)
 	}
 	if archiveErr != nil || len(archives) != 1 {
-		t.Fatalf("default archive: %v %v", archives, archiveErr)
+		t.Fatalf("archive: %v %v", archives, archiveErr)
 	}
 	previous, err := delivery.InspectInstallation(ctx, filepath.Join(archives[0], "previous"), "addon")
 	if err != nil || previous.State != "managed" || previous.Receipt == nil || previous.Receipt.Version != oldVersion {
@@ -215,6 +238,38 @@ func testLiveDoctorDefaultArchiveUpgrade(t *testing.T, client, projectDirectory 
 	if string(previousJSON) != string(originalJSON) {
 		t.Fatalf("archived receipt changed: original=(%s) archived=(%s)",
 			liveDoctorReceiptSummary(deployment.Installation.Receipt), liveDoctorReceiptSummary(previous.Receipt))
+	}
+	if output != "" {
+		if archives[0] != output {
+			t.Fatalf("explicit archive relocated: got %q want %q", archives[0], output)
+		}
+		journalPath := filepath.Join(output, "replacement.json")
+		journalBefore, err := os.ReadFile(journalPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A repeated explicit destination must remain a conflict, preserving its
+		// existing recovery record and old tree rather than choosing a new path.
+		if _, err := fixLiveDoctor(ctx, project, opts, report); !errors.Is(err, delivery.ErrConflict) {
+			t.Fatalf("existing explicit archive was not preserved: %v", err)
+		}
+		journalAfter, err := os.ReadFile(journalPath)
+		if err != nil || string(journalAfter) != string(journalBefore) {
+			t.Fatalf("existing recovery journal changed: %v", err)
+		}
+		retained, err := delivery.InspectInstallation(ctx, filepath.Join(output, "previous"), "addon")
+		retainedJSON, _ := json.Marshal(retained.Receipt)
+		if err != nil || retained.State != "managed" || string(retainedJSON) != string(originalJSON) {
+			t.Fatalf("existing archived tree changed: %+v %v", retained, err)
+		}
+		for _, unused := range []string{
+			filepath.Join(project.Root, ".lycheedev", "live", "repairs"),
+			filepath.Join(client, "Interface", ".lycheedev-repairs"),
+		} {
+			if _, err := os.Stat(unused); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("explicit archive created a default repair parent %q: %v", unused, err)
+			}
+		}
 	}
 }
 

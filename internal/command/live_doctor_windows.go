@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -111,9 +112,15 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 		} else {
 			archive := opts.output
 			if archive == "" {
-				archive = filepath.Join(project.Root, ".lycheedev", "live", "repairs", time.Now().UTC().Format("20060102T150405.000000000"))
-				// The default repair location belongs to this project. Prepare its
-				// parent, leaving the final archive absent for managed publication.
+				parent := filepath.Join(project.Root, ".lycheedev", "live", "repairs")
+				if !strings.EqualFold(filepath.VolumeName(project.Root), filepath.VolumeName(target.Client.Directory)) {
+					// Managed replacement uses directory renames. Keep a cross-volume
+					// project's archive on the target volume, outside AddOns discovery.
+					parent = filepath.Join(filepath.Dir(filepath.Dir(delivery.AddonDirectory(target.Client.Directory))), ".lycheedev-repairs")
+				}
+				archive = filepath.Join(parent, time.Now().UTC().Format("20060102T150405.000000000"))
+				// Prepare only the parent; managed publication must still refuse an
+				// existing archive, and explicit --output paths remain unchanged.
 				if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
 					return channel.ProjectResult{}, err
 				}

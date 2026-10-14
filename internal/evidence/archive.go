@@ -355,8 +355,8 @@ func (a *Archive) findExternalReference(ctx context.Context, target CaptureRef) 
 			if bytes.Contains(doc.Value, needle) || bytes.Contains(doc.Value, locator) {
 				return true, nil
 			}
-			if target.Provenance.Kind == "hotfix-records" && strings.HasPrefix(doc.Key, "capture/") {
-				if referenced, err := a.legacyHotfixPageReference(ctx, doc, id); err != nil || referenced {
+			if strings.HasPrefix(doc.Key, "capture/") {
+				if referenced, err := a.capturePayloadReference(ctx, doc, target); err != nil || referenced {
 					return referenced, err
 				}
 			}
@@ -369,28 +369,96 @@ func (a *Archive) findExternalReference(ctx context.Context, target CaptureRef) 
 	return false, ErrReferenceScanLimit
 }
 
-// Older Hotfix checkpoints kept page IDs only in their bounded scan blob.
-// Read that one known representation without rewriting immutable manifests or
-// recursively interpreting arbitrary capture payloads as references.
-func (a *Archive) legacyHotfixPageReference(ctx context.Context, doc vault.Document, id string) (bool, error) {
+// Demux manifests keep frame references in their bounded payload, which can
+// exceed the metadata document budget. Older Hotfix/export captures also kept
+// dependencies only in payloads. Read only those known typed representations;
+// never rewrite immutable manifests or interpret arbitrary JSON as references.
+func (a *Archive) capturePayloadReference(ctx context.Context, doc vault.Document, target CaptureRef) (bool, error) {
 	var ref CaptureRef
 	if err := json.Unmarshal(doc.Value, &ref); err != nil {
 		return false, err
 	}
-	if ref.Provenance.Kind != "hotfix-scan" || len(ref.Dependencies) != 0 {
+	if ref.MediaType != "application/json" || ref.Provenance.Kind != "asset-demux-manifest" && len(ref.Dependencies) != 0 {
 		return false, nil
 	}
-	_, raw, err := a.FetchCapture(ctx, strings.TrimPrefix(doc.Key, "capture/"), 4<<20)
+	var limit int64
+	switch ref.Provenance.Kind {
+	case "hotfix-scan":
+		if target.Provenance.Kind == "hotfix-records" {
+			limit = 4 << 20
+		}
+	case "hotfix-records":
+		if target.Provenance.Kind == "hotfix-cache" && strings.HasPrefix(ref.Provenance.Locator, "dbcache:sha256:") {
+			limit = 32 << 20
+		}
+	case "asset-export-manifest":
+		if target.Provenance.Kind == "asset-image" {
+			limit = 1 << 20
+		}
+	case "asset-demux-manifest":
+		switch target.Provenance.Kind {
+		case "asset", "asset-demux-source", "asset-demux-frame":
+			limit = 16 << 20
+		}
+	}
+	if limit == 0 {
+		return false, nil
+	}
+	_, raw, err := a.FetchCapture(ctx, strings.TrimPrefix(doc.Key, "capture/"), limit)
 	if err != nil {
 		return false, err
 	}
-	var scan struct {
-		Pages []string `json:"pages"`
+	switch ref.Provenance.Kind {
+	case "hotfix-scan":
+		var scan struct {
+			Pages []string `json:"pages"`
+		}
+		if err := json.Unmarshal(raw, &scan); err != nil {
+			return false, err
+		}
+		return slices.Contains(scan.Pages, target.ID), nil
+	case "hotfix-records":
+		var page struct {
+			Snapshot string     `json:"snapshot"`
+			Source   CaptureRef `json:"source"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return false, err
+		}
+		return page.Snapshot == ref.Provenance.Snapshot && page.Source.Schema == "lycheedev.capture.v1" && page.Source.ID == target.ID, nil
+	case "asset-export-manifest":
+		var manifest struct {
+			Schema          string      `json:"schema"`
+			ArtifactCapture *CaptureRef `json:"artifactCapture"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return false, err
+		}
+		return manifest.Schema == "lycheedev.asset-export.v1" && manifest.ArtifactCapture != nil && manifest.ArtifactCapture.Schema == "lycheedev.capture.v1" && manifest.ArtifactCapture.ID == target.ID, nil
+	case "asset-demux-manifest":
+		var manifest struct {
+			Schema        string `json:"schema"`
+			SourceCapture string `json:"sourceCapture"`
+			Frames        []struct {
+				Capture string `json:"capture"`
+			} `json:"frames"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return false, err
+		}
+		if manifest.Schema != "lycheedev.asset-demux.v1" {
+			return false, nil
+		}
+		if target.Provenance.Kind != "asset-demux-frame" {
+			return manifest.SourceCapture == target.ID, nil
+		}
+		for _, frame := range manifest.Frames {
+			if frame.Capture == target.ID {
+				return true, nil
+			}
+		}
 	}
-	if err := json.Unmarshal(raw, &scan); err != nil {
-		return false, err
-	}
-	return slices.Contains(scan.Pages, id), nil
+	return false, nil
 }
 
 func (a *Archive) blobSharedByAnotherCapture(ctx context.Context, id string, blob vault.BlobRef) (bool, error) {

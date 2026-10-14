@@ -245,6 +245,11 @@ func TestHotfixScanSourceRemovedBeforeCheckpointPublication(t *testing.T) {
 		if err != nil {
 			return page, err
 		}
+		// The ordinary page now owns its source as well. Both must be
+		// removed before the scan can encounter a missing-source gap.
+		if _, err := removeScanCapture(t, root, page.Capture.ID); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := removeScanCapture(t, root, page.Result.Source.ID); err != nil {
 			t.Fatal(err)
 		}
