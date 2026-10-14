@@ -140,6 +140,9 @@ jobs:
           retention-days: 14
 
   windows-emmy-context:
+    env:
+      # Nested upstream rust-toolchain.toml must not select moving stable.
+      RUSTUP_TOOLCHAIN: '1.99.0'
     # Separate host/ownership channel: never reuse an unresolved local build lease.
     if: github.ref == 'refs/heads/rust-refactor'
     runs-on: windows-2025
