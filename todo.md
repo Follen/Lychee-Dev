@@ -11,7 +11,7 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 - [x] Keep only handover.md; mark old guidance/evidence historical and preserve prior README/UI text.
 - [x] Put every user/game/specific-interactive-machine test at the end of handover.
 
-- [ ] Push the reviewed documentation to rust-refactor and create/reuse its own draft PR; subsequent authorized code batches update that same PR promptly, without waiting for all validation or opening one PR per batch.
+- [x] Push the reviewed documentation to rust-refactor and create/reuse its own draft PR (#14); subsequent authorized code batches update that same PR promptly, without waiting for all validation or opening one PR per batch.
 
 ## 1. Reproducible foundation (no user interaction)
 
@@ -26,7 +26,8 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 - [ ] Keep native Emmy worker/session; close full Source/validation/batch/flow/cache/crash/deadline/cleanup gaps without reducing inputs or checks.
 - [ ] Complete Data DB2/SQL effective/table/scan Hotfix/providers/CASC/CDN/assets/relations and error paths.
 - [ ] Reuse the released addon; reconcile installation/500-slot/upgrade/rollback/modified-file protection.
-- [ ] Reconcile versioned Skill and launcher with actual implemented command/flag contracts.
+- [ ] Reuse the fixed Go3.2.0 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
+- [ ] Enforce no unsafe in owned business/cross-platform crates with suitable forbid/deny; inventory unavoidable Windows FFI/memory boundaries, use minimal safe wrappers with per-site SAFETY proofs and pointer/lifetime/thread tests; independently audit, no blanket module exemptions or performance shortcut. Report dependency unsafe separately.
 
 ## 3. Complete Mailbox protocol (no game needed yet)
 
@@ -49,6 +50,8 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 Each stage repeats independent audit → actionable findings → fixes → verification → independent re-audit until no new actionable finding remains on the fixed reviewed tree. Only then advance. Record scope, commit, findings and evidence; never claim mathematical zero bugs. Human/game-dependent exceptions stay unverified in handover’s final section while independent work continues.
 
 - [ ] Stage 1: architecture, all business bugs, Skill and all code-related paths converge.
+- [ ] Assign a fresh independent Source evaluator: real representative CLI queries, Chinese/large/empty/error/refs/context results, correct readable file/symbol/line/source evidence.
+- [ ] Assign a separate fresh independent Skill evaluator: actually follow its workflow, discover entrypoints/use correct arguments, keep steps concise and recovery current, prefer pinned Source over ad hoc GitHub raw. Record real CLI evidence and regressions, not implementer self-approval or aesthetic contract changes.
 - [ ] Stage 2: test sufficiency/meaningful coverage and tests without independent value converge; add regressions/remove proven redundancy, then measure coverage.
 - [ ] Stage 3: dedicated dead-code audit including dynamic/platform/feature/tool/package consumers converges after cleanup and regression.
 - [ ] Stage 4: combined whole-repository audit across all three dimensions converges after fixes, verification and independent re-review.

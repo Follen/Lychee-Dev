@@ -22,6 +22,10 @@ The allowed implementation differences are Rust host code and EmmyLua direct-lib
 
 Crate placement is not a new external interface. Shared addon reuse means no alternate Rust-only envelope, schema, binding or state machine. First compare the branch addon bytes with the release; restore equivalent released behavior where divergent, retaining the release's Compat/product catalog boundaries.
 
+### Rust safety boundary
+
+Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.0 Skill workflow, changing only necessary Emmy/install/diagnostic details.
+
 ## 3. Source: preserve and finish the direct-library path
 
 Keep `emmylua_code_analysis` / `emmylua_parser` linked into the native worker. CLI/worker/session ownership remains explicit: bounded requests, fixed inputs, deadlines, cache identity/invalidation, crash/cancellation containment, cleanup and resource release. The worker may be a mode of the same executable; a subprocess is not proof of LuaLS or LSP. Never execute studied Lua or repository configuration.

@@ -19,6 +19,11 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
   same addon, CLI, Skill and complete `Lycheedev mailbox protocol v1`, including
   input/recovery/diagnostics, must match the fixed Go release. Old Rust exact
   COMMIT/four-slot redesigns and old input versions are not current authority.
+- For owned business/cross-platform Rust, prohibit unsafe with suitable crate
+  forbid/deny. Only unavoidable Windows FFI/memory boundaries may use minimal
+  reviewed unsafe with per-site SAFETY, pointer/lifetime/thread invariants and
+  tests. No blanket module exemptions or performance-driven unsafe. Inventory
+  dependency unsafe separately. Reuse Go3.2.0 Skill with only necessary changes.
 - Performance target: controllable elapsed Rust <= 30% of Go (at least 70% less),
   excluding separately recorded downloads and uncontrollable external waits.
   Same machine/data and equivalent results/checks; independent cold/warm repeats
