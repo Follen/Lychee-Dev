@@ -18,8 +18,9 @@ pub const MAX_HISTORY_SEGMENTS: usize = 1024;
 
 /// Implementors own the exclusive driver lease for all mutating calls. An Err
 /// never permits the driver to proceed with the external effect being journaled.
-/// historical_request is read-only and must check the complete retained chain;
-/// missing/corrupt history cannot make an old request look new.
+/// historical_request is read-only and returns the newest matching state as
+/// soon as Go historicalState does. Until a match is found, missing/corrupt
+/// required history cannot make an old request look new.
 pub trait StateJournal {
     fn append(
         &mut self,
