@@ -1,58 +1,44 @@
-更新日期：2026-10-14，Asia/Shanghai。当前状态见下；详细问题与逐轮证据见 [审计报告](docs/Clean-repo-2026-10-14.md)，协作规则见 [AGENTS.md](AGENTS.md#multi-agent-handover)。
+更新日期：2026-10-15，Asia/Shanghai。详细历史问题与证据见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
 
 ## 分支与交付
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)：`codex/fix-3.2.0` → `main`，保持草稿。最新代码 `71d645ec` / tree `0d3306adbe4f2b0b7090bcd62f6de822cc24be21` 已推送；[原生CI38593192586](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586)五项必需作业与汇总全部通过。
-- 已交付R3/R4的13项、R5–R9修复、R16-02/R19-02/R20/R21恢复边界及R17 Source Skill规则；R18/R22等独立复核与撤回R16-01的依据见审计。现场因果未确认，不将其他代码复现当现场根因。
-- [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并。只移植必要Definitions冷读预算修复 `ef9b0113`；旧地区槽位算法与现合同冲突，未移植。
-- 发行源3.1.2、渠道next、latest=2.5.1保持；3.2.0为开发基线。不合并、不发布。只用本仓库handover，未连接用户电脑/游戏、发键、部署游戏目录或修改Lychee Talent。
+- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)：`codex/fix-3.2.0` → `main`，保持草稿。当前远端head `568a5865`，产品基线 `71d645ec`；本轮R29修复尚未提交。用户要求处理7项实机检查及交接的连接故障，使用新PR代码。
+- `71d645ec`的[Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586)五项必需作业与汇总全部通过；该结果不代表本轮工作区。原生覆盖24349/31245=77.9293%，0fail、17skip的口径与明细见审计报告。
+- [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并，只移植必要Definitions冷读预算修复。R23无消费者WGC删除、R24–R26用户要求的三轮清理及R27整合已完成，不扩展新一轮全仓审计。
+- 发行源3.1.2、渠道next、latest=2.5.1保持；3.2.0为开发基线。不合并、不发布。没有修改Lychee Talent或全局npm安装。
 
-## 当前批次
+## 当前实现与分工
 
-- **R23完成**：删除无生产消费者的WGC实现、专属测试/SDK/观察CI与失效截图文案。保留窗口身份、输入、进程及历史图像读取。此前把残留当产品能力/用户实测义务属于漏审，现撤回；删除不是修好截图。
-- **用户要求的三轮已完成**：R24、R25、R26各由不同全新审计者按顺序审查修正后的冻结树，分别确认并最小清理10、5、5组；有效测试迁到现行入口。R25四份仍有消费者的baseline probe已改用当前模块并加入正式真实TOC/ProbeExecution回归。R26删除109对旧语言键，263活键及动态选择保持。
-- **R27整合验收**未发现R23–R26运行回退，另确认末端忽略的Native私有cache参数链。窄清理已完成并冻结；公开--no-cache保留兼容、当前带或不带走同一新鲜路径，旧3.1.2另核。最终build/vet及完整套件已完成，有限独立复核无可操作缺陷，不扩大全仓审计。
-- 写入边界：所有产品实现者和独立复核者均已完成；协调者维护最终文档与PR。原ZIP只读调查完成，未确认新增可直接修复的产品缺陷，原始私人日志不公开。
+- 主代理独占实机、受管安装、所有CON、整合和文档。live worker已完成旧200槽迁移分类、首个读取失败诊断及公开Mailbox map初始化；delivery worker已完成禁用槽的INPUT/doctor诊断；data worker提供Trace/Objects临时probe。所有worker当前已结束写入。
+- **R29-01**：结构有效的已知旧200槽身份只进入手动激活等待，不授权旧协议输入。正式回归及原CON实机红绿验证通过。
+- **R29-02**：`LoadAddOn`返回DISABLED时保留`slot_addon_disabled`，doctor显示最近回调失败；500份元数据不再表述成500个已加载槽。已通过离线回归，旧运行时捕获的真实DISABLED是故障依据，不声称修复后的错误文案已在游戏重新触发。
+- **R29-03**：公开receipts/bodies map保留固定schema元数据，避免没有业务记录时使用不可读的空哈希节点；私有协议map不变。正式Lua/Go回归通过，修复后实机对照待部署。
+- 首发读取诊断沿既有scan记录逻辑节点、单次长度、已有区域准入结果及guard摘要，不增加读取、不放宽准入、不记录原始地址/内存/角色信息。正式fixture与Windows自有子进程回归通过。
 
-## 实际验证与下一步
+## 当前实机状态
 
-- 工具链Go1.27.1、Node24.18.1、npm11.18.0、Lua5.1.5已核，设置LYCHEEDEV_REQUIRE_LUA51=1及确切解释器路径。
-- R23–R26受影响检查已完成：全局build/vet、Windows交叉构建、各包/协议/Lua回归通过；R26最终预检Node81pass/6 Windows-only skip，版本/Skill/命令目录/import通过。两处既有channel fixture完成条件已修且定向通过，生产预算不变；此前失败日志保留。Linux npm launcher4项受既有Windows平台准入限制，不称通过。
-- R27冻结913文件起终一致（aggregate `0c7c62a0384fad93a6fd67d21dc9b4eeb57d68e91bcbd7252f2797581b6abf31`）。最终build/vet通过；完整Lua必需Linux套件2578事件pass/2346叶节点、28skip、3既有平台fail，仅TestLiveConnectArgumentAdmission、TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess、TestSourceResearchThroughCLI；30包pass，不称Linux全套通过。定向64事件0fail/skip、四Windows包测试交叉编译及有限独立终审通过。对应71d645ec已在Windows原生完成contract/race/process/addon/package及ci-required；交叉编译没有替代原生结果。
-- 71d645ec原生计量 **24349/31245=77.9293%**，2894事件pass=2628叶节点+266容器、0fail；[原始coverage/events/identity](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586/artifacts/11908722051) SHA256 `af9b4e2ce6ef2eb7ccd1c4e4ad5b41932c065a069cb7368cb937425dcb8a0e0e`已独立核验。Windows/amd64 Go1.27.1、atomic跨包cmd/internal（不含testkit）、默认tags；不是Lua/Node或业务场景覆盖。前批24752/32099→本批24349/31245，分母减少854，不把比率变化当新增业务覆盖。
+- 固定同一Retail 12.1.0.69933进程、创建身份和窗口，使用本地CLI及受管500槽安装。用户按当前客户端的角色GUID启用了500个槽并保存设置；当前bridge已恢复on。
+- 当前版本失败已区分两件事：Slot 01禁用导致INPUT回调load_failed且未Receive；空回执查询另在`record.receipts.entry.node`被MEM_MAPPED区域准入拒绝，56字节请求、0字节实际读取、guard稳定。
+- 用户重载后的全新、无owner、NextSlot=1运行时，不发布槽、不发键，仅查询未执行nonce的命名回执，同样复现2161B/116calls的稳定拒绝。因此空表问题独立于禁用槽和提交输入；修复后同条件对照尚未执行。
+- 失败CON凭新鲜替代runtime证据关闭；随后成功CON已完成全部请求、verified报告、released清理及正常disconnect。当前两条CON均closed，安装无owner、无待处理槽预约。用户完成bridge off后的reload，已销毁本轮Trace hook和Objects临时快照。
 
-- 当前17skip=9子进程helper入口（11个父回归确实pass）+8实际可选项：4安装/index/图像材料、2原runtime材料、1客户端只读目标、1宿主8.3能力。16项旧公开固定输入缺口全部原生通过；删去WGC三项skip不等于WGC测试通过。详细名称/原因见审计。
+## 7项实机结果
 
-## 待实机验证
-
-代码修复、离线通过和实机验证分别记账。下列实际结果留空，只供后续明确授权的本机任务；各项详细复验见审计条目。共同前置为匹配版本的干净受管 CLI/addon、固定 installation/PID/创建时间/HWND、产品/构建与原 project/CON/request/期限，不重放 submitted/uncertain 输入。
-
-| ID | 最小复验与预期 | 实机结果 |
+| ID | 已完成的实际检查 | 剩余范围或限制 |
 | --- | --- | --- |
-| R3-01 | Trace `GetTime.foo`/标量路径及正常方法；前者页内错误，后者正常追踪 | |
-| R3-06 | 主窗口隐藏时开拾取后进入战斗；dock/键盘脚本立即关闭，不吞 F/Enter/Escape | |
-| R4-01 | 无副作用请求跨 prepare/commit/confirm/release、原 CON resume；已知输入及恢复上界后采样间隔至少 100ms，无重放，reload 新 runtime 独立 | |
-| R4-04 | 新配置 status、off/on、保存 off 后 reload；状态与 INPUT 生命周期一致 | |
-| R4-07 | Objects 检查失败 tostring/普通错误及健康对象；无二次错误、失败明确、部分流/limited 保留 | |
-| R5-01 | 只返回高精度有限数值和 `%.17g` 对照文本；报告数值保持一致，正常清理并断开 | |
-| R20 现场因果未确认 | 两原CON已关闭，原3.1.2同runtime bind读取根因仍未确认；后续匹配当前协议CLI/addon、隔离新CON，复验bind回执及同进程切角色/reload后原bind无回执；有新鲜替代证据才无输入退役，暂不可读无证明时保留未知，中断后续清理且正常关闭不退化。旧3.1.2日志仅用匹配CLI诊断，当前driver不得接管 | |
+| R3-01 Trace | 真实已加载页面OnClick回调：GetTime.foo及3类标量owner报页内错误；自有方法两次调用、参数与停止正常 | 非硬件点击；测试hook已由reload清除 |
+| R3-06 拾取器 | 用户实际进入/退出战斗；报告确认dock、键盘脚本和输入保护关闭；用户确认F、Enter、Esc正常 | 本轮特定角色/客户端，不扩展全部战斗场景 |
+| R4-01 输入与恢复 | 完整prepare/commit/confirm/release；数值请求采样比恢复上界晚382–460ms；异步请求running后原CON/request恢复至verified/released | 修复版整合后核对最终journal及独立runtime |
+| R4-04 bridge状态 | 已加载运行时默认option、off/on与INPUT一致；用户保存off并reload后status为false、无RuntimePublication；on恢复成功 | 新加载运行时的默认option待最后一次部署重载；不清空整个账户配置 |
+| R4-07 Objects | 真实页面回调处理失败tostring与普通错误；保留5000字partial/limited；健康对象42恢复 | 非硬件点击；临时快照已由reload清除 |
+| R5-01 数值 | 4个高精度/大数/微小数JSON数值与%.17g文本double回读相等；报告verified、released，正常断开 | 修复版完整交易将再次覆盖受影响Mailbox map |
+| R20 连接故障 | 匹配500槽协议新CON bind成功；旧失败CON在reload后无充分证据时保持pending，取得新鲜替代证据后无新输入关闭 | 当前禁用槽及空表问题已定位；旧3.1.2原包仍不能唯一归因 |
 
-本轮原6项之外新增R20现场复验1项，共7项客户端整合；已确认无生产入口的WGC不再列为待验证产品能力。七产品旧矩阵见 [todo.md](todo.md)，未扩展为本轮通过。
+本轮共7项，不包括已删除的WGC；七产品完整安装/登录/升级矩阵仍见[todo.md](todo.md)。
 
-## 候选与特定环境复验
+## 验证与下一步
 
-| 项目 / 当前状态 | 必要环境、最小步骤与预期 | 复验结果 |
-| --- | --- | --- |
-| R3-C01 候选 | 固定真实SpellMisc DB2/DBD/DifficultyID多匹配资料；比较全表、导航及领域合同，证据冲突才升级 | |
-| R28-C01 现场静态空节点候选 | 后续获准Windows固定目标与匹配版本的只读诊断；不发布槽/不发键，查询未执行nonce的命名receipt，记录逻辑节点/单次长度/region拒绝/guard结论，预期区分候选路径。现原包不能唯一定位，不重放旧输入 | |
-| R3-C03 候选 | 先明确instances归属语义；隔离Windows owner fixture，对照展示与连接消费者，不把被动字段当阻断 | |
-| R4-C01 已修复/原生通过 | Windows双真实卷、隔离release/client/project、PID=0；比较同卷及跨卷默认/显式archive，旧树应保全并在安全激活边界停止 | R8 `7566493c` 双真实卷及同卷对照通过 |
-| 原安装/index/图像与runtime材料缺口 | 取得获准、匹配hash/build的原始资料后跑正式replay；身份/字节/解码/根证据应吻合，合成fixture不代替原材料 | |
-| Live read-only可选缺口 | 后续授权Windows/WoW固定目标；只读核对身份和窗口，不扩展输入许可 | |
-
-## 证据与限制
-
-- R20最新401行诊断报告确认两次CON均已通过runtime_replacement_closed关闭，旧“仍卡closing”现状已更正；核心是同runtime的bind回执Kind2持续short_read/ineligible_read。identity/INPUT完整不证明回执可读，1574字节/42调用仅汇总，不能定位根因。旧3.1.2/新Skill合同差异已确认；69文件/50scans原ZIP现已取得且SHA256吻合，69文件路径/CRC、68项内部hash、两journal校验链均通过。精确旧reader的三条不同路径可产生相同汇总，不能据此定位。静态空节点仅R28-C01候选，WoW布局/节点证据不足，无可直接修复的现场根因结论。已推R20读取变化分类和R19/R21关闭边界不等于此现场根因已修，不要求现在开游戏。
-- 全部剩余忽略材料保留，不再清理。此前部分R20/R22临时负对照原日志已删除；正式回归、版本和GitHub正式CI artifacts仍在，不能声称全证据完好或重造历史日志。
-
-- 最小后续诊断方案（未实施）：在现有source.go/lua_mailbox.go/process_windows.go记录一个有界首发readFailure及guard复核摘要，沿Native.Find既有scan链保存；不加读取、不放宽准入、不输出原始内存/地址/角色信息。现有doctor不查receipts；旧3.1.2需匹配旧协议的独立只读构建，不能拿当前driver接管旧CON。先做确定性fixture与Windows自有子进程验证，再在后续明确授权范围观察一次；无错误时保留历史原因未知，不要求重复reload碰运气。
+- 本轮Go build/vet及完整Lua必需Go套件通过：本地Windows/amd64、Go1.27.1、Lua5.1.5、包并发2、测试并发4、包时限20分钟，2886事件/2620叶节点pass、0fail、42skip、无未完成测试。skip包含helper及本地缺少的公开/原始资料、LuaLS集成和符号链接权限，不借用旧CI结果补算；此前中止的运行不计通过。
+- 版本检查通过，版本源仍为3.1.2。没有修改命令目录或Skill输入，不扩展无关验收。
+- 下一步：提交本轮代码，受管安装该提交，用户手动reload；同条件只读空回执对照应为完整读取、0记录、无首发失败，再做bind/数值报告/release/disconnect，更新同一PR。
+- 私人现场日志只留在本地，不上传公共PR。按用户既有要求保留全部剩余忽略材料、原ZIP和恢复记录；不得清理其他任务或保留的`.worktrees/rust-refactor`。原R20/R22部分临时负对照日志已删除的历史限制仍见审计报告，不能补造。

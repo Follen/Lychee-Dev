@@ -1624,3 +1624,18 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 - R28独立原包调查已完成，7个隔离叶场景通过，未确认可直接修改的现场产品缺陷。包中未保存的故障节点/region不能离线恢复；仅有现行trace error字符串也不足。最小后续方案未实施：source.go为LookupResult加可选首发readFailure；Process.Read复用现有VirtualQueryEx结果记录准入拒绝/ioAttempted/n；luaAccess设置固定逻辑路径并保留R20复核摘要，Native.Find既有scan链自动保存。元数据不含原地址、角色/nonce、payload或guard原始字节，不额外读取、不放宽MEM_PRIVATE判定/预算/输入/身份，不新建扫描器。
 - 诊断字段可先用现有memory/traversal/trace fixture、序列化隐私测试及Windows自有子进程完成确定性验证。现有doctor既不查receipts也不设置TraceDir，不能声称再跑doctor就会取得它们。若后续处理旧3.1.2，需精确旧reader的独立只读维护者产物且不替换已发布包；只核固定身份→命名identity/INPUT→未发布/未执行nonce的receipt读取→输出/关闭，不调用driver/Connect/Publish/Input/安装/reload。当前500槽主协议不增加旧回执旁路。字段证据不足或当前无法复现时保留未知，不反复重连碰运气。
 - PR12重新确认closed、merged=false；版本源3.1.2、next/latest2.5.1未变。全部剩余材料及新诊断原包保留；此前R20/R22部分临时负对照原日志已删除的限制仍如实保留，不声称全证据完好。
+
+## R29：匹配当前协议的连接故障与7项实机整合
+
+2026-10-15，用户明确要求完成7项实机检查及交接的连接故障。基于PR13产品代码71d645ec、文档head568a5865，在固定的Retail 12.1.0.69933进程/创建身份/窗口使用本地CLI及受管安装；未修改Lychee Talent、全局npm版本或发行标签。
+
+| ID | 确认问题与最小修复 | 当前证据 |
+| --- | --- | --- |
+| R29-01 | 已发布200槽identity.v2/hybrid.v2被500槽字段校验提前拒绝，首次激活不能进入手动重载等待。仅将结构、release和runtime均有效的已知200槽身份分类为不兼容旧生产端 | 正式正反回归通过；同一原CON由identity_record_invalid转为waiting_manual_reload，未发送输入，等待不消耗业务预算；旧身份仍不能授权输入 |
+| R29-02 | Slot 01被角色配置禁用，INPUT记录load_failed且未Receive，doctor却因当前INPUT ready显示健康。保留LoadAddOn的DISABLED为slot_addon_disabled，并让doctor显示最近失败回调 | 实机GetAddOnInfo和INPUT互证禁用；用户用角色GUID启用500槽并SaveAddOns/reload后bind成功。修复后诊断文案已离线验证，未为文案重新禁用客户端槽 |
+| R29-03 | 当前新运行时空receipts表的命名查询在entry.node处遭稳定区域准入拒绝。公开receipts/bodies保留固定schema键，使无业务记录时仍有普通hash；私有map、token键和记录语义不变 | 无owner、NextSlot=1的新运行时，无槽发布/按键的只读查询仍复现：56字节请求、0返回、MEM_MAPPED/COMMIT、guard稳定、2161B/116calls。正式Lua/Go回归通过，修复后同条件实机对照待完成 |
+
+- 实施R28提出的有界首发读取诊断：固定逻辑路径、请求/返回长度、已有VirtualQueryEx证据、是否实际读取及guard复核摘要，经Native.Find原有scan保存。没有新增探测读取、私有堆扫描、区域放宽、输入许可或原始地址/内存输出；Windows自有子进程及fixture覆盖稳定失败、变化、复核失败和隐私边界。旧3.1.2原ZIP缺失的字段不能由当前结果补写，仍不认定其唯一根因。
+- 当前7项结果：Trace和Objects真实页面回调通过；用户实际战斗确认拾取器消失且F/Enter/Esc正常，报告亦确认dock/键盘脚本关闭；精度数值4项往返通过；异步请求running后用原CON/request完成；bridge保存off后重载无RuntimePublication，手动on恢复；bind成功及新鲜替代runtime退役通过。报告均verified/released，成功CON正常disconnect，两CON均closed、无预约；最后的手动reload已销毁测试hook/临时快照。
+- 本轮build/vet与完整Lua必需Go套件通过：本地Windows/amd64、Go1.27.1、Lua5.1.5，`go test -json -p 2 -parallel 4 -count=1 -timeout=20m ./...`退出0，2886 test/subtest事件pass（2620叶节点）、0fail、42skip、无未完成测试；32测试包pass，3包无测试/整体skip。skip包含9个helper、缺少公开/原始资料或真实LuaLS集成条件及宿主符号链接权限，不借旧CI17skip口径补算。此前为整合新修复中止的运行不计通过；版本检查与diff检查通过。
+- 尚待新加载运行时默认option、修复版空表同条件对照及完整交易整合。最终代码提交和部署结果在完成后更新；不把本次Retail检查扩大成七产品完整矩阵。

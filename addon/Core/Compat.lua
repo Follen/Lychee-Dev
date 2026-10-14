@@ -42,6 +42,7 @@ ns.Compat = {
         if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
         local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
         if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end
+        if loaded~=true and reason=="DISABLED" then return nil,"slot_addon_disabled" end
         return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
     end,
     ReceiverChord = function(key)

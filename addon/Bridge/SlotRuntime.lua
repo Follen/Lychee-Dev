@@ -8,7 +8,7 @@ local zero=string.rep("0",32)
 local attemptSequence,attemptActive,attemptReceived,lastAttempt=0,false,false,nil
 local attemptReasons={slot_input_not_ready=true,input_protection_not_ready=true,input_protection_busy=true,
     input_protection_unavailable=true,input_protection_timer_unavailable=true,slot_exhausted=true,
-    slot_loader_no_dispatch=true,slot_inventory_incomplete=true,slot_load_failed=true,slot_wake_failed=true}
+    slot_loader_no_dispatch=true,slot_inventory_incomplete=true,slot_load_failed=true,slot_addon_disabled=true,slot_wake_failed=true}
 local function noteAttempt(stage,reason,slot)
     if not attemptActive or not runtimeToken or not engine then return end
     if reason and not attemptReasons[reason] then
@@ -126,7 +126,7 @@ local function wake()
         noteAttempt("loading",nil,index)
         local loaded,failure=ns.Compat.LoadInputSlot(string.format("Lychee Dev Slot %02d",index))
         expectedSlot=nil
-        if not loaded then noteAttempt("load_failed","slot_load_failed",index);releaseInput();engine.Describe();return nil,failure end
+        if not loaded then noteAttempt("load_failed",failure=="slot_addon_disabled" and failure or "slot_load_failed",index);releaseInput();engine.Describe();return nil,failure end
         if skipLoaded==nil then noteAttempt("no_dispatch","slot_loader_no_dispatch",index);releaseInput();engine.Describe();return nil,"slot_loader_no_dispatch" end
         if not skipLoaded then break end
     end

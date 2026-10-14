@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 	"path/filepath"
@@ -129,6 +130,71 @@ func TestIdentityPublicationRejectsMalformedChecksummedHeaders(t *testing.T) {
 			_, err = decodeIdentityRecord(memory.Record{Header: decoded, Payload: payload}, i.Release)
 			if (err == nil) != tc.valid {
 				t.Fatal("identity header qualification", err)
+			}
+		})
+	}
+}
+
+func identityPublicationTestRecord(t *testing.T, i Identity, h bridge.MemoryHeader) memory.Record {
+	t.Helper()
+	payload, err := json.Marshal(i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := bridge.EncodeMemoryRecord(h, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err = bridge.DecodeMemoryHeader(wire[:bridge.MemoryHeaderBytes])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return memory.Record{Header: h, Payload: payload}
+}
+
+func publishedLegacyIdentityRecord(t *testing.T) memory.Record {
+	t.Helper()
+	// The shipped 9d3d3598 addon publishes this identity shape: 200 slots,
+	// identity.v2 and hybrid INPUT. It is readable upgrade evidence only.
+	i := Identity{Schema: legacyIdentitySchema, Runtime: strings.Repeat("1", 32), Slots: 200, NextSlot: 1, GUID: "g", Character: "c", Realm: "r", Build: "b", Product: "retail", Release: "3.1.2", InputState: "lycheedev.input.hybrid.v2"}
+	inventory := 200
+	i.Inventory = &inventory
+	runtime, _ := tokenBytes(i.Runtime)
+	return identityPublicationTestRecord(t, i, bridge.MemoryHeader{Kind: bridge.MemoryIdentity, State: 1, Runtime: runtime})
+}
+
+func TestPublishedLegacyIdentityRequiresManualActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		edit         func(*Identity, *bridge.MemoryHeader)
+		incompatible bool
+	}{
+		{"published-200-hybrid", func(*Identity, *bridge.MemoryHeader) {}, true},
+		{"malformed-current-200", func(i *Identity, _ *bridge.MemoryHeader) { i.Schema, i.InputState = IdentitySchema, InputSchema }, false},
+		{"other-capacity", func(i *Identity, _ *bridge.MemoryHeader) { i.Slots = 64; i.Inventory = nil }, false},
+		{"unknown-capability", func(i *Identity, _ *bridge.MemoryHeader) { i.InputState = "future" }, false},
+		{"inventory-overflow", func(i *Identity, _ *bridge.MemoryHeader) { inventory := 201; i.Inventory = &inventory }, false},
+		{"cursor-overflow", func(i *Identity, _ *bridge.MemoryHeader) { i.NextSlot = 202 }, false},
+		{"missing-actor", func(i *Identity, _ *bridge.MemoryHeader) { i.GUID = "" }, false},
+		{"wrong-release", func(i *Identity, _ *bridge.MemoryHeader) { i.Release = "other" }, false},
+		{"wrong-runtime", func(_ *Identity, h *bridge.MemoryHeader) { h.Runtime[0] ^= 1 }, false},
+		{"nonzero-nonce", func(_ *Identity, h *bridge.MemoryHeader) { h.Nonce = h.Runtime }, false},
+		{"wrong-kind", func(_ *Identity, h *bridge.MemoryHeader) { h.Kind = bridge.MemoryInputState }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := publishedLegacyIdentityRecord(t)
+			var i Identity
+			if err := json.Unmarshal(r.Payload, &i); err != nil {
+				t.Fatal(err)
+			}
+			tc.edit(&i, &r.Header)
+			r = identityPublicationTestRecord(t, i, r.Header)
+			got, err := decodeIdentityRecord(r, "3.1.2")
+			if err == nil || errors.Is(err, memory.ErrMailboxIncompatible) != tc.incompatible {
+				t.Fatalf("manual-activation classification=%t: %v", tc.incompatible, err)
+			}
+			if tc.incompatible && (got.Slots != 200 || got.Validate() == nil || inputActionCapabilityError(got.InputState, "reload") == nil) {
+				t.Fatal("legacy discovery evidence was promoted to current identity or input authority", got)
 			}
 		})
 	}

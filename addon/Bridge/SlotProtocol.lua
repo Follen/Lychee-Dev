@@ -34,7 +34,10 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     function api.AttachMailbox(publication)
         assert(plain(publication) and publication.schema=="Lycheedev mailbox protocol v1"
             and publication.runtime==adapter.runtime and publication.release==adapter.release,"invalid slot mailbox")
-        mailbox,mailboxReceipts,mailboxBodies=publication,{},{}
+        -- A fixed non-token key keeps each public hash allocated before the
+        -- first receipt and after the last BODY is released. Missing token
+        -- lookups remain absent; private protocol maps contain only records.
+        mailbox,mailboxReceipts,mailboxBodies=publication,{schema=publication.schema},{schema=publication.schema}
         rawset(mailbox,"receipts",mailboxReceipts);rawset(mailbox,"bodies",mailboxBodies)
         rawset(mailbox,"identity",descriptor)
         for nonce,record in pairs(receipts) do rawset(mailboxReceipts,nonce,record) end

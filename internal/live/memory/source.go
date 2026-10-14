@@ -43,10 +43,41 @@ type Coverage struct {
 }
 
 type LookupResult struct {
-	Records       []Record `json:"records"`
-	Coverage      Coverage `json:"coverage"`
-	Path          string   `json:"path"`
-	HintMillis    int64    `json:"hintMillis"`
-	ElapsedMillis int64    `json:"elapsedMillis"`
-	Fallback      string   `json:"fallback,omitempty"`
+	FirstReadFailure *ReadFailure `json:"firstReadFailure,omitempty"`
+	Records          []Record     `json:"records"`
+	Coverage         Coverage     `json:"coverage"`
+	Path             string       `json:"path"`
+	HintMillis       int64        `json:"hintMillis"`
+	ElapsedMillis    int64        `json:"elapsedMillis"`
+	Fallback         string       `json:"fallback,omitempty"`
 }
+
+// ReadFailure contains bounded diagnostics from an already attempted read.
+// Paths are fixed logical labels, never addresses, requested keys or contents.
+// Missing region/IO fields mean the adapter supplied no such evidence.
+type ReadFailure struct {
+	Path            string      `json:"path"`
+	RequestedBytes  int         `json:"requestedBytes"`
+	ReturnedBytes   int         `json:"returnedBytes"`
+	Source          string      `json:"source"`
+	Reason          string      `json:"reason"`
+	Region          *ReadRegion `json:"region,omitempty"`
+	IOAttempted     *bool       `json:"ioAttempted,omitempty"`
+	NativeErrorCode uint32      `json:"nativeErrorCode,omitempty"`
+	GuardRecheck    string      `json:"guardRecheck"`
+}
+
+type ReadRegion struct {
+	Type    uint32 `json:"type"`
+	State   uint32 `json:"state"`
+	Protect uint32 `json:"protect"`
+}
+
+// Preserve the original error text and chain; metadata grants no read authority.
+type readFailureError struct {
+	cause   error
+	details ReadFailure
+}
+
+func (e *readFailureError) Error() string { return e.cause.Error() }
+func (e *readFailureError) Unwrap() error { return e.cause }

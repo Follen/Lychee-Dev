@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -18,11 +19,12 @@ import (
 )
 
 type childMemory struct {
-	PID     uint32
-	Created uint64
-	Image   string
-	Address uint64
-	Header  bridge.MemoryHeader
+	PID            uint32
+	Created        uint64
+	Image          string
+	Address        uint64
+	BlockedAddress uint64
+	Header         bridge.MemoryHeader
 }
 
 // Only this test child allocates/writes its own memory. The parent exercises
@@ -59,7 +61,12 @@ func TestNativeMemoryChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info := childMemory{uint32(os.Getpid()), uint64(c.HighDateTime)<<32 | uint64(c.LowDateTime), image, uint64(address) + uint64(at), h}
+	blocked := address + uintptr((2<<20)-os.Getpagesize())
+	var prior uint32
+	if err := windows.VirtualProtect(blocked, uintptr(os.Getpagesize()), windows.PAGE_NOACCESS, &prior); err != nil {
+		t.Fatal(err)
+	}
+	info := childMemory{PID: uint32(os.Getpid()), Created: uint64(c.HighDateTime)<<32 | uint64(c.LowDateTime), Image: image, Address: uint64(address) + uint64(at), BlockedAddress: uint64(blocked), Header: h}
 	if err = json.NewEncoder(os.Stdout).Encode(info); err != nil {
 		t.Fatal(err)
 	}
@@ -111,5 +118,30 @@ func TestNativeChildPointReadAndStaleProcessIdentity(t *testing.T) {
 	}
 	if !bytes.Equal(point.Payload, []byte(`{"native":"荔枝<&>","ok":true}`)) {
 		t.Fatal("native point read changed payload")
+	}
+	// The parent's real private read must stop at the existing OS eligibility
+	// check, retaining its error contract and the already-observed mapping.
+	returned, err := process.Read(ctx, child.BlockedAddress, make([]byte, 8))
+	var failure *readFailureError
+	if returned != 0 || err == nil || err.Error() != "memory.ineligible_read" || !errors.As(err, &failure) {
+		t.Fatal("lost native rejection diagnostics", returned, err)
+	}
+	details := failure.details
+	if details.Region == nil || details.Region.Type != 0x20000 || details.Region.State != windows.MEM_COMMIT || details.Region.Protect != windows.PAGE_NOACCESS || details.IOAttempted == nil || *details.IOAttempted || details.NativeErrorCode != 0 {
+		t.Fatalf("invented native IO or lost actual region: %+v", details)
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, child.PID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
+	restricted := &Process{handle: handle}
+	returned, err = restricted.Read(ctx, child.Address, make([]byte, 8))
+	if returned != 0 || !errors.Is(err, windows.ERROR_ACCESS_DENIED) || !errors.As(err, &failure) {
+		t.Fatal("native error chain changed", returned, err)
+	}
+	details = failure.details
+	if details.IOAttempted == nil || !*details.IOAttempted || details.NativeErrorCode != uint32(windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("lost attempted native read: %+v", details)
 	}
 }

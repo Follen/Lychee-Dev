@@ -11,11 +11,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 type diagnosticSource struct{ verifies int }
+
+type legacyActivationMailbox struct{ record memory.Record }
+
+func (m *legacyActivationMailbox) Lookup(ctx context.Context, selector memory.Selector) (memory.LookupResult, error) {
+	if selector.Kind != bridge.MemoryIdentity {
+		return memory.LookupResult{}, errors.New("unexpected input observation")
+	}
+	return memory.LookupResult{Records: []memory.Record{m.record}, Coverage: memory.Coverage{Complete: true}}, ctx.Err()
+}
+func (*legacyActivationMailbox) Binding() memory.LuaRootBinding { return memory.LuaRootBinding{} }
+
+func TestNativePublishedLegacyIdentityKeepsManualActivationClassification(t *testing.T) {
+	n := &Native{Version: "3.1.2", Mailbox: &legacyActivationMailbox{record: publishedLegacyIdentityRecord(t)}}
+	identities, coverage, err := n.Discover(context.Background(), "", "")
+	if !errors.Is(err, memory.ErrMailboxIncompatible) || len(identities) != 0 || !coverage.Complete {
+		t.Fatalf("published legacy runtime cannot reach the manual-activation branch: identities=%d coverage=%+v err=%v", len(identities), coverage, err)
+	}
+}
 
 func (s *diagnosticSource) Lookup(ctx context.Context, _ memory.Selector) (memory.LookupResult, error) {
 	s.verifies++

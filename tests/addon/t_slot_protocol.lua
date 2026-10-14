@@ -89,9 +89,11 @@ local record,reason,skip=engine.Receive(malformed.index,malformed)
 assert(not record and reason=="slot_envelope_invalid" and not skip)
 local retained=0
 for nonce,record in pairs(mailbox.receipts)do
-    retained=retained+1;assert(engine.Snapshot().receipts[nonce]==record)
+    if nonce=="schema" then assert(record==mailbox.schema and engine.Snapshot().receipts.schema==nil)
+    else retained=retained+1;assert(engine.Snapshot().receipts[nonce]==record) end
 end
-assert(retained<=500 and next(mailbox.bodies)==nil,"mailbox exceeded existing retention")
+assert(retained<=500 and next(mailbox.bodies)=="schema" and next(mailbox.bodies,"schema")==nil,
+    "mailbox exceeded record retention or removed its metadata")
 
 -- Compilation failure consumes three slots but still consumes one operation.
 engine=create(runtime)

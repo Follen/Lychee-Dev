@@ -68,6 +68,17 @@ func TestMailboxTraversalRetirementRequiresChangedPath(t *testing.T) {
 				if !changed && !strings.Contains(err.Error(), "short_read") {
 					t.Fatalf("stable path hid original read failure: %v", err)
 				}
+				first := found.FirstReadFailure
+				if first == nil || first.Source != "private" || first.ReturnedBytes != 0 || first.IOAttempted != nil || first.Region != nil {
+					t.Fatalf("lost first traversal failure or invented OS evidence: %+v", first)
+				}
+				wantGuard := "stable"
+				if changed {
+					wantGuard = "path_changed"
+				}
+				if first.GuardRecheck != wantGuard || point == "hash_nodes" && first.RequestedBytes != 56 {
+					t.Fatalf("first failure overwritten by guard recheck: %+v", first)
+				}
 				if changed {
 					found, err = f.reader().Lookup(context.Background(), f.selectors["input"])
 					if err != nil || len(found.Records) != 1 || f.regions != 0 {

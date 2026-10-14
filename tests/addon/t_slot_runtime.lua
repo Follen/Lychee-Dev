@@ -37,6 +37,8 @@ assert(not ns.SlotRuntime.Wake() and Env.framesCreated==frames+1)
 local mailbox=assert(ns.Mailbox)
 assert(mailbox.schema=="Lycheedev mailbox protocol v1" and mailbox.release==ns.Release)
 assert(mailbox.identity==ns.SlotRuntime.Snapshot().descriptor and mailbox.input==ns.InputState.Snapshot())
+assert(mailbox.receipts.schema==mailbox.schema and mailbox.bodies.schema==mailbox.schema,
+    "runtime published structurally empty record maps")
 assert(ns.InputState.Snapshot():find('"inputBlocked":true',1,true))
 local rejected=ns.InputState.Snapshot()
 ready=true
@@ -170,7 +172,8 @@ state.options.bridgeEnabled=true
 assert(ns.SlotRuntime.Start())
 assert(ns.Mailbox~=mailbox and ns.Mailbox.runtime~=mailbox.runtime)
 assert(ns.Mailbox.identity==ns.SlotRuntime.Snapshot().descriptor and ns.Mailbox.input==ns.InputState.Snapshot())
-assert(next(ns.Mailbox.receipts)==nil and next(ns.Mailbox.bodies)==nil)
+assert(next(ns.Mailbox.receipts)=="schema" and next(ns.Mailbox.receipts,"schema")==nil
+    and next(ns.Mailbox.bodies)=="schema" and next(ns.Mailbox.bodies,"schema")==nil)
 ns.InputState.Stop()
 state.options.bridgeEnabled=false
 assert(not ns.SlotRuntime.Wake() and not ns.InputState.Snapshot(),"disabled wake revived sampler")

@@ -189,7 +189,7 @@ func (p *Project) Doctor(ctx context.Context, request TargetRequest, session str
 	if identity.Inventory == nil || *identity.Inventory != bridge.SlotCount {
 		r.add("live.inventory", "blocked", "client has not discovered all 500 slots", "restart the selected client once after installation")
 	} else {
-		r.add("live.inventory", "ok", "500 loaded slot descriptors", "")
+		r.add("live.inventory", "ok", "500 discovered slot metadata entries; enabled/loadable state is not checked", "")
 	}
 	e := bridge.SlotEnvelope{Runtime: identity.Runtime, Owner: identity.Owner, Fence: identity.Fence, Index: identity.NextSlot, GUID: identity.GUID, Build: identity.Build, Action: "reload"}
 	sampled, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
@@ -212,11 +212,27 @@ func (p *Project) Doctor(ctx context.Context, request TargetRequest, session str
 		r.add("live.input", "blocked", err.Error(), "wait for a fresh input sample; check bindings and bridge state")
 		return
 	}
+	r.inspectInput(input)
+	return
+}
+
+func (r *DoctorResult) inspectInput(input InputObservation) {
 	r.Input = &input
 	if *input.InputBlocked {
 		r.add("live.input", "blocked", input.Reason, "resolve the reported input condition, then resume; no Esc is sent")
 	} else {
 		r.add("live.input", "ok", "execute "+input.Bindings.Wake+", reload "+input.Bindings.Reload, "")
 	}
-	return
+	// The latest callback explains a failure even when current INPUT is ready.
+	// It is neither an execution receipt nor authorization to repeat input.
+	if attempt := input.InputDiagnostic; attempt != nil {
+		switch attempt.Stage {
+		case "load_failed", "no_dispatch", "exception", "rejected":
+			next := "inspect the latest callback failure and original CON; diagnosis does not replay input"
+			if attempt.Reason == "slot_addon_disabled" {
+				next = "enable the reported slot in the selected character's addon settings, reload once, then resume the original CON; do not replay submitted input"
+			}
+			r.add("live.input_attempt", "error", fmt.Sprintf("latest callback %s at slot %d: %s", attempt.Stage, attempt.Slot, attempt.Reason), next)
+		}
+	}
 }

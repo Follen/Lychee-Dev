@@ -23,7 +23,7 @@ type mailboxFaultSource struct {
 func TestLuaMailboxRecordReadRetainsPreIOBudgetCause(t *testing.T) {
 	f := newMailboxFixture(t, 0x140000000, 0x200000000)
 	a := &luaAccess{reader: f.reader(), count: (1 << 20) - bridge.MemoryHeaderBytes + 1}
-	_, err := ReadRecord(context.Background(), &luaRecordSource{a}, f.strings["input"]+32, f.selectors["input"])
+	_, err := ReadRecord(context.Background(), &luaRecordSource{a: a}, f.strings["input"]+32, f.selectors["input"])
 	if err == nil || !errors.Is(a.readError, ErrMailboxUnavailable) || !strings.Contains(a.readError.Error(), "read_budget") || f.privateReads != 0 || a.calls != 0 {
 		t.Fatal("record header lost pre-IO budget cause or reached Source", err, a.readError, f.privateReads, a.calls)
 	}
@@ -205,7 +205,7 @@ func TestLuaMailboxFullCollisionPathSharesReadBudget(t *testing.T) {
 	// The byte cap must also reject a request before allocation or Source IO.
 	f = newMailboxFixture(t, 0x140000000, 0x200000000)
 	access := luaAccess{reader: f.reader()}
-	if _, err := access.read(context.Background(), f.strings["input"], (1<<20)+1, false); !errors.Is(err, ErrMailboxUnavailable) || f.privateReads != 0 {
+	if _, err := access.read(context.Background(), f.strings["input"], (1<<20)+1, false, "record.string_header"); !errors.Is(err, ErrMailboxUnavailable) || f.privateReads != 0 {
 		t.Fatal("oversized read reached Source", err)
 	}
 }
