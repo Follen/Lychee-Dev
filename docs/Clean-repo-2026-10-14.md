@@ -1268,3 +1268,34 @@ R9 `ef9b0113` 的Windows CI38547831499现六作业全部success。Go产品语句
 - 已实际离线验证：固定文档Environment及Retail/Forever flow通过，固定DBD父测试与Map/SpellName/ChrClasses通过；生产生成器处理612文档/5873 mappings，保留真实partial-type覆盖receipt；build/vet及adapter vet通过。stage核对Windows PE、1285个resource hash和实际binary bytes/SHA/VCS身份，仅为构建形状，不计原生LuaLS通过。CascLib仅确认固定clean checkout与37个构建源码路径，不把Linux源码检查当Windowsoracle运行。
 - 新增/受影响工具Node全套实际82 pass、6个Windows专属skip、0fail；定向harness/workflow14项通过。旧R8原始35skip事件被新required-integration核验正确拒绝，不能用父pass掩盖未执行。
 - 当前901文件冻结aggregate `605dfe687ce6b6bcc4188e6322060b3e8f6b3afd310cd69ca3232ae198a0328c`，parentef9b0113；全新R11审计者独立检查该树，尚未出最终结论。后续新原生结果和skip变化按精确提交更新。
+
+
+### R11 独立复审完成 / 原生执行中
+
+- 901文件起终SHA和aggregate均与冻结基线一致；独立检查公开输入来源/身份、生成器partial合同、stage资源与native身份边界、正式集成选择和失败/skip证据链。本轮已检查范围未发现其他可操作离线修复项，不作全局零bug或原生通过声明。
+- 实际CLI级负对照：缺必需子项、缺package终止及旧R8真实skip事件均拒绝；BOM/CRLF合法证据通过，无关helper skip不扩大门禁。同一严格coverage reader拒绝fail后pass洗白。独立核对1285资源hash、binary bytes/SHA/VCS、固定docs及生成定义receipt全部相符，complete=false如实保留。
+- 本批已推送`ebde90ed346ff22d087af29a5975f7f3e672ad6e`（tree `fee83999d5581bc38ec8d790d49f3f7b05b23284`），[Windows CI38549548276](https://github.com/Follen/Lychee-Dev/actions/runs/38549548276)正在执行。实际skip/pass/覆盖率必须从本批artifact取得，不能按35−16预测后宣称通过。WGC另一次自建窗口测试不并入主profile/事件计数；CascLib missing-key子项仅证明Go严格拒绝，不称外部oracle同值验证。
+
+
+### R11 新原生执行结果（ebde90ed，失败证据保留）
+
+- CI38549548276：process、addon、package、race通过；contract及汇总失败。固定输入准备成功，原16个skip事件均进入执行；主套件2795事件pass、3父子fail、19skip（叶节点2542pass/2fail/19skip）。失败集中在`TestRealBrokerCloseWaitsForProcessCleanup`及其reply/listener两子项；其余公开输入集成通过。
+- [原始coverage/required-integrations](https://github.com/Follen/Lychee-Dev/actions/runs/38549548276/artifacts/11886332314)的tree为fee83999、实际merge948f05bf，与head树一致。24381/32122=75.9013%仅失败运行诊断值，不作为最终验收覆盖。profile SHA2565363f8850ccaed1ed3027ae817faa1226a136bb5d0eec03a5a6e5522704bd189；events SHA256fbb21ebe3e97740bb367dca5d43af8ac25300e9989f138a373bbe8d3bf2dd138。
+- [单独WGC自建窗口](https://github.com/Follen/Lychee-Dev/actions/runs/38549548276/artifacts/11885714946)在CreateCaptureItem失败，HRESULT0x80070057；未获得frame/lifetime通过证据。不能仅凭HRESULT把它称作缺交互桌面或游戏问题，继续检查fixture/interop/宿主证据。该结果不并入主profile。
+
+## R12：新原生失败定位与最小修正
+
+### R12-01 · 已确认测试编排缺陷 · 两个真实broker集成争用同一登录会话单实例
+
+- 原生证据：codebase跨CLI测试worker存活10:30:12.700至10:30:17.675；command的reply/listener子进程在10:30:13.627/14.418结束，首事件为空，均未进入原关闭屏障断言。sourceBrokerMain在发listening前按既有合同TryAcquireLease登录会话唯一aggregate，失败立即退出。此前发行集成-p=1未触发这条并行路径。
+- 已实施测试专用共享OS lease：仅这两个集成等待实际logon scope的独立test key，等原child/session清理完成再释放；复用现有lease，不修改产品aggregate限制、不隔离掉真实竞争域、不提高超时、不把完整套件降为-p=1。正式Windows跨进程/不同home回归核对gate互斥、cleanup释放及production aggregate不被占用；helper顶层明确skip，父测试运行才算覆盖。旧EOF诊断补上真实child exit/scanner error。
+- build/vet和受影响离线31 pass/0fail/1可选runtime skip，Windows相关build/vet和三个测试程序交叉编译通过；均不替代Windows运行，原生重跑待结果。
+
+### R12-C01 · 待核实 · WGC自建窗口CreateForWindow失败
+
+- 已知interop GUID及IUnknown方法槽与SDK一致，原fixture为160×120可见WS_POPUP/WS_EX_NOACTIVATE/WS_EX_TOOLWINDOW。当前仅确认CI失败，尚未确认产品bug或宿主能力限制。独立desktop组检查标准窗口资格与真实session/桌面证据，必要时准备安全的自建窗口对照。
+- 已准备仅test文件的失败后诊断：process session、station可见面、fixture desktop input、HWND可见/尺寸/style/cloak/affinity、manifest敏感的DWM值和IsSupported；失败后原HWND晚时点item与非tool标准顶层窗口item对照。原错误仍硬失败，控制成功不顶替lifetime通过；无输入、激活、窗口枚举或策略修改。Windows交叉build/vet和Linux desktop包通过，原生诊断尚未执行。
+- 所需环境：Windows原生runner及测试自建窗口，无用户游戏或外部PID。最小步骤为记录session/桌面能力，分别对fixture及正常顶层窗口建item并采帧；预期能在可支持环境完成10轮生命周期且delegate归零，不能支持则保留明确宿主证据。当前失败记录如上，复验结果留空。
+
+
+R12修正/诊断树904文件冻结aggregate `bd962ee611d60876f16d05daaefee5e3cd91b325663a186dc164d0494fffd210`，parentebde90ed；完整指定Lua必需Go套件已启动，另由全新R13审计者独立核验实际scope/cleanup/ABI/证据合同。诊断未运行前不把R12-C01定为环境限制，复审未完成不预填通过。

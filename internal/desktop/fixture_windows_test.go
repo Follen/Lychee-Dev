@@ -95,6 +95,11 @@ var (
 
 func openFixtureWindow(t *testing.T, picture image.Image) *fixtureWindow {
 	t.Helper()
+	return openFixtureWindowWithStyle(t, picture, 0x80000000, 0x08000080) // WS_POPUP; WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+}
+
+func openFixtureWindowWithStyle(t *testing.T, picture image.Image, style, extendedStyle uint32) *fixtureWindow {
+	t.Helper()
 	f := &fixtureWindow{done: make(chan struct{}), packets: make(chan inputPacket, 512), width: picture.Bounds().Dx(), height: picture.Bounds().Dy()}
 	f.pixels = make([]byte, f.width*f.height*4)
 	for y := 0; y < f.height; y++ {
@@ -126,7 +131,7 @@ func openFixtureWindow(t *testing.T, picture image.Image) *fixtureWindow {
 			return
 		}
 		defer userLibrary.NewProc("UnregisterClassW").Call(uintptr(unsafe.Pointer(name)), module)
-		hwnd, _, err := userLibrary.NewProc("CreateWindowExW").Call(0x08000080, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(name)), 0x80000000, 30, 30, uintptr(f.width), uintptr(f.height), 0, 0, module, 0)
+		hwnd, _, err := userLibrary.NewProc("CreateWindowExW").Call(uintptr(extendedStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(name)), uintptr(style), 30, 30, uintptr(f.width), uintptr(f.height), 0, 0, module, 0)
 		if hwnd == 0 {
 			ready <- err
 			return

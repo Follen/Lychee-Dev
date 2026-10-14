@@ -23,6 +23,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/luals"
 	"github.com/follenfang/lycheedev/internal/selection"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"golang.org/x/sys/windows"
 )
@@ -165,6 +166,16 @@ func TestRealBrokerCloseWaitsForProcessCleanup(t *testing.T) {
 
 func testBrokerRetirementBarrier(t *testing.T, release, mode string) {
 	home, snapshot, pin := brokerRetirementFixture(t)
+	testkit.SerializeSourceBroker(t, home)
+	t.Cleanup(func() {
+		// The controlled child is joined first by its later cleanup. Also close
+		// any detached broker opened by the subsequent uncached queries.
+		cleanup, stop := context.WithTimeout(context.Background(), 45*time.Second)
+		defer stop()
+		if err := retireSourceBroker(cleanup, home, release); err != nil {
+			t.Errorf("close real broker during cleanup: %v", err)
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	started, _, err := luals.BrokerProcessIdentity(uint32(os.Getpid()))
@@ -188,17 +199,22 @@ func testBrokerRetirementBarrier(t *testing.T, release, mode string) {
 	}
 	t.Cleanup(func() { input.Close(); _ = child.Process.Kill(); _ = child.Wait() })
 	events := make(chan string, 8)
+	scanned := make(chan error, 1)
 	go func() {
 		scanner := bufio.NewScanner(output)
 		for scanner.Scan() {
 			events <- scanner.Text()
 		}
+		scanned <- scanner.Err()
 		close(events)
 	}()
 	wait := func(want string) {
 		t.Helper()
 		select {
-		case got := <-events:
+		case got, ok := <-events:
+			if !ok {
+				t.Fatalf("broker output ended before %q: exit=%v scan=%v", want, child.Wait(), <-scanned)
+			}
 			if got != want {
 				t.Fatalf("event=%q want=%q", got, want)
 			}

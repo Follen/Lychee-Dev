@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/follenfang/lycheedev/internal/selection"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"github.com/follenfang/lycheedev/internal/vault"
 	"os"
 	"os/exec"
@@ -19,9 +20,20 @@ func TestRealBrokerAcrossCLIProcesses(t *testing.T) {
 	if binary == "" || release == "" {
 		t.Skip("compiled CLI and verified release not selected")
 	}
+	b, seed := sourceFixture(t)
+	testkit.SerializeSourceBroker(t, b.store.Root())
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	b, seed := sourceFixture(t)
+	t.Cleanup(func() {
+		// Test failure may exhaust ctx; still retire our session before the
+		// shared gate is released to another package's integration.
+		cleanup, stop := context.WithTimeout(context.Background(), 45*time.Second)
+		defer stop()
+		command := exec.CommandContext(cleanup, binary, "source", "session", "close", "--home", b.store.Root(), "--release", release, "--format=json")
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Errorf("close real broker during cleanup: %v: %s", err, output)
+		}
+	})
 	docs := `local API={Name="Fixture",Type="System",Functions={{Name="FixtureAPI",Type="Function",Returns={{Name="v",Type="number"}}}}};APIDocumentation:AddDocumentationTable(API)`
 	pin := testCommit(t, b, seed, map[string]string{"Interface/AddOns/Blizzard_APIDocumentationGenerated/Fixture.lua": docs, "probe.lua": "function First()\n return FixtureAPI()\nend\nfunction Second()\n return FixtureAPI()\nend\nfunction Third()\n return First()\nend\n"}, "broker fixed source")
 	_, err := b.IndexSource(ctx, pin)
@@ -55,7 +67,6 @@ func TestRealBrokerAcrossCLIProcesses(t *testing.T) {
 		}
 		return result
 	}
-	defer func() { call("source", "session", "close") }()
 	status := call("source", "session", "status")
 	if status["state"] != "closed" {
 		t.Fatalf("status created broker: %v", status)

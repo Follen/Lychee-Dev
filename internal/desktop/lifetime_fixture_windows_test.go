@@ -6,6 +6,7 @@ import (
 	"context"
 	"image"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,15 @@ func TestWGCLifetimeBetweenSessions(t *testing.T) {
 		t.Skip("requires an interactive desktop for native WGC")
 	}
 	f := openFixtureWindow(t, image.NewNRGBA(image.Rect(0, 0, 160, 120)))
+	// Observe capability after the attempt so diagnostics cannot mask a
+	// capture-startup race. A failed native operation still fails this test.
+	var captureItemFailed bool
+	defer func() {
+		logWGCHostDiagnostics(t, f.identity)
+		if captureItemFailed {
+			logWGCCaptureItemControls(t, f.identity)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	module, err := windows.UTF16PtrFromString("GraphicsCapture.dll")
@@ -26,6 +36,7 @@ func TestWGCLifetimeBetweenSessions(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		stream, err := CaptureFrames(ctx, f.identity, image.Rectangle{})
 		if err != nil {
+			captureItemFailed = strings.HasPrefix(err.Error(), "desktop.create_capture_item:")
 			t.Fatal(err)
 		}
 		frame, err := stream.Next(ctx)
