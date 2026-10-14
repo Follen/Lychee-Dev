@@ -38,6 +38,37 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
     }
     let scope = BrokerScope::for_native_source(home).unwrap();
     let mut observations = Vec::new();
+    // Rejected envelopes must close only their connection. They cannot clear a
+    // valid retained snapshot or replace the process that authenticated Hello.
+    let status = |scope: &BrokerScope| {
+        let mut stream = BrokerStream::connect(scope, Instant::now() + Duration::from_secs(2), Arc::new(AtomicBool::new(false))).unwrap();
+        let hello = read_frame(&mut stream);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        write_frame(&mut stream, &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+2_000,"action":"status","work":null}));
+        (hello, read_frame(&mut stream))
+    };
+    let (retained_hello, retained_status) = status(&scope);
+    assert_eq!(retained_status["value"]["state"], "ready");
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let invalid_envelopes = [
+        ("zero_deadline", json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":0,"action":"status","work":null})),
+        ("oversized_deadline", json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":u64::MAX,"action":"status","work":null})),
+        ("unknown_field", json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+30_000,"action":"status","work":null,"unknown_field":true})),
+    ];
+    for (case, envelope) in invalid_envelopes {
+        let mut rejected = BrokerStream::connect(&scope, Instant::now() + Duration::from_secs(2), Arc::new(AtomicBool::new(false))).unwrap();
+        let hello = read_frame(&mut rejected);
+        assert_eq!(hello["pid"], retained_hello["pid"]);
+        assert_eq!(hello["created"], retained_hello["created"]);
+        write_frame(&mut rejected, &envelope);
+        assert_eq!(rejected.read(&mut [0u8; 1]).unwrap(), 0, "invalid envelope must be rejected before admission: {case}");
+        drop(rejected);
+        let (after_hello, after_status) = status(&scope);
+        assert_eq!(after_hello["pid"], retained_hello["pid"]);
+        assert_eq!(after_hello["created"], retained_hello["created"]);
+        assert_eq!(after_status, retained_status);
+        observations.push(json!({"event":"native_session_rejected_envelope","case":case,"request":envelope,"status":after_status}));
+    }
     for (cancel, code, exit) in [
         (true, "command.cancelled", 7),
         (false, "command.deadline", 5),

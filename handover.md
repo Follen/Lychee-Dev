@@ -310,6 +310,12 @@ Delivery两处安装/更新门槛改正式SlotRuntime，保留release清单/hash
 
 候选包装只复用与当前sourceDigest完全相同的sealed EXE，换luac pin后必须重新编译。assembly-only仍生成受控许可证闭包，但不会将装配称Source/session通过；后续须先独立核双重建证据，再提交新pin、重编产品并执行完整语义/持久会话验收。
 
+### Native session wire 准入与非法顶层字段拒绝
+
+已按固定Go对请求wire期限作有界准入：客户端不发超过90秒的wire期限，服务端拒绝0和超过90秒上界；合法非零但已过期请求保留缓存并按既有admitted规则重置idle。解码失败、wire不符、越界期限及未知顶层字段仅退当前handler，不清缓存或刷新原绝对idle。新增边界/严格解码单测及真实连接EOF后同PID/创建时间/完整缓存状态fixture，独立两次复核关闭未知字段遗漏。
+
+本批仅wire准入，exchange仍受原调用期限（可180秒）约束，不宣称端到端硬90秒或全部Go非法帧都已覆盖。60s实际idle、真实连接fixture、256 semantic batch退休与完整Go状态仍各自待验；Rust运行NOT_RUN，已有生命周期CI组将跑新增单测，完整真实session待重建候选包。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

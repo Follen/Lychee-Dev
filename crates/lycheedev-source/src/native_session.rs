@@ -30,6 +30,23 @@ const RESPONSE_BYTES: usize = 32 << 20;
 const REPLY_RESERVE: Duration = Duration::from_millis(500);
 const OWNER_IDLE: Duration = Duration::from_secs(60);
 const OWNER_LIFETIME: Duration = Duration::from_secs(600);
+const REQUEST_LIMIT: Duration = Duration::from_secs(90);
+
+fn request_wire_deadline(now_unix_ms: u64, remaining: Duration) -> u64 {
+    now_unix_ms.saturating_add(remaining.min(REQUEST_LIMIT).as_millis() as u64)
+}
+
+/// Invalid envelopes are not admitted work and must neither retire the retained
+/// analysis nor restart the owner's idle timer. Expired nonzero deadlines are
+/// valid envelopes, matching Go's admission followed by caller cancellation.
+fn admitted_request_remaining(deadline_unix_ms: u64, now_unix_ms: u64) -> Option<Duration> {
+    if deadline_unix_ms == 0
+        || deadline_unix_ms > now_unix_ms.saturating_add(REQUEST_LIMIT.as_millis() as u64)
+    {
+        return None;
+    }
+    Some(Duration::from_millis(deadline_unix_ms.saturating_sub(now_unix_ms)))
+}
 
 /// The idle interval starts after a request finishes. Active work suspends idle,
 /// but neither work nor status may extend the fixed owner lifetime.
@@ -96,6 +113,7 @@ enum Action {
     Query,
 }
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Request {
     wire: String,
     deadline_unix_ms: u64,
@@ -220,7 +238,7 @@ fn request(inv: &Invocation, action: Action, work: Option<WorkerRequest>) -> Res
     let remaining = inv.control.remaining()?;
     Ok(Request {
         wire: WIRE.into(),
-        deadline_unix_ms: utc_ms()?.saturating_add(remaining.as_millis() as u64),
+        deadline_unix_ms: request_wire_deadline(utc_ms()?, remaining),
         action,
         work,
         cached: None,
@@ -517,11 +535,11 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
     let mut listener = BrokerListener::bind(&scope).map_err(platform)?;
     let mut cached: Option<Cached> = None;
     let run = (|| -> Result<()> {
+        let mut idle_deadline = lifetime.idle_deadline(Instant::now());
         loop {
-            // Starting this wait after the response resets idle without charging
-            // active request time. The fixed owner deadline is never reset.
+            // Only an admitted request may restart idle. Failed handshakes and
+            // malformed envelopes retain this absolute idle boundary.
             owner_control.check()?;
-            let idle_deadline = lifetime.idle_deadline(Instant::now());
             let mut stream = match listener.accept(
                 idle_deadline,
                 owner_control.token(),
@@ -534,7 +552,7 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                 lifetime.handshake_deadline(Instant::now(), idle_deadline),
                 owner_control.cancel_handle(),
             );
-            write_frame(
+            if write_frame(
                 &mut stream,
                 &Hello {
                     wire: WIRE.into(),
@@ -543,14 +561,27 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                     created: own.identity().created,
                 },
                 4096,
-            )?;
-            let request: Request = read_frame(&mut stream, REQUEST_BYTES)?;
-            if request.wire != WIRE {
-                return Err(fault("Invalid native Source session protocol"));
+            ).is_err() {
+                continue;
             }
-            let remaining = request.deadline_unix_ms.saturating_sub(utc_ms()?);
+            let request: Request = match read_frame(&mut stream, REQUEST_BYTES) {
+                Ok(request) => request,
+                Err(_) => continue,
+            };
+            if request.wire != WIRE {
+                continue;
+            }
+            let Some(remaining) = admitted_request_remaining(request.deadline_unix_ms, utc_ms()?) else {
+                continue;
+            };
+            if remaining.is_zero() {
+                // Go dequeues an already-cancelled task without touching its
+                // worker, then resets idle. Its expired transport cannot reply.
+                idle_deadline = lifetime.idle_deadline(Instant::now());
+                continue;
+            }
             let total_deadline = Instant::now()
-                .checked_add(Duration::from_millis(remaining))
+                .checked_add(remaining)
                 .ok_or_else(|| fault("Native request deadline range"))?;
             let total_deadline = lifetime.request_deadline(total_deadline);
             let response_control =
@@ -689,6 +720,8 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                     write_frame(&mut stream, &response, RESPONSE_BYTES)?;
                 }
             }
+            // Active work suspends idle, but cannot extend owner lifetime.
+            idle_deadline = lifetime.idle_deadline(Instant::now());
         }
     })();
     // Retire analysis before releasing the process ownership boundary on every
@@ -701,6 +734,31 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_request_field_is_rejected_by_production_frame_reader() {
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &json!({
+            "wire":WIRE, "deadline_unix_ms":1_000, "action":"status",
+            "work":null, "unknown_field":true,
+        }), REQUEST_BYTES).unwrap();
+        // Rejection occurs before admission and hence before the only admitted
+        // request path that resets idle or touches cached analysis.
+        let error = read_frame::<Request>(&mut std::io::Cursor::new(wire), REQUEST_BYTES)
+            .err().expect("unknown envelope field must not be admitted");
+        assert!(error.message.contains("unknown field"));
+    }
+
+    #[test]
+    fn wire_request_budget_is_bounded_without_extending_shorter_callers() {
+        assert_eq!(request_wire_deadline(1_000, Duration::from_secs(180)), 91_000);
+        assert_eq!(request_wire_deadline(1_000, Duration::from_millis(250)), 1_250);
+        assert_eq!(admitted_request_remaining(91_000, 1_000), Some(REQUEST_LIMIT));
+        assert_eq!(admitted_request_remaining(91_001, 1_000), None);
+        assert_eq!(admitted_request_remaining(u64::MAX, 1_000), None);
+        assert_eq!(admitted_request_remaining(0, 1_000), None);
+        assert_eq!(admitted_request_remaining(999, 1_000), Some(Duration::ZERO));
+    }
 
     #[test]
     fn idle_restarts_after_work_but_owner_lifetime_does_not() {
