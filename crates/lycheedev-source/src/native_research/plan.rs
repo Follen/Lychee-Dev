@@ -92,9 +92,69 @@ impl ResearchPlan {
         }
         Ok(())
     }
+    pub(crate) fn execution_identity(&self)->(String,Arc<()>) {(digest(self),self.owner.clone())}
+    pub(crate) fn validate_execution_identity(&self,identity:&str,owner:&Arc<()>)->Result<()> {
+        if identity!=digest(self)||!Arc::ptr_eq(owner,&self.owner){return Err(ToolkitError::new("source.native_plan_identity","completion belongs to another semantic plan or request",4));}Ok(())
+    }
+    pub(crate) fn operations(&self)->&[LogicalOperation] { &self.operations }
+    pub(crate) fn batch_count(&self)->usize { self.batch_sizes.len() }
+    pub(crate) fn incomplete(&self)->bool { !self.unavailable.is_empty() }
     pub(crate) fn evidence(&self) -> Value {
         // Do not present a planned operation count as executed semantic work.
         serde_json::json!({"state":"planned_not_executed", "plan":self})
+    }
+}
+
+/// Completion is issued only after every planned operation has an answer for
+/// every successfully selected scope, with no failed/unexecuted scope hidden.
+#[derive(Debug,Serialize)]
+pub(crate) struct ExecutionReceipt {
+    pub(super) planned_batches:usize,
+    pub(super) completed_batches:usize,
+    pub(super) scopes:usize,
+    pub(super) unavailable_scopes:usize,
+    pub(super) uncertain_answers:usize,
+    pub(super) unexecuted_operations:usize,
+    pub(super) plan_identity:String,
+}
+pub(crate) struct ResearchExecution<'a> {
+    plan:&'a ResearchPlan, completed:Vec<bool>, unexecuted_operations:usize,
+    answers:Vec<Value>, scopes:usize, unavailable_scopes:usize, uncertain_answers:usize, evidence_bytes:usize,
+}
+impl<'a> ResearchExecution<'a> {
+    pub(crate) fn new(plan:&'a ResearchPlan)->Self {Self{plan,completed:vec![true;plan.batch_count()],unexecuted_operations:0,answers:Vec::new(),scopes:0,unavailable_scopes:0,uncertain_answers:0,evidence_bytes:0}}
+    pub(crate) fn scope(&mut self,scope:Value,completion:crate::native::ResearchScopeCompletion)->Result<()> {
+        let (answers,performed)=completion.consume(self.plan)?;
+        // Match the existing worker output ceiling without allocating a second
+        // serialization of all scope answers while their JSON trees are live.
+        struct Counter(usize);
+        impl std::io::Write for Counter {
+            fn write(&mut self,bytes:&[u8])->std::io::Result<usize>{
+                self.0=self.0.checked_add(bytes.len()).filter(|size|*size<=32*1024*1024)
+                    .ok_or_else(||std::io::Error::other("semantic execution evidence exceeds output budget"))?;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self)->std::io::Result<()>{Ok(())}
+        }
+        let mut bytes=Counter(self.evidence_bytes);
+        serde_json::to_writer(&mut bytes,&scope).and_then(|_|serde_json::to_writer(&mut bytes,&answers))
+            .map_err(|_|ToolkitError::new("source.native_output_budget","semantic execution evidence exceeds output budget",3))?;
+        self.evidence_bytes=bytes.0;
+        for (index,batch) in performed.chunks(BATCH_QUERIES).enumerate(){self.completed[index]&=batch.iter().all(|done|*done);}
+        self.unexecuted_operations+=performed.iter().filter(|done|!**done).count();
+        self.uncertain_answers+=answers.iter().filter(|answer|answer["state"]!="known"&&answer["state"]!="known_declaration").count();
+        self.scopes+=1;
+        self.answers.push(serde_json::json!({"scope":scope,"operations":answers}));
+        Ok(())
+    }
+    pub(crate) fn unavailable_scope(&mut self,reason:Value) {
+        self.unavailable_scopes+=1;
+        self.answers.push(serde_json::json!({"scope":reason,"state":"unavailable","operationsExecuted":false}));
+    }
+    pub(crate) fn finish(self)->(Value,ExecutionReceipt) {
+        let completed=if self.scopes>0&&self.unavailable_scopes==0 {self.completed.iter().filter(|done|**done).count()} else {0};
+        let receipt=ExecutionReceipt{planned_batches:self.plan.batch_count(),completed_batches:completed,scopes:self.scopes,unavailable_scopes:self.unavailable_scopes,uncertain_answers:self.uncertain_answers,unexecuted_operations:self.unexecuted_operations,plan_identity:digest(self.plan)};
+        (serde_json::json!({"schema":"lycheedev.native-semantic-execution.v1","receipt":receipt,"answers":self.answers}),receipt)
     }
 }
 
@@ -198,6 +258,14 @@ mod tests {
         assert!(matches!(plan.operations[0], LogicalOperation::References(_)));
         assert!(matches!(plan.operations[1], LogicalOperation::Type(_)));
         plan.validate("source", &"both", &owner).unwrap();
+    }
+    #[test]
+    fn execution_receipt_without_a_native_completion_cannot_credit_work() {
+        let mut plan=ResearchPlan::new("source",&"both",Arc::new(()));
+        plan.incoming(site(0));for n in 1..=128{plan.definition(site(n));}let plan=plan.finish();
+        let (_,receipt)=ResearchExecution::new(&plan).finish();assert_eq!(receipt.completed_batches,0);assert_eq!(receipt.planned_batches,2);
+        let mut execution=ResearchExecution::new(&plan);execution.unavailable_scope(serde_json::json!({"reason":"graph_budget"}));
+        let (evidence,receipt)=execution.finish();assert_eq!(receipt.completed_batches,0);assert_eq!(receipt.unavailable_scopes,1);assert_eq!(evidence["answers"][0]["operationsExecuted"],false);
     }
     #[test]
     fn zero_work_and_outgoing_limit_are_explicit() {

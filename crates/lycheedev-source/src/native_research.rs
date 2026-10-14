@@ -9,7 +9,7 @@ use std::{collections::BTreeMap,path::PathBuf};
 pub(crate) mod plan;
 mod xml;
 pub(crate) use xml::XmlResearch;
-pub const RESEARCH_RULES:&str="source-native-research-v4-independent-environment-plan";
+pub const RESEARCH_RULES:&str="source-native-research-v5-executed-logical-operations";
 #[derive(Clone,Serialize,Deserialize)]
 pub struct LoadEvidence { pub manifest:String,pub ordered:Vec<String>,pub issues:Vec<Value> }
 #[derive(Clone,Serialize,Deserialize)]
@@ -42,6 +42,9 @@ struct ResearchMetadata {
     load_plans:Vec<LoadEvidence>,input_gaps:Vec<Value>,api_definitions:Option<plan::VerifiedApiDefinitions>,
 }
 pub struct ResearchSession {snapshot:ResearchMetadata,prepared:PreparedSnapshot,xml:XmlResearch}
+pub(crate) struct ResearchRequestPlan {query:QueryRequest,semantic_plan:plan::ResearchPlan,planning_steps:usize}
+impl ResearchRequestPlan {pub(crate) fn batch_count(&self)->usize{self.semantic_plan.batch_count()}}
+pub(crate) struct ExecutedResearch {pub(crate) value:Value,pub(crate) receipt:plan::ExecutionReceipt}
 impl ResearchSession {
     pub fn prepare(snapshot:SnapshotRequest,control:&OperationControl)->Result<Self> {
         Self::prepare_observed(snapshot,control,|_|{})
@@ -68,12 +71,21 @@ impl ResearchSession {
         self.query_observed(query,control,|_|{})
     }
     pub fn query_observed(&mut self,query:QueryRequest,control:&OperationControl,mut observer:impl FnMut(&'static str))->Result<Value> {
+        let planned=self.plan_query(query,control)?;
+        observer("query_inputs_renewed");observer("query_operations_planned");
+        self.execute_planned_observed(planned,control,observer).map(|executed|executed.value)
+    }
+    pub(crate) fn plan_query(&mut self,query:QueryRequest,control:&OperationControl)->Result<ResearchRequestPlan> {
         self.prepared.begin_research_request(control)?;
-        observer("query_inputs_renewed");
         if !["incoming","outgoing","both"].contains(&query.direction.as_str()){return Err(ToolkitError::arguments("invalid native relation direction"));}
         let semantic_plan=self.prepared.plan_research_operations(&query,&self.xml,self.snapshot.api_definitions.as_ref())?;
         let planning_steps=self.prepared.research_steps();
-        observer("query_operations_planned");
+        Ok(ResearchRequestPlan{query,semantic_plan,planning_steps})
+    }
+    pub(crate) fn execute_planned_observed(&mut self,planned:ResearchRequestPlan,control:&OperationControl,mut observer:impl FnMut(&'static str))->Result<ExecutedResearch> {
+        let ResearchRequestPlan{query,semantic_plan,planning_steps}=planned;
+        control.check()?;self.prepared.validate_research_plan(&semantic_plan,&query)?;
+        let mut execution=plan::ResearchExecution::new(&semantic_plan);
         let programs=self.xml.programs.iter().filter(|program|program.documents.contains_key(&query.symbol.path)).collect::<Vec<_>>();
         let mut gaps=self.snapshot.input_gaps.clone();gaps.extend(self.xml.gaps.clone());
         for plan in &self.snapshot.load_plans{if plan.ordered.contains(&query.symbol.path)||programs.iter().any(|program|program.manifest==plan.manifest){for issue in &plan.issues{let mut issue=issue.clone();issue["manifest"]=json!(plan.manifest);gaps.push(issue);}}}
@@ -84,7 +96,7 @@ impl ResearchSession {
 
             observer("query_build_scope");
             let graph=match self.prepared.build_xml_plan("source-research-load",(*program).clone(),None,control){
-                Ok(graph)=>graph,Err(error)=>{control.check()?;gaps.push(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));continue;}
+                Ok(graph)=>graph,Err(error)=>{control.check()?;execution.unavailable_scope(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));gaps.push(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));continue;}
             };
             observer("query_scope_built");
             let mut requests=Vec::new();
@@ -112,8 +124,11 @@ impl ResearchSession {
             let requests=if requests.is_empty(){vec![None]}else{requests.into_iter().map(Some).collect()};
             for request in requests {
                 let graph=if let Some(request)=request{observer("query_build_entry");match self.prepared.build_xml_plan("source-research-entry",(*program).clone(),Some(request),control){
-                    Ok(graph)=>graph,Err(error)=>{control.check()?;gaps.push(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));continue;}
+                    Ok(graph)=>graph,Err(error)=>{control.check()?;execution.unavailable_scope(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));gaps.push(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));continue;}
                 }}else{loaded.take().expect("load-only graph")};
+                observer("query_execute_operations");
+                let answers=self.prepared.execute_research_operations(&semantic_plan,&query,Some(&graph),&self.xml,&self.snapshot.api)?;
+                execution.scope(json!({"manifest":program.manifest,"snapshot":graph.snapshot_key}),answers)?;
                 observer("query_project");
                 let mut result=self.prepared.research_relations(&query.symbol,&query.direction,Some(&graph),&self.xml)?;
                 observer("query_projected");
@@ -128,6 +143,9 @@ impl ResearchSession {
         }
         if programs.is_empty(){
             gaps.push(json!({"code":"load_order_unknown","detail":"no TOC/XML program contains the selected declaration"}));
+            observer("query_execute_operations");
+            let answers=self.prepared.execute_research_operations(&semantic_plan,&query,None,&self.xml,&self.snapshot.api)?;
+            execution.scope(json!({"kind":"unknown_load_order"}),answers)?;
             observer("query_project");
             let mut result=self.prepared.research_relations(&query.symbol,&query.direction,None,&self.xml)?;
             observer("query_projected");
@@ -159,10 +177,14 @@ impl ResearchSession {
         output["analysis"]["cacheHit"]=json!(false);
         if has_gaps{output["analysis"]["state"]=json!("partial");}
         self.prepared.validate_research_plan(&semantic_plan,&query)?;
+        let (execution_evidence,receipt)=execution.finish();
+        if semantic_plan.incomplete()||receipt.unavailable_scopes>0||receipt.uncertain_answers>0||receipt.unexecuted_operations>0 {output["analysis"]["state"]=json!("partial");}
         output["semanticPlan"]=semantic_plan.evidence();
-        output["semanticPlan"]["resourceAccounting"]=json!({"planningSteps":planning_steps,"totalSharedSteps":self.prepared.research_steps(),"budgetReset":"once_before_planning","executedSemanticBatches":null});
+        output["semanticPlan"]["state"]=json!(if receipt.unavailable_scopes>0||receipt.unexecuted_operations>0{"execution_incomplete"}else{"executed"});
+        output["semanticPlan"]["resourceAccounting"]=json!({"planningSteps":planning_steps,"totalSharedSteps":self.prepared.research_steps(),"budgetReset":"once_before_planning","executedSemanticBatches":receipt.completed_batches});
+        output["semanticExecution"]=execution_evidence;
         observer("query_reply_assembled");
-        Ok(output)
+        Ok(ExecutedResearch{value:output,receipt})
     }
 }
 
@@ -375,6 +397,17 @@ mod projection_tests {
         assert_eq!(evidence["plan"]["operations"][0]["target"]["file_sha256"],definitions_sha);
         assert_eq!(evidence["plan"]["operations"][0]["target"]["material"]["mapping"]["callable"],"C_Timer.After");
         assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty());
+        // Even with an actual execution graph, declaration metadata alone is
+        // not a native Type operation and cannot complete this semantic batch.
+        // Clone the admitted request control; do not refresh its deadline or budget.
+        let control=session.prepared.operation_control().clone();
+        let program=crate::xml_load::Program::from_sources("Main.toc",[("Main.toc",b"addon.lua\n".as_slice()),("addon.lua",session.prepared.inputs().original("addon.lua").unwrap().as_bytes())],&control).unwrap();
+        let graph=session.prepared.build_xml_plan("api-metadata-credit",std::sync::Arc::new(program),None,&control).unwrap();
+        let plan=session.prepared.plan_research_operations(&query,&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
+        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&graph),&session.xml,&session.snapshot.api).unwrap();
+        let mut execution=plan::ResearchExecution::new(&plan);execution.scope(json!({"kind":"actual_graph"}),completion).unwrap();
+        let (evidence,receipt)=execution.finish();assert_eq!(receipt.completed_batches,0);assert_eq!(receipt.unexecuted_operations,1);
+        assert_eq!(evidence["answers"][0]["operations"][1]["state"],"known_declaration");assert_eq!(evidence["answers"][0]["operations"][1]["executed"],false);
     }
 
     #[test]
@@ -386,22 +419,94 @@ mod projection_tests {
             ("Objects.xml".into(),"<Ui>\n<Frame name=\"Actual\" inherits=\"Template\"/>\n</Ui>".into()),
         ]);
         let session=ResearchSession::prepare(SnapshotRequest{
-            files:BTreeMap::new(),load_documents:documents,environment_documents:BTreeMap::new(),source:json!({"repository":"xml-plan-test","product":"retail"}),
+            files:BTreeMap::new(),load_documents:documents.clone(),environment_documents:BTreeMap::new(),source:json!({"repository":"xml-plan-test","product":"retail"}),
             luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
             api:vec![],environment_manifest:None,
             load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
-        for (name,path,end_line) in [("Actual","Objects.xml",2),("Template","Templates.xml",6)] {
-            let query=planned_query(name,path,2,end_line,"xml-frame","outgoing");
+        for (name,path) in [("Actual","Objects.xml"),("Template","Templates.xml")] {
+            // Use the real index scanner: XML objects currently carry only the
+            // opening tag line, including virtual templates.
+            let raw=&documents[path];
+            let facts=crate::facts::xml(raw.as_bytes());
+            let declaration=facts.declarations.iter().find(|item|item.name==name).unwrap();
+            assert_eq!(declaration.line,declaration.end_line);
+            let query=planned_query(name,path,declaration.line,declaration.end_line,&declaration.category,"outgoing");
             let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
             let operations=evidence["plan"]["operations"].as_array().unwrap();
             assert_eq!(operations.len(),1,"{name}: {evidence}");
             assert_eq!(operations[0]["kind"],"definition");
             assert_eq!(operations[0]["target"]["position"]["path"],"Templates.xml");
-            assert_eq!(operations[0]["target"]["position"]["coveringRange"]["start"]["line"],4);
+            assert_eq!(operations[0]["target"]["position"]["coveringRange"]["start"]["line"],3);
             let site=&operations[0]["target"]["site"];
             let original=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
             assert_eq!(&original[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Target");
         }
+    }
+
+    #[test]
+    fn virtual_template_plan_excludes_named_and_unnamed_child_object_handlers() {
+        for child_name in [" name=\"B\"",""] {
+            let xml=format!("<Ui>\n<Frame name=\"A\" virtual=\"true\">\n<Scripts><OnLoad>Own()</OnLoad></Scripts>\n<Frames><Frame{child_name}><Scripts><OnLoad>Child()</OnLoad></Scripts></Frame></Frames>\n</Frame>\n</Ui>");
+            let facts=crate::facts::xml(xml.as_bytes());let declaration=facts.declarations.iter().find(|item|item.name=="A").unwrap();
+            let query=planned_query("A","Templates.xml",declaration.line,declaration.end_line,&declaration.category,"outgoing");
+            let control=OperationControl::default();
+            let session=ResearchSession::prepare(SnapshotRequest{
+                files:BTreeMap::new(),load_documents:BTreeMap::from([("Main.toc".into(),"Templates.xml\n".into()),("Templates.xml".into(),xml)]),environment_documents:BTreeMap::new(),source:json!({"repository":"xml-child-test","product":"retail"}),
+                luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+                api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+            let evidence=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap().evidence();
+            let operations=evidence["plan"]["operations"].as_array().unwrap();assert_eq!(operations.len(),1,"{evidence}");
+            let site=&operations[0]["target"]["site"];let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
+            assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Own");
+        }
+    }
+
+    #[test]
+    fn xml_named_function_plan_uses_actual_index_ranges_and_excludes_nested_calls() {
+        let xml="<Ui>\n<Script>\nfunction Named()\n local function Inner() Hidden() end\n Target()\nend\n</Script>\n</Ui>";
+        let facts=crate::facts::xml(xml.as_bytes());
+        let declaration=facts.declarations.iter().find(|item|item.name=="Named").unwrap();
+        assert_eq!(declaration.category,"function");
+        let query=planned_query("Named","Logic.xml",declaration.line,declaration.end_line,&declaration.category,"both");
+        let control=OperationControl::default();
+        let session=ResearchSession::prepare(SnapshotRequest{
+            files:BTreeMap::new(),load_documents:BTreeMap::from([("Main.toc".into(),"Logic.xml\n".into()),("Logic.xml".into(),xml.into())]),environment_documents:BTreeMap::new(),source:json!({"repository":"xml-named-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+        let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
+        let evidence=plan.evidence();
+        assert_eq!(evidence["plan"]["batch_sizes"],json!([3]),"{evidence}");
+        assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"{evidence}");
+        let operations=evidence["plan"]["operations"].as_array().unwrap();
+        assert_eq!(operations[0]["kind"],"references");assert_eq!(operations[1]["kind"],"type");assert_eq!(operations[2]["kind"],"definition");
+        let site:&Value=&operations[2]["target"]["site"];
+        let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
+        assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Target");
+        assert_eq!(operations[2]["target"]["position"]["coveringRange"]["start"]["line"],4);
+    }
+
+    #[test]
+    fn static_fallback_answers_do_not_issue_execution_credit() {
+        let control=OperationControl::default();
+        let mut session=planner_fixture(BTreeMap::from([("logic.lua".into(),"function Caller()\n Missing()\nend\n".into())]),BTreeMap::new(),None);
+        let planned=session.plan_query(planned_query("Caller","logic.lua",1,3,"function","both"),&control).unwrap();
+        assert_eq!(planned.batch_count(),1);
+        let executed=session.execute_planned_observed(planned,&control,|_|{}).unwrap();
+        assert_eq!(executed.receipt.completed_batches,0);
+        assert_eq!(executed.receipt.unexecuted_operations,3);
+        assert!(executed.receipt.uncertain_answers>0);
+        let answers=executed.value["semanticExecution"]["answers"][0]["operations"].as_array().unwrap();
+        assert_eq!(answers.len(),3);
+        assert!(answers[0]["result"]["relationsSHA256"].as_str().is_some_and(|hash|hash.len()==64));
+        assert_eq!(answers[1]["state"],"unavailable");
+        assert_eq!(answers[2]["kind"],"definition");
+        assert_ne!(answers[2]["state"],"known");
+        assert_eq!(executed.value["analysis"]["state"],"partial");
+        assert_eq!(executed.value["semanticPlan"]["resourceAccounting"]["executedSemanticBatches"],0);
+        assert_eq!(executed.value["semanticPlan"]["state"],"execution_incomplete");
+        let stale=session.plan_query(planned_query("Caller","logic.lua",1,3,"function","outgoing"),&control).unwrap();
+        let _new=session.plan_query(planned_query("Caller","logic.lua",1,3,"function","incoming"),&control).unwrap();
+        assert_eq!(session.execute_planned_observed(stale,&control,|_|{}).err().unwrap().code,"source.native_plan_identity");
     }
 
     #[test]
@@ -460,6 +565,15 @@ mod projection_tests {
         let _graph=session.prepared.build_xml_plan("planned-budget",session.xml.programs[0].clone(),None,&control).unwrap();
         assert!(session.prepared.research_steps()>planned_steps,"graph construction must retain planning charges");
         session.prepared.validate_research_plan(&plan,&query).unwrap();
+        let answers=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,&session.snapshot.api).unwrap();
+        let (answers,performed)=answers.consume(&plan).unwrap();
+        assert!(performed.iter().all(|done|*done));
+        assert_eq!(answers.len(),130);
+        assert_eq!(answers[127]["batch"],0);assert_eq!(answers[128]["batch"],1);assert_eq!(answers[129]["batch"],1);
+        assert_eq!(answers[129]["kind"],"definition");assert!(answers[129]["result"]["site"].is_object());
+        let completion=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,&session.snapshot.api).unwrap();
+        let mut execution=plan::ResearchExecution::new(&plan);execution.scope(json!({"snapshot":_graph.snapshot_key}),completion).unwrap();
+        let (_,receipt)=execution.finish();assert_eq!(receipt.completed_batches,2);
         session.prepared.begin_research_request(&control).unwrap();
         assert!(session.prepared.validate_research_plan(&plan,&query).is_err(),"a second renewal invalidates the old request plan");
     }

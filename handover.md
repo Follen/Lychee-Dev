@@ -406,6 +406,14 @@ Data dbcache named table现在按固定DBD顺序解码uint64、合法UTF8、有�
 
 独立审核修复命中历史仍读无关旧段、checkpoint错误加入1024写入门槛、既有claim缺log reseed、LF后额外严格事件大小四处差异。按固定Go保留JSON恰2MiB写成功而reader随后拒绝的上游边界不一致，明确不伪称已修上游；checkpoint直接使用生成hash避免读限失败后索引panic。27测试函数含1子进程helper已编写，覆盖真正子进程无析构退出、锁与持久化故障等；源码复审所查finding关闭，实际Rust/Windows运行NOT_RUN。现导出进入all-target及Mailbox组，不含Book/claim创建退休/default host/物理输入消费者，不称完整Live接通。
 
+### Native Source operation 执行证据与范围绑定
+
+Source逻辑operation现在有Definition/References/Type答案及受封装的scope completion，绑定同一request owner/原文/query/plan digest及逐项index/batch/kind/operation digest；账本借用唯一plan且不接受替换plan finish。真实执行后仍可诚实返回unavailable/partial；graph缺失的静态fallback与API descriptor Type元数据明确executed:false，不给completed批数。API真正Type查询仍未实现，不能用descriptor假装查询完成。
+
+独立审查发现并修复静态占位假计数、仅凭Vec长度可伪造receipt、XML具名子Frame handler错误归父virtual template及两处UTF16错行fixture；fixture控制还修为复用原admitted control，不放宽身份守卫或reset预算。真实XML索引产物覆盖named/unnamed子对象边界，规则v5使旧结果材料缓存失效。新增/修改Rust回归运行NOT_RUN，已有Windows计划/研究组将覆盖；这不是完整语义或性能通过，incoming projection仍有重复工作。
+
+尚未接256生命周期退休。后续必须分清fixedGo admitted/attempted batch计数与completed证据；Go在执行前/请求批次层累计且失败退休，不能以partial的0completed令session永久存活，也不能为限额伪报执行。需要按真实plan预准入、超256先退analysis/要求full snapshot、恰256响应后退analysis，保broker现有idle/lifetime合同及独立实际生命周期验证。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

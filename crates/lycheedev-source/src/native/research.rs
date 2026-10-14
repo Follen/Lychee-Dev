@@ -17,9 +17,44 @@ impl PreparedSnapshot {
         self.control.check()?;
         if !["incoming","outgoing","both"].contains(&query.direction.as_str()) {return Err(input_error("invalid native relation direction"));}
         let mut plan=ResearchPlan::new(self.inputs.identity_sha256(),query,self.owner.clone());
+        let named_xml=query.symbol.path.to_ascii_lowercase().ends_with(".xml")&&!query.symbol.category.starts_with("xml-");
+        let mut named_scopes=BTreeMap::new();
+        let mut xml_owner_programs=BTreeMap::new();
+        let mut xml_object_elements=None;
+        if named_xml {
+            for (file,script) in &origins.scripts {
+                self.control.check()?;self.inputs.charge(1)?;
+                if script.path!=query.symbol.path {continue;}
+                let body=script.body_text();
+                let original=self.inputs.original(file)?;
+                let Some(offset)=original.find(body).filter(|offset|original.rfind(body)==Some(*offset)) else {plan.unavailable("xml_decoded_body_position_unavailable");continue;};
+                let facts=plan.scan_facts(body,file,&self.control)?;
+                for declaration in &facts.declarations {
+                    self.inputs.charge(1)?;
+                    if declaration.name==query.symbol.name&&script.original_body_line(declaration.line)?==query.symbol.line
+                        &&script.original_body_line(declaration.end_line)?==query.symbol.end_line.max(query.symbol.line) {
+                        named_scopes.entry(file.clone()).or_insert_with(Vec::new).push((declaration.line,declaration.end_line,offset));
+                    }
+                }
+            }
+            if named_scopes.values().map(Vec::len).sum::<usize>()!=1 {
+                plan.unavailable("xml_named_function_selector_unavailable");named_scopes.clear();
+            }
+        }
         if query.direction!="outgoing" && query.symbol.category.starts_with("api-") {
             if let Some(target)=api.map(|api|api.target(&query.symbol)).transpose()?.flatten() {plan.incoming(target);}
             else {plan.unavailable("incoming_unique_api_definition_mapping_unavailable");}
+        } else if query.direction!="outgoing" && named_xml {
+            let mut target=None;
+            if let Some((file,scopes))=named_scopes.iter().next() {
+                let (line,_,offset)=scopes[0];
+                let script=&origins.scripts[file];
+                if let Some(range)=unique_name_range(script.body_text(),line,&query.symbol.name) {
+                    target=self.research_syntax_target(self.inputs.corpus.index[file],range.start+offset..range.end+offset)?;
+                }
+            }
+            if let Some(site)=target {plan.incoming(self.research_authenticated_site(site,origins)?);}
+            else {plan.unavailable("incoming_original_syntax_position_unavailable");}
         } else if query.direction!="outgoing" {
             let target=if let Some(&file)=self.inputs.corpus.index.get(&query.symbol.path) {
                 let text=self.inputs.original(&query.symbol.path)?;
@@ -48,9 +83,47 @@ impl PreparedSnapshot {
                 // each edge to its nearest named/anonymous caller. A containing
                 // line interval alone would incorrectly charge nested callers.
                 let inline=origins.scripts.get(&self.inputs.corpus.files[file].path);
-                if inline.is_some() {
+                if inline.is_some() && named_xml {
+                    if !named_scopes.contains_key(&self.inputs.corpus.files[file].path){continue;}
+                } else if inline.is_some() {
                     match origins.planner_script_eligibility(&query.symbol,&self.inputs.corpus.files[file].path,||self.inputs.charge(1))? {
-                        Some(true)=>{}, Some(false)=>continue,
+                        Some(true)=>{
+                            let script=inline.expect("inline script");
+                            let mut definition=false;
+                            for program in &origins.programs {for action in program.actions(){self.inputs.charge(1)?;
+                                if let crate::xml_load::Action::Definition{name,origin,..}=action
+                                    &&name==&query.symbol.name&&origins.matches_origin(&query.symbol,origin){definition=true;}
+                            }}
+                            if definition {
+                                // A template's enclosing span is only a candidate.
+                                // Its nearest object ancestor must own the script;
+                                // named and unnamed child frames are separate owners.
+                                if !xml_owner_programs.contains_key(&script.path){
+                                    let raw=origins.documents.get(&script.path).ok_or_else(||input_error("XML original missing"))?;
+                                    let parsed=crate::xml_program::extract_production(&script.path,raw.as_bytes()).map_err(|error|input_error(&error))?;
+                                    self.control.check()?;self.inputs.charge(parsed.occurrences.len().saturating_add(1))?;
+                                    xml_owner_programs.insert(script.path.clone(),parsed);
+                                }
+                                let parsed=&xml_owner_programs[&script.path];
+                                if parsed.raw_sha256!=script.xml_sha256{return Err(input_error("XML owner source differs"));}
+                                if xml_object_elements.is_none(){xml_object_elements=Some(crate::xml_program::catalog().map_err(|error|input_error(&error))?.object_elements());}
+                                let objects=xml_object_elements.as_ref().expect("object catalog");
+                                let mut node=parsed.occurrences.iter().find(|node|node.raw==script.element);
+                                let mut owner=None;
+                                while let Some(current)=node {
+                                    self.inputs.charge(parsed.occurrences.len().saturating_add(1))?;
+                                    let parent=current.parent.map(|id|&parsed.occurrences[id]);
+                                    let object=objects.contains(&current.tag)||current.kind=="object_declaration"||current.attributes.contains_key("intrinsic")
+                                        ||parent.is_some_and(|parent|parent.tag=="Frames")
+                                        ||parsed.occurrences.iter().any(|child|child.parent==Some(current.ordinal)&&child.tag=="Scripts");
+                                    if object {owner=Some(current);break;}node=parent;
+                                }
+                                let Some(owner)=owner else{plan.unavailable("xml_script_owner_unavailable");continue;};
+                                let raw=&origins.documents[&script.path];
+                                let line=1+raw.as_bytes()[..owner.raw.start].iter().filter(|byte|**byte==b'\n').count();
+                                if script.path!=query.symbol.path||line!=query.symbol.line||owner.attributes.get("name").is_none_or(|name|name.value!=query.symbol.name){continue;}
+                            }
+                        }, Some(false)=>continue,
                         None=>{plan.unavailable("xml_script_owner_unavailable");continue;},
                     }
                 }
@@ -74,7 +147,10 @@ impl PreparedSnapshot {
                         // Scan the decoded body without its synthetic anonymous
                         // wrapper. Root-body calls belong to the authenticated
                         // XML owner; nested named/anonymous functions do not.
-                        if edge.from!="<file>" {continue;}
+                        if named_xml {
+                            let scopes=&named_scopes[&self.inputs.corpus.files[file].path];
+                            if edge.from!=query.symbol.name||!scopes.iter().any(|(first,last,_)|edge.line>=*first&&edge.line<=*last){continue;}
+                        } else if edge.from!="<file>" {continue;}
                     } else if edge.from!=query.symbol.name||edge.line<query.symbol.line||edge.line>query.symbol.end_line.max(query.symbol.line) {continue;}
                     // Match Go: the first further eligible edge proves the cut;
                     // do not resolve/authenticate all remaining sites to count it.
@@ -87,13 +163,22 @@ impl PreparedSnapshot {
                         .filter(|site|site.start as usize<=range.start&&site.end as usize>=range.end);
                     let Some(site)=candidates.next() else {plan.unavailable("outgoing_original_syntax_position_unavailable");continue;};
                     if candidates.next().is_some(){plan.unavailable("outgoing_original_syntax_position_ambiguous");continue;}
-                    if !origins.within(self,&query.symbol,&site)? {continue;}
+                    if inline.is_none()&&!origins.within(self,&query.symbol,&site)? {continue;}
                     plan.definition(self.research_authenticated_site(site,origins)?);
                 }
             }
         }
         self.control.check()?;
         Ok(plan.finish())
+    }
+    fn research_syntax_target(&self,file:usize,range:std::ops::Range<usize>)->lycheedev_core::Result<Option<Site>> {
+        let syntax=public_result(self.file_syntax(file),&self.control)?;
+        self.inputs.charge(syntax.references.len().saturating_add(syntax.calls.len()).saturating_add(1))?;
+        let mut sites=syntax.references.iter().map(|item|item.site.public(&self.inputs))
+            .chain(self.syntax.declarations.iter().filter(|item|item.site.file==file).map(|item|item.site.public(&self.inputs)))
+            .filter(|site|site.start as usize<=range.start&&site.end as usize>=range.end).collect::<Vec<_>>();
+        sites.sort_by_key(|site|(site.end-site.start,site.start));sites.dedup();
+        Ok(sites.first().cloned())
     }
     fn research_authenticated_site(&self,site:Site,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<crate::native_research::plan::AuthenticatedSite> {
         site.text(&self.inputs)?;self.inputs.charge(1)?;
@@ -106,6 +191,68 @@ impl PreparedSnapshot {
     }
     pub(crate) fn research_steps(&self)->usize {
         self.inputs.shared_steps.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn execute_research_operations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,api:&[crate::environment::ApiRecord])->lycheedev_core::Result<ResearchScopeCompletion> {
+        use crate::native_research::plan::LogicalOperation;
+        self.validate_research_plan(plan,query)?;
+        let mut answers=Vec::with_capacity(plan.operations().len());
+        let mut performed=Vec::with_capacity(plan.operations().len());
+        for (batch,operations) in plan.operations().chunks(crate::native_research::plan::BATCH_QUERIES).enumerate(){
+            for operation in operations {
+                self.control.check()?;self.inputs.charge(1)?;
+                let target=match operation {LogicalOperation::References(target)|LogicalOperation::Type(target)|LogicalOperation::Definition(target)=>target};
+                if target.material["kind"]=="source" {
+                    let file=self.inputs.file(&target.site.file).map_err(|message|input_error(&message))?;
+                    if file.identity["sha256"]!=target.file_sha256||origins.position(self,&target.site)?!=target.position {return Err(input_error("semantic operation source identity differs"));}
+                    target.site.text(&self.inputs)?;
+                }
+                let mut answer=match operation {
+                    LogicalOperation::References(_)=>{
+                        let result=self.research_relations(&query.symbol,"incoming",graph,origins)?;
+                        let rows=result["relations"].as_array().ok_or_else(||input_error("reference projection rows missing"))?;
+                        json!({"kind":"references","state":if result["analysis"]["state"]=="complete"{"known"}else{"partial"},
+                            "result":{"relationsSHA256":digest(&rows),"relationCount":rows.len(),"analysis":result["analysis"]},
+                            "evidence":"full relation projection digest and coverage; source research retains independently projected rows"})
+                    },
+                    LogicalOperation::Definition(_)=>{
+                        let facade=self.source_queries(&self.control)?;
+                        let facade=if let Some(graph)=graph {facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)?}else{facade};
+                        let result=facade.definitions(&target.site)?;
+                        let known=matches!(&result.selected,QueryFact::Known{..});
+                        json!({"kind":"definition","state":if known{"known"}else{"partial"},"result":result})
+                    },
+                    LogicalOperation::Type(_) if target.material["kind"]=="api_definition"=>{
+                        let matches=api.iter().filter(|record|record.kind=="function"&&record.name==query.symbol.name&&record.path==query.symbol.path
+                            &&record.line>=query.symbol.line&&record.line<=query.symbol.end_line.max(query.symbol.line)).collect::<Vec<_>>();
+                        if let [record]=matches.as_slice(){json!({"kind":"type","state":"known_declaration","result":{"type":"function","descriptor":record,"sourceExecution":false,"bindingSelection":"not_asserted"}})}
+                        else{json!({"kind":"type","state":"unavailable","reason":"unique_authenticated_api_descriptor_unavailable"})}
+                    },
+                    LogicalOperation::Type(_)=>{
+                        if let Some(graph)=graph {
+                            let facade=Facade{graph};let mut observations=Vec::new();let mut omitted=0usize;
+                            for fact in &graph.uses {self.inputs.charge(1)?;if fact.site==target.site&&fact.host_return_slot.is_none(){
+                                if observations.len()<64 {observations.push(facade.type_view(fact));}else{omitted+=1;}
+                            }}
+                            for write in &graph.writes {self.inputs.charge(1)?;if write.site==target.site {
+                                if observations.len()<64 {observations.push(match facade.value_type(&write.decision,0){Ok(kind)=>json!({"state":"known","type":kind,"write":write.id}),Err(reason)=>json!({"state":"unavailable","reason":reason,"write":write.id})});}else{omitted+=1;}
+                            }}
+                            if observations.is_empty(){json!({"kind":"type","state":"unavailable","reason":"target_not_observed_in_selected_execution"})}
+                            else{let known=omitted==0&&observations.iter().all(|item|item["state"]=="known");json!({"kind":"type","state":if known{"known"}else{"partial"},"result":{"observations":observations,"observationsOmitted":omitted}})}
+                        } else {json!({"kind":"type","state":"unavailable","reason":"no_execution_scope_for_selected_type"})}
+                    },
+                };
+                let executed=graph.is_some()&&!matches!(operation,LogicalOperation::Type(target) if target.material["kind"]=="api_definition");
+                answer["executed"]=json!(executed);
+                answer["operationIdentity"]=json!(digest(operation));
+                answer["batch"]=json!(batch);answer["operation"]=json!(answers.len());
+                performed.push(executed);
+                answers.push(answer);
+            }
+        }
+        self.control.check()?;
+        let (identity,owner)=plan.execution_identity();
+        Ok(ResearchScopeCompletion{identity,owner,answers,performed})
     }
 
     pub(crate) fn research_relations(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<Value> {
@@ -286,4 +433,51 @@ impl PreparedSnapshot {
         Ok(json!({"relations":relations,"analysis":{"state":if unresolved==0&&control.is_some_and(|control|control.complete){"complete"}else{"partial"},"engine":"native_common_facts","lexicalDeclarations":self.syntax.declarations.len(),"sourceReferences":self.syntax.reference_count,"sourceCalls":self.syntax.call_count,"unresolvedRelations":unresolved,"graphControl":control,"sourceFiles":self.inputs.corpus.files.len(),"inputIdentity":self.inputs.identity_sha256(),"sourceExecution":false}}))
     }
 
+}
+
+/// Constructed only by the native operation executor. JSON projections alone
+/// cannot mint execution credit or change the bound request after execution.
+pub(crate) struct ResearchScopeCompletion {
+    identity:String, owner:Arc<()>, answers:Vec<Value>, performed:Vec<bool>,
+}
+impl ResearchScopeCompletion {
+    pub(crate) fn consume(self,plan:&crate::native_research::plan::ResearchPlan)->lycheedev_core::Result<(Vec<Value>,Vec<bool>)> {
+        use crate::native_research::plan::{LogicalOperation,BATCH_QUERIES};
+        plan.validate_execution_identity(&self.identity,&self.owner)?;
+        if self.answers.len()!=plan.operations().len()||self.performed.len()!=self.answers.len(){return Err(input_error("semantic completion operation count differs"));}
+        for (index,((answer,performed),operation)) in self.answers.iter().zip(&self.performed).zip(plan.operations()).enumerate(){
+            let kind=match operation{LogicalOperation::References(_)=>"references",LogicalOperation::Type(_)=>"type",LogicalOperation::Definition(_)=>"definition"};
+            if answer["operation"]!=index||answer["batch"]!=index/BATCH_QUERIES||answer["kind"]!=kind||answer["operationIdentity"]!=digest(operation)||answer["executed"]!=*performed {
+                return Err(input_error("semantic completion operation identity or order differs"));
+            }
+        }
+        Ok((self.answers,self.performed))
+    }
+}
+
+#[cfg(test)]
+mod research_completion_identity_tests {
+    use super::*;
+    use crate::native_research::plan::{AuthenticatedSite,ResearchPlan};
+    fn plan(owner:Arc<()>,query:&str)->ResearchPlan {
+        let mut plan=ResearchPlan::new("source",&query,owner);
+        for n in 0..2 {plan.definition(AuthenticatedSite{site:Site{file:"a.lua".into(),start:n,end:n+1},file_sha256:"a".repeat(64),position:Value::Null,material:json!({"kind":"source"})});}plan.finish()
+    }
+    fn completion(plan:&ResearchPlan)->ResearchScopeCompletion {
+        let(identity,owner)=plan.execution_identity();
+        let answers=plan.operations().iter().enumerate().map(|(index,operation)|json!({"kind":"definition","state":"unavailable","executed":true,"operation":index,"batch":0,"operationIdentity":digest(operation)})).collect();
+        ResearchScopeCompletion{identity,owner,answers,performed:vec![true;2]}
+    }
+    #[test]
+    fn completion_rejects_duplicate_reordered_missing_and_foreign_answers() {
+        let owner=Arc::new(());let plan=plan(owner.clone(),"query");
+        let mut duplicate=completion(&plan);duplicate.answers[1]=duplicate.answers[0].clone();assert!(duplicate.consume(&plan).is_err());
+        let mut swapped=completion(&plan);swapped.answers.swap(0,1);assert!(swapped.consume(&plan).is_err());
+        let mut missing=completion(&plan);missing.answers.pop();assert!(missing.consume(&plan).is_err());
+        let mut wrong_kind=completion(&plan);wrong_kind.answers[0]["kind"]=json!("type");assert!(wrong_kind.consume(&plan).is_err());
+        let mut wrong_batch=completion(&plan);wrong_batch.answers[0]["batch"]=json!(1);assert!(wrong_batch.consume(&plan).is_err());
+        let other= self::plan(owner,"other query");assert!(completion(&plan).consume(&other).is_err());
+        let renewed=self::plan(Arc::new(()),"query");assert!(completion(&plan).consume(&renewed).is_err());
+        assert!(completion(&plan).consume(&plan).is_ok());
+    }
 }
