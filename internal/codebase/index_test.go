@@ -19,8 +19,8 @@ func TestIndexRetainsSyntaxDiagnostics(t *testing.T) {
 	if summary.Complete || summary.Diagnostics != 1 || summary.Documents != 1 {
 		t.Fatalf("%+v", summary)
 	}
-	result, err := b.FindSymbols(context.Background(), pin, "missing", 10)
-	if err != nil || result.Index.Complete || len(result.Matches) != 0 {
+	result, err := b.Search(context.Background(), "PIN-TEST", pin, SearchQuery{Text: "missing", Limit: 10})
+	if err != nil || result.Complete || result.Coverage.Complete || len(result.Results) != 0 {
 		t.Fatalf("%+v %v", result, err)
 	}
 }
@@ -71,13 +71,23 @@ func TestIndexQueriesPinnedSyntaxAndReopens(t *testing.T) {
 		t.Fatalf("%+v", summary)
 	}
 	for _, name := range []string{"Handler", "Called", "EVENT_A"} {
-		result, err := OpenBrowser(b.store).FindSymbols(ctx, pin, name, 20)
-		if err != nil || len(result.Matches) == 0 || result.Index.Commit != pin.ExactCommit {
+		result, err := OpenBrowser(b.store).Search(ctx, "PIN-TEST", pin, SearchQuery{Text: name, Limit: 20})
+		if err != nil || len(result.Results) == 0 || result.ResolvedCommit != pin.ExactCommit {
 			t.Fatalf("%s: %+v %v", name, result, err)
 		}
+		if name != "Handler" {
+			// Body matches cannot substitute for the indexed syntax edge.
+			found := false
+			for _, relation := range result.Relations {
+				found = found || relation.Target == name
+			}
+			if !found {
+				t.Fatalf("%s: indexed relation missing: %+v", name, result.Relations)
+			}
+		}
 	}
-	limited, err := b.FindSymbols(ctx, pin, "Handler", 1)
-	if err != nil || len(limited.Matches) != 1 || !limited.Truncated {
+	limited, err := b.Search(ctx, "PIN-TEST", pin, SearchQuery{Text: "Handler", Limit: 1})
+	if err != nil || len(limited.Results) != 1 || !limited.Truncated || limited.Complete {
 		t.Fatalf("%+v %v", limited, err)
 	}
 	// Repeat preparation opens the immutable completed index, without mutation.
@@ -94,7 +104,7 @@ func TestIndexQueriesPinnedSyntaxAndReopens(t *testing.T) {
 		t.Fatal("index was rewritten")
 	}
 	pin.ExactCommit = strings.Repeat("a", 40)
-	if _, err := b.FindSymbols(ctx, pin, "Handler", 20); err == nil {
+	if _, err := b.Search(ctx, "PIN-TEST", pin, SearchQuery{Text: "Handler", Limit: 20}); err == nil {
 		t.Fatal("different commit reused index")
 	}
 }

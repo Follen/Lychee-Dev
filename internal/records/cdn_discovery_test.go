@@ -11,7 +11,73 @@ import (
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/records/resource"
+	"github.com/follenfang/lycheedev/internal/vault"
 )
+
+func TestCDNDownloadWorkersBoundsTwoAdmittedQueries(t *testing.T) {
+	for _, configured := range []int{1, 2, 3, 4, 8} {
+		t.Run(fmt.Sprint(configured), func(t *testing.T) {
+			ctx := context.Background()
+			store, err := vault.Initialize(ctx, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := vault.DefaultConfig()
+			cfg.Download.Workers = configured
+			if _, err := vault.WriteConfig(ctx, store.Root(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			var active, peak atomic.Int32
+			base := &cdnTestTransport{objects: map[string][]byte{}}
+			transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				n := active.Add(1)
+				defer active.Add(-1)
+				for previous := peak.Load(); n > previous && !peak.CompareAndSwap(previous, n); previous = peak.Load() {
+				}
+				time.Sleep(5 * time.Millisecond)
+				return base.RoundTrip(r)
+			})
+			count := 2
+			if configured == 1 {
+				count = 1
+			}
+			files := make([]*cdnFiles, count)
+			wanted := make([]string, count)
+			for query := range files {
+				admission, err := store.AcquireDataResources(ctx, vault.DataOrdinary)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer admission.Close()
+				var archives []string
+				for i := 0; i < 8; i++ {
+					key := fmt.Sprintf("%032x", query*16+i+1)
+					index, archive := cdnIndexFixture(4, []string{key}, []uint32{128}, []uint64{0})
+					archives = append(archives, archive)
+					base.objects[archive+".index"] = index
+					if i == 7 {
+						wanted[query] = key
+					}
+				}
+				files[query] = newCDNFilesOnStoreTest(t, store, transport, false, map[string][]string{"archives": archives})
+				files[query].downloadWorkers = admission.DownloadWorkers
+				files[query].budget = resource.New(resource.DefaultLimits())
+			}
+			done := make(chan error, count)
+			for i := range files {
+				go func(i int) { _, err := files[i].locate(wanted[i], 128); done <- err }(i)
+			}
+			for range files {
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if peak.Load() > int32(configured) || peak.Load() < int32(count) {
+				t.Fatalf("download.workers=%d observed aggregate=%d", configured, peak.Load())
+			}
+		})
+	}
+}
 
 func TestCDNArchiveDiscoveryPreservesOrderedIntegrityErrors(t *testing.T) {
 	for _, badFirst := range []bool{true, false} {

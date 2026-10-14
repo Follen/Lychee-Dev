@@ -195,6 +195,17 @@ function hooksecurefunc(owner, name, callback)
     hookInstalls[name] = (hookInstalls[name] or 0) + 1
     hooks[owner] = hooks[owner] or {}
     hooks[owner][name] = callback
+    local original = owner[name]
+    local depth = 0
+    owner[name] = function(...)
+        local result = { original(...) }
+        depth = depth + 1
+        assert(depth <= 8, "function trace recursively entered its own hook")
+        local ok, message = pcall(callback, ...)
+        depth = depth - 1
+        if not ok then error(message, 0) end
+        return unpack(result)
+    end
 end
 
 C_AddOns = {
@@ -338,6 +349,29 @@ assert(ns.FunctionTrace.GetCount() == countBeforeCombatCall, "function trace rec
 inCombat = false
 hooks[_G].TestTrace("after-combat")
 assert(ns.FunctionTrace.GetCount() == countBeforeCombatCall + 1, "function trace skipped a call after combat")
+ns.FunctionTrace.Stop()
+ns.FunctionTrace.Clear()
+
+-- These APIs are called by recording itself. The real hooksecurefunc calls its
+-- callback again when that callback calls the hooked function (Forever 70374).
+for _, path in ipairs({ "GetTime", "InCombatLockdown", "math.min", "math.max" }) do
+    assert(ns.FunctionTrace.Start(path), "self-used trace target did not start: " .. path)
+    ns.FunctionTrace.Clear()
+    local owner, key = _G, path
+    if path:sub(1, 5) == "math." then owner, key = math, path:sub(6) end
+    owner[key](1, 2)
+    assert(ns.FunctionTrace.GetCount() == 1, "self-used trace target did not record once: " .. path)
+    ns.FunctionTrace.Stop()
+end
+ns.FunctionTrace.Clear()
+
+-- A failing consumer must not leave the reentry guard locked for later calls.
+assert(ns.FunctionTrace.Start("TestTrace", function() error("trace callback failed") end))
+assert(not pcall(TestTrace), "trace callback error was hidden")
+assert(ns.FunctionTrace.Start("TestTrace"))
+ns.FunctionTrace.Clear()
+TestTrace("recovered")
+assert(ns.FunctionTrace.GetCount() == 1, "trace did not recover after callback failure")
 ns.FunctionTrace.Stop()
 ns.FunctionTrace.Clear()
 

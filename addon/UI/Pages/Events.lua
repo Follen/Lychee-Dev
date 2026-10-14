@@ -675,10 +675,6 @@ function ns.CreateEventsPage(parent)
         page:Refresh()
     end)
 
-    function page:FocusInput()
-        inputPanel.editBox:SetFocus()
-    end
-
     function page:StopMonitor()
         ns.EventMonitor.Stop()
         SetSelectionStatus()

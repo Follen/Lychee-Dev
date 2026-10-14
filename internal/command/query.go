@@ -2,13 +2,13 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/codebase"
 	"github.com/follenfang/lycheedev/internal/codebase/environment"
 	"github.com/follenfang/lycheedev/internal/codebase/flow"
 	"github.com/follenfang/lycheedev/internal/evidence"
-	"github.com/follenfang/lycheedev/internal/live"
 	"github.com/follenfang/lycheedev/internal/luals"
 	"github.com/follenfang/lycheedev/internal/records"
 	"github.com/follenfang/lycheedev/internal/records/archive"
@@ -65,14 +65,7 @@ func queryFault(err error) (int, string, bool) {
 		{luals.ErrBudget, 3, "luals.input_budget"},
 		{luals.ErrUnsupported, 3, "luals.unsupported"},
 		{luals.ErrFailed, 5, "luals.check_failed"},
-		{live.ErrAckReadinessPending, 6, "live.ack_readiness_pending"},
-		{live.ErrInvestigationPending, 6, "live.investigation_pending"},
-		{live.ErrBusinessFailed, 5, "live.business_failed"},
-		{live.ErrReportWriterAmbiguous, 3, "live.report_writer_ambiguous"},
-		{live.ErrReceiptHidePending, 6, "live.receipt_hide_pending"},
-		{live.ErrReceiptWindowBusy, 3, "live.receipt_window_busy"},
-		{live.ErrUpgradeInstallation, 3, "live.upgrade_requires_current_managed_addon"},
-		{live.ErrUpgradeChanged, 3, "live.upgrade_installation_changed"},
+		{selection.ErrTargetBuildUnavailable, 3, "selection.target_build_unavailable"},
 		{selection.ErrTargetMissing, 3, "selection.target_missing"},
 		{records.ErrInstallationMissing, 3, "selection.installation_missing"},
 		{records.ErrInstallationAmbiguous, 2, "selection.installation_ambiguous"},
@@ -206,7 +199,7 @@ func readDataQuery(path string) (records.DataQuery, error) {
 // readSelectedDataQuery preserves the JSON query-document contract while also
 // accepting plain SQL from a file, stdin or an inline flag. Source selection is
 // checked by dispatch before this helper runs; no fallback to ambient input.
-func readSelectedDataQuery(opts Options) (records.DataQuery, error) {
+func readSelectedDataQuery(ctx context.Context, opts Options) (records.DataQuery, error) {
 	if opts.file != "" && strings.EqualFold(filepath.Ext(opts.file), ".json") {
 		if len(opts.parameters) != 0 {
 			return records.DataQuery{}, errors.New("--param cannot be combined with a JSON query document")
@@ -219,7 +212,7 @@ func readSelectedDataQuery(opts Options) (records.DataQuery, error) {
 	case opts.sql != "":
 		raw = []byte(opts.sql)
 	case opts.stdin:
-		raw, err = io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
+		raw, err = readSQLStdin(ctx, os.Stdin)
 	case opts.file != "":
 		file, openErr := os.Open(opts.file)
 		if openErr != nil {

@@ -19,6 +19,25 @@ func indexedSearchFixture(t *testing.T, files map[string]string) (*Browser, sele
 	return b, pin
 }
 
+func TestBodySearchIgnoresUnindexedTextFiles(t *testing.T) {
+	b, pin := indexedSearchFixture(t, map[string]string{"README.md": "bodytoken readmeonly", "Core.lua": "-- bodytoken\nreturn 1\n"})
+	for _, mode := range []SearchMode{SearchModePrecise, SearchModeExploratory} {
+		got, err := b.Search(context.Background(), "PIN-TEST", pin, SearchQuery{Mode: mode, Text: "bodytoken"})
+		if err != nil || len(got.Results) == 0 {
+			t.Fatalf("%s search: %+v %v", mode, got, err)
+		}
+		for _, item := range got.Results {
+			if item.Path != "Core.lua" {
+				t.Fatalf("unindexed result: %+v", item)
+			}
+		}
+		got, err = b.Search(context.Background(), "PIN-TEST", pin, SearchQuery{Mode: mode, Text: "readmeonly"})
+		if err != nil || len(got.Results) != 0 {
+			t.Fatalf("readme search: %+v %v", got, err)
+		}
+	}
+}
+
 func searchWidgetTree() map[string]string {
 	return map[string]string{
 		"Interface/AddOns/Test/Core.lua":           "function Widget()\nend\nfunction WidgetFactory()\nend\nframe:RegisterEvent(\"WIDGET_READY\")\n",

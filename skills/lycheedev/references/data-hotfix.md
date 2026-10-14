@@ -58,8 +58,11 @@ lycheedev data hotfix --source dbcache --snapshot <derived-pin> --from <source.i
 client cache update cannot shift pagination. Physical order is not push order.
 `page.matched` counts all matching records (or the whole selected latest batch),
 not only this page. Preserve `--latest` and all table/ID filters when continuing.
-An ending suffix is not a complete whole-query result. Even `page.complete`
-only describes the selected local-cache query, never all server Hotfixes.
+An ending suffix is not a complete whole-query result. Wago's `coverage.complete`
+means the current window reached its end; local snapshots retain whole-snapshot
+completion semantics. Across sources, `coverage.fullQueryComplete` is true
+only for a query starting on the first page without a cursor and reaching the
+end. Even full local-cache coverage never establishes all server Hotfixes.
 
 Default input budget is 128 MiB (maximum 512 MiB), with 1–200 returned records
 and at most 8 MiB of raw payload per page. Decoded fields have an 8 MiB JSON
@@ -86,7 +89,7 @@ Treat Wago text search as candidate acceleration only. Establish a fact from
 the returned physical records after applying the exact product, full build,
 region, locale, table/hash, record, push and status filters relevant to the
 question. A zero-candidate page is not proof of absence unless the returned
-coverage is complete for that exact scope. Raidbots never acts as an implicit
+coverage has `fullQueryComplete=true` for that exact scope. Raidbots never acts as an implicit
 Wago fallback.
 
 ## Bounded scans

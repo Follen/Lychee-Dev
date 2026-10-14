@@ -34,7 +34,6 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 	runtime, _ := tokenBytes(e.Runtime)
 	ticket, _ := tokenBytes(e.Ticket)
 	selector := memory.Selector{Nonce: nonce, Runtime: runtime, Ticket: ticket, Kind: bridge.MemoryReceipt}
-	first := true
 	switch q.Kind {
 	case "receipt":
 		if e.Action == "confirm" {
@@ -45,20 +44,10 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 			r, err := decodePublicationReceipt(record)
 			return err == nil && r.Schema == e.Schema && r.State == "reported" && r.Action == "prepare" && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Runtime == e.Runtime && r.Owner == e.Owner && r.Fence == e.Fence && r.GUID == e.GUID && r.Build == e.Build && r.Product == i.Product && r.Release == i.Release
 		}
-	case "bootstrap_changed":
-		first = false
-		selector.Runtime = [16]byte{}
-		selector.Accept = func(record memory.Record) bool {
-			r, err := decodePublicationReceipt(record)
-			if err != nil {
-				return false
-			}
-			return r.Schema == e.Schema && r.Nonce == e.Nonce && r.Ticket == e.Ticket && r.Action == "bind" && r.State == "rejected" && r.Reason == "slot_runtime_changed" && r.Runtime != e.Runtime && r.GUID == e.GUID && r.Build == e.Build && r.Release == i.Release && r.NextSlot == e.Index+1 && r.Owner == ""
-		}
 	default:
 		return Observation{}, errors.New("live.channel_observation_invalid")
 	}
-	found, err := reader.Find(ctx, selector, first)
+	found, err := reader.Find(ctx, selector, true)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -83,15 +72,6 @@ func ObserveRecords(ctx context.Context, reader RecordReader, q ObservationQuery
 	}
 	if r, err = decodePublicationReceipt(found.Records[0]); err != nil {
 		return Observation{}, err
-	}
-	if q.Kind == "bootstrap_changed" {
-		for _, record := range found.Records[1:] {
-			other, decodeErr := decodePublicationReceipt(record)
-			if decodeErr != nil || !selector.Accept(record) || other.Runtime != r.Runtime {
-				return Observation{}, errors.New("live.channel_runtime_ambiguous")
-			}
-		}
-		return Observation{Receipt: r}, nil
 	}
 	if r.ReportBytes == 0 || r.ReportBytes > bridge.MemoryMaxPayload {
 		return Observation{}, errors.New("live.channel_report_length")

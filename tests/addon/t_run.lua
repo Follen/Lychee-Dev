@@ -77,6 +77,7 @@ assert(page:GetSelectedHistoryIndex() == 1, "new run was not selected as newest 
 
 -- Save (落盘) goes through the single export hook as run_result evidence.
 local executeAfterRun = executeCount
+page.inputPanel.editBox:SetText("return 2")
 page.exportResultButton:Click()
 local order = ns.Stores.Exports.GetOrder()
 local runEvidence = ns.Stores.Exports.Get(order[1])
@@ -87,6 +88,10 @@ assert(runEvidence and runEvidence.source.kind == "run_result"
         and runEvidence.metadata.code == "return { nested = { value = 7 } }",
     "Run did not save its complete result and input as run_result evidence")
 assert(executeCount == executeAfterRun, "Save unexpectedly executed code")
+page.clearInputButton:Click()
+page.exportResultButton:Click()
+assert(ns.Stores.Exports.Get(ns.Stores.Exports.GetOrder()[1]).metadata.code == "return { nested = { value = 7 } }",
+    "clearing editor changed result provenance")
 
 -- Run without return values: no tree, text mode.
 page.inputPanel.editBox:SetText("print('no return value')")
@@ -107,6 +112,10 @@ page.historyButtons[3]:Click()
 assert(page.treeView:HasTree(), "persisted history did not restore its stored tree")
 assert(page.inputPanel.editBox:GetText() == persistedCode,
     "persisted history did not restore its code")
+page.inputPanel.editBox:SetText("return 3")
+page.exportResultButton:Click()
+assert(ns.Stores.Exports.Get(ns.Stores.Exports.GetOrder()[1]).metadata.code == persistedCode,
+    "editing restored history changed result provenance")
 
 -- History preview truncation at 22 characters + "...", first line only.
 local longLine = string.rep("a", 30)

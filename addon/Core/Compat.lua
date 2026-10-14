@@ -42,6 +42,7 @@ ns.Compat = {
         if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
         local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
         if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end
+        if loaded~=true and reason=="DISABLED" then return nil,"slot_addon_disabled" end
         return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
     end,
     ReceiverChord = function(key)
@@ -88,28 +89,5 @@ ns.Compat = {
             return nil
         end
         return foci[1]
-    end,
-
-    -- UI units per physical screen pixel, for screen-space overlays. The
-    -- caller multiplies by a physical-pixel target to get UI units.
-    --
-    -- Only the width ratio is trustworthy: GetScreenWidth and the physical
-    -- width are both display measurements. GetScreenHeight is NOT usable as a
-    -- fallback, because the engines disagree about what it returns (Retail
-    -- reports the UIParent height, Classic the display height), so a ratio
-    -- built from it inflates or shrinks an overlay by a large factor on exactly
-    -- the clients that lack GetPhysicalScreenSize. When the physical width is
-    -- unavailable this reports 1: one UI unit per pixel, the neutral answer.
-    GetPhysicalPixelSize = function()
-        if GetPhysicalScreenSize and GetScreenWidth then
-            local succeeded, width = pcall(GetPhysicalScreenSize)
-            local uiWidth = GetScreenWidth()
-            if succeeded and not (issecretvalue and (issecretvalue(width) or issecretvalue(uiWidth)))
-                and type(width) == "number" and width > 0 and width < math.huge
-                and type(uiWidth) == "number" and uiWidth > 0 and uiWidth < math.huge then
-                return math.min(uiWidth / width, 1)
-            end
-        end
-        return 1
     end,
 }

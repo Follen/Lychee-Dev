@@ -1,5 +1,6 @@
 local Env,client=...
 local ns=Env.LoadWorkbench()
+local loadInputSlot=ns.Compat.LoadInputSlot
 ns.Release="test"
 local state={options={bridgeEnabled=false}}
 ns.Persistence={Current=function()return state end,Bridge=function()return state end}
@@ -30,6 +31,15 @@ local function diagnostic()
     assert(ns.InputState.Snapshot():find('"inputAttempt":',1,true),"diagnostic missing from current INPUT")
     return d
 end
+local addonLoader=C_AddOns.LoadAddOn
+C_AddOns.LoadAddOn=function()return nil,"DISABLED" end
+ns.Compat.LoadInputSlot=loadInputSlot
+local disabled,disabledReason=ns.SlotRuntime.Wake()
+assert(not disabled and disabledReason=="slot_addon_disabled","disabled slot lost its stable cause")
+local disabledAttempt=diagnostic()
+assert(disabledAttempt.stage=="load_failed" and disabledAttempt.reason=="slot_addon_disabled" and not disabledAttempt.received and disabledAttempt.slot==1,
+    "disabled load became a generic diagnostic or receive evidence")
+C_AddOns.LoadAddOn=addonLoader
 ns.Compat.LoadInputSlot=function()return nil,"raw loader error: private suffix" end
 local ok,reason=ns.SlotRuntime.Wake()
 assert(not ok and reason=="raw loader error: private suffix","changed actual error")

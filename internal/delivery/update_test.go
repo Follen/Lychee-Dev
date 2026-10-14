@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -161,5 +162,92 @@ func TestUpdateRejectsChangedAndContainedTargets(t *testing.T) {
 				t.Fatalf("failed preflight wrote state: %v", err)
 			}
 		})
+	}
+}
+
+func TestUpdateDiscoverySkipsRemovedButKeepsInterruptedReplacement(t *testing.T) {
+	source, target, archive, version := upgradeFixture(t)
+	state := t.TempDir()
+	targetInfo := UpdateTarget{Component: "skill", Path: target}
+	raw, _ := json.Marshal([]UpdateTarget{targetInfo})
+	if err := os.WriteFile(filepath.Join(state, "targets.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	found, err := DiscoverUpdateTargets(context.Background(), state)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("installed: %v %v", found, err)
+	}
+	removed := filepath.Join(t.TempDir(), "removed")
+	if _, err := RemoveInstallation(context.Background(), target, removed, "skill"); err != nil {
+		t.Fatal(err)
+	}
+	found, err = DiscoverUpdateTargets(context.Background(), state)
+	if err != nil || len(found) != 0 {
+		t.Fatalf("removed target rediscovered: %v %v", found, err)
+	}
+	// Explicit selection remains able to reinstall the absent target.
+	if _, err := UpdateManaged(context.Background(), source, version, state, []UpdateTarget{targetInfo}, false); err != nil {
+		t.Fatal(err)
+	}
+	// A journal which already moved the old installation remains discoverable.
+	recovery := filepath.Join(filepath.Dir(filepath.Dir(target)), ".lycheedev-updates", "replace-fixture")
+	if err := os.MkdirAll(filepath.Dir(recovery), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpgradeInstallation(context.Background(), source, target, archive, "skill", version); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(archive, recovery); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(target, filepath.Join(recovery, "next")); err != nil {
+		t.Fatal(err)
+	}
+	found, err = DiscoverUpdateTargets(context.Background(), state)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("pending replacement lost: %v %v", found, err)
+	}
+}
+
+func TestUpdateKeepsPendingOriginalRelease(t *testing.T) {
+	source, target, _, version := upgradeFixture(t)
+	state := t.TempDir()
+	targets := []UpdateTarget{{Component: "skill", Path: target}}
+	plan, err := UpdateManaged(context.Background(), source, version, state, targets, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := plan.Targets[0].Recovery
+	if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := UpgradeInstallation(cancelAfterOldMove{ctx, archive, cancel}, source, target, archive, "skill", version); !errors.Is(err, context.Canceled) {
+		t.Fatalf("old-moved checkpoint: %v", err)
+	}
+	release, err := InspectRelease(context.Background(), source, version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release.Commit = strings.Repeat("c", 40)
+	writeRelease(t, source, release)
+	result, err := UpdateManaged(context.Background(), source, version, state, targets, false)
+	if !errors.Is(err, ErrConflict) || result.Complete || len(result.Targets) != 1 || result.Targets[0].Recovery != archive {
+		t.Fatalf("silently replaced pending release: %+v %v", result, err)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("published a different release: %v", err)
+	}
+	for _, name := range []string{"previous", "next", "replacement.json"} {
+		if _, err := os.Stat(filepath.Join(archive, name)); err != nil {
+			t.Fatalf("lost original recovery %s: %v", name, err)
+		}
+	}
+	release.Commit = strings.Repeat("b", 40)
+	writeRelease(t, source, release)
+	result, err = UpdateManaged(context.Background(), source, version, state, targets, false)
+	if err != nil || !result.Complete {
+		t.Fatalf("original release no longer recoverable: %+v %v", result, err)
 	}
 }

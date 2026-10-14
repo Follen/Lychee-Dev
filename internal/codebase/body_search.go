@@ -24,12 +24,17 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	if c.manifest.FixtureRoot != "" {
 		return c.fixtureBodyCandidates(ctx, text, topic, limit)
 	}
+	if err := c.loadPaths(ctx); err != nil {
+		return nil, false, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	args := []string{"grep", "-n", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--"}
+	args := []string{"grep", "-n", "-z", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--"}
 	// Apply the same topic restriction before Git's bounded output is filled.
 	// icase matches bodyTopicPath for uppercase source extensions as well.
 	switch topic {
+	case "":
+		args = append(args, ":(glob,icase)**/*.lua", ":(glob,icase)**/*.xml", ":(glob,icase)**/*.toc")
 	case "lua", "xml", "toc":
 		args = append(args, ":(glob,icase)**/*."+topic)
 	case "api":
@@ -55,15 +60,20 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	reader.Buffer(make([]byte, 64<<10), 1<<20)
 	for reader.Scan() {
 		line := reader.Text()
-		_, remainder, ok := strings.Cut(line, ":")
+		// Git -n -z emits commit:path NUL line NUL snippet LF without
+		// quoting the path. sourcePath excludes embedded CR/LF in filenames.
+		file, rest, ok := strings.Cut(line, "\x00")
 		if !ok {
 			continue
 		}
-		name, rest, ok := strings.Cut(remainder, ":")
+		name, ok := strings.CutPrefix(file, c.pin.ExactCommit+":")
 		if !ok || !sourcePath(name) || !bodyTopicPath(topic, name) {
 			continue
 		}
-		number, snippet, ok := strings.Cut(rest, ":")
+		if _, indexed := c.documents[name]; !indexed {
+			continue
+		}
+		number, snippet, ok := strings.Cut(rest, "\x00")
 		if !ok {
 			continue
 		}
@@ -112,9 +122,9 @@ func bodyTopicPath(topic, name string) bool {
 	lower := strings.ToLower(name)
 	switch topic {
 	case "":
-		return true
+		return strings.HasSuffix(lower, ".lua") || strings.HasSuffix(lower, ".xml") || strings.HasSuffix(lower, ".toc")
 	case "api":
-		return strings.Contains(lower, "/blizzard_apidocumentationgenerated/")
+		return strings.Contains(lower, "/blizzard_apidocumentationgenerated/") && bodyTopicPath("", name)
 	case "lua", "xml", "toc":
 		return strings.HasSuffix(lower, "."+topic)
 	default:

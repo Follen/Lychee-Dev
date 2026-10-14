@@ -38,7 +38,7 @@ func prepareFileSource(ctx context.Context, store *vault.Store, pin selection.Da
 	}
 	src := fileSource{done: func() {}}
 	if q.CDN {
-		remote, meta, err := prepareCDNFiles(ctx, store, pin, q.Offline, q.budget)
+		remote, meta, err := prepareCDNFiles(ctx, store, pin, q.Offline, q.downloadWorkers, q.budget)
 		if err != nil {
 			return fileSource{}, err
 		}

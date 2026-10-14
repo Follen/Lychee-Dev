@@ -168,7 +168,7 @@ func validateRemovalSlot(dir string, index int, version, schema string, entry Sl
 		if err != nil {
 			return err
 		}
-		if slotDigest(got) != slotDigest(want) {
+		if !slotStaticMatches(name, got, want) {
 			return ErrConflict
 		}
 	}

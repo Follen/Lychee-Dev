@@ -52,6 +52,7 @@ func (r *Reader) NewSession(ctx context.Context, pin selection.DataPin, q FileQu
 			return nil, err
 		}
 		q.admitted = true
+		q.downloadWorkers = admission.DownloadWorkers
 	}
 	return &Reader{store: r.store, session: &readSession{pin: pin, query: q, views: make(map[string]preparedSessionTable), admission: admission}}, nil
 }

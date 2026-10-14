@@ -56,12 +56,15 @@ coverage as heap coverage, or a successful named-field lookup as whole-client
 memory coverage. A missing field, changed layout or unreadable guard fails closed
 without a scanner fallback. Do not bypass that failure with guessed RVAs.
 
-Native transport creates no WGC capture session. Scene screenshots, when requested,
-are a separate measurement. Keep cache setting, window state,
-foreground/background FPS, loaded capability and candidate binary fixed when
+Native transport reads the Mailbox directly and does not capture screenshots.
+Keep window state, foreground/background FPS, loaded capability and candidate
+binary fixed when
 comparing runs. Preserve module coverage, read counts/bytes and named-lookup
-completion where recorded. `--no-cache` still resolves the current Lua table path;
-no retained heap address or hint participates in the current reader. Keep initial
+completion where recorded. `--no-cache` is an accepted compatibility flag: with
+or without it, the current reader uses the same guarded Lua table lookup. No
+retained heap address or hint participates, so the flag is not a current
+measurement variable. Diagnose historical versions against their own command
+contract and implementation rather than assuming this behavior. Keep initial
 root resolution separate from subsequent receipt/body lookups, and keep a
 completed historical request's input-free read-back separate from fresh execution;
 report transport completion, `report.ok` and cleanup separately. A failed probe

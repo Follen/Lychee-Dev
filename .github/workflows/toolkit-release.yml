@@ -190,6 +190,26 @@ jobs:
           node @arguments
           if ($LASTEXITCODE -ne 0) { throw 'release assembly failed' }
           "out=$out" >> $env:GITHUB_OUTPUT
+      - name: Exercise packaged Source semantics and real LuaLS broker
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path '${{ steps.assemble.outputs.out }}' 'npm-stage'
+          $binary = Join-Path $stage 'native/windows-amd64/lycheedev.exe'
+          $env:LYCHEEDEV_LUALS_TEST_RUNTIME = Join-Path $stage 'payload/tool/luals'
+          $env:LYCHEEDEV_SOURCE_PACKAGE_RELEASE_ROOT = $stage
+          $env:LYCHEEDEV_SOURCE_PACKAGE_BINARY = $binary
+          $env:LYCHEEDEV_BROKER_TEST_RELEASE = $stage
+          $env:LYCHEEDEV_BROKER_TEST_BINARY = $binary
+          $env:GOMAXPROCS = '2'
+          $required = @('TestRealLuaLSMapsAPIReferencesAndDefinitions', 'TestRealBrokerAcrossCLIProcesses', 'TestRealBrokerCloseWaitsForProcessCleanup', 'TestPackagedSourceSemanticCLIWhenAvailable', 'TestRealRuntimePublicInterfaces', 'TestRealRuntimeOversizedLuaKeepsOrdinaryCoverage', 'TestRealWorkspaceSessionWarmAndCancellation', 'TestRealSessionCancelsAnInflightReadinessRequest', 'TestRealSessionEnvironmentAndConfigIsolation')
+          $events = go test -json -p=1 -parallel=2 -count=1 -timeout=10m ./internal/codebase ./internal/command ./internal/luals -run ('^(' + ($required -join '|') + ')$')
+          $events | Set-Content (Join-Path '${{ steps.assemble.outputs.out }}' 'source-integration.jsonl')
+          if ($LASTEXITCODE -ne 0) { throw 'packaged Source integration failed' }
+          $records = $events | ForEach-Object { $_ | ConvertFrom-Json }
+          foreach ($name in $required) {
+            if (-not ($records | Where-Object { $_.Test -eq $name -and $_.Action -eq 'pass' })) { throw "required integration did not pass: $name" }
+            if ($records | Where-Object { ($_.Test -eq $name -or ($_.Test -and $_.Test.StartsWith("$name/"))) -and $_.Action -eq 'skip' }) { throw "required integration skipped: $name" }
+          }
       - name: Upload the sealed npm tarball
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -513,7 +533,7 @@ jobs:
         run: |
           set -e
           npm publish "./out/lycheedev-$PUBLISH_VERSION.tgz" --access public --tag "$PUBLISH_DIST_TAG"
-      - name: Registry read-back (name, version, integrity, provenance)
+      - name: Registry read-back (name, version, integrity, provenance metadata)
         run: |
           set -e
           # npm can accept a publish while the new version is still processing.
@@ -534,7 +554,7 @@ jobs:
           node -e "
             const r = JSON.parse(require('fs').readFileSync('readback-check.json', 'utf8'));
             if (!r.ok) { console.error('::error::registry read-back violations: ' + r.violations.join('; ')); process.exit(1); }
-            console.log('registry integrity verified; provenance: ' + JSON.stringify(r.attestations ?? null));
+            console.log('registry integrity verified; provenance metadata present: ' + JSON.stringify(r.attestations ?? null));
           "
       - name: Verify protected npm channels after publication
         run: |

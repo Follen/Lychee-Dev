@@ -146,6 +146,11 @@ func Bundle(ctx context.Context, root string, ids []string, output string) (Bund
 	if err := stage.Close(); err != nil {
 		return BundleManifest{}, err
 	}
+	// Compression and ZIP finalization can outlast the last blob read. Honor
+	// cancellation before the completed stage becomes the public output.
+	if err := ctx.Err(); err != nil {
+		return BundleManifest{}, err
+	}
 	if err := os.Link(stage.Name(), abs); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return BundleManifest{}, ErrBundleOutput

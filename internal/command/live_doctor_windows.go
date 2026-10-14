@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -84,24 +85,19 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 	}
 	needsInstall := deployment.State != "managed" || deployment.Version != buildinfo.Version || deployment.Slots == nil || deployment.Slots.Count != bridge.SlotCount || (deployment.Slots.State != "managed" && deployment.Slots.State != "pending")
 	if report.Owner != nil {
-		// Connect resolves ownership and resumes only this project's exact target.
-		// It never takes another project's PID or mutates its installation.
-		var result channel.ProjectResult
-		var err error
-		if opts.session != "" {
-			result, err = project.Resume(ctx, opts.session, !opts.noCache)
-		} else {
-			result, err = project.Connect(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, !opts.noCache)
+		if opts.session != "" && opts.session != report.Owner.OperationID {
+			return channel.ProjectResult{}, errors.New("live.channel_owner_mismatch: repair must use the original CON")
 		}
-		if err != nil || (!needsInstall && opts.release == "") {
-			return result, err
+		if !needsInstall && opts.release == "" {
+			return project.Resume(ctx, report.Owner.OperationID)
 		}
-		// Finish the existing connection before replacing its managed files. Any
-		// unresolved input or cleanup remains on that same CON and stops repair.
-		if result, err = project.Disconnect(ctx, result.Session, !opts.noCache); err != nil {
+		// Close the original connection without resuming pending business. Older
+		// managed files are accepted only by this repair-specific cleanup path.
+		if result, err := project.CloseForRepair(ctx, report.Owner.OperationID); err != nil {
 			return result, err
 		}
 	}
+
 	if needsInstall || opts.release != "" {
 		release := opts.release
 		if release == "" {
@@ -116,7 +112,18 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 		} else {
 			archive := opts.output
 			if archive == "" {
-				archive = filepath.Join(project.Root, ".lycheedev", "live", "repairs", time.Now().UTC().Format("20060102T150405.000000000"))
+				parent := filepath.Join(project.Root, ".lycheedev", "live", "repairs")
+				if !strings.EqualFold(filepath.VolumeName(project.Root), filepath.VolumeName(target.Client.Directory)) {
+					// Managed replacement uses directory renames. Keep a cross-volume
+					// project's archive on the target volume, outside AddOns discovery.
+					parent = filepath.Join(filepath.Dir(filepath.Dir(delivery.AddonDirectory(target.Client.Directory))), ".lycheedev-repairs")
+				}
+				archive = filepath.Join(parent, time.Now().UTC().Format("20060102T150405.000000000"))
+				// Prepare only the parent; managed publication must still refuse an
+				// existing archive, and explicit --output paths remain unchanged.
+				if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
+					return channel.ProjectResult{}, err
+				}
 			}
 			_, err = delivery.UpgradeAddon(ctx, release, target.Client.Directory, archive, buildinfo.Version, false)
 		}
@@ -127,12 +134,12 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 		if key == "" {
 			key = "doctor-" + time.Now().UTC().Format("20060102T150405.000000000")
 		}
-		return project.Activate(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, key, !opts.noCache)
+		return project.Activate(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, key)
 	}
 	if opts.session != "" {
-		return project.Resume(ctx, opts.session, !opts.noCache)
+		return project.Resume(ctx, opts.session)
 	}
-	return project.Connect(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID}, !opts.noCache)
+	return project.Connect(ctx, channel.TargetRequest{Installation: target.Client.Directory, PID: target.Window.ProcessID})
 }
 func bundledDoctorRelease() string {
 	exe, err := os.Executable()

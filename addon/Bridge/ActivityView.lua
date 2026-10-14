@@ -1,7 +1,7 @@
 local _, ns = ...
 
--- Presentation has no input authority. The receiver owns the short input
--- shield; this independent, click-through companion owns only task feedback.
+-- Presentation has no input authority. InputProtection owns the transport
+-- input shield; this click-through view owns only task feedback.
 local frame, receiving, requestId, startedAt, failed, collecting, collectionTimer
 local function clearTimer()
     if collectionTimer then collectionTimer:Cancel();collectionTimer=nil end
@@ -26,7 +26,6 @@ local function create()
     frame.label:SetPoint("TOP", anchor, "BOTTOM", 0, 0)
     frame:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
 end
-local function anchor() end -- Position belongs to this view, never a receipt.
 local function render()
     if not receiving and not requestId then
         if frame then frame:SetScript("OnUpdate", nil); frame:Hide() end
@@ -36,7 +35,6 @@ local function render()
     if not frame then create() end
     startedAt = startedAt or GetTime()
     frame.label:SetText(receiving and ns.L.ACTIVITY_CONNECTING or collecting and ns.L.ACTIVITY_COLLECTING or ns.L.ACTIVITY_PROBE)
-    anchor()
     local current = ns.Persistence.Current()
     local reduced = current and current.options and current.options.reducedMotion == true
     ns.Theme.DrawConnectionBounce(frame.logo, frame.anchor, 96, 0)
@@ -79,6 +77,5 @@ ns.ActivityView = {
     end,
     Stop = function() clearTimer();receiving, requestId, collecting = false, nil, false; update() end,
     Refresh = update,
-    Anchor = anchor,
     Current = function() return receiving and "connecting" or collecting and "collecting" or requestId and "probe" or nil, requestId end,
 }

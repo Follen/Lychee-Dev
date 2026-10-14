@@ -145,28 +145,6 @@ func ListRemoteAvailability(ctx context.Context, options AvailabilityOptions) (A
 	return result, nil
 }
 
-// SelectRelease applies the historical-build resolution rule to manifest rows:
-// without an exact build the newest row is selected; with an exact build only
-// an exact match is acceptable. The CDN-side "still served" check happens
-// during preparation and maps to the same error.
-func SelectRelease(rows []ReleaseRow, exactBuild string) (ReleaseRow, error) {
-	if exactBuild == "" {
-		if len(rows) == 0 {
-			return ReleaseRow{}, fmt.Errorf("%w: no release row for region", ErrTargetBuildUnavailable)
-		}
-		return rows[0], nil
-	}
-	if !build(exactBuild) {
-		return ReleaseRow{}, fmt.Errorf("%w: malformed build %q", ErrTargetFormat, exactBuild)
-	}
-	for _, row := range rows {
-		if row.FullBuild == exactBuild {
-			return row, nil
-		}
-	}
-	return ReleaseRow{}, fmt.Errorf("%w: %s", ErrTargetBuildUnavailable, exactBuild)
-}
-
 // VersionsLocator is the bounded manifest endpoint for one region and product.
 func VersionsLocator(region, productCode string) string {
 	if region == "cn" {

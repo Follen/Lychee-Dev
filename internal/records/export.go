@@ -83,18 +83,21 @@ func ExportAsset(ctx context.Context, root, snapshot string, request AssetExport
 			}
 			artifact, err = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
 				Reader: bytes.NewReader(raw), MaxBytes: request.File.ContentBytes, MediaType: "image/" + request.Encoding, Complete: true,
-				Provenance: evidence.Provenance{Kind: "asset-image", Locator: reading.Capture.ID, Snapshot: snapshot, DataBuild: reading.Result.Pin.FullBuild},
+				Dependencies: []string{reading.Capture.ID},
+				Provenance:   evidence.Provenance{Kind: "asset-image", Locator: reading.Capture.ID, Snapshot: snapshot, DataBuild: reading.Result.Pin.FullBuild},
 			})
 			if err != nil {
 				return AssetExport{}, err
 			}
 		}
+		dependencies := []string{reading.Capture.ID}
 		manifest := AssetExportManifest{
 			Schema: "lycheedev.asset-export.v1", Snapshot: snapshot, Encoding: request.Encoding, Output: dst.path,
 			Content: artifact.Blob, Source: reading.Result, SourceCapture: reading.Capture, Image: imageInfo,
 		}
 		if request.Encoding != "raw" {
 			manifest.ArtifactCapture = &artifact
+			dependencies = append(dependencies, artifact.ID)
 		}
 		encoded, err := json.Marshal(manifest)
 		if err != nil {
@@ -102,7 +105,8 @@ func ExportAsset(ctx context.Context, root, snapshot string, request AssetExport
 		}
 		capture, err := evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
 			Reader: bytes.NewReader(encoded), MaxBytes: 1 << 20, MediaType: "application/json", Complete: true,
-			Provenance: evidence.Provenance{Kind: "asset-export-manifest", Locator: reading.Capture.ID, Snapshot: snapshot, DataBuild: reading.Result.Pin.FullBuild},
+			Dependencies: dependencies,
+			Provenance:   evidence.Provenance{Kind: "asset-export-manifest", Locator: reading.Capture.ID, Snapshot: snapshot, DataBuild: reading.Result.Pin.FullBuild},
 		})
 		if err != nil {
 			return AssetExport{}, err

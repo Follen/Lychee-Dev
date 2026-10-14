@@ -11,7 +11,9 @@ lycheedev live status <CON-id> --project <project-directory> --format json
 lycheedev live resume <CON-id> --project <project-directory> --wait-seconds 120 --format json
 ```
 
-Status reads persisted evidence. Resume acquires the same connection's driver
+Status reads persisted evidence; retained identity/input is not a fresh sample
+and cannot establish that a user reload or character change did not happen.
+Resume acquires the same connection's driver
 lease, reconciles original nonces and continues within both the caller's wait
 limit and the original durable deadline. Exit 6 retains usable results and
 unfinished cleanup. Choose from the returned `continuation`, including its
@@ -19,12 +21,19 @@ goal, blocker condition and remaining budget:
 
 | Kind | Next action |
 | --- | --- |
-| `continue` | Continue the original CON serially within its budget; reconcile the receipt or focus condition |
+| `continue` | Continue the original CON serially within its budget when no unresolved hard error prevents progress; reconcile the receipt or focus condition |
 | `wait_active_driver` | Wait for the existing host call; do not start a competing resume |
 | `wait_external` | Resolve or wait for the named dependency to change, then resume |
 | `needs_decision` | Inspect the concrete outcome/blocker and choose an action covered by the task's scope |
 | `budget_exhausted` | Retain results and consider permitted cleanup/recovery; do not renew business time |
 | `completed` | Read this command's terminal outcome; check whether the overall investigation is done |
+
+Continuation describes the retained goal, not permission to ignore a returned
+error. `continue` together with `retryable=false` calls for diagnosing that
+concrete read/compatibility failure, then retrying only after relevant evidence
+or a prerequisite changes. Keep the original CON; do not busy-loop resume or
+request repeated reloads. A read failure alone proves neither runtime retirement
+nor that a submitted input was unexecuted.
 
 For a verified report whose attempted release has no exact receipt, the CLI
 observes the original receipt for five seconds, then journals one automatic
@@ -153,7 +162,6 @@ bridge is enabled. Focus and draft text stay intact. Current INPUT publishes
 `escapeLimit=0`; no Esc is needed. Password, secure text, protected or forbidden
 editors return `input_focus_unavailable`; retain the CON and wait for the user to
 leave that field. Combat, loading and stale evidence never authorize keys.
-Old upgrade journals retain their original bounded Esc counts; do not reset them.
 Held Ctrl, Alt, Shift, either Win key or a key in the selected chord delays input
 until release. The CLI never forces the user's physical keys up. A user can
 still interrupt a chord after that check; only the addon receipt confirms execution.
@@ -204,8 +212,7 @@ do not fix them by copying an RVA, scanning memory or looping reloads.
 `waiting: shared_publication` is shared-file contention inside one installation,
 not proof of a lost connection. Native 3.2 development requires the Mailbox wire,
 identity and 500-slot pool; it rejects older native connection identities.
-Retain incompatible evidence for its matching older CLI rather than applying
-the new driver to it. The current 500-slot allocator can skip another
+Retain incompatible evidence for diagnosis; current drivers cannot execute old-wire journals. The current 500-slot allocator can skip another
 owner's reservations for a new exchange only before publication or input. The
 runtime skips empty/foreign slots and stops at the first envelope for itself;
 it does not skip its own pending work. Once published, submitted or uncertain,
@@ -242,7 +249,7 @@ rollback stops automatic work; an unseen offline clock change cannot be detected
 
 Current native writes use channel-v2 and activation-v3 with the current Mailbox
 identity. Older native wire/identity journals are rejected before driving or
-budget migration; preserve them for diagnosis with their matching release.
+budget migration; preserve them for read-only diagnosis.
 An older artifact serialization within a compatible connection is a different
 case and does not establish old-wire compatibility. A CLI wait timeout or
 interruption ends the host call, not the game-side probe or its cleanup.

@@ -49,6 +49,7 @@ func inspectData(ctx context.Context, root, snapshot, name string, query FileQue
 		}
 		defer admission.Close()
 		query.admitted = true
+		query.downloadWorkers = admission.DownloadWorkers
 		bundle, err := OpenDefinitions(s, m).WithBudget(query.budget).Prepare(ctx, pin.Data.DefinitionCommit, name, query.Offline)
 		if err != nil {
 			return RecordReading{}, err
@@ -105,6 +106,7 @@ func captureAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, snapsh
 	}
 	defer admission.Close()
 	query.admitted = true
+	query.downloadWorkers = admission.DownloadWorkers
 	reading, err := OpenReader(s).ReadFile(ctx, *pin.Data, query)
 	if err != nil {
 		return AssetReading{}, nil, err

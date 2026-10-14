@@ -14,7 +14,7 @@ func AnalyzeDocument(ctx context.Context, name string, data []byte) (DocumentFac
 	if err := ctx.Err(); err != nil {
 		return DocumentFacts{}, err
 	}
-	if len(data) > maxSourceBytes || !utf8.Valid(data) {
+	if len(data) > 32<<20 || !utf8.Valid(data) {
 		return DocumentFacts{}, errors.New("codebase.analysis_encoding_or_budget")
 	}
 	var result DocumentFacts

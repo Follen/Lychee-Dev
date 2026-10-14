@@ -33,6 +33,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   await check('BUILD', 'Build all packages', 'go', ['build', './...']);
   await check('VET', 'Vet all packages', 'go', ['vet', './...']);
+  await check('CASC-ORACLE-CLI', 'CASC comparison argument and JSON admission', 'go', ['test', '-tags', 'casc_oracle', './tests/data-regression/compare']);
   await check('GO', 'All Go tests and mandatory Lua 5.1 suites', 'go', ['test', '-json', '-p=2', '-parallel=4', '-count=1', '-timeout=20m', './...'], (entry, text) => {
     const evidence = parseGoEvents(text);
     entry.tests = evidence.tests.size;

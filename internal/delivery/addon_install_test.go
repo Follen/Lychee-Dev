@@ -3,11 +3,13 @@ package delivery_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/delivery"
 	"github.com/follenfang/lycheedev/internal/testkit"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +76,19 @@ func TestRemoveAddonIncludesSlotsAndResumesPartialMoves(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := filepath.Dir(delivery.AddonDirectory(client))
+	// Both sides of a partial removal must accept the exact old TOC bytes
+	// already recognized by InspectSlots, and preserve those bytes in archive.
+	for _, slot := range []int{1, 64} {
+		toc := filepath.Join(delivery.SlotDirectory(parent, slot), fmt.Sprintf("Lychee Dev Slot %02d.toc", slot))
+		raw, err := os.ReadFile(toc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := strings.Replace(string(raw), "## X-Lychee-Transport: Lycheedev mailbox protocol v1", "## X-Lychee-Transport: memory-slot-v3", 1)
+		if err := os.WriteFile(toc, []byte(old), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	archive := filepath.Join(t.TempDir(), "removed")
 	result, err := delivery.RemoveAddon(ctx, client, archive)
 	if err != nil || result.State != "archived" || result.SlotArchive != archive+".slots" {

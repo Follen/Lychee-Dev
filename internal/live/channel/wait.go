@@ -58,6 +58,16 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 	}
 	bounded, cancel, err := d.budgetContext(ctx)
 	if err != nil {
+		if errors.Is(err, ErrBudgetExhausted) && d.closeBookkeepingOnly() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// Successful retirement can outlive its bounded journal write.
+			// Finish the existing close transition with the caller's context;
+			// the exhausted goal grants no further input or cleanup work.
+			d.Waiting = ""
+			return d.next(ctx)
+		}
 		return err
 	}
 	defer cancel()
@@ -106,14 +116,6 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		knownBlock := knownInputBlocker(d.Waiting)
 		if !d.closingExplicitReload() && (!knownBlock || d.State.Closing && d.Waiting != "input_observation_stale") && ctx.Err() == nil && !time.Now().Before(nextDiscovery) {
 			discoveryStarted := time.Now()
-			if tx := d.State.Transaction; !d.State.Bound && d.State.Operation == nil && tx != nil && tx.Envelope.Action == "bind" && tx.Phase == "input_attempted" {
-				if recoverErr := d.pendingObservation(d.RecoverBinding(ctx)); recoverErr == nil {
-					nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
-					continue
-				} else if !errors.Is(recoverErr, ErrPending) {
-					return recoverErr
-				}
-			}
 			candidate, observeErr := d.Backend.RuntimeCandidate(ctx, d.State.Identity)
 			nextDiscovery = time.Now().Add(discoveryCooldown(time.Since(discoveryStarted)))
 			observeErr = d.pendingObservation(observeErr)
@@ -148,6 +150,14 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 		case <-timer.C:
 		}
 	}
+}
+
+func (d *Driver) closeBookkeepingOnly() bool {
+	s := &d.State
+	return s.Closing && !s.Bound && s.Transaction == nil &&
+		(s.Operation == nil || s.Operation.Stage == "complete" || s.Operation.Stage == "execution_unknown" || s.Operation.Stage == "cancelled") &&
+		(s.Reload == nil || s.Reload.Phase == "complete") &&
+		(s.Recovery == nil || s.Recovery.Phase == "complete")
 }
 
 // Missing mailbox input is not evidence that the old runtime still exists.
@@ -212,7 +222,7 @@ func (d *Driver) next(ctx context.Context) error {
 	if err == nil && closing {
 		return errProgress
 	}
-	if errors.Is(err, ErrCleanupReloadRequired) {
+	if errors.Is(err, ErrCleanupReloadRequired) || errors.Is(err, ErrReloadRequired) {
 		return errProgress
 	}
 	return err

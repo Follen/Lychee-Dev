@@ -2,13 +2,20 @@ package codebase
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/follenfang/lycheedev/internal/evidence"
+	"github.com/follenfang/lycheedev/internal/vault"
 )
 
 func TestInspectPathReturnsFileAndAssetRows(t *testing.T) {
 	files := topicTree()
-	files["Interface/AddOns/Test/Core.lua"] = "line one\nline two\nline three\nline four\nline five\nline six\nline seven\n"
+	files["Interface/AddOns/Test/Core.lua"] = "-- line one\n-- line two\n-- line three\n-- line four\n-- line five\n-- line six\n-- line seven\n"
 	b, pin := indexedSearchFixture(t, files)
 	ctx := context.Background()
 
@@ -23,7 +30,7 @@ func TestInspectPathReturnsFileAndAssetRows(t *testing.T) {
 	if file.Kind != "file" || file.Name != "Core.lua" || file.MatchedBy != "path" || file.Score != 100 || file.ScoreParts["match"] != 100 {
 		t.Fatalf("file row = %+v", file)
 	}
-	if !strings.HasPrefix(file.Excerpt, "1: line one") || !strings.Contains(file.Excerpt, "6: line six") || file.ContentHash == "" {
+	if !strings.HasPrefix(file.Excerpt, "1: -- line one") || !strings.Contains(file.Excerpt, "6: -- line six") || file.ContentHash == "" {
 		t.Fatalf("file excerpt/hash = %+v", file)
 	}
 
@@ -86,5 +93,69 @@ func TestInspectTargetAdmission(t *testing.T) {
 	}
 	if _, err := b.InspectTarget(ctx, "PIN-TEST", pin, TargetQuery{Symbol: "x", Path: "y"}); err == nil || !strings.Contains(err.Error(), "codebase.inspect_target_conflict") {
 		t.Fatalf("conflicting targets accepted: %v", err)
+	}
+}
+
+func TestInspectSourceTargetPreservesIndexCoverageAndCapture(t *testing.T) {
+	for _, skipped := range []bool{false, true} {
+		t.Run(map[bool]string{false: "complete_index", true: "skipped_file"}[skipped], func(t *testing.T) {
+			ctx := context.Background()
+			fixture := t.TempDir()
+			if err := os.WriteFile(filepath.Join(fixture, "Good.lua"), []byte("return 1\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if skipped {
+				f, err := os.Create(filepath.Join(fixture, "Large.lua"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := f.Truncate(maxSourceBytes + 1); err != nil {
+					f.Close()
+					t.Fatal(err)
+				}
+				if err := f.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store, err := vault.Initialize(ctx, filepath.Join(t.TempDir(), "home"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if indexed.Summary.Complete == skipped || skipped && indexed.Summary.SkippedDocuments != 1 {
+				t.Fatalf("fixture coverage = %+v", indexed.Summary)
+			}
+			for _, target := range []string{"Large.lua", "Good.lua", "Missing.lua"} {
+				reading, err := InspectSourceTarget(ctx, store.Root(), indexed.Snapshot.ID, TargetQuery{Path: target})
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantRows := 0
+				if target == "Good.lua" {
+					wantRows = 1
+				}
+				if len(reading.Result.Results) != wantRows || reading.Result.Complete == skipped || reading.Result.Truncated || reading.Capture.Complete != reading.Result.Complete {
+					t.Fatalf("%s inspect = %+v", target, reading)
+				}
+				if !reflect.DeepEqual(reading.Result.Coverage, indexed.Summary.Coverage()) {
+					t.Fatalf("%s coverage = %+v, want %+v", target, reading.Result.Coverage, indexed.Summary.Coverage())
+				}
+				stored, err := vault.ReadWorkspace(ctx, store.Root(), func(s *vault.Store, m *vault.Metadata) (SearchResponse, error) {
+					_, raw, err := evidence.OpenArchive(s, m).FetchCapture(ctx, reading.Capture.ID, 1<<20)
+					if err != nil {
+						return SearchResponse{}, err
+					}
+					var result SearchResponse
+					err = json.Unmarshal(raw, &result)
+					return result, err
+				})
+				if err != nil || !reflect.DeepEqual(stored.Coverage, reading.Result.Coverage) || stored.Complete != reading.Result.Complete {
+					t.Fatalf("%s archived coverage = %+v, %v", target, stored, err)
+				}
+			}
+		})
 	}
 }

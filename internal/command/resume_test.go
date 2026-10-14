@@ -29,7 +29,7 @@ func TestLiveResumeRejectsInvalidIntentWithoutMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, code := invoke(t, "live", "resume", record.OperationID, "--home", root, "--format=json")
-	if code == 0 || result.OK || result.Result == nil || result.OperationID != record.OperationID || result.Error == nil || result.Error.Stage != "prepared" || result.Error.Retryable || result.Error.ResumeOperationID != record.OperationID {
+	if code != 2 || result.OK || result.Result != nil || result.Error == nil || result.Error.Retryable {
 		t.Fatalf("unsupported stage: %+v code=%d", result, code)
 	}
 	current, err := book.InspectWork(ctx, record.OperationID)
@@ -51,7 +51,7 @@ func TestLiveResumeRejectsInvalidIntentWithoutMutation(t *testing.T) {
 		t.Fatal("resume created a workspace")
 	}
 	result, code = invoke(t, "live", "resume", "OP-missing", "--home", root, "--format=json")
-	if code == 0 || result.OK || result.Result != nil || result.Error.Code != "vault.record_missing" {
+	if code != 2 || result.OK || result.Result != nil {
 		t.Fatal("missing operation resumed")
 	}
 	found := false
@@ -66,11 +66,11 @@ func TestLiveResumeRejectsInvalidIntentWithoutMutation(t *testing.T) {
 }
 
 func TestLiveResumeDoesNotPermitRetargeting(t *testing.T) {
-	if _, err := parseOptions([]string{"live", "resume", "OP-existing"}); err != nil {
+	if _, err := parseOptions([]string{"live", "resume", "CON-existing"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, flag := range []string{"--snapshot=PIN-other", "--pid=2", "--nonce=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--character=Other", "--realm=Other", "--installation=C:/Other", "--region=window", "--region=0,0,600,600", "--session=SESSION-other", "--account=OTHER"} {
-		if _, err := parseOptions([]string{"live", "resume", "OP-existing", flag}); err == nil {
+		if _, err := parseOptions([]string{"live", "resume", "CON-existing", flag}); err == nil {
 			t.Fatal("accepted recovery retarget or invalid crop", flag)
 		}
 	}

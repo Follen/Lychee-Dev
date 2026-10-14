@@ -99,6 +99,7 @@ func (r *Reader) withTableView(ctx context.Context, pin selection.DataPin, q Fil
 		}
 		defer admission.Close()
 		q.admitted = true
+		q.downloadWorkers = admission.DownloadWorkers
 	}
 	if r.session == nil {
 		owned, err := r.NewSession(ctx, pin, q)

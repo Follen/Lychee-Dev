@@ -26,6 +26,7 @@ type slotPeer struct {
 	current bridge.SlotEnvelope
 	fault   string
 	sends   int
+	millis  int64
 	driver  *channel.Driver
 }
 
@@ -65,15 +66,18 @@ func (p *slotPeer) Input(_ context.Context, a channel.InputAction) (channel.Inpu
 		return channel.InputOutcome{Disposition: "not_sent"}, errors.New("unexpected simulated input")
 	}
 	err := p.send()
-	out := channel.InputOutcome{Disposition: "submitted", MessagesQueued: 1}
+	p.millis++
+	out := channel.InputOutcome{Disposition: "submitted", MessagesQueued: 1, AtMillis: p.millis}
 	if err != nil {
 		out.Disposition = "uncertain"
 	}
 	return out, err
 }
-func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, _ int64, _ string) (channel.InputObservation, error) {
+func (p *slotPeer) ObserveInput(_ context.Context, e bridge.SlotEnvelope, after int64, _ string) (channel.InputObservation, error) {
 	blocked := false
-	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, InputBlocked: &blocked}, nil
+	// Model a fresh sample on the same monotonic host clock as Input outcomes.
+	p.millis = max(p.millis+100, after+100)
+	return channel.InputObservation{Schema: channel.InputSchema, Bindings: &channel.InputBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, Runtime: e.Runtime, Owner: e.Owner, Fence: e.Fence, NextSlot: e.Index, GUID: e.GUID, Build: e.Build, SampleMillis: p.millis, ObservedAtMillis: p.millis, InputBlocked: &blocked}, nil
 }
 func (p *slotPeer) RuntimeCandidate(context.Context, channel.Identity) (*channel.Identity, error) {
 	return nil, nil
@@ -86,9 +90,6 @@ func (p *slotPeer) Consumed(context.Context, bridge.SlotEnvelope) error { return
 type recordSource struct{ bytes []byte }
 
 func (s recordSource) Verify(context.Context) error { return nil }
-func (s recordSource) Regions(context.Context) ([]memory.Region, error) {
-	return []memory.Region{{Range: memory.Range{Start: 4096, End: 4096 + uint64(len(s.bytes))}, Private: true, Committed: true, Readable: true}}, nil
-}
 func (s recordSource) Read(_ context.Context, address uint64, b []byte) (int, error) {
 	if address < 4096 || address-4096 >= uint64(len(s.bytes)) {
 		return 0, io.EOF
@@ -104,19 +105,22 @@ func (p *slotPeer) Find(ctx context.Context, s memory.Selector, first bool) (mem
 	if err != nil {
 		return memory.LookupResult{}, err
 	}
-	var data []byte
+	result := memory.LookupResult{Coverage: memory.Coverage{Complete: true}}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return memory.LookupResult{}, err
+			return result, err
 		}
-		data = append(data, b...)
-		data = append(data, make([]byte, 31)...)
+		record, err := memory.ReadRecord(ctx, recordSource{b}, 4096, s)
+		if err != nil {
+			continue
+		}
+		result.Records = append(result.Records, record)
+		if first {
+			break
+		}
 	}
-	if len(data) == 0 {
-		return memory.LookupResult{}, nil
-	}
-	return memory.Find(ctx, recordSource{data}, s, nil, first)
+	return result, nil
 }
 func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 	for _, fault := range []string{"", "bind", "prepare", "commit", "confirm", "release", "reload_bind", "compile_error", "cleanup_error"} {
@@ -176,13 +180,16 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 				if fault != "bind" && fault != "reload_bind" {
 					t.Fatal(err)
 				}
+				original := d.State.Transaction.Envelope
+				phase, runtime := d.State.Transaction.Phase, d.State.Identity.Runtime
 				restart()
 				if fault == "reload_bind" {
-					err = d.RecoverBinding(ctx)
-					// v2 foreign loads are skipped without emitting a receipt for
+					err = d.Connect(ctx)
+					// Foreign loads are skipped without emitting a receipt for
 					// another runtime. Missing evidence cannot authorize replay.
-					if !errors.Is(err, channel.ErrPending) || peer.sends != 1 {
-						t.Fatal("foreign bootstrap was replayed", err)
+					tx := d.State.Transaction
+					if !errors.Is(err, channel.ErrPending) || peer.sends != 1 || d.State.Bound || d.State.Identity.Runtime != runtime || tx == nil || tx.Envelope != original || tx.Phase != phase || tx.Receipt != nil {
+						t.Fatalf("foreign bind was replayed or its pending evidence changed: err=%v state=%+v sends=%d", err, d.State, peer.sends)
 					}
 					return
 				} else {
@@ -197,7 +204,7 @@ func TestSlotDriverLuaRecoveryWithoutBusinessReplay(t *testing.T) {
 			if fault == "compile_error" {
 				code = "return { broken ="
 			}
-			if err = d.PrepareOperation(ctx, code, 10, "observation"); err != nil {
+			if err = d.PrepareRequest(ctx, "protocol-recovery", code, 10, "observation"); err != nil {
 				t.Fatal(err)
 			}
 			if err = d.Run(ctx); err != nil {

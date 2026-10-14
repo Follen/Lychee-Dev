@@ -4,8 +4,7 @@ local ns=LycheeDevInternal
 assert(ns.ActivityView, "old_runtime")
 local timers,pages={},{}
 local function check()
-    assert(not ns.Receiver.IsActive(),"receiver_blocks_probe")
-    assert(ns.ReceiptView.Current()==nil,"probe_receipt_overlay")
+    assert(not ns.InputProtection.IsActive(),"input_protected_during_execution")
     assert(ns.ActivityView.Current()=="probe","probe_activity_lost")
 end
 local function later(seconds,callback)
@@ -35,9 +34,9 @@ later(24,function()
     assert(ns.Workbench.ShowPage("automation"))
     local page=ns.Workbench.GetPage("automation")
     local _,id=ns.ActivityView.Current()
-    page.SelectRecord(id)
+    page.SelectRecord("MEM-"..assert(id))
     assert(page.statusValue:GetText()==ns.L.AUTO_STATUS_RUNNING,"running_status_incorrect")
-    assert(not page.executeButton:IsEnabled(),"running_execute_enabled")
+    assert(not page.executeButton,"retired_execute_control_present")
     pages[#pages+1]="automation-result"
 end)
 later(32,function()
@@ -47,14 +46,11 @@ later(32,function()
     pages[#pages+1]="automation-details"
 end)
 later(40,function()
-    assert(ns.Workbench.ShowSettings())
-    local settings=ns.Workbench.GetSettingsPage()
-    assert(not settings.saveBindings and not settings.resetBindings)
-    for _,action in ipairs({"wake","submit","close"}) do
-        assert(not settings.bindings[action].edit)
-        assert(not settings.bindings[action].button:IsMouseEnabled())
+    local profile=assert(ns.ReceiverBindings.Current())
+    for _,action in ipairs({"wake","reload"}) do
+        assert(GetBindingAction(profile[action],true)=="LYCHEEDEV_"..string.upper(action),"binding_action_mismatch")
     end
-    pages[#pages+1]="fixed-shortcuts"
+    pages[#pages+1]="native-bindings"
 end)
 later(48,function() ns.Workbench.Close();pages[#pages+1]="probe-indicator-only" end)
-later(56,function() probe:Finish({passed=true,pages=pages,probeActivity=true,inputReleased=true,fixedShortcuts=true}) end)
+later(56,function() probe:Finish({passed=true,pages=pages,probeActivity=true,inputReleased=true,nativeBindings=true}) end)

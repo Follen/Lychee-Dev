@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -39,17 +41,20 @@ type CaptureDraft struct {
 	Provenance Provenance
 	Complete   bool
 	Truncated  bool
+	// Dependencies are captures whose lifetime is owned by this capture.
+	Dependencies []string
 }
 
 type CaptureRef struct {
-	Schema     string        `json:"schema"`
-	ID         string        `json:"id"`
-	Blob       vault.BlobRef `json:"blob"`
-	MediaType  string        `json:"mediaType"`
-	Provenance Provenance    `json:"provenance"`
-	Complete   bool          `json:"complete"`
-	Truncated  bool          `json:"truncated"`
-	CapturedAt time.Time     `json:"capturedAt"`
+	Schema       string        `json:"schema"`
+	ID           string        `json:"id"`
+	Blob         vault.BlobRef `json:"blob"`
+	MediaType    string        `json:"mediaType"`
+	Provenance   Provenance    `json:"provenance"`
+	Complete     bool          `json:"complete"`
+	Truncated    bool          `json:"truncated"`
+	CapturedAt   time.Time     `json:"capturedAt"`
+	Dependencies []string      `json:"dependencies,omitempty"`
 }
 
 var (
@@ -94,11 +99,24 @@ func (a *Archive) CommitCapture(ctx context.Context, draft CaptureDraft) (Captur
 	if draft.Provenance.Kind == "" || draft.Provenance.Locator == "" || draft.MediaType == "" || draft.Complete && draft.Truncated {
 		return CaptureRef{}, errors.New("evidence.invalid_capture")
 	}
+	ctx, release, err := a.metadata.AcquireWriteLease(ctx)
+	if err != nil {
+		return CaptureRef{}, err
+	}
+	defer release()
+	dependencies := slices.Clone(draft.Dependencies)
+	// Validate and publish references in the same lease as removal. The page
+	// producer may have returned before this compound capture was committed.
+	for _, id := range dependencies {
+		if _, err := a.InspectCapture(ctx, id); err != nil {
+			return CaptureRef{}, err
+		}
+	}
 	blob, err := a.store.PublishBlob(ctx, vault.BlobInput{Reader: draft.Reader, MaxBytes: draft.MaxBytes})
 	if err != nil {
 		return CaptureRef{}, err
 	}
-	ref := CaptureRef{Schema: "lycheedev.capture.v1", Blob: blob, MediaType: draft.MediaType, Provenance: draft.Provenance, Complete: draft.Complete, Truncated: draft.Truncated, CapturedAt: capturedAt()}
+	ref := CaptureRef{Schema: "lycheedev.capture.v1", Blob: blob, MediaType: draft.MediaType, Provenance: draft.Provenance, Complete: draft.Complete, Truncated: draft.Truncated, CapturedAt: capturedAt(), Dependencies: dependencies}
 	identity, err := json.Marshal(ref)
 	if err != nil {
 		return CaptureRef{}, err
@@ -215,6 +233,11 @@ func (a *Archive) ListCaptures(ctx context.Context, after string, limit int) ([]
 // KeepCapture records an explicit retention decision beside the immutable
 // capture manifest. Repeating the command is idempotent.
 func (a *Archive) KeepCapture(ctx context.Context, id string) (KeepResult, error) {
+	ctx, release, err := a.metadata.AcquireWriteLease(ctx)
+	if err != nil {
+		return KeepResult{}, err
+	}
+	defer release()
 	ref, err := a.InspectCapture(ctx, id)
 	if err != nil {
 		return KeepResult{}, err
@@ -255,6 +278,11 @@ func (a *Archive) KeepCapture(ctx context.Context, id string) (KeepResult, error
 // in the same metadata transaction, and deletes the blob only when no other
 // capture manifest shares it.
 func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, error) {
+	ctx, release, err := a.metadata.AcquireWriteLease(ctx)
+	if err != nil {
+		return RemoveResult{CaptureID: id}, err
+	}
+	defer release()
 	ref, err := a.InspectCapture(ctx, id)
 	if err != nil {
 		return RemoveResult{CaptureID: id}, err
@@ -274,7 +302,7 @@ func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, e
 			return RemoveResult{CaptureID: id}, ErrInvalidRetention
 		}
 	}
-	if referenced, err := a.findExternalReference(ctx, id); err != nil {
+	if referenced, err := a.findExternalReference(ctx, ref); err != nil {
 		return RemoveResult{CaptureID: id}, err
 	} else if referenced {
 		return RemoveResult{CaptureID: id}, ErrCaptureReferenced
@@ -305,8 +333,12 @@ func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, e
 	return result, nil
 }
 
-func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, error) {
+func (a *Archive) findExternalReference(ctx context.Context, target CaptureRef) (bool, error) {
+	id := target.ID
 	needle := []byte("\"" + id + "\"")
+	// Existing scan captures used a capture: locator rather than the bare ID.
+	// Both forms are persistent references, including in pre-upgrade metadata.
+	locator := []byte("\"capture:" + id + "\"")
 	after := ""
 	for page := 0; page < 100; page++ {
 		docs, err := a.metadata.ListDocuments(ctx, "", after, 1000)
@@ -320,8 +352,13 @@ func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, e
 			if doc.Key == "capture/"+id || doc.Key == "evidence/keep/"+id {
 				continue
 			}
-			if bytes.Contains(doc.Value, needle) {
+			if bytes.Contains(doc.Value, needle) || bytes.Contains(doc.Value, locator) {
 				return true, nil
+			}
+			if strings.HasPrefix(doc.Key, "capture/") {
+				if referenced, err := a.capturePayloadReference(ctx, doc, target); err != nil || referenced {
+					return referenced, err
+				}
 			}
 		}
 		after = docs[len(docs)-1].Key
@@ -330,6 +367,98 @@ func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, e
 		}
 	}
 	return false, ErrReferenceScanLimit
+}
+
+// Demux manifests keep frame references in their bounded payload, which can
+// exceed the metadata document budget. Older Hotfix/export captures also kept
+// dependencies only in payloads. Read only those known typed representations;
+// never rewrite immutable manifests or interpret arbitrary JSON as references.
+func (a *Archive) capturePayloadReference(ctx context.Context, doc vault.Document, target CaptureRef) (bool, error) {
+	var ref CaptureRef
+	if err := json.Unmarshal(doc.Value, &ref); err != nil {
+		return false, err
+	}
+	if ref.MediaType != "application/json" || ref.Provenance.Kind != "asset-demux-manifest" && len(ref.Dependencies) != 0 {
+		return false, nil
+	}
+	var limit int64
+	switch ref.Provenance.Kind {
+	case "hotfix-scan":
+		if target.Provenance.Kind == "hotfix-records" {
+			limit = 4 << 20
+		}
+	case "hotfix-records":
+		if target.Provenance.Kind == "hotfix-cache" && strings.HasPrefix(ref.Provenance.Locator, "dbcache:sha256:") {
+			limit = 32 << 20
+		}
+	case "asset-export-manifest":
+		if target.Provenance.Kind == "asset-image" {
+			limit = 1 << 20
+		}
+	case "asset-demux-manifest":
+		switch target.Provenance.Kind {
+		case "asset", "asset-demux-source", "asset-demux-frame":
+			limit = 16 << 20
+		}
+	}
+	if limit == 0 {
+		return false, nil
+	}
+	_, raw, err := a.FetchCapture(ctx, strings.TrimPrefix(doc.Key, "capture/"), limit)
+	if err != nil {
+		return false, err
+	}
+	switch ref.Provenance.Kind {
+	case "hotfix-scan":
+		var scan struct {
+			Pages []string `json:"pages"`
+		}
+		if err := json.Unmarshal(raw, &scan); err != nil {
+			return false, err
+		}
+		return slices.Contains(scan.Pages, target.ID), nil
+	case "hotfix-records":
+		var page struct {
+			Snapshot string     `json:"snapshot"`
+			Source   CaptureRef `json:"source"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return false, err
+		}
+		return page.Snapshot == ref.Provenance.Snapshot && page.Source.Schema == "lycheedev.capture.v1" && page.Source.ID == target.ID, nil
+	case "asset-export-manifest":
+		var manifest struct {
+			Schema          string      `json:"schema"`
+			ArtifactCapture *CaptureRef `json:"artifactCapture"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return false, err
+		}
+		return manifest.Schema == "lycheedev.asset-export.v1" && manifest.ArtifactCapture != nil && manifest.ArtifactCapture.Schema == "lycheedev.capture.v1" && manifest.ArtifactCapture.ID == target.ID, nil
+	case "asset-demux-manifest":
+		var manifest struct {
+			Schema        string `json:"schema"`
+			SourceCapture string `json:"sourceCapture"`
+			Frames        []struct {
+				Capture string `json:"capture"`
+			} `json:"frames"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return false, err
+		}
+		if manifest.Schema != "lycheedev.asset-demux.v1" {
+			return false, nil
+		}
+		if target.Provenance.Kind != "asset-demux-frame" {
+			return manifest.SourceCapture == target.ID, nil
+		}
+		for _, frame := range manifest.Frames {
+			if frame.Capture == target.ID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (a *Archive) blobSharedByAnotherCapture(ctx context.Context, id string, blob vault.BlobRef) (bool, error) {

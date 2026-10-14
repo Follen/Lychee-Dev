@@ -1,7 +1,6 @@
 // Minimal dependency-free reader for npm pack tarballs (.tgz = gzip + ustar).
 // Handles the tar subset npm-packlist produces: ustar headers, PAX extended
 // headers (long/unicode paths) and GNU long names.
-import { readFile } from 'node:fs/promises';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
 function parseOctal(buffer, offset, length) {
@@ -61,10 +60,6 @@ export function readTgz(buffer) {
     entries.push({ name, bytes: Buffer.from(data), mode, type });
   }
   return entries;
-}
-
-export async function readTgzFile(path) {
-  return readTgz(await readFile(path));
 }
 
 function tarChecksum(header) {

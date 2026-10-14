@@ -210,10 +210,13 @@ func TestZeroQueryWorkspaceDoesNotStartSemanticProcess(t *testing.T) {
 		t.Fatalf("empty query started runtime or lost coverage: %+v %v", result, err)
 	}
 }
-func TestWorkspaceBatchInputValidatedBeforeStartup(t *testing.T) {
-	r := &Runtime{Identity: Pinned()}
-	if _, err := r.AnalyzeWorkspaceBatches(context.Background(), t.TempDir(), nil, [][]Query{make([]Query, 129)}); !errors.Is(err, ErrBudget) {
-		t.Fatalf("invalid batch reached startup: %v", err)
+func TestWorkspaceBatchInputValidatedBeforeAnalysis(t *testing.T) {
+	// No worker exists: invalid batch input must fail before touching it.
+	session := &WorkspaceSession{runtime: &Runtime{Identity: Pinned()}}
+	for _, batches := range [][][]Query{{make([]Query, 129)}, {{}, {}, {}}} {
+		if _, err := session.AnalyzeBatches(context.Background(), batches); !errors.Is(err, ErrBudget) {
+			t.Fatalf("invalid batch reached analysis: %v", err)
+		}
 	}
 }
 func TestLSPBatchAndLifetimeBudgetsAreIndependent(t *testing.T) {

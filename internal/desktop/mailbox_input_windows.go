@@ -16,7 +16,7 @@ func WithMailboxInput(ctx context.Context, target WindowIdentity, b MailboxBindi
 	if err := ValidateMailboxBindings(b); err != nil {
 		return InputReceipt{}, err
 	}
-	return withNativeInput(ctx, target, "postmessage", guard, func(in *nativeInput) error {
+	return withNativeInput(ctx, target, guard, func(in *nativeInput) error {
 		return fn(func() error { return in.ReceiverChord(b.Wake) },
 			func() error { return in.ReceiverChord(b.Reload) })
 	})

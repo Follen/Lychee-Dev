@@ -104,39 +104,6 @@ func InspectSourceTarget(ctx context.Context, root, snapshot string, query Targe
 	return result, err
 }
 
-// SourceValidation is a captured TOC validation result.
-type SourceValidation struct {
-	Result  TOCValidation       `json:"result"`
-	Capture evidence.CaptureRef `json:"capture"`
-}
-
-// ValidateSourceTOC runs the TOC-closure validation mode against the fixed
-// snapshot. There is no latest fallback: evidence is exactly the pinned commit.
-func ValidateSourceTOC(ctx context.Context, root, snapshot string, input AddonInput) (SourceValidation, error) {
-	ctx, closeQuery := sourceQueryContext(ctx)
-	defer closeQuery()
-
-	var result SourceValidation
-	pin, err := pinnedSource(ctx, root, snapshot)
-	if err != nil {
-		return result, err
-	}
-	s, err := vault.OpenStore(root)
-	if err != nil {
-		return result, err
-	}
-	b := OpenBrowser(s)
-	if err := b.EnsureIndex(ctx, pin); err != nil {
-		return result, err
-	}
-	result.Result, err = b.ValidateTOC(ctx, pin, snapshot, input, ValidationIdentity{})
-	if err != nil {
-		return result, err
-	}
-	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Valid, false, evidence.Provenance{Kind: "addon-validate", Locator: input.Root + "/" + input.Manifest, Snapshot: snapshot, SourceCommit: pin.ExactCommit})
-	return result, err
-}
-
 // MatrixValidation is a captured merged matrix validation result.
 type MatrixValidation struct {
 	Result  MatrixResult        `json:"result"`
@@ -193,7 +160,11 @@ func ValidateSourceMatrix(ctx context.Context, root, matrixFile string, resolve 
 		targets = append(targets, value)
 	}
 	result.Result = MergeMatrix(filepath.Clean(addonRoot), targets)
-	result.Capture, err = captureSourceJSON(ctx, root, result.Result, result.Result.Valid, false, evidence.Provenance{Kind: "addon-matrix-validate", Locator: matrixFile})
+	complete := result.Result.Valid
+	for _, target := range targets {
+		complete = complete && target.Coverage.Unresolved == 0 && target.SourceCoverage.Complete
+	}
+	result.Capture, err = captureSourceJSON(ctx, root, result.Result, complete, false, evidence.Provenance{Kind: "addon-matrix-validate", Locator: matrixFile})
 	return result, err
 }
 

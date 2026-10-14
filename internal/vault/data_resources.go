@@ -13,14 +13,6 @@ import (
 // then excludes new data queries in this workspace until Close.
 type DataResourcePolicy string
 
-type dataResourcePolicyKey struct{}
-
-// WithDataResourcePolicy selects explicit measurement admission for a data
-// query without teaching source readers a second coordination path.
-func WithDataResourcePolicy(ctx context.Context, policy DataResourcePolicy) context.Context {
-	return context.WithValue(ctx, dataResourcePolicyKey{}, policy)
-}
-
 const (
 	DataOrdinary      DataResourcePolicy = "ordinary"
 	DataMeasurement   DataResourcePolicy = "measurement"
@@ -28,9 +20,11 @@ const (
 )
 
 type DataResources struct {
-	once   sync.Once
-	leases []*Lease
-	err    error
+	// DownloadWorkers is this query's share of the workspace download cap.
+	DownloadWorkers int
+	once            sync.Once
+	leases          []*Lease
+	err             error
 }
 
 func (r *DataResources) Close() error {
@@ -51,9 +45,6 @@ func (s *Store) AcquireDataResources(ctx context.Context, policy DataResourcePol
 	if s == nil {
 		return nil, ErrWorkspaceFormat
 	}
-	if requested, ok := ctx.Value(dataResourcePolicyKey{}).(DataResourcePolicy); ok {
-		policy = requested
-	}
 	if policy != DataOrdinary && policy != DataMeasurement {
 		return nil, fmt.Errorf("vault: invalid data resource policy %q", policy)
 	}
@@ -73,6 +64,10 @@ func (s *Store) AcquireDataResources(ctx context.Context, policy DataResourcePol
 	slots := dataResourceSlots
 	if cfg.Download.Workers == 1 {
 		slots = 1
+	}
+	out.DownloadWorkers = 8
+	if cfg.Download.Workers > 0 {
+		out.DownloadWorkers = min(8, max(1, cfg.Download.Workers/slots))
 	}
 	if policy == DataMeasurement {
 		for i := 0; i < dataResourceSlots; i++ {

@@ -16,6 +16,9 @@ Start from the question and retained state. Read one relevant entry, then its
 detail references when needed. Follow-ups such as “继续”, “已登录” or “还是卡住”
 continue the existing goal, scope and evidence.
 
+Use LycheeDev by default for WoW source/API research, following the
+[source routing and external-evidence rules](references/source-research.md#route-source-evidence).
+
 | Need | Entry |
 | --- | --- |
 | API/event constraints, implementation, callers, revision differences, stack trace, secrets or taint | [Source research](references/source-research.md) |

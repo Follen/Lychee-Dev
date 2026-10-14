@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { collectAddonZipEntries } from '../../../../tools/addon-package.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(packageRoot, '../../..');
@@ -63,9 +64,9 @@ function stageResources(source, relative) {
     resources.push({ path: name, bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') });
   }
 }
-assert.equal(readFileSync(join(repository, 'addon/Bridge/Definitions.lua'), 'utf8'),
-  'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n',
-  'refuse to package a modified or nonempty probe queue');
+// Validate current TOC/bindings inputs; the retired probe queue is no longer
+// a source input for the Native Mailbox addon.
+collectAddonZipEntries(repository);
 stageResources(join(repository, 'addon'), 'addon');
 stageResources(join(repository, 'skills/lycheedev'), 'skill');
 assert.equal(run('git', ['rev-parse', 'HEAD'], repository).trim(), commit, 'HEAD changed during assembly');
@@ -160,9 +161,9 @@ const assetExport = { status: 'passed', scope: 'synthetic authenticated CDN cach
 const sessionContract = describe.result.commands.find(command => command.path === 'live session');
 assert(sessionContract, 'installed CLI is missing session evidence query');
 assert.equal(sessionContract.mutates, false);
-assert.equal(describe.result.commands.find(command => command.path === 'live bind')?.mutates, true);
+assert.equal(describe.result.commands.find(command => command.path === 'live connect')?.mutates, true);
 assert.equal(describe.result.commands.find(command => command.path === 'live resume')?.mutates, true);
-assert.equal(describe.result.commands.find(command => command.path === 'live run')?.mutates, true);
+assert.equal(describe.result.commands.find(command => command.path === 'live execute')?.mutates, true);
 const probeFile = join(root, 'probe.lua');
 writeFileSync(probeFile, 'return 42\n');
 const absentRunHome = join(root, 'absent-run-home');
@@ -181,13 +182,6 @@ for (const extra of [[], ['--session', 'SESSION-missing', '--account', 'Account-
   assert(!existsSync(absentRunHome), 'run admission created an implicit workspace');
   runAdmission.push(result);
 }
-const recoveryOutput = run('go', ['test', '-count=1', '-run', '^TestOperationReportLifecycleUsesArchivedEvidence$', '-v', './internal/live'], repository, {
-  LYCHEEDEV_RECOVERY_NODE: process.execPath,
-  LYCHEEDEV_RECOVERY_LAUNCHER: launcher,
-});
-assert(recoveryOutput.includes(`using installed recovery launcher: ${launcher}`), 'recovery did not use installed package');
-assert(recoveryOutput.includes('--- PASS: TestOperationReportLifecycleUsesArchivedEvidence'), 'recovery integration test did not pass');
-const terminalRecovery = { status: 'passed', scope: 'synthetic completed operation, real installed CLI owner retirement, not game execution', launcher, output: recoveryOutput };
 const incompleteBind = spawnSync(process.execPath, [launcher, 'live', 'bind', '--format=json'], {
   cwd: root, encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
 });
@@ -204,17 +198,6 @@ const sessionFailure = JSON.parse(missingSession.stdout);
 assert.equal(sessionFailure.ok, false);
 assert.equal(sessionFailure.result, null, 'failed lookup returned a fabricated empty session');
 assert(!existsSync(absentSessionHome), 'historical session lookup created a workspace');
-let nativeBinding = { status: 'not-run', scope: 'owned synthetic Windows window, not WoW' };
-if (process.env.LYCHEEDEV_TEST_DESKTOP === '1') {
-  assert.equal(target, 'windows-amd64', 'native binding fixture requires Windows amd64');
-  const output = run('go', ['test', '-count=1', '-run', '^TestLiveBindNativeCLI$', '-v', './internal/command'], repository, {
-    LYCHEEDEV_BINDING_NODE: process.execPath,
-    LYCHEEDEV_BINDING_LAUNCHER: launcher,
-  });
-  assert(output.includes(`using installed npm launcher: ${launcher}`), 'native test did not use installed launcher');
-  assert(output.includes('--- PASS: TestLiveBindNativeCLI'), 'native binding test was skipped or failed');
-  nativeBinding = { ...nativeBinding, status: 'passed', launcher, output };
-}
 function cli(...args) {
   const result = JSON.parse(run(process.execPath, [launcher, ...args, '--format=json']));
   assert.equal(result.ok, true);
@@ -274,7 +257,7 @@ writeFileSync(join(skillPath, 'SKILL.md'), skillOriginal);
 const skillRemove = cli('skill', 'remove', '--path', skillPath, '--output', join(root, 'removed-skill'));
 assert.equal(cli('skill', 'status', '--path', skillPath).result.state, 'absent');
 assert.equal(createHash('sha256').update(readFileSync(tgz)).digest('hex'), digest);
-const report = { scope: 'development host binary and current addon/skill payload; simulated deployment, not game or release acceptance', target, root, tgz, sha256: digest, commit, workspaceDirty, resources, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, ignoreScripts: true, version, shimVersion, initialized, describe, projectContext, hotfixQuery, assetExport, runAdmission, sessionFailure, nativeBinding, terminalRecovery, skillInstall, skillUpgrade, skillResume, skillRemove, skillConflict, addonInstall, addonUpgrade, addonResume, addonRemove, addonConflict };
+const report = { scope: 'development host binary and current addon/skill payload; simulated deployment, not game or release acceptance', target, root, tgz, sha256: digest, commit, workspaceDirty, resources, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, ignoreScripts: true, version, shimVersion, initialized, describe, projectContext, hotfixQuery, assetExport, runAdmission, sessionFailure, skillInstall, skillUpgrade, skillResume, skillRemove, skillConflict, addonInstall, addonUpgrade, addonResume, addonRemove, addonConflict };
 writeFileSync(join(root, 'report.json'), JSON.stringify(report, null, 2));
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `report=${join(root, 'report.json')}\n`);
 process.stdout.write(JSON.stringify({ root, target, sha256: digest, compressedBytes: bytes.length, unpackedBytes: packed.unpackedSize, status: 'passed' }) + '\n');

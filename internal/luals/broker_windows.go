@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	winio "github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
@@ -111,6 +112,55 @@ func BrokerProcessIdentity(pid uint32) (uint64, string, error) {
 		return 0, "", err
 	}
 	return uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime), hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// WaitBrokerExit joins the exact broker lifetime already authenticated by the
+// pipe handshake. The closed response precedes handler, listener and ownership
+// cleanup; process exit is the completion boundary for all three. Cancellation
+// only stops waiting and never terminates the broker or any reused PID.
+func WaitBrokerExit(ctx context.Context, pid uint32, started uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, pid)
+	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+		return nil // The authenticated lifetime has already exited.
+	}
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(process)
+	var created, exited, kernel, user windows.Filetime
+	if err = windows.GetProcessTimes(process, &created, &exited, &kernel, &user); err != nil {
+		return err
+	}
+	if uint64(created.HighDateTime)<<32|uint64(created.LowDateTime) != started {
+		return nil // PID reuse also proves that the original lifetime ended.
+	}
+	cancelled, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(cancelled)
+	signalled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = windows.SetEvent(cancelled); close(signalled) })
+	defer func() {
+		if !stop() {
+			<-signalled
+		}
+	}()
+	state, err := windows.WaitForMultipleObjects([]windows.Handle{process, cancelled}, false, windows.INFINITE)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case windows.WAIT_OBJECT_0:
+		return nil
+	case windows.WAIT_OBJECT_0 + 1:
+		return ctx.Err()
+	default:
+		return ErrUnavailable
+	}
 }
 
 // StartBroker only launches this CLI executable. The child proves the launching

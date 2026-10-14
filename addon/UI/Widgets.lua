@@ -284,57 +284,6 @@ local function CreateBackButton(parent)
     return CreateTextNavButton(parent, ns.L.BACK or "Back")
 end
 
-local function CreateSettingsButton(parent)
-    return CreateTextNavButton(parent, ns.L.SETTINGS or "Settings")
-end
-
-local function CreateToggle(parent, onChange)
-    local button = CreateFrame("Button", nil, parent)
-    button:SetSize(40, 32)
-    -- Lychee's 32 x 18 pill and 14-unit round thumb, with a larger hit target.
-    local track = CreateFrame("Frame", nil, button)
-    track:SetSize(32, 18)
-    track:SetPoint("CENTER")
-    Theme.PaintRoundedPanel(track, Theme.disabled, { radius = 8 })
-    local thumb = CreateFrame("Frame", nil, track)
-    thumb:SetSize(14, 14)
-    Theme.PaintRoundedPanel(thumb, Theme.text, { radius = 6.9 })
-    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
-    button.track, button.thumb = track, thumb
-    local position = 2
-    local function place(x)
-        position = x
-        thumb:ClearAllPoints()
-        thumb:SetPoint("LEFT", track, "LEFT", x, 0)
-    end
-    local elapsed, start, destination
-    local function finish()
-        button:SetScript("OnUpdate", nil)
-        place(button.checked and 16 or 2)
-    end
-    local function advance(_, delta)
-        elapsed = math.min(.14, elapsed + delta)
-        place(start + (destination - start) * (1 - (1 - elapsed / .14) ^ 3))
-        if elapsed == .14 then finish() end
-    end
-    local function SetChecked(self, checked, instant)
-        self.checked = checked == true
-        track.lycheeSurface:SetColor(self.checked and Theme.accent or Theme.disabled)
-        if instant or Theme.reducedMotion then finish(); return end
-        elapsed, start, destination = 0, position, self.checked and 16 or 2
-        if start == destination then finish() else self:SetScript("OnUpdate", advance) end
-    end
-    button.SetChecked = SetChecked
-    button:SetScript("OnHide", finish)
-    button:SetScript("OnClick", function(self)
-        self:SetChecked(not self.checked)
-        if onChange then onChange(self.checked) end
-        if Theme.reducedMotion then finish() end
-    end)
-    button:SetChecked(false, true)
-    return button
-end
-
 local function SetButtonLabelOffset(button, y)
     button.label:ClearAllPoints()
     button.label:SetPoint("CENTER", 0, 0)
@@ -419,50 +368,6 @@ local function SetButtonVariant(button, variant)
     ApplyButtonState(button, "normal")
 end
 
--- A shortcut is a sequence of keys, not an editable text field. The focused
--- recorder replaces these caps with its instruction without moving the row.
-local function CreateShortcutButton(parent)
-    local button = CreateButton(parent, 220, "", "ghost")
-    local group = CreateFrame("Frame", nil, button)
-    group:SetHeight(28)
-    group:SetPoint("RIGHT", button, "RIGHT", -8, 0)
-    button.keycaps = {}
-    for index = 1, 4 do
-        local cap = CreateFrame("Frame", nil, group)
-        cap:SetHeight(28)
-        Theme.PaintRoundedPanel(cap, Theme.action, { radius = 4 })
-        cap.label = cap:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        Theme.SetFont(cap.label, 11, Theme.text)
-        cap.label:SetPoint("CENTER")
-        button.keycaps[index] = cap
-    end
-    function button:SetShortcut(chord, recording)
-        self.label:SetText(chord)
-        self.label:SetShown(recording)
-        group:SetShown(not recording)
-        if recording then return end
-        local x, count = 0, 0
-        for key in chord:gmatch("[^+]+") do
-            count = count + 1
-            local cap = self.keycaps[count]
-            if not cap then break end
-            cap.label:SetText(key)
-            local width = math.max(26, math.ceil(cap.label:GetStringWidth()) + 16)
-            cap:SetWidth(width)
-            cap:ClearAllPoints(); cap:SetPoint("LEFT", group, "LEFT", x, 0)
-            cap:Show()
-            x = x + width + 4
-        end
-        for index = count + 1, 4 do self.keycaps[index]:Hide() end
-        group:SetWidth(math.max(1, x - 4))
-    end
-    return button
-end
-
-local function SetButtonPrimary(button, primary)
-    SetButtonVariant(button, primary and "primary" or "secondary")
-end
-
 local function SetButtonEnabled(button, enabled)
     button:SetEnabled(enabled and true or false)
     if not enabled then
@@ -502,9 +407,6 @@ local function CreateConfirmButton(parent, width, text, confirmText, onConfirm, 
     end
 
     button.ResetConfirm = Reset
-    button.IsConfirmArmed = function()
-        return armed
-    end
     button:SetScript("OnClick", function(self)
         if not armed then
             armed = true
@@ -816,17 +718,13 @@ ns.Widgets = {
     CreatePanel = CreatePanel,
     CreateFieldPanel = CreateFieldPanel,
     CreateLineInput = CreateLineInput,
-    CreateShortcutButton = CreateShortcutButton,
     CreatePageHeading = CreatePageHeading,
     CreateScrollArea = CreateScrollArea,
     CreateCloseButton = CreateCloseButton,
     CreateBackButton = CreateBackButton,
-    CreateSettingsButton = CreateSettingsButton,
-    CreateToggle = CreateToggle,
     CreateButton = CreateButton,
     CreateConfirmButton = CreateConfirmButton,
     SetButtonVariant = SetButtonVariant,
-    SetButtonPrimary = SetButtonPrimary,
     SetButtonEnabled = SetButtonEnabled,
     SetButtonText = SetButtonText,
     CreateSectionLabel = CreateSectionLabel,

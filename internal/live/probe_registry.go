@@ -107,18 +107,26 @@ func ListProbes(ctx context.Context, root string, includeRemoved bool, limit int
 		return ProbeListResult{}, errors.New("live.probe_limit_invalid")
 	}
 	return vault.ReadWorkspace(ctx, root, func(_ *vault.Store, metadata *vault.Metadata) (ProbeListResult, error) {
-		docs, err := metadata.ListDocuments(ctx, "probe/name/", "", limit)
-		if err != nil {
-			return ProbeListResult{}, err
-		}
-		result := ProbeListResult{Items: make([]ProbeName, 0, len(docs))}
-		for _, doc := range docs {
-			var item ProbeName
-			if err := json.Unmarshal(doc.Value, &item); err != nil || !validProbeName(item) || doc.Key != "probe/name/"+item.Name {
-				return ProbeListResult{}, errors.New("live.probe_name_corrupt")
+		result := ProbeListResult{Items: make([]ProbeName, 0, limit)}
+		after := ""
+		for len(result.Items) < limit {
+			pageSize := limit - len(result.Items)
+			docs, err := metadata.ListDocuments(ctx, "probe/name/", after, pageSize)
+			if err != nil {
+				return ProbeListResult{}, err
 			}
-			if item.Active || includeRemoved {
-				result.Items = append(result.Items, item)
+			for _, doc := range docs {
+				var item ProbeName
+				if err := json.Unmarshal(doc.Value, &item); err != nil || !validProbeName(item) || doc.Key != "probe/name/"+item.Name {
+					return ProbeListResult{}, errors.New("live.probe_name_corrupt")
+				}
+				if item.Active || includeRemoved {
+					result.Items = append(result.Items, item)
+				}
+				after = doc.Key
+			}
+			if len(docs) < pageSize {
+				break
 			}
 		}
 		return result, nil

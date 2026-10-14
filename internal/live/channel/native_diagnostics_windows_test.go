@@ -11,34 +11,57 @@ import (
 	"testing"
 	"time"
 
+	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/live/journal"
 	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 type diagnosticSource struct{ verifies int }
 
-func (s *diagnosticSource) Verify(ctx context.Context) error               { s.verifies++; return ctx.Err() }
-func (*diagnosticSource) Regions(context.Context) ([]memory.Region, error) { return nil, nil }
+type legacyActivationMailbox struct{ record memory.Record }
+
+func (m *legacyActivationMailbox) Lookup(ctx context.Context, selector memory.Selector) (memory.LookupResult, error) {
+	if selector.Kind != bridge.MemoryIdentity {
+		return memory.LookupResult{}, errors.New("unexpected input observation")
+	}
+	return memory.LookupResult{Records: []memory.Record{m.record}, Coverage: memory.Coverage{Complete: true}}, ctx.Err()
+}
+func (*legacyActivationMailbox) Binding() memory.LuaRootBinding { return memory.LuaRootBinding{} }
+
+func TestNativePublishedLegacyIdentityKeepsManualActivationClassification(t *testing.T) {
+	n := &Native{Version: "3.1.2", Mailbox: &legacyActivationMailbox{record: publishedLegacyIdentityRecord(t)}}
+	identities, coverage, err := n.Discover(context.Background(), "", "")
+	if !errors.Is(err, memory.ErrMailboxIncompatible) || len(identities) != 0 || !coverage.Complete {
+		t.Fatalf("published legacy runtime cannot reach the manual-activation branch: identities=%d coverage=%+v err=%v", len(identities), coverage, err)
+	}
+}
+
+func (s *diagnosticSource) Lookup(ctx context.Context, _ memory.Selector) (memory.LookupResult, error) {
+	s.verifies++
+	return memory.LookupResult{}, ctx.Err()
+}
+func (*diagnosticSource) Binding() memory.LuaRootBinding { return memory.LuaRootBinding{} }
+
+func (s *diagnosticSource) Verify(ctx context.Context) error { s.verifies++; return ctx.Err() }
 func (*diagnosticSource) Read(context.Context, uint64, []byte) (int, error) {
 	return 0, errors.New("unexpected read")
 }
 
-func TestFindDefersTraceAndHintsIOUntilClose(t *testing.T) {
+func TestFindDefersTraceIOUntilClose(t *testing.T) {
 	root := t.TempDir()
 	sink := filepath.Join(root, "blocked")
 	if err := os.WriteFile(sink, []byte("file blocks directory creation"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	n := &Native{TraceDir: filepath.Join(sink, "scans"), CacheFile: filepath.Join(root, "hints.json"), Hints: &memory.Hints{Schema: "lycheedev.memory-hints.v1", Scope: "fixture"}}
+	n := &Native{TraceDir: filepath.Join(sink, "scans"), Mailbox: &diagnosticSource{}}
 	source := &diagnosticSource{}
+	n.Mailbox = source
 	for i := 0; i < 3; i++ {
-		if _, err := n.find(context.Background(), source, memory.Selector{}, true); err != nil {
+		if _, err := n.Find(context.Background(), memory.Selector{}, true); err != nil {
 			t.Fatal("diagnostic sink blocked the lookup", err)
 		}
 	}
-	if _, err := os.Stat(n.CacheFile); !os.IsNotExist(err) {
-		t.Fatal("hints persisted inside Find", err)
-	}
+
 	if len(n.traces) != 3 || n.traceSequence != 3 {
 		t.Fatal("lost buffered evidence")
 	}
@@ -63,24 +86,15 @@ func TestFindDefersTraceAndHintsIOUntilClose(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, err := os.Stat(n.CacheFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := n.Close(); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.Stat(n.CacheFile)
-	if !before.ModTime().Equal(after.ModTime()) {
-		t.Fatal("repeated close rewrote disposable cache")
-	}
+
 }
 
 func TestTraceFlushIsBoundedAndRetainsOnlyUnwrittenEvidence(t *testing.T) {
-	n := &Native{TraceDir: t.TempDir()}
+	n := &Native{TraceDir: t.TempDir(), Mailbox: &diagnosticSource{}}
 	source := &diagnosticSource{}
+	n.Mailbox = source
 	for i := 0; i < 3; i++ {
-		if _, err := n.find(context.Background(), source, memory.Selector{}, true); err != nil {
+		if _, err := n.Find(context.Background(), memory.Selector{}, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -108,24 +122,41 @@ func TestTraceFlushIsBoundedAndRetainsOnlyUnwrittenEvidence(t *testing.T) {
 		t.Fatal("trace buffer retained after flush")
 	}
 	for i := 3; i < observationLimit; i++ {
-		if _, err := n.find(context.Background(), source, memory.Selector{}, true); err != nil {
+		if _, err := n.Find(context.Background(), memory.Selector{}, true); err != nil {
 			t.Fatal(err)
 		}
 	}
 	before := source.verifies
-	if _, err := n.find(context.Background(), source, memory.Selector{}, true); err == nil || err.Error() != "live.channel_observation_budget" {
-		t.Fatal("observation cap lost", err)
+	for i := 0; i < 20; i++ {
+		if _, err := n.Find(context.Background(), memory.Selector{}, true); err != nil {
+			t.Fatal("diagnostic cap blocked observation", err)
+		}
 	}
-	if source.verifies != before || n.traceSequence != 256 || len(n.Lookups) != 256 {
-		t.Fatal("over-budget scan executed")
+	if n.tracesOmitted != 20 || source.verifies <= before || len(n.Lookups) != observationLimit || len(n.traces) > observationLimit {
+		t.Fatal("lookup stopped or diagnostics grew without bound")
 	}
+
+	if err := n.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var summary struct {
+		Observations, Retained, Omitted int
+		Truncated                       bool
+	}
+	if err := readProjectJSON(filepath.Join(n.TraceDir, "summary.json"), &summary, 4096); err != nil {
+		t.Fatal(err)
+	}
+	if !summary.Truncated || summary.Omitted != 20 || summary.Retained != observationLimit || summary.Observations != observationLimit+20 {
+		t.Fatalf("bad truncation evidence: %+v", summary)
+	}
+
 }
 
 func TestCancelledLookupStillFlushesAtClose(t *testing.T) {
-	n := &Native{TraceDir: filepath.Join(t.TempDir(), "scans")}
+	n := &Native{TraceDir: filepath.Join(t.TempDir(), "scans"), Mailbox: &diagnosticSource{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := n.find(ctx, &diagnosticSource{}, memory.Selector{}, true); !errors.Is(err, context.Canceled) {
+	if _, err := n.Find(ctx, memory.Selector{}, true); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if err := n.Close(); err != nil {
@@ -141,9 +172,9 @@ func TestCancelledLookupStillFlushesAtClose(t *testing.T) {
 }
 
 func TestSlowTraceWriterRunsOnlyAtFlushAndObeysSharedDeadline(t *testing.T) {
-	n := &Native{TraceDir: t.TempDir()}
+	n := &Native{TraceDir: t.TempDir(), Mailbox: &diagnosticSource{}}
 	for i := 0; i < 2; i++ {
-		if _, err := n.find(context.Background(), &diagnosticSource{}, memory.Selector{}, true); err != nil {
+		if _, err := n.Find(context.Background(), memory.Selector{}, true); err != nil {
 			t.Fatal(err)
 		}
 	}

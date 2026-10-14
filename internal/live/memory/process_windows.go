@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -72,29 +73,13 @@ func readable(protect uint32) bool {
 	}
 	return false
 }
-func (p *Process) Regions(ctx context.Context) ([]Region, error) {
-	var out []Region
-	for address, count := uintptr(0), 0; count < 100000; count++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		var info windows.MemoryBasicInformation
-		err := windows.VirtualQueryEx(p.handle, address, &info, unsafe.Sizeof(info))
-		if err != nil {
-			if errors.Is(err, windows.ERROR_INVALID_PARAMETER) && address > 0 {
-				return out, nil
-			}
-			return nil, err
-		}
-		next := info.BaseAddress + info.RegionSize
-		if next <= address {
-			return nil, errors.New("memory.region_overflow")
-		}
-		out = append(out, Region{Range{uint64(info.BaseAddress), uint64(next)}, info.Type == 0x20000, info.State == windows.MEM_COMMIT, readable(info.Protect)})
-		address = next
-	}
-	return nil, errors.New("memory.region_limit")
+
+func nativeReadFailure(cause error, reason string, region *ReadRegion, attempted bool) error {
+	var code syscall.Errno
+	errors.As(cause, &code)
+	return &readFailureError{cause: cause, details: ReadFailure{Reason: reason, Region: region, IOAttempted: &attempted, NativeErrorCode: uint32(code)}}
 }
+
 func (p *Process) Read(ctx context.Context, address uint64, b []byte) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -105,20 +90,23 @@ func (p *Process) Read(ctx context.Context, address uint64, b []byte) (int, erro
 	if address+uint64(len(b)) < address {
 		return 0, errors.New("memory.address_overflow")
 	}
-	// Point reads follow the same eligibility rules as scans, including every
+	// Named publication reads validate every
 	// adjacent mapping spanned by a record. No module or guard-page fallback.
 	for at, end := address, address+uint64(len(b)); at < end; {
 		var info windows.MemoryBasicInformation
 		if err := windows.VirtualQueryEx(p.handle, uintptr(at), &info, unsafe.Sizeof(info)); err != nil {
-			return 0, err
+			return 0, nativeReadFailure(err, "region_query_failed", nil, false)
 		}
 		next := uint64(info.BaseAddress + info.RegionSize)
 		if next <= at || info.Type != 0x20000 || info.State != windows.MEM_COMMIT || !readable(info.Protect) {
-			return 0, errors.New("memory.ineligible_read")
+			return 0, nativeReadFailure(errors.New("memory.ineligible_read"), "region_ineligible", &ReadRegion{Type: info.Type, State: info.State, Protect: info.Protect}, false)
 		}
 		at = next
 	}
 	var n uintptr
 	err := windows.ReadProcessMemory(p.handle, uintptr(address), &b[0], uintptr(len(b)), &n)
+	if err != nil {
+		err = nativeReadFailure(err, "native_read_failed", nil, true)
+	}
 	return int(n), err
 }

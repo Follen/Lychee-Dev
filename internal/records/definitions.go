@@ -135,11 +135,14 @@ func (d *Definitions) load(ctx context.Context, url string, offline bool, valida
 	if response.StatusCode != http.StatusOK {
 		return vault.BlobRef{}, fmt.Errorf("records.definition_http: %d", response.StatusCode)
 	}
-	// The bounded read buffer is reserved before allocation, even when HTTP
-	// omits Content-Length. Parsing is reserved separately before validation.
-	if err := d.budget.Charge(resource.Cost{RetainedBytes: 8 << 20, MetadataBytes: 8 << 20}); err != nil {
+	// Bound the temporary HTTP buffer even without Content-Length. Its worst
+	// case capacity is not persistent metadata: charge actual bytes below,
+	// matching the cached path, before parsing or retaining the definition.
+	releaseRead, err := d.budget.ReserveScratch(8 << 20)
+	if err != nil {
 		return vault.BlobRef{}, err
 	}
+	defer releaseRead()
 	body := io.Reader(response.Body)
 	if d.budget != nil {
 		body = &definitionBudgetReader{source: response.Body, budget: d.budget}
@@ -151,9 +154,10 @@ func (d *Definitions) load(ctx context.Context, url string, offline bool, valida
 	if len(raw) > 4<<20 {
 		return vault.BlobRef{}, ErrMetadataLimit
 	}
-	if err := d.budget.Charge(resource.Cost{RetainedBytes: int64(len(raw)) * 3, MetadataBytes: int64(len(raw)) * 3, DecodeWork: (int64(len(raw)) + 65535) / 65536}); err != nil {
+	if err := d.budget.Charge(resource.Cost{RetainedBytes: int64(len(raw)) * 4, MetadataBytes: int64(len(raw)) * 4, DecodeWork: (int64(len(raw)) + 65535) / 65536}); err != nil {
 		return vault.BlobRef{}, err
 	}
+	releaseRead()
 	if err := validate(raw); err != nil {
 		return vault.BlobRef{}, err
 	}

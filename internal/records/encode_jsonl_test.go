@@ -105,9 +105,13 @@ func TestWriteJSONLFrameValidation(t *testing.T) {
 	}
 }
 
-func TestWriteJSONLErrorFrame(t *testing.T) {
+func TestWriteJSONLFrameErrorDoesNotClaimCompletion(t *testing.T) {
 	var buffer bytes.Buffer
-	if err := records.WriteJSONLErrorFrame(&buffer, "PIN-2", records.JSONLError{Code: "records.hotfix_offline", Message: "page 2 is not in the verified cache", Stage: "fetch", Retryable: true}); err != nil {
+	if err := records.WriteJSONLFrame(&buffer, records.JSONLFrame{
+		Type:        records.JSONLFrameError,
+		OperationID: "PIN-2",
+		Error:       &records.JSONLError{Code: "records.hotfix_offline", Message: "page 2 is not in the verified cache", Stage: "fetch", Retryable: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	frames := decodeJSONLFrames(t, buffer.String())

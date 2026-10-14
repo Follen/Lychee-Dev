@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
 	"github.com/follenfang/lycheedev/internal/vault"
@@ -41,7 +39,8 @@ var ErrQueryCSVLimit = errors.New("records.query_csv_limit")
 // ExportQueryCSV publishes complete CSV bytes first and the manifest last.
 // Both destinations must be outside the managed workspace; existing files are
 // refused unless replacement is explicit. No result is claimed before the
-// completion manifest has been published.
+// completion manifest has been published. A destination-scoped OS lease holds
+// both publications together, including exports from different workspaces.
 func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryReading, output string, overwrite bool) (QueryCSVExport, error) {
 	if snapshot == "" || reading.Capture.ID == "" {
 		return QueryCSVExport{}, ErrExportPath
@@ -56,18 +55,8 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 		return QueryCSVExport{}, err
 	}
 	defer manifestDestination.Close()
-	workspace, err := filepath.EvalSymlinks(root)
-	if err != nil {
+	if err := outsideExportWorkspace(root, dataDestination, manifestDestination); err != nil {
 		return QueryCSVExport{}, err
-	}
-	workspace, err = filepath.Abs(workspace)
-	if err != nil {
-		return QueryCSVExport{}, err
-	}
-	for _, destination := range []*exportDestination{dataDestination, manifestDestination} {
-		if relative, err := filepath.Rel(workspace, destination.path); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return QueryCSVExport{}, fmt.Errorf("%w: output must be outside the managed workspace", ErrExportPath)
-		}
 	}
 	var buffer bytes.Buffer
 	writer := csv.NewWriter(&buffer)
@@ -111,7 +100,8 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 		var commitErr error
 		capture, commitErr = evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
 			Reader: bytes.NewReader(raw), MaxBytes: 32 << 20, MediaType: "text/csv; charset=utf-8", Complete: reading.Result.Complete,
-			Provenance: evidence.Provenance{Kind: "data-query-csv", Locator: reading.Capture.ID, Snapshot: snapshot},
+			Provenance:   evidence.Provenance{Kind: "data-query-csv", Locator: reading.Capture.ID, Snapshot: snapshot},
+			Dependencies: []string{reading.Capture.ID},
 		})
 		return commitErr == nil, commitErr
 	})
@@ -125,10 +115,7 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 	if err != nil {
 		return QueryCSVExport{}, err
 	}
-	if err := dataDestination.publish(ctx, raw); err != nil {
-		return QueryCSVExport{}, err
-	}
-	if err := manifestDestination.publish(ctx, append(manifestRaw, '\n')); err != nil {
+	if err := publishCSVPair(ctx, dataDestination, manifestDestination, raw, append(manifestRaw, '\n')); err != nil {
 		return QueryCSVExport{}, err
 	}
 	return QueryCSVExport{Manifest: manifest, Capture: capture}, nil

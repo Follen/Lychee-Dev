@@ -54,11 +54,6 @@ func (l Limits) normalized() Limits {
 	return l
 }
 
-type Span struct {
-	Path    string `json:"path"`
-	Line    int    `json:"line"`
-	EndLine int    `json:"endLine"`
-}
 type Slot struct {
 	Index     int            `json:"index"` // exact 1-based API slot
 	Name      string         `json:"name"`

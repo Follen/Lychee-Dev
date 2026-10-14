@@ -303,6 +303,9 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 	}
 	for i := siteOffset; i < len(unique); i++ {
 		site := unique[i]
+		if i != siteOffset {
+			lineOffset, byteOffset = 0, 0
+		}
 		if len(result.Snippets) >= limit {
 			result.Truncated = true
 			result.NextCursor = encodeContextCursor(cursorKey, relationCursor, i, lineOffset, byteOffset)
@@ -328,7 +331,11 @@ func (b *Browser) Context(ctx context.Context, snapshot string, pin selection.So
 		if i == siteOffset {
 			startByte = byteOffset
 		}
-		text, last, nextLine, nextByte, done, excerptErr := contextExcerpt(data, start, site.last, startByte, query.MaxBytes-usedBytes, lineBudget)
+		starts, err := cache.documentLineStarts(ctx, site.path, data)
+		if err != nil {
+			return result, err
+		}
+		text, last, nextLine, nextByte, done, excerptErr := contextExcerpt(data, starts, start, site.last, startByte, query.MaxBytes-usedBytes, lineBudget)
 		if excerptErr != nil {
 			return result, excerptErr
 		}
@@ -461,17 +468,16 @@ func decodeContextCursor(cursor, key string) (string, int, int, int, error) {
 	return string(raw), site, line, byteOffset, nil
 }
 
-func contextExcerpt(data []byte, first, last, startByte, maxBytes, maxLines int) (string, int, int, int, bool, error) {
-	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	if first > last || first > len(lines) {
+func contextExcerpt(data []byte, starts []uint32, first, last, startByte, maxBytes, maxLines int) (string, int, int, int, bool, error) {
+	if first > last || first > len(starts) {
 		return "", first - 1, first, 0, true, nil
 	}
 	var out strings.Builder
 	lastOutput := first - 1
 	line := first
 	byteAt := startByte
-	for line <= last && line <= len(lines) && line-first < maxLines {
-		whole := fmt.Sprintf("%d: %s", line, strings.TrimSuffix(lines[line-1], "\r"))
+	for line <= last && line <= len(starts) && line-first < maxLines {
+		whole := numberedDocumentLine(data, starts, line)
 		if byteAt > len(whole) {
 			return "", 0, 0, 0, false, ErrInvalidSearchCursor
 		}
@@ -506,5 +512,5 @@ func contextExcerpt(data []byte, first, last, startByte, maxBytes, maxLines int)
 		line++
 		byteAt = 0
 	}
-	return out.String(), lastOutput, line, 0, line > last || line > len(lines), nil
+	return out.String(), lastOutput, line, 0, line > last || line > len(starts), nil
 }

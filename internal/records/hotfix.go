@@ -192,7 +192,7 @@ func InspectHotfix(ctx context.Context, root, snapshot string, q HotfixRequest) 
 		if err != nil {
 			return HotfixReading{}, err
 		}
-		capture, err := archive.CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(body), MaxBytes: 32 << 20, MediaType: "application/json", Complete: page.Complete, Truncated: page.Truncated, Provenance: evidence.Provenance{Kind: "hotfix-records", Locator: "dbcache:sha256:" + digest, Snapshot: pin.ID, DataBuild: pin.Data.FullBuild}})
+		capture, err := archive.CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(body), MaxBytes: 32 << 20, MediaType: "application/json", Complete: page.Complete, Truncated: page.Truncated, Dependencies: []string{source.ID}, Provenance: evidence.Provenance{Kind: "hotfix-records", Locator: "dbcache:sha256:" + digest, Snapshot: pin.ID, DataBuild: pin.Data.FullBuild}})
 		if err != nil {
 			return HotfixReading{}, err
 		}

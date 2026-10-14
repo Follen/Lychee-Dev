@@ -29,6 +29,7 @@ func OpenReader(store *vault.Store) *Reader { return &Reader{store: store} }
 type FileQuery struct {
 	budget          *resource.Budget
 	admitted        bool
+	downloadWorkers int
 	binding         *readSession
 	metadataContent bool
 	keySource       *KeySource
@@ -95,6 +96,7 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 		}
 		defer lease.Close()
 		q.admitted = true
+		q.downloadWorkers = lease.DownloadWorkers
 	}
 	if err := ctx.Err(); err != nil {
 		return FileReading{}, err

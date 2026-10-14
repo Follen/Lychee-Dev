@@ -161,10 +161,6 @@ assert(emptyId == nil and emptyError == L.EXPORT_EMPTY, "empty export was accept
 local hugeId, hugeError = Exports.Add("run_result", "huge", string.rep("x", 16 * 1024 * 1024 + 1))
 assert(hugeId == nil and hugeError == L.EXPORT_TOO_LARGE, "oversized record was accepted")
 
--- The fit precheck reserves headroom for later automation failure reports.
-assert(Exports.CanFit(1024, 0), "small record does not fit")
-assert(not Exports.CanFit(16 * 1024 * 1024, 1024), "reserved budget is not enforced")
-
 -- A fresh session keeps the records but none of the session-only state.
 local durableId = Exports.Add("run_result", "durable", "durable body")
 local ns2 = Env.LoadWorkbench()
@@ -178,16 +174,30 @@ assert(ns2.Stores.History.Get() == nil or #ns2.Stores.History.Get() >= 0, "histo
 
 -- Newer section versions refuse writes but preserve the stored data.
 LycheeToolkitDB.exports.version = 2
+LycheeToolkitDB.exports.nextId = {futureCounter=true}
 LycheeToolkitDB.history.version = 2
+local futureCode=string.rep("x",13000)
+LycheeToolkitDB.history.entries={{code=futureCode,result="future",extra={unknown=true}}}
+LycheeToolkitDB.exports.records.future={unknown={format=true}}
+LycheeToolkitDB.exports.order={"future"}
 local ns3 = Env.LoadWorkbench()
 assert(ns3.Persistence.Load())
 local rejectedId, rejectedError = ns3.Stores.Exports.Add("run_result", "x", "y")
 assert(rejectedId == nil and rejectedError == L.EXPORT_DATABASE_NEWER,
     "newer export data was overwritten by a downgrade")
-assert(ns3.Stores.Exports.Get(durableId), "downgrade guard lost stored records")
+assert(LycheeToolkitDB.exports.records[durableId], "downgrade guard lost stored records")
+ns3.Stores.History.Get();ns3.Stores.Exports.GetOrder();ns3.Stores.History.GetStats();ns3.Stores.Exports.GetStats()
+assert(not ns3.Stores.History.Clear())
+assert(not ns3.Stores.Exports.Delete("future"))
+assert(ns3.Stores.Exports.Clear()==0)
+assert(LycheeToolkitDB.history.entries[1].code==futureCode and LycheeToolkitDB.history.entries[1].extra.unknown,
+    "future history was normalized or cleared")
+assert(LycheeToolkitDB.exports.records.future.unknown.format and LycheeToolkitDB.exports.order[1]=="future",
+    "future export was normalized or removed")
 local rejectedHistory, historyReason = ns3.Stores.History.Add("c", "r", true)
 assert(rejectedHistory == nil and historyReason == "state_unsupported_version",
     "newer history data was overwritten by a downgrade")
+LycheeToolkitDB.exports.nextId = 0
 LycheeToolkitDB.exports.version = nil
 LycheeToolkitDB.history.version = nil
 

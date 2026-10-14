@@ -42,7 +42,7 @@ APIDocumentation:AddDocumentationTable(Unit)
 }
 
 // Supply local copies of the exact pinned Gethe source-mirror files to run
-// this offline real-source check. CI does not fetch remote GitHub content.
+// this offline real-source check. CI prepares and verifies these pinned inputs.
 func TestExtractPinnedUnitDocumentationWhenAvailable(t *testing.T) {
 	for _, variant := range []struct{ name, env, commit, sha string }{
 		{"retail", "LYCHEEDEV_FLOW_RETAIL_DOC", "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b", "a33d4c585bc3458ab1179070778a2ebef5c324bc5c56bee9511a9fa9eee04a60"},

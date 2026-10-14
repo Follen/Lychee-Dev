@@ -10,9 +10,9 @@ import (
 	"github.com/follenfang/lycheedev/internal/live/journal"
 )
 
-// Rotate only at a quiescent boundary. Each immutable segment preserves its
-// whole hash chain. Current operations retain enough space for bounded recovery
-// and cleanup; historical requests still resolve to their original results.
+// Ordinary operation boundaries rotate only while quiescent. A proven-zero
+// input retry may also rotate the exact pending snapshot through checkpointLog;
+// each immutable segment preserves its entire hash chain.
 func (d *Driver) checkpoint(ctx context.Context) error {
 	if d.State.Transaction != nil || d.State.Reload != nil && d.State.Reload.Phase != "complete" || d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
 		return ErrPending
@@ -20,6 +20,12 @@ func (d *Driver) checkpoint(ctx context.Context) error {
 	if d.State.Operation != nil && d.State.Operation.Stage != "complete" && d.State.Operation.Stage != "execution_unknown" && d.State.Operation.Stage != "cancelled" {
 		return ErrPending
 	}
+	return d.checkpointLog(ctx)
+}
+
+// The driver lease owns rotation. This preserves every pending input fact and
+// the original deadlines; it never retires a transaction or authorizes replay.
+func (d *Driver) checkpointLog(ctx context.Context) error {
 	info, err := os.Stat(d.Log)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

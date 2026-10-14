@@ -1,9 +1,10 @@
 // npm owns replacement of the CLI package. Native delivery owns target identity,
 // receipts and recoverable addon/skill replacement. No native process stays alive
 // while npm replaces its executable (Windows denies replacing a running image).
+import { createServer } from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 
 function readJSON(file) {
@@ -46,42 +47,35 @@ function frozenTargets(plan) {
   });
 }
 
-function takeLock(directory) {
+export async function takeLock(directory) {
+  // The OS owns this mutex. A terminated reclaiming process cannot leave a
+  // second stale lock which prevents recovery of the original transaction.
+  const identity = createHash('sha256').update(resolve(directory).toLowerCase()).digest('hex');
+  const server = createServer(socket => socket.destroy());
+  if (process.platform !== 'win32') throw new Error('distribution.unsupported_platform');
+  const address = `\\\\.\\pipe\\lycheedev-update-${identity}`;
+  await new Promise((resolve, reject) => {
+    server.once('error', error => reject(new Error(`update.busy: ${error.message}`)));
+    server.listen(address, resolve);
+  });
   const file = join(directory, 'lock.json');
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const descriptor = openSync(file, 'wx');
-      writeFileSync(descriptor, JSON.stringify({ pid: process.pid })); closeSync(descriptor);
-      return () => rmSync(file);
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
+  try {
+    if (existsSync(file)) {
       const owner = readJSON(file);
       if (!Number.isSafeInteger(owner.pid) || owner.pid < 1) throw new Error('update.invalid_lock');
-      try { process.kill(owner.pid, 0); } catch (error) {
-        if (error.code === 'ESRCH') {
-          // Serialize stale reclamation separately. Two retriers must not remove
-          // each other's newly acquired owner file after observing one dead PID.
-          const reclaim = join(directory, 'reclaim.lock');
-          let descriptor;
-          try { descriptor = openSync(reclaim, 'wx'); } catch { throw new Error('update.busy: stale-lock recovery is already in progress'); }
-          try {
-            const current = readJSON(file);
-            if (current.pid !== owner.pid) throw new Error('update.busy: owner changed during recovery');
-            try { process.kill(current.pid, 0); throw new Error('update.busy'); } catch (error) {
-              if (error.code !== 'ESRCH') throw error;
-            }
-            rmSync(file);
-          } finally { closeSync(descriptor); rmSync(reclaim); }
-          continue;
-        }
-      }
-      throw new Error('update.busy: another updater owns this npm prefix');
+      try { process.kill(owner.pid, 0); throw new Error('update.busy: another updater owns this npm prefix'); }
+      catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
-  }
-  throw new Error('update.busy');
+    writeFileSync(`${file}.next`, JSON.stringify({ pid: process.pid }));
+    renameSync(`${file}.next`, file);
+    // Old releases used an empty persistent reclaim lock. Holding the kernel
+    // mutex and replacing a proven dead owner makes that marker obsolete.
+    rmSync(join(directory, 'reclaim.lock'), { force: true });
+    return () => { try { rmSync(file); } finally { server.close(); } };
+  } catch (error) { server.close(); throw error; }
 }
 
-export function update(root, args, nativePath) {
+export async function update(root, args, nativePath) {
   root = realpathSync(root);
   const prefix = dirname(dirname(root));
   if (root.toLowerCase() !== join(prefix, 'node_modules', 'lycheedev').toLowerCase() || !existsSync(join(prefix, 'lycheedev.cmd'))) {
@@ -93,7 +87,7 @@ export function update(root, args, nativePath) {
   const directory = join(prefix, '.lycheedev-update');
   mkdirSync(directory, { recursive: true });
   if (lstatSync(directory).isSymbolicLink() || realpathSync(directory).toLowerCase() !== resolve(directory).toLowerCase()) throw new Error('update.redirected_state');
-  const unlock = takeLock(directory);
+  const unlock = await takeLock(directory);
   const journal = join(directory, 'transaction.json');
   const save = value => {
     writeFileSync(`${journal}.next`, JSON.stringify(value));

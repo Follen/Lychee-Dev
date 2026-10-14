@@ -228,13 +228,18 @@ func (d *Driver) receive(ctx context.Context, tx *Transaction) (*Receipt, error)
 	}
 	return &r, nil
 }
-func (d *Driver) finishTransaction(ctx context.Context) error {
+func (d *Driver) finishTransaction(ctx context.Context, transition func()) error {
 	tx := d.State.Transaction
 	if tx == nil || tx.Receipt == nil {
 		return errors.New("live.channel_receipt_required")
 	}
 	if err := d.Backend.Consumed(ctx, tx.Envelope); err != nil {
 		return err
+	}
+	// Callers must not advance logical state while reservation retirement is
+	// still pending: cancellation may persist the current state as a blocker.
+	if transition != nil {
+		transition()
 	}
 	d.State.Identity = tx.Receipt.Identity
 	d.State.Identity.Schema = IdentitySchema
@@ -258,42 +263,7 @@ func (d *Driver) Connect(ctx context.Context) error {
 	if r.State != "bound" {
 		return errors.New("live.channel_bind_not_confirmed")
 	}
-	d.State.Bound = true
-	return d.finishTransaction(ctx)
-}
-
-// RecoverBinding consumes an explicit runtime-changed rejection for the exact
-// bootstrap nonce. It only selects a new candidate; a NEW binding challenge
-// must still succeed before this connection can execute business code.
-func (d *Driver) RecoverBinding(ctx context.Context) error {
-	if d.State.RuntimeEnd != nil {
-		return runtimeRetirementPending()
-	}
-	tx := d.State.Transaction
-	if d.State.Bound || d.State.Operation != nil || tx == nil || tx.Envelope.Action != "bind" {
-		return errors.New("live.channel_bootstrap_recovery_unsafe")
-	}
-	e := tx.Envelope
-	observation, err := d.Backend.Observe(ctx, ObservationQuery{Kind: "bootstrap_changed", Envelope: e, Identity: d.State.Identity})
-	if err != nil {
-		return err
-	}
-	receipt := observation.Receipt
-	tx.Receipt = &receipt
-	tx.Phase = "received"
-	if err = d.Save(ctx, "bootstrap_runtime_rejected"); err != nil {
-		return err
-	}
-	if err = d.finishTransaction(ctx); err != nil {
-		return err
-	}
-	if d.State.Closing {
-		return nil
-	}
-	return d.Connect(ctx)
-}
-func (d *Driver) PrepareOperation(ctx context.Context, code string, budget int, policy string) error {
-	return d.PrepareRequest(ctx, "", code, budget, policy)
+	return d.finishTransaction(ctx, func() { d.State.Bound = true })
 }
 
 func (d *Driver) PrepareRequest(ctx context.Context, request, code string, budget int, policy string) error {
@@ -370,18 +340,31 @@ func (d *Driver) Run(ctx context.Context) error {
 			}
 			r, err := d.advance(ctx)
 			if err != nil {
+				var rejected *RejectedError
+				if errors.As(err, &rejected) && rejected.Reason == "slot_capacity" {
+					// The exact prepare nonce was rejected before compilation or
+					// execution. Consume it once and carry the original request
+					// and deadline across an automatic runtime reload.
+					if finishErr := d.finishTransaction(ctx, func() {
+						d.State.Reload = &ReloadAttempt{Request: "capacity-" + op.ID, From: d.State.Identity.Runtime, Phase: "intent", RecoveryBudget: op.RecoveryBudget, Automatic: true}
+					}); finishErr != nil {
+						return finishErr
+					}
+					return ErrReloadRequired
+				}
 				return err
 			}
 			if (r.State != "prepared" && r.State != "reported") || len(r.Challenge) != 32 {
 				return errors.New("live.channel_prepare_mismatch")
 			}
-			op.PreparedNonce = d.State.Transaction.Envelope.Nonce
-			op.Challenge = r.Challenge
-			op.Stage = "commit_ready"
-			if r.State == "reported" {
-				op.Stage = "running"
-			}
-			if err = d.finishTransaction(ctx); err != nil {
+			if err = d.finishTransaction(ctx, func() {
+				op.PreparedNonce = d.State.Transaction.Envelope.Nonce
+				op.Challenge = r.Challenge
+				op.Stage = "commit_ready"
+				if r.State == "reported" {
+					op.Stage = "running"
+				}
+			}); err != nil {
 				return err
 			}
 		case "commit_ready":
@@ -397,8 +380,7 @@ func (d *Driver) Run(ctx context.Context) error {
 			if r.State != "accepted" {
 				return errors.New("live.channel_commit_not_accepted")
 			}
-			op.Stage = "running"
-			if err = d.finishTransaction(ctx); err != nil {
+			if err = d.finishTransaction(ctx, func() { op.Stage = "running" }); err != nil {
 				return err
 			}
 		case "running":
@@ -430,8 +412,7 @@ func (d *Driver) Run(ctx context.Context) error {
 				return errors.New("live.channel_report_not_current")
 			}
 			// The result journal and standalone artifact both precede game release.
-			op.Stage = "result_verified"
-			if err = d.finishTransaction(ctx); err != nil {
+			if err = d.finishTransaction(ctx, func() { op.Stage = "result_verified" }); err != nil {
 				return err
 			}
 		case "result_verified":
@@ -462,8 +443,7 @@ func (d *Driver) Run(ctx context.Context) error {
 				}
 				var rejection *RejectedError
 				if errors.As(err, &rejection) && rejection.Reason == "slot_resources_pending" {
-					op.CleanupMethod = "reload_required"
-					if err = d.finishTransaction(ctx); err != nil {
+					if err = d.finishTransaction(ctx, func() { op.CleanupMethod = "reload_required" }); err != nil {
 						return err
 					}
 					return ErrCleanupReloadRequired
@@ -473,9 +453,10 @@ func (d *Driver) Run(ctx context.Context) error {
 			if r.State != "released" {
 				return errors.New("live.channel_release_not_confirmed")
 			}
-			op.Stage = "complete"
-			op.CleanupMethod = "released"
-			if err = d.finishTransaction(ctx); err != nil {
+			if err = d.finishTransaction(ctx, func() {
+				op.Stage = "complete"
+				op.CleanupMethod = "released"
+			}); err != nil {
 				return err
 			}
 		default:
@@ -509,6 +490,5 @@ func (d *Driver) Disconnect(ctx context.Context) error {
 	if r.State != "unbound" {
 		return errors.New("live.channel_unbind_not_confirmed")
 	}
-	d.State.Bound = false
-	return d.finishTransaction(ctx)
+	return d.finishTransaction(ctx, func() { d.State.Bound = false })
 }

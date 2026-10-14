@@ -67,7 +67,7 @@ func updateToolkit(ctx context.Context, opts Options) (any, error, int) {
 		targets = append(targets, delivery.UpdateTarget{Component: "addon", Path: path})
 	}
 	if len(targets) == 0 && opts.file == "" {
-		targets, err = delivery.ReadUpdateTargets(state)
+		targets, err = delivery.DiscoverUpdateTargets(ctx, state)
 		if err != nil {
 			return nil, err, 4
 		}
@@ -104,7 +104,7 @@ func updateToolkit(ctx context.Context, opts Options) (any, error, int) {
 				}
 			}
 		}
-		discovered, err := live.DiscoverCandidates(ctx, root, live.DiscoveryRequest{Passive: true, Roots: roots})
+		discovered, err := live.DiscoverCandidates(ctx, root, live.DiscoveryRequest{Roots: roots})
 		if err != nil {
 			return nil, err, 3
 		}

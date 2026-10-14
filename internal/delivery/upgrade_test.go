@@ -114,3 +114,50 @@ func TestUpgradeCancellationAfterOldMove(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type cancelUpgradePreparation struct {
+	context.Context
+	parent, checkpoint string
+	cancel             context.CancelFunc
+}
+
+func (c cancelUpgradePreparation) Err() error {
+	dirs, _ := filepath.Glob(filepath.Join(c.parent, ".lycheedev-prepare-*"))
+	for _, dir := range dirs {
+		path := dir
+		if c.checkpoint == "next" {
+			path = filepath.Join(dir, "next", installationMarker)
+		}
+		if c.checkpoint == "journal" {
+			path = filepath.Join(dir, "replacement.json")
+		}
+		if _, err := os.Stat(path); err == nil {
+			c.cancel()
+		}
+	}
+	return c.Context.Err()
+}
+func TestUpgradePreparationInterruptionLeavesOriginalRetryable(t *testing.T) {
+	for _, checkpoint := range []string{"created", "next", "journal"} {
+		t.Run(checkpoint, func(t *testing.T) {
+			source, target, archive, version := upgradeFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := UpgradeInstallation(cancelUpgradePreparation{ctx, filepath.Dir(archive), checkpoint, cancel}, source, target, archive, "skill", version)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("checkpoint %s: %v", checkpoint, err)
+			}
+			if _, err := os.Stat(archive); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("partial archive published: %v", err)
+			}
+			before, err := InspectInstallation(context.Background(), target, "skill")
+			if err != nil || before.State != "managed" || before.Receipt.Commit != strings.Repeat("a", 40) {
+				t.Fatalf("original changed: %+v %v", before, err)
+			}
+			result, err := UpgradeInstallation(context.Background(), source, target, archive, "skill", version)
+			if err != nil || result.Receipt.Commit != strings.Repeat("b", 40) {
+				t.Fatalf("original retry: %+v %v", result, err)
+			}
+		})
+	}
+}

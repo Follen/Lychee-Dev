@@ -20,7 +20,6 @@ const legacyIdentitySchema = "lycheedev.slot.identity.v2"
 var ErrPending = errors.New("live.channel_pending")
 var ErrPublicationPending = errors.Join(ErrPending, errors.New("live.channel_shared_publication_pending"))
 
-var ErrRuntimeChanged = errors.New("live.channel_runtime_changed")
 var ErrReloadRequired = errors.New("live.channel_reload_required")
 var ErrJournalMissing = errors.New("live.channel_journal_missing")
 var ErrCleanupReloadRequired = errors.New("live.channel_cleanup_reload_required")
@@ -78,7 +77,7 @@ func (i Identity) Validate() error {
 	if i.Schema != IdentitySchema && !(i.Schema == legacyIdentitySchema && upgradeInputCapability(i.InputState)) && !(i.Schema == bridge.PreviousMailboxSchema && i.InputState == bridge.PreviousMailboxSchema) {
 		return errors.New("live.channel_identity_schema_invalid")
 	}
-	return i.validateFields()
+	return i.validateFields(bridge.SlotCount)
 }
 
 // Receipts share identity fields but have their own wire schema.
@@ -86,17 +85,17 @@ func (r Receipt) Validate() error {
 	if r.Schema != bridge.SlotSchema {
 		return errors.New("live.channel_receipt_schema_invalid")
 	}
-	return r.Identity.validateFields()
+	return r.Identity.validateFields(bridge.SlotCount)
 }
 
-func (i Identity) validateFields() error {
+func (i Identity) validateFields(slots int) error {
 	if i.Inventory != nil && (*i.Inventory < 0 || *i.Inventory > i.Slots) {
 		return errors.New("live.channel_inventory_invalid")
 	}
 	if _, err := tokenBytes(i.Runtime); err != nil {
 		return err
 	}
-	if i.Slots != bridge.SlotCount || i.NextSlot < 1 || i.NextSlot > i.Slots+1 || i.GUID == "" || i.Character == "" || i.Realm == "" || i.Build == "" || i.Product == "" || i.Release == "" {
+	if i.Slots != slots || i.NextSlot < 1 || i.NextSlot > i.Slots+1 || i.GUID == "" || i.Character == "" || i.Realm == "" || i.Build == "" || i.Product == "" || i.Release == "" {
 		return errors.New("live.channel_identity_invalid")
 	}
 	return nil
@@ -107,11 +106,20 @@ func (i Identity) validateFields() error {
 func decodeIdentityRecord(record memory.Record, release string) (Identity, error) {
 	var i Identity
 	h := record.Header
-	if h.Kind != bridge.MemoryIdentity || h.State != 1 || h.Nonce != [16]byte{} || h.Ticket != [16]byte{} || len(record.Payload) > 16384 || json.Unmarshal(record.Payload, &i) != nil || i.Validate() != nil || i.Release != release {
+	if h.Kind != bridge.MemoryIdentity || h.State != 1 || h.Nonce != [16]byte{} || h.Ticket != [16]byte{} || len(record.Payload) > 16384 || json.Unmarshal(record.Payload, &i) != nil || i.Release != release {
 		return i, errors.New("live.channel_identity_record_invalid")
 	}
 	runtime, err := tokenBytes(i.Runtime)
 	if err != nil || runtime == [16]byte{} || runtime != h.Runtime {
+		return i, errors.New("live.channel_identity_record_invalid")
+	}
+	// A valid shipped 200-slot descriptor selects manual activation only. It
+	// remains incompatible with the current driver and grants no input authority.
+	if i.Schema == legacyIdentitySchema &&
+		(i.InputState == legacyInputSchema || i.InputState == "lycheedev.input.hybrid.v2") && i.validateFields(200) == nil {
+		return i, errors.Join(memory.ErrMailboxIncompatible, errors.New("live.channel_legacy_identity_requires_activation"))
+	}
+	if i.Validate() != nil {
 		return i, errors.New("live.channel_identity_record_invalid")
 	}
 	return i, nil

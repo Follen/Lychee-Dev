@@ -1,7 +1,6 @@
 package delivery
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -237,50 +236,6 @@ func TestSlotPoolDoesNotAdoptUnmanagedDirectories(t *testing.T) {
 	}
 	if _, err := installSlotPool(context.Background(), parent, "2.5.1"); err == nil {
 		t.Fatal("adopted unmanaged slot")
-	}
-}
-
-func TestSlotBootstrapRepairPreservesPayloadAndRejectsDrift(t *testing.T) {
-	ctx := context.Background()
-	parent := t.TempDir()
-	if _, err := installSlotPool(ctx, parent, "2.5.1"); err != nil {
-		t.Fatal(err)
-	}
-	marker, _ := os.ReadFile(filepath.Join(parent, slotMarker))
-	path := filepath.Join(SlotDirectory(parent, 1), "Lychee Dev Slot 01.toc")
-	want, _ := os.ReadFile(path)
-	if strings.Contains(string(want), "Dependencies:") {
-		t.Fatal("slot must be passive without a main-addon dependency")
-	}
-	old := strings.Replace(string(want), "## LoadOnDemand: 1\n", "## LoadOnDemand: 1\n## Dependencies: Lychee Dev\n", 1)
-	if err := os.WriteFile(path, []byte(old), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := RepairSlotBootstrap(ctx, parent, "2.5.1"); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.ReadFile(filepath.Join(parent, slotMarker))
-	if string(marker) != string(after) {
-		t.Fatal("repair changed reservation ledger")
-	}
-	if err := RepairSlotBootstrap(ctx, parent, "2.5.1"); err != nil {
-		t.Fatal("not resumable", err)
-	}
-	oldTransport := strings.Replace(string(want), bridge.MailboxSchema, "lycheedev-mailbox-v1", 1)
-	if err := os.WriteFile(path, []byte(oldTransport), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := RepairSlotBootstrap(ctx, parent, "2.5.1"); err != nil {
-		t.Fatal("protocol-name migration", err)
-	}
-	if current, err := os.ReadFile(path); err != nil || !bytes.Equal(current, want) {
-		t.Fatal("protocol name was not migrated", err)
-	}
-	if err := os.WriteFile(path, []byte(old+"Injected.lua\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := RepairSlotBootstrap(ctx, parent, "2.5.1"); err == nil {
-		t.Fatal("repair accepted unknown drift")
 	}
 }
 

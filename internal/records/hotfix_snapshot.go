@@ -165,14 +165,15 @@ func (s SnapshotHotfix) QueryHotfix(ctx context.Context, q HotfixQuery) (RemoteH
 		Locale:    q.Locale,
 		// A snapshot may lag the server; only a live cache file attests that its
 		// own full data set was covered, never server-side coverage.
-		Complete:     s.Provider == dbcacheProviderName && page.Complete,
-		Truncated:    page.Truncated,
-		Scanned:      int(page.Scanned),
-		Matched:      int(page.Matched),
-		Returned:     len(records),
-		SelectedPush: page.SelectedPush,
-		CapturedAt:   &capturedAt,
-		Ref:          digest,
+		Complete:          s.Provider == dbcacheProviderName && page.Complete,
+		FullQueryComplete: s.Provider == dbcacheProviderName && page.Complete && cursor == nil,
+		Truncated:         page.Truncated,
+		Scanned:           int(page.Scanned),
+		Matched:           int(page.Matched),
+		Returned:          len(records),
+		SelectedPush:      page.SelectedPush,
+		CapturedAt:        &capturedAt,
+		Ref:               digest,
 	}
 	if page.Truncated {
 		coverage.TruncationReason = "limit"
@@ -245,124 +246,4 @@ func applyCacheDecode(ctx context.Context, raw []byte, page *CachePage, definiti
 		entry.DecodeState = "decoded"
 	}
 	return nil
-}
-
-// HotfixFallback composes two providers without silent source fallback: the
-// fallback is consulted only when the primary fails or its coverage is
-// incomplete, the composition is always reported, and every record keeps its
-// provider provenance. A limit bounds each provider's contribution separately.
-type HotfixFallback struct {
-	Primary  HotfixProvider
-	Fallback HotfixProvider
-}
-
-func (f HotfixFallback) QueryHotfix(ctx context.Context, q HotfixQuery) (RemoteHotfixResult, error) {
-	if f.Primary == nil || f.Fallback == nil {
-		return RemoteHotfixResult{}, fmt.Errorf("%w: fallback composition needs a primary and a fallback provider", ErrHotfixQuery)
-	}
-	primary, primaryErr := f.Primary.QueryHotfix(ctx, q)
-	if primaryErr == nil && primary.Coverage.Complete {
-		return primary, nil
-	}
-	if q.Cursor != "" {
-		// Cursor-bound queries stay with the source the cursor was cut from.
-		if primaryErr != nil {
-			return RemoteHotfixResult{}, primaryErr
-		}
-		return primary, nil
-	}
-	fallback, fallbackErr := f.Fallback.QueryHotfix(ctx, q)
-	return composeHotfixResults(q, primary, primaryErr, fallback, fallbackErr)
-}
-
-func composeHotfixResults(q HotfixQuery, primary RemoteHotfixResult, primaryErr error, fallback RemoteHotfixResult, fallbackErr error) (RemoteHotfixResult, error) {
-	if fallbackErr != nil {
-		if primaryErr != nil {
-			return RemoteHotfixResult{}, fmt.Errorf("%w; fallback also failed: %v", primaryErr, fallbackErr)
-		}
-		primary.Warnings = append(primary.Warnings, "records.hotfix_fallback_failed:"+fallbackErr.Error())
-		return primary, nil
-	}
-	composed := fallback
-	composed.Warnings = append([]string(nil), fallback.Warnings...)
-	sources := []HotfixCoverage{fallback.Coverage}
-	names := fallback.Coverage.Provider
-	records := append([]HotfixRecord(nil), fallback.Records...)
-	scanned, matched := fallback.Coverage.Scanned, fallback.Coverage.Matched
-	fetchedAt := time.Time{}
-	if fallback.Coverage.CapturedAt != nil {
-		fetchedAt = *fallback.Coverage.CapturedAt
-	}
-	refs := []string{fallback.Coverage.Ref}
-	complete := false
-	if primaryErr != nil {
-		composed.Warnings = append(composed.Warnings,
-			"records.hotfix_fallback_used",
-			"records.hotfix_fallback_reason:"+primaryErr.Error())
-	} else {
-		composed.Warnings = append(composed.Warnings, "records.hotfix_fallback_used")
-		sources = append([]HotfixCoverage{primary.Coverage}, sources...)
-		names = primary.Coverage.Provider + "+" + fallback.Coverage.Provider
-		records = append(append([]HotfixRecord(nil), primary.Records...), records...)
-		scanned += primary.Coverage.Scanned
-		matched += primary.Coverage.Matched
-		refs = append([]string{primary.Coverage.Ref}, refs...)
-		if primary.Coverage.CapturedAt != nil && primary.Coverage.CapturedAt.After(fetchedAt) {
-			fetchedAt = *primary.Coverage.CapturedAt
-		}
-		seen := map[string]bool{}
-		for _, record := range primary.Records {
-			seen[hotfixRecordKey(record)] = true
-		}
-		duplicates := 0
-		for _, record := range fallback.Records {
-			if seen[hotfixRecordKey(record)] {
-				duplicates++
-			}
-		}
-		if duplicates > 0 {
-			composed.Warnings = append(composed.Warnings, fmt.Sprintf("records.hotfix_cross_source_duplicate:%d", duplicates))
-		}
-	}
-	composed.Records = records
-	composed.Sources = sources
-	composed.Warnings = append(composed.Warnings, "records.hotfix_multi_source")
-	combined := HotfixCoverage{
-		Provider:   names,
-		Product:    q.Product,
-		FullBuild:  q.FullBuild,
-		Region:     q.Region,
-		Locale:     q.Locale,
-		Complete:   complete,
-		Truncated:  primary.Truncated || fallback.Truncated,
-		Scanned:    scanned,
-		Matched:    matched,
-		Returned:   len(records),
-		CapturedAt: nil,
-		Ref:        hotfixDigest(refs...),
-	}
-	if primary.Coverage.SelectedPush != nil {
-		combined.SelectedPush = primary.Coverage.SelectedPush
-	} else {
-		combined.SelectedPush = fallback.Coverage.SelectedPush
-	}
-	if !fetchedAt.IsZero() {
-		stamp := fetchedAt
-		combined.CapturedAt = &stamp
-	}
-	if combined.Truncated {
-		if primary.Truncated && primary.Coverage.TruncationReason != "" {
-			combined.TruncationReason = primary.Coverage.TruncationReason
-		} else {
-			combined.TruncationReason = fallback.Coverage.TruncationReason
-		}
-	}
-	composed.Coverage = combined
-	composed.Change = HotfixChange(names, q, fetchedAt, combined.Ref)
-	composed.Complete = complete
-	composed.Truncated = combined.Truncated
-	// A composed view never claims a complete source view: the primary source
-	// was incomplete by definition.
-	composed.NextCursor = ""
-	return composed, nil
 }

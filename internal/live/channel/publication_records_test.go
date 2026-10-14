@@ -191,18 +191,3 @@ func TestReportedHeadQualifiedBeforeBodyRead(t *testing.T) {
 		}
 	}
 }
-
-func TestBootstrapChangedRejectUsesTypedReceipt(t *testing.T) {
-	r, e, h := publicationTestReceipt()
-	r.Runtime = strings.Repeat("4", 32)
-	r.State, r.Reason = "rejected", "slot_runtime_changed"
-	h.Runtime, _ = tokenBytes(r.Runtime)
-	for _, kind := range []bridge.MemoryKind{bridge.MemoryReceipt, bridge.MemoryConfirmation, bridge.MemoryIdentity} {
-		h.Kind = kind
-		reader := &publicationTestReader{record: publicationTestRecord(t, r, h)}
-		_, err := ObserveRecords(context.Background(), reader, ObservationQuery{Kind: "bootstrap_changed", Envelope: e, Identity: r.Identity})
-		if (err == nil) != (kind == bridge.MemoryReceipt) {
-			t.Fatalf("kind %d: %v", kind, err)
-		}
-	}
-}

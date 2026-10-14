@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +71,7 @@ func TestSnapshotHotfixQueriesExplicitFile(t *testing.T) {
 	}
 	sum := sha256.Sum256(raw)
 	digest := hex.EncodeToString(sum[:])
-	if result.Coverage.Ref != digest || !result.Coverage.Complete || result.Coverage.Provider != "dbcache" {
+	if result.Coverage.Ref != digest || !result.Coverage.Complete || !result.Coverage.FullQueryComplete || result.Coverage.Provider != "dbcache" {
 		t.Fatalf("coverage = %+v", result.Coverage)
 	}
 	info, err := os.Stat(path)
@@ -240,6 +239,12 @@ func TestSnapshotHotfixLatestBatchAndCursor(t *testing.T) {
 	if len(next.Records) != 1 || next.Records[0].RecordID == first.Records[0].RecordID {
 		t.Fatalf("resumed window = %+v", next.Records)
 	}
+	lastQuery := windowed
+	lastQuery.Cursor = next.NextCursor
+	last, err := source.QueryHotfix(context.Background(), lastQuery)
+	if err != nil || last.Truncated || last.Coverage.Complete || last.Coverage.FullQueryComplete {
+		t.Fatalf("resumed final coverage = %+v, %v", last.Coverage, err)
+	}
 
 	// The cursor binds to immutable bytes: a rewritten snapshot is refused.
 	if err := os.WriteFile(path, append(raw, 0), 0o600); err != nil {
@@ -281,150 +286,5 @@ func TestSnapshotHotfixDecodeStates(t *testing.T) {
 	}
 	if states[55] != "decoded" || states[56] != "not_valid" || states[57] != "no_payload" {
 		t.Fatalf("decode states = %v", states)
-	}
-}
-
-type stubHotfixProvider struct {
-	result records.RemoteHotfixResult
-	err    error
-	calls  int
-}
-
-func (s *stubHotfixProvider) QueryHotfix(ctx context.Context, query records.HotfixQuery) (records.RemoteHotfixResult, error) {
-	s.calls++
-	return s.result, s.err
-}
-
-func stubResult(provider string, complete bool, ids ...uint32) records.RemoteHotfixResult {
-	recordsOut := make([]records.HotfixRecord, 0, len(ids))
-	for _, id := range ids {
-		recordsOut = append(recordsOut, records.HotfixRecord{Provider: provider, Push: 1, RecordID: id, Status: 1, Build: "68974"})
-	}
-	return records.RemoteHotfixResult{
-		Records:  recordsOut,
-		Coverage: records.HotfixCoverage{Provider: provider, Complete: complete, Ref: strings.Repeat("a", 64), Returned: len(ids)},
-		Complete: complete,
-	}
-}
-
-func TestHotfixFallbackComposition(t *testing.T) {
-	query := wagoTestQuery()
-
-	// A complete primary never consults the fallback: no silent merge.
-	primary := &stubHotfixProvider{result: stubResult("wago", true, 1)}
-	fallback := &stubHotfixProvider{result: stubResult("raidbots", false, 2)}
-	composed, err := (records.HotfixFallback{Primary: primary, Fallback: fallback}).QueryHotfix(context.Background(), query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(composed.Records) != 1 || fallback.calls != 0 {
-		t.Fatalf("records = %d fallback calls = %d", len(composed.Records), fallback.calls)
-	}
-
-	// Incomplete primary coverage composes with the fallback and reports both.
-	primary = &stubHotfixProvider{result: stubResult("wago", false, 1, 2)}
-	fallback = &stubHotfixProvider{result: stubResult("raidbots", false, 2, 3)}
-	composed, err = (records.HotfixFallback{Primary: primary, Fallback: fallback}).QueryHotfix(context.Background(), query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(composed.Records) != 4 {
-		t.Fatalf("composed records = %+v", composed.Records)
-	}
-	if composed.Coverage.Provider != "wago+raidbots" || composed.Complete || len(composed.Sources) != 2 {
-		t.Fatalf("combined coverage = %+v sources = %+v", composed.Coverage, composed.Sources)
-	}
-	for index, record := range composed.Records {
-		want := "wago"
-		if index >= 2 {
-			want = "raidbots"
-		}
-		if record.Provider != want {
-			t.Fatalf("record %d provenance = %+v", index, record)
-		}
-	}
-	if !containsWarning(composed.Warnings, "records.hotfix_fallback_used") ||
-		!containsWarning(composed.Warnings, "records.hotfix_multi_source") ||
-		!containsWarning(composed.Warnings, "records.hotfix_cross_source_duplicate:1") {
-		t.Fatalf("warnings = %v", composed.Warnings)
-	}
-
-	// A failed primary falls back with the reason reported.
-	primary = &stubHotfixProvider{err: errors.New("records.hotfix_wago_http: boom")}
-	fallback = &stubHotfixProvider{result: stubResult("raidbots", false, 3)}
-	composed, err = (records.HotfixFallback{Primary: primary, Fallback: fallback}).QueryHotfix(context.Background(), query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(composed.Records) != 1 || composed.Coverage.Provider != "raidbots" {
-		t.Fatalf("fallback result = %+v", composed.Coverage)
-	}
-	reasoned := false
-	for _, warning := range composed.Warnings {
-		if strings.HasPrefix(warning, "records.hotfix_fallback_reason:") {
-			reasoned = true
-		}
-	}
-	if !reasoned {
-		t.Fatalf("warnings = %v", composed.Warnings)
-	}
-
-	// Both sources failing keeps the primary error visible.
-	primary = &stubHotfixProvider{err: errors.New("records.hotfix_wago_http: boom")}
-	fallback = &stubHotfixProvider{err: errors.New("records.hotfix_snapshot_stale: boom")}
-	if _, err = (records.HotfixFallback{Primary: primary, Fallback: fallback}).QueryHotfix(context.Background(), query); err == nil || !strings.Contains(err.Error(), "records.hotfix_wago_http") {
-		t.Fatalf("error = %v", err)
-	}
-
-	// Cursor-bound queries stay with their own source.
-	cursor, err := records.EncodeHotfixCursor(records.HotfixCursor{Source: "wago", Ref: strings.Repeat("b", 64), Scope: "x", ResumePage: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	primary = &stubHotfixProvider{err: errors.New("records.hotfix_wago_http: boom")}
-	fallback = &stubHotfixProvider{result: stubResult("raidbots", false, 3)}
-	cursorQuery := query
-	cursorQuery.Cursor = cursor
-	if _, err = (records.HotfixFallback{Primary: primary, Fallback: fallback}).QueryHotfix(context.Background(), cursorQuery); err == nil {
-		t.Fatal("cursor query silently fell back")
-	}
-	if fallback.calls != 0 {
-		t.Fatalf("fallback calls = %d", fallback.calls)
-	}
-}
-
-func TestHotfixFallbackRealProvidersCompose(t *testing.T) {
-	pages := map[int][]byte{
-		1: wagoFixturePage(1, 2, 2, wagoRow(11, 100, 55, 1, "SpellEffect", `[1]`, "2026-08-05 22:09:07", 71, "enUS")),
-		2: wagoFixturePage(2, 2, 2, wagoRow(12, 100, 56, 1, "SpellEffect", `[2]`, "2026-08-05 22:09:07", 71, "enUS")),
-	}
-	server := newWagoTestServer(t, pages)
-	wago := &records.WagoHotfix{Root: hotfixTestWorkspace(t), BaseURL: server.URL, Client: server.Client(), MaxPages: 1}
-	path, _ := writeHotfixSnapshotFile(t, 9,
-		cacheRecordFixture{Region: 71, Push: 7, Table: 0x11223344, Record: 55, Status: 1, Payload: []byte{1}},
-	)
-	snapshotQuery := snapshotTestQuery()
-	snapshotQuery.TableHash = nil
-	snapshot, err := records.DBCacheSnapshot(path, snapshotQuery)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := wagoTestQuery()
-	composed, err := (records.HotfixFallback{Primary: wago, Fallback: snapshot}).QueryHotfix(context.Background(), query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	providers := map[string]bool{}
-	for _, record := range composed.Records {
-		providers[record.Provider] = true
-	}
-	if !providers["wago"] || !providers["dbcache"] || len(composed.Records) < 2 {
-		t.Fatalf("composed records = %+v", composed.Records)
-	}
-	if composed.Coverage.Provider != "wago+dbcache" || composed.Complete {
-		t.Fatalf("combined coverage = %+v", composed.Coverage)
-	}
-	if len(composed.Sources) != 2 || !containsWarning(composed.Warnings, "records.hotfix_multi_source") {
-		t.Fatalf("sources = %+v warnings = %v", composed.Sources, composed.Warnings)
 	}
 }

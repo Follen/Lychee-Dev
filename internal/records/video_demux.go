@@ -276,11 +276,6 @@ func demuxAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, root, sn
 		if err := ctx.Err(); err != nil {
 			return AssetDemux{}, err
 		}
-		digest := sha256.Sum256(frame.Payload)
-		blob, err := s.PublishBlob(ctx, vault.BlobInput{Reader: bytes.NewReader(frame.Payload), MaxBytes: request.MaxOutputBytes})
-		if err != nil {
-			return AssetDemux{}, err
-		}
 		capture, err := evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
 			Reader: bytes.NewReader(frame.Payload), MaxBytes: request.MaxFrameBytes, MediaType: "video/VP9", Complete: true,
 			Provenance: evidence.Provenance{
@@ -295,25 +290,32 @@ func demuxAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, root, sn
 		manifest.Frames = append(manifest.Frames, AssetDemuxFrame{
 			Index: index, Type: frame.Type, Timestamp: frame.Timestamp, Duration: frame.Duration,
 			Size: frame.Size, Chunk: frame.Chunk, Offset: frame.Offset,
-			Output: outputs[index], SHA256: hex.EncodeToString(digest[:]),
-			Blob: blob, Capture: capture.ID, SubFrames: frame.SubFrames,
+			Output: outputs[index], SHA256: capture.Blob.SHA256,
+			Blob: capture.Blob, Capture: capture.ID, SubFrames: frame.SubFrames,
 		})
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return AssetDemux{}, err
 	}
-	capture, err := evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{
-		Reader: bytes.NewReader(encoded), MaxBytes: 16 << 20, MediaType: "application/json", Complete: manifest.Complete,
-		Truncated: manifest.Truncated,
-		Provenance: evidence.Provenance{
-			Kind: "asset-demux-manifest", Locator: manifest.Input, Snapshot: snapshot, DataBuild: build,
-		},
-	})
+	capture, err := commitDemuxManifest(ctx, s, m, manifest, encoded, build)
 	if err != nil {
 		return AssetDemux{}, err
 	}
 	demux.Capture = capture
+	// One directory-scoped lease covers the entire artifact set, not each
+	// frame separately. Different homes and output aliases must agree on the
+	// same completion record. Recheck preflight after waiting for a prior run.
+	lease, err := acquireExportLease(ctx, filepath.Dir(destinations[len(destinations)-1].path), "asset-demux")
+	if err != nil {
+		return AssetDemux{}, err
+	}
+	defer lease.Close()
+	for _, destination := range destinations {
+		if err := destination.check(); err != nil {
+			return AssetDemux{}, err
+		}
+	}
 	// Frames publish first and the manifest last: without a successful return
 	// and a manifest file the artifact set is visibly incomplete.
 	for index, frame := range parsed.Frames {
@@ -331,6 +333,31 @@ func demuxAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, root, sn
 	demux.Published = append(demux.Published, manifestPath)
 	demux.Manifest = manifest
 	return demux, nil
+}
+
+// A legal 16 MiB demux manifest can name more frame captures than fit in a
+// 1 MiB metadata document. Keep their existing typed payload references, rather
+// than duplicating them into CaptureRef.Dependencies. The archive recognizes
+// these references on removal; validation and publication share its write lease.
+func commitDemuxManifest(ctx context.Context, s *vault.Store, m *vault.Metadata, manifest AssetDemuxManifest, encoded []byte, build string) (evidence.CaptureRef, error) {
+	ctx, release, err := m.AcquireWriteLease(ctx)
+	if err != nil {
+		return evidence.CaptureRef{}, err
+	}
+	defer release()
+	archive := evidence.OpenArchive(s, m)
+	for _, frame := range manifest.Frames {
+		if _, err := archive.InspectCapture(ctx, frame.Capture); err != nil {
+			return evidence.CaptureRef{}, err
+		}
+	}
+	return archive.CommitCapture(ctx, evidence.CaptureDraft{
+		Reader: bytes.NewReader(encoded), MaxBytes: 16 << 20, MediaType: "application/json", Complete: manifest.Complete,
+		Truncated: manifest.Truncated, Dependencies: []string{manifest.SourceCapture},
+		Provenance: evidence.Provenance{
+			Kind: "asset-demux-manifest", Locator: manifest.Input, Snapshot: manifest.Snapshot, DataBuild: build,
+		},
+	})
 }
 
 // demuxSource reads and evidences the full input container from the selected

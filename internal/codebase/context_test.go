@@ -103,6 +103,47 @@ func TestLoadedPathRejectsSuffixCollisionAndTraversal(t *testing.T) {
 	}
 }
 
+func TestContextByteContinuationResetsOffsetForNextSite(t *testing.T) {
+	for _, otherFile := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same", true: "other"}[otherFile], func(t *testing.T) {
+			files := map[string]string{"Main.lua": "function Foo()\n  local value = 123456789\n  return value\nend\n"}
+			if otherFile {
+				files["Other.lua"] = "-- before\nFoo()\n-- after\n"
+			} else {
+				files["Main.lua"] += "\nFoo()\n-- after\n"
+			}
+			b, pin := indexedSearchFixture(t, files)
+			query := ContextQuery{Symbol: "Foo", Depth: 1, Limit: 1, MaxBytes: 23, MaxLines: 100}
+			texts := map[string]string{}
+			for page := 0; page < 30; page++ {
+				got, err := b.Context(context.Background(), "PIN-TEST", pin, query, ResearchOptions{})
+				if err != nil {
+					t.Fatalf("page %d: %v", page, err)
+				}
+				for _, snippet := range got.Snippets {
+					texts[snippet.Path+"/"+snippet.Basis] += snippet.Text
+				}
+				query.Cursor = got.NextCursor
+				if query.Cursor == "" {
+					break
+				}
+			}
+			if query.Cursor != "" {
+				t.Fatal("pagination did not finish")
+			}
+			full, err := b.Context(context.Background(), "PIN-TEST", pin, ContextQuery{Symbol: "Foo", Depth: 1, Limit: 20, MaxBytes: 4096, MaxLines: 100}, ResearchOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, snippet := range full.Snippets {
+				if strings.ReplaceAll(texts[snippet.Path+"/"+snippet.Basis], "\n", "") != strings.ReplaceAll(snippet.Text, "\n", "") {
+					t.Fatalf("lost snippet %s/%s: got %q want %q", snippet.Path, snippet.Basis, texts[snippet.Path+"/"+snippet.Basis], snippet.Text)
+				}
+			}
+		})
+	}
+}
+
 func TestContextFlowUsesVersionedGeneratedMetadata(t *testing.T) {
 	ctx := context.Background()
 	fixture := t.TempDir()
@@ -170,7 +211,7 @@ func TestContextExcerptContinuesLongLineWithoutDroppingBytes(t *testing.T) {
 	line, offset := 1, 0
 	joined := ""
 	for n := 0; n < 10; n++ {
-		part, _, nextLine, nextByte, done, err := contextExcerpt(data, line, 1, offset, 5, 1)
+		part, _, nextLine, nextByte, done, err := contextExcerpt(data, []uint32{0, uint32(len(data))}, line, 1, offset, 5, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,8 +224,52 @@ func TestContextExcerptContinuesLongLineWithoutDroppingBytes(t *testing.T) {
 	if joined != "1: abcdefghijklmnop" {
 		t.Fatalf("continuation dropped bytes: %q", joined)
 	}
-	exact, last, _, _, done, err := contextExcerpt([]byte("abc\n"), 1, 1, 0, len("1: abc"), 1)
+	exact, last, _, _, done, err := contextExcerpt([]byte("abc\n"), []uint32{0, 4}, 1, 1, 0, len("1: abc"), 1)
 	if err != nil || !done || last != 1 || exact != "1: abc" {
 		t.Fatalf("exact boundary falsely truncated: text=%q last=%d done=%v err=%v", exact, last, done, err)
+	}
+}
+
+func TestContextSourceFlowKeepsExactSymbolIDLocation(t *testing.T) {
+	ctx := context.Background()
+	fixture := t.TempDir()
+	for name, body := range map[string]string{
+		"main.lua": "do\n local function Same() return 1 end\nend\ndo\n local function Same() return 2 end\nend\n",
+		"Interface/AddOns/Blizzard_APIDocumentationGenerated/TestDocumentation.lua": `local Test = {Name="Test", Type="System", Functions={{Name="Example", Type="Function"}}}; APIDocumentation:AddDocumentationTable(Test)`,
+	} {
+		full := filepath.Join(fixture, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := vault.Initialize(ctx, filepath.Join(t.TempDir(), "home"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := QuerySource(ctx, store.Root(), indexed.Snapshot.ID, SearchQuery{Mode: SearchModePrecise, Text: "Same"})
+	if err != nil || len(matches.Result.Results) != 2 {
+		t.Fatalf("same-name declarations = %+v, %v", matches, err)
+	}
+	for _, symbol := range matches.Result.Results {
+		reading, err := ContextSource(ctx, store.Root(), indexed.Snapshot.ID, ContextQuery{SymbolID: symbol.SymbolID, Depth: 0, Limit: 10, MaxBytes: 4096, MaxLines: 40}, ResearchOptions{Flow: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := reading.Result
+		if result.Symbol == nil || result.Symbol.Line != symbol.Line || result.Flow == nil || result.Flow.Coverage.Paths != 1 {
+			t.Fatalf("exact SymbolID %s at %d = %+v", symbol.SymbolID, symbol.Line, result)
+		}
+		for _, boundary := range result.Flow.Boundaries {
+			if boundary.Code == "ambiguous_symbol" || boundary.Code == "target_unresolved" {
+				t.Fatalf("exact declaration was reselected by name: %+v", result.Flow)
+			}
+		}
 	}
 }

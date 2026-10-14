@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
@@ -39,5 +40,44 @@ func TestLuaMailboxRecipeGuardChangeIsNotPublicationRetry(t *testing.T) {
 	err := a.verify(context.Background())
 	if !errors.Is(err, ErrMailboxUnavailable) || errors.Is(err, ErrMailboxPathChanged) || err.Error() != "memory.mailbox_unavailable: root_recipe_changed" {
 		t.Fatalf("changed runtime instruction recipe was treated as temporary: %v", err)
+	}
+}
+
+func TestLuaMailboxReplacedInvalidRecordReportsPathChange(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		for _, phase := range []string{"header", "payload", "layout"} {
+			t.Run(fmt.Sprintf("changed=%t/%s", changed, phase), func(t *testing.T) {
+				f := newMailboxFixture(t, 0x140000000, 0x200000000)
+				old := f.strings["input"]
+				next := f.record("replacement", bridge.MemoryInputState, [16]byte{})
+				f.beforeRead = func(at uint64, _ int) {
+					trigger := old
+					if phase == "payload" {
+						trigger += 32
+					}
+					if at != trigger {
+						return
+					}
+					f.beforeRead = nil
+					if changed {
+						binary.LittleEndian.PutUint64(f.bytes(f.nodes["box.input"], 8), next)
+					}
+					if phase == "layout" {
+						f.bytes(old+16, 1)[0] = 0
+						return
+					}
+					for i, span := range f.spans {
+						if span.address == old {
+							f.spans = append(f.spans[:i], f.spans[i+1:]...)
+							break
+						}
+					}
+				}
+				found, err := f.reader().Lookup(context.Background(), f.selectors["input"])
+				if err == nil || len(found.Records) != 0 || errors.Is(err, ErrMailboxPathChanged) != changed {
+					t.Fatalf("changed=%t returned %v %+v", changed, err, found)
+				}
+			})
+		}
 	}
 }

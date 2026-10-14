@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/follenfang/lycheedev/internal/addoncheck"
-	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"io"
 	"os"
@@ -39,20 +38,7 @@ func InspectAddonRelease(ctx context.Context, directory, version string) ([]Addo
 		return nil, err
 	}
 	defer root.Close()
-	if _, exists := files["addon/Bridge/Definitions.lua"]; exists {
-		file, err := root.Open("addon/Bridge/Definitions.lua")
-		if err != nil {
-			return nil, err
-		}
-		definitions, parseErr := bridge.DecodeProbeQueue(file)
-		closeErr := file.Close()
-		if parseErr != nil || len(definitions) != 0 {
-			return nil, fmt.Errorf("%w: release probe queue must be canonical and empty", ErrPayload)
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-	}
+
 	var result []AddonManifest
 	name := "addon/" + selection.MainTOC
 	record, ok := files[name]

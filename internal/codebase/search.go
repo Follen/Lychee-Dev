@@ -325,16 +325,14 @@ func (b *Browser) Search(ctx context.Context, snapshotID string, pin selection.S
 			}
 			snippet = s.Path
 		} else {
-			data, digest, err := cache.document(ctx, s.Path)
-			if err != nil {
-				return response, err
-			}
-			hash = digest
 			start, end := max(s.Line-3, 1), s.Line+3
 			if c.matched == "exact_symbol" && s.EndLine >= s.Line {
 				start, end = s.Line, s.EndLine
 			}
-			snippet = numberedLines(data, start, end, 80)
+			snippet, hash, err = cache.numberedLines(ctx, s.Path, start, end, 80)
+			if err != nil {
+				return response, err
+			}
 		}
 		kind := s.Category
 		if s.Kind == "header" {
@@ -379,20 +377,6 @@ func confidenceRank(v string) int {
 	default:
 		return 2
 	}
-}
-func numberedLines(data []byte, start, end, maxLines int) string {
-	if end < start {
-		end = start
-	}
-	if maxLines > 0 && end-start+1 > maxLines {
-		end = start + maxLines - 1
-	}
-	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	out := []string{}
-	for n := start; n <= end && n <= len(lines); n++ {
-		out = append(out, fmt.Sprintf("%d: %s", n, strings.TrimSuffix(lines[n-1], "\r")))
-	}
-	return strings.Join(out, "\n")
 }
 func searchTopicFilter(topic string) error {
 	switch topic {

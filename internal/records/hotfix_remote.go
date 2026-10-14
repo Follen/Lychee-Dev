@@ -94,15 +94,6 @@ func (q HotfixQuery) Validate() error {
 	return nil
 }
 
-// HotfixStatusFilter validates a raw --status value in 0..255.
-func HotfixStatusFilter(value int) (*uint8, error) {
-	if value < 0 || value > 255 {
-		return nil, fmt.Errorf("%w: status must be 0..255", ErrHotfixQuery)
-	}
-	status := uint8(value)
-	return &status, nil
-}
-
 // ParseHotfixTime accepts RFC3339 or the source-native "2006-01-02 15:04:05"
 // layout. Nothing else is guessed.
 func ParseHotfixTime(value string) (time.Time, error) {
@@ -195,29 +186,31 @@ type HotfixFetchBudget struct {
 	Bytes       int64 `json:"bytes"`
 }
 
-// HotfixCoverage describes what the query actually covered. Complete means the
-// provider's own data for the query scope was fully covered; it never claims
-// server-side coverage for a local snapshot.
+// HotfixCoverage describes provider coverage. Wago Complete means its requested
+// result window was exhausted; snapshot Complete retains whole-snapshot scope.
+// FullQueryComplete always requires traversal from the query's beginning without
+// a cursor. Neither field claims server-side coverage for a local snapshot.
 type HotfixCoverage struct {
-	Provider         string             `json:"provider"`
-	Product          string             `json:"product"`
-	FullBuild        string             `json:"fullBuild"`
-	Region           string             `json:"region"`
-	Locale           string             `json:"locale"`
-	Complete         bool               `json:"complete"`
-	Truncated        bool               `json:"truncated"`
-	TruncationReason string             `json:"truncationReason,omitempty"`
-	StartPage        int                `json:"startPage,omitempty"`
-	EndPage          int                `json:"endPage,omitempty"`
-	LastPage         int                `json:"lastPage,omitempty"`
-	Total            int64              `json:"total,omitempty"`
-	Scanned          int                `json:"scanned"`
-	Matched          int                `json:"matched"`
-	Returned         int                `json:"returned"`
-	SelectedPush     *int32             `json:"selectedPush,omitempty"`
-	CapturedAt       *time.Time         `json:"capturedAt,omitempty"`
-	Ref              string             `json:"ref,omitempty"`
-	Fetch            *HotfixFetchBudget `json:"fetch,omitempty"`
+	Provider          string             `json:"provider"`
+	Product           string             `json:"product"`
+	FullBuild         string             `json:"fullBuild"`
+	Region            string             `json:"region"`
+	Locale            string             `json:"locale"`
+	Complete          bool               `json:"complete"`
+	FullQueryComplete bool               `json:"fullQueryComplete"`
+	Truncated         bool               `json:"truncated"`
+	TruncationReason  string             `json:"truncationReason,omitempty"`
+	StartPage         int                `json:"startPage,omitempty"`
+	EndPage           int                `json:"endPage,omitempty"`
+	LastPage          int                `json:"lastPage,omitempty"`
+	Total             int64              `json:"total,omitempty"`
+	Scanned           int                `json:"scanned"`
+	Matched           int                `json:"matched"`
+	Returned          int                `json:"returned"`
+	SelectedPush      *int32             `json:"selectedPush,omitempty"`
+	CapturedAt        *time.Time         `json:"capturedAt,omitempty"`
+	Ref               string             `json:"ref,omitempty"`
+	Fetch             *HotfixFetchBudget `json:"fetch,omitempty"`
 }
 
 // RemoteHotfixResult is one provider run. Change is the ChangePin-compatible record
@@ -235,12 +228,6 @@ type RemoteHotfixResult struct {
 	Complete   bool                 `json:"complete"`
 	Truncated  bool                 `json:"truncated"`
 	NextCursor string               `json:"nextCursor,omitempty"`
-}
-
-// HotfixProvider runs one shared query against one explicit source. Providers
-// never fall back to another source by themselves.
-type HotfixProvider interface {
-	QueryHotfix(ctx context.Context, query HotfixQuery) (RemoteHotfixResult, error)
 }
 
 // HotfixCursorPage pins one remote page by its request identity and response

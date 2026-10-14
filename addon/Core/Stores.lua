@@ -275,19 +275,22 @@ local function InitializeSections(root)
     if historyVersion == nil or historyVersion > HISTORY_SCHEMA_VERSION then
         historyWritesBlocked = true
     end
-    if type(history.entries) ~= "table" then
-        history.entries = {}
-    end
     historyBytes = 0
-    for index = #history.entries, 1, -1 do
-        local entry = NormalizeHistoryEntry(history.entries[index])
-        if not entry then
-            table.remove(history.entries, index)
-        else
-            historyBytes = historyBytes + GetHistoryEntryBytes(entry)
+    if not historyWritesBlocked then
+        if type(history.entries) ~= "table" then
+            history.entries = {}
         end
+        historyBytes = 0
+        for index = #history.entries, 1, -1 do
+            local entry = NormalizeHistoryEntry(history.entries[index])
+            if not entry then
+                table.remove(history.entries, index)
+            else
+                historyBytes = historyBytes + GetHistoryEntryBytes(entry)
+            end
+        end
+        PruneHistoryToBudget(root)
     end
-    PruneHistoryToBudget(root)
 
     if not Plain(root.exports) then
         root.exports = {}
@@ -297,40 +300,43 @@ local function InitializeSections(root)
     if exportsVersion == nil or exportsVersion > EXPORT_SCHEMA_VERSION then
         exportsWritesBlocked = true
     end
-    exports.nextId = math.max(0, math.floor(tonumber(exports.nextId) or 0))
-    exports.records = Plain(exports.records) and exports.records or {}
-    exports.order = type(exports.order) == "table" and exports.order or {}
-
-    local validRecords = {}
     exportBytes = 0
-    for id, entry in pairs(exports.records) do
-        local normalized = type(id) == "string" and NormalizeExportRecord(id, entry) or nil
-        if normalized then
-            validRecords[id] = normalized
-            exportBytes = exportBytes + GetExportEntryBytes(normalized)
-        end
-    end
-    exports.records = validRecords
+    if not exportsWritesBlocked then
+        exports.nextId = math.max(0, math.floor(tonumber(exports.nextId) or 0))
+        exports.records = Plain(exports.records) and exports.records or {}
+        exports.order = type(exports.order) == "table" and exports.order or {}
 
-    local ordered = {}
-    local included = {}
-    for index = 1, #exports.order do
-        local id = exports.order[index]
-        if validRecords[id] and not included[id] then
-            ordered[#ordered + 1] = id
-            included[id] = true
+        local validRecords = {}
+        exportBytes = 0
+        for id, entry in pairs(exports.records) do
+            local normalized = type(id) == "string" and NormalizeExportRecord(id, entry) or nil
+            if normalized then
+                validRecords[id] = normalized
+                exportBytes = exportBytes + GetExportEntryBytes(normalized)
+            end
         end
-    end
-    for id in pairs(validRecords) do
-        if not included[id] then
-            ordered[#ordered + 1] = id
+        exports.records = validRecords
+
+        local ordered = {}
+        local included = {}
+        for index = 1, #exports.order do
+            local id = exports.order[index]
+            if validRecords[id] and not included[id] then
+                ordered[#ordered + 1] = id
+                included[id] = true
+            end
         end
+        for id in pairs(validRecords) do
+            if not included[id] then
+                ordered[#ordered + 1] = id
+            end
+        end
+        table.sort(ordered, function(left, right)
+            return validRecords[left].createdAt > validRecords[right].createdAt
+        end)
+        exports.order = ordered
+        PruneExportsToBudget(root)
     end
-    table.sort(ordered, function(left, right)
-        return validRecords[left].createdAt > validRecords[right].createdAt
-    end)
-    exports.order = ordered
-    PruneExportsToBudget(root)
 end
 
 -- Fetches the current database root at use time and (re)initializes the store
@@ -390,23 +396,27 @@ end
 
 function History.Get()
     local root = EnsureState()
-    return root and root.history.entries or nil
+    return root and not historyWritesBlocked and root.history.entries or nil
 end
 
 function History.GetStats()
     local root = EnsureState()
-    local count = root and #root.history.entries or 0
+    local count = root and not historyWritesBlocked and #root.history.entries or 0
     return count, historyBytes, MAX_HISTORY_BYTES
 end
 
 function History.Clear()
     local root = EnsureState()
-    if not root then
+    if not root or historyWritesBlocked then
         return false
     end
     wipe(root.history.entries)
     historyBytes = 0
     return true
+end
+
+function History.IsWritable()
+    return EnsureState() ~= nil and not historyWritesBlocked
 end
 
 local Exports = {
@@ -421,6 +431,10 @@ local Exports = {
         automation_result = true,
     },
 }
+
+function Exports.IsWritable()
+    return EnsureState() ~= nil and not exportsWritesBlocked
+end
 
 function Exports.Add(kind, title, content, metadata, options)
     local root, reason = EnsureState()
@@ -461,17 +475,17 @@ end
 
 function Exports.Get(id)
     local root = EnsureState()
-    return root and root.exports.records[id] or nil
+    return root and not exportsWritesBlocked and root.exports.records[id] or nil
 end
 
 function Exports.GetOrder()
     local root = EnsureState()
-    return root and root.exports.order or nil
+    return root and not exportsWritesBlocked and root.exports.order or nil
 end
 
 function Exports.GetStats()
     local root = EnsureState()
-    local count = root and #root.exports.order or 0
+    local count = root and not exportsWritesBlocked and #root.exports.order or 0
     return count, exportBytes, MAX_EXPORT_BYTES
 end
 
@@ -491,23 +505,11 @@ function Exports.GetProtectedCount()
     return protectedExportCount
 end
 
-function Exports.Protect(id)
-    local root = EnsureState()
-    if not root or type(id) ~= "string" or not root.exports.records[id] then
-        return false
-    end
-    if not protectedExports[id] then
-        protectedExports[id] = true
-        protectedExportCount = protectedExportCount + 1
-    end
-    return true
-end
-
 -- Records the flush of one record to disk: it leaves the pending and protected
 -- sets and becomes ordinary saved data.
 function Exports.MarkSaved(id)
     local root = EnsureState()
-    if not root or type(id) ~= "string" or not root.exports.records[id] then
+    if not root or exportsWritesBlocked or type(id) ~= "string" or not root.exports.records[id] then
         return false
     end
     if pendingExports[id] then
@@ -525,7 +527,7 @@ end
 -- session, "saved" once it is ordinary on-disk data.
 function Exports.GetState(id)
     local root = EnsureState()
-    if not root or type(id) ~= "string" or not root.exports.records[id] then
+    if not root or exportsWritesBlocked or type(id) ~= "string" or not root.exports.records[id] then
         return "none"
     end
     return pendingExports[id] and "pending" or "saved"
@@ -533,7 +535,7 @@ end
 
 function Exports.Delete(id)
     local root = EnsureState()
-    if not root or type(id) ~= "string" or not root.exports.records[id] then
+    if not root or exportsWritesBlocked or type(id) ~= "string" or not root.exports.records[id] then
         return false
     end
     -- Results awaiting their reload disk write cannot be deleted.
@@ -554,7 +556,7 @@ end
 
 function Exports.Clear()
     local root = EnsureState()
-    if not root then
+    if not root or exportsWritesBlocked then
         return 0
     end
     local removed = 0
@@ -568,40 +570,6 @@ function Exports.Clear()
         end
     end
     return removed
-end
-
--- Precheck that a new record fits after pruning protected records aside;
--- reserved bytes keep headroom for failure reports.
-function Exports.CanFit(byteCount, reserve)
-    local root = EnsureState()
-    if not root then
-        return false
-    end
-    byteCount = tonumber(byteCount) or 0
-    local budget = MAX_EXPORT_BYTES - math.max(0, tonumber(reserve) or 0)
-    if byteCount > budget then
-        return false
-    end
-    local projectedBytes = exportBytes + byteCount
-    local projectedCount = #root.exports.order + 1
-    if projectedBytes <= budget and projectedCount <= MAX_EXPORT_RECORDS then
-        return true
-    end
-    local order = root.exports.order
-    for index = #order, 1, -1 do
-        local id = order[index]
-        if not protectedExports[id] then
-            local entry = root.exports.records[id]
-            if entry then
-                projectedBytes = projectedBytes - GetExportEntryBytes(entry)
-                projectedCount = projectedCount - 1
-                if projectedBytes <= budget and projectedCount <= MAX_EXPORT_RECORDS then
-                    return true
-                end
-            end
-        end
-    end
-    return false
 end
 
 ns.Stores = {

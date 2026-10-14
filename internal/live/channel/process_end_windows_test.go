@@ -38,7 +38,7 @@ func TestDisconnectEndedLifetimeRetiresOnlyExactOwnerAndIsIdempotent(t *testing.
 		t.Fatal(err)
 	}
 	for n := 0; n < 2; n++ {
-		r, err := p.Disconnect(ctx, d.State.ID, false)
+		r, err := p.Disconnect(ctx, d.State.ID)
 		if err != nil || !r.Closed || r.Complete || r.ReportState != "unavailable" || r.ProcessEnd != "pid_reused" {
 			t.Fatalf("%+v %v", r, err)
 		}
@@ -55,7 +55,7 @@ func TestDisconnectEndedLifetimeRetiresOnlyExactOwnerAndIsIdempotent(t *testing.
 		t.Fatal("missing durable process-end evidence")
 	}
 	before := len(events)
-	if _, err = p.Disconnect(ctx, d.State.ID, false); err != nil {
+	if _, err = p.Disconnect(ctx, d.State.ID); err != nil {
 		t.Fatal(err)
 	}
 	events, err = journal.ReadMemoryLog(d.Log)

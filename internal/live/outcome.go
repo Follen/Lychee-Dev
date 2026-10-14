@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"time"
 
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/evidence"
@@ -35,11 +34,9 @@ type NextAction struct {
 	Reason  string   `json:"reason"`
 }
 
-var ErrBusinessFailed = errors.New("live.business_failed")
-
 func withNextAction(result Outcome) Outcome {
 	if result.Goal == "finished" && !result.Complete && result.Cleanup != "abandoned" && result.Status != "failed" {
-		result.NextAction = &NextAction{Command: "lycheedev", Args: []string{"live", "resume", result.OperationID}, Reason: "continue_same_operation_without_replaying_unknown_input"}
+		result.NextAction = &NextAction{Command: "lycheedev", Args: []string{"live", "abandon", result.OperationID}, Reason: "legacy_execution_retired_explicit_host_abandon_available"}
 	}
 	return result
 }
@@ -191,25 +188,4 @@ func pendingOutcome(record journal.WorkRecord) Outcome {
 		result.Cleanup = "complete"
 	}
 	return result
-}
-
-func finishOutcome(ctx context.Context, root string, record journal.WorkRecord, runErr error) (Outcome, error) {
-	if record.OperationID == "" {
-		return Outcome{}, runErr
-	}
-	// The run's deadline cannot discard an already committed result. This
-	// bounded read performs no game input or state transition.
-	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-	defer cancel()
-	result, err := Status(read, root, record.OperationID)
-	if result.OperationID == "" {
-		result = pendingOutcome(record)
-	}
-	if record.Intent.Goal == "finished" && result.Complete && result.Business != nil && (result.Business.State == "failed" || result.Business.State == "assertion_failed") {
-		runErr = errors.Join(runErr, ErrBusinessFailed)
-	}
-	if record.Intent.Goal == "finished" && !result.Complete && result.Cleanup != "abandoned" && runErr == nil && err == nil {
-		runErr = ErrInvestigationPending
-	}
-	return withNextAction(result), errors.Join(runErr, err)
 }

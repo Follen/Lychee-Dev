@@ -281,47 +281,6 @@ func (c *CacheManager) Read(ctx context.Context, ref CacheRef, maxBytes int64) (
 	return data, nil
 }
 
-// Stream hands the object bytes to fn while holding the object lock, then
-// verifies the consumed content against the object name. Callers that need
-// verified bytes before use should call Read instead.
-func (c *CacheManager) Stream(ctx context.Context, ref CacheRef, fn func(io.Reader) error) error {
-	if !validDigest(ref.SHA256) || ref.Bytes < 0 || fn == nil {
-		return ErrCacheIntegrity
-	}
-	lease, err := AcquireLease(ctx, c.locksDir(), objectLeaseName(ref.SHA256))
-	if err != nil {
-		return err
-	}
-	defer lease.Close()
-	f, err := os.Open(c.objectPath(ref.SHA256))
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("%w: %s", ErrCacheMissing, ref.SHA256)
-	}
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	stat, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if !stat.Mode().IsRegular() || stat.Size() != ref.Bytes {
-		return ErrCacheIntegrity
-	}
-	hash := sha256.New()
-	wrapped := &interruptibleReader{ctx, io.TeeReader(f, hash)}
-	if err := fn(wrapped); err != nil {
-		return err
-	}
-	if _, err := io.Copy(io.Discard, wrapped); err != nil {
-		return err
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != ref.SHA256 {
-		return ErrCacheIntegrity
-	}
-	return nil
-}
-
 // Retain adds one reference-protected owner to an object. It may run before
 // the object is published so acquisition-side protection cannot race a prune;
 // markers without an object are reported, never silently dropped.

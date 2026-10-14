@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -84,6 +85,81 @@ func testTarget(name string) TargetConfig {
 	return TargetConfig{
 		Name: name, Product: "retail", Region: "us", Locale: "enUS",
 		Source: TargetSourceRemote, Repository: "wow-ui-source",
+	}
+}
+
+func TestTargetCaseCollisionsRemainIndividuallyAddressable(t *testing.T) {
+	ctx := context.Background()
+	root := newTestWorkspace(t)
+	for _, name := range []string{"Foo", "foo"} {
+		if _, err := PutTarget(ctx, root, testTarget(name), StoreTargetOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"Foo", "foo"} {
+		view, err := ShowTarget(ctx, root, name)
+		if err != nil || view.Config.Name != name {
+			t.Fatalf("show %s: %+v %v", name, view, err)
+		}
+	}
+	if _, err := LookupTarget(ctx, root, "FOO"); !errors.Is(err, ErrTargetAmbiguous) {
+		t.Fatalf("folded collision: %v", err)
+	}
+	if got, err := RemoveTarget(ctx, root, "foo"); err != nil || got.Name != "foo" {
+		t.Fatalf("remove: %+v %v", got, err)
+	}
+	if _, err := ShowTarget(ctx, root, "Foo"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTargetInstallationLocationFixedWhenSaved(t *testing.T) {
+	ctx := context.Background()
+	root := newTestWorkspace(t)
+	a, b := t.TempDir(), t.TempDir()
+	t.Chdir(a)
+	config := testTarget("local")
+	config.Source, config.Installation = TargetSourceInstallation, "game"
+	if _, err := PutTarget(ctx, root, config, StoreTargetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(b)
+	got, err := LookupTarget(ctx, root, "local")
+	if err != nil || got.Installation != filepath.Join(a, "game") {
+		t.Fatalf("location changed: %+v %v", got, err)
+	}
+}
+
+func TestOldRelativeTargetRemainsVisibleButRequiresReplacement(t *testing.T) {
+	ctx := context.Background()
+	root := newTestWorkspace(t)
+	config := testTarget("old")
+	config.Source, config.Installation = TargetSourceInstallation, "./game"
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = vault.WriteMetadata(ctx, root, func(_ *vault.Store, m *vault.Metadata) (bool, error) {
+		return true, m.CommitDocuments(ctx, vault.Mutation{Key: "target/old", Value: raw})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ShowTarget(ctx, root, "old"); err != nil {
+		t.Fatal(err)
+	}
+	preparer := &fakePreparer{}
+	if _, err := ResolveTarget(ctx, root, "old", ResolveOptions{Preparer: preparer}); !errors.Is(err, ErrTargetFormat) {
+		t.Fatalf("old relative resolve: %v", err)
+	}
+	if preparer.calls != 0 {
+		t.Fatal("relative target reached installation preparer")
+	}
+	if _, err := PutTarget(ctx, root, config, StoreTargetOptions{Replace: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveTarget(ctx, root, "old", ResolveOptions{Preparer: preparer}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -304,60 +380,6 @@ func TestHistoricalBuildUnavailableIsPrecise(t *testing.T) {
 	}
 }
 
-func TestResolveIntentOrderingBeatsProjectLockWithConflictNotes(t *testing.T) {
-	ctx := context.Background()
-	root := newTestWorkspace(t)
-	project := t.TempDir()
-
-	locked := pinFor(t, root, "retail", "12.1.0.60001")
-	if _, err := InitializeProject(ctx, project, "retail"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LockProject(ctx, root, project, locked.ID); err != nil {
-		t.Fatal(err)
-	}
-	explicit := pinFor(t, root, "classic", "5.5.4.50001")
-
-	// Explicit snapshot beats the project lock, and the conflict is reported
-	// instead of silently overwriting either side.
-	choice, err := ResolveIntent(ctx, root, IntentRequest{Snapshot: explicit.ID, Target: "", Project: project})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if choice.Origin != "snapshot" || choice.Pin.ID != explicit.ID {
-		t.Fatalf("ResolveIntent() = %v", choice)
-	}
-	if len(choice.Conflicts) == 0 || !strings.Contains(strings.Join(choice.Conflicts, "; "), "project lock") {
-		t.Fatalf("missing conflict note: %v", choice.Conflicts)
-	}
-
-	// Explicit named target beats the project lock too.
-	preparer := &fakePreparer{}
-	if _, err := PutTarget(ctx, root, testTarget("retail"), StoreTargetOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	choice, err = ResolveIntent(ctx, root, IntentRequest{Target: "retail", Project: project, Preparer: preparer})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if choice.Origin != "target" || choice.TargetName != "retail" {
-		t.Fatalf("ResolveIntent() = %v", choice)
-	}
-
-	// The project lock is the last fallback and never invented.
-	choice, err = ResolveIntent(ctx, root, IntentRequest{Project: project})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if choice.Origin != "project-lock" || choice.Pin.ID != locked.ID {
-		t.Fatalf("ResolveIntent() = %v", choice)
-	}
-
-	if _, err := ResolveIntent(ctx, root, IntentRequest{}); !errors.Is(err, ErrTargetRequired) {
-		t.Fatalf("empty intent error = %v, want %v", err, ErrTargetRequired)
-	}
-}
-
 // CON-11 (metadata competition): concurrent writes to one mutable target have
 // stable, precise outcomes and never half-commit.
 func TestConcurrentTargetWritesReportStableErrors(t *testing.T) {
@@ -397,27 +419,4 @@ func TestConcurrentTargetWritesReportStableErrors(t *testing.T) {
 	if err != nil || view.Config.FullBuild == "" {
 		t.Fatalf("target corrupted by concurrent create: %+v, %v", view, err)
 	}
-}
-
-func pinFor(t *testing.T, root, product, fullBuild string) PinnedSet {
-	t.Helper()
-	pin, err := vault.WriteMetadata(context.Background(), root, func(_ *vault.Store, metadata *vault.Metadata) (PinnedSet, error) {
-		return OpenPinner(metadata).PinSelection(context.Background(), SelectionSpec{Data: &DataPin{
-			Product:          product,
-			Region:           "us",
-			Language:         "enUS",
-			FullBuild:        fullBuild,
-			BuildConfig:      strings.Repeat("a", 32),
-			CDNConfig:        strings.Repeat("b", 32),
-			DefinitionCommit: strings.Repeat("c", 40),
-		}})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(pin)
-	if err != nil || len(raw) == 0 {
-		t.Fatal(err)
-	}
-	return pin
 }

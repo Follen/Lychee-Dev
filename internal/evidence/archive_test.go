@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +57,57 @@ func TestCapturePersistsExactBytesAndPartialStatus(t *testing.T) {
 	}
 }
 
+func TestCapturePublicationProtectsSharedBlobUntilManifestCommit(t *testing.T) {
+	ctx := context.Background()
+	s, err := vault.Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	a := OpenArchive(s, m)
+	draft := func(locator string) CaptureDraft {
+		return CaptureDraft{Reader: strings.NewReader("shared payload"), MaxBytes: 1024, MediaType: "text/plain", Complete: true, Provenance: Provenance{Kind: "fixture", Locator: locator}}
+	}
+	first, err := a.CommitCapture(ctx, draft("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, release := make(chan struct{}), make(chan struct{})
+	capturedAt = func() time.Time { close(published); <-release; return time.Now().UTC() }
+	t.Cleanup(func() { capturedAt = func() time.Time { return time.Now().UTC() } })
+	type committed struct {
+		ref CaptureRef
+		err error
+	}
+	done := make(chan committed, 1)
+	go func() { ref, err := a.CommitCapture(ctx, draft("second")); done <- committed{ref, err} }()
+	<-published
+	removeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	_, removeErr := a.RemoveCapture(removeCtx, first.ID)
+	cancel()
+	close(release)
+	second := <-done
+	if second.err != nil {
+		t.Fatal(second.err)
+	}
+	if !errors.Is(removeErr, context.DeadlineExceeded) {
+		t.Fatalf("removal crossed uncommitted publication: %v", removeErr)
+	}
+	if err := a.VerifyCapture(ctx, second.ref.ID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := a.RemoveCapture(ctx, first.ID); err != nil || !result.BlobShared {
+		t.Fatalf("shared removal: %+v %v", result, err)
+	}
+	if err := a.VerifyCapture(ctx, second.ref.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A capture key digests the whole manifest, so two committers that produce the
 // same manifest race on one insert. This is the CI-exposed shape of concurrent
 // archive reads: one process must reuse the committed object instead of failing
@@ -90,7 +142,7 @@ func TestCaptureCommitReusesIdenticalContentAddressedObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identical re-commit failed the insert CAS: %v", err)
 	}
-	if second != first {
+	if !reflect.DeepEqual(second, first) {
 		t.Fatalf("reuse returned a different object: %+v != %+v", second, first)
 	}
 
@@ -116,7 +168,7 @@ func TestCaptureCommitReusesIdenticalContentAddressedObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range refs {
-		if ref != first {
+		if !reflect.DeepEqual(ref, first) {
 			t.Fatalf("racer returned a different object: %+v != %+v", ref, first)
 		}
 	}
@@ -132,6 +184,55 @@ func TestCaptureCommitReusesIdenticalContentAddressedObject(t *testing.T) {
 	}
 	if _, err := a.CommitCapture(ctx, newDraft()); !errors.Is(err, vault.ErrGeneration) {
 		t.Fatalf("diverging content under one content address: %v", err)
+	}
+}
+
+func TestCaptureReferencePublicationExcludesRemoval(t *testing.T) {
+	ctx := context.Background()
+	s, err := vault.Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	a := OpenArchive(s, m)
+	ref, err := a.CommitCapture(ctx, CaptureDraft{Reader: strings.NewReader("payload"), MaxBytes: 1024, MediaType: "text/plain", Complete: true, Provenance: Provenance{Kind: "fixture", Locator: "reference"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication, release, err := m.AcquireWriteLease(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	// A business operation validates and publishes its reference in one scope.
+	if _, err := a.InspectCapture(publication, ref.ID); err != nil {
+		t.Fatal(err)
+	}
+	removeCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+	defer cancel()
+	if _, err := a.RemoveCapture(removeCtx, ref.ID); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("removal crossed publication: %v", err)
+	}
+	if _, err := a.KeepCapture(publication, ref.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CommitDocuments(publication, vault.Mutation{Key: "fixture/reference", Value: json.RawMessage(`{"capture":"` + ref.ID + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if _, err := a.RemoveCapture(ctx, ref.ID); !errors.Is(err, ErrCaptureReferenced) {
+		t.Fatalf("reference was lost: %v", err)
+	}
+	if err := m.DeleteDocuments(ctx, vault.Deletion{Key: "fixture/reference", ExpectedGeneration: 1}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := a.RemoveCapture(ctx, ref.ID)
+	if err != nil || !removed.RetentionRemoved || !removed.BlobRemoved {
+		t.Fatalf("retention cleanup = %+v %v", removed, err)
 	}
 }
 
@@ -214,5 +315,39 @@ func TestCaptureRemovalRejectsReferencesAndPreservesSharedBlob(t *testing.T) {
 	page, err := a.ListCaptures(ctx, "", 10)
 	if err != nil || len(page) != 1 {
 		t.Fatalf("remaining capture = %+v, err=%v", page, err)
+	}
+}
+
+func TestCaptureRemovalRecognizesLegacyCaptureLocator(t *testing.T) {
+	ctx := context.Background()
+	s, err := vault.Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	a := OpenArchive(s, m)
+	source, err := a.CommitCapture(ctx, CaptureDraft{Reader: strings.NewReader("cache"), MaxBytes: 1024, MediaType: "application/octet-stream", Complete: true, Provenance: Provenance{Kind: "hotfix-cache", Locator: "fixture"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := a.CommitCapture(ctx, CaptureDraft{Reader: strings.NewReader(`{"complete":false}`), MaxBytes: 1024, MediaType: "application/json", Truncated: true, Provenance: Provenance{Kind: "hotfix-scan", Locator: "capture:" + source.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RemoveCapture(ctx, source.ID); !errors.Is(err, ErrCaptureReferenced) {
+		t.Fatalf("legacy scan source removal = %v, want capture referenced", err)
+	}
+	if err := a.VerifyCapture(ctx, source.ID); err != nil {
+		t.Fatalf("rejected removal damaged source: %v", err)
+	}
+	if _, err := a.RemoveCapture(ctx, checkpoint.ID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := a.RemoveCapture(ctx, source.ID); err != nil || !result.ManifestRemoved || !result.BlobRemoved {
+		t.Fatalf("unreferenced source removal = %+v, %v", result, err)
 	}
 }

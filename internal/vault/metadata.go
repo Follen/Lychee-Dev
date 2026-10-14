@@ -19,7 +19,26 @@ var ErrMissingRecord = errors.New("vault.record_missing")
 
 // Metadata holds bounded documents; original reports and large data belong in
 // blobs. Each mutation uses a short SQL transaction without user callbacks.
-type Metadata struct{ db *sql.DB }
+type Metadata struct {
+	db         *sql.DB
+	writeScope string
+}
+
+type metadataLeaseKey struct{}
+
+// AcquireWriteLease coordinates compound document/blob lifetimes with normal
+// document mutations. Acquire it before starting any SQL transaction or taking
+// a blob lease; nested mutations use the returned context without reacquiring.
+func (m *Metadata) AcquireWriteLease(ctx context.Context) (context.Context, func(), error) {
+	if scope, _ := ctx.Value(metadataLeaseKey{}).(string); scope == m.writeScope {
+		return ctx, func() {}, nil
+	}
+	lease, err := AcquireLease(ctx, m.writeScope, "metadata-write")
+	if err != nil {
+		return ctx, nil, err
+	}
+	return context.WithValue(ctx, metadataLeaseKey{}, m.writeScope), func() { _ = lease.Close() }, nil
+}
 
 type Document struct {
 	Key        string          `json:"key"`
@@ -112,12 +131,17 @@ func (s *Store) openMetadata(ctx context.Context, readOnly bool) (*Metadata, err
 		}
 	}
 	if !readOnly {
+		// Preserve the last generation of removed keys so recreation cannot
+		// authorize a compare-and-swap prepared against an older document.
+		if _, err := db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS deleted_generations (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL) WITHOUT ROWID"); err != nil {
+			return nil, err
+		}
 		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=WAL"); err != nil {
 			return nil, err
 		}
 	}
 	accepted = true
-	return &Metadata{db: db}, nil
+	return &Metadata{db: db, writeScope: filepath.Join(s.root, "locks")}, nil
 }
 
 func (m *Metadata) Close() error { return m.db.Close() }
@@ -145,6 +169,11 @@ func (m *Metadata) CommitDocuments(ctx context.Context, changes ...Mutation) err
 		}
 		seen[change.Key] = true
 	}
+	ctx, release, err := m.AcquireWriteLease(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -153,7 +182,7 @@ func (m *Metadata) CommitDocuments(ctx context.Context, changes ...Mutation) err
 	for _, change := range changes {
 		var result sql.Result
 		if change.ExpectedGeneration == 0 {
-			result, err = tx.ExecContext(ctx, "INSERT INTO documents(key,generation,value) VALUES (?,1,?) ON CONFLICT(key) DO NOTHING", change.Key, []byte(change.Value))
+			result, err = tx.ExecContext(ctx, "INSERT INTO documents(key,generation,value) VALUES (?,COALESCE((SELECT generation+1 FROM deleted_generations WHERE key=?),1),?) ON CONFLICT(key) DO NOTHING", change.Key, change.Key, []byte(change.Value))
 		} else {
 			result, err = tx.ExecContext(ctx, "UPDATE documents SET generation=generation+1,value=? WHERE key=? AND generation=?", []byte(change.Value), change.Key, change.ExpectedGeneration)
 		}
@@ -190,12 +219,20 @@ func (m *Metadata) DeleteDocuments(ctx context.Context, removals ...Deletion) er
 		}
 		seen[removal.Key] = true
 	}
+	ctx, release, err := m.AcquireWriteLease(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	for _, removal := range removals {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO deleted_generations(key,generation) SELECT key,generation FROM documents WHERE key=? AND generation=? ON CONFLICT(key) DO UPDATE SET generation=excluded.generation", removal.Key, removal.ExpectedGeneration); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, "DELETE FROM documents WHERE key=? AND generation=?", removal.Key, removal.ExpectedGeneration)
 		if err != nil {
 			return err

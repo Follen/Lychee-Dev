@@ -137,6 +137,7 @@ ns.ProbeExecution={Run=function(fn,budget,done)
         logs[#logs+1]=line;logBytes=logBytes+#line;return true
     end
     function api:IsCancelled()return not live end
+    function api:Cancel()return settle(false,"probe_cancelled")end
     depth=1;local ok,result=pcall(fn,api);depth=0
     if not ok then api:Fail(result)
     elseif pending then finish()

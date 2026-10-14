@@ -37,7 +37,7 @@ func (d InputDiagnostic) valid() bool {
 	case "received":
 		return d.Received && d.Reason == ""
 	case "load_failed":
-		return d.Reason == "slot_load_failed"
+		return d.Reason == "slot_load_failed" || d.Reason == "slot_addon_disabled"
 	case "no_dispatch":
 		return d.Reason == "slot_loader_no_dispatch"
 	case "exception":

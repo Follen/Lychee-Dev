@@ -56,7 +56,8 @@ func scanHotfix(ctx context.Context, root, snapshot string, q HotfixRequest, res
 			return HotfixScanReading{}, ErrCacheIdentity
 		}
 		previous, err := vault.ReadWorkspace(ctx, root, func(s *vault.Store, m *vault.Metadata) (HotfixScan, error) {
-			ref, raw, err := evidence.OpenArchive(s, m).FetchCapture(ctx, resume, 4<<20)
+			archive := evidence.OpenArchive(s, m)
+			ref, raw, err := archive.FetchCapture(ctx, resume, 4<<20)
 			if err != nil {
 				return HotfixScan{}, err
 			}
@@ -72,13 +73,21 @@ func scanHotfix(ctx context.Context, root, snapshot string, q HotfixRequest, res
 				return HotfixScan{}, fmt.Errorf("%w: resume filters changed", ErrCacheIdentity)
 			}
 			previousRef = ref
+			checkpoint = HotfixScanReading{Result: saved, Capture: ref, Resume: ref.ID}
+			// Historical checkpoints may already have lost a page before their
+			// dependencies were protected. Keep the original resume identity and
+			// report that loss, including for an already-complete checkpoint.
+			for _, id := range append([]string{saved.Source.ID}, saved.Pages...) {
+				if _, err := archive.InspectCapture(ctx, id); err != nil {
+					return HotfixScan{}, err
+				}
+			}
 			return saved, nil
 		})
 		if err != nil {
 			return HotfixScanReading{}, err
 		}
 		state = previous
-		checkpoint = HotfixScanReading{Result: state, Capture: previousRef, Resume: previousRef.ID}
 		if state.Complete {
 			return HotfixScanReading{Result: state, Capture: previousRef}, nil
 		}
@@ -137,7 +146,7 @@ func scanHotfix(ctx context.Context, root, snapshot string, q HotfixRequest, res
 			if err != nil {
 				return evidence.CaptureRef{}, err
 			}
-			return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(raw), MaxBytes: 4 << 20, MediaType: "application/json", Complete: state.Complete, Truncated: state.Truncated, Provenance: evidence.Provenance{Kind: "hotfix-scan", Locator: "capture:" + state.Source.ID, Snapshot: state.Snapshot, DataBuild: state.Source.Provenance.DataBuild}})
+			return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(raw), MaxBytes: 4 << 20, MediaType: "application/json", Complete: state.Complete, Truncated: state.Truncated, Dependencies: append([]string{state.Source.ID}, state.Pages...), Provenance: evidence.Provenance{Kind: "hotfix-scan", Locator: state.Source.ID, Snapshot: state.Snapshot, DataBuild: state.Source.Provenance.DataBuild}})
 		})
 		if err != nil {
 			return HotfixScanReading{}, err

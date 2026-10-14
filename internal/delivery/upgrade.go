@@ -60,12 +60,21 @@ func UpgradeInstallation(ctx context.Context, releaseDirectory, target, archive,
 	if current.State != "managed" {
 		return Upgrade{}, fmt.Errorf("%w: %s", ErrConflict, current.State)
 	}
-	if err := os.Mkdir(archive, 0700); err != nil {
+	// Publish the recovery directory only once next and its journal are complete.
+	// A preparation failure leaves the installed target and requested archive
+	// untouched, so the original parameters remain retryable.
+	if _, err := os.Lstat(archive); !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return Upgrade{}, err
+		}
+		return Upgrade{}, ErrConflict
+	}
+	prepared, err := os.MkdirTemp(filepath.Dir(archive), ".lycheedev-prepare-")
+	if err != nil {
 		return Upgrade{}, err
 	}
-	// Retain an incomplete preparation on failure. No installed bytes have moved
-	// yet; never infer ownership of an existing archive on retry.
-	next, err := InstallFresh(ctx, releaseDirectory, filepath.Join(archive, "next"), component, version)
+	defer os.RemoveAll(prepared)
+	next, err := InstallFresh(ctx, releaseDirectory, filepath.Join(prepared, "next"), component, version)
 	if err != nil {
 		return Upgrade{}, fmt.Errorf("prepare %s: %w", archive, err)
 	}
@@ -74,7 +83,7 @@ func UpgradeInstallation(ctx context.Context, releaseDirectory, target, archive,
 	if err != nil {
 		return Upgrade{}, err
 	}
-	file, err := os.OpenFile(filepath.Join(archive, "replacement.json"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(filepath.Join(prepared, "replacement.json"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return Upgrade{}, err
 	}
@@ -82,6 +91,12 @@ func UpgradeInstallation(ctx context.Context, releaseDirectory, target, archive,
 	syncErr := file.Sync()
 	closeErr := file.Close()
 	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		return Upgrade{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Upgrade{}, err
+	}
+	if err := publishDirectory(prepared, archive); err != nil {
 		return Upgrade{}, err
 	}
 	return resumeReplacement(ctx, target, archive, record)

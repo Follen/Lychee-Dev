@@ -36,28 +36,6 @@ local tree = ns.TreeView.Create(UIParent)
 assert(tree.panel.fieldOutline.radius == input.fieldOutline.radius)
 assert(tree.panel.fieldOutline.color == input.fieldOutline.color,
     "tree and text mode do not share their resting surface")
-local shortcut = W.CreateShortcutButton(UIParent)
-shortcut:SetShortcut("Ctrl+Alt+Shift+F12", false)
-assert(not shortcut.label:IsShown() and shortcut.keycaps[4].label:GetText() == "F12")
-shortcut:SetShortcut("Press keys", true)
-assert(shortcut.label:IsShown() and not shortcut.keycaps[1]:GetParent():IsShown())
-shortcut:SetShortcut("Ctrl+Alt+[", false)
-assert(not shortcut.keycaps[4]:IsShown() and shortcut.keycaps[3].label:GetText() == "[")
-
-local toggle = W.CreateToggle(UIParent)
-local created = Env.framesCreated
-toggle:Click()
-assert(toggle.checked and toggle:GetScript("OnUpdate"), "switch did not start its bounded slide")
-Env.FireScript(toggle, "OnUpdate", .2)
-assert(not toggle:GetScript("OnUpdate") and toggle.thumb.point[4] == 16)
-toggle:Click()
-Env.FireScript(toggle, "OnHide")
-assert(not toggle:GetScript("OnUpdate") and toggle.thumb.point[4] == 2,
-    "switch retained motion or an intermediate position after hide")
-Theme.reducedMotion = true
-for index = 1, 2000 do toggle:Click() end
-assert(not toggle:GetScript("OnUpdate") and Env.framesCreated == created,
-    "switch leaked controls or ignored reduced motion")
 local logo = UIParent:CreateTexture()
 Theme.DrawConnectionBounce(logo, UIParent, 96, 0)
 assert(logo:GetWidth() == 96 and logo:GetHeight() == 96)

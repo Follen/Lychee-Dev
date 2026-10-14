@@ -43,6 +43,26 @@ func attemptDiagnosticFixture() InputDiagnostic {
 	return InputDiagnostic{Schema: InputDiagnosticSchema, Runtime: strings.Repeat("1", 32), AttemptSeq: 4, Slot: 7, Stage: "no_dispatch", Reason: "slot_loader_no_dispatch", Received: false}
 }
 
+func TestDisabledSlotDiagnosticPreservesInputEligibility(t *testing.T) {
+	d := attemptDiagnosticFixture()
+	d.Stage, d.Reason = "load_failed", "slot_addon_disabled"
+	raw, _ := json.Marshal(d)
+	r, envelope := attemptInputFixture(t, 7, raw)
+	s, err := inputObservation(r, envelope, 1000, 1400)
+	if err != nil || *s.InputBlocked || s.InputDiagnostic == nil || s.InputDiagnostic.Reason != d.Reason {
+		t.Fatalf("disabled diagnostic lost or changed eligibility: input=%+v err=%v", s, err)
+	}
+	envelope.Runtime = strings.Repeat("9", 32)
+	if _, err := inputObservation(r, envelope, 1000, 1400); err == nil {
+		t.Fatal("disabled diagnostic suppressed target mismatch")
+	}
+	d.Reason += ": private suffix"
+	raw, _ = json.Marshal(d)
+	if parseInputDiagnostic(raw, d.Runtime, 1200) != nil {
+		t.Fatal("disabled diagnostic accepted a raw suffix")
+	}
+}
+
 func TestInputDiagnosticOptionalPreservesEligibilityAndErrors(t *testing.T) {
 	d := attemptDiagnosticFixture()
 	good, _ := json.Marshal(d)

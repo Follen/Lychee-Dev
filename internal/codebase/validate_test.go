@@ -70,6 +70,66 @@ func issueCodes(diagnostics []ValidationDiagnostic) map[string]int {
 	return counts
 }
 
+func TestValidateTOCDoesNotProveAbsenceAcrossIndexGaps(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	files := evidenceTree("120100")
+	files["Interface/AddOns/Blizzard_APIDocumentationGenerated/Large.lua"] = `return {Type="System",Name="C_Missing",Namespace="C_Missing",Functions={{Type="Function",Name="Do"}},Events={{Type="Event",Name="OnMissing",LiteralName="MISSING_TICK"}}}`
+	writeAddonFiles(t, root, files)
+	large, err := os.OpenFile(filepath.Join(root, "Interface/AddOns/Blizzard_APIDocumentationGenerated/Large.lua"), os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := large.Truncate(maxSourceBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := large.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := vault.Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addon := t.TempDir()
+	writeAddonFiles(t, addon, map[string]string{"Test.toc": "## Interface: 120100\nMain.lua\n", "Main.lua": "C_Good.Do()\nC_Missing.Do()\nframe:RegisterEvent('MISSING_TICK')\n"})
+	writeAddonFiles(t, addon, map[string]string{"matrix.json": `{"path":".","targets":[{"id":"retail","toc":"Test.toc","product":"retail","ref":"fixture"}]}`})
+	got, err := ValidateSourceMatrix(ctx, store.Root(), filepath.Join(addon, "matrix.json"), func(_ context.Context, repository, product, ref string) (selection.SourcePin, error) {
+		if repository != indexed.Pin.Repository || product != indexed.Pin.Product || ref != "fixture" {
+			t.Fatalf("matrix changed source identity: %s %s %s", repository, product, ref)
+		}
+		return indexed.Pin, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Result.Targets) != 1 {
+		t.Fatalf("matrix targets = %+v", got.Result.Targets)
+	}
+	result := got.Result.Targets[0]
+	if !result.Valid || len(result.Unresolved) < 2 || result.SourceCoverage.Complete {
+		t.Fatalf("gap became hard absence: %+v", result)
+	}
+	if got.Capture.ID == "" || got.Capture.Complete {
+		t.Fatal("incomplete source coverage produced complete capture")
+	}
+	found := false
+	for _, fact := range result.Facts {
+		if fact.Name == "C_Good.Do" && fact.Exists {
+			found = true
+		}
+		if fact.Name == "MISSING_TICK" || fact.Name == "C_Missing.Do" {
+			t.Fatalf("false absence fact: %+v", fact)
+		}
+	}
+	if !found {
+		t.Fatal("positive evidence lost")
+	}
+}
+
 func TestValidateTOCOrderedClosureWithBOMCRLFAndBackslashes(t *testing.T) {
 	addon := map[string]string{
 		"Addon.toc":          "\ufeff## Interface: 120100\r\n# ignored\r\nXML\\Root.xml\r\nDirect.lua\r\n",
@@ -321,27 +381,7 @@ func TestCompatibilityMissingCodes(t *testing.T) {
 	}
 }
 
-func TestValidateLuaDirectorySyntaxOnlyScan(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "scan")
-	writeAddonFiles(t, root, map[string]string{
-		"ok.lua":          "return true\n",
-		"broken.lua":      "function nope(\n",
-		"nested/deep.lua": "return 1\n",
-		"notes.txt":       "ignored\n",
-	})
-	result, err := ValidateLuaDirectory(context.Background(), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.CheckedLua != 3 || result.Valid {
-		t.Fatalf("scan result = %+v", result)
-	}
-	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "lua_parse_failed" || result.Diagnostics[0].Path != "broken.lua" {
-		t.Fatalf("diagnostics = %+v", result.Diagnostics)
-	}
-}
-
-func TestValidateSourceTOCUseCase(t *testing.T) {
+func TestAssessAddonCapturesPinnedSource(t *testing.T) {
 	addon := map[string]string{"Addon.toc": "## Interface: 120100\nmain.lua\n", "main.lua": "C_Good.Do()\n"}
 	home, b, seed := workspaceFixture(t)
 	pin := testCommit(t, b, seed, evidenceTree("120100"), "evidence")
@@ -359,11 +399,14 @@ func TestValidateSourceTOCUseCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reading, err := ValidateSourceTOC(context.Background(), home, pinned.ID, AddonInput{Root: root, Manifest: "Addon.toc"})
+	reading, err := AssessAddon(context.Background(), home, pinned.ID, AddonInput{Root: root, Manifest: "Addon.toc"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reading.Result.Valid || reading.Result.ResolvedCommit != pin.ExactCommit || reading.Capture.ID == "" {
+	if !reading.Result.StaticValid || reading.Result.Source.ExactCommit != pin.ExactCommit || reading.Capture.ID == "" {
 		t.Fatalf("use case result = %+v", reading)
+	}
+	if reading.Capture.Provenance.Kind != "addon-static-check" || reading.Capture.Provenance.Snapshot != pinned.ID || reading.Capture.Provenance.SourceCommit != pin.ExactCommit || reading.Capture.Complete != reading.Result.Complete {
+		t.Fatalf("capture identity or completeness = %+v", reading.Capture)
 	}
 }

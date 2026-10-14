@@ -41,8 +41,12 @@ lycheedev source sync --source <catalog-key> --product <repository-track> --ref 
 commit or full `refs/heads/...` / `refs/tags/...` ref. Omission observes the selected
 track's current branch; use that only when the request allows current source.
 For a named release without an exact ref, establish its tag/commit from repository
-evidence. Ask only if that mapping remains unavailable or ambiguous. Never guess
-a tag, silently use latest, or replace an unavailable exact revision with a branch.
+evidence already retained or available through the Toolkit. If the installed CLI
+lacks the needed tag/ref discovery capability, use verified external repository
+metadata under the [source routing rules](source-research.md#route-source-evidence),
+then return the resolved ref to `source sync`. Ask only if the mapping remains
+unavailable or ambiguous. Never guess a tag, silently use latest, or replace an
+unavailable exact revision with a branch.
 
 Carry the returned fixed pin and exact commit between calls. Preserve requested
 version/tag, repository identity and parser revision; a tag is a traceable label,

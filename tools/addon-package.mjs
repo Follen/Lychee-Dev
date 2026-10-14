@@ -18,7 +18,6 @@ const MAIN_TOC = 'Lychee Dev.toc';
 // archive ships exactly one manifest and it must declare all of these.
 const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001', '11509', '20506'];
 const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
-const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.
 const BANNED_FRAGMENTS = [
   'automation.py', 'wowdoc', 'wowdata', 'wowdump',
@@ -72,6 +71,11 @@ export function collectAddonZipEntries(repoRoot) {
   const entries = new Map();
   const tocs = [];
   const report = [];
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES']) {
+    const key = `${ROOT}/${name}`;
+    entries.set(key, readFileSync(join(repoRoot, 'packages/npm/lycheedev', name)));
+    report.push({ path: key, selected: 'license' });
+  }
   const loads = new Map();
   // WoW loads this reserved filename independently of the TOC load list.
   // Ship the real binding declarations as well as their Lua dispatcher.
@@ -204,12 +208,14 @@ export function verifyAddonZip(input, options = {}) {
     violations.push(`missing Media content: ${ROOT}/Media/`);
   }
 
+  const licenseKeys = new Set(['LICENSE', 'THIRD_PARTY_NOTICES'].map(name => `${ROOT}/${name}`));
+  for (const name of licenseKeys) if (!zip.get(name)?.length) violations.push(`missing license: ${name}`);
   const tocKeys = new Set([tocKey()]);
   const loadKeys = new Set([`${ROOT}/Bindings.xml`]);
   if (!zip.has(`${ROOT}/Bindings.xml`)) violations.push(`missing bindings: ${ROOT}/Bindings.xml`);
   for (const parse of parsed.values()) for (const line of parse.loads) loadKeys.add(loadKey(line));
   for (const name of names) {
-    const selected = tocKeys.has(name) ? 'toc' : loadKeys.has(name) ? 'load'
+    const selected = licenseKeys.has(name) ? 'license' : tocKeys.has(name) ? 'toc' : loadKeys.has(name) ? 'load'
       : name.startsWith(`${ROOT}/Media/`) ? 'media' : null;
     if (!selected) violations.push(`entry not selected as toc/load/media: ${name}`);
     const lowered = name.toLowerCase().replaceAll('\\', '/');
@@ -222,11 +228,6 @@ export function verifyAddonZip(input, options = {}) {
     }
   }
 
-  // The probe registry ships empty: local task blocks must never reach release.
-  const definitions = zip.get(`${ROOT}/Bridge/Definitions.lua`);
-  if (definitions && definitions.toString('utf8').replaceAll('\r\n', '\n') !== EMPTY_DEFINITIONS) {
-    violations.push(`task block: ${ROOT}/Bridge/Definitions.lua must be the empty probe queue`);
-  }
 
   return {
     ok: violations.length === 0,

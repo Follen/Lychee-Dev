@@ -27,6 +27,12 @@ go test -p=2 -parallel=4 -count=1 -timeout=20m ./...
 
 限制并发是为了避免 500 槽安装测试的大量文件操作互相拖慢。20 分钟为测试包时限，不改变产品预算。
 
+Windows CI 在同一次完整 Go 套件中收集 atomic 语句覆盖，不另跑一套重复测试；计量包为 `cmd/...` 和 `internal/...`（不含 `internal/testkit`），测试选择仍为 `./...`。`windows-go-coverage` artifact 保留原始 coverprofile、JSON 测试事件、准确 checkout commit/tree、PR head、工具链/平台/命令及加权汇总。`tools/go-coverage.mjs` 拒绝缺失的包终止证据，失败/skip 不冒充测试通过；PR 的 merge checkout 与分支 head 分别记录。Go 比例不代表 Lua/Node 或业务场景/实机覆盖，也不设任意比例门槛。
+
+PR 的 Windows contract 作业通过 `tools/ci-inputs.mjs prepare` 准备公开固定输入：复用现有 LuaLS archive 校验、开发 stage/原生 binary 身份验证，固定 Gethe Retail/Forever 源码与 API 文档、生产定义生成器及既有 CascLib oracle builder，并启用固定 WoWDBDefs 测试。准备结果通过 GitHub 环境文件供同一次完整套件消费；`verify` 必须看到全部指定顶层及子测试实际通过，不能用父节点 pass 掩盖子项 skip。`windows-integration-inputs` 保存 commit/hash、compiler、release 与生成覆盖说明，生成器的 partial-type 覆盖仍如实保留。
+
+真实客户端、原 runtime dump、固定安装/图像样本和8.3卷能力仍各自记录，不能仅为消除 skip 修改宿主策略或替换原始证据。Native Live不提供截图入口；历史归档中的图像仍可读取、校验和打包。
+
 版本、Skill、构建工具或启动器有相关变化时执行对应检查：
 
 ```powershell
@@ -44,7 +50,7 @@ node --test packages/npm/lycheedev/test/launcher.test.mjs
 | `internal/` | 命令、Source、Data、Live 状态机、安装与持久化 |
 | `tests/addon/`、`tests/protocol/` | Lua 5.1、禁用成本、客户端 profile 和跨语言协议 |
 | `tests/process/` | 原生进程、发布与竞争 |
-| `tests/parity/`、`tests/fixtures/` | 语义对照、最小 fixture 和来源 |
+| `tests/fixtures/`、`internal/command/*oracle*` | 最小 fixture、来源和公共 CLI 语义对照 |
 | `tests/dbcd/`、`tests/data-regression/` | 外部数据对照 |
 | `tools/*.test.mjs`、npm `test/` | 构建、包装、启动器、升级与发布合同 |
 
@@ -62,12 +68,12 @@ node tools/live-stage.mjs --out .tmp/live-stage --commit $commit
 
 stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `live doctor`、connect、execute、resume、reload、disconnect 操作固定客户端。具体参数读当前 `describe` 和 `--help`。
 
-每次实机任务使用明确的 project 和 PID。中断沿原 CON 恢复，保留原请求和期限；完成报告确认及连接释放后再清理项目产物。截图采用 WGC。首次无可验证 INPUT 时手动重载一次，新增槽位未被客户端发现时重启该客户端。
+每次实机任务使用明确的 project 和 PID。中断沿原 CON 恢复，保留原请求和期限；完成报告确认及连接释放后再清理项目产物。首次无可验证 INPUT 时手动重载一次，新增槽位未被客户端发现时重启该客户端。
 
 ## 仓库卫生
 
-- 根目录保留 README、Design、Changelog、todo 和 AGENTS；`docs/` 保留当前协议、开发和许可说明。
-- Skill 参考、测试用法、fixture 来源及第三方许可随对应代码保留。历史设计通过 Git 查阅，不再复制工作流水或交接日志。
+- 根目录保留 README、Design、Changelog、todo、AGENTS 和 [handover.md](../handover.md)；`docs/` 保留当前协议、开发、许可说明及用户要求的审计报告。
+- Skill 参考、测试用法、fixture 来源及第三方许可随对应代码保留。历史设计通过 Git 查阅；handover.md 只维护当前交接状态，按 AGENTS.md 约定更新，不追加逐轮工作流水。
 - 临时二进制、stage、截图和实验放在 `.tmp/<task>/`，任务结束后清理。Git 忽略不等于已经清理。
 - `.lycheedev` 包含来源引用和恢复记录。先区分活动项目与已结束实验，确认连接已关闭再按用户授权清理。
 - 清理 worktree 前核对分支、改动和忽略文件；使用 `git worktree remove` 同步移除登记。明确保留的工作树不纳入清理。
@@ -81,5 +87,7 @@ stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `l
 `release/npm-channel.json` 固定发行渠道；当前政策是发布到 `next`，保留 `latest` 为 2.5.1，改变渠道须有用户明确授权。
 
 发布使用 `.github/workflows/toolkit-release.yml`：固定干净提交，取得所需 CI 结果，校验许可和源码，构建 Windows 包及 corresponding source，完成重建比较、摘要封存和隔离安装；随后 OIDC 发布、回读 registry，再创建 GitHub Release。
+
+组装阶段用已固定的 LuaLS runtime 运行九项真实 runtime、Source、跨 CLI broker 与安装包语义测试，包括受控关闭后的进程退出和重新查询；任一缺失、跳过或失败都阻止后续发布。registry 回读分别检查包 integrity 和 provenance 元数据，registry signatures 不能代替 provenance；元数据存在检查不声称完成其密码学验证。
 
 已发布包不可修改。提交、推送 main 与发布 npm 分别确认，自动 CI 不代表真实游戏验收。

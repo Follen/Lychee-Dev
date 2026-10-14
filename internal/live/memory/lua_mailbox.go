@@ -122,6 +122,7 @@ type luaAccess struct {
 	guards       []luaGuard
 	calls, count uint64
 	readError    error
+	firstFailure *ReadFailure
 }
 
 func mailboxError(reason string) error {
@@ -137,14 +138,16 @@ func mailboxError(reason string) error {
 	}
 }
 
-func (a *luaAccess) read(ctx context.Context, address uint64, size int, root bool) ([]byte, error) {
+func (a *luaAccess) read(ctx context.Context, address uint64, size int, root bool, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if address == 0 || size < 1 || address > ^uint64(0)-uint64(size) {
+		a.noteReadFailure(path, size, 0, root, "address", nil)
 		return nil, mailboxError("address")
 	}
 	if a.calls >= 512 || a.count+uint64(size) > 1<<20 {
+		a.noteReadFailure(path, size, 0, root, "read_budget", nil)
 		return nil, mailboxError("read_budget")
 	}
 	a.calls++
@@ -158,6 +161,7 @@ func (a *luaAccess) read(ctx context.Context, address uint64, size int, root boo
 		n, err = a.reader.source.Read(ctx, address, b)
 	}
 	if err != nil || n != size {
+		a.noteReadFailure(path, size, n, root, "short_read", err)
 		if n != size && err == nil {
 			err = io.ErrUnexpectedEOF
 		}
@@ -166,24 +170,60 @@ func (a *luaAccess) read(ctx context.Context, address uint64, size int, root boo
 	}
 	return b, nil
 }
+
+func (a *luaAccess) noteReadFailure(path string, requested, returned int, root bool, reason string, err error) {
+	if a.firstFailure != nil {
+		return
+	}
+	failure := ReadFailure{Path: path, RequestedBytes: requested, ReturnedBytes: returned, Source: "private", Reason: reason, GuardRecheck: "not_run"}
+	if root {
+		failure.Source = "module"
+	}
+	if reason == "address" || reason == "read_budget" {
+		attempted := false
+		failure.IOAttempted = &attempted
+	}
+	var native *readFailureError
+	if errors.As(err, &native) {
+		failure.Reason, failure.Region, failure.IOAttempted, failure.NativeErrorCode = native.details.Reason, native.details.Region, native.details.IOAttempted, native.details.NativeErrorCode
+	}
+	a.firstFailure = &failure
+}
+
+func (a *luaAccess) noteGuardRecheck(state string) {
+	if a.firstFailure != nil {
+		a.firstFailure.GuardRecheck = state
+	}
+}
 func (a *luaAccess) guard(address uint64, b []byte, root bool) {
 	a.guards = append(a.guards, luaGuard{address, bytes.Clone(b), root})
 }
 func (a *luaAccess) verify(ctx context.Context) error {
 	for _, g := range a.guards {
-		b, err := a.read(ctx, g.address, len(g.bytes), g.root)
+		b, err := a.read(ctx, g.address, len(g.bytes), g.root, "guard_recheck")
 		if err != nil {
+			a.noteGuardRecheck("read_failed")
 			return err
 		}
 		if !bytes.Equal(b, g.bytes) {
 			if g.root && g.address != a.reader.root {
+				a.noteGuardRecheck("root_recipe_changed")
 				return mailboxError("root_recipe_changed")
 			}
+			a.noteGuardRecheck("path_changed")
 			return mailboxError("path_changed")
 		}
 	}
 	if err := a.reader.source.Verify(ctx); err != nil {
+		a.noteGuardRecheck("identity_failed")
 		return err
+	}
+	if ctx.Err() != nil {
+		a.noteGuardRecheck("cancelled")
+	} else if len(a.guards) == 0 {
+		a.noteGuardRecheck("no_guards")
+	} else {
+		a.noteGuardRecheck("stable")
 	}
 	return ctx.Err()
 }
@@ -196,8 +236,8 @@ func luaHash(text string) uint32 {
 	}
 	return h
 }
-func (a *luaAccess) string(ctx context.Context, address uint64, maximum uint64, guard bool) ([]byte, error) {
-	h, err := a.read(ctx, address, 32, false)
+func (a *luaAccess) string(ctx context.Context, address uint64, maximum uint64, guard bool, path string) ([]byte, error) {
+	h, err := a.read(ctx, address, 32, false, path+".header")
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +247,7 @@ func (a *luaAccess) string(ctx context.Context, address uint64, maximum uint64, 
 	}
 	var b []byte
 	if length != 0 {
-		b, err = a.read(ctx, address+32, int(length), false)
+		b, err = a.read(ctx, address+32, int(length), false, path+".bytes")
 		if err != nil {
 			return nil, err
 		}
@@ -221,8 +261,8 @@ func (a *luaAccess) string(ctx context.Context, address uint64, maximum uint64, 
 	}
 	return b, nil
 }
-func (a *luaAccess) lookup(ctx context.Context, table uint64, name string) (luaValue, error) {
-	h, err := a.read(ctx, table, 72, false)
+func (a *luaAccess) lookup(ctx context.Context, table uint64, name, path string) (luaValue, error) {
+	h, err := a.read(ctx, table, 72, false, path+".table")
 	if err != nil {
 		return luaValue{}, err
 	}
@@ -244,7 +284,7 @@ func (a *luaAccess) lookup(ctx context.Context, table uint64, name string) (luaV
 			return luaValue{}, mailboxError("collision_chain")
 		}
 		seen[node] = true
-		b, err := a.read(ctx, node, 56, false)
+		b, err := a.read(ctx, node, 56, false, path+".node")
 		if err != nil {
 			return luaValue{}, err
 		}
@@ -253,7 +293,7 @@ func (a *luaAccess) lookup(ctx context.Context, table uint64, name string) (luaV
 			if b[33] != 0 {
 				return luaValue{}, mailboxError("restricted_key")
 			}
-			key, err := a.string(ctx, binary.LittleEndian.Uint64(b[24:32]), 256, true)
+			key, err := a.string(ctx, binary.LittleEndian.Uint64(b[24:32]), 256, true, path+".key")
 			if err != nil {
 				return luaValue{}, err
 			}
@@ -282,7 +322,23 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	a := &luaAccess{reader: r}
 	out = LookupResult{Path: "lua_mailbox"}
 	defer func() {
+		// Any traversed object can retire after its parent was read, not only
+		// the final record string. Recheck the recorded prefix once before
+		// calling such a failure permanent; old bytes never become a result.
+		if err != nil && errors.Is(err, ErrMailboxUnavailable) && !errors.Is(err, ErrMailboxPathChanged) && ctx.Err() == nil {
+			if verifyErr := a.verify(ctx); errors.Is(verifyErr, ErrMailboxPathChanged) {
+				if identityErr := r.source.Verify(ctx); identityErr != nil {
+					err = errors.Join(err, identityErr)
+				} else {
+					err = verifyErr
+				}
+			}
+		}
+		if err != nil {
+			err = errors.Join(err, ctx.Err())
+		}
 		out.ElapsedMillis = time.Since(started).Milliseconds()
+		out.FirstReadFailure = a.firstFailure
 		out.Coverage = Coverage{Complete: err == nil, Gaps: []Gap{}, Workers: []Worker{{Complete: err == nil, ReadCalls: a.calls, ScannedBytes: a.count, PlannedBytes: a.count, Gaps: []Gap{}}}, ScannedBytes: a.count, PlannedBytes: a.count, ElapsedMillis: out.ElapsedMillis}
 	}()
 	if err = r.source.Verify(ctx); err != nil {
@@ -291,7 +347,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	var b []byte
 	if r.binding.proof != nil {
 		anchor := r.root - r.binding.RootRVA + r.binding.AnchorRVA
-		b, err = a.read(ctx, anchor, r.binding.Evidence.PatternBytes, true)
+		b, err = a.read(ctx, anchor, r.binding.Evidence.PatternBytes, true, "root.recipe")
 		if err != nil {
 			return out, err
 		}
@@ -301,7 +357,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		}
 		a.guard(anchor, b, true)
 	}
-	b, err = a.read(ctx, r.root, 8, true)
+	b, err = a.read(ctx, r.root, 8, true, "root.state")
 	if err != nil {
 		return out, err
 	}
@@ -310,7 +366,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	if state == 0 {
 		return out, mailboxError("lua_state_null")
 	}
-	b, err = a.read(ctx, state+16, 1, false)
+	b, err = a.read(ctx, state+16, 1, false, "state.tag")
 	if err != nil {
 		return out, err
 	}
@@ -318,7 +374,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		return out, mailboxError("lua_state_tag")
 	}
 	a.guard(state+16, b, false)
-	b, err = a.read(ctx, state+0x90, 24, false)
+	b, err = a.read(ctx, state+0x90, 24, false, "state.globals")
 	if err != nil {
 		return out, err
 	}
@@ -327,7 +383,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	}
 	a.guard(state+0x90, b[:10], false)
 	var ns, box luaValue
-	ns, err = a.lookup(ctx, binary.LittleEndian.Uint64(b[:8]), "LycheeDevInternal")
+	ns, err = a.lookup(ctx, binary.LittleEndian.Uint64(b[:8]), "LycheeDevInternal", "namespace")
 	if err != nil {
 		return out, err
 	}
@@ -342,7 +398,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	if selector.Kind == bridge.MemoryBootstrap {
 		mailboxField = "BootstrapMailbox"
 	}
-	box, err = a.lookup(ctx, ns.pointer, mailboxField)
+	box, err = a.lookup(ctx, ns.pointer, mailboxField, "mailbox")
 	if err != nil {
 		return out, err
 	}
@@ -355,14 +411,14 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	}
 	for _, check := range []struct{ name, want string }{{"schema", MailboxSchema}, {"release", r.release}} {
 		var v luaValue
-		v, err = a.lookup(ctx, box.pointer, check.name)
+		v, err = a.lookup(ctx, box.pointer, check.name, "mailbox."+check.name)
 		if err != nil {
 			return out, err
 		}
 		if v.tag != 4 {
 			return out, mailboxError("mailbox_" + check.name)
 		}
-		b, err = a.string(ctx, v.pointer, 64, true)
+		b, err = a.string(ctx, v.pointer, 64, true, "mailbox."+check.name+".value")
 		if err != nil {
 			return out, err
 		}
@@ -374,14 +430,14 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		}
 	}
 	var rt luaValue
-	rt, err = a.lookup(ctx, box.pointer, "runtime")
+	rt, err = a.lookup(ctx, box.pointer, "runtime", "mailbox.runtime")
 	if err != nil {
 		return out, err
 	}
 	if rt.tag != 4 {
 		return out, mailboxError("runtime_layout")
 	}
-	b, err = a.string(ctx, rt.pointer, 32, true)
+	b, err = a.string(ctx, rt.pointer, 32, true, "mailbox.runtime.value")
 	if err != nil {
 		return out, err
 	}
@@ -422,7 +478,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		return out, mailboxError("kind_unsupported")
 	}
 	var value luaValue
-	value, err = a.lookup(ctx, box.pointer, field)
+	value, err = a.lookup(ctx, box.pointer, field, "record."+field)
 	if err != nil {
 		return out, err
 	}
@@ -430,7 +486,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 		if value.tag != 5 {
 			return out, mailboxError("record_map")
 		}
-		value, err = a.lookup(ctx, value.pointer, key)
+		value, err = a.lookup(ctx, value.pointer, key, "record."+field+".entry")
 		if err != nil {
 			return out, err
 		}
@@ -442,7 +498,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	if value.tag != 4 {
 		return out, mailboxError("record_type")
 	}
-	h, readErr := a.read(ctx, value.pointer, 32, false)
+	h, readErr := a.read(ctx, value.pointer, 32, false, "record.string_header")
 	if readErr != nil {
 		return out, readErr
 	}
@@ -460,7 +516,7 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	validate := selector
 	validate.Accept = nil
 	var record Record
-	record, readErr = ReadRecord(ctx, &luaRecordSource{a}, value.pointer+32, validate)
+	record, readErr = ReadRecord(ctx, &luaRecordSource{a: a}, value.pointer+32, validate)
 	if readErr != nil {
 		if err = ctx.Err(); err != nil {
 			return out, errors.Join(err, a.readError)
@@ -487,14 +543,19 @@ func (r *MailboxReader) Lookup(ctx context.Context, selector Selector) (out Look
 	return out, nil
 }
 
-type luaRecordSource struct{ a *luaAccess }
+type luaRecordSource struct {
+	a     *luaAccess
+	reads int
+}
 
 func (s *luaRecordSource) Verify(ctx context.Context) error { return s.a.reader.source.Verify(ctx) }
-func (*luaRecordSource) Regions(context.Context) ([]Region, error) {
-	return nil, mailboxError("region_enumeration_forbidden")
-}
 func (s *luaRecordSource) Read(ctx context.Context, address uint64, b []byte) (int, error) {
-	v, err := s.a.read(ctx, address, len(b), false)
+	path := "record.wire_header"
+	if s.reads > 0 {
+		path = "record.wire_bytes"
+	}
+	s.reads++
+	v, err := s.a.read(ctx, address, len(b), false, path)
 	if err != nil {
 		s.a.readError = err
 		return 0, err

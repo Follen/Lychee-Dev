@@ -15,6 +15,7 @@ import (
 	"github.com/follenfang/lycheedev/internal/bridge"
 	"github.com/follenfang/lycheedev/internal/desktop"
 	"github.com/follenfang/lycheedev/internal/live/journal"
+	"github.com/follenfang/lycheedev/internal/live/memory"
 )
 
 type retirementPeer struct {
@@ -403,6 +404,174 @@ func TestOptionalRetirementRawWrappedAndMixedTimeout(t *testing.T) {
 				}
 			} else if !errors.Is(err, tc.err) || d.State.Closed || len(transport.inputs) != 0 || len(transport.publications) != 0 {
 				t.Fatal("suppressed real fault", err)
+			}
+		})
+	}
+}
+
+func TestOptionalRetirementPublicationGapPreservesOriginalExchange(t *testing.T) {
+	for _, kind := range []string{"path_changed", "wrapped_path_changed", "short_read", "access_error", "process_changed", "protocol_incompatible", "parent_cancel", "saved_proof"} {
+		t.Run(kind, func(t *testing.T) {
+			d, transport, peer := retirementFixture(t)
+			d.State.Bound = false
+			d.State.Operation = nil // Initial bind, before any business request.
+			d.State.Input = &InputAttempt{ID: strings.Repeat("9", 32), Exchange: d.State.Transaction.Envelope.Nonce, Runtime: d.State.Identity.Runtime,
+				Kind: "invoke", Outcome: &InputOutcome{Disposition: "submitted", MessagesQueued: 6, AtMillis: 1000}}
+			if err := d.RequestClose(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			originalTx, originalInput, originalIdentity := *d.State.Transaction, *d.State.Input, d.State.Identity
+			budget := *d.State.CloseBudget
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			fault := memory.ErrMailboxPathChanged
+			pending := kind == "path_changed" || kind == "wrapped_path_changed"
+			if kind == "saved_proof" {
+				d.State.RuntimeEnd = peer.proof
+				peer.retireError = fault
+			} else {
+				peer.proof = nil
+				switch kind {
+				case "wrapped_path_changed":
+					fault = fmt.Errorf("live.channel_mailbox_unavailable: %w", fault)
+				case "short_read":
+					fault = fmt.Errorf("%w: short_read", memory.ErrMailboxUnavailable)
+				case "access_error":
+					fault = errors.New("memory.ineligible_read")
+				case "process_changed":
+					fault = errors.New("memory.process_changed")
+				case "protocol_incompatible":
+					fault = memory.ErrMailboxIncompatible
+				case "parent_cancel":
+					peer.onObserve = cancel
+				}
+				peer.observeError = fault
+			}
+			err := d.continueOrRetireWith(ctx, peer, retirementTarget(), true)
+			if !errors.Is(err, fault) || errors.Is(err, ErrPending) != pending {
+				t.Fatalf("incorrect observation disposition: pending=%t err=%v", pending, err)
+			}
+			if d.State.Closed || d.State.Bound || !d.State.Closing || d.State.Identity != originalIdentity ||
+				!reflect.DeepEqual(d.State.Transaction, &originalTx) || !reflect.DeepEqual(d.State.Input, &originalInput) || *d.State.CloseBudget != budget ||
+				len(transport.inputs) != 0 || len(transport.publications) != 0 || len(peer.retired) != 0 {
+				t.Fatal("observation gap advanced old work or renewed its budget")
+			}
+			if (d.State.RuntimeEnd != nil) != (kind == "saved_proof") {
+				t.Fatal("invented or discarded runtime-end proof")
+			}
+		})
+	}
+}
+
+// R19's deadline regression produces this durable post-Consumed boundary.
+// Test its public driver wrapper separately: no new runtime observation is
+// necessary to finish an already-unbound close, even when the Mailbox moved.
+func TestQuiescentClosePreflightPreservesTerminalEvidence(t *testing.T) {
+	for _, kind := range []string{"idle", "verified_report", "unknown_result", "still_bound", "pending_bind", "running_operation", "pending_reload", "pending_recovery"} {
+		t.Run(kind, func(t *testing.T) {
+			d, _, now := budgetDriverFixture(t)
+			backend := &closeBudgetPeer{}
+			d.Backend = backend
+			allowed := kind == "idle" || kind == "verified_report" || kind == "unknown_result"
+			switch kind {
+			case "verified_report":
+				closeBudgetOperation(t, d, "complete")
+			case "unknown_result":
+				closeBudgetOperation(t, d, "execution_unknown")
+			case "running_operation":
+				closeBudgetOperation(t, d, "running")
+			}
+			d.State.Bound, d.State.Closing = kind == "still_bound", true
+			d.State.CloseBudget = NewDurableBudget(*now, time.Second, false)
+			d.State.CloseBudget.Exhausted = true
+			switch kind {
+			case "pending_bind":
+				if err := d.begin(context.Background(), "bind", d.State.Owner, nil); err != nil {
+					t.Fatal(err)
+				}
+				d.State.Transaction.Phase = "input_attempted"
+			case "pending_reload":
+				d.State.Reload = &ReloadAttempt{Request: "retained-reload", From: d.State.Identity.Runtime, Phase: "input_attempted", RecoveryBudget: d.State.CloseBudget}
+			case "pending_recovery":
+				from := d.State.Identity
+				d.State.Identity.Runtime = strings.Repeat("2", 32)
+				d.State.Recovery = &RuntimeRecovery{From: from, Phase: "binding"}
+			}
+			d.State.Input = &InputAttempt{ID: strings.Repeat("9", 32), Exchange: strings.Repeat("8", 32), Runtime: d.State.Identity.Runtime,
+				Kind: "invoke", Outcome: &InputOutcome{Disposition: "submitted", MessagesQueued: 6, AtMillis: 1000}}
+			if err := d.Save(context.Background(), "durable_close_boundary_fixture"); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Load(d.Log, backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d = loaded
+			d.Now = func() time.Time { return *now }
+			before := closeBudgetEvidence(t, d.State)
+			peer := &retirementPeer{observeError: memory.ErrMailboxPathChanged}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err = d.continueOrRetireWith(ctx, peer, retirementTarget(), true)
+			if allowed {
+				if err != nil || peer.observed != 0 {
+					t.Fatalf("terminal bookkeeping depended on a fresh runtime: err=%v observations=%d", err, peer.observed)
+				}
+			} else if !errors.Is(err, memory.ErrMailboxPathChanged) || peer.observed != 1 {
+				t.Fatalf("unfinished close bypassed retirement observation: err=%v observations=%d", err, peer.observed)
+			}
+			d, err = Load(d.Log, backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.State.Closed != allowed || d.State.Closing == allowed || closeBudgetEvidence(t, d.State) != before ||
+				len(backend.calls) != 0 || len(backend.consumed) != 0 || len(peer.retired) != 0 {
+				t.Fatalf("wrapper replayed work or changed retained evidence: state=%+v backend=%+v", d.State, backend)
+			}
+		})
+	}
+}
+
+func TestQuiescentClosePreflightKeepsProofAndCancellationGates(t *testing.T) {
+	for _, kind := range []string{"saved_proof", "wrong_process_proof", "caller_cancelled"} {
+		t.Run(kind, func(t *testing.T) {
+			d, _, now := budgetDriverFixture(t)
+			backend := &closeBudgetPeer{}
+			d.Backend, d.State.Bound, d.State.Closing = backend, false, true
+			d.State.CloseBudget = NewDurableBudget(*now, time.Second, false)
+			d.State.CloseBudget.Exhausted = true
+			target := retirementTarget()
+			if kind != "caller_cancelled" {
+				old, proof := replacementFixture()
+				d.State.Identity, d.State.RuntimeEnd = old, &proof
+				target.ProcessID, target.ProcessStartedAt = proof.ProcessID, proof.ProcessStartedAt
+				if kind == "wrong_process_proof" {
+					target.ProcessStartedAt++
+				}
+			}
+			if err := d.Save(context.Background(), "quiescent_close_gate_fixture"); err != nil {
+				t.Fatal(err)
+			}
+			before := closeBudgetEvidence(t, d.State)
+			peer := &retirementPeer{observeError: errors.New("unexpected runtime observation")}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if kind == "caller_cancelled" {
+				cancel()
+				peer.observeError = context.Canceled
+			}
+			err := d.continueOrRetireWith(ctx, peer, target, true)
+			allowed := kind == "saved_proof"
+			if allowed && err != nil || !allowed && err == nil || kind == "caller_cancelled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("lost proof or caller admission gate: %v", err)
+			}
+			loaded, loadErr := Load(d.Log, backend)
+			if loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if loaded.State.Closed != allowed || loaded.State.Closing == allowed || closeBudgetEvidence(t, loaded.State) != before ||
+				(kind != "caller_cancelled" && peer.observed != 0) || len(peer.retired) != 0 || len(backend.calls) != 0 || len(backend.consumed) != 0 {
+				t.Fatal("terminal wrapper discarded proof, changed evidence or performed backend work")
 			}
 		})
 	}

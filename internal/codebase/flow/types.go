@@ -3,8 +3,6 @@
 // runtime secrecy, safety, or secure execution taint.
 package flow
 
-import "time"
-
 type RuleIdentity struct {
 	Client         string `json:"client"`
 	APICommit      string `json:"apiCommit"`
@@ -49,13 +47,12 @@ type Target struct {
 }
 
 type Budget struct {
-	MaxFiles       int       `json:"maxFiles,omitempty"`
-	MaxFunctions   int       `json:"maxFunctions,omitempty"`
-	MaxDepth       int       `json:"maxDepth,omitempty"`
-	MaxPaths       int       `json:"maxPaths,omitempty"`
-	MaxMillis      int       `json:"maxMillis,omitempty"`
-	MaxOutputBytes int       `json:"maxOutputBytes,omitempty"`
-	Deadline       time.Time `json:"-"`
+	MaxFiles       int `json:"maxFiles,omitempty"`
+	MaxFunctions   int `json:"maxFunctions,omitempty"`
+	MaxDepth       int `json:"maxDepth,omitempty"`
+	MaxPaths       int `json:"maxPaths,omitempty"`
+	MaxMillis      int `json:"maxMillis,omitempty"`
+	MaxOutputBytes int `json:"maxOutputBytes,omitempty"`
 }
 
 type Request struct {

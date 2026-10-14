@@ -143,7 +143,6 @@ const REQUIRED_RESOURCES = [
   'skill/SKILL.md',
   'addon/Lychee Dev.toc',
 ];
-const EMPTY_PROBE_QUEUE = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 
 /** REL-01 identity: commit + worktree state from VCS, never from the caller's cwd. */
 export function identity({ allowDirty = false, requireTagRef = false, tag } = {}) {
@@ -190,6 +189,11 @@ function stagePayload(stage, resources) {
       writeFileSync(destination, content);
       resources.push({ path: name, bytes: content.length, sha256: sha256(content) });
     }
+  }
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES']) {
+    const content = readFileSync(join(repository, 'packages/npm/lycheedev', name));
+    writeFileSync(join(stage, 'payload/addon', name), content);
+    resources.push({ path: `addon/${name}`, bytes: content.length, sha256: sha256(content) });
   }
   resources.sort((a, b) => (a.path < b.path ? -1 : 1));
   for (const required of REQUIRED_RESOURCES) {
@@ -754,7 +758,7 @@ function platformEvidenceCommand(argv) {
   return record;
 }
 
-function verifyRegistryReadbackCommand(argv) {
+export function verifyRegistryReadbackCommand(argv) {
   const options = parseOptions(argv);
   const name = requiredOption(options, '--name');
   const version = requiredOption(options, '--version');
@@ -767,12 +771,12 @@ function verifyRegistryReadbackCommand(argv) {
   if (view.name !== name) violations.push(`registry name ${view.name}`);
   if (view.version !== version) violations.push(`registry version ${view.version}`);
   if (dist.integrity !== expectedIntegrity) violations.push(`registry integrity ${dist.integrity} != ${expectedIntegrity} (REL-06/12)`);
-  if (!dist.attestations && !(Array.isArray(dist.signatures) && dist.signatures.length)) {
+  if (!dist.attestations?.url || !dist.attestations.provenance) {
     violations.push('registry provenance/attestations missing (REL-12)');
   }
   const repositoryUrl = view.repository?.url ?? '';
   if (!repositoryUrl.includes('Follen/Lychee-Dev')) violations.push(`registry repository ${repositoryUrl}`);
-  return { ok: violations.length === 0, violations, integrity: dist.integrity, attestations: dist.attestations ?? dist.signatures };
+  return { ok: violations.length === 0, violations, integrity: dist.integrity, attestations: dist.attestations, signatures: dist.signatures ?? [] };
 }
 
 function checkAssetsCommand(argv) {
@@ -930,10 +934,10 @@ export function auditTgz(entries, { version, expectedCommit, sourceRoot, develop
         const match = /^package\/payload\/((?:addon|skill|tool\/luals)\/.*)$/.exec(entry.name);
         if (match && !listed.has(match[1])) violations.push(`payload file not in release.json resources: ${match[1]}`);
       }
-      const queue = byName.get('package/payload/addon/Bridge/Definitions.lua');
+
       const runtimeIdentity = byName.get('package/payload/tool/luals/runtime.json');
       if (runtimeIdentity && !runtimeIdentity.equals(Buffer.from(JSON.stringify(JSON.parse(readFileSync(join(repository, 'release/tools/luals.json'), 'utf8')))))) violations.push('LuaLS runtime identity differs from canonical manifest');
-      if (queue && queue.toString('utf8') !== EMPTY_PROBE_QUEUE) violations.push('payload carries local task blocks: addon/Bridge/Definitions.lua (PKG-05)');
+
       const source = manifest.correspondingSource;
       if (!source && !developmentOnly) violations.push('release.json missing correspondingSource (licensing closure; npm assembly requires it)');
       if (source && developmentOnly) violations.push('development-only package must omit correspondingSource claim');

@@ -14,24 +14,30 @@ function fromPath() {
   for (const directory of (process.env.PATH ?? '').split(delimiter)) {
     if (!directory) continue;
     const candidate = join(directory, executable);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) return { command: candidate, args: [] };
+    if (windows && existsSync(join(directory, 'lycheedev.cmd'))) {
+      const launcher = join(directory, 'node_modules', 'lycheedev', 'bin', 'lycheedev.mjs');
+      if (existsSync(launcher)) return { command: process.execPath, args: [launcher] };
+    }
   }
   return undefined;
 }
 
 function fromNpmGlobal() {
+  // Windows cannot execute npm.cmd with shell:false. Resolve the npm CLI
+  // beside its PATH shim and run it with Node, keeping every argument separate.
+  let npm = { command: 'npm', args: [] };
   if (windows) {
-    // npm exposes .cmd/.ps1 shims on Windows, not an executable. Resolve the
-    // package beside its PATH shim and invoke JavaScript through Node; never
-    // send forwarded arguments through a shell.
+    npm = undefined;
     for (const directory of (process.env.PATH ?? '').split(delimiter)) {
-      if (!directory || !existsSync(join(directory, 'lycheedev.cmd'))) continue;
-      const launcher = join(directory, 'node_modules', 'lycheedev', 'bin', 'lycheedev.mjs');
-      if (existsSync(launcher)) return { command: process.execPath, args: [launcher] };
+      if (!directory || !existsSync(join(directory, 'npm.cmd'))) continue;
+      const cli = join(directory, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      if (existsSync(cli)) npm = { command: process.execPath, args: [cli] };
+      break;
     }
+    if (!npm) return undefined;
   }
-  const npm = windows ? 'npm.cmd' : 'npm';
-  const found = spawnSync(npm, ['prefix', '-g'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000 });
+  const found = spawnSync(npm.command, [...npm.args, 'prefix', '-g'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000 });
   if (found.status !== 0 || !found.stdout) return undefined;
   const root = found.stdout.trim().split(/\r?\n/)[0];
   const launcher = join(root, 'node_modules', 'lycheedev', 'bin', 'lycheedev.mjs');
@@ -48,9 +54,7 @@ if (process.env.LYCHEEDEV_BIN) {
   resolution = { command: process.env.LYCHEEDEV_BIN, args: [] };
 } else {
   const onPath = fromPath();
-  resolution = onPath
-    ? { command: onPath, args: [] }
-    : fromNpmGlobal();
+  resolution = onPath ?? fromNpmGlobal();
 }
 if (!resolution) {
   console.error('lycheedev launcher: installed CLI not found. Install it with `npm install -g lycheedev` or set LYCHEEDEV_BIN to the native binary.');

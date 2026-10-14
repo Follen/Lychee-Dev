@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,7 +29,7 @@ func TestSQLInputSelectionAndParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := readSelectedDataQuery(opts)
+	query, err := readSelectedDataQuery(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestSQLInputSelectionAndParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err = readSelectedDataQuery(opts)
+	query, err = readSelectedDataQuery(context.Background(), opts)
 	if err != nil || query.SQL != "SELECT ID FROM SpellName WHERE ID=:id" {
 		t.Fatalf("plain SQL file: %+v %v", query, err)
 	}

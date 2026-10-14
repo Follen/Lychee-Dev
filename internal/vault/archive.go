@@ -155,6 +155,13 @@ func runArchive(ctx context.Context, plan ArchivePlan, stopAfter string) (FreshR
 		return result, err
 	}
 	defer lease.Close()
+	// A concurrent initializer may have published its plan while this caller
+	// waited for the lease. The journal owns the entire recovery identity.
+	if journal, err := readArchiveJournal(plan.JournalPath, abs); err == nil {
+		plan = journal
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return result, err
+	}
 
 	if plan.ArchivePath == "" {
 		// No legacy content to isolate: creating the new root is the whole plan.
@@ -179,7 +186,7 @@ func runArchive(ctx context.Context, plan ArchivePlan, stopAfter string) (FreshR
 	} else if journal, err := readArchiveJournal(plan.JournalPath, abs); err != nil {
 		return result, err
 	} else {
-		plan.State, plan.CompletedAt = journal.State, journal.CompletedAt
+		plan = journal
 	}
 	if stopAfter == "journal" {
 		return result, errArchiveInterrupt

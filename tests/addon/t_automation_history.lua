@@ -23,7 +23,6 @@ assert(history.Observe(first))
 view.Collect()
 local id="MEM-"..first.envelope.ticket
 assert(view.GetCount()==1 and view.GetRecord(id).status=="loaded")
-assert(select(2,view.Execute(id))=="auto_history_read_only")
 assert(view.ClearRecords()==0,"prepared history was cleared")
 first.state="reported";first.ok=true;first.payload='{"ok":true,"result":"测试结果"}'
 assert(history.Observe(first));view.Collect()
@@ -34,7 +33,6 @@ local body=first.payload
 first.state="released";first.payload=nil
 assert(history.Observe(first));view.Collect()
 assert(view.GetRecord(id).status=="acknowledged" and view.GetReportText(id)==body)
-assert(select(2,view.ShowNotice(id))=="auto_notice_unavailable")
 local unfinished=operation(2,"running")
 assert(history.Observe(unfinished))
 local pendingReport=operation(3,"reported",'{"ok":false}',false)

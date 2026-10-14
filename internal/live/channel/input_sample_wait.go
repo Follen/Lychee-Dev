@@ -9,10 +9,6 @@ import (
 
 const inputSampleGrace = 2 * time.Second
 
-// One sampling period plus the freshness window. This is a discovery hint's
-// maximum age, never an input authorization window.
-const inputRecentHintMillis int64 = 1500
-
 // This is a local scheduling allowance, never a lease or input authorization.
 // Old (even successively newer-but-expired) records cannot renew it. A public
 // resume remains bounded by the connection/operation's original durable budget.

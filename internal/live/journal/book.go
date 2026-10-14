@@ -174,39 +174,6 @@ func (b *Book) InspectWork(ctx context.Context, id string) (WorkRecord, error) {
 	return record, nil
 }
 
-// SetGoal records the terminal promised by the next explicit public command.
-// Goals only move forward; resume never invents or broadens one.
-func (b *Book) SetGoal(ctx context.Context, id, expectedStage, goal string) (WorkRecord, error) {
-	record, err := b.InspectWork(ctx, id)
-	if err != nil {
-		return record, err
-	}
-	if record.Stage == "abandoning" || record.Stage == "abandoned" {
-		return record, ErrTransition
-	}
-	if record.Intent.Goal == goal {
-		return record, nil
-	}
-	if record.Stage != expectedStage || record.Status != "running" && record.Status != "unresolved" {
-		return record, ErrTransition
-	}
-	allowed := record.Intent.Goal == "loaded" && goal == "verified" || record.Intent.Goal == "verified" && goal == "cleaned"
-	if !allowed {
-		return record, ErrTransition
-	}
-	record.Intent.Goal = goal
-	record.Generation++
-	record.UpdatedAt = time.Now().UTC()
-	payload, err := json.Marshal(record)
-	if err != nil {
-		return WorkRecord{}, err
-	}
-	if err := b.metadata.CommitDocuments(ctx, vault.Mutation{Key: "work/" + id, ExpectedGeneration: record.Generation - 1, Value: payload}); err != nil {
-		return WorkRecord{}, err
-	}
-	return record, nil
-}
-
 func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 	record, err := b.InspectWork(ctx, change.OperationID)
 	if err != nil {
@@ -254,7 +221,7 @@ func (b *Book) AdvanceStage(ctx context.Context, change StageChange) error {
 
 func allowsTransition(kind, from, to, status string) bool {
 	if from == "abandoning" || to == "abandoning" || to == "abandoned" {
-		return (kind == "probe" || kind == "faults") && ((from == "load_requested" || from == "loaded" || from == "dispatch_requested" || from == "reported" || from == "flush_requested" || from == "persisted" || from == "verified" || from == "ack_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned") ||
+		return (kind == "probe" || kind == "faults") && ((from == "prepared" || from == "load_requested" || from == "loaded" || from == "dispatch_requested" || from == "reported" || from == "flush_requested" || from == "persisted" || from == "verified" || from == "ack_requested" || from == "acknowledged") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned") ||
 			kind == "reload" && ((from == "prepared" || from == "reload_requested") && to == "abandoning" && status == "running" || from == "abandoning" && to == "abandoned" && status == "abandoned")
 	}
 	if to == "cleaned" {

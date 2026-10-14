@@ -58,7 +58,7 @@ func TestCDNRefreshDuringConfigurationPreparation(t *testing.T) {
 		}
 		return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
 	})}
-	c := &cdnFiles{ctx: ctx, store: f.store, metadata: f.metadata, client: client}
+	c := &cdnFiles{downloadWorkers: 8, ctx: ctx, store: f.store, metadata: f.metadata, client: client}
 	meta, err := c.prepare(pin)
 	if err != nil || refreshes != 1 || meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
 		t.Fatalf("config recovery: %+v %v refreshes=%d", meta, err, refreshes)
@@ -80,47 +80,57 @@ func TestCDNDeadlineStopsRecovery(t *testing.T) {
 	}
 }
 
+// Explicit beta IDs keep independent data identity. The documented legacy
+// alias keeps the Asia publishing slot even with a CN endpoint region.
 func TestCDNPrepareForeverUsesDataSlot(t *testing.T) {
-	f := newRemoteTargetFixture(t)
-	build := []byte("root = " + strings.Repeat("1", 32) + "\nencoding = " + strings.Repeat("2", 32) + " " + strings.Repeat("3", 32) + "\nencoding-size = 123 456\nbuild-uid = wow_classic_beta\n")
-	buildKey := fmt.Sprintf("%x", md5.Sum(build))
-	cdn := f.transport.responses[f.configURL].body
-	cdnKey := fmt.Sprintf("%x", md5.Sum(cdn))
-	buildURL := "https://cdn.example.test/tpr/wow/config/" + buildKey[:2] + "/" + buildKey[2:4] + "/" + buildKey
-	catalogURL := remoteVersionBase("us") + "wow_classic_beta/cdns"
-	f.transport.responses = map[string]definitionResponse{
-		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
-		buildURL:   {status: 200, body: build}, f.configURL: {status: 200, body: cdn},
-	}
-	c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
-	pin := selection.DataPin{Product: "forever", Region: "us", Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
-	meta, err := c.prepare(pin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta.Installed.BuildConfig != buildKey || meta.Installed.FullBuild != pin.FullBuild {
-		t.Fatalf("changed pin: %+v", meta)
-	}
-	if got := f.transport.callURLs(); !equalStrings(got, []string{catalogURL, buildURL, f.configURL}) {
-		t.Fatal(got)
-	}
-	f.transport.responses = nil
-	c.offline = true
-	if _, err := c.prepare(pin); err != nil {
-		t.Fatalf("offline exact-pin reuse: %v", err)
-	}
-	// Fresh target resolution must validate the same distribution identity,
-	// while retaining the user-facing Forever product in its resulting pin.
-	f.transport.responses = map[string]definitionResponse{
-		remoteVersionBase("us") + "wow_classic_beta/versions": {status: 200, body: []byte(fmt.Sprintf("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\nus|%s|%s|70009|1.60.1.70009\n", buildKey, cdnKey))},
-		catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.test\n")},
-	}
-	resolved, err := f.resolve(context.Background(), RemoteTargetRequest{Product: "forever", Region: "us", Locale: "enUS", FullBuild: pin.FullBuild, Definitions: definitionsTestCommit})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.Pin.Data.Product != "forever" || resolved.Pin.Data.BuildConfig != buildKey {
-		t.Fatal(resolved.Pin)
+	for _, tc := range []struct{ product, region, slot string }{
+		{"forever", "us", "wow_classic_beta"}, {"forever", "cn", "wow_classic_beta"},
+		{"forever-asia-beta", "us", "wow_classic_beta"}, {"forever-asia-beta", "cn", "wow_classic_beta"},
+		{"forever-cn-beta", "us", "wow_cn_beta"}, {"forever-cn-beta", "cn", "wow_cn_beta"},
+	} {
+		t.Run(tc.product+"/"+tc.region, func(t *testing.T) {
+			f := newRemoteTargetFixture(t)
+			build := []byte("root = " + strings.Repeat("1", 32) + "\nencoding = " + strings.Repeat("2", 32) + " " + strings.Repeat("3", 32) + "\nencoding-size = 123 456\nbuild-uid = " + tc.slot + "\n")
+			buildKey := fmt.Sprintf("%x", md5.Sum(build))
+			cdn := f.transport.responses[f.configURL].body
+			cdnKey := fmt.Sprintf("%x", md5.Sum(cdn))
+			buildURL := "https://cdn.example.test/tpr/wow/config/" + buildKey[:2] + "/" + buildKey[2:4] + "/" + buildKey
+			catalogURL := remoteVersionBase(tc.region) + tc.slot + "/cdns"
+			f.transport.responses = map[string]definitionResponse{
+				catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\n" + tc.region + "|tpr/wow|cdn.example.test\n")},
+				buildURL:   {status: 200, body: build}, f.configURL: {status: 200, body: cdn},
+			}
+			c := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+			pin := selection.DataPin{Product: tc.product, Region: tc.region, Language: "enUS", FullBuild: "1.60.1.70009", BuildConfig: buildKey, CDNConfig: cdnKey, DefinitionCommit: definitionsTestCommit}
+			meta, err := c.prepare(pin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Installed.BuildConfig != buildKey || meta.Installed.FullBuild != pin.FullBuild {
+				t.Fatalf("changed pin: %+v", meta)
+			}
+			if got := f.transport.callURLs(); !equalStrings(got, []string{catalogURL, buildURL, f.configURL}) {
+				t.Fatal(got)
+			}
+			f.transport.responses = nil
+			c.offline = true
+			if _, err := c.prepare(pin); err != nil {
+				t.Fatalf("offline exact-pin reuse: %v", err)
+			}
+			// Fresh target resolution must validate the same distribution identity,
+			// while retaining the user-facing Forever product in its resulting pin.
+			f.transport.responses = map[string]definitionResponse{
+				remoteVersionBase(tc.region) + tc.slot + "/versions": {status: 200, body: []byte(fmt.Sprintf("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\n"+tc.region+"|%s|%s|70009|1.60.1.70009\n", buildKey, cdnKey))},
+				catalogURL: {status: 200, body: []byte("Name!STRING:0|Path!STRING:0|Hosts!STRING:0\n" + tc.region + "|tpr/wow|cdn.example.test\n")},
+			}
+			resolved, err := f.resolve(context.Background(), RemoteTargetRequest{Product: tc.product, Region: tc.region, Locale: "enUS", FullBuild: pin.FullBuild, Definitions: definitionsTestCommit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Pin.Data.Product != tc.product || resolved.Pin.Data.BuildConfig != buildKey {
+				t.Fatal(resolved.Pin)
+			}
+		})
 	}
 }
 
@@ -131,7 +141,7 @@ func TestCDNRefreshStaleRouteOnceWithoutRetargeting(t *testing.T) {
 			b := f.transport.responses[f.buildURL].body
 			d := f.transport.responses[f.configURL].body
 			pin := selection.DataPin{Product: "retail", Region: "cn", Language: "zhCN", FullBuild: "12.1.0.69875", BuildConfig: md5TestKey(b), CDNConfig: md5TestKey(d), DefinitionCommit: definitionsTestCommit}
-			c := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
+			c := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: f.defs.client}
 			if _, err := c.prepare(pin); err != nil {
 				t.Fatal(err)
 			}
@@ -168,7 +178,7 @@ func TestCDNRefreshStaleRouteOnceWithoutRetargeting(t *testing.T) {
 				if err != nil || !bytes.Equal(got, encoded) {
 					t.Fatalf("wrong content: %v", err)
 				}
-				fresh := &cdnFiles{ctx: context.Background(), store: f.store, metadata: f.metadata, client: c.client, offline: true}
+				fresh := &cdnFiles{downloadWorkers: 8, ctx: context.Background(), store: f.store, metadata: f.metadata, client: c.client, offline: true}
 				meta, err := fresh.prepare(pin)
 				if err != nil || fresh.route.Hosts[0] != "new.example.test" || meta.Installed.BuildConfig != pin.BuildConfig || meta.Installed.CDNConfig != pin.CDNConfig {
 					t.Fatalf("refreshed route/pin not retained: %+v %v", meta, err)
@@ -317,7 +327,7 @@ func newCDNFilesOnStoreTest(t *testing.T, store *vault.Store, transport http.Rou
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = metadata.Close() })
-	return &cdnFiles{
+	return &cdnFiles{downloadWorkers: 8,
 		ctx:      ctx,
 		store:    store,
 		metadata: metadata,
@@ -371,7 +381,7 @@ func TestCDNFilesOpenLooseHeaderlessBLTEAndOfflineCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer offlineMetadata.Close()
-	offlineFiles := &cdnFiles{
+	offlineFiles := &cdnFiles{downloadWorkers: 8,
 		ctx:      context.Background(),
 		store:    files.store,
 		metadata: offlineMetadata,

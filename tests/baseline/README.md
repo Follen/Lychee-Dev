@@ -16,7 +16,7 @@
 
 [catalog.mjs](catalog.mjs) 为必要的行为指定实际 Go 测试名称；测试缺失、被跳过或包没有正常结束，不能作为通过。当前 Mailbox 的编辑框输入、独立重载、启动诊断和读取恢复位于 BASE-08–11。
 
-生产模块测试还保留已有格式、历史持久化和兼容解析覆盖。这些结果不能证明当前协议的游戏实机场景。基础 runner 的旧 Live envelope 验证仍有离线回归，不作为 3.2.0 的实机入口。
+历史持久化覆盖仅验证只读查看和取消处置；旧 Live 执行驱动与 envelope 基线已移除。这些结果不能证明当前协议的游戏实机场景。
 
 当前实机验收直接使用公共 live doctor/connect/execute/resume/reload/disconnect 命令，遵循 [协议](../../docs/live-protocol.md)，并对照 [待办矩阵](../../todo.md)。保留本次失败所需的原连接；不要为了重跑创建竞争请求或重放未知输入。
 

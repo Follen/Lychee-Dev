@@ -21,7 +21,9 @@ Root evidence records coverage gaps: a successful lookup with `scanComplete=fals
 does not establish uniqueness across unreadable code. Unsupported code/layout
 or unresolved root ambiguity stops discovery; it never invokes a heap scanner
 or reuses another build's RVA.
-`--no-cache` follows this same path. Raw address research is a separate task.
+`--no-cache` remains accepted for compatibility; both forms use this same
+current guarded lookup. Historical CLI versions require their own contract and
+implementation evidence. Raw address research is a separate task.
 
 ## Select and connect
 

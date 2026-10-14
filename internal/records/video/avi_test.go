@@ -129,6 +129,60 @@ func TestParseAVIMinimalSampleMatchesLegacyOracle(t *testing.T) {
 	}
 }
 
+func TestParseAVIRejectsIncompleteInnerHeaders(t *testing.T) {
+	for _, location := range []string{"top", "header", "movi"} {
+		for tail := 1; tail < 8; tail++ {
+			partial := make([]byte, tail)
+			movi := list("movi", chunk("00db", []byte{1, 2}))
+			body := []byte("AVI ")
+			switch location {
+			case "top":
+				body = append(append(body, movi...), partial...)
+			case "header":
+				body = append(append(body, list("hdrl", partial)...), movi...)
+			case "movi":
+				body = append(body, list("movi", append(chunk("00db", []byte{1, 2}), partial...))...)
+			}
+			data := append(binary.LittleEndian.AppendUint32([]byte("RIFF"), uint32(len(body))), body...)
+			if _, err := video.ParseAVI(data, video.Limits{}); !errors.Is(err, video.ErrContainerTruncated) {
+				t.Fatalf("%s tail=%d: %v", location, tail, err)
+			}
+		}
+	}
+}
+
+func TestParseAVIRecordListsPreserveFrameOrderAndLimits(t *testing.T) {
+	makeAVI := func(body []byte) []byte {
+		body = append([]byte("AVI "), list("movi", body)...)
+		return append(binary.LittleEndian.AppendUint32([]byte("RIFF"), uint32(len(body))), body...)
+	}
+	body := append(chunk("00db", []byte{1, 2}), list("rec ", append(chunk("00dc", []byte{3, 4}), list("rec ", chunk("00db", []byte{5, 6}))...))...)
+	data := makeAVI(body)
+	got, err := video.ParseAVI(data, video.Limits{})
+	if err != nil || got.FrameCount != 3 || !got.Complete {
+		t.Fatalf("record list: %+v %v", got, err)
+	}
+	for i, frame := range got.Frames {
+		if frame.Payload[0] != byte(2*i+1) || frame.Timestamp != float64(i)*frame.Duration {
+			t.Fatalf("frame %d: %+v", i, frame)
+		}
+	}
+	got, err = video.ParseAVI(data, video.Limits{MaxFrames: 1, AllowPartial: true})
+	if err != nil || len(got.Frames) != 1 || got.EnumeratedFrames != 3 || !got.Truncated {
+		t.Fatalf("bounded record list: %+v %v", got, err)
+	}
+	if _, err := video.ParseAVI(makeAVI(list("rec ", []byte("00db"))), video.Limits{}); !errors.Is(err, video.ErrContainerTruncated) {
+		t.Fatalf("short nested header: %v", err)
+	}
+	deep := chunk("00db", []byte{1, 2})
+	for i := 0; i < 17; i++ {
+		deep = list("rec ", deep)
+	}
+	if _, err := video.ParseAVI(makeAVI(deep), video.Limits{}); !errors.Is(err, video.ErrContainerFormat) {
+		t.Fatalf("unbounded nesting: %v", err)
+	}
+}
+
 func TestParseAVISyntheticFrameTimeline(t *testing.T) {
 	frames := [][]byte{bytesOf(10, 7), bytesOf(3, 1), bytesOf(5, 2)}
 	container, err := video.ParseAVI(buildAVI(20000, 640, 480, frames), video.Limits{})

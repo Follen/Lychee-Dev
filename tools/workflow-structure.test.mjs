@@ -98,6 +98,7 @@ test('manual dry-run writes release identity outside the checkout', () => {
 
 test('ci gate: required windows jobs aggregate strictly and stay callable', () => {
   assert.match(ci, /workflow_call:/);
+  assert.deepEqual(Object.keys(jobsOf(ci)), ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']);
   for (const job of ['windows-contract', 'windows-process', 'windows-addon', 'windows-package', 'race', 'ci-required']) {
     assert.match(ci, new RegExp(`^  ${job}:$`, 'm'), `missing required job ${job}`);
   }
@@ -120,4 +121,17 @@ test('every windows job normalizes TMP before any test runs', () => {
       assert.match(body, /Normalize TMP to the long runner temp path/, `job ${job} in ${name} lacks TMP normalization`);
     }
   }
+});
+
+test('PR CI prepares pinned integration inputs before its single measured suite and rejects missing passes', () => {
+  const contract = ci.slice(ci.indexOf('  windows-contract:\n'), ci.indexOf('  windows-process:\n'));
+  const prepare = contract.indexOf('node tools/ci-inputs.mjs prepare');
+  const suite = contract.indexOf("$command = @('test', '-json'");
+  const verify = contract.indexOf('node tools/ci-inputs.mjs verify --events $events');
+  assert.ok(prepare > 0 && prepare < suite && suite < verify);
+  assert.equal((contract.match(/-coverprofile=\$profile/g) ?? []).length, 1);
+  assert.match(contract, /\$coverageExit = \$LASTEXITCODE/);
+  assert.match(contract, /\$LASTEXITCODE -ne 0 -or \$coverageExit -ne 0 -or \$testExit -ne 0/);
+  assert.match(contract, /name: windows-integration-inputs/);
+  assert.match(contract, /required-integrations\.json/);
 });

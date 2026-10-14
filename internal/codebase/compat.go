@@ -2,7 +2,7 @@ package codebase
 
 import (
 	"context"
-	"errors"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -186,6 +186,7 @@ func compatibilityMatchesForUsages(ctx context.Context, pin selection.SourcePin,
 		return resolutions, nil
 	}
 	known := map[string]bool{}
+	incomplete := map[string]bool{}
 	appendMatch := func(kind, name string, symbol *SymbolMatch) {
 		if !requested[kind][name] {
 			return
@@ -202,6 +203,19 @@ func compatibilityMatchesForUsages(ctx context.Context, pin selection.SourcePin,
 		}
 	}
 	err := scan(ctx, func(record sourceRecord) error {
+		if record.Kind == "diagnostic" {
+			switch strings.ToLower(path.Ext(record.Path)) {
+			case ".lua":
+				incomplete["mixin"] = true
+				if strings.Contains(strings.ToLower(record.Path), "/blizzard_apidocumentationgenerated/") {
+					incomplete["api"], incomplete["event"] = true, true
+				}
+			case ".xml":
+				incomplete["template"], incomplete["frame-type"] = true, true
+			case ".toc":
+				incomplete["interface"] = true
+			}
+		}
 		if record.Kind != "symbol" || record.Symbol == nil {
 			return nil
 		}
@@ -243,7 +257,7 @@ func compatibilityMatchesForUsages(ctx context.Context, pin selection.SourcePin,
 		for name := range names {
 			key := kind + "\x00" + name
 			resolution := resolutions[key]
-			resolution.known = known[kind]
+			resolution.known = known[kind] && !incomplete[kind]
 			if kind == "interface" && pin.Repository == "wow-ui-source" {
 				// The verified client baseline supplies authoritative Interface
 				// evidence when the indexed TOC headers do not match.
@@ -271,10 +285,6 @@ func interfaceValueMatches(value, name string) bool {
 		}
 	}
 	return false
-}
-
-func compatibilityKindError(kind string) error {
-	return errors.New("codebase.unsupported_compatibility_kind: " + kind)
 }
 
 func normalizeCompatibilityKind(kind string) string {
