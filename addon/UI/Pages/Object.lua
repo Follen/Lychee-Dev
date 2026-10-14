@@ -304,10 +304,6 @@ local function BuildObjectPage(parent)
         return true
     end
 
-    function page.OpenSelectedNodeDetail()
-        return OpenNodePopup(treeView:GetSelectedNode())
-    end
-
     treeView:SetOnNodeContext(OpenNodePopup)
 
     exportSnapshot:SetScript("OnClick", function()

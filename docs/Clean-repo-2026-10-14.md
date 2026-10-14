@@ -927,8 +927,8 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 | 轮次 | 基线 | 状态 | 当前结果 |
 | --- | --- | --- | --- |
-| R5 | `81ccdd5` 产品代码；文档 head `f7f2239` | 审计及离线修复完成，新 head Windows CI 待运行 | 5 项新确认（2 bug、1 架构优化、1 Skill 合同、1 死代码）；R4-01、D-06 残留沿用原 ID |
-| R6 | R5 后的最新修复提交 | 待启动，另一个审计者 | |
+| R5 | `81ccdd5` 产品代码；文档 head `f7f2239` | 修复已推送 `2660a4ef`，Windows CI 六作业全部通过 | 5 项新确认（2 bug、1 架构优化、1 Skill 合同、1 死代码）；R4-01、D-06 残留沿用原 ID |
+| R6 | `2660a4ef` | 4 项修复及额外测试修正完成，最终整合已验证，新 head Windows CI 待运行 | 2 个 bug、1 个可计量架构优化、1 个死代码清理 |
 | R7 | R6 后的最新修复提交 | 待启动，另一个审计者 | |
 
 新发现的仅实机问题只记录前置、最小复验步骤、预期与空白实机结果，不操作游戏、不作无离线证据的修复；已有 R3/R4 实机待办保持上方状态。
@@ -987,6 +987,66 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 ### R5 验证与审计覆盖
 
 - 定向修复验证：build/vet、channel/journal、protocol、addon、records 子树/evidence/vault 均通过；demux 和 SQL export 并发 race 各重复三次通过。数值/并发导出/blob staging 的旧代码负对照均实际失败，正式测试已覆盖触发路径。
-- 受影响 Node 18 项：15 通过、3 个 Windows launcher 专属跳过，未计为通过。版本、Skill（84 命令/220 引用/0 违规）及生成命令目录通过。整合 build/vet 通过；Lua 必需完整 Go 套件实际执行为 30 包通过、command 1 包失败、4 包无测试，2420 test/subtest pass、3 fail、28 skip。失败仅为同样的基线 Linux Native admission 两项和 Source prune/LuaLS broker 一项，无新增失败；未称 Linux 全套通过。新 head Windows CI 待提交后运行。
+- 受影响 Node 18 项：15 通过、3 个 Windows launcher 专属跳过，未计为通过。版本、Skill（84 命令/220 引用/0 违规）及生成命令目录通过。整合 build/vet 通过；Lua 必需完整 Go 套件实际执行为 30 包通过、command 1 包失败、4 包无测试，2420 test/subtest pass、3 fail、28 skip。失败仅为同样的基线 Linux Native admission 两项和 Source prune/LuaLS broker 一项，无新增失败；未称 Linux 全套通过。新 head `2660a4ef` 的 [Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38532230482) 六作业全部 success：Lua 必需完整指定 Go 套件（31 测试包）、race、process、addon、真实 tgz/隔离安装和 aggregate；未借用旧 head 结果。
 - 独立审计还抽查了 CLI 准入/JSONL/取消、Source 查询/分页/batch/恢复、SQL/DB2/Hotfix/capture、Native 回执/期限、addon 工作台、受管安装/npm 事务及 Skill 跨文档合同。没有把薄适配器、大文件或合法 partial 失败当作重写依据；未发现其他已确认的新项，不构成全状态零缺陷证明。
 - R3-C01、R3-C03、R4-C01 未取得新增领域/消费者/双 Windows 卷证据，保持候选；本轮没有新增只能靠游戏才能确认的缺陷，R5-01 客户端整合和既有实机项结果仍留空。
+
+
+### R6-01 · 中 · Git-backed Source 正文搜索漏掉有效中文文件名
+
+- 状态：代码已修复，正式 codebase 全包及定向 race ×3 通过；不需要游戏环境。
+- 触发与证据：真实 IndexSource → ReadSpan → Browser.Search 路径中，`测试.lua` 已索引且 ReadSpan 返回匹配注释，但 precise/exploratory 两种正文搜索均返回空结果，`Complete=true`、`Truncated=false`、无错误。Git 默认把非 ASCII 文件名输出为带引号的 octal escape，当前按冒号切割后被 sourcePath/topic 过滤掉。
+- 根因：`internal/codebase/body_search.go` 使用带文本引号的 `git grep -n` 输出，未使用无歧义文件名分隔。不是 Lua 解析失败或未索引文件。
+- 修复：使用 Git `-n -z` 的 NUL filename/line 分隔，校验 exact commit 前缀；保留 fixed commit、索引/topic/路径过滤、原输出预算与截断合同，没有放宽路径规则。
+- 正式 `body_search_test.go` 覆盖生产 Git-backed 两种搜索模式、中文/引号/tab 文件名、colon/NUL snippet、二进制排除、no-match 和 bounds/truncation；新测试在旧实现仅返回普通 ASCII 路径时失败。
+
+
+### R6-02 · 低 · Search 摘要反复整文件切分，绕过已有行索引缓存
+
+- 状态：有测量证据的架构优化已实施，正式 codebase 全包及定向 race ×3 通过；不需要游戏环境。
+- 真实 Browser.Search 对 1,165,200 字节合法 Lua 文件中的 200 个同名声明生成结果时，分配 302,403,328 字节；其中 200 次 `numberedLines` 整文件转字符串/CRLF 替换/Split 占 299,990,824 字节。当前查询已有带预算的 `documentLine`/`lineMemo`，摘要却没有复用。
+- 离线原型复用现有行索引，200 个摘要逐字节相同、仅建立一次索引，分配 446,168 字节。原测试约 981ms、摘要旧路径约 820ms、原型约 31ms 仅为本 fixture 的指示性时间，非真实用户性能承诺。
+- 修复：Search/Inspect 摘要与已有 documentLine 共用同一个有预算的行索引，不新增缓存层；保留原 8MiB/256 文件边界、CRLF/CR-CR-LF/末尾 CR 与空行语义、行数上限、hash、分页与覆盖合同。
+- 正式 `document_lines_test.go` 的 200 结果公开 Search 路径：旧代码分配 302,369,464 字节，修复后 2,810,488 字节，只建立一次行索引，摘要/hash 相同；旧实现负对照失败。这里是受控 fixture 分配量，不宣称真实用户耗时同比下降。
+
+
+### R6-03 · 中 · Hotfix CSV 独立发布路径缺少目标级互斥
+
+- 状态：代码已修复，公开 CLI 跨进程回归、records/evidence/vault 12 包和 Hotfix/SQL 定向 race ×3 通过；最终整合已执行。不需要游戏环境。
+- 真实触发：八个不同 home 的公开 `Execute(data hotfix --source raidbots ... --encoding csv --output 同路径)` 并发，均退出 0；第 47 次复现得到 manifest SHA `73edf...` 而 CSV SHA `3e87...`，均为 99 字节。原 helper 直接 `os.WriteFile` CSV，再 `O_TRUNC` sidecar，两者无共同 lease。与 SQL R4-02、demux R5-02 是不同实际 exporter，不重复计数。
+- 修复：CLI 只调用 `records.ExportHotfixCSV(ctx, ...)`；复用 records 的规范化 destination、已有 OS lease 与逐文件完整 stage 发布。Hotfix/SQL 共用原 `sql-csv` 锁身份，不能按 provider 分成两个互不协调的锁。共同边界先复核两个目标，再发布 CSV 和最后 manifest；保留 Hotfix 默认覆盖、原 manifest schema、warnings/filter/cursor 与输出语义，不引入整组回滚框架。
+- 正式 `hotfix_csv_export_test.go` 通过公开 Execute，在不同 home/子进程/规范化与 symlink 别名上暂停 CSV→manifest 窗口，断言另一个调用等待并响应原 deadline、未改变文件，之后两次成功且最终 bytes/hash/返回 manifest 一致；Windows case 别名留给新 CI。旧 command 实现负对照失败。
+- 正式 `hotfix_export_test.go` 证明 Hotfix 等待既有 SQL lease、取消不写、隐式覆盖仍成立、编码错误/manifest 预检不替换旧 CSV，输出字节与原 encoder 完全一致。
+
+### R6-04 · 低 · 三个没有当前消费者的内部 Lua 包装函数
+
+- 状态：代码已清理，addon 全包 34 suite × 六 profile = 204 组通过，无 Lua 跳过。
+- 全仓生产、测试、文档和 Skill 无调用：`diagnostics.FormatError` 只是转发 FormatAgentReport；`inspector.GetMouseFocusLabel` 是未使用的捕获包装；`page.OpenSelectedNodeDetail` 无调用且实际 tree context 直接绑定本地 OpenNodePopup。
+- 仅删除这三个独立包装（约 19 行实现）；保留实际 FormatAgentReport、Compat.GetMouseFocus/CaptureMouseFocus、OpenNodePopup，以及 SearchPath、Stores 状态和 legacy report 消费者，不按模块名整体删除。
+
+### R6 实际覆盖与验证
+
+- 审计抽查 Source search/context/batch/line index，Data export/Hotfix/DB2，Native INPUT/report/recovery、probe 生命周期，受管替换/npm 更新及 Skill source/data/live/recovery 合同。只有上述 4 项得到确认；没有新增只能依靠游戏确认的缺陷。R3-C01/R3-C03/R4-C01 未取得新证据，仍为候选。
+- Source 新旧代码负对照、codebase 全包（136 test/subtest pass；2 个真实 LuaLS/broker 可选集成缺环境 skip）及定向 race ×3 通过；Windows 未在本地冒称执行。Hotfix 真实并发已复现，正式跨进程测试、records/evidence/vault 12 包及 Hotfix/SQL race ×3 通过；addon 全包通过。代码批次 build/vet 通过，首次完整 Lua 必需 Go 整合已执行：29 包通过、2 包失败、4 包无测试；2438 test/subtest pass、4 fail、28 skip。除既有3个Linux平台失败，当时出现容量重载请求/期限保持测试失败（`TestAutomaticCapacityReloadContinuesOriginalRequest`）；后续已确认并修正单测计时条件，未发现对应生产缺陷，诊断负对照和最终完整重跑结果见下节。
+- Skill 合同 84 命令/220 引用/0 违规及生成命令检查通过，本批没有改 Skill/命令目录或发行版本输入。本次提交包含 R6 全部修复及额外测试修正；R5 `2660a4ef` 绿色 CI 不能替代本批的新 head 验证，推送后另跑 Windows CI。
+
+
+### R6 额外整合测试修正：容量 reload 的计时完成条件
+
+- 首次完整套件的额外失败不是已证实的生产缺陷：测试把 350ms 调用超时当成自动 reload 已完成，磁盘/调度稍慢便停在正常 bind/recovery 中间。诊断版 30 次有 5 次失败，精确 HEAD 依赖对照的原测试 30 次有 3 次失败；两者都保留原 request ID 和持久 deadline。
+- 400ms runtime-observation 延迟负对照明确 `context deadline exceeded`、sameID/sameDeadline=true。只修改 `stop_reconcile_test.go`：达到新 runtime 的 prepare Publish 边界后取消，5 秒只作死锁兜底且到期必须失败。检查内存及 Load 后原 ID/request/两个期限、durable reload complete、精确 prepare nonce/runtime 和单次 bind 输入；不改生产时限、cadence、重放规则或共用 pending fixture。
+- 修复单测 30/30、同样 400ms 延迟对照、channel/journal 全包、cadence/自动 reload/不重放 race ×3、build/vet 通过。修正后完整 Lua 必需套件已重新执行：30测试包通过、command 1包仅3个既有Linux平台失败、4包无测试；2439 test/subtest pass、3 fail、28 skip，无新增失败。保留首轮失败和负对照事实，未改生产行为或以重跑代替诊断。
+
+### 特定环境与证据缺口的后续复验
+
+以下不是新增已确认生产 bug。候选和可选覆盖缺口分别标注；本任务不要求用户现在执行，也未操作游戏/真实安装。未执行结果留空；已有六项待实机步骤见 R3/R4 对应条目、R5-01 及 handover。
+
+| 项目 / 当前状态 | 必需环境或材料 | 最小步骤 | 预期 / 判定标准 | 实际结果 |
+| --- | --- | --- | --- | --- |
+| R4-C01 候选，跨卷是否为合同缺陷未确认 | Windows 两个真实可写卷；隔离受管旧版/新版 release、合法 client 元数据、project 在 A 卷、安装在 B 卷；无需游戏进程 | 执行同卷对照，再以默认 repairs archive 跑跨卷 doctor/update 磁盘 fixture，停在 PID=0 激活边界；记录 Rel/MoveFileEx、transaction/archive 和原安装状态 | 先核实支持合同；若跨卷承诺合法则升级/归档应完成，否则以确切失败阶段和恢复可用性定性，不能由 Linux 推断 | |
+| R3-C01 候选，多 Misc 领域语义未确认 | 固定真实构建 SpellMisc DB2、匹配 DBD 与 DifficultyID 说明及多匹配 SpellID | 比较原表全部匹配、导航单值与领域定义，保存固定 hash/build 与差异 | 只有真实变体语义与现有单值合同冲突才升级为缺陷；合成双行不够 | |
+| R3-C03 候选，foreignOwner 展示语义未确认 | 明确 instances 的项目归属合同；必要时 Windows 隔离窗口/owner fixture 与两个 project | 先确认“当前项目”基准；对照 instances 展示与 Connect/doctor/activation 的实际 owner 判断 | 被动字段差异不能当作连接阻断；有约定消费者且展示/行为违约才升级 | |
+| 真实 LuaLS/broker/打包 Source 语义，可选覆盖缺口 | Windows；固定 LuaLS 3.19.1 可运行目录、匹配 release/CLI、固定生成定义与 Retail Source | 配置正式测试所列 runtime/release/docs 输入，运行 codebase/luals/command 的 real integration 测试 | LSP 引用/定义、关闭交接、取消、workspace 隔离和已安装 Source 语义符合对应断言；archive SHA 通过不能替代进程运行 | |
+| API 文档与安装数据/图像/CASC oracle，可选覆盖缺口 | 固定文档、显式安装产品/build、本地 CASC index、icon.blp/png/webp、校验过的 CascLib oracle 与固定 DB2 definitions | 按对应测试环境变量选定固定资料，分别运行 environment/flow/records/archive/navigatetest/schema 测试 | 固定身份/原始字节/解码/导出与各 oracle 断言一致；不把缺样本 skip 当作通过或已确认 bug | |
+| 原 runtime dump/header replay，可选覆盖缺口 | 已有、获准使用的原始 dump manifest/header/匹配 executable 及 hash；不采集新游戏数据 | 配置正式 memory replay 测试的固定输入，验证 root recipe 和捕获 header 对照 | 根定位证据及身份与固定原始数据吻合；合成 memory fixture 不代替原始 replay | |
+| Live read-only 可选覆盖缺口 | 后续明确授权的 Windows/WoW 固定 PID/创建时间/HWND 和对应受管版本 | 只在后续本机任务运行显式只读目标测试，核实身份和可读窗口；不借此扩大输入许可 | 原身份/只读窗口信息正确；本次未执行，不要求现在启动游戏 | |

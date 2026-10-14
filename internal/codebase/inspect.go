@@ -104,11 +104,11 @@ func (b *Browser) inspectPath(ctx context.Context, snapshotID string, pin select
 			response.Truncated = true
 			break
 		}
-		data, hash, err := cache.document(ctx, r.Path)
+		snippet, hash, err := cache.numberedLines(ctx, r.Path, 1, 6, 0)
 		if err != nil {
 			return response, err
 		}
-		response.Results = append(response.Results, Match{Kind: "file", Name: path.Base(r.Path), Path: r.Path, Line: 1, MatchedBy: "path", Role: pathRole(r.Path), Score: 100, ScoreParts: map[string]int{"match": 100}, ContentHash: hash, Excerpt: numberedLines(data, 1, 6, 0)})
+		response.Results = append(response.Results, Match{Kind: "file", Name: path.Base(r.Path), Path: r.Path, Line: 1, MatchedBy: "path", Role: pathRole(r.Path), Score: 100, ScoreParts: map[string]int{"match": 100}, ContentHash: hash, Excerpt: snippet})
 	}
 	for _, r := range assets {
 		if len(response.Results) >= inspectTargetLimit {

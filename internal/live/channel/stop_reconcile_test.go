@@ -134,6 +134,22 @@ func TestStopBeforePrepareAtCapacityDoesNotReload(t *testing.T) {
 	}
 }
 
+type capacityReloadPeer struct {
+	*stopReconcilePeer
+	cancel context.CancelFunc
+}
+
+func (p *capacityReloadPeer) Publish(ctx context.Context, e bridge.SlotEnvelope) error {
+	err := p.stopReconcilePeer.Publish(ctx, e)
+	if e.Action == "prepare" {
+		// The reload completion and resumed prepare intent are already durable.
+		// Stop at that boundary, rather than racing those journal writes against
+		// the short observation timeout used by unrelated pending/stop tests.
+		p.cancel()
+	}
+	return err
+}
+
 func TestAutomaticCapacityReloadContinuesOriginalRequest(t *testing.T) {
 	d, p := stopReconcileFixture(t)
 	d.State.Identity.NextSlot = 486
@@ -143,14 +159,32 @@ func TestAutomaticCapacityReloadContinuesOriginalRequest(t *testing.T) {
 	originalID, deadline := d.State.Operation.ID, d.State.Operation.RecoveryBudget.DeadlineMS
 	p.current.Runtime = strings.Repeat("2", 32)
 	p.current.NextSlot = 1
-	if err := stopReconcileContinue(d); !errors.Is(err, ErrPending) {
-		t.Fatalf("unfinished business returned success: %v", err)
+	// This timeout is only a deadlock guard. Reaching prepare cancels the call;
+	// expiry is a failure and never serves as the test's completion signal.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	peer := &capacityReloadPeer{stopReconcilePeer: p, cancel: cancel}
+	d.Backend = peer
+	if err := d.Continue(ctx); !errors.Is(err, ErrPending) || !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("did not reach resumed prepare publication: err=%v reload=%+v transaction=%+v", err, d.State.Reload, d.State.Transaction)
 	}
-	if d.State.Reload == nil || !d.State.Reload.Automatic || d.State.Reload.Phase != "complete" || d.State.Operation.ID != originalID || d.State.Operation.RecoveryBudget.DeadlineMS != deadline {
-		t.Fatal("capacity reload replaced request or budget")
+	if len(p.publications) != 2 || p.publications[0].Action != "bind" || p.publications[1].Action != "prepare" || len(p.inputs) != 1 || p.inputs[0].Envelope.Action != "bind" {
+		t.Fatalf("unexpected reload effects: publications=%+v inputs=%+v", p.publications, p.inputs)
 	}
-	if d.State.Transaction == nil || d.State.Transaction.Envelope.Action != "prepare" {
-		t.Fatal("automatic reload stopped before resuming business")
+	loaded, err := Load(d.Log, peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []*State{&d.State, &loaded.State} {
+		if state.Reload == nil || !state.Reload.Automatic || state.Reload.Phase != "complete" {
+			t.Fatalf("automatic capacity reload did not complete durably: %+v", state.Reload)
+		}
+		if state.Operation.ID != originalID || state.Operation.Request != "capacity-original" || state.Operation.RecoveryBudget.DeadlineMS != deadline || state.Reload.RecoveryBudget.DeadlineMS != deadline {
+			t.Fatalf("capacity reload replaced request or budget: %+v", state.Operation)
+		}
+		if state.Transaction == nil || state.Transaction.Envelope.Action != "prepare" || state.Transaction.Envelope.Nonce != p.publications[1].Nonce || state.Transaction.Envelope.Runtime != p.current.Runtime {
+			t.Fatalf("automatic reload lost the resumed prepare: %+v", state.Transaction)
+		}
 	}
 }
 func TestStopPreparedOperationDoesNotCommit(t *testing.T) {

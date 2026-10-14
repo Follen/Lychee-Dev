@@ -126,15 +126,7 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 	if err != nil {
 		return QueryCSVExport{}, err
 	}
-	lease, err := acquireExportLease(ctx, dataDestination.path, "sql-csv")
-	if err != nil {
-		return QueryCSVExport{}, err
-	}
-	defer lease.Close()
-	if err := dataDestination.publish(ctx, raw); err != nil {
-		return QueryCSVExport{}, err
-	}
-	if err := manifestDestination.publish(ctx, append(manifestRaw, '\n')); err != nil {
+	if err := publishCSVPair(ctx, dataDestination, manifestDestination, raw, append(manifestRaw, '\n')); err != nil {
 		return QueryCSVExport{}, err
 	}
 	return QueryCSVExport{Manifest: manifest, Capture: capture}, nil

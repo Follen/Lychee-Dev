@@ -29,7 +29,7 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	args := []string{"grep", "-n", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--"}
+	args := []string{"grep", "-n", "-z", "-I", "-i", "-F", "--full-name", "-e", text, c.pin.ExactCommit, "--"}
 	// Apply the same topic restriction before Git's bounded output is filled.
 	// icase matches bodyTopicPath for uppercase source extensions as well.
 	switch topic {
@@ -60,18 +60,20 @@ func (c *snapshotCache) bodyCandidates(ctx context.Context, text, topic string, 
 	reader.Buffer(make([]byte, 64<<10), 1<<20)
 	for reader.Scan() {
 		line := reader.Text()
-		_, remainder, ok := strings.Cut(line, ":")
+		// Git -n -z emits commit:path NUL line NUL snippet LF without
+		// quoting the path. sourcePath excludes embedded CR/LF in filenames.
+		file, rest, ok := strings.Cut(line, "\x00")
 		if !ok {
 			continue
 		}
-		name, rest, ok := strings.Cut(remainder, ":")
+		name, ok := strings.CutPrefix(file, c.pin.ExactCommit+":")
 		if !ok || !sourcePath(name) || !bodyTopicPath(topic, name) {
 			continue
 		}
 		if _, indexed := c.documents[name]; !indexed {
 			continue
 		}
-		number, snippet, ok := strings.Cut(rest, ":")
+		number, snippet, ok := strings.Cut(rest, "\x00")
 		if !ok {
 			continue
 		}

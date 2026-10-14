@@ -253,19 +253,6 @@ function inspector.CaptureMouseFocus()
     return inspection ~= nil and errorMessage == nil, inspection, errorMessage
 end
 
-function inspector.GetMouseFocusLabel()
-    if IsCombatBlocked() then
-        return false, nil, nil, ns.L.COMBAT_BLOCKED
-    end
-    local focus = ns.Compat.GetMouseFocus()
-    if not focus then
-        return false, nil, nil, ns.L.NO_MOUSE_FOCUS
-    end
-    return true,
-        SafeMethod(focus, "GetName") or SafePreview(focus),
-        SafeMethod(focus, "GetObjectType") or type(focus)
-end
-
 -- Case-insensitive key substring search ranked exact -> prefix -> contains,
 -- each bucket key-sorted. Bounds: 200 results / 10000 scans / 2000 visited
 -- nodes / depth 6. Secret keys and values are skipped; the walk descends

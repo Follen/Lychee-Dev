@@ -164,10 +164,6 @@ function diagnostics.FormatAgentReport(entry)
     return table.concat(sections, "\n")
 end
 
-function diagnostics.FormatError(entry)
-    return diagnostics.FormatAgentReport(entry)
-end
-
 function diagnostics.ResetErrors()
     if ns.Safety.IsCombatBlocked() then
         return false, ns.L.COMBAT_BLOCKED

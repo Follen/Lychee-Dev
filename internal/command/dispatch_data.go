@@ -1,13 +1,11 @@
 package command
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
@@ -478,7 +476,7 @@ func runDataHotfixRemote(ctx context.Context, opts Options, response *Envelope, 
 		if opts.output == "" {
 			return false, 2, errors.New("data hotfix --encoding csv requires --output")
 		}
-		manifest, err := writeHotfixCSV(opts.output, result)
+		manifest, err := records.ExportHotfixCSV(ctx, opts.output, result)
 		if err != nil {
 			return false, 0, err
 		}
@@ -502,27 +500,4 @@ func runDataHotfixRemote(ctx context.Context, opts Options, response *Envelope, 
 		return true, 0, nil
 	}
 	return false, 0, nil
-}
-
-// writeHotfixCSV encodes the unified result as RFC 4180 CSV at the requested
-// location and publishes its machine-readable manifest beside it.
-func writeHotfixCSV(output string, result records.RemoteHotfixResult) (records.CSVExportManifest, error) {
-	var manifest records.CSVExportManifest
-	var buffer bytes.Buffer
-	encoded, err := records.EncodeHotfixCSV(&buffer, result)
-	if err != nil {
-		return manifest, err
-	}
-	if err := os.WriteFile(output, buffer.Bytes(), 0600); err != nil {
-		return manifest, err
-	}
-	sidecar, err := os.OpenFile(output+".manifest.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return manifest, err
-	}
-	if err := records.WriteCSVManifest(sidecar, encoded); err != nil {
-		sidecar.Close()
-		return manifest, err
-	}
-	return encoded, sidecar.Close()
 }

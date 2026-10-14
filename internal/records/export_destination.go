@@ -65,6 +65,26 @@ func acquireExportLease(ctx context.Context, canonicalPath, kind string) (*vault
 	return vault.AcquireLease(ctx, filepath.Join(filepath.Dir(canonicalPath), ".lycheedev-locks"), kind+":"+resource)
 }
 
+// The existing sql-csv lock identity is shared by all CSV publishers. Different
+// encodings targeting the same CSV/manifest pair must not form separate domains.
+func publishCSVPair(ctx context.Context, data, manifest *exportDestination, raw, sidecar []byte) error {
+	lease, err := acquireExportLease(ctx, data.path, "sql-csv")
+	if err != nil {
+		return err
+	}
+	defer lease.Close()
+	if err := data.check(); err != nil {
+		return err
+	}
+	if err := manifest.check(); err != nil {
+		return err
+	}
+	if err := data.publish(ctx, raw); err != nil {
+		return err
+	}
+	return manifest.publish(ctx, sidecar)
+}
+
 func (d *exportDestination) check() error {
 	info, err := d.root.Lstat(d.name)
 	if errors.Is(err, os.ErrNotExist) {
