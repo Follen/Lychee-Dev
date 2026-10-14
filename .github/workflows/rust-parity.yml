@@ -132,6 +132,15 @@ jobs:
       - name: Run CLI contract metadata and arity unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-cli-contract --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev contract::tests -j 1
+      - name: Run bounded Emmy doctor evidence fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-emmy-doctor --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::emmy_doctor_ -j 1
+      - name: Run preserved release integrity doctor fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-doctor-release --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::doctor_release_ -j 1
+      - name: Run native session lifecycle unit fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-session-lifecycle --one-shot -- test --locked --offline -p lycheedev-source --lib native_session::tests -j 1
       - name: Run Source query admission unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-query-default --one-shot -- test --locked --offline -p lycheedev-source --lib public_query_defaults -j 1
@@ -140,7 +149,10 @@ jobs:
         run: node tools/rust-cargo.mjs --owner ci-mailbox-v1 --one-shot -- test --locked --offline -p lycheedev-live --lib go_mailbox_v1 -j 1
       - name: Run real local Data installation and catalog fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-data-installation --one-shot -- test --locked --offline -p lycheedev-data --test installed_parity --test local_domain_parity -j 1
+        run: node tools/rust-cargo.mjs --owner ci-data-installation --one-shot -- test --locked --offline -p lycheedev-data --test installed_parity -j 1
+      - name: Run local Data domain fixtures independently
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-data-domain --one-shot -- test --locked --offline -p lycheedev-data --test local_domain_parity -j 1
       - name: Run target cancellation before symbolic resolution
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1
@@ -151,6 +163,9 @@ jobs:
       - name: Execute sealed CLI version help and describe
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
         run: node tools/rust-cli-smoke.mjs .tmp/ci-cli-artifact/artifact.json
+      - name: Execute real Emmy doctor in an isolated workspace
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
+        run: node tools/rust-cli-smoke.mjs .tmp/ci-cli-artifact/artifact.json --doctor
       - name: Preserve each controlled command receipt and logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -184,6 +184,12 @@ mod tests {
         });
         for definition in &mut expected {
             definition.as_object_mut().unwrap().remove("parserFlags");
+            // The only allowed doctor metadata delta is the selected Source
+            // engine; keep the fixed Go fixture and all other fields exact.
+            if definition["path"] == "doctor" {
+                assert_eq!(definition["summary"], "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
+                definition["summary"] = serde_json::json!("Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
+            }
         }
         assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
     }

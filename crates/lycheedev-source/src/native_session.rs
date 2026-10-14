@@ -28,6 +28,36 @@ const WIRE: &str = "lycheedev.native-source-session.v1";
 const REQUEST_BYTES: usize = 768 << 20;
 const RESPONSE_BYTES: usize = 32 << 20;
 const REPLY_RESERVE: Duration = Duration::from_millis(500);
+const OWNER_IDLE: Duration = Duration::from_secs(60);
+const OWNER_LIFETIME: Duration = Duration::from_secs(600);
+
+/// The idle interval starts after a request finishes. Active work suspends idle,
+/// but neither work nor status may extend the fixed owner lifetime.
+struct SessionLifetime {
+    deadline: Instant,
+}
+impl SessionLifetime {
+    fn new(started: Instant, caller_deadline: Instant) -> Self {
+        Self {
+            deadline: caller_deadline.min(started + OWNER_LIFETIME),
+        }
+    }
+    fn idle_deadline(&self, now: Instant) -> Instant {
+        self.deadline.min(now + OWNER_IDLE)
+    }
+    fn handshake_deadline(&self, now: Instant, idle_deadline: Instant) -> Instant {
+        self.deadline.min(idle_deadline).min(now + Duration::from_secs(5))
+    }
+    fn request_deadline(&self, requested: Instant) -> Instant {
+        self.deadline.min(requested)
+    }
+}
+
+fn session_status(cached_key: Option<&str>, owner_pid: u32) -> Value {
+    json!({"state":if cached_key.is_some(){"ready"}else{"idle"},
+        "backend":"native", "workerPid":if cached_key.is_some(){owner_pid}else{0},
+        "ownerPid":owner_pid, "cachedSnapshot":cached_key})
+}
 fn reply_reserve(deadline: Instant) -> Duration {
     REPLY_RESERVE.min(deadline.saturating_duration_since(Instant::now()) / 4)
 }
@@ -420,7 +450,7 @@ pub fn server(args: &[String]) -> Result<()> {
         flags: flags.clone(),
         home: home.canonicalize()?,
         cwd: std::env::current_dir()?,
-        control: OperationControl::new(Instant::now() + Duration::from_secs(600), console.token()),
+        control: OperationControl::new(Instant::now() + OWNER_LIFETIME, console.token()),
     };
     let current = identity(&inv.control)?;
     let own = Process::open(std::process::id()).map_err(platform)?;
@@ -455,6 +485,10 @@ pub fn serve(inv: &Invocation) -> Result<()> {
     serve_owned(inv, identity(&inv.control)?)
 }
 fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
+    let lifetime = SessionLifetime::new(Instant::now(), inv.control.deadline());
+    let owner_control = inv
+        .control
+        .child(lifetime.deadline, inv.control.cancel_handle());
     workspace::open(&inv.home)?;
     let scope = BrokerScope::for_native_source(&inv.home).map_err(platform)?;
     let _owner =
@@ -462,24 +496,24 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
     let mut job = BrokerJob::own_current_process(2 << 30).map_err(platform)?;
     let own = Process::open(std::process::id()).map_err(platform)?;
     let mut listener = BrokerListener::bind(&scope).map_err(platform)?;
-    let stop = AtomicBool::new(false);
     let mut cached: Option<Cached> = None;
     let run = (|| -> Result<()> {
         loop {
-            // An idle owner has a bounded lifetime and no polling or timers.
+            // Starting this wait after the response resets idle without charging
+            // active request time. The fixed owner deadline is never reset.
+            owner_control.check()?;
+            let idle_deadline = lifetime.idle_deadline(Instant::now());
             let mut stream = match listener.accept(
-                inv.control
-                    .deadline()
-                    .min(Instant::now() + Duration::from_secs(600)),
-                &stop,
+                idle_deadline,
+                owner_control.token(),
             ) {
                 Ok(stream) => stream,
                 Err(message) if message.contains("deadline") => return Ok(()),
                 Err(message) => return Err(platform(message)),
             };
             stream.set_deadline(
-                Instant::now() + Duration::from_secs(10),
-                Arc::new(AtomicBool::new(false)),
+                lifetime.handshake_deadline(Instant::now(), idle_deadline),
+                owner_control.cancel_handle(),
             );
             write_frame(
                 &mut stream,
@@ -499,16 +533,18 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
             let total_deadline = Instant::now()
                 .checked_add(Duration::from_millis(remaining))
                 .ok_or_else(|| fault("Native request deadline range"))?;
+            let total_deadline = lifetime.request_deadline(total_deadline);
             let response_control =
-                OperationControl::new(total_deadline, Arc::new(AtomicBool::new(false)));
+                owner_control.child(total_deadline, owner_control.cancel_handle());
             stream.set_deadline(total_deadline, response_control.cancel_handle());
             match request.action {
                 Action::Status => write_frame(
                     &mut stream,
                     &Response {
-                        value: Some(
-                            json!({"state":"ready","backend":"native","workerPid":own.identity().pid,"cachedSnapshot":cached.as_ref().map(|value|value.key.as_str())}),
-                        ),
+                        value: Some(session_status(
+                            cached.as_ref().map(|value| value.key.as_str()),
+                            own.identity().pid,
+                        )),
                         error: None,
                     },
                     RESPONSE_BYTES,
@@ -551,7 +587,7 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                     let deadline = total_deadline
                         .checked_sub(reply_reserve(total_deadline))
                         .unwrap_or_else(Instant::now);
-                    let control = OperationControl::new(deadline, cancel);
+                    let control = owner_control.child(deadline, cancel);
                     let diagnostic = inv.home.join("tmp/source-native-last-request.json");
                     let begun = Instant::now();
                     let record = |phase: &str, error: Option<&ToolkitError>| {
@@ -568,12 +604,16 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                             if cached.as_ref().is_none_or(|value| value.key != reuse.key) {
                                 // This handshake does not prepare or run a query.
                                 // The caller sends the full input after a miss.
-                                return Err(ToolkitError::new("source.native_snapshot_missing", "Native Source snapshot is not cached", 3));
+                                return Err(ToolkitError::new(
+                                    "source.native_snapshot_missing",
+                                    "Native Source snapshot is not cached",
+                                    3,
+                                ));
                             }
                             (reuse.query, true)
                         } else {
-                            let WorkerRequest { snapshot, query } = work
-                                .ok_or_else(|| fault("Native query request missing"))?;
+                            let WorkerRequest { snapshot, query } =
+                                work.ok_or_else(|| fault("Native query request missing"))?;
                             // Only the independently hashed received snapshot can
                             // establish a cache entry; a caller key never does.
                             let key = snapshot.cache_key(&control)?;
@@ -601,8 +641,7 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
                             .analysis
                             .query_observed(query, &control, |phase| record(phase, None))?;
                         value["analysis"]["cacheHit"] = json!(hit);
-                        value["nativeSession"] =
-                            json!({"workerPid":own.identity().pid,"cacheHit":hit,"snapshotTransfer":if identity_only{"identity_only"}else{"full"}});
+                        value["nativeSession"] = json!({"workerPid":own.identity().pid,"cacheHit":hit,"snapshotTransfer":if identity_only{"identity_only"}else{"full"}});
                         control.check()?;
                         Ok(value)
                     })();
@@ -633,6 +672,9 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
             }
         }
     })();
+    // Retire analysis before releasing the process ownership boundary on every
+    // exit, including owner expiry, transport failure and cancellation.
+    drop(cached.take());
     job.disarm().map_err(platform)?;
     run
 }
@@ -640,6 +682,83 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_restarts_after_work_but_owner_lifetime_does_not() {
+        let start = Instant::now();
+        let lifetime = SessionLifetime::new(start, start + Duration::from_secs(900));
+        assert_eq!(
+            lifetime.idle_deadline(start),
+            start + Duration::from_secs(60)
+        );
+        // Connecting is not admission: a slow handshake at t=59 cannot renew
+        // the owner's t=60 idle deadline.
+        assert_eq!(
+            lifetime.handshake_deadline(start + Duration::from_secs(59), lifetime.idle_deadline(start)),
+            start + OWNER_IDLE
+        );
+        assert_eq!(lifetime.handshake_deadline(start, lifetime.idle_deadline(start)), start + Duration::from_secs(5));
+        // A long query is allowed to outlive idle; completing it starts a fresh
+        // idle interval. A status request has the same reset behavior.
+        let finished = start + Duration::from_secs(120);
+        assert_eq!(
+            lifetime.idle_deadline(finished),
+            start + Duration::from_secs(180)
+        );
+        assert_eq!(
+            lifetime.idle_deadline(start + Duration::from_secs(590)),
+            start + OWNER_LIFETIME
+        );
+        assert_eq!(
+            lifetime.request_deadline(start + Duration::from_secs(900)),
+            start + OWNER_LIFETIME
+        );
+        assert_eq!(
+            lifetime.handshake_deadline(start + Duration::from_secs(599), start + OWNER_LIFETIME),
+            start + OWNER_LIFETIME
+        );
+    }
+
+    #[test]
+    fn shorter_caller_and_request_deadlines_are_preserved() {
+        let start = Instant::now();
+        let lifetime = SessionLifetime::new(start, start + Duration::from_secs(30));
+        assert_eq!(
+            lifetime.idle_deadline(start),
+            start + Duration::from_secs(30)
+        );
+        assert_eq!(
+            lifetime.request_deadline(start + Duration::from_secs(5)),
+            start + Duration::from_secs(5)
+        );
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let owner = OperationControl::new(lifetime.deadline, cancelled.clone());
+        let request = owner.child(
+            start + Duration::from_secs(100),
+            Arc::new(AtomicBool::new(false)),
+        );
+        assert_eq!(request.deadline(), lifetime.deadline);
+        // Blocking transport only observes this atomic, without invoking
+        // OperationControl::check to propagate cancellation lazily.
+        let transport = owner.child(lifetime.deadline, owner.cancel_handle());
+        let transport_token = transport.cancel_handle();
+        cancelled.store(true, Ordering::Release);
+        assert!(transport_token.load(Ordering::Acquire));
+        assert_eq!(request.check().unwrap_err().code, "command.cancelled");
+    }
+
+    #[test]
+    fn retained_owner_without_analysis_is_idle() {
+        let idle = session_status(None, 42);
+        assert_eq!(idle["state"], "idle");
+        assert_eq!(idle["workerPid"], 0);
+        assert_eq!(idle["ownerPid"], 42);
+        assert!(idle["cachedSnapshot"].is_null());
+        let ready = session_status(Some("authenticated-snapshot"), 42);
+        assert_eq!(ready["state"], "ready");
+        assert_eq!(ready["workerPid"], 42);
+        assert_eq!(ready["cachedSnapshot"], "authenticated-snapshot");
+    }
 
     #[test]
     fn truncated_response_keeps_primary_failure_when_retirement_is_denied() {

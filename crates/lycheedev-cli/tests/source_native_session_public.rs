@@ -280,6 +280,7 @@ APIDocumentation:AddDocumentationTable(API)
     let status = cli(&home, &["source", "session", "status"]);
     assert_eq!(status["result"]["state"], "ready");
     assert_eq!(status["result"]["workerPid"], pid);
+    assert_eq!(status["result"]["ownerPid"], pid);
     let changed = cli(
         &home,
         &[

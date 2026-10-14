@@ -717,7 +717,7 @@
   },
   {
     "path": "doctor",
-    "summary": "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check",
+    "summary": "Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check",
     "mutates": false,
     "arguments": [],
     "flags": [

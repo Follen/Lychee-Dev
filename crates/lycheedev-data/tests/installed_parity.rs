@@ -386,9 +386,30 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     )
     .unwrap();
     std::fs::write(client.join("version.txt"), "1.60.1.70124").unwrap();
+    // Fixed Go inspectExactClient returns the successfully resolved canonical
+    // wow_forever identity with this later catalog conflict. The explicit
+    // regional selector associates only wow_cn_beta issues, so it reports no
+    // installation; the unfiltered selector and pinned reader still reject
+    // the conflicting client rather than borrowing the sibling's archives.
+    let regional_error = installed::resolve_target(&request).unwrap_err();
+    assert_eq!(regional_error.code, "selection.installation_missing");
+    let issue = &regional_error.details["__commandContext"]["installationSelection"]["issues"][0];
+    assert_eq!(issue["productCode"], "wow_forever");
+    assert_eq!(issue["reason"], "selection.installation_metadata_conflict");
     assert_eq!(
-        installed::resolve_target(&request).unwrap_err().code,
+        installed::resolve_target(&installed::LocalTargetRequest {
+            product: None,
+            ..request.clone()
+        })
+        .unwrap_err()
+        .code,
         "selection.installation_metadata_conflict"
+    );
+    assert_eq!(
+        installed::resolve_pinned_target_budgeted(&client, &resolved.data, None)
+            .unwrap_err()
+            .code,
+        "records.pinned_build_changed"
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -568,6 +589,12 @@ impl InstallationFixture {
                 .as_nanos()
         ));
         std::fs::create_dir(&root).unwrap();
+        // Windows TEMP may contain an 8.3 alias (RUNNER~1). Selection follows
+        // Go's EvalSymlinks contract and exposes the canonical directory, so
+        // fixture identity expectations must use the public canonical spelling.
+        let root = std::path::PathBuf::from(lycheedev_core::client::display_path(
+            &std::fs::canonicalize(&root).unwrap(),
+        ));
         Self { root }
     }
     fn client(&self, name: &str, flavor: Option<&str>, build: Option<&str>) -> std::path::PathBuf {

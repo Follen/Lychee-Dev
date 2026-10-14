@@ -675,47 +675,210 @@ fn dispatch_available(inv: &Invocation) -> Result<Outcome> {
     }
     Ok(result)
 }
-fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    let root = std::env::current_exe()?
-        .parent()
-        .and_then(|path| path.parent())
-        .and_then(|path| path.parent())
-        .map(std::path::Path::to_path_buf);
-    let runtime = (|| -> Result<()> {
-        let root = root.as_ref().ok_or_else(|| {
-            ToolkitError::new(
-                "luals.unavailable",
-                "complete distribution root unavailable",
-                3,
-            )
-        })?;
-        let release =
-            lycheedev_delivery::release::inspect_with_control(root, VERSION, &inv.control)?;
-        let inventory = release
-            .resources
-            .iter()
-            .filter_map(|resource| {
-                resource
-                    .path
-                    .strip_prefix("tool/luals/")
-                    .map(|name| (name.to_owned(), resource.sha256.clone()))
-            })
-            .collect();
-        lycheedev_source::luals::Runtime::prepare_inspected_release(
-            &root.join("payload/tool/luals"),
-            inventory,
-        )?
-        .verify_with_control(&inv.control)
-    })();
-    inv.control.check()?;
-    let tool = match runtime {
-        Ok(()) => json!({"id":"luals.runtime","ok":true,"detail":"bundled LuaLS 3.19.1 verified"}),
-        Err(error) => {
-            json!({"id":"luals.runtime","ok":false,"status":"warn","detail":error.message,"nextStep":"install the complete lycheedev npm package or native release for source refs/context semantic analysis and source validate --semantic"})
-        }
+const EMMY_DOCTOR_FILE: &str = "doctor-smoke.lua";
+const EMMY_DOCTOR_MANIFEST: &str = "DoctorSmoke.toc";
+const EMMY_DOCTOR_SYMBOL: &str = "LycheeDoctorTarget";
+const EMMY_DOCTOR_SOURCE: &str =
+    "local function LycheeDoctorTarget()\n    return 7\nend\nlocal answer = LycheeDoctorTarget()\n";
+const EMMY_DOCTOR_EXECUTION_SECONDS: u64 = 5;
+
+fn emmy_doctor_request() -> Result<lycheedev_source::native_research::WorkerRequest> {
+    use lycheedev_source::{
+        index::Symbol,
+        native::LuacIdentity,
+        native_research::{LoadEvidence, QueryRequest, SnapshotRequest, WorkerRequest},
     };
-    let mut providers = vec![tool];
+    // The native input contract needs a pinned syntax-checker identity. This is
+    // admission metadata only: this smoke neither loads nor verifies luac.
+    let pinned: Value = serde_json::from_str(include_str!("../../../release/tools/luac.json"))?;
+    let luac: lycheedev_source::luac::Manifest = serde_json::from_value(pinned["runtime"].clone())?;
+    Ok(WorkerRequest {
+        snapshot: SnapshotRequest {
+            files: BTreeMap::from([(EMMY_DOCTOR_FILE.into(), EMMY_DOCTOR_SOURCE.into())]),
+            load_documents: BTreeMap::from([(
+                EMMY_DOCTOR_MANIFEST.into(),
+                format!("{EMMY_DOCTOR_FILE}\n"),
+            )]),
+            // This product belongs solely to the built-in fixture's load rules;
+            // doctor does not select or access a user's client/source snapshot.
+            source: json!({"repository":"lycheedev-doctor-smoke","product":"retail","sourceExecution":false}),
+            luac: LuacIdentity {
+                version: luac.version,
+                platform: luac.platform,
+                executable_sha256: luac.sha256,
+                executable_bytes: luac.bytes,
+            },
+            api: vec![],
+            environment_manifest: None,
+            load_plans: vec![LoadEvidence {
+                manifest: EMMY_DOCTOR_MANIFEST.into(),
+                ordered: vec![EMMY_DOCTOR_FILE.into()],
+                issues: vec![],
+            }],
+            input_gaps: vec![],
+        },
+        query: QueryRequest {
+            symbol: Symbol {
+                id: String::new(),
+                kind: "function".into(),
+                name: EMMY_DOCTOR_SYMBOL.into(),
+                target: String::new(),
+                category: String::new(),
+                confidence: String::new(),
+                path: EMMY_DOCTOR_FILE.into(),
+                line: 1,
+                end_line: 3,
+                signature: String::new(),
+                scope: String::new(),
+                ordinal: 0,
+            },
+            direction: "incoming".into(),
+        },
+    })
+}
+fn validate_emmy_doctor_result(value: &Value) -> Result<()> {
+    let expected_call = value["relations"].as_array().is_some_and(|rows| {
+        rows.iter().any(|row| {
+            row["kind"] == "call"
+                && row["state"] == "resolved"
+                && row["target"] == EMMY_DOCTOR_SYMBOL
+                && row["path"] == EMMY_DOCTOR_FILE
+                && row["line"] == 4
+        })
+    });
+    if value["schema"] != "lycheedev.source-native-research.v1"
+        || value["analysis"]["engine"] != "native_common_facts"
+        || value["analysis"]["state"] != "complete"
+        || value["analysis"]["sourceExecution"] != false
+        || value["analysis"]["sourceFiles"] != 1
+        || !lycheedev_core::selection::valid_digest(
+            value["inputIdentity"].as_str().unwrap_or(""),
+            64,
+        )
+        || value["lifecycle"]["owner"] != "source_owned_process"
+        || value["lifecycle"]["mode"] != "one_shot"
+        || value["lifecycle"]["retired"] != true
+        || !expected_call
+    {
+        return Err(ToolkitError::new(
+            "source.emmy_doctor_mismatch",
+            "embedded Emmy worker did not prove the expected bounded fixture call and retirement",
+            3,
+        ));
+    }
+    Ok(())
+}
+fn emmy_doctor_check_with(
+    inv: &Invocation,
+    run: impl FnOnce(&Invocation, lycheedev_source::native_research::WorkerRequest) -> Result<Value>,
+) -> Result<Value> {
+    inv.control.check()?;
+    let mut probe = inv.clone();
+    probe.control = inv.control.child(
+        std::time::Instant::now() + std::time::Duration::from_secs(EMMY_DOCTOR_EXECUTION_SECONDS),
+        inv.control.cancel_handle(),
+    );
+    let observed = (|| -> Result<Value> {
+        let value = run(&probe, emmy_doctor_request()?)?;
+        probe.control.check()?;
+        validate_emmy_doctor_result(&value)?;
+        Ok(value)
+    })();
+    // Caller cancellation/deadline still terminates doctor; only a probe-local
+    // failure becomes a warning. The owned process runner retains its separate
+    // bounded retirement grace after terminating a timed-out child.
+    inv.control.check()?;
+    let mut check = json!({
+        "id":"emmy.runtime",
+        "scope":"embedded-worker-fixture",
+        "engineCommit":lycheedev_source::native::ENGINE_COMMIT,
+        "executionBudgetSeconds":EMMY_DOCTOR_EXECUTION_SECONDS,
+        "retirementGraceSeconds":5,
+        "sourceExecution":false,
+        "notChecked":["persistent_session","luac_runtime","user_source_analysis"],
+        "releaseIntegrityCheck":"release.integrity"
+    });
+    match observed {
+        Ok(value) => {
+            check["ok"] = json!(true);
+            check["detail"] = json!(
+                "embedded Emmy worker parsed and resolved the built-in call fixture and retired"
+            );
+            check["inputIdentity"] = value["inputIdentity"].clone();
+            check["lifecycle"] = value["lifecycle"].clone();
+        }
+        Err(error) if error.exit_code == 7 => return Err(error),
+        Err(error) => {
+            check["ok"] = json!(false);
+            check["status"] = json!("warn");
+            check["detail"] = json!(error.message);
+            check["code"] = json!(error.code);
+            if !error.details.is_null() {
+                check["details"] = error.details;
+            }
+            check["nextStep"] = json!(
+                "inspect the embedded Emmy worker failure and reinstall a verified Rust candidate if needed; this check does not validate persistent sessions or the bundled syntax compiler"
+            );
+        }
+    }
+    Ok(check)
+}
+fn release_doctor_check_with(
+    inv: &Invocation,
+    inspect: impl FnOnce() -> Result<lycheedev_delivery::release::Release>,
+) -> Result<Value> {
+    inv.control.check()?;
+    let observed = inspect();
+    inv.control.check()?;
+    match observed {
+        Ok(release) => Ok(json!({
+            "id":"release.integrity","ok":true,
+            "scope":"manifest-and-payload-inventory",
+            "detail":"distribution manifest and complete payload inventory verified",
+            "version":release.version,"resourceCount":release.resources.len()
+        })),
+        Err(error) if error.exit_code == 7 || error.code == "command.deadline" => Err(error),
+        Err(error) => Ok(json!({
+            "id":"release.integrity","ok":false,"status":"warn",
+            "scope":"manifest-and-payload-inventory",
+            "detail":error.message,"code":error.code,
+            "nextStep":"install the complete verified lycheedev npm package or native release; inspect missing or modified release resources"
+        })),
+    }
+}
+fn doctor_provider_checks_with(
+    inv: &Invocation,
+    inspect: impl FnOnce() -> Result<lycheedev_delivery::release::Release>,
+    run: impl FnOnce(&Invocation, lycheedev_source::native_research::WorkerRequest) -> Result<Value>,
+) -> Result<Vec<Value>> {
+    // Package integrity remains an independent diagnostic. A broken package
+    // warns without suppressing the embedded worker smoke or workspace checks.
+    let release = release_doctor_check_with(inv, inspect)?;
+    let engine = emmy_doctor_check_with(inv, run)?;
+    Ok(vec![release, engine])
+}
+fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
+    let mut providers = doctor_provider_checks_with(
+        inv,
+        || {
+            // Preserve the original installed-layout lookup and full, bounded
+            // inventory verification, under the caller's unchanged operation budget.
+            let executable = std::env::current_exe()?;
+            let root = executable
+                .parent()
+                .and_then(|path| path.parent())
+                .and_then(|path| path.parent())
+                .ok_or_else(|| {
+                    ToolkitError::new(
+                        "delivery.invalid_release",
+                        "complete distribution root unavailable",
+                        3,
+                    )
+                })?;
+            lycheedev_delivery::release::inspect_with_control(root, VERSION, &inv.control)
+        },
+        lycheedev_source::native_research::one_shot,
+    )?;
     if let Ok(project) = lycheedev_core::selection::find_project(&inv.cwd)
         .and_then(|directory| lycheedev_core::selection::inspect_project(&directory))
         && let Some(product) = project["project"]["product"].as_str()
@@ -1423,6 +1586,316 @@ mod tests {
     }
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
+    }
+    #[test]
+    fn doctor_release_failure_keeps_worker_and_workspace_diagnostics() {
+        let mut inv = parse(&args(&["doctor"])).unwrap();
+        inv.home = std::env::temp_dir().join(format!(
+            "lycheedev-doctor-absent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut worker_ran = false;
+        let providers = doctor_provider_checks_with(
+            &inv,
+            || {
+                Err(ToolkitError::new(
+                    "delivery.invalid_payload",
+                    "digest differs: skill/SKILL.md",
+                    4,
+                ))
+            },
+            |_, _| {
+                worker_ran = true;
+                Ok(emmy_doctor_reply_fixture())
+            },
+        )
+        .unwrap();
+        assert!(worker_ran);
+        assert_eq!(providers[0]["id"], "release.integrity");
+        assert_eq!(providers[0]["ok"], false);
+        assert_eq!(providers[0]["status"], "warn");
+        assert_eq!(providers[0]["code"], "delivery.invalid_payload");
+        assert_eq!(providers[1]["ok"], true);
+        let result = lycheedev_core::doctor::inspect_with_checks(&inv, providers).unwrap_err();
+        assert_eq!(result.code, "doctor.unhealthy");
+        let checks = result.details["result"]["checks"].as_array().unwrap();
+        assert!(
+            checks
+                .iter()
+                .any(|check| check["id"] == "vault.workspace" && check["ok"] == false)
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check["id"] == "release.integrity" && check["status"] == "warn")
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check["id"] == "emmy.runtime" && check["ok"] == true)
+        );
+        assert!(!inv.home.exists());
+    }
+    #[test]
+    fn doctor_release_inventory_checks_real_missing_and_modified_files() {
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = std::env::temp_dir().join(format!(
+            "lycheedev-doctor-release-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _cleanup = Cleanup(root.clone());
+        let inv = parse(&args(&["doctor"])).unwrap();
+        let inspect =
+            || lycheedev_delivery::release::inspect_with_control(&root, VERSION, &inv.control);
+        assert_eq!(
+            release_doctor_check_with(&inv, inspect).unwrap()["status"],
+            "warn"
+        );
+        let mut resources = vec![];
+        for (name, bytes) in [
+            ("skill/SKILL.md", b"skill".as_slice()),
+            ("addon/Lychee Dev.toc", b"addon".as_slice()),
+        ] {
+            let path = root.join("payload").join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+            resources.push(json!({"path":name,"sha256":lycheedev_core::storage::sha256(bytes),"bytes":bytes.len()}));
+        }
+        let manifest = json!({"schema":"lycheedev.release.v1","version":VERSION,"commit":"a".repeat(40),
+            "binaries":{"windows-amd64":{"path":"native/windows-amd64/lycheedev.exe","bytes":1,"sha256":"b".repeat(64)}},"resources":resources});
+        std::fs::write(
+            root.join("release.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let check = release_doctor_check_with(&inv, inspect).unwrap();
+        assert_eq!(check["ok"], true);
+        assert_eq!(check["scope"], "manifest-and-payload-inventory");
+        assert_eq!(check["resourceCount"], 2);
+        std::fs::write(root.join("payload/skill/SKILL.md"), b"other").unwrap();
+        let check = release_doctor_check_with(&inv, inspect).unwrap();
+        assert_eq!(check["ok"], false);
+        assert_eq!(check["status"], "warn");
+        assert_eq!(check["code"], "delivery.invalid_payload");
+        std::fs::write(root.join("payload/skill/SKILL.md"), b"skill").unwrap();
+        std::fs::remove_file(root.join("payload/addon/Lychee Dev.toc")).unwrap();
+        assert_eq!(
+            release_doctor_check_with(&inv, inspect).unwrap()["status"],
+            "warn"
+        );
+    }
+    #[test]
+    fn doctor_release_does_not_downgrade_cancel_or_original_deadline() {
+        let inv = parse(&args(&["doctor"])).unwrap();
+        for error in [
+            ToolkitError::new("command.deadline", "expired", 5),
+            ToolkitError::new("process.cancelled", "cancelled", 7),
+        ] {
+            let expected = error.code.clone();
+            assert_eq!(
+                doctor_provider_checks_with(
+                    &inv,
+                    || Err(error),
+                    |_, _| panic!("cancelled release check launched worker")
+                )
+                .unwrap_err()
+                .code,
+                expected
+            );
+        }
+        let error = release_doctor_check_with(&inv, || {
+            inv.control
+                .cancel_handle()
+                .store(true, std::sync::atomic::Ordering::Release);
+            Err(ToolkitError::new(
+                "delivery.invalid_payload",
+                "interrupted read",
+                4,
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "command.cancelled");
+        let mut expired = parse(&args(&["doctor"])).unwrap();
+        expired.control = lycheedev_core::control::OperationControl::new(
+            std::time::Instant::now(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        assert_eq!(
+            release_doctor_check_with(&expired, || panic!("expired release check started"))
+                .unwrap_err()
+                .code,
+            "command.deadline"
+        );
+    }
+    fn emmy_doctor_reply_fixture() -> Value {
+        json!({
+            "schema":"lycheedev.source-native-research.v1",
+            "inputIdentity":"a".repeat(64),
+            "analysis":{"engine":"native_common_facts","state":"complete","sourceFiles":1,"sourceExecution":false},
+            "relations":[{"kind":"call","state":"resolved","target":EMMY_DOCTOR_SYMBOL,"path":EMMY_DOCTOR_FILE,"line":4}],
+            "lifecycle":{"owner":"source_owned_process","mode":"one_shot","retired":true}
+        })
+    }
+    #[test]
+    fn emmy_doctor_validates_evidence_instead_of_a_success_exit_alone() {
+        let valid = emmy_doctor_reply_fixture();
+        validate_emmy_doctor_result(&valid).unwrap();
+        for (pointer, replacement) in [
+            ("/schema", json!("other")),
+            ("/inputIdentity", json!("unverified")),
+            ("/analysis/engine", json!("luals")),
+            ("/analysis/state", json!("partial")),
+            ("/analysis/sourceFiles", json!(2)),
+            ("/analysis/sourceExecution", json!(true)),
+            ("/relations/0/kind", json!("reference")),
+            ("/relations/0/state", json!("static_candidate")),
+            ("/relations/0/target", json!("Other")),
+            ("/relations/0/path", json!("other.lua")),
+            ("/relations/0/line", json!(3)),
+            ("/lifecycle/owner", json!("unowned")),
+            ("/lifecycle/mode", json!("persistent")),
+            ("/lifecycle/retired", json!(false)),
+        ] {
+            let mut value = valid.clone();
+            *value.pointer_mut(pointer).unwrap() = replacement;
+            assert_eq!(
+                validate_emmy_doctor_result(&value).unwrap_err().code,
+                "source.emmy_doctor_mismatch",
+                "{pointer}"
+            );
+        }
+        for key in [
+            "schema",
+            "inputIdentity",
+            "analysis",
+            "relations",
+            "lifecycle",
+        ] {
+            let mut value = valid.clone();
+            value.as_object_mut().unwrap().remove(key);
+            assert!(validate_emmy_doctor_result(&value).is_err(), "{key}");
+        }
+    }
+    #[test]
+    fn emmy_doctor_probe_is_bounded_and_distinguishes_unchecked_tools() {
+        let mut inv = parse(&args(&["doctor"])).unwrap();
+        inv.control = lycheedev_core::control::OperationControl::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(1),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        let check = emmy_doctor_check_with(&inv, |probe, request| {
+            assert_eq!(probe.control.deadline(), inv.control.deadline());
+            assert!(
+                probe.control.remaining().unwrap()
+                    <= std::time::Duration::from_secs(EMMY_DOCTOR_EXECUTION_SECONDS)
+            );
+            assert_eq!(request.snapshot.files.len(), 1);
+            assert_eq!(request.snapshot.files[EMMY_DOCTOR_FILE], EMMY_DOCTOR_SOURCE);
+            assert_eq!(request.snapshot.load_documents.len(), 1);
+            assert_eq!(request.snapshot.load_plans[0].ordered, [EMMY_DOCTOR_FILE]);
+            assert_eq!(request.query.direction, "incoming");
+            assert_eq!(request.query.symbol.name, EMMY_DOCTOR_SYMBOL);
+            assert_eq!(request.snapshot.luac.version, "5.1.5");
+            Ok(emmy_doctor_reply_fixture())
+        })
+        .unwrap();
+        assert_eq!(check["id"], "emmy.runtime");
+        assert_eq!(check["ok"], true);
+        assert_eq!(check["scope"], "embedded-worker-fixture");
+        assert_eq!(
+            check["notChecked"],
+            json!([
+                "persistent_session",
+                "luac_runtime",
+                "user_source_analysis"
+            ])
+        );
+        assert!(
+            check["detail"]
+                .as_str()
+                .unwrap()
+                .contains("built-in call fixture")
+        );
+        let long = parse(&args(&["doctor"])).unwrap();
+        emmy_doctor_check_with(&long, |probe, _| {
+            assert!(probe.control.deadline() < long.control.deadline());
+            assert!(probe.control.remaining().unwrap() <= std::time::Duration::from_secs(5));
+            Ok(emmy_doctor_reply_fixture())
+        })
+        .unwrap();
+    }
+    #[test]
+    fn emmy_doctor_failed_probe_warns_without_claiming_retirement() {
+        let inv = parse(&args(&["doctor"])).unwrap();
+        let check = emmy_doctor_check_with(&inv, |_, _| {
+            Err(
+                ToolkitError::new("source.native_worker_failed", "fixture worker failed", 5)
+                    .with_details(json!({"reaped":false})),
+            )
+        })
+        .unwrap();
+        assert_eq!(check["ok"], false);
+        assert_eq!(check["status"], "warn");
+        assert_eq!(check["code"], "source.native_worker_failed");
+        assert_eq!(check["details"]["reaped"], false);
+        assert!(check.get("lifecycle").is_none());
+        let check = emmy_doctor_check_with(&inv, |_, _| Ok(json!({}))).unwrap();
+        assert_eq!(check["ok"], false);
+        assert_eq!(check["code"], "source.emmy_doctor_mismatch");
+        let check = emmy_doctor_check_with(&inv, |_, _| {
+            Err(ToolkitError::new(
+                "command.deadline",
+                "probe-local budget exhausted",
+                5,
+            ))
+        })
+        .unwrap();
+        assert_eq!(check["status"], "warn");
+        assert_eq!(check["code"], "command.deadline");
+        assert!(inv.control.check().is_ok());
+    }
+    #[test]
+    fn emmy_doctor_preserves_caller_cancel_and_deadline() {
+        use std::sync::atomic::Ordering;
+        let inv = parse(&args(&["doctor"])).unwrap();
+        let error = emmy_doctor_check_with(&inv, |probe, _| {
+            inv.control.cancel_handle().store(true, Ordering::Release);
+            // The process polls this same token while blocking in the worker.
+            assert!(probe.control.token().load(Ordering::Acquire));
+            Ok(emmy_doctor_reply_fixture())
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "command.cancelled");
+        let inv = parse(&args(&["doctor"])).unwrap();
+        let error = emmy_doctor_check_with(&inv, |_, _| {
+            Err(ToolkitError::new("process.cancelled", "cancelled", 7))
+        })
+        .unwrap_err();
+        assert_eq!(error.exit_code, 7);
+        let mut expired = inv;
+        expired.control = lycheedev_core::control::OperationControl::new(
+            std::time::Instant::now(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        assert_eq!(
+            emmy_doctor_check_with(&expired, |_, _| panic!("expired doctor launched worker"))
+                .unwrap_err()
+                .code,
+            "command.deadline"
+        );
     }
     #[test]
     fn describe_includes_frozen_format_and_development_metadata() {

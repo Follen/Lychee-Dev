@@ -101,7 +101,9 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
             &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+10_000,"action":"status","work":null}),
         );
         let status = read_frame(&mut status);
-        assert_eq!(status["value"]["state"], "ready");
+        assert_eq!(status["value"]["state"], "idle");
+        assert_eq!(status["value"]["workerPid"], 0);
+        assert_eq!(status["value"]["ownerPid"], hello["pid"]);
         assert!(status["value"]["cachedSnapshot"].is_null());
     }
     observations

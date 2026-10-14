@@ -266,6 +266,20 @@ Data 两层消费者现共享固定Go安装身份：target需要真实client选�
 
 作者与独立审核者分别实跑14项Node：11通过、3Windows条件skip；固定目标84命令/313引用与生成一致检查通过。恢复Go两项Windows launcher路径回归，新增Windows CI实际执行。尚无真实Rust Skill任务质量通过，必须等封存exe实际使用独立验收；本批静态门只证明文档/声明检查能力。session规则按Go生产源码明确：60s空闲（请求中停表）、600s总lifetime、每保留分析worker256semantic batches后仅worker退役，broker可继续准备，非256条CLI请求后broker退出。
 
+### 真实 Windows CLI、Emmy 与基础合同执行结果
+
+固定d27a174/run38624344361的Emmy job116061756336真实编译并运行35/35通过；artifact11923113192 ZIP SHA256 b7845a435a464ad356cefad1323ad93203d020fe74896f95733c2c285026bff3。已下载核receipt41cd5404：tree1b8a8da7、recipe a6cc9d5e25148243e67409442887f98dd31ebe8d81e50682681ba4ed2154e7cb，exit0、root/tree/handles/readers回收、active0；精确核验Enterprise helper由knownAuxiliaryCleanup清理。此证据覆盖35项，不能代替全仓Source/性能。
+
+固定c68d6d85/run38625341832已真实构建42,555,904B Windows CLI，SHA256 2bb446a112671e7576ac6a30b8490ecfdedce56f6e2788fef053821067510b83，version/help/describe实际成功且封存。product artifact11925460902 ZIP SHA256 6464ec42c35ac9b962fd97d1c996c00c2eda8ed03924ab563b052d31bb66b648。metadata18、selection10、Delivery2、passive11、CLI安装3/合同6、Source参数1、Mailbox纯合同24、target取消1共76项通过，各组受控命令成功；这不含未提交Live读路径/doctor/session变更。
+
+all-target仍FAIL：旧example遗漏NativeQueryView::Xml，此批按精确control occurrence处理，不回退任意source view。Data installed14项9过4失败1需真实客户端ignore：3个fixture对Windows TEMP短路径与canonical路径错误比较，1个区域selector错误优先级期望不符合Go；此批仅修fixture，增加诊断/无product/已有pin三层拒绝断言。local_domain_parity被同Cargo前一target失败短路，现拆独立CI组；不得将未跑记通过。失败命令exit101并触严格残留回收仍FAIL，未放松门槛。
+
+### Emmy doctor 和 native session 生命周期有限对齐
+
+doctor改真实内置样本经native worker分析并检查resolved调用/源码行/retired证据；只证明embedded-worker-fixture，不证明luac/session/user-source。独立审查发现删除原发行完整性能力后已恢复release.integrity独立检查，缺/坏资源保留warn，原cancel/deadline不降级。仅doctor summary为必要精确引擎差异，固定Go oracle原文不改。标准执行预算≤5秒，常规故障回收另≤5秒；既有JobGuard附加失败的无界wait仍需后续修复，不能承诺所有OS异常10秒。新增Rust fixtures和隔离scratch home真实doctor CI配置，尚NOT_RUN。
+
+native session本批独立复核：60s idle请求中停表、固定600s lifetime限制在途、5s握手且不延长saved idle、原取消token、空缓存状态idle；新增3个确定性单测，更新两个真实CLI fixture预期。Rust运行NOT_RUN；完整真实session fixture需要已核发行包，本批不会把ignore算通过。256 semantic batch worker退休映射、>90s wire deadline拒绝、坏帧只退handler、精确Go状态JSON仍未齐，继续后续实现。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

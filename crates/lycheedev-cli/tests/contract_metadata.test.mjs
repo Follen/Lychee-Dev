@@ -34,6 +34,11 @@ test('shared definitions equal pinned Go metadata and ordering', () => {
     .filter(({ path }) => !['live doctor', 'source batch'].includes(path))
     .map(({ parserFlags, ...definition }) => definition);
   assert.equal(expected.length, 82);
+  // Single approved Source-engine description exception; no wildcard summary
+  // skips, mutation of the fixed oracle, or relaxation of any other field.
+  const doctor = expected.find(({ path }) => path === 'doctor');
+  assert.equal(doctor.summary, 'Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check');
+  doctor.summary = 'Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check';
   assert.deepEqual(inventory, expected);
 });
 
