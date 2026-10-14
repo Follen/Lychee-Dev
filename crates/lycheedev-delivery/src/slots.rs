@@ -392,7 +392,7 @@ pub(crate) fn read_pool(parent: &Path) -> Result<SlotPool> {
     }
     Ok(pool)
 }
-fn save_pool(parent: &Path, pool: &SlotPool, control: &OperationControl) -> Result<()> {
+pub(crate) fn save_pool(parent: &Path, pool: &SlotPool, control: &OperationControl) -> Result<()> {
     control.check()?;
     let bytes = serde_json::to_vec_pretty(pool)?;
     if bytes.len() > MANIFEST_LIMIT {
@@ -718,13 +718,22 @@ pub fn inspect_controlled(
     version: &str,
     control: &OperationControl,
 ) -> Result<Value> {
+    Ok(serde_json::to_value(inspect_typed(
+        parent, version, control,
+    )?)?)
+}
+pub(crate) fn inspect_typed(
+    parent: &Path,
+    version: &str,
+    control: &OperationControl,
+) -> Result<SlotPool> {
     control.check()?;
     let pool = read_pool(parent)?;
     if pool.schema != SCHEMA || pool.files.len() != COUNT as usize {
         return Err(invalid("business requires the current 500-slot inventory"));
     }
     inspect_pool(parent, &pool, version, control)?;
-    Ok(serde_json::to_value(pool)?)
+    Ok(pool)
 }
 /// The historical byte-only API cannot establish the formal consumer/runtime/
 /// nonce/envelope publication contract. Keep it fail-closed until that typed

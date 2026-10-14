@@ -7,6 +7,7 @@ pub mod installation;
 pub mod npm_update;
 pub mod release;
 pub mod removal;
+pub mod slot_publication;
 pub mod slots;
 pub mod update;
 pub use installation::{VerifiedInstallation, verify_clean};

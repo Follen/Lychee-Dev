@@ -426,6 +426,12 @@ Source逻辑operation现在有Definition/References/Type答案及受封装的sco
 
 复核发现1d0eaec、be99829、0b26b9a的产品workflow在进入runner前即失败：新hotfix::过滤器后的空格使未引号run标量含冒号分隔，被YAML拒绝。这三树产品测试完全未运行，不能把已推送或静态审查当CI通过。现将含该形式的命令改block scalar并用本地YAML解析器实际解析完整三job工作流；新native_research::过滤器也同样保护。等待GitHub精确新树确认调度和实际测试，不掩盖原准入失败。
 
+### 正式 typed slot publication / 消费确认 / 退役
+
+Delivery新增共享core信封的typed API，完整pending manifest→payload→committed manifest三写点、同nonce不可变、实际有界route检查、Consumed确认及独立process/runtime退役。旧任意bytes发布仍失败关闭。短lease先维护锁再正式publication锁，原control贯穿，持至physical burst后应在receipt wait前显式close；持久reservation保护后续等待。cleanup按Go仅依已认证路径/槽池和caller确切证明，不被主addon receipt缺失/内容变动或旧Rust claims错误新增阻塞。
+
+core只抽同namespace lock-only维护lease，旧InstallationGuard注册行为不变；ExclusiveLock消费File后仅checked close一次，不先unlock、失败后不重复关闭。两锁关闭都尝试并保有序错误；原atomic writer逐byte未变。独立新上下文审核六路径，29项Delivery+3项core回归及Go场景映射源码未见本批阻断，实际Rust/Windows测试NOT_RUN，现分组接CI。尚无正式生产driver消费者，调用方仍须在业务失败也显式关闭并保留业务与close错误，不能声称物理input/receipt生命周期已完整接通。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

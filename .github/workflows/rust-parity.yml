@@ -150,6 +150,12 @@ jobs:
       - name: Run cancellation immediately before atomic publication
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-atomic-cancellation --one-shot -- test --locked --offline -p lycheedev-core --lib storage::controlled_publication_tests -j 1
+      - name: Run formal typed slot publication and reservation fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-slot-publication --one-shot -- test --locked --offline -p lycheedev-delivery --lib slot_publication::tests -j 1
+      - name: Run consuming shared lock close fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-lock-close --one-shot -- test --locked --offline -p lycheedev-core --lib storage::exclusive_lock_close_tests -j 1
       - name: Run fake-window passive discovery fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-passive-fixtures --one-shot -- test --locked --offline -p lycheedev-live --lib passive::tests -j 1

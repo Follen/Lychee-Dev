@@ -295,7 +295,7 @@ pub fn guard_path(root: &Path, path: &Path) -> Result<()> {
 }
 /// Kernel lock lifetime follows the handle, not a stale timestamp or owner TTL.
 pub struct ExclusiveLock {
-    file: File,
+    file: Option<File>,
 }
 impl ExclusiveLock {
     pub fn resource(scope: &Path, resource: &str) -> Result<Self> {
@@ -313,12 +313,102 @@ impl ExclusiveLock {
             .open(path)?;
         fs2::FileExt::try_lock_exclusive(&file)
             .map_err(|e| ToolkitError::new("workspace.busy", e.to_string(), 6))?;
-        Ok(Self { file })
+        Ok(Self { file: Some(file) })
+    }
+    /// Consume the handle and check its close result. Closing the last owning
+    /// handle releases the kernel lock, as Go Lease.Close does; do not unlock
+    /// first or retry a consumed handle after an uncertain close failure.
+    pub fn close(self) -> Result<()> {
+        self.close_with(lycheedev_windows::filesystem::close_file)
+    }
+    fn close_with(mut self, close: impl FnOnce(File) -> std::io::Result<()>) -> Result<()> {
+        let file = self.file.take().expect("exclusive lock owns one handle");
+        close(file).map_err(ToolkitError::io)
     }
 }
 impl Drop for ExclusiveLock {
     fn drop(&mut self) {
-        let _ = fs2::FileExt::unlock(&self.file);
+        // Fallback only. Explicit close has already consumed the ownership and
+        // must never unlock/close the old numeric handle a second time.
+        if let Some(file) = &self.file {
+            let _ = fs2::FileExt::unlock(file);
+        }
+    }
+}
+
+#[cfg(test)]
+mod exclusive_lock_close_tests {
+    use super::*;
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "lychee-lock-close-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn consuming_lock_close_releases_without_deleting_namespace() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("held.lock");
+        let lock = ExclusiveLock::acquire(&path).unwrap();
+        assert!(ExclusiveLock::acquire(&path).is_err());
+        lock.close().unwrap();
+        assert!(path.is_file());
+        ExclusiveLock::acquire(&path).unwrap().close().unwrap();
+    }
+    #[test]
+    fn close_failure_consumes_once_and_drop_does_not_unlock_transferred_handle() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("held.lock");
+        let lock = ExclusiveLock::acquire(&path).unwrap();
+        let mut calls = 0;
+        let mut transferred = None;
+        let error = lock
+            .close_with(|file| {
+                calls += 1;
+                // Inject an uncertain close at the ownership boundary, retaining
+                // the handle to detect an illicit Drop unlock. No kernel failure
+                // is claimed. The fixture later closes its transferred ownership.
+                transferred = Some(file);
+                Err(std::io::Error::other("injected close failure"))
+            })
+            .unwrap_err();
+        assert_eq!(error.code, "external.io");
+        assert_eq!(calls, 1);
+        assert!(ExclusiveLock::acquire(&path).is_err());
+        lycheedev_windows::filesystem::close_file(transferred.take().unwrap()).unwrap();
+        ExclusiveLock::acquire(&path).unwrap().close().unwrap();
+    }
+    #[test]
+    fn error_after_real_close_is_reported_without_second_close() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("held.lock");
+        let lock = ExclusiveLock::acquire(&path).unwrap();
+        let mut calls = 0;
+        let error = lock
+            .close_with(|file| {
+                calls += 1;
+                lycheedev_windows::filesystem::close_file(file)?;
+                Err(std::io::Error::other("injected post-close failure"))
+            })
+            .unwrap_err();
+        assert_eq!(error.code, "external.io");
+        assert_eq!(calls, 1);
+        ExclusiveLock::acquire(&path).unwrap().close().unwrap();
     }
 }
 

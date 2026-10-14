@@ -29,9 +29,19 @@ pub struct InstallationGuard {
     pub target: PathBuf,
     pub registry: ClaimRegistry,
     path: PathBuf,
+    _maintenance: InstallationMaintenanceLease,
+}
+
+/// The existing installation mutation lock, without reading legacy claim data.
+/// Formal slot cleanup needs this same exclusion but must not depend on the
+/// retired native-live registry being parseable. This creates no logical claim
+/// and is not the separate Go window-admission or execution lease.
+pub struct InstallationMaintenanceLease {
+    pub target: PathBuf,
+    parent: PathBuf,
     _lock: ExclusiveLock,
 }
-impl InstallationGuard {
+impl InstallationMaintenanceLease {
     pub fn acquire(target: &Path) -> Result<Self> {
         let parent = fs::canonicalize(
             target
@@ -57,6 +67,20 @@ impl InstallationGuard {
             &parent.join(".lycheedev-locks"),
             &format!("installation-maintenance:{canonical}"),
         )?;
+        Ok(Self {
+            target,
+            parent,
+            _lock: lock,
+        })
+    }
+    pub fn close(self) -> Result<()> {
+        self._lock.close()
+    }
+}
+impl InstallationGuard {
+    pub fn acquire(target: &Path) -> Result<Self> {
+        let maintenance = InstallationMaintenanceLease::acquire(target)?;
+        let parent = &maintenance.parent;
         let path = parent.join(".lycheedev-claims.json");
         let registry: ClaimRegistry = if path.exists() {
             storage::guard_path(&parent, &path)?;
@@ -75,10 +99,10 @@ impl InstallationGuard {
             ));
         }
         Ok(Self {
-            target,
+            target: maintenance.target.clone(),
             registry,
             path,
-            _lock: lock,
+            _maintenance: maintenance,
         })
     }
     pub fn require_idle(&self) -> Result<()> {
