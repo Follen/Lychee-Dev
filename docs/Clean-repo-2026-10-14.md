@@ -2,7 +2,7 @@
 
 本文件记录审计基线、改进清单及实施状态。日期按 Asia/Shanghai。下方审计结论对应原提交；实施结果单独记录，未验证事项不视为完成。
 
-修复后追加审计已完成：三名 GPT-6.1-sol、xhigh 连续执行两轮全仓审计，第二轮轮换分区并交叉复核。新增 13 项确认问题（高 1、中 11、低 1），另保留 3 项候选；均追加在文末。此次只审计并更新报告，新问题尚未修复，与前一批已完成的 42 项修复分别记录。
+修复后追加审计已完成：三名 GPT-6.1-sol、xhigh 连续执行两轮全仓审计，第二轮轮换分区并交叉复核。新增 13 项确认问题（高 1、中 11、低 1），另保留 3 项候选；均追加在文末。追加审计阶段只确认问题；本轮已完成这 13 项代码修复并加入正式回归，当前离线验证、Windows CI 和待实机项分别记录在各条目及文末。前一批 42 项修复保持基线，不重复计数。
 
 交接更新：当前代码基线及本文已按用户授权提交、推送到 `codex/fix-3.2.0`，交接 PR 为 [#13 · fix-3.2.0（草稿）](https://github.com/Follen/Lychee-Dev/pull/13)。当前分工、待办和验证边界统一见 [handover.md](../handover.md)；本文保留各阶段的审计和实施证据，PR 提交不代表新发现的问题已修复。
 
@@ -727,6 +727,11 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R3-01 · 中 · Trace 输入的末级 owner 不是表时，错误逃出页面点击回调
 
+- **本轮状态：代码已修复；Lua 5.1 六 profile 的真实 Trace 按钮回归通过；待实机验证。**
+- 修复与正式验证：在函数目标解析边界保护末级读取、验证函数，移除 Start 的重复无保护索引；保留 frame、继承方法及可索引 userdata 的既有 hook 合同。正式回归：[t_trace_owner.lua](../tests/addon/t_trace_owner.lua)。
+- 最小实机复验：同版受管 addon、非战斗状态下打开 Trace，依次开始 GetTime.foo、标量父路径和正常表方法。预期前两者显示原有失败状态且点击不抛错，正常目标仍能开始/停止。
+- 实机结果：
+
 - 证据：[FunctionTrace.lua:108–114](../addon/Modules/FunctionTrace.lua#L108)、[Trace.lua:219–225](../addon/UI/Pages/Trace.lua#L219)、[ObjectInspector.lua:199](../addon/Modules/ObjectInspector.lua#L199)。
 - 触发：在工作台 Trace 输入 `GetTime.foo`，点击开始。路径语法合法，父路径解析为已存在的 GetTime 函数；末段不是可追踪函数，应通过现有失败结果提示用户。
 - 影响：ResolveFunctionTarget 返回成功后，Start 直接执行 `owner[functionName]`，在返回 FUNCTION_NOT_FOUND 之前抛 Lua 错误；真实 OnClick 没有承接，页面的错误状态与按钮同步分支没有执行。
@@ -734,6 +739,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 - 改进与回归：在函数目标解析边界拒绝不可索引的 owner，并返回既有错误；覆盖函数/标量父路径和正常表方法的真实按钮操作。此项发生在启动前，与 C-06 的 hook 回调重入独立。
 
 #### R3-02 · 中 · Source context 的 flow 丢弃已选声明的位置
+
+- **本轮状态：代码已修复；离线回归通过。**
+- 修复与正式验证：flow 的 Symbol 选择同时保留已解析 Path/Line；精确 ID 不再重新产生同名歧义，只给名称仍报告真实歧义。正式回归：[context_test.go](../internal/codebase/context_test.go) 的 TestContextSourceFlowKeepsExactSymbolIDLocation、[flow_test.go](../internal/codebase/flow/flow_test.go) 的 TestFlowSymbolTargetPreservesExactDeclaration。
 
 - 证据：[context.go:404](../internal/codebase/context.go#L404)、[flow/analyze.go:246–260](../internal/codebase/flow/analyze.go#L246)。
 - 触发：同一 Lua 文件的两个不同作用域各有局部函数 `Same`；调用 `source context --symbol-id <精确声明> --flow`。Context 已按 SymbolID 选中正确文件和行。
@@ -743,6 +751,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R3-03 · 高 · evidence remove 漏认 Hotfix scan 的已持久化来源引用
 
+- **本轮状态：代码已修复；离线回归和相关 race 检查通过。**
+- 修复与正式验证：新 checkpoint 使用既有裸 Capture ID 引用；删除检查同时识别历史 capture:CAP locator。正式回归：[hotfix_scan_test.go](../internal/records/hotfix_scan_test.go) 的 pending/取消、拒绝删除与原 checkpoint resume，以及 [archive_test.go](../internal/evidence/archive_test.go) 的历史 locator 生命周期。
+
 - 证据：[hotfix_scan.go:140](../internal/records/hotfix_scan.go#L140)、[archive.go:323–343](../internal/evidence/archive.go#L323)、[公开删除入口 entry.go:773](../internal/command/entry.go#L773)。
 - 触发：Hotfix scan 分页停止并保存 pending checkpoint 后，执行 `evidence remove` 删除该 checkpoint 的原始 Source capture，再按原 snapshot/from/resume 继续。
 - 影响：checkpoint 的元数据把来源保存为正式 locator `capture:CAP-…`，删除检查只搜索带引号的裸 `CAP-…`，没有识别这条依赖。删除返回成功，原 resume 随后因来源记录缺失失败。
@@ -750,6 +761,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 - 改进与回归：让 checkpoint 依赖以删除检查可识别的正式引用表达，并处理现有 capture locator；回归 pending scan 来源删除应拒绝、原 resume 可继续。本例是串行、已持久化引用，区别于 SOL-01 已修复的并发发布/删除竞争。
 
 #### R3-04 · 中 · Windows Skill 的 npm 全局 prefix 查找无法执行
+
+- **本轮状态：代码已修复；Windows 原生回归待本次 CI，Linux 未计作通过。**
+- 修复与正式验证：按 PATH 中 npm.cmd 位置解析 npm-cli.js，以 Node 和分离参数查询全局 prefix，不经 shell。正式回归：[skill-launcher.test.mjs](../tools/skill-launcher.test.mjs) 的自定义 prefix 不在 PATH、参数与退出码测试。
 
 - 证据：[Skill 启动器 lycheedev.mjs:26–33](../skills/lycheedev/scripts/lycheedev.mjs#L26)、[实际回退入口:45](../skills/lycheedev/scripts/lycheedev.mjs#L45)、[现有启动器测试](../tools/skill-launcher.test.mjs)。
 - 触发：Node/npm 在 PATH，自定义 npm 全局 prefix 没有加入 PATH，但其中已安装 Lychee Dev；LYCHEEDEV_BIN 未设置。
@@ -759,6 +773,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R3-05 · 中 · game-root 更新中断后，默认恢复改用另一个 recovery 目录
 
+- **本轮状态：代码已修复；离线回归及 delivery 整包通过。**
+- 修复与正式验证：先固定实际 client 再生成去重/recovery 身份；按原目标识别旧 game-root replacement 与 cleanup marker，继续原事务；冲突发行保留原事务。正式回归：[update_addon_test.go](../internal/delivery/update_addon_test.go) 覆盖 root/client 一致性、old-moved 默认恢复、历史恢复目录和 cleanup，另见 [update_test.go](../internal/delivery/update_test.go)。
+
 - 证据：[update.go:139–179](../internal/delivery/update.go#L139)、[库存保存:224](../internal/delivery/update.go#L224)、[恢复/首次安装分支:252–275](../internal/delivery/update.go#L252)、[upgrade.go:214](../internal/delivery/upgrade.go#L214)。
 - 触发：原生 `update --release … --installation <game-root>`，根目录下只有一个合法客户端；更新在 old-moved 后中断，再执行默认目标发现的更新。
 - 调用链：UpdateManaged 在解析客户端前计算 key，随后将 target.Path 固定为实际 client；recovery digest 仍用旧 key，库存却保存 client。DiscoverUpdateTargets 找到原事务对应的 client 后，再次 UpdateManaged 计算了另一个 recovery 目录。
@@ -767,6 +784,11 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 - 改进与回归：先固定实际 client 再计算去重身份和 recovery；发现既有 pending 事务时沿原恢复目录继续。覆盖 root/client 一致性、old-moved 后默认恢复和同客户端重复选择。直接 client 路径已有恢复分支；npm 更新会冻结 plan 返回的 client，不能将问题泛化到全部更新。与 SOL-06 的准备日志缺口、C-07 的发现合同独立。
 
 #### R3-06 · 中 · 对象拾取器在进入战斗后继续显示并截获按键
+
+- **本轮状态：代码已修复；Lua 5.1 六 profile 的真实拾取器回归通过；待实机验证。**
+- 修复与正式验证：仅在首次创建 picker dock 时懒注册战斗关闭，主窗口已隐藏也立即停拾取、隐藏 dock 并解除键盘脚本。正式回归：[t_object_picker_combat.lua](../tests/addon/t_object_picker_combat.lua)，含禁用成本。
+- 最小实机复验：同版受管 addon 中开始鼠标拾取，确认主窗口隐藏，然后进入战斗。预期 dock 立即隐藏、拾取停止；F/Enter/Escape 不被拾取器吞掉，离战后可重新启用。
+- 实机结果：
 
 - 证据：[Object.lua:389–414](../addon/UI/Pages/Object.lua#L389)、[Window.lua:377–389](../addon/UI/Window.lua#L377)、[停止拾取入口 Object.lua:373](../addon/UI/Pages/Object.lua#L373)。
 - 触发：在工作台对象页开始鼠标拾取；主窗口按设计隐藏，独立的 UIParent dock 开启键盘处理，随后角色进入战斗。
@@ -779,13 +801,18 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 以下三项在第一轮结束时尚未计入确认问题。第二轮检查正式合同、生产消费者与实际影响，并在各项中更新处理结果；复现某个内部行为不等于已经证明用户可达缺陷。
 
-- **R3-C01 · 第二轮后仍为候选：SpellMisc 多匹配的单值选择。** [navigate_spell.go:341](../internal/records/navigate_spell.go#L341) 与 [navigate_encounter.go:280](../internal/records/navigate_encounter.go#L280) 按 SpellID 限制为一条，忽略 extra。合法双行 WDC3 离线 fixture 返回 Complete=true、Partial=false、Truncated=false，只显示最低 ID 的一行。第二轮检查发现当前导航合同和 legacy oracle 都保留单个 Misc，仓库没有固定的真实多行/DifficultyID 资料；合成多行不足以证明领域合同违例，需核实固定构建中的变体语义后再定性。
+- **R3-C01 · 本轮复核后仍为候选：SpellMisc 多匹配的单值选择。** [navigate_spell.go:341](../internal/records/navigate_spell.go#L341) 与 [navigate_encounter.go:280](../internal/records/navigate_encounter.go#L280) 按 SpellID 限制为一条，忽略 extra。合法双行 WDC3 离线 fixture 返回 Complete=true、Partial=false、Truncated=false，只显示最低 ID 的一行。第二轮检查发现当前导航合同和 legacy oracle 都保留单个 Misc，仓库没有固定的真实多行/DifficultyID 资料；合成多行不足以证明领域合同违例，本轮再次检查确认 SpellMiscDetail 仍为单值，现有 synthetic golden 无 DifficultyID，仓库没有固定真实 SpellMisc DB2/DBD；需核实固定构建中的变体语义后再定性。
 - **R3-C02 · 已确认，转 R4-01。** 第二轮沿完整生产交易链核实了 INPUT 的 100ms 间隔缺失；正式协议不按 exchange 限定，正常连续交易没有补足这项条件。仅计入 R4-01 一次，影响与离线证据见下文。
-- **R3-C03 · 第二轮后仍为候选：foreignOwner 的比较身份。** [Native owner](../internal/live/channel/project_windows.go#L100) 使用项目路径派生 ID，[instances](../internal/live/discover.go#L179) 则传入 home 的 vault WorkspaceID，再由 [windowOwnership](../internal/live/discovery_io.go#L23) 比较。两轮均未发现 ForeignOwner 阻断连接或恢复的生产消费者；公开 instances 也不接受 --project。它是被动诊断展示候选，需先明确实例列表中的“当前项目”语义。
+- **R3-C03 · 本轮复核后仍为候选：foreignOwner 的比较身份。** [Native owner](../internal/live/channel/project_windows.go#L100) 使用项目路径派生 ID，[instances](../internal/live/discover.go#L179) 则传入 home 的 vault WorkspaceID，再由 [windowOwnership](../internal/live/discovery_io.go#L23) 比较。两轮均未发现 ForeignOwner 阻断连接或恢复的生产消费者；公开 instances 也不接受 --project。它是被动诊断展示候选，本轮搜索仍只有 ForeignOwner 声明/赋值；Connect、doctor、activation 使用项目 workspaceID，update 只消费 Installations。需先明确实例列表中的“当前项目”语义。
 
 ### 第二轮新增确认问题
 
 #### R4-01 · 中 · 新交易没有保留前次输入后 100ms 的采样条件
+
+- **本轮状态：代码已修复；生产状态机、原日志恢复和 +99/+100ms 离线回归通过；待实机验证。**
+- 修复与正式验证：InputAttempt 持久保留同 runtime 输入 watermark；跨 exchange 和发键前复核共同使用，not_sent 不丢失原 watermark；新 runtime 不继承旧时间，同 exchange 未知输入不重放。正式回归：[input_cadence_test.go](../internal/live/channel/input_cadence_test.go)。
+- 最小实机复验：后续授权本机任务固定 installation/PID/创建时间/HWND、project/CON，非战斗且 INPUT ready。完成一个无副作用请求，检查 prepare/commit/confirm/release 及 resume 的持久输入记录：后续 sampleMillis 至少为上次 AtMillis+100，原 request/期限不变，无重放；再授权 reload/rebind，预期新 runtime 首次 bind 不继承旧 watermark。
+- 实机结果：
 
 - 证据：[正式输入合同](live-protocol.md#L66)、[input.go:117–130](../internal/live/channel/input.go#L117)、[采样判断:183](../internal/live/channel/input.go#L183)、[正常连续交易 driver.go:395–412](../internal/live/channel/driver.go#L395)、[Native 发键前复核 input_windows.go:108](../internal/live/channel/input_windows.go#L108)。
 - 触发：同一 runtime 完成一次输入及交易后，进入另一个 nonce 的 prepare、commit 或 confirm；新 INPUT 的身份与 nextSlot 已更新、年龄仍在 500ms 内，但采样时间尚未晚于前次输入至少 100ms。
@@ -796,6 +823,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R4-02 · 中 · 并发覆盖导出 SQL CSV 后，数据与完成记录不属于同一查询
 
+- **本轮状态：代码已修复；跨进程、跨 home 的受控交错回归及 race 检查通过。**
+- 修复与正式验证：复用 vault OS lease，在规范化后的外部目标父目录协调 CSV/manifest 整对发布；保留 data-first、manifest-last 和失败 partial 合同，锁文件按 OS lease 合同保留。正式回归：[sql_export_test.go](../internal/records/navigatetest/sql_export_test.go) 暂停 A 于两文件之间，验证 B 阻塞，然后分别成功并校验哈希与 capture 引用。
+
 - 证据：[CSV 完成记录合同 sql_export.go:19](../internal/records/sql_export.go#L19)、[发布顺序与返回:121–134](../internal/records/sql_export.go#L121)、[单文件覆盖 export_destination.go:107](../internal/records/export_destination.go#L107)、[公开调用 entry.go:328](../internal/command/entry.go#L328)。
 - 触发：两个不同的 SQL 查询同时通过 `--encoding csv --output <同一路径> --overwrite` 导出。每个数据文件与 manifest 分别发布，没有覆盖这两个文件发布过程的目标互斥。
 - 影响：A 发布 CSV1，B 发布 CSV2 和 manifest2 并成功返回，再由 A 发布 manifest1 并成功返回。最终数据为查询 B，manifest 的 SHA256、QueryCapture 和 CSVCapture 仍指向查询 A；两个调用都声称完成，按 manifest 校验当前 CSV 会失败。
@@ -804,6 +834,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 - 改进与回归：按规范化后的导出目标，为 CSV 与 manifest 的整个发布过程使用跨进程互斥；不同 home 导出同一外部路径也须协调。回归两份不同查询的受控交错，成功后的最终两个文件必须属于同一次导出。
 
 #### R4-03 · 中 · doctor 首次升级旧版受管插件时，默认归档父目录不存在
+
+- **本轮状态：代码已修复；正式 Windows 磁盘回归待本次 CI；此缺陷不依赖游戏验证。**
+- 修复与正式验证：仅默认归档路径由 doctor 创建其管理的 repairs 父目录，不提前创建最终 archive。正式回归：[live_doctor_windows_test.go](../internal/command/live_doctor_windows_test.go) 的 TestLiveDoctorUpgradeCreatesDefaultArchiveParent，真实安装/升级后在 PID=0 的安全激活边界停止，无进程或输入操作。
 
 - 证据：[live_doctor_windows.go:112–116](../internal/command/live_doctor_windows.go#L112)、[UpgradeInstallation 的路径解析:43](../internal/delivery/upgrade.go#L43)、[installationDestination:120](../internal/delivery/install.go#L120)。
 - 触发：新项目首次运行 `live doctor --fix`，目标是干净但版本较旧的受管插件，当前 release 有效，用户没有指定 `--output`。
@@ -814,6 +847,11 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R4-04 · 低 · 新账户默认 bridge 已开启，status 却显示关闭
 
+- **本轮状态：代码已修复；Lua 5.1 六 profile 的真实启动/status/off/on 回归通过；待实机验证。**
+- 修复与正式验证：Persistence 与 SlotRuntime 统一 nil 为默认开启。正式回归：[t_bridge_status.lua](../tests/addon/t_bridge_status.lua)，验证 status 和 INPUT 生命周期一致。
+- 最小实机复验：使用隔离的新账号配置启动同版 addon，执行 /dev status，再显式 bridge off/on。预期默认 enabled=true 且有 INPUT；关闭为 false 并停止 INPUT，重新开启恢复，两者始终一致。
+- 实机结果：
+
 - 证据：[默认启动 SlotRuntime.lua:93](../addon/Bridge/SlotRuntime.lua#L93)、[状态读取 Persistence.lua:78–80](../addon/Core/Persistence.lua#L78)、[Controls status:36](../addon/Core/Controls.lua#L36)。
 - 触发：全新账户没有保存 LycheeToolkitDB，正常 StartRuntime 后查询 `/dev status`。
 - 影响：SlotRuntime 将 bridgeEnabled=nil 按默认开启处理并发布 INPUT；Persistence.BridgeEnabled 只将显式 true 视为开启，status 因而返回 enabled=false，诊断展示与实际状态相反。
@@ -821,6 +859,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 - 改进与回归：状态查询与运行时采用相同的默认值解释；覆盖新账户、显式关闭和显式开启。此项仅为默认状态的诊断错误，不代表用户显式禁用后仍工作，也不涉及输入授权错误。
 
 #### R4-05 · 中 · Source inspect 丢弃索引覆盖，把已跳过的文件报告为完整空结果
+
+- **本轮状态：代码已修复；公开 InspectSource 和 capture 覆盖回归通过。**
+- 修复与正式验证：传递已有索引 summary 的 Coverage/诊断，并以 summary.Complete 和截断共同决定完整性，保留可回答的有界结果。正式回归：[inspect_test.go](../internal/codebase/inspect_test.go) 覆盖目标跳过、其他文件跳过、真实无匹配及归档；旧 excerpt fixture 改为合法 Lua 注释，避免把语法错误误当完整索引。
 
 - 证据：[inspect.go:56](../internal/codebase/inspect.go#L56)、[匹配范围:65–78](../internal/codebase/inspect.go#L65)、[完成标志:131](../internal/codebase/inspect.go#L131)、[超限文件诊断 index.go:354–366](../internal/codebase/index.go#L354)、[归档 usecases.go:103](../internal/codebase/usecases.go#L103)、[公开入口 entry.go:643](../internal/command/entry.go#L643)。
 - 触发：固定 Source 快照中某个实际存在的 Lua 文件超过 32MiB 分析上限，索引明确记录 skipped 与诊断；调用 `source inspect --snapshot <pin> --target-path <该文件>`。
@@ -831,6 +872,9 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 #### R4-06 · 中 · SQL 标准输入等待不受整个查询超时控制
 
+- **本轮状态：代码已修复；Linux 公共 Execute、真实继承管道、取消/期限/EOF/复用回归通过；Windows 路径待本次 CI。**
+- 修复与正式验证：同一查询 context 控制 stdin；Unix 使用自有非阻塞描述符并还原共享标志，Windows 在固定线程取消同步/重叠 I/O 并等待取消任务退出，保留调用者 stdin。正式回归：[sql_stdin_test.go](../internal/command/sql_stdin_test.go) 同时覆盖已经写入 SQL 但未 EOF 的生产触发路径与普通文件输入；期限/取消仍返回 5/command.deadline、7/command.cancelled。
+
 - 证据：[整个查询的超时合同 command_contract.go:331](../internal/command/command_contract.go#L331)、[创建期限 entry.go:173–180](../internal/command/entry.go#L173)、[公开调用:310](../internal/command/entry.go#L310)、[阻塞读取 query.go:213–214](../internal/command/query.go#L213)。
 - 触发：`data sql --stdin --timeout-seconds 1` 从合法管道读取；生产者已写入完整 SQL，但仍保持写端打开，没有 EOF。
 - 影响：Execute 已创建整个查询的期限，readSelectedDataQuery 却直接 io.ReadAll(os.Stdin)，没有接入 context。读操作在期限后继续阻塞，直到 EOF 或读取失败，用户指定的超时不能结束这次命令。
@@ -838,6 +882,11 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 - 改进与回归：让标准输入读取使用同一查询 context，期限或取消到来时结束读取并清理读取任务；覆盖已经收到 SQL、写端保持开放的期限测试及正常 EOF 成功。取消缺少连接是同一代码边界，未另行宣称执行 Ctrl+C 实测。
 
 #### R4-07 · 中 · 对象检查的流式序列化错误再次格式化失败，逃出点击回调
+
+- **本轮状态：代码已修复；Lua 5.1 六 profile 的真实 Object 点击和流式回归通过；待实机验证。**
+- 修复与正式验证：流式错误出口保护 tostring，异常错误对象回退短诊断；返回 false/错误时保留已生成的 text/textStream 和 limited，停止继续建树，让页面使用原有失败分支。正式回归：[t_object_stream_errors.lua](../tests/addon/t_object_stream_errors.lua)，含普通字符串错误、5KB 已生成片段及分块读取。
+- 最小实机复验：同版受管 addon、非战斗状态，以隔离对象构造两个表键及嵌套失败 __tostring，再从 Objects 页点击 Inspect。预期点击不抛第二次 Lua 错误、显示失败提示、不创建成功记录；普通对象检查仍工作，已有流片段/limited 仍可读取。
+- 实机结果：
 
 - 证据：[Serializer.lua:281–285](../addon/Core/Serializer.lua#L281)、[ObjectInspector.lua:170–179](../addon/Modules/ObjectInspector.lua#L170)、[页面错误分支 Object.lua:451–458](../addon/UI/Pages/Object.lua#L451)、[真实按钮入口:548–553](../addon/UI/Pages/Object.lua#L548)。
 - 触发：合法全局路径指向含两个表键的对象；其中一个键的 __tostring 抛出非字符串错误对象，而错误对象自身的 __tostring 也抛错。在 Objects 页面检查该路径。
@@ -848,7 +897,7 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 
 ### 第二轮候选与排除
 
-- **R4-C01 · 候选：doctor 默认归档与游戏位于不同卷。** [默认 archive](../internal/command/live_doctor_windows.go#L114) 取项目目录，游戏可以位于另一卷；当前升级会经过 [outsideDiscovery 的 filepath.Rel](../internal/delivery/upgrade.go#L225) 与 [MoveFileEx 目录发布](../internal/delivery/publish_windows.go#L14)。尚未用合法跨卷部署 fixture 核实完整失败轨迹与支持合同，不计入确认，也不与 R4-03 的父目录缺失合并。
+- **R4-C01 · 候选：doctor 默认归档与游戏位于不同卷。** [默认 archive](../internal/command/live_doctor_windows.go#L114) 取项目目录，游戏可以位于另一卷；当前升级会经过 [outsideDiscovery 的 filepath.Rel](../internal/delivery/upgrade.go#L225) 与 [MoveFileEx 目录发布](../internal/delivery/publish_windows.go#L14)。本轮复核合同只要求 archive 位于 discovery 外；Linux 环境未执行两个 Windows 卷上的合法部署 fixture，尚未核实完整失败轨迹与支持合同，保留候选、不添加 unsupported 限制，也不与 R4-03 的父目录缺失合并。
 - **创建 claim 前的持久化窗口未计入问题。** CON/activation 文件落盘后、owner claim 发布前若创建失败，可能留下文件；当前没有证明正式创建合同要求恢复尚未成功返回的 claim，也没有实际复现可见业务后果，不据此添加恢复框架或清理限制。
 - 未将可选外部 oracle/实机测试未执行、已有 legacy 单值转换约定、无当前调用的库方法、明确允许的 partial 输出或理论锁竞争当作新增 bug。旧 42 项修复状态保持不变。
 
@@ -861,3 +910,12 @@ C-06 完成上述亚服 Forever 受管部署、实机前后对比及连接清理
 追加审计阶段仅更新此报告，本地引用与行号范围检查通过，工作区 git diff --check 通过。随后按用户授权创建交接文档、补充 AGENTS.md 约定，并将现有基线提交到交接分支；没有合并或发布。
 
 六个追加审计临时目录已在代理结束后清理，删除范围仅为本任务的离线合成 fixture；有用结果保留在各条目中。当前用户项目、恢复记录与保留的 Rust worktree 没有清理。
+
+
+### 本轮 R3/R4 修复交付
+
+- 13 项确认问题的代码修复和正式回归已加入；旧 42 项维持基线，3 项候选保持候选，不因合成行为或平台缺失扩大定性。
+- 额外修复既有 Windows CI 打包 smoke 的失效输入：不再读取已退役的 `addon/Bridge/Definitions.lua`，改为复用当前 TOC/Bindings 资源检查；正式 Node 回归覆盖 Native Mailbox load graph。这是交付验证修复，不计入 13 项。
+- 当前代码的本地整套检查及本次提交的 Windows CI 状态见 [handover.md](../handover.md)。历史主批次/审计结果不代替本轮验证，交叉编译和跳过不计作原生运行通过。
+- R3-01、R3-06、R4-01、R4-04、R4-07 保留“待实机验证”；上方各条目已列前置条件、最小步骤、预期，实机结果留空。本轮没有连接游戏、发送按键、部署游戏目录或操作用户电脑。
+- 只提交推送同一草稿 PR #13；不合并、不发布、不更改发行版本或 npm 标签，仍为 3.1.2 / next / latest=2.5.1。

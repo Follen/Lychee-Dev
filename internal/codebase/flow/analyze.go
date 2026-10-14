@@ -247,7 +247,7 @@ func (a *analyzer) selectTargets(target Target) []*function {
 	if target.Symbol != "" {
 		candidates := []*function{}
 		for _, fn := range a.byName[target.Symbol] {
-			if target.Path == "" || fn.file == target.Path {
+			if (target.Path == "" || fn.file == target.Path) && (target.Line == 0 || fn.line == target.Line) {
 				candidates = append(candidates, fn)
 			}
 		}

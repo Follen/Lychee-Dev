@@ -229,3 +229,47 @@ func TestContextExcerptContinuesLongLineWithoutDroppingBytes(t *testing.T) {
 		t.Fatalf("exact boundary falsely truncated: text=%q last=%d done=%v err=%v", exact, last, done, err)
 	}
 }
+
+func TestContextSourceFlowKeepsExactSymbolIDLocation(t *testing.T) {
+	ctx := context.Background()
+	fixture := t.TempDir()
+	for name, body := range map[string]string{
+		"main.lua": "do\n local function Same() return 1 end\nend\ndo\n local function Same() return 2 end\nend\n",
+		"Interface/AddOns/Blizzard_APIDocumentationGenerated/TestDocumentation.lua": `local Test = {Name="Test", Type="System", Functions={{Name="Example", Type="Function"}}}; APIDocumentation:AddDocumentationTable(Test)`,
+	} {
+		full := filepath.Join(fixture, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := vault.Initialize(ctx, filepath.Join(t.TempDir(), "home"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := IndexFixtureSource(ctx, store.Root(), "wow-ui-source", "retail", fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := QuerySource(ctx, store.Root(), indexed.Snapshot.ID, SearchQuery{Mode: SearchModePrecise, Text: "Same"})
+	if err != nil || len(matches.Result.Results) != 2 {
+		t.Fatalf("same-name declarations = %+v, %v", matches, err)
+	}
+	for _, symbol := range matches.Result.Results {
+		reading, err := ContextSource(ctx, store.Root(), indexed.Snapshot.ID, ContextQuery{SymbolID: symbol.SymbolID, Depth: 0, Limit: 10, MaxBytes: 4096, MaxLines: 40}, ResearchOptions{Flow: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := reading.Result
+		if result.Symbol == nil || result.Symbol.Line != symbol.Line || result.Flow == nil || result.Flow.Coverage.Paths != 1 {
+			t.Fatalf("exact SymbolID %s at %d = %+v", symbol.SymbolID, symbol.Line, result)
+		}
+		for _, boundary := range result.Flow.Boundaries {
+			if boundary.Code == "ambiguous_symbol" || boundary.Code == "target_unresolved" {
+				t.Fatalf("exact declaration was reselected by name: %+v", result.Flow)
+			}
+		}
+	}
+}

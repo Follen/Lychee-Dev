@@ -85,20 +85,12 @@ func DiscoverUpdateTargets(ctx context.Context, state string) ([]UpdateTarget, e
 			result = append(result, target)
 			continue
 		}
-		paths, err := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(directory)), ".lycheedev-updates", "replace-*", "replacement.json"))
+		recoveries, err := pendingUpdateRecoveries(directory, target.Component)
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range paths {
-			raw, err := readSlotFile(path, 1<<20)
-			if err != nil {
-				return nil, err
-			}
-			var record replacementRecord
-			if json.Unmarshal(raw, &record) == nil && record.Schema == "lycheedev.replacement.v1" && strings.EqualFold(record.Target, directory) && record.Next.Component == target.Component {
-				result = append(result, target)
-				break
-			}
+		if len(recoveries) != 0 {
+			result = append(result, target)
 		}
 	}
 	return result, nil
@@ -136,11 +128,6 @@ func UpdateManaged(ctx context.Context, releaseDirectory, version, state string,
 			return result, err
 		}
 		target.Path = filepath.Clean(absolute)
-		key := strings.ToLower(target.Component + ":" + target.Path)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		directory := target.Path
 		if target.Component == "addon" {
 			deployment, parent, err := ResolveAddonDestination(ctx, target.Path)
@@ -162,6 +149,13 @@ func UpdateManaged(ctx context.Context, releaseDirectory, version, state string,
 		} else if filepath.Base(target.Path) != "lycheedev" {
 			return result, ErrInstallation
 		}
+		// A game root is only a selector. Identity, de-duplication and recovery
+		// are all based on the resolved client, just like the saved inventory.
+		key := strings.ToLower(target.Component + ":" + target.Path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		if _, _, err := installationDestination(directory); err != nil {
 			return result, err
 		}
@@ -177,6 +171,22 @@ func UpdateManaged(ctx context.Context, releaseDirectory, version, state string,
 		// Renames must stay on the target volume (a game often lives on D:
 		// while the Agent/workspace lives on C:). Keep recovery outside discovery.
 		entry.Recovery = filepath.Join(filepath.Dir(filepath.Dir(directory)), ".lycheedev-updates", fmt.Sprintf("replace-%x", digest[:16]))
+		// Older callers hashed the game-root selector. Keep their original
+		// journal/cleanup directory rather than creating a second transaction.
+		recoveries, err := pendingUpdateRecoveries(directory, target.Component)
+		if err != nil {
+			return result, err
+		}
+		if len(recoveries) > 1 {
+			return result, fmt.Errorf("%w: multiple update recoveries for %s", ErrConflict, directory)
+		}
+		if len(recoveries) == 1 {
+			entry.Recovery = recoveries[0].archive
+			if !sameReceipt(recoveries[0].record.Next, updateReceipt(release, target.Component)) {
+				result.Targets = append(result.Targets, entry)
+				return result, fmt.Errorf("%w: resume the original update at %s", ErrConflict, entry.Recovery)
+			}
+		}
 		if current.State != "managed" && current.State != "absent" {
 			result.Targets = append(result.Targets, entry)
 			return result, fmt.Errorf("%w: %s: %s", ErrConflict, directory, current.State)
@@ -236,12 +246,7 @@ func UpdateManaged(ctx context.Context, releaseDirectory, version, state string,
 	}
 	for i := range result.Targets {
 		item := &result.Targets[i]
-		wanted := InstallationReceipt{Schema: "lycheedev.installation.v1", Component: item.Component, Version: release.Version, Commit: release.Commit}
-		for _, resource := range release.Resources {
-			if strings.HasPrefix(resource.Path, item.Component+"/") {
-				wanted.Resources = append(wanted.Resources, resource)
-			}
-		}
+		wanted := updateReceipt(release, item.Component)
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -311,6 +316,57 @@ func UpdateManaged(ctx context.Context, releaseDirectory, version, state string,
 	}
 	result.Complete = true
 	return result, nil
+}
+
+// Retained records are discovery evidence only: the installer still verifies
+// the selected target, both receipts and the staged files under its usual lock.
+// Include cleanup markers because a crash may already have removed the archive.
+type updateRecovery struct {
+	archive string
+	record  replacementRecord
+}
+
+func pendingUpdateRecoveries(directory, component string) ([]updateRecovery, error) {
+	root := filepath.Join(filepath.Dir(filepath.Dir(directory)), ".lycheedev-updates")
+	paths, err := filepath.Glob(filepath.Join(root, "replace-*", "replacement.json"))
+	if err != nil {
+		return nil, err
+	}
+	markers, err := filepath.Glob(filepath.Join(root, "replace-*.cleanup.json"))
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var result []updateRecovery
+	for _, path := range append(markers, paths...) {
+		raw, err := readSlotFile(path, 1<<20)
+		if err != nil {
+			return nil, err
+		}
+		var record replacementRecord
+		if json.Unmarshal(raw, &record) != nil || record.Schema != "lycheedev.replacement.v1" || !strings.EqualFold(record.Target, directory) || record.Next.Component != component {
+			continue
+		}
+		archive := filepath.Dir(path)
+		if strings.HasSuffix(path, ".cleanup.json") {
+			archive = strings.TrimSuffix(path, ".cleanup.json")
+		}
+		if !seen[archive] {
+			seen[archive] = true
+			result = append(result, updateRecovery{archive: archive, record: record})
+		}
+	}
+	return result, nil
+}
+
+func updateReceipt(release Release, component string) InstallationReceipt {
+	wanted := InstallationReceipt{Schema: "lycheedev.installation.v1", Component: component, Version: release.Version, Commit: release.Commit}
+	for _, resource := range release.Resources {
+		if strings.HasPrefix(resource.Path, component+"/") {
+			wanted.Resources = append(wanted.Resources, resource)
+		}
+	}
+	return wanted
 }
 
 // Resolve existing parent aliases (including Windows 8.3 paths), while rejecting

@@ -307,9 +307,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					break
 				}
 				var request records.DataQuery
-				request, err = readSelectedDataQuery(opts)
+				request, err = readSelectedDataQuery(ctx, opts)
 				if err != nil {
-					code = 2
+					if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+						code = 2
+					}
 					break
 				}
 				var root string

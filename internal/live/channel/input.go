@@ -41,6 +41,7 @@ type InputAction struct {
 	Envelope    bridge.SlotEnvelope `json:"-"`
 	Observation *InputObservation   `json:"observation,omitempty"`
 	Capability  string              `json:"capability,omitempty"`
+	AfterMillis int64               `json:"afterMillis,omitempty"`
 }
 type InputOutcome struct {
 	Disposition    string `json:"disposition"` // not_sent, submitted, uncertain
@@ -50,10 +51,13 @@ type InputOutcome struct {
 	Retryable      bool   `json:"retryable,omitempty"`
 }
 type InputAttempt struct {
-	ID              string            `json:"id"`
-	Exchange        string            `json:"exchange"`
-	Runtime         string            `json:"runtime"`
-	Kind            string            `json:"kind"`
+	ID       string `json:"id"`
+	Exchange string `json:"exchange"`
+	Runtime  string `json:"runtime"`
+	Kind     string `json:"kind"`
+	// Preserve the prior runtime input watermark even if this attempt proves
+	// not_sent before the native transport can provide a timestamp.
+	AfterMillis     int64             `json:"afterMillis,omitempty"`
 	EscapeAttempts  int               `json:"escapeAttempts,omitempty"`
 	Observation     *InputObservation `json:"observation,omitempty"`
 	Outcome         *InputOutcome     `json:"outcome,omitempty"`
@@ -75,7 +79,7 @@ func (d *Driver) perform(ctx context.Context, exchange, runtime string, action I
 	if err != nil {
 		return InputOutcome{}, err
 	}
-	d.State.Input = &InputAttempt{ID: id, Exchange: exchange, Runtime: runtime, Kind: action.Kind, Observation: action.Observation}
+	d.State.Input = &InputAttempt{ID: id, Exchange: exchange, Runtime: runtime, Kind: action.Kind, Observation: action.Observation, AfterMillis: action.AfterMillis}
 	if err = d.Save(ctx, "input_intent"); err != nil {
 		return InputOutcome{}, err
 	}
@@ -115,16 +119,20 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 		return runtimeRetirementPending()
 	}
 	var after int64
-	if previous := d.State.Input; previous != nil && previous.Exchange == exchange && previous.Runtime == runtime {
-		if previous.Kind == desired && (previous.Outcome == nil || previous.Outcome.Disposition != "not_sent") {
+	if previous := d.State.Input; previous != nil && previous.Runtime == runtime {
+		if previous.Exchange == exchange && previous.Kind == desired && (previous.Outcome == nil || previous.Outcome.Disposition != "not_sent") {
 			return nil
 		}
+		// Cadence belongs to the runtime, not a nonce. finishTransaction keeps
+		// Input, so adjacent prepare/commit/confirm exchanges and resumed logs
+		// must all wait for a sample taken at least 100ms after the last input.
+		after = previous.AfterMillis
 		if previous.Outcome != nil {
-			after = previous.Outcome.AtMillis
+			after = max(after, previous.Outcome.AtMillis)
 		} else if previous.Observation != nil {
-			// Lost Escape outcomes may only advance from a newer observation,
+			// A missing outcome may only advance from a newer observation,
 			// never from the same pre-input sample restored from the journal.
-			after = previous.Observation.SampleMillis
+			after = max(after, previous.Observation.SampleMillis)
 		}
 	}
 	s, err := d.Backend.ObserveInput(ctx, envelope, after, d.State.Identity.InputState)
@@ -143,7 +151,7 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 		d.Waiting = s.Reason
 		return ErrPending
 	}
-	out, err := d.perform(ctx, exchange, runtime, InputAction{Kind: desired, Envelope: envelope, Observation: &s, Capability: d.State.Identity.InputState})
+	out, err := d.perform(ctx, exchange, runtime, InputAction{Kind: desired, Envelope: envelope, Observation: &s, Capability: d.State.Identity.InputState, AfterMillis: after})
 	if out.Disposition == "not_sent" {
 		d.Waiting = out.Reason
 		if out.Retryable {

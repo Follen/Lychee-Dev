@@ -105,7 +105,7 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return ErrPending
 		}
 		r := current.Records[0]
-		s, readErr := inputObservation(r, a.Envelope, 0, uptimeMillis())
+		s, readErr := inputObservation(r, a.Envelope, a.AfterMillis, uptimeMillis())
 		if readErr != nil || s.SampleMillis != a.Observation.SampleMillis || !sameInputProfile(s, *a.Observation) {
 			return ErrPending
 		}

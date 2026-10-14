@@ -322,6 +322,9 @@ func (a *Archive) RemoveCapture(ctx context.Context, id string) (RemoveResult, e
 
 func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, error) {
 	needle := []byte("\"" + id + "\"")
+	// Existing scan captures used a capture: locator rather than the bare ID.
+	// Both forms are persistent references, including in pre-upgrade metadata.
+	locator := []byte("\"capture:" + id + "\"")
 	after := ""
 	for page := 0; page < 100; page++ {
 		docs, err := a.metadata.ListDocuments(ctx, "", after, 1000)
@@ -335,7 +338,7 @@ func (a *Archive) findExternalReference(ctx context.Context, id string) (bool, e
 			if doc.Key == "capture/"+id || doc.Key == "evidence/keep/"+id {
 				continue
 			}
-			if bytes.Contains(doc.Value, needle) {
+			if bytes.Contains(doc.Value, needle) || bytes.Contains(doc.Value, locator) {
 				return true, nil
 			}
 		}

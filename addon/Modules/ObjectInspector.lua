@@ -174,6 +174,8 @@ local function BuildInspection(value, label)
     local isFrame = IsScriptRegion(value)
     local textStream = ns.Serializer.CreateStream(value)
     local serialized = textStream:ReadChunk(MAX_TEXT_CHUNK_BYTES)
+    -- Failed streams still own useful partial text and their terminal state.
+    -- Return those with the failure, without continuing to build a value tree.
     return {
         label = label,
         valueType = type(value),
@@ -182,8 +184,8 @@ local function BuildInspection(value, label)
         isFrame = isFrame,
         text = string.format(ns.L.OBJECT_TEXT_HEADER, label or "", type(value)) .. "\n" .. serialized,
         textStream = textStream,
-        tree = ns.Inspector.CreateLiveTree({ n = 1, value }),
-    }
+        tree = not textStream.errorMessage and ns.Inspector.CreateLiveTree({ n = 1, value }) or nil,
+    }, textStream.errorMessage
 end
 
 function inspector.ResolvePath(path)
@@ -195,7 +197,8 @@ function inspector.ResolvePath(path)
 end
 
 -- Function targets must end in a string key: the key names the hooked method
--- and the rest of the path resolves to its owner table.
+-- and the rest resolves to its owner. Resolve the member under pcall because
+-- the owner can be a scalar or expose methods through a client metatable.
 function inspector.ResolveFunctionTarget(path)
     local tokens, errorMessage = ParsePath(path)
     if not tokens then
@@ -208,6 +211,12 @@ function inspector.ResolveFunctionTarget(path)
     local succeeded, owner, resolveError = ResolveTokens(tokens, #tokens - 1)
     if not succeeded then
         return false, nil, nil, resolveError
+    elseif IsSecret(owner) then
+        return false, nil, nil, ns.L.SECRET_VALUE_BLOCKED
+    end
+    local readable, target = pcall(function() return owner[key] end)
+    if not readable or IsSecret(target) or type(target) ~= "function" then
+        return false, nil, nil, ns.L.FUNCTION_NOT_FOUND
     end
     return true, owner, key
 end
@@ -221,7 +230,7 @@ function inspector.InspectPath(path)
         return false, nil, errorMessage
     end
     local inspection, inspectError = BuildInspection(value, Trim(path))
-    return inspection ~= nil, inspection, inspectError
+    return inspection ~= nil and inspectError == nil, inspection, inspectError
 end
 
 function inspector.InspectValue(value, label)
@@ -229,7 +238,7 @@ function inspector.InspectValue(value, label)
         return false, nil, ns.L.COMBAT_BLOCKED
     end
     local inspection, inspectError = BuildInspection(value, Trim(label))
-    return inspection ~= nil, inspection, inspectError
+    return inspection ~= nil and inspectError == nil, inspection, inspectError
 end
 
 function inspector.CaptureMouseFocus()
@@ -241,7 +250,7 @@ function inspector.CaptureMouseFocus()
         return false, nil, ns.L.NO_MOUSE_FOCUS
     end
     local inspection, errorMessage = BuildInspection(focus, SafeMethod(focus, "GetName") or SafePreview(focus))
-    return inspection ~= nil, inspection, errorMessage
+    return inspection ~= nil and errorMessage == nil, inspection, errorMessage
 end
 
 function inspector.GetMouseFocusLabel()

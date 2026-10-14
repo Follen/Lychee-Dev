@@ -282,7 +282,15 @@ local function CreateStream(value)
                 if not succeeded then
                     self.finished = true
                     self.state.limited = true
-                    self.errorMessage = tostring(segment)
+                    -- An error may itself have a failing __tostring. Keep this
+                    -- error outlet passive so callers receive the partial text
+                    -- and limited state instead of a second escaping error.
+                    local formatted, message = false, nil
+                    if not (issecretvalue and issecretvalue(segment)) then
+                        formatted, message = pcall(tostring, segment)
+                    end
+                    self.errorMessage = formatted and type(message) == "string"
+                        and not (issecretvalue and issecretvalue(message)) and message or "serialization_failed"
                     break
                 elseif coroutine.status(thread) == "dead" then
                     self.finished = true

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { collectAddonZipEntries } from '../../../../tools/addon-package.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(packageRoot, '../../..');
@@ -63,9 +64,9 @@ function stageResources(source, relative) {
     resources.push({ path: name, bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') });
   }
 }
-assert.equal(readFileSync(join(repository, 'addon/Bridge/Definitions.lua'), 'utf8'),
-  'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n',
-  'refuse to package a modified or nonempty probe queue');
+// Validate current TOC/bindings inputs; the retired probe queue is no longer
+// a source input for the Native Mailbox addon.
+collectAddonZipEntries(repository);
 stageResources(join(repository, 'addon'), 'addon');
 stageResources(join(repository, 'skills/lycheedev'), 'skill');
 assert.equal(run('git', ['rev-parse', 'HEAD'], repository).trim(), commit, 'HEAD changed during assembly');

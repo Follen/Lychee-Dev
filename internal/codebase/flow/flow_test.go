@@ -226,3 +226,24 @@ func hasBoundary(result Result, code string) bool {
 	}
 	return false
 }
+
+func TestFlowSymbolTargetPreservesExactDeclaration(t *testing.T) {
+	files := map[string]string{"main.lua": "do\n local function Same() Use(Source()) end\nend\ndo\n local function Same() return nil end\nend\n"}
+	for _, tc := range []struct {
+		line     int
+		findings int
+	}{{2, 1}, {5, 0}} {
+		result := investigate(t, files, Target{Path: "main.lua", Line: tc.line, Symbol: "Same"})
+		if result.Coverage.Paths != 1 || len(result.Findings) != tc.findings || hasBoundary(result, "ambiguous_symbol") || hasBoundary(result, "target_unresolved") {
+			t.Fatalf("exact declaration at line %d = %+v", tc.line, result)
+		}
+	}
+	ambiguous := investigate(t, files, Target{Path: "main.lua", Symbol: "Same"})
+	if !hasBoundary(ambiguous, "ambiguous_symbol") || ambiguous.Coverage.Paths != 0 {
+		t.Fatalf("name-only target lost ambiguity: %+v", ambiguous)
+	}
+	missing := investigate(t, files, Target{Path: "main.lua", Line: 3, Symbol: "Same"})
+	if !hasBoundary(missing, "target_unresolved") || missing.Coverage.Paths != 0 {
+		t.Fatalf("mismatched declaration location selected another target: %+v", missing)
+	}
+}

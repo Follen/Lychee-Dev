@@ -81,6 +81,14 @@ test('collectAddonZipEntries ships one flat manifest, its loads and Media', () =
   assert.ok(toc.loads.indexOf('Core\\Runtime.lua') < toc.loads.indexOf('Core\\Controls.lua'));
 });
 
+test('host package smoke inputs use the current Native Mailbox load graph', () => {
+  const { entries } = collectAddonZipEntries(repo);
+  for (const name of ['Bridge/SlotRuntime.lua', 'Bridge/InputState.lua', 'Bridge/MemoryProtocol.lua']) {
+    assert.ok(entries.has(`Lychee Dev/${name}`), name);
+  }
+  assert.equal(entries.has('Lychee Dev/Bridge/Definitions.lua'), false);
+});
+
 test('built addon zip verifies clean', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'lycheedev-package-'));
   t.after(() => rmSync(dir, { recursive: true }));

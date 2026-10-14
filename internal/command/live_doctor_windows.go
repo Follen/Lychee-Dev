@@ -112,6 +112,11 @@ func fixLiveDoctor(ctx context.Context, project *channel.Project, opts Options, 
 			archive := opts.output
 			if archive == "" {
 				archive = filepath.Join(project.Root, ".lycheedev", "live", "repairs", time.Now().UTC().Format("20060102T150405.000000000"))
+				// The default repair location belongs to this project. Prepare its
+				// parent, leaving the final archive absent for managed publication.
+				if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
+					return channel.ProjectResult{}, err
+				}
 			}
 			_, err = delivery.UpgradeAddon(ctx, release, target.Client.Directory, archive, buildinfo.Version, false)
 		}

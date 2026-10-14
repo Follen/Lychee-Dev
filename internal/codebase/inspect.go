@@ -53,11 +53,12 @@ func (b *Browser) inspectPath(ctx context.Context, snapshotID string, pin select
 	if len(target) > 4096 {
 		return response, errors.New("codebase.invalid_span")
 	}
-	cache, _, err := b.openIndex(ctx, pin)
+	cache, summary, err := b.openIndex(ctx, pin)
 	if err != nil {
 		return response, err
 	}
 	defer cache.Close()
+	response.Coverage = summary.Coverage()
 	var files, assets []sourceRecord
 	documents := map[string]sourceRecord{}
 	assetRows := map[string]sourceRecord{}
@@ -128,7 +129,7 @@ func (b *Browser) inspectPath(ctx context.Context, snapshotID string, pin select
 		}
 		response.Results = append(response.Results, Match{Kind: "asset", Name: path.Base(asset.Path), Path: asset.Path, Line: 1, MatchedBy: "path", Role: "project", Score: 100, ContentHash: asset.ContentHash, Excerpt: assetMetaExcerpt(asset)})
 	}
-	response.Complete = !response.Truncated
+	response.Complete = summary.Complete && !response.Truncated
 	if len(response.Results) == 0 {
 		response.Suggestions = []string{"use query --topic asset with a filename or a shorter path"}
 	}

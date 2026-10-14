@@ -77,6 +77,6 @@ ns.Persistence = {
     end,
     BridgeEnabled = function()
         local state = ns.Persistence.Current()
-        return state and state.options and state.options.bridgeEnabled == true or false
+        return state and (not state.options or state.options.bridgeEnabled ~= false) or false
     end,
 }

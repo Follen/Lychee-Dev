@@ -208,3 +208,46 @@ func TestUpdateDiscoverySkipsRemovedButKeepsInterruptedReplacement(t *testing.T)
 		t.Fatalf("pending replacement lost: %v %v", found, err)
 	}
 }
+
+func TestUpdateKeepsPendingOriginalRelease(t *testing.T) {
+	source, target, _, version := upgradeFixture(t)
+	state := t.TempDir()
+	targets := []UpdateTarget{{Component: "skill", Path: target}}
+	plan, err := UpdateManaged(context.Background(), source, version, state, targets, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := plan.Targets[0].Recovery
+	if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := UpgradeInstallation(cancelAfterOldMove{ctx, archive, cancel}, source, target, archive, "skill", version); !errors.Is(err, context.Canceled) {
+		t.Fatalf("old-moved checkpoint: %v", err)
+	}
+	release, err := InspectRelease(context.Background(), source, version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release.Commit = strings.Repeat("c", 40)
+	writeRelease(t, source, release)
+	result, err := UpdateManaged(context.Background(), source, version, state, targets, false)
+	if !errors.Is(err, ErrConflict) || result.Complete || len(result.Targets) != 1 || result.Targets[0].Recovery != archive {
+		t.Fatalf("silently replaced pending release: %+v %v", result, err)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("published a different release: %v", err)
+	}
+	for _, name := range []string{"previous", "next", "replacement.json"} {
+		if _, err := os.Stat(filepath.Join(archive, name)); err != nil {
+			t.Fatalf("lost original recovery %s: %v", name, err)
+		}
+	}
+	release.Commit = strings.Repeat("b", 40)
+	writeRelease(t, source, release)
+	result, err = UpdateManaged(context.Background(), source, version, state, targets, false)
+	if err != nil || !result.Complete {
+		t.Fatalf("original release no longer recoverable: %+v %v", result, err)
+	}
+}

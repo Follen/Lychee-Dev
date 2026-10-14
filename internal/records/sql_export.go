@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/follenfang/lycheedev/internal/evidence"
@@ -41,7 +42,8 @@ var ErrQueryCSVLimit = errors.New("records.query_csv_limit")
 // ExportQueryCSV publishes complete CSV bytes first and the manifest last.
 // Both destinations must be outside the managed workspace; existing files are
 // refused unless replacement is explicit. No result is claimed before the
-// completion manifest has been published.
+// completion manifest has been published. A destination-scoped OS lease holds
+// both publications together, including exports from different workspaces.
 func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryReading, output string, overwrite bool) (QueryCSVExport, error) {
 	if snapshot == "" || reading.Capture.ID == "" {
 		return QueryCSVExport{}, ErrExportPath
@@ -125,6 +127,15 @@ func ExportQueryCSV(ctx context.Context, root, snapshot string, reading QueryRea
 	if err != nil {
 		return QueryCSVExport{}, err
 	}
+	resource := dataDestination.name
+	if runtime.GOOS == "windows" {
+		resource = strings.ToLower(resource)
+	}
+	lease, err := vault.AcquireLease(ctx, filepath.Join(filepath.Dir(dataDestination.path), ".lycheedev-locks"), "sql-csv:"+resource)
+	if err != nil {
+		return QueryCSVExport{}, err
+	}
+	defer lease.Close()
 	if err := dataDestination.publish(ctx, raw); err != nil {
 		return QueryCSVExport{}, err
 	}

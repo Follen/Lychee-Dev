@@ -109,10 +109,6 @@ function trace.Start(path, callback)
     if not succeeded then
         return false, errorMessage
     end
-    local target = owner[functionName]
-    if IsSecret(target) or type(target) ~= "function" then
-        return false, ns.L.FUNCTION_NOT_FOUND
-    end
     -- Install once per path. A failed install leaves no partial state behind.
     if not hooks[path] then
         local hooked = pcall(hooksecurefunc, owner, functionName, function(...) OnCall(path, ...) end)

@@ -24,8 +24,20 @@ function fromPath() {
 }
 
 function fromNpmGlobal() {
-  const npm = windows ? 'npm.cmd' : 'npm';
-  const found = spawnSync(npm, ['prefix', '-g'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000 });
+  // Windows cannot execute npm.cmd with shell:false. Resolve the npm CLI
+  // beside its PATH shim and run it with Node, keeping every argument separate.
+  let npm = { command: 'npm', args: [] };
+  if (windows) {
+    npm = undefined;
+    for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+      if (!directory || !existsSync(join(directory, 'npm.cmd'))) continue;
+      const cli = join(directory, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      if (existsSync(cli)) npm = { command: process.execPath, args: [cli] };
+      break;
+    }
+    if (!npm) return undefined;
+  }
+  const found = spawnSync(npm.command, [...npm.args, 'prefix', '-g'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000 });
   if (found.status !== 0 || !found.stdout) return undefined;
   const root = found.stdout.trim().split(/\r?\n/)[0];
   const launcher = join(root, 'node_modules', 'lycheedev', 'bin', 'lycheedev.mjs');

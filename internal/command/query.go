@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/follenfang/lycheedev/internal/codebase"
@@ -198,7 +199,7 @@ func readDataQuery(path string) (records.DataQuery, error) {
 // readSelectedDataQuery preserves the JSON query-document contract while also
 // accepting plain SQL from a file, stdin or an inline flag. Source selection is
 // checked by dispatch before this helper runs; no fallback to ambient input.
-func readSelectedDataQuery(opts Options) (records.DataQuery, error) {
+func readSelectedDataQuery(ctx context.Context, opts Options) (records.DataQuery, error) {
 	if opts.file != "" && strings.EqualFold(filepath.Ext(opts.file), ".json") {
 		if len(opts.parameters) != 0 {
 			return records.DataQuery{}, errors.New("--param cannot be combined with a JSON query document")
@@ -211,7 +212,7 @@ func readSelectedDataQuery(opts Options) (records.DataQuery, error) {
 	case opts.sql != "":
 		raw = []byte(opts.sql)
 	case opts.stdin:
-		raw, err = io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
+		raw, err = readSQLStdin(ctx, os.Stdin)
 	case opts.file != "":
 		file, openErr := os.Open(opts.file)
 		if openErr != nil {

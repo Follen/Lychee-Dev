@@ -316,3 +316,37 @@ func TestCaptureRemovalRejectsReferencesAndPreservesSharedBlob(t *testing.T) {
 		t.Fatalf("remaining capture = %+v, err=%v", page, err)
 	}
 }
+
+func TestCaptureRemovalRecognizesLegacyCaptureLocator(t *testing.T) {
+	ctx := context.Background()
+	s, err := vault.Initialize(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.OpenMetadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	a := OpenArchive(s, m)
+	source, err := a.CommitCapture(ctx, CaptureDraft{Reader: strings.NewReader("cache"), MaxBytes: 1024, MediaType: "application/octet-stream", Complete: true, Provenance: Provenance{Kind: "hotfix-cache", Locator: "fixture"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := a.CommitCapture(ctx, CaptureDraft{Reader: strings.NewReader(`{"complete":false}`), MaxBytes: 1024, MediaType: "application/json", Truncated: true, Provenance: Provenance{Kind: "hotfix-scan", Locator: "capture:" + source.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RemoveCapture(ctx, source.ID); !errors.Is(err, ErrCaptureReferenced) {
+		t.Fatalf("legacy scan source removal = %v, want capture referenced", err)
+	}
+	if err := a.VerifyCapture(ctx, source.ID); err != nil {
+		t.Fatalf("rejected removal damaged source: %v", err)
+	}
+	if _, err := a.RemoveCapture(ctx, checkpoint.ID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := a.RemoveCapture(ctx, source.ID); err != nil || !result.ManifestRemoved || !result.BlobRemoved {
+		t.Fatalf("unreferenced source removal = %+v, %v", result, err)
+	}
+}

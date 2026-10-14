@@ -137,7 +137,7 @@ func scanHotfix(ctx context.Context, root, snapshot string, q HotfixRequest, res
 			if err != nil {
 				return evidence.CaptureRef{}, err
 			}
-			return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(raw), MaxBytes: 4 << 20, MediaType: "application/json", Complete: state.Complete, Truncated: state.Truncated, Provenance: evidence.Provenance{Kind: "hotfix-scan", Locator: "capture:" + state.Source.ID, Snapshot: state.Snapshot, DataBuild: state.Source.Provenance.DataBuild}})
+			return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(raw), MaxBytes: 4 << 20, MediaType: "application/json", Complete: state.Complete, Truncated: state.Truncated, Provenance: evidence.Provenance{Kind: "hotfix-scan", Locator: state.Source.ID, Snapshot: state.Snapshot, DataBuild: state.Source.Provenance.DataBuild}})
 		})
 		if err != nil {
 			return HotfixScanReading{}, err
