@@ -234,6 +234,16 @@ aa86ef86/run38618929588 artifact11922486642（ZIP SHA256 ffbc206b02ef5413747aa6e
 
 Python准备43测试中1失败/1平台条件skip：即时同尺寸写入并不保证Windows可观测时间戳变化。本次仅改fixture为真实内容写入加显式不同mtime并断言确已变化，另加真实长度变化case；生产guard不放松。44项Linux准备回归通过，实际Windows待重跑。该test文件从隔离stage发布；云exec服务断连导致正在运行的独立Emmy测试无可信终态，普通lease/证据保留，不根据新PID namespace中看不见进程就清锁。后续新语义的真实运行安排独立Windows host，不借更换本地target绕lease。
 
+### Emmy 上下文扩展与 Windows 第二次真实结果
+
+新公开上游补丁候选 tree 1b8a8da7209996539016f40ad1ce4ea10a0e859ddb2664658db3084fb2e74d99，853文件，提供35个独立integration回归（context20/cardinality9/checker guards6），修补model/session绑定、冻结对象身份、成员与多返回值不确定性，以及公开binding_decision API。历史example改为正确区分Lua/XML ObjectOrigin。已报告的局部问题经过独立静态复看，源码准备认证通过；精确候选编译和35测试仍NOT_RUN，新增独立Windows job执行。managed多返回参数、完整return-flow、环境结构/callback/nominal receiver以及泛型/require/诊断传播仍有未覆盖或不可用边界，不宣称Source语义收敛或全仓通过。
+
+固定07df35f3/run38620576235产物11921949297，ZIP SHA256 996210d0be2ce8b47dd06979923137baef9e1662d6f6733435ef11f3b9f7eedd：metadata18、CLI安装envelope3、CLI合同6、Source参数1实际断言通过；CLI合同组受控命令也完整成功。selection9/10、Delivery1/2、passive10/11，各失败为普通slot公开DTO错误期待8字段；固定Go对空catalogProduct使用omitempty，实际7字段正确。本批将三处改为精确7键集合断言，不修改产品输出或减小校验。其余受控组仍有旧helper强制回收FAIL，不能仅凭内部测试成功判整组成功。
+
+只读官方Windows身份run38621626563确认Enterprise vctip.exe SHA256 41fe46f8a0b41f6dd94c68c85fba20a10aacb662a9ef04784a632e37f3692371、514528B、14.51.36260.0、Microsoft有效签名。已独立审查的最小策略支持保留旧Community精确版本并加入该精确版本；未知残留子进程仍强制失败，新增真实Windows生命周期/未知进程拒绝回归。实际新helper回收结果待新CI，不能预报通过。
+
+云失联测试9da7dda2的支持文件曾被短暂改写后恢复，因此已标记external-invalidation；即使后来有成功终态也不可验收该运行。原证据/lease保留，所有新源码与支持候选在隔离stage冻结后按同一提交发布，由新Windows host验证，不清除旧lease或假定进程已回收。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

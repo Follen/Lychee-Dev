@@ -414,7 +414,27 @@ fn passive_known_folders_include_era_and_anniversary_without_public_enrichment()
             .any(|entry| entry["client"]["product"] == "anniversary")
     );
     for entry in installations {
-        assert_eq!(entry["client"].as_object().unwrap().len(), 8);
+        // Go selection.ClientInstallation omits catalogProduct for ordinary slots.
+        let keys = entry["client"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "directory",
+                "product",
+                "productCode",
+                "fullBuild",
+                "interface",
+                "toc",
+                "identitySource"
+            ]
+            .into_iter()
+            .collect()
+        );
         for name in ["displayName", "channel", "metadataBranch", "interfaceKnown"] {
             assert!(entry["client"].get(name).is_none());
         }

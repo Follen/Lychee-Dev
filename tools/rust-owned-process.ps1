@@ -44,8 +44,13 @@ if($requestData.cargoBuild -eq $true){
   $cargoIdentity=Open-IdentityFile $binary
   if($cargoIdentity.sha256 -ne $policy.cargoSHA256){throw 'owned.unreviewed_cargo_identity'}
   $helperAdmission=@{state='enabled';cargo=$cargoIdentity;helpers=@()}
+  if(@($policy.helpers).Count -lt 1 -or @($policy.helpers).Count -gt 8){throw 'owned.auxiliary_policy_budget'}
   foreach($helper in $policy.helpers){
    $helperPath=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $helper.programFilesPath
+   # The reviewed Community and hosted Enterprise variants need not coexist.
+   # This never admits another path: every present variant still requires all
+   # pinned bytes, version, signature and held-file identity checks below.
+   if(-not [IO.File]::Exists($helperPath)){continue}
    $identity=Open-IdentityFile $helperPath
    if($identity.bytes -ne $helper.bytes -or $identity.sha256 -ne $helper.sha256){throw 'owned.unreviewed_helper_identity'}
    $version=[Diagnostics.FileVersionInfo]::GetVersionInfo($helperPath).FileVersion
@@ -54,6 +59,7 @@ if($requestData.cargoBuild -eq $true){
    $identity.kind=$helper.kind;$identity.fileVersion=$version;$identity.signatureStatus='WinVerifyTrust:0';$identity.signerSubject=$signature.Subject;$identity.signerThumbprint=$signature.Thumbprint
    $helperAdmission.helpers+=@($identity);$admittedHelperPaths+=@($identity.path)
   }
+  if($admittedHelperPaths.Count -eq 0){throw 'owned.no_reviewed_helper_present'}
  }catch{$admittedHelperPaths=@();$helperAdmission=@{state='disabled';reason=$_.Exception.Message;helpers=@()}}
 }
 

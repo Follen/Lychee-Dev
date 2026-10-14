@@ -1,5 +1,5 @@
 use emmylua_code_analysis::{LuaType, CheckConfig, DiagnosticCode, humanize_semantic_type};
-use emmylua_code_analysis::binding_context::{BindingContext, BindingDecision, BindingSite, BoundValue, SelectedValue, ObjectRef, BindingSession};
+use emmylua_code_analysis::binding_context::{BindingContext, BindingDecision, BindingSite, BoundValue, SelectedValue, ObjectRef, ObjectOrigin, BindingSession};
 use emmylua_parser::{LuaAstNode, LuaCallExpr};
 
 const NATIVE_FILES: &[&str] = &["profile.lua", "generic-defs.lua", "generic-calls.lua", "generic-replace.lua"];
@@ -56,12 +56,18 @@ fn coverage_json(input:&NativeInput,session:&BindingSession)->Vec<Value> {
 fn binding_site_json(input:&NativeInput,site:BindingSite)->Value {
     json!({"file":input.files().iter().find(|(_,id)|**id==site.file_id).map(|(file,_)|file),"start":u32::from(site.syntax.get_range().start()),"end":u32::from(site.syntax.get_range().end())})
 }
+fn object_origin_json(input:&NativeInput,origin:&ObjectOrigin)->Value {
+    match origin {
+        ObjectOrigin::Lua(site)=>binding_site_json(input,*site),
+        ObjectOrigin::Xml(span)=>json!({"file":span.path,"contentSHA256":span.content_sha256,"start":u32::from(span.range.start()),"end":u32::from(span.range.end())}),
+    }
+}
 fn decision_json(input:&NativeInput,decision:&BindingDecision<BoundValue>)->Value {
     match decision {
         BindingDecision::Bound(value)=> {
             let selected=match &value.value {
                 SelectedValue::Function(function)=>json!({"kind":"function","closure":binding_site_json(input,BindingSite{file_id:function.file_id,syntax:function.closure}),"declaration":format!("{:?}",function.declaration)}),
-                SelectedValue::Object(object)=>json!({"kind":"object","objectId":object.identity,"epoch":object.epoch,"origin":binding_site_json(input,object.origin)}),
+                SelectedValue::Object(object)=>json!({"kind":"object","objectId":object.identity,"epoch":object.epoch,"origin":object_origin_json(input,&object.origin)}),
                 SelectedValue::Expression(site)=>json!({"kind":"expression","origin":binding_site_json(input,*site)}),
                 SelectedValue::Parameter(decl)=>json!({"kind":"parameter","declaration":format!("{decl:?}")}),
                 SelectedValue::DerivedNumber(number)=>json!({"kind":"derived_number","value":number.value,"origin":{"file":input.files().iter().find(|(_,id)|**id==number.origin.file_id).map(|(file,_)|file),"start":u32::from(number.origin.range.start()),"end":u32::from(number.origin.range.end())},"occurrence":number.occurrence_identity,"proof":number.proof}),

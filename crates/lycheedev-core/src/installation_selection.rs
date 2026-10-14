@@ -430,7 +430,27 @@ mod tests {
         let exact = select(&path, "").unwrap();
         assert_eq!(select(&fixture.0, "").unwrap(), exact);
         let public = serde_json::to_value(Client::from(&exact)).unwrap();
-        assert_eq!(public.as_object().unwrap().len(), 8);
+        // Go selection.ClientInstallation omits catalogProduct for ordinary slots.
+        let keys = public
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "directory",
+                "product",
+                "productCode",
+                "fullBuild",
+                "interface",
+                "toc",
+                "identitySource"
+            ]
+            .into_iter()
+            .collect()
+        );
         for name in [
             "interfaceKnown",
             "displayName",

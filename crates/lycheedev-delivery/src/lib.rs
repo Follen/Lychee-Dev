@@ -218,7 +218,27 @@ mod selection_tests {
         let exact = dispatch(&inv).unwrap().data;
         assert_eq!(root, exact);
         assert_eq!(root["client"]["product"], "titan");
-        assert_eq!(root["client"].as_object().unwrap().len(), 8);
+        // Go selection.ClientInstallation omits catalogProduct for ordinary slots.
+        let keys = root["client"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "directory",
+                "product",
+                "productCode",
+                "fullBuild",
+                "interface",
+                "toc",
+                "identitySource"
+            ]
+            .into_iter()
+            .collect()
+        );
         assert_eq!(root["installation"]["state"], "absent");
         assert!(!inv.home.exists());
     }
