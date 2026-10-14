@@ -1590,5 +1590,37 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 ### R28-C01：静态空哈希节点候选，未确认WoW现场根因
 
 - 官方Lua5.1.5真实C fixture证明空表共用文件映射只读静态节点，首个字符串插入后变私有节点；但stock Table/Node/node-offset为64/40/32，当前WoW受支持布局为72/56/40。前者不能证明目标客户端的sentinel合同。当前reader若遇稳定非private节点仍拒绝，R20-01仅有guard变化才改分类；没有据候选新增内存回退/扫描或放松身份检查。
-- 当前包缺失败单次地址/请求与返回长度、具体命名路径节点、区域State/Type/Protect和原始错误、失败前后guard字节及接收端bind处理证据。后续需在明确授权、匹配CLI/addon与固定客户端的新连接中记录首个失败读的这些最小字段；保留原输入意图/未知结果，不恢复已closed旧CON或重放submitted输入。区分静态空节点、已证明发布变化与稳定坏指针，再决定是否修复。原有7项客户端整合中的R20包含此复验，不另算已完成实机测试。
+- 当前包缺失败单次地址/请求与返回长度、具体命名路径节点、区域State/Type/Protect和原始错误、失败前后guard复核结论及接收端bind处理证据。后续需在明确授权、匹配版本与固定客户端的有界命名只读查询中记录首个失败读的这些最小字段；保留原输入意图/未知结果，不恢复已closed旧CON或重放submitted输入。区分静态空节点、已证明发布变化与稳定坏指针，再决定是否修复。原有7项客户端整合中的R20包含此复验，不另算已完成实机测试。
 - 必要环境：后续获准的Windows目标客户端和匹配版本诊断能力；预期：定位到唯一读节点/区域或明确仍不足，只有guard变化才允许既有有界重读，稳定坏读不被掩盖。实际复验结果：
+
+### R23–R28交付与Windows原生结果
+
+- 代码提交 [`71d645ec`](https://github.com/Follen/Lychee-Dev/commit/71d645ec6d20bd0c69ce937a70f122d83648fc75)，tree `0d3306adbe4f2b0b7090bcd62f6de822cc24be21` 已推同草稿PR13。[精确head CI38593192586](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586)的contract、race、process、addon、package及ci-required全部success。Linux既有平台失败由当前Windows原生实际补跑，不拿交叉编译或旧提交冒充通过。
+- [coverage artifact11908722051](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586/artifacts/11908722051)大小5444097字节、下载SHA256 `af9b4e2ce6ef2eb7ccd1c4e4ad5b41932c065a069cb7368cb937425dcb8a0e0e`与API一致。独立核对testedCommit/tree、profile/events/identity输入hash并OR合并695889条重复block：22448唯一block，**24349/31245语句=77.9293%**。2894 test/subtest pass=2628叶节点+266容器，0fail/未完成；33测试包pass，两个无测试包不算测试skip。
+- 口径为Windows/amd64 Go1.27.1、同一次Lua必需完整套件的atomic跨包cmd/internal（排除testkit），28个instrumented包、27个有语句block，navigatetest无产品block；默认build tags。独立race与casc_oracle门禁不混入此profile，CLI子进程不会自动计量，比例不代表Lua/Node、业务场景或游戏覆盖。前次3ed74d85为24752/32099=77.1114%，本批覆盖语句减少403、分母减少854；不能把比例上升当新增业务覆盖。
+- 旧16项公开输入缺口全部实际pass。当前精确gate为15顶层root/30终态名称（25叶节点+5容器），旧“16项”将flow retail/forever分开计数；不能重复计父子。17skip逐项如下，9个helper对应11个不同父测试root真实pass（含后代20事件=17叶+3容器）。
+
+| 类别 | 精确测试（路径均为internal/下） | 原因/实际证据 |
+| --- | --- | --- |
+| 材料 | command/TestInstalledAssetCommand | 需明确installed build fixture |
+| 宿主 | delivery/TestInstallationLeaseShortPathSpelling | 该卷8.3短名未启用；不修改宿主策略消skip |
+| 客户端 | live/TestClientWindowLiveReadOnly | 需明确获准live只读目标 |
+| 原材料 | live/memory/TestLuaMailboxRootRecipeOriginalRuntimeDump | 需原runtime dump manifest |
+| 原材料 | live/memory/TestLuaMailboxRootRecipeCapturedRuntimeHeader | 需原header、dump manifest及hash匹配EXE |
+| 材料 | records/TestImageExportRealSample | 需icon.blp/png/webp样本目录 |
+| 材料 | records/TestInstalledBuildMetadata | 需明确installation/product/build |
+| 材料 | records/archive/TestInstalledIndexReadOnly | 需明确本地index fixture |
+| helper | delivery/TestInstallationWorker | 独立进程同目标安装父测试pass |
+| helper | delivery/TestUpgradeWorker | old-move后杀进程恢复父测试pass |
+| helper | live/journal/TestAdmissionCrashHelper | before/after-claim崩溃恢复父测试pass |
+| helper | live/journal/TestWindowOwnerProcessHelper | 同窗口跨进程owner竞争父测试pass |
+| helper | live/journal/TestWindowRunProcessHelper | 进程退出仅允许已记录恢复父测试pass |
+| helper | live/memory/TestNativeMemoryChild | 主模块边界/身份及精确点读两个父测试pass |
+| helper | live/memory/TestNativeModuleMappedChild | mapped区间/protection与外部映射拒绝两个父测试pass |
+| helper | live/memory/TestNativeModuleProtectionChild | 受保护image页拒绝父测试pass |
+| helper | testkit/TestSourceBrokerGateHelperProcess | Source broker受控跨进程门禁父测试pass |
+
+- WGC三个实际skip随无消费者代码/测试删除，没有变成捕获pass；剩8实际可选项不混称都需游戏。7项客户端整合仍留空，旧矩阵不因离线通过重填。
+- R28独立原包调查已完成，7个隔离叶场景通过，未确认可直接修改的现场产品缺陷。包中未保存的故障节点/region不能离线恢复；仅有现行trace error字符串也不足。最小后续方案未实施：source.go为LookupResult加可选首发readFailure；Process.Read复用现有VirtualQueryEx结果记录准入拒绝/ioAttempted/n；luaAccess设置固定逻辑路径并保留R20复核摘要，Native.Find既有scan链自动保存。元数据不含原地址、角色/nonce、payload或guard原始字节，不额外读取、不放宽MEM_PRIVATE判定/预算/输入/身份，不新建扫描器。
+- 诊断字段可先用现有memory/traversal/trace fixture、序列化隐私测试及Windows自有子进程完成确定性验证。现有doctor既不查receipts也不设置TraceDir，不能声称再跑doctor就会取得它们。若后续处理旧3.1.2，需精确旧reader的独立只读维护者产物且不替换已发布包；只核固定身份→命名identity/INPUT→未发布/未执行nonce的receipt读取→输出/关闭，不调用driver/Connect/Publish/Input/安装/reload。当前500槽主协议不增加旧回执旁路。字段证据不足或当前无法复现时保留未知，不反复重连碰运气。
+- PR12重新确认closed、merged=false；版本源3.1.2、next/latest2.5.1未变。全部剩余材料及新诊断原包保留；此前R20/R22部分临时负对照原日志已删除的限制仍如实保留，不声称全证据完好。
