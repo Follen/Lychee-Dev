@@ -27,10 +27,13 @@ for(const [name,expected] of [['rustc',compiler.rustc],['cargo',compiler.cargo]]
   if(version.status!==0||!version.stdout.toString().startsWith(`${name} ${expected} `))throw new Error(`rust-rebuild.toolchain_identity_mismatch:${name}`);
   tools.push({name,executable,executableSHA256:hashFile(executable),versionSHA256:sha256(version.stdout)});
 }
-const report={schema:'lycheedev.rust-source-rebuild.v1',state:'running',offline:true,locked:true,compiler,tools,emmy,sourceDigest:sourceDigest(source),sourceCargoLockSHA256:hashFile(join(source,'Cargo.lock')),builds:[],scope:'uncommitted immutable Rust-only snapshot including the complete pinned private Emmy dependency; two fresh Cargo homes and sequential empty controlled caches; not an official tagged release source archive'};
+const sourceCommit=spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true,shell:false,timeout:30000,maxBuffer:1<<20});
+if(sourceCommit.status!==0||!(/^[a-f0-9]{40}$/.test(sourceCommit.stdout.trim())))throw new Error('rust-rebuild.source_commit_unavailable');
+const sealedSource={commit:sourceCommit.stdout.trim(),snapshotSHA256:sourceDigest(source),dirty:true};
+const report={schema:'lycheedev.rust-source-rebuild.v1',state:'running',offline:true,locked:true,compiler,tools,emmy,sourceIdentity:sealedSource,sourceDigest:sealedSource.snapshotSHA256,sourceCargoLockSHA256:hashFile(join(source,'Cargo.lock')),builds:[],scope:'uncommitted immutable Rust-only snapshot including the complete newly reconstructed Emmy dependency and pinned public base/patch recipe; historical private patch not recovered; two fresh Cargo homes and sequential empty controlled caches; not an official tagged release source archive'};
 const reportPath=join(out,'report.json'),save=()=>writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');save();
 for(const name of ['first','second']){
-  const environment={CARGO_NET_OFFLINE:'true',LYCHEEDEV_BUILD_COMMIT:'9d3d3598b8bac7efabf0b937df30508075eaa841',LYCHEEDEV_BUILD_DIRTY:'true',CFLAGS:'/DNDEBUG /Brepro',CXXFLAGS:'/DNDEBUG /Brepro',CARGO_ENCODED_RUSTFLAGS:['-C','target-feature=+crt-static','-C','link-arg=/Brepro','--remap-path-prefix',`${source}=/lycheedev`,'--remap-path-prefix',`${source.replaceAll('\\','/')}=/lycheedev`].join('\x1f')};
+  const environment={CARGO_NET_OFFLINE:'true',LYCHEEDEV_BUILD_COMMIT:sealedSource.commit,LYCHEEDEV_BUILD_DIRTY:'true',CFLAGS:'/DNDEBUG /Brepro',CXXFLAGS:'/DNDEBUG /Brepro',CARGO_ENCODED_RUSTFLAGS:['-C','target-feature=+crt-static','-C','link-arg=/Brepro','--remap-path-prefix',`${source}=/lycheedev`,'--remap-path-prefix',`${source.replaceAll('\\','/')}=/lycheedev`].join('\x1f')};
   try{
     const built=runCargo(root,['build','--locked','--offline','-j','1','--release','-p','lycheedev-cli','--target',compiler.target],{sourceRoot:source,environment,owner:`rust-source-rebuild/${name}`,freshOffline:true,onSuccess(invocation){
       const generated=join(invocation.target,compiler.target,'release/lycheedev.exe'),binary=join(out,`${name}-lycheedev.exe`),digest=hashFile(generated,128<<20);

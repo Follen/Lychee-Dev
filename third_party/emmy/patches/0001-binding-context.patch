@@ -1,0 +1,1075 @@
+--- /dev/null
++++ b/crates/emmylua_code_analysis/src/binding_context.rs
+@@ -0,0 +1,165 @@
++//! Immutable host-selected binding evidence for one semantic query session.
++//! This is a new public-base reconstruction, not the historical private patch.
++#![forbid(unsafe_code)]
++
++use std::collections::{BTreeMap, HashMap, HashSet};
++use std::sync::{Arc, Mutex};
++use emmylua_parser::LuaSyntaxId;
++use rowan::TextRange;
++use serde::{Deserialize, Serialize};
++use crate::{FileId, SemanticId};
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
++pub struct BindingSite { pub file_id: FileId, pub syntax: LuaSyntaxId }
++#[derive(Clone, Debug)]
++pub enum BindingDecision<T> {
++    NotManaged,
++    Bound(T),
++    KnownAbsent { proof: String },
++    Unavailable { proof: String, reason: String },
++}
++#[derive(Clone, Debug)]
++pub struct BoundValue { pub identity: String, pub proof: String, pub value: SelectedValue }
++#[derive(Clone, Debug)]
++pub enum SelectedValue {
++    Expression(BindingSite), Parameter(SemanticId), Function(FunctionRef), Object(ObjectRef),
++    DerivedNumber(DerivedNumber), EnvironmentCallable(Arc<EnvironmentCallable>),
++    EnvironmentReturn(EnvironmentReturn),
++}
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct FunctionRef { pub file_id: FileId, pub closure: LuaSyntaxId, pub declaration: Option<SemanticId> }
++#[derive(Clone, Debug)]
++pub struct SourceSpan { pub file_id: FileId, pub range: TextRange }
++#[derive(Clone, Debug)]
++pub struct ExternalSourceSpan { pub path: String, pub content_sha256: String, pub range: TextRange }
++#[derive(Clone, Debug)]
++pub enum ObjectOrigin { Lua(BindingSite), Xml(ExternalSourceSpan) }
++#[derive(Clone, Debug)]
++pub enum FieldWriteOrigin { Lua(SourceSpan), Xml(ExternalSourceSpan) }
++#[derive(Clone, Debug, PartialEq, Eq, Hash)]
++pub struct ObjectViewKey { pub context: String, pub observation: usize, pub object_id: usize }
++#[derive(Clone, Debug)]
++pub struct ObjectRef { pub identity: String, pub epoch: String, pub origin: ObjectOrigin, pub view: ObjectViewKey }
++#[derive(Clone, Debug)]
++pub struct ObjectShape { pub key: ObjectViewKey, pub fields: Vec<ObjectField>, pub enumeration: ShapeEnumeration, pub proof: String }
++#[derive(Clone, Debug)]
++pub struct ObjectField { pub key: String, pub presence: FieldPresence, pub value: BindingDecision<BoundValue>, pub destination_write: FieldWriteOrigin, pub source_write: Option<FieldWriteOrigin>, pub copy_origin: Option<FieldWriteOrigin> }
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum FieldPresence { Present, Absent, Unavailable }
++#[derive(Clone, Debug)]
++pub enum ShapeEnumeration { Complete, Unavailable(String) }
++#[derive(Clone, Debug)]
++pub struct DerivedNumber { pub value: f64, pub origin: SourceSpan, pub occurrence_identity: String, pub rule: DerivedNumberRule, pub proof: String }
++#[derive(Clone, Debug)]
++pub enum DerivedNumberRule { NumericForIteration { statement: BindingSite, header: Vec<BindingSite>, iteration: usize, predecessor: Option<String> } }
++#[derive(Clone, Debug)]
++pub struct CallPermit { pub callee: BindingSite, pub proof: String, pub capability_profile: String }
++#[derive(Clone, Debug)]
++pub enum ObservedCallee { Source(FunctionRef), Environment(Arc<EnvironmentCallable>) }
++#[derive(Clone, Debug)]
++pub struct CallObservation { pub callee: ObservedCallee, pub selected_callee_identity: String, pub closure_identity: String, pub invocation_identity: String, pub returns: Vec<BindingDecision<BoundValue>>, pub proof: String }
++#[derive(Clone, Debug)]
++pub struct BindingReference { pub site: BindingSite, pub proof: String, pub execution_context: String }
++
++#[derive(Clone, Debug, Default, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub struct EnvironmentSlot {
++    pub index: usize, pub name: String, #[serde(rename = "type")] pub type_name: String,
++    #[serde(default)] pub inner_type: String, #[serde(default)] pub nilable: bool,
++    #[serde(default)] pub line: usize, #[serde(default)] pub raw: BTreeMap<String, serde_json::Value>,
++}
++#[derive(Clone, Debug, Serialize, Deserialize)]
++pub struct EnvironmentOwner { pub kind: String, pub name: String, #[serde(default)] pub source: serde_json::Value }
++/// The actual ApiRecord schema: parameters/returns/payload/fields/values carry
++/// Slot records; raw metadata is retained and is never interpreted as Lua code.
++#[derive(Clone, Debug, Default, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub struct EnvironmentRecord {
++    pub kind: String, pub name: String,
++    #[serde(default)] pub owner: Option<EnvironmentOwner>,
++    #[serde(default)] pub declaration_role: String, #[serde(default)] pub display_group: String,
++    #[serde(default)] pub namespace: String, #[serde(default)] pub path: String,
++    #[serde(default)] pub line: usize, #[serde(default)] pub end_line: usize,
++    #[serde(default)] pub parameters: Vec<EnvironmentSlot>, #[serde(default)] pub returns: Vec<EnvironmentSlot>,
++    #[serde(default)] pub payload: Vec<EnvironmentSlot>, #[serde(default)] pub fields: Vec<EnvironmentSlot>,
++    #[serde(default)] pub values: Vec<EnvironmentSlot>, #[serde(default)] pub raw: BTreeMap<String, serde_json::Value>,
++}
++#[derive(Clone, Debug, Default)]
++pub struct EnvironmentTypeCatalog {
++    pub identity: String, pub aliases: BTreeMap<String, String>,
++    pub nominal_objects: BTreeMap<String, serde_json::Value>,
++    pub declarations: BTreeMap<String, Vec<EnvironmentRecord>>,
++}
++#[derive(Clone, Debug)]
++pub struct EnvironmentOrigin { pub material: String, pub material_sha256: String, pub pointer: String, pub identity: String }
++#[derive(Clone, Debug)]
++pub struct EnvironmentCallable { pub origin: EnvironmentOrigin, pub declaration: EnvironmentRecord, pub types: Arc<EnvironmentTypeCatalog> }
++impl EnvironmentCallable {
++    pub fn nominal_return_name(&self, slot: usize) -> Option<&str> {
++        let value = self.declaration.returns.get(slot.checked_sub(1)?)?;
++        if value.index != slot || value.nilable { return None; }
++        self.types.nominal_objects.contains_key(&value.type_name).then_some(value.type_name.as_str())
++    }
++    pub fn receiver_type_name(&self) -> Option<&str> {
++        let owner = self.declaration.owner.as_ref().filter(|o| o.kind == "script-object")?;
++        let mut names = self.types.nominal_objects.iter().filter(|(_, value)| value.get("owner").and_then(serde_json::Value::as_str) == Some(owner.name.as_str()));
++        let (name, _) = names.next()?;
++        if names.next().is_some() { return None; }
++        Some(name.as_str())
++    }
++}
++#[derive(Clone, Debug)]
++pub struct EnvironmentReturn { pub callable: Arc<EnvironmentCallable>, pub slot: usize, pub invocation_identity: String }
++
++pub trait BindingContext: Send + Sync {
++    fn identity(&self) -> &str;
++    fn resolve(&self, site: BindingSite) -> BindingDecision<BoundValue>;
++    fn call(&self, _site: BindingSite) -> BindingDecision<CallPermit> { BindingDecision::NotManaged }
++    fn call_observation(&self, _site: BindingSite) -> BindingDecision<CallObservation> { BindingDecision::NotManaged }
++    fn object_shape(&self, _key: &ObjectViewKey) -> BindingDecision<ObjectShape> { BindingDecision::Unavailable { proof: String::new(), reason: "object_shape_provider_unavailable".into() } }
++    fn references(&self, _identity: &str) -> BindingDecision<Vec<BindingReference>> { BindingDecision::Unavailable { proof: String::new(), reason: "reference_provider_unavailable".into() } }
++}
++#[derive(Clone, Debug)]
++pub struct BindingCoverage {
++    pub site: BindingSite, pub operation: &'static str, pub state: &'static str,
++    pub proof: String, pub reason: Option<String>, pub parameter: Option<String>,
++    pub parameter_index: Option<usize>, pub argument: Option<BindingSite>,
++}
++/// All context-dependent state is session-owned, never stored in the database.
++/// Models made with `model_for` retain this exact Arc, including cycle guards.
++#[derive(Clone, Debug, PartialEq, Eq, Hash)]
++pub struct BoundObjectType {
++    pub context: String, pub identity: String, pub epoch: String,
++    pub view: ObjectViewKey, pub site: BindingSite, pub proof: String, pub complete: bool,
++}
++
++pub struct BindingSession {
++    pub(crate) context: Arc<dyn BindingContext>,
++    identity: String,
++    coverage: Mutex<Vec<BindingCoverage>>,
++    active: Mutex<HashSet<BindingSite>>,
++    pub(crate) active_objects: Mutex<HashSet<ObjectViewKey>>,
++    pub(crate) shapes: Mutex<HashMap<ObjectViewKey, ObjectShape>>,
++}
++impl BindingSession {
++    pub fn new(context: Arc<dyn BindingContext>) -> Arc<Self> {
++        Arc::new(Self { identity: context.identity().into(), context, coverage: Mutex::new(Vec::new()), active: Mutex::new(HashSet::new()), active_objects: Mutex::new(HashSet::new()), shapes: Mutex::new(HashMap::new()) })
++    }
++    pub fn identity(&self) -> &str { &self.identity }
++    pub fn coverage(&self) -> Vec<BindingCoverage> { self.coverage.lock().unwrap_or_else(|p| p.into_inner()).clone() }
++    pub fn references(&self, identity: &str) -> BindingDecision<Vec<BindingReference>> { self.context.references(identity) }
++    pub(crate) fn record(&self, site: BindingSite, operation: &'static str, state: &'static str, proof: String, reason: Option<String>) {
++        let mut rows = self.coverage.lock().unwrap_or_else(|p| p.into_inner());
++        if !rows.iter().any(|r| r.site == site && r.operation == operation && r.state == state && r.proof == proof && r.reason == reason) {
++            rows.push(BindingCoverage { site, operation, state, proof, reason, parameter: None, parameter_index: None, argument: None });
++        }
++    }
++    pub(crate) fn enter(&self, site: BindingSite) -> bool {
++        let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
++        active.len() < 64 && active.insert(site)
++    }
++    pub(crate) fn leave(&self, site: BindingSite) { self.active.lock().unwrap_or_else(|p| p.into_inner()).remove(&site); }
++}
++
++#[cfg(test)]
++mod tests;
+--- /dev/null
++++ b/crates/emmylua_code_analysis/src/binding_context/tests.rs
+@@ -0,0 +1,104 @@
++use super::*;
++use crate::{EmmyLuaAnalysis, LuaType};
++use emmylua_parser::{LuaAstNode, LuaExpr};
++use std::collections::HashMap;
++
++struct Context {
++    identity: String,
++    decisions: HashMap<BindingSite, BindingDecision<BoundValue>>,
++    calls: HashMap<BindingSite, BindingDecision<CallPermit>>,
++    observations: HashMap<BindingSite, CallObservation>,
++}
++impl BindingContext for Context {
++    fn identity(&self) -> &str { &self.identity }
++    fn resolve(&self, site: BindingSite) -> BindingDecision<BoundValue> { self.decisions.get(&site).cloned().unwrap_or(BindingDecision::NotManaged) }
++    fn call(&self, site: BindingSite) -> BindingDecision<CallPermit> { self.calls.get(&site).cloned().unwrap_or(BindingDecision::NotManaged) }
++    fn call_observation(&self, site: BindingSite) -> BindingDecision<CallObservation> { self.observations.get(&site).cloned().map(BindingDecision::Bound).unwrap_or(BindingDecision::NotManaged) }
++}
++fn context(identity: &str) -> Context { Context { identity: identity.into(), decisions: HashMap::new(), calls: HashMap::new(), observations: HashMap::new() } }
++fn site(analysis: &EmmyLuaAnalysis, file_id: FileId, text: &str) -> BindingSite {
++    let model = analysis.semantic_model(file_id);
++    let expr = model.syntax_tree().unwrap().get_red_root().descendants().filter_map(LuaExpr::cast).find(|expr| expr.syntax().text().to_string() == text).unwrap();
++    BindingSite { file_id, syntax: expr.get_syntax_id() }
++}
++fn load() -> (EmmyLuaAnalysis, Vec<FileId>, Arc<str>) {
++    let mut analysis = EmmyLuaAnalysis::new();
++    let root = std::env::current_dir().unwrap().join("binding-test-input");
++    analysis.add_main_workspace(root.clone());
++    let text: Arc<str> = Arc::from("local x = 42\nreturn x, x + 1\n");
++    let ids = analysis.update_files_by_path_shared_checked(vec![(root.join("a.lua"), Some(text.clone())), (root.join("b.lua"), Some(Arc::from("return true\n")))], || Ok::<_, ()>(())).unwrap();
++    (analysis, ids, text)
++}
++#[test]
++fn shared_ingestion_preserves_allocation_and_facts() {
++    let (analysis, ids, text) = load();
++    assert_eq!(analysis.db.get_file_text(ids[0]).unwrap().as_ptr(), text.as_ptr());
++    let mut other = EmmyLuaAnalysis::new();
++    let path = std::env::current_dir().unwrap().join("binding-test-input/a.lua");
++    let other_ids = other.update_files_by_path_checked(vec![(path, Some(text.to_string()))], || Ok::<_, ()>(())).unwrap();
++    assert_eq!(analysis.semantic_model(ids[0]).file_facts(), other.semantic_model(other_ids[0]).file_facts());
++}
++#[test]
++fn shared_ingestion_propagates_each_interruption_and_removes() {
++    let path = std::env::current_dir().unwrap().join("binding-test-input/c.lua");
++    let mut checks = 0;
++    let mut analysis = EmmyLuaAnalysis::new();
++    let ids = analysis.update_files_by_path_shared_checked(vec![(path.clone(), Some(Arc::from("return 1")))], || { checks += 1; Ok::<_, &str>(()) }).unwrap();
++    for stop in 1..=checks {
++        let mut interrupted = EmmyLuaAnalysis::new();
++        let mut count = 0;
++        assert_eq!(interrupted.update_files_by_path_shared_checked(vec![(path.clone(), Some(Arc::from("return 1")))], || { count += 1; if count == stop { Err("cancel-original") } else { Ok(()) } }), Err("cancel-original"));
++        assert_eq!(count, stop);
++    }
++    analysis.update_files_by_path_shared_checked(vec![(path, None)], || Ok::<_, ()>(())).unwrap();
++    assert!(analysis.db.get_file_text(ids[0]).is_none());
++}
++#[test]
++fn managed_unavailable_and_absent_do_not_fall_back() {
++    let (analysis, ids, _) = load();
++    let use_site = site(&analysis, ids[0], "x");
++    for (decision, expected) in [(BindingDecision::Unavailable { proof: "p".into(), reason: "blocked".into() }, LuaType::Unknown), (BindingDecision::KnownAbsent { proof: "p".into() }, LuaType::Nil)] {
++        let mut provider = context("phase");
++        provider.decisions.insert(use_site, decision);
++        let session = BindingSession::new(Arc::new(provider));
++        let model = analysis.semantic_model_with_context(ids[0], session.clone());
++        assert_eq!(model.type_of_expr(use_site.syntax), expected);
++        assert!(!session.coverage().is_empty());
++    }
++}
++#[test]
++fn model_for_inherits_context_and_context_caches_are_isolated() {
++    let (analysis, ids, _) = load();
++    let use_site = site(&analysis, ids[0], "x");
++    let origin = site(&analysis, ids[1], "true");
++    let mut provider = context("selected");
++    provider.decisions.insert(use_site, BindingDecision::Bound(BoundValue { identity: "boolean-value".into(), proof: "p".into(), value: SelectedValue::Expression(origin) }));
++    let session = BindingSession::new(Arc::new(provider));
++    let selected = analysis.semantic_model_with_context(ids[1], session.clone());
++    let foreign = selected.model_for(ids[0]);
++    assert_eq!(foreign.binding_context_identity(), Some("selected"));
++    assert_eq!(foreign.type_of_expr(use_site.syntax), LuaType::BooleanConst(true));
++    assert_eq!(analysis.semantic_model(ids[0]).type_of_expr(use_site.syntax), LuaType::IntegerConst(42));
++    let raw_session = BindingSession::new(Arc::new(context("raw")));
++    assert_eq!(analysis.semantic_model_with_context(ids[0], raw_session).type_of_expr(use_site.syntax), LuaType::IntegerConst(42));
++    assert_eq!(foreign.type_of_expr(use_site.syntax), LuaType::BooleanConst(true));
++}
++#[test]
++fn selected_expression_cycles_are_bounded_and_visible() {
++    let (analysis, ids, _) = load();
++    let use_site = site(&analysis, ids[0], "x");
++    let mut provider = context("cycle");
++    provider.decisions.insert(use_site, BindingDecision::Bound(BoundValue { identity: "cycle".into(), proof: "p".into(), value: SelectedValue::Expression(use_site) }));
++    let session = BindingSession::new(Arc::new(provider));
++    assert_eq!(analysis.semantic_model_with_context(ids[0], session.clone()).type_of_expr(use_site.syntax), LuaType::Unknown);
++    assert!(session.coverage().iter().any(|row| row.reason.as_deref() == Some("binding_projection_cycle")));
++}
++#[test]
++fn environment_records_keep_actual_slots_and_raw_evidence() {
++    let value = serde_json::json!({"kind":"function","name":"Host","parameters":[{"index":1,"name":"unit","type":"UnitToken","nilable":false,"line":4,"raw":{"Name":"unit"}}],"returns":[{"index":1,"name":"ok","type":"bool","nilable":false,"line":5}],"raw":{"documentation":"完整"}});
++    let record: EnvironmentRecord = serde_json::from_value(value.clone()).unwrap();
++    assert_eq!(record.parameters[0].type_name, "UnitToken");
++    assert_eq!(record.returns[0].type_name, "bool");
++    assert_eq!(record.raw["documentation"], "完整");
++    assert_eq!(serde_json::to_value(&record).unwrap()["parameters"][0]["raw"], value["parameters"][0]["raw"]);
++}
+--- a/crates/emmylua_code_analysis/src/check/checker/param_type_check.rs
++++ b/crates/emmylua_code_analysis/src/check/checker/param_type_check.rs
+@@ -109,6 +109,9 @@
+     semantic_model: &SemanticModel<'_>,
+     callee: &LuaExpr,
+ ) -> Vec<LuaFunctionType> {
++    if let Some(ty) = semantic_model.binding_type_of_expr(callee.get_syntax_id()) {
++        return semantic_model.callable_functions_cached(&ty);
++    }
+     // Unified path for name callees: global cross-file overloads must be visible
+     // here exactly as they are in the VM call-selection path.
+     if let LuaExpr::NameExpr(_) = callee {
+@@ -211,13 +214,15 @@
+     semantic_model: &SemanticModel<'_>,
+     call_expr: &LuaCallExpr,
+ ) {
++    if !semantic_model.binding_call_allowed(call_expr.get_syntax_id(), "argument_check") { return; }
+     let Some(callee) = call_expr.get_prefix_expr() else {
+         return;
+     };
+     let analysis = semantic_model.call_site_analysis(call_expr);
+     let mut candidates = analysis.candidates;
+     // Local `---@type F1` (fun alias) declaration structure takes precedence over closure body inference.
+-    if let LuaExpr::NameExpr(name_expr) = &callee
++    if !semantic_model.binding_manages(callee.get_syntax_id())
++        && let LuaExpr::NameExpr(name_expr) = &callee
+         && let Some(decl) = semantic_model.resolve_name(name_expr.get_position())
+     {
+         if let Some(facts) = semantic_model.file_facts()
+@@ -235,7 +240,8 @@
+         .map(|list| list.get_args().collect::<Vec<_>>())
+         .unwrap_or_default();
+     // `pcall(callback, ...)`: forward the remaining arguments to the callback check.
+-    if let LuaExpr::NameExpr(callee_name) = &callee
++    if !semantic_model.binding_manages(callee.get_syntax_id())
++        && let LuaExpr::NameExpr(callee_name) = &callee
+         && callee_name.get_name_text().as_deref() == Some("pcall")
+         && !args.is_empty()
+         && check_pcall_forward(context, semantic_model, &args)
+--- a/crates/emmylua_code_analysis/src/lib.rs
++++ b/crates/emmylua_code_analysis/src/lib.rs
+@@ -8,6 +8,7 @@
+     )
+ )]
+ 
++pub mod binding_context;
+ mod check;
+ mod config;
+ mod locale;
+@@ -18,6 +19,7 @@
+ mod vfs;
+ 
+ use crate::check::LuaDiagnostic;
++pub use crate::check::checker::Diagnostic as ContextDiagnostic;
+ pub use crate::semantic_db::SemanticDatabase;
+ pub use crate::semantic_db::def::ModuleVisibility;
+ /// Public types for the semantic layer.
+@@ -190,6 +192,35 @@
+         self.update_files_by_uri(files)
+     }
+ 
++    /// Owned-text compatibility wrapper for interruptible batch ingestion.
++    pub fn update_files_by_path_checked<E>(
++        &mut self,
++        files: Vec<(PathBuf, Option<String>)>,
++        check: impl FnMut() -> Result<(), E>,
++    ) -> Result<Vec<FileId>, E> {
++        self.update_files_by_path_shared_checked(files.into_iter()
++            .map(|(path, text)| (path, text.map(Arc::<str>::from))).collect(), check)
++    }
++
++    /// Preserve the caller's Arc allocation all the way into the VFS.
++    /// Like the original API, paths that cannot form file URIs are omitted.
++    /// Interruption may leave a partial batch; discard the analysis on error.
++    /// Parsing/cache rebuild remain synchronous: a host must enforce its hard
++    /// deadline with an owned worker process in addition to this callback.
++    pub fn update_files_by_path_shared_checked<E>(
++        &mut self,
++        files: Vec<(PathBuf, Option<Arc<str>>)>,
++        mut check: impl FnMut() -> Result<(), E>,
++    ) -> Result<Vec<FileId>, E> {
++        check()?;
++        let mut mapped = Vec::with_capacity(files.len());
++        for (path, text) in files {
++            check()?;
++            if let Some(uri) = file_path_to_uri(&path) { mapped.push((uri, text)); }
++        }
++        self.db.set_files_shared_checked(mapped, check)
++    }
++
+     pub fn reload_workspace_files(
+         &mut self,
+         files: Vec<(PathBuf, Option<String>)>,
+@@ -211,6 +242,14 @@
+     /// Semantic model: accesses only the semantic analysis layer.
+     pub fn semantic_model(&self, file_id: FileId) -> SemanticModel<'_> {
+         SemanticModel::new(&self.db, file_id)
++    }
++
++    pub fn semantic_model_with_context(&self, file_id: FileId, session: Arc<binding_context::BindingSession>) -> SemanticModel<'_> {
++        SemanticModel::with_context(&self.db, file_id, session)
++    }
++
++    pub fn diagnose_file_with_context(&self, file_id: FileId, config: Arc<CheckConfig>, session: Arc<binding_context::BindingSession>) -> Vec<ContextDiagnostic> {
++        check::check_file(&self.semantic_model_with_context(file_id, session), config)
+     }
+ 
+     pub fn diagnose_file_with_config(
+--- a/crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/complex.rs
++++ b/crates/emmylua_code_analysis/src/semantic_db/def/lua_type/types/complex.rs
+@@ -214,6 +214,7 @@
+ 
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct LuaObjectType {
++    binding: Option<Arc<crate::binding_context::BoundObjectType>>,
+     fields: HashMap<LuaMemberKey, LuaType>,
+     index_access: Vec<(LuaType, LuaType)>,
+ }
+@@ -239,6 +240,7 @@
+         Self {
+             fields,
+             index_access,
++            binding: None,
+         }
+     }
+ 
+@@ -249,8 +251,21 @@
+         Self {
+             fields,
+             index_access,
+-        }
+-    }
++            binding: None,
++        }
++    }
++
++    /// Frozen runtime identity is part of equality and hashing; structurally
++    /// equal objects from different contexts/epochs cannot alias query caches.
++    pub fn with_binding(mut self, binding: crate::binding_context::BoundObjectType) -> Self {
++        self.binding = Some(Arc::new(binding));
++        self
++    }
++    pub fn binding(&self) -> Option<&crate::binding_context::BoundObjectType> { self.binding.as_deref() }
++    pub fn rebuild_with_fields(&self, fields: HashMap<LuaMemberKey, LuaType>, index_access: Vec<(LuaType, LuaType)>) -> Self {
++        Self { fields, index_access, binding: self.binding.clone() }
++    }
++
+ 
+     pub fn get_fields(&self) -> &HashMap<LuaMemberKey, LuaType> {
+         &self.fields
+@@ -308,6 +323,7 @@
+ 
+ impl Hash for LuaObjectType {
+     fn hash<H: Hasher>(&self, state: &mut H) {
++        self.binding.hash(state);
+         let mut fields: Vec<_> = self.fields.iter().collect();
+         fields.sort_by(|a, b| a.0.cmp(b.0));
+         fields.len().hash(state);
+--- a/crates/emmylua_code_analysis/src/semantic_db/mod.rs
++++ b/crates/emmylua_code_analysis/src/semantic_db/mod.rs
+@@ -567,6 +567,35 @@
+         file_ids
+     }
+ 
++    /// Shared ingestion checks between files and around the synchronous rebuild.
++    /// An error preserves the original callback error; callers must discard this
++    /// partially updated database rather than query it after interruption.
++    pub(crate) fn set_files_shared_checked<E>(
++        &mut self,
++        files: Vec<(Uri, Option<Arc<str>>)>,
++        mut check: impl FnMut() -> Result<(), E>,
++    ) -> Result<Vec<FileId>, E> {
++        check()?;
++        let mut file_ids = Vec::with_capacity(files.len());
++        for (uri, text) in files {
++            check()?;
++            let file_id = self.lookup_file_id(&uri)
++                .unwrap_or_else(|| self.vfs.allocate_file_id());
++            if let Some(text) = text {
++                let path = uri_to_file_path(&uri);
++                self.vfs.insert_at(file_id, Some(uri), path, text);
++            } else {
++                self.vfs.remove(file_id);
++            }
++            file_ids.push(file_id);
++            check()?;
++        }
++        check()?;
++        if !file_ids.is_empty() { self.rebuild_all_caches(); }
++        check()?;
++        Ok(file_ids)
++    }
++
+     #[cfg(test)]
+     pub(crate) fn set_file_content(&mut self, uri: &Uri, text: Option<String>) -> FileId {
+         let fid = self
+--- a/crates/emmylua_code_analysis/src/semantic_model/access.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/access.rs
+@@ -10,7 +10,10 @@
+     }
+     /// A model for any file on the same analysis database.
+     pub fn model_for(&self, file_id: FileId) -> Self {
+-        SemanticModel::new(self.db(), file_id)
++        match &self.binding_session {
++            Some(session) => SemanticModel::with_context(self.db(), file_id, session.clone()),
++            None => SemanticModel::new(self.db(), file_id),
++        }
+     }
+     pub fn file_id(&self) -> FileId {
+         self.view.file_id()
+@@ -601,6 +604,7 @@
+     /// cross-file globals) with the full signature projection (main + `---@overload`)
+     /// so all rendering paths share one candidate list.
+     pub fn callable_candidates_for_expr(&self, callee: &LuaExpr) -> Vec<LuaFunctionType> {
++        if let Some(ty) = self.binding_type_of_expr(callee.get_syntax_id()) { return self.callable_functions_cached(&ty); }
+         let mut out = callable_candidates_uncached(self, callee);
+         // The diagnostic path may only project the callee value type; append the
+         // full signature candidates (main + `---@overload`) for name callees.
+@@ -651,6 +655,9 @@
+         analysis
+     }
+     pub(crate) fn call_site_analysis_uncached(&self, call_expr: &LuaCallExpr) -> CallSiteAnalysis {
++        if !self.binding_call_allowed(call_expr.get_syntax_id(), "call_check") {
++            return CallSiteAnalysis { candidates: Vec::new(), arg_types: Vec::new(), colon_call: call_expr.is_colon_call(), receiver_ty: LuaType::Unknown, explicit_generics: Vec::new() };
++        }
+         let Some(callee) = call_expr.get_prefix_expr() else {
+             return CallSiteAnalysis {
+                 candidates: Vec::new(),
+--- /dev/null
++++ b/crates/emmylua_code_analysis/src/semantic_model/binding.rs
+@@ -0,0 +1,272 @@
++//! Context-sensitive projection. Unknown evidence never re-enters raw inference.
++#![forbid(unsafe_code)]
++use std::sync::Arc;
++use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaExpr, LuaSyntaxId};
++use crate::binding_context::*;
++use crate::{AsyncState, LuaFunctionType, LuaTupleStatus, LuaTupleType, LuaType, SemanticId};
++use super::SemanticModel;
++
++impl SemanticModel<'_> {
++    pub(crate) fn binding_manages(&self, syntax: LuaSyntaxId) -> bool {
++        self.binding_session.as_ref().is_some_and(|session| !matches!(session.context.resolve(BindingSite { file_id: self.file_id(), syntax }), BindingDecision::NotManaged))
++    }
++
++    pub(crate) fn binding_call_allowed(&self, syntax: LuaSyntaxId, operation: &'static str) -> bool {
++        let Some(session) = &self.binding_session else { return true; };
++        let site = BindingSite { file_id: self.file_id(), syntax };
++        match session.context.call(site) {
++            BindingDecision::NotManaged => true,
++            BindingDecision::Bound(permit) => { session.record(site, operation, "bound", permit.proof, None); true }
++            BindingDecision::KnownAbsent { proof } => { session.record(site, operation, "known_absent", proof, None); false }
++            BindingDecision::Unavailable { proof, reason } => { session.record(site, operation, "unavailable", proof, Some(reason)); false }
++        }
++    }
++
++    pub(crate) fn binding_type_of_expr(&self, syntax: LuaSyntaxId) -> Option<LuaType> {
++        let session = self.binding_session.as_ref()?;
++        let site = BindingSite { file_id: self.file_id(), syntax };
++        if !session.enter(site) {
++            session.record(site, "resolve", "unavailable", String::new(), Some("binding_projection_cycle".into()));
++            return Some(LuaType::Unknown);
++        }
++        let result = self.binding_type_inner(site);
++        session.leave(site);
++        result
++    }
++
++    fn binding_type_inner(&self, site: BindingSite) -> Option<LuaType> {
++        let session = self.binding_session.as_ref()?;
++        let is_call = self.syntax_tree().and_then(|tree| site.syntax.to_node_from_root(&tree.get_red_root())).and_then(LuaCallExpr::cast).is_some();
++        if is_call {
++            match session.context.call(site) {
++                BindingDecision::KnownAbsent { proof } => {
++                    session.record(site, "call", "known_absent", proof, None);
++                    return Some(LuaType::Unknown);
++                }
++                BindingDecision::Unavailable { proof, reason } => {
++                    session.record(site, "call", "unavailable", proof, Some(reason));
++                    return Some(LuaType::Unknown);
++                }
++                BindingDecision::Bound(permit) => {
++                    match session.context.call_observation(site) {
++                        BindingDecision::Bound(observation) => {
++                            let valid = match session.context.resolve(permit.callee) {
++                                BindingDecision::Bound(value) if value.identity == observation.selected_callee_identity => match (&value.value, &observation.callee) {
++                                    (SelectedValue::Function(a), ObservedCallee::Source(b)) => a == b,
++                                    (SelectedValue::EnvironmentCallable(a), ObservedCallee::Environment(b)) => a.origin.identity == b.origin.identity && a.origin.material_sha256 == b.origin.material_sha256 && a.origin.pointer == b.origin.pointer,
++                                    _ => false,
++                                },
++                                _ => false,
++                            };
++                            if !valid || observation.returns.len() > 32 || observation.invocation_identity.is_empty()
++                                || matches!(&observation.callee, ObservedCallee::Source(_)) && observation.closure_identity.is_empty() {
++                                session.record(site, "call_return", "unavailable", observation.proof, Some("call_observation_identity_or_budget".into()));
++                                return Some(LuaType::Unknown);
++                            }
++                            if matches!(&observation.callee, ObservedCallee::Environment(callable) if callable.declaration.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true))) {
++                                session.record(site, "call_return", "unavailable", observation.proof, Some("environment_return_cardinality_unavailable".into()));
++                                return Some(LuaType::Variadic(Arc::new(crate::VariadicType::Base(LuaType::Unknown))));
++                            }
++                            let slots = observation.returns.into_iter().map(|value| self.binding_decision_type(site, value, "call_return").unwrap_or(LuaType::Unknown)).collect();
++                            session.record(site, "call", "bound", permit.proof, None);
++                            return Some(LuaType::Tuple(Arc::new(LuaTupleType::new(slots, LuaTupleStatus::InferResolve))));
++                        }
++                        BindingDecision::Unavailable { proof, reason } => {
++                            session.record(site, "call_return", "unavailable", proof, Some(reason));
++                            return Some(LuaType::Unknown);
++                        }
++                        BindingDecision::KnownAbsent { proof } => {
++                            session.record(site, "call_return", "known_absent", proof, None);
++                            return Some(LuaType::Unknown);
++                        }
++                        BindingDecision::NotManaged => {
++                            session.record(site, "call", "bound", permit.proof, None);
++                        }
++                    }
++                }
++                BindingDecision::NotManaged => {}
++            }
++        }
++        self.binding_decision_type(site, session.context.resolve(site), "resolve")
++    }
++
++    fn binding_decision_type(&self, site: BindingSite, decision: BindingDecision<BoundValue>, operation: &'static str) -> Option<LuaType> {
++        let session = self.binding_session.as_ref()?;
++        match decision {
++            BindingDecision::NotManaged => None,
++            BindingDecision::KnownAbsent { proof } => {
++                session.record(site, operation, "known_absent", proof, None);
++                Some(LuaType::Nil)
++            }
++            BindingDecision::Unavailable { proof, reason } => {
++                session.record(site, operation, "unavailable", proof, Some(reason));
++                Some(LuaType::Unknown)
++            }
++            BindingDecision::Bound(value) => {
++                let result = self.binding_value_type(site, &value.value);
++                match result {
++                    Ok(ty) => { session.record(site, operation, "bound", value.proof, None); Some(ty) }
++                    Err(reason) => { session.record(site, operation, "unavailable", value.proof, Some(reason.into())); Some(LuaType::Unknown) }
++                }
++            }
++        }
++    }
++
++    fn binding_object_type(&self, site: BindingSite, object: &ObjectRef) -> Result<LuaType, &'static str> {
++        let session = self.binding_session.as_ref().ok_or("object_session_missing")?;
++        if object.view.context != session.identity() || object.identity.is_empty() || object.epoch.is_empty() {
++            return Err("object_context_or_epoch_mismatch");
++        }
++        match &object.origin {
++            ObjectOrigin::Lua(origin) => {
++                if self.syntax_tree_of(origin.file_id).and_then(|t| origin.syntax.to_node_from_root(&t.get_red_root())).is_none() { return Err("object_source_origin_missing"); }
++            }
++            ObjectOrigin::Xml(origin) => {
++                if origin.path.is_empty() || origin.content_sha256.len() != 64 { return Err("object_external_origin_invalid"); }
++            }
++        }
++        {
++            let mut active = session.active_objects.lock().unwrap_or_else(|p| p.into_inner());
++            if active.len() >= 64 || !active.insert(object.view.clone()) { return Err("object_projection_cycle_or_depth"); }
++        }
++        let result = (|| {
++            let cached = session.shapes.lock().unwrap_or_else(|p| p.into_inner()).get(&object.view).cloned();
++            let shape = if let Some(shape) = cached { shape } else {
++                let BindingDecision::Bound(shape) = session.context.object_shape(&object.view) else { return Err("object_shape_unavailable"); };
++                if shape.key != object.view || shape.proof.is_empty() || shape.fields.len() > 128 { return Err("object_shape_identity_or_budget"); }
++                session.shapes.lock().unwrap_or_else(|p| p.into_inner()).insert(object.view.clone(), shape.clone());
++                shape
++            };
++            let mut fields = hashbrown::HashMap::new();
++            let mut seen = std::collections::HashSet::new();
++            let mut complete = matches!(shape.enumeration, ShapeEnumeration::Complete);
++            for field in &shape.fields {
++                if !seen.insert(field.key.clone()) { return Err("object_duplicate_field"); }
++                if field.presence == FieldPresence::Absent {
++                    if !matches!(field.value, BindingDecision::KnownAbsent { .. }) { complete = false; }
++                    continue;
++                }
++                let ty = if field.presence == FieldPresence::Unavailable { complete = false; LuaType::Unknown }
++                    else { self.binding_decision_type(site, field.value.clone(), "object_field").unwrap_or(LuaType::Unknown) };
++                if matches!(ty, LuaType::Unknown) { complete = false; }
++                fields.insert(crate::LuaMemberKey::Name(field.key.clone().into()), ty);
++            }
++            session.record(site, "object_shape", if complete { "bound" } else { "unavailable" }, shape.proof.clone(), (!complete).then(|| "object_shape_incomplete".into()));
++            let metadata = BoundObjectType { context: session.identity().into(), identity: object.identity.clone(), epoch: object.epoch.clone(), view: object.view.clone(), site, proof: shape.proof, complete };
++            Ok(LuaType::Object(Arc::new(crate::LuaObjectType::new_with_fields(fields, Vec::new()).with_binding(metadata))))
++        })();
++        session.active_objects.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.view);
++        result
++    }
++
++    pub(crate) fn binding_members(&self, ty: &LuaType) -> Option<Vec<super::member::MemberInfo>> {
++        let LuaType::Object(object) = ty else { return None; };
++        let metadata = object.binding()?;
++        let Some(session) = &self.binding_session else { return Some(Vec::new()); };
++        if metadata.context != session.identity() { session.record(metadata.site, "member_lookup", "unavailable", metadata.proof.clone(), Some("object_context_mismatch".into())); return Some(Vec::new()); }
++        let shape = session.shapes.lock().unwrap_or_else(|p| p.into_inner()).get(&metadata.view).cloned();
++        let Some(shape) = shape else { return Some(Vec::new()); };
++        let mut members = Vec::new();
++        for field in &shape.fields {
++            let key = crate::LuaMemberKey::Name(field.key.clone().into());
++            let Some(typ) = object.get_fields().get(&key) else { continue; };
++            let (file_id, id) = match &field.destination_write {
++                FieldWriteOrigin::Xml(_) => (None, None),
++                FieldWriteOrigin::Lua(span) => {
++                    let found = self.file_facts_of(span.file_id).and_then(|facts| facts.members.iter().find(|member| member.key == key && member.id.member_key_range().is_some_and(|range| span.range.contains_range(range)))).map(|member| member.id.clone());
++                    (Some(span.file_id), found)
++                }
++            };
++            members.push(super::member::MemberInfo { key, typ: typ.clone(), id, file_id, is_method: matches!(typ, LuaType::DocFunction(f) if f.is_colon_define()) });
++        }
++        session.record(metadata.site, "member_lookup", if metadata.complete { "bound" } else { "unavailable" }, metadata.proof.clone(), (!metadata.complete).then(|| "object_shape_incomplete".into()));
++        Some(members)
++    }
++
++    pub(crate) fn binding_structure_allowed(&self, ty: &LuaType) -> bool {
++        use crate::LuaTypeNode;
++        let mut pending = vec![ty];
++        let mut steps = 0;
++        while let Some(ty) = pending.pop() {
++            steps += 1;
++            if steps > 4096 { return false; }
++            if let LuaType::Object(object) = ty && let Some(metadata) = object.binding() {
++                let valid = self.binding_session.as_ref().is_some_and(|session| session.identity() == metadata.context) && metadata.complete;
++                if let Some(session) = &self.binding_session {
++                    session.record(metadata.site, "structure_check", if valid { "native_checked" } else { "unavailable" }, metadata.proof.clone(), (!valid).then(|| "object_context_or_shape_unavailable".into()));
++                }
++                if !valid { return false; }
++            }
++            ty.push_direct_children(&mut pending);
++        }
++        true
++    }
++
++    fn binding_value_type(&self, site: BindingSite, value: &SelectedValue) -> Result<LuaType, &'static str> {
++        match value {
++            SelectedValue::Expression(origin) => {
++                let model = self.model_for(origin.file_id);
++                let node = model.syntax_tree().and_then(|t| origin.syntax.to_node_from_root(&t.get_red_root())).and_then(LuaExpr::cast).ok_or("selected_expression_missing")?;
++                Ok(model.type_of_expr(node.get_syntax_id()))
++            }
++            SelectedValue::Parameter(parameter) => {
++                let file = match parameter { SemanticId::Decl(key) => key.file_id, _ => return Err("selected_parameter_not_declaration") };
++                let model = self.model_for(file);
++                let decl = model.file_facts().and_then(|f| f.decl_by_id(parameter)).ok_or("selected_parameter_missing")?;
++                if !matches!(decl.kind, crate::DeclKind::Param) { return Err("selected_parameter_not_parameter"); }
++                model.type_of_decl(parameter).ok_or("selected_parameter_type_unavailable")
++            }
++            SelectedValue::Function(function) => self.type_of_signature_in_file(function.file_id, function.closure).map(|f| LuaType::DocFunction(Arc::new(f))).ok_or("selected_function_signature_unavailable"),
++            SelectedValue::DerivedNumber(number) => {
++                if !number.value.is_finite() || number.occurrence_identity.is_empty() || number.proof.is_empty() { return Err("derived_number_evidence_invalid"); }
++                match &number.rule { DerivedNumberRule::NumericForIteration { statement, header, iteration, predecessor } => {
++                    let model = self.model_for(statement.file_id);
++                    let statement_valid = model.syntax_tree().and_then(|t| statement.syntax.to_node_from_root(&t.get_red_root())).and_then(emmylua_parser::LuaForStat::cast).is_some();
++                    if !statement_valid || !(2..=3).contains(&header.len()) || (*iteration == 0) != predecessor.is_none() { return Err("derived_number_rule_invalid"); }
++                }}
++                Ok(LuaType::FloatConst(number.value))
++            }
++            SelectedValue::Object(object) => self.binding_object_type(site, object),
++            SelectedValue::EnvironmentCallable(callable) => environment_function(callable).map(|f| LuaType::DocFunction(Arc::new(f))),
++            SelectedValue::EnvironmentReturn(result) => {
++                if result.invocation_identity.is_empty() || result.slot == 0 { return Err("environment_return_identity_invalid"); }
++                let slot = result.callable.declaration.returns.get(result.slot - 1).ok_or("environment_return_slot_unavailable")?;
++                environment_slot(slot, &result.callable.types, 0)
++            }
++        }
++    }
++}
++
++fn environment_slot(slot: &EnvironmentSlot, types: &EnvironmentTypeCatalog, depth: usize) -> Result<LuaType, &'static str> {
++    let mut ty = environment_type(&slot.type_name, &slot.inner_type, types, depth)?;
++    if slot.nilable { ty = LuaType::Union(Arc::new(crate::LuaUnionType::from_vec(vec![ty, LuaType::Nil]))); }
++    Ok(ty)
++}
++fn environment_type(name: &str, inner: &str, types: &EnvironmentTypeCatalog, depth: usize) -> Result<LuaType, &'static str> {
++    if depth >= 32 { return Err("environment_type_depth"); }
++    if let Some(alias) = types.aliases.get(name) { return environment_type(alias, inner, types, depth + 1); }
++    Ok(match name {
++        "number" => LuaType::Number, "integer" => LuaType::Integer,
++        "string" => LuaType::String, "bool" | "boolean" => LuaType::Boolean,
++        "nil" => LuaType::Nil, "any" => LuaType::Any,
++        "function" | "LuaFunction" => LuaType::Function,
++        "table" if inner.is_empty() => LuaType::Table,
++        _ => return Err("environment_type_unavailable"),
++    })
++}
++fn environment_function(callable: &EnvironmentCallable) -> Result<LuaFunctionType, &'static str> {
++    if callable.declaration.kind != "function" || callable.origin.identity.is_empty() || callable.origin.material_sha256.len() != 64 { return Err("environment_callable_identity_invalid"); }
++    if callable.declaration.parameters.len() > 32 || callable.declaration.returns.len() > 32 { return Err("environment_signature_budget"); }
++    let parameters = callable.declaration.parameters.iter().enumerate().map(|(i, slot)| {
++        if slot.index != i + 1 { return Err("environment_parameter_index_invalid"); }
++        Ok((slot.name.clone(), Some(environment_slot(slot, &callable.types, 0)?)))
++    }).collect::<Result<Vec<_>, _>>()?;
++    let returns = callable.declaration.returns.iter().enumerate().map(|(i, slot)| {
++        if slot.index != i + 1 { return Err("environment_return_index_invalid"); }
++        environment_slot(slot, &callable.types, 0)
++    }).collect::<Result<Vec<_>, _>>()?;
++    let returns = if callable.declaration.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true)) {
++        LuaType::Variadic(Arc::new(crate::VariadicType::Base(LuaType::Unknown)))
++    } else { LuaType::Tuple(Arc::new(LuaTupleType::new(returns, LuaTupleStatus::InferResolve))) };
++    Ok(LuaFunctionType::new(AsyncState::None, callable.declaration.owner.is_some(), false, parameters, returns, None))
++}
+--- a/crates/emmylua_code_analysis/src/semantic_model/flow.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/flow.rs
+@@ -427,6 +427,7 @@
+     expr_syntax: emmylua_parser::LuaSyntaxId,
+     offset: TextSize,
+ ) -> LuaType {
++    if let Some(ty) = model.binding_type_of_expr(expr_syntax) { return ty; }
+     let Some(tree) = model.syntax_tree() else {
+         return model.type_of_expr(expr_syntax);
+     };
+--- a/crates/emmylua_code_analysis/src/semantic_model/infer/unify.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/infer/unify.rs
+@@ -9,7 +9,7 @@
+ use crate::{
+     Arc, GenericParam, GenericTplId, LuaAliasCallType, LuaArrayType, LuaConditionalType,
+     LuaFunctionType, LuaGenericType, LuaInstanceType, LuaIntersectionType, LuaMappedType,
+-    LuaMultiLineUnion, LuaObjectType, LuaStringTplType, LuaTupleStatus, LuaTupleType, LuaType,
++    LuaMultiLineUnion, LuaStringTplType, LuaTupleStatus, LuaTupleType, LuaType,
+     LuaUnionType, VariadicType,
+ };
+ 
+@@ -328,7 +328,7 @@
+                 .iter()
+                 .map(|(key, ty)| (substitute(key, bindings), substitute(ty, bindings)))
+                 .collect();
+-            Object(Arc::new(LuaObjectType::new_with_fields(
++            Object(Arc::new(object.rebuild_with_fields(
+                 fields,
+                 index_access,
+             )))
+--- a/crates/emmylua_code_analysis/src/semantic_model/infer/vm.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/infer/vm.rs
+@@ -148,11 +148,15 @@
+ }
+ 
+ /// Compile an expression -> linear bytecode.
+-pub fn compile(expr: LuaExpr, file_id: FileId, out: &mut Vec<Instr>) {
++pub fn compile(expr: LuaExpr, model: &SemanticModel, out: &mut Vec<Instr>) {
++    let file_id = model.file_id();
+     let mut stack = vec![CTask::Expr(expr)];
+     while let Some(task) = stack.pop() {
+         match task {
+-            CTask::Expr(expr) => compile_expr(&expr, file_id, out, &mut stack),
++            CTask::Expr(expr) => {
++                if let Some(ty) = model.binding_type_of_expr(expr.get_syntax_id()) { out.push(Instr::PushValue(ty)); }
++                else { compile_expr(&expr, file_id, out, &mut stack); }
++            },
+             CTask::Index { key } => out.push(Instr::IndexMember {
+                 key,
+                 dynamic: false,
+@@ -445,7 +449,7 @@
+             return LuaType::Unknown;
+         };
+         let mut code = Vec::new();
+-        compile(expr, self.model.file_id(), &mut code);
++        compile(expr, self.model, &mut code);
+         code.push(Instr::Result);
+         let mut vm = InferVm::new(self.model, &code);
+         vm.computing = self.computing.clone();
+@@ -2155,7 +2159,7 @@
+         for expr in return_exprs {
+             let expr_syntax = expr.get_syntax_id();
+             let mut code = Vec::new();
+-            compile(expr, self.model.file_id(), &mut code);
++            compile(expr, self.model, &mut code);
+             code.push(Instr::Result);
+             let mut vm = InferVm::new(self.model, &code);
+             vm.closure_params = self.closure_params.clone();
+@@ -3541,7 +3545,7 @@
+             replace_self_type(fun.get_ret(), self_ty),
+             Some(fun.get_generic_params().to_vec()),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -4286,7 +4290,7 @@
+         return LuaType::Unknown;
+     };
+     let mut code = Vec::new();
+-    compile(expr, model.file_id(), &mut code);
++    compile(expr, model, &mut code);
+     code.push(Instr::Result);
+     InferVm::new(model, &code).run()
+ }
+@@ -4340,7 +4344,7 @@
+         return LuaType::Unknown;
+     };
+     let mut code = Vec::new();
+-    compile(LuaExpr::CallExpr(call_expr), model.file_id(), &mut code);
++    compile(LuaExpr::CallExpr(call_expr), model, &mut code);
+     code.push(Instr::Result);
+     let mut vm = InferVm::new(model, &code);
+     let _ = vm.run();
+@@ -4890,7 +4894,7 @@
+                 .iter()
+                 .map(|(key, value)| (key.clone(), bind_signature_generics(value, generics)))
+                 .collect();
+-            LuaType::Object(Arc::new(LuaObjectType::new_with_fields(
++            LuaType::Object(Arc::new(object.rebuild_with_fields(
+                 fields,
+                 object.get_index_access().to_vec(),
+             )))
+--- a/crates/emmylua_code_analysis/src/semantic_model/member.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/member.rs
+@@ -42,6 +42,7 @@
+ 
+ /// All members of a prefix type (completion candidates; deduplicated by key, with this class's `@field` before parent/runtime values).
+ pub fn member_infos(model: &SemanticModel, prefix_type: &LuaType) -> Vec<MemberInfo> {
++    if let Some(members) = model.binding_members(prefix_type) { return members; }
+     let mut out = Vec::new();
+     let mut visited = Vec::new();
+     collect_members(model, prefix_type, None, None, &mut visited, &mut out, None);
+@@ -54,6 +55,7 @@
+     prefix_type: &LuaType,
+     key: &LuaMemberKey,
+ ) -> Option<MemberInfo> {
++    if let Some(members) = model.binding_members(prefix_type) { return members.into_iter().find(|member| &member.key == key); }
+     member_info_impl(model, prefix_type, key)
+ }
+ 
+@@ -308,6 +310,7 @@
+     prefix_type: &LuaType,
+     key: &LuaMemberKey,
+ ) -> Option<MemberInfo> {
++    if let Some(members) = model.binding_members(prefix_type) { return members.into_iter().find(|member| &member.key == key); }
+     // Single-key direct lookup avoids collecting every member of a type when only one key is needed.
+     if let Some(info) = direct_member_info(model, prefix_type, key) {
+         return Some(info);
+@@ -379,6 +382,7 @@
+     prefix_type: &LuaType,
+     key: &LuaMemberKey,
+ ) -> Vec<MemberInfo> {
++    if let Some(members) = model.binding_members(prefix_type) { return members.into_iter().filter(|member| &member.key == key).collect(); }
+     let mut out = Vec::new();
+     let mut visited = Vec::new();
+     collect_members(
+@@ -399,6 +403,7 @@
+     prefix_type: &LuaType,
+     key: &LuaMemberKey,
+ ) -> Vec<MemberInfo> {
++    if let Some(members) = model.binding_members(prefix_type) { return members.into_iter().filter(|member| &member.key == key).collect(); }
+     let mut out = Vec::new();
+     let mut visited = Vec::new();
+     collect_members(
+@@ -729,6 +734,10 @@
+         }
+         // Rich projection object: access field members directly (`{ foo: number }`'s `.foo`).
+         LuaType::Object(object) => {
++            if let Some(members) = model.binding_members(prefix_type) {
++                for member in members { push_member_info(out, filter, member); }
++                return;
++            }
+             for (key, ty) in object.get_fields() {
+                 push_member_info(
+                     out,
+--- a/crates/emmylua_code_analysis/src/semantic_model/mod.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/mod.rs
+@@ -7,6 +7,7 @@
+ pub mod type_eval;
+ 
+ mod access;
++mod binding;
+ mod doc_types;
+ mod prelude;
+ mod signature;
+@@ -95,6 +96,7 @@
+ /// Semantic model: a per-file access handle, only through the semantic analysis layer.
+ pub struct SemanticModel<'db> {
+     view: FileView<'db>,
++    binding_session: Option<std::sync::Arc<crate::binding_context::BindingSession>>,
+ 
+     /// Per-model local query cache. Recursion-in-progress state is stored in
+     /// cache entries, so no separate O(n) guard stacks are needed.
+@@ -159,9 +161,20 @@
+     pub fn new(db: &'db SemanticDatabase, file_id: FileId) -> Self {
+         Self {
+             view: AnalysisView::new(db).file(file_id),
++            binding_session: None,
+             cache: LazyCache::default(),
+             closure_return_in_progress: LazySet::default(),
+         }
++    }
++
++    pub fn with_context(db: &'db SemanticDatabase, file_id: FileId, session: std::sync::Arc<crate::binding_context::BindingSession>) -> Self {
++        let mut model = Self::new(db, file_id);
++        model.binding_session = Some(session);
++        model
++    }
++
++    pub fn binding_context_identity(&self) -> Option<&str> {
++        self.binding_session.as_ref().map(|session| session.identity())
+     }
+ 
+     pub(crate) fn db(&self) -> &'db SemanticDatabase {
+--- a/crates/emmylua_code_analysis/src/semantic_model/render/mod.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/render/mod.rs
+@@ -691,7 +691,7 @@
+                     .map(|t| self.substitute_named_refs(t, map))
+                     .collect(),
+             ))),
+-            Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++            Object(object) => Object(Arc::new(object.rebuild_with_fields(
+                 object
+                     .get_fields()
+                     .iter()
+--- a/crates/emmylua_code_analysis/src/semantic_model/type_check/mod.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/type_check/mod.rs
+@@ -96,6 +96,9 @@
+     compact_type: &LuaType,
+     check_guard: guard::TypeCheckGuard,
+ ) -> TypeCheckResult {
++    if !context.model.binding_structure_allowed(source) || !context.model.binding_structure_allowed(compact_type) {
++        return Err(TypeCheckFailReason::TypeNotMatchWithReason("binding object context or shape unavailable".into()));
++    }
+     if source == compact_type {
+         return Ok(());
+     }
+--- a/crates/emmylua_code_analysis/src/semantic_model/type_eval.rs
++++ b/crates/emmylua_code_analysis/src/semantic_model/type_eval.rs
+@@ -252,7 +252,7 @@
+                 .map(|t| bind_mapped_param_ref(t, param_id, param_name))
+                 .collect(),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -345,7 +345,7 @@
+                 .map(|t| sanitize_unresolved_generics(t, allowed))
+                 .collect(),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -430,7 +430,7 @@
+                 .map(|ty| sanitize_unresolved_generics_with_model(model, ty, allowed))
+                 .collect(),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -511,7 +511,7 @@
+                 .map(|ty| sanitize_generic_param(model, ty))
+                 .collect(),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -639,7 +639,7 @@
+             substitute_named_refs(fun.get_ret(), map),
+             Some(fun.get_generic_params().to_vec()),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -869,7 +869,7 @@
+                 .map(|t| expand_alias_generic_inner(model, t, visited))
+                 .collect(),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+@@ -1084,7 +1084,7 @@
+                 .map(|t| eval_conditionals_inner(model, t, visiting))
+                 .collect(),
+         ))),
+-        Object(object) => Object(Arc::new(LuaObjectType::new_with_fields(
++        Object(object) => Object(Arc::new(object.rebuild_with_fields(
+             object
+                 .get_fields()
+                 .iter()
+--- a/crates/emmylua_code_analysis/src/vfs/mod.rs
++++ b/crates/emmylua_code_analysis/src/vfs/mod.rs
+@@ -93,8 +93,9 @@
+         file_id: FileId,
+         uri: Option<Uri>,
+         path: Option<PathBuf>,
+-        text: String,
++        text: impl Into<Arc<str>>,
+     ) {
++        let text = text.into();
+         let index = file_id.id as usize;
+         if file_id.id >= self.next_file_id {
+             self.next_file_id = file_id.id + 1;

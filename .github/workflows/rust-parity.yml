@@ -56,3 +56,67 @@ jobs:
           path: rust-parity-report.json
           if-no-files-found: warn
           retention-days: 14
+
+  windows-product-foundation:
+    # Deliberately no needs: static parity gaps must not suppress real builds.
+    if: github.ref == 'refs/heads/rust-refactor'
+    runs-on: windows-2025
+    timeout-minutes: 65
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Install fixed official Rust toolchain
+        id: rust
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustc -Vv
+          cargo -V
+      - name: Reconstruct and authenticate fixed public Emmy dependency
+        id: emmy
+        run: |
+          python third_party/emmy/prepare.py --download
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python third_party/emmy/prepare.py --check
+          exit $LASTEXITCODE
+      - name: Test custody and controlled runner fixtures
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.emmy.outcome == 'success' }}
+        run: node --test tools/rust-emmy-identity.test.mjs tools/rust-build.test.mjs
+      - name: Test bounded dependency preparation fixtures
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.emmy.outcome == 'success' }}
+        run: python -m unittest discover -s third_party/emmy -p test_prepare.py
+      - name: Fetch lockfile dependencies under ownership controls
+        id: dependencies
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.emmy.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-fetch -- fetch --locked
+      - name: Compile all workspace targets without executing game fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-check --one-shot -- check --locked --offline --workspace --all-targets -j 1
+      - name: Run client metadata filesystem fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-client-fixtures --one-shot -- test --locked --offline -p lycheedev-core --lib client::tests -j 1
+      - name: Run CLI contract metadata and arity unit fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-cli-contract --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev contract::tests -j 1
+      - name: Run Source query admission unit fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-query-default --one-shot -- test --locked --offline -p lycheedev-source --lib public_query_defaults -j 1
+      - name: Preserve each controlled command receipt and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rust-product-foundation-${{ github.sha }}
+          path: .tmp/rust-disk/evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,30 @@
+{
+  "schema": "lycheedev.emmy-reconstruction.v1",
+  "identity": "public-base-binding-context-reconstruction-v1",
+  "historicalPrivatePatchRecovered": false,
+  "base": {
+    "repository": "https://github.com/CppCXY/emmylua-analyzer-rust",
+    "commit": "08b0873962e83bb8307e9a81052e3f41578fbc78",
+    "archiveURL": "https://codeload.github.com/CppCXY/emmylua-analyzer-rust/tar.gz/08b0873962e83bb8307e9a81052e3f41578fbc78",
+    "archiveRoot": "emmylua-analyzer-rust-08b0873962e83bb8307e9a81052e3f41578fbc78",
+    "archiveSHA256": "ae529a06b551dbb301744bea2b58ba94cb3e30340f63a8c83f9335be9086fdb7",
+    "archiveBytes": 2386393,
+    "files": 848,
+    "bytes": 8382174,
+    "treeSHA256": "375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104",
+    "license": {
+      "path": "LICENSE",
+      "spdx": "MIT",
+      "sha256": "7f8fd5ae0962c6757a8980592c264c8bce5004aa9f369084db761874b8969ff8"
+    }
+  },
+  "patches": [
+    {
+      "path": "patches/0001-binding-context.patch",
+      "sha256": "1ec8fc0d981bb5c52dcefd7378677045585820c9ff81e6412bc16375153b118d"
+    }
+  ],
+  "patchedTreeSHA256": "1c4aef41afa70a1edec0f5714902e6221e75cb204d5b8e090fd017ce982962a0",
+  "files": 851,
+  "bytes": 8423416
+}

@@ -202,6 +202,16 @@ source query默认limit由10修为固定Go的50，显式1..200边界保留；新
 
 审核同时发现另批消费者缺口，已列入继续实施：Delivery尚直接inspect精确client，缺Go完整game-root有界Discover/Select；addon status直接序列化内部安装结构，额外公开displayName/channel/metadataBranch/interfaceKnown。应共享Go形状DTO并保留内部身份字段，不能把旧passive固定目录扫描或Data旧flavor parser当完整实现。
 
+### 公开Emmy最小可复建快照与独立Windows产品CI
+
+新依赖recipe `third_party/emmy/` 固定公开基底08b0873962e83bb8307e9a81052e3f41578fbc78、archive SHA256 ae529a06b551dbb301744bea2b58ba94cb3e30340f63a8c83f9335be9086fdb7；851文件/8,423,416B的新patched tree为1c4aef41afa70a1edec0f5714902e6221e75cb204d5b8e090fd017ce982962a0，明确historicalPrivatePatchRecovered=false。Cargo路径/构建receipt/对应源码与license工具切到新身份，不伪造旧私有manifest。recipe和完整支持脚本闭包前后认证；文件/字节/路径/目录集合有界，空目录也不能暗改include_dir!输入；patch用有界精确上下文应用，无运行upstream配置。准备采用独立owner scratch与超时/中断证据，保持现有cargo渠道/lease规则。
+
+作者36项Python准备回归通过，真实新目录archive重建证据75cd3bdb-2728-4203-b004-c254ce0710de；集成与旧runner的24项Node检查由独立审核者实际重跑通过。真实对应源码stage内prepare --check和check.mjs --verify均exit0，源/目标tree及recipe一致，证据27480fa0-28e1-4a9b-bdb2-07596c607ad7；recipe hash 523081f23ae404e9a5945974b46d5143d981a141821e5613b4f6d20d47c8179e。发现的空目录、Windows大小写overlap、准备无界、runner假成功/丢日志问题已修复并复审。以上是来源/准备/封存证据，非Windows产品编译或双fresh-home离线重建验收。
+
+冻结最小API快照曾通过库级cargo check（328a3d4b-4bba-4baf-855d-6dd15d7ab827）；上游--lib冷测试编译超过600s，真实失败与回收证据2eb8c586-2d74-4fff-b479-90dde9bd4043，未运行契约测试。更多binding context语义审计修复仍在隔离next-stage，本批不宣称等价恢复。将先用实际Windows产品编译暴露API集成错误，再持续补齐语义与公开API独立integration回归；不能让工具准备无限推迟产品验证。
+
+Windows新增独立windows-product-foundation job，无needs静态差分门槛：官方Rust1.99、固定recipe下载/校验、Node/Python自身测试、受控locked fetch、workspace all-target check、client metadata/CLI contract/Source query参数unit fixtures。各执行组在依赖准备成功后独立继续，保留真实失败和每次receipt/log；不运行游戏、真实输入或整个Live integration。已做YAML/命令路径/筛选/权限独立静态复核，实际hosted结果等待此批精确commit；不得把配置存在叫测试通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

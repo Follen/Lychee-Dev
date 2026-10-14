@@ -159,3 +159,10 @@ The reviewed arity adapter now mirrors the explicit name-based Rust flag match,
 not help-string heuristics. A contract source hash change makes it unverified
 until reviewed. Rust Unicode scalar string escapes are decoded explicitly;
 unsupported syntax remains a failed extraction.
+
+The independent `windows-product-foundation` job prepares the pinned public Emmy
+reconstruction and runs controlled product compilation plus narrowly selected
+metadata/CLI/Source admission unit fixtures. It has no dependency on the static
+parity job. Each command preserves ownership receipts/logs even on failure;
+compilation and fixture success do not establish whole-product equivalence or
+full Source corpus acceptance. Real game/cooperation checks remain last.

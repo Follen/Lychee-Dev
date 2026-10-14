@@ -4,10 +4,10 @@ import {createHash} from 'node:crypto';
 import {dirname,join,resolve} from 'node:path';
 import {acquireChannel,admission,beginFreshCache,beginScratch,contained,sha256} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
-import {inspectContext} from '../tests/rust-source-engine/context-identity.mjs';
+import {emmyRecipeFiles,emmyRecipePath,emmySupportFiles,inspectEmmy,verifyEmmyWiring} from './rust-emmy-identity.mjs';
 
 export function hashFile(path,max=512<<20){const file=lstatSync(path);if(!file.isFile()||file.isSymbolicLink()||file.size>max)throw new Error('build.file_budget');const fd=openSync(path,'r'),hash=createHash('sha256'),chunk=Buffer.alloc(65536);let bytes=0;try{for(;;){const read=readSync(fd,chunk,0,chunk.length,null);if(!read)break;bytes+=read;if(bytes>max)throw new Error('build.file_budget');hash.update(chunk.subarray(0,read));}if(bytes!==file.size)throw new Error('build.file_changed');return hash.digest('hex');}finally{closeSync(fd);}}
-export function sourceDigest(root){const hash=createHash('sha256');let entries=0;function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort())visit(join(path,child),`${name}/${child}`);}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tests/rust-source-data/generate-unicode-simple.mjs'])if(existsSync(join(root,name)))visit(join(root,name),name);return hash.digest('hex');}
+export function sourceDigest(root){const hash=createHash('sha256');let entries=0;function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort())visit(join(path,child),`${name}/${child}`);}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tests/rust-source-data/generate-unicode-simple.mjs'])if(existsSync(join(root,name)))visit(join(root,name),name);if(existsSync(join(root,emmyRecipePath))){for(const name of [...emmyRecipeFiles,'patches'])visit(join(root,emmyRecipePath,name),`${emmyRecipePath}/${name}`);for(const name of emmySupportFiles.filter(path=>path.startsWith('tools/')))visit(join(root,name),name);}return hash.digest('hex');}
 
 // Fetch resolves the lockfile without compiling product code. Bind manifests
 // and Cargo configuration; source workers can continue editing Rust meanwhile.
@@ -37,14 +37,21 @@ export function runCargo(root,args,{sourceRoot=root,owner='rust-cargo',channelKi
   if(process.env.CARGO_TARGET_DIR||environment.CARGO_TARGET_DIR)throw new Error('build.uncontrolled_target_override');
   if(freshOffline&&(channelKind!=='ordinary'||!onSuccess||environment.CARGO_HOME))throw new Error('build.invalid_fresh_gate');
   const sourceManifest=join(sourceRoot,'crates/lycheedev-source/Cargo.toml');
-  const privateEmmy=compiling&&existsSync(sourceManifest)&&readFileSync(sourceManifest,'utf8').includes('.tmp/rust-source-binding-context-01/upstream');
-  const patch=privateEmmy?inspectContext(sourceRoot).patchSHA256:undefined;
+  let emmy;
+  if(existsSync(sourceManifest)){
+    verifyEmmyWiring(readFileSync(sourceManifest,'utf8'));
+    emmy=inspectEmmy(sourceRoot);
+  }
+  // This existing runtime variable now identifies the NEW patched source tree.
+  // It must never contain the historical private manifest/patch identity.
+  const patch=emmy?.patchedTreeSHA256;
   if(patch){
     for(const value of [process.env.LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256,environment.LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256])
       if(value!==undefined&&value!==patch)throw new Error('build.emmy_patch_identity_differs');
     environment={...environment,LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256:patch};
   }
-  const inputs=!compiling?{manifests:manifestDigest(sourceRoot),priorCargoLock:hashFile(join(sourceRoot,'Cargo.lock'))}:{sourceTree:sourceDigest(sourceRoot),...(patch?{emmyPatch:patch}:{})};
+  const inputs={...(!compiling?{manifests:manifestDigest(sourceRoot),priorCargoLock:hashFile(join(sourceRoot,'Cargo.lock'))}:{sourceTree:sourceDigest(sourceRoot)}),
+    ...(emmy?{emmyPatch:patch,emmy:{schema:emmy.schema,identitySHA256:emmy.identitySHA256,recipeSHA256:emmy.recipeSHA256,patchedTreeSHA256:patch,historicalPrivatePatchRecovered:false}}:{})};
   const job=beginScratch(root,owner,{command:['cargo',...args],inputs,admissionOptions:{requiredBytes:2*1024**3,cacheReserveBytes:2*1024**3}});
   let channel;
   try{channel=acquireChannel(root,channelKind,owner);}catch(error){job.seal({state:'failed',handlesReaped:true});job.cleanup();throw error;}
@@ -70,7 +77,10 @@ export function runCargo(root,args,{sourceRoot=root,owner='rust-cargo',channelKi
       const command=JSON.parse(readFileSync(metadata));command.inputHashes=inputs;command.compilation=false;
       writeFileSync(metadata,JSON.stringify(command,null,2)+'\n');
     }else if(sourceDigest(sourceRoot)!==inputs.sourceTree)throw new Error('build.source_changed_during_compile');
-    if(patch&&inspectContext(sourceRoot).patchSHA256!==patch)throw new Error('build.emmy_patch_changed_during_compile');
+    if(emmy){
+      const after=inspectEmmy(sourceRoot);
+      if(after.patchedTreeSHA256!==patch||after.recipeSHA256!==emmy.recipeSHA256)throw new Error('build.emmy_identity_changed_during_cargo');
+    }
     const invocation={target,inputHashes:inputs,environmentSHA256,buildEvidence:job.receipt,freshCacheReceipt:fresh?.receipt,cargoHome:fresh?env.CARGO_HOME:undefined,stdout:result.stdout?.toString()||'',stderr:result.stderr?.toString()||''};
     const resultValue=onSuccess?onSuccess(invocation):invocation;
     if(fresh)fresh.sealArtifacts(resultValue.preservedArtifacts);

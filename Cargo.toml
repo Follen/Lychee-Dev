@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/lycheedev-core", "crates/lycheedev-cli", "crates/lycheedev-source", "crates/lycheedev-data", "crates/lycheedev-live", "crates/lycheedev-delivery", "crates/lycheedev-windows"]
-exclude = [".tmp/rust-source-engine-research-01/upstream", ".tmp/rust-source-engine-research-01/upstream/crates/*", ".tmp/rust-source-binding-context-01/upstream", ".tmp/rust-source-binding-context-01/upstream/crates/*"]
+exclude = [".tmp/emmy-reconstruction-v1/upstream", ".tmp/emmy-reconstruction-v1/upstream/crates/*", ".tmp/rust-source-engine-research-01/upstream", ".tmp/rust-source-engine-research-01/upstream/crates/*", ".tmp/rust-source-binding-context-01/upstream", ".tmp/rust-source-binding-context-01/upstream/crates/*"]
 resolver = "2"
 
 [workspace.package]

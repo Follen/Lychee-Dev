@@ -1,24 +1,47 @@
-// Include the complete, pinned private Emmy dependency in corresponding source.
+// Corresponding source includes the complete NEW public-base reconstruction,
+// its original MIT license, and the independently verifiable tracked recipe.
 import assert from 'node:assert/strict';
-import {cpSync,mkdirSync} from 'node:fs';
-import {join,resolve} from 'node:path';
-import {inspectContext} from '../tests/rust-source-engine/context-identity.mjs';
+import {constants,copyFileSync,existsSync,mkdirSync} from 'node:fs';
+import pathAPI,{join,resolve} from 'node:path';
+import {emmyNoLinks,emmyRecipePath,emmyRelativePath,emmySourcePath,inspectEmmy} from './rust-emmy-identity.mjs';
 
+// Inventory paths are always POSIX-style. Do not feed them through the host's
+// dirname and then split on '/', which can lose parent boundaries on Windows.
+export function emmyPathsOverlap(left,right,paths=pathAPI){
+  const contains=(parent,child)=>{const rel=paths.relative(parent,child);return rel===''||(!paths.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith(`..${paths.sep}`));};
+  return contains(left,right)||contains(right,left);
+}
+export function emmyStageParentComponents(path){return emmyRelativePath(path).split('/').slice(0,-1);}
+function directory(root,components){
+  let path=root;emmyNoLinks(path);
+  for(const part of components){
+    path=join(path,part);if(!existsSync(path))mkdirSync(path);emmyNoLinks(path);
+  }
+  return path;
+}
 export function stageEmmySources(root,destination){
   root=resolve(root);destination=resolve(destination);
   assert.notEqual(root,destination);
-  const before=inspectContext(root);
-  for(const [directory,manifest] of [
-    ['.tmp/rust-source-engine-research-01','source-identity.json'],
-    ['.tmp/rust-source-binding-context-01','identity.json'],
-  ]){
-    const target=join(destination,directory);mkdirSync(target,{recursive:true});
-    cpSync(join(root,directory,'upstream'),join(target,'upstream'),{recursive:true,errorOnExist:true,force:false});
-    cpSync(join(root,directory,manifest),join(target,manifest),{errorOnExist:true,force:false});
+  const before=inspectEmmy(root);destination=emmyNoLinks(destination);
+  assert(!emmyPathsOverlap(before.source,destination),'emmy.overlapping_source_stage');
+  for(const target of [emmyRecipePath,emmySourcePath])assert(!existsSync(join(destination,target)),'emmy.fresh_stage_required');
+  for(const [prefix,rows] of [[emmyRecipePath,before.recipeFiles],[emmySourcePath,before.files],['',before.supportFiles]]){
+    for(const file of rows){
+      const path=prefix?`${prefix}/${file.path}`:file.path;
+      directory(destination,emmyStageParentComponents(path));
+      // COPYFILE_EXCL: never replace another owner's file, including a link.
+      // The enclosing source snapshot may already include release policy.
+      // Never replace it; the complete post-copy identity check authenticates it.
+      if(!prefix&&existsSync(join(destination,path)))continue;
+      copyFileSync(emmyNoLinks(join(root,path)),join(destination,path),constants.COPYFILE_EXCL);
+    }
   }
-  const after=inspectContext(destination);
-  assert.equal(after.patchSHA256,before.patchSHA256);
-  assert.deepEqual(after.baseIdentity,before.baseIdentity);
-  assert.deepEqual(after.fork.files,before.fork.files);
-  return {baseIdentity:after.baseIdentity,patchSHA256:after.patchSHA256,files:after.fork.files.length,bytes:after.fork.totalBytes};
+  const after=inspectEmmy(destination),original=inspectEmmy(root);
+  for(const current of [after,original]){
+    assert.equal(current.recipeSHA256,before.recipeSHA256,'emmy.recipe_changed_during_stage');
+    assert.equal(current.patchedTreeSHA256,before.patchedTreeSHA256,'emmy.tree_changed_during_stage');
+  }
+  return {schema:after.schema,identity:after.identity,historicalPrivatePatchRecovered:false,
+    base:after.base,identitySHA256:after.identitySHA256,recipeSHA256:after.recipeSHA256,
+    patchedTreeSHA256:after.patchedTreeSHA256,files:after.files.length,bytes:after.totalBytes};
 }
