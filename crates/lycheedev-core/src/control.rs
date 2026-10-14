@@ -237,6 +237,17 @@ impl OperationControl {
     pub fn deadline(&self) -> Instant {
         self.deadline
     }
+    /// Read cancellation signals, including ancestors, without exporting a
+    /// writable token or copying a parent's signal into the local state.
+    /// This does not decide whether cancellation preceded the deadline; use
+    /// check/stop_cause when the caller needs the operation's actual stop cause.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+            || self
+                .parent_cancellations
+                .iter()
+                .any(|token| token.load(Ordering::Acquire))
+    }
     /// Clones share one stop scope. Equal timestamps do not imply the same
     /// request: independent cleanup controls must never replace its cause.
     pub fn same_scope(&self, other: &Self) -> bool {
@@ -443,6 +454,47 @@ mod tests {
         assert_eq!(
             expired.stop_cause().unwrap(),
             Some(StopCause::DeadlineExceeded)
+        );
+    }
+
+    #[test]
+    fn read_only_cancellation_preserves_ancestry_order_and_local_timestamp() {
+        let signal = TrackedCancellation::new();
+        let parent =
+            OperationControl::tracked(Instant::now() + Duration::from_secs(5), signal.clone());
+        let child = parent.ordered_child(parent.deadline()).unwrap();
+        let local = child.tracked_cancel_handle().unwrap();
+        assert!(!parent.is_cancelled());
+        assert!(!child.is_cancelled());
+        assert_eq!(child.stop_cause().unwrap(), None);
+        signal.cancel();
+        assert!(child.is_cancelled());
+        assert!(!local.is_cancelled());
+        assert!(local.state.at.lock().unwrap().is_none());
+        assert_eq!(child.stop_cause().unwrap(), Some(StopCause::Cancelled));
+        assert_eq!(parent.stop_cause().unwrap(), Some(StopCause::Cancelled));
+    }
+
+    #[test]
+    fn read_only_signal_is_distinct_from_deadline_precedence() {
+        let signal = TrackedCancellation::new();
+        let control = OperationControl::tracked(Instant::now(), signal.clone());
+        assert!(!control.is_cancelled());
+        signal.cancel();
+        assert!(control.is_cancelled());
+        assert_eq!(
+            control.stop_cause().unwrap(),
+            Some(StopCause::DeadlineExceeded)
+        );
+        assert_eq!(control.check().unwrap_err().code, "command.deadline");
+        let raw = Arc::new(AtomicBool::new(false));
+        let legacy = OperationControl::new(Instant::now() + Duration::from_secs(5), raw.clone());
+        assert!(!legacy.is_cancelled());
+        raw.store(true, Ordering::Release);
+        assert!(legacy.is_cancelled());
+        assert_eq!(
+            legacy.stop_cause().unwrap_err().code,
+            "control.cancellation_order_unavailable"
         );
     }
 }

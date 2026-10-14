@@ -60,6 +60,25 @@ pub struct Process {
     handle: Handle,
     identity: ProcessIdentity,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExitWaitPolicy {
+    Legacy,
+    Controlled,
+}
+fn finish_process_wait(
+    policy: ExitWaitPolicy,
+    check: &mut impl FnMut() -> Result<()>,
+    read_exit: impl FnOnce() -> Result<u32>,
+) -> Result<u32> {
+    if policy == ExitWaitPolicy::Controlled {
+        check()?;
+    }
+    let exit = read_exit()?;
+    if policy == ExitWaitPolicy::Controlled {
+        check()?;
+    }
+    Ok(exit)
+}
 impl Process {
     pub fn memory(&self) -> Result<ProcessMemory> {
         self.verify()?;
@@ -114,25 +133,69 @@ impl Process {
         deadline: std::time::Instant,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<u32> {
+        self.wait_exit_with_policy(
+            deadline,
+            || {
+                if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                    Err("command.cancelled: process exit wait".into())
+                } else {
+                    Ok(())
+                }
+            },
+            ExitWaitPolicy::Legacy,
+        )
+    }
+    /// Read the complete caller-owned control without exporting a writable
+    /// cancellation token. `check` is synchronous and called on each wait slice;
+    /// callers can preserve ancestor cancellation and deadline event ordering.
+    /// The closure must be bounded and the deadline cannot extend its control.
+    pub fn wait_exit_with_control(
+        &self,
+        deadline: std::time::Instant,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<u32> {
+        self.wait_exit_with_policy(deadline, check, ExitWaitPolicy::Controlled)
+    }
+    fn wait_exit_with_policy(
+        &self,
+        deadline: std::time::Instant,
+        mut check: impl FnMut() -> Result<()>,
+        policy: ExitWaitPolicy,
+    ) -> Result<u32> {
+        // SAFETY: `self` owns this process handle for the entire borrow. The
+        // identity helper writes only its own initialized FILETIME buffers.
         if unsafe { identity(self.handle.0, self.identity.pid)? } != self.identity {
             return Err("process.identity_changed".into());
         }
         loop {
-            if cancel.load(std::sync::atomic::Ordering::Acquire) {
-                return Err("command.cancelled: process exit wait".into());
-            }
+            check()?;
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() {
+                // A cancellation may have linearized before the deadline
+                // between the first check and this clock read. Let the caller
+                // resolve its actual cause before applying this wait's limit.
+                if policy == ExitWaitPolicy::Controlled {
+                    check()?;
+                }
                 return Err("command.deadline: process exit wait".into());
             }
+            // SAFETY: The borrowed owned handle stays open, and a bounded wait
+            // does not transfer ownership or retain any caller memory.
             let state =
                 unsafe { WaitForSingleObject(self.handle.0, left.as_millis().clamp(1, 50) as u32) };
             if state == WAIT_OBJECT_0 {
-                let mut exit = 0;
-                unsafe {
-                    GetExitCodeProcess(self.handle.0, &mut exit).map_err(|e| e.to_string())?;
-                }
-                return Ok(exit);
+                // Legacy callers historically accept the signaled exit even
+                // if cancellation arrives afterward. Only the complete-control
+                // entry opts into rechecking before/after reading that exit.
+                return finish_process_wait(policy, &mut check, || {
+                    let mut exit = 0;
+                    // SAFETY: `exit` is a writable u32 for this synchronous call;
+                    // the borrowed process handle has not been closed or reopened.
+                    unsafe {
+                        GetExitCodeProcess(self.handle.0, &mut exit).map_err(|e| e.to_string())?;
+                    }
+                    Ok(exit)
+                });
             }
             if state != WAIT_TIMEOUT {
                 return Err("process.wait_failed".into());
@@ -373,6 +436,120 @@ impl Process {
             offset += n;
         }
         self.verify()
+    }
+}
+
+#[cfg(test)]
+mod wait_exit_tests {
+    use super::*;
+    use std::{
+        cell::Cell,
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
+
+    #[test]
+    fn late_cancellation_keeps_legacy_exit_but_stops_controlled_completion() {
+        // Inject the two exact completion boundaries without relying on OS
+        // scheduling: a signaled wait before exit-code read, and after read.
+        for before_exit_read in [true, false] {
+            for policy in [ExitWaitPolicy::Legacy, ExitWaitPolicy::Controlled] {
+                let cancelled = AtomicBool::new(false);
+                let checks = Cell::new(0);
+                let reads = Cell::new(0);
+                let mut check = || {
+                    checks.set(checks.get() + 1);
+                    if cancelled.load(Ordering::Acquire) {
+                        Err("fixture.late_cancel".into())
+                    } else {
+                        Ok(())
+                    }
+                };
+                check().unwrap(); // The ordinary pre-wait check passes.
+                if before_exit_read {
+                    cancelled.store(true, Ordering::Release);
+                }
+                let result = finish_process_wait(policy, &mut check, || {
+                    reads.set(reads.get() + 1);
+                    cancelled.store(true, Ordering::Release);
+                    Ok(42)
+                });
+                if policy == ExitWaitPolicy::Legacy {
+                    assert_eq!(result, Ok(42));
+                    assert_eq!(checks.get(), 1);
+                    assert_eq!(reads.get(), 1);
+                } else {
+                    assert_eq!(result, Err("fixture.late_cancel".into()));
+                    assert_eq!(checks.get(), if before_exit_read { 2 } else { 3 });
+                    assert_eq!(reads.get(), if before_exit_read { 0 } else { 1 });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wait_exit_control_observes_parent_without_a_raw_token() {
+        let own = Process::open(std::process::id()).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut checks = 0;
+        let result = own.wait_exit_with_control(Instant::now() + Duration::from_secs(5), || {
+            checks += 1;
+            if checks == 2 {
+                cancelled.store(true, Ordering::Release);
+            }
+            if cancelled.load(Ordering::Acquire) {
+                Err("fixture.parent_cancelled".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err("fixture.parent_cancelled".into()));
+        assert_eq!(checks, 2);
+        assert_eq!(own.identity().pid, std::process::id());
+        own.verify().unwrap();
+    }
+
+    #[test]
+    fn wait_exit_control_preserves_caller_stop_cause_and_legacy_wrapper() {
+        let own = Process::open(std::process::id()).unwrap();
+        let result = own.wait_exit_with_control(Instant::now(), || {
+            Err("fixture.deadline_before_cancel".into())
+        });
+        assert_eq!(result, Err("fixture.deadline_before_cancel".into()));
+        let mut checks = 0;
+        let result = own.wait_exit_with_control(Instant::now(), || {
+            checks += 1;
+            if checks == 1 {
+                Ok(())
+            } else {
+                Err("fixture.cancel_before_clock_read".into())
+            }
+        });
+        assert_eq!(result, Err("fixture.cancel_before_clock_read".into()));
+        assert_eq!(checks, 2);
+        let mut checks = 0;
+        let result = own.wait_exit_with_policy(
+            Instant::now(),
+            || {
+                checks += 1;
+                if checks == 1 {
+                    Ok(())
+                } else {
+                    Err("fixture.late_cancel".into())
+                }
+            },
+            ExitWaitPolicy::Legacy,
+        );
+        assert_eq!(result, Err("command.deadline: process exit wait".into()));
+        assert_eq!(checks, 1);
+        assert_eq!(
+            own.wait_exit(Instant::now(), &AtomicBool::new(true)),
+            Err("command.cancelled: process exit wait".into())
+        );
+        assert_eq!(
+            own.wait_exit(Instant::now(), &AtomicBool::new(false)),
+            Err("command.deadline: process exit wait".into())
+        );
     }
 }
 fn readable(p: PAGE_PROTECTION_FLAGS) -> bool {

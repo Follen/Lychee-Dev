@@ -418,7 +418,7 @@ Source逻辑operation现在有Definition/References/Type答案及受封装的sco
 
 固定ec2a09b/run38637995018产品job116108268721终态success；artifact11930054873 ZIP SHA256 94a6052d8e411e05e1975292404de13a190d1c92823f02af0401a3294ba05ecc下载后核445份封存日志hash。315项Rust通过、2项ignore，包含Mailbox A/B/C与共享边界121、slot maintenance17、combined/rollback/removal组；sealed EXE SHA256 3f02ef9910372a24c5a6c554434719240d96cfebc0ec2a1a5d0ad80d51931411。全仓static CLI、真实doctor、luac重建及精确source候选/许可证装配均完成。
 
-真实multi-CLI native session集成首次执行成功（29.64s），覆盖同快照复用、关闭退休、取消/期限与坏帧等原fixture；取消响应样本68ms、期限样本818ms仅该场景观测。session owned receipt确认exit0/root/tree/handles/readers完整回收/active0。此证据尚待另一个独立视角复核，且不是完整4036语义、256新准入、实际Skill使用或性能通过；后续journal/Hotfix/consumer提交不继承该树运行结果。
+真实multi-CLI native session集成首次执行成功（29.64s），覆盖同快照复用、关闭退休、取消/期限与坏帧等原fixture；取消响应样本68ms、期限样本818ms仅该场景观测。session owned receipt确认exit0/root/tree/handles/readers完整回收/active0。此证据已由独立验收者重核源码DFS digest、105包资源、445日志及5份公开结果/capture，40Lua+TOC+独立API原Git对象逐一认证；坏信封保持owner/cache、取消/期限后重建恢复、close后新owner均成立，但不是完整4036语义、256新准入、实际Skill使用或性能通过；后续journal/Hotfix/consumer提交不继承该树运行结果。
 
 复核发现CI过滤器native_research::tests实际0测试通过，不能记为XML研究fixtures通过；独立plan组6项确实运行。立即合并为真实native_research::模块过滤器，覆盖plan、projection、load_context、reply_assembly各模块而不重复计数。新过滤器实际执行仍待下一精确树；保留原零测试证据，不改旧结果为通过。
 
@@ -439,6 +439,12 @@ core只抽同namespace lock-only维护lease，旧InstallationGuard注册行为�
 独立复审修复四项：Node目录门禁旧缺失断言、Index正文/符号扫描未贯穿control、默认引擎不可用缺warning/static partial、聚合native结果预算迟到。现受控搜索/分块原文读取可停止；默认未显式release资源准入失败警告降级且不执行坏资源，显式release/取消期限保持失败；先验证原参数避免降级移除reuse后接受冲突。default/reuse逐项计量包含协议封装、超额立即停止后续求值并不capture，不构造第二份全JSON。
 
 独立metadata5+Skill检查器17项通过；14项Rust batch与既有refs_context整合回归实际NOT_RUN，现接Windows。预算fixture只证明局部owner析构/后续不求值，真实进程退休与取消/崩溃/恢复须产品运行证据。新命令让实际Skill runner可按describe执行三项batch，当前仍不能记实际Skill通过。
+
+### tracked console 与只读取消边界 API
+
+Windows新增callback注册guard供CLI连接core TrackedCancellation而不反向依赖core；回调/FFI均锁外执行，Arc保障已取快照的旧回调可安全完成且不串新注册，panic不跨ABI或冒称取消成功。显式注销报告失败，Drop只尝试一次且失败禁止重复注册。core新增只读祖先取消查询，不暴露raw写权限、不代替deadline/first-cause裁决。Process新增完整control检查入口；独立审核发现旧wait_exit退出后检查造成行为漂移，已用共享内部policy恢复Legacy原边界，新入口仍保完整检查与唯一FFI实现。
+
+11项新core/Windows fixture含确定性退出/取消竞态已编写，独立源码复审所查finding闭合，Rust/Windows实际NOT_RUN；现接CI。CLI正常invocation、broker、helper及Source serve仍有旧token接线，当前仅API基础，不声称正常Ctrl+C已经保留取消时间戳；后续接线须继续保原deadline与生命周期，不从raw AtomicBool伪造历史时点。
 
 ## 11. 最后执行：需要实际配合的测试清单
 

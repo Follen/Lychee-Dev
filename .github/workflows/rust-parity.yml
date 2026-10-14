@@ -156,6 +156,12 @@ jobs:
       - name: Run consuming shared lock close fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-lock-close --one-shot -- test --locked --offline -p lycheedev-core --lib storage::exclusive_lock_close_tests -j 1
+      - name: Run tracked console registration lifecycle fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-console-cancel --one-shot -- test --locked --offline -p lycheedev-windows --lib cancellation::tests -j 1
+      - name: Run process wait cancellation boundary fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-process-wait --one-shot -- test --locked --offline -p lycheedev-windows --lib process::wait_exit_tests -j 1
       - name: Run fake-window passive discovery fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-passive-fixtures --one-shot -- test --locked --offline -p lycheedev-live --lib passive::tests -j 1
