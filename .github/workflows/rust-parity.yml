@@ -127,6 +127,19 @@ jobs:
       - name: Run Source query admission unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-query-default --one-shot -- test --locked --offline -p lycheedev-source --lib public_query_defaults -j 1
+      - name: Run real local Data installation and catalog fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-data-installation --one-shot -- test --locked --offline -p lycheedev-data --test installed_parity --test local_domain_parity -j 1
+      - name: Run target cancellation before symbolic resolution
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1
+      - name: Build a sealed real CLI executable
+        id: cli_binary
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-build.mjs .tmp/ci-cli-artifact dev --one-shot
+      - name: Execute sealed CLI version help and describe
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
+        run: node tools/rust-cli-smoke.mjs .tmp/ci-cli-artifact/artifact.json
       - name: Preserve each controlled command receipt and logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -135,6 +148,7 @@ jobs:
           path: |
             .tmp/rust-disk/evidence/
             .tmp/rust-process-test-*/
+            .tmp/ci-cli-artifact/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

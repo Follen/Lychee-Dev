@@ -6,17 +6,20 @@ use crate::{
     resource::{Budget, Cost, RetainedReservation},
     schema,
 };
-use lycheedev_core::{Result, storage};
+use lycheedev_core::{
+    Result, ToolkitError,
+    client::{self, ClientInstallation, MetadataControl, MetadataCost},
+    installation_selection, storage,
+};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    fs::File,
     io::Read,
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
 };
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledBuild {
     pub product: String,
@@ -31,6 +34,36 @@ pub struct InstalledBuild {
     pub channel: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub display_name: String,
+}
+/// Fixed Go records.InstalledBuild wire shape. Enrichment stays internal.
+#[derive(Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct InstalledBuildPublic<'a> {
+    product: &'a str,
+    full_build: &'a str,
+    build_config: &'a str,
+    #[serde(rename = "cdnConfig")]
+    cdn_config: &'a str,
+    active: bool,
+}
+impl InstalledBuild {
+    fn public(&self) -> InstalledBuildPublic<'_> {
+        InstalledBuildPublic {
+            product: &self.product,
+            full_build: &self.full_build,
+            build_config: &self.build_config,
+            cdn_config: &self.cdn_config,
+            active: self.active,
+        }
+    }
+}
+impl Serialize for InstalledBuild {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        self.public().serialize(serializer)
+    }
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,143 +150,65 @@ pub fn resolve_target_budgeted(
             "Target needs explicit region, locale and exact lowercase definition commit",
         ));
     }
-    let _paths = temporary(budget, request.installation.as_os_str().len() * 4 + 256)?;
-    let (root, product_code, flavor_sha256) = if request.installation.join(".flavor.info").is_file()
-    {
-        let (root, flavor) = installation_root_budgeted(&request.installation, budget)?;
-        let observed_track = slot_track(&flavor);
-        if observed_track.is_none() {
-            return Err(fault(
-                "records.unsupported_profile",
-                3,
-                "Unknown client publishing slot",
-            ));
-        }
-        if requested_product.is_some_and(|p| Some(p) != observed_track) {
-            return Err(fault(
-                "records.client_identity",
-                4,
-                "Explicit product differs from selected client flavor",
-            ));
-        }
-        let bytes = read(
-            &request.installation,
-            &request.installation.join(".flavor.info"),
-            65536,
-            budget,
-        )?;
-        owned(budget, 64)?;
-        work(budget, bytes.len())?;
-        (root, flavor, Some(storage::sha256(&bytes)))
-    } else {
-        let product = requested_product.ok_or_else(|| {
-            fault(
-                "records.client_identity",
-                2,
-                "Common root selection requires explicit product",
-            )
-        })?;
-        // A common root has no observed client flavor. Admit exactly one
-        // active matching slot/build; a regional slot is never borrowed from
-        // another slot selected by an explicit client flavor.
-        let catalog = read(
-            &request.installation,
-            &request.installation.join(".build.info"),
-            1 << 20,
-            budget,
-        )?;
-        let mut matches = installed_rows_budgeted(&catalog, budget)?
-            .into_iter()
-            .filter(|b| {
-                b.active
-                    && slot_track(&b.product) == Some(product)
-                    && request
-                        .full_build
-                        .as_ref()
-                        .is_none_or(|build| build == &b.full_build)
-            });
-        let selected = matches.next();
-        if selected.is_none() || matches.next().is_some() {
-            return Err(fault(
-                if selected.is_none() {
-                    "records.build_unavailable"
-                } else {
-                    "records.build_ambiguous"
-                },
-                if selected.is_none() { 3 } else { 4 },
-                "Common root needs one exact active toolkit track/slot/build",
-            ));
-        }
-        owned(budget, request.installation.as_os_str().len())?;
-        (
-            request.installation.clone(),
-            selected.expect("one matching build").product,
-            None,
-        )
-    };
-    let build = {
-        let catalog = read(&root, &root.join(".build.info"), 1 << 20, budget)?;
-        let mut matches = installed_rows_budgeted(&catalog, budget)?
-            .into_iter()
-            .filter(|b| b.active && b.product == product_code);
-        let selected = matches.next();
-        if selected.is_none() || matches.next().is_some() {
-            return Err(fault(
-                if selected.is_none() {
-                    "records.build_unavailable"
-                } else {
-                    "records.build_ambiguous"
-                },
-                if selected.is_none() { 3 } else { 4 },
-                "Target needs exactly one active product/build row",
-            ));
-        }
-        let observed = selected.expect("one active build").full_build;
-        if request
-            .full_build
-            .as_ref()
-            .is_some_and(|build| build != &observed)
-        {
-            return Err(fault(
-                "records.build_unavailable",
-                3,
-                "Requested build differs from the exact active product row",
-            ));
-        }
-        observed
-    };
-    let track = slot_track(&product_code).ok_or_else(invalid)?;
-    let series = lycheedev_core::client::product(track)
-        .map(|profile| profile.series)
-        .ok_or_else(invalid)?;
-    version(&build, budget)?;
-    let _series = temporary(budget, 16)?;
-    if !build.starts_with(&format!("{series}.")) {
+    if request.installation.as_os_str().is_empty() {
         return Err(fault(
-            "records.client_identity",
-            4,
-            "Observed slot/build is outside the verified client series",
+            "records.target_installation_required",
+            2,
+            "Installation is required",
         ));
     }
-    if request.installation.join("version.txt").is_file() {
-        let raw = read(
-            &request.installation,
-            &request.installation.join("version.txt"),
-            4096,
-            budget,
-        )?;
-        let version = checked_text(&raw, budget)?
-            .trim_start_matches('\u{feff}')
-            .trim();
-        if version != build {
-            return Err(fault(
-                "records.client_identity",
-                4,
-                "Client version.txt contradicts exact active catalog build",
-            ));
-        }
+    if requested_product.is_none() && request.full_build.as_deref().is_some_and(|s| !s.is_empty()) {
+        return Err(fault(
+            "records.target_product_required_for_build",
+            2,
+            "An exact build requires a product",
+        ));
     }
-    let metadata = resolve_local_budgeted(&root, &product_code, &build, budget)?;
+    // Target preparation selects a real client even when passed a game root.
+    // A catalog alone is sufficient only for a reader with an existing pin.
+    let selected = select_client_budgeted(
+        &request.installation,
+        requested_product.unwrap_or(""),
+        budget,
+    )?;
+    if request
+        .full_build
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_some_and(|build| build != selected.full_build)
+    {
+        return Err(fault(
+            "selection.target_build_unavailable",
+            3,
+            "Requested build differs from the selected client",
+        ));
+    }
+    let installation = PathBuf::from(&selected.directory);
+    let root = installation.parent().ok_or_else(invalid)?.to_owned();
+    let product_code = observed_slot(&selected);
+    let track = client::client_data_product(&selected);
+    let build = selected.full_build.clone();
+    let flavor_sha256 = flavor_digest(&installation, budget)?;
+    let metadata = resolve_local_budgeted(&root, product_code, &build, budget)?;
+    // The selector and configuration reads have independent file lifetimes.
+    // Recheck both observations before returning a pin, just as Go target.go.
+    let current = select_client_budgeted(
+        &request.installation,
+        requested_product.unwrap_or(""),
+        budget,
+    )?;
+    if !same_client_identity(&current, &selected) {
+        return Err(pinned_changed(
+            "Selected client changed during target preparation",
+        ));
+    }
+    let after = resolve_local_budgeted(&root, product_code, &build, budget)?;
+    if after.installed.public() != metadata.installed.public() {
+        return Err(pinned_changed(
+            "Active catalog identity changed during target preparation",
+        ));
+    }
+    let metadata = after;
     owned(
         budget,
         track.len()
@@ -276,13 +231,236 @@ pub fn resolve_target_budgeted(
     Ok(ResolvedLocalTarget {
         data,
         metadata,
-        installation: request.installation.clone(),
+        installation,
         common_root: root,
         flavor_sha256,
     })
 }
-fn slot_track(code: &str) -> Option<&'static str> {
-    lycheedev_core::client::catalog_product(code).map(|profile| profile.id)
+/// Resolve an already-pinned reader without preparing a new target. This is
+/// the records.file_source path: catalog-only CASC roots are legitimate here.
+pub fn resolve_pinned_target_budgeted(
+    installation: &Path,
+    pin: &lycheedev_core::selection::DataPin,
+    budget: Option<&Budget>,
+) -> Result<ResolvedLocalTarget> {
+    let profile = client::product(&pin.product).ok_or_else(|| {
+        fault(
+            "selection.unsupported_data_product",
+            2,
+            "Unknown toolkit product",
+        )
+    })?;
+    if profile.reused_slot
+        && (!lycheedev_core::selection::valid_build(&pin.full_build)
+            || !pin.full_build.starts_with(&format!("{}.", profile.series)))
+    {
+        return Err(fault(
+            "selection.data_product_build_mismatch",
+            4,
+            "Pinned build is outside the verified reused-slot series",
+        ));
+    }
+    let product_code = if pin.product == "forever" {
+        "wow_forever"
+    } else {
+        profile.catalog_product
+    };
+    let (common_root, product_code) =
+        data_installation_root_budgeted(installation, product_code, &pin.full_build, budget)?;
+    let metadata = resolve_local_budgeted(&common_root, &product_code, &pin.full_build, budget)?;
+    if metadata.installed.build_config != pin.build_config
+        || metadata.installed.cdn_config != pin.cdn_config
+    {
+        return Err(pinned_changed(
+            "Local configurations differ from fixed DataPin",
+        ));
+    }
+    owned(
+        budget,
+        installation.as_os_str().len()
+            + pin.product.len()
+            + pin.region.len()
+            + pin.full_build.len()
+            + pin.build_config.len()
+            + pin.cdn_config.len()
+            + pin.language.len()
+            + pin.definition_commit.len(),
+    )?;
+    Ok(ResolvedLocalTarget {
+        data: pin.clone(),
+        metadata,
+        installation: installation.to_owned(),
+        common_root,
+        flavor_sha256: None,
+    })
+}
+/// Filesystem/path/parser allocation admissions are transient retained memory,
+/// not bytes read from metadata. Keep conservative reservations until the whole
+/// inspection ends; only owned output is charged beyond that scope.
+struct InstallationBudget<'a> {
+    budget: Option<&'a Budget>,
+    allocations: Vec<RetainedReservation<'a>>,
+}
+impl<'a> InstallationBudget<'a> {
+    fn new(budget: Option<&'a Budget>) -> Self {
+        Self {
+            budget,
+            allocations: Vec::new(),
+        }
+    }
+}
+impl MetadataControl for InstallationBudget<'_> {
+    fn charge(&mut self, cost: MetadataCost) -> Result<()> {
+        if let Some(budget) = self.budget {
+            budget.charge(Cost {
+                metadata_bytes: cost.requested_bytes,
+                decode_work: cost
+                    .work_units
+                    .saturating_add(cost.io_operations)
+                    .saturating_add(cost.read_calls),
+                ..Default::default()
+            })?;
+            if cost.allocation_bytes != 0 {
+                let bytes = usize::try_from(cost.allocation_bytes)
+                    .ok()
+                    .and_then(|bytes| bytes.checked_add(4 * size_of::<RetainedReservation<'_>>()))
+                    .ok_or_else(exceeds)?;
+                // Includes the vector's geometric growth and minimum initial capacity.
+                let reservation = budget.reserve_retained(bytes)?;
+                self.allocations.try_reserve(1).map_err(|_| exceeds())?;
+                self.allocations.push(reservation);
+            }
+        }
+        Ok(())
+    }
+    fn check(&mut self) -> Result<()> {
+        self.budget.map_or(Ok(()), Budget::check)
+    }
+}
+fn select_client_budgeted(
+    directory: &Path,
+    product: &str,
+    budget: Option<&Budget>,
+) -> Result<ClientInstallation> {
+    let mut control = InstallationBudget::new(budget);
+    let client = installation_selection::select_with(directory, product, &mut control)?;
+    owned(
+        budget,
+        size_of::<ClientInstallation>()
+            + client.directory.len()
+            + client.product.len()
+            + client.product_code.len()
+            + client.catalog_product.len()
+            + client.display_name.len()
+            + client.channel.len()
+            + client.metadata_branch.len()
+            + client.full_build.len()
+            + client.toc.len()
+            + client.identity_source.len(),
+    )?;
+    Ok(client)
+}
+impl storage::FileControl for InstallationBudget<'_> {
+    type Error = ToolkitError;
+    fn charge(&mut self, cost: storage::FileCost) -> Result<()> {
+        MetadataControl::charge(
+            self,
+            MetadataCost {
+                io_operations: cost.io_operations,
+                allocation_bytes: cost.allocation_bytes,
+                work_units: cost.work_units,
+                ..Default::default()
+            },
+        )
+    }
+    fn check(&mut self) -> Result<()> {
+        MetadataControl::check(self)
+    }
+}
+enum RootProbeError {
+    Io(std::io::Error),
+    Operation(ToolkitError),
+}
+impl From<std::io::Error> for RootProbeError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+impl From<RootProbeError> for ToolkitError {
+    fn from(error: RootProbeError) -> Self {
+        match error {
+            RootProbeError::Io(error) => error.into(),
+            RootProbeError::Operation(error) => error,
+        }
+    }
+}
+struct RootProbe<'a>(InstallationBudget<'a>);
+impl storage::FileControl for RootProbe<'_> {
+    type Error = RootProbeError;
+    fn charge(&mut self, cost: storage::FileCost) -> std::result::Result<(), Self::Error> {
+        storage::FileControl::charge(&mut self.0, cost).map_err(RootProbeError::Operation)
+    }
+    fn check(&mut self) -> std::result::Result<(), Self::Error> {
+        MetadataControl::check(&mut self.0).map_err(RootProbeError::Operation)
+    }
+}
+fn has_casc_catalog(directory: &Path, budget: Option<&Budget>) -> Result<bool> {
+    let mut control = RootProbe(InstallationBudget::new(budget));
+    let root = match storage::Directory::open_controlled(directory, &mut control) {
+        Ok(root) => root,
+        Err(RootProbeError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(false);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    Ok(root
+        .optional_metadata_controlled(".build.info".as_ref(), &mut control)?
+        .is_some())
+}
+fn same_client_identity(left: &ClientInstallation, right: &ClientInstallation) -> bool {
+    // Go compares its public ClientInstallation, not optional internal enrichment.
+    left.directory == right.directory
+        && left.product == right.product
+        && left.product_code == right.product_code
+        && left.catalog_product == right.catalog_product
+        && left.full_build == right.full_build
+        && left.interface == right.interface
+        && left.toc == right.toc
+        && left.identity_source == right.identity_source
+}
+fn observed_slot(client: &ClientInstallation) -> &str {
+    if client.catalog_product.is_empty() {
+        &client.product_code
+    } else {
+        &client.catalog_product
+    }
+}
+fn pinned_changed(message: &str) -> ToolkitError {
+    fault("records.pinned_build_changed", 4, message)
+}
+fn flavor_digest(directory: &Path, budget: Option<&Budget>) -> Result<Option<String>> {
+    let mut control = InstallationBudget::new(budget);
+    let root = storage::Directory::open_controlled(directory, &mut control)?;
+    for name in [".flavor.info", "flavor.info"] {
+        if root
+            .optional_metadata_controlled(name.as_ref(), &mut control)?
+            .is_none()
+        {
+            continue;
+        }
+        let raw = read(directory, &directory.join(name), 65536, budget)?;
+        if checked_text(&raw, budget)?
+            .trim_start_matches('\u{feff}')
+            .trim()
+            .is_empty()
+        {
+            continue;
+        }
+        owned(budget, 64)?;
+        work(budget, raw.len())?;
+        return Ok(Some(storage::sha256(&raw)));
+    }
+    Ok(None)
 }
 fn invalid() -> lycheedev_core::ToolkitError {
     fault(
@@ -351,7 +529,7 @@ fn version(value: &str, budget: Option<&Budget>) -> Result<[u32; 4]> {
     // schema::version collects borrowed components in a geometrically grown Vec.
     let capacity = value.split('.').count().next_power_of_two().max(4);
     let _parts = temporary(budget, capacity * size_of::<&str>())?;
-    schema::version(value)
+    schema::version(value).map_err(|_| invalid())
 }
 // A BTreeMap entry may cause a node allocation/split. Reserve a full node per
 // insertion, including links/alignment, rather than pretending it is just K+V.
@@ -365,9 +543,11 @@ pub fn installed_rows_budgeted(raw: &[u8], budget: Option<&Budget>) -> Result<Ve
     if raw.len() > 1 << 20 {
         return Err(exceeds());
     }
-    let mut lines = checked_text(raw, budget)?
-        .trim_start_matches('\u{feff}')
-        .lines();
+    let raw_text = checked_text(raw, budget)?;
+    if !raw_text.contains('\n') {
+        return Err(invalid());
+    }
+    let mut lines = raw_text.trim_start_matches('\u{feff}').lines();
     let header = lines.next().ok_or_else(invalid)?;
     work(budget, header.len())?;
     let header_count = header.split('|').count();
@@ -414,19 +594,12 @@ pub fn installed_rows_budgeted(raw: &[u8], budget: Option<&Budget>) -> Result<Ve
             return Err(invalid());
         }
         version(get("Version"), budget)?;
-        casc::key(get("Build Key"))?;
-        casc::key(get("CDN Key"))?;
+        casc::key(get("Build Key")).map_err(|_| invalid())?;
+        casc::key(get("CDN Key")).map_err(|_| invalid())?;
         let branch = columns
             .get("Branch")
             .map(|&i| values[i].trim())
             .unwrap_or("");
-        if branch.len() > 64
-            || !branch
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-        {
-            return Err(invalid());
-        }
         let profile = lycheedev_core::client::catalog_product(get("Product"));
         if rows.len() == rows.capacity() {
             let capacity = (rows.capacity() * 2).clamp(4, 4096);
@@ -476,11 +649,12 @@ pub fn parse_configuration_budgeted(
     key: &str,
     budget: Option<&Budget>,
 ) -> Result<ConfigDocument> {
-    let expected = casc::key(key)?;
     if raw.len() > 4 << 20 {
         return Err(exceeds());
     }
-    work(budget, raw.len())?;
+    let expected = casc::key(key).map_err(|_| invalid())?;
+    // Go rejects malformed text before considering its content hash.
+    checked_text(&raw, budget)?;
     if Md5::digest(&raw)[..] != expected {
         return Err(fault(
             "records.configuration_integrity",
@@ -537,13 +711,34 @@ pub fn parse_configuration_budgeted(
     })
 }
 fn read(root: &Path, path: &Path, max: usize, budget: Option<&Budget>) -> Result<Vec<u8>> {
-    // Joined/canonical paths and Windows path conversion coexist inside the
-    // existing path guard. Their scratch is bounded by this explicit path.
+    // A lexical child plus held non-reparse ancestry and handle-relative file
+    // open provides confinement without unchecked stat/canonicalize traversals.
     let _paths = temporary(budget, path.as_os_str().len() * 8 + 512)?;
-    storage::guard_path(root, path)?;
-    let mut file = File::open(path)?;
+    let mut control = InstallationBudget::new(budget);
+    let held_root = storage::Directory::open_controlled(root, &mut control)?;
+    let relative = path.strip_prefix(root).map_err(|_| invalid())?;
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(invalid());
+    }
+    let parent =
+        storage::Directory::open_controlled(path.parent().ok_or_else(invalid)?, &mut control)?;
+    let mut file =
+        parent.open_file_controlled(path.file_name().ok_or_else(invalid)?, &mut control)?;
+    MetadataControl::charge(
+        &mut control,
+        MetadataCost {
+            io_operations: 1,
+            ..Default::default()
+        },
+    )?;
     let meta = file.metadata()?;
-    if !meta.is_file() {
+    MetadataControl::check(&mut control)?;
+    use std::os::windows::fs::MetadataExt;
+    if !meta.is_file() || meta.file_attributes() & 0x400 != 0 {
         return Err(invalid());
     }
     if meta.len() > max as u64 {
@@ -585,7 +780,8 @@ fn read(root: &Path, path: &Path, max: usize, budget: Option<&Budget>) -> Result
             "Local metadata changed during read",
         ));
     }
-    storage::guard_path(root, path)?;
+    parent.verify_controlled(&mut control)?;
+    held_root.verify_controlled(&mut control)?;
     checked_text(&raw, budget)?;
     if let Some(reservation) = allocation {
         reservation.commit();
@@ -605,12 +801,26 @@ pub fn resolve_local_budgeted(
         return Err(invalid());
     }
     version(full_build, budget)?;
+    let (root, product_code) =
+        data_installation_root_budgeted(root, product_code, full_build, budget)?;
+    let root = root.as_path();
+    let product_code = product_code.as_str();
     let _catalog_path = temporary(budget, root.as_os_str().len() * 2 + 64)?;
     let raw = read(root, &root.join(".build.info"), 1 << 20, budget)?;
     let rows = installed_rows_budgeted(&raw, budget)?;
-    let mut matches = rows
-        .into_iter()
-        .filter(|r| r.active && r.product == product_code && r.full_build == full_build);
+    let exact = rows
+        .iter()
+        .any(|row| row.active && row.product == product_code && row.full_build == full_build);
+    // Fixed Go catalog.go permits the canonical Forever family only when an
+    // exact row is absent. An observed regional slot never enters this fallback.
+    let legacy_slots = !exact && product_code == "wow_forever" && full_build.starts_with("1.60.1.");
+    let mut matches = rows.into_iter().filter(|row| {
+        row.active
+            && row.full_build == full_build
+            && (row.product == product_code
+                || (legacy_slots
+                    && matches!(row.product.as_str(), "wow_classic_beta" | "wow_cn_beta")))
+    });
     let selected = matches.next();
     if matches.next().is_some() {
         return Err(fault(
@@ -649,7 +859,7 @@ pub fn resolve_local_budgeted(
         return Err(invalid());
     }
     for key in root_keys.iter().chain(encoding) {
-        casc::key(key)?;
+        casc::key(key).map_err(|_| invalid())?;
     }
     if fields
         .get("build-uid")
@@ -662,7 +872,7 @@ pub fn resolve_local_budgeted(
             return Err(invalid());
         }
         let n = s.parse().map_err(|_| invalid())?;
-        if n == 0 || n > 1usize << 40 {
+        if n == 0 || n > 1usize << 50 {
             return Err(invalid());
         }
         Ok(n)
@@ -684,32 +894,59 @@ pub fn resolve_local_budgeted(
         cdn_document,
     })
 }
-/// Resolve an explicit client directory using its flavor. The parent catalog
-/// is used only when the selected directory has a valid one-column identity.
-/// The returned code is the observed catalog slot. Track resolution is separate.
-pub fn installation_root(client: &Path) -> Result<(PathBuf, String)> {
-    installation_root_budgeted(client, None)
+/// Inspect a client or game root using the shared installation selector.
+/// Readers with an existing pin must use `data_installation_root` instead.
+pub fn installation_root(directory: &Path) -> Result<(PathBuf, String)> {
+    let client = select_client_budgeted(directory, "", None)?;
+    let root = Path::new(&client.directory)
+        .parent()
+        .ok_or_else(invalid)?
+        .to_owned();
+    Ok((root, observed_slot(&client).to_owned()))
 }
-fn installation_root_budgeted(client: &Path, budget: Option<&Budget>) -> Result<(PathBuf, String)> {
-    let _paths = temporary(budget, client.as_os_str().len() * 4 + 128)?;
-    let raw = read(client, &client.join(".flavor.info"), 65536, budget)?;
-    let mut lines = checked_text(&raw, budget)?
-        .lines()
-        .filter(|s| !s.trim().is_empty());
-    if lines.next() != Some("Product Flavor!STRING:0") {
-        return Err(invalid());
+/// Go records.dataInstallationRoot: an explicit CASC root retains the supplied
+/// pin, while a selected client must match canonical product or actual slot and
+/// full build before its parent archives can be used. Never borrow a sibling.
+pub fn data_installation_root(
+    directory: &Path,
+    product_code: &str,
+    full_build: &str,
+) -> Result<(PathBuf, String)> {
+    data_installation_root_budgeted(directory, product_code, full_build, None)
+}
+pub fn data_installation_root_budgeted(
+    directory: &Path,
+    product_code: &str,
+    full_build: &str,
+    budget: Option<&Budget>,
+) -> Result<(PathBuf, String)> {
+    if has_casc_catalog(directory, budget)? {
+        owned(budget, directory.as_os_str().len() + product_code.len())?;
+        return Ok((directory.to_owned(), product_code.to_owned()));
     }
-    let product_code = lines.next().ok_or_else(invalid)?.trim();
-    if !product(product_code) || lines.next().is_some() {
-        return Err(invalid());
+    let selected = select_client_budgeted(directory, "", budget).map_err(|error| {
+        if error.code == "selection.installation_metadata_conflict" {
+            pinned_changed(&error.to_string()).with_details(error.details)
+        } else {
+            error
+        }
+    })?;
+    if (selected.product_code != product_code && selected.catalog_product != product_code)
+        || selected.full_build != full_build
+    {
+        return Err(pinned_changed(
+            "Selected client differs from pinned product/slot/build",
+        ));
     }
-    owned(budget, client.as_os_str().len() + product_code.len())?;
-    let root = if client.join(".build.info").is_file() {
-        client.to_owned()
-    } else {
-        client.parent().ok_or_else(invalid)?.to_owned()
-    };
-    Ok((root, product_code.into()))
+    let root = Path::new(&selected.directory)
+        .parent()
+        .ok_or_else(invalid)?
+        .to_owned();
+    owned(
+        budget,
+        root.as_os_str().len() + observed_slot(&selected).len(),
+    )?;
+    Ok((root, observed_slot(&selected).to_owned()))
 }
 pub fn open_encoding(
     root: &Path,

@@ -1,6 +1,7 @@
 use crate::{Result, ToolkitError};
 // Business providers use the shared mechanism layer, rather than adding their
 // own Win32 publication path or a direct platform dependency.
+pub use lycheedev_windows::filesystem::destination::{FileControl, FileCost};
 pub use lycheedev_windows::filesystem::{Destination, Directory};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};

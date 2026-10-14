@@ -244,6 +244,14 @@ Python准备43测试中1失败/1平台条件skip：即时同尺寸写入并不�
 
 云失联测试9da7dda2的支持文件曾被短暂改写后恢复，因此已标记external-invalidation；即使后来有成功终态也不可验收该运行。原证据/lease保留，所有新源码与支持候选在隔离stage冻结后按同一提交发布，由新Windows host验证，不清除旧lease或假定进程已回收。
 
+### Data 默认安装消费者与真实 CLI 可用性执行入口
+
+Data 两层消费者现共享固定Go安装身份：target需要真实client选择，pin读取先接受有效catalog-only CASC root，再检验canonical product/实际slot/full build一致性；local query/navigation默认读者已接该路径。公开InstalledBuild仅Go五字段，Branch不新增准入限制，配置key/UTF8/integrity错误顺序与encoding-size上限1<<50对齐。临时selector allocation用RAII释放，metadata只累计实际读取字节，保留双次选择更新检查；新增64目录默认预算、真实上限、取消、CASC和区域slot回归。
+
+独立静态复核关闭上述发现，另发现symbolic definitions解析会早于预算检查；本批在dispatch_target入口先检查同inv.control，并加exact/symbolic offline已取消/过期不创建home回归。definitions resolver运行中的持续取消/网络deadline仍是明确后续缺口，不称整个target全程受控。源码语法/scoped diff通过；新增Rust测试NOT_RUN，Windows job将实际跑installed_parity/local_domain_parity与target取消场景。
+
+另加受控构建封存真实CLI exe，以及校验精确artifact后独立owned-process执行version/help/describe并保存原始输出和receipt。此入口用于接续独立Source/Skill真实使用，当前仅配置/静态验证，不是产品运行通过；没有游戏、安装或业务执行。嵌套Emmy job显式RUSTUP_TOOLCHAIN=1.99.0，防upstream更近的stable工具链文件覆盖根目录pin。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

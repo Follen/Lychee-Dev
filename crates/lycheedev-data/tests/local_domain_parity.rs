@@ -424,3 +424,60 @@ fn authenticated_local_spell_navigation_success_and_corrupt_original_rejection()
         fs::remove_dir_all(fx.root).unwrap();
     }
 }
+
+#[test]
+fn pinned_navigation_accepts_casc_root_and_recovers_client_conflicts() {
+    // Go file_source.go uses dataInstallationRoot for existing pins. This
+    // exercises both local_query and navigate/catalog through public dispatch.
+    let root = std::env::temp_dir().join(format!(
+        "lychee-pinned-domain-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let fixture = Fixture::create(root);
+    let common = fixture.client.parent().unwrap();
+    let exact = navigate::dispatch(&fixture.invocation("data spell auras", 100, None)).unwrap();
+    let mut from_root = fixture.invocation("data spell auras", 100, None);
+    from_root.flags.insert(
+        "--installation".into(),
+        common.to_string_lossy().into_owned(),
+    );
+    let root_result = navigate::dispatch(&from_root).unwrap();
+    assert_eq!(root_result.data["hasAura"], exact.data["hasAura"]);
+    assert_eq!(
+        root_result.data["tableVerification"],
+        exact.data["tableVerification"]
+    );
+    std::fs::write(fixture.client.join("version.txt"), "12.1.0.69934").unwrap();
+    let error = navigate::dispatch(&fixture.invocation("data spell auras", 100, None)).unwrap_err();
+    assert_eq!(error.code, "records.pinned_build_changed");
+    std::fs::write(fixture.client.join("version.txt"), BUILD).unwrap();
+    assert!(
+        navigate::dispatch(&fixture.invocation("data spell auras", 100, None))
+            .unwrap()
+            .complete
+    );
+    // Read a fixed CASC pin with no installed client. Target preparation must
+    // still refuse to invent one from catalog rows.
+    std::fs::remove_dir_all(&fixture.client).unwrap();
+    assert_eq!(
+        installed::resolve_target(&installed::LocalTargetRequest {
+            installation: common.to_owned(),
+            product: Some("retail".into()),
+            full_build: Some(BUILD.into()),
+            region: "cn".into(),
+            language: "zhCN".into(),
+            definition_commit: DEFS.into(),
+        })
+        .unwrap_err()
+        .code,
+        "selection.installation_missing"
+    );
+    let catalog_only = navigate::dispatch(&from_root).unwrap();
+    assert!(catalog_only.complete);
+    assert_eq!(catalog_only.data["hasAura"], exact.data["hasAura"]);
+    std::fs::remove_dir_all(fixture.root).unwrap();
+}

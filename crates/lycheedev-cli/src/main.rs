@@ -406,6 +406,7 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
     }
 }
 fn dispatch_target(inv: &Invocation) -> Result<Outcome> {
+    inv.control.check()?;
     if inv.flag("--file").is_some() {
         return lycheedev_core::workspace::dispatch(inv);
     }
@@ -462,7 +463,10 @@ fn dispatch_target(inv: &Invocation) -> Result<Outcome> {
         language: selected.required("--locale")?.into(),
         definition_commit: definition,
     };
-    let resolved = lycheedev_data::installed::resolve_target(&request)?;
+    let budget = lycheedev_data::resource::Budget::controlled(
+        lycheedev_data::resource::Cost::defaults(), inv.control.deadline(), inv.control.clone(),
+    );
+    let resolved = lycheedev_data::installed::resolve_target_budgeted(&request, Some(&budget))?;
     let pin = lycheedev_core::selection::pin_selection(
         &inv.home,
         lycheedev_core::selection::SelectionSpec {
@@ -1318,6 +1322,37 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn target_dispatch_preserves_invocation_cancellation_and_deadline() {
+        use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
+        let home = std::env::temp_dir().join(format!("lychee-cancelled-target-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        assert!(!home.exists());
+        for definition in ["a".repeat(40), "refs/heads/master".into()] {
+            for (cancelled, expired, expected) in [(true, false, "command.cancelled"), (false, true, "command.deadline")] {
+                let now = Instant::now();
+                let control = lycheedev_core::control::OperationControl::new(
+                    if expired { now - Duration::from_secs(1) } else { now + Duration::from_secs(30) },
+                    Arc::new(AtomicBool::new(cancelled)),
+                );
+                let invocation = Invocation {
+                    command: "target resolve".into(), positional: None,
+                    flags: BTreeMap::from([
+                        ("--installation".into(), home.join("absent-installation").to_string_lossy().into_owned()),
+                        ("--product".into(), "retail".into()),
+                        ("--region".into(), "cn".into()),
+                        ("--locale".into(), "zhCN".into()),
+                        ("--definitions".into(), definition.clone()),
+                        ("--offline".into(), "true".into()),
+                    ]),
+                    home: home.clone(), cwd: PathBuf::from("."), control,
+                };
+                assert_eq!(dispatch(&invocation).unwrap_err().code, expected);
+                assert!(!home.exists(), "cancelled symbolic resolution must not initialize metadata");
+            }
+        }
+    }
+
     #[test]
     fn installation_error_context_survives_project_context_merge() {
         let selection = json!({"directory":"fixture", "candidates":[], "issues":[]});

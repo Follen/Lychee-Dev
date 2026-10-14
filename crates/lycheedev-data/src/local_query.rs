@@ -182,14 +182,9 @@ fn read_files_with_keys(
     budget.charge(Cost::metadata(inv.required("--installation")?.len()
         + pin.product.len() + pin.full_build.len() + pin.region.len()
         + pin.language.len() + pin.definition_commit.len()))?;
-    let target = installed::resolve_target_budgeted(&installed::LocalTargetRequest {
-        installation: Path::new(inv.required("--installation")?).to_owned(),
-        product: Some(pin.product.clone()),
-        full_build: Some(pin.full_build.clone()),
-        region: pin.region.clone(),
-        language: pin.language.clone(),
-        definition_commit: pin.definition_commit.clone(),
-    }, Some(budget))?;
+    let target = installed::resolve_pinned_target_budgeted(
+        Path::new(inv.required("--installation")?), pin, Some(budget),
+    )?;
     if &target.data != pin {
         return Err(fault(
             "records.pinned_build_changed",
