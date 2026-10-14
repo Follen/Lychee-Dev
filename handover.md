@@ -470,6 +470,12 @@ run38639615054/product116122379218 于 2026-10-14 22:19:54 UTC 结束：all-targ
 
 三轮独立复审关闭时间/Unicode/字段严格度及原始顺序 P1，8文件receipt SHA256 68de154999537fd4638b8d311b652003636084e0e52aba098fc498dc5b5f7fb1。24项新Rust测试全部 NOT_RUN，现分组接 Windows；直接 SQL 原始JSON fixture避免测试本身丢顺序。非capture文档仍用旧Value扫描，其被覆盖字面引用和转义并不等价Go raw扫描；旧64MiB scan限额、Metadata::open等待、archive恢复/幂等错误边界未在本批解决，不能称archive全等价。
 
+### 正式 CON 准入、目标与退休持久化
+
+新增 ConnectionBook create/find_selected/status/acquire/retire_closed 与 OwnerInspection，正式 CON 项目文件和 OP SQLite Book 分离。保留 target→初始 log→claim 顺序；claim 前 orphan只读保留，不补claim或reseed，既有claim缺日志拒绝。完整 ClientWindow/owner、同PID创建时间多HWND排他、256 JSON/1024 entries、admission→try-only execution 锁及Forever Asia旧slot单向兼容按固定Go实现。新增连接target独占stage→sync→checked close→原子no-replace，跨安装同token也不覆盖赢家证据。
+
+独审发现并修复 quoted u64 前导正号误接受、interface:-0误拒绝，以及跨安装同token的target check-then-replace竞态；复审所查finding闭合。29个测试声明含子进程helper及Unix-only项，全部 NOT_RUN，已有go_mailbox_v1整组Windows过滤器覆盖新模块。真实进程exit崩溃切点fixture保留磁盘证据，但未执行不能称crash验证通过；AppendClosed注入也不冒称真实OS close失败。默认CLI仍接旧host/session/runtime，当前仅正式持久化与准入基础，后续须完整接新driver/runtime/input/doctor。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

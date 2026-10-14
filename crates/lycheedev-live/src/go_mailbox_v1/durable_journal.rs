@@ -33,15 +33,15 @@ use std::{
 const OWNER_SCHEMA: &str = "lycheedev.window-owner.v1";
 const OWNER_BYTES: usize = 4096;
 
-fn error(code: &'static str) -> ChannelError {
+pub(super) fn error(code: &'static str) -> ChannelError {
     ContractError(code).into()
 }
-fn io_error(e: std::io::Error) -> ChannelError {
+pub(super) fn io_error(e: std::io::Error) -> ChannelError {
     ChannelError::External {
         causes: vec![e.to_string()],
     }
 }
-fn storage_error(e: ToolkitError) -> ChannelError {
+pub(super) fn storage_error(e: ToolkitError) -> ChannelError {
     match e.code.as_str() {
         "command.cancelled" => ChannelError::Cancelled,
         "command.deadline" => ChannelError::DeadlineExceeded,
@@ -50,7 +50,7 @@ fn storage_error(e: ToolkitError) -> ChannelError {
         },
     }
 }
-fn joined(results: impl IntoIterator<Item = ChannelResult<()>>) -> ChannelResult<()> {
+pub(super) fn joined(results: impl IntoIterator<Item = ChannelResult<()>>) -> ChannelResult<()> {
     let mut causes: Vec<_> = results.into_iter().filter_map(Result::err).collect();
     match causes.len() {
         0 => Ok(()),
@@ -64,11 +64,11 @@ fn digest(text: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
-fn json(value: &impl Serialize) -> ChannelResult<Vec<u8>> {
+pub(super) fn json(value: &impl Serialize) -> ChannelResult<Vec<u8>> {
     let bytes = serde_json::to_vec(value).map_err(|_| error("live.channel_journal_invalid"))?;
     Ok(go_json_bytes(&bytes)?)
 }
-fn close_file(file: File) -> ChannelResult<()> {
+pub(super) fn close_file(file: File) -> ChannelResult<()> {
     // This consuming safe platform boundary reports CloseHandle failures. Drop
     // is only the fallback for early unwinding, never a successful write check.
     lycheedev_windows::filesystem::close_file(file).map_err(io_error)
@@ -179,9 +179,9 @@ impl ChannelPaths {
 }
 
 /// Retained lock file: never unlink it, including after a process crash.
-struct Lease(File);
+pub(super) struct Lease(File);
 impl Lease {
-    fn acquire(
+    pub(super) fn acquire(
         scope: &Path,
         resource: &str,
         wait: bool,
@@ -219,12 +219,12 @@ impl Lease {
         }
         Ok(Self(file))
     }
-    fn close(self) -> ChannelResult<()> {
+    pub(super) fn close(self) -> ChannelResult<()> {
         close_file(self.0)
     }
 }
 
-fn ordinary_path(path: &Path, directory: bool, missing: bool) -> ChannelResult<()> {
+pub(super) fn ordinary_path(path: &Path, directory: bool, missing: bool) -> ChannelResult<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if missing && e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -247,7 +247,7 @@ fn ordinary_path(path: &Path, directory: bool, missing: bool) -> ChannelResult<(
 
 /// Bounded reads preserve missing-file separately and check cancellation every
 /// 64 KiB. File size and regular-file checks are repeated on the opened handle.
-fn read_file(
+pub(super) fn read_file(
     path: &Path,
     maximum: usize,
     invalid: &'static str,
@@ -404,6 +404,61 @@ fn read_state(
     paths.check_state(&state)?;
     check_control(control)?;
     Ok(state)
+}
+
+/// Persist the first channel event while the caller holds shared admission.
+/// This is never a recovery/reseed path: exclusive creation preserves any old
+/// (including empty or torn) chain. The public admission API allocates a fresh
+/// random CON before calling this, exactly as fixed-Go Project.Connect does.
+pub(super) fn seed_connection(
+    paths: &ChannelPaths,
+    state: &State,
+    control: &OperationControl,
+    mut boundary: impl FnMut(SeedPoint, &OperationControl) -> ChannelResult<()>,
+) -> ChannelResult<()> {
+    check_control(control)?;
+    paths.check_state(state)?;
+    let prepared = snapshot(state)?;
+    for (hash, bytes) in &prepared.artifacts {
+        let path = paths.artifact(hash)?;
+        if let Some(existing) = read_file(&path, MAX_PAYLOAD, "live.channel_artifact_invalid", control)? {
+            if existing != *bytes {
+                return Err(error("live.channel_artifact_corrupt"));
+            }
+        } else {
+            storage::atomic_write_controlled(&path, bytes, control).map_err(storage_error)?;
+        }
+    }
+    boundary(SeedPoint::ArtifactsDurable, control)?;
+    let bytes = prepare_event(&[], "connection_created", &prepared.state)?;
+    fs::create_dir_all(paths.log.parent().unwrap()).map_err(io_error)?;
+    check_control(control)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&paths.log).map_err(io_error)?;
+    let write = (|| {
+        // The cut follows real bytes, permitting a child to exit without Drop
+        // and preserve an actual torn first event. It has no production hook.
+        let middle = bytes.len() / 2;
+        file.write_all(&bytes[..middle]).map_err(io_error)?;
+        boundary(SeedPoint::AppendPartial, control)?;
+        for chunk in bytes[middle..].chunks(65536) {
+            check_control(control)?;
+            file.write_all(chunk).map_err(io_error)?;
+        }
+        boundary(SeedPoint::AppendWritten, control)
+    })();
+    let sync = file.sync_all().map_err(io_error);
+    let synced = boundary(SeedPoint::AppendSynced, control);
+    let close = close_file(file);
+    let closed = boundary(SeedPoint::AppendClosed, control);
+    joined([write, sync, synced, close, closed, check_control(control)])
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SeedPoint {
+    ArtifactsDurable,
+    AppendPartial,
+    AppendWritten,
+    AppendSynced,
+    AppendClosed,
 }
 
 /// Read-only status load: no lease, directories, repair, or filesystem writes.
