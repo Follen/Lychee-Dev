@@ -103,10 +103,10 @@ pub fn verify_clean(
             3,
         ));
     }
-    if protocol != "memory-slot-v4" || slots != 500 {
+    if protocol != crate::slots::TRANSPORT || slots != crate::slots::COUNT {
         return Err(ToolkitError::new(
             "delivery.protocol_mismatch",
-            "new Live requires memory-slot-v4 with 500 slots",
+            "Live requires Lycheedev mailbox protocol v1 with 500 slots",
             3,
         ));
     }

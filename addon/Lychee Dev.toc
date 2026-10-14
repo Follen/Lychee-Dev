@@ -1,6 +1,6 @@
-## Interface: 120100, 50504, 38002, 16001
+## Interface: 120100, 50504, 38002, 16001, 11509, 20506
 ## Title: Lychee Dev
-## Version: 3.1.2
+## Version: 3.2.0
 ## SavedVariables: LycheeToolkitDB
 ## SavedVariablesPerCharacter: LycheeToolkitBridgeDB
 
@@ -12,6 +12,11 @@ Core\ClientGate.lua
 Core\Locale.lua
 Core\Locale_enUS.lua
 Core\Compat.lua
+Bridge\CaptureWriter.lua
+Bridge\MemoryProtocol.lua
+Bridge\ReceiverBindings.lua
+Bridge\FocusBindings.lua
+Core\Runtime.lua
 Core\Serializer.lua
 Core\Inspector.lua
 Core\Safety.lua
@@ -19,44 +24,28 @@ Core\Execute.lua
 Core\Stores.lua
 Core\Platform.lua
 Core\Persistence.lua
-Bridge\Session.lua
 Core\Controls.lua
-Bridge\CaptureWriter.lua
-Bridge\MemoryProtocol.lua
 Bridge\SlotProtocol.lua
 Bridge\InputProtection.lua
 Bridge\ProbeExecution.lua
-Bridge\InputProtocol.lua
-Bridge\MatrixSymbol.lua
-Bridge\ReceiptView.lua
 Bridge\ActivityView.lua
-Bridge\ReportStore.lua
-Bridge\Investigation.lua
-Bridge\ProbeRunner.lua
-Bridge\Definitions.lua
 Modules\AutomationHistory.lua
 Modules\AutomationView.lua
-Bridge\ProbeQueue.lua
-Bridge\Reentry.lua
-Bridge\Identity.lua
-Bridge\ReceiverBindings.lua
-Bridge\StartupBeacon.lua
-Bridge\Receiver.lua
 Bridge\SlotRuntime.lua
-Bridge\InputSignal.lua
 Bridge\InputState.lua
 # --- Event catalogs: all four load; Catalog.lua selects ns.Client's table ---
 Modules\Events\CatalogData_Mainline.lua
 Modules\Events\CatalogData_Mists.lua
 Modules\Events\CatalogData_Titan.lua
 Modules\Events\CatalogData_Forever.lua
+Modules\Events\CatalogData_Era.lua
+Modules\Events\CatalogData_Anniversary.lua
 Modules\Events\Catalog.lua
 Modules\Events\Monitor.lua
 # --- Workbench feature modules (object inspection, function trace, diagnostics) ---
 Modules\ObjectInspector.lua
 Modules\FunctionTrace.lua
 Modules\Diagnostics.lua
-Bridge\FaultRunner.lua
 # --- Workbench UI foundation (Widgets, TreeView, Export popup, Window shell) ---
 UI\Theme.lua
 UI\Widgets.lua
@@ -72,4 +61,4 @@ UI\Pages\Diagnostics.lua
 UI\Pages\Events.lua
 UI\Pages\Automation.lua
 UI\Pages\ExportRecords.lua
-Core\Runtime.lua
+Core\Startup.lua

@@ -5,14 +5,28 @@ local ADDON_NAME, ns = ...
 -- before it is compared, formatted, indexed or branched on; failures open to a
 -- harmless visible state instead of throwing.
 ns.Compat = {
-    LoadNativeInputSlot = function(name)
-        if (issecretvalue and issecretvalue(name)) or type(name)~="string" then return nil,"slot_name_invalid" end
-        local index=tonumber(name:match("^Lychee Dev Slot (%d+)$"))
-        if not index or index<1 or index>500 or name~=string.format("Lychee Dev Slot %02d",index) then return nil,"slot_name_invalid" end
-        if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
-        local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
-        if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end
-        return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
+    CanReload = function()
+        if type(IsLoggedIn) ~= "function" or type(InCombatLockdown) ~= "function" then return nil,"input_observation_unavailable" end
+        local loggedIn,combat=IsLoggedIn(),InCombatLockdown()
+        if issecretvalue and (issecretvalue(loggedIn) or issecretvalue(combat)) then return nil,"input_observation_unavailable" end
+        if loggedIn~=true then return nil,"input_not_logged_in" end
+        if combat~=false then return nil,"input_combat_lockdown" end
+        return true
+    end,
+    ObserveChatFocus = function(owner, callback)
+        if not EventRegistry or type(EventRegistry.RegisterCallback) ~= "function" then return end
+        EventRegistry:RegisterCallback("ChatFrame.OnEditBoxFocusGained", callback, owner)
+        EventRegistry:RegisterCallback("ChatFrame.OnEditBoxFocusLost", callback, owner)
+    end,
+    StopObservingChatFocus = function(owner)
+        if not EventRegistry or type(EventRegistry.UnregisterCallback) ~= "function" then return end
+        EventRegistry:UnregisterCallback("ChatFrame.OnEditBoxFocusGained", owner)
+        EventRegistry:UnregisterCallback("ChatFrame.OnEditBoxFocusLost", owner)
+    end,
+    ReloadUI = function()
+        if C_UI and type(C_UI.Reload) == "function" then C_UI.Reload(); return true end
+        if type(ReloadUI) == "function" then ReloadUI(); return true end
+        return nil, "reload_unavailable"
     end,
     -- Pinned PlayerScriptDocumentation declares this on Retail/Classic/Titan.
     InWorld = function()
@@ -24,10 +38,11 @@ ns.Compat = {
     LoadInputSlot = function(name)
         if type(name)~="string" then return nil,"slot_name_invalid" end
         local index=tonumber(name:match("^Lychee Dev Slot (%d+)$"))
-        if not index or index<1 or index>200 or name~=string.format("Lychee Dev Slot %02d",index) then return nil,"slot_name_invalid" end
+        if not index or index<1 or index>ns.SlotProtocol.Count or name~=string.format("Lychee Dev Slot %02d",index) then return nil,"slot_name_invalid" end
         if type(C_AddOns)~="table" or type(C_AddOns.LoadAddOn)~="function" then return nil,"slot_loader_unavailable" end
         local ok,loaded,reason=pcall(C_AddOns.LoadAddOn,name)
         if not ok or (issecretvalue and (issecretvalue(loaded) or issecretvalue(reason))) then return nil,"slot_load_failed" end
+        if loaded~=true and reason=="DISABLED" then return nil,"slot_addon_disabled" end
         return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
     end,
     ReceiverChord = function(key)
@@ -74,28 +89,5 @@ ns.Compat = {
             return nil
         end
         return foci[1]
-    end,
-
-    -- UI units per physical screen pixel, for screen-space overlays. The
-    -- caller multiplies by a physical-pixel target to get UI units.
-    --
-    -- Only the width ratio is trustworthy: GetScreenWidth and the physical
-    -- width are both display measurements. GetScreenHeight is NOT usable as a
-    -- fallback, because the engines disagree about what it returns (Retail
-    -- reports the UIParent height, Classic the display height), so a ratio
-    -- built from it inflates or shrinks an overlay by a large factor on exactly
-    -- the clients that lack GetPhysicalScreenSize. When the physical width is
-    -- unavailable this reports 1: one UI unit per pixel, the neutral answer.
-    GetPhysicalPixelSize = function()
-        if GetPhysicalScreenSize and GetScreenWidth then
-            local succeeded, width = pcall(GetPhysicalScreenSize)
-            local uiWidth = GetScreenWidth()
-            if succeeded and not (issecretvalue and (issecretvalue(width) or issecretvalue(uiWidth)))
-                and type(width) == "number" and width > 0 and width < math.huge
-                and type(uiWidth) == "number" and uiWidth > 0 and uiWidth < math.huge then
-                return math.min(uiWidth / width, 1)
-            end
-        end
-        return 1
     end,
 }

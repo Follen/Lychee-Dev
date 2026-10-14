@@ -20,13 +20,16 @@ export const sha256 = data => createHash('sha256').update(data).digest('hex');
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
 // Small bounded lexer, not a Go/Rust interpreter. Comments cannot supply tokens.
-// JSON-compatible strings plus explicit Rust Unicode scalar escapes are decoded;
-// unsupported escape syntax fails. Escaped backslashes remain literal.
+// JSON-compatible strings plus explicit Rust Unicode scalar/NUL escapes are decoded;
+// unsupported escape syntax fails. Rust raw strings bypass escape decoding.
 function quotedString(raw) {
   let normalized = '"';
   for (let i = 1; i < raw.length - 1; i++) {
     if (raw[i] !== '\\') { normalized += raw[i]; continue; }
-    if (raw[i + 1] === 'u' && raw[i + 2] === '{') {
+    if (raw[i + 1] === '0') {
+      normalized += '\\u0000';
+      i++;
+    } else if (raw[i + 1] === 'u' && raw[i + 2] === '{') {
       const end = raw.indexOf('}', i + 3);
       const digits = raw.slice(i + 3, end);
       assert(end >= 0 && /^[0-9a-fA-F]{1,6}$/.test(digits), 'invalid Rust Unicode escape');
@@ -54,7 +57,25 @@ export function lex(source) {
       i = end + 2; continue;
     }
     let token;
-    if (source[i] === '"') {
+    let rawQuote = i;
+    if (source[i] === 'r') {
+      rawQuote++;
+      while (source[rawQuote] === '#') rawQuote++;
+    }
+    if (rawQuote > i && source[rawQuote] === '"') {
+      // Rust permits 0..255 hashes. Scan only for the matching delimiter;
+      // backslashes, shorter delimiters and comment markers are literal data.
+      const hashes = rawQuote - i - 1;
+      assert(hashes <= 255, 'Rust raw string delimiter exceeds 255 hashes');
+      const closing = '"' + '#'.repeat(hashes);
+      const end = source.indexOf(closing, rawQuote + 1);
+      assert(end >= 0, 'unterminated Rust raw string');
+      // Rust source preprocessing folds CRLF; an isolated CR is invalid.
+      const value = source.slice(rawQuote + 1, end).replace(/\r\n/g, '\n');
+      assert(!value.includes('\r'), 'invalid carriage return in Rust raw string');
+      token = { string: value };
+      i = end + closing.length;
+    } else if (source[i] === '"') {
       const start = i++;
       while (i < source.length && source[i] !== '"') {
         if (source[i] === '\\') i++;

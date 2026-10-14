@@ -3,7 +3,7 @@ local _, ns = ...
 -- Pure bounded protocol engine. Host input, frames, file loading and async
 -- execution are adapters; there is only one owner and one active business job.
 local ZERO=string.rep("0",32)
-local LIMIT=200
+local LIMIT=500
 local MAX_OPERATIONS=math.floor((LIMIT-16)/4)
 local function plain(v)return not (issecretvalue and issecretvalue(v)) and type(v)=="table" and getmetatable(v)==nil end
 local function safe(v)return not (issecretvalue and issecretvalue(v))end
@@ -26,14 +26,18 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     local sequence,count,cursor=0,0,1
     local consumed,operations,receipts={},{},{}
     local descriptor
+    local closing=false
     -- Passive copies only. Public maps must never alias protocol state: callers
     -- may inspect or overwrite them without changing nonce/owner decisions.
     local mailbox,mailboxReceipts,mailboxBodies
     local api={}
     function api.AttachMailbox(publication)
-        assert(plain(publication) and publication.schema=="lycheedev.mailbox.v1"
+        assert(plain(publication) and publication.schema=="Lycheedev mailbox protocol v1"
             and publication.runtime==adapter.runtime and publication.release==adapter.release,"invalid slot mailbox")
-        mailbox,mailboxReceipts,mailboxBodies=publication,{},{}
+        -- A fixed non-token key keeps each public hash allocated before the
+        -- first receipt and after the last BODY is released. Missing token
+        -- lookups remain absent; private protocol maps contain only records.
+        mailbox,mailboxReceipts,mailboxBodies=publication,{schema=publication.schema},{schema=publication.schema}
         rawset(mailbox,"receipts",mailboxReceipts);rawset(mailbox,"bodies",mailboxBodies)
         rawset(mailbox,"identity",descriptor)
         for nonce,record in pairs(receipts) do rawset(mailboxReceipts,nonce,record) end
@@ -64,7 +68,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if sequence>=4294967295 then return nil,"slot_sequence_exhausted" end
         local a=actor();if not a then return nil,"slot_actor_unavailable" end
         sequence=sequence+1
-        local value={schema="lycheedev.slot.v3",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
+        local value={schema="Lycheedev mailbox protocol v1",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
             nonce=e.nonce,ticket=e.ticket or ZERO,action=e.action,state=state,sequence=sequence,
             nextSlot=nextSlot(),slots=LIMIT,character=a.character,realm=a.realm,guid=a.guid,
             build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState}
@@ -78,7 +82,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     end
     function api.Describe()
         local a=actor();if not a then return nil,"slot_actor_unavailable" end
-        local text=encode({schema="lycheedev.slot.identity.v2",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
+        local text=encode({schema="Lycheedev mailbox protocol v1",runtime=adapter.runtime,owner=owner or "",fence=fence or 0,
             nextSlot=nextSlot(),slots=LIMIT,character=a.character,realm=a.realm,guid=a.guid,
             build=adapter.build,product=adapter.product,release=adapter.release,inventory=adapter.inventory,inputState=adapter.inputState},16384)
         if not text then return nil,"slot_identity_encoding" end
@@ -89,17 +93,18 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
     local function finish(op,ok,value,metadata)
         if op.state~="running" then return nil,"slot_not_running" end
         op.resourcesReleased=not metadata or metadata.resourcesReleased~=false
-        local text,reason=encode({ok=ok,result=ok and value or nil,error=not ok and value or nil,
-            resourcesReleased=op.resourcesReleased,logs=metadata and metadata.logs or nil},524288)
+        local report={ok=ok,resourcesReleased=op.resourcesReleased,logs=metadata and metadata.logs or nil}
+        if ok then report.result=value else report.error=value end
+        local text,reason=encode(report,524288)
         if not text then ok=false;text=assert(encode({ok=false,error=type(reason)=="string" and reason or "report_encoding_failed"},16384)) end
         -- Store body and outcome before constructing its public response.
         op.payload=text;op.bytes=#text;op.checksum=wire.Checksum(text)
         op.body=assert(wire.Encode(op.envelope.nonce,adapter.runtime,op.envelope.ticket,3,3,op.sequence,text))
         if mailboxBodies then rawset(mailboxBodies,op.envelope.ticket,op.body) end
-        op.state="reported";op.ok=ok
+        op.state="reported";op.ok=ok;op.execution=nil
         observe(op)
         local record,value=publish(op.envelope,"reported",{reportBytes=op.bytes,reportChecksum=op.checksum,challenge=op.challenge})
-        if adapter.activity then adapter.activity("collecting",op.envelope.ticket) end
+        if adapter.activity and not closing then adapter.activity("collecting",op.envelope.ticket) end
         return record,value
     end
     local function reject(e,reason)
@@ -114,7 +119,7 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         if not plain(e) then return nil,"slot_envelope_invalid" end
         -- Never inspect or execute encoded business code before these checks.
         for _,key in ipairs({"schema","index","runtime","owner","fence","nonce","ticket","action","guid","build","challenge","preparedNonce","reportBytes","reportChecksum"}) do if not safe(e[key]) then return nil,"slot_secret_envelope" end end
-        if e.schema~="lycheedev.slot.v3" or e.index~=index or not wire.Token(e.nonce)
+        if e.schema~="Lycheedev mailbox protocol v1" or e.index~=index or not wire.Token(e.nonce)
             or not wire.Token(e.ticket) or not wire.Token(e.owner) or not wire.Token(e.runtime) then return nil,"slot_envelope_invalid" end
         if e.runtime~=adapter.runtime then
             if type(e.guid)~="string" or type(e.build)~="string"
@@ -164,7 +169,8 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
             local record,value=publish(e,"accepted")
             if adapter.releaseInput then adapter.releaseInput() end
             if adapter.activity then adapter.activity("running",e.ticket) end
-            local ok,reason=pcall(adapter.execute,op.fn,op.envelope.budget,function(ok,result,metadata)return finish(op,ok,result,metadata)end)
+            local ok,execution=pcall(adapter.execute,op.fn,op.envelope.budget,function(ok,result,metadata)return finish(op,ok,result,metadata)end)
+            if ok and op.state=="running" then op.execution=execution end
             if not ok and op.state=="running" then finish(op,false,"probe_executor_error") end
             return record,value
         elseif e.action=="confirm" then
@@ -192,13 +198,25 @@ ns.SlotProtocol = { Count=LIMIT, Create=function(adapter)
         return reject(e,"slot_action_invalid")
     end
     function api.NextSlot()return nextSlot()end
+    function api.Close()
+        closing=true
+        if active and active.state=="running" and active.execution then
+            active.execution:Cancel()
+            active.execution=nil
+        end
+        if pending then
+            local op=pending;pending=nil;active=op;op.state="running"
+            finish(op,false,"probe_cancelled")
+        end
+        closing=false
+    end
     function api.InputIdentity()
         local a=actor();if not a then return nil end
         return {runtime=adapter.runtime,owner=owner or "",fence=fence or 0,nextSlot=nextSlot(),
             guid=a.guid,build=adapter.build,character=a.character,realm=a.realm}
     end
     function api.Snapshot()
-        -- At most 200 receipts/consumed bits and 46 operation fact objects.
+        -- At most 500 receipts/consumed bits and 121 operation fact objects.
         -- Immutable strings may be shared; execution functions, callbacks,
         -- code and writable private tables never leave the engine.
         local result={descriptor=descriptor,receipts={},operations={},owner=owner,fence=fence,consumed={}}

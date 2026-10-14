@@ -286,6 +286,14 @@ native session本批独立复核：60s idle请求中停表、固定600s lifetime
 
 独立审核两次发现guard复核错误可能吞取消/身份变化，分别覆盖原lookup失败及完整record成功后guard变更，均已修复并补拒绝Accept回归；旧release错误断言也按Go joined incompatible修正。当前native::open无RootRule仍locator_not_finalized，有显式旧RootRule则临时migration_incomplete防混协议发送。旧WindowsChannel/四槽driver尚未迁移，不称完整Live可用；下一步按固定Go typed state/journal、写事务、恢复期限拆分，最后替换临时阻断接正式输入。
 
+### 正式 Go addon 资源与 Delivery 模板首批恢复
+
+独立按Git对象逐字节验证：固定Go的55个addon文件/1,035,262B全部恢复一致，正式TOC加载50个Lua且未加载旧Native额外文件，Bindings.xml及3媒体资源均在正式集合。21个旧额外文件仍留待真实消费者迁移，完整库存差分仍失败；不能仅以正式TOC不引用就删掉仍由历史测试/包装工具使用的文件。已列旧协议完整fixture保存与当前有效Go回归分别迁移方案。
+
+Delivery两处安装/更新门槛改正式SlotRuntime，保留release清单/hash验证；六Interface/正式transport/SlotRuntime Loader的1..500全部槽字面模板已与固定Go独立核对。新增4项Node静态合同测试通过并加入CI，其中门槛源码regex仅静态证据；combined_addon实际Rust事务fixture仍NOT_RUN，新增独立Windows组。pool仍v4/modules，正式Go v3/files/marker内升级intent、publish/verify/confirm/retire与旧消费者尚需下一批，Live旧transport会失败关闭，不称端到端安装/执行已齐。
+
+审查另发现静态oracle的Rust lexer把raw Windows路径与合法\0当JSON escape而exit2。本批修raw delimiter匹配和NUL escape，新增6回归；30项Node通过，固定oracle SHA不变。实际报告恢复exit1正常差分：products7/7，缺live doctor/source batch和必要doctor summary差异、21 addon extras如实保留，未verified的arity/advertised不改为pass。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

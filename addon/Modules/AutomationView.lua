@@ -1,180 +1,18 @@
-local ADDON_NAME, ns = ...
-
--- Workbench view over legacy queue records and the current memory-slot
--- history. Native history persists per character and is strictly read-only;
--- manual Execute remains solely for legacy queue entries. Neither provider
--- makes this page a second executor or a transport recovery journal.
---
--- Real status vocabulary (derived from the bridge surface):
---   queued        lycheedev.queue.v1 entry registered, nothing loaded yet
---   loaded        compiled but not dispatched
---   running       the shared ProbeRunner is executing
---   finalizing    the shared ProbeRunner is releasing resources
---   reported      ReportStore retains the report (awaiting acknowledgement)
---   acknowledged  report acknowledged and removed (acknowledge lifecycle done)
---   cleared       retired: no queue entry, no runner request, no report
---   unavailable   derivation failed; errorCode carries the bridge error code
-local MAX_RECORDS = 200
-local REPORT_DISPLAY_BYTES = 48 * 1024
-local KIND_LUA = "lua"
-
--- Captured before Bridge/ProbeQueue.lua takes ownership of the table (see the
--- TOC order note). Strictly read-only: used to list queued request ids and
--- their code digests. When nil (different load order or bridge), the list can
--- only show report-backed history and says so through HasQueueRegistry().
-local queueDefinitions = ns.ProbeDefinitions
-
-local records = {}
-local recordIndex = {}
-local observedSequence = 0
+local _, ns = ...
+-- Read-only workbench projection of the current mailbox history.
+local MAX_RECORDS, REPORT_DISPLAY_BYTES = 200, 48*1024
+local records, recordIndex, observedSequence = {}, {}, 0
 local changeHandler
-
-local function Restricted(value)
-    return issecretvalue and issecretvalue(value)
-end
-
-local function RequestId(value)
-    return not Restricted(value) and type(value) == "string"
-        and #value > 0 and #value <= 128
-        and string.match(value, "^[%w_%-]+$") ~= nil
-end
-
-local function BoundedText(value, limit)
-    if Restricted(value) or type(value) ~= "string" then
-        return nil
-    end
-    if #value > limit then
-        return value:sub(1, limit)
-    end
-    return value
-end
-
--- Display-only bounded pattern reads over stored report/receipt text. Nothing
--- is evaluated or rewritten; the stored bodies stay byte-identical.
-local function ReadSignalField(receipt, pattern)
-    if Restricted(receipt) or type(receipt) ~= "string" then
-        return nil
-    end
-    return string.match(receipt, pattern)
-end
-
-local function IsPending(record)
-    return record.pending == true or record.hasReport == true
-end
-
-local function IsProtected(record)
-    return record.protected == true
-end
-
+local function Restricted(v) return issecretvalue and issecretvalue(v) end
+local function RequestId(v) return not Restricted(v) and type(v)=="string" and #v>0 and #v<=128 end
 local function PruneRecordSlot()
-    if #records < MAX_RECORDS then
-        return true
-    end
-    for index = 1, #records do
-        local record = records[index]
-        if not IsProtected(record) and not IsPending(record) then
-            table.remove(records, index)
-            recordIndex[record.requestId] = nil
-            return true
-        end
-    end
+    if #records<MAX_RECORDS then return true end
+    for i,r in ipairs(records) do if not r.protected and not r.pending and not r.hasReport then
+        recordIndex[r.requestId]=nil;table.remove(records,i);return true
+    end end
     return false
 end
-
-local function ReportRead(requestId)
-    if not ns.ReportStore or type(ns.ReportStore.Read) ~= "function" then
-        return nil, "bridge_unavailable"
-    end
-    return ns.ReportStore.Read(requestId)
-end
-
--- Side-effect-free status derivation from the bridge records only.
-local function DeriveStatus(requestId)
-    local receipt, bodyOrReason = ReportRead(requestId)
-    if receipt then
-        return "reported", nil, receipt, bodyOrReason
-    end
-    if bodyOrReason ~= "report_unavailable" then
-        return "unavailable", bodyOrReason
-    end
-
-    if ns.ReportStore and type(ns.ReportStore.Acknowledged) == "function" then
-        local acknowledged = ns.ReportStore.Acknowledged(requestId)
-        if acknowledged then
-            return "acknowledged", nil, acknowledged
-        end
-    end
-
-    if not ns.ProbeRunner or type(ns.ProbeRunner.Reported) ~= "function"
-        or type(ns.ProbeRunner.VerifyAbsent) ~= "function" then
-        return "unavailable", "bridge_unavailable"
-    end
-    local reportedReceipt, reportedReason = ns.ProbeRunner.Reported(requestId)
-    if reportedReceipt then
-        return "reported", nil, reportedReceipt
-    end
-    if reportedReason == "report_unavailable" then
-        -- Runner reported once and the report was acknowledged away.
-        return "acknowledged"
-    elseif reportedReason ~= "probe_not_reported" then
-        return "unavailable", reportedReason
-    end
-
-    local absent, probeReason = ns.ProbeRunner.VerifyAbsent(requestId)
-    if absent == true then
-        if not ns.ProbeQueue or type(ns.ProbeQueue.ReloadScope) ~= "function" then
-            return "unavailable", "bridge_unavailable"
-        end
-        local scope, scopeReason = ns.ProbeQueue.ReloadScope(requestId)
-        if scope then
-            return "queued"
-        elseif scopeReason == "queue_request_missing" then
-            return "cleared"
-        end
-        return "unavailable", scopeReason
-    elseif probeReason == "probe_still_retained" then
-        if type(ns.ProbeRunner.State)=="function" then
-            local phase=ns.ProbeRunner.State(requestId)
-            if phase=="running" then return "running" end
-            if phase=="settling" then return "finalizing" end
-            if phase=="quarantined" or phase=="unresolved" then return "unavailable","probe_"..phase end
-        end
-        return "loaded"
-    end
-    return "unavailable", probeReason
-end
-
-local function ApplyDerived(record)
-    if record.transport == "memory-slot" then return record end
-    record.status, record.errorCode = nil, nil
-    record.receipt, record.reportBody, record.hasReport = nil, nil, nil
-    record.probeStatus, record.probeError = nil, nil
-
-    local status, errorCode, receipt, body = DeriveStatus(record.requestId)
-    record.status = status
-    record.errorCode = errorCode
-    if receipt then
-        record.receipt = receipt
-        record.hasReport = status == "reported" and true or nil
-        record.signalKind = ReadSignalField(receipt, '"kind":"(%a+)"')
-        local sequence = ReadSignalField(receipt, '"sequence":(%d+)')
-        record.sequence = sequence and tonumber(sequence) or nil
-        if record.codeBytes == nil then
-            local codeBytes = ReadSignalField(receipt, '"codeBytes":(%d+)')
-            record.codeBytes = codeBytes and tonumber(codeBytes) or nil
-        end
-        if record.codeAdler32 == nil then
-            record.codeAdler32 = ReadSignalField(receipt, '"codeAdler32":"([0-9a-f]+)"')
-        end
-    end
-    if status == "reported" and type(body) == "string" and not Restricted(body) then
-        record.reportBody = body
-        record.probeStatus = string.match(body, '"probeStatus":"(%a+)"')
-        record.probeError = BoundedText(string.match(body, '"error":"([^"]*)"'), 128)
-    end
-    return record
-end
-
+local KIND_LUA="lua"
 local function Observe(incoming)
     if type(incoming) ~= "table" or not RequestId(incoming.requestId) then
         return nil, "auto_invalid_request"
@@ -204,220 +42,46 @@ local function Observe(incoming)
     return record
 end
 
+
 local function Collect()
-    if ns.AutomationHistory then
-        local current = {}
-        for _,stored in ipairs(ns.AutomationHistory.List()) do
-            local incoming={transport="memory-slot",kind=KIND_LUA}
-            for key,value in pairs(stored) do incoming[key]=value end
-            current[incoming.requestId]=true
-            Observe(incoming)
-        end
-        for index=#records,1,-1 do
-            local record=records[index]
-            if record.transport=="memory-slot" and not current[record.requestId] then
-                recordIndex[record.requestId]=nil;table.remove(records,index)
-            end
-        end
+    local current={}
+    for _,stored in ipairs(ns.AutomationHistory.List()) do
+        local incoming={transport="memory-slot",kind="lua"}
+        for key,value in pairs(stored) do incoming[key]=value end
+        current[incoming.requestId]=true
+        local old=recordIndex[incoming.requestId]
+        -- Clear fields removed by the current persisted record.
+        if old then for key in pairs(old) do if key~="requestId" and key~="observedSeq" and key~="protected" then old[key]=nil end end end
+        Observe(incoming)
     end
-    if not ns.ProbeQueue and not ns.ReportStore and not ns.Persistence then
-        return 0
-    end
-
-    local discovered, seen = {}, {}
-    local entries
-    if type(queueDefinitions) == "table" and not Restricted(queueDefinitions) then
-        entries = queueDefinitions.entries
-        if type(entries) == "table" and not Restricted(entries) then
-            for id in pairs(entries) do
-                if RequestId(id) and not seen[id] then
-                    seen[id] = true
-                    discovered[#discovered + 1] = id
-                end
-            end
-        end
-    end
-
-    local state
-    if ns.Persistence and type(ns.Persistence.Bridge) == "function" then
-        state = ns.Persistence.Bridge()
-    end
-    if type(state) == "table" and not Restricted(state) then
-        local reports = state.reports
-        if type(reports) == "table" and not Restricted(reports) then
-            for id in pairs(reports) do
-                if RequestId(id) and not seen[id] then
-                    seen[id] = true
-                    discovered[#discovered + 1] = id
-                end
-            end
-        end
-        local ticket = state.reentry
-        if type(ticket) == "table" and not Restricted(ticket) and RequestId(ticket.requestId)
-            and not seen[ticket.requestId] then
-            seen[ticket.requestId] = true
-            discovered[#discovered + 1] = ticket.requestId
-        end
-    end
-
-    -- Deterministic within one pass; across passes later-observed ids are
-    -- newer (they get the higher observation sequence).
-    table.sort(discovered)
-    for index = 1, #discovered do
-        local requestId = discovered[index]
-        local record = recordIndex[requestId]
-        if not record then
-            record = Observe({ requestId = requestId })
-        end
-        if record then
-            local entry = entries and entries[requestId] or nil
-            if type(entry) == "table" and not Restricted(entry) then
-                record.codeBytes = entry.codeBytes
-                record.codeSHA256 = entry.codeSHA256
-                record.codeAdler32 = entry.codeAdler32
-            end
-            ApplyDerived(record)
-        end
-    end
-    return #discovered
+    for i=#records,1,-1 do local r=records[i];if not current[r.requestId] then recordIndex[r.requestId]=nil;table.remove(records,i) end end
+    return #records
 end
-
-local function GetOrder()
-    local order = {}
-    for index = #records, 1, -1 do
-        order[#order + 1] = records[index].requestId
-    end
-    return order
-end
-
-local function GetRecord(target)
-    if type(target) == "table" then
-        return target
-    end
-    return RequestId(target) and recordIndex[target] or nil
-end
-
-local function RefreshRecord(target)
-    local record = GetRecord(target)
-    if not record then
-        return nil, "auto_execution_unknown"
-    end
-    ApplyDerived(record)
-    return record
-end
-
--- Manual execute: the same two calls the /dev bridge load/run verbs make, in
--- the same order. When the bridge or session context is absent the honest
--- bridge error code is returned instead of inventing one.
-local function Execute(target)
-    local record = GetRecord(target)
-    if not record then
-        return nil, "auto_execution_unknown"
-    end
-    if record.transport=="memory-slot" then return nil,"auto_history_read_only" end
-    if not ns.ProbeQueue or type(ns.ProbeQueue.Load) ~= "function"
-        or not ns.ProbeRunner or type(ns.ProbeRunner.Dispatch) ~= "function" then
-        return nil, "bridge_unavailable"
-    end
-    local loadReceipt, loadReason = ns.ProbeQueue.Load(record.requestId)
-    if not loadReceipt and loadReason ~= "probe_request_exists" then
-        return nil, loadReason
-    end
-    return ns.ProbeRunner.Dispatch(record.requestId)
-end
-
-local function ShowNotice(target)
-    local record = GetRecord(target)
-    if not record then
-        return nil, "auto_execution_unknown"
-    end
-    if record.transport=="memory-slot" then return nil,"auto_notice_unavailable" end
-    local receipt = record.receipt
-    if not receipt then
-        receipt = ReportRead(record.requestId)
-    end
-    if Restricted(receipt) or type(receipt) ~= "string" or #receipt == 0 then
-        return nil, "auto_notice_unavailable"
-    end
-    if not ns.ReceiptView or type(ns.ReceiptView.Show) ~= "function" then
-        return nil, "bridge_unavailable"
-    end
-    -- Read-only redisplay through the one overlay system.
-    return ns.ReceiptView.Show(receipt)
-end
-
-local function HideNotice()
-    if ns.ReceiptView and type(ns.ReceiptView.Hide) == "function" then
-        ns.ReceiptView.Hide()
-    end
-    return true
-end
-
--- Display text for the report view. The 48 KB display cap only bounds the
--- returned string; the stored body is never modified.
+local function GetRecord(target) return type(target)=="table" and target or recordIndex[target] end
 local function GetReportText(target)
-    local record = GetRecord(target)
-    if not record then
-        return nil, "auto_execution_unknown"
-    end
-    local body = record.reportBody
-    if body == nil then
-        local receipt, stored = ReportRead(record.requestId)
-        body = receipt and stored or nil
-    end
-    if Restricted(body) then
-        return "<secret>"
-    end
-    if type(body) ~= "string" then
-        return nil, ns.L.AUTO_NO_REPORT
-    end
-    if record.reportTruncated then
-        return body .. "\n... " .. string.format(ns.L.AUTO_REPORT_HISTORY_LIMIT, ns.AutomationHistory.REPORT_BYTES / 1024)
-    end
-    if #body > REPORT_DISPLAY_BYTES then
-        return body:sub(1, REPORT_DISPLAY_BYTES)
-            .. "\n... " .. string.format(ns.L.AUTO_REPORT_DISPLAY_LIMIT, REPORT_DISPLAY_BYTES / 1024)
-    end
+    local r=GetRecord(target);if not r then return nil,"auto_execution_unknown" end
+    local body=r.reportBody
+    if Restricted(body) then return "<secret>" end
+    if type(body)~="string" then return nil,ns.L.AUTO_NO_REPORT end
+    if r.reportTruncated then return body.."\n... "..string.format(ns.L.AUTO_REPORT_HISTORY_LIMIT,ns.AutomationHistory.REPORT_BYTES/1024) end
+    if #body>REPORT_DISPLAY_BYTES then return body:sub(1,REPORT_DISPLAY_BYTES).."\n... "..string.format(ns.L.AUTO_REPORT_DISPLAY_LIMIT,REPORT_DISPLAY_BYTES/1024) end
     return body
 end
-
--- Mirrors ns.Stores protection semantics and the ReportStore acknowledge
--- lifecycle: records that are protected, or pending (a report the store still
--- retains), survive the clear.
-local function ClearRecords()
-    local removed = 0
-    for index = #records, 1, -1 do
-        local record = records[index]
-        if not IsProtected(record) and not IsPending(record) then
-            if record.transport=="memory-slot" then ns.AutomationHistory.Remove(record.requestId) end
-            table.remove(records, index)
-            recordIndex[record.requestId] = nil
-            removed = removed + 1
+ns.AutomationView={
+    MAX_RECORDS=MAX_RECORDS,REPORT_DISPLAY_BYTES=REPORT_DISPLAY_BYTES,
+    SetChangeHandler=function(handler)changeHandler=handler end,
+    Changed=function()if changeHandler then pcall(changeHandler) end end,
+    Observe=Observe,Collect=Collect,GetRecord=GetRecord,GetReportText=GetReportText,
+    GetCount=function()return #records end,
+    GetOrder=function()local out={};for i=#records,1,-1 do out[#out+1]=records[i].requestId end;return out end,
+    RefreshRecord=function(target)local r=GetRecord(target);return r,r==nil and "auto_execution_unknown" or nil end,
+    ClearRecords=function()
+        local removed=0
+        for i=#records,1,-1 do local r=records[i]
+            if not r.protected and not r.pending and not r.hasReport then
+                ns.AutomationHistory.Remove(r.requestId);recordIndex[r.requestId]=nil;table.remove(records,i);removed=removed+1
+            end
         end
-    end
-    return removed
-end
-
-ns.AutomationView = {
-    SetChangeHandler = function(handler) changeHandler=handler end,
-    Changed = function() if changeHandler then pcall(changeHandler) end end,
-    MAX_RECORDS = MAX_RECORDS,
-    REPORT_DISPLAY_BYTES = REPORT_DISPLAY_BYTES,
-    Observe = Observe,
-    Collect = Collect,
-    GetOrder = GetOrder,
-    GetRecord = GetRecord,
-    GetCount = function()
-        return #records
-    end,
-    DeriveStatus = DeriveStatus,
-    RefreshRecord = RefreshRecord,
-    Execute = Execute,
-    ShowNotice = ShowNotice,
-    HideNotice = HideNotice,
-    GetReportText = GetReportText,
-    ClearRecords = ClearRecords,
-    HasQueueRegistry = function()
-        return type(queueDefinitions) == "table" and type(queueDefinitions.entries) == "table"
+        return removed
     end,
 }

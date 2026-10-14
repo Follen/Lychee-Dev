@@ -5,14 +5,26 @@ use std::{
     path::{Path, PathBuf},
 };
 pub const COUNT: u16 = 500;
-pub const TRANSPORT: &str = "memory-slot-v4";
+pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
+pub const INTERFACES: &str = "120100, 50504, 38002, 16001, 11509, 20506";
 pub fn directory(parent: &Path, index: u16) -> PathBuf {
     parent.join(format!("Lychee Dev Slot {index:02}"))
 }
 pub fn files(index: u16, version: &str) -> [(String, Vec<u8>); 3] {
     let name = format!("Lychee Dev Slot {index:02}");
-    [(format!("{name}.toc"),format!("## Interface: 120100, 50504, 38002, 16001\n## Title: Lychee Dev input slot {index:02}\n## Version: {version}\n## LoadOnDemand: 1\n## X-Lychee-Slot: {index}\n## X-Lychee-Transport: {TRANSPORT}\nPayload.lua\nLoader.lua\n").into_bytes()),("Loader.lua".into(),format!("local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.NativeRuntime then ns.NativeRuntime.Receive({index}, envelope) end\n").into_bytes()),("Payload.lua".into(),b"LycheeDevSlotEnvelope = nil\n".to_vec())]
+    [
+        (
+            format!("{name}.toc"),
+            format!("## Interface: {INTERFACES}\n## Title: Lychee Dev input slot {index:02}\n## Version: {version}\n## LoadOnDemand: 1\n## X-Lychee-Slot: {index}\n## X-Lychee-Transport: {TRANSPORT}\nPayload.lua\nLoader.lua\n").into_bytes(),
+        ),
+        (
+            "Loader.lua".into(),
+            format!("local envelope = LycheeDevSlotEnvelope\nLycheeDevSlotEnvelope = nil\nlocal ns = LycheeDevInternal\nif ns and ns.SlotRuntime then ns.SlotRuntime.Receive({index}, envelope) end\n").into_bytes(),
+        ),
+        ("Payload.lua".into(), b"LycheeDevSlotEnvelope = nil\n".to_vec()),
+    ]
 }
+
 pub fn install(parent: &Path, version: &str) -> Result<Value> {
     let marker = parent.join(".lycheedev-slots.json");
     let migration = parent.join(".lycheedev-slots.migration-v4.json");

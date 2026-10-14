@@ -270,7 +270,7 @@ local function BuildExportRecordsPage(parent)
         local order = ns.Stores.Exports.GetOrder() or {}
         local count, bytes, maximum = ns.Stores.Exports.GetStats()
         local pendingCount = ns.Stores.Exports.GetPendingCount()
-        countText:SetText(string.format(L.EXPORT_RECORD_COUNT, count))
+        countText:SetText(ns.Stores.Exports.IsWritable() and string.format(L.EXPORT_RECORD_COUNT, count) or L.EXPORT_DATABASE_NEWER)
         pendingText:SetText(pendingCount > 0 and string.format(L.EXPORT_PENDING_COUNT, pendingCount) or "")
         usageText:SetText(string.format(L.EXPORT_STORAGE_USAGE,
             bytes / 1024, maximum / 1024 / 1024))

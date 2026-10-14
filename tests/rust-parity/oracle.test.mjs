@@ -146,3 +146,64 @@ test('Rust Unicode scalar literals decode without reinterpreting escaped backsla
   assert.equal(parseLiteral('"\\\\u{feff}"'), '\\u{feff}');
   for (const value of ['"\\u{d800}"', '"\\u{110000}"', '"\\u{zz}"']) assert.throws(() => parseLiteral(value));
 });
+
+test('Rust NUL escapes decode without reinterpreting escaped or raw backslashes', () => {
+  assert.equal(parseLiteral('"\\0wow\\0"'), '\0wow\0');
+  assert.equal(parseLiteral('"\\\\0wow\\\\0"'), '\\0wow\\0');
+  assert.equal(parseLiteral('r"\\0wow\\0"'), '\\0wow\\0');
+  assert.throws(() => parseLiteral('"\\1"'));
+});
+
+test('Rust raw strings preserve Windows paths and escape-like text verbatim', () => {
+  for (const value of ['\\\\?\\UNC\\', '\\\\?\\', '\\n\\u{feff}\\u{zz}\\q', '', '原样😀']) {
+    for (const hashes of ['', '#', '###']) {
+      assert.equal(parseLiteral(`r${hashes}"${value}"${hashes}`), value);
+    }
+  }
+  assert.deepEqual(lex('r"one"; r#"two"#;'), [{ string: 'one' }, ';', { string: 'two' }, ';']);
+  assert.deepEqual(lex('r#type raw_name'), ['r', '#', 'type', 'raw_name']);
+});
+
+test('Rust raw string delimiters isolate quotes, comments and forged declarations', () => {
+  const value = 'a"##b"#c"d // comment\n/* comment */ pub static PRODUCTS: [Product; 0] = [];';
+  assert.equal(parseLiteral(`r###"${value}"###`), value);
+  assert.deepEqual(lex('r#"value"##'), [{ string: 'value' }, '#']);
+  assert.deepEqual(lex('// r#"unterminated\n/* r##"unterminated */ r"real"'), [{ string: 'real' }]);
+  const source = 'pub static PRODUCTS: [Product; 1] = [Product { id: r#"real"#, },];';
+  const forged = 'pub static PRODUCTS: [Product; 0] = [];';
+  const input = `// ${forged}\n/* ${forged} */ const DECOY: &str = r#"${forged}"#; ${source}`;
+  assert.deepEqual(extractRustProducts(input).map(p => p.id), ['real']);
+});
+
+test('Rust raw strings enforce delimiter, source and token bounds', () => {
+  const hashes = '#'.repeat(255);
+  assert.equal(parseLiteral(`r${hashes}"ok"${hashes}`), 'ok');
+  assert.throws(() => lex(`r${hashes}#"invalid"${hashes}#`), /exceeds 255 hashes/);
+  for (const value of ['r"unterminated', 'r#"unterminated"', 'r##"wrong"#', 'r###"wrong"##']) {
+    assert.throws(() => lex(value), /unterminated Rust raw string/);
+  }
+  assert.equal(parseLiteral('r"line\r\nnext\nline"'), 'line\nnext\nline');
+  assert.throws(() => lex('r"isolated\rcarriage return"'), /invalid carriage return/);
+  assert.throws(() => lex('r"' + 'a'.repeat(LIMITS.fileBytes - 2) + '"'), /byte limit/);
+  assert.throws(() => lex('r""'.repeat(LIMITS.tokens + 1)), /token limit/);
+});
+
+test('raw string support does not relax malformed ordinary strings or comments', () => {
+  for (const value of ['"\\q"', '"\\U"', '"\\u{zz}"', '"unterminated', '"line\nnext"']) {
+    assert.throws(() => lex(value));
+  }
+  assert.throws(() => lex('/* r"value"'), /unterminated comment/);
+  assert.throws(() => lex('/* /* r"value" */ */'), /nested comments unsupported/);
+  assert.throws(() => parseLiteral('r "value"'), /unsupported literal expression/);
+});
+
+test('real client source extracts products despite unrelated raw Windows path literals', () => {
+  const source = readBounded(root, 'crates/lycheedev-core/src/client.rs').toString('utf8');
+  assert.ok(lex(source).some(token => token?.string === '\\\\?\\UNC\\'));
+  const products = extractRustProducts(source);
+  assert.equal(products.length, 7);
+  assert.deepEqual(products.map(p => p.id), ['retail', 'classic', 'classic-era', 'titan', 'forever-asia-beta', 'forever-cn-beta', 'anniversary']);
+  // A malformed literal elsewhere in the containing source still fails closed.
+  assert.throws(() => extractRustProducts(source + '\nconst BAD: &str = r##"unterminated"#;'), /unterminated Rust raw string/);
+  assert.throws(() => extractRustProducts(source + '\nconst BAD: &str = "\\q";'));
+});

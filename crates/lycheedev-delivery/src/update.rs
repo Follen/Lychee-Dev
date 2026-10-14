@@ -251,11 +251,11 @@ pub fn managed_with_control(
         let toc = fs::read_to_string(root.join("payload/addon/Lychee Dev.toc"))?;
         if !toc
             .lines()
-            .any(|line| line.trim().replace('\\', "/") == "Bridge/NativeRuntime.lua")
+            .any(|line| line.trim().replace('\\', "/") == "Bridge/SlotRuntime.lua")
         {
             return Err(ToolkitError::new(
                 "delivery.protocol_mismatch",
-                "v4 addon update needs matching NativeRuntime closure",
+                "mailbox protocol v1 addon update needs matching SlotRuntime closure",
                 3,
             ));
         }

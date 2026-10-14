@@ -4,7 +4,7 @@ local ADDON_NAME, ns = ...
 -- (ns.EventCatalogData: alternating name, payloadSignature strings). Data is
 -- sorted by literal event name, so Find is a binary search. No frames, events
 -- or hooks are created here; selection editing stays pure Lua state.
--- All four client catalogs load in one TOC under per-product fields
+-- All client catalogs load in one TOC under per-product fields
 -- (EventCatalogData_<product>); the runtime client gate's product selects the
 -- table here at load time. An unknown client has no catalog, which surfaces as
 -- an empty catalog rather than wrong data.

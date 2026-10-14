@@ -196,11 +196,6 @@ local function BuildTracePage(parent)
     end
 
     local function QueueRefresh()
-        -- HandleActivate always rebuilds from the bounded trace ring.
-        -- Hidden notifications need no timer or closure allocation.
-        if not page:IsShown() then
-            return
-        end
         if refreshQueued then
             return
         end

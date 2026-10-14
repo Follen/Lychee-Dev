@@ -1,0 +1,12 @@
+<Bindings>
+    <Binding name="LYCHEEDEV_WAKE" header="LYCHEEDEV" category="Lychee Dev">
+        if LycheeDevInternal and LycheeDevInternal.ReceiverBindings then
+            LycheeDevInternal.ReceiverBindings.Dispatch("wake")
+        end
+    </Binding>
+    <Binding name="LYCHEEDEV_RELOAD" category="Lychee Dev">
+        if LycheeDevInternal and LycheeDevInternal.ReceiverBindings then
+            LycheeDevInternal.ReceiverBindings.Dispatch("reload")
+        end
+    </Binding>
+</Bindings>

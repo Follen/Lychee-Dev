@@ -20,7 +20,7 @@ ns.MemoryProtocol = {
     Encode=function(nonce,runtime,ticket,kind,state,sequence,payload)
         if not token(nonce) or not token(runtime) or not token(ticket)
             or type(payload)~="string" or #payload>524288
-            or kind<1 or kind>5 or state<1 or state>255
+            or kind<1 or kind>6 or state<1 or state>255
             or type(sequence)~="number" or sequence<0 or sequence>=4294967296 or sequence%1~=0 then
             return nil,"memory_record_invalid"
         end

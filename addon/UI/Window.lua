@@ -572,12 +572,6 @@ ns.Workbench = {
         return exportController:Show(id)
     end,
 
-    HideTicketPopup = function()
-        if exportController then
-            exportController:Hide()
-        end
-    end,
-
     -- The shared export controller (Save/Show/Hide plus its lazy popup).
     GetExportController = function()
         return exportController

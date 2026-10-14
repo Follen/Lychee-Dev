@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 fn candidate(root: &Path, version: &str, body: &[u8]) {
-    let files=[("addon/Lychee Dev.toc",format!("## Interface: 120100, 50504, 38002, 16001\n## Version: {version}\nBridge/NativeRuntime.lua\n").into_bytes()),("addon/Bridge/NativeRuntime.lua",body.to_vec()),("skill/SKILL.md",b"fixture skill\n".to_vec())];
+    let files=[("addon/Lychee Dev.toc",format!("## Interface: 120100, 50504, 38002, 16001\n## Version: {version}\nBridge/SlotRuntime.lua\n").into_bytes()),("addon/Bridge/SlotRuntime.lua",body.to_vec()),("skill/SKILL.md",b"fixture skill\n".to_vec())];
     for (name, bytes) in &files {
         let path = root.join("payload").join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -80,7 +80,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         6
     );
     assert_eq!(
-        fs::read(target.join("Bridge/NativeRuntime.lua")).unwrap(),
+        fs::read(target.join("Bridge/SlotRuntime.lua")).unwrap(),
         b"-- fixture old runtime\n"
     );
     assert!(!archive.exists());
@@ -108,11 +108,11 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
     assert_eq!(error.details["result"]["phase"], "main");
     assert_eq!(error.details["result"]["complete"], false);
     assert_eq!(
-        fs::read(target.join("Bridge/NativeRuntime.lua")).unwrap(),
+        fs::read(target.join("Bridge/SlotRuntime.lua")).unwrap(),
         b"-- fixture new runtime\n"
     );
     assert_eq!(
-        fs::read(archive.join("previous/Bridge/NativeRuntime.lua")).unwrap(),
+        fs::read(archive.join("previous/Bridge/SlotRuntime.lua")).unwrap(),
         b"-- fixture old runtime\n"
     );
     let journal = PathBuf::from(error.details["result"]["journal"].as_str().unwrap());
@@ -137,7 +137,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         6
     );
     drop(held);
-    fs::write(target.join("Bridge/NativeRuntime.lua"), b"owner edit").unwrap();
+    fs::write(target.join("Bridge/SlotRuntime.lua"), b"owner edit").unwrap();
     assert_eq!(
         addon_transaction::apply(
             &target,
@@ -155,7 +155,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         4
     );
     fs::write(
-        target.join("Bridge/NativeRuntime.lua"),
+        target.join("Bridge/SlotRuntime.lua"),
         b"-- fixture new runtime\n",
     )
     .unwrap();
@@ -190,7 +190,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         .unwrap(),
         result
     );
-    assert!(archive.join("previous/Bridge/NativeRuntime.lua").exists());
+    assert!(archive.join("previous/Bridge/SlotRuntime.lua").exists());
     let old_migration = fs::read(parent.join(".lycheedev-slots.migration-v4.json")).unwrap();
     let old_digest = storage::sha256(&old_migration);
     let third = temp.0.join("third");
@@ -220,7 +220,7 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         old_migration
     );
     assert_eq!(
-        fs::read(archive2.join("previous/Bridge/NativeRuntime.lua")).unwrap(),
+        fs::read(archive2.join("previous/Bridge/SlotRuntime.lua")).unwrap(),
         b"-- fixture new runtime\n"
     );
 }

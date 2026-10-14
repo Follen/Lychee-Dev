@@ -304,10 +304,6 @@ local function BuildObjectPage(parent)
         return true
     end
 
-    function page.OpenSelectedNodeDetail()
-        return OpenNodePopup(treeView:GetSelectedNode())
-    end
-
     treeView:SetOnNodeContext(OpenNodePopup)
 
     exportSnapshot:SetScript("OnClick", function()
@@ -368,6 +364,11 @@ local function BuildObjectPage(parent)
             StopPicker(true, L.PICKER_CANCELLED)
         end)
         pickerDock:Hide()
+        -- Picking intentionally hides the main window, so its OnHide cannot
+        -- own a later combat shutdown. Register only once this tool is used.
+        ns.Safety.RegisterCombatShutdown(function()
+            StopPicker(false)
+        end)
     end
 
     StopPicker = function(restoreWindow, statusText)

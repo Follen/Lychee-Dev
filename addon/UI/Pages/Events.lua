@@ -630,12 +630,6 @@ function ns.CreateEventsPage(parent)
     end
 
     local function QueueRefresh()
-        -- Capture continues while another page is selected. Its hidden view
-        -- needs one activation refresh, not a new timer for every event burst.
-        if not page:IsShown() then
-            dirty = true
-            return
-        end
         if refreshQueued then
             return
         end
@@ -680,10 +674,6 @@ function ns.CreateEventsPage(parent)
         W.SetReadOnlyText(detailPanel, L.SELECT_EVENT_DETAIL)
         page:Refresh()
     end)
-
-    function page:FocusInput()
-        inputPanel.editBox:SetFocus()
-    end
 
     function page:StopMonitor()
         ns.EventMonitor.Stop()
