@@ -1,5 +1,6 @@
 //! Runtime-only Lua path reader. Runtime code location and Lua ABI admission
 //! remain separate capabilities. No executable hash is invented or imported.
+#![forbid(unsafe_code)]
 use crate::{
     locator::Layout,
     mailbox::{Memory, Reader, Record, Selector},
@@ -185,15 +186,33 @@ impl RuntimeLayoutAdmission {
         recipe: RecipeId,
         profiles: &'static [CatalogProfile],
     ) -> Result<Self> {
-        let known = client::product(&client.product).ok_or("reader.runtime_client_identity")?;
-        if known.id != client.product
-            || known.catalog_product != client.catalog_product
-            || client.product_code != client.catalog_product
+        // The API family may be shared, but ABI admission remains tied to the
+        // exact observed delivery slot. No regional catalog evidence is borrowed.
+        let known = client::product(client::client_data_product(client))
+            .ok_or("reader.runtime_client_identity")?;
+        let expected_code = if known.family == "forever" {
+            "wow_forever"
+        } else {
+            known.catalog_product
+        };
+        let expected_catalog = if known.id != known.family {
+            known.catalog_product
+        } else {
+            ""
+        };
+        if known.family != client.product
+            || client.product_code != expected_code
+            || client.catalog_product != expected_catalog
             || known.channel != client.channel
             || client.full_build.len() > 64
         {
             return Err("reader.runtime_client_identity".into());
         }
+        let observed_slot = if client.catalog_product.is_empty() {
+            client.product_code.as_str()
+        } else {
+            client.catalog_product.as_str()
+        };
         let mut components = client.full_build.split('.');
         for _ in 0..4 {
             let part = components.next().ok_or("reader.runtime_client_identity")?;
@@ -206,7 +225,7 @@ impl RuntimeLayoutAdmission {
         }
         let mut matches = profiles.iter().filter(|p| {
             p.product == client.product
-                && p.catalog_product == client.catalog_product
+                && p.catalog_product == observed_slot
                 && p.channel == client.channel
                 && p.full_build == client.full_build
                 && p.recipe == recipe

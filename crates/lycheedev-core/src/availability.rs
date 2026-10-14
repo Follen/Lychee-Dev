@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Bounded current release observations. HTTP is supplied by an entry adapter.
 use crate::{Result, ToolkitError, client::PRODUCTS, control::OperationControl, storage};
 use serde::{Deserialize, Serialize};
@@ -180,17 +181,12 @@ pub fn list(
         let slot = profile.catalog_product;
         let series = profile.series;
         let mut entry = json!({"product":product,"productCode":slot,"locator":locator(region,slot),"rows":null,"rejected":0,"totalRows":0,"truncated":false});
-        if !profile.channel.is_empty() {
-            entry["displayName"] = json!(profile.display_name);
-            entry["channel"] = json!(profile.channel);
-            entry["catalogProduct"] = json!(slot);
-        }
         let parsed = fetch(region, slot, control).and_then(|raw| parse(&raw, region, control));
         control.check()?;
         match parsed {
             Err(error) => entry["error"] = json!(error.message),
             Ok((mut rows, mut rejected)) => {
-                if !profile.channel.is_empty() {
+                if profile.reused_slot {
                     rows.retain(|row|{if row.full_build.starts_with(&format!("{series}.")){true}else{rejected+=1;entry["error"]=json!(format!("selection.data_product_build_mismatch: {product} slot {slot} serves {}; verified series is {series}",row.full_build));false}});
                 }
                 entry["totalRows"] = json!(rows.len());
@@ -230,9 +226,9 @@ mod tests {
             Ok(manifest().into_bytes())
         };
         let result = list("cn", false, 1, &control, &mut fetch).unwrap();
-        assert_eq!(calls.len(), 5);
-        assert_eq!(calls[3].1, "wow_classic_beta");
-        assert_eq!(calls[4].1, "wow_cn_beta");
+        assert_eq!(calls.len(), 7);
+        assert_eq!(calls[4].1, "wow_classic_beta");
+        assert_eq!(calls[5].1, "wow_cn_beta");
         assert_eq!(result["products"][0]["totalRows"], 2);
         assert_eq!(result["products"][0]["truncated"], true);
         assert_eq!(
@@ -240,8 +236,8 @@ mod tests {
             "12.1.0.70009"
         );
         assert_eq!(result["products"][0]["rows"][0]["current"], true);
-        assert_eq!(result["products"][3]["rows"], json!([]));
-        assert!(result["products"][3]["error"].is_string());
+        assert_eq!(result["products"][4]["rows"], json!([]));
+        assert!(result["products"][4]["error"].is_string());
         assert_eq!(
             list("cn", true, 0, &control, &mut |_, _, _| panic!(
                 "offline must not fetch"
@@ -269,14 +265,12 @@ mod tests {
             slots.iter().filter(|s| s.as_str() == "wow_cn_beta").count(),
             1
         );
-        let asia = &result["products"][3];
-        let cn = &result["products"][4];
-        assert_eq!(asia["product"], "forever");
-        assert_eq!(cn["product"], "cn-beta");
-        assert_eq!(asia["displayName"], "Forever Asia Beta");
-        assert_eq!(cn["displayName"], "Forever CN Beta");
-        assert_eq!(asia["catalogProduct"], "wow_classic_beta");
-        assert_eq!(cn["catalogProduct"], "wow_cn_beta");
+        let asia = &result["products"][4];
+        let cn = &result["products"][5];
+        assert_eq!(asia["product"], "forever-asia-beta");
+        assert_eq!(cn["product"], "forever-cn-beta");
+        assert_eq!(asia["productCode"], "wow_classic_beta");
+        assert_eq!(cn["productCode"], "wow_cn_beta");
         assert_eq!(asia["rows"][0]["fullBuild"], cn["rows"][0]["fullBuild"]);
         assert!(
             cn["locator"]
@@ -284,6 +278,30 @@ mod tests {
                 .unwrap()
                 .contains("/wow_cn_beta/versions")
         );
+    }
+    #[test]
+    fn seven_products_have_the_fixed_go_order_slots_and_schema() {
+        let expected = [
+            ("retail", "wow"),
+            ("classic", "wow_classic"),
+            ("classic-era", "wow_classic_era"),
+            ("titan", "wow_classic_titan"),
+            ("forever-asia-beta", "wow_classic_beta"),
+            ("forever-cn-beta", "wow_cn_beta"),
+            ("anniversary", "wow_anniversary"),
+        ];
+        let result = list("us", false, 1, &OperationControl::default(), &mut |region, _, _| {
+            Ok(format!("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|VersionsName!STRING:0\n{region}|{}|{}|1.60.1.70338\n", "a".repeat(32), "b".repeat(32)).into_bytes())
+        }).unwrap();
+        let entries = result["products"].as_array().unwrap();
+        assert_eq!(entries.len(), expected.len());
+        for (entry, (product, slot)) in entries.iter().zip(expected) {
+            assert_eq!(entry["product"], product);
+            assert_eq!(entry["productCode"], slot);
+            assert_eq!(entry["locator"], locator("us", slot));
+            assert_eq!(entry.as_object().unwrap().len(), 7);
+            assert_eq!(entry["totalRows"], 1);
+        }
     }
     #[test]
     fn malformed_utf8_duplicate_header_and_row_budget_are_rejected() {

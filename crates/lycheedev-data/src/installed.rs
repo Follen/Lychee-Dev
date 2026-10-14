@@ -59,7 +59,7 @@ pub struct BuildMetadata {
 #[derive(Clone, Debug)]
 pub struct LocalTargetRequest {
     pub installation: PathBuf,
-    /// Toolkit product id or official display alias; never inferred from a build.
+    /// Exact toolkit delivery product id; never inferred from a build.
     pub product: Option<String>,
     pub full_build: Option<String>,
     pub region: String,

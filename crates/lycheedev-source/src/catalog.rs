@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use lycheedev_core::{Result, ToolkitError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -27,6 +28,8 @@ pub fn repositories() -> Vec<Repository> {
                 ("anniversary", "classic_anniversary"),
                 ("titan", "classic_titan"),
                 ("forever", "forever"),
+                ("forever-asia-beta", "forever"),
+                ("forever-cn-beta", "forever"),
             ],
         ),
         (
@@ -83,4 +86,29 @@ pub fn lookup(key: &str) -> Result<Repository> {
                 2,
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn regional_source_tracks_alias_only_the_shared_forever_ref() {
+        let repository = lookup("wow-ui-source").unwrap();
+        for product in ["forever", "forever-asia-beta", "forever-cn-beta"] {
+            assert_eq!(
+                repository.tracks.get(product).map(String::as_str),
+                Some("forever")
+            );
+        }
+        assert_eq!(repository.tracks["classic-beta"], "classic_beta");
+        assert_eq!(repository.tracks["classic-era"], "classic_era");
+        assert_eq!(repository.tracks["anniversary"], "classic_anniversary");
+        assert!(!repository.tracks.contains_key("cn-beta"));
+        assert!(
+            !lookup("elvui")
+                .unwrap()
+                .tracks
+                .contains_key("forever-cn-beta")
+        );
+    }
 }

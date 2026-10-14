@@ -23,7 +23,7 @@ fn client() -> ClientInstallation {
     ClientInstallation {
         directory: "synthetic".into(),
         product: "forever".into(),
-        product_code: "wow_classic_beta".into(),
+        product_code: "wow_forever".into(),
         catalog_product: "wow_classic_beta".into(),
         display_name: "Forever Asia Beta".into(),
         channel: "asia-beta".into(),
@@ -359,7 +359,7 @@ mod observation {
         assert_eq!(observed.identity.guid, "Player-1-ABC");
         assert_eq!(observed.identity.character, "测试角色");
         assert!(!observed.identity.activation_only);
-        assert_eq!(observed.binding.client.product_code, "wow_classic_beta");
+        assert_eq!(observed.binding.client.product_code, "wow_forever");
         assert_eq!(observed.budget.used.os_call_units, 3);
         assert!(observed.budget.used.read_calls > 10);
         assert!(observed.budget.used.work_units > 4 * 131072);
@@ -592,11 +592,19 @@ fn historical_admission_matches_archived_lua_layout_and_exact_client_scope() {
             recorded["publicPath"],
             serde_json::json!(["_G", "LycheeDevInternal", "Mailbox"])
         );
-        let known = client::product(profile.product).unwrap();
+        let known = client::catalog_product(profile.catalog_product).unwrap();
         let mut c = client();
         c.product = profile.product.into();
-        c.product_code = profile.catalog_product.into();
-        c.catalog_product = profile.catalog_product.into();
+        c.product_code = if known.family == "forever" {
+            "wow_forever".into()
+        } else {
+            profile.catalog_product.into()
+        };
+        c.catalog_product = if known.id != known.family {
+            profile.catalog_product.into()
+        } else {
+            String::new()
+        };
         c.channel = profile.channel.into();
         c.full_build = profile.full_build.into();
         c.interface = known.interface.unwrap();
@@ -651,9 +659,9 @@ fn historical_admission_matches_archived_lua_layout_and_exact_client_scope() {
         c.full_build.push('1');
         assert!(RuntimeLayoutAdmission::select_from(&c, profile.recipe, PROFILES).is_err());
         c.full_build = profile.full_build.into();
-        c.product = "cn-beta".into();
+        c.product = "forever".into();
         c.catalog_product = "wow_cn_beta".into();
-        c.product_code = "wow_cn_beta".into();
+        c.product_code = "wow_forever".into();
         c.channel = "cn-beta".into();
         assert!(RuntimeLayoutAdmission::select_from(&c, profile.recipe, PROFILES).is_err());
     }
@@ -676,8 +684,8 @@ fn admission_requires_exact_product_channel_build_and_recipe() {
         assert!(RuntimeLayoutAdmission::select_from(&c, RecipeId::Forever, CATALOG).is_err());
     }
     let mut cn = client();
-    cn.product = "cn-beta".into();
-    cn.product_code = "wow_cn_beta".into();
+    cn.product = "forever".into();
+    cn.product_code = "wow_forever".into();
     cn.catalog_product = "wow_cn_beta".into();
     cn.channel = "cn-beta".into();
     assert_eq!(
@@ -1044,4 +1052,40 @@ fn runtime_budget_inherits_expired_parent_deadline() {
             .unwrap(),
         "memory.runtime_deadline"
     );
+}
+
+#[test]
+fn api_family_never_substitutes_for_exact_regional_abi_evidence() {
+    let asia = client();
+    assert_eq!(client::client_data_product(&asia), "forever-asia-beta");
+    RuntimeLayoutAdmission::select_from(&asia, RecipeId::Forever, CATALOG).unwrap();
+    let mut cn = asia.clone();
+    cn.catalog_product = "wow_cn_beta".into();
+    cn.channel = "cn-beta".into();
+    assert_eq!(client::client_data_product(&cn), "forever-cn-beta");
+    assert_eq!(
+        RuntimeLayoutAdmission::select_from(&cn, RecipeId::Forever, CATALOG)
+            .err()
+            .unwrap(),
+        "reader.runtime_layout_unsupported"
+    );
+    let mut legacy = asia.clone();
+    legacy.catalog_product.clear();
+    legacy.channel.clear();
+    assert_eq!(client::client_data_product(&legacy), "forever");
+    assert_eq!(
+        RuntimeLayoutAdmission::select_from(&legacy, RecipeId::Forever, CATALOG)
+            .err()
+            .unwrap(),
+        "reader.runtime_layout_unsupported"
+    );
+    for mut conflicting in [asia.clone(), cn] {
+        conflicting.product_code = "wow_classic_beta".into();
+        assert_eq!(
+            RuntimeLayoutAdmission::select_from(&conflicting, RecipeId::Forever, CATALOG)
+                .err()
+                .unwrap(),
+            "reader.runtime_client_identity"
+        );
+    }
 }

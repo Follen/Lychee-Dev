@@ -197,14 +197,14 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     .unwrap();
     let request = installed::LocalTargetRequest {
         installation: client.clone(),
-        product: Some("Forever CN Beta".into()),
+        product: Some("forever-cn-beta".into()),
         full_build: None,
         region: "cn".into(),
         language: "zhCN".into(),
         definition_commit: "a".repeat(40),
     };
     let resolved = installed::resolve_target(&request).unwrap();
-    assert_eq!(resolved.data.product, "cn-beta");
+    assert_eq!(resolved.data.product, "forever-cn-beta");
     assert_eq!(resolved.data.full_build, "1.60.1.70338");
     assert_eq!(resolved.metadata.installed.product, "wow_cn_beta");
     assert_eq!(resolved.metadata.installed.metadata_branch, "cn");
@@ -294,12 +294,12 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     .unwrap();
     let asia_request = installed::LocalTargetRequest {
         installation: asia_client,
-        product: Some("Forever Asia Beta".into()),
+        product: Some("forever-asia-beta".into()),
         region: "tw".into(),
         ..request.clone()
     };
     let asia = installed::resolve_target(&asia_request).unwrap();
-    assert_eq!(asia.data.product, "forever");
+    assert_eq!(asia.data.product, "forever-asia-beta");
     assert_eq!(asia.data.full_build, resolved.data.full_build);
     assert_ne!(asia.data, resolved.data);
     assert_eq!(asia.metadata.installed.product, "wow_classic_beta");
@@ -310,7 +310,7 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     );
     let common_cn = installed::resolve_target(&installed::LocalTargetRequest {
         installation: root.clone(),
-        product: Some("cn-beta".into()),
+        product: Some("forever-cn-beta".into()),
         ..request.clone()
     })
     .unwrap();
@@ -318,7 +318,7 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     let common_metered = installed::resolve_target_budgeted(
         &installed::LocalTargetRequest {
             installation: root.clone(),
-            product: Some("cn-beta".into()),
+            product: Some("forever-cn-beta".into()),
             ..request.clone()
         },
         Some(&parser_budget(Cost::defaults())),
@@ -330,7 +330,7 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
     );
     let common_asia = installed::resolve_target(&installed::LocalTargetRequest {
         installation: root.clone(),
-        product: Some("forever".into()),
+        product: Some("forever-asia-beta".into()),
         region: "tw".into(),
         ..request.clone()
     })

@@ -919,3 +919,124 @@ fn evidence_pending_intent_rejects_forgery_and_recovers_delete_before_checkpoint
     assert_eq!(result["blobMissing"], false);
     assert_eq!(evidence::remove_capture(&temp.0, id).unwrap(), result);
 }
+
+#[test]
+fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
+    use selection::{ChangePin, DataPin};
+    let temp = initialized();
+    let source = SourcePin {
+        repository: "wow-ui-source".into(),
+        product: "forever".into(),
+        requested_ref: "forever".into(),
+        exact_commit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069".into(),
+        parser_revision: "fixture-v1".into(),
+    };
+    let parent = selection::pin_selection(
+        &temp.0,
+        SelectionSpec {
+            source: Some(source),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut ids = vec![];
+    for product in ["forever-asia-beta", "forever-cn-beta"] {
+        let data = DataPin {
+            product: product.into(),
+            region: "cn".into(),
+            language: "zhCN".into(),
+            full_build: "1.60.1.70338".into(),
+            build_config: "c".repeat(32),
+            cdn_config: "d".repeat(32),
+            definition_commit: "e".repeat(40),
+        };
+        let changes = ChangePin {
+            product: product.into(),
+            region: "cn".into(),
+            provider: "fixture".into(),
+            scope: "full".into(),
+            full_build: data.full_build.clone(),
+            fetched_at: "2026-10-14T00:00:00Z".into(),
+            sha256: "f".repeat(64),
+        };
+        let pin = selection::pin_selection(
+            &temp.0,
+            SelectionSpec {
+                parent: parent.id.clone(),
+                data: Some(data),
+                changes: Some(changes),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ids.push(pin.id.clone());
+        assert_eq!(
+            selection::load_pinned(&temp.0, &pin.id)
+                .unwrap()
+                .data
+                .as_ref()
+                .unwrap()
+                .product,
+            product
+        );
+        let path = temp.0.join(product);
+        let path = path.to_str().unwrap();
+        selection::dispatch_project(&inv(
+            temp.0.clone(),
+            "project init",
+            &[("--path", path), ("--product", product)],
+        ))
+        .unwrap();
+        selection::dispatch_project(&inv(
+            temp.0.clone(),
+            "project lock",
+            &[("--path", path), ("--snapshot", &pin.id)],
+        ))
+        .unwrap();
+        let status = selection::inspect_project(std::path::Path::new(path)).unwrap();
+        assert_eq!(status["state"], "locked");
+        assert_eq!(status["lock"]["selection"]["source"]["product"], "forever");
+        assert_eq!(status["lock"]["selection"]["data"]["product"], product);
+        let opposite = if product == "forever-cn-beta" {
+            "forever-asia-beta"
+        } else {
+            "forever-cn-beta"
+        };
+        let mut replacement = pin.data.clone().unwrap();
+        replacement.product = opposite.into();
+        assert_eq!(
+            selection::pin_selection(
+                &temp.0,
+                SelectionSpec {
+                    parent: pin.id.clone(),
+                    data: Some(replacement),
+                    ..Default::default()
+                }
+            )
+            .unwrap_err()
+            .code,
+            "selection.fixed_data_conflict"
+        );
+    }
+    assert_ne!(ids[0], ids[1]);
+    assert!(
+        selection::load_pinned(&temp.0, &parent.id)
+            .unwrap()
+            .data
+            .is_none()
+    );
+    let cn_path = temp.0.join("forever-cn-beta");
+    assert_eq!(
+        selection::dispatch_project(&inv(
+            temp.0.clone(),
+            "project lock",
+            &[
+                ("--path", cn_path.to_str().unwrap()),
+                ("--snapshot", &ids[0])
+            ]
+        ))
+        .unwrap_err()
+        .code,
+        "selection.project_conflict"
+    );
+}

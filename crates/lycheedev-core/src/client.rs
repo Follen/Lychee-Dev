@@ -1,4 +1,5 @@
 //! Explicit flavor/build identity; directory names and equal builds never select a product.
+#![forbid(unsafe_code)]
 use crate::{Result, ToolkitError, selection::valid_build, storage};
 use lycheedev_windows::filesystem::destination::{Directory, FileControl, FileCost};
 use serde::{Deserialize, Serialize};
@@ -63,69 +64,148 @@ fn exists(directory: &Directory, name: &str, control: &mut impl MetadataControl)
         .map(|metadata| metadata.is_some())
 }
 
+/// Delivery identity is separate from the shared UI/API source family.
 pub struct Product {
     pub id: &'static str,
+    pub family: &'static str,
     pub display_name: &'static str,
     pub catalog_product: &'static str,
+    pub folder: &'static str,
     pub series: &'static str,
     pub channel: &'static str,
+    pub reused_slot: bool,
     pub interface: Option<u32>,
 }
-/// `forever` is the compatibility id for Forever Asia Beta only.
-pub static PRODUCTS: [Product; 5] = [
+/// Ordered data catalog from the fixed Go 3.2.0 release.
+pub static PRODUCTS: [Product; 7] = [
     Product {
         id: "retail",
+        family: "retail",
         display_name: "Retail",
         catalog_product: "wow",
+        folder: "_retail_",
         series: "12.1.0",
         channel: "",
+        reused_slot: false,
         interface: Some(120100),
     },
     Product {
         id: "classic",
+        family: "classic",
         display_name: "Classic",
         catalog_product: "wow_classic",
+        folder: "_classic_",
         series: "5.5.4",
         channel: "",
+        reused_slot: false,
         interface: Some(50504),
     },
     Product {
+        id: "classic-era",
+        family: "classic-era",
+        display_name: "Classic Era",
+        catalog_product: "wow_classic_era",
+        folder: "_classic_era_",
+        series: "1.15.9",
+        channel: "",
+        reused_slot: false,
+        interface: Some(11509),
+    },
+    Product {
         id: "titan",
+        family: "titan",
         display_name: "Titan",
         catalog_product: "wow_classic_titan",
+        folder: "_classic_titan_",
         series: "3.80.2",
         channel: "",
+        reused_slot: false,
         interface: Some(38002),
     },
     Product {
-        id: "forever",
+        id: "forever-asia-beta",
+        family: "forever",
         display_name: "Forever Asia Beta",
         catalog_product: "wow_classic_beta",
+        folder: "_classic_beta_",
         series: "1.60.1",
         channel: "asia-beta",
+        reused_slot: true,
         interface: Some(16001),
     },
-    // A publishing build observation does not authorize a Source API interface.
     Product {
-        id: "cn-beta",
+        id: "forever-cn-beta",
+        family: "forever",
         display_name: "Forever CN Beta",
         catalog_product: "wow_cn_beta",
+        folder: "_cn_beta_",
         series: "1.60.1",
         channel: "cn-beta",
-        interface: None,
+        reused_slot: true,
+        interface: Some(16001),
+    },
+    Product {
+        id: "anniversary",
+        family: "anniversary",
+        display_name: "Anniversary",
+        catalog_product: "wow_anniversary",
+        folder: "_anniversary_",
+        series: "2.5.6",
+        channel: "",
+        reused_slot: false,
+        interface: Some(20506),
     },
 ];
+/// Legacy wow_forever metadata does not identify either regional beta track.
+static LEGACY_FOREVER: Product = Product {
+    id: "forever",
+    family: "forever",
+    display_name: "Forever",
+    catalog_product: "wow_classic_beta",
+    folder: "_forever_",
+    series: "1.60.1",
+    channel: "",
+    reused_slot: true,
+    interface: Some(16001),
+};
 pub fn product(value: &str) -> Option<&'static Product> {
     PRODUCTS
         .iter()
-        .find(|p| p.id == value || p.display_name == value)
+        .chain(std::iter::once(&LEGACY_FOREVER))
+        .find(|p| p.id == value)
 }
-
 pub fn catalog_product(value: &str) -> Option<&'static Product> {
+    if value == "wow_forever" {
+        return Some(&LEGACY_FOREVER);
+    }
     PRODUCTS.iter().find(|p| p.catalog_product == value)
 }
 pub fn canonical_product(value: &str) -> Option<&'static str> {
     product(value).map(|p| p.id)
+}
+pub fn source_product_family(product: &str) -> &str {
+    PRODUCTS
+        .iter()
+        .find(|profile| profile.id == product)
+        .map_or(product, |profile| profile.family)
+}
+/// Metadata identifies a delivery track even when the client API family is shared.
+pub fn client_data_product(client: &ClientInstallation) -> &str {
+    PRODUCTS
+        .iter()
+        .find(|profile| {
+            profile.catalog_product == client.catalog_product
+                || profile.catalog_product == client.product_code
+        })
+        .map_or(&client.product, |profile| profile.id)
+}
+pub fn client_matches_product(client: &ClientInstallation, product: &str) -> bool {
+    product.is_empty() || product == client.product || product == client_data_product(client)
+}
+pub fn client_folders() -> Vec<&'static str> {
+    std::iter::once(LEGACY_FOREVER.folder)
+        .chain(PRODUCTS.iter().map(|profile| profile.folder))
+        .collect()
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -412,9 +492,17 @@ pub fn inspect_with(
             .to_string_lossy()
             .trim_start_matches("\\\\?\\")
             .into(),
-        product: profile.id.into(),
-        product_code: code.clone(),
-        catalog_product: code,
+        product: profile.family.into(),
+        product_code: if profile.family == "forever" {
+            "wow_forever".into()
+        } else {
+            code.clone()
+        },
+        catalog_product: if profile.reused_slot && code != "wow_forever" {
+            code
+        } else {
+            String::new()
+        },
         display_name: profile.display_name.into(),
         channel: profile.channel.into(),
         metadata_branch: branch,
@@ -655,7 +743,7 @@ mod tests {
                 asia.product_code.as_str(),
                 asia.catalog_product.as_str()
             ),
-            ("forever", "wow_classic_beta", "wow_classic_beta")
+            ("forever", "wow_forever", "wow_classic_beta")
         );
         assert_eq!(
             (
@@ -663,7 +751,7 @@ mod tests {
                 cn.product_code.as_str(),
                 cn.catalog_product.as_str()
             ),
-            ("cn-beta", "wow_cn_beta", "wow_cn_beta")
+            ("forever", "wow_forever", "wow_cn_beta")
         );
         assert_eq!(
             (asia.display_name.as_str(), cn.display_name.as_str()),
@@ -678,8 +766,12 @@ mod tests {
             ("asia-beta", "cn-beta")
         );
         assert!(asia.interface_known);
-        assert!(!cn.interface_known);
-        assert_eq!(cn.interface, 0);
+        assert!(cn.interface_known);
+        assert_eq!(cn.interface, 16001);
+        assert_eq!(client_data_product(&asia), "forever-asia-beta");
+        assert_eq!(client_data_product(&cn), "forever-cn-beta");
+        assert!(!client_matches_product(&asia, "forever-cn-beta"));
+        assert!(!client_matches_product(&cn, "forever-asia-beta"));
         assert_eq!(cn.identity_source, ".flavor.info+.build.info");
         let value = serde_json::to_value(&asia).unwrap();
         assert!(
@@ -731,27 +823,45 @@ mod tests {
         );
     }
     #[test]
-    fn formal_aliases_are_shared_and_cn_has_no_borrowed_source_authority() {
+    fn exact_products_and_source_family_do_not_conflate_delivery_tracks() {
+        for profile in &PRODUCTS {
+            assert_eq!(canonical_product(profile.id), Some(profile.id));
+            assert_eq!(
+                catalog_product(profile.catalog_product).unwrap().id,
+                profile.id
+            );
+            assert_eq!(source_product_family(profile.id), profile.family);
+        }
         assert_eq!(canonical_product("forever"), Some("forever"));
-        assert_eq!(canonical_product("Forever Asia Beta"), Some("forever"));
-        assert_eq!(canonical_product("Forever CN Beta"), Some("cn-beta"));
-        assert_eq!(canonical_product("cn-beta"), Some("cn-beta"));
-        assert_eq!(canonical_product("Forever"), None);
-        let mut source = crate::selection::SourcePin {
-            repository: "wow-ui-source".into(),
-            product: "forever".into(),
-            exact_commit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069".into(),
-            ..Default::default()
-        };
-        assert_eq!(crate::selection::source_interface(&source), Some(16001));
-        source.product = "cn-beta".into();
-        assert_eq!(crate::selection::source_interface(&source), None);
+        for unsupported in ["cn-beta", "Forever", "Forever Asia Beta", "Forever CN Beta"] {
+            assert_eq!(canonical_product(unsupported), None);
+        }
+        assert_eq!(source_product_family("custom"), "custom");
+        assert_eq!(client_folders().len(), 8);
         let old = serde_json::json!({"directory":"fixture","product":"forever","productCode":"wow_forever","fullBuild":"1.60.1.70338","interface":16001,"toc":"Lychee Dev.toc","identitySource":"version.txt"});
         let old: ClientInstallation = serde_json::from_value(old).unwrap();
         assert!(!old.interface_known);
-        assert_eq!(
-            old.product_code, "wow_forever",
-            "deserialization never rewrites old evidence"
-        );
+        assert_eq!(client_data_product(&old), "forever");
+        assert!(!client_matches_product(&old, "forever-asia-beta"));
+        assert!(!client_matches_product(&old, "forever-cn-beta"));
+    }
+    #[test]
+    fn every_explicit_product_metadata_uses_its_own_slot() {
+        for profile in &PRODUCTS {
+            let fixture = Fixture::new();
+            let path = fixture.client("arbitrarily-renamed", profile.catalog_product);
+            fixture.catalog(&format!(
+                "us|1|{}.70338|{}\n",
+                profile.series, profile.catalog_product
+            ));
+            let observed = inspect(&path).unwrap();
+            assert_eq!(client_data_product(&observed), profile.id);
+            assert_eq!(observed.product, profile.family);
+            assert_eq!(observed.interface, profile.interface.unwrap());
+        }
+        let fixture = Fixture::new();
+        let path = fixture.client("_cn_beta_", "wow_forever");
+        fs::write(path.join("version.txt"), "1.60.1.70338").unwrap();
+        assert_eq!(client_data_product(&inspect(&path).unwrap()), "forever");
     }
 }

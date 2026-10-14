@@ -168,6 +168,12 @@ Source与Skill分别安排新的独立代理，不能由实现者自评通过，
 
 `.github/workflows/rust-parity.yml`新增仅rust-refactor push的Windows自动静态合同检查，contents:read，无游戏/发布/密钥；即使PR合并引用不可用仍能触发。对每个精确commit保留差分artifact，候选不等价时保持失败。Windows Rust编译/运行任务待新Emmy准备及custody接入后追加，不能用这个Node作业代替产品测试。
 
+### 七产品与Source-family迁移批次
+
+七个正式delivery product、准确Source别名/已固定Interface基线已写入，Forever共享Source可用于各自区域Data/Changes，但区域Source不可借另一地区，Data/Changes不可混区。项目锁按Data→Changes→Source确定产品。元数据分开API family与实际区域slot；runtime_binding同步最小身份适配，仍要求exact slot/build/recipe/证据，未接默认输入。已有磁盘安装消费者只调整直接受影响测试和注释，未借本批宣称完整安装或Live等价。
+
+协调者独立核对固定Go products/pins合同并运行静态oracle：产品7/7精确字段对齐，整体仍FAIL（命令/flags/addon等缺口仍在）。新增正反向pin、持久化、七目录/schema、元数据和ABI隔离fixture；rustfmt与diff检查通过，Rust运行测试仍因旧custody/Windows条件blocked、未运行。Source-family行为的静态报告保持unverified，不能拿catalog7/7当行为通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -1,4 +1,5 @@
 //! Fixed context resolution and project identities, using the existing SQLite document contract.
+#![forbid(unsafe_code)]
 use crate::{
     Invocation, Outcome, Result, ToolkitError,
     metadata::Metadata,
@@ -82,7 +83,11 @@ pub fn valid_build(value: &str) -> bool {
             .all(|s| !s.is_empty() && s.parse::<u32>().is_ok())
 }
 pub fn valid_product(value: &str) -> bool {
-    crate::client::canonical_product(value).is_some()
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_".contains(&b))
 }
 /// Approved interface observations belong to exact source commits, not version arithmetic.
 pub fn source_interface(pin: &SourcePin) -> Option<u32> {
@@ -92,17 +97,52 @@ pub fn source_interface(pin: &SourcePin) -> Option<u32> {
     [
         ("retail", "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b", 120100),
         ("classic", "1028c1e687f721ba9d3af14d1b12a5745e4227c7", 50504),
+        (
+            "classic-era",
+            "8165d4cd6e48d606369336cc3a7977902310e81e",
+            11509,
+        ),
+        (
+            "anniversary",
+            "2cfec7c00f0f24762d5ca35a4beb1e93c0cde328",
+            20506,
+        ),
         ("titan", "825d29d3662b372f0bead725ee6abd339e4a77b5", 38002),
         ("forever", "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069", 16001),
     ]
     .into_iter()
-    .find(|(product, commit, _)| *product == pin.product && *commit == pin.exact_commit)
+    .find(|(product, commit, _)| {
+        *product == crate::client::source_product_family(&pin.product)
+            && *commit == pin.exact_commit
+    })
     .map(|(_, _, interface)| interface)
 }
+/// Family-wide Blizzard source pins support each delivery track, but an exact
+/// regional pin never grants access to the other regional track.
+pub fn source_supports_product(source: &SourcePin, product: &str) -> bool {
+    source.product == product
+        || source.repository == "wow-ui-source"
+            && source.product == crate::client::source_product_family(product)
+}
+fn pin_product(spec: &SelectionSpec) -> Option<&str> {
+    spec.data
+        .as_ref()
+        .map(|p| p.product.as_str())
+        .or(spec.changes.as_ref().map(|p| p.product.as_str()))
+        .or(spec.source.as_ref().map(|p| p.product.as_str()))
+}
 fn validate(spec: &SelectionSpec) -> Result<()> {
+    if spec.source.is_none() && spec.data.is_none() && spec.changes.is_none() {
+        return Err(ToolkitError::new(
+            "selection.empty",
+            "no fixed selection provided",
+            4,
+        ));
+    }
     let mut products = vec![];
     if let Some(source) = &spec.source {
         if source.repository.is_empty()
+            || source.product.is_empty()
             || source.parser_revision.is_empty()
             || !valid_digest(&source.exact_commit, 40)
         {
@@ -112,10 +152,10 @@ fn validate(spec: &SelectionSpec) -> Result<()> {
                 4,
             ));
         }
-        products.push(&source.product);
     }
     if let Some(data) = &spec.data {
-        if !valid_build(&data.full_build)
+        if data.product.is_empty()
+            || !valid_build(&data.full_build)
             || !valid_digest(&data.build_config, 32)
             || !valid_digest(&data.cdn_config, 32)
             || !valid_digest(&data.definition_commit, 40)
@@ -131,7 +171,11 @@ fn validate(spec: &SelectionSpec) -> Result<()> {
         products.push(&data.product);
     }
     if let Some(changes) = &spec.changes {
-        if !valid_build(&changes.full_build)
+        if changes.product.is_empty()
+            || changes.provider.is_empty()
+            || changes.region.is_empty()
+            || changes.scope.is_empty()
+            || !valid_build(&changes.full_build)
             || !valid_digest(&changes.sha256, 64)
             || changes.fetched_at.is_empty()
         {
@@ -143,14 +187,13 @@ fn validate(spec: &SelectionSpec) -> Result<()> {
         }
         products.push(&changes.product);
     }
-    if products.is_empty() {
-        return Err(ToolkitError::new(
-            "selection.empty",
-            "no fixed selection provided",
-            4,
-        ));
-    }
-    if products.iter().any(|p| p.is_empty() || *p != products[0]) {
+    if products.windows(2).any(|pair| pair[0] != pair[1])
+        || spec.source.as_ref().is_some_and(|source| {
+            products
+                .first()
+                .is_some_and(|product| !source_supports_product(source, product))
+        })
+    {
         return Err(ToolkitError::new(
             "selection.product_mismatch",
             "selection products disagree",
@@ -257,14 +300,7 @@ pub fn inspect_project(path: &Path) -> Result<Value> {
                 4,
             ));
         }
-        if pin
-            .source
-            .as_ref()
-            .map(|s| s.product.as_str())
-            .or(pin.data.as_ref().map(|d| d.product.as_str()))
-            .or(pin.changes.as_ref().map(|c| c.product.as_str()))
-            != project["product"].as_str()
-        {
+        if pin_product(&pin.spec) != project["product"].as_str() {
             return Err(ToolkitError::new(
                 "selection.project_conflict",
                 "project product differs from lock",
@@ -358,8 +394,10 @@ pub fn dispatch_project(inv: &Invocation) -> Result<Outcome> {
         .unwrap_or_else(|| inv.cwd.clone());
     match inv.command.as_str() {
         "project init" => {
-            let product = crate::client::canonical_product(inv.required("--product")?)
-                .ok_or_else(|| ToolkitError::arguments("unsupported product"))?;
+            let product = inv.required("--product")?;
+            if !valid_product(product) {
+                return Err(ToolkitError::arguments("unsupported product"));
+            }
             fs::create_dir_all(&path)?;
             let _lock = ExclusiveLock::acquire(&path.join(".lycheedev-locks/project.lock"))?;
             if path.join("lycheedev.json").exists() {
@@ -402,12 +440,7 @@ pub fn dispatch_project(inv: &Invocation) -> Result<Outcome> {
             let _lock = ExclusiveLock::acquire(&path.join(".lycheedev-locks/project.lock"))?;
             let status = inspect_project(&path)?;
             let pin = load_pinned(&inv.home, inv.required("--snapshot")?)?;
-            let product = pin
-                .source
-                .as_ref()
-                .map(|s| s.product.as_str())
-                .or(pin.data.as_ref().map(|d| d.product.as_str()))
-                .or(pin.changes.as_ref().map(|c| c.product.as_str()));
+            let product = pin_product(&pin.spec);
             if product != status["project"]["product"].as_str() {
                 return Err(ToolkitError::new(
                     "selection.project_conflict",
@@ -422,5 +455,180 @@ pub fn dispatch_project(inv: &Invocation) -> Result<Outcome> {
             Ok(Outcome::new(inspect_project(&path)?))
         }
         _ => Err(ToolkitError::arguments("unknown project verb")),
+    }
+}
+
+#[cfg(test)]
+mod product_tests {
+    use super::*;
+    fn source(product: &str, repository: &str) -> SourcePin {
+        SourcePin {
+            repository: repository.into(),
+            product: product.into(),
+            requested_ref: "forever".into(),
+            exact_commit: "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069".into(),
+            parser_revision: "fixture-v1".into(),
+        }
+    }
+    fn data(product: &str) -> DataPin {
+        DataPin {
+            product: product.into(),
+            region: "cn".into(),
+            language: "zhCN".into(),
+            full_build: "1.60.1.70338".into(),
+            build_config: "c".repeat(32),
+            cdn_config: "d".repeat(32),
+            definition_commit: "e".repeat(40),
+        }
+    }
+    fn changes(product: &str) -> ChangePin {
+        ChangePin {
+            product: product.into(),
+            region: "cn".into(),
+            provider: "fixture".into(),
+            scope: "full".into(),
+            full_build: "1.60.1.70338".into(),
+            fetched_at: "2026-10-14T00:00:00Z".into(),
+            sha256: "f".repeat(64),
+        }
+    }
+    #[test]
+    fn shared_source_supports_each_exact_track_without_collapsing_pin_identity() {
+        let mut identities = vec![];
+        for product in ["forever-asia-beta", "forever-cn-beta"] {
+            let spec = SelectionSpec {
+                source: Some(source("forever", "wow-ui-source")),
+                data: Some(data(product)),
+                changes: Some(changes(product)),
+                ..Default::default()
+            };
+            validate(&spec).unwrap();
+            assert_eq!(pin_product(&spec), Some(product));
+            identities.push(
+                identity(&PinnedSet {
+                    schema: "lycheedev.selection.v1".into(),
+                    id: String::new(),
+                    spec,
+                })
+                .unwrap(),
+            );
+            let regional = source(product, "wow-ui-source");
+            assert!(source_supports_product(&regional, product));
+            assert_eq!(source_interface(&regional), Some(16001));
+            let changes_only = SelectionSpec {
+                source: Some(source("forever", "wow-ui-source")),
+                changes: Some(changes(product)),
+                ..Default::default()
+            };
+            validate(&changes_only).unwrap();
+            assert_eq!(pin_product(&changes_only), Some(product));
+        }
+        assert_ne!(identities[0], identities[1]);
+        let source_only = SelectionSpec {
+            source: Some(source("forever", "wow-ui-source")),
+            ..Default::default()
+        };
+        validate(&source_only).unwrap();
+        assert_eq!(pin_product(&source_only), Some("forever"));
+    }
+    #[test]
+    fn regional_and_unrelated_sources_cannot_borrow_another_tracks_data() {
+        for (source_product, repository, data_product) in [
+            ("forever-asia-beta", "wow-ui-source", "forever-cn-beta"),
+            ("forever-cn-beta", "wow-ui-source", "forever-asia-beta"),
+            ("forever", "elvui", "forever-cn-beta"),
+            ("forever", "wow-ui-source", "classic-era"),
+            ("forever-asia-beta", "wow-ui-source", "forever"),
+        ] {
+            let spec = SelectionSpec {
+                source: Some(source(source_product, repository)),
+                data: Some(data(data_product)),
+                ..Default::default()
+            };
+            assert_eq!(
+                validate(&spec).unwrap_err().code,
+                "selection.product_mismatch"
+            );
+        }
+    }
+    #[test]
+    fn shared_source_never_relaxes_data_changes_track_equality() {
+        for (data_product, change_product) in [
+            ("forever-asia-beta", "forever-cn-beta"),
+            ("forever-cn-beta", "forever-asia-beta"),
+        ] {
+            for with_source in [false, true] {
+                let spec = SelectionSpec {
+                    source: with_source.then(|| source("forever", "wow-ui-source")),
+                    data: Some(data(data_product)),
+                    changes: Some(changes(change_product)),
+                    ..Default::default()
+                };
+                assert_eq!(
+                    validate(&spec).unwrap_err().code,
+                    "selection.product_mismatch"
+                );
+            }
+        }
+    }
+    #[test]
+    fn exact_source_commit_and_repository_remain_required_for_interface() {
+        for (product, commit, interface) in [
+            (
+                "classic-era",
+                "8165d4cd6e48d606369336cc3a7977902310e81e",
+                11509,
+            ),
+            (
+                "anniversary",
+                "2cfec7c00f0f24762d5ca35a4beb1e93c0cde328",
+                20506,
+            ),
+        ] {
+            let mut pin = source(product, "wow-ui-source");
+            pin.exact_commit = commit.into();
+            assert_eq!(source_interface(&pin), Some(interface));
+            pin.repository = "fixture".into();
+            assert_eq!(source_interface(&pin), None);
+        }
+        let mut pin = source("forever-cn-beta", "wow-ui-source");
+        pin.exact_commit = "a".repeat(40);
+        assert_eq!(source_interface(&pin), None);
+    }
+    #[test]
+    fn empty_identity_fields_are_unresolved_not_family_permissions() {
+        let spec = SelectionSpec {
+            source: Some(source("", "wow-ui-source")),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate(&spec).unwrap_err().code,
+            "selection.unresolved_source"
+        );
+        let spec = SelectionSpec {
+            data: Some(data("")),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate(&spec).unwrap_err().code,
+            "selection.unresolved_data"
+        );
+        for field in ["provider", "product", "region", "scope"] {
+            let mut change = changes("forever-cn-beta");
+            match field {
+                "provider" => change.provider.clear(),
+                "product" => change.product.clear(),
+                "region" => change.region.clear(),
+                _ => change.scope.clear(),
+            }
+            let spec = SelectionSpec {
+                changes: Some(change),
+                ..Default::default()
+            };
+            assert_eq!(
+                validate(&spec).unwrap_err().code,
+                "selection.unresolved_changes"
+            );
+        }
     }
 }
