@@ -3,10 +3,16 @@ import {existsSync,lstatSync,readFileSync,writeFileSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
-function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false}){
+export function auxiliaryRequest({cargoBuild=false,msvcCompile=false}={}){
+  if(typeof cargoBuild!=='boolean'||typeof msvcCompile!=='boolean')throw new Error('owned.invalid_auxiliary_request');
+  if(cargoBuild&&msvcCompile)throw new Error('owned.conflicting_auxiliary_request');
+  return {cargoBuild,msvcCompile};
+}
+function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false,msvcCompile=false}){
   if(process.platform!=='win32')throw new Error('owned.windows_required');
+  const admission=auxiliaryRequest({cargoBuild,msvcCompile});
   const id=randomUUID(),base=join(evidence,`process-${id}`),path=`${base}.request.json`;
-  const spec={command,args,cwd:resolve(cwd),timeoutMs:timeout,orphanMs,cargoBuild,stdout:`${base}.stdout.bin`,stderr:`${base}.stderr.bin`,receipt:`${base}.receipt.json`};
+  const spec={command,args,cwd:resolve(cwd),timeoutMs:timeout,orphanMs,...admission,stdout:`${base}.stdout.bin`,stderr:`${base}.stderr.bin`,receipt:`${base}.receipt.json`};
   writeFileSync(path,JSON.stringify(spec,null,2)+'\n',{flag:'wx'});
   return {spec,path,env,wrapper:join(import.meta.dirname,'rust-owned-process.ps1')};
 }

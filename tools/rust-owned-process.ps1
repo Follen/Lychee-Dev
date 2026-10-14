@@ -34,7 +34,57 @@ function Open-IdentityFile([string]$path) {
  try{$hash=[BitConverter]::ToString($digest.ComputeHash($file)).Replace('-','').ToLowerInvariant()}finally{$digest.Dispose();$file.Position=0}
  return @{path=[IO.Path]::GetFullPath($path);bytes=$file.Length;sha256=$hash}
 }
-if($requestData.cargoBuild -eq $true){
+# Only this reviewed C compile/link shape can request the MSVC helper path.
+# In particular, response files and /B1,/B2 tool replacement are not admitted.
+function Assert-MsvcCompileArguments($arguments,[string]$cwd) {
+ $args=@($arguments);$prefix=@('/nologo','/Bv','/O2','/MT','/Brepro','/TC');$suffix=@('/link','/Brepro','/INCREMENTAL:NO','/OPT:REF','/OPT:ICF')
+ if($args.Count -lt 13 -or $args.Count -gt 140){throw 'owned.not_msvc_c_compile'}
+ for($i=0;$i -lt $prefix.Count;$i++){if($args[$i] -cne $prefix[$i]){throw 'owned.not_msvc_c_compile'}}
+ for($i=0;$i -lt $suffix.Count;$i++){if($args[$args.Count-$suffix.Count+$i] -cne $suffix[$i]){throw 'owned.not_msvc_c_compile'}}
+ $output=[string]$args[6]
+ if(-not $output.StartsWith('/Fe:',[StringComparison]::Ordinal) -or -not [IO.Path]::IsPathRooted($output.Substring(4)) -or [IO.Path]::GetExtension($output.Substring(4)) -ine '.exe'){throw 'owned.not_msvc_c_compile'}
+ $sourceCount=$args.Count-$prefix.Count-$suffix.Count-1
+ if($sourceCount -lt 1 -or $sourceCount -gt 128){throw 'owned.not_msvc_c_compile'}
+ $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+ for($i=7;$i -lt $args.Count-$suffix.Count;$i++){
+  $name=[string]$args[$i]
+  if($name -cnotmatch '^[A-Za-z_][A-Za-z0-9_]*\.c$' -or -not $seen.Add($name) -or -not [IO.File]::Exists((Join-Path $cwd $name))){throw 'owned.not_msvc_c_compile'}
+ }
+ foreach($name in @('CL','_CL_','LINK','_LINK_')){if(-not [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))){throw 'owned.msvc_environment_override'}}
+}
+function Open-ReviewedMsvcTool($entry,[string]$kind) {
+ if($entry.kind -cne $kind -or [string]::IsNullOrEmpty($entry.programFilesPath) -or [IO.Path]::IsPathRooted($entry.programFilesPath) -or $entry.programFilesPath -match '(^|[\\/])\.\.([\\/]|$)'){throw 'owned.invalid_msvc_policy'}
+ $path=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $entry.programFilesPath
+ $identity=Open-IdentityFile $path
+ if($identity.bytes -ne $entry.bytes -or $identity.sha256 -cne $entry.sha256){throw 'owned.unreviewed_msvc_identity'}
+ $version=[Diagnostics.FileVersionInfo]::GetVersionInfo($path).FileVersion;$signature=[ToolkitSignature]::Verify($path)
+ if($version -cne $entry.fileVersion -or $signature.Subject -cne $entry.signerSubject -or $signature.Thumbprint -cne $entry.signerThumbprint){throw 'owned.msvc_signature_identity'}
+ $identity.kind=$kind;$identity.fileVersion=$version;$identity.signatureStatus='WinVerifyTrust:0';$identity.signerSubject=$signature.Subject;$identity.signerThumbprint=$signature.Thumbprint
+ return $identity
+}
+if($requestData.msvcCompile -eq $true){
+ try{
+  if($requestData.cargoBuild -eq $true){throw 'owned.conflicting_auxiliary_request'}
+  if([IO.Path]::GetFileName($binary) -ine 'cl.exe'){throw 'owned.not_msvc_compile'}
+  Assert-MsvcCompileArguments $requestData.args ([string]$requestData.cwd)
+  $policyPath=Join-Path $PSScriptRoot 'rust-build-auxiliary.json';$policyRaw=[IO.File]::ReadAllBytes($policyPath)
+  if($policyRaw.Length -gt 16384){throw 'owned.auxiliary_policy_budget'}
+  $policy=[Text.Encoding]::UTF8.GetString($policyRaw)|ConvertFrom-Json
+  if($policy.schema -ne 'lycheedev.build-auxiliary-policy.v1'){throw 'owned.auxiliary_policy_schema'}
+  if(@($policy.msvcCompilers).Count -lt 1 -or @($policy.msvcCompilers).Count -gt 4){throw 'owned.no_reviewed_msvc_compiler'}
+  $matches=@($policy.msvcCompilers|Where-Object {[string]::Equals([IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $_.programFilesPath)),[IO.Path]::GetFullPath($binary),[StringComparison]::OrdinalIgnoreCase)})
+  if($matches.Count -ne 1){throw 'owned.unreviewed_msvc_path'}
+  $compiler=$matches[0];$clIdentity=Open-ReviewedMsvcTool $compiler 'msvc-cl'
+  $linkIdentity=Open-ReviewedMsvcTool $compiler.linker 'msvc-link'
+  $helperMatches=@($policy.helpers|Where-Object {$_.programFilesPath -ceq $compiler.helperProgramFilesPath})
+  if($helperMatches.Count -ne 1){throw 'owned.unreviewed_msvc_helper'}
+  $helperIdentity=Open-ReviewedMsvcTool $helperMatches[0] 'msvc-vctip'
+  $directory=[IO.Path]::GetDirectoryName($clIdentity.path)
+  if(-not [string]::Equals($directory,[IO.Path]::GetDirectoryName($linkIdentity.path),[StringComparison]::OrdinalIgnoreCase) -or -not [string]::Equals($directory,[IO.Path]::GetDirectoryName($helperIdentity.path),[StringComparison]::OrdinalIgnoreCase)){throw 'owned.msvc_toolchain_directory'}
+  $helperAdmission=@{state='enabled';kind='msvc-c-compile';compiler=$clIdentity;linker=$linkIdentity;helpers=@($helperIdentity)}
+  $admittedHelperPaths=@($helperIdentity.path)
+ }catch{$admittedHelperPaths=@();$helperAdmission=@{state='disabled';reason=$_.Exception.Message;helpers=@()}}
+}elseif($requestData.cargoBuild -eq $true){
  try{
   if([IO.Path]::GetFileName($binary) -ine 'cargo.exe' -or @('build','check','test','clippy') -notcontains $requestData.args[0]){throw 'owned.not_cargo_build'}
   $policyPath=Join-Path $PSScriptRoot 'rust-build-auxiliary.json';$policyRaw=[IO.File]::ReadAllBytes($policyPath)

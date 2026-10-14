@@ -60,10 +60,13 @@ test('missing pinned compiler or SDK never falls back and duplicate installation
   assert.throws(() => selectCompiler([first, second], fixed, env, path => files.has(path)), /msvc_ambiguous/);
   assert.equal(selectCompiler([first, first], fixed, env, path => files.has(path)).version, fixed.version);
 });
-test('luac builds retain ordinary Job admission and never borrow Cargo helper approval', () => {
+test('luac builds request only exact MSVC admission and never borrow Cargo helper approval', () => {
   const source = readFileSync(new URL('./luac.mjs', import.meta.url), 'utf8');
   assert(source.includes('ownedSpawnSync(command, args'));
-  assert(source.includes('cargoBuild: false'));
+  assert(source.includes('cargoBuild: false, msvcCompile'));
+  assert(source.includes('env = process.env, msvcCompile = false'));
+  assert(source.includes('run(toolchain.executable, args, sourceRoot, toolchain.env, true)'));
+  assert.equal((source.match(/toolchain\.env, true/g)??[]).length,1);
   assert(!source.includes('cargoBuild: true'));
   assert(!source.includes("'-latest'"));
 });

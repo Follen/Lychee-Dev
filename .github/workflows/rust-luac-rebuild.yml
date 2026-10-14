@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: '24'
       - name: Test reconstruction and packaging admission
-        run: node --test tools/luac.test.mjs tools/rust-package-smoke.test.mjs
+        run: node --test tools/luac.test.mjs tools/rust-package-smoke.test.mjs tools/rust-owned-process.test.mjs
       - name: First fixed official source build
         id: first
         run: node tools/luac.mjs build .tmp/ci-luac-a --msvc-version 14.51.36231 --sdk-version 10.0.26100.0

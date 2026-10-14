@@ -89,11 +89,11 @@ export async function buildLuac(output, { sourceArchive, writeIdentity = false, 
   const selected = fixedToolchain(requested ?? JSON.parse(pinnedBytes).toolchain);
   const job = beginScratch(repository, 'luac-build', { command: process.argv, inputs: { sourceSHA256: luaSource.sha256, priorIdentitySHA256: hash(pinnedBytes), toolchain: selected }, admissionOptions: { requiredBytes: 32 << 20, scratchReserveBytes: 32 << 20 } });
   const logs = []; let state = 'failed', handlesReaped = true, sequence = 0;
-  function run(command, args, cwd, env = process.env) {
+  function run(command, args, cwd, env = process.env, msvcCompile = false) {
     handlesReaped = false;
-    // This is an ordinary compiler Job. Never label cl.exe as a Cargo build to
-    // borrow Cargo's reviewed helper admission. Any surviving helper fails.
-    const result = ownedSpawnSync(command, args, { cwd, env, evidence: job.evidence, timeout: 120000, cargoBuild: false });
+    // Only the exact reviewed cl.exe compile below requests the separate MSVC
+    // admission. Never borrow Cargo approval; any unknown helper still fails.
+    const result = ownedSpawnSync(command, args, { cwd, env, evidence: job.evidence, timeout: 120000, cargoBuild: false, msvcCompile });
     handlesReaped = result.handlesReaped === true; logs.push(...result.logs);
     const record = join(job.evidence, `command-${sequence++}.json`);
     writeFileSync(record, JSON.stringify({ command, args, cwd, exit: result.status, error: result.error?.message, handlesReaped }, null, 2) + '\n'); logs.push(record);
@@ -113,7 +113,7 @@ export async function buildLuac(output, { sourceArchive, writeIdentity = false, 
     const executable = join(root, 'luac.exe');
     const arguments_ = ['/Bv', '/O2', '/MT', '/Brepro', '/TC', '/link', '/Brepro', '/INCREMENTAL:NO', '/OPT:REF', '/OPT:ICF'];
     const args = ['/nologo', ...arguments_.slice(0, 5), `/Fe:${executable}`, ...sources, ...arguments_.slice(5)];
-    const compilerVersion = run(toolchain.executable, args, sourceRoot, toolchain.env);
+    const compilerVersion = run(toolchain.executable, args, sourceRoot, toolchain.env, true);
     for (const tool of toolFiles) if (hash(regularBytes(tool.path, 64 << 20)) !== tool.sha256) throw new Error('luac.toolchain_changed');
     const bytes = regularBytes(executable, 16 << 20), imports = verifySystemImports(bytes), version = run(executable, ['-v'], root).trim();
     if (!version.startsWith('Lua 5.1.5')) throw new Error('luac.runtime_version');

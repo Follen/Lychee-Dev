@@ -324,6 +324,14 @@ Delivery两处安装/更新门槛改正式SlotRuntime，保留release清单/hash
 
 luac首轮真实Windows run38632703141/artifact11927375965（ZIP SHA256 8082b69a0e80578918c51cc5ccb825b0c9c52919580f782dd81cdc67dd674a53）13工具测试通过，cl自身exit0，但vctip子进程未自然退出，普通Job严格回收并失败。已保留完整证据，第二构建/7例实际检查未运行；将按已验证cl与helper精确身份作最小独立支持，不冒用cargoBuild或将失败产物更新pin。
 
+### 生产只读 Mailbox 与 addon 真实 Windows 结果、cl 最小支持
+
+固定8c9199a/run38630824020产品job116082486009全部成功：157项Rust通过、2个人工条件ignore，其中正式codec25、生产mailbox lookup19、binding观察34、combined addon真实文件事务1。all-target、sealed CLI及真实doctor均通过；EXE SHA256 fce18cb538a3e9745be02c55276c7e76a94700e3aec0730eb994c061c3b849f9。artifact11926507844 ZIP SHA256 25917743512d27e366b2afd19b2141126e6c242b518b50249c18a21782855d24已下载，25个产品owned-process成功receipt逐项核root/tree/handles/readers回收、active0。该树未含typed A/B/C或全仓runner，不把它们算通过。
+
+724edd8的独立Go日志oracle run38633376924/job116090323945实际使用Go1.27.1成功生成并比对；artifact11927796307 ZIP SHA256 57077b2ebaf232b1b855fde0a2317c4dd48fc7a133c353e5fee87302a6e43bee下载后再次核JSON值与黄金一致。此为真实Go黄金证据，Rust journal运行仍待队列。
+
+luac失败后的只读run38633376782核定cl/link精确文件与有效Microsoft签名。新增独立msvcCompile准入与cargoBuild互斥，固定cl/link/helper身份并持文件锁，只接受本次固定C编译shape，拒绝response/替换工具/隐式参数；仅root成功且剩余均为准确已核本Job helper才允许定向退休。原Cargo分支、既有Cargo/helper pins与C# Job/退休核心逐字节不变，未知子进程仍失败。隔离stage纯Node10通过/9Windows skip，独立静态审核关闭；真实cl双重建及新Windows负例尚NOT_RUN。本地冻结support旧字节不用于证明新树测试，通过远端精确候选CI验证。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
