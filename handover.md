@@ -354,6 +354,14 @@ Windows产品CI现将在新pin下重新编译CLI，重建luac并验证精确当�
 
 将已审的SlotEnvelope、ExpectedEnvelope、token/checksum、ContractError与Lua payload生成器唯一实现抽取至lycheedev_core::mailbox，Live原公开路径全部re-export同类型/函数，原生memory reader与状态机路由留Live。Delivery将依core复用，不形成delivery→live依赖或复制第二种信封。独立复核迁移实现逐字一致、JSON/default/omitempty/Lua转义与边界无变化，7个core加1个Live身份fixture已写，现接独立Windows测试组；运行NOT_RUN。
 
+### 全仓静态 Source 首次真实验收与恢复状态机 C
+
+独立验收71180b3/run38632871866产品job116090164748：全部4049文件/4036文档/32,269,051B逐一SHA256、Git blob SHA1、精确commit/tree及61日志hash一致；25次实际CLI的21验收项通过。证据包含Lua 97/2、API query10/inspect11原文位置、4775候选两页连续无重复、三种exit2错误及恢复、三条静态callsite/context原文和合法UTF8中文无结果。artifact11927883033 ZIP SHA256 41fd9320ed43720d1724b75582e74ed2deff26f405bf9c113018bb2fcea545da，EXE a8d8ffe70fb0790d074f2f2e80b8bfd1b75c580e2ff6cf9e2bccee26893bf80f。cold index87.488s/warm2.607s、首GetAction6.562s/复查1.121s、static refs5.140s/context7.518s为各一次实际命令样本；sync2.153s混合输入准备独列。没有同机Go差分、20次重复或70%性能结论，也不覆盖后续计划/语义/session新代码。
+
+C新增持久预算、reload/continuation、candidate bind→supersede、opaque unknown不重放、输入时间一次恢复、报告与cleanup分离及proof-gated runtime retirement。独立审核修复自动reload与原operation预算分离造成的rollback/exhaustion丢失，并在加载/保存/观察时合并原deadline/maxObserved/sticky事实。取消原因曾在延迟flush后误判，现采用core opt-in真实单调取消时间戳与固定deadline裁决首次原因；祖先/root-to-leaf锁顺序无环、无后台线程，独立flush用scope身份区分。raw AtomicBool保留旧兼容但不能伪称可证明先后，C输入前拒绝该模式。
+
+38项C与5项新core测试、原测试均已写，静态独审关闭所查finding，运行NOT_RUN，现导出并接Windows组。生产console/Invocation仍需tracked取消接线，native backend只读token边界、durable journal writer、正式Delivery发布及默认host输入仍未接通，不能据此称完整Live可用或启动四阶段最终审计。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

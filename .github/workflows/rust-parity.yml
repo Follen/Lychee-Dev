@@ -151,6 +151,9 @@ jobs:
       - name: Run Source query admission unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-query-default --one-shot -- test --locked --offline -p lycheedev-source --lib public_query_defaults -j 1
+      - name: Run ordered cancellation and deadline cause fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-core-control --one-shot -- test --locked --offline -p lycheedev-core --lib control::tests -j 1
       - name: Run shared Core mailbox envelope and payload fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-core-mailbox --one-shot -- test --locked --offline -p lycheedev-core --test mailbox_contract -j 1

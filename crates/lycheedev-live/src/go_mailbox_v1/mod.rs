@@ -6,6 +6,9 @@
 pub mod driver;
 pub mod slot_allocation;
 pub mod transactions;
+pub mod recovery;
+pub mod reload;
+pub mod runtime_retirement;
 pub mod journal;
 pub mod observations;
 pub mod state;

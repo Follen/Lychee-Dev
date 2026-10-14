@@ -382,6 +382,9 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         self.save(control, "input_intent")?;
         self.check(control)?;
         let dispatch = self.backend.input(control, &action);
+        // Observe the original stop before the independent fact flush can
+        // cross its deadline. Cancellation remains cancellation afterward.
+        let ordering_error = self.capture_invocation_stop(control).err();
         let (outcome, failure) = if dispatch.outcome.validate().is_err() {
             (
                 InputOutcome {
@@ -395,6 +398,11 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             )
         } else {
             (dispatch.outcome, dispatch.error)
+        };
+        let failure = match (failure, ordering_error) {
+            (Some(a), Some(b)) => Some(join_errors(a, b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
         };
         self.state.input.as_mut().unwrap().outcome = Some(outcome.clone());
         // Cancellation stops new input, not the bounded persistence of facts.

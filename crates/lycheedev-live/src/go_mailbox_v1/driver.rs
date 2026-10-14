@@ -7,6 +7,7 @@ use super::observations::{
     Backend, ChannelError, ChannelResult, Observation, ObservationKind, ObservationQuery,
     check_control,
 };
+use super::recovery::{InvocationStop, synchronize_automatic_budget};
 use super::slot_allocation::operation_needs_reload;
 use super::state::{
     Blocker, CHANNEL_SCHEMA, CleanupMethod, DEFAULT_CONNECT_MILLIS, DEFAULT_RECOVERY_MILLIS,
@@ -14,7 +15,8 @@ use super::state::{
     ReloadPhase, SlotEnvelope, State, validate_request,
 };
 use super::{ContractError, Identity, MAX_PAYLOAD, SCHEMA, checksum, parse_token};
-use lycheedev_core::control::OperationControl;
+use lycheedev_core::control::{OperationControl, StopCause};
+use std::cell::Cell;
 
 /// Wall-clock Unix milliseconds for durable budgets and the release wait. INPUT
 /// uses same-machine uptime supplied by its backend, never this wall clock.
@@ -41,6 +43,8 @@ pub struct Driver<B, J, C, T> {
     // effect may proceed, but a fresh bounded save may persist known facts and
     // sticky budget exhaustion. Never clear an ambiguous append failure here.
     pub(super) save_pending: bool,
+    pub(super) invocation_control: Option<OperationControl>,
+    pub(super) invocation_stop: Cell<Option<InvocationStop>>,
 }
 
 /// Witness the exact boundary rather than guessing from an error code: a
@@ -128,13 +132,14 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
     /// The caller must first verify and hydrate the complete journal/history.
     /// This constructor never invents a new identity, request, nonce or deadline.
     pub fn from_state(
-        state: State,
+        mut state: State,
         backend: B,
         journal: J,
         clock: C,
         tokens: T,
     ) -> ChannelResult<Self> {
         state.validate()?;
+        synchronize_automatic_budget(&mut state)?;
         Ok(Self {
             state,
             backend,
@@ -144,14 +149,39 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             waiting: String::new(),
             journal_failed: false,
             save_pending: false,
+            invocation_control: None,
+            invocation_stop: Cell::new(None),
         })
     }
 
     pub(crate) fn check(&self, control: &OperationControl) -> ChannelResult<()> {
+        self.capture_invocation_stop(control)?;
         if self.journal_failed || self.save_pending {
             return Err(error("live.channel_journal_reload_required"));
         }
         check_control(control)
+    }
+
+    /// Ask the ordered control for its immutable first cause, rather than
+    /// infer event order from a token sampled after a blocked backend returns.
+    pub(super) fn capture_invocation_stop(&self, control: &OperationControl) -> ChannelResult<()> {
+        if self
+            .invocation_control
+            .as_ref()
+            .is_none_or(|active| !active.same_scope(control))
+        {
+            return Ok(());
+        }
+        let cause = control
+            .stop_cause()
+            .map_err(|_| error("live.channel_cancellation_order_unavailable"))?;
+        if self.invocation_stop.get().is_none() {
+            self.invocation_stop.set(cause.map(|cause| match cause {
+                StopCause::Cancelled => InvocationStop::Cancelled,
+                StopCause::DeadlineExceeded => InvocationStop::DeadlineExceeded,
+            }));
+        }
+        Ok(())
     }
 
     pub(crate) fn next_token(&mut self) -> ChannelResult<String> {
@@ -165,12 +195,18 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             return Err(error("live.channel_journal_reload_required"));
         }
         self.save_pending = true;
+        self.capture_invocation_stop(control)?;
+        if let Err(err) = synchronize_automatic_budget(&mut self.state) {
+            self.journal_failed = true;
+            return Err(err);
+        }
         let mut entered = false;
         let mut journal = AppendWitness {
             inner: &mut self.journal,
             entered: &mut entered,
         };
         let result = save_state(&mut journal, control, &mut self.state, event);
+        let observed = self.capture_invocation_stop(control);
         match &result {
             Ok(()) => self.save_pending = false,
             Err(ChannelError::Cancelled | ChannelError::DeadlineExceeded) if !entered => {
@@ -179,7 +215,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             }
             Err(_) => self.journal_failed = true,
         }
-        result
+        super::recovery::join_result(result, observed)
     }
 
     pub(crate) fn checkpoint(&mut self, control: &OperationControl) -> ChannelResult<()> {
