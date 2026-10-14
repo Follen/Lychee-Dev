@@ -13,9 +13,9 @@
 - [x] 16项公开LuaLS/API/DBD/CascLib输入已在a60e294f原生全部执行通过；当前20skip为9helper入口与11实际可选环境/材料项。
 - [x] 更正WGC验证义务：现行产品无捕获入口，旧SDK失败不再列用户待测；历史证据保留，删除无消费者代码不等于修好截图。
 - [x] R17-01主Skill与Source规则已统一：固定Source优先、空结果自查、禁止猜raw路径、真实缺口/明确外搜例外；合同检查和R18独立17场景复核通过。规范复核不等于实际模型重放。
-- [ ] R20现场专项：旧3.1.2原包的唯一根因仍未确认。当前匹配500槽协议实机已定位到禁用槽导致未Receive，以及空回执表命名节点的稳定区域拒绝；启用槽后bind及完整请求通过。首发读取诊断已实现，公开map固定元数据键和doctor诊断修复已离线通过，整合部署复验待完成；不把当前观察倒填旧原包证据。
+- [x] R20当前协议现场专项：已定位禁用槽导致未Receive，以及空回执表命名节点的稳定区域拒绝。e17f0759完成首发诊断、公开map固定元数据键及doctor诊断；同进程新runtime的无输入空回执对照由失败转为完整0记录，bind/报告/release/disconnect通过。旧3.1.2原包的唯一根因仍未知，不将当前结果倒填旧证据。
 - [x] 用户追加高风险覆盖补强已交付：数据保全、非幂等恢复、取消/事务和并发边界均有独立触发与负对照，当前Windows正式回归通过，未为覆盖数字改产品合同。
-- [ ] 完成本轮7项实机的最终整合：Retail12.1.0.69933已通过Trace/Objects真实页面回调、用户实际战斗与按键、数值往返、running原请求resume、bridge off/on及保存off重载、bind回执与新鲜替代runtime退役。报告已verified/released、当前两CON均closed；默认option在新加载运行时与修复后空map复验尚待最终部署。范围与限制见 [handover.md](handover.md#待实机验证)。
+- [x] 完成本轮7项实机整合：Retail12.1.0.69933通过Trace/Objects真实页面回调、用户实际战斗与按键、数值往返、running原请求resume、bridge off/on及保存off重载、默认option重新加载、bind回执与新鲜替代runtime退役。e17f0759修复后空map和完整交易复验通过；报告verified/released、本轮三CON均closed、doctor全绿、0预约。范围与限制见 [handover.md](handover.md#7项实机结果)。
 - [ ] 补齐七产品的干净首次安装、重新登录和完整升级实机矩阵。
 - [ ] 补齐战斗、受限编辑框和最小化窗口等真实阻塞场景；现有离线测试不能替代这些验收。
 - [ ] 获得发布授权后，更新 3.2.0 版本和渠道记录，完成 CI、打包、隔离安装、registry 回读与 GitHub Release。

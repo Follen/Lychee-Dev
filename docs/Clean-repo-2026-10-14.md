@@ -2,6 +2,8 @@
 
 本文件记录审计基线、改进清单及实施状态。日期按 Asia/Shanghai。下方审计结论对应原提交；实施结果单独记录，未验证事项不视为完成。
 
+2026-10-15最新状态：R29已完成本轮7项Retail实机整合及当前协议连接故障修复，产品提交e17f0759；结果和限制见文末R29及[当前交接](../handover.md#7项实机结果)。前文“待实机”保留各轮当时状态，不作为当前待办。
+
 修复后追加审计已完成：三名 GPT-6.1-sol、xhigh 连续执行两轮全仓审计，第二轮轮换分区并交叉复核。新增 13 项确认问题（高 1、中 11、低 1），另保留 3 项候选；均追加在文末。追加审计阶段只确认问题；本轮已完成这 13 项代码修复并加入正式回归，当前离线验证、Windows CI 和待实机项分别记录在各条目及文末。前一批 42 项修复保持基线，不重复计数。
 
 交接更新：当前代码基线及本文已按用户授权提交、推送到 `codex/fix-3.2.0`，交接 PR 为 [#13 · fix-3.2.0（草稿）](https://github.com/Follen/Lychee-Dev/pull/13)。当前分工、待办和验证边界统一见 [handover.md](../handover.md)；本文保留各阶段的审计和实施证据，PR 提交不代表新发现的问题已修复。
@@ -1633,9 +1635,10 @@ R15独立复审完成：SDK header/IID、3660-byte ABI、restricted-error时机�
 | --- | --- | --- |
 | R29-01 | 已发布200槽identity.v2/hybrid.v2被500槽字段校验提前拒绝，首次激活不能进入手动重载等待。仅将结构、release和runtime均有效的已知200槽身份分类为不兼容旧生产端 | 正式正反回归通过；同一原CON由identity_record_invalid转为waiting_manual_reload，未发送输入，等待不消耗业务预算；旧身份仍不能授权输入 |
 | R29-02 | Slot 01被角色配置禁用，INPUT记录load_failed且未Receive，doctor却因当前INPUT ready显示健康。保留LoadAddOn的DISABLED为slot_addon_disabled，并让doctor显示最近失败回调 | 实机GetAddOnInfo和INPUT互证禁用；用户用角色GUID启用500槽并SaveAddOns/reload后bind成功。修复后诊断文案已离线验证，未为文案重新禁用客户端槽 |
-| R29-03 | 当前新运行时空receipts表的命名查询在entry.node处遭稳定区域准入拒绝。公开receipts/bodies保留固定schema键，使无业务记录时仍有普通hash；私有map、token键和记录语义不变 | 无owner、NextSlot=1的新运行时，无槽发布/按键的只读查询仍复现：56字节请求、0返回、MEM_MAPPED/COMMIT、guard稳定、2161B/116calls。正式Lua/Go回归通过，修复后同条件实机对照待完成 |
+| R29-03 | 当前新运行时空receipts表的命名查询在entry.node处遭稳定区域准入拒绝。公开receipts/bodies保留固定schema键，使无业务记录时仍有普通hash；私有map、token键和记录语义不变 | 无owner、NextSlot=1的新运行时，无槽发布/按键的只读查询复现：56字节请求、0返回、MEM_MAPPED/COMMIT、guard稳定、2161B/116calls。修复后同进程新runtime、同条件/同helper为2236B/123calls、完整0记录、无首发失败；未放宽区域准入 |
 
 - 实施R28提出的有界首发读取诊断：固定逻辑路径、请求/返回长度、已有VirtualQueryEx证据、是否实际读取及guard复核摘要，经Native.Find原有scan保存。没有新增探测读取、私有堆扫描、区域放宽、输入许可或原始地址/内存输出；Windows自有子进程及fixture覆盖稳定失败、变化、复核失败和隐私边界。旧3.1.2原ZIP缺失的字段不能由当前结果补写，仍不认定其唯一根因。
 - 当前7项结果：Trace和Objects真实页面回调通过；用户实际战斗确认拾取器消失且F/Enter/Esc正常，报告亦确认dock/键盘脚本关闭；精度数值4项往返通过；异步请求running后用原CON/request完成；bridge保存off后重载无RuntimePublication，手动on恢复；bind成功及新鲜替代runtime退役通过。报告均verified/released，成功CON正常disconnect，两CON均closed、无预约；最后的手动reload已销毁测试hook/临时快照。
 - 本轮build/vet与完整Lua必需Go套件通过：本地Windows/amd64、Go1.27.1、Lua5.1.5，`go test -json -p 2 -parallel 4 -count=1 -timeout=20m ./...`退出0，2886 test/subtest事件pass（2620叶节点）、0fail、42skip、无未完成测试；32测试包pass，3包无测试/整体skip。skip包含9个helper、缺少公开/原始资料或真实LuaLS集成条件及宿主符号链接权限，不借旧CI17skip口径补算。此前为整合新修复中止的运行不计通过；版本检查与diff检查通过。
-- 尚待新加载运行时默认option、修复版空表同条件对照及完整交易整合。最终代码提交和部署结果在完成后更新；不把本次Retail检查扩大成七产品完整矩阵。
+- 产品代码提交`e17f0759f9145383fdbb67b2ef6ecd021aa4802f`（tree `0b7948d0ede0abafa830ec8086f5a6b81d78d304`），本地CLI为该提交且workspaceDirty=false；78项开发资源经受管update安装，用户清除显式bridge开关后reload，status截图enabled=true，新runtime可读。空表同条件对照通过后，新CON的bind→prepare→commit→报告→confirm/release→disconnect全部通过，4项数值再验证一致，游戏内两map的schema键存在。
+- 7项已按handover范围完成：两成功连接共28次输入交换各提交一次，后续采样比恢复上界最小分别257ms和332ms；异步原请求resume及reload后独立runtime通过。最终三CON均closed、报告verified/released、doctor全绿、0预约，测试hook/快照已由reload销毁。没有制造真实崩溃或缺失outcome，没有清空全账户配置；这些及七产品完整安装/登录/升级矩阵不扩大为本次通过。远端新head CI另记，不用本地结果代替。
