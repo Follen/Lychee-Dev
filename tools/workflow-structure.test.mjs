@@ -121,3 +121,29 @@ test('every windows job normalizes TMP before any test runs', () => {
     }
   }
 });
+
+test('PR CI prepares pinned integration inputs before its single measured suite and rejects missing passes', () => {
+  const contract = ci.slice(ci.indexOf('  windows-contract:\n'), ci.indexOf('  windows-process:\n'));
+  const prepare = contract.indexOf('node tools/ci-inputs.mjs prepare');
+  const suite = contract.indexOf("$command = @('test', '-json'");
+  const verify = contract.indexOf('node tools/ci-inputs.mjs verify --events $events');
+  assert.ok(prepare > 0 && prepare < suite && suite < verify);
+  assert.equal((contract.match(/-coverprofile=\$profile/g) ?? []).length, 1);
+  assert.match(contract, /\$coverageExit = \$LASTEXITCODE/);
+  assert.match(contract, /\$LASTEXITCODE -ne 0 -or \$coverageExit -ne 0 -or \$testExit -ne 0/);
+  assert.match(contract, /name: windows-integration-inputs/);
+  assert.match(contract, /required-integrations\.json/);
+});
+
+test('WGC probe is bounded to its own fixture and failures remain visible with raw evidence', () => {
+  const probe = ci.slice(ci.indexOf('      - name: Native WGC capability'), ci.indexOf('      - name: Native doctor volume-boundary'));
+  assert.match(probe, /LYCHEEDEV_TEST_DESKTOP: '1'/);
+  assert.equal((ci.match(/LYCHEEDEV_TEST_DESKTOP/g) ?? []).length, 1);
+  assert.doesNotMatch(probe, /continue-on-error|LYCHEEDEV_TEST_CAPTURE_PID|LYCHEEDEV_LIVE/);
+  assert.match(probe, /-count=1 -timeout=1m \.\/internal\/desktop -run '\^TestWGCLifetimeBetweenSessions\$'/);
+  assert.match(probe, /\$testExit -eq 0 -and \$passed -and \$packagePassed -and -not \$rejected/);
+  assert.match(probe, /throw 'native WGC probe did not pass/);
+  assert.match(probe, /exitCode = \$testExit/);
+  assert.match(probe, /name: windows-wgc-probe/);
+  assert.match(probe, /steps\.wgc-probe\.outcome != 'skipped'/);
+});

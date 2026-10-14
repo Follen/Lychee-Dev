@@ -29,6 +29,10 @@ go test -p=2 -parallel=4 -count=1 -timeout=20m ./...
 
 Windows CI 在同一次完整 Go 套件中收集 atomic 语句覆盖，不另跑一套重复测试；计量包为 `cmd/...` 和 `internal/...`（不含 `internal/testkit`），测试选择仍为 `./...`。`windows-go-coverage` artifact 保留原始 coverprofile、JSON 测试事件、准确 checkout commit/tree、PR head、工具链/平台/命令及加权汇总。`tools/go-coverage.mjs` 拒绝缺失的包终止证据，失败/skip 不冒充测试通过；PR 的 merge checkout 与分支 head 分别记录。Go 比例不代表 Lua/Node 或业务场景/实机覆盖，也不设任意比例门槛。
 
+PR 的 Windows contract 作业通过 `tools/ci-inputs.mjs prepare` 准备公开固定输入：复用现有 LuaLS archive 校验、开发 stage/原生 binary 身份验证，固定 Gethe Retail/Forever 源码与 API 文档、生产定义生成器及既有 CascLib oracle builder，并启用固定 WoWDBDefs 测试。准备结果通过 GitHub 环境文件供同一次完整套件消费；`verify` 必须看到全部指定顶层及子测试实际通过，不能用父节点 pass 掩盖子项 skip。`windows-integration-inputs` 保存 commit/hash、compiler、release 与生成覆盖说明，生成器的 partial-type 覆盖仍如实保留。
+
+WGC 宿主探针单独运行现有自建窗口 lifetime 测试，环境变量只作用于该步骤，不选取用户或游戏进程。`windows-wgc-probe` 保存原始事件、退出码及结果；失败保持可见，先区分宿主图形能力与产品回归。真实客户端、原 runtime dump、固定安装/图像样本和8.3卷能力仍各自记录，不能仅为消除 skip 修改宿主策略或替换原始证据。
+
 版本、Skill、构建工具或启动器有相关变化时执行对应检查：
 
 ```powershell

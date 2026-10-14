@@ -4,7 +4,8 @@
 
 ## 分支、授权与状态
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)，`codex/fix-3.2.0` → `main`，保持草稿。已推送首批产品修复 `81ccdd5` 和文档 `f7f2239`；R5 `2660a4ef` Windows CI 全部通过；R6 `9a02522f` 六个 CI 作业通过；R8 已推送 `7566493c`（tree `e827851d`），[当前 Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38544503854) contract及双真实卷修复验证已通过，阶段Go语句覆盖73.9475%，六作业均success；R7 曾因 R4-C01 双卷探针失败，保留原始失败证据。
+- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)，`codex/fix-3.2.0` → `main`，保持草稿。最新已推送R9 `ef9b0113`（tree `b05c5ce7`）；[该head Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38547831499)六作业全部通过，阶段Go覆盖74.2544%。此前R8 `7566493c`六作业全通过，阶段Go覆盖73.9475%，不能外推为新head结果。
+- [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并；必要Definitions预算修复及正式回归在`ef9b0113`。旧地区槽位移植违反现行legacy合同，未移植，不是整批cherry-pick。
 - R3/R4 的 13 项及 R5 的 5 项已交付；R6 又确认并实施 4 项新事项。R4-01 crash 分支和 D-06 清理残留沿用原 ID，不重复计数。前一批 42 项保留为基线，候选不当作确认问题。
 - 追加任务：至少 R5/R6/R7 三轮，各由不同的新审计者检查架构、bug、死代码、Skill 编排及有明确收益、可验证的架构优化；持续审计→修复→验证→推送，直到独立复审不再发现可离线修复项。仅实机的新问题记录复验，不代替用户操作。
 - 本任务允许提交、推送同一分支及更新 PR，阶段性进展同时汇报。未连接用户电脑/游戏、未发键或部署游戏目录；不合并、不发布。只使用仓库 handover.md，不使用 handoff Skill。
@@ -21,7 +22,7 @@
 | PR12 必要移植 | 仅移植冷读预算与正式回归；槽位旧修复与现行legacy兼容合同冲突，不移植 | 协调者：definitions两文件；新增六组CDN/远端测试锁定现有独立beta/legacy身份 |
 | 独立审计 / 文档 | R9与99次CLI独立Skill试用完成；R10已纠正非必要槽位移植；898文件修正树整测2506通过/3既有Linux失败/28跳过，R10已完成且该范围无其他可操作离线修复 | 审计者只读；协调者独占审计、handover、todo、Changelog |
 
-R8 的普通 Hotfix/资产依赖、Bundle取消、R4-C01宿主修复及两处冗余输入清理均已随 `7566493c` 推送。当前CI contract/addon/package/process已通过，2747 pass/0 fail/35 skip，race及汇总也已通过；R9尚未发布，旧绿色结果不替代当前验证。正式测试不依赖临时审计 fixture。
+R8 的普通 Hotfix/资产依赖、Bundle取消、R4-C01宿主修复及两处冗余输入清理均已随 `7566493c` 推送。当前CI contract/addon/package/process已通过，2747 pass/0 fail/35 skip，race及汇总也已通过；R9已发布并获该head原生六作业通过，旧绿色结果不替代当前验证。正式测试不依赖临时审计 fixture。
 
 ## 实际验证与限制
 
@@ -30,7 +31,7 @@ R8 的普通 Hotfix/资产依赖、Bundle取消、R4-C01宿主修复及两处冗
 - R8 与两处冗余输入清理后的完整 Lua 必需命令 `go test -p=2 -parallel=4 -count=1 -timeout=20m ./...` 实际执行：30 测试包通过、command 1 包仅 3 个既有 Linux 平台失败、4 包无测试；2484 test/subtest pass、3 fail、28 skip。三个失败是 Native Live 参数检查两项和非 Windows LuaLS broker 的 Source prune，基线已复现；不称 Linux 全套通过。
 - R6 已完成 [`9a02522f` 的 Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38536137573) 六作业全部 success：Lua 必需完整 Go、race、process、addon、真实 tgz/隔离安装、汇总。R7 `f84cf0f4` contract 因 R4-C01 双卷探针失败，同卷通过；process/addon/package 通过；race 同样仅因 R4-C01 失败，无 detector 报告。R8 `7566493c` contract已通过，真实D/C双卷默认/显式archive及同卷对照全通过，PID=0。
 - R8阶段覆盖：Windows/amd64 Go1.27.1、Lua必需，2747 pass/0 fail/35 skip；23976/32423 Go产品语句=73.9475%。2747为事件pass、2503为叶节点pass，均非业务场景数。35skip中8helper有父测试通过，27真未跑，其中16项公开固定输入已安排补齐。实际merge checkout `d5f0d7b` 的tree `e827851d` 与PR head相同；[原始profile/events/identity/summary](https://github.com/Follen/Lychee-Dev/actions/runs/38544503854/artifacts/11883583264)。不同宿主、可选输入和helper入口skip不计通过，不代表业务/Lua/Node/游戏百分比。
-- R9修正树build/vet、19个受影响包及定向race×3通过；完整Lua必需套件2506 pass/3既有Linux fail/28 skip，30包通过、command1包失败、4包无测试。新Windows CI待本批推送。
+- R9修正树build/vet、19个受影响包及定向race×3通过；完整Lua必需套件2506 pass/3既有Linux fail/28 skip，30包通过、command1包失败、4包无测试。Windows CI38547831499六作业全部通过，2769事件pass/0fail/35skip，23852/32122语句=74.2544%；35skip名称与R8相同，16项输入补齐批次尚未执行原生。
 - R8 Node tools 全套76通过/6个Windows专属skip、0失败；覆盖率汇总10项通过，真实历史JSON兼容性解析无误。import 合同、文档本地引用、diff 检查通过。版本/Skill/命令目录输入未变。R5/R6 的计量、旧代码负对照与额外容量 reload 计时 fixture 修正详见审计，不复制运行历史。
 - LuaLS/broker/固定API/DBD/CascLib共16个skip可准备公开固定输入，下一独立CI批次实施；WGC优先尝试CI自建窗口。安装图像/原runtime等真实资料及客户端条件仍单列，不都归为游戏限制。Windows 专属测试、交叉编译、缺环境 skip 与游戏验证分别记录，均不冒充当前通过。
 
@@ -64,7 +65,7 @@ R8 的普通 Hotfix/资产依赖、Bundle取消、R4-C01宿主修复及两处冗
 
 ## 下一步
 
-1. 跟进 `7566493c` 原生 CI，优先报告这个精确提交的阶段 Go 语句覆盖率与跨盘结果，不因 R9 新发现无限推迟计量。
-2. 推送已验证R9修复/PR12必要预算移植与当前文档；R10已完成。并行补齐coverage专项确认可公开准备的真实LuaLS/固定API/DBD/CascLib输入，下一批原生重测，不等用户游戏。
+1. `ef9b0113`原生六CI通过、74.2544%阶段覆盖率已交付；下一批16项公开输入/WGC宿主验证后重测，不将阶段值当最终业务覆盖。
+2. R9/必要PR12移植与文档已推送，R10已完成且本轮范围无其他可操作离线修复。当前独立CI准备组负责workflow及tools验证helper，16项公开LuaLS/API/DBD/CascLib输入准备已完成并冻结，固定文档/DBD本地通过；全新R11复审中，等待同PR推送后原生LuaLS/CascLib/WGC自建窗口验证；协调者独占文档。按新head重测，不等用户游戏。
 3. 冗余专项已清理两个重复输入；R9额外删除只服务退役解析器的测试，不删除仍有独立边界/故障/跨进程/平台价值的覆盖。阶段值73.9475%仅对应R8，最终修复后重测；业务场景单列。
 4. 暂存材料只在忽略的 `.tmp/pr13/`，任务结束后按已核实绝对路径清理本轮产物；不触碰用户项目、未解决恢复记录或保留的 Rust worktree。

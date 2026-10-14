@@ -97,6 +97,12 @@ jobs:
           name: windows-contract-lua51-report
           path: ${{ runner.temp }}/toolkit-lua51/build-report.json
           if-no-files-found: error
+      - name: Prepare fixed public integration inputs for the same full suite
+        id: integration-inputs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/ci-inputs.mjs prepare --out (Join-Path $env:RUNNER_TEMP 'toolkit-integration-inputs')
+          if ($LASTEXITCODE -ne 0) { throw 'pinned integration input preparation failed' }
       - name: Full Go suite with Lua 5.1 required (missing interpreter fails, never skips)
         id: go-suite
         env:
@@ -145,13 +151,64 @@ jobs:
             Get-Content $events -Tail 80
           }
           node tools/go-coverage.mjs --profile $profile --events $events --identity (Join-Path $report 'identity.json') --out (Join-Path $report 'summary.json')
-          if ($LASTEXITCODE -ne 0 -or $testExit -ne 0) { throw 'go test or coverage evidence failed' }
+          $coverageExit = $LASTEXITCODE
+          node tools/ci-inputs.mjs verify --events $events --out (Join-Path $report 'required-integrations.json')
+          if ($LASTEXITCODE -ne 0 -or $coverageExit -ne 0 -or $testExit -ne 0) { throw 'go test, coverage or required integration evidence failed' }
       - name: Preserve exact Go coverage evidence
         if: ${{ !cancelled() && steps.go-suite.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-go-coverage
           path: ${{ runner.temp }}/toolkit-go-coverage/
+          if-no-files-found: error
+      - name: Preserve pinned integration input identities
+        if: ${{ !cancelled() && steps.integration-inputs.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-integration-inputs
+          path: |
+            ${{ runner.temp }}/toolkit-integration-inputs/inputs.json
+            ${{ runner.temp }}/toolkit-integration-inputs/documentation-inputs.json
+            ${{ runner.temp }}/toolkit-integration-inputs/definitions/manifest.json
+            ${{ runner.temp }}/toolkit-integration-inputs/oracle/oracle-build.json
+            ${{ runner.temp }}/toolkit-integration-inputs/oracle/CascLib-LICENSE
+            ${{ runner.temp }}/toolkit-integration-inputs/release/release.json
+          if-no-files-found: error
+      - name: Native WGC capability and lifetime probe (test-owned window only)
+        id: wgc-probe
+        if: ${{ !cancelled() }}
+        env:
+          LYCHEEDEV_TEST_DESKTOP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $report = Join-Path $env:RUNNER_TEMP 'toolkit-wgc-probe'
+          New-Item -ItemType Directory -Force $report | Out-Null
+          $events = Join-Path $report 'go-test.jsonl'
+          go test -json -p=1 -parallel=1 -count=1 -timeout=1m ./internal/desktop -run '^TestWGCLifetimeBetweenSessions$' > $events 2> (Join-Path $report 'stderr.log')
+          $testExit = $LASTEXITCODE
+          $records = Get-Content $events | ForEach-Object { $_ | ConvertFrom-Json }
+          $passed = @($records | Where-Object { $_.Test -eq 'TestWGCLifetimeBetweenSessions' -and $_.Action -eq 'pass' }).Count -eq 1
+          $packagePassed = @($records | Where-Object { -not $_.Test -and $_.Action -eq 'pass' }).Count -eq 1
+          $rejected = @($records | Where-Object { $_.Action -eq 'fail' -or $_.Action -eq 'skip' }).Count -gt 0
+          $verified = $testExit -eq 0 -and $passed -and $packagePassed -and -not $rejected
+          [ordered]@{
+            scope = 'test-owned Win32 fixture; WGC session lifetime, no game or external PID'
+            commit = (git rev-parse HEAD).Trim()
+            exitCode = $testExit
+            state = $(if ($verified) { 'passed' } else { 'failed' })
+            note = 'A failure remains explicit; inspect raw events to distinguish host capability from a regression.'
+          } | ConvertTo-Json | Set-Content (Join-Path $report 'result.json')
+          if (-not $verified) {
+            Get-Content (Join-Path $report 'stderr.log')
+            Get-Content $events
+            throw 'native WGC probe did not pass; see windows-wgc-probe evidence'
+          }
+      - name: Preserve native WGC probe evidence
+        if: ${{ !cancelled() && steps.wgc-probe.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-wgc-probe
+          path: ${{ runner.temp }}/toolkit-wgc-probe/
           if-no-files-found: error
       - name: Native doctor volume-boundary evidence (disk fixture, PID zero)
         if: ${{ !cancelled() }}

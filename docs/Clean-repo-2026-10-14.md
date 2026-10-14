@@ -1249,3 +1249,22 @@ R9 主审已开始，产品/正式测试按固定835文件指纹复核；另有�
 | 1 | `TestInstallationLeaseShortPathSpelling`：runner卷禁用了8.3短文件名 | 不为减少skip修改宿主安全/卷策略，保留环境限制 |
 
 因此35项中8个是已被父测试执行的helper入口，27个是真正未跑的顶层或叶测试；其中16个可用公开固定依赖/源码补齐。覆盖率不是“合格阈值”：优先补真实LuaLS/broker取消/恢复/隔离路径（当前source_broker.go、session.go语句覆盖较低），再固定领域输入；不为百分比添加无价值重复测试。build-tag专项与主覆盖运行范围不同，主profile未加入casc_oracle tag，不冒称它已计入分母。下一批新CI结果与skip变化将按精确提交更新。
+
+
+R9修复及当前审计/交接/todo/Changelog已推送`ef9b0113e606db0fa6717f4203c93d6e11537216`（tree `b05c5ce71b114999bee7f8b6b1baf6448fac79c7`），[该head原生CI](https://github.com/Follen/Lychee-Dev/actions/runs/38547831499)进行中。PR12必要预算修复已从远端读取确认，PR12随后关闭、未合并；非必要地区槽位未移植。16项公开输入补齐是下一独立CI批次，尚未记作新增测试通过或新覆盖率。
+
+
+R9 `ef9b0113` 的Windows CI38547831499现六作业全部success。Go产品语句23852/32122=74.2544%，2769 test/subtest事件pass、0fail、35skip；skip名称与R8逐项相同。实际merge `5bae9e984a7f3212208c986039b2b6b621ac9a3e` 的tree `b05c5ce7`与PR head相同，[原始artifact](https://github.com/Follen/Lychee-Dev/actions/runs/38547831499/artifacts/11885855845)。这是16项输入补齐前的R9阶段测量，不把分母随代码增删变化当作业务覆盖已完善，也不冒用R8的叶节点数作为本次叶节点数。
+
+
+## R11：公开验证输入补齐与独立复审
+
+### R11-01 · 验证准备项 · 16个已有正式集成缺公开固定输入
+
+- 状态：准备实现与正式工具回归已完成，原生执行待本批新CI；不计作16个产品bug，不提前降低skip或提高覆盖率。
+- 根因证据为R8原始事件的确切skip原因及现有release流程：9项LuaLS/broker测试已经在发行CI要求实际通过，却未在PR完整套件选入其固定runtime/release；其余API文档/完整Retail/DBD/CascLib也有固定公开来源，不能误称必须等用户游戏。
+- 最小实施：现有完整instrumented Go运行前准备已有pins/checksums，复用live-stage、LuaLS完整性检查、native binary身份验证、生产environment.Build和既有CascLib builder；不新增第二套完整suite、不改发行策略/产品行为。验证15个现有顶层名称与必需子项（对应原16个skip叶/顶层事件），拒绝missing/skip/fail及缺package终止证据。WGC另跑一个自建窗口lifetime探针，失败显性并保留原始artifact，不自动把能力缺失计通过。
+- 固定材料：Gethe Retail `31c7f7b9cc79e56c986b365c06a6afbcf3c9177b`、Forever `4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069`，Unit文档沿既有SHA；WoWDBDefs `83057bdc0cbe13062850ebf8ad530031e128a1cd`；CascLib `38a34665624b8775bb875274b36191b21c38d97b`。gcc/g++ preflight记录版本，缺工具明确失败，不安装替代来源。
+- 已实际离线验证：固定文档Environment及Retail/Forever flow通过，固定DBD父测试与Map/SpellName/ChrClasses通过；生产生成器处理612文档/5873 mappings，保留真实partial-type覆盖receipt；build/vet及adapter vet通过。stage核对Windows PE、1285个resource hash和实际binary bytes/SHA/VCS身份，仅为构建形状，不计原生LuaLS通过。CascLib仅确认固定clean checkout与37个构建源码路径，不把Linux源码检查当Windowsoracle运行。
+- 新增/受影响工具Node全套实际82 pass、6个Windows专属skip、0fail；定向harness/workflow14项通过。旧R8原始35skip事件被新required-integration核验正确拒绝，不能用父pass掩盖未执行。
+- 当前901文件冻结aggregate `605dfe687ce6b6bcc4188e6322060b3e8f6b3afd310cd69ca3232ae198a0328c`，parentef9b0113；全新R11审计者独立检查该树，尚未出最终结论。后续新原生结果和skip变化按精确提交更新。
