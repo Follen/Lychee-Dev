@@ -584,6 +584,14 @@ r3另补正常open/bind错误和显式NativeReader finish/close的唯一process 
 
 明确新发现待修：Delivery PublicationLease在构造过程中取得维护锁后发生错误，及wait_lock成功后遇取消，仍可能仅Drop而不回传checked-close失败。backend只能显式关闭已经返回的lease，无法修未返回资源；此构造cleanup作为独立批处理，不能借本批审核关闭。完整CON/public CLI、activation/doctor与自有进程Lua端到端仍待接。
 
+### 公共JSON显式数字来源候选
+
+新增内部serde(skip) NumberLayout：未知Value默认保留现有token，不把所有decimal猜为float；仅typed生产者声明Binary64，Hotfix schema Float字段/数组明确标注，整数不经f64。Exact(JsonNumber)只接受完整有界JSON数值原token并核当前Value匹配，保留SQL等Go json.Number的-0/指数词法；Indexed用于异构行，SQL消费者另批复审。公共JSON/JSONL/text统一Go HTML不转义及U+2028/2029转义，布局不进archive/cache/journal身份。
+
+独审两P2已修并复审：Object默认required，只有合法Hotfix删除行fields显式optional；借用前缀避免布局/Exact深复制，同一不可变Value/layout及相同formatter先sink预检再直接输出，去掉整帧无限Vec、不自造更小输出cap。序列化失败不触输出；实际IO失败仍可能部分写入并exit5，不承诺OS原子写。两遍CPU成本须实际测量。
+
+最终6文件freeze SHA256 36e947e82c5c6c2e0fcbdd144755c2faee5f8aa5e12752bc78c93fd83c6c725d，嵌入r1性能值漂移已还原，能精确重建旧8c130952收据。独审24唯一测试声明/16固定Go引用核实，rustfmt/diff通过；全部Rust/Windows/性能NOT_RUN，CI独立core/CLI输出组与既有Hotfix组验证。该typed数值入口没有声称所有其他生产者和完整SQL已经对齐。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

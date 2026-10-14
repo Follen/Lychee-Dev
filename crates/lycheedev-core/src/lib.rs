@@ -12,6 +12,7 @@ pub mod installation_selection;
 pub mod mailbox;
 pub mod metadata;
 pub mod process;
+pub mod public_json;
 pub mod selection;
 pub mod storage;
 pub mod workspace;
@@ -130,6 +131,9 @@ impl Invocation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Outcome {
     pub data: Value,
+    /// Encoding-only typed provenance; never persisted in result artifacts.
+    #[serde(skip)]
+    pub public_numbers: public_json::NumberLayout,
     pub complete: bool,
     pub warnings: Vec<Value>,
     pub selection: Value,
@@ -141,6 +145,7 @@ impl Outcome {
     pub fn new(data: Value) -> Self {
         Self {
             data,
+            public_numbers: public_json::NumberLayout::Verbatim,
             complete: true,
             warnings: vec![],
             selection: json!({}),

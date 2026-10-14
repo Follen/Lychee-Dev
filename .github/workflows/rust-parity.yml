@@ -286,6 +286,18 @@ jobs:
       - name: Run immutable capture dependency transaction fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-capture-dependencies --one-shot -- test --locked --offline -p lycheedev-core --test capture_dependencies -j 1
+      - name: Run explicit public JSON numeric provenance fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-public-json --one-shot -- test --locked --offline -p lycheedev-core --lib public_json:: -j 1
+      - name: Run actual CLI public JSON envelope fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-cli-public-json --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::public_json -j 1
+      - name: Run public error and stream raw-number preservation
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-cli-public-raw --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::public_error_and_typed_stream -j 1
       - name: Run capture identity and Go consumer compatibility fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

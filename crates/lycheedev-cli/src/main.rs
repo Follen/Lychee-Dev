@@ -1136,24 +1136,23 @@ fn render_with_context(
     {
         value["context"]["timeoutSeconds"] = json!(seconds);
     }
+    use lycheedev_core::public_json::{self, NumberLayout};
+    let numbers = result.as_ref().map(|outcome| &outcome.public_numbers)
+        .unwrap_or(&NumberLayout::Verbatim);
     match format {
-        "json" => writeln!(out, "{value}")?,
+        "json" => public_json::write_line_at(out, &value, &["result"], numbers)?,
         "jsonl" => {
-            writeln!(
-                out,
-                "{}",
-                json!({"type":"begin","schema":"lycheedev.result.v1"})
-            )?;
+            public_json::write_line(out, &json!({"type":"begin","schema":"lycheedev.result.v1"}), &NumberLayout::Verbatim)?;
             match result {
                 Ok(outcome) => {
-                    writeln!(out, "{}", json!({"type":"record","result":outcome.data}))?;
-                    writeln!(out, "{}", json!({"type":"end","envelope":value}))?;
+                    public_json::write_line_at(out, &json!({"type":"record","result":outcome.data}), &["result"], numbers)?;
+                    public_json::write_line_at(out, &json!({"type":"end","envelope":value}), &["envelope", "result"], numbers)?;
                 }
-                Err(_) => writeln!(out, "{}", json!({"type":"error","envelope":value}))?,
+                Err(_) => public_json::write_line(out, &json!({"type":"error","envelope":value}), &NumberLayout::Verbatim)?,
             }
         }
         _ => match result {
-            Ok(outcome) => writeln!(out, "{}", serde_json::to_string_pretty(&outcome.data)?)?,
+            Ok(outcome) => public_json::write_pretty_line(out, &outcome.data, numbers)?,
             Err(error) => writeln!(out, "{error}")?,
         },
     }
@@ -1399,7 +1398,9 @@ struct StreamWriter<'a, W: Write> {
 impl<W: Write> StreamWriter<'_, W> {
     fn emit(&mut self, frame: &Value) -> Result<()> {
         self.yielded = true;
-        writeln!(self.out, "{frame}")?;
+        lycheedev_core::public_json::write_line(
+            self.out, frame, &lycheedev_core::public_json::NumberLayout::Verbatim,
+        )?;
         self.out.flush()?;
         Ok(())
     }
@@ -2526,6 +2527,69 @@ mod tests {
         assert_eq!(frames.len(), 3);
         assert_eq!(frames[2]["type"], "end");
         assert_eq!(frames[2]["envelope"]["result"]["complete"], false);
+    }
+    #[test]
+    fn public_json_numbers_follow_explicit_layout_in_all_success_formats() {
+        use lycheedev_core::public_json::NumberLayout;
+        let mut outcome = Outcome::new(serde_json::from_str(r#"{"f":[-0.0,1.0,1e21],"raw":9007199254740993.125,"wide":18446744073709551615,"text":"<>&\u2028\u2029"}"#).unwrap());
+        outcome.public_numbers = NumberLayout::field("f", NumberLayout::array(NumberLayout::Binary64));
+        let expected = r#""f":[-0,1,1e+21]"#;
+        for format in ["json", "jsonl", "text"] {
+            let mut out = Vec::new();
+            render(&mut out, format, &Ok(outcome.clone())).unwrap();
+            let text = String::from_utf8(out).unwrap();
+            assert!(text.ends_with('\n'));
+            assert!(text.contains("9007199254740993.125"));
+            assert!(text.contains("18446744073709551615"));
+            assert!(text.contains(r#"<>&\u2028\u2029"#));
+            if format == "text" {
+                assert!(text.contains("    -0,\n    1,\n    1e+21"));
+            } else {
+                assert_eq!(text.matches(expected).count(), if format == "jsonl" { 2 } else { 1 });
+                let frames: Vec<Value> = text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+                assert_eq!(frames.len(), if format == "jsonl" { 3 } else { 1 });
+                if format == "jsonl" {
+                    assert_eq!(frames.iter().map(|frame| frame["type"].as_str().unwrap()).collect::<Vec<_>>(), ["begin", "record", "end"]);
+                }
+            }
+            assert!(!text.contains("public_numbers"));
+        }
+    }
+    #[test]
+    fn public_error_and_typed_stream_preserve_unknown_numeric_tokens() {
+        let raw: Value = serde_json::from_str(r#"{"raw":9007199254740993.125,"huge":1e400,"zero":-0.0,"text":"<>&\u2028"}"#).unwrap();
+        let result = Err(ToolkitError::new("live.pending", "pending", 6)
+            .with_details(json!({"result":raw,"operationId":"CON-exact"})));
+        let mut out = Vec::new();
+        render(&mut out, "jsonl", &result).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 2);
+        assert!(!text.contains(r#""type":"end""#));
+        assert!(text.contains("9007199254740993.125"));
+        assert!(text.contains("1e+400"));
+        assert!(text.contains(r#""zero":-0.0"#));
+        assert!(text.contains(r#"<>&\u2028"#));
+        let mut out = Vec::new();
+        let mut writer = StreamWriter { out: &mut out, yielded: false };
+        writer.emit(&json!({"type":"record","record":raw})).unwrap();
+        assert!(writer.yielded);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 1);
+        assert!(text.contains("9007199254740993.125"));
+        assert!(text.contains(r#""zero":-0.0"#));
+        assert!(text.contains(r#"<>&\u2028"#));
+    }
+    #[test]
+    fn public_jsonl_encoding_failure_never_writes_record_or_success_end() {
+        use lycheedev_core::public_json::NumberLayout;
+        let mut outcome = Outcome::new(json!({"f":null}));
+        outcome.public_numbers = NumberLayout::field("f", NumberLayout::Binary64);
+        let mut out = Vec::new();
+        assert!(render(&mut out, "jsonl", &Ok(outcome)).is_err());
+        let frames: Vec<Value> = String::from_utf8(out).unwrap().lines()
+            .map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["type"], "begin");
     }
     struct Closed;
     impl Write for Closed {

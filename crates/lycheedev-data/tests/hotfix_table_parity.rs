@@ -731,6 +731,19 @@ fn named_hotfix_capture_keeps_go_bytes_and_public_numbers_keep_precision() {
     let expected_fields = format!(
         r#""fields":{{"Label":"\u003c\u003e\u0026\u2028\u2029-0","Values":{expected_values},"Wide":18446744073709551615,"Zero":-0}}"#
     );
+    let mut public = Vec::new();
+    lycheedev_core::public_json::write_line(&mut public, &result.data, &result.public_numbers)
+        .unwrap();
+    let expected_public_fields = format!(
+        r#""fields":{{"Label":"<>&\u2028\u2029-0","Values":{expected_values},"Wide":18446744073709551615,"Zero":-0}}"#
+    );
+    assert!(
+        std::str::from_utf8(&public)
+            .unwrap()
+            .contains(&expected_public_fields),
+        "the actual typed public encoder must preserve integer precision, Go floats and public HTML escaping"
+    );
+
     let encoded =
         evidence::read_blob(&fixture.home, &result.provenance[1]["blob"], 32 << 20).unwrap();
     assert!(

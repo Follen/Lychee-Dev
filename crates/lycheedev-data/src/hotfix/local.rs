@@ -377,6 +377,71 @@ fn restore_field_zero_signs(
     Ok(())
 }
 
+// Attach numeric types while the selected DBD is still available. The public
+// encoder never guesses float provenance from a JSON token or field name.
+// This one schema layout is shared across all page entries, including rows
+// without fields (for example removals), rather than copied once per record.
+fn public_number_layout(
+    definition: Option<&schema::Definition>,
+    budget: &Budget,
+) -> Result<lycheedev_core::public_json::NumberLayout> {
+    use lycheedev_core::public_json::NumberLayout;
+    use std::collections::BTreeMap;
+    let Some(definition) = definition else {
+        return Ok(NumberLayout::Verbatim);
+    };
+    let count = definition
+        .fields
+        .iter()
+        .filter(|field| field.kind == "float")
+        .count();
+    if count == 0 {
+        return Ok(NumberLayout::Verbatim);
+    }
+    // Same BTree allocation bound as typed field decoding, plus three fixed
+    // object nodes, the entries Array and optional-fields boxes. Array-valued
+    // fields own one box.
+    budget.charge(Cost::retained(
+        super::tree_bytes::<String, NumberLayout>(count)
+            + 3 * super::tree_bytes::<String, NumberLayout>(1)
+            + 2 * size_of::<NumberLayout>()
+            + "pageentriesfields".len(),
+    ))?;
+    let mut fields = BTreeMap::new();
+    for field in &definition.fields {
+        budget.charge(Cost::work(1))?;
+        if field.kind != "float" {
+            continue;
+        }
+        budget.charge(Cost::retained(
+            field.name.len()
+                + if field.array {
+                    size_of::<NumberLayout>()
+                } else {
+                    0
+                },
+        ))?;
+        fields.insert(
+            field.name.clone(),
+            if field.array {
+                NumberLayout::array(NumberLayout::Binary64)
+            } else {
+                NumberLayout::Binary64
+            },
+        );
+    }
+    Ok(NumberLayout::field(
+        "page",
+        NumberLayout::field(
+            "entries",
+            NumberLayout::array(NumberLayout::optional_field(
+                "fields",
+                NumberLayout::Object(fields),
+            )),
+        ),
+    ))
+}
+
 pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     inv.control.check()?;
     let snapshot = inv.required("--snapshot")?;
@@ -503,6 +568,8 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     if let Some((_, definition)) = &named {
         page = decode_page(&raw, page, definition, &budget)?;
     }
+    let public_numbers =
+        public_number_layout(named.as_ref().map(|(_, definition)| definition), &budget)?;
     let digest = digest(&raw, &budget)?;
     let scope = format!("local-cache:{}", data.language);
     if let Some(changes) = &pin.changes {
@@ -584,7 +651,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     // including arbitrary-precision Number values. A count-only formatter
     // would admit the right page but still archive different floats (1.0
     // instead of 1). The public Value projection preserves number semantics;
-    // its negative-zero spelling remains -0.0 as explained above.
+    // its typed public layout below restores Go spelling at the CLI boundary.
     let encoded = capture::json_bytes_with_formatter(
         &body,
         &budget,
@@ -613,6 +680,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         &budget,
     )?;
     let mut out = Outcome::new(result);
+    out.public_numbers = public_numbers;
     out.complete = complete;
     out.selection = serde_json::to_value(pin)?;
     out.provenance = vec![source, result_capture];
@@ -623,6 +691,34 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn public_layout_comes_from_schema_and_does_not_guess_other_numbers() {
+        use lycheedev_core::public_json;
+        let definition = schema::Document::parse(
+            b"COLUMNS\nfloat F\nfloat A\nint I\n\nBUILD 12.1.0.69875\nF\nA[2]\nI<u64>\n",
+        )
+        .unwrap()
+        .select("12.1.0.69875", "")
+        .unwrap();
+        let budget = Budget::new(
+            Cost::defaults(),
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let layout = public_number_layout(Some(&definition), &budget).unwrap();
+        let value: Value = serde_json::from_str(r#"{"page":{"entries":[{"fields":{"F":-0.0,"A":[1.0,1e21],"I":18446744073709551615,"unknown":9007199254740993.125}},{"decodeState":"removed"}]},"source":{"raw":-0.0}}"#).unwrap();
+        let mut out = Vec::new();
+        public_json::write_line(&mut out, &value, &layout).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "{\"page\":{\"entries\":[{\"fields\":{\"A\":[1,1e+21],\"F\":-0,\"I\":18446744073709551615,\"unknown\":9007199254740993.125}},{\"decodeState\":\"removed\"}]},\"source\":{\"raw\":-0.0}}\n"
+        );
+        assert!(matches!(
+            public_number_layout(None, &budget).unwrap(),
+            public_json::NumberLayout::Verbatim
+        ));
+    }
+
     #[test]
     fn hotfix_ledger_admits_full_input_and_separate_metadata_but_stays_bounded() {
         for maximum in [128 << 20, 512 << 20] {

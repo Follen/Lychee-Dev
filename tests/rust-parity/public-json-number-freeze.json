@@ -1,0 +1,112 @@
+{
+  "schema": "lycheedev.public-json-number-freeze.v1",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "baseHead": "54d7655daaef42812f7c1d6273945561a51c9958",
+  "revision": 2,
+  "meaning": "Exact shared-worktree per-file bytes. Independent r1 findings addressed in source, independent re-review pending. Receipt does not self-hash. No runtime pass claimed.",
+  "execution": "NOT_RUN",
+  "files": [
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d",
+      "bytes": 4772
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json.rs",
+      "sha256": "d5cbe12d37d39ffa9d16f6f8e652ff41894ab33bfebb320955c8c2992a09232d",
+      "bytes": 25870
+    },
+    {
+      "path": "crates/lycheedev-cli/src/main.rs",
+      "sha256": "92c56d9f661a21ee9e0c2d2e61c3229aef8814185905d403854c8e4bec861c5a",
+      "bytes": 123387
+    },
+    {
+      "path": "crates/lycheedev-data/src/hotfix/local.rs",
+      "sha256": "c8eaee7a54c988f5d3d049b166c03c97e65208b24d6be9aca06f4eb6388c19ad",
+      "bytes": 26613
+    },
+    {
+      "path": "crates/lycheedev-data/tests/hotfix_table_parity.rs",
+      "sha256": "5c355e1b0c9a3537a783fc05cf0887c8637bfc640967f4459df27a662231db5c",
+      "bytes": 33587
+    },
+    {
+      "path": "tests/rust-parity/public-json-number-test-map.json",
+      "sha256": "2e4783f2b9cc418f3d63031a3b215cd5a6f91c9bfd76cf34a5a2338f1a68cd94",
+      "bytes": 20034
+    }
+  ],
+  "checks": {
+    "rustfmt": "PASS: parse only; main not globally reformatted",
+    "diffCheck": "PASS scoped files",
+    "nodeNumeric": "PASS 14 token expectations plus 4 integer lexemes; not Go/Rust execution",
+    "cargo": "NOT_RUN; prohibited",
+    "windows": "NOT_RUN; parent CI required",
+    "go": "NOT_RUN",
+    "performance": "NOT_RUN; two-pass CPU cost explicitly pending"
+  },
+  "previousReview": {
+    "sha256": "8c1309523411026223c290b506028b9fe30587e465815d2d46d45a63787bfa79",
+    "findings": [
+      "P2: Object provenance silently accepted absent declared fields unlike Indexed bounds.",
+      "P2: unbounded frame-sized Vec and CLI deep layout/Exact-token clone bypassed producer ledger."
+    ],
+    "freeze": {
+      "schema": "lycheedev.public-json-number-freeze.v1",
+      "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+      "baseHead": "5a0e3edd228a14dc3a9bb76b5eeb986188158d36",
+      "revision": 1,
+      "meaning": "Exact shared-worktree per-file bytes. Independent review pending. Receipt does not self-hash. No runtime pass claimed.",
+      "execution": "NOT_RUN",
+      "files": [
+        {
+          "path": "crates/lycheedev-core/src/lib.rs",
+          "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d",
+          "bytes": 4772
+        },
+        {
+          "path": "crates/lycheedev-core/src/public_json.rs",
+          "sha256": "e774d9dbd3075da51a39c91b9a2d4712141d2103ac661e5c4c822b3d0e00be69",
+          "bytes": 18080
+        },
+        {
+          "path": "crates/lycheedev-cli/src/main.rs",
+          "sha256": "db4d18613b11034cf3d3337cfffd169b41ae7c4a2c1541301d78e9552746fda4",
+          "bytes": 123465
+        },
+        {
+          "path": "crates/lycheedev-data/src/hotfix/local.rs",
+          "sha256": "49af61cfbe396be838e0322f2cf7d11e76007091af991de767e5eb991af18486",
+          "bytes": 26527
+        },
+        {
+          "path": "crates/lycheedev-data/tests/hotfix_table_parity.rs",
+          "sha256": "5c355e1b0c9a3537a783fc05cf0887c8637bfc640967f4459df27a662231db5c",
+          "bytes": 33587
+        },
+        {
+          "path": "tests/rust-parity/public-json-number-test-map.json",
+          "sha256": "c7a9e4cec1ffdb86b7b12f98cbf4ab78b852f5fa41d651dc4960c09108122362",
+          "bytes": 18971
+        }
+      ],
+      "checks": {
+        "rustfmt": "PASS: parse only; main not globally reformatted",
+        "diffCheck": "PASS scoped files",
+        "nodeNumeric": "PASS 14 token expectations plus 4 integer lexemes; not Go/Rust execution",
+        "cargo": "NOT_RUN; prohibited",
+        "windows": "NOT_RUN; parent CI required",
+        "go": "NOT_RUN",
+        "performance": "NOT_RUN"
+      }
+    }
+  },
+  "changes": [
+    "All Object entries required by default; Optional field wrapper only explicitly applied to Hotfix entries.fields and an intentional optional test fixture.",
+    "Borrowed required-prefix view replaces all CLI NumberLayout deep clones.",
+    "Same immutable value/layout serialized to sink first and then directly to writer using the same cloned formatter configuration. No frame-sized buffer/new output cap; second-pass IO errors retain external.io exit5.",
+    "Binary64 reads borrowed Number::as_str instead of allocating a token copy. Hotfix budget includes optional wrapper box.",
+    "Added four regressions for required/optional fields, borrowed envelope prefixes, late zero-write failure and uncapped direct output/partial broken-pipe mapping."
+  ]
+}
