@@ -498,7 +498,6 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
         ("--after-index", "0", "records.hotfix_identity"),
         ("--cursor", "0", "command.invalid_arguments"),
         ("--region-id", "3", "records.hotfix_filter_unsupported"),
-        ("--scan", "true", "command.unsupported"),
         ("--encoding", "csv", "command.invalid_arguments"),
     ] {
         let mut inv = fixture.inv();
@@ -509,6 +508,14 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
             "{flag}"
         );
     }
+    // Scan is now a supported fixed-Go route. Keep an actual successful
+    // dispatch here; its checkpoint/recovery boundaries have their own suite.
+    let mut scan = fixture.inv();
+    scan.flags.insert("--scan".into(), "true".into());
+    let scanned = lycheedev_data::dispatch(&scan).unwrap();
+    assert!(scanned.complete);
+    assert_eq!(scanned.data["result"]["returned"], 1);
+    assert_eq!(scanned.data["capture"]["provenance"]["kind"], "hotfix-scan");
     for expired in [false, true] {
         let mut inv = fixture.inv();
         inv.control = OperationControl::new(

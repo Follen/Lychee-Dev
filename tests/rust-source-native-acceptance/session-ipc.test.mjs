@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
-import {nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
+import {acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const luac={version:'5.1.5',platform:'windows-amd64',executable_sha256:'a'.repeat(64),executable_bytes:1};
@@ -73,4 +73,16 @@ test('quota path has real requests for all cumulative boundaries and distinct mi
 });
 test('non-Windows entry fails before any mock could be reported as acceptance',{skip:process.platform==='win32'},async()=>{
   await assert.rejects(runSessionGroup({group:'quota'}),/Windows IPC groups are not simulated/);
+});
+
+test('bootstrap project uses fixed path-local CLI contract without home while source keeps isolated home',()=>{
+  const args=['project','init','--path','C:\\isolated\\project','--product','retail'];
+  assert.deepEqual(acceptanceCliArgs(args,'C:\\isolated\\home',{useHome:false}),[...args,'--format','json']);
+  assert.deepEqual(acceptanceCliArgs(['source','session','status'],'C:\\isolated\\home'),
+    ['source','session','status','--home','C:\\isolated\\home','--format','json']);
+  assert.throws(()=>acceptanceCliArgs(['source','refs'],'ignored',{useHome:false}),/only project init/);
+  const controller=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
+  assert(controller.includes('acceptanceCliArgs(args, home, options)'));
+  const bootstrap=readFileSync(new URL('./session-ipc.mjs',import.meta.url),'utf8');
+  assert(bootstrap.includes("'--product','retail'],{useHome:false})"));
 });

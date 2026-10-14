@@ -304,7 +304,7 @@ jobs:
           node tools/rust-cargo.mjs --owner ci-capture-identity --one-shot -- test --locked --offline -p lycheedev-core --lib evidence:: -j 1
       - name: Run SQLite lock cancellation and rollback fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-metadata-cancel --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::tests -j 1
+        run: node tools/rust-cargo.mjs --owner ci-metadata-cancel --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::controlled_tests -j 1
       - name: Run target cancellation before symbolic resolution
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1

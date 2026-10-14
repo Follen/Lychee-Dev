@@ -13,7 +13,9 @@ use super::*;
 use crate::installation::Resource;
 use lycheedev_core::coordination::InstallationGuard;
 use std::{
+    cell::RefCell,
     fs,
+    rc::Rc,
     sync::atomic::{AtomicU64, Ordering},
     time::Instant,
 };
@@ -843,11 +845,15 @@ fn pre_cancelled_control_prevents_all_reads_writes_and_lock_attempts() {
     route.start_slot = 1;
     code(verify_route(&mut store, &c, &route), "command.cancelled");
     let mut attempts = 0;
-    let result = wait_lock(&c, || {
-        attempts += 1;
-        Ok(())
-    });
-    assert_eq!(result.unwrap_err().code, "command.cancelled");
+    let result = wait_lock(
+        &c,
+        || {
+            attempts += 1;
+            Ok(())
+        },
+        |_| panic!("no lock was acquired"),
+    );
+    assert_eq!(result.unwrap_err().0[0].code, "command.cancelled");
     assert_eq!(attempts, 0);
     assert_eq!(store.reads, 0);
     assert!(store.writes.is_empty());
@@ -856,21 +862,293 @@ fn pre_cancelled_control_prevents_all_reads_writes_and_lock_attempts() {
 fn lock_wait_keeps_original_deadline_and_checks_success_after_cancel() {
     let c = OperationControl::uncancelable(Instant::now() + Duration::from_millis(5));
     let mut attempts = 0;
-    let result: lycheedev_core::Result<()> = wait_lock(&c, || {
-        attempts += 1;
-        Err(ToolkitError::new("workspace.busy", "held", 6))
-    });
-    assert_eq!(result.unwrap_err().code, "command.deadline");
+    let result: AcquisitionResult<()> = wait_lock(
+        &c,
+        || {
+            attempts += 1;
+            Err(ToolkitError::new("workspace.busy", "held", 6))
+        },
+        |_| panic!("a failed attempt owns no lock"),
+    );
+    assert_eq!(result.unwrap_err().0[0].code, "command.deadline");
     assert!(
         attempts <= 2,
         "an already-expired budget may admit no attempt"
     );
     let c = OperationControl::default();
-    let result = wait_lock(&c, || {
-        c.tracked_cancel_handle().unwrap().cancel();
-        Ok(())
-    });
-    assert_eq!(result.unwrap_err().code, "command.cancelled");
+    let mut closes = 0;
+    let result = wait_lock(
+        &c,
+        || {
+            c.tracked_cancel_handle().unwrap().cancel();
+            Ok(())
+        },
+        |_| {
+            closes += 1;
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().0[0].code, "command.cancelled");
+    assert_eq!(closes, 1);
+}
+
+// Only helper-level close faults are injected here. They do not demonstrate an
+// actual OS close failure; the core storage suite owns its consumed File tests.
+#[derive(Debug)]
+struct CloseProbe {
+    name: &'static str,
+    events: Rc<RefCell<Vec<String>>>,
+    held: bool,
+    fail_close: bool,
+}
+impl CloseProbe {
+    fn new(name: &'static str, events: &Rc<RefCell<Vec<String>>>, fail_close: bool) -> Self {
+        events.borrow_mut().push(format!("acquire:{name}"));
+        Self {
+            name,
+            events: events.clone(),
+            held: true,
+            fail_close,
+        }
+    }
+    fn close(mut self) -> lycheedev_core::Result<()> {
+        assert!(self.held, "a consumed lock must never be closed twice");
+        self.held = false;
+        self.events
+            .borrow_mut()
+            .push(format!("close:{}", self.name));
+        if self.fail_close {
+            Err(ToolkitError::new(
+                format!("fixture.{}_close", self.name),
+                "helper-injected close failure",
+                5,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+impl Drop for CloseProbe {
+    fn drop(&mut self) {
+        if self.held {
+            self.events
+                .borrow_mut()
+                .push(format!("fallback:{}", self.name));
+        }
+    }
+}
+
+#[test]
+fn acquisition_failure_keeps_primary_and_ordered_cleanup_without_drop_retry() {
+    for primary in ["fixture.path", "fixture.inspect"] {
+        for publication_fails in [false, true] {
+            for maintenance_fails in [false, true] {
+                let events = Rc::new(RefCell::new(Vec::new()));
+                let maintenance = CloseProbe::new("maintenance", &events, maintenance_fails);
+                let result = with_acquired(
+                    maintenance,
+                    |_| {
+                        let publication =
+                            CloseProbe::new("publication", &events, publication_fails);
+                        with_acquired(
+                            publication,
+                            |_| -> AcquisitionResult<()> {
+                                Err(ToolkitError::new(primary, "original", 4)
+                                    .with_details(serde_json::json!({"original": 17}))
+                                    .into())
+                            },
+                            CloseProbe::close,
+                        )
+                    },
+                    CloseProbe::close,
+                );
+                let error = PublicationError::from(result.unwrap_err());
+                let causes = match &error {
+                    PublicationError::Failure(cause) => std::slice::from_ref(cause),
+                    PublicationError::CloseFailures(causes) => causes.as_slice(),
+                    PublicationError::Reserved { .. } => panic!("not an acquisition error"),
+                };
+                let mut expected = vec![primary];
+                if publication_fails {
+                    expected.push("fixture.publication_close");
+                }
+                if maintenance_fails {
+                    expected.push("fixture.maintenance_close");
+                }
+                assert_eq!(
+                    causes
+                        .iter()
+                        .map(|cause| cause.code.as_str())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(causes[0].message, "original");
+                assert_eq!(causes[0].exit_code, 4);
+                assert_eq!(causes[0].details, serde_json::json!({"original": 17}));
+                for code in expected {
+                    assert!(error.is_code(code));
+                }
+                assert_eq!(
+                    *events.borrow(),
+                    [
+                        "acquire:maintenance",
+                        "acquire:publication",
+                        "close:publication",
+                        "close:maintenance"
+                    ]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn acquisition_failure_before_second_lock_closes_only_maintenance() {
+    for primary in ["fixture.path", "fixture.second_lock"] {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let result = with_acquired(
+            CloseProbe::new("maintenance", &events, true),
+            |_| -> AcquisitionResult<()> { Err(ToolkitError::new(primary, "original", 5).into()) },
+            CloseProbe::close,
+        );
+        let error = PublicationError::from(result.unwrap_err());
+        assert!(error.is_code(primary));
+        assert!(error.is_code("fixture.maintenance_close"));
+        assert!(!error.is_code("fixture.publication_close"));
+        assert_eq!(
+            *events.borrow(),
+            ["acquire:maintenance", "close:maintenance"]
+        );
+    }
+}
+
+#[test]
+fn acquisition_cleanup_ignores_cancelled_or_expired_control() {
+    for cancelled in [false, true] {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let result = with_acquired(
+            CloseProbe::new("maintenance", &events, true),
+            |_| {
+                with_acquired(
+                    CloseProbe::new("publication", &events, true),
+                    |_| {
+                        let control = if cancelled {
+                            let control = OperationControl::default();
+                            control.tracked_cancel_handle()?.cancel();
+                            control
+                        } else {
+                            OperationControl::uncancelable(Instant::now())
+                        };
+                        Ok(control.check()?)
+                    },
+                    CloseProbe::close,
+                )
+            },
+            CloseProbe::close,
+        );
+        let PublicationError::CloseFailures(causes) = PublicationError::from(result.unwrap_err())
+        else {
+            panic!("primary plus both cleanup failures")
+        };
+        assert_eq!(causes.len(), 3);
+        assert_eq!(
+            causes[0].code,
+            if cancelled {
+                "command.cancelled"
+            } else {
+                "command.deadline"
+            }
+        );
+        assert_eq!(causes[1].code, "fixture.publication_close");
+        assert_eq!(causes[2].code, "fixture.maintenance_close");
+        assert_eq!(
+            *events.borrow(),
+            [
+                "acquire:maintenance",
+                "acquire:publication",
+                "close:publication",
+                "close:maintenance"
+            ]
+        );
+    }
+}
+
+#[test]
+fn second_lock_post_acquire_cancel_closes_before_maintenance() {
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let control = OperationControl::default();
+    let result = with_acquired(
+        CloseProbe::new("maintenance", &events, true),
+        |_| {
+            wait_lock(
+                &control,
+                || {
+                    let publication = CloseProbe::new("publication", &events, true);
+                    control.tracked_cancel_handle()?.cancel();
+                    Ok(publication)
+                },
+                CloseProbe::close,
+            )
+        },
+        CloseProbe::close,
+    );
+    let PublicationError::CloseFailures(causes) = PublicationError::from(result.unwrap_err())
+    else {
+        panic!("post-acquire cancellation plus both close failures")
+    };
+    assert_eq!(
+        causes
+            .iter()
+            .map(|cause| cause.code.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "command.cancelled",
+            "fixture.publication_close",
+            "fixture.maintenance_close"
+        ]
+    );
+    assert_eq!(
+        *events.borrow(),
+        [
+            "acquire:maintenance",
+            "acquire:publication",
+            "close:publication",
+            "close:maintenance"
+        ]
+    );
+}
+
+#[test]
+fn acquisition_success_transfers_ownership_without_early_close() {
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let (maintenance, (publication, value)) = with_acquired(
+        CloseProbe::new("maintenance", &events, false),
+        |_| {
+            with_acquired(
+                CloseProbe::new("publication", &events, false),
+                |_| Ok(17),
+                CloseProbe::close,
+            )
+        },
+        CloseProbe::close,
+    )
+    .unwrap();
+    assert_eq!(value, 17);
+    assert_eq!(
+        *events.borrow(),
+        ["acquire:maintenance", "acquire:publication"]
+    );
+    publication.close().unwrap();
+    maintenance.close().unwrap();
+    assert_eq!(
+        *events.borrow(),
+        [
+            "acquire:maintenance",
+            "acquire:publication",
+            "close:publication",
+            "close:maintenance"
+        ]
+    );
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -935,6 +1213,115 @@ impl Drop for DiskFixture {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+fn assert_disk_locks_available(f: &DiskFixture) {
+    InstallationMaintenanceLease::acquire(&f.identity.canonical_path)
+        .unwrap()
+        .close()
+        .unwrap();
+    ExclusiveLock::resource(&f.root.join(".lycheedev-slot-locks"), "publication")
+        .unwrap()
+        .close()
+        .unwrap();
+}
+
+#[test]
+fn lock_wait_post_acquire_cancel_checks_real_close_once_and_releases() {
+    let f = DiskFixture::new();
+    let path = f.root.join("post-acquire.lock");
+    for inject_close_failure in [false, true] {
+        let control = OperationControl::default();
+        let mut closes = 0;
+        let result = wait_lock(
+            &control,
+            || {
+                let lock = ExclusiveLock::acquire(&path)?;
+                control.tracked_cancel_handle()?.cancel();
+                Ok(lock)
+            },
+            |lock| {
+                closes += 1;
+                lock.close()?;
+                if inject_close_failure {
+                    // This is an error after a real successful close, not an
+                    // OS close failure. Ownership must still not be retried.
+                    Err(ToolkitError::new(
+                        "fixture.post_close",
+                        "helper-injected",
+                        5,
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        let error = PublicationError::from(result.err().expect("post-acquire cancellation"));
+        assert!(error.is_code("command.cancelled"));
+        assert_eq!(error.is_code("fixture.post_close"), inject_close_failure);
+        assert_eq!(closes, 1);
+        assert!(path.is_file());
+        ExclusiveLock::acquire(&path).unwrap().close().unwrap();
+    }
+}
+
+#[test]
+fn disk_acquire_canonical_path_failure_releases_maintenance() {
+    let f = DiskFixture::new();
+    fs::create_dir(f.root.join("alias")).unwrap();
+    let identity = RecordedInstallationIdentity::from_authenticated_record(
+        f.root.join("alias").join("..").join("Lychee Dev"),
+    )
+    .unwrap();
+    let error =
+        PublicationLease::acquire_recorded(&identity, "3.2.0", &OperationControl::default())
+            .err()
+            .expect("noncanonical recorded identity");
+    assert!(error.is_code("delivery.invalid_installation"));
+    assert!(!f.root.join(".lycheedev-slot-locks").exists());
+    assert_disk_locks_available(&f);
+}
+
+#[test]
+fn disk_acquire_second_lock_io_failure_releases_maintenance() {
+    let f = DiskFixture::new();
+    let scope = f.root.join(".lycheedev-slot-locks");
+    fs::write(&scope, b"a file cannot be a lock directory").unwrap();
+    let error = PublicationLease::acquire(&f.identity, "3.2.0", &OperationControl::default())
+        .err()
+        .expect("publication lock directory cannot be created");
+    assert!(error.is_code("external.io"));
+    InstallationMaintenanceLease::acquire(&f.identity.canonical_path)
+        .unwrap()
+        .close()
+        .unwrap();
+    assert_eq!(
+        fs::read(&scope).unwrap(),
+        b"a file cannot be a lock directory"
+    );
+    fs::remove_file(&scope).unwrap();
+    assert_disk_locks_available(&f);
+}
+
+#[test]
+fn disk_acquire_second_lock_deadline_releases_only_owned_maintenance() {
+    let f = DiskFixture::new();
+    let scope = f.root.join(".lycheedev-slot-locks");
+    let foreign_publication = ExclusiveLock::resource(&scope, "publication").unwrap();
+    let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(25));
+    let original_deadline = control.deadline();
+    let error = PublicationLease::acquire(&f.identity, "3.2.0", &control)
+        .err()
+        .expect("foreign publication still held");
+    assert!(error.is_code("command.deadline"));
+    assert_eq!(control.deadline(), original_deadline);
+    InstallationMaintenanceLease::acquire(&f.identity.canonical_path)
+        .unwrap()
+        .close()
+        .unwrap();
+    assert!(ExclusiveLock::resource(&scope, "publication").is_err());
+    foreign_publication.close().unwrap();
+    assert_disk_locks_available(&f);
+}
+
 #[test]
 fn disk_publication_roundtrip_holds_both_locks_and_releases_before_receipt_wait() {
     let f = DiskFixture::new();
@@ -991,6 +1378,7 @@ fn disk_publication_rejects_changed_receipt_and_admission_rejects_pool_drift() {
             .unwrap()
             .is_code("delivery.invalid_installation")
     );
+    assert_disk_locks_available(&f);
     fs::write(&loader, original).unwrap();
     fs::write(
         slots::directory(&f.root, 499).join("Payload.lua"),
@@ -1003,6 +1391,7 @@ fn disk_publication_rejects_changed_receipt_and_admission_rejects_pool_drift() {
             .unwrap()
             .is_code("delivery.invalid_installation")
     );
+    assert_disk_locks_available(&f);
 }
 
 #[test]

@@ -65,9 +65,16 @@ function releaseLuac(release){
  * the ordinary public source refs path. invoke(caseId,args,options) is the
  * caller's bounded, evidence-recording CLI launcher (it supplies --home/json).
  */
+// project init is path-local in the fixed Go public contract and has no --home.
+// All workspace-backed operations retain the explicit isolated acceptance home.
+export function acceptanceCliArgs(args, home, {useHome = true} = {}) {
+  if (!useHome) assert(args[0] === 'project' && args[1] === 'init', 'only project init omits workspace home');
+  return [...args, ...(useHome ? ['--home', home] : []), '--format', 'json'];
+}
+
 export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke,timeoutMs=60_000}){
   assert.equal(typeof invoke,'function');const started=performance.now();mkdirSync(evidenceDir,{recursive:true});
-  const command=(id,args)=>invoke(id,args,{timeout:Math.min(45_000,budget(started,timeoutMs)),phase:'local'});
+  const command=(id,args,options={})=>invoke(id,args,{...options,timeout:Math.min(45_000,budget(started,timeoutMs)),phase:'local'});
   command('session-bootstrap-init',['init']);
   const repository=join(home,'tmp','native-session-bootstrap');assert(!existsSync(repository),'fresh tiny fixture required');
   mkdirSync(repository,{recursive:true});writeNew(join(repository,'a.lua'),tinySource());
@@ -93,7 +100,7 @@ export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke
   const commit=git(['rev-parse','HEAD']),mirror=join(home,'mirrors','wow-ui-source.git');
   assert(!existsSync(mirror),'tiny bootstrap cannot replace an existing source mirror');
   git(['clone','--bare','--no-hardlinks','--','.',mirror]);
-  command('session-bootstrap-project',['project','init','--path',repository,'--product','retail']);
+  command('session-bootstrap-project',['project','init','--path',repository,'--product','retail'],{useHome:false});
   const selection=fixtureSelection(commit),lock={schema:'lycheedev.project-lock.v1',selection};
   writeNew(join(repository,'lycheedev.lock.json'),pretty(lock));
   writeNew(join(evidenceDir,'bootstrap-fixture.json'),pretty({binary,home,repository,mirror,commit,selection,

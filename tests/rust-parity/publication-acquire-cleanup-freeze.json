@@ -1,0 +1,56 @@
+{
+  "schema": "lycheedev.publication-acquire-cleanup.freeze.v1",
+  "createdAt": "2026-10-14T23:47:11.353413+00:00",
+  "baseRustHead": "54d7655daaef42812f7c1d6273945561a51c9958",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "ownedFiles": [
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 28654,
+      "sha256": "8b020c7cfeebb8829076b787562d0d40b0974fc3af85d501336294edb5bb8645"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "bytes": 54942,
+      "sha256": "61c0fc74e5eed49025da7a7b2d439fb91d0a1fe0fe4f781bfb5aa78bec7e24de"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "sha256": "efe49996c20fe79ed398b7d19ae17f3dd8da90c7b2c8fb6bb89f64fb8efb6ec7"
+    },
+    {
+      "path": "crates/lycheedev-core/src/coordination.rs",
+      "sha256": "4130866ad72d52150f64e870f2e1c07a777c63518561dbd457fc539f1a809dc0"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs",
+      "sha256": "1ad164ed4f1c1ec8a41985c4bf3919cfce4d38af685416430c8680900b75e589"
+    },
+    {
+      "path": ".github/workflows/rust-parity.yml",
+      "sha256": "5a2d7fc101053bdd9ac0e2dfaff3c68c565af6f135f7381163f272fc8f47feb3"
+    }
+  ],
+  "testMapSha256": "207e056b2ef0436f70d3d909ff8b1df833188add436cfb911d055a821f35b435",
+  "staticChecks": {
+    "rustfmt": "PASS",
+    "gitDiffCheck": "PASS",
+    "unchangedPublicationAlgorithms": "PASS byte-exact suffix after next_free_slot documentation",
+    "preservedTestDeclarations": 29,
+    "newTestDeclarations": 9,
+    "totalTestDeclarations": 38
+  },
+  "execution": {
+    "cargoRustc": "NOT_RUN prohibited for this batch",
+    "rustTests": "NOT_RUN",
+    "windows": "NOT_RUN existing slot_publication::tests CI group",
+    "realOsCloseFault": "NOT_RUN helper injection only"
+  },
+  "review": "PENDING independent frozen-snapshot review"
+}

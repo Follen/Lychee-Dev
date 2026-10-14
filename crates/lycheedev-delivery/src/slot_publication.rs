@@ -35,7 +35,12 @@ const INERT: &[u8] = b"LycheeDevSlotEnvelope = nil\n";
 #[derive(Debug, Clone)]
 pub enum PublicationError {
     Failure(ToolkitError),
-    Reserved { reservation: SlotFile },
+    Reserved {
+        reservation: SlotFile,
+    },
+    /// Ordered acquisition/close causes: the original acquisition failure, if
+    /// any, followed by publication then maintenance close failures. Acquisition
+    /// cannot produce Reserved, so its captured reservation is never flattened.
     CloseFailures(Vec<ToolkitError>),
 }
 pub type Result<T> = std::result::Result<T, PublicationError>;
@@ -173,33 +178,52 @@ impl<'a> PublicationLease<'a> {
         control: &'a OperationControl,
     ) -> Result<Self> {
         control.check()?;
-        let maintenance = wait_lock(control, || {
-            InstallationMaintenanceLease::acquire(&identity.canonical_path)
-        })?;
-        control.check()?;
-        if maintenance.target != identity.canonical_path {
-            return Err(invalid("installation canonical identity changed").into());
-        }
-        let parent = maintenance
-            .target
-            .parent()
-            .ok_or_else(|| invalid("addon has no parent"))?
-            .to_path_buf();
-        let scope = parent.join(".lycheedev-slot-locks");
-        let lock_path = scope.join(format!("{}.lock", storage::sha256(b"publication")));
-        storage::guard_path(&parent, &scope)?;
-        storage::guard_path(&parent, &lock_path)?;
-        let publication = wait_lock(control, || ExclusiveLock::resource(&scope, "publication"))?;
-        storage::guard_path(&parent, &lock_path)?;
-        control.check()?;
-        let mut store = DiskStore {
-            parent,
-            addon: maintenance.target.clone(),
-            version: version.into(),
-            manifest_sha256: identity.manifest_sha256.clone(),
-            _receipt_file: None,
-        };
-        store.inspect(control)?;
+        let maintenance = wait_lock(
+            control,
+            || InstallationMaintenanceLease::acquire(&identity.canonical_path),
+            InstallationMaintenanceLease::close,
+        )?;
+        let (maintenance, (publication, store)) = with_acquired(
+            maintenance,
+            |maintenance| {
+                control.check()?;
+                if maintenance.target != identity.canonical_path {
+                    return Err(invalid("installation canonical identity changed").into());
+                }
+                let parent = maintenance
+                    .target
+                    .parent()
+                    .ok_or_else(|| invalid("addon has no parent"))?
+                    .to_path_buf();
+                let scope = parent.join(".lycheedev-slot-locks");
+                let lock_path = scope.join(format!("{}.lock", storage::sha256(b"publication")));
+                storage::guard_path(&parent, &scope)?;
+                storage::guard_path(&parent, &lock_path)?;
+                let publication = wait_lock(
+                    control,
+                    || ExclusiveLock::resource(&scope, "publication"),
+                    ExclusiveLock::close,
+                )?;
+                with_acquired(
+                    publication,
+                    |_| {
+                        storage::guard_path(&parent, &lock_path)?;
+                        control.check()?;
+                        let mut store = DiskStore {
+                            parent,
+                            addon: maintenance.target.clone(),
+                            version: version.into(),
+                            manifest_sha256: identity.manifest_sha256.clone(),
+                            _receipt_file: None,
+                        };
+                        store.inspect(control)?;
+                        Ok(store)
+                    },
+                    ExclusiveLock::close,
+                )
+            },
+            InstallationMaintenanceLease::close,
+        )?;
         Ok(Self {
             store,
             control,
@@ -212,7 +236,8 @@ impl<'a> PublicationLease<'a> {
         Ok(self.store.inspect(self.control)?)
     }
     /// End the short lease BEFORE a receipt wait and propagate both lock-close
-    /// failures. Drop is only the early-error/unwind fallback. A close failure
+    /// failures. Construction errors also close explicitly; Drop is the unwind
+    /// or caller-omitted-close fallback. A close failure
     /// never rolls back a possibly completed publication or authorizes replay.
     pub fn close(self) -> Result<()> {
         let Self {
@@ -287,21 +312,61 @@ fn close_results(
         _ => Err(PublicationError::CloseFailures(causes)),
     }
 }
+
+// Construction only admits ToolkitError causes. Keep this separate from the
+// public operation error so Reserved and its captured metadata cannot be lost
+// in a cleanup join. The primary error remains first, with each consumed lock's
+// close error appended exactly once while the nested scopes unwind normally.
+#[derive(Debug)]
+struct AcquisitionFailure(Vec<ToolkitError>);
+type AcquisitionResult<T> = std::result::Result<T, AcquisitionFailure>;
+impl From<ToolkitError> for AcquisitionFailure {
+    fn from(error: ToolkitError) -> Self {
+        Self(vec![error])
+    }
+}
+impl From<AcquisitionFailure> for PublicationError {
+    fn from(mut error: AcquisitionFailure) -> Self {
+        if error.0.len() == 1 {
+            Self::Failure(error.0.remove(0))
+        } else {
+            Self::CloseFailures(error.0)
+        }
+    }
+}
+fn with_acquired<G, T>(
+    guard: G,
+    operation: impl FnOnce(&G) -> AcquisitionResult<T>,
+    close: impl FnOnce(G) -> lycheedev_core::Result<()>,
+) -> AcquisitionResult<(G, T)> {
+    match operation(&guard) {
+        Ok(value) => Ok((guard, value)),
+        Err(mut error) => {
+            // Cleanup never consults the cancelled/expired operation control.
+            // close consumes the only owner, even when it reports a failure.
+            if let Err(cause) = close(guard) {
+                error.0.push(cause);
+            }
+            Err(error)
+        }
+    }
+}
 fn wait_lock<T>(
     control: &OperationControl,
     mut attempt: impl FnMut() -> lycheedev_core::Result<T>,
-) -> lycheedev_core::Result<T> {
+    close: impl FnOnce(T) -> lycheedev_core::Result<()>,
+) -> AcquisitionResult<T> {
     loop {
         control.check()?;
         match attempt() {
             Ok(guard) => {
-                control.check()?;
-                return Ok(guard);
+                return with_acquired(guard, |_| Ok(control.check()?), close)
+                    .map(|(guard, ())| guard);
             }
             Err(error) if error.code == "workspace.busy" => {
                 std::thread::sleep(control.remaining()?.min(Duration::from_millis(25)));
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
     }
 }

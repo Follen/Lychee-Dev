@@ -9,6 +9,7 @@ import {performance} from 'node:perf_hooks';
 import os from 'node:os';
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {jsonFile} from '../rust-skill-usage/assertions.mjs';
+import {acceptanceCliArgs} from './session-ipc.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
 
 const [binaryArg, releaseArg, scratchArg, evidenceArg, group, ...extra] = process.argv.slice(2);
@@ -53,7 +54,7 @@ function command(caseId, executable, args, {timeout = 210000, phase = 'local', i
   return {stdout, stderr, observation};
 }
 function invoke(caseId, args, options = {}) {
-  const run = command(caseId, binary, [...args, '--home', home, '--format', 'json'], options);
+  const run = command(caseId, binary, acceptanceCliArgs(args, home, options), options);
   let envelope; try { envelope = JSON.parse(run.stdout); } catch {}
   const result = assertEnvelope({...run.observation, envelope}, options.expectedExit ?? 0);
   const phases = run.stderr.toString('utf8').split(/\r?\n/).flatMap(line => { try { const event = JSON.parse(line); return event.schema === 'lycheedev.source-phase.v1' ? [event] : []; } catch { return []; } });

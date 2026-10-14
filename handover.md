@@ -592,6 +592,22 @@ r3另补正常open/bind错误和显式NativeReader finish/close的唯一process 
 
 最终6文件freeze SHA256 36e947e82c5c6c2e0fcbdd144755c2faee5f8aa5e12752bc78c93fd83c6c725d，嵌入r1性能值漂移已还原，能精确重建旧8c130952收据。独审24唯一测试声明/16固定Go引用核实，rustfmt/diff通过；全部Rust/Windows/性能NOT_RUN，CI独立core/CLI输出组与既有Hotfix组验证。该typed数值入口没有声称所有其他生产者和完整SQL已经对齐。
 
+### PublicationLease 构造失败清理
+
+补齐取得维护锁后在control/path/第二锁/inspect失败，以及wait_lock刚取得锁后取消的显式cleanup。正常错误路径只消费各已取得owner一次，按publication→maintenance checked-close，保留原ToolkitError/details/exit及cleanup原因，不新增公开variant，不丢Reserved元数据，不改变发布/退役算法或授权重放。
+
+两文件独审无新增可行动finding；29原测试保留，新增9项，38声明全部Rust/Windows NOT_RUN。close故障仅helper注入，不冒称真实kernel失败实测。freeze SHA256 6e59929a75ed3af6e2a29582e7bdfebffcd5ae55632eea8e4ff176bf5df46c83，review SHA256 936703e729401c9a810cf65f02993400170832522c8e9c03baf135a90575eb42；既有slot_publication::tests CI会复跑。后续service主addon验证复用仍需核core release/storage其他Drop-only边界，NativeBackend非control错误转文本也不等于端到端details/exit已透传，本批不覆盖这些独立缺口。
+
+### e38851d Windows 完整终态与新失败
+
+run38650383333/job116148400586终态失败；artifact11936886255 ZIP SHA256 40eb97deee89c42e41cae59028b188364df4cd656a000b78e7c99c87ffaed911，107 owner收据的811份日志hash全吻合，复核记录SHA256 b34cb04eaabc43a954317b55ebdd56b8cde957615f0e5dcb7e258942890c481e。EXE SHA256 1c9a14cdbfc7bda6ba59d494d231a46f2744541de7e4fc42eeff03626e951169，sourceDigest 837ad96ba8b08bd31fc2238b4cb575af1d66b9bec6b9e9d0360487c65dfcc276。539通过/5失败/6ignored为各Cargo组断言执行次数，非去重覆盖率。正式Mailbox/admission176、scan11、capture依赖18实际成功；metadata::tests过滤匹配0，不能算取消测试通过。
+
+除后继a8c/cb修复的旧XML/数值失败，还发现旧测试期待scan unsupported但新实现已支持。实际Skill普通refs/context与全Retail refs/context/APItype/持久会话失败：source.native_plan_environment，生成API出现“---@return number in”被Emmy解析为缺右操作数类型表达式；正在修生产emit，保留校验与4036输入。quota/idle/lifetime均在project init被runner非法--home参数拒绝，未进入真实IPC容量或60/600秒生命周期，不能称这些边界已跑。所有这几组outer root/tree/handles/readers已回收active0且未forced；完整失败原证据保留。
+
+### e388 验收入口修正候选
+
+三IPC组的project init现显式不附--home，其他workspace命令仍强制隔离home，helper拒绝对source等命令省略home。metadata过滤改为源码实际controlled_tests，避免0项绿灯；旧--scan unsupported断言替为实际成功dispatch、returned=1与hotfix-scan捕获类型断言，其他非法参数/取消和既有scan回归不减。五文件另一个独立视角复核无阻断，43/43 Node实际通过/0skip，diff检查通过。Windows IPC、metadata与scan Rust新候选均NOT_RUN；本次修的是已证实错误调用/过期预期，不改变CLI准入来迎合runner。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

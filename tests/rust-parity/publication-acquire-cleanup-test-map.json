@@ -1,0 +1,125 @@
+{
+  "schema": "lycheedev.publication-acquire-cleanup.test-map.v1",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "rustExecution": "NOT_RUN",
+  "newTests": [
+    "acquisition_failure_keeps_primary_and_ordered_cleanup_without_drop_retry",
+    "acquisition_failure_before_second_lock_closes_only_maintenance",
+    "acquisition_cleanup_ignores_cancelled_or_expired_control",
+    "second_lock_post_acquire_cancel_closes_before_maintenance",
+    "acquisition_success_transfers_ownership_without_early_close",
+    "lock_wait_post_acquire_cancel_checks_real_close_once_and_releases",
+    "disk_acquire_canonical_path_failure_releases_maintenance",
+    "disk_acquire_second_lock_io_failure_releases_maintenance",
+    "disk_acquire_second_lock_deadline_releases_only_owned_maintenance"
+  ],
+  "preservedTests": [
+    "publication_is_intent_then_exact_core_payload_then_commit",
+    "reserved_preserves_both_go_causes_and_exact_captured_owner",
+    "immutable_same_nonce_digest_includes_all_payload_fields",
+    "shared_encoder_validation_and_error_order_are_preserved",
+    "each_uncertain_write_boundary_retains_recoverable_exact_intent",
+    "cancellation_at_each_persistent_boundary_does_not_roll_back_or_continue",
+    "torn_same_nonce_changed_intent_never_overwrites_either_payload",
+    "confirmation_requires_committed_exact_consumer_and_ignores_newer_nonce",
+    "confirmation_rejects_pending_empty_identity_and_invalid_index",
+    "lower_level_confirmation_keeps_go_nonce_contract_after_durable_receipt",
+    "process_retirement_reconciles_both_torn_payload_states_without_ack",
+    "runtime_retirement_persists_exact_successor_and_never_orders_tokens",
+    "retirement_rejects_corrupt_payload_and_wrong_runtime_without_mutation",
+    "retirement_prechecks_and_lower_level_successor_length_match_go",
+    "consumed_retirement_is_noop_but_foreign_consumer_still_conflicts",
+    "confirm_and_retire_uncertain_saves_are_idempotent_without_replay",
+    "verify_rejects_every_reservation_retirement_and_hash_gate",
+    "forward_allocation_preserves_unknown_pending_and_does_not_wrap",
+    "route_uses_actual_foreign_and_empty_bytes_not_pending_reservation",
+    "route_runtime_is_unique_anchored_ascii_and_checks_every_skipped_file",
+    "route_range_defaults_and_schema_gate_match_go",
+    "pre_cancelled_control_prevents_all_reads_writes_and_lock_attempts",
+    "lock_wait_keeps_original_deadline_and_checks_success_after_cancel",
+    "disk_publication_roundtrip_holds_both_locks_and_releases_before_receipt_wait",
+    "disk_publication_rejects_changed_receipt_and_admission_rejects_pool_drift",
+    "disk_cleanup_uses_recorded_path_and_pool_even_when_addon_or_receipt_changed",
+    "disk_pre_input_rechecks_addon_inventory_with_original_control",
+    "disk_formal_cleanup_does_not_load_legacy_claims_but_shares_maintenance_lock",
+    "explicit_close_preserves_both_ordered_failure_causes"
+  ],
+  "mapping": [
+    {
+      "rustTests": [
+        "acquisition_failure_keeps_primary_and_ordered_cleanup_without_drop_retry",
+        "acquisition_failure_before_second_lock_closes_only_maintenance",
+        "acquisition_cleanup_ignores_cancelled_or_expired_control",
+        "second_lock_post_acquire_cancel_closes_before_maintenance",
+        "acquisition_success_transfers_ownership_without_early_close",
+        "lock_wait_post_acquire_cancel_checks_real_close_once_and_releases"
+      ],
+      "goSource": [
+        "internal/vault/lease.go:TryAcquireLease",
+        "internal/live/channel/native_windows.go:unlockPublication,Publish,Consumed,Supersede"
+      ],
+      "contract": "Owned handles close once, preserving primary plus cleanup errors; Rust two-lock constructor cleanup is an added resource-safety regression, not a claim Go waitLease already reports every Close error.",
+      "faultBoundary": "helper-only; no actual OS close error executed"
+    },
+    {
+      "rustTests": [
+        "disk_acquire_canonical_path_failure_releases_maintenance",
+        "disk_acquire_second_lock_io_failure_releases_maintenance",
+        "disk_acquire_second_lock_deadline_releases_only_owned_maintenance"
+      ],
+      "goSource": [
+        "internal/vault/lease.go:openLease,waitLease",
+        "internal/vault/lease_test.go:TestAcquireLeaseIsExclusiveForSameScopeAndResource,TestAcquireLeaseHonorsCancellationWhileWaiting"
+      ],
+      "contract": "Same scope/resource exclusivity, fixed deadline, retained namespace, failed admission releases only owned locks."
+    },
+    {
+      "rustTests": [
+        "disk_publication_rejects_changed_receipt_and_admission_rejects_pool_drift"
+      ],
+      "goSource": [
+        "internal/delivery/slots.go:InspectSlots",
+        "internal/delivery/slots_test.go:TestSlotPoolIncompleteInstallAndPendingPublication"
+      ],
+      "contract": "Inventory rejection cannot leave either constructor-acquired lock held."
+    }
+  ],
+  "goSources": [
+    {
+      "path": "internal/vault/lease.go",
+      "gitBlob": "a7a668e2454dba46be9b4445b92909427e81b8b1",
+      "bytes": 2203,
+      "sha256": "de5a9334c107834dbfb669a43a28a8226171bcfbd4775519de232ba4c24b209b"
+    },
+    {
+      "path": "internal/vault/lease_test.go",
+      "gitBlob": "9c43471c86754e4a100998f8a80c2947835b0918",
+      "bytes": 5372,
+      "sha256": "b7d1abc0918f43c114ea18121ec1421c3f72aedb77af9e3736577042223cbc49"
+    },
+    {
+      "path": "internal/vault/lease_windows.go",
+      "gitBlob": "c289825bd060b24c5bb51b31edccbfa4b15054d9",
+      "bytes": 383,
+      "sha256": "18b08ca948136469f7a7f9be8ded39fec3733d3e2caa99a3d12545b0b8f2b091"
+    },
+    {
+      "path": "internal/live/channel/native_windows.go",
+      "gitBlob": "1cb0db6b7e00c132ea44e8797b04feb359feb68f",
+      "bytes": 10641,
+      "sha256": "6dc0d019ad3b72d5dbe4abe56fcbb8f735059d6ec060fbfe55d90017d0f4eada"
+    },
+    {
+      "path": "internal/delivery/slots.go",
+      "gitBlob": "5f04500071bf708f6520c4271193e1ec8918bf92",
+      "bytes": 20149,
+      "sha256": "58ca862c2eaa55e8a39020ed7fdbf9838452957970f29d8b6d2ac2812faff461"
+    },
+    {
+      "path": "internal/delivery/slots_test.go",
+      "gitBlob": "e4dabcbb5209271feef3bafee06f4d3ead1248c1",
+      "bytes": 8920,
+      "sha256": "b79f3917edecf2450724747f12d7c74c5068b7f03cab6b5dad1aa6b2d84faf2c"
+    }
+  ]
+}
