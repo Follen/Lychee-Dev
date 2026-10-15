@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 20:58 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`a588f526db5616eef3014e66327bb84cb0196440`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 21:05 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b18a91081375b23f9dfded86e2aa90b742fc3ca6`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,13 +25,13 @@
 
 ## 2. 当前实现与未闭环事项
 
-默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file正继续按其自身Go JSON规则实施，不误套project更严duplicate/depth限制。其余workspace同步open/native Drop及project命令边界仍未闭合。
+默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。其余workspace同步open/native Drop及project命令边界仍未闭合。
 
 默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。后继默认local SQL的Encoding/Root/selected现共用query内CASC索引owner：64MiB缓存、XOR首选bucket、原累计逻辑账、真实内存释放与成功capture前原Directory逐块SHA256/最新generation复核已接，8新Rust回归未跑。独立legacy local API仍原路径，EXISTS/标量子查询/EXPLAIN ANALYZE继续实施，未称全SQL等价。
 
 默认 named target 现已组合完整配置-only分页查找、严格解码/名称匹配、真实local/remote pin准备及create-only引用；不读取旧引用历史，不因准备期间配置删除拒绝已认证目标，named结果不冒认底层capture为公开provenance。默认local同时恢复固定Go的client/build→parent/definitions→复查→pin→配置blob→capture顺序。12源与17项新Rust测试已写，未编译执行；原目录/客户端读取的native Drop边界仍待后续收口。
 
-集中验证 [38801126956](https://github.com/Follen/Lychee-Dev/actions/runs/38801126956) 已针对 cd576 启动。context 组实际编译失败：owned signature 调用上游私有 `signature_by_position`，后继已改为公开 signatures 逆序按位置查找，保原索引重复位置 last-wins 及 typed checkpoint，不新增引擎补丁；product all-target 亦失败，早期51个receipt/72份sealed日志已核，all-target/CLI均仅上述E0624。静态入口测试仍把已更新的 Skill 判为 Go3.2.2，后继已改为精确323并证明命令表来源与322字节相同；历史322 Lua环境测试也改为分别认证原351记录与现323全源，仅应用已授权3.5版本字段。71项本地首组及其余142项Node检查已通过，3项Windows launcher在Linux准确跳过；这些修正未包含在 cd576，Rust修正尚未编译。另Lua checker旧21个addon extra断言已随完整退役收紧为0，本地34/34通过，真实Lua运行仍待测。冻结三方实验本轮按独立触发策略跳过，既有6699成功仍仅证明其冻结输入。
+集中验证 [38801126956](https://github.com/Follen/Lychee-Dev/actions/runs/38801126956) 已针对 cd576 启动。context 组实际编译失败：owned signature 调用上游私有 `signature_by_position`，后继已改为公开 signatures 逆序按位置查找，保原索引重复位置 last-wins 及 typed checkpoint，不新增引擎补丁；product all-target 亦失败，早期51个receipt/72份sealed日志已核，all-target/CLI均仅上述E0624。静态入口测试仍把已更新的 Skill 判为 Go3.2.2，后继已改为精确323并证明命令表来源与322字节相同；历史322 Lua环境测试也改为分别认证原351记录与现323全源，仅应用已授权3.5版本字段。71项本地首组及其余142项Node检查已通过，3项Windows launcher在Linux准确跳过；这些修正未包含在 cd576，Rust修正尚未编译。 在已读回 b18 当前树重新运行 static job 的全部 Node 测试，219通过、0失败，3项Windows launcher因Linux准确跳过；Skill 84命令/313引用及自有unsafe清单均无静态违规，322差分仅既有明确引擎文案和授权版本字段差异。无Rust运行或全业务通过含义。另Lua checker旧21个addon extra断言已随完整退役收紧为0，本地34/34通过，真实Lua运行仍待测。冻结三方实验本轮按独立触发策略跳过，既有6699成功仍仅证明其冻结输入。
 
 内存当前实际实现：API定义原文副本在验证重建后立即释放；身份唯一性临时sets在syntax索引前释放；managed reads/calls冻结上下文共享Arc而不深拷贝；XML生成文本去掉Script重复Vec，仅compiler文本保有并供现消费者读取。后继把同一请求的 XML 原文 Arc 在 Script 与各 manifest Program 之间共享，避免每个 manifest 重建原文分配；每份 AST、模板、动作和加载上下文仍独立。原行映射/hash/未知处理不变，Rust与完整Retail降幅均待集中实测。
 

@@ -13,6 +13,8 @@ use std::{
 };
 
 pub mod target;
+mod file;
+pub use file::resolve_selection_file_controlled;
 mod project_controlled;
 pub use project_controlled::resolve_pinned_controlled_with_check;
 
@@ -316,30 +318,7 @@ fn pin_selection_observed_with_check(
             }
             None => load_pinned(home, &spec.parent)?,
         };
-        if spec.source.is_some() && parent.source.is_some() && spec.source != parent.source {
-            return Err(ToolkitError::new(
-                "selection.fixed_source_conflict",
-                "cannot change an inherited source",
-                4,
-            ));
-        }
-        if spec.data.is_some() && parent.data.is_some() && spec.data != parent.data {
-            return Err(ToolkitError::new(
-                "selection.fixed_data_conflict",
-                "cannot change inherited data",
-                4,
-            ));
-        }
-        if spec.changes.is_some() && parent.changes.is_some() && spec.changes != parent.changes {
-            return Err(ToolkitError::new(
-                "selection.fixed_changes_conflict",
-                "cannot change inherited changes",
-                4,
-            ));
-        }
-        spec.source = spec.source.or(parent.spec.source);
-        spec.data = spec.data.or(parent.spec.data);
-        spec.changes = spec.changes.or(parent.spec.changes);
+        inherit_parent(&mut spec, parent)?;
     }
     validate(&spec)?;
     let mut pin = PinnedSet {
@@ -363,6 +342,33 @@ fn pin_selection_observed_with_check(
         published(&pin);
     }
     Ok(pin)
+}
+fn inherit_parent(spec: &mut SelectionSpec, parent: PinnedSet) -> Result<()> {
+    if spec.source.is_some() && parent.source.is_some() && spec.source != parent.source {
+        return Err(ToolkitError::new(
+            "selection.fixed_source_conflict",
+            "cannot change an inherited source",
+            4,
+        ));
+    }
+    if spec.data.is_some() && parent.data.is_some() && spec.data != parent.data {
+        return Err(ToolkitError::new(
+            "selection.fixed_data_conflict",
+            "cannot change inherited data",
+            4,
+        ));
+    }
+    if spec.changes.is_some() && parent.changes.is_some() && spec.changes != parent.changes {
+        return Err(ToolkitError::new(
+            "selection.fixed_changes_conflict",
+            "cannot change inherited changes",
+            4,
+        ));
+    }
+    spec.source = spec.source.take().or(parent.spec.source);
+    spec.data = spec.data.take().or(parent.spec.data);
+    spec.changes = spec.changes.take().or(parent.spec.changes);
+    Ok(())
 }
 pub fn find_project(start: &Path) -> Result<PathBuf> {
     for parent in start.ancestors() {

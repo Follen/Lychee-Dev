@@ -1208,6 +1208,17 @@ fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
             error.exit_code = 5;
         }
     }
+    if inv.command == "target resolve" && inv.flag("--file").is_some() {
+        // Selection-file errors are ordinary Go errors rather than queryFault
+        // sentinels. Keep full typed cleanup/publication facts at this boundary.
+        if error.code.starts_with("selection.") || matches!(error.code.as_str(), "input.invalid" | "external.io" | "vault.metadata") {
+            error.code = "command.failed".into();
+            error.exit_code = 5;
+        }
+    }
+    if inv.command == "target resolve" && inv.flag("--file").is_some() && error.code == "vault.workspace_schema_newer" {
+        error.code = "vault.unsupported_workspace".into();
+    }
     // Go entry.queryFault projects installation selection errors for every
     // command, including addon handlers, rather than only catalog queries.
     if matches!(error.code.as_str(), "selection.installation_missing" | "selection.installation_ambiguous" | "selection.installation_product_mismatch" | "selection.installation_metadata_conflict") {

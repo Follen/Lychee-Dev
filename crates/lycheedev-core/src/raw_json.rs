@@ -79,6 +79,15 @@ fn whitespace(byte: u8) -> bool {
 /// Iterative grammar scanner; scratch is bounded by Go's depth limit. String
 /// bytes and escaped surrogate code units are intentionally never decoded.
 pub(crate) fn validate_at(bytes: &[u8], base: usize) -> Result<(), InvalidJson> {
+    scan(bytes, base, false).map(|_| ())
+}
+/// The first complete JSON value, with Go byte/string/depth rules. Selection
+/// files decode that value before classifying any following data. This shares
+/// the validator and does not change full-document RawMessage admission.
+pub(crate) fn first_value_end(bytes: &[u8]) -> Result<usize, InvalidJson> {
+    scan(bytes, 0, true)
+}
+fn scan(bytes: &[u8], base: usize, first_only: bool) -> Result<usize, InvalidJson> {
     let mut at = 0;
     let mut frames = Vec::new();
     let mut root = false;
@@ -90,8 +99,8 @@ pub(crate) fn validate_at(bytes: &[u8], base: usize) -> Result<(), InvalidJson> 
         let byte = bytes.get(at).copied();
         match frame {
             None if root => {
-                return if at == bytes.len() {
-                    Ok(())
+                return if first_only || at == bytes.len() {
+                    Ok(at)
                 } else {
                     Err(InvalidJson { offset: at })
                 };

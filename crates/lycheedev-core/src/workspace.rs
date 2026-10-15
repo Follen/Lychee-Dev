@@ -222,7 +222,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
 }
 fn target(inv: &Invocation) -> Result<Outcome> {
     if inv.command != "target resolve" { return selection::target::dispatch(inv); }
-    open(&inv.home)?;
     if inv.command == "target resolve" {
         if let Some(file) = inv.flag("--file") {
             if inv.flag("--target").is_some()
@@ -233,29 +232,8 @@ fn target(inv: &Invocation) -> Result<Outcome> {
                     "target resolve --file cannot combine with target/provider selectors",
                 ));
             }
-            if fs::metadata(file)?.len() > 65536 {
-                return Err(ToolkitError::new(
-                    "selection.spec_limit",
-                    "selection file exceeds 64 KiB",
-                    4,
-                ));
-            }
-            let raw = fs::read(file)?;
-            let value: Value = serde_json::from_slice(&raw)?;
-            if value.as_object().is_none_or(|fields| {
-                fields
-                    .keys()
-                    .any(|key| !["parent", "source", "data", "changes"].contains(&key.as_str()))
-            }) {
-                return Err(ToolkitError::invalid(
-                    "selection spec contains unknown fields",
-                ));
-            }
-            let spec: selection::SelectionSpec = serde_json::from_value(value)?;
-            let pin = selection::pin_selection(&inv.home, spec)?;
-            let mut outcome = Outcome::new(serde_json::to_value(&pin)?);
-            outcome.selection = serde_json::to_value(pin)?;
-            return Ok(outcome);
+            let pin = selection::resolve_selection_file_controlled(&inv.home, &inv.cwd.join(file), &inv.control)?;
+            return Ok(Outcome::new(serde_json::to_value(pin)?));
         }
         return Err(ToolkitError::new(
             "selection.provider_required",

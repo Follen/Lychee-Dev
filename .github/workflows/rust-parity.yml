@@ -659,6 +659,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-named-target-selection --one-shot -- test --locked --offline -p lycheedev-core --lib selection::target:: -j 1
+      - name: Run controlled explicit selection file fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-selection-file --one-shot -- test --locked --offline -p lycheedev-core --lib selection::file:: -j 1
       - name: Run controlled automatic project pin fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
