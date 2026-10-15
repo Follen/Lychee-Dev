@@ -199,6 +199,87 @@ impl HistoricalWriter<'_> {
             _ => Err(ToolkitError::invalid("metadata document exceeds 1 MiB")),
         }
     }
+    /// Keyset pages on this same checked metadata owner. Visitors are never
+    /// replayed after the first row, and unrelated document kinds stay unread.
+    pub(crate) fn visit_raw_page(
+        &self,
+        prefix: &str,
+        after: &str,
+        visit: impl FnMut(&str, i64, &[u8]) -> Result<()>,
+    ) -> Result<(usize, String)> {
+        super::raw_page::visit_raw_page(
+            self.connection,
+            prefix,
+            after,
+            1000,
+            self.control,
+            Duration::ZERO,
+            || Ok(()),
+            visit,
+        )
+    }
+    /// Fixed-Go DeleteDocuments: one <=64-key CAS transaction and persistent
+    /// tombstones. An unrelated document is never decoded or scanned.
+    pub(crate) fn delete(&self, removals: &[(String, i64)]) -> Result<()> {
+        self.control.check()?;
+        if removals.is_empty() || removals.len() > 64 {
+            return Err(ToolkitError::new(
+                "command.failed",
+                "vault: invalid deletion count",
+                5,
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for (key, generation) in removals {
+            self.control.check()?;
+            if key.is_empty() || key.len() > 512 || !seen.insert(key) || *generation <= 0 {
+                return Err(ToolkitError::new(
+                    "command.failed",
+                    "vault: invalid deletion",
+                    5,
+                ));
+            }
+        }
+        let lease = historical_lease(self.home, "metadata-write", self.control)?;
+        let result = (|| {
+            let until = self.control.deadline();
+            let mut transaction = checked_sql(self.control, until, &mut || {}, || {
+                rusqlite::Transaction::new_unchecked(
+                    self.connection,
+                    rusqlite::TransactionBehavior::Immediate,
+                )
+            })?;
+            let result = (|| {
+                for (key, generation) in removals {
+                    checked_sql(self.control, until, &mut || {}, || {
+                        transaction.execute(
+                        "INSERT INTO deleted_generations(key,generation) SELECT key,generation FROM documents WHERE key=?1 AND generation=?2 ON CONFLICT(key) DO UPDATE SET generation=excluded.generation",
+                        params![key, generation])
+                    })?;
+                    let count = checked_sql(self.control, until, &mut || {}, || {
+                        transaction.execute(
+                            "DELETE FROM documents WHERE key=?1 AND generation=?2",
+                            params![key, generation],
+                        )
+                    })?;
+                    if count != 1 {
+                        return Err(ToolkitError::new(
+                            "vault.generation_conflict",
+                            format!("vault.generation_conflict: {key}"),
+                            3,
+                        ));
+                    }
+                }
+                checked_sql(self.control, until, &mut || {}, || {
+                    transaction.execute_batch("COMMIT")
+                })?;
+                Ok(())
+            })();
+            finish_transaction(&mut transaction, result)
+        })();
+        let result = finish_historical(result, lease.close());
+        crate::selection::selection_finish(result, self.control.check())
+    }
     pub fn commit(&self, changes: &[HistoricalMutation<'_>]) -> Result<()> {
         self.commit_observed(changes, &mut || {})
     }
@@ -289,4 +370,63 @@ fn finish_transaction(
         transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
     }
     finish_historical(result, rollback)
+}
+
+#[cfg(test)]
+mod target_lifecycle_tests {
+    use super::*;
+    #[test]
+    fn shared_raw_page_restores_zero_sql_timeout_before_checked_writer_retry() {
+        let path = std::env::temp_dir().join(format!(
+            "lychee-target-writer-timeout-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        crate::workspace::initialize(&path).unwrap();
+        let token = crate::control::TrackedCancellation::new();
+        let control =
+            OperationControl::tracked(Instant::now() + Duration::from_secs(60), token.clone());
+        let result = Metadata::with_historical_write(&path, &control, |writer| {
+            writer.commit(&[HistoricalMutation {
+                key: "target/a",
+                expected_generation: 0,
+                bytes: b"null",
+            }])?;
+            assert_eq!(
+                writer
+                    .visit_raw_page("target/", "target/", |_, _, _| Ok(()))?
+                    .0,
+                1
+            );
+            let timeout: i64 = writer
+                .connection
+                .pragma_query_value(None, "busy_timeout", |r| r.get(0))?;
+            assert_eq!(timeout, 0);
+            let blocker = Connection::open(path.join("state/toolkit.sqlite"))?;
+            blocker.execute_batch("BEGIN IMMEDIATE")?;
+            let mut saw_busy = false;
+            let result = writer.commit_observed(
+                &[HistoricalMutation {
+                    key: "target/b",
+                    expected_generation: 0,
+                    bytes: b"null",
+                }],
+                &mut || {
+                    saw_busy = true;
+                    token.cancel();
+                },
+            );
+            assert!(saw_busy);
+            assert_eq!(result.unwrap_err().code, "command.cancelled");
+            blocker.execute_batch("ROLLBACK")?;
+            blocker.close().map_err(|(_, e)| ToolkitError::from(e))?;
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err().code, "command.cancelled");
+        assert!(control.stop_cause().is_ok());
+        std::fs::remove_dir_all(path).unwrap();
+    }
 }

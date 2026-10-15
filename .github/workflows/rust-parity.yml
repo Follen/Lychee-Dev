@@ -367,7 +367,8 @@ jobs:
         run: node tools/rust-cargo.mjs --owner ci-history-metadata --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_read_tests -j 1
       - name: Run historical multi-document transactional CAS fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-history-cas --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_write::tests -j 1
+        run: |
+          node tools/rust-cargo.mjs --owner ci-history-cas --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_write:: -j 1
       - name: Run ordered Lua compiler cancellation and retention fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

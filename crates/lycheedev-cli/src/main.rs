@@ -265,6 +265,12 @@ fn parse(args: &[String]) -> Result<Invocation> {
     if command == "target resolve" {
         target_remote::validate_flags(&flags)?;
     }
+    if command == "target add" && flags.get("--help").map(String::as_str) != Some("true")
+        && (flags.get("--remote").map(String::as_str) == Some("true"))
+            == flags.get("--installation").is_some_and(|path| !path.is_empty())
+    {
+        return Err(ToolkitError::arguments("target add requires exactly one of --installation or --remote"));
+    }
     Ok(Invocation {
         command,
         positional,
@@ -1190,6 +1196,17 @@ fn asset_committed_context(error: &ToolkitError) -> bool {
 fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     if inv.command == "target resolve" && inv.flag("--target").is_some_and(|name| !name.is_empty()) {
         error = target_remote::named_fault(error);
+    }
+    if matches!(inv.command.as_str(), "target list" | "target add" | "target show" | "target remove") {
+        if matches!(error.code.as_str(), "selection.target_missing" | "selection.target_exists" | "selection.target_ambiguous" | "selection.target_in_use" | "selection.target_format") {
+            if !error.details.is_object() {
+                error.details = if error.details.is_null() { json!({}) } else { json!({"primaryDetails":error.details}) };
+            }
+            error.details["stage"] = json!("query");
+        } else if matches!(error.code.as_str(), "selection.unsupported_data_product" | "selection.unsupported_data_language" | "selection.unsupported_data_region") {
+            error.code = "command.failed".into();
+            error.exit_code = 5;
+        }
     }
     // Go entry.queryFault projects installation selection errors for every
     // command, including addon handlers, rather than only catalog queries.

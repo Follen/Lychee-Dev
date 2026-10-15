@@ -90,7 +90,10 @@ fn error(code: &str, message: impl Into<String>) -> ToolkitError {
         code,
         message,
         match code {
-            "selection.target_missing" | "selection.target_build_unavailable" => 3,
+            "selection.target_missing"
+            | "selection.target_build_unavailable"
+            | "selection.target_exists"
+            | "selection.target_in_use" => 3,
             "selection.target_format" | "selection.target_ambiguous" => 2,
             _ => 5,
         },
@@ -197,6 +200,37 @@ fn decode(raw: &[u8], control: &OperationControl) -> Result<TargetConfig> {
     config.validate()?;
     Ok(config)
 }
+fn read_metadata(
+    home: &Path,
+    control: &OperationControl,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Metadata> {
+    let metadata = Metadata::open_controlled_with_check(home, false, control, &mut check).map_err(
+        |mut error| {
+            if matches!(
+                error.code.as_str(),
+                "vault.schema_newer" | "vault.schema_invalid"
+            ) {
+                error.code = "vault.unsupported_workspace".into();
+                if error.details.is_null() {
+                    error.message = "vault.unsupported_workspace".into();
+                }
+                error.exit_code = 4;
+            }
+            error
+        },
+    )?;
+    let result = metadata.require_historical_schema_with_check(control, &mut check);
+    match result {
+        Ok(()) => Ok(metadata),
+        Err(error) => {
+            let result =
+                crate::metadata::historical_write::finish_historical(Err(error), metadata.close());
+            let result = super::selection_finish(result, control.check());
+            super::selection_finish(result, check())
+        }
+    }
+}
 /// Lookup scans all configuration pages, as fixed Go ListTargets does, even
 /// after an exact match. An invalid unrelated configuration is still an error.
 /// Only candidate configurations/names survive a page; no history is read.
@@ -208,14 +242,13 @@ pub fn lookup_controlled_with_check(
 ) -> Result<TargetConfig> {
     let mut scope = Scope { control, check };
     scope.check()?;
-    let metadata =
-        match Metadata::open_controlled_with_check(home, false, control, || (scope.check)()) {
-            Ok(metadata) => metadata,
-            Err(error) if pure(&error, "vault.record_missing") => {
-                return scope.finish(Err(error_missing(key)), Ok(()));
-            }
-            Err(error) => return scope.finish(Err(error), Ok(())),
-        };
+    let metadata = match read_metadata(home, control, || (scope.check)()) {
+        Ok(metadata) => metadata,
+        Err(error) if pure(&error, "vault.record_missing") => {
+            return scope.finish(Err(error_missing(key)), Ok(()));
+        }
+        Err(error) => return scope.finish(Err(error), Ok(())),
+    };
     let result = (|| {
         let mut after = "target/".to_owned();
         let mut exact = None;
@@ -371,3 +404,6 @@ pub fn resolve_controlled_with_check(
 }
 #[cfg(test)]
 mod tests;
+
+mod management;
+pub use management::dispatch;

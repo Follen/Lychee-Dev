@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 20:49 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e74ffdfb666ab525f964aec0728f497c9cc1fe65`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 20:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`f5bd1d9ef99bba3962b7f20d99629b51b839dd65`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file正继续按其自身Go JSON规则实施，不误套project更严duplicate/depth限制。其余workspace同步open/native Drop及project命令边界仍未闭合。
 
 默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。query内CASC索引缓存/成功capture前原路径rehash、EXISTS/标量子查询/EXPLAIN ANALYZE仍是明确后继缺口，未称全SQL等价。
 

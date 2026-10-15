@@ -1,7 +1,6 @@
 //! Workspace settings, budgets, and retention.
 use crate::{
     Invocation, Outcome, Result, ToolkitError,
-    metadata::Metadata,
     selection,
     storage::{self, ExclusiveLock},
 };
@@ -222,6 +221,7 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     }
 }
 fn target(inv: &Invocation) -> Result<Outcome> {
+    if inv.command != "target resolve" { return selection::target::dispatch(inv); }
     open(&inv.home)?;
     if inv.command == "target resolve" {
         if let Some(file) = inv.flag("--file") {
@@ -263,184 +263,7 @@ fn target(inv: &Invocation) -> Result<Outcome> {
             3,
         ));
     }
-    if inv.command == "target show" && inv.argument()?.starts_with("PIN-") {
-        return Ok(Outcome::new(serde_json::to_value(selection::load_pinned(
-            &inv.home,
-            inv.argument()?,
-        )?)?));
-    }
-    if inv.command == "target list" && !inv.home.join("state/toolkit.sqlite").exists() {
-        return Ok(Outcome::new(json!({"targets":[]})));
-    }
-    let mut metadata = Metadata::open(
-        &inv.home,
-        inv.command == "target add" || inv.command == "target remove",
-    )?;
-    let all: Vec<Value> = metadata.list("target/", 10_000)?;
-    match inv.command.as_str() {
-        "target list" => Ok(Outcome::new(json!({"targets":all}))),
-        "target add" => {
-            let name = inv.argument()?;
-            if name.is_empty()
-                || name.len() > 100
-                || !name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
-            {
-                return Err(ToolkitError::arguments(
-                    "target name must be bounded ASCII identifier",
-                ));
-            }
-            let product = crate::client::canonical_product(inv.required("--product")?)
-                .ok_or_else(|| ToolkitError::arguments("unsupported product"))?;
-            let region = inv.required("--region")?;
-            let locale = inv.required("--locale")?;
-            if !selection::valid_product(product)
-                || !["us", "eu", "cn", "kr", "tw"].contains(&region)
-                || ![
-                    "enUS", "enGB", "deDE", "esES", "esMX", "frFR", "itIT", "ptBR", "ruRU", "koKR",
-                    "zhCN", "zhTW",
-                ]
-                .contains(&locale)
-            {
-                return Err(ToolkitError::arguments(
-                    "unsupported product, region, or locale",
-                ));
-            }
-            if inv.flag_bool("--remote") == inv.flag("--installation").is_some() {
-                return Err(ToolkitError::arguments(
-                    "exactly one of --remote or --installation is required",
-                ));
-            }
-            if inv
-                .flag("--build")
-                .is_some_and(|s| !selection::valid_build(s))
-            {
-                return Err(ToolkitError::arguments(
-                    "--build requires full numeric build",
-                ));
-            }
-            let key = format!("target/{name}");
-            let generation = metadata.generation(&key)?;
-            if generation.is_some() && !inv.flag_bool("--replace") {
-                return Err(ToolkitError::new(
-                    "selection.target_exists",
-                    "target exists; explicit --replace required",
-                    4,
-                ));
-            }
-            let mut value = json!({"schema":"lycheedev.target.v1","name":name,"product":product,"region":region,"locale":locale,"source":if inv.flag_bool("--remote"){"remote"}else{"installation"}});
-            for (flag, key) in [
-                ("--build", "fullBuild"),
-                ("--installation", "installation"),
-                ("--definitions", "definitions"),
-            ] {
-                if let Some(v) = inv.flag(flag) {
-                    value[key] = json!(v);
-                }
-            }
-            metadata.put(&key, &value, generation)?;
-            Ok(Outcome::new(value))
-        }
-        "target show" | "target remove" => {
-            let key = inv.argument()?.to_ascii_lowercase();
-            let matches: Vec<_> = all
-                .iter()
-                .filter(|v| {
-                    v["name"]
-                        .as_str()
-                        .is_some_and(|s| s.to_ascii_lowercase().starts_with(&key))
-                })
-                .collect();
-            let exact = matches.iter().find(|v| {
-                v["name"]
-                    .as_str()
-                    .is_some_and(|s| s.eq_ignore_ascii_case(&key))
-            });
-            let selected = if let Some(v) = exact {
-                *v
-            } else if matches.len() == 1 {
-                matches[0]
-            } else {
-                return Err(ToolkitError::new(
-                    if matches.is_empty() {
-                        "selection.target_missing"
-                    } else {
-                        "selection.target_ambiguous"
-                    },
-                    "target selection must match exactly one name",
-                    2,
-                ));
-            };
-            let name = selected["name"].as_str().unwrap();
-            let refs: Vec<Value> = metadata.list(&format!("target-ref/{name}/"), 10001)?;
-            if refs.len() > 10000
-                || refs.iter().any(|reference| {
-                    reference["schema"] != "lycheedev.target-ref.v1"
-                        || reference["name"] != name
-                        || !["pin", "operation"].contains(&reference["kind"].as_str().unwrap_or(""))
-                })
-            {
-                return Err(ToolkitError::new(
-                    "selection.target_format",
-                    "named target reference ledger is invalid or exceeds bounds",
-                    4,
-                ));
-            }
-            let active: Vec<_> = refs
-                .iter()
-                .filter(|v| v["kind"] == "operation")
-                .map(|v| v["id"].clone())
-                .collect();
-            if inv.command == "target show" {
-                return Ok(Outcome::new(
-                    json!({"config":selected,"references":refs,"activeOperations":active}),
-                ));
-            }
-            if !active.is_empty() {
-                return Err(ToolkitError::new(
-                    "selection.target_in_use",
-                    "active operations block target removal",
-                    6,
-                ));
-            }
-            let target_key = format!("target/{name}");
-            let generation = metadata.generation(&target_key)?.ok_or_else(|| {
-                ToolkitError::new("selection.target_missing", "target disappeared", 2)
-            })?;
-            let mut keys = vec![target_key.clone()];
-            for reference in &refs {
-                keys.push(format!(
-                    "target-ref/{name}/{}/{}",
-                    reference["kind"].as_str().unwrap(),
-                    reference["id"]
-                        .as_str()
-                        .ok_or_else(|| ToolkitError::invalid("target reference ID missing"))?
-                ));
-            }
-            metadata.delete_checked(&keys, &[(target_key, generation)], |documents| {
-                if documents.iter().any(|doc| {
-                    doc.key.starts_with(&format!("target-ref/{name}/"))
-                        && doc.value["kind"] == "operation"
-                }) {
-                    return Err(ToolkitError::new(
-                        "selection.target_in_use",
-                        "a concurrent operation still owns the named target",
-                        6,
-                    ));
-                }
-                Ok(())
-            })?;
-            Ok(Outcome::new(
-                json!({"name":name,"removedRefCount":refs.len(),"keptPins":refs.iter().filter(|v|v["kind"]=="pin").map(|v|v["id"].clone()).collect::<Vec<_>>()}),
-            ))
-        }
-        _ => Err(ToolkitError::new(
-            "selection.migration_incomplete",
-            "target resolution belongs to provider adapters and is not complete",
-            3,
-        )),
-    }
+    selection::target::dispatch(inv)
 }
 
 #[cfg(test)]
