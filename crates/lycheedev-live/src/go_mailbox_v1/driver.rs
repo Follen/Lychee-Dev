@@ -664,8 +664,9 @@ fn validate_result(q: &ObservationQuery, r: &super::Receipt, bytes: &[u8]) -> Ch
     if bytes.len() != r.report_bytes as usize || checksum(bytes) != r.report_checksum {
         return Err(error("live.channel_report_record_invalid"));
     }
-    serde_json::from_slice::<Box<serde_json::value::RawValue>>(bytes)
-        .map_err(|_| error("live.channel_report_json"))?;
+    if !lycheedev_core::raw_json::is_valid(bytes) {
+        return Err(error("live.channel_report_json"));
+    }
     Ok(())
 }
 

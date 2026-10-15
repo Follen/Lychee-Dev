@@ -231,6 +231,18 @@ jobs:
       - name: Run normal invocation ordered cancellation fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-cli-control --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::normal_invocation_control_ -j 1
+      - name: Run formal Live CLI admission rendering and repair validator fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-formal-live-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev formal_live -j 1
+      - name: Run ordered Lua compiler cancellation and retention fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-ordered-luac --one-shot -- test --locked --offline -p lycheedev-source --lib luac::ordered_tests -j 1
+      - name: Run exact native raw byte JSON grammar fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-raw-json --one-shot -- test --locked --offline -p lycheedev-core --lib raw_json::tests -j 1
       - name: Run actual Source child scope and cleanup fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-process --one-shot -- test --locked --offline -p lycheedev-source --lib process::tests -j 1
@@ -376,6 +388,12 @@ jobs:
         id: candidate_luac
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
         run: node tools/luac.mjs build .tmp/ci-package-luac
+      - name: Execute authenticated ordered Lua compiler regression
+        if: ${{ !cancelled() && steps.candidate_luac.outcome == 'success' }}
+        run: |
+          $env:LYCHEEDEV_LUAC_STAGE = (Resolve-Path .tmp/ci-package-luac).Path
+          node tools/rust-cargo.mjs --owner ci-ordered-luac-real --one-shot -- test --locked --offline -p lycheedev-source --test luac_ordered_real -j 1 -- --ignored --nocapture
+          exit $LASTEXITCODE
       - name: Assemble an unpublished exact-source candidate with licenses
         id: candidate_package
         if: ${{ !cancelled() && steps.candidate_luac.outcome == 'success' && steps.cli_binary.outcome == 'success' }}

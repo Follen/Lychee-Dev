@@ -737,8 +737,7 @@ impl State {
             ) && (o.result_bytes.0.len() > MAX_PAYLOAD
                 || o.result_bytes.0.len() != o.report_bytes as usize
                 || checksum(&o.result_bytes.0) != o.report_checksum
-                || serde_json::from_slice::<Box<serde_json::value::RawValue>>(&o.result_bytes.0)
-                    .is_err())
+                || !lycheedev_core::raw_json::is_valid(&o.result_bytes.0))
             {
                 return Err(bad());
             }

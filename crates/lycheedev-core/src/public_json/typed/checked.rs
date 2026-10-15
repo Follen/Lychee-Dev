@@ -5,15 +5,30 @@ use serde::{
     Serialize, Serializer,
     ser::{self, Error as _},
 };
+use std::cell::Cell;
 
-pub(super) struct Value<'a, T: ?Sized>(pub &'a T);
+pub(super) struct Value<'a, T: ?Sized>(pub &'a T, pub &'a Cell<bool>);
 impl<T: ?Sized + Serialize> Serialize for Value<'_, T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(Checked(serializer))
+        self.0.serialize(Checked(serializer, self.1))
     }
 }
-struct Checked<S>(S);
-struct Compound<S>(S);
+struct Checked<'a, S>(S, &'a Cell<bool>);
+struct Compound<'a, S>(S, &'a Cell<bool>);
+
+mod bytes_only;
+struct BytePayload<'a, T: ?Sized>(&'a T);
+impl<T: ?Sized + Serialize> Serialize for BytePayload<'_, T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(bytes_only::BytesOnly(serializer))
+    }
+}
+struct RawScope<'a>(&'a Cell<bool>);
+impl Drop for RawScope<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
 
 macro_rules! scalar {
     ($($method:ident ($ty:ty)),* $(,)?) => { $(
@@ -22,16 +37,16 @@ macro_rules! scalar {
         }
     )*};
 }
-impl<S: Serializer> Serializer for Checked<S> {
+impl<'a, S: Serializer> Serializer for Checked<'a, S> {
     type Ok = S::Ok;
     type Error = S::Error;
-    type SerializeSeq = Compound<S::SerializeSeq>;
-    type SerializeTuple = Compound<S::SerializeTuple>;
-    type SerializeTupleStruct = Compound<S::SerializeTupleStruct>;
-    type SerializeTupleVariant = Compound<S::SerializeTupleVariant>;
-    type SerializeMap = Compound<S::SerializeMap>;
-    type SerializeStruct = Compound<S::SerializeStruct>;
-    type SerializeStructVariant = Compound<S::SerializeStructVariant>;
+    type SerializeSeq = Compound<'a, S::SerializeSeq>;
+    type SerializeTuple = Compound<'a, S::SerializeTuple>;
+    type SerializeTupleStruct = Compound<'a, S::SerializeTupleStruct>;
+    type SerializeTupleVariant = Compound<'a, S::SerializeTupleVariant>;
+    type SerializeMap = Compound<'a, S::SerializeMap>;
+    type SerializeStruct = Compound<'a, S::SerializeStruct>;
+    type SerializeStructVariant = Compound<'a, S::SerializeStructVariant>;
     scalar! {
         serialize_bool(bool), serialize_i8(i8), serialize_i16(i16), serialize_i32(i32),
         serialize_i64(i64), serialize_i128(i128), serialize_u8(u8), serialize_u16(u16),
@@ -54,7 +69,7 @@ impl<S: Serializer> Serializer for Checked<S> {
         self.0.serialize_none()
     }
     fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Self::Ok, Self::Error> {
-        self.0.serialize_some(&Value(value))
+        self.0.serialize_some(&Value(value, self.1))
     }
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         self.0.serialize_unit()
@@ -75,7 +90,15 @@ impl<S: Serializer> Serializer for Checked<S> {
         name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error> {
-        self.0.serialize_newtype_struct(name, &Value(value))
+        if name == crate::raw_json::MARKER {
+            if self.1.get() {
+                return Err(S::Error::custom("nested raw JSON byte marker"));
+            }
+            self.1.set(true);
+            let _scope = RawScope(self.1);
+            return self.0.serialize_newtype_struct(name, &BytePayload(value));
+        }
+        self.0.serialize_newtype_struct(name, &Value(value, self.1))
     }
     fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
@@ -85,20 +108,26 @@ impl<S: Serializer> Serializer for Checked<S> {
         value: &T,
     ) -> Result<Self::Ok, Self::Error> {
         self.0
-            .serialize_newtype_variant(name, index, variant, &Value(value))
+            .serialize_newtype_variant(name, index, variant, &Value(value, self.1))
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        self.0.serialize_seq(len).map(Compound)
+        self.0
+            .serialize_seq(len)
+            .map(|inner| Compound(inner, self.1))
     }
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        self.0.serialize_tuple(len).map(Compound)
+        self.0
+            .serialize_tuple(len)
+            .map(|inner| Compound(inner, self.1))
     }
     fn serialize_tuple_struct(
         self,
         name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        self.0.serialize_tuple_struct(name, len).map(Compound)
+        self.0
+            .serialize_tuple_struct(name, len)
+            .map(|inner| Compound(inner, self.1))
     }
     fn serialize_tuple_variant(
         self,
@@ -109,17 +138,21 @@ impl<S: Serializer> Serializer for Checked<S> {
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         self.0
             .serialize_tuple_variant(name, index, variant, len)
-            .map(Compound)
+            .map(|inner| Compound(inner, self.1))
     }
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        self.0.serialize_map(len).map(Compound)
+        self.0
+            .serialize_map(len)
+            .map(|inner| Compound(inner, self.1))
     }
     fn serialize_struct(
         self,
         name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        self.0.serialize_struct(name, len).map(Compound)
+        self.0
+            .serialize_struct(name, len)
+            .map(|inner| Compound(inner, self.1))
     }
     fn serialize_struct_variant(
         self,
@@ -130,7 +163,7 @@ impl<S: Serializer> Serializer for Checked<S> {
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         self.0
             .serialize_struct_variant(name, index, variant, len)
-            .map(Compound)
+            .map(|inner| Compound(inner, self.1))
     }
     fn collect_str<T: ?Sized + std::fmt::Display>(
         self,
@@ -145,11 +178,11 @@ impl<S: Serializer> Serializer for Checked<S> {
 
 macro_rules! sequence {
     ($trait:ident, $method:ident) => {
-        impl<S: ser::$trait> ser::$trait for Compound<S> {
+        impl<S: ser::$trait> ser::$trait for Compound<'_, S> {
             type Ok = S::Ok;
             type Error = S::Error;
             fn $method<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
-                self.0.$method(&Value(value))
+                self.0.$method(&Value(value, self.1))
             }
             fn end(self) -> Result<Self::Ok, Self::Error> {
                 self.0.end()
@@ -161,21 +194,22 @@ sequence!(SerializeSeq, serialize_element);
 sequence!(SerializeTuple, serialize_element);
 sequence!(SerializeTupleStruct, serialize_field);
 sequence!(SerializeTupleVariant, serialize_field);
-impl<S: ser::SerializeMap> ser::SerializeMap for Compound<S> {
+impl<S: ser::SerializeMap> ser::SerializeMap for Compound<'_, S> {
     type Ok = S::Ok;
     type Error = S::Error;
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Self::Error> {
-        self.0.serialize_key(&Value(key))
+        self.0.serialize_key(&Value(key, self.1))
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
-        self.0.serialize_value(&Value(value))
+        self.0.serialize_value(&Value(value, self.1))
     }
     fn serialize_entry<K: ?Sized + Serialize, V: ?Sized + Serialize>(
         &mut self,
         key: &K,
         value: &V,
     ) -> Result<(), Self::Error> {
-        self.0.serialize_entry(&Value(key), &Value(value))
+        self.0
+            .serialize_entry(&Value(key, self.1), &Value(value, self.1))
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         self.0.end()
@@ -183,7 +217,7 @@ impl<S: ser::SerializeMap> ser::SerializeMap for Compound<S> {
 }
 macro_rules! structure {
     ($trait:ident) => {
-        impl<S: ser::$trait> ser::$trait for Compound<S> {
+        impl<S: ser::$trait> ser::$trait for Compound<'_, S> {
             type Ok = S::Ok;
             type Error = S::Error;
             fn serialize_field<T: ?Sized + Serialize>(
@@ -191,7 +225,7 @@ macro_rules! structure {
                 key: &'static str,
                 value: &T,
             ) -> Result<(), Self::Error> {
-                self.0.serialize_field(key, &Value(value))
+                self.0.serialize_field(key, &Value(value, self.1))
             }
             fn skip_field(&mut self, key: &'static str) -> Result<(), Self::Error> {
                 self.0.skip_field(key)

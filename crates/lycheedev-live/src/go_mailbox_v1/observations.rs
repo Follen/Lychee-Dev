@@ -449,7 +449,7 @@ pub fn observe_records(
     {
         return Err(invalid("live.channel_report_record_invalid"));
     }
-    if serde_json::from_slice::<Box<serde_json::value::RawValue>>(&record.payload).is_err() {
+    if !lycheedev_core::raw_json::is_valid(&record.payload) {
         return Err(invalid("live.channel_report_json"));
     }
     Ok(Observation::Reported {

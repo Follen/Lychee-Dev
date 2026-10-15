@@ -1163,3 +1163,86 @@ fn go_mailbox_v1_durable_checkpoint_preserves_go_two_mib_json_write_boundary() {
     journal.close().unwrap();
     assert_code(f.acquire(&control), "journal.memory_log_limit");
 }
+
+#[test]
+fn go_mailbox_v1_durable_raw_byte_report_artifact_result_and_history_are_exact() {
+    let f = Fixture::new();
+    let mut journal = f.open();
+    let control = OperationControl::default();
+    let mut s = with_operation("raw report", false);
+    let raw = b" { \"s\":\"\xff\", \"x\":1e400, \"x\":-0 } \n".to_vec();
+    let op = s.operation.as_mut().unwrap();
+    op.result_bytes = ResultBytes(raw.clone());
+    op.report_bytes = raw.len() as u32;
+    op.report_checksum = checksum(&raw);
+    s.validate().unwrap();
+    journal.append(&control, "result_verified", &s).unwrap();
+    assert_eq!(
+        journal
+            .load(&control)
+            .unwrap()
+            .operation
+            .unwrap()
+            .result_bytes
+            .0,
+        raw
+    );
+    journal
+        .write_result(&control, s.operation.as_ref().unwrap())
+        .unwrap();
+    let op = s.operation.as_ref().unwrap();
+    let bytes = fs::read(f.paths.results.join(format!("{}.json", op.id))).unwrap();
+    let persisted: Operation = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(persisted.result_bytes.0, raw);
+    assert_eq!(persisted.report_checksum, checksum(&raw));
+    let op = s.operation.as_mut().unwrap();
+    op.stage = OperationStage::Complete;
+    op.cleanup_method = CleanupMethod::Released;
+    journal.append(&control, "complete", &s).unwrap();
+    // Reach the actual checkpoint threshold through durable snapshots, then
+    // remove this request from active state so history must hydrate its artifact.
+    for _ in 0..CHECKPOINT_EVENTS {
+        journal.append(&control, "fixture_progress", &s).unwrap();
+    }
+    journal.checkpoint(&control, &mut s, false).unwrap();
+    assert!(!s.archive.is_empty());
+    let archived = read_segment(
+        &f.paths.history.join(format!("{}.jsonl", s.archive)),
+        &control,
+    )
+    .unwrap();
+    let snapshot: State = serde_json::from_str(archived.events.last().unwrap().data.get()).unwrap();
+    assert!(
+        snapshot
+            .operation
+            .as_ref()
+            .unwrap()
+            .result_bytes
+            .0
+            .is_empty()
+    );
+    assert_eq!(snapshot.artifacts["result"], storage::sha256(&raw));
+    s.operation = with_operation("new request", true).operation;
+    journal.append(&control, "next_request", &s).unwrap();
+    // The first checkpoint itself still names the old request. Rotate again
+    // so no active event can satisfy it; the reader must cross an archive.
+    for _ in 0..CHECKPOINT_EVENTS {
+        journal
+            .append(&control, "fixture_new_progress", &s)
+            .unwrap();
+    }
+    journal.checkpoint(&control, &mut s, false).unwrap();
+    let active = read_segment(&f.paths.log, &control).unwrap();
+    assert_eq!(active.events.len(), 1);
+    for event in &active.events {
+        let active_state: State = serde_json::from_str(event.data.get()).unwrap();
+        assert_eq!(active_state.operation.unwrap().request, "new request");
+    }
+    journal.close().unwrap();
+    let before = fs::read(&f.paths.log).unwrap();
+    let historic = historical_request(&f.paths, "raw report", &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(historic.operation.unwrap().result_bytes.0, raw);
+    assert_eq!(fs::read(&f.paths.log).unwrap(), before);
+}

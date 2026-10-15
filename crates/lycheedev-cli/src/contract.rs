@@ -174,14 +174,6 @@ mod tests {
     #[test]
     fn current_inventory_matches_fixed_go_metadata_in_order() {
         let mut expected = frozen_commands();
-        // This handler remains absent. Registering a definition alone must
-        // not be used to claim its behavior has been implemented.
-        expected.retain(|definition| {
-            !matches!(
-                definition["path"].as_str(),
-                Some("live doctor")
-            )
-        });
         for definition in &mut expected {
             definition.as_object_mut().unwrap().remove("parserFlags");
             // The only allowed doctor metadata delta is the selected Source

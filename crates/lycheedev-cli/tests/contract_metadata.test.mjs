@@ -31,9 +31,8 @@ function explicitArities() {
 test('shared definitions equal pinned Go metadata and ordering', () => {
   assert.equal(fixture.oracle.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
   const expected = fixture.commands
-    .filter(({ path }) => path !== 'live doctor')
     .map(({ parserFlags, ...definition }) => definition);
-  assert.equal(expected.length, 83);
+  assert.equal(expected.length, 84);
   // Two approved Source-engine description exceptions; no wildcard summary
   // skips, mutation of the fixed oracle, or relaxation of any other field.
   const doctor = expected.find(({ path }) => path === 'doctor');
@@ -69,11 +68,14 @@ test('every current flag has a reviewed arity; enum and prose regressions', () =
   assert.equal(arities.get('--session-reuse'), false);
 });
 
-test('seven legacy paths and the remaining missing handler are absent from public inventory', () => {
+test('seven legacy paths are absent and formal doctor routes are registered', () => {
   for (const path of [
     'live ack', 'live bind', 'live finish', 'live hide', 'live probe load',
-    'live reset', 'live run', 'live doctor',
+    'live reset', 'live run',
   ]) assert.ok(!inventory.some(definition => definition.path === path), path);
+  for (const path of ['live doctor', 'live reload fallback']) {
+    assert.ok(inventory.some(definition => definition.path === path), path);
+  }
 });
 
 test('batch is registered only with its concrete source handler and exact flags', () => {

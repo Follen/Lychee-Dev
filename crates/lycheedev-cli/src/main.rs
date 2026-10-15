@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod contract;
+mod formal_live;
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, VERSION};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, io::Write, path::PathBuf};
@@ -160,6 +161,12 @@ fn parse(args: &[String]) -> Result<Invocation> {
             } else {
                 "true".into()
             };
+            // Frozen Go validates each admitted Live value in this second
+            // argv pass. A later repeated/route-invalid flag must not outrank it.
+            // Other command families retain their existing validation path.
+            if command.starts_with("live ") || command == "doctor" {
+                formal_live::validate_option(key, &value)?;
+            }
             flag_order.push((key.to_owned(), value.clone()));
             if let Some(previous) = flags.insert(key.into(), value.clone()) {
                 let store = format!("__repeat:{key}");
@@ -379,13 +386,9 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
         value if value.starts_with("data ") || value.starts_with("asset ") => {
             lycheedev_data::dispatch(inv)
         }
-        value if value.starts_with("live ") => lycheedev_live::host::dispatch_with(
-            inv,
-            &lycheedev_live::native::WindowsServices::with_control(
-                DeliveryAdapter,
-                inv.control.clone(),
-            ),
-        ),
+        // Formal CON commands are selected by dispatch_formal_entry before
+        // this Value-only path. Static probes/instances have no v4 lifecycle.
+        value if value.starts_with("live ") => lycheedev_live::dispatch(inv),
         value
             if value.starts_with("addon ") || value.starts_with("skill ") || value == "update" =>
         {
@@ -926,6 +929,7 @@ fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
         };
         providers.push(json!({"id":"codebase.source_mirror","ok":true,"status":"unknown","detail":format!("{detail}; remote currency {}",if inv.flag_bool("--offline"){"not checked (--offline)"}else{"unknown"}),"nextStep":format!("run source sync --source wow-ui-source --product {product} to prepare or refresh the mirror"),"scope":"repository-format","objectsVerified":false}));
     }
+    providers.extend(formal_live::doctor_checks(inv));
     lycheedev_core::doctor::inspect_with_checks(inv, providers)
 }
 fn source_runtime_bundle_from_release(
@@ -1411,6 +1415,18 @@ fn stream_fault(mut error: ToolkitError, yielded: bool) -> ToolkitError {
     }
     error
 }
+/// Shared production/test dispatch boundary. Formal results must never enter
+/// Outcome.data or the generic Value renderer used by Source/Data.
+fn dispatch_formal_entry_with(
+    inv: &Invocation,
+    run: impl FnOnce(&Invocation) -> formal_live::Response,
+) -> Option<formal_live::Response> {
+    if !formal_live::handles(inv) { return None; }
+    Some(match inv.control.check() {
+        Ok(()) => run(inv),
+        Err(error) => formal_live::Response::failure(command_fault(inv, error)),
+    })
+}
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args
@@ -1502,6 +1518,17 @@ fn main() {
     let requested = requested_format(&args);
     let format = if valid_format(requested) { requested } else { "json" };
     let mut stdout = std::io::stdout().lock();
+    if let Some(response) = parsed.as_ref().ok().and_then(|inv| {
+        dispatch_formal_entry_with(inv, formal_live::dispatch)
+    }) {
+        if let Err(error) = formal_live::render(&mut stdout, format, &response) {
+            let _ = writeln!(std::io::stderr(), "command.output_failed: {}", error.message);
+            std::process::exit(5);
+        }
+        let exit = response.exit_code();
+        drop(console);
+        std::process::exit(exit);
+    }
     let mut yielded = false;
     let result = parsed.as_ref().map_err(Clone::clone).and_then(|inv| {
         inv.control

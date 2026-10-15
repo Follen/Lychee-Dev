@@ -1,0 +1,3046 @@
+{
+  "schema": "lycheedev.formal-live-cli-freeze.v1",
+  "revision": 3,
+  "baseCommit": "a3535c8766beaa5a025d090429bd971334b73d3d",
+  "originalBaseCommit": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "snapshot": "/tmp/lycheedev-formal-cli-review-r3",
+  "previousSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final",
+  "previousFreezeSHA256": "3a0b33d3dd6a376413221f75e57b5a14af85ccf5253894a049962949a0478ccf",
+  "files": [
+    {
+      "path": "crates/lycheedev-cli/src/commands.json",
+      "bytes": 44017,
+      "sha256": "554f30c665f1780c38bdf318ee3dfaea745a4972aba7374e4ae054b416f68972"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/contract.rs",
+      "bytes": 9572,
+      "sha256": "1f6a3882606682b3b658c1325987f39d8d630dcdaa72c9c7b816d0800af5e194"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live.rs",
+      "bytes": 26263,
+      "sha256": "25aab726de813b1e35dfa3265f5598e8bb4406f54c3bbe80fd283077626bef7c"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_output.rs",
+      "bytes": 4275,
+      "sha256": "2899d2bf52f7cd775279377f4690e591bc343529b6738e9ed041f24cc39b531c"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "bytes": 40662,
+      "sha256": "c4a7214d6abdcec0fbb09cada377e75c1285b4573da5a584b5dd7425db0cf5e0"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_validation.rs",
+      "bytes": 30914,
+      "sha256": "e4b2c29beaa47e02db87cfe8eb5a00b9362317ffd80b642c306df463e31fbcf4"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/main.rs",
+      "bytes": 124769,
+      "sha256": "aaadd329974390781ba163ee741b480ba571d32d7ea91f13fce0529df6c52c5d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/lib.rs",
+      "bytes": 2863,
+      "sha256": "985028313430e06104e3cd797120542d43af4037db0eed19003b598e4834b855"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac.rs",
+      "bytes": 16745,
+      "sha256": "fa117cc725989295fbe495b31910c6104834d0897fd0bd0cf85850f6f841329d"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac/ordered_tests.rs",
+      "bytes": 7690,
+      "sha256": "84b9572384ce12509c3577ff538aedbe01097c39f3a6461aff1fe0e972d49d7f"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac/retention.rs",
+      "bytes": 1310,
+      "sha256": "b07d1f3d77c995810acf004a29c24cf36ad3c69c48676d3c75d14a1f19d87401"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/luac_ordered_real.rs",
+      "bytes": 1997,
+      "sha256": "94ff455f2e6cb24c4b6b704eed01df77af972ef98260773951c8fda96070755d"
+    },
+    {
+      "path": "tests/rust-parity/formal-live-cli-contract.md",
+      "bytes": 11174,
+      "sha256": "f2135343e69c54c9010aeb80fb00f6a49eceb26760dd9e582625b8e87cbf4c8c"
+    },
+    {
+      "path": "tests/rust-parity/formal-live-cli-test-map.json",
+      "bytes": 19700,
+      "sha256": "4bdb0e9f7a743cbbc822c21fccd0ab355c50839b626a9ac509833408abb123be"
+    }
+  ],
+  "dependencySnapshots": [
+    {
+      "path": "Cargo.lock",
+      "bytes": 71426,
+      "sha256": "a0d3f014709d3364d0ee28bc6ad58f260410ea7df81e8dc99fdebb35b4d45a6b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/Cargo.lock",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 1840,
+      "sha256": "0e00a44fd16a0de1697a3e0c7158cbaf010f09ace305b285f33f841fc3c5831d",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/Cargo.toml",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/Cargo.toml",
+      "bytes": 376,
+      "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/Cargo.toml",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/archive.rs",
+      "bytes": 7985,
+      "sha256": "75acabe672a11f13b2c4cd826ef351821256d3db350834f0fe95342a161f9fe3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/archive.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/availability.rs",
+      "bytes": 12406,
+      "sha256": "a6c96f55b2794712175f1b89d0e8f15227d7b3f5cee5daf267b070b789fc209e",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/availability.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/cache.rs",
+      "bytes": 14764,
+      "sha256": "361d2b05084a43cb3cbc64bd509c516f6536bfcfade8864b9a525bea51fb7e57",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/cache.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/client.rs",
+      "bytes": 73334,
+      "sha256": "bb1694eb93ec8d097d6df8775319f85a71a2983552437f98dca5a21d45248dcf",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/client.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-core/src/control.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/coordination.rs",
+      "bytes": 7144,
+      "sha256": "4130866ad72d52150f64e870f2e1c07a777c63518561dbd457fc539f1a809dc0",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/coordination.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/doctor.rs",
+      "bytes": 12706,
+      "sha256": "94fa15c54f4cbf8efa3defafe57adc9c443e2f09fcec0e078a2f7bffe479065c",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/doctor.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence.rs",
+      "bytes": 20931,
+      "sha256": "f33856af2242ea822f1a7706ab0a5c3db46d73d5676bb38413e0b07c55a6965f",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-core/src/evidence.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/bounded.rs",
+      "bytes": 17320,
+      "sha256": "f7ee07a01bcb3f1904591f85cdb7e33c536a76ee63fc347e4a443f227b3bada3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence/bounded.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/budgeted.rs",
+      "bytes": 19940,
+      "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence/budgeted.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/dependencies.rs",
+      "bytes": 34029,
+      "sha256": "95dbfeaf43098017f587443fb266e0b8fd2eb78d542ed6f148e6e50cfc254b27",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence/dependencies.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/installation_selection.rs",
+      "bytes": 37840,
+      "sha256": "3cb63d5de67df1f47dafb8216ff874597845c2c11e6520ea5851940ba637f0b9",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/installation_selection.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4790,
+      "sha256": "beb975bb9f3836cd89e9b69d14404cd47421c2a7d02aca2d779f94b86a157fb1",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/lib.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox.rs",
+      "bytes": 7328,
+      "sha256": "a8698fb1d4915e709c7881cbc1076a899e301611a5fabda6c3e662c49c985626",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-core/src/mailbox.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes.rs",
+      "bytes": 3189,
+      "sha256": "8a411b4a7825fc98745b9ea2bfb4577565938b8e73d005903a946979fdb9aaf8",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/mailbox/code_bytes.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "bytes": 3525,
+      "sha256": "b60de8bc2a3e935e456ebd2c9f065f6ffc1e3d3ea5871a6de68d146db95bc104",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/metadata.rs",
+      "bytes": 30579,
+      "sha256": "1beaefaa6ba2ca2b58b5c28b502c846809abd85dfae386a47988818448509971",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/metadata.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/process.rs",
+      "bytes": 7267,
+      "sha256": "10432aa433d71c24851bbb3fe4d467dff6be57fe3f0d2a69ae2d2310565dec89",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/process.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json.rs",
+      "bytes": 25956,
+      "sha256": "bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-core/src/public_json.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed.rs",
+      "bytes": 13946,
+      "sha256": "433f715ed4cff496dc210194dd7325492e9e47f5cbb18fb5b7e27699b78773a0",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed/checked.rs",
+      "bytes": 8495,
+      "sha256": "7f7abc0c9b38856e7bfe395f220fbaf2f61ef425623de5d4315967dfd4129800",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed/checked.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed/checked/bytes_only.rs",
+      "bytes": 3996,
+      "sha256": "353275d8216f722a64e010375b5c6a3858ee0aec2ee795e58108ae052f36f19f",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed/checked/bytes_only.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed/tests.rs",
+      "bytes": 21812,
+      "sha256": "3693c77ff41eef1c4834558587cf70e08b196ec54221296316992e27fd6d584a",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed/tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/raw_json.rs",
+      "bytes": 8324,
+      "sha256": "e8a0e77234d56318b586385c27f69ed7a8ba63cb7fb895aa19d7e49befb703f3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/raw_json.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/raw_json/tests.rs",
+      "bytes": 2534,
+      "sha256": "c1ffc43b782846e5007fd3435d39e255297bc609b2956c0972c8da939203c560",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/raw_json/tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-core/src/selection.rs",
+      "bytes": 23518,
+      "sha256": "8fb86e9baf73cc63a35c0c01e2bc2142da7c3fa4111d75f57c1ddf79812ff588",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/selection.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 26525,
+      "sha256": "40755423855b7b296071e23bfb2ec0483c3a8d60561b7ba428874aa296c1ee6d",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-core/src/storage.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/checked_close_tests.rs",
+      "bytes": 13317,
+      "sha256": "efa17acf2d0ba0a828522d5ebdd9a832493fcb78e1a827029a4a4bb4d76b5fd3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/storage/checked_close_tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/owned_cleanup.rs",
+      "bytes": 2062,
+      "sha256": "da3ddc3ceeddfcd488a716e1b8fd7ddde41885859cbd5d45bdcf267c0a6fecbe",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-core/src/storage/owned_cleanup.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/workspace.rs",
+      "bytes": 15598,
+      "sha256": "9cfaab974b9c0cd42ac11ae3a31dba844e8fc7dbeb6d97e4a9d602be0d44d0af",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/workspace.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/bounded_evidence.rs",
+      "bytes": 8685,
+      "sha256": "fb6c7fbe089b5489fec6d358b8f38aaf76cb9a497ca14401a3ee5d7be516330f",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/bounded_evidence.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/budgeted_capture.rs",
+      "bytes": 9477,
+      "sha256": "22bffa41b63d11348e633c138e39cbec63f0faec334a99b088569cd160b453e5",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/budgeted_capture.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/capture_dependencies.rs",
+      "bytes": 36225,
+      "sha256": "8d1a472222d42265a36759ef9359196e1cc73e5a2b7f80a81ad0ef5525bd2b0b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/capture_dependencies.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/capture_query_references.rs",
+      "bytes": 7789,
+      "sha256": "895dde943cd4ac76a5e8abbfea8f13c3a59d4b71b798da69faf6c606e06dc35c",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/capture_query_references.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/durability.rs",
+      "bytes": 35906,
+      "sha256": "1cd43af6c5288fbc1ba1d030622de489ad49721b2e6b92bdeb9957d547efa080",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/durability.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/mailbox_contract.rs",
+      "bytes": 8144,
+      "sha256": "9bac7915b8e3273323cbad32f401b4eb3cb43e0ff9fe069a081b673191bad40b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/mailbox_contract.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/Cargo.toml",
+      "bytes": 243,
+      "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/Cargo.toml",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/addon_transaction.rs",
+      "bytes": 12995,
+      "sha256": "b9b110141afc4e3d5a3d044dd40d81e7b31b6cdfe487b48268abda1916d8b377",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/addon_transaction.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/deploy.rs",
+      "bytes": 8104,
+      "sha256": "be0eb1535a05acd24f694c92d9847b758e67e5e455280accb7baf704fb9aa1a8",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/deploy.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/formal_repair.rs",
+      "bytes": 11839,
+      "sha256": "91d56910fc28a49f6f2ef52f0360aac967cfb6560b0de350b01e978e41f3bbd7",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/formal_repair.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/formal_repair/cleanup.rs",
+      "bytes": 7958,
+      "sha256": "c7135a8cdecf2062fc7209e5196bdae160c45ee4e1cc4e9a3874db49b4f30b19",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/formal_repair/cleanup.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/formal_repair/publication.rs",
+      "bytes": 6168,
+      "sha256": "a5bfb5be6c033b653795fcd7e5a2872b8da82000bf07301af58d5a4668f7b070",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/formal_repair/publication.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/formal_repair/slot_reads_tests.rs",
+      "bytes": 2045,
+      "sha256": "604034ccca4915d676cc054d6cba588815ac25cfa386762168462a60a26280dc",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/formal_repair/slot_reads_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/formal_repair/snapshot.rs",
+      "bytes": 7096,
+      "sha256": "bf455d0fb588789764e739c6e14c8ab95da3a897dc1800a1a71cd0cd5b6c0237",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/formal_repair/snapshot.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/formal_repair/tests.rs",
+      "bytes": 22398,
+      "sha256": "6386d6486545114eecb06e5ab3cfb3629c73f90e3059d70d2f8646f3912d91c4",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/formal_repair/tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/installation.rs",
+      "bytes": 9084,
+      "sha256": "048df2553425cef1099a00fe7d66977df95a86a976597fdce4379af742c6545b",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/installation.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/lib.rs",
+      "bytes": 13212,
+      "sha256": "5e8ca9ad6474fb2a92bfaa027e7f7667427dec6e9f47c760f1ce3e1f7878886f",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/lib.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/npm_update.rs",
+      "bytes": 27616,
+      "sha256": "04b2c0246bfd1c514ec6a8aa250220053c7ebb819d9a4e63b5e6767ecf5bf4ca",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/npm_update.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/release.rs",
+      "bytes": 11237,
+      "sha256": "0db05b990994bb9311ab4f90963463c5e0575297c30e6a1ba33a395fc69bd6af",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-delivery/src/release.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/release/checked_close_tests.rs",
+      "bytes": 11027,
+      "sha256": "08a4214772d40627382b01f178888e6871c92ec27dade5199cdd787be1985c22",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/release/checked_close_tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/removal.rs",
+      "bytes": 32142,
+      "sha256": "59917f4a8c382a220714d45eb691c6182e6abb79715a96de644fe84f8d97ea98",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/removal.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 34907,
+      "sha256": "4afbea1ba8191d88c0265f14958428f0a5d755bae8d14d3f3dd61e633bd60170",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/slot_publication.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "bytes": 77614,
+      "sha256": "1d1de7c62f8c00accedfbff93f96468338c772cfa9d2de4add2cac101cb23217",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slots.rs",
+      "bytes": 27106,
+      "sha256": "ee2b59101770213f149055979daff7826dbe7447ec487693e3e1d0cb8e7a39fc",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/slots.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/update.rs",
+      "bytes": 19290,
+      "sha256": "0959ef0c4d9d1f4941e1d3fd3d64493b7969009df4ca22819659aefcd892fe07",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/update.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/tests/combined_addon.rs",
+      "bytes": 8000,
+      "sha256": "80c1eb9d9d95ce3ca14b0c776629c76bbd8e652355c66afae255e78dda7616c4",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/combined_addon.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/tests/release_control.rs",
+      "bytes": 2579,
+      "sha256": "ab832b41378dacb8977b7602dca21fb286b388f718f6bc39589bebd67e44dba3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/release_control.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/tests/slot_maintenance.rs",
+      "bytes": 19516,
+      "sha256": "ef878845f89dcd8eaaab5a66e3d8cb243c730f45af5296224f528528639fe369",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/slot_maintenance.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-delivery/tests/transactions.rs",
+      "bytes": 15387,
+      "sha256": "bed3b62122d21efc459311e016f6cea7f9707be8ba4a71419b9f3a1112fb6436",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/transactions.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/Cargo.toml",
+      "bytes": 516,
+      "sha256": "df1e3caa6a0e4bebe441483a3ddab212b002e2442aeb97ee922836baf0d0b533",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/Cargo.toml",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/examples/current_source.rs",
+      "bytes": 4654,
+      "sha256": "76cd40eac829dbe2c3b84a70044973e0d4701a5c54b57df348b447b3758cac19",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/current_source.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/examples/research_xrefs.rs",
+      "bytes": 1365,
+      "sha256": "ba5e65441176dfbc2e974ec1838b6040446925427384ca072d36fd3fc5427929",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/research_xrefs.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/examples/runtime_archive_current.rs",
+      "bytes": 1190,
+      "sha256": "43d8066d753ee7c6cb1d3aa4b0e3d4922ad07c768d3cb0056cd37e3d85ea5b67",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/runtime_archive_current.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/examples/runtime_archive_location.rs",
+      "bytes": 3175,
+      "sha256": "d6bab2020396ead14a8e92128d49bb807612d6bce664f053015d0417721a7e96",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/runtime_archive_location.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/examples/static_location.rs",
+      "bytes": 1597,
+      "sha256": "3c4fc2d71f74a111db0621d3ec01e238f136a9a28e847082d6730232360d112b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/static_location.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/binding.rs",
+      "bytes": 4283,
+      "sha256": "5e61d77be3b52fbf4b181650e0505fc548cceda1979816ebc52ad65b86e8d5a6",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/binding.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/README.md",
+      "bytes": 12024,
+      "sha256": "c3af49cc3539fef9d37f35fd43bfde77e3511ec209fa139554a387e19b3a414b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/README.md",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation.rs",
+      "bytes": 6892,
+      "sha256": "6d8c11d48405c47ac1b892db7dad14207981e9cc2f882d698996246aca6d4748",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_backend.rs",
+      "bytes": 1476,
+      "sha256": "1ff08aff556e73faa3cf79a3aebd4dad24513e74b408c0410751bd6579e695f8",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_backend.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_history.rs",
+      "bytes": 3278,
+      "sha256": "c4e4df6db09c3030f588bac3cdb6168403700e217946bc273f9d99603c0ea319",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_history.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_native.rs",
+      "bytes": 867,
+      "sha256": "5c52fe8f48d69f6da39d22af41f115312c9f13a4c6f875ffda8e0a44b046bb40",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_native.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_reload.rs",
+      "bytes": 6785,
+      "sha256": "c8fc6a52408c7032a08e67738188539ba701039a3795a1321e97ad69b4f9c932",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_reload.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_service.rs",
+      "bytes": 25451,
+      "sha256": "bc6e17e874de47306e8aaa52b6221be51108a12cfe4906717891ae81df537b1e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_service.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_store.rs",
+      "bytes": 12480,
+      "sha256": "0ae83cf9be3d5f068bb77f44b8c3775ce7ca852981f67087956684d1cf825a53",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_store.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "bytes": 40947,
+      "sha256": "ec677f0ebe13f8ad271cca2383f608879e3abc719b680bd97cb2e8c6f1ff4f5b",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/admission.rs",
+      "bytes": 34237,
+      "sha256": "0b889c661cf1703d839b819d8caeba6a5ffbc5a9f0a34ad1d38c4476df20951d",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/admission.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/admission_tests.rs",
+      "bytes": 41761,
+      "sha256": "1641c631a17c7304bdf84756d44e76ebef0d55211025f35ec40b9518dfe9b801",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/admission_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection.rs",
+      "bytes": 26395,
+      "sha256": "46c94fcec766cbecd30f8f48e766ee386bfd02c9f9052aa8c4d17da9c5590767",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/connection.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/errors.rs",
+      "bytes": 4533,
+      "sha256": "f5edf0900bb33251a97741388bef845c615d20d2bcaaa0ff38a06881b4be501d",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/connection/errors.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs",
+      "bytes": 17552,
+      "sha256": "6f3c1aa4fd3b90883bf46ac78ffc8bffaebe2b95dda105726c06e562dc16cd58",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+      "bytes": 7326,
+      "sha256": "d39a038063c96711dcf40b0884259f6d21e967440bb8283898941cab412672c5",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "bytes": 45516,
+      "sha256": "1af10650aea05110b137ecc473607af548f0c38dfae71ccaa109ce9e608b2a83",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "bytes": 23168,
+      "sha256": "9e51a1fdc4ab1380305810d0ff91a8b59f5a1faa359b7025fa0528b694acc98f",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor.rs",
+      "bytes": 19352,
+      "sha256": "ee092a158a07b5ba6e45f2048c7021b1f3232417a27498d70d3f0d02366c0eb5",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/doctor.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_delivery.rs",
+      "bytes": 2393,
+      "sha256": "c8380447965c944ef5e3b4cbc40dbc118fff368bb647c3620e58aa530435798e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/doctor_delivery.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_native.rs",
+      "bytes": 7770,
+      "sha256": "830cb65957822483a27e78ec46b1c761a5851064e30cfce241f6ab639e3e726c",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/doctor_native.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs",
+      "bytes": 15308,
+      "sha256": "3f6917cfea89ca21bd81512bdd4aec7e1184751fa5cf4ac988df6b7ff073b860",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_service.rs",
+      "bytes": 7972,
+      "sha256": "75366e404b0865002c904b9cb6a7c76078b8df703c486b6cf097fa389f92310e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/doctor_service.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_tests.rs",
+      "bytes": 14029,
+      "sha256": "c5e96d8c90d8a765f1e0426d739d618b737e69586e7df841d6752baacc494826",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/doctor_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+      "bytes": 27929,
+      "sha256": "96e5d32d2cc8c6c68780cfcc695e94bb26dc26f811b64aabf253bd325c13ef93",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs",
+      "bytes": 45937,
+      "sha256": "22375083cf4caa7bd2437f0a148c839eb30d60a43dbdc7641fe02edabfcfef6a",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+      "bytes": 38944,
+      "sha256": "68e46b98f8aa40b821685ff2f189cf202b5774e0882f97b67de92073849ac4e7",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs",
+      "bytes": 46098,
+      "sha256": "d6c2944eb7890127e28122e9f43a991016c8ba6397a8be16a1f659d54cbcec85",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/input.rs",
+      "bytes": 12470,
+      "sha256": "87c9b8e7ec64f1d0aaf9d1a32678ab00c241ca2660d73ca6ced4613bbbefca4d",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/input.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+      "bytes": 12097,
+      "sha256": "255e2095bcda4da14233ee3a3793bb1a38490395edc0456638ae0446f6923652",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal_tests.rs",
+      "bytes": 9389,
+      "sha256": "aee467776282a98207327740f5863f08219144c2ecd6b009506e98dd6182a39e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/journal_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "bytes": 2187,
+      "sha256": "69b15f0815828dbdb52e152e383196f388bdc27041c3b01eac5671802ad119a7",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "bytes": 36232,
+      "sha256": "0947da78170f0dd7743b6a3de665b83f3e424105ddde57ad7cc3c112a28c6153",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs",
+      "bytes": 11067,
+      "sha256": "da2ecc245f05ddb09be3af0f36aaccd3ad74a1443b1d67cd2bda601a119c6a75",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform/repair.rs",
+      "bytes": 3236,
+      "sha256": "a1c804a54ec4bf43c9d7464d9c117396dc409ed7b82c50ada2f505920aa96ede",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform/repair.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "bytes": 46346,
+      "sha256": "f28e12529ee0e0b8c0fd7713517dffa094564fc73d90cb4eed56e595bf4b1afd",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "bytes": 9741,
+      "sha256": "31a25637b95b3c996bc5b97536aeb74bdbc94d89410f196395873dc8615bf4f4",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace.rs",
+      "bytes": 8512,
+      "sha256": "3f303fe3f1f6cec4f3e2e2119af2214677c8d18617ff28bc6da0f82d915ddb21",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace_tests.rs",
+      "bytes": 5970,
+      "sha256": "aa96615c0b2aa44e2ce14d61ece7b90933be22a07320da777fd1e94e5600e01b",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs",
+      "bytes": 8088,
+      "sha256": "2ac55d9837a706d20ac573ac94aad4fa522229f0ef63e75569673a369030bd96",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs",
+      "bytes": 8694,
+      "sha256": "a0508ec6607081d3396e2dc2558f825c89f56225b4a94c015b9de0c81f264534",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+      "bytes": 17052,
+      "sha256": "e6e65e71147a12359155e6effd32afeb1dd9f929f0d9826d8e88b10291883a81",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/observations_tests.rs",
+      "bytes": 14053,
+      "sha256": "71563e3eeb19f45614d7dc72c32d16d4f2af97c8817fd482226d130fb1b8cfb6",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/observations_tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/protocol.rs",
+      "bytes": 7805,
+      "sha256": "57716ef95466be867afed5e107f61b4a19b7faef1e9e7e49d40e48d6db7b8c36",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/protocol.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+      "bytes": 23531,
+      "sha256": "7d04ac6ed0da68e8ee04b809dbc9b455825b031d0fb72e75e71082c507e99b4e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery_test_support.rs",
+      "bytes": 13461,
+      "sha256": "a46e13e3be23e5e16d858f47af1c6dbd85003d8ee7c960082920cdd39b360b59",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/recovery_test_support.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery_tests.rs",
+      "bytes": 7676,
+      "sha256": "01097b674a3ef59463302b81dd17dbcce1d1efc65e5992ac580486e49868ff49",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/recovery_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/reload.rs",
+      "bytes": 18608,
+      "sha256": "5d0a9544330834022a8bda44862eb3c8cd41a59e63bc29656cfb09cfa911544d",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/reload.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/reload_tests.rs",
+      "bytes": 26711,
+      "sha256": "fce008b6102d60284fa96752ce62f29d38728ef7b6d39ab94786fccc68830cc0",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/reload_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement.rs",
+      "bytes": 9141,
+      "sha256": "f30a44cb4443c279f77698b7c0d7cd4fbdae963641f10306ee390b0ed429d3b9",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement_tests.rs",
+      "bytes": 6252,
+      "sha256": "f3635fe16a8fb8e1c965672c41071fb1e96ef0b55ac80970ecfe7ab2ea971961",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/slot_allocation.rs",
+      "bytes": 2876,
+      "sha256": "e99e8099ba95ac53a4edc25683d26df7f51a7b43f28340a1830078e7aa0b3121",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/slot_allocation.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/slot_allocation_tests.rs",
+      "bytes": 4819,
+      "sha256": "0ff1bdc62d3127a324033b49d753a4e5d142e7cbc4e5b5f34358853b74ea0c2e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/slot_allocation_tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "bytes": 26306,
+      "sha256": "76b93f9fc804e01f37e5edfc2de06b9df4e4f023762f5bc5068fc2758e568cb3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs",
+      "bytes": 9434,
+      "sha256": "7439bee3ed304208a66c90847d3888bcb2c5086fca6dc07eb031847327a100d5",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/tests.rs",
+      "bytes": 29030,
+      "sha256": "68f4bc7c1465936719c30c2ae5c30f6e79ee62652b81d6ed769e1c2bc33b7c0c",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/tests.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/transactions.rs",
+      "bytes": 22111,
+      "sha256": "86a87275ecd338515abeb4d87dfcb45b2391da1a00900f4f2979182a991dc364",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/transactions.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/wire.rs",
+      "bytes": 6702,
+      "sha256": "6a174b9bd738d35edc29d542b30812576e63a97a0074f839fb5813c54e16b4ee",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-live/src/go_mailbox_v1/wire.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-live/src/host.rs",
+      "bytes": 26953,
+      "sha256": "3fa9e087fa03d05793ef05d69f537a08a70ff72ff6e3865e757edb1fcf5d9145",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/host.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/journal.rs",
+      "bytes": 13116,
+      "sha256": "c0dbffac662d9a967fbf7b6675a301ac78a085af1fd5d030a0cc8ab9122bf1ca",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/journal.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/lifecycle.rs",
+      "bytes": 39435,
+      "sha256": "aa81f10cbce7ac608d810f25e89928b481b896c078ced3658ca3468a150df498",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/lifecycle.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/locator.rs",
+      "bytes": 15936,
+      "sha256": "0f7f8c477858d39b67ab92139781ee29ec72304a8794d30ea91eeb14409d6450",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/locator.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/mailbox.rs",
+      "bytes": 30314,
+      "sha256": "232d35440bee4acdd8a233c3823bfc5470f5e13b57b8e1194a7ed61a760ef4f9",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/mailbox.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/managed.rs",
+      "bytes": 646,
+      "sha256": "eba41d8b641f80f7bc06e5d69f294c6d9b2d8a9a6bf7f5b4cbea248dc9c37719",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/managed.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/native.rs",
+      "bytes": 8347,
+      "sha256": "55f2157aa9258c8e58e1df60b4cbd7194e16f3eeb9df974abbc8a3fdc90ff105",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/native.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/optical.rs",
+      "bytes": 4689,
+      "sha256": "e6907912cc6f99705b3d3e88315172b6d9e581bfb0258f8b24725643fa4324f4",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/optical.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/passive.rs",
+      "bytes": 14082,
+      "sha256": "f0706d0fb161bac4195ee51410a30c47a6f272716b99151f2a567bfbb0a920d0",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/passive.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/passive/tests.rs",
+      "bytes": 17619,
+      "sha256": "170d35c607a1f5244a0bbe799b86aa1bf38d7f2cb4eeaf74a2371b3b75635eb5",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/passive/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/probes.rs",
+      "bytes": 10002,
+      "sha256": "7612931f49cf2bab96267165c459402e24351b907095fc900e88286bd3635f81",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/probes.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/replacement.rs",
+      "bytes": 5436,
+      "sha256": "0ca82a8361b622b4ff2b1a415a363cbd7a22da645c0a8cc29d876b1e05fdf46b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/replacement.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/routes.rs",
+      "bytes": 18166,
+      "sha256": "d55ba2e28c584be716f0bcab44924ae8ca5c03a69ddb2e9f3253f540a6502111",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/routes.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_archive.rs",
+      "bytes": 22037,
+      "sha256": "fb24f461de3872718d6750464375dd18fdd2a5f058f2ec78a7c72475995be84a",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_archive.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_binding.rs",
+      "bytes": 45701,
+      "sha256": "284acc45d5340f2dcd2c88e00ada5e46e477500a8399b215e0c671eaa3022d4e",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_binding.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_binding/tests.rs",
+      "bytes": 53532,
+      "sha256": "361d1231e8ac1c5669a521dbdfabb82385732204038fc8df12c65185f8fa03ed",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_binding/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_discovery.rs",
+      "bytes": 27692,
+      "sha256": "1217e10d4f31138f10317fc5d0cccda095de7d85baa36277f418f2ee0173bbb4",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_discovery.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_observation.rs",
+      "bytes": 8924,
+      "sha256": "3109dc41731cb5ad291236030d9ac6dc463f5ed9c6a0024bbfc7e01e078f1b2b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_observation.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_root.rs",
+      "bytes": 41989,
+      "sha256": "966553e418e69751cac77b06663b0ddaec16cd2dd83d9a7c6f6d4b7191650eb6",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_root.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_root/tests.rs",
+      "bytes": 38654,
+      "sha256": "fd8edf4bb1860e6f6661936daa1811cf0ec7c94ddc5592aa3f1eb6deae616613",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_root/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/runtime_windows.rs",
+      "bytes": 5800,
+      "sha256": "614ca920072f32ea4a9d8c0cf303fa9a6b14651a3de7fc20be1fd6f7085a6a88",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_windows.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/slots.rs",
+      "bytes": 9789,
+      "sha256": "388659c3c2996066ada3f626c887c4733eccf54942e62efc0191bb528f5e3f52",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/slots.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/transport.rs",
+      "bytes": 16949,
+      "sha256": "f94e656d1a30f2ffed39d07f1e67549aeb87850425aae91352bd2d8488aed992",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/transport.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/src/windows_channel.rs",
+      "bytes": 19047,
+      "sha256": "efe96f2c3214d2ec9e0dc5179870f799598d4677b11cc53fc43799689513b41e",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/windows_channel.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+      "bytes": 32105,
+      "sha256": "997263e309bdf36a963b0e882835a4e4172b4c97419a5f6a1d0aaa2f51260752",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/mailbox_lookup.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_e2e.rs",
+      "bytes": 54430,
+      "sha256": "422dbe21ec27a116694cf83214c07e683228fa4432dcff308fdb355b0abbf6aa",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_e2e.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_exact_commit_prototype.rs",
+      "bytes": 226,
+      "sha256": "469a4121632c69ee242e8cd1231f867f2e10d03116710f9e27589cdd62b1383f",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_exact_commit_prototype.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_p3_original_negative.rs",
+      "bytes": 229,
+      "sha256": "58dde5f0012a758681eb93bcd2421262f3a04b0bc3326a6b40838d80b2bc3975",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_p3_original_negative.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_revised_lifecycle.rs",
+      "bytes": 150,
+      "sha256": "271bf6ff3a2813a693c162fd86b5deb994376ce11d827a33e43aca150fac717f",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_revised_lifecycle.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_shared_lifecycle_prototype.rs",
+      "bytes": 231,
+      "sha256": "98b707d47b21fe6fbb4663d4d67376cd94a28709eb4248db14930c526b9d1bb9",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_shared_lifecycle_prototype.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_termination.rs",
+      "bytes": 13025,
+      "sha256": "f82efd21daccd1f70d89bc1564172717bcf5fd1ee02e49d8b44a8515bda927fc",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_termination.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/native_v1_prototype.rs",
+      "bytes": 7696,
+      "sha256": "bc966f7c51c37a2d07555c273b6fd95b687216d944789c959afe3540be5172b5",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_v1_prototype.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/passive_windows.rs",
+      "bytes": 2947,
+      "sha256": "018845a7b88537a708cbf0420375171090b7b5a42b992d0c6520ef31627d2598",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/passive_windows.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/runtime_discovery.rs",
+      "bytes": 42088,
+      "sha256": "3feef469536ab07aea44643dbad56217569db58075b2fcb03b02c71bcd731ae1",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/runtime_discovery.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/runtime_windows.rs",
+      "bytes": 13011,
+      "sha256": "ac79f90522359cd43e53508a0232490fee31b6f22ebfb84f42f934f0c11b1eda",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/runtime_windows.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/sealed_memory.rs",
+      "bytes": 9918,
+      "sha256": "fac5c1c2f909b301201f51376f1e3faaa12224b7fd54f1ca28a8acd1814eecdf",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/sealed_memory.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-source/src/closure.rs",
+      "bytes": 12656,
+      "sha256": "54e446d357ee392811e5075afd3010ed287b399b436a22e12387b650d5d1569e",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-source/src/closure.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-source/src/process.rs",
+      "bytes": 23741,
+      "sha256": "78ee09061421b1b6640db87c8128963057d5c89daebfee8264beba5d09ef7e39",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-source/src/process.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-windows/Cargo.toml",
+      "bytes": 1245,
+      "sha256": "e514624884cebeb1a793bc91dfcc3469715b4be1cac12d2746c0514cf71d0b6a",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/Cargo.toml",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/examples/broker_job.rs",
+      "bytes": 794,
+      "sha256": "495526bbff94a8fbea97bbc6aba9c4ca199a50b77858d81074e11354a05fa057",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/examples/broker_job.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/examples/digest_benchmark.rs",
+      "bytes": 1446,
+      "sha256": "d8741a09b44cf8e9a2042c1c88dcfb4632e9cd4e76329130a0fab96851cb7d21",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/examples/digest_benchmark.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/broker.rs",
+      "bytes": 23408,
+      "sha256": "b2ead7f2f1ae55a91b35625c7c55ea403f011458e6cf27c5dcf42c028e11691a",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/broker.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/cancellation.rs",
+      "bytes": 14129,
+      "sha256": "0a8b692b75c8cdda3083c45bc30b4619ac3e9f8a0195f0e56acef30a55e03dbb",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/cancellation.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/capture.rs",
+      "bytes": 11584,
+      "sha256": "94112a7b49992ae39aa3d361ff7e34e3fb2fa3198d77b351250c985e083b22d7",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/capture.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/detached.rs",
+      "bytes": 7876,
+      "sha256": "8ee14288e14b12e13b52057b687e0e330a68b9e4f8150b1808e79fb8b5de502d",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/detached.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "bytes": 10712,
+      "sha256": "5af8199bdfc4f98b635c0a795335877919e139ce70e9f31e703fbeefa6a263af",
+      "sourceSnapshot": "/tmp/lycheedev-formal-cli-review-r2-final/crates/lycheedev-windows/src/filesystem.rs",
+      "origin": "formal-cli R2-final dependency"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem/destination.rs",
+      "bytes": 36504,
+      "sha256": "f806c0c5867e830ffac2c0e01bb76d76b7e6df3bbcd6714b0753a043b864ade3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/filesystem/destination.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/geometry.rs",
+      "bytes": 2714,
+      "sha256": "fc29b2fffa9dc818dcacffce1977b2a6657914181b6f9752f6853ed00c320316",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/geometry.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/guarded_spawn.rs",
+      "bytes": 11733,
+      "sha256": "2715043e528e85a96aea813cb4f338623eff741a790ee82bf37b4c9cac9b9744",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/guarded_spawn.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/guarded_spawn_tests.rs",
+      "bytes": 20083,
+      "sha256": "cbb34f159304ab5f8961f5aabe6aa63fdbba2c93bc6f2863cf264650b4f0845b",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/guarded_spawn_tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/input.rs",
+      "bytes": 6118,
+      "sha256": "181e65d379ecf6061d7cdd213b4d27fd18b23c4d3ad576e290f1b84eec47330e",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/input.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/inventory.rs",
+      "bytes": 6076,
+      "sha256": "9f3757547584fcbc9e60ab1613d2a1c600944617f0853e13e780b2ac9da2844a",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/inventory.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/job.rs",
+      "bytes": 9109,
+      "sha256": "ad62bb8cc208eae27f08e00d6b509ba7ade3b072b3afabd5c31453a2b0a33495",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/job.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/legacy_digest.rs",
+      "bytes": 2650,
+      "sha256": "3c5e31afc6a441b686ae832561c7209402f02efa77a1b4ce58ce1b6aca38ba83",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/legacy_digest.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/lib.rs",
+      "bytes": 588,
+      "sha256": "e5ac63a0209560f1db55460a4b5f95da6a05c9963429562359bb904075ef2089",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/lib.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input.rs",
+      "bytes": 11042,
+      "sha256": "d77340c11be92b2ae0cfdbd67be6fccf9fbb93b2f98bcfeaa3db1e8169dc7458",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/engine.rs",
+      "bytes": 11348,
+      "sha256": "c30b795828bf2489e7a15e159221c46421cee7f09fd11180fb36609b8fdbefd3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/engine.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/equal_fold.rs",
+      "bytes": 2910,
+      "sha256": "79324615b034362aea88a5ce6189a744bf45d07038f43155e95ff208ae33b874",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/equal_fold.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/equal_fold_data.rs",
+      "bytes": 39587,
+      "sha256": "e474990232cd2f59245987171cee4d7bc417e5d6a04ffa881e77425ffff85ef2",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/equal_fold_data.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/go_unicode/LICENSE",
+      "bytes": 1453,
+      "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/LICENSE",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/go_unicode/generate.py",
+      "bytes": 5248,
+      "sha256": "2bc2981c4298d570980a887f394277f2235c022e3304f4980029729495a9aae0",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/generate.py",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/go_unicode/identity.json",
+      "bytes": 1908,
+      "sha256": "08db7596e4adc143c77f70a757f91264dc5e2d6ba6e5d019b2d4e43c10470902",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/identity.json",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/go_unicode/letter.go.txt",
+      "bytes": 10702,
+      "sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/letter.go.txt",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/go_unicode/strings.go.txt",
+      "bytes": 34265,
+      "sha256": "a81bdf73a308277c322e35d0c602e3813f57b6f769c091f8f8962c8884a45ea3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/strings.go.txt",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/go_unicode/tables.go.txt",
+      "bytes": 256788,
+      "sha256": "ac0e5d5d1b58ed4b02d7cb4a0085bdefbdb4f7aae6fadddbc9477f8463da8bd8",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/tables.go.txt",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/identity_tests.rs",
+      "bytes": 6119,
+      "sha256": "e4868e09719972ea94bfd9ab52b5fe9d9e867d570136490ce6ab57e96a588b81",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/identity_tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/tests.rs",
+      "bytes": 15928,
+      "sha256": "71f5edd97f60fdfff3c9961eaa969792ab29102174bc6eaf828792ef2a290d18",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process.rs",
+      "bytes": 43150,
+      "sha256": "eb25f8ea338fab09b9af1a54bffb892d33d2f89a2faa572a097eb3fe8b9a3b32",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/lifetime.rs",
+      "bytes": 7886,
+      "sha256": "f0e016aedff57d7409b2d695a4c55c2ab58e0bfeaf3794f3e697120a36e685ff",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/lifetime.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/lifetime/tests.rs",
+      "bytes": 10759,
+      "sha256": "9331ac0a1623946d4b2629913e66f4b29b3cde5cbb77b55db63f4f8cacf71480",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/lifetime/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_image.rs",
+      "bytes": 20457,
+      "sha256": "8bf3ff301edbc1420d5bba90ec0ca5a57fe579999802fb45aa6e02e7d3d5ea5d",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_image.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_image/tests.rs",
+      "bytes": 19294,
+      "sha256": "cbc9da9bda45b8a60f686929802936e3832eb2181da6d1d4cdd42715394170cc",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_image/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_module.rs",
+      "bytes": 53927,
+      "sha256": "390fcbeb050c9f9c091fdfb89d3a1b856f299a42c1546485cf503d7f784b00e1",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_module.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+      "bytes": 22749,
+      "sha256": "69b0d1383b93a5192ee566be439a9a3143dc1719091d06a2a9cc516ca276ca21",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/random.rs",
+      "bytes": 339,
+      "sha256": "f48eea0c3f011297c36acab5f186eee6812859164a5f809a144fa95a5620e198",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/random.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/watch.rs",
+      "bytes": 7145,
+      "sha256": "622d10e1b8bb5301351241cb8900a45aedeb3efa2ff495bd524cb5e5da78ae8d",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/watch.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/destination.rs",
+      "bytes": 7634,
+      "sha256": "39ca94449790ae54caeec3fccaadb061aa65b0df17cac532799937d305c6f1c9",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/destination.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/detached.rs",
+      "bytes": 5491,
+      "sha256": "8822def7924b9042571aa4876ded4bb6d41bd2be58289a6388d7d35bcb67c6d3",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/detached.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/guarded_spawn_fixture.rs",
+      "bytes": 3090,
+      "sha256": "c3721add2cbd2e6993928ff061ef43961b1f7e9f453a1cf4ad2db028f6ac6017",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/guarded_spawn_fixture.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/input_fixture.rs",
+      "bytes": 4364,
+      "sha256": "5682bc26eb914bf78138d452942b6f6d6afddaa38a7eee4736f5902fff7904ab",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/input_fixture.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/mailbox_input_fixture.rs",
+      "bytes": 10441,
+      "sha256": "bb670ede4e444e549a48c53ee35666fed3884f20e52c97fa5fb4bf5d5fcec5e5",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/mailbox_input_fixture.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/multiinstance.rs",
+      "bytes": 2947,
+      "sha256": "3a2f407972f00a9ca17ec5e103282a224deecc505bcaff889f08008cd986a0a7",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/multiinstance.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/native.rs",
+      "bytes": 2463,
+      "sha256": "ac77932569f96df0f591ed09568421865605ec86f0a778927a82f1f331004029",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/native.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/native_source_retirement.rs",
+      "bytes": 2149,
+      "sha256": "d296ef803e98af3e00c1e5ea9adfb00068eecf82e02df977416742495a974d0e",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/native_source_retirement.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/private_runtime.rs",
+      "bytes": 10584,
+      "sha256": "b8811ade21afcaf9c1db113bbf8bbf9378d48c4813230401ae3aad036e3d75e2",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/private_runtime.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/process_lifetime.rs",
+      "bytes": 4502,
+      "sha256": "60bffa247182e2431bffa301f874ea312b3eb56649f69d427f874d6cda28b731",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/process_lifetime.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/runtime_module.rs",
+      "bytes": 17582,
+      "sha256": "16353935d37291d286cd7b6832eb656c8234f0736c6373a091849d8e7ad45cae",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/runtime_module.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/support/owned_target.rs",
+      "bytes": 8445,
+      "sha256": "0d5f1f47199b11794a7a2a59148925ea5be6ebfcf50c3dd5a6343e7e81c7e760",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/support/owned_target.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "crates/lycheedev-windows/tests/support/reparse.rs",
+      "bytes": 1857,
+      "sha256": "c2c4b40073e03008edac25c9f85fd722757bab71c977fab30ca292aaab2e6671",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/support/reparse.rs",
+      "origin": "native-report-bytes R2 baseline"
+    },
+    {
+      "path": "tests/rust-parity/native-report-bytes-contract.md",
+      "bytes": 5377,
+      "sha256": "be27d7addee8fe296b72bb6f430b0be5024e0671c8ba23dccbd7ebabf913e2f8",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/tests/rust-parity/native-report-bytes-contract.md",
+      "origin": "native-report-bytes R2 candidate"
+    },
+    {
+      "path": "tests/rust-parity/native-report-bytes-test-map.json",
+      "bytes": 9179,
+      "sha256": "dbd95239c62102b4ffebca5ab8e053918839a735ea1d28dcc0c8090dbd730bf2",
+      "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/tests/rust-parity/native-report-bytes-test-map.json",
+      "origin": "native-report-bytes R2 candidate"
+    }
+  ],
+  "dependenciesStatus": "Immutable candidate composition only. Full raw-byte evidence package retained. Source runner is exact R2-final, not unfinished worktree. Parent must integrate final exports and run build/runtime checks; no acceptance inferred.",
+  "preservedSpans": [
+    {
+      "scope": "generic envelope and Value/NumberLayout render",
+      "sha256": "54c06bda5843ddb561ad605a625847324c14a27665436adcc45e9fe36fb56073",
+      "unchangedFromR1AfterRemovingFormalOnlyValidation": true,
+      "unchangedFromOriginalBase": true
+    },
+    {
+      "scope": "Source dispatch",
+      "sha256": "3a2ae5ef88b0026832029d37aa7b0542b22539814e012f242e465330dab3639d",
+      "unchangedFromR1AfterRemovingFormalOnlyValidation": true,
+      "unchangedFromOriginalBase": true
+    },
+    {
+      "scope": "operation budget and console registration",
+      "sha256": "4cb92f9cf7894cf7886d9def6cb03b50e0b1d49ca117718f2109f5a80e3e0eb2",
+      "unchangedFromR1AfterRemovingFormalOnlyValidation": true,
+      "unchangedFromOriginalBase": true
+    },
+    {
+      "scope": "existing generic fault projection",
+      "sha256": "a4462e1abb7c7e2d3c0610e9b47d909a67229025aa35b5e9b1ff027ebd2fb548",
+      "unchangedFromR1AfterRemovingFormalOnlyValidation": true,
+      "unchangedFromOriginalBase": true
+    },
+    {
+      "scope": "Source/Data third-pass parser validation",
+      "sha256": "1db4b7d324f047dd5cb1b5bcc252d49491ac7ec44d25bb40f5a46dbf68d3302e",
+      "unchangedFromR1AfterRemovingFormalOnlyValidation": true,
+      "unchangedFromOriginalBase": true
+    }
+  ],
+  "checks": {
+    "rustfmtNewAndLuac": "PASS",
+    "mainRustfmtParseOnly": "PASS",
+    "metadataExactGoWithExistingSourceSubstitutions": "PASS",
+    "gitDiffCheckOwned": "PASS",
+    "r1SnapshotUnchanged": "PASS",
+    "cargoRustc": "NOT_RUN",
+    "rustTests": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "gameInput": "NOT_RUN",
+    "r2FinalSnapshotUnchanged": "PASS",
+    "rawByteR2FullCustody229Entries": "PASS",
+    "sourceRunnerUnchangedFromR2Final": "PASS",
+    "ownedWorkingTreeMatchesSnapshot": "PASS"
+  },
+  "authoredTests": 55,
+  "unresolved": "Source Closure checked-close/control and strict runner worker join proof, required historical OP/BTP consumers, full raw-byte public CLI integration/build/runtime acceptance remain outstanding.",
+  "completeRawByteSnapshot": {
+    "source": "/workspace/shared/native-report-bytes-review-r2",
+    "freezeSHA256": "1d5c2c61ac1b2a8f38e004afb5f2c8464a4ab24f5f73bf04b3da0872e9b70d28",
+    "listedEntries": 229,
+    "copiedFiles": [
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/Cargo.lock",
+        "bytes": 71426,
+        "sha256": "a0d3f014709d3364d0ee28bc6ad58f260410ea7df81e8dc99fdebb35b4d45a6b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/Cargo.lock"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/Cargo.toml",
+        "bytes": 1840,
+        "sha256": "0e00a44fd16a0de1697a3e0c7158cbaf010f09ace305b285f33f841fc3c5831d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/Cargo.toml"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/Cargo.toml",
+        "bytes": 376,
+        "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/Cargo.toml"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/archive.rs",
+        "bytes": 7985,
+        "sha256": "75acabe672a11f13b2c4cd826ef351821256d3db350834f0fe95342a161f9fe3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/archive.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/availability.rs",
+        "bytes": 12406,
+        "sha256": "a6c96f55b2794712175f1b89d0e8f15227d7b3f5cee5daf267b070b789fc209e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/availability.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/cache.rs",
+        "bytes": 14764,
+        "sha256": "361d2b05084a43cb3cbc64bd509c516f6536bfcfade8864b9a525bea51fb7e57",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/cache.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/client.rs",
+        "bytes": 73334,
+        "sha256": "bb1694eb93ec8d097d6df8775319f85a71a2983552437f98dca5a21d45248dcf",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/client.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/control.rs",
+        "bytes": 20162,
+        "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/control.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/coordination.rs",
+        "bytes": 7144,
+        "sha256": "4130866ad72d52150f64e870f2e1c07a777c63518561dbd457fc539f1a809dc0",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/coordination.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/doctor.rs",
+        "bytes": 12706,
+        "sha256": "94fa15c54f4cbf8efa3defafe57adc9c443e2f09fcec0e078a2f7bffe479065c",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/doctor.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/evidence/bounded.rs",
+        "bytes": 17320,
+        "sha256": "f7ee07a01bcb3f1904591f85cdb7e33c536a76ee63fc347e4a443f227b3bada3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence/bounded.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/evidence/budgeted.rs",
+        "bytes": 19940,
+        "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence/budgeted.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/evidence/dependencies.rs",
+        "bytes": 34029,
+        "sha256": "95dbfeaf43098017f587443fb266e0b8fd2eb78d542ed6f148e6e50cfc254b27",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence/dependencies.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/evidence.rs",
+        "bytes": 20931,
+        "sha256": "f33856af2242ea822f1a7706ab0a5c3db46d73d5676bb38413e0b07c55a6965f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/evidence.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/installation_selection.rs",
+        "bytes": 37840,
+        "sha256": "3cb63d5de67df1f47dafb8216ff874597845c2c11e6520ea5851940ba637f0b9",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/installation_selection.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/lib.rs",
+        "bytes": 4772,
+        "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/lib.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/mailbox/code_bytes.rs",
+        "bytes": 3189,
+        "sha256": "8a411b4a7825fc98745b9ea2bfb4577565938b8e73d005903a946979fdb9aaf8",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/mailbox/code_bytes.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+        "bytes": 3525,
+        "sha256": "b60de8bc2a3e935e456ebd2c9f065f6ffc1e3d3ea5871a6de68d146db95bc104",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/mailbox/code_bytes_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/mailbox.rs",
+        "bytes": 7328,
+        "sha256": "a8698fb1d4915e709c7881cbc1076a899e301611a5fabda6c3e662c49c985626",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/mailbox.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/metadata.rs",
+        "bytes": 30579,
+        "sha256": "1beaefaa6ba2ca2b58b5c28b502c846809abd85dfae386a47988818448509971",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/metadata.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/process.rs",
+        "bytes": 7267,
+        "sha256": "10432aa433d71c24851bbb3fe4d467dff6be57fe3f0d2a69ae2d2310565dec89",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/process.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/public_json/typed/checked.rs",
+        "bytes": 7255,
+        "sha256": "bb5aee679b41949d0becc9a6486738cd649c514e26b4a47122c5d0e88accbc04",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/public_json/typed/checked.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/public_json/typed/tests.rs",
+        "bytes": 15884,
+        "sha256": "7eb18b3bea7eeeac5cafe41c3bd30c2d14c5fc712188c532c91cb17e2e1a4fc5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/public_json/typed/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/public_json/typed.rs",
+        "bytes": 13007,
+        "sha256": "d33e3c1dda9744d1ec37139a1316e973ab109f3774d09cec943a7691271bb27b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/public_json/typed.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/public_json.rs",
+        "bytes": 25956,
+        "sha256": "bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/public_json.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/selection.rs",
+        "bytes": 23518,
+        "sha256": "8fb86e9baf73cc63a35c0c01e2bc2142da7c3fa4111d75f57c1ddf79812ff588",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/selection.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/storage/checked_close_tests.rs",
+        "bytes": 13317,
+        "sha256": "efa17acf2d0ba0a828522d5ebdd9a832493fcb78e1a827029a4a4bb4d76b5fd3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/storage/checked_close_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/storage.rs",
+        "bytes": 22397,
+        "sha256": "8cf24f46ce1af4b4445c529f4123c936df4d610bd8c42eff5f71e339bcb77c6d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/storage.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/src/workspace.rs",
+        "bytes": 15598,
+        "sha256": "9cfaab974b9c0cd42ac11ae3a31dba844e8fc7dbeb6d97e4a9d602be0d44d0af",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/src/workspace.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/tests/bounded_evidence.rs",
+        "bytes": 8685,
+        "sha256": "fb6c7fbe089b5489fec6d358b8f38aaf76cb9a497ca14401a3ee5d7be516330f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/bounded_evidence.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/tests/budgeted_capture.rs",
+        "bytes": 9477,
+        "sha256": "22bffa41b63d11348e633c138e39cbec63f0faec334a99b088569cd160b453e5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/budgeted_capture.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/tests/capture_dependencies.rs",
+        "bytes": 36225,
+        "sha256": "8d1a472222d42265a36759ef9359196e1cc73e5a2b7f80a81ad0ef5525bd2b0b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/capture_dependencies.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/tests/capture_query_references.rs",
+        "bytes": 7789,
+        "sha256": "895dde943cd4ac76a5e8abbfea8f13c3a59d4b71b798da69faf6c606e06dc35c",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/capture_query_references.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/tests/durability.rs",
+        "bytes": 35906,
+        "sha256": "1cd43af6c5288fbc1ba1d030622de489ad49721b2e6b92bdeb9957d547efa080",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/durability.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-core/tests/mailbox_contract.rs",
+        "bytes": 8144,
+        "sha256": "9bac7915b8e3273323cbad32f401b4eb3cb43e0ff9fe069a081b673191bad40b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-core/tests/mailbox_contract.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/Cargo.toml",
+        "bytes": 243,
+        "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/Cargo.toml"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/addon_transaction.rs",
+        "bytes": 12995,
+        "sha256": "b9b110141afc4e3d5a3d044dd40d81e7b31b6cdfe487b48268abda1916d8b377",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/addon_transaction.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/deploy.rs",
+        "bytes": 8104,
+        "sha256": "be0eb1535a05acd24f694c92d9847b758e67e5e455280accb7baf704fb9aa1a8",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/deploy.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/installation.rs",
+        "bytes": 9084,
+        "sha256": "048df2553425cef1099a00fe7d66977df95a86a976597fdce4379af742c6545b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/installation.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/lib.rs",
+        "bytes": 13189,
+        "sha256": "19d5c106ada181db7291b1f44875c7883b622f19cd344c72f402d14d494c3484",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/lib.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/npm_update.rs",
+        "bytes": 27616,
+        "sha256": "04b2c0246bfd1c514ec6a8aa250220053c7ebb819d9a4e63b5e6767ecf5bf4ca",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/npm_update.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/release/checked_close_tests.rs",
+        "bytes": 11027,
+        "sha256": "08a4214772d40627382b01f178888e6871c92ec27dade5199cdd787be1985c22",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/release/checked_close_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/release.rs",
+        "bytes": 11237,
+        "sha256": "0db05b990994bb9311ab4f90963463c5e0575297c30e6a1ba33a395fc69bd6af",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/release.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/removal.rs",
+        "bytes": 32142,
+        "sha256": "59917f4a8c382a220714d45eb691c6182e6abb79715a96de644fe84f8d97ea98",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/removal.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/slot_publication.rs",
+        "bytes": 34907,
+        "sha256": "4afbea1ba8191d88c0265f14958428f0a5d755bae8d14d3f3dd61e633bd60170",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/slot_publication.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/slot_publication_tests.rs",
+        "bytes": 77614,
+        "sha256": "1d1de7c62f8c00accedfbff93f96468338c772cfa9d2de4add2cac101cb23217",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/slot_publication_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/slots.rs",
+        "bytes": 27106,
+        "sha256": "ee2b59101770213f149055979daff7826dbe7447ec487693e3e1d0cb8e7a39fc",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/slots.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/src/update.rs",
+        "bytes": 19290,
+        "sha256": "0959ef0c4d9d1f4941e1d3fd3d64493b7969009df4ca22819659aefcd892fe07",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/src/update.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/tests/combined_addon.rs",
+        "bytes": 8000,
+        "sha256": "80c1eb9d9d95ce3ca14b0c776629c76bbd8e652355c66afae255e78dda7616c4",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/combined_addon.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/tests/release_control.rs",
+        "bytes": 2579,
+        "sha256": "ab832b41378dacb8977b7602dca21fb286b388f718f6bc39589bebd67e44dba3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/release_control.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/tests/slot_maintenance.rs",
+        "bytes": 19516,
+        "sha256": "ef878845f89dcd8eaaab5a66e3d8cb243c730f45af5296224f528528639fe369",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/slot_maintenance.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-delivery/tests/transactions.rs",
+        "bytes": 15387,
+        "sha256": "bed3b62122d21efc459311e016f6cea7f9707be8ba4a71419b9f3a1112fb6436",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-delivery/tests/transactions.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/Cargo.toml",
+        "bytes": 516,
+        "sha256": "df1e3caa6a0e4bebe441483a3ddab212b002e2442aeb97ee922836baf0d0b533",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/Cargo.toml"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/examples/current_source.rs",
+        "bytes": 4654,
+        "sha256": "76cd40eac829dbe2c3b84a70044973e0d4701a5c54b57df348b447b3758cac19",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/current_source.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/examples/research_xrefs.rs",
+        "bytes": 1365,
+        "sha256": "ba5e65441176dfbc2e974ec1838b6040446925427384ca072d36fd3fc5427929",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/research_xrefs.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/examples/runtime_archive_current.rs",
+        "bytes": 1190,
+        "sha256": "43d8066d753ee7c6cb1d3aa4b0e3d4922ad07c768d3cb0056cd37e3d85ea5b67",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/runtime_archive_current.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/examples/runtime_archive_location.rs",
+        "bytes": 3175,
+        "sha256": "d6bab2020396ead14a8e92128d49bb807612d6bce664f053015d0417721a7e96",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/runtime_archive_location.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/examples/static_location.rs",
+        "bytes": 1597,
+        "sha256": "3c4fc2d71f74a111db0621d3ec01e238f136a9a28e847082d6730232360d112b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/examples/static_location.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/binding.rs",
+        "bytes": 4283,
+        "sha256": "5e61d77be3b52fbf4b181650e0505fc548cceda1979816ebc52ad65b86e8d5a6",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/binding.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/README.md",
+        "bytes": 12024,
+        "sha256": "c3af49cc3539fef9d37f35fd43bfde77e3511ec209fa139554a387e19b3a414b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/README.md"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/admission.rs",
+        "bytes": 34237,
+        "sha256": "0b889c661cf1703d839b819d8caeba6a5ffbc5a9f0a34ad1d38c4476df20951d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/admission.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/admission_tests.rs",
+        "bytes": 41761,
+        "sha256": "1641c631a17c7304bdf84756d44e76ebef0d55211025f35ec40b9518dfe9b801",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/admission_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/errors.rs",
+        "bytes": 4533,
+        "sha256": "f5edf0900bb33251a97741388bef845c615d20d2bcaaa0ff38a06881b4be501d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/errors.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs",
+        "bytes": 17552,
+        "sha256": "6f3c1aa4fd3b90883bf46ac78ffc8bffaebe2b95dda105726c06e562dc16cd58",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+        "bytes": 6687,
+        "sha256": "0d44b9724228595698cbe098a8518d97ec228985cf498887cf338b2c4cb689ea",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+        "bytes": 23168,
+        "sha256": "9e51a1fdc4ab1380305810d0ff91a8b59f5a1faa359b7025fa0528b694acc98f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+        "bytes": 43656,
+        "sha256": "cf57509ba48cbd4624da225ee42f6a495eaad185763e8cdf2eeac7ccae33eda3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection.rs",
+        "bytes": 26395,
+        "sha256": "46c94fcec766cbecd30f8f48e766ee386bfd02c9f9052aa8c4d17da9c5590767",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/connection.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+        "bytes": 27944,
+        "sha256": "4c102e8a059a6e0c83015e5583b4b1c07a12de87dc07b62df7d3dea180035c35",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/driver.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs",
+        "bytes": 45121,
+        "sha256": "b7a58a70cd1bdd784916b4533c2a292e496f2df942fd70e297f82eea242fe13e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+        "bytes": 38944,
+        "sha256": "68e46b98f8aa40b821685ff2f189cf202b5774e0882f97b67de92073849ac4e7",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs",
+        "bytes": 42807,
+        "sha256": "95439a84090ae1c565ef53f940b009be361b1179f0bb624ba741334d59d5b2e5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/input.rs",
+        "bytes": 12470,
+        "sha256": "87c9b8e7ec64f1d0aaf9d1a32678ab00c241ca2660d73ca6ced4613bbbefca4d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/input.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+        "bytes": 12097,
+        "sha256": "255e2095bcda4da14233ee3a3793bb1a38490395edc0456638ae0446f6923652",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/journal.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/journal_tests.rs",
+        "bytes": 9389,
+        "sha256": "aee467776282a98207327740f5863f08219144c2ecd6b009506e98dd6182a39e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/journal_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+        "bytes": 2187,
+        "sha256": "69b15f0815828dbdb52e152e383196f388bdc27041c3b01eac5671802ad119a7",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/mod.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs",
+        "bytes": 8491,
+        "sha256": "1ad164ed4f1c1ec8a41985c4bf3919cfce4d38af685416430c8680900b75e589",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+        "bytes": 46305,
+        "sha256": "c894205c77c79060634809a3626c9a522cf9474ef21d32bb9dc4c5ff1f54558d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace.rs",
+        "bytes": 8512,
+        "sha256": "3f303fe3f1f6cec4f3e2e2119af2214677c8d18617ff28bc6da0f82d915ddb21",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace_tests.rs",
+        "bytes": 5970,
+        "sha256": "aa96615c0b2aa44e2ce14d61ece7b90933be22a07320da777fd1e94e5600e01b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+        "bytes": 35688,
+        "sha256": "16b89ee11887dbcfef4f3f23bcb43233edd37d020d6847154d7013f3bb97a99a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs",
+        "bytes": 8088,
+        "sha256": "2ac55d9837a706d20ac573ac94aad4fa522229f0ef63e75569673a369030bd96",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs",
+        "bytes": 8694,
+        "sha256": "a0508ec6607081d3396e2dc2558f825c89f56225b4a94c015b9de0c81f264534",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/native_reader_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+        "bytes": 17084,
+        "sha256": "a67790f55ab1382ead7ef1d026602ead91be2683d0136131e71973a54d71a522",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/observations.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/observations_tests.rs",
+        "bytes": 12810,
+        "sha256": "71ffaaa21d49fcdd083d3828705c3056c830bacd5b9806ac7f4bbcbbf1f447b7",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/observations_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/protocol.rs",
+        "bytes": 7805,
+        "sha256": "57716ef95466be867afed5e107f61b4a19b7faef1e9e7e49d40e48d6db7b8c36",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/protocol.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+        "bytes": 23531,
+        "sha256": "7d04ac6ed0da68e8ee04b809dbc9b455825b031d0fb72e75e71082c507e99b4e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/recovery.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/recovery_test_support.rs",
+        "bytes": 13461,
+        "sha256": "a46e13e3be23e5e16d858f47af1c6dbd85003d8ee7c960082920cdd39b360b59",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/recovery_test_support.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/recovery_tests.rs",
+        "bytes": 7676,
+        "sha256": "01097b674a3ef59463302b81dd17dbcce1d1efc65e5992ac580486e49868ff49",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/recovery_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/reload.rs",
+        "bytes": 18608,
+        "sha256": "5d0a9544330834022a8bda44862eb3c8cd41a59e63bc29656cfb09cfa911544d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/reload.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/reload_tests.rs",
+        "bytes": 26711,
+        "sha256": "fce008b6102d60284fa96752ce62f29d38728ef7b6d39ab94786fccc68830cc0",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/reload_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement.rs",
+        "bytes": 9141,
+        "sha256": "f30a44cb4443c279f77698b7c0d7cd4fbdae963641f10306ee390b0ed429d3b9",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement_tests.rs",
+        "bytes": 6252,
+        "sha256": "f3635fe16a8fb8e1c965672c41071fb1e96ef0b55ac80970ecfe7ab2ea971961",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/slot_allocation.rs",
+        "bytes": 2876,
+        "sha256": "e99e8099ba95ac53a4edc25683d26df7f51a7b43f28340a1830078e7aa0b3121",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/slot_allocation.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/slot_allocation_tests.rs",
+        "bytes": 4819,
+        "sha256": "0ff1bdc62d3127a324033b49d753a4e5d142e7cbc4e5b5f34358853b74ea0c2e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/slot_allocation_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+        "bytes": 26359,
+        "sha256": "26f0d5b37ef7d1b6c9d9dfa166f38190e35e18492543c93f2a9d4b3e7cc917fe",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/state.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs",
+        "bytes": 7966,
+        "sha256": "7126f1774bbeb7053031f02aabd8ce7497c38a06d2c74c27c579e9a46a0d8e34",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/tests.rs",
+        "bytes": 29030,
+        "sha256": "68f4bc7c1465936719c30c2ae5c30f6e79ee62652b81d6ed769e1c2bc33b7c0c",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/transactions.rs",
+        "bytes": 22111,
+        "sha256": "86a87275ecd338515abeb4d87dfcb45b2391da1a00900f4f2979182a991dc364",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/transactions.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/wire.rs",
+        "bytes": 6702,
+        "sha256": "6a174b9bd738d35edc29d542b30812576e63a97a0074f839fb5813c54e16b4ee",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/go_mailbox_v1/wire.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/host.rs",
+        "bytes": 26953,
+        "sha256": "3fa9e087fa03d05793ef05d69f537a08a70ff72ff6e3865e757edb1fcf5d9145",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/host.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/journal.rs",
+        "bytes": 13116,
+        "sha256": "c0dbffac662d9a967fbf7b6675a301ac78a085af1fd5d030a0cc8ab9122bf1ca",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/journal.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/lib.rs",
+        "bytes": 2945,
+        "sha256": "1372478f9b82545f80f6129e3327fd78deaabf69da9b2459c9d576a705292956",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/lib.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/lifecycle.rs",
+        "bytes": 39435,
+        "sha256": "aa81f10cbce7ac608d810f25e89928b481b896c078ced3658ca3468a150df498",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/lifecycle.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/locator.rs",
+        "bytes": 15936,
+        "sha256": "0f7f8c477858d39b67ab92139781ee29ec72304a8794d30ea91eeb14409d6450",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/locator.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/mailbox.rs",
+        "bytes": 30314,
+        "sha256": "232d35440bee4acdd8a233c3823bfc5470f5e13b57b8e1194a7ed61a760ef4f9",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/mailbox.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/managed.rs",
+        "bytes": 646,
+        "sha256": "eba41d8b641f80f7bc06e5d69f294c6d9b2d8a9a6bf7f5b4cbea248dc9c37719",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/managed.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/native.rs",
+        "bytes": 8347,
+        "sha256": "55f2157aa9258c8e58e1df60b4cbd7194e16f3eeb9df974abbc8a3fdc90ff105",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/native.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/optical.rs",
+        "bytes": 4689,
+        "sha256": "e6907912cc6f99705b3d3e88315172b6d9e581bfb0258f8b24725643fa4324f4",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/optical.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/passive/tests.rs",
+        "bytes": 17619,
+        "sha256": "170d35c607a1f5244a0bbe799b86aa1bf38d7f2cb4eeaf74a2371b3b75635eb5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/passive/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/passive.rs",
+        "bytes": 14082,
+        "sha256": "f0706d0fb161bac4195ee51410a30c47a6f272716b99151f2a567bfbb0a920d0",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/passive.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/probes.rs",
+        "bytes": 10002,
+        "sha256": "7612931f49cf2bab96267165c459402e24351b907095fc900e88286bd3635f81",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/probes.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/replacement.rs",
+        "bytes": 5436,
+        "sha256": "0ca82a8361b622b4ff2b1a415a363cbd7a22da645c0a8cc29d876b1e05fdf46b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/replacement.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/routes.rs",
+        "bytes": 18166,
+        "sha256": "d55ba2e28c584be716f0bcab44924ae8ca5c03a69ddb2e9f3253f540a6502111",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/routes.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_archive.rs",
+        "bytes": 22037,
+        "sha256": "fb24f461de3872718d6750464375dd18fdd2a5f058f2ec78a7c72475995be84a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_archive.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_binding/tests.rs",
+        "bytes": 53532,
+        "sha256": "361d1231e8ac1c5669a521dbdfabb82385732204038fc8df12c65185f8fa03ed",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_binding/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_binding.rs",
+        "bytes": 45701,
+        "sha256": "284acc45d5340f2dcd2c88e00ada5e46e477500a8399b215e0c671eaa3022d4e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_binding.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_discovery.rs",
+        "bytes": 27692,
+        "sha256": "1217e10d4f31138f10317fc5d0cccda095de7d85baa36277f418f2ee0173bbb4",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_discovery.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_observation.rs",
+        "bytes": 8924,
+        "sha256": "3109dc41731cb5ad291236030d9ac6dc463f5ed9c6a0024bbfc7e01e078f1b2b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_observation.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_root/tests.rs",
+        "bytes": 38654,
+        "sha256": "fd8edf4bb1860e6f6661936daa1811cf0ec7c94ddc5592aa3f1eb6deae616613",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_root/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_root.rs",
+        "bytes": 41989,
+        "sha256": "966553e418e69751cac77b06663b0ddaec16cd2dd83d9a7c6f6d4b7191650eb6",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_root.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/runtime_windows.rs",
+        "bytes": 5800,
+        "sha256": "614ca920072f32ea4a9d8c0cf303fa9a6b14651a3de7fc20be1fd6f7085a6a88",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/runtime_windows.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/slots.rs",
+        "bytes": 9789,
+        "sha256": "388659c3c2996066ada3f626c887c4733eccf54942e62efc0191bb528f5e3f52",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/slots.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/transport.rs",
+        "bytes": 16949,
+        "sha256": "f94e656d1a30f2ffed39d07f1e67549aeb87850425aae91352bd2d8488aed992",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/transport.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/src/windows_channel.rs",
+        "bytes": 19047,
+        "sha256": "efe96f2c3214d2ec9e0dc5179870f799598d4677b11cc53fc43799689513b41e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/src/windows_channel.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/mailbox_lookup.rs",
+        "bytes": 32105,
+        "sha256": "997263e309bdf36a963b0e882835a4e4172b4c97419a5f6a1d0aaa2f51260752",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/mailbox_lookup.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_e2e.rs",
+        "bytes": 54430,
+        "sha256": "422dbe21ec27a116694cf83214c07e683228fa4432dcff308fdb355b0abbf6aa",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_e2e.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_exact_commit_prototype.rs",
+        "bytes": 226,
+        "sha256": "469a4121632c69ee242e8cd1231f867f2e10d03116710f9e27589cdd62b1383f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_exact_commit_prototype.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_p3_original_negative.rs",
+        "bytes": 229,
+        "sha256": "58dde5f0012a758681eb93bcd2421262f3a04b0bc3326a6b40838d80b2bc3975",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_p3_original_negative.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_revised_lifecycle.rs",
+        "bytes": 150,
+        "sha256": "271bf6ff3a2813a693c162fd86b5deb994376ce11d827a33e43aca150fac717f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_revised_lifecycle.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_shared_lifecycle_prototype.rs",
+        "bytes": 231,
+        "sha256": "98b707d47b21fe6fbb4663d4d67376cd94a28709eb4248db14930c526b9d1bb9",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_shared_lifecycle_prototype.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_termination.rs",
+        "bytes": 13025,
+        "sha256": "f82efd21daccd1f70d89bc1564172717bcf5fd1ee02e49d8b44a8515bda927fc",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_termination.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/native_v1_prototype.rs",
+        "bytes": 7696,
+        "sha256": "bc966f7c51c37a2d07555c273b6fd95b687216d944789c959afe3540be5172b5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/native_v1_prototype.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/passive_windows.rs",
+        "bytes": 2947,
+        "sha256": "018845a7b88537a708cbf0420375171090b7b5a42b992d0c6520ef31627d2598",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/passive_windows.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/runtime_discovery.rs",
+        "bytes": 42088,
+        "sha256": "3feef469536ab07aea44643dbad56217569db58075b2fcb03b02c71bcd731ae1",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/runtime_discovery.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/runtime_windows.rs",
+        "bytes": 13011,
+        "sha256": "ac79f90522359cd43e53508a0232490fee31b6f22ebfb84f42f934f0c11b1eda",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/runtime_windows.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-live/tests/sealed_memory.rs",
+        "bytes": 9918,
+        "sha256": "fac5c1c2f909b301201f51376f1e3faaa12224b7fd54f1ca28a8acd1814eecdf",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-live/tests/sealed_memory.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/Cargo.toml",
+        "bytes": 1245,
+        "sha256": "e514624884cebeb1a793bc91dfcc3469715b4be1cac12d2746c0514cf71d0b6a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/Cargo.toml"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/examples/broker_job.rs",
+        "bytes": 794,
+        "sha256": "495526bbff94a8fbea97bbc6aba9c4ca199a50b77858d81074e11354a05fa057",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/examples/broker_job.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/examples/digest_benchmark.rs",
+        "bytes": 1446,
+        "sha256": "d8741a09b44cf8e9a2042c1c88dcfb4632e9cd4e76329130a0fab96851cb7d21",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/examples/digest_benchmark.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/broker.rs",
+        "bytes": 23408,
+        "sha256": "b2ead7f2f1ae55a91b35625c7c55ea403f011458e6cf27c5dcf42c028e11691a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/broker.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/cancellation.rs",
+        "bytes": 14129,
+        "sha256": "0a8b692b75c8cdda3083c45bc30b4619ac3e9f8a0195f0e56acef30a55e03dbb",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/cancellation.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/capture.rs",
+        "bytes": 11584,
+        "sha256": "94112a7b49992ae39aa3d361ff7e34e3fb2fa3198d77b351250c985e083b22d7",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/capture.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/detached.rs",
+        "bytes": 7876,
+        "sha256": "8ee14288e14b12e13b52057b687e0e330a68b9e4f8150b1808e79fb8b5de502d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/detached.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/filesystem/destination.rs",
+        "bytes": 36504,
+        "sha256": "f806c0c5867e830ffac2c0e01bb76d76b7e6df3bbcd6714b0753a043b864ade3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/filesystem/destination.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/filesystem.rs",
+        "bytes": 10689,
+        "sha256": "c2e5ab6a3a014c298c91ed77535fd2c5017d23d824698fc84a27c2b7e59576d6",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/filesystem.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/geometry.rs",
+        "bytes": 2714,
+        "sha256": "fc29b2fffa9dc818dcacffce1977b2a6657914181b6f9752f6853ed00c320316",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/geometry.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/guarded_spawn.rs",
+        "bytes": 11733,
+        "sha256": "2715043e528e85a96aea813cb4f338623eff741a790ee82bf37b4c9cac9b9744",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/guarded_spawn.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/guarded_spawn_tests.rs",
+        "bytes": 20083,
+        "sha256": "cbb34f159304ab5f8961f5aabe6aa63fdbba2c93bc6f2863cf264650b4f0845b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/guarded_spawn_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/input.rs",
+        "bytes": 6118,
+        "sha256": "181e65d379ecf6061d7cdd213b4d27fd18b23c4d3ad576e290f1b84eec47330e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/input.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/inventory.rs",
+        "bytes": 6076,
+        "sha256": "9f3757547584fcbc9e60ab1613d2a1c600944617f0853e13e780b2ac9da2844a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/inventory.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/job.rs",
+        "bytes": 9109,
+        "sha256": "ad62bb8cc208eae27f08e00d6b509ba7ade3b072b3afabd5c31453a2b0a33495",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/job.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/legacy_digest.rs",
+        "bytes": 2650,
+        "sha256": "3c5e31afc6a441b686ae832561c7209402f02efa77a1b4ce58ce1b6aca38ba83",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/legacy_digest.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/lib.rs",
+        "bytes": 588,
+        "sha256": "e5ac63a0209560f1db55460a4b5f95da6a05c9963429562359bb904075ef2089",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/lib.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/engine.rs",
+        "bytes": 11348,
+        "sha256": "c30b795828bf2489e7a15e159221c46421cee7f09fd11180fb36609b8fdbefd3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/engine.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/equal_fold.rs",
+        "bytes": 2910,
+        "sha256": "79324615b034362aea88a5ce6189a744bf45d07038f43155e95ff208ae33b874",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/equal_fold.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/equal_fold_data.rs",
+        "bytes": 39587,
+        "sha256": "e474990232cd2f59245987171cee4d7bc417e5d6a04ffa881e77425ffff85ef2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/equal_fold_data.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/LICENSE",
+        "bytes": 1453,
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/LICENSE"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/generate.py",
+        "bytes": 5248,
+        "sha256": "2bc2981c4298d570980a887f394277f2235c022e3304f4980029729495a9aae0",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/generate.py"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/identity.json",
+        "bytes": 1908,
+        "sha256": "08db7596e4adc143c77f70a757f91264dc5e2d6ba6e5d019b2d4e43c10470902",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/identity.json"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/letter.go.txt",
+        "bytes": 10702,
+        "sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/letter.go.txt"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/strings.go.txt",
+        "bytes": 34265,
+        "sha256": "a81bdf73a308277c322e35d0c602e3813f57b6f769c091f8f8962c8884a45ea3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/strings.go.txt"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/tables.go.txt",
+        "bytes": 256788,
+        "sha256": "ac0e5d5d1b58ed4b02d7cb4a0085bdefbdb4f7aae6fadddbc9477f8463da8bd8",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/go_unicode/tables.go.txt"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/identity_tests.rs",
+        "bytes": 6119,
+        "sha256": "e4868e09719972ea94bfd9ab52b5fe9d9e867d570136490ce6ab57e96a588b81",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/identity_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input/tests.rs",
+        "bytes": 15928,
+        "sha256": "71f5edd97f60fdfff3c9961eaa969792ab29102174bc6eaf828792ef2a290d18",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/mailbox_input.rs",
+        "bytes": 11042,
+        "sha256": "d77340c11be92b2ae0cfdbd67be6fccf9fbb93b2f98bcfeaa3db1e8169dc7458",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/mailbox_input.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process/lifetime/tests.rs",
+        "bytes": 10759,
+        "sha256": "9331ac0a1623946d4b2629913e66f4b29b3cde5cbb77b55db63f4f8cacf71480",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/lifetime/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process/lifetime.rs",
+        "bytes": 7886,
+        "sha256": "f0e016aedff57d7409b2d695a4c55c2ab58e0bfeaf3794f3e697120a36e685ff",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/lifetime.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process/runtime_image/tests.rs",
+        "bytes": 19294,
+        "sha256": "cbc9da9bda45b8a60f686929802936e3832eb2181da6d1d4cdd42715394170cc",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_image/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process/runtime_image.rs",
+        "bytes": 20457,
+        "sha256": "8bf3ff301edbc1420d5bba90ec0ca5a57fe579999802fb45aa6e02e7d3d5ea5d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_image.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process/runtime_module/tests.rs",
+        "bytes": 22749,
+        "sha256": "69b0d1383b93a5192ee566be439a9a3143dc1719091d06a2a9cc516ca276ca21",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_module/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process/runtime_module.rs",
+        "bytes": 53927,
+        "sha256": "390fcbeb050c9f9c091fdfb89d3a1b856f299a42c1546485cf503d7f784b00e1",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process/runtime_module.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/process.rs",
+        "bytes": 43150,
+        "sha256": "eb25f8ea338fab09b9af1a54bffb892d33d2f89a2faa572a097eb3fe8b9a3b32",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/process.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/random.rs",
+        "bytes": 339,
+        "sha256": "f48eea0c3f011297c36acab5f186eee6812859164a5f809a144fa95a5620e198",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/random.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/src/watch.rs",
+        "bytes": 7145,
+        "sha256": "622d10e1b8bb5301351241cb8900a45aedeb3efa2ff495bd524cb5e5da78ae8d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/src/watch.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/destination.rs",
+        "bytes": 7634,
+        "sha256": "39ca94449790ae54caeec3fccaadb061aa65b0df17cac532799937d305c6f1c9",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/destination.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/detached.rs",
+        "bytes": 5491,
+        "sha256": "8822def7924b9042571aa4876ded4bb6d41bd2be58289a6388d7d35bcb67c6d3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/detached.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/guarded_spawn_fixture.rs",
+        "bytes": 3090,
+        "sha256": "c3721add2cbd2e6993928ff061ef43961b1f7e9f453a1cf4ad2db028f6ac6017",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/guarded_spawn_fixture.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/input_fixture.rs",
+        "bytes": 4364,
+        "sha256": "5682bc26eb914bf78138d452942b6f6d6afddaa38a7eee4736f5902fff7904ab",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/input_fixture.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/mailbox_input_fixture.rs",
+        "bytes": 10441,
+        "sha256": "bb670ede4e444e549a48c53ee35666fed3884f20e52c97fa5fb4bf5d5fcec5e5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/mailbox_input_fixture.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/multiinstance.rs",
+        "bytes": 2947,
+        "sha256": "3a2f407972f00a9ca17ec5e103282a224deecc505bcaff889f08008cd986a0a7",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/multiinstance.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/native.rs",
+        "bytes": 2463,
+        "sha256": "ac77932569f96df0f591ed09568421865605ec86f0a778927a82f1f331004029",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/native.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/native_source_retirement.rs",
+        "bytes": 2149,
+        "sha256": "d296ef803e98af3e00c1e5ea9adfb00068eecf82e02df977416742495a974d0e",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/native_source_retirement.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/private_runtime.rs",
+        "bytes": 10584,
+        "sha256": "b8811ade21afcaf9c1db113bbf8bbf9378d48c4813230401ae3aad036e3d75e2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/private_runtime.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/process_lifetime.rs",
+        "bytes": 4502,
+        "sha256": "60bffa247182e2431bffa301f874ea312b3eb56649f69d427f874d6cda28b731",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/process_lifetime.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/runtime_module.rs",
+        "bytes": 17582,
+        "sha256": "16353935d37291d286cd7b6832eb656c8234f0736c6373a091849d8e7ad45cae",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/runtime_module.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/support/owned_target.rs",
+        "bytes": 8445,
+        "sha256": "0d5f1f47199b11794a7a2a59148925ea5be6ebfcf50c3dd5a6343e7e81c7e760",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/support/owned_target.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/baseline/crates/lycheedev-windows/tests/support/reparse.rs",
+        "bytes": 1857,
+        "sha256": "c2c4b40073e03008edac25c9f85fd722757bab71c977fab30ca292aaab2e6671",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/baseline/crates/lycheedev-windows/tests/support/reparse.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/lib.rs",
+        "bytes": 4790,
+        "sha256": "beb975bb9f3836cd89e9b69d14404cd47421c2a7d02aca2d779f94b86a157fb1",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/lib.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/public_json/typed/checked/bytes_only.rs",
+        "bytes": 3996,
+        "sha256": "353275d8216f722a64e010375b5c6a3858ee0aec2ee795e58108ae052f36f19f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed/checked/bytes_only.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/public_json/typed/checked.rs",
+        "bytes": 8495,
+        "sha256": "7f7abc0c9b38856e7bfe395f220fbaf2f61ef425623de5d4315967dfd4129800",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed/checked.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/public_json/typed/tests.rs",
+        "bytes": 21812,
+        "sha256": "3693c77ff41eef1c4834558587cf70e08b196ec54221296316992e27fd6d584a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/public_json/typed.rs",
+        "bytes": 13946,
+        "sha256": "433f715ed4cff496dc210194dd7325492e9e47f5cbb18fb5b7e27699b78773a0",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/public_json/typed.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/raw_json/tests.rs",
+        "bytes": 2534,
+        "sha256": "c1ffc43b782846e5007fd3435d39e255297bc609b2956c0972c8da939203c560",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/raw_json/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-core/src/raw_json.rs",
+        "bytes": 8324,
+        "sha256": "e8a0e77234d56318b586385c27f69ed7a8ba63cb7fb895aa19d7e49befb703f3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-core/src/raw_json.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+        "bytes": 7326,
+        "sha256": "d39a038063c96711dcf40b0884259f6d21e967440bb8283898941cab412672c5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+        "bytes": 45516,
+        "sha256": "1af10650aea05110b137ecc473607af548f0c38dfae71ccaa109ce9e608b2a83",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+        "bytes": 27929,
+        "sha256": "96e5d32d2cc8c6c68780cfcc695e94bb26dc26f811b64aabf253bd325c13ef93",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/driver.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs",
+        "bytes": 45937,
+        "sha256": "22375083cf4caa7bd2437f0a148c839eb30d60a43dbdc7641fe02edabfcfef6a",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs",
+        "bytes": 46098,
+        "sha256": "d6c2944eb7890127e28122e9f43a991016c8ba6397a8be16a1f659d54cbcec85",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+        "bytes": 17052,
+        "sha256": "e6e65e71147a12359155e6effd32afeb1dd9f929f0d9826d8e88b10291883a81",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/observations.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/observations_tests.rs",
+        "bytes": 14053,
+        "sha256": "71563e3eeb19f45614d7dc72c32d16d4f2af97c8817fd482226d130fb1b8cfb6",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/observations_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+        "bytes": 26306,
+        "sha256": "76b93f9fc804e01f37e5edfc2de06b9df4e4f023762f5bc5068fc2758e568cb3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/state.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs",
+        "bytes": 9434,
+        "sha256": "7439bee3ed304208a66c90847d3888bcb2c5086fca6dc07eb031847327a100d5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/tests/rust-parity/native-report-bytes-contract.md",
+        "bytes": 5377,
+        "sha256": "be27d7addee8fe296b72bb6f430b0be5024e0671c8ba23dccbd7ebabf913e2f8",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/tests/rust-parity/native-report-bytes-contract.md"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/tests/rust-parity/native-report-bytes-freeze.json",
+        "bytes": 73441,
+        "sha256": "1d5c2c61ac1b2a8f38e004afb5f2c8464a4ab24f5f73bf04b3da0872e9b70d28",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/tests/rust-parity/native-report-bytes-freeze.json"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/candidate/tests/rust-parity/native-report-bytes-test-map.json",
+        "bytes": 9179,
+        "sha256": "dbd95239c62102b4ffebca5ab8e053918839a735ea1d28dcc0c8090dbd730bf2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/candidate/tests/rust-parity/native-report-bytes-test-map.json"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/dependencies/serde_core-1.0.229/src/ser/mod.rs",
+        "bytes": 65231,
+        "sha256": "ec097d92c8545356961e977a4c9650361cadd1d3a243d805ae7b0e0e589ae803",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/dependencies/serde_core-1.0.229/src/ser/mod.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/dependencies/serde_json-1.0.151/src/de.rs",
+        "bytes": 86840,
+        "sha256": "4998d7e252eb513be85b298e287048b4fb283882e9ba7df905f572f07200f3f3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/dependencies/serde_json-1.0.151/src/de.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/dependencies/serde_json-1.0.151/src/raw.rs",
+        "bytes": 23498,
+        "sha256": "0e6ae2ade492a3c5c090dfaf31f03ff4e54123a5a47b59def5f1b3dcc035a2e3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/dependencies/serde_json-1.0.151/src/raw.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/dependencies/serde_json-1.0.151/src/read.rs",
+        "bytes": 33041,
+        "sha256": "17a2efe49e5a6937c8d7d4a5c0b9eac84453de0f86bf8e7ee421387e82341bb3",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/dependencies/serde_json-1.0.151/src/read.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/dependencies/serde_json-1.0.151/src/ser.rs",
+        "bytes": 63877,
+        "sha256": "f2b8cc0b97e30c49dbc58698fa22c14a7d56ea616cdb57b067835a59af49a75f",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/dependencies/serde_json-1.0.151/src/ser.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/integration/cli-r2/crates/lycheedev-cli/src/formal_live.rs",
+        "bytes": 26263,
+        "sha256": "25aab726de813b1e35dfa3265f5598e8bb4406f54c3bbe80fd283077626bef7c",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/integration/cli-r2/crates/lycheedev-cli/src/formal_live.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/integration/cli-r2/crates/lycheedev-cli/src/formal_live_output.rs",
+        "bytes": 4275,
+        "sha256": "2899d2bf52f7cd775279377f4690e591bc343529b6738e9ed041f24cc39b531c",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/integration/cli-r2/crates/lycheedev-cli/src/formal_live_output.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/integration/cli-r2/crates/lycheedev-cli/src/main.rs",
+        "bytes": 124769,
+        "sha256": "aaadd329974390781ba163ee741b480ba571d32d7ea91f13fce0529df6c52c5d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/integration/cli-r2/crates/lycheedev-cli/src/main.rs"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/go.mod",
+        "bytes": 751,
+        "sha256": "99351c6ffe4251990055ba52f5d501be04af2682264ab8d037b7d6ad6c9c9119",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/go.mod"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/bridge/memory_record.go",
+        "bytes": 3074,
+        "sha256": "cbd932f27b2fb38ab374e8ac90450aea66cc54989261c5131f386d4910220e74",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/bridge/memory_record.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/bridge/report.go",
+        "bytes": 2896,
+        "sha256": "4aead498330f51b9f3a3ce5a7fa241bdcc76bae4f1ed2031e7df0820fbf76fe2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/bridge/report.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/command/entry.go",
+        "bytes": 59149,
+        "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/command/entry.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/live/channel/driver.go",
+        "bytes": 17426,
+        "sha256": "a7d818003d3ed19496400fb21fb0b00bb37ba0d1573905216b64150486de64c2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/live/channel/driver.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/live/channel/history.go",
+        "bytes": 2894,
+        "sha256": "7ca726c5cfa8c56c80347f0a01ad85a71e9ef27adface2ad01d57b04cb36127b",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/live/channel/history.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/live/channel/observations.go",
+        "bytes": 3825,
+        "sha256": "e41a608a9a0198e5c0bb5b5e6c5a80c45e6a1bb7490e34e9e54a3d9a5605aef2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/live/channel/observations.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/live/channel/project_windows.go",
+        "bytes": 20287,
+        "sha256": "3c824507b764721a4830723868a6f6b9b70e36ec9fc53600b55818c4dfdfd7b5",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/live/channel/project_windows.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/live/channel/state.go",
+        "bytes": 5613,
+        "sha256": "a734d05ac4784c7034fa694a86f0f3a5455b67556adce9908609f99b24eeb5f1",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/live/channel/state.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/application/internal/live/channel/state_test.go",
+        "bytes": 1670,
+        "sha256": "40bcf7d6b1db63d54c22267dab0bc928d5ac712c4c45de9574387209eb7e4fc8",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/application/internal/live/channel/state_test.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/go1.27.1/VERSION",
+        "bytes": 35,
+        "sha256": "25eb74b09036e1ad894fb63b86cb0f0ee53342df8d2e2e860da4ff5079607758",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/go1.27.1/VERSION"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/go1.27.1/src/encoding/json/encode.go",
+        "bytes": 40011,
+        "sha256": "8ff45e82c60c6e29d11fe57ce0c59d79f40ef0d53be28ac36617482a7463b217",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/go1.27.1/src/encoding/json/encode.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/go1.27.1/src/encoding/json/indent.go",
+        "bytes": 5523,
+        "sha256": "9ef9eac29fc4cc9d94bf305976891eb5e78a2644acd4f07ed7a0c186991ac908",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/go1.27.1/src/encoding/json/indent.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/go1.27.1/src/encoding/json/scanner.go",
+        "bytes": 16569,
+        "sha256": "2b16dd215274dfa8e0806b53cca144684d5b9c8a02319cf5ce10120c50e6eef2",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/go1.27.1/src/encoding/json/scanner.go"
+      },
+      {
+        "path": "dependency-evidence/native-report-bytes-r2/oracle/go1.27.1/src/encoding/json/stream.go",
+        "bytes": 13862,
+        "sha256": "065501364e4954cf1c8f1887900248d4c0983593b8c058b2fe7997d9635b793d",
+        "sourceSnapshot": "/workspace/shared/native-report-bytes-review-r2/oracle/go1.27.1/src/encoding/json/stream.go"
+      }
+    ]
+  },
+  "dependencyPrecedence": [
+    "raw-byte R2 baseline",
+    "formal CLI R2-final dependency",
+    "raw-byte R2 candidate",
+    "CLI R3 owned"
+  ]
+}

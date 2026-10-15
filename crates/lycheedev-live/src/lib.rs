@@ -45,12 +45,8 @@ pub fn commands() -> &'static [&'static str] {
         "live resume",
         "live disconnect",
         "live reload",
-        "live probe load",
-        "live run",
-        "live ack",
-        "live finish",
-        "live cancel",
-        "live abandon",
+        "live reload fallback",
+        "live doctor",
     ]
 }
 pub fn capabilities() -> serde_json::Value {

@@ -1360,3 +1360,22 @@ fn go_mailbox_v1_driver_invalid_hex_challenge_keeps_go_consumption_error_order()
         "live.channel_journal_reload_required"
     ));
 }
+
+#[test]
+fn go_mailbox_v1_driver_raw_byte_report_survives_complete_and_readonly_recovery() {
+    let mut d = prepared();
+    d.backend.result = b" { \"s\":\"\xff\", \"x\":1e400, \"x\":-0 } \n".to_vec();
+    let original = d.backend.result.clone();
+    let control = OperationControl::default();
+    d.run(&control).unwrap();
+    let op = d.state.operation.as_ref().unwrap();
+    assert_eq!(op.stage, OperationStage::Complete);
+    assert_eq!(op.result_bytes.0, original);
+    assert_eq!(op.report_checksum, checksum(&original));
+    assert_eq!(d.journal.results[0].result_bytes.0, original);
+    let sends = d.backend.inputs.len();
+    let mut d = reload(d);
+    d.run(&control).unwrap();
+    assert_eq!(d.backend.inputs.len(), sends);
+    assert_eq!(d.state.operation.as_ref().unwrap().result_bytes.0, original);
+}

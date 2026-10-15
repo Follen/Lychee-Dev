@@ -1204,3 +1204,42 @@ fn recorded_addon_directory_matches_fixed_go_and_core_destination() {
 }
 
 mod code_bytes;
+
+#[test]
+fn native_raw_byte_report_survives_service_projection_and_public_json_frames() {
+    use lycheedev_core::public_json::{write_pretty_serializable_line, write_serializable_line};
+    let f = Fixture::new();
+    f.operation(OperationStage::Complete, "raw report");
+    let raw = b" { \"s\":\"\xff\", \"x\":1e400, \"x\":-0 } \n".to_vec();
+    f.edit(|s| {
+        let op = s.operation.as_mut().unwrap();
+        op.result_bytes = ResultBytes(raw.clone());
+        op.report_bytes = raw.len() as u32;
+        op.report_checksum = super::super::checksum(&raw);
+    });
+    let before = fs::read(f.log()).unwrap();
+    for result in [
+        f.service().status(&f.id, &control()),
+        f.service().report(&f.id, "raw report", &control()),
+    ] {
+        assert!(result.error.is_none());
+        let result = result.result.unwrap();
+        assert_eq!(result.report.as_ref().unwrap().0, raw);
+        assert!(serde_json::to_vec(&result).is_err());
+        let mut output = Vec::new();
+        write_serializable_line(&mut output, &result).unwrap();
+        assert!(
+            output
+                .windows(b"\"report\":{\"s\":\"\xff\",\"x\":1e400,\"x\":-0}".len())
+                .any(|b| b == b"\"report\":{\"s\":\"\xff\",\"x\":1e400,\"x\":-0}")
+        );
+        let mut pretty = Vec::new();
+        write_pretty_serializable_line(&mut pretty, &result).unwrap();
+        assert!(pretty.windows(b"\"report\": {\n    \"s\": \"\xff\",\n    \"x\": 1e400,\n    \"x\": -0\n  }".len()).any(|b| b == b"\"report\": {\n    \"s\": \"\xff\",\n    \"x\": 1e400,\n    \"x\": -0\n  }"));
+    }
+    assert_eq!(fs::read(f.log()).unwrap(), before);
+    let invalid = RawReport(b"{\"s\":\"\xff\"} trailing".to_vec());
+    let mut out = b"previous\n".to_vec();
+    assert!(write_serializable_line(&mut out, &invalid).is_err());
+    assert_eq!(out, b"previous\n");
+}

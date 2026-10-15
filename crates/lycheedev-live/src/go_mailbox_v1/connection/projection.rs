@@ -16,9 +16,21 @@ use std::path::Path;
 pub struct RawReport(pub Vec<u8>);
 impl Serialize for RawReport {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let raw: &serde_json::value::RawValue =
-            serde_json::from_slice(&self.0).map_err(serde::ser::Error::custom)?;
-        raw.serialize(serializer)
+        if self.0.len() > super::super::MAX_PAYLOAD {
+            return Err(serde::ser::Error::custom("live.channel_report_length"));
+        }
+        let bytes = lycheedev_core::raw_json::RawJsonBytes::new(&self.0)
+            .map_err(serde::ser::Error::custom)?;
+        // Preserve ordinary serde_json behavior for UTF-8 reports. Native Go
+        // RawMessage also accepts non-UTF-8 string bytes; those require the
+        // typed public writer and fail closed through ordinary serde_json.
+        if let Ok(text) = std::str::from_utf8(bytes.as_bytes()) {
+            let raw: &serde_json::value::RawValue =
+                serde_json::from_str(text).map_err(serde::ser::Error::custom)?;
+            raw.serialize(serializer)
+        } else {
+            bytes.serialize(serializer)
+        }
     }
 }
 #[derive(Debug, Clone, Serialize)]

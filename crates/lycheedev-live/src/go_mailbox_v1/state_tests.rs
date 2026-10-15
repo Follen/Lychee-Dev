@@ -234,3 +234,39 @@ fn go_mailbox_v1_state_cleanup_stages_and_result_digest_are_independent() {
     s.operation.as_mut().unwrap().report_checksum ^= 1;
     assert!(s.validate().is_err());
 }
+
+#[test]
+fn go_mailbox_v1_state_raw_byte_reports_preserve_cap_checksum_and_base64() {
+    let mut cap = vec![b'x'; MAX_PAYLOAD];
+    cap[0] = b'"';
+    cap[1] = 0xff;
+    cap[MAX_PAYLOAD - 1] = b'"';
+    for bytes in [b"{\"s\":\"\xff\",\"s\":1e400}".to_vec(), cap] {
+        let mut s = state();
+        let mut op = operation();
+        op.stage = OperationStage::Complete;
+        op.prepared_nonce = "5".repeat(32);
+        op.challenge = "6".repeat(32);
+        op.report_bytes = bytes.len() as u32;
+        op.report_checksum = checksum(&bytes);
+        op.result_bytes = ResultBytes(bytes.clone());
+        op.cleanup_method = CleanupMethod::Released;
+        s.operation = Some(op);
+        s.validate().unwrap();
+        let copy: State = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        copy.validate().unwrap();
+        assert_eq!(copy.operation.unwrap().result_bytes.0, bytes);
+        s.operation.as_mut().unwrap().report_checksum ^= 1;
+        assert!(s.validate().is_err());
+    }
+    let mut s = state();
+    let mut op = operation();
+    op.stage = OperationStage::Complete;
+    op.prepared_nonce = "5".repeat(32);
+    op.challenge = "6".repeat(32);
+    op.result_bytes = ResultBytes([b"\"".as_slice(), &vec![b'x'; MAX_PAYLOAD - 1], b"\""].concat());
+    op.report_bytes = op.result_bytes.0.len() as u32;
+    op.report_checksum = checksum(&op.result_bytes.0);
+    s.operation = Some(op);
+    assert!(s.validate().is_err());
+}

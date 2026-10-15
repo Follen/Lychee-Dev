@@ -391,3 +391,43 @@ fn go_mailbox_v1_blocked_wrappers_follow_go_unwrap_and_nested_join_timeout_table
         }
     }
 }
+
+#[test]
+fn go_mailbox_v1_observations_raw_byte_json_uses_go_scanner_without_utf8_gate() {
+    for (payload, valid) in [
+        (
+            b" { \"s\":\"\xff\", \"x\":1E+400, \"x\":-0 } ".to_vec(),
+            true,
+        ),
+        (b"{\"s\":\"\x1f\"}".to_vec(), false),
+        (b"{\"s\":\"\\\xff\"}".to_vec(), false),
+        (b"{\"s\":\"\xff\"} trailing".to_vec(), false),
+    ] {
+        let mut r = receipt();
+        r.report_bytes = payload.len() as u32;
+        r.report_checksum = checksum(&payload);
+        let mut reader = fake(vec![
+            vec![record(Kind::Receipt, 8, serde_json::to_vec(&r).unwrap())],
+            vec![record(Kind::Body, 3, payload.clone())],
+        ]);
+        let observed = observe_records(
+            &OperationControl::default(),
+            &mut reader,
+            &query(ObservationKind::Result),
+        );
+        if valid {
+            assert_eq!(
+                observed.unwrap(),
+                Observation::Reported {
+                    receipt: r,
+                    payload
+                }
+            );
+        } else {
+            assert_eq!(
+                observed,
+                Err(ContractError("live.channel_report_json").into())
+            );
+        }
+    }
+}

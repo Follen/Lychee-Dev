@@ -731,6 +731,25 @@
     ]
   },
   {
+    "path": "live doctor",
+    "summary": "Diagnose one PID or retained CON without input; --fix installs a clean release when needed and resumes or activates that same target under Lycheedev mailbox protocol v1; missing runtime requires one manual reload",
+    "mutates": true,
+    "arguments": [],
+    "flags": [
+      "--format text|json|jsonl",
+      "--installation <client>",
+      "--pid <pid>",
+      "--session <CON-id>",
+      "--project <directory>",
+      "--fix",
+      "--release <distribution-root>",
+      "--output <upgrade-archive>",
+      "--request <idempotency-key>",
+      "--wait-seconds <1-600> (default 30)",
+      "--no-cache"
+    ]
+  },
+  {
     "path": "config show",
     "summary": "Read the workspace user preference and resource budget document; a missing document reports the documented defaults",
     "mutates": false,

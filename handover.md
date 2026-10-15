@@ -708,6 +708,21 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - run `38661264087` / product `116185104371` 仍在运行。all-target check、sealed CLI build/smoke实际成功；early artifact `11939886461` ZIP SHA256 `edc6efcaa1e562e3bd190cba1688adf39c4da1f55a52d7e6d9fee8a71afd8b1e` 已校验大小、路径和全部index文件hash。构建 source digest `71d0cb27744732d11d85e9e2060e1738d32f92b9c1f4f3e978a9c54e5dda04fa`，check owner `ecde983b-c525-440f-a73c-0e1d292a43ed`、build owner `819f7f56-ab79-4f74-9d93-dc19097295ff` exit0。
 - 固定Go Lua解释器build和profiles执行step首次SUCCESS；最终artifact的实际匹配数量/完整日志尚待核验，暂不宣称214项全部通过。真实describe差分仍失败，后续独立组继续执行。此树不包含本节新Activation/Repair候选，也不包含a353的Execute字节候选。
 
+### 正式默认 Live CLI 与 native 原始报告集成
+
+- CLI R3 freeze `6d7fc1eb25703c2d29fb91bd90c5da6a2261aa81171b4dc0cbefe7909f6cd238`，原审复核关闭原6项及R2新P1。默认正式CON/activation/doctor/reload与真实repair validator走新service；probe/instances复用原安全实现，旧非CON OP/BTP仍是真实未齐项，不宣称全部Live完成。
+- 参数逐flag错误顺序、PID拒绝+前缀、文件读/close/control原cause、doctor query stage及空nextStep省略对齐。typed renderer不经Value，错误伴结果/JSONL仍保留。validator只做认证release/TOC/XML闭包/固定luac `-p`，不运行addon。
+- entered-runner所有Err均保留compiler子目录和validator父目录；owner.json发布前就关闭自动删除能力，atomic临时保留叶及未知lock close在有界typed聚合中传播，避免父Drop抹掉尚未证明回收的资源。8根admission容量记录每根路径/保留原因，不按PID或年龄清理。成功runner worker-join证明和Closure I/O/control仍由后续窄修复处理。
+- RawReport R2 freeze `1d5c2c61ac1b2a8f38e004afb5f2c8464a4ab24f5f73bf04b3da0872e9b70d28`，独审核229项。Go兼容迭代字节JSON grammar、四native gates与显式scoped byte formatter保留非法UTF8 string字节/duplicate keys/checksum，普通serde_json遇非法UTF8仍失败；无unsafe/TLS/global缓存。真实archive-only历史fixture强化，不把活跃checkpoint误称archive读取。
+- 原CLI R3依赖副本仍缺已审module声明，未篡改该历史freeze。`formal-cli-integration.json` 新组成从完整固定b83a4d3 crate树＋精确CLI R3/Raw R2 owners建立436项source快照，包含实际inspect_controlled及七声明；4 crate＋CLI递归rustfmt解析成功。全树format check发现既有evidence/bounded格式差异，保留日志，不以此改写无关源码；编译及新CLI实际任务仍 **NOT_RUN**。
+- 新55 CLI/ordered-validator＋15 raw回归声明不等于已运行。新增三个独立unit组及固定luac构建后显式ignored实测组；本次普通push不触发长原生，完整默认入口/Source生命周期/内存观测可用后集中带 `[rust-native]` 验收。
+- 本地快速验证实际发现4个旧测试/hash锁不适配，修为完整84命令、保留7旧路径拒绝，contract生产advertised/arity字节未改；固定Go oracle无改。重跑Node **51/51通过**，保留首次失败及第二次日志。新Linux纯模块工具初次实际执行原始production raw_json **4/4通过**（23.57s symbols编译），owner `9227754a-3a35-456e-8a8c-14acead7be80` 的6份sealed日志已核hash；本地runner独审尚在进行，不冒称全workspace/Windows通过。
+
+### Source 内存观测与 Emmy 补丁边界
+
+- 已保存完整Retail报告均 `performance.peakRSS=not_measured`，无可信实际占用数字；4036文档/32MB源码与runner主机16GB不是运行内存。下一有效原生批添加按phase同步的Job成员WorkingSet/PrivateBytes采样，区分冷索引/暖查询/native语义/常驻会话、controller/CLI/worker及未分类成员；报告采样峰值/稳态/缺口，不叠加各进程各自峰值，不把失败run当完成数据。
+- 独立只读Emmy审计确认当前29路径补丁未最小化：生产新增2248行，另1857行为35测试。优先可移回自身adapter的领域DTO/类型投影/provenance/references报告与独立VFS共享输入扩展已列下一架构任务。递归跨文件上下文、session/epoch对象身份、unknown/absent/返回基数及真实checker完成观测仍需某种内核接缝，外层过滤不能等价。两个默认不启用checker仍可能被文件级diagnostic opt-in触发，不视为已证死代码；先映射消费者/合同并保35回归，再小批缩减，当前不声称已删或性能已提升。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -492,3 +492,162 @@ fn arbitrary_precision_marker_cannot_inject_non_number_json() {
         assert_eq!(render(&NumberToken(token), false), format!("{token}\n"));
     }
 }
+
+struct OrdinaryBytes<'a>(&'a [u8]);
+impl Serialize for OrdinaryBytes<'_> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(self.0)
+    }
+}
+fn byte_render<T: ?Sized + Serialize>(value: &T, pretty: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    if pretty {
+        write_pretty_serializable_line(&mut out, value).unwrap();
+    } else {
+        write_serializable_line(&mut out, value).unwrap();
+    }
+    out
+}
+#[test]
+fn explicit_raw_bytes_keep_invalid_utf8_and_all_raw_lexemes_in_nested_frames() {
+    use crate::raw_json::RawJsonBytes;
+    let bytes = b" { \"s\": \"\xff\xc0\x80\" , \"x\": 1E+400, \"x\": -0, \"u\": \"\\uD800\", \"html\": \"<>&\xe2\x80\xa8\" } ";
+    let raw = RawJsonBytes::new(bytes).unwrap();
+    let value = Envelope {
+        schema: "s",
+        result: (OrdinaryBytes(&[0, 255]), Some(raw), OrdinaryBytes(&[2, 3])),
+    };
+    let compact = byte_render(&value, false);
+    assert_eq!(compact, b"{\"schema\":\"s\",\"result\":[[0,255],{\"s\":\"\xff\xc0\x80\",\"x\":1E+400,\"x\":-0,\"u\":\"\\uD800\",\"html\":\"<>&\xe2\x80\xa8\"},[2,3]]}\n");
+    let pretty = byte_render(&value, true);
+    assert_eq!(pretty, b"{\n  \"schema\": \"s\",\n  \"result\": [\n    [\n      0,\n      255\n    ],\n    {\n      \"s\": \"\xff\xc0\x80\",\n      \"x\": 1E+400,\n      \"x\": -0,\n      \"u\": \"\\uD800\",\n      \"html\": \"<>&\xe2\x80\xa8\"\n    },\n    [\n      2,\n      3\n    ]\n  ]\n}\n");
+}
+struct RawMarker<T>(T);
+impl<T: Serialize> Serialize for RawMarker<T> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_newtype_struct(crate::raw_json::MARKER, &self.0)
+    }
+}
+#[test]
+fn raw_marker_requires_exact_bytes_and_valid_grammar_before_output() {
+    rejected(&RawMarker("{}"));
+    rejected(&RawMarker(vec![123u8, 125]));
+    rejected(&RawMarker(Some(OrdinaryBytes(b"{}"))));
+    rejected(&RawMarker(RawMarker(OrdinaryBytes(b"{}"))));
+    rejected(&RawMarker(OrdinaryBytes(b"{\"s\":\"\xff\"} trailing")));
+    let raw = crate::raw_json::RawJsonBytes::new(b"{\"s\":\"\xff\"}").unwrap();
+    rejected(&(raw, f64::INFINITY));
+    rejected(&(f32::NAN, raw));
+    assert_eq!(byte_render(&OrdinaryBytes(b"{}"), false), b"[123,125]\n");
+}
+#[test]
+fn raw_byte_scope_resets_on_serializer_error_and_unwind() {
+    struct Fails(bool);
+    impl Serialize for Fails {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> std::result::Result<S::Ok, S::Error> {
+            if self.0 {
+                panic!("fixture panic inside private marker");
+            }
+            Err(S::Error::custom("fixture marker error"))
+        }
+    }
+    let state = Cell::new(false);
+    let value = RawMarker(Fails(false));
+    assert!(
+        checked::Value(&value, &state)
+            .serialize(&mut serde_json::Serializer::new(Vec::new()))
+            .is_err()
+    );
+    assert!(!state.get());
+    let value = RawMarker(Fails(true));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ =
+            checked::Value(&value, &state).serialize(&mut serde_json::Serializer::new(Vec::new()));
+    }));
+    assert!(result.is_err());
+    assert!(!state.get());
+}
+#[test]
+fn raw_bytes_depth_matches_go_compact_and_pretty_context_limits() {
+    let bytes = [
+        vec![b'['; GO_MAX_DEPTH],
+        b"\"\xff\"".to_vec(),
+        vec![b']'; GO_MAX_DEPTH],
+    ]
+    .concat();
+    let raw = crate::raw_json::RawJsonBytes::new(&bytes).unwrap();
+    write_serializable_line(&mut io::sink(), &Some(raw)).unwrap();
+    let nested = Envelope {
+        schema: "s",
+        result: raw,
+    };
+    write_serializable_line(&mut io::sink(), &nested).unwrap();
+    let mut out = Vec::new();
+    assert!(write_pretty_serializable_line(&mut out, &nested).is_err());
+    assert!(out.is_empty());
+}
+#[test]
+fn raw_byte_output_io_failure_retains_external_error_and_next_frame_is_normal() {
+    struct Short {
+        remaining: usize,
+        bytes: Vec<u8>,
+    }
+    impl Write for Short {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.remaining == 0 {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "fixture"));
+            }
+            let n = self.remaining.min(bytes.len());
+            self.bytes.extend_from_slice(&bytes[..n]);
+            self.remaining -= n;
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let raw = crate::raw_json::RawJsonBytes::new(b"{\"s\":\"\xff\"}").unwrap();
+    for pretty in [false, true] {
+        let mut out = Short {
+            remaining: 7,
+            bytes: Vec::new(),
+        };
+        let error = if pretty {
+            write_pretty_serializable_line(&mut out, &raw)
+        } else {
+            write_serializable_line(&mut out, &raw)
+        }
+        .unwrap_err();
+        assert_eq!((error.code.as_str(), error.exit_code), ("external.io", 5));
+        assert_eq!(out.bytes.len(), 7);
+    }
+    assert_eq!(byte_render(&OrdinaryBytes(b"{}"), false), b"[123,125]\n");
+}
+
+#[test]
+fn private_marker_spelling_in_normal_values_never_enables_raw_bytes() {
+    let value = serde_json::Value::Object(serde_json::Map::from_iter([
+        (
+            crate::raw_json::MARKER.to_owned(),
+            serde_json::json!([123, 34, 115, 34, 58, 255, 125]),
+        ),
+        ("ordinary".to_owned(), serde_json::json!("{not JSON}")),
+    ]));
+    let mut expected = serde_json::to_vec(&value).unwrap();
+    expected.push(b'\n');
+    assert_eq!(byte_render(&value, false), expected);
+    let mut old_writer = Vec::new();
+    crate::public_json::write_line(
+        &mut old_writer,
+        &value,
+        &crate::public_json::NumberLayout::Verbatim,
+    )
+    .unwrap();
+    assert_eq!(old_writer, expected);
+}

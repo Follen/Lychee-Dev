@@ -1,0 +1,421 @@
+{
+  "schema": "lycheedev.formal-live-cli-test-map.v1",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "execution": "NOT_RUN",
+  "goFiles": [
+    {
+      "path": "internal/command/live_channel_windows.go",
+      "sha256": "8c7123aa257b6abc311039a8dcce594299b0e799b9d0ab1e5486213fe72302ef",
+      "bytes": 5108,
+      "tests": []
+    },
+    {
+      "path": "internal/command/live_channel_error.go",
+      "sha256": "3dc09d489d8a06cf0f2326f845e08350cfe99aaacc7348c511262dcc059f46e7",
+      "bytes": 2249,
+      "tests": []
+    },
+    {
+      "path": "internal/command/live_channel_error_test.go",
+      "sha256": "18274ec74ba68602707cd62e187a966d9ce78d21b676a16099d9add8e0a231ba",
+      "bytes": 1776,
+      "tests": [
+        "TestChannelTraceFlushFailureHasPriority",
+        "TestChannelResultWithoutFlushFailureKeepsClassification"
+      ]
+    },
+    {
+      "path": "internal/command/live_doctor_windows.go",
+      "sha256": "b6e329f19b5cc601d79f26e373b16c5158fb6d43e4bd125e9bc6b5e5aeb3a972",
+      "bytes": 6581,
+      "tests": []
+    },
+    {
+      "path": "internal/command/live_doctor_windows_test.go",
+      "sha256": "81447e572cf88b30224cc3f5f85bea0de818b39bc588b682abd4cbea28df58d5",
+      "bytes": 15317,
+      "tests": [
+        "TestLiveDoctorRejectsMutatingFlagsWithoutFix",
+        "TestDoctorUsesLiveChecksOnlyForAnExplicitTarget",
+        "TestLiveDoctorUpgradeCreatesDefaultArchiveParent",
+        "TestLiveDoctorUpgradePreservesExplicitArchive",
+        "TestLiveDoctorUpgradeDefaultArchiveAcrossVolumes"
+      ]
+    },
+    {
+      "path": "internal/command/live_probe.go",
+      "sha256": "3dfea7b41f09c3f67e3d8baf22a46186f65cde51c77cf2bcb5913404311cacd8",
+      "bytes": 1107,
+      "tests": []
+    },
+    {
+      "path": "internal/command/entry.go",
+      "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b",
+      "bytes": 59149,
+      "tests": []
+    },
+    {
+      "path": "internal/command/entry_test.go",
+      "sha256": "5052cf493a6564184c5821f655b68082ff4e933614f31673affd89251ddee54b",
+      "bytes": 6012,
+      "tests": [
+        "TestMachineErrors",
+        "TestWorkspaceSelectionAndLegacyIsolation",
+        "TestReadOnlyCommandsDoNotCreateHome",
+        "TestSourceFlagsAreScopedAndRequired",
+        "TestJSONLFraming",
+        "TestBrokenOutputDoesNotSucceed"
+      ]
+    },
+    {
+      "path": "internal/command/execute_contract_test.go",
+      "sha256": "a4ee424606f597a3a91f93a1a2b57683a091c99effe029ada3cf67a94c15c9af",
+      "bytes": 3331,
+      "tests": [
+        "TestPassiveDiscoveryParsesWithoutDowngradingToActive",
+        "TestNoCacheCompatibilityFlagPreservesNativeOptions",
+        "TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess"
+      ]
+    },
+    {
+      "path": "internal/live/channel/request.go",
+      "sha256": "63dab567c9edeb63c0339dcdfe29cb91a9caafa3bff10cc2863e700dccaabe4f",
+      "bytes": 999,
+      "tests": []
+    },
+    {
+      "path": "internal/live/channel/project_windows_test.go",
+      "sha256": "7e2b4b767a1502ddab3cdf208da3dd22f2850a9b3a8b1f2cb9f4be11f5edc88a",
+      "bytes": 9844,
+      "tests": [
+        "TestRecoveryReloadCompletionSurvivesPendingDisconnect",
+        "TestClosedProjectRetiresClaimAfterCrashWithoutGame",
+        "TestPendingCloseDoesNotInheritBoundCompletion",
+        "TestClosingUnknownOperationDoesNotInventCompletion",
+        "TestCompletedRequestRetryNeverTouchesGameOrReplacesLaterOperation",
+        "TestCopiedProjectCannotClaimOriginalConnection",
+        "TestHistoricalReloadRetryDoesNotRepeatAfterLaterReload",
+        "TestActivationStatusHasNoInventedRuntimeAndRejectsInvalidPhase",
+        "TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory",
+        "TestRepairCloseRetiresOriginalClosedConnection"
+      ]
+    },
+    {
+      "path": "internal/delivery/addon_release.go",
+      "sha256": "a3d0605b28d24a2a8347fe11c69e71c7be76430616caa4ee83afd025ea36bd73",
+      "bytes": 5317,
+      "tests": []
+    },
+    {
+      "path": "internal/delivery/addon_release_test.go",
+      "sha256": "633c16bd7eb08eaec88086f0f232c8ffcce4de9fda71678b566883c399c4bb8f",
+      "bytes": 4084,
+      "tests": [
+        "TestAddonReleaseManifestContracts"
+      ]
+    },
+    {
+      "path": "internal/selection/baselines.go",
+      "sha256": "993a540456f0641c5330652c341d16c3a5a5e2ab18f17500c812885f83d327b8",
+      "bytes": 2959,
+      "tests": []
+    }
+  ],
+  "rustTests": [
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "tests": [
+        "main_routes_con_aliases_to_formal_service_and_never_old_home",
+        "route_and_argument_priority_matches_frozen_go",
+        "parser_live_typed_options_keep_argv_order_and_exact_errors",
+        "connect_and_activation_preserve_explicit_target",
+        "bugs_uses_exact_fixed_go_source_budget_and_observation_policy",
+        "execute_preserves_file_bytes_and_does_not_invent_a_request",
+        "execute_reuses_exact_stored_probe_revision_without_reput",
+        "typed_verified_report_survives_pending_error_without_number_or_duplicate_loss",
+        "success_jsonl_ends_once_and_business_false_does_not_fail_transport",
+        "trace_flush_precedes_cancel_and_pending_with_original_result",
+        "ordered_invocation_cancellation_survives_wait_child",
+        "cancelled_main_never_opens_service_or_restarts_budget",
+        "doctor_retains_typed_connection_and_uses_protocol_context",
+        "doctor_fix_preserves_result_on_error_and_does_not_reinspect_after_failure",
+        "doctor_validation_precedes_project_io_and_top_level_unselected_is_quiet",
+        "finish_flush_failure_is_not_reported_as_success",
+        "default_cli_advertises_only_the_connected_formal_routes",
+        "actual_default_dispatch_reads_completed_history_before_any_native_open",
+        "actual_default_dispatch_rejects_history_conflicts_without_native_or_new_journal",
+        "project_open_error_precedes_route_specific_required_arguments",
+        "wait_child_cannot_extend_original_deadline_or_lose_ancestor_cancel",
+        "deadline_without_pending_wrapper_uses_go_live_deadline_classification",
+        "no_cache_compatibility_does_not_change_formal_resume_action",
+        "file_admission_failures_keep_empty_context_and_do_not_invoke_backend",
+        "live_parser_mixed_errors_follow_second_pass_value_order",
+        "pid_uses_go_parse_uint_lexical_boundary",
+        "probe_read_mid_operation_cancellation_remains_typed_after_checked_close",
+        "probe_checked_close_and_control_causes_survive_public_error_projection",
+        "main_file_preparation_does_not_turn_cancellation_into_arguments_or_invoke_service",
+        "doctor_fix_without_target_projects_check_failed_at_query_stage",
+        "top_level_doctor_omits_empty_next_step_and_retains_nonempty_guidance",
+        "probe_read_close_and_control_failure_preserves_original_typed_causes"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_validation.rs",
+      "tests": [
+        "repair_manifest_accepts_exact_fixed_go_identity_and_all_interfaces",
+        "repair_manifest_rejects_duplicate_headers_and_missing_or_extra_interfaces",
+        "repair_manifest_rejects_reordered_repeated_unlisted_or_escaping_loads",
+        "repair_compiler_identity_is_pinned_not_release_self_attested",
+        "repair_cleanup_error_cannot_hide_original_validation_failure",
+        "unresolved_compiler_retention_crosses_checked_close_to_parent_owner",
+        "retained_and_active_validation_owners_bound_future_admission",
+        "parent_drop_after_unproven_compiler_entry_retains_ownership",
+        "unknown_and_retained_validation_roots_are_never_reclaimed_for_capacity",
+        "owner_publication_retained_temporary_preserves_parent_and_original_reason",
+        "unknown_owner_publication_error_or_unwind_never_drops_parent",
+        "validator_finish_retains_atomic_leaf_in_every_checked_close_branch",
+        "retained_owner_publication_faults_exhaust_bounded_admission_without_reclaim",
+        "retained_cause_walk_is_bounded_and_fails_closed"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac/ordered_tests.rs",
+      "tests": [
+        "ordered_cancel_before_io_retains_caller_lineage",
+        "ordered_expired_short_parent_wins_over_later_cancel",
+        "ordered_empty_compile_checks_closes_and_keeps_parent_ordered",
+        "ordered_identity_failure_releases_already_acquired_runtime",
+        "ordered_runner_unknown_lifetime_retains_owned_scratch_and_original_error",
+        "ordered_runner_partial_pipe_or_reap_proof_never_allows_cleanup",
+        "ordered_no_runner_can_cleanup_but_error_metadata_is_not_terminal_proof",
+        "ordered_retention_marker_survives_checked_close_cause_tree"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/luac_ordered_real.rs",
+      "tests": [
+        "actual_ordered_luac_preserves_parent_and_reaps_compile_children"
+      ],
+      "status": "NOT_RUN"
+    }
+  ],
+  "coverage": [
+    {
+      "go": [
+        "internal/command/live_channel_windows.go",
+        "TestNoCacheCompatibilityFlagPreservesNativeOptions",
+        "TestExecuteContractRejectsIncompleteRequestsBeforeWorkspaceAccess"
+      ],
+      "rust": [
+        "main_routes_con_aliases_to_formal_service_and_never_old_home",
+        "route_and_argument_priority_matches_frozen_go",
+        "parser_live_typed_options_keep_argv_order_and_exact_errors",
+        "no_cache_compatibility_does_not_change_formal_resume_action",
+        "bugs_uses_exact_fixed_go_source_budget_and_observation_policy",
+        "execute_preserves_file_bytes_and_does_not_invent_a_request",
+        "execute_reuses_exact_stored_probe_revision_without_reput",
+        "file_admission_failures_keep_empty_context_and_do_not_invoke_backend"
+      ]
+    },
+    {
+      "go": [
+        "TestCompletedRequestRetryNeverTouchesGameOrReplacesLaterOperation",
+        "TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory"
+      ],
+      "rust": [
+        "actual_default_dispatch_reads_completed_history_before_any_native_open",
+        "actual_default_dispatch_rejects_history_conflicts_without_native_or_new_journal"
+      ],
+      "scope": "Real production dispatch and service on owned synthetic journal; no native open, no game evidence"
+    },
+    {
+      "go": [
+        "TestChannelTraceFlushFailureHasPriority",
+        "TestChannelResultWithoutFlushFailureKeepsClassification",
+        "TestJSONLFraming",
+        "TestBrokenOutputDoesNotSucceed"
+      ],
+      "rust": [
+        "typed_verified_report_survives_pending_error_without_number_or_duplicate_loss",
+        "success_jsonl_ends_once_and_business_false_does_not_fail_transport",
+        "trace_flush_precedes_cancel_and_pending_with_original_result",
+        "deadline_without_pending_wrapper_uses_go_live_deadline_classification",
+        "finish_flush_failure_is_not_reported_as_success"
+      ]
+    },
+    {
+      "go": [
+        "TestLiveDoctorRejectsMutatingFlagsWithoutFix",
+        "TestDoctorUsesLiveChecksOnlyForAnExplicitTarget",
+        "internal/command/live_doctor_windows.go"
+      ],
+      "rust": [
+        "doctor_retains_typed_connection_and_uses_protocol_context",
+        "doctor_fix_preserves_result_on_error_and_does_not_reinspect_after_failure",
+        "doctor_validation_precedes_project_io_and_top_level_unselected_is_quiet"
+      ],
+      "scope": "Public composition; production mutation/close correctness additionally belongs to separate activation and Delivery fixtures"
+    },
+    {
+      "go": [
+        "TestAddonReleaseManifestContracts",
+        "internal/delivery/addon_release.go"
+      ],
+      "rust": [
+        "repair_manifest_accepts_exact_fixed_go_identity_and_all_interfaces",
+        "repair_manifest_rejects_duplicate_headers_and_missing_or_extra_interfaces",
+        "repair_manifest_rejects_reordered_repeated_unlisted_or_escaping_loads",
+        "repair_compiler_identity_is_pinned_not_release_self_attested",
+        "repair_cleanup_error_cannot_hide_original_validation_failure",
+        "ordered_cancel_before_io_retains_caller_lineage",
+        "ordered_expired_short_parent_wins_over_later_cancel",
+        "ordered_empty_compile_checks_closes_and_keeps_parent_ordered",
+        "ordered_identity_failure_releases_already_acquired_runtime",
+        "actual_ordered_luac_preserves_parent_and_reaps_compile_children"
+      ],
+      "scope": "TOC/Lua entry and cleanup/control properties; full real compiler fixture requires explicit controlled Windows CI"
+    },
+    {
+      "go": [
+        "internal/command/entry.go",
+        "TestMachineErrors"
+      ],
+      "rust": [
+        "live_parser_mixed_errors_follow_second_pass_value_order",
+        "pid_uses_go_parse_uint_lexical_boundary"
+      ],
+      "scope": "R2 P2: globally known flags precede second-pass route/repeat/value validation in argv order; signed PID rejected, signed wait remains accepted."
+    },
+    {
+      "go": [
+        "internal/command/live_probe.go",
+        "TestMachineErrors"
+      ],
+      "rust": [
+        "probe_read_mid_operation_cancellation_remains_typed_after_checked_close",
+        "probe_checked_close_and_control_causes_survive_public_error_projection",
+        "probe_read_close_and_control_failure_preserves_original_typed_causes",
+        "main_file_preparation_does_not_turn_cancellation_into_arguments_or_invoke_service"
+      ],
+      "scope": "R2 P2: actual fixture handles consumed with original control; injectable read/close failures remain explicitly modeled and their typed cause trees survive real public rendering."
+    },
+    {
+      "go": [
+        "internal/command/live_doctor_windows.go",
+        "TestDoctorUsesLiveChecksOnlyForAnExplicitTarget"
+      ],
+      "rust": [
+        "doctor_fix_without_target_projects_check_failed_at_query_stage",
+        "top_level_doctor_omits_empty_next_step_and_retains_nonempty_guidance"
+      ],
+      "scope": "R2 P2: doctor query-stage projection and omission of empty nextStep."
+    },
+    {
+      "go": [
+        "internal/delivery/addon_release.go"
+      ],
+      "rust": [
+        "ordered_runner_unknown_lifetime_retains_owned_scratch_and_original_error",
+        "ordered_runner_partial_pipe_or_reap_proof_never_allows_cleanup",
+        "ordered_no_runner_can_cleanup_but_error_metadata_is_not_terminal_proof",
+        "ordered_retention_marker_survives_checked_close_cause_tree",
+        "unresolved_compiler_retention_crosses_checked_close_to_parent_owner",
+        "retained_and_active_validation_owners_bound_future_admission",
+        "parent_drop_after_unproven_compiler_entry_retains_ownership",
+        "unknown_and_retained_validation_roots_are_never_reclaimed_for_capacity"
+      ],
+      "scope": "R2 P1 ownership requirement beyond Go read/compile intent: injected runner outcomes never execute a process; every entered-runner Err retains child and parent, including all-true legacy flags. Admission max8 includes unknown owners; tests clean only their own no-process fixtures."
+    },
+    {
+      "go": [
+        "internal/delivery/addon_release.go"
+      ],
+      "rust": [
+        "owner_publication_retained_temporary_preserves_parent_and_original_reason",
+        "unknown_owner_publication_error_or_unwind_never_drops_parent",
+        "validator_finish_retains_atomic_leaf_in_every_checked_close_branch",
+        "retained_owner_publication_faults_exhaust_bounded_admission_without_reclaim",
+        "retained_cause_walk_is_bounded_and_fails_closed"
+      ],
+      "scope": "R3 P1 resource ownership: parent deletion disarmed before owner publication; original typed atomic retained path/reason preserved through every checked-close branch; modeled unknown publication/unwind and eight-fault capacity bound. Actual fixture I/O/admission, no unsafe native fault injection; NOT_RUN."
+    }
+  ],
+  "unresolved": [
+    {
+      "path": "crates/lycheedev-source/src/closure.rs",
+      "function": "Walker::load",
+      "lines": "267-275",
+      "issue": "File -> Read::take read has Drop-only success/error close."
+    },
+    {
+      "path": "crates/lycheedev-source/src/closure.rs",
+      "function": "Walker::load",
+      "lines": "302-303",
+      "issue": "evidence::publish_blob lacks original operation control."
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence.rs",
+      "function": "publish_blob",
+      "lines": "91-94",
+      "issue": "workspace::open and bounded::publish_internal(..., None) do not receive caller control."
+    },
+    {
+      "path": "crates/lycheedev-source/src/process.rs",
+      "function": "run_inner / terminate_and_reap",
+      "issue": "Unchanged runner marks Event::Exited(Err) as reaped and sends pipe completion events without joining worker handles. Every entered-runner Err retains scratch irrespective of flags in R2. Success path remains existing behavior and still needs strict joined-worker terminal proof in a later Source batch."
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live.rs",
+      "function": "route_admission",
+      "issue": "Historical OP/BTP lookup/resume/cancel/abandon are required Go contracts and remain explicitly unported, not waived."
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json",
+      "function": "typed serialization dependency",
+      "issue": "Complete immutable native-report-bytes R2 candidate and all 229 listed evidence/dependency entries are included. No moving raw_json/projection dependency. Build/runtime acceptance and full CLI raw-byte differential remain NOT_RUN."
+    }
+  ],
+  "notRun": [
+    "all Rust unit/integration tests",
+    "controlled Windows build/type checking",
+    "ignored real Lua 5.1 process fixture",
+    "full fixed-Go public differential",
+    "native process/input acceptance",
+    "game acceptance"
+  ],
+  "revision": 3,
+  "previousFreezeSHA256": "3a0b33d3dd6a376413221f75e57b5a14af85ccf5253894a049962949a0478ccf",
+  "authoredTests": 55,
+  "retainedOwnership": {
+    "base": "OS temp_dir()/lycheedev-addon-validator-v1",
+    "owner": "formal-addon-validator",
+    "maximumActiveRetainedUnknownRoots": 8,
+    "maximumScannedEntries": 32,
+    "ownerRecordMaxBytes": 65536,
+    "retentionRecordMaxBytes": 1048576,
+    "sourceClosureMaxBytes": 67108864,
+    "sourceClosureMaxDocuments": 10000,
+    "capacityDiagnostics": "blockedBy lists each observed root and terminal_ownership_not_proven; no PID/age inference; scanStoppedAtCapacity is explicit",
+    "marker": "lycheedev.luac-retained-scratch.v1",
+    "reclamation": "No automatic reclamation or PID/age inference; missing terminal proof blocks cleanup and exhausted capacity blocks new admissions. Delivery separately retains its snapshot on validator error.",
+    "parentMarker": "lycheedev.addon-validator-retained-scratch.v1",
+    "causeWalkMaximumDepth": 32,
+    "causeWalkMaximumNodes": 128,
+    "atomicRetention": "lycheedev.atomic-temporary-retained.v1 survives typed primary/cleanup/control joins; owner publication failure or unwind and uncertain admission-lock close preserve parent."
+  },
+  "fixedDependencySnapshots": {
+    "previousCli": {
+      "snapshot": "/tmp/lycheedev-formal-cli-review-r2-final",
+      "freezeSHA256": "3a0b33d3dd6a376413221f75e57b5a14af85ccf5253894a049962949a0478ccf"
+    },
+    "rawByte": {
+      "snapshot": "/workspace/shared/native-report-bytes-review-r2",
+      "freezeSHA256": "1d5c2c61ac1b2a8f38e004afb5f2c8464a4ab24f5f73bf04b3da0872e9b70d28",
+      "status": "independently reviewed candidate, not runtime acceptance"
+    },
+    "processRunner": "Exact R2-final snapshot, never current in-progress worktree"
+  }
+}

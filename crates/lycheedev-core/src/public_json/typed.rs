@@ -1,16 +1,20 @@
-//! Typed presentation preserves RawValue until its final public encoding.
+//! Typed presentation preserves RawValue and explicit RawJsonBytes until final encoding.
 use super::PublicFormatter;
 use crate::{Result, ToolkitError};
 use serde::Serialize;
 use serde_json::ser::{CompactFormatter, Formatter, PrettyFormatter};
-use std::io::{self, Write};
+use std::{
+    cell::Cell,
+    io::{self, Write},
+};
 
 mod checked;
 #[cfg(test)]
 mod tests;
 
-/// Write one compact public JSON record without a Value conversion or frame
-/// buffer. RawValue fields preserve duplicate keys, number/string lexemes and
+/// Write one compact public JSON record, including explicit RawJsonBytes,
+/// without a Value conversion or frame buffer. RawValue fields preserve
+/// duplicate keys, number/string lexemes and
 /// literal HTML/JavaScript separators, with insignificant whitespace removed,
 /// matching the fixed Go encoder's SetEscapeHTML(false) RawMessage handling.
 /// Typed strings retain the ordinary public escaping and typed finite floats
@@ -49,11 +53,13 @@ fn encode<T: ?Sized + Serialize, F: Formatter + Clone>(
     structure: F,
     pretty: bool,
 ) -> Result<()> {
-    let value = checked::Value(value);
-    value.serialize(&mut serde_json::Serializer::with_formatter(
-        io::sink(),
-        TypedFormatter::new(structure.clone(), pretty),
-    ))?;
+    let preflight_raw = Cell::new(false);
+    checked::Value(value, &preflight_raw).serialize(
+        &mut serde_json::Serializer::with_formatter(
+            io::sink(),
+            TypedFormatter::new(structure.clone(), pretty, &preflight_raw),
+        ),
+    )?;
     // Formatter errors also use serde_json's IO error carrier. Only errors
     // originating in the real writer are output IO failures, not malformed
     // raw JSON emitted by an unstable custom Serialize implementation.
@@ -61,10 +67,12 @@ fn encode<T: ?Sized + Serialize, F: Formatter + Clone>(
         inner: out,
         error: None,
     };
-    let result = value.serialize(&mut serde_json::Serializer::with_formatter(
-        &mut output,
-        TypedFormatter::new(structure, pretty),
-    ));
+    let raw = Cell::new(false);
+    let result =
+        checked::Value(value, &raw).serialize(&mut serde_json::Serializer::with_formatter(
+            &mut output,
+            TypedFormatter::new(structure, pretty, &raw),
+        ));
     if let Err(error) = result {
         return Err(match output.error {
             Some(kind) => ToolkitError::io(io::Error::new(kind, error)),
@@ -100,15 +108,17 @@ impl<W: Write> Write for Output<'_, W> {
 // Go1.27.1 encoding/json/scanner.go maxNestingDepth; not a new report-byte cap.
 // RawMessage is validated independently by appendCompact. Pretty output is
 // additionally checked as one whole document by appendIndent.
-const GO_MAX_DEPTH: usize = 10_000;
-struct TypedFormatter<F> {
+const GO_MAX_DEPTH: usize = crate::raw_json::MAX_DEPTH;
+struct TypedFormatter<'a, F> {
+    raw: &'a Cell<bool>,
     public: PublicFormatter<F>,
     depth: usize,
     pretty: bool,
 }
-impl<F: Formatter> TypedFormatter<F> {
-    fn new(structure: F, pretty: bool) -> Self {
+impl<'a, F: Formatter> TypedFormatter<'a, F> {
+    fn new(structure: F, pretty: bool, raw: &'a Cell<bool>) -> Self {
         Self {
+            raw,
             public: PublicFormatter(structure),
             depth: 0,
             pretty,
@@ -125,7 +135,21 @@ impl<F: Formatter> TypedFormatter<F> {
 fn invalid(message: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
-impl<F: Formatter> Formatter for TypedFormatter<F> {
+impl<F: Formatter> Formatter for TypedFormatter<'_, F> {
+    fn write_byte_array<W: ?Sized + Write>(&mut self, w: &mut W, bytes: &[u8]) -> io::Result<()> {
+        if !self.raw.get() {
+            self.begin_array(w)?;
+            for (index, byte) in bytes.iter().enumerate() {
+                self.begin_array_value(w, index == 0)?;
+                self.write_u8(w, *byte)?;
+                self.end_array_value(w)?;
+            }
+            return self.end_array(w);
+        }
+        let base = if self.pretty { self.depth } else { 0 };
+        crate::raw_json::validate_at(bytes, base).map_err(invalid)?;
+        format_raw(&mut self.public, w, bytes)
+    }
     fn write_number_str<W: ?Sized + Write>(
         &mut self,
         writer: &mut W,
@@ -175,7 +199,7 @@ impl<F: Formatter> Formatter for TypedFormatter<F> {
     fn write_raw_fragment<W: ?Sized + Write>(&mut self, w: &mut W, raw: &str) -> io::Result<()> {
         let base = if self.pretty { self.depth } else { 0 };
         validate_raw(raw, base)?;
-        format_raw(&mut self.public, w, raw)
+        format_raw(&mut self.public, w, raw.as_bytes())
     }
     fn begin_array<W: ?Sized + Write>(&mut self, w: &mut W) -> io::Result<()> {
         self.enter()?;
@@ -279,8 +303,11 @@ impl Frame {
         }
     }
 }
-fn format_raw<F: Formatter, W: ?Sized + Write>(f: &mut F, w: &mut W, raw: &str) -> io::Result<()> {
-    let bytes = raw.as_bytes();
+fn format_raw<F: Formatter, W: ?Sized + Write>(
+    f: &mut F,
+    w: &mut W,
+    bytes: &[u8],
+) -> io::Result<()> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut at = 0;
     while at < bytes.len() {

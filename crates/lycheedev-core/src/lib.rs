@@ -13,6 +13,7 @@ pub mod mailbox;
 pub mod metadata;
 pub mod process;
 pub mod public_json;
+pub mod raw_json;
 pub mod selection;
 pub mod storage;
 pub mod workspace;
