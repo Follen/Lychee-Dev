@@ -16,6 +16,7 @@ use std::{
 mod bounded;
 mod budgeted;
 mod dependencies;
+mod history_read;
 pub use bounded::{
     CaptureInput, DEFAULT_CAPTURE_BYTES, MAX_CAPTURE_BYTES, VerifiedBlob, commit_capture_bounded,
     commit_verified_capture, open_verified_blob_bounded, publish_blob_bounded,
@@ -25,7 +26,9 @@ pub use budgeted::{
     CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
     commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
 };
+pub(crate) use dependencies::decode_workspace_identity;
 pub use dependencies::{GoCaptureDecode, GoSignedInteger, normalize_go_json_strings};
+pub use history_read::fetch_capture_controlled;
 pub fn blob_path(home: &Path, digest: &str) -> Result<PathBuf> {
     if !valid_digest(digest, 64) {
         return Err(ToolkitError::new(

@@ -241,9 +241,13 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-formal-live-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev formal_live -j 1
-      - name: Run historical bootstrap readonly compatibility fixtures
+      - name: Run historical operation bootstrap signal and session readonly fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-history-read --one-shot -- test --locked --offline -p lycheedev-live --lib history::tests -j 1
+        run: |
+          node tools/rust-cargo.mjs --owner ci-history-read --one-shot -- test --locked --offline -p lycheedev-live --lib history:: -j 1
+      - name: Run fixed Go workspace admission compatibility fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-workspace-admission --one-shot -- test --locked --offline -p lycheedev-core --lib workspace::tests -j 1
       - name: Run controlled historical raw metadata read fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-history-metadata --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_read_tests -j 1

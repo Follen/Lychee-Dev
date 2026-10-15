@@ -1,0 +1,86 @@
+{
+  "schema": "lycheedev.workspace-open-impact.v1",
+  "baseCommit": "2ae19cb36431369ab2eaabc493b184f8b14711fe",
+  "references": [
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-cli/src/formal_live.rs:498:                lycheedev_core::workspace::open(&inv.home)",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/archive.rs:53:            \"vault.unsupported_workspace\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/archive.rs:59:        workspace::open(root)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/archive.rs:178:        let identity = workspace::open(&root)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/cache.rs:172:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/cache.rs:285:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/doctor.rs:54:    let identity = workspace::open(&inv.home);",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/doctor.rs:60:                \"vault.legacy_detected\"",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence.rs:92:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence.rs:114:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence.rs:129:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence.rs:162:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:192:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:231:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:296:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:316:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:353:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:358:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:431:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/bounded.rs:437:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/budgeted.rs:377:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/evidence/budgeted.rs:396:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/metadata.rs:43:        crate::workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/metadata.rs:104:        crate::workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/metadata.rs:130:                    \"vault.unsupported_workspace\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/metadata.rs:131:                    \"vault.unsupported_workspace\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/metadata.rs:1130:            assert_eq!(error.code, \"vault.unsupported_workspace\");",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/workspace.rs:14:            \"vault.unsupported_workspace\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/workspace.rs:22:            \"vault.workspace_schema_newer\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/workspace.rs:34:            \"vault.unsupported_workspace\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/src/workspace.rs:66:            \"vault.legacy_detected\",",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/tests/bounded_evidence.rs:169:    let expected = workspace::open(&temp.0).unwrap_err();",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-core/tests/durability.rs:233:        \"vault.legacy_detected\"",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-data/src/assets/source.rs:280:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-data/tests/content_budget_parity.rs:137:    assert_eq!(failed.unwrap_err().code, \"vault.workspace_schema_newer\");",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-live/src/host.rs:68:        workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-live/src/host.rs:109:        workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-live/src/host.rs:129:        workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-live/src/probes.rs:113:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/examples/check_broker_lease.rs:7:    workspace::open(&home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/native_session.rs:423:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/native_session.rs:440:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/native_session.rs:618:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/prune.rs:333:    workspace::open(home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/session.rs:534:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/session.rs:842:    workspace::open(&inv.home)?;",
+    "2ae19cb36431369ab2eaabc493b184f8b14711fe:crates/lycheedev-source/src/session.rs:925:    workspace::open(&inv.home)?;"
+  ],
+  "internalCallers": [
+    "workspace::initialize_unlocked -> open for existing manifest",
+    "workspace::config -> open",
+    "workspace::target -> open"
+  ],
+  "changes": [
+    {
+      "contract": "uppercase hex accepted; invalid length/time before schema, hex after schema",
+      "oracle": "internal/vault/workspace.go:57-72"
+    },
+    {
+      "contract": "zero time includes equivalent offset instants and nil time, raw timestamp escapes rejected",
+      "oracle": "internal/vault/workspace.go:57; Go time/time.go IsZero and UnmarshalJSON"
+    },
+    {
+      "contract": "nonempty missing manifest legacy/3; empty or absent directory retains OS read error",
+      "oracle": "internal/vault/workspace.go:47-55; internal/command/entry.go:825-826"
+    },
+    {
+      "contract": "future recognized schema joined cause, arbitrary schema unsupported; CLI unsupported/4",
+      "oracle": "internal/vault/workspace.go:60-65,158-174; internal/command/entry.go:827-828"
+    }
+  ],
+  "existingTestImpact": [
+    "core/tests/bounded_evidence.rs:169 derives expected from workspace::open and should retain comparison; NOT_RUN",
+    "STAGED FIX: data/content_budget_parity.rs is the base2ae test with exactly one assertion changed from vault.workspace_schema_newer to vault.unsupported_workspace. Malformed marker lacks id/time; future valid schema tests still expect newer. NOT_RUN.",
+    "core/tests/durability.rs:233 initialization legacy behavior untouched; NOT_RUN",
+    "core/src/metadata.rs existing format test remains unsupported; NOT_RUN"
+  ],
+  "limitations": [
+    "Shared foundation returns serde_json::Value, not typed Go time.Time; a parseable >=24h timestamp offset remains an existing projection-representation gap: admission accepts it but later serialization cannot carry Go marshal failure through Value.",
+    "No production changes; no execution. Initializer/config unrelated policies are not rewritten."
+  ]
+}

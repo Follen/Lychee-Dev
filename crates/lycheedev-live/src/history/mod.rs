@@ -12,11 +12,13 @@ pub use bootstrap::BootstrapAttempt;
 #[derive(Debug, Clone)]
 struct Timestamp {
     canonical: Option<String>,
+    zero: bool,
 }
 impl Default for Timestamp {
     fn default() -> Self {
         Self {
             canonical: Some("0001-01-01T00:00:00Z".into()),
+            zero: true,
         }
     }
 }
@@ -108,9 +110,22 @@ fn parse_timestamp(value: &str) -> Option<Timestamp> {
         }
         offset = hour * 60 + minute;
     }
+    let signed_minutes = if zone.first() == Some(&b'-') {
+        -(i64::from(offset))
+    } else {
+        i64::from(offset)
+    };
+    let local = chrono::NaiveDate::from_ymd_opt(year as i32, month, day)?
+        .and_hms_opt(hour, minute, second)?;
+    let zero = fraction.is_empty()
+        && local.checked_sub_signed(chrono::Duration::minutes(signed_minutes))
+            == chrono::NaiveDate::from_ymd_opt(1, 1, 1).and_then(|date| date.and_hms_opt(0, 0, 0));
     // Go can parse a >=24h offset but refuses to marshal it into an identity.
     if offset >= 24 * 60 {
-        return Some(Timestamp { canonical: None });
+        return Some(Timestamp {
+            canonical: None,
+            zero,
+        });
     }
     let mut canonical = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
     if !fraction.is_empty() {
@@ -125,6 +140,7 @@ fn parse_timestamp(value: &str) -> Option<Timestamp> {
     }
     Some(Timestamp {
         canonical: Some(canonical),
+        zero,
     })
 }
 
@@ -169,3 +185,66 @@ fn corrupt() -> ToolkitError {
 
 #[cfg(test)]
 mod tests;
+
+impl Timestamp {
+    fn is_zero(&self) -> bool {
+        self.zero
+    }
+}
+
+mod display;
+mod pins;
+mod records;
+mod session;
+mod signal;
+mod status;
+mod store;
+pub use session::HistoricalConnection;
+pub use status::{HistoricalOutcome, HistoricalRead};
+use store::{Captured, DiskRead, RawDocument, ReadStore};
+fn fault(message: &str) -> ToolkitError {
+    ToolkitError::new("command.failed", message, 5)
+}
+fn decode_record<T: crate::go_mailbox_v1::admission::WireRecord + Default>(
+    raw: &[u8],
+    control: &OperationControl,
+) -> Result<T> {
+    control.check()?;
+    if !lycheedev_core::raw_json::is_valid(raw) {
+        return Err(fault("invalid historical JSON"));
+    }
+    let normalized = lycheedev_core::evidence::normalize_go_json_strings(raw, control)?;
+    let value = crate::go_mailbox_v1::admission::decode_wire_record(&normalized);
+    control.check()?;
+    value.map_err(|error| fault(&error.to_string()))
+}
+fn domain_decode<T>(result: Result<T>, code: &str, control: &OperationControl) -> Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            control.check()?;
+            Err(
+                if matches!(
+                    error.code.as_str(),
+                    "command.cancelled" | "command.deadline" | "live.deadline_pending"
+                ) {
+                    error
+                } else {
+                    fault(code)
+                },
+            )
+        }
+    }
+}
+pub fn inspect_operation(home: &Path, id: &str, control: &OperationControl) -> HistoricalRead {
+    status::read_status_outcome(&DiskRead(home), id, control)
+}
+pub fn inspect_session(
+    home: &Path,
+    id: &str,
+    control: &OperationControl,
+) -> Result<HistoricalConnection> {
+    Ok(session::read_session(&DiskRead(home), id, control)?.connection())
+}
+#[cfg(test)]
+mod status_tests;

@@ -1,0 +1,21 @@
+{
+  "schema": "lycheedev.legacy-read-stage-r2-review.v1",
+  "reviewedFreeze": "stage-r2-freeze.json",
+  "reviewedFreezeSha256": "a05d2db91e072591c9916f7c5c9f22c9071cdb39050d74b54f7db1313c38e348",
+  "state": "INDEPENDENT_STATIC_REVIEW_CONVERGED_FOR_DECLARED_SCOPE",
+  "supersedesManifestReviewState": "FINAL_STATIC_RECHECK_PENDING",
+  "checked": {
+    "ownerFiles": 29,
+    "baseDependencies": 134,
+    "fixedGoFiles": 258,
+    "newTestsNotRun": 97,
+    "ownerBaseHashes": true,
+    "supportingArtifactHashes": true
+  },
+  "execution": "No Cargo, Go, compilation, tests or native execution. Rustfmt --check only.",
+  "limitationsRemain": [
+    "General JSON syntax/type diagnostics and corrupt-DEFLATE error/offset wording not fully Go-equivalent.",
+    "Workspace Value API cannot express delayed Go MarshalJSON failure for accepted >=24h timezone offsets.",
+    "Production integration, Cargo dependency/lock update and owned Windows test runs not performed."
+  ]
+}

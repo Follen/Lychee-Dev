@@ -1,0 +1,188 @@
+{
+  "schema": "lycheedev.legacy-read-r2-integration.v1",
+  "baseCommit": "95bd313d2850b0fd1e3da875846047ee18e42f54",
+  "ownerFreezeSHA256": "a05d2db91e072591c9916f7c5c9f22c9071cdb39050d74b54f7db1313c38e348",
+  "files": [
+    {
+      "path": "crates/lycheedev-cli/src/formal_live.rs",
+      "sha256": "0868b56ce19914b0096ca0a7e68d5348c8607e7c8858b88904ec3f3e3ec6fc95",
+      "bytes": 29990
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_history_tests.rs",
+      "sha256": "ac27b1cc9b66b3e100bc5650d36804087d599f2c4aac51bead510ddae0d60ed9",
+      "bytes": 10921
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_output.rs",
+      "sha256": "e4fd13b1a0ebc57131b35efd95d3a7719c7747dd9ff31d0770a86fe71c19673c",
+      "bytes": 4292
+    },
+    {
+      "path": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "sha256": "d85506624fe70f94201bb26fb47e50871b7774a40d5b635f581ea1e926626487",
+      "bytes": 44716
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/dependencies.rs",
+      "sha256": "68e5c00c0604eddbd0ba47c46305c9a93267a720d0d500af3438725b716bdb3f",
+      "bytes": 39099
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/history_read.rs",
+      "sha256": "0ffdaf054279f4ee0ff237fd6a28520bf16c2765a13fb5a7330fea4282142d97",
+      "bytes": 1326
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/history_read_tests.rs",
+      "sha256": "73fb7c52b2c04b27b99f233a8f2f661ff9f2006bf3c7786b19b6a92aefb1ea11",
+      "bytes": 6124
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence.rs",
+      "sha256": "2d07172aaf75cb514f3423f5c3385b9b5f583e0630910eacaf60f36e7323cb65",
+      "bytes": 21053
+    },
+    {
+      "path": "crates/lycheedev-core/src/metadata.rs",
+      "sha256": "1f4d7c91dbc5e87549396a05bb59de655ce0f878927e190c732b1210b06517ae",
+      "bytes": 45544
+    },
+    {
+      "path": "crates/lycheedev-core/src/workspace.rs",
+      "sha256": "65400a4f293093c826e2f8dac34bd2b84c3408d3cd16c74bae4fcc6a660e701d",
+      "bytes": 16802
+    },
+    {
+      "path": "crates/lycheedev-core/src/workspace_tests.rs",
+      "sha256": "d5ddf3e550adb716cd0aec24c6057163afcf57bd067ea36d440a6f3c973f00a7",
+      "bytes": 4996
+    },
+    {
+      "path": "crates/lycheedev-data/tests/content_budget_parity.rs",
+      "sha256": "5b42ad00cefaf5ecdf89ec84adc2317e00fdb37059364a434947b0defc24cb2a",
+      "bytes": 19166
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/bootstrap.rs",
+      "sha256": "65abf53731dffe0dd58603e2fe4f2973c960d846ebe800c1cb1669ff65a0311d",
+      "bytes": 18585
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/display.rs",
+      "sha256": "418c7e7c0bae7bc34af02e3433ecefa3f802726358e4de85b8ed43132afda78b",
+      "bytes": 18990
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/display_tests.rs",
+      "sha256": "3f4cdb550afe257deff48f69b2a66b08db066291df239b0f0423dfebde17944e",
+      "bytes": 27417
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/mod.rs",
+      "sha256": "7320e20c58051dddf990fa7478d1df88c429cc842e8c6635808987e8e73af7ad",
+      "bytes": 8290
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/pins.rs",
+      "sha256": "2acc4ea9a6185249b516ec1d8f541c7950fbf0788c56d865f244ddcbba434b5a",
+      "bytes": 9685
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/pins_tests.rs",
+      "sha256": "a895657978a910f9e2771b288419f0c27e143752fbf180930aa56c053241cf61",
+      "bytes": 13526
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/records.rs",
+      "sha256": "46f61cf6333af5799815013982faa6b32bada35ddc6978137fb628f470b64899",
+      "bytes": 20779
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/session.rs",
+      "sha256": "d33e4ea60dc4242b9db4048057e54ec4f21484d554ea8797a901f762fdc411fb",
+      "bytes": 10670
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/session_tests.rs",
+      "sha256": "83e8d76210dc9e498be860340f7f4afc7c0533842bccb139f9670549faa532a0",
+      "bytes": 21044
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/signal/json.rs",
+      "sha256": "ff0162c4f98696b3594558e4e90c76b0fceb4963089bb852420da797e0ad0270",
+      "bytes": 6563
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/signal/validation.rs",
+      "sha256": "e61699c951917db027f0d0d59dabcbb51bbce68ca3e046ca57e1090b4a8190ca",
+      "bytes": 16696
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/signal.rs",
+      "sha256": "49ae7a78cebaa37c27dced172a060e0ff0fc059c1bd3a21ecd8af9a4e09c8db5",
+      "bytes": 21947
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/signal_tests.rs",
+      "sha256": "49da53dd1ccf7eda9910a0a89de6957ee4f54fcf7cecf46761b687f1a5d181f3",
+      "bytes": 35682
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/status.rs",
+      "sha256": "d5e6f90c41481ccdcbd51b1a5ec2e5fc1ddc5b29e2c7308c690a31ba73b96884",
+      "bytes": 17129
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/status_tests.rs",
+      "sha256": "c90ae8f43b87fddf7c80f4d27e358e58ed405b07650f90ecaf64689335aee1ef",
+      "bytes": 14153
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/store.rs",
+      "sha256": "7e079776653c39970a3c8b1d3ab4dd0f13708317aa5615100b2d01c866cdfd3a",
+      "bytes": 2446
+    },
+    {
+      "path": "crates/lycheedev-live/src/history/tests.rs",
+      "sha256": "0eea19463a1b7e500821cdc37168fb19ba29d2bb5e9a0c7ccdf318dbb4642145",
+      "bytes": 5394
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-stage-r2-freeze.json",
+      "sha256": "a05d2db91e072591c9916f7c5c9f22c9071cdb39050d74b54f7db1313c38e348",
+      "bytes": 106717
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-stage-r2-review.json",
+      "sha256": "de81157ae36b9a12a3de367d49bc4e70c4a7244775cadbf14cc5e56d919ba535",
+      "bytes": 967
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-workspace-impact.json",
+      "sha256": "1915f331d405988df129fd870b66112756d187ed8e0e7ce885866563af61d77f",
+      "bytes": 8171
+    },
+    {
+      "path": "crates/lycheedev-live/Cargo.toml",
+      "sha256": "dac6417f895e8e979569e7f815e8389b63abd433661422562b4fe35b41d138ee",
+      "bytes": 618
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "2a5922b6070bac2f39e93514bb69249b3f079878b03f738aa90f63efc60eda7c",
+      "bytes": 71634
+    },
+    {
+      "path": ".github/workflows/rust-parity.yml",
+      "sha256": "065bdad92cb6b9616813faabac3911dc86351c6e10d832e54b6144b9da0f8188",
+      "bytes": 38815
+    }
+  ],
+  "changedReviewedDependencies": {
+    "crates/lycheedev-core/src/storage.rs": "c294c7b842190945896ed554a11c7a1e57b94a33d7045cf3c61af158aacfaac1",
+    "crates/lycheedev-core/src/storage/controlled_lock_tests.rs": "c7b79c5c7eba2648199567610afe56eb3eacc364f66a63489c839c68e6aa86f3"
+  },
+  "dependencyIntegration": "Only add existing locked flate2 1.1.10 zlib-rs production and base64 0.22.1 dev edges to Live. No registry package/version/checksum changes. Other 132 original dependency hashes unchanged.",
+  "execution": "97 new declarations NOT_RUN; frozen independent static review and manifest wiring review passed."
+}

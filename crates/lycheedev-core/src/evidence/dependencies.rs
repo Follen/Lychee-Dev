@@ -644,11 +644,13 @@ deserialize_object!(Scan, Page, Export, Demux, Frame, EmbeddedCapture);
 // are NOT unescaped by Time.UnmarshalJSON (go.dev/issue/47353).
 struct GoTimestamp {
     canonical: Option<String>,
+    zero: bool,
 }
 impl Default for GoTimestamp {
     fn default() -> Self {
         Self {
             canonical: Some("0001-01-01T00:00:00Z".into()),
+            zero: true,
         }
     }
 }
@@ -727,9 +729,22 @@ fn parse_go_timestamp(value: &str) -> Option<GoTimestamp> {
         }
         offset = hour * 60 + minute;
     }
+    let signed_minutes = if zone.first() == Some(&b'-') {
+        -(i64::from(offset))
+    } else {
+        i64::from(offset)
+    };
+    let local = chrono::NaiveDate::from_ymd_opt(year as i32, month, day)?
+        .and_hms_opt(hour, minute, second)?;
+    let zero = fraction.is_empty()
+        && local.checked_sub_signed(chrono::Duration::minutes(signed_minutes))
+            == chrono::NaiveDate::from_ymd_opt(1, 1, 1).and_then(|date| date.and_hms_opt(0, 0, 0));
     // Go can parse a >=24h offset but refuses to marshal it into an identity.
     if offset >= 24 * 60 {
-        return Some(GoTimestamp { canonical: None });
+        return Some(GoTimestamp {
+            canonical: None,
+            zero,
+        });
     }
     let mut canonical = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
     if !fraction.is_empty() {
@@ -744,6 +759,7 @@ fn parse_go_timestamp(value: &str) -> Option<GoTimestamp> {
     }
     Some(GoTimestamp {
         canonical: Some(canonical),
+        zero,
     })
 }
 
@@ -762,6 +778,13 @@ fn fold_field(key: &str) -> String {
 // and each unpaired UTF-16 escape with U+FFFD; malformed JSON syntax stays an
 // error. The output is bounded by three times the original producer cap.
 fn normalize_go_strings<'a>(raw: &'a [u8], control: &OperationControl) -> Result<Cow<'a, [u8]>> {
+    normalize_go_strings_with_time_key(raw, control, "capturedat")
+}
+fn normalize_go_strings_with_time_key<'a>(
+    raw: &'a [u8],
+    control: &OperationControl,
+    time_key: &str,
+) -> Result<Cow<'a, [u8]>> {
     control.check()?;
     // Normal producer JSON needs no second body allocation. Only Unicode
     // escapes can hide a valid timestamp character from the raw Go reader;
@@ -903,7 +926,7 @@ fn normalize_go_strings<'a>(raw: &'a [u8], control: &OperationControl) -> Result
         let next = skip_space(raw, at);
         if raw.get(next) == Some(&b':') && at - start <= 64 {
             let key: String = serde_json::from_slice(&out[output_start..])?;
-            if fold_field(&key) == "capturedat" {
+            if fold_field(&key) == time_key {
                 timestamp_at = Some(skip_space(raw, next + 1));
             }
         }
@@ -964,4 +987,118 @@ mod compatibility_tests {
             Cow::Borrowed(_)
         ));
     }
+}
+
+// Preserve the Go signed wire representation through manifest authentication.
+// The blob reader, not the manifest decoder, rejects a negative byte length.
+pub(super) fn decode_historical_capture(
+    raw: &[u8],
+    id: &str,
+    control: &OperationControl,
+) -> Result<(CaptureRef, i64)> {
+    control.check()?;
+    if !crate::raw_json::is_valid(raw) {
+        return Err(ToolkitError::invalid("invalid capture JSON"));
+    }
+    let normalized = normalize_go_strings(raw, control)?;
+    let mut value: EmbeddedCapture = serde_json::from_slice(&normalized)?;
+    control.check()?;
+    if value.schema != "lycheedev.capture.v1" || value.id != id || value.complete && value.truncated
+    {
+        return Err(ToolkitError::new(
+            "command.failed",
+            "evidence.invalid_manifest",
+            5,
+        ));
+    }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity<'a> {
+        schema: &'a str,
+        id: &'a str,
+        blob: &'a EmbeddedBlob,
+        media_type: &'a str,
+        provenance: &'a EmbeddedProvenance,
+        complete: bool,
+        truncated: bool,
+        captured_at: &'a str,
+        #[serde(skip_serializing_if = "<[String]>::is_empty")]
+        dependencies: &'a [String],
+    }
+    let captured_at = value.captured_at.canonical.as_deref().ok_or_else(|| {
+        ToolkitError::invalid("capture timestamp offset cannot be marshaled by Go")
+    })?;
+    let identity = Identity {
+        schema: &value.schema,
+        id: "",
+        blob: &value.blob,
+        media_type: &value.media_type,
+        provenance: &value.provenance,
+        complete: value.complete,
+        truncated: value.truncated,
+        captured_at,
+        dependencies: &value.dependencies.elements[..value.dependencies.length],
+    };
+    let bytes = crate::storage::identity_json(&identity)?;
+    if format!("CAP-{}", crate::storage::sha256(&bytes)) != id {
+        return Err(ToolkitError::new(
+            "command.failed",
+            "evidence.manifest_integrity",
+            5,
+        ));
+    }
+    let signed_bytes = value.blob.bytes;
+    // A negative length remains carried separately until FetchCapture's blob
+    // boundary; no unsigned projection is returned to its public consumer.
+    value.blob.bytes = signed_bytes.max(0);
+    let capture = value.into_capture()?;
+    control.check()?;
+    Ok((capture, signed_bytes))
+}
+
+// Shared foundation admission uses the same Go scalar/null/string/time decoder
+// as capture manifests; no separate historical-workspace policy is introduced.
+pub(crate) fn decode_workspace_identity(raw: &[u8]) -> Result<(serde_json::Value, bool)> {
+    #[derive(Default)]
+    struct Identity {
+        schema: String,
+        workspace_id: String,
+        created_at: GoTimestamp,
+        original_time: String,
+    }
+    impl GoObject for Identity {
+        fn field<'de, A: MapAccess<'de>>(
+            &mut self,
+            key: &str,
+            map: &mut A,
+        ) -> std::result::Result<(), A::Error> {
+            match key {
+                "schema" => scalar(map, &mut self.schema),
+                "workspaceid" => scalar(map, &mut self.workspace_id),
+                "createdat" => {
+                    if let Some(value) = map.next_value::<Option<String>>()? {
+                        self.created_at = parse_go_timestamp(&value).ok_or_else(|| {
+                            serde::de::Error::custom("invalid Go workspace timestamp")
+                        })?;
+                        self.original_time = value;
+                    }
+                    Ok(())
+                }
+                _ => ignore(map),
+            }
+        }
+    }
+    if !crate::raw_json::is_valid(raw) {
+        return Err(ToolkitError::invalid("invalid workspace JSON"));
+    }
+    let normalized =
+        normalize_go_strings_with_time_key(raw, &OperationControl::default(), "createdat")?;
+    let mut identity = Identity::default();
+    let mut decoder = serde_json::Deserializer::from_slice(&normalized);
+    ObjectSeed(&mut identity).deserialize(&mut decoder)?;
+    decoder.end()?;
+    Ok((
+        serde_json::json!({"schema":identity.schema,"workspaceId":identity.workspace_id,"createdAt":identity.created_at.canonical.unwrap_or(identity.original_time)}),
+        identity.created_at.zero,
+    ))
 }

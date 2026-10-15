@@ -805,6 +805,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 已查真实前置仅 sealed CLI、固定 tracked oracle、Git及独立 fresh home；该组自行 source sync/完整原始字节认证，不依赖后续 luac、候选package或doctor。完成后的 owner receipt/日志由既有 early snapshot 验 hash，未封存/未回收的证据仍跳过；最终完整 artifact 继续保留。workflow实际解析3jobs、所有step引用先定义、run字符串检查，以及early证据Node8项均通过。
 - 本节点 `[rust-native]` 启动有意义整批验证；既有79ef仍继续不取消。当前只是提前获得实际测量反馈的接线，尚无新增内存数字，不把静态 cold/warm 验收冒充完整 native/session 或Go性能比较。
 
+### 历史 OP/SESSION 只读完整证据链候选 R2（2026-10-15）
+
+- 新只读 status 路线读取原历史 OP、SESSION、signal、report、capture/blob，验证原身份/引用/完整性与显示证明，不接当前 native connection、输入或重放。库层保留 Go partial Outcome；CLI依 Go entry.go773–776 在错误时清 result。signed capture 先验证 schema/id/hash，再按 blob 完整性处理负长度，避免提前改成输入错误。
+- R2同时补共享workspace验证：大写32hex合法、零创建时间拒绝、非空无manifest的legacy诊断及无效schema字段顺序；47消费者引用核对，Data现有缺id/time的错误fixture仅修对应unsupported断言，合法future schema仍保留newer语义。
+- 29 owner、134基线依赖与258固定Go来源逐一核hash并独立静态收敛，冻结 `legacy-read-r2-stage-r2-freeze.json` SHA256 `a05d2db91e072591c9916f7c5c9f22c9071cdb39050d74b54f7db1313c38e348`，最终回执 `legacy-read-r2-stage-r2-review.json` 取代freeze中的待复审标记。97新增测试声明全部 **NOT_RUN**，rustfmt解析不是typecheck。相对冻结依赖仅已独审Core锁分类两文件变化，见integration清单。
+- Cargo只增加Live至已有固定flate21.1.10/zlib-rs的生产边及base640.22.1测试边；lock全部包/version/checksum不变，不混入第二解压后端。CI扩大history::覆盖各真实子模块并独立workspace::tests；CLI formal_live与Core evidence::原组保留。接线实际YAML/TOML校验和独立窄审通过，尚未执行这些Rust组。
+- 明确剩余差异：通用JSON语法/类型及损坏DEFLATE的错误文案/offset未全部等价；workspace Value不能表达Go接受异常时区后延迟MarshalJSON失败。prepared-only OP cancel、显式owner OP/BTP abandon及多文档原子CAS另片实施中。此批不宣称历史兼容全齐、describe84齐或四阶段审计已开始。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

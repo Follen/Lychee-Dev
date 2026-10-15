@@ -3,6 +3,12 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Serialize, de::DeserializeOwned};
 use std::path::Path;
 
+#[derive(Debug, Clone)]
+pub struct RawDocument {
+    pub generation: i64,
+    pub bytes: Vec<u8>,
+}
+
 pub struct Metadata {
     connection: Connection,
 }
@@ -92,6 +98,13 @@ impl Metadata {
         key: &str,
         control: &crate::control::OperationControl,
     ) -> Result<Vec<u8>> {
+        Self::read_document_raw_controlled(home, key, control).map(|document| document.bytes)
+    }
+    pub fn read_document_raw_controlled(
+        home: &Path,
+        key: &str,
+        control: &crate::control::OperationControl,
+    ) -> Result<RawDocument> {
         Self::read_raw_controlled_observed(home, key, control, || {})
     }
     fn read_raw_controlled_observed(
@@ -99,7 +112,7 @@ impl Metadata {
         key: &str,
         control: &crate::control::OperationControl,
         mut on_busy: impl FnMut(),
-    ) -> Result<Vec<u8>> {
+    ) -> Result<RawDocument> {
         control.check()?;
         crate::workspace::open(home)?;
         control.check()?;
@@ -135,14 +148,14 @@ impl Metadata {
             // One SQL statement is an atomic read snapshot. Reject an invalid
             // oversized row before allocating its bytes, even in a corrupted
             // database that has bypassed the ordinary table CHECK constraint.
-            let row: Option<(i64, Option<Vec<u8>>)> = checked_sql(
+            let row: Option<(i64, i64, Option<Vec<u8>>)> = checked_sql(
                 control,
                 until,
                 &mut on_busy,
                 || {
                     connection.query_row(
-                    "SELECT length(CAST(value AS BLOB)),CASE WHEN length(CAST(value AS BLOB))<=1048576 THEN CAST(value AS BLOB) ELSE NULL END FROM documents WHERE key=?1",
-                    [key], |row| Ok((row.get(0)?, row.get(1)?)),
+                    "SELECT generation,length(CAST(value AS BLOB)),CASE WHEN length(CAST(value AS BLOB))<=1048576 THEN CAST(value AS BLOB) ELSE NULL END FROM documents WHERE key=?1",
+                    [key], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 ).optional()
                 },
             )?;
@@ -153,10 +166,13 @@ impl Metadata {
                     "vault.record_missing",
                     2,
                 )),
-                Some((length, Some(raw)))
+                Some((generation, length, Some(raw)))
                     if (0..=1_048_576).contains(&length) && raw.len() as i64 == length =>
                 {
-                    Ok(raw)
+                    Ok(RawDocument {
+                        generation,
+                        bytes: raw,
+                    })
                 }
                 Some(_) => Err(ToolkitError::invalid("metadata document exceeds 1 MiB")),
             }

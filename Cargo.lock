@@ -1281,7 +1281,9 @@ dependencies = [
 name = "lycheedev-live"
 version = "3.1.2"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
+ "flate2",
  "hex",
  "lycheedev-core",
  "lycheedev-delivery",

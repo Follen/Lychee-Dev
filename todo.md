@@ -138,3 +138,9 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Validate native lexical path repair and removal fixture uniqueness; keep original failed run evidence.
 - [ ] Independently review lower-level binding-contracts extraction and its complete stage custody, then execute new crate/adapter/engine regressions.
 - [ ] Obtain actual full Retail cold/warm/native/session memory and phase timing; sampler implementation and successful compilation are not measurements.
+
+## Historical read R2 checkpoint
+
+- [ ] Execute reviewed OP/SESSION/signal/report/capture read chain and shared workspace admission on Windows; 97 new declarations remain NOT_RUN.
+- [ ] Close residual Go JSON/corrupt-DEFLATE diagnostics and deferred timestamp marshal semantics.
+- [ ] Finish prepared-only cancel and explicit-owner abandon with multi-document generation CAS, then verify actual 84-command describe.

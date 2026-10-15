@@ -9,34 +9,66 @@ use serde_json::{Value, json};
 use std::{fs, path::Path};
 pub fn open(home: &Path) -> Result<Value> {
     let path = home.join("workspace.json");
-    if !path.exists() {
-        return Err(ToolkitError::new(
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if fs::read_dir(home)
+                .ok()
+                .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>().ok())
+                .is_some_and(|entries| !entries.is_empty())
+            {
+                return Err(ToolkitError::new(
+                    "vault.legacy_detected",
+                    "vault.legacy_detected",
+                    3,
+                ));
+            }
+            return Err(error.into());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let unsupported = || {
+        ToolkitError::new(
             "vault.unsupported_workspace",
-            "initialize an explicit empty workspace first",
-            3,
-        ));
-    }
-    let identity: Value = storage::read_json(&path)?;
-    if identity["schema"] != "lycheedev.workspace.v1" {
-        return Err(ToolkitError::new(
-            "vault.workspace_schema_newer",
-            "unsupported workspace schema; refusing writes",
-            4,
-        ));
-    }
-    if !selection::valid_digest(identity["workspaceId"].as_str().unwrap_or(""), 32)
-        || identity["createdAt"]
-            .as_str()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .is_none()
-    {
-        return Err(ToolkitError::new(
             "vault.unsupported_workspace",
-            "invalid workspace identity",
             4,
-        ));
+        )
+    };
+    let (identity, zero_time) =
+        crate::evidence::decode_workspace_identity(&bytes).map_err(|_| unsupported())?;
+    let id = identity["workspaceId"].as_str().unwrap_or("");
+    // Fixed Go checks decoded length and time.IsZero before schema, then hex.
+    if id.len() != 32 || zero_time {
+        return Err(unsupported());
+    }
+    let schema = identity["schema"].as_str().unwrap_or("");
+    if schema != "lycheedev.workspace.v1" {
+        if workspace_schema_newer(schema) {
+            return Err(ToolkitError::new(
+                "vault.workspace_schema_newer",
+                "vault.workspace_schema_newer\nvault.unsupported_workspace",
+                4,
+            ));
+        }
+        return Err(unsupported());
+    }
+    if hex::decode(id).is_err() {
+        return Err(unsupported());
     }
     Ok(identity)
+}
+fn workspace_schema_newer(schema: &str) -> bool {
+    let Some(version) = schema.strip_prefix("lycheedev.workspace.v") else {
+        return false;
+    };
+    let mut value = 0i64;
+    for digit in version.bytes() {
+        if !digit.is_ascii_digit() {
+            return false;
+        }
+        value = value.wrapping_mul(10).wrapping_add(i64::from(digit - b'0'));
+    }
+    value > 1
 }
 pub fn initialize(home: &Path) -> Result<Value> {
     let home = if home.is_absolute() {
@@ -409,3 +441,7 @@ fn target(inv: &Invocation) -> Result<Outcome> {
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod tests;

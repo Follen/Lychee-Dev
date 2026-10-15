@@ -134,7 +134,7 @@ fn stream_publishes_manifest_before_end_and_has_no_end_or_new_capture_on_failure
         Ok(())
     });
     std::fs::write(&marker, original).unwrap();
-    assert_eq!(failed.unwrap_err().code, "vault.workspace_schema_newer");
+    assert_eq!(failed.unwrap_err().code, "vault.unsupported_workspace");
     assert_eq!(frames.iter().map(|frame| frame["frame"].as_str().unwrap()).collect::<Vec<_>>(), ["begin", "record", "error"]);
     assert_eq!(captures(), before);
     frames.clear();

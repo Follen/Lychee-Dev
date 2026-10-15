@@ -37,12 +37,15 @@ pub enum LiveResult {
     Connection(ProjectResult),
     Doctor(DoctorResult),
     Bootstrap(lycheedev_live::history::BootstrapAttempt),
+    HistoricalOperation(lycheedev_live::history::HistoricalOutcome),
+    HistoricalSession(lycheedev_live::history::HistoricalConnection),
 }
 #[derive(Debug, Default)]
 pub struct Response {
     pub result: Option<LiveResult>,
     pub context: BTreeMap<String, Value>,
     pub operation_id: String,
+    pub warnings: Vec<String>,
     pub error: Option<ToolkitError>,
 }
 impl Response {
@@ -305,17 +308,11 @@ fn route_admission(inv: &Invocation) -> Result<()> {
             ));
         }
     }
-    if matches!(
-        inv.command.as_str(),
-        "live status" | "live session" | "live resume"
-    ) && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
-        && !(inv.command == "live status"
-            && inv.positional.as_deref().unwrap_or("").starts_with("BTP-"))
+    if matches!(inv.command.as_str(), "live status" | "live session")
+        && inv.positional.as_deref().unwrap_or("").is_empty()
     {
-        return Err(ToolkitError::new(
-            "live.migration_incomplete",
-            "historical OP/BTP lookup is not integrated into the formal adapter; no input was sent",
-            3,
+        return Err(ToolkitError::arguments(
+            "missing selection file or record ID; use describe",
         ));
     }
     if !matches!(
@@ -364,19 +361,66 @@ pub fn dispatch_with<S: Services>(
             return Response::failure(ToolkitError::arguments(channel_message(&e)));
         }
     }
-    if inv.command == "live status" && inv.positional.as_deref().unwrap_or("").starts_with("BTP-") {
-        let id = inv.positional.as_deref().expect("checked BTP positional");
-        let result = lycheedev_live::history::inspect_bootstrap(&inv.home, id, &inv.control);
-        let mut response = Response {
-            operation_id: id.into(),
-            ..Response::default()
+    if matches!(inv.command.as_str(), "live status" | "live session")
+        && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
+    {
+        let id = inv
+            .positional
+            .as_deref()
+            .expect("admitted historical positional");
+        let mut response = Response::default();
+        let result = if inv.command == "live session" {
+            lycheedev_live::history::inspect_session(&inv.home, id, &inv.control)
+                .map(LiveResult::HistoricalSession)
+        } else {
+            response.operation_id = id.into();
+            if id.starts_with("BTP-") {
+                lycheedev_live::history::inspect_bootstrap(&inv.home, id, &inv.control)
+                    .map(LiveResult::Bootstrap)
+            } else {
+                {
+                    let read =
+                        lycheedev_live::history::inspect_operation(&inv.home, id, &inv.control);
+                    response.result = Some(LiveResult::HistoricalOperation(read.outcome));
+                    match read.error {
+                        Some(error) => Err(error),
+                        None => Ok(response.result.take().expect("historical outcome")),
+                    }
+                }
+            }
         };
         match result {
-            Ok(value) => response.result = Some(LiveResult::Bootstrap(value)),
+            Ok(value) => {
+                response.result = Some(value);
+                if inv.command == "live session" {
+                    response.context.insert("session".into(), json!(id));
+                    response.warnings.push("Historical session evidence only; live window identity and readiness have not been refreshed.".into());
+                }
+            }
             Err(mut error) => {
+                // Fixed Go entry.go:773–776 clears failed status projections.
+                // The library retains partial evidence; the CLI does not emit it.
+                if inv.command == "live status" {
+                    response.result = None;
+                }
+                if error.code == "vault.workspace_schema_newer" {
+                    error.code = "vault.unsupported_workspace".into();
+                }
                 if error.code == "vault.record_missing" {
                     error.exit_code = 2;
                     error.message = "vault.record_missing".into();
+                } else if !matches!(
+                    error.code.as_str(),
+                    "command.cancelled"
+                        | "command.deadline"
+                        | "live.deadline_pending"
+                        | "vault.legacy_detected"
+                        | "vault.unsupported_workspace"
+                        | "vault.workspace_schema_newer"
+                        | "vault.blob_integrity"
+                ) {
+                    error.code = "command.failed".into();
+                    error.exit_code = 5;
                 }
                 response.error = Some(super::command_fault(inv, error));
             }

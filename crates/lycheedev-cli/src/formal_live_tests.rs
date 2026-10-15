@@ -1284,3 +1284,6 @@ fn legacy_bootstrap_unmarshalable_time_fails_only_at_render_without_partial_fram
         }
     }
 }
+
+#[path = "formal_live_history_tests.rs"]
+mod history;
