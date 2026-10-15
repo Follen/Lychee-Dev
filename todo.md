@@ -13,9 +13,18 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 
 - [x] Push the reviewed documentation to rust-refactor and create/reuse its own draft PR (#14); subsequent authorized code batches update that same PR promptly, without waiting for all validation or opening one PR per batch.
 
-## Current release increment: Go 3.2.1
+## Current tagged increment: Go 3.2.2
 
-- [x] Pin current target to released 10b561db5706702cd42e047eaeed4ccb5e825351; retain 3057a966 as historical evidence. See [increment matrix](docs/toolkit/rust-go-3.2.1-increment.md).
+- [x] Pin v3.2.2 to `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`; preserve both prior oracles and all results. Tag/main checked, Release API assets not verified. See [increment matrix](docs/toolkit/rust-go-3.2.2-increment.md).
+- [ ] Implement GUID-scoped managed-slot enable/verify/save without LoadAddOn or slot consumption; retain foreign-addon and partial-failure behavior.
+- [ ] Propagate slotReloadRequired through fresh observation, input-profile equality, native pre-send authorization, original-transaction reload/recovery and Continue progress; no unknown replay or deadline reset.
+- [ ] Add read-only live.slot_activation doctor and fixed startup Skill guidance.
+- [ ] Build separate 3.2.2 oracle/Lua fixtures and real recovery regressions, including replacement runtimes and submitted/uncertain/missing crashes. Old 214 Lua or 3.2.1 results are not 3.2.2 evidence.
+- [ ] Complete G322-01–G322-06 with independent automated checks before the user-assisted cases at the end of handover.
+
+## Cumulative prior increment: Go 3.2.1
+
+- [x] Pin the prior target to released 10b561db5706702cd42e047eaeed4ccb5e825351; retain 3057a966 as historical evidence. See [increment matrix](docs/toolkit/rust-go-3.2.1-increment.md).
 - [ ] Implement and verify Retail 12.1.5/120105 plus 12.1.0 compatibility across ClientGate, TOCs, runtime/slot catalogs and product/build selection.
 - [ ] Implement and verify all-key release plus 500 ms keyboard-activity quiet time, fresh INPUT, chord release, no replay and original deadlines; retain timestamp only, no keystroke history.
 - [ ] Synchronize fixed 3.2.1 Skill/protocol guidance and rebuild current oracle/test mappings; do not rename old passing evidence.

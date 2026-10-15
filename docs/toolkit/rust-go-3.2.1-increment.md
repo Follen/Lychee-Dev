@@ -1,13 +1,13 @@
 # Released Go 3.2.1 migration increment
 
-Current authority: [handover](../../handover.md). This is a pending acceptance map, not a passing report.
+Current authority: [handover](../../handover.md). Current target is now the cumulative [3.2.2 increment](rust-go-3.2.2-increment.md). This preserved 3.2.1 map remains required, not a passing report.
 
-- Current release: `v3.2.1`, annotated tag `637584b8b976966c3863c1889e9ff86fe55493d4`, peeled commit **`10b561db5706702cd42e047eaeed4ccb5e825351`**.
+- Preserved increment source: `v3.2.1`, annotated tag `637584b8b976966c3863c1889e9ff86fe55493d4`, peeled commit **`10b561db5706702cd42e047eaeed4ccb5e825351`**.
 - Historical baseline: `v3.2.0`, **`3057a9666ab078270b63c7f06de748069b0d1f4b`**. Existing fixtures, binaries, hashes and results keep this identity.
 - Business increment: `83463a03ac99050f6d9e15d9f27849cde53dab10`; later release bookkeeping is not permission to change Rust package versions. Main `1ee747e021da74a53643ec91ebdb16f6ad22e03c` is not the release pin.
 - Verification: remote tag object and local exact commit fetch checked on 2026-10-15. [Exact release diff](https://github.com/Follen/Lychee-Dev/compare/3057a9666ab078270b63c7f06de748069b0d1f4b...10b561db5706702cd42e047eaeed4ccb5e825351).
 
-All source paths below are at the current exact release. Full acceptance remains **PENDING**. G321-01/02 have independently reviewed A code integrated locally and seven actual Node source/packaging checks passing; their Rust/Lua/Windows execution is **NOT_RUN**. G321-03–06 remain pending independent candidate integration and execution. See handover for exact freeze and publication state.
+All source paths below remain at the exact 3.2.1 release. Full acceptance remains **PENDING**. The initial candidate-status narrative has been superseded by the implementation and exact-run evidence in handover; this map is not a second live status ledger. Integrated code and individual passing groups do not establish complete cumulative acceptance.
 
 | ID | Contract increment | Fixed Go sources / tests | Rust acceptance |
 | --- | --- | --- | --- |

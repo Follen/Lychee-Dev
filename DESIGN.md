@@ -4,9 +4,13 @@ Current decision/status authority: [handover.md](handover.md). This file specifi
 
 ## 1. Contract and migration strategy
 
-Go release `10b561db5706702cd42e047eaeed4ccb5e825351` (v3.2.1) defines current observable behavior. The prior v3.2.0 oracle `3057a9666ab078270b63c7f06de748069b0d1f4b` remains the source of historical tests; it is not silently relabeled as 3.2.1 evidence. Compare each existing Rust module with that immutable oracle and classify it as retain / adapt / replace / missing / unverified. Retain code only with evidence for the current contract, not its age, number of tests or registration in `describe`. The Rust snapshot is an implementation starting point, not a second behavioral oracle.
+Go tagged baseline `0bec60e4406f5d5dc155ee25cef44f9a710e37e8` (v3.2.2) defines current observable behavior. Prior v3.2.1 `10b561db5706702cd42e047eaeed4ccb5e825351` and v3.2.0 `3057a9666ab078270b63c7f06de748069b0d1f4b` remain historical test oracles; no existing result is relabeled. Compare each Rust module against this immutable source and classify retain / adapt / replace / missing / unverified. The Rust snapshot is an implementation starting point, not a second behavioral oracle. Tag/main identity is verified; release assets remain unverified.
 
 The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
+
+### Tagged 3.2.2 managed-slot activation and recovery
+
+Follow the [3.2.2 increment matrix](docs/toolkit/rust-go-3.2.2-increment.md) cumulatively with 3.2.1. For the current character GUID, enable only authenticated managed slot addons, verify changed entries and save addon settings; never load a slot or consume capacity merely to enable it. Preparation failure must not advertise ready. The input profile carries `slotReloadRequired`; compare it even when the timestamp is unchanged. Fresh pre-bind/Invoke observations journal the reload intent under the original CON, deadline, request and recovery transaction. A slot action is blocked while reload is required, but reload itself remains allowed. Repeated replacement runtimes resume the same operation; submitted/uncertain or missing-receipt outcomes must never be replayed. Continue handles recovery progress without resetting its budget. Doctor slot-activation observations are read-only. Keep the 500 ms keyboard-quiet contract and typed cleanup/error evidence intact.
 
 ### Released 3.2.1 increment and input ownership
 
@@ -34,7 +38,7 @@ Crate placement is not a new external interface. Shared addon reuse means no alt
 
 ### Rust safety boundary
 
-Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.1 Skill workflow, changing only necessary Emmy/install/diagnostic details.
+Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.2 Skill workflow, changing only necessary Emmy/install/diagnostic details.
 
 ## 3. Source: preserve and finish the direct-library path
 

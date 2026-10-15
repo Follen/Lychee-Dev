@@ -2,15 +2,15 @@
 
 [简体中文](README_zhCN.md)
 
-This branch, `rust-refactor`, is an **unfinished Rust implementation of the released Go 3.2.1 product contract**. It is not a release or a claim of functional/performance parity.
+This branch, `rust-refactor`, is an **unfinished Rust implementation of the tagged Go 3.2.2 product contract**. It is not a release or a claim of functional/performance parity.
 
 ## Goal and fixed baseline
 
-The behavioral oracle is **v3.2.1**, peeled release commit **`10b561db5706702cd42e047eaeed4ccb5e825351`** ([release source](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/README.md)). Do not use a moving `main`, Go 3.1.2, an arbitrary development binary, or later fixes as the oracle.
+The behavioral oracle is **v3.2.2**, peeled tag commit **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`** ([release source](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/README.md)). Do not use a moving `main`, Go 3.1.2, an arbitrary development binary, or later fixes as the oracle.
 
-The earlier v3.2.0 oracle (`3057a9666ab078270b63c7f06de748069b0d1f4b`) and all of its test evidence remain historical. The 3.2.1 increment adds Retail 12.1.5 / interface 120105 with 12.1.0 compatibility, product/build-specific catalog selection, and physical-key release plus 500 ms keyboard-activity quiet time before fresh INPUT authorization. Submitted or uncertain input still waits for its original receipt without replay or deadline reset. Skill recovery guidance follows the same release. These increments are pending Rust implementation/acceptance; see the [increment matrix](docs/toolkit/rust-go-3.2.1-increment.md).
+Prior v3.2.1 (`10b561db5706702cd42e047eaeed4ccb5e825351`) and v3.2.0 (`3057a9666ab078270b63c7f06de748069b0d1f4b`) fixtures and results keep their original identities. The cumulative [3.2.1 increment](docs/toolkit/rust-go-3.2.1-increment.md) remains required. The new [3.2.2 increment](docs/toolkit/rust-go-3.2.2-increment.md) enables owned managed slots for the current character GUID without loading them, propagates `slotReloadRequired`, preserves the original connection/deadline/transaction through reload recovery, and adds read-only slot-activation diagnostics and startup guidance. These changes require new implementation and exact-candidate tests. Tag/main source identity is verified; Release API assets were not available at the check and are not claimed verified.
 
-Reuse the existing Rust work where differential evidence supports it. Keep, replace or complete each module against Go 3.2.1; do not start over indiscriminately or preserve an obsolete Rust protocol merely because it already exists.
+Reuse the existing Rust work where differential evidence supports it. Keep, replace or complete each module against Go 3.2.2; do not start over indiscriminately or preserve an obsolete Rust protocol merely because it already exists.
 
 Only the host implementation language and Source analysis engine change: Rust plus **EmmyLua's direct analysis libraries, native worker and session ownership**, replacing LuaLS. All other business behavior, the same Lua addon, public CLI, versioned Skill, delivery and complete **Lycheedev mailbox protocol v1** remain equivalent to the pinned release.
 
@@ -21,7 +21,7 @@ Performance acceptance means at least **70% less controllable elapsed time: Rust
 - [handover.md](handover.md): the only current migration status/decision/evidence source; human-assisted tests are its final section.
 - [DESIGN.md](DESIGN.md): target architecture and compatibility rules, derived from that authority.
 - [todo.md](todo.md): ordered implementation/acceptance checklist, no independent status narrative.
-- [Pinned Go protocol](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/live-protocol.md): the full wire, recovery, input and diagnostic contract.
+- [Pinned Go protocol](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/live-protocol.md): the full wire, recovery, input and diagnostic contract.
 
 Older `docs/toolkit/` plans and test reports are historical evidence. Their Go 3.1.2 goals, 50% threshold, four-slot exact-COMMIT redesign and old input assumptions do not override this migration.
 
@@ -37,4 +37,4 @@ Windows amd64 remains the product platform. Source/Data/assets do not require a 
 
 The initial change was documentation only; full implementation of the plan is now in progress. No game input, publication or main merge is authorized. Implementation proceeds through offline tests and automated Windows checks first; tests needing the user, a real game, or a specific interactive machine run last. Each authorized batch updates the same dedicated draft PR. After implementation, perform the four sequential convergent audit stages specified in handover. Preserve historical failures and artifacts, and delete dead code only after call-site, feature, package and regression evidence proves it is unused.
 
-Released installation instructions belong to the [pinned Go README](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/README.md). This branch must not present an npm install as installation of the unfinished Rust candidate. Prior branch README and UI design text are preserved in [docs/history](docs/history/).
+Released installation instructions belong to the [pinned Go README](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/README.md). This branch must not present an npm install as installation of the unfinished Rust candidate. Prior branch README and UI design text are preserved in [docs/history](docs/history/).

@@ -4,13 +4,13 @@
 
 ## 1. 当前决定与不可漂移基线
 
-- 唯一验收目标：以正式 **Go 3.2.1** 为当前行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
-- 当前 Go tag `v3.2.1` 的 tag object：`637584b8b976966c3863c1889e9ff86fe55493d4`；peeled release commit：**`10b561db5706702cd42e047eaeed4ccb5e825351`**。2026-10-15 通过远端 tag object 与本地精确 fetch 核实。main 的后续文档提交 `1ee747e021da74a53643ec91ebdb16f6ad22e03c` 不是行为 pin。
-- 原 v3.2.0 tag object `93849f43f34d8ff1d6f4539c5a3496ab941ef229`、commit **`3057a9666ab078270b63c7f06de748069b0d1f4b`** 及既有fixture/测试/失败记录保持原身份，不能升级标签冒充3.2.1通过。3.2.1业务增量 `83463a03ac99050f6d9e15d9f27849cde53dab10` 的新测试与迁移见[增量矩阵](docs/toolkit/rust-go-3.2.1-increment.md)。
+- 唯一验收目标：以固定 **Go 3.2.2** tag 源码为当前行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
+- 当前 Go tag `v3.2.2`：tag object `97890b267a620a166889db0934e57a826d72a872`，peeled commit **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`**；2026-10-15 精确远端对象与本地 fetch 已核，检查时 main 同 commit。Release API 当时返回 404，不能声称发行二进制/资产已验证。业务增量 `969fe480fdb38eb038401044c3327b04ccaaee81`，详见[3.2.2 增量矩阵](docs/toolkit/rust-go-3.2.2-increment.md)。
+- 前 v3.2.1 tag object `637584b8b976966c3863c1889e9ff86fe55493d4` / commit **`10b561db5706702cd42e047eaeed4ccb5e825351`** 和 v3.2.0 tag object `93849f43f34d8ff1d6f4539c5a3496ab941ef229` / commit **`3057a9666ab078270b63c7f06de748069b0d1f4b`** 的源码、fixture、二进制、测试/失败证据均保留原身份，不能重标为3.2.2通过。未完成的[3.2.1 累积增量](docs/toolkit/rust-go-3.2.1-increment.md)仍须完成。
 - Rust 调查起点：`5443314c536e925801d3f0360110db946181d1b3`。它是复用基础，不是完成声明。按模块差分决定保留/替换/补齐，不从零丢弃已有成果，不沿用不符目标的旧协议。
 - unsafe约束：自有业务/跨平台Rust代码默认禁止unsafe，用适当crate级forbid/deny守住；确有必要的Windows FFI/内存边界必须最小化安全封装、逐处SAFETY理由和指针/生命周期/线程约束与测试，独立审查，不整模块无限豁免，不为性能目标放开unsafe。第三方依赖另列审计，不能宣称整个依赖图无unsafe。
 - 内部设计应体现Rust特点，不逐行翻译Go：合理所有权/借用减少复制，enum/类型状态、Result、RAII和有界安全并发按实际收益使用，避免过度抽象/炫技。对外合同不变，unsafe边界不放松，性能仍实测；纳入独立架构验收。
-- Skill尽量复用固定Go3.2.1版本；仅Emmy引擎、安装和真实诊断等必要差异修改，不因换语言重造工作流。
+- Skill尽量复用固定Go3.2.2版本；仅Emmy引擎、安装和真实诊断等必要差异修改，不因换语言重造工作流。
 - 性能：可控耗时减少至少 70%，即 **Rust ≤ Go 30%**，排除下载与不可控外部等待；同机同数据、输出与校验等价，cold/warm 分开独立重复，逐路径记录。未测不能保证达标。
 - 所有需要用户、实际游戏或特定本机互动配合的测试放在本文最后；离线与可自动执行的 Windows CI 先做。Windows 专属测试不自动等于游戏测试。
 - 首批交付仅文档；随后已获准全量实施本计划。仍不操作游戏、不发布、不合 main，不修改 Go PR #13 或其他项目。只保留本文件，不创建 `handoff` 文件或第二份交接事实来源。
@@ -18,17 +18,17 @@
 
 [DESIGN.md](DESIGN.md)解释目标结构，[todo.md](todo.md)给执行顺序，两者从本文件派生；更新状态与证据首先改这里。旧 `docs/toolkit/` 和历史 README/UI 设计是原受测范围的记录，不得覆盖本节。历史“Go3.1.2替换”“Rust≤Go50%”“重新设计四槽exact-COMMIT”与旧输入合同已被本次目标替代；历史测试通过仍只证明原始候选。
 
-## 2. 当前 Go 3.2.1 合同索引（历史证据仍各自固定）
+## 2. 当前 Go 3.2.2 合同索引（历史证据仍各自固定）
 
 | 合同 | 固定来源 | 使用方式 |
 | --- | --- | --- |
-| 产品/架构/业务 | [Design.md](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/Design.md) | 提取模块和产品合同，不复制其运行状态为 Rust 状态 |
-| 全量命令、参数、输出 | [command_contract.go](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/command/command_contract.go) | 固定 release binary 的 describe/help/正常及错误 golden；不能沿用旧89命令数量 |
-| 协议全貌 | [docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/live-protocol.md) | 全部8节与实现/测试共同组成验收，不只移植定位 |
-| 协议实现 | [channel](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/live/channel)、[memory](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/live/memory)、[bridge](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/bridge)、[desktop](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/desktop)、[addon Bridge](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/addon/Bridge) | 原样保留语义及边界，差分正常/失败/中断 |
-| Agent 工作流 | [Skill](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/skills/lycheedev/SKILL.md) | 比对公开业务步骤、命令/flag和错误恢复；只改真实引擎/构建说明 |
-| 开发/发行/许可 | [development](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/development.md)、[licensing](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/licensing.md)、[release](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/release) | 固定包身份、对应源码、清单和自动验证 |
-| Go 原始验收范围 | [todo](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/todo.md)、[handover](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/handover.md) | 参考已知限制与故障，不把 Go 实机通过转记成 Rust 通过 |
+| 产品/架构/业务 | [Design.md](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/Design.md) | 提取模块和产品合同，不复制其运行状态为 Rust 状态 |
+| 全量命令、参数、输出 | [command_contract.go](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/command/command_contract.go) | 固定 tag 对应候选 binary 的 describe/help/正常及错误 golden；不能沿用旧89命令数量 |
+| 协议全貌 | [docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/live-protocol.md) | 全部8节与实现/测试共同组成验收，不只移植定位 |
+| 协议实现 | [channel](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/live/channel)、[memory](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/live/memory)、[bridge](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/bridge)、[desktop](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/desktop)、[addon Bridge](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/addon/Bridge) | 原样保留语义及边界，差分正常/失败/中断 |
+| Agent 工作流 | [Skill](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/skills/lycheedev/SKILL.md) | 比对公开业务步骤、命令/flag和错误恢复；只改真实引擎/构建说明 |
+| 开发/发行/许可 | [development](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/development.md)、[licensing](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/licensing.md)、[release](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/release) | 固定包身份、对应源码、清单和自动验证 |
+| Go 原始验收范围 | [todo](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/todo.md)、[handover](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/handover.md) | 参考已知限制与故障，不把 Go 实机通过转记成 Rust 通过 |
 
 Go 基线若需要变更，必须明确记录新目标、精确 commit、原因和差分范围，再重建受影响 oracle。不能因远端 main 前进而自动滚动。
 
@@ -946,6 +946,6 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 | H04 | 同安装双实例、跨build并行及混合多实例就绪 | 分别连接/执行/关闭，交错共享槽发布和选定实例reload/doctor --fix；至少Retail双实例，其他产品依声明范围补齐 | 独立身份/owner/fence/CON，短锁预约不串线，其他实例不被授权/升级结果冒认 | |
 | H05 | 用户允许真实容量与reload/relogin验证 | 连续运行触发500槽完整操作容量边界，先日志后reload/重绑同请求；reload/relogin前后验证 | 旧槽不复用、预算不延长、目标固定、exact报告与清理，运行时退役明确 | |
 | H06 | 用户同意可控故障与恢复窗口 | bind无回执关闭、submitted/uncertain中断、发布替换、release无回执5秒cleanup reload、退出/重开CLI、opaque与observation区别 | 无未知业务重发；原request/ticket/期限/attempt保留；报告可用和cleanup分离，退役后才runtime_destroyed | |
-| H07 | 所选角色可临时设置槽禁用并恢复 | doctor读取真实DISABLED诊断；新无owner runtime读取不存在receipt/空BODY；启动模块失败诊断的安全受控场景 | slot_addon_disabled、inputAttempt不冒充执行；公开map元数据与缺键正确；bootstrap不授输入；保存恢复步骤与结果 | |
+| H07 | 用户同意在选定真实角色设置受管槽禁用并恢复 | 按角色GUID启用、复查并保存；doctor只读核slot_activation；有新鲜INPUT时按原CON reload，模拟多次replacement与可控保存失败 | 不LoadAddOn、不消费槽、不动foreign元数据；slotReloadRequired未清不发槽动作，reload自身可执行；原deadline/交易/unknown不重放，失败不报ready；记录恢复步骤 | |
 | H08 | 同机同数据Go/Rust正式候选与用户允许的只读/有界Live采样 | 按B06独立cold/warm交替重复，真实游戏等待分段；保持同业务/输入/校验 | 原始计时/输出等价、excluded阶段与总wall时间，未达0.30照实失败，不影响前面可自动工作 | |
 | H09 | 若既有“十分钟空格”人工活动仍由用户确认需要 | 先确认当时任务目的和安全场景，再由用户实际配合；不把历史计划当持续输入授权 | 人工行为与工具输入分开标记，明确时长/目标/结果，不冒充CLI输入或协议通过 | |
