@@ -87,14 +87,18 @@ impl Fixture {
         self.parent().join("Lychee Dev")
     }
     fn run(&self, archive: Option<&Path>) -> Result<Receipt> {
-        apply(
+        let control = OperationControl::default();
+        let phase = crate::slot_test_diagnostics::SlotPhase::begin("repair.apply", Some(&control));
+        let result = apply(
             &self.client,
             &self.release,
             archive,
             lycheedev_core::VERSION,
             &mut FixtureValidator,
-            &OperationControl::default(),
-        )
+            &control,
+        );
+        phase.finish(result.as_ref().err());
+        result
     }
     fn old(&self) -> Receipt {
         fs::create_dir(self.target()).unwrap();
@@ -432,7 +436,13 @@ fn formal_repair_migrates_old_two_hundred_slots_without_deleting_archive() {
     let f = Fixture::new();
     f.old();
     let c = OperationControl::default();
-    slots::install_controlled(&f.parent(), "3.0.0", &c).unwrap();
+    {
+        let phase =
+            crate::slot_test_diagnostics::SlotPhase::begin("repair.fixture_install", Some(&c));
+        let result = slots::install_controlled(&f.parent(), "3.0.0", &c);
+        phase.finish(result.as_ref().err());
+        result.unwrap();
+    }
     let mut pool = slots::read_pool_controlled(&f.parent(), &c).unwrap();
     pool.files.truncate(200);
     slots::save_pool(&f.parent(), &pool, &c).unwrap();
@@ -441,7 +451,15 @@ fn formal_repair_migrates_old_two_hundred_slots_without_deleting_archive() {
     }
     let archive = f.root.join("archive");
     f.run(Some(&archive)).unwrap();
-    let pool = slots::read_pool_controlled(&f.parent(), &c).unwrap();
+    // This is a new postcondition observation after apply's separate control.
+    // The setup control must not acquire an unrelated apply's elapsed time.
+    // This does not fix a deadline inside the preceding fixture installation.
+    let observation = OperationControl::default();
+    let phase =
+        crate::slot_test_diagnostics::SlotPhase::begin("repair.postcondition", Some(&observation));
+    let result = slots::read_pool_controlled(&f.parent(), &observation);
+    phase.finish(result.as_ref().err());
+    let pool = result.unwrap();
     assert_eq!(pool.files.len(), 500);
     assert_eq!(pool.version, lycheedev_core::VERSION);
     assert_eq!(pool.state, "ready");
@@ -455,7 +473,13 @@ fn formal_repair_pending_old_slot_refuses_main_upgrade_without_replay() {
     let f = Fixture::new();
     f.old();
     let c = OperationControl::default();
-    slots::install_controlled(&f.parent(), "3.0.0", &c).unwrap();
+    {
+        let phase =
+            crate::slot_test_diagnostics::SlotPhase::begin("repair.fixture_install", Some(&c));
+        let result = slots::install_controlled(&f.parent(), "3.0.0", &c);
+        phase.finish(result.as_ref().err());
+        result.unwrap();
+    }
     let mut pool = slots::read_pool_controlled(&f.parent(), &c).unwrap();
     pool.files[0].nonce = "original-unknown".into();
     pool.files[0].consumer = "original-consumer".into();

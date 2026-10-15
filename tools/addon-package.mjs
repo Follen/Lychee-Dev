@@ -72,7 +72,15 @@ export function collectAddonZipEntries(repoRoot) {
   const entries = new Map();
   const tocs = [];
   const report = [];
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES']) {
+    const key = `${ROOT}/${name}`;
+    entries.set(key, readFileSync(join(repoRoot, 'packages/npm/lycheedev', name)));
+    report.push({ path: key, selected: 'license' });
+  }
   const loads = new Map();
+  // WoW loads this reserved filename independently of the TOC load list.
+  // Ship the real binding declarations as well as their Lua dispatcher.
+  loads.set(`${ROOT}/Bindings.xml`, 'Bindings.xml');
   {
     const bytes = readFileSync(join(repoRoot, 'addon', MAIN_TOC));
     const parse = parseToc(bytes.toString('utf8'));
@@ -201,11 +209,14 @@ export function verifyAddonZip(input, options = {}) {
     violations.push(`missing Media content: ${ROOT}/Media/`);
   }
 
+  const licenseKeys = new Set(['LICENSE', 'THIRD_PARTY_NOTICES'].map(name => `${ROOT}/${name}`));
+  for (const name of licenseKeys) if (!zip.get(name)?.length) violations.push(`missing license: ${name}`);
   const tocKeys = new Set([tocKey()]);
-  const loadKeys = new Set();
+  const loadKeys = new Set([`${ROOT}/Bindings.xml`]);
+  if (!zip.has(`${ROOT}/Bindings.xml`)) violations.push(`missing bindings: ${ROOT}/Bindings.xml`);
   for (const parse of parsed.values()) for (const line of parse.loads) loadKeys.add(loadKey(line));
   for (const name of names) {
-    const selected = tocKeys.has(name) ? 'toc' : loadKeys.has(name) ? 'load'
+    const selected = licenseKeys.has(name) ? 'license' : tocKeys.has(name) ? 'toc' : loadKeys.has(name) ? 'load'
       : name.startsWith(`${ROOT}/Media/`) ? 'media' : null;
     if (!selected) violations.push(`entry not selected as toc/load/media: ${name}`);
     const lowered = name.toLowerCase().replaceAll('\\', '/');

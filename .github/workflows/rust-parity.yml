@@ -268,6 +268,14 @@ jobs:
       - name: Run fixed Go workspace admission compatibility fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-workspace-admission --one-shot -- test --locked --offline -p lycheedev-core --lib workspace::tests -j 1
+      - name: Run controlled Data kernel admission and configuration fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-admission --one-shot -- test --locked --offline -p lycheedev-core --lib workspace::data_resources:: -j 1
+      - name: Run queued Windows Data lock lifetime fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-lease --one-shot -- test --locked --offline -p lycheedev-windows --lib data_lease:: -j 1
       - name: Run controlled historical raw metadata read fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-history-metadata --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_read_tests -j 1

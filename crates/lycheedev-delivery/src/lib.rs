@@ -9,6 +9,8 @@ pub mod npm_update;
 pub mod release;
 pub mod removal;
 pub mod slot_publication;
+#[cfg(test)]
+mod slot_test_diagnostics;
 pub mod slots;
 pub mod update;
 pub use installation::{VerifiedInstallation, verify_clean};

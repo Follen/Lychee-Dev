@@ -8,6 +8,10 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+#[path = "../src/slot_test_diagnostics.rs"]
+mod slot_test_diagnostics;
+use slot_test_diagnostics::SlotPhase;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const OLD: &str = "3.1.2";
 const NEW: &str = "3.2.0";
@@ -43,6 +47,7 @@ fn raw(parent: &Path) -> Vec<u8> {
     fs::read(parent.join(slots::MARKER)).unwrap()
 }
 fn fixture(parent: &Path, schema: &str, count: usize) -> SlotPool {
+    let phase = SlotPhase::begin("maintenance.fixture", None);
     let pool = SlotPool {
         schema: schema.into(),
         version: OLD.into(),
@@ -77,7 +82,17 @@ fn fixture(parent: &Path, schema: &str, count: usize) -> SlotPool {
         }
     }
     save(parent, &pool);
+    phase.finish(None);
     pool
+}
+// Match slots::install's original per-call default budget. Diagnostic output
+// is inside that same budget; fixture construction remains outside it.
+fn install(parent: &Path, version: &str) -> lycheedev_core::Result<Value> {
+    let control = OperationControl::default();
+    let phase = SlotPhase::begin("maintenance.install", Some(&control));
+    let result = slots::install_controlled(parent, version, &control);
+    phase.finish(result.as_ref().err());
+    result
 }
 fn migrating(mut pool: SlotPool, previous: bool) -> SlotPool {
     pool.source_schema = pool.schema;
@@ -115,10 +130,10 @@ fn assert_current(parent: &Path, version: &str) -> Value {
 #[test]
 fn fresh_pool_uses_exact_formal_shape_and_is_idempotent() {
     let temp = Temp::new();
-    let first = slots::install(&temp.0, NEW).unwrap();
+    let first = install(&temp.0, NEW).unwrap();
     assert_eq!(first, assert_current(&temp.0, NEW));
     let before = raw(&temp.0);
-    assert_eq!(slots::install(&temp.0, NEW).unwrap(), first);
+    assert_eq!(install(&temp.0, NEW).unwrap(), first);
     assert_eq!(raw(&temp.0), before);
     for index in [1, 64, 200, 201, 500] {
         for (name, expected) in slots::files(index, NEW) {
@@ -142,7 +157,7 @@ fn canonical_legacy_64_and_previous_200_pools_migrate_without_business_admission
         let before = raw(&temp.0);
         slots::preflight(&temp.0, NEW).unwrap();
         assert_eq!(raw(&temp.0), before);
-        slots::install(&temp.0, NEW).unwrap();
+        install(&temp.0, NEW).unwrap();
         assert_current(&temp.0, NEW);
     }
 }
@@ -153,13 +168,13 @@ fn same_version_200_pool_expands_but_unowned_extension_is_never_adopted() {
     let foreign = slots::directory(&temp.0, 500);
     fs::create_dir(&foreign).unwrap();
     let before = raw(&temp.0);
-    let error = slots::install(&temp.0, OLD).unwrap_err();
+    let error = install(&temp.0, OLD).unwrap_err();
     assert_eq!(error.code, "delivery.invalid_installation");
     assert_eq!(error.exit_code, 4);
     assert_eq!(raw(&temp.0), before);
     assert!(!slots::directory(&temp.0, 201).exists());
     fs::remove_dir(foreign).unwrap();
-    slots::install(&temp.0, OLD).unwrap();
+    install(&temp.0, OLD).unwrap();
     assert_current(&temp.0, OLD);
 }
 #[test]
@@ -176,7 +191,7 @@ fn unresolved_pending_or_unknown_nonce_blocks_without_rewriting_marker() {
         let before = raw(&temp.0);
         for error in [
             slots::preflight(&temp.0, NEW).unwrap_err(),
-            slots::install(&temp.0, NEW).unwrap_err(),
+            install(&temp.0, NEW).unwrap_err(),
         ] {
             assert_eq!(error.code, "delivery.installation_conflict");
             assert_eq!(error.exit_code, 3);
@@ -198,10 +213,10 @@ fn consumed_and_explicitly_retired_reservations_can_migrate_but_pending_always_b
         }
         pool.files[0].pending_hash = pool.files[0].payload_hash.clone();
         save(&temp.0, &pool);
-        assert_eq!(slots::install(&temp.0, NEW).unwrap_err().exit_code, 3);
+        assert_eq!(install(&temp.0, NEW).unwrap_err().exit_code, 3);
         pool.files[0].pending_hash.clear();
         save(&temp.0, &pool);
-        slots::install(&temp.0, NEW).unwrap();
+        install(&temp.0, NEW).unwrap();
         assert_current(&temp.0, NEW);
     }
 }
@@ -228,11 +243,11 @@ fn current_pool_recognizes_only_exact_previous_interface_and_transport_tocs() {
         if interfaces != slots::INTERFACES || transport != slots::TRANSPORT {
             pool.files[0].nonce = "a".repeat(32);
             save(&temp.0, &pool);
-            assert_eq!(slots::install(&temp.0, OLD).unwrap_err().exit_code, 3);
+            assert_eq!(install(&temp.0, OLD).unwrap_err().exit_code, 3);
             pool.files[0].consumed = true;
             save(&temp.0, &pool);
         }
-        slots::install(&temp.0, OLD).unwrap();
+        install(&temp.0, OLD).unwrap();
         assert_eq!(fs::read(&toc).unwrap(), slots::files(1, OLD)[0].1);
         let unverified = String::from_utf8(slots::files(1, OLD)[0].1.clone())
             .unwrap()
@@ -258,7 +273,7 @@ fn current_and_previous_migration_markers_resume_partial_static_and_extension() 
         fs::create_dir(&extension).unwrap();
         fs::write(extension.join("Loader.lua"), &slots::files(201, NEW)[1].1).unwrap();
         assert!(slots::inspect(&temp.0, NEW).is_err());
-        slots::install(&temp.0, NEW).unwrap();
+        install(&temp.0, NEW).unwrap();
         assert_current(&temp.0, NEW);
     }
 }
@@ -276,7 +291,7 @@ fn migration_accepts_previous_target_static_only_with_authenticated_intent() {
         toc,
     )
     .unwrap();
-    slots::install(&temp.0, NEW).unwrap();
+    install(&temp.0, NEW).unwrap();
     assert_current(&temp.0, NEW);
 }
 #[test]
@@ -290,7 +305,7 @@ fn migration_preflights_last_foreign_byte_before_changing_any_first_slot_byte() 
     let first = slots::directory(&temp.0, 1).join("Lychee Dev Slot 01.toc");
     let before = fs::read(&first).unwrap();
     let marker = raw(&temp.0);
-    assert_eq!(slots::install(&temp.0, NEW).unwrap_err().exit_code, 4);
+    assert_eq!(install(&temp.0, NEW).unwrap_err().exit_code, 4);
     assert_eq!(raw(&temp.0), marker);
     assert_eq!(fs::read(first).unwrap(), before);
     assert!(!slots::directory(&temp.0, 65).exists());
@@ -301,13 +316,10 @@ fn migration_rejects_missing_old_members_and_wrong_resume_version() {
     let pool = fixture(&temp.0, "lycheedev.slots.v1", 64);
     save(&temp.0, &migrating(pool, false));
     let before = raw(&temp.0);
-    assert_eq!(
-        slots::install(&temp.0, "different").unwrap_err().exit_code,
-        3
-    );
+    assert_eq!(install(&temp.0, "different").unwrap_err().exit_code, 3);
     assert_eq!(raw(&temp.0), before);
     fs::remove_file(slots::directory(&temp.0, 64).join("Payload.lua")).unwrap();
-    assert!(slots::install(&temp.0, NEW).is_err());
+    assert!(install(&temp.0, NEW).is_err());
     assert_eq!(raw(&temp.0), before);
 }
 #[test]
@@ -337,7 +349,7 @@ fn malformed_or_historical_rust_metadata_is_rejected_without_write() {
         save(&temp.0, &pool);
         let before = raw(&temp.0);
         assert_eq!(
-            slots::install(&temp.0, NEW).unwrap_err().code,
+            install(&temp.0, NEW).unwrap_err().code,
             "delivery.invalid_installation"
         );
         assert_eq!(raw(&temp.0), before);
@@ -412,14 +424,14 @@ fn cancellation_preserves_original_marker_and_never_creates_slots() {
 fn unknown_extra_members_and_unmanaged_empty_directories_are_never_adopted() {
     let temp = Temp::new();
     fs::create_dir(slots::directory(&temp.0, 1)).unwrap();
-    assert_eq!(slots::install(&temp.0, NEW).unwrap_err().exit_code, 4);
+    assert_eq!(install(&temp.0, NEW).unwrap_err().exit_code, 4);
     assert!(!temp.0.join(slots::MARKER).exists());
     fs::remove_dir(slots::directory(&temp.0, 1)).unwrap();
     fixture(&temp.0, slots::SCHEMA, 500);
     let foreign = slots::directory(&temp.0, 500).join("other.lua");
     fs::write(&foreign, b"owner notes").unwrap();
     let before = raw(&temp.0);
-    assert!(slots::install(&temp.0, NEW).is_err());
+    assert!(install(&temp.0, NEW).is_err());
     assert_eq!(raw(&temp.0), before);
     assert_eq!(fs::read(foreign).unwrap(), b"owner notes");
 }
@@ -436,7 +448,7 @@ fn omitted_and_null_optional_ownership_fields_match_go_zero_values() {
     value["sourceSchema"] = Value::Null;
     value["files"][0]["nonce"] = Value::Null;
     storage::atomic_json(&temp.0.join(slots::MARKER), &value).unwrap();
-    slots::install(&temp.0, NEW).unwrap();
+    install(&temp.0, NEW).unwrap();
     assert_current(&temp.0, NEW);
 }
 #[cfg(unix)]
@@ -446,7 +458,7 @@ fn linked_slot_directory_or_static_member_is_rejected_without_following_it() {
     let temp = Temp::new();
     let outside = Temp::new();
     symlink(&outside.0, slots::directory(&temp.0, 1)).unwrap();
-    assert!(slots::install(&temp.0, NEW).is_err());
+    assert!(install(&temp.0, NEW).is_err());
     assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0);
     fs::remove_file(slots::directory(&temp.0, 1)).unwrap();
     fixture(&temp.0, slots::SCHEMA, 500);
@@ -506,7 +518,7 @@ fn go_json_sequence_casing_duplicates_and_null_never_erase_reservations() {
             1,
         );
         fs::write(temp.0.join(slots::MARKER), &raw).unwrap();
-        assert_eq!(slots::install(&temp.0, NEW).unwrap_err().exit_code, 3);
+        assert_eq!(install(&temp.0, NEW).unwrap_err().exit_code, 3);
         assert_eq!(
             fs::read(temp.0.join(slots::MARKER)).unwrap(),
             raw.as_bytes()

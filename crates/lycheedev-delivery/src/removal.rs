@@ -538,7 +538,14 @@ mod tests {
             }],
         };
         storage::atomic_json(&target.join(installation::MARKER), &receipt).unwrap();
-        slots::install(&parent, "3.2.0").unwrap();
+        let control = OperationControl::default();
+        let phase = crate::slot_test_diagnostics::SlotPhase::begin(
+            "removal.fixture_install",
+            Some(&control),
+        );
+        let result = slots::install_controlled(&parent, "3.2.0", &control);
+        phase.finish(result.as_ref().err());
+        result.unwrap();
         (target, root.join("archive"))
     }
     #[test]

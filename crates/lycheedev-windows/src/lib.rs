@@ -2,6 +2,7 @@
 pub mod broker;
 pub mod cancellation;
 pub mod capture;
+pub mod data_lease;
 pub mod detached;
 pub mod filesystem;
 pub mod geometry;

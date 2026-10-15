@@ -7,6 +7,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{fs, path::Path};
+pub mod data_resources;
 pub fn open(home: &Path) -> Result<Value> {
     let path = home.join("workspace.json");
     let bytes = match fs::read(&path) {
