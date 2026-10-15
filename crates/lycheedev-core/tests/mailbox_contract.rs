@@ -171,11 +171,11 @@ fn go_mailbox_v1_shared_admission_preserves_envelope_and_token_boundaries() {
         assert_eq!(value.validate(), Err(invalid));
     }
     value.fence = 1;
-    value.code = "中".repeat(87_381);
-    value.code.push('x');
+    value.code = "中".repeat(87_381).into();
+    value.code.push_byte(b'x');
     assert_eq!(value.code.len(), 262_144);
     assert_eq!(value.validate(), Ok(()));
-    value.code.push('x');
+    value.code.push_byte(b'x');
     assert_eq!(slot_payload(&value), Err(invalid));
     value.code.clear();
     value.schema = "lycheedev.mailbox.v1".into();

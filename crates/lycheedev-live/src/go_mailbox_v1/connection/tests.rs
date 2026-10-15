@@ -289,7 +289,7 @@ fn service(root: &Path, target: ConnectionTarget) -> Service {
 fn request(key: &str) -> ExecuteRequest<'_> {
     ExecuteRequest {
         request: key,
-        code: "return 1",
+        code: b"return 1",
         budget_seconds: 5,
         policy: OperationPolicy::Opaque,
     }
@@ -331,7 +331,7 @@ fn history_conflicts_are_readonly_for_code_budget_and_policy() {
     let before = fs::read(f.log()).unwrap();
     for req in [
         ExecuteRequest {
-            code: "return 2",
+            code: b"return 2",
             ..request("same")
         },
         ExecuteRequest {
@@ -1202,3 +1202,5 @@ fn recorded_addon_directory_matches_fixed_go_and_core_destination() {
     assert!(!path.exists());
     assert!(!f.target.addon_parent().join("LycheeDev").exists());
 }
+
+mod code_bytes;

@@ -5,7 +5,7 @@ use super::{
     ContractError, Identity, InputDiagnostic, InputObservation, InputOutcome, MAX_EXACT_INTEGER,
     MAX_PAYLOAD, Receipt, Result, SCHEMA, SLOT_COUNT, ZERO_TOKEN, checksum, parse_token,
 };
-pub use lycheedev_core::mailbox::SlotEnvelope;
+pub use lycheedev_core::mailbox::{CodeBytes, SlotEnvelope};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -332,7 +332,7 @@ pub struct Operation {
     pub origin: Option<Identity>,
     pub id: String,
     pub ticket: String,
-    pub code: String,
+    pub code: CodeBytes,
     pub budget: i32,
     pub policy: OperationPolicy,
     pub stage: OperationStage,
@@ -361,6 +361,15 @@ impl Operation {
         id: String,
         ticket: String,
         code: String,
+        budget: i32,
+        policy: OperationPolicy,
+    ) -> Self {
+        Self::prepared_bytes(id, ticket, code.into(), budget, policy)
+    }
+    pub fn prepared_bytes(
+        id: String,
+        ticket: String,
+        code: CodeBytes,
         budget: i32,
         policy: OperationPolicy,
     ) -> Self {

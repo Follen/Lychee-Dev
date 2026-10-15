@@ -45,7 +45,7 @@ pub struct TargetRequest {
 #[derive(Debug, Clone, Copy)]
 pub struct ExecuteRequest<'a> {
     pub request: &'a str,
-    pub code: &'a str,
+    pub code: &'a [u8],
     pub budget_seconds: i32,
     pub policy: OperationPolicy,
 }
@@ -668,7 +668,7 @@ fn historical(
             .operation
             .as_ref()
             .ok_or_else(|| error("live.channel_request_history_invalid"))?;
-        if op.code != request.code
+        if op.code.as_bytes() != request.code
             || op.budget != request.budget_seconds
             || op.policy != request.policy
         {

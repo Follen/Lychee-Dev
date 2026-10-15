@@ -399,6 +399,26 @@ fn read_state(
     Ok(state)
 }
 
+// Go artifacts.go bounds existing/read artifacts at 512 KiB, but first writes
+// the JSON-cloned code even when replacement expanded it past that read bound.
+// Every source byte expands to at most one UTF-8 U+FFFD (3 bytes) AFTER JSON
+// decoding; control-character JSON escapes decode back to their single byte.
+// Result bytes are base64-decoded unchanged and are bounded by MAX_PAYLOAD.
+const MAX_WRITTEN_ARTIFACT_BYTES: usize = 3 * 262144;
+fn write_artifact(path: &Path, bytes: &[u8], control: &OperationControl) -> ChannelResult<()> {
+    check_control(control)?;
+    if bytes.len() > MAX_WRITTEN_ARTIFACT_BYTES {
+        return Err(error("live.channel_artifact_invalid"));
+    }
+    if let Some(existing) = read_file(path, MAX_PAYLOAD, "live.channel_artifact_invalid", control)? {
+        if existing != bytes {
+            return Err(error("live.channel_artifact_corrupt"));
+        }
+        return Ok(());
+    }
+    storage::atomic_write_controlled(path, bytes, control).map_err(storage_error)
+}
+
 /// Persist the first channel event while the caller holds shared admission.
 /// This is never a recovery/reseed path: exclusive creation preserves any old
 /// (including empty or torn) chain. The public admission API allocates a fresh
@@ -414,13 +434,7 @@ pub(super) fn seed_connection(
     let prepared = snapshot(state)?;
     for (hash, bytes) in &prepared.artifacts {
         let path = paths.artifact(hash)?;
-        if let Some(existing) = read_file(&path, MAX_PAYLOAD, "live.channel_artifact_invalid", control)? {
-            if existing != *bytes {
-                return Err(error("live.channel_artifact_corrupt"));
-            }
-        } else {
-            storage::atomic_write_controlled(&path, bytes, control).map_err(storage_error)?;
-        }
+        write_artifact(&path, bytes, control)?;
     }
     boundary(SeedPoint::ArtifactsDurable, control)?;
     let bytes = prepare_event(&[], "connection_created", &prepared.state)?;
@@ -744,14 +758,7 @@ impl DurableChannelJournal {
         let snapshot = snapshot(state)?;
         for (digest, bytes) in &snapshot.artifacts {
             self.check(control)?;
-            self.immutable(
-                &self.paths.artifact(digest)?,
-                bytes,
-                MAX_PAYLOAD,
-                "live.channel_artifact_invalid",
-                "live.channel_artifact_corrupt",
-                control,
-            )?;
+            write_artifact(&self.paths.artifact(digest)?, bytes, control)?;
             self.cut(FaultPoint::ArtifactDurable, control)?;
         }
         Ok(snapshot.state)
@@ -943,7 +950,14 @@ impl StateJournal for DurableChannelJournal {
         let result = (|| {
             self.check(control)?;
             let state = self.load(control)?;
-            if state.operation.as_ref() != Some(operation)
+            // The durable state is a Go JSON copy, so its source bytes may
+            // already contain per-invalid-byte U+FFFD replacements. Compare
+            // that same persisted representation without mutating live source
+            // or weakening any of the other Operation identity/result fields.
+            let bytes = json(operation)?;
+            let persisted: Operation = serde_json::from_slice(&bytes)
+                .map_err(|_| error("live.channel_result_invalid"))?;
+            if state.operation.as_ref() != Some(&persisted)
                 || operation.stage != OperationStage::ResultVerified
                 || operation.result_bytes.0.is_empty()
                 || operation.result_bytes.0.len() > MAX_PAYLOAD
@@ -954,7 +968,6 @@ impl StateJournal for DurableChannelJournal {
             }
             // Operation::validate is part of State validation. Preserve its
             // LMO identity and exact base64 resultBytes, not parsed RawMessage.
-            let bytes = json(operation)?;
             let path = self.paths.results.join(format!("{}.json", operation.id));
             storage::atomic_write_controlled(&path, &bytes, control).map_err(storage_error)?;
             self.cut(FaultPoint::ResultDurable, control)

@@ -267,12 +267,13 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         &mut self,
         control: &OperationControl,
         request: &str,
-        code: &str,
+        code: impl AsRef<[u8]>,
         budget: i32,
         policy: OperationPolicy,
     ) -> ChannelResult<Option<State>> {
         self.check(control)?;
         validate_request(request)?;
+        let code = code.as_ref();
         let previous = self.journal.historical_request(control, request)?;
         if let Some(state) = &previous {
             state.validate()?;
@@ -283,7 +284,10 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             if operation.request != request {
                 return Err(error("live.channel_request_history_invalid"));
             }
-            if operation.code != code || operation.budget != budget || operation.policy != policy {
+            if operation.code.as_bytes() != code
+                || operation.budget != budget
+                || operation.policy != policy
+            {
                 return Err(error("live.channel_request_conflict"));
             }
         }
@@ -312,7 +316,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         &mut self,
         control: &OperationControl,
         request: &str,
-        code: &str,
+        code: impl AsRef<[u8]>,
         execution_budget: i32,
         policy: OperationPolicy,
     ) -> ChannelResult<()> {
@@ -332,9 +336,10 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         {
             return Err(pending());
         }
+        let code = code.as_ref();
         if code.is_empty()
             || code.len() > 262144
-            || code.as_bytes()[0] == 27
+            || code[0] == 27
             || !(1..=120).contains(&execution_budget)
         {
             return Err(error("live.channel_request_invalid"));
@@ -347,7 +352,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         self.checkpoint(control)?;
         let id = self.next_token()?;
         let ticket = self.next_token()?;
-        let mut operation = Operation::prepared(
+        let mut operation = Operation::prepared_bytes(
             format!("LMO-{id}"),
             ticket,
             code.into(),

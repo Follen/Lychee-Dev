@@ -681,6 +681,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 独立重跑14 Node通过、9既有Windows跳过；新增12为11个source-bound scheduled/fake-kernel决策回归＋1个严格函数身份回归。7个仅生产源mutation均按行为断言失败。它们不执行C#、Job或真实CloseHandle；可控Windows root→普通child→允许helper定序仍缺，后续构建观察不能冒充该精确覆盖。
 - 5a原catalog wrapper仍为失败；首次拒绝退休原因未记录，代码可成立的时序不能升级为历史事实。既有严格退休还含独立有界回收窗口，本补丁不宣称整个wrapper总耗时严格落在原hard timeout内。新Windows执行 **NOT_RUN**。
 
+### Execute 原始字节与 Go 持久副本语义
+
+- R2 冻结 `d989d512a54cb3e7857285ceeed8386d2108f591b51ddd15cbd9553b6dd9bb2a`，`tests/rust-parity/execute-code-bytes-{freeze,test-map}.json` 与 contract。全新原审复核闭合2项P2，14owner、26固定依赖、18回归声明核实；R1原失败快照保留。
+- ExecuteRequest 使用 `&[u8]`，CodeBytes 保持原始长度/请求等值与 Lua 逐字节编码；合法 U+FFFD 与非法字节不可提前lossy合并。JSON副本按Go逐非法字节替换，live内存原始bytes不变，恢复后按已恢复字节比较。首次artifact写入可达解码后3×262144，后续读取/已有写仍执行Go512KiB界限；其他result/archive immutable路径保留。
+- 修正真实 ResultVerified 写结果时持久归一化 Operation 与 raw live 误比较：全Operation按实际持久表示比较，其他身份/结果不弱化，写同一编码；真实Driver→DurableChannelJournal→standalone结果→ReleaseReady/release intent回归保留raw与结果checksum，11种其他身份差异仍拒绝。另一新fixture改用正确记录publication后停止的backend，未削弱旧recovery-only Peer约束。
+- 新core字节组与现有formal Mailbox/共享payload/Delivery组接入CI；静态rustfmt/diff/身份映射通过，18项Rust及Windows **NOT_RUN**。现有core3行/Delivery1行fixture仅API适配，原断言保留。native RawReport非法UTF8准入/公开byte输出仍是下一批必修边界，不能凭此声称全字节合同通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
+mod code_bytes;
+pub use code_bytes::CodeBytes;
+
 pub const SCHEMA: &str = "Lycheedev mailbox protocol v1";
 pub const SLOT_COUNT: i32 = 500;
 pub const MAX_EXACT_INTEGER: u64 = 9_007_199_254_740_991;
@@ -71,8 +74,8 @@ pub struct SlotEnvelope {
     pub action: String,
     pub guid: String,
     pub build: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub code: String,
+    #[serde(skip_serializing_if = "CodeBytes::is_empty")]
+    pub code: CodeBytes,
     #[serde(skip_serializing_if = "zero_i32")]
     pub code_bytes: i32,
     #[serde(skip_serializing_if = "zero_u32")]
@@ -155,9 +158,9 @@ impl ExpectedEnvelope {
         }
     }
 }
-fn lua_string(out: &mut String, value: &str) {
+fn lua_string(out: &mut String, value: &[u8]) {
     out.push('"');
-    for byte in value.bytes() {
+    for &byte in value {
         match byte {
             b'"' | b'\\' => {
                 out.push('\\');
@@ -184,17 +187,17 @@ pub fn slot_payload(envelope: &SlotEnvelope) -> Result<Vec<u8>> {
         let _ = writeln!(out, "  startSlot = {},", envelope.start_slot);
     }
     for (name, value) in [
-        ("schema", &envelope.schema),
-        ("runtime", &envelope.runtime),
-        ("owner", &envelope.owner),
-        ("nonce", &envelope.nonce),
-        ("ticket", &envelope.ticket),
-        ("action", &envelope.action),
-        ("guid", &envelope.guid),
-        ("build", &envelope.build),
-        ("code", &envelope.code),
-        ("challenge", &envelope.challenge),
-        ("preparedNonce", &envelope.prepared_nonce),
+        ("schema", envelope.schema.as_bytes()),
+        ("runtime", envelope.runtime.as_bytes()),
+        ("owner", envelope.owner.as_bytes()),
+        ("nonce", envelope.nonce.as_bytes()),
+        ("ticket", envelope.ticket.as_bytes()),
+        ("action", envelope.action.as_bytes()),
+        ("guid", envelope.guid.as_bytes()),
+        ("build", envelope.build.as_bytes()),
+        ("code", envelope.code.as_bytes()),
+        ("challenge", envelope.challenge.as_bytes()),
+        ("preparedNonce", envelope.prepared_nonce.as_bytes()),
     ] {
         let _ = write!(out, "  {name} = ");
         lua_string(&mut out, value);
@@ -221,3 +224,6 @@ pub fn slot_payload(envelope: &SlotEnvelope) -> Result<Vec<u8>> {
     );
     Ok(out.into_bytes())
 }
+
+#[cfg(test)]
+mod code_bytes_tests;

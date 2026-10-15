@@ -253,6 +253,10 @@ jobs:
       - name: Run shared Core mailbox envelope and payload fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-core-mailbox --one-shot -- test --locked --offline -p lycheedev-core --test mailbox_contract -j 1
+      - name: Run exact Go code byte and JSON persistence boundaries
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-code-bytes --one-shot -- test --locked --offline -p lycheedev-core --lib mailbox::code_bytes_tests -j 1
       - name: Run formal Go mailbox v1 pure fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-mailbox-v1 --one-shot -- test --locked --offline -p lycheedev-live --lib go_mailbox_v1 -j 1

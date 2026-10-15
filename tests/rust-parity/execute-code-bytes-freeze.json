@@ -1,0 +1,244 @@
+{
+  "schema": "lycheedev.execute-code-bytes-freeze.v1",
+  "revision": 2,
+  "createdAt": "2026-10-15T00:47:24.436003+00:00",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "baseHead": "da66b8eed1cfb2bc1f9035666a5a62275acf6821",
+  "status": "frozen_for_independent_rereview; 2 P2 candidate fixes, not independently approved; compile/Rust/Windows NOT_RUN",
+  "files": [
+    {
+      "path": "crates/lycheedev-core/src/mailbox.rs",
+      "bytes": 7328,
+      "sha256": "a8698fb1d4915e709c7881cbc1076a899e301611a5fabda6c3e662c49c985626"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes.rs",
+      "bytes": 3189,
+      "sha256": "8a411b4a7825fc98745b9ea2bfb4577565938b8e73d005903a946979fdb9aaf8"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "bytes": 3525,
+      "sha256": "b60de8bc2a3e935e456ebd2c9f065f6ffc1e3d3ea5871a6de68d146db95bc104"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/mailbox_contract.rs",
+      "bytes": 8144,
+      "sha256": "9bac7915b8e3273323cbad32f401b4eb3cb43e0ff9fe069a081b673191bad40b"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "bytes": 77614,
+      "sha256": "1d1de7c62f8c00accedfbff93f96468338c772cfa9d2de4add2cac101cb23217"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection.rs",
+      "bytes": 26395,
+      "sha256": "46c94fcec766cbecd30f8f48e766ee386bfd02c9f9052aa8c4d17da9c5590767"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "bytes": 43656,
+      "sha256": "cf57509ba48cbd4624da225ee42f6a495eaad185763e8cdf2eeac7ccae33eda3"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "bytes": 23168,
+      "sha256": "9e51a1fdc4ab1380305810d0ff91a8b59f5a1faa359b7025fa0528b694acc98f"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "bytes": 26359,
+      "sha256": "26f0d5b37ef7d1b6c9d9dfa166f38190e35e18492543c93f2a9d4b3e7cc917fe"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+      "bytes": 27944,
+      "sha256": "4c102e8a059a6e0c83015e5583b4b1c07a12de87dc07b62df7d3dea180035c35"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+      "bytes": 12097,
+      "sha256": "255e2095bcda4da14233ee3a3793bb1a38490395edc0456638ae0446f6923652"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+      "bytes": 38944,
+      "sha256": "68e46b98f8aa40b821685ff2f189cf202b5774e0882f97b67de92073849ac4e7"
+    },
+    {
+      "path": "tests/rust-parity/execute-code-bytes-contract.md",
+      "bytes": 6778,
+      "sha256": "d6cc1922f79855cf731775d3a192a722e609184863153e4b4ee457f4cb0b3c15"
+    },
+    {
+      "path": "tests/rust-parity/execute-code-bytes-test-map.json",
+      "bytes": 9404,
+      "sha256": "9d310bbdca58e7811bdc7401083154628526c27eb34e55d50f98c5f61fdc0dd8"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "Cargo.toml",
+      "bytes": 1840,
+      "sha256": "0e00a44fd16a0de1697a3e0c7158cbaf010f09ace305b285f33f841fc3c5831d"
+    },
+    {
+      "path": "crates/lycheedev-core/Cargo.toml",
+      "bytes": 376,
+      "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16"
+    },
+    {
+      "path": "crates/lycheedev-live/Cargo.toml",
+      "bytes": 516,
+      "sha256": "df1e3caa6a0e4bebe441483a3ddab212b002e2442aeb97ee922836baf0d0b533"
+    },
+    {
+      "path": "crates/lycheedev-delivery/Cargo.toml",
+      "bytes": 243,
+      "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4772,
+      "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 22397,
+      "sha256": "8cf24f46ce1af4b4445c529f4123c936df4d610bd8c42eff5f71e339bcb77c6d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/lib.rs",
+      "bytes": 2945,
+      "sha256": "1372478f9b82545f80f6129e3327fd78deaabf69da9b2459c9d576a705292956"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "bytes": 2187,
+      "sha256": "69b15f0815828dbdb52e152e383196f388bdc27041c3b01eac5671802ad119a7"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/admission.rs",
+      "bytes": 34237,
+      "sha256": "0b889c661cf1703d839b819d8caeba6a5ffbc5a9f0a34ad1d38c4476df20951d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+      "bytes": 17084,
+      "sha256": "a67790f55ab1382ead7ef1d026602ead91be2683d0136131e71973a54d71a522"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+      "bytes": 23531,
+      "sha256": "7d04ac6ed0da68e8ee04b809dbc9b455825b031d0fb72e75e71082c507e99b4e"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/reload.rs",
+      "bytes": 18608,
+      "sha256": "5d0a9544330834022a8bda44862eb3c8cd41a59e63bc29656cfb09cfa911544d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement.rs",
+      "bytes": 9141,
+      "sha256": "f30a44cb4443c279f77698b7c0d7cd4fbdae963641f10306ee390b0ed429d3b9"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/transactions.rs",
+      "bytes": 22111,
+      "sha256": "86a87275ecd338515abeb4d87dfcb45b2391da1a00900f4f2979182a991dc364"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "bytes": 35688,
+      "sha256": "16b89ee11887dbcfef4f3f23bcb43233edd37d020d6847154d7013f3bb97a99a"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs",
+      "bytes": 17552,
+      "sha256": "6f3c1aa4fd3b90883bf46ac78ffc8bffaebe2b95dda105726c06e562dc16cd58"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+      "bytes": 6687,
+      "sha256": "0d44b9724228595698cbe098a8518d97ec228985cf498887cf338b2c4cb689ea"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/errors.rs",
+      "bytes": 4533,
+      "sha256": "f5edf0900bb33251a97741388bef845c615d20d2bcaaa0ff38a06881b4be501d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery_test_support.rs",
+      "bytes": 13461,
+      "sha256": "a46e13e3be23e5e16d858f47af1c6dbd85003d8ee7c960082920cdd39b360b59"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs",
+      "bytes": 45121,
+      "sha256": "b7a58a70cd1bdd784916b4533c2a292e496f2df942fd70e297f82eea242fe13e"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal_tests.rs",
+      "bytes": 9389,
+      "sha256": "aee467776282a98207327740f5863f08219144c2ecd6b009506e98dd6182a39e"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal_tests.rs",
+      "bytes": 42807,
+      "sha256": "95439a84090ae1c565ef53f940b009be361b1179f0bb624ba741334d59d5b2e5"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state_tests.rs",
+      "bytes": 7966,
+      "sha256": "7126f1774bbeb7053031f02aabd8ce7497c38a06d2c74c27c579e9a46a0d8e34"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/slot_allocation_tests.rs",
+      "bytes": 4819,
+      "sha256": "0ff1bdc62d3127a324033b49d753a4e5d142e7cbc4e5b5f34358853b74ea0c2e"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 34907,
+      "sha256": "4afbea1ba8191d88c0265f14958428f0a5d755bae8d14d3f3dd61e633bd60170"
+    },
+    {
+      "path": "tests/rust-parity/formal-connection-freeze.json",
+      "bytes": 9979,
+      "sha256": "cd3fb4289aa5e39ca9acbcbef491606eb29a9f20a439cccda66a2b898098770b"
+    }
+  ],
+  "dependencySource": "Exact Git object bytes at baseHead; apply owned files on baseHead, not other owners mutable worktree",
+  "snapshot": "/tmp/lycheedev-execute-code-bytes-review-r2",
+  "declaredTests": 18,
+  "checks": {
+    "rustfmtSyntaxParse": "PASS, no type checking",
+    "gitDiffCheck": "PASS",
+    "mechanicalFixtureDiff": "PASS, exactly 3 core and 1 Delivery lines",
+    "unchangedResultArchiveImmutable": "PASS: archive and immutable helpers/limits unchanged; write_result identity comparison intentionally revised",
+    "testDeclarationMap": "PASS, 18 declarations",
+    "rustTests": "NOT_RUN",
+    "cargo": "NOT_RUN",
+    "rustc": "NOT_RUN",
+    "goExecution": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "game": "NOT_RUN",
+    "r2ScopeDiff": "PASS, only write_result + dedicated byte tests/map/contract changed from R1"
+  },
+  "notes": [
+    "ExecuteRequest.code is &[u8]; CLI owner consumes separately",
+    "CodeBytes changes only Operation.code and SlotEnvelope.code; identity/request strings unchanged",
+    "Original byte identity/length/Lua encoding and Go JSON-copy journal restore semantics preserved by candidate",
+    "Artifact first-write/read asymmetry retained from fixed Go; decoded bound 786432; report/result/archive immutable limits unchanged",
+    "No public_json writer, CLI, activation/doctor, production publication, Cargo files, workflow or handover edits",
+    "Raw-report invalid UTF8 fixture 7b2273223a22ff227d remains a required separate byte validation/output boundary, not waived",
+    "Parent owns independent review/commit/push/Windows acceptance"
+  ],
+  "previousFreezeSha256": "a36de9e4f3258ccf5f7a9184b8a7bab1a5b6887ed43cdf8520c50ccae2c0d512",
+  "previousSnapshot": "/tmp/lycheedev-execute-code-bytes-review-r1",
+  "reviewFixes": [
+    "P2: compare full persisted Operation representation before standalone result write; preserve live raw code, complete other identity checks, exact report bytes/checksum and failure poison",
+    "P2: replace recovery-only Peer in prepare regression with action-specific recording backend and controlled stop; original Peer unchanged"
+  ]
+}

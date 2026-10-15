@@ -1,0 +1,220 @@
+{
+  "schema": "lycheedev.execute-code-bytes-test-map.v1",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "execution": "NOT_RUN",
+  "goFiles": [
+    {
+      "path": "internal/command/live_channel_windows.go",
+      "bytes": 5108,
+      "sha256": "8c7123aa257b6abc311039a8dcce594299b0e799b9d0ab1e5486213fe72302ef"
+    },
+    {
+      "path": "internal/command/live_probe.go",
+      "bytes": 1107,
+      "sha256": "3dfea7b41f09c3f67e3d8baf22a46186f65cde51c77cf2bcb5913404311cacd8"
+    },
+    {
+      "path": "internal/live/channel/request.go",
+      "bytes": 999,
+      "sha256": "63dab567c9edeb63c0339dcdfe29cb91a9caafa3bff10cc2863e700dccaabe4f"
+    },
+    {
+      "path": "internal/live/channel/driver.go",
+      "bytes": 17426,
+      "sha256": "a7d818003d3ed19496400fb21fb0b00bb37ba0d1573905216b64150486de64c2"
+    },
+    {
+      "path": "internal/live/channel/artifacts.go",
+      "bytes": 3174,
+      "sha256": "d967df4a5b51e3c772939e191f55de1664c3985aa558207d8fc1524b7b9d66b8"
+    },
+    {
+      "path": "internal/live/channel/state.go",
+      "bytes": 5613,
+      "sha256": "a734d05ac4784c7034fa694a86f0f3a5455b67556adce9908609f99b24eeb5f1"
+    },
+    {
+      "path": "internal/bridge/slot.go",
+      "bytes": 3245,
+      "sha256": "70cce1afd60888e6d87a69de6b61cb41e74606217bc3c220de9eab6ab6958803"
+    },
+    {
+      "path": "internal/live/channel/observations.go",
+      "bytes": 3825,
+      "sha256": "e41a608a9a0198e5c0bb5b5e6c5a80c45e6a1bb7490e34e9e54a3d9a5605aef2"
+    }
+  ],
+  "declarations": 18,
+  "rustTests": [
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "name": "code_bytes_keep_invalid_and_valid_replacement_bytes_distinct_in_memory",
+      "execution": "NOT_RUN",
+      "kind": "shared_byte_contract"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "name": "code_bytes_json_replaces_each_bad_byte_including_truncated_sequences",
+      "execution": "NOT_RUN",
+      "kind": "shared_byte_contract"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "name": "code_bytes_json_preserves_valid_unicode_nul_and_escaping",
+      "execution": "NOT_RUN",
+      "kind": "shared_byte_contract"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "name": "code_bytes_valid_utf8_serialization_remains_the_existing_string_contract",
+      "execution": "NOT_RUN",
+      "kind": "shared_byte_contract"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "name": "slot_payload_uses_original_code_byte_escapes_length_and_checksum",
+      "execution": "NOT_RUN",
+      "kind": "shared_byte_contract"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "name": "slot_code_limit_measures_original_bytes_before_json_expansion",
+      "execution": "NOT_RUN",
+      "kind": "shared_byte_contract"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "prepare_keeps_raw_code_while_owned_journal_json_copy_normalizes_only_saved_bytes",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "completed_byte_history_compares_before_native_open_without_lossy_aliasing",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "actual_driver_transaction_publishes_original_bytes_before_a_later_restore",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "code_admission_uses_raw_length_and_rejects_empty_oversize_or_bytecode_before_save",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "go_first_write_can_exceed_artifact_read_bound_then_restore_and_existing_write_fail",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "json_control_escapes_do_not_expand_the_decoded_artifact_limit",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "existing_small_artifacts_are_verified_and_never_overwritten",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "hydrate_accepts_exact_authenticated_non_utf8_code_artifact_without_normalizing",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "hydrate_transaction_and_recovery_code_are_raw_go_strings_too",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "decoded_code_expansion_below_artifact_limit_can_still_fail_restored_state_limit",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "actual_driver_writes_verified_byte_code_result_then_release_intent_without_poisoning",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests/code_bytes.rs",
+      "name": "result_persistent_code_normalization_does_not_weaken_other_operation_identity",
+      "execution": "NOT_RUN",
+      "kind": "owned_filesystem_and_actual_driver"
+    }
+  ],
+  "mapping": [
+    {
+      "go": "command live_channel_windows.go []byte->string and live_probe.go arbitrary-byte read; channel driver.go PrepareRequest admission",
+      "rust": [
+        "code_bytes_keep_invalid_and_valid_replacement_bytes_distinct_in_memory",
+        "slot_code_limit_measures_original_bytes_before_json_expansion",
+        "prepare_keeps_raw_code_while_owned_journal_json_copy_normalizes_only_saved_bytes",
+        "code_admission_uses_raw_length_and_rejects_empty_oversize_or_bytecode_before_save",
+        "go_first_write_can_exceed_artifact_read_bound_then_restore_and_existing_write_fail"
+      ]
+    },
+    {
+      "go": "channel artifacts.go snapshot JSON clone before extracting code; hydrate string(data)",
+      "rust": [
+        "code_bytes_json_replaces_each_bad_byte_including_truncated_sequences",
+        "code_bytes_json_preserves_valid_unicode_nul_and_escaping",
+        "slot_code_limit_measures_original_bytes_before_json_expansion",
+        "prepare_keeps_raw_code_while_owned_journal_json_copy_normalizes_only_saved_bytes",
+        "go_first_write_can_exceed_artifact_read_bound_then_restore_and_existing_write_fail",
+        "json_control_escapes_do_not_expand_the_decoded_artifact_limit",
+        "existing_small_artifacts_are_verified_and_never_overwritten",
+        "hydrate_accepts_exact_authenticated_non_utf8_code_artifact_without_normalizing",
+        "hydrate_transaction_and_recovery_code_are_raw_go_strings_too",
+        "decoded_code_expansion_below_artifact_limit_can_still_fail_restored_state_limit"
+      ]
+    },
+    {
+      "go": "channel request.go checkRequest and project historical lookup before native open",
+      "rust": [
+        "completed_byte_history_compares_before_native_open_without_lossy_aliasing",
+        "prepare_keeps_raw_code_while_owned_journal_json_copy_normalizes_only_saved_bytes"
+      ]
+    },
+    {
+      "go": "bridge slot.go byte-wise decimal escaping, original byte count/checksum",
+      "rust": [
+        "slot_payload_uses_original_code_byte_escapes_length_and_checksum",
+        "actual_driver_transaction_publishes_original_bytes_before_a_later_restore"
+      ]
+    },
+    {
+      "go": "channel Driver ResultVerified/write-result -> ReleaseReady, using Go JSON-cloned durable operation identity",
+      "rust": [
+        "actual_driver_writes_verified_byte_code_result_then_release_intent_without_poisoning",
+        "result_persistent_code_normalization_does_not_weaken_other_operation_identity"
+      ]
+    }
+  ],
+  "existingRegression": [
+    "core mailbox_contract all original assertions; only 3 mechanical CodeBytes fixture adaptations",
+    "Delivery slot_publication_tests all original assertions; only 1 mechanical .into() adaptation",
+    "entire go_mailbox_v1 including driver/state/journal/durable journal/connection and original native_backend group; require nonzero new declarations"
+  ],
+  "notImplemented": [
+    "Go raw report JSON invalid UTF8 acceptance/output; fixture 7b2273223a22ff227d",
+    "public CLI end-to-end run / Windows / game acceptance"
+  ],
+  "checks": {
+    "syntaxOnly": "rustfmt; no compilation",
+    "run": "NOT_RUN"
+  },
+  "revision": 2
+}

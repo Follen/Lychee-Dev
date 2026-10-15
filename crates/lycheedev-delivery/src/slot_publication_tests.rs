@@ -305,7 +305,7 @@ fn shared_encoder_validation_and_error_order_are_preserved() {
                 "bridge.invalid_slot_envelope"
             }
             _ => {
-                e.code = "x".repeat(262145);
+                e.code = "x".repeat(262145).into();
                 "bridge.invalid_slot_envelope"
             }
         };

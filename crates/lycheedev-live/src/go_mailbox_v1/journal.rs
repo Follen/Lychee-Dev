@@ -77,7 +77,7 @@ pub struct Snapshot {
     /// Contains digest references and cleared code/report fields. Validate only
     /// after hydration, as Go does; this is not a ready-to-run channel state.
     pub state: State,
-    /// SHA256 => exact original bytes; commit durably before appending state.
+    /// SHA256 => bytes AFTER Go JSON cloning; commit durably before appending state.
     pub artifacts: BTreeMap<String, Vec<u8>>,
 }
 fn hash(bytes: &[u8]) -> String {
@@ -89,7 +89,8 @@ fn artifact_digest(s: &str) -> bool {
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 pub fn snapshot(state: &State) -> Result<Snapshot> {
-    // Match Go's JSON copy: host observedAtMillis is not restored as freshness.
+    // Match Go's JSON copy: code invalid UTF-8 is replaced on the COPY only;
+    // host observedAtMillis is not restored as freshness.
     let bytes =
         serde_json::to_vec(state).map_err(|_| ContractError("live.channel_journal_invalid"))?;
     let mut copy: State = serde_json::from_slice(&bytes)
@@ -150,8 +151,7 @@ pub fn hydrate(mut state: State, mut read: impl FnMut(&str) -> Result<Vec<u8>>) 
                     .operation
                     .as_mut()
                     .ok_or(ContractError("live.channel_artifact_invalid"))?
-                    .code = String::from_utf8(bytes)
-                    .map_err(|_| ContractError("live.channel_artifact_invalid"))?
+                    .code = bytes.into()
             }
             "transaction" => {
                 state
@@ -159,8 +159,7 @@ pub fn hydrate(mut state: State, mut read: impl FnMut(&str) -> Result<Vec<u8>>) 
                     .as_mut()
                     .ok_or(ContractError("live.channel_artifact_invalid"))?
                     .envelope
-                    .code = String::from_utf8(bytes)
-                    .map_err(|_| ContractError("live.channel_artifact_invalid"))?
+                    .code = bytes.into()
             }
             "recovery" => {
                 state
@@ -169,8 +168,7 @@ pub fn hydrate(mut state: State, mut read: impl FnMut(&str) -> Result<Vec<u8>>) 
                     .and_then(|r| r.transaction.as_mut())
                     .ok_or(ContractError("live.channel_artifact_invalid"))?
                     .envelope
-                    .code = String::from_utf8(bytes)
-                    .map_err(|_| ContractError("live.channel_artifact_invalid"))?
+                    .code = bytes.into()
             }
             _ => return Err(ContractError("live.channel_artifact_invalid")),
         }
