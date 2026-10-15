@@ -136,11 +136,14 @@ jobs:
       - name: Compare actual early CLI describe against fixed Go contract
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
         run: node tools/rust-cli-smoke.mjs .tmp/ci-cli-artifact/artifact.json --contract
+      - name: Execute fixed full Retail Source import and public CLI cases
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
+        run: node tools/rust-source-full-corpus.mjs .tmp/ci-cli-artifact/artifact.json
       - name: Snapshot only completed hash-sealed early evidence
         id: early_snapshot
         if: ${{ !cancelled() }}
         run: node tools/rust-early-evidence.mjs
-      - name: Publish early build and describe diagnostics before long tests
+      - name: Publish early build describe and sealed Retail observations
         if: ${{ !cancelled() && steps.early_snapshot.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -422,9 +425,6 @@ jobs:
       - name: Execute real Emmy doctor in an isolated workspace
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
         run: node tools/rust-cli-smoke.mjs .tmp/ci-cli-artifact/artifact.json --doctor
-      - name: Execute fixed full Retail Source import and public CLI cases
-        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
-        run: node tools/rust-source-full-corpus.mjs .tmp/ci-cli-artifact/artifact.json
       - name: Rebuild the independently verified Lua compiler identity
         id: candidate_luac
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}

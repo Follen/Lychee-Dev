@@ -799,6 +799,12 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - Windows move 路径 R3 对普通 DOS/UNC 先作词法展开再进入 extended namespace，显式 verbatim/device/native NT `\??\` 保留原始 UTF16，未使用生产 filesystem canonicalize；flags/no-replace 绝对路径限制不变。独审 R2 发现 native NT 前缀会被误作当前盘根路径，R3 已修并加实际替换回归。removal 仅改测试目录名唯一计数器。4 项 Windows 路径测试与原失败组仍 **NOT_RUN**。
 - combined addon 的第四个残留来自失败发布后的保留临时对象，但原首次失败日志没有保存 raw OS code。不能推断32/33必定无发布副作用，也不能据此删除未知对象。slot-only 父层受控 staging 仍在设计独审，本批不宣称已修复该项。历史维护/卸载须继续不认领未知残留。
 
+### 原生反馈顺序调整（2026-10-15）
+
+- `6153aa86810f27301f687a46fb0d44c23e085f8b` 已普通 push 保存前述22文件，550项组合闭包和22个远端blob逐字复核。随后本节点只将原 full Retail 静态 import/index/query 组前移至 sealed CLI 后、early artifact 前；原组命令/预算/断言不改，不重复执行。
+- 已查真实前置仅 sealed CLI、固定 tracked oracle、Git及独立 fresh home；该组自行 source sync/完整原始字节认证，不依赖后续 luac、候选package或doctor。完成后的 owner receipt/日志由既有 early snapshot 验 hash，未封存/未回收的证据仍跳过；最终完整 artifact 继续保留。workflow实际解析3jobs、所有step引用先定义、run字符串检查，以及early证据Node8项均通过。
+- 本节点 `[rust-native]` 启动有意义整批验证；既有79ef仍继续不取消。当前只是提前获得实际测量反馈的接线，尚无新增内存数字，不把静态 cold/warm 验收冒充完整 native/session 或Go性能比较。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
