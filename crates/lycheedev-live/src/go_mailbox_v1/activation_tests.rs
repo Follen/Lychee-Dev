@@ -1217,3 +1217,365 @@ fn repair_unknown_business_never_republishes_or_dispatches_before_delivery() {
     assert_eq!(after.state.operation.unwrap().id, operation.id);
     assert_eq!(after.state.transaction.unwrap().envelope, envelope);
 }
+
+#[test]
+fn repair_finalization_requires_durable_exact_operation_and_release_artifact() {
+    use crate::go_mailbox_v1::{
+        connection::doctor_repair::authenticated_repair_publication,
+        journal::save_state,
+        state::{
+            CleanupMethod, Operation, OperationPolicy, OperationStage, ResultBytes, Transaction,
+            TransactionPhase,
+        },
+    };
+    for action in ["confirm", "release"] {
+        let f = Fixture::new();
+        let counts = Rc::new(RefCell::new(Counts::default()));
+        let clock = Rc::new(Cell::new(1000));
+        let (mut service, id) = start(&f, &counts, &clock);
+        counts.borrow_mut().candidates = vec![identity('3')];
+        let control = OperationControl::default();
+        assert!(
+            service
+                .resume_with_activation(&id, &control)
+                .error
+                .is_none()
+        );
+        let book = ConnectionBook::open(&f.root).unwrap();
+        let (mut record, mut journal) = book.acquire(&id, &control).unwrap();
+        let owner = record.metadata.owner.clone();
+        let release = record.state.identity.release.clone();
+        let authorize = |e: &SlotEnvelope| {
+            authenticated_repair_publication(&book, &f.target, &owner, &release, e, &control)
+        };
+        let mut op = Operation::prepared(
+            format!("LMO-{}", "5".repeat(32)),
+            "6".repeat(32),
+            "return 1".into(),
+            5,
+            OperationPolicy::Opaque,
+        );
+        op.recovery_budget = Some(budget(1000, DEFAULT_RECOVERY_MILLIS).unwrap());
+        op.prepared_nonce = "7".repeat(32);
+        op.challenge = "8".repeat(32);
+        op.result_bytes = ResultBytes(b"{\"ok\":true}".to_vec());
+        op.report_bytes = op.result_bytes.0.len() as u32;
+        op.report_checksum = crate::go_mailbox_v1::checksum(&op.result_bytes.0);
+        op.stage = if action == "confirm" {
+            OperationStage::ConfirmReady
+        } else {
+            OperationStage::ReleaseReady
+        };
+        let envelope = SlotEnvelope {
+            schema: crate::go_mailbox_v1::SCHEMA.into(),
+            index: record.state.identity.next_slot,
+            runtime: record.state.identity.runtime.clone(),
+            owner: record.state.owner.clone(),
+            fence: record.state.identity.fence,
+            nonce: "b".repeat(32),
+            ticket: op.ticket.clone(),
+            action: action.into(),
+            guid: record.state.identity.guid.clone(),
+            build: record.state.identity.build.clone(),
+            report_bytes: if action == "release" {
+                op.report_bytes
+            } else {
+                0
+            },
+            report_checksum: if action == "release" {
+                op.report_checksum
+            } else {
+                0
+            },
+            ..SlotEnvelope::default()
+        };
+        record.state.closing = true;
+        record.state.close_budget = Some(budget(1000, DEFAULT_RECOVERY_MILLIS).unwrap());
+        record.state.operation = Some(op.clone());
+        record.state.transaction = Some(Transaction {
+            envelope: envelope.clone(),
+            phase: TransactionPhase::Intent,
+            receipt: None,
+            escape_attempts: 0,
+            input_observation: None,
+            release_wait_started_at_ms: 0,
+        });
+        assert!(authorize(&envelope).is_err());
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_finalization",
+        )
+        .unwrap();
+        let artifact_path = record
+            .paths
+            .result_directory()
+            .join(format!("{}.json", op.id));
+        if action == "release" {
+            assert!(authorize(&envelope).is_err()); // Stage alone cannot replace the artifact.
+            fs::create_dir_all(record.paths.result_directory()).unwrap();
+            let mut artifact = op.clone();
+            artifact.stage = OperationStage::ResultVerified;
+            fs::write(&artifact_path, serde_json::to_vec(&artifact).unwrap()).unwrap();
+        }
+        assert_eq!(authorize(&envelope).unwrap().envelope(), &envelope);
+        for field in ["nonce", "ticket", "action"] {
+            let mut changed = envelope.clone();
+            match field {
+                "nonce" => changed.nonce = "d".repeat(32),
+                "ticket" => changed.ticket = "e".repeat(32),
+                _ => changed.action = "commit".into(),
+            }
+            assert!(authorize(&changed).is_err());
+        }
+        // A valid journal with an inconsistent current operation is still denied.
+        for mutation in ["ticket", "stage", "fence", "cleanup"] {
+            let saved = record.state.clone();
+            match mutation {
+                "ticket" => record.state.operation.as_mut().unwrap().ticket = "e".repeat(32),
+                "stage" => record.state.operation.as_mut().unwrap().stage = OperationStage::Running,
+                "fence" => record.state.transaction.as_mut().unwrap().envelope.fence += 1,
+                _ => {
+                    record.state.operation.as_mut().unwrap().stage = OperationStage::ReleaseReady;
+                    record.state.operation.as_mut().unwrap().cleanup_method =
+                        CleanupMethod::ReloadRequired;
+                }
+            }
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_inconsistent_operation",
+            )
+            .unwrap();
+            let actual = &record.state.transaction.as_ref().unwrap().envelope;
+            assert!(authorize(actual).is_err());
+            // Keep the journal's incremented sequence when restoring fields.
+            record.state.operation = saved.operation;
+            record.state.transaction = saved.transaction;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_restore_operation",
+            )
+            .unwrap();
+        }
+        if action == "release" {
+            let original = fs::read(&artifact_path).unwrap();
+            let mut artifact: Operation = serde_json::from_slice(&original).unwrap();
+            artifact.id = format!("LMO-{}", "9".repeat(32));
+            fs::write(&artifact_path, serde_json::to_vec(&artifact).unwrap()).unwrap();
+            assert!(authorize(&envelope).is_err());
+            fs::write(&artifact_path, b"{").unwrap();
+            assert!(authorize(&envelope).is_err());
+            fs::write(&artifact_path, original).unwrap();
+        }
+        if action == "release" {
+            record
+                .state
+                .operation
+                .as_mut()
+                .unwrap()
+                .recovery_budget
+                .as_mut()
+                .unwrap()
+                .last_observed_ms += 1;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_budget_progress",
+            )
+            .unwrap();
+            assert!(authorize(&envelope).is_ok());
+            record
+                .state
+                .operation
+                .as_mut()
+                .unwrap()
+                .recovery_budget
+                .as_mut()
+                .unwrap()
+                .deadline_ms += 1;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_budget_changed",
+            )
+            .unwrap();
+            assert!(authorize(&envelope).is_err());
+            record
+                .state
+                .operation
+                .as_mut()
+                .unwrap()
+                .recovery_budget
+                .as_mut()
+                .unwrap()
+                .deadline_ms -= 1;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_budget_restore",
+            )
+            .unwrap();
+        }
+        assert!(authorize(&envelope).is_ok());
+        if action == "release" {
+            let original_artifact = fs::read(&artifact_path).unwrap();
+            let original_op = record.state.operation.clone();
+            let original_tx = record.state.transaction.clone();
+            let current = record.state.operation.as_mut().unwrap();
+            current.code = format!("--{}", "<".repeat(262142)).into();
+            current.result_bytes = ResultBytes(
+                format!("\"{}\"", "a".repeat(crate::go_mailbox_v1::MAX_PAYLOAD - 2)).into_bytes(),
+            );
+            current.report_bytes = current.result_bytes.0.len() as u32;
+            current.report_checksum = crate::go_mailbox_v1::checksum(&current.result_bytes.0);
+            let mut artifact = current.clone();
+            artifact.stage = OperationStage::ResultVerified;
+            let encoded = crate::go_mailbox_v1::journal::go_json_bytes(
+                &serde_json::to_vec(&artifact).unwrap(),
+            )
+            .unwrap();
+            assert!(encoded.len() > crate::go_mailbox_v1::journal::MAX_EVENT_BYTES);
+            fs::write(&artifact_path, encoded).unwrap();
+            let e = &mut record.state.transaction.as_mut().unwrap().envelope;
+            e.report_bytes = current.report_bytes;
+            e.report_checksum = current.report_checksum;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_large_result",
+            )
+            .unwrap();
+            assert!(authorize(&record.state.transaction.as_ref().unwrap().envelope).is_ok());
+            record.state.operation = original_op;
+            record.state.transaction = original_tx;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_restore_result",
+            )
+            .unwrap();
+            fs::write(&artifact_path, &original_artifact).unwrap();
+            // Only legacy initialization permits an absent artifact budget.
+            let mut artifact: Operation = serde_json::from_slice(&original_artifact).unwrap();
+            artifact.recovery_budget = None;
+            fs::write(&artifact_path, serde_json::to_vec(&artifact).unwrap()).unwrap();
+            assert!(authorize(&envelope).is_err());
+            record
+                .state
+                .operation
+                .as_mut()
+                .unwrap()
+                .recovery_budget
+                .as_mut()
+                .unwrap()
+                .legacy = true;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_legacy_budget",
+            )
+            .unwrap();
+            assert!(authorize(&envelope).is_ok());
+            record
+                .state
+                .operation
+                .as_mut()
+                .unwrap()
+                .recovery_budget
+                .as_mut()
+                .unwrap()
+                .legacy = false;
+            save_state(
+                &mut journal,
+                &control,
+                &mut record.state,
+                "fixture_restore_budget",
+            )
+            .unwrap();
+            fs::write(&artifact_path, original_artifact).unwrap();
+        }
+        // Completed historical runtime recovery is compatible with new work;
+        // an unfinished recovery or ended process cannot authorize finalization.
+        let mut from = record.state.identity.clone();
+        from.runtime = "1".repeat(32);
+        record.state.recovery = Some(crate::go_mailbox_v1::state::RuntimeRecovery {
+            from,
+            transaction: None,
+            phase: crate::go_mailbox_v1::state::RecoveryPhase::Complete,
+        });
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_completed_recovery",
+        )
+        .unwrap();
+        assert!(authorize(&envelope).is_ok());
+        record.state.recovery.as_mut().unwrap().phase =
+            crate::go_mailbox_v1::state::RecoveryPhase::Binding;
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_pending_recovery",
+        )
+        .unwrap();
+        assert!(authorize(&envelope).is_err());
+        record.state.recovery = None;
+        record.state.process_end = crate::go_mailbox_v1::state::ProcessEnd::ProcessExited;
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_ended_process",
+        )
+        .unwrap();
+        assert!(authorize(&envelope).is_err());
+        record.state.process_end = crate::go_mailbox_v1::state::ProcessEnd::None;
+        record.state.bound = false;
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_unbound_runtime",
+        )
+        .unwrap();
+        assert!(authorize(&envelope).is_err());
+        record.state.bound = true;
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_restore_runtime",
+        )
+        .unwrap();
+        // A torn log is not repaired or treated as permission during admission.
+        let original = fs::read(record.paths.log_path()).unwrap();
+        let mut torn = original.clone();
+        torn.extend_from_slice(b"{broken");
+        fs::write(record.paths.log_path(), torn).unwrap();
+        assert!(authorize(&envelope).is_err());
+        fs::write(record.paths.log_path(), original).unwrap();
+        record.state.closing = false;
+        save_state(
+            &mut journal,
+            &control,
+            &mut record.state,
+            "fixture_remove_close",
+        )
+        .unwrap();
+        assert!(authorize(&envelope).is_err());
+        journal.close().unwrap();
+    }
+}

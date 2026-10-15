@@ -1,0 +1,14 @@
+{
+  "schema": "lycheedev.repair-finalization.integration-snapshot.v1",
+  "freezeSha256": "bb57f3757f26253b240708b4443f7375f196f2df690aa88ffbe7360ac4ffc437",
+  "fixedWindowsCommit": "7489aa83542323253662aefc7b5217dfea008129",
+  "snapshot": "/workspace/shared/repair-finalization-bb57f375-review",
+  "archive": "/workspace/shared/repair-finalization-bb57f375-review.tar.gz",
+  "archiveSha256": "0644219e3ed06bcc0df9d1c48dc193d0665e5f6a58e9efea6ad80ac1bc0edeb2",
+  "ownedFiles": 7,
+  "dependencies": 162,
+  "goSources": 102,
+  "verification": "All source bytes in snapshot individually verified against original freeze. Complete Windows source closure uses fixed 7489 commit; no file_identity API is used by these owner edits.",
+  "concurrentDrift": "Current worktree filesystem.rs plus new filesystem/file_identity.rs belong to unrelated ongoing native-control work and are excluded from this immutable review snapshot. Original freeze remains preserved.",
+  "review": "Independent static review closed four findings; all seven owner hashes matched afterward. rustfmt and scoped diff checks passed. Rust/Cargo/Windows/game tests NOT_RUN."
+}

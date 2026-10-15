@@ -79,8 +79,12 @@ impl Fixture {
                 if !allow.get() || actual != &e {
                     return Err(error("fixture.repair_authority_denied"));
                 }
-                RepairPublication::from_authenticated_record(&identity, "3.2.0", "41/99", actual)
-                    .map_err(|e| external(e.to_string()))
+                (if actual.action == "unbind" {
+                    RepairPublication::from_authenticated_record
+                } else {
+                    RepairPublication::from_authenticated_finalization
+                })(&identity, "3.2.0", "41/99", actual)
+                .map_err(|e| external(e.to_string()))
             },
         )
         .unwrap()
@@ -255,21 +259,42 @@ fn repair_freshness_changed_publication_and_cancelled_burst_never_replay() {
 }
 
 #[test]
-fn repair_non_unbind_cleanup_keeps_original_clean_main_gate() {
+fn repair_finalization_modified_main_requires_exact_authority_even_when_clean() {
     for action in ["confirm", "release"] {
         let f = Fixture::new();
         let e = envelope(action);
         let c = control();
-        // This denied repair authority must never authorize non-unbind work.
-        let mut core = core(&f, &e, Rc::new(Cell::new(false)), true);
+        let allow = Rc::new(Cell::new(false));
+        let mut core = core(&f, &e, allow.clone(), true);
         assert!(core.publish(&c, &e).is_err());
         f.unlocked();
-        fs::write(f.addon.join("Core.lua"), b"-- fixture\n").unwrap();
+        allow.set(true);
         core.publish(&c, &e).unwrap();
         let action = invoke(&mut core, &c, &e);
         let outcome = core.input(&c, &action);
         assert!(outcome.error.is_none());
         assert_eq!(core.sender.sent.get(), 6);
+        f.unlocked();
+        assert_eq!(
+            fs::read(f.addon.join("Core.lua")).unwrap(),
+            b"modified managed main"
+        );
+    }
+}
+#[test]
+fn repair_finalization_revocation_stops_before_burst() {
+    for action in ["confirm", "release"] {
+        let f = Fixture::new();
+        let e = envelope(action);
+        let c = control();
+        let allow = Rc::new(Cell::new(true));
+        let mut core = core(&f, &e, allow.clone(), true);
+        core.publish(&c, &e).unwrap();
+        let input = invoke(&mut core, &c, &e);
+        allow.set(false);
+        let outcome = core.input(&c, &input);
+        assert!(outcome.error.is_some());
+        assert_eq!(core.sender.sent.get(), 0);
         f.unlocked();
     }
 }

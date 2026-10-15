@@ -2182,3 +2182,37 @@ fn cancelled_receipt_close_still_releases_both_locks_and_preserves_control() {
     )
     .unwrap();
 }
+
+#[test]
+fn repair_finalization_capability_rejects_business_and_copies_exact_envelope() {
+    let identity =
+        RecordedInstallationIdentity::from_authenticated_record(std::env::temp_dir()).unwrap();
+    for action in ["bind", "prepare", "commit", "unbind", "", "execute"] {
+        let e = SlotEnvelope {
+            action: action.into(),
+            ..envelope()
+        };
+        assert!(
+            RepairPublication::from_authenticated_finalization(&identity, "3.2.0", "123/456", &e)
+                .is_err()
+        );
+    }
+    for action in ["confirm", "release"] {
+        let e = SlotEnvelope {
+            action: action.into(),
+            ..envelope()
+        };
+        let cap =
+            RepairPublication::from_authenticated_finalization(&identity, "3.2.0", "123/456", &e)
+                .unwrap();
+        assert_eq!(cap.envelope(), &e);
+        for (release, consumer) in [("", "123/456"), ("3.2.0", "")] {
+            assert!(
+                RepairPublication::from_authenticated_finalization(
+                    &identity, release, consumer, &e
+                )
+                .is_err()
+            );
+        }
+    }
+}

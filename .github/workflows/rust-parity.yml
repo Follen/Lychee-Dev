@@ -348,6 +348,21 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-sql-resource-lifetime --one-shot -- test --locked --offline -p lycheedev-data --lib resource::temporary_tests -j 1
+      - name: Run SQL semantic catalogs and source mapping fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-semantic-sql --one-shot -- test --locked --offline -p lycheedev-data --test semantic_sql_parity -j 1
+      - name: Run SQL logical and safety ledger fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-sql-logical-resource --one-shot -- test --locked --offline -p lycheedev-data --lib resource::logical_tests -j 1
+      - name: Run SQL exact resource output fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-sql-resource-output --one-shot -- test --locked --offline -p lycheedev-data --test sql_resource_parity -j 1
+      - name: Run definition publication conflict recharge fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-definition-conflict --one-shot -- test --locked --offline -p lycheedev-data --lib definitions:: -j 1
+      - name: Run strict metadata create and legacy idempotence fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-metadata-strict-create --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::strict_create_tests -j 1
       - name: Run effective SQL overlays and exact parameter integration fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

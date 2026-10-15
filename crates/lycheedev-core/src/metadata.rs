@@ -112,6 +112,20 @@ impl Metadata {
         let raw = serde_json::to_vec(value)?;
         self.put_serialized(key, &raw, expected, || Ok(()))
     }
+    /// Atomic creation: an existing key is a typed conflict even when its
+    /// document bytes match. Existing put callers retain byte idempotence.
+    pub fn create<T: Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
+        let raw = serde_json::to_vec(value)?;
+        self.put_serialized_policy(key, &raw, None, true, || Ok(()))
+    }
+    pub fn create_controlled<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        control: &crate::control::OperationControl,
+    ) -> Result<()> {
+        self.put_controlled_policy(key, value, None, control, true, || {})
+    }
     /// Cancellation-aware publication. SQLite never sleeps inside an attempt:
     /// lock contention is retried with a stop check before every statement,
     /// including COMMIT. Dropping a stopped transaction rolls it back.
@@ -130,6 +144,17 @@ impl Metadata {
         value: &T,
         expected: Option<i64>,
         control: &crate::control::OperationControl,
+        on_busy: impl FnMut(),
+    ) -> Result<()> {
+        self.put_controlled_policy(key, value, expected, control, false, on_busy)
+    }
+    fn put_controlled_policy<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        expected: Option<i64>,
+        control: &crate::control::OperationControl,
+        strict_create: bool,
         mut on_busy: impl FnMut(),
     ) -> Result<()> {
         control.check()?;
@@ -164,7 +189,7 @@ impl Metadata {
                         )
                     })?;
                 }
-                Some((_, true)) if expected.is_none() => return control.check(),
+                Some((_, true)) if expected.is_none() && !strict_create => return control.check(),
                 None if expected.is_none() => {
                     checked_sql(control, until, &mut on_busy, || {
                         transaction.execute(
@@ -203,6 +228,16 @@ impl Metadata {
         key: &str,
         raw: &[u8],
         expected: Option<i64>,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        self.put_serialized_policy(key, raw, expected, false, check)
+    }
+    fn put_serialized_policy(
+        &mut self,
+        key: &str,
+        raw: &[u8],
+        expected: Option<i64>,
+        strict_create: bool,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<()> {
         if raw.len() > 1_048_576 {
@@ -226,7 +261,7 @@ impl Metadata {
                     "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
                     params![key, raw],
                 )?;
-            } else if expected.is_none() && same_bytes {
+            } else if expected.is_none() && same_bytes && !strict_create {
                 return Ok(());
             } else {
                 return Err(ToolkitError::new(
@@ -769,5 +804,112 @@ mod controlled_tests {
         assert_eq!(metadata.generation("capture/source").unwrap(), Some(1));
         drop(metadata);
         std::fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod strict_create_tests {
+    use super::*;
+    use crate::control::{OperationControl, TrackedCancellation};
+    use std::time::{Duration, Instant};
+    #[test]
+    fn strict_create_conflicts_preserve_legacy_put_idempotence() {
+        let home = std::env::temp_dir().join(format!(
+            "lychee-strict-create-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        crate::workspace::initialize(&home).unwrap();
+        let mut metadata = Metadata::open(&home, true).unwrap();
+        let control = OperationControl::default();
+        for controlled in [false, true] {
+            let key = if controlled {
+                "strict/controlled"
+            } else {
+                "strict/plain"
+            };
+            let create = |metadata: &mut Metadata, value: bool| {
+                if controlled {
+                    metadata.create_controlled(key, &value, &control)
+                } else {
+                    metadata.create(key, &value)
+                }
+            };
+            create(&mut metadata, true).unwrap();
+            assert_eq!(metadata.generation(key).unwrap(), Some(1));
+            for value in [true, false] {
+                assert_eq!(
+                    create(&mut metadata, value).unwrap_err().code,
+                    "vault.generation_conflict"
+                );
+                assert_eq!(metadata.read::<bool>(key).unwrap(), true);
+                assert_eq!(metadata.generation(key).unwrap(), Some(1));
+            }
+            metadata.put(key, &true, None).unwrap();
+            metadata.put_controlled(key, &true, None, &control).unwrap();
+            assert_eq!(metadata.generation(key).unwrap(), Some(1));
+        }
+        let cancellation = TrackedCancellation::new();
+        let cancelled = OperationControl::tracked(
+            Instant::now() + Duration::from_secs(10),
+            cancellation.clone(),
+        );
+        cancellation.cancel();
+        assert_eq!(
+            metadata
+                .create_controlled("strict/cancelled", &true, &cancelled)
+                .unwrap_err()
+                .code,
+            "command.cancelled"
+        );
+        assert_eq!(metadata.generation("strict/cancelled").unwrap(), None);
+        let expired = OperationControl::uncancelable(Instant::now());
+        assert_eq!(
+            metadata
+                .create_controlled("strict/expired", &true, &expired)
+                .unwrap_err()
+                .code,
+            "command.deadline"
+        );
+        assert_eq!(metadata.generation("strict/expired").unwrap(), None);
+        metadata.create("strict/recovery", &true).unwrap();
+    }
+    #[test]
+    fn strict_controlled_create_preserves_cancellation_during_lock_wait() {
+        let home = std::env::temp_dir().join(format!(
+            "lychee-strict-create-lock-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        crate::workspace::initialize(&home).unwrap();
+        let mut metadata = Metadata::open(&home, true).unwrap();
+        let blocker = Connection::open(home.join("state/toolkit.sqlite")).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        let cancellation = TrackedCancellation::new();
+        let control = OperationControl::tracked(
+            Instant::now() + Duration::from_secs(10),
+            cancellation.clone(),
+        );
+        let mut observed = false;
+        let error = metadata
+            .put_controlled_policy("strict/blocked", &true, None, &control, true, || {
+                observed = true;
+                cancellation.cancel();
+            })
+            .unwrap_err();
+        assert!(observed);
+        assert_eq!(error.code, "command.cancelled");
+        blocker.execute_batch("ROLLBACK;").unwrap();
+        assert_eq!(metadata.generation("strict/blocked").unwrap(), None);
+        metadata
+            .create_controlled("strict/blocked", &true, &OperationControl::default())
+            .unwrap();
+        assert_eq!(metadata.generation("strict/blocked").unwrap(), Some(1));
     }
 }

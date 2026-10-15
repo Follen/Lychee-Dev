@@ -752,6 +752,20 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 原adapter R2依赖副本含另一在途native control修改且缺其子模块，故不以该副本冒充完整组合。新 `adapter-native-integration.json` 从固定a3c10d1完整crate/tool/recipe源＋已审adapter owner建立542文件组合，采用原正式native_research.rs；control R1独审P2指出sidecar writer按路径重开未绑定parent原file，**本批明确排除**并继续修，不将未审修复混入测试树。
 - 本批用 `[rust-native]` 触发有意义的真实Windows验收，优先取得cold/warm静态及native阶段内存、默认CLI和adapter11测试结果。全仓native仍可能失败；不等全部功能才测内存，也不把sampler实现等同已测。Source预算传递/phase和callback修复各自继续，不扩大deadline掩盖失败。
 
+### SQL 逻辑资源计费与 modified-main 修复收尾
+
+- SQL资源R2在同一个原子准入中分别维护Go逻辑账与Rust安全账。definition逻辑metadata按4×实际字节及ceil(bytes/65536)decode计费，安全保留仍按8×；executor只预留一次64MiB逻辑额度，其具体执行与发布仍受独立安全账约束。resources在source复核/SQL执行之后、发布前快照。此片限定纯语义/无物理provider；physical/effective逻辑计费仍未全部审齐，不能整体冒称等价或RSS。
+- 独审发现cold definition并发publication winner路径少了Go重复read/charge/validation。R2新增Core原子strict create/create_controlled，完全保留旧put/put_controlled同字节幂等；same-byte既有记录也严格conflict，事务退出后复用cached read重收费/rehash/validation，再比较内容。预算或validation原cause优先，取消/锁等待/COMMIT回滚边界保留。五个确定性loopback竞态和两个Core严格创建测试新增，旧batch明确metadata4×/retained8×。14个映射声明全部 **NOT_RUN**；原审复核通过，新freeze与R1历史均保留。
+- Modified-main repair现在仅允许精确原CON的confirm/release收尾：每次重新认证owner/target/transaction/original operation/ticket/fence和durable阶段。confirm须report_candidate；release还须读取验证standalone结果artifact，不凭release_ready字符串授予。prepare/commit仍走clean inventory，不给予通用豁免。原fresh INPUT、同publication lease及burst约束保留。
+- Finalization freeze `bb57f3757f26253b240708b4443f7375f196f2df690aa88ffbe7360ac4ffc437`，七owner/162deps/102Go来源。独审关闭artifact预算演进、completed历史恢复、Go escaped结果大于2MiB上界、legacy预算初始化四项；17个repair fixture仍 **NOT_RUN**。组合使用固定7489 Windows closure，排除另一路正在修改的file_identity helper，原freeze与snapshot hash均保留。
+- 这批SQL五组独立测试入口已接Windows CI：semantic catalog、logical ledger、resource output、definition conflicts、strict metadata create。普通push仅持久化，不替换在跑7489原生证据；新增测试等下一意义批次执行。
+- 固定Go3057已刻意退役旧OP/BTP execution/resume，不应恢复旧协议。剩余迁移范围是只读status/session、prepared-only OP cancel、显式OP/BTP abandon及exact owner退役、resume准确exit2退役错误。当前migration_incomplete错误仍需对齐；此前笼统“OP/BTP未齐”不代表必须重建旧执行链。
+
+### 7489 原生批编译阻断（2026-10-15）
+
+- run38670108226的Emmy job116210989364已SUCCESS，最终日志数量尚待artifact核验。product all-target及sealed CLI build均失败；不是采样正在正常进行。early artifact11944491855 ZIP SHA256 `361c8a6af8999558e6423075ff210fc88088b4b81385c0110a290dbd9ef51b59` 及119条index文件hash已核。
+- 两个失败均为Delivery formal_repair/publication.rs100 的E0282：闭包result的错误类型在map_err字段访问前无法推断。最小修复为第67行显式 `let result: Result<bool>`，不改变闭包、原cause或retention语义，父独立窄核通过；当前尚未重新编译，不能称编译修复已验证。原错误日志保留。由于无sealed CLI，本批不能提供所需完整Retail内存结果；修后再次原生验证，不以预算推算占用。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

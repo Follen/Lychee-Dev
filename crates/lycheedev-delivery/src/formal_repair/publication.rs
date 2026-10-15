@@ -64,7 +64,7 @@ pub(super) fn publish_with(
             previous,
             next: wanted.clone(),
         };
-        let result = (|| {
+        let result: Result<bool> = (|| {
             storage::atomic_write_controlled(
                 &staging.join(snapshot::OWNER),
                 &storage::bounded_json(

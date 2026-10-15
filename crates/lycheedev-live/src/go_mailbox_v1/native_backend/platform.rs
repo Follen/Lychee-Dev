@@ -59,7 +59,9 @@ impl Publications for DiskPublications {
         control: &'a OperationControl,
         envelope: &SlotEnvelope,
     ) -> ChannelResult<Box<dyn Publication + 'a>> {
-        if self.repair.is_none() || envelope.action == "unbind" {
+        if self.repair.is_none()
+            || matches!(envelope.action.as_str(), "unbind" | "confirm" | "release")
+        {
             return self.acquire(control);
         }
         // A recorded path alone cannot authorize ordinary publication. Obtain
@@ -120,7 +122,9 @@ impl Publication for DiskLease<'_> {
     }
     fn publish(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()> {
         let result = match &self.repair {
-            Some(authority) if envelope.action == "unbind" => {
+            Some(authority)
+                if matches!(envelope.action.as_str(), "unbind" | "confirm" | "release") =>
+            {
                 let capability = authority.authorize(consumer, envelope, self.control)?;
                 self.lease.publish_repair(&capability)
             }
@@ -156,7 +160,11 @@ impl Publication for DiskLease<'_> {
         }
     }
     fn verify(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()> {
-        if let Some(authority) = self.repair.as_ref().filter(|_| envelope.action == "unbind") {
+        if let Some(authority) = self
+            .repair
+            .as_ref()
+            .filter(|_| matches!(envelope.action.as_str(), "unbind" | "confirm" | "release"))
+        {
             let capability = authority.authorize(consumer, envelope, self.control)?;
             self.lease
                 .verify_repair(&capability)
@@ -168,7 +176,11 @@ impl Publication for DiskLease<'_> {
         }
     }
     fn verify_route(&mut self, envelope: &SlotEnvelope) -> ChannelResult<()> {
-        if let Some(authority) = self.repair.as_ref().filter(|_| envelope.action == "unbind") {
+        if let Some(authority) = self
+            .repair
+            .as_ref()
+            .filter(|_| matches!(envelope.action.as_str(), "unbind" | "confirm" | "release"))
+        {
             let capability = authority.authorize(&authority.consumer, envelope, self.control)?;
             self.lease
                 .verify_repair_route(&capability)

@@ -66,13 +66,44 @@ pub(crate) fn authenticated_repair_publication(
         || !state.closing
         || state.closed
         || state.close_budget.is_none()
-        || envelope.action != "unbind"
+        || !repair_action_matches_operation(state, envelope)
         || state
             .transaction
             .as_ref()
             .is_none_or(|tx| tx.envelope != *envelope)
     {
         return Err(error("live.channel_repair_publication_invalid"));
+    }
+    if envelope.action == "release" {
+        let operation = state.operation.as_ref().expect("matched release operation");
+        let path = record
+            .paths
+            .result_directory()
+            .join(format!("{}.json", operation.id));
+        let bytes = durable_journal::read_file(
+            &path,
+            // A journal snapshot carries metadata, while the standalone artifact
+            // embeds up to 6x JSON-escaped 256 KiB code and base64 512 KiB
+            // result. Three event bounds cover all three with headroom.
+            3 * super::super::journal::MAX_EVENT_BYTES,
+            "live.channel_repair_publication_invalid",
+            control,
+        )?
+        .ok_or_else(|| error("live.channel_repair_publication_invalid"))?;
+        let artifact: super::super::state::Operation = serde_json::from_slice(&bytes)
+            .map_err(|_| error("live.channel_repair_publication_invalid"))?;
+        if !repair_budget_progression(
+            artifact.recovery_budget.as_ref(),
+            operation.recovery_budget.as_ref(),
+        ) {
+            return Err(error("live.channel_repair_publication_invalid"));
+        }
+        let mut expected = operation.clone();
+        expected.recovery_budget = artifact.recovery_budget.clone();
+        expected.stage = super::super::state::OperationStage::ResultVerified;
+        if artifact != expected {
+            return Err(error("live.channel_repair_publication_invalid"));
+        }
     }
     let addon = lycheedev_delivery::deploy::destination(&super::native::recorded_addon_directory(
         &record.metadata.target,
@@ -85,15 +116,76 @@ pub(crate) fn authenticated_repair_publication(
         "{}/{}",
         target.window.process_id, target.window.process_started_at
     );
-    let capability = RepairPublication::from_authenticated_record(
-        &identity,
-        original_release,
-        &consumer,
-        envelope,
-    )
-    .map_err(repair_publication_error)?;
+    let constructor = if envelope.action == "unbind" {
+        RepairPublication::from_authenticated_record
+    } else {
+        RepairPublication::from_authenticated_finalization
+    };
+    let capability = constructor(&identity, original_release, &consumer, envelope)
+        .map_err(repair_publication_error)?;
     check_control(control)?;
     Ok(capability)
+}
+// State is read from the durable journal and validated before this check.
+// Confirm has a durable candidate, not a durable verified result yet. Release
+// requires the stage written only after write_result + result_durable succeed.
+fn repair_action_matches_operation(
+    state: &super::super::state::State,
+    envelope: &super::super::state::SlotEnvelope,
+) -> bool {
+    use super::super::state::{CleanupMethod, OperationStage, ProcessEnd, RecoveryPhase};
+    if envelope.action == "unbind" {
+        return true;
+    }
+    let Some(op) = &state.operation else {
+        return false;
+    };
+    if !state.bound
+        || state.process_end != ProcessEnd::None
+        || state.runtime_end.is_some()
+        || state
+            .recovery
+            .as_ref()
+            .is_some_and(|r| r.phase != RecoveryPhase::Complete)
+        || envelope.fence != state.identity.fence
+        || envelope.ticket != op.ticket
+        || op.cleanup_method != CleanupMethod::None
+    {
+        return false;
+    }
+    match envelope.action.as_str() {
+        "confirm" => op.stage == OperationStage::ConfirmReady,
+        "release" => {
+            op.stage == OperationStage::ReleaseReady
+                && envelope.report_bytes == op.report_bytes
+                && envelope.report_checksum == op.report_checksum
+        }
+        _ => false,
+    }
+}
+// Recovery observations can advance after the immutable result artifact was
+// written. Ignore only that projection, never reset its origin or deadline.
+fn repair_budget_progression(
+    before: Option<&super::super::state::DurableBudget>,
+    after: Option<&super::super::state::DurableBudget>,
+) -> bool {
+    match (before, after) {
+        (None, None) => true,
+        // Legacy resume creates this budget once; it does not replace an
+        // earlier artifact deadline (the artifact had none).
+        (None, Some(b)) => b.legacy && b.validate().is_ok(),
+        (Some(a), Some(b)) => {
+            a.validate().is_ok()
+                && b.validate().is_ok()
+                && a.started_at_ms == b.started_at_ms
+                && a.deadline_ms == b.deadline_ms
+                && a.last_observed_ms <= b.last_observed_ms
+                && (!a.exhausted || b.exhausted)
+                && (!a.clock_rollback || b.clock_rollback)
+                && a.legacy == b.legacy
+        }
+        _ => false,
+    }
 }
 fn repair_publication_error(
     cause: lycheedev_delivery::slot_publication::PublicationError,

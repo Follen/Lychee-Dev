@@ -1,4 +1,4 @@
-//! Narrow original-CON unbind publication. The ordinary NativeCore still owns
+//! Narrow original-CON cleanup publication. The ordinary NativeCore still owns
 //! fresh INPUT, one-use witnesses, same-lease verification and the entire burst.
 #![forbid(unsafe_code)]
 use super::*;
@@ -19,10 +19,12 @@ impl RepairAuthorization {
         control: &OperationControl,
     ) -> ChannelResult<RepairPublication> {
         check_control(control)?;
-        if envelope.action != "unbind" || consumer != self.consumer {
+        if !matches!(envelope.action.as_str(), "unbind" | "confirm" | "release")
+            || consumer != self.consumer
+        {
             return Err(error("live.channel_repair_publication_invalid"));
         }
-        // Re-read the original durable close intent and exact unbind while the
+        // Re-read the original durable close intent and exact cleanup transaction while the
         // caller holds its CON execution lease. No cached proof widens authority.
         let capability = (self.authenticate)(envelope, control)?;
         if capability.consumer() != consumer || capability.envelope() != envelope {
@@ -51,10 +53,10 @@ impl DiskPublications {
 impl NativeBackend {
     /// The caller must hold the original CON execution lease throughout this
     /// backend's life. `authenticate` must read its authenticated journal under
-    /// the SAME control, require durable closing and exact current unbind, and
+    /// the SAME control, require durable closing and exact current cleanup transaction with its operation stage, and
     /// derive the capability from that original target/release/consumer only.
     /// It is called at publication and pre-burst verification, not at open:
-    /// RequestClose and the unbind transaction are persisted after native open.
+    /// RequestClose and cleanup transaction intents are persisted after native open.
     pub(crate) fn open_for_repair(
         target: MailboxWindow,
         authenticated_addon: PathBuf,

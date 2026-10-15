@@ -11,7 +11,7 @@ use std::{
     },
     time::Instant,
 };
-#[derive(Default, Clone, Copy, Debug, Serialize)]
+#[derive(Default, Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Cost {
     pub retained_bytes: u64,
@@ -55,11 +55,14 @@ impl Cost {
 #[derive(Default)]
 struct State {
     used: Cost,
+    logical: Cost,
+    logical_scratch: u64,
     once: BTreeSet<String>,
 }
 pub struct Budget {
     limits: Cost,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
+    safety_only: bool,
     pub deadline: Instant,
     cancel: Option<Arc<AtomicBool>>,
     control: Option<OperationControl>,
@@ -70,6 +73,19 @@ pub(crate) struct RetainedReservation<'a> {
     budget: &'a Budget,
     bytes: u64,
     committed: bool,
+}
+/// Go logical scratch is separate from Rust allocation ownership and is never
+/// included in the public lifetime-usage snapshot.
+pub(crate) struct LogicalScratch<'a> {
+    budget: &'a Budget,
+    bytes: u64,
+}
+impl Drop for LogicalScratch<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.budget.state.lock() {
+            state.logical_scratch -= self.bytes;
+        }
+    }
 }
 impl RetainedReservation<'_> {
     /// Extend only this owner's refundable allocation. Failed admission leaves
@@ -93,10 +109,13 @@ impl RetainedReservation<'_> {
                     "Retained allocation overflow",
                 )
             })?;
-        self.budget.charge(Cost {
-            retained_bytes: bytes,
-            ..Default::default()
-        })?;
+        self.budget.charge_split(
+            Cost::default(),
+            Cost {
+                retained_bytes: bytes,
+                ..Default::default()
+            },
+        )?;
         self.bytes = total;
         Ok(())
     }
@@ -118,7 +137,8 @@ impl Budget {
     pub fn new(limits: Cost, deadline: Instant, cancel: Option<Arc<AtomicBool>>) -> Self {
         Self {
             limits,
-            state: Mutex::new(State::default()),
+            state: Arc::new(Mutex::new(State::default())),
+            safety_only: false,
             deadline,
             cancel,
             control: None,
@@ -130,6 +150,75 @@ impl Budget {
             control: Some(control),
             ..Self::new(limits, deadline, None)
         }
+    }
+    /// A view sharing the same hard safety caps, cancellation and allocations,
+    /// but excluding Rust-only request/executor/publication costs from Go usage.
+    pub(crate) fn safety_only(&self) -> Self {
+        Self {
+            limits: self.limits,
+            state: self.state.clone(),
+            safety_only: true,
+            deadline: self.deadline,
+            cancel: self.cancel.clone(),
+            control: self.control.clone(),
+        }
+    }
+    pub(crate) fn logical_snapshot(&self) -> Result<Cost> {
+        self.state
+            .lock()
+            .map(|s| s.logical)
+            .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))
+    }
+    /// Both ledgers are checked before either changes. Safety retained bytes
+    /// may exceed Go's allocation estimate without inflating metadata usage.
+    pub(crate) fn charge_split(&self, logical: Cost, safety: Cost) -> Result<()> {
+        self.check()?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
+        let logical = if self.safety_only {
+            Cost::default()
+        } else {
+            logical
+        };
+        let next_logical = self.admitted_logical(&state, logical)?;
+        let next_safety = self.admitted(state.used, safety)?;
+        state.logical = next_logical;
+        state.used = next_safety;
+        Ok(())
+    }
+    pub(crate) fn reserve_logical_scratch(&self, bytes: u64) -> Result<LogicalScratch<'_>> {
+        self.check()?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
+        let bytes = if self.safety_only { 0 } else { bytes };
+        let current = state.logical.retained_bytes + state.logical_scratch;
+        if bytes > self.limits.retained_bytes - current {
+            return Err(fault(
+                "records.query_resource_budget",
+                3,
+                "Whole query scratch_bytes budget exceeded",
+            ));
+        }
+        state.logical_scratch += bytes;
+        Ok(LogicalScratch {
+            budget: self,
+            bytes,
+        })
+    }
+    fn admitted_logical(&self, state: &State, cost: Cost) -> Result<Cost> {
+        let next = self.admitted(state.logical, cost)?;
+        if state.logical_scratch > self.limits.retained_bytes - next.retained_bytes {
+            return Err(fault(
+                "records.query_resource_budget",
+                3,
+                "Whole query scratch_bytes budget exceeded",
+            ));
+        }
+        Ok(next)
     }
     pub fn token(&self) -> Option<&AtomicBool> {
         self.control
@@ -173,7 +262,7 @@ impl Budget {
         self.admit(&mut state, cost)
     }
     pub(crate) fn reserve_retained(&self, bytes: usize) -> Result<RetainedReservation<'_>> {
-        self.charge(Cost::retained(bytes))?;
+        self.charge_split(Cost::default(), Cost::retained(bytes))?;
         Ok(RetainedReservation {
             budget: self,
             bytes: bytes as u64,
@@ -201,7 +290,18 @@ impl Budget {
         Ok(())
     }
     fn admit(&self, state: &mut State, cost: Cost) -> Result<()> {
-        let mut next = state.used;
+        let logical = if self.safety_only {
+            Cost::default()
+        } else {
+            cost
+        };
+        let next_logical = self.admitted_logical(&state, logical)?;
+        let next_safety = self.admitted(state.used, cost)?;
+        state.logical = next_logical;
+        state.used = next_safety;
+        Ok(())
+    }
+    fn admitted(&self, mut next: Cost, cost: Cost) -> Result<Cost> {
         for (used, limit, add, name) in [
             (
                 &mut next.retained_bytes,
@@ -243,8 +343,7 @@ impl Budget {
             }
             *used += add;
         }
-        state.used = next;
-        Ok(())
+        Ok(next)
     }
 }
 
@@ -310,5 +409,80 @@ mod temporary_tests {
         persistent.grow(20).unwrap();
         persistent.commit();
         assert_eq!(budget.snapshot().unwrap().retained_bytes, 30);
+    }
+}
+
+#[cfg(test)]
+mod logical_tests {
+    use super::*;
+    use std::time::Duration;
+    fn budget() -> Budget {
+        Budget::new(
+            Cost {
+                retained_bytes: 100,
+                metadata_bytes: 50,
+                decode_work: 100_000_000,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(30),
+            None,
+        )
+    }
+    #[test]
+    fn split_charges_are_atomic_in_both_directions() {
+        let b = budget();
+        b.charge_split(Cost::retained(40), Cost::retained(80))
+            .unwrap();
+        assert!(
+            b.charge_split(Cost::retained(1), Cost::retained(21))
+                .is_err()
+        );
+        assert_eq!(b.logical_snapshot().unwrap().retained_bytes, 40);
+        assert_eq!(b.snapshot().unwrap().retained_bytes, 80);
+        assert!(
+            b.charge_split(Cost::retained(61), Cost::retained(1))
+                .is_err()
+        );
+        assert_eq!(b.logical_snapshot().unwrap().retained_bytes, 40);
+        assert_eq!(b.snapshot().unwrap().retained_bytes, 80);
+    }
+    #[test]
+    fn safety_view_and_scratch_never_release_another_owners_charge() {
+        let b = budget();
+        b.charge_split(Cost::retained(64), Cost::default()).unwrap();
+        let safety = b.safety_only();
+        let scratch = b.reserve_logical_scratch(36).unwrap();
+        assert!(b.charge_split(Cost::retained(1), Cost::default()).is_err());
+        safety.charge(Cost::retained(90)).unwrap();
+        let reservation = safety.reserve_retained(10).unwrap();
+        drop(scratch);
+        assert!(safety.charge(Cost::retained(1)).is_err());
+        drop(reservation);
+        assert_eq!(b.snapshot().unwrap().retained_bytes, 90);
+        assert_eq!(b.logical_snapshot().unwrap().retained_bytes, 64);
+        assert!(safety.charge(Cost::retained(11)).is_err());
+    }
+    #[test]
+    fn decode_limit_and_cancellation_apply_to_both_views() {
+        let b = budget();
+        b.charge(Cost::work(100_000_000)).unwrap();
+        assert!(b.charge(Cost::work(1)).is_err());
+        assert!(b.safety_only().charge(Cost::work(1)).is_err());
+        assert_eq!(b.logical_snapshot().unwrap().decode_work, 100_000_000);
+        let token = Arc::new(AtomicBool::new(true));
+        let cancelled = Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(30),
+            Some(token),
+        );
+        assert_eq!(
+            cancelled
+                .safety_only()
+                .charge(Cost::default())
+                .unwrap_err()
+                .code,
+            "operation.cancelled"
+        );
+        assert_eq!(cancelled.logical_snapshot().unwrap(), Cost::default());
     }
 }

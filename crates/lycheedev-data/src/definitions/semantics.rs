@@ -296,12 +296,20 @@ pub(crate) fn source(
                         _ => 0,
                     })
                     .sum::<usize>();
-            budget.charge(Cost {
-                retained_bytes: 256 + strings as u64,
-                metadata_bytes: 256,
-                decode_work: 1,
-                ..Default::default()
-            })?;
+            budget.charge_split(
+                Cost {
+                    retained_bytes: 256,
+                    metadata_bytes: 256,
+                    decode_work: 1,
+                    ..Default::default()
+                },
+                Cost {
+                    retained_bytes: 256 + strings as u64,
+                    metadata_bytes: 256,
+                    decode_work: 1,
+                    ..Default::default()
+                },
+            )?;
             rows.push(vec![
                 Scalar::String(mapping.field.clone()),
                 Scalar::String(mapping.kind.clone()),

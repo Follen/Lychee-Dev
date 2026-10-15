@@ -289,6 +289,70 @@ pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
         .build()
         .new_agent()
 }
+// Both ordinary hits and publication conflicts must rehash, charge and parse.
+// Go definitions.load calls its read closure again before comparing the winner.
+fn read_cached_definition(
+    home: &Path,
+    metadata: &mut Metadata,
+    key: &str,
+    url: &str,
+    budget: Option<&crate::resource::Budget>,
+    control: Option<&OperationControl>,
+    validate: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<(Value, Vec<u8>)> {
+    if let Some(control) = control {
+        control.check()?;
+    }
+    if let Some(budget) = budget {
+        budget.check()?;
+    }
+    let object: Object = metadata.read(key)?;
+    if object.url != url {
+        return Err(fault(
+            "records.definition_identity",
+            4,
+            "Cached definition URL differs",
+        ));
+    }
+    if let Some(budget) = budget {
+        let bytes = object.blob["bytes"]
+            .as_u64()
+            .filter(|v| *v <= 4 << 20)
+            .ok_or_else(|| {
+                fault(
+                    "records.definition_identity",
+                    4,
+                    "Invalid cached definition size",
+                )
+            })?;
+        budget.charge_split(
+            definition_cost(bytes),
+            crate::resource::Cost {
+                retained_bytes: bytes * 8,
+                ..definition_cost(bytes)
+            },
+        )?;
+    }
+    let raw = match control {
+        Some(control) => evidence::read_blob_bounded(home, &object.blob, 4 << 20, control)?,
+        None => evidence::read_blob(home, &object.blob, 4 << 20)?,
+    };
+    if let Some(control) = control {
+        control.check()?;
+    }
+    if let Some(budget) = budget {
+        budget.check()?;
+    }
+    validate(&raw)?;
+    if let Some(control) = control {
+        control.check()?;
+    }
+    if let Some(budget) = budget {
+        budget.check()?;
+    }
+    Ok((object.blob, raw))
+}
+
 fn load(
     home: &Path,
     url: &str,
@@ -313,37 +377,16 @@ fn load(
         .ok_or_else(|| fault("records.resource_limit", 3, "Definition deadline exceeded"))?;
     let key = format!("definition/{}", storage::sha256(url.as_bytes()));
     let mut metadata = Metadata::open(home, true)?;
-    match metadata.read::<Object>(&key) {
-        Ok(object) => {
-            if object.url != url {
-                return Err(fault(
-                    "records.definition_identity",
-                    4,
-                    "Cached definition URL differs",
-                ));
-            }
-            if let Some(budget) = budget {
-                let bytes = object.blob["bytes"]
-                    .as_u64()
-                    .filter(|v| *v <= 4 << 20)
-                    .ok_or_else(|| {
-                        fault(
-                            "records.definition_identity",
-                            4,
-                            "Invalid cached definition size",
-                        )
-                    })?;
-                budget.charge(crate::resource::Cost::metadata(bytes as usize * 8))?;
-            }
-            let raw = match control {
-                Some(control) => evidence::read_blob_bounded(home, &object.blob, 4 << 20, control)?,
-                None => evidence::read_blob(home, &object.blob, 4 << 20)?,
-            };
-            check()?;
-            validate(&raw)?;
-            check()?;
-            return Ok((object.blob, raw));
-        }
+    match read_cached_definition(
+        home,
+        &mut metadata,
+        &key,
+        url,
+        budget,
+        control,
+        &mut validate,
+    ) {
+        Ok(cached) => return Ok(cached),
         Err(error) if error.code == "vault.record_missing" => {}
         Err(error) => return Err(error),
     }
@@ -372,6 +415,9 @@ fn load(
             format!("Definition HTTP status {}", response.status()),
         ));
     }
+    let logical_scratch = budget
+        .map(|budget| budget.reserve_logical_scratch(8 << 20))
+        .transpose()?;
     let mut raw = Vec::new();
     let mut reader = response.body_mut().as_reader().take((4 << 20) + 1);
     let mut chunk = [0; 65536];
@@ -387,12 +433,18 @@ fn load(
             break;
         }
         if let Some(budget) = budget {
-            budget.charge(crate::resource::Cost {
-                retained_bytes: n as u64 * 8,
-                metadata_bytes: n as u64 * 8,
-                network_bytes: n as u64,
-                ..Default::default()
-            })?;
+            budget.charge_split(
+                crate::resource::Cost {
+                    network_bytes: n as u64,
+                    ..Default::default()
+                },
+                crate::resource::Cost {
+                    retained_bytes: n as u64 * 8,
+                    metadata_bytes: 0,
+                    network_bytes: n as u64,
+                    ..Default::default()
+                },
+            )?;
         }
         raw.extend_from_slice(&chunk[..n]);
     }
@@ -403,6 +455,17 @@ fn load(
             "Definition byte budget exceeded",
         ));
     }
+    if let Some(budget) = budget {
+        let logical = definition_cost(raw.len() as u64);
+        budget.charge_split(
+            logical,
+            crate::resource::Cost {
+                retained_bytes: 0,
+                ..logical
+            },
+        )?;
+    }
+    drop(logical_scratch);
     check()?;
     validate(&raw)?;
     check()?;
@@ -416,14 +479,22 @@ fn load(
         blob: blob.clone(),
     };
     let published = match control {
-        Some(control) => metadata.put_controlled(&key, &object, None, control),
-        None => metadata.put(&key, &object, None),
+        Some(control) => metadata.create_controlled(&key, &object, control),
+        None => metadata.create(&key, &object),
     };
     match published {
         Ok(()) => {}
         Err(error) if error.code == "vault.generation_conflict" => {
-            let other: Object = metadata.read(&key)?;
-            if other.url != url || other.blob != blob {
+            let (other, _) = read_cached_definition(
+                home,
+                &mut metadata,
+                &key,
+                url,
+                budget,
+                control,
+                &mut validate,
+            )?;
+            if other != blob {
                 return Err(fault(
                     "records.definition_identity",
                     4,
@@ -476,6 +547,16 @@ pub(crate) fn prepare_many_budgeted(
     budget: Option<&crate::resource::Budget>,
 ) -> Result<Vec<(Bundle, Vec<u8>)>> {
     prepare_many_controlled(home, commit, names, offline, deadline, budget, None)
+}
+
+// Fixed Go definitions.go: charge actual bytes, not the HTTP buffer bound.
+fn definition_cost(bytes: u64) -> crate::resource::Cost {
+    crate::resource::Cost {
+        retained_bytes: bytes * 4,
+        metadata_bytes: bytes * 4,
+        decode_work: bytes.div_ceil(65536),
+        ..Default::default()
+    }
 }
 
 fn prepare_many_controlled(
@@ -579,7 +660,7 @@ mod batch_tests {
         .unwrap();
         let definition =
             b"COLUMNS\nint ID\n\nBUILD 12.1.0.69933\nLAYOUT 00000001\n$id$ID<u32>\n".to_vec();
-        let expected_metadata = (manifest.len() + definition.len() * 2) as u64 * 8;
+        let expected_metadata = (manifest.len() + definition.len() * 2) as u64 * 4;
         let mut metadata = Metadata::open(&home, true).unwrap();
         for (suffix, raw) in [
             ("manifest.json", manifest),
@@ -617,6 +698,10 @@ mod batch_tests {
         assert_eq!(prepared[0].0.identity.name, "Item");
         assert_eq!(prepared[1].0.identity.name, "ItemSparse");
         assert_eq!(budget.snapshot().unwrap().metadata_bytes, expected_metadata);
+        assert_eq!(
+            budget.snapshot().unwrap().retained_bytes,
+            expected_metadata * 2
+        );
         assert_eq!(prepared[0].0.manifest, prepared[1].0.manifest);
         let tight = Budget::new(
             Cost {
@@ -654,5 +739,179 @@ mod batch_tests {
             7
         );
         assert_eq!(budget.snapshot().unwrap().metadata_bytes, expected_metadata);
+    }
+}
+
+#[cfg(test)]
+mod publication_conflict_tests {
+    use super::*;
+    use crate::resource::{Budget, Cost};
+    use lycheedev_core::workspace;
+    use std::{
+        io::Write,
+        net::TcpListener,
+        sync::atomic::{AtomicU64, Ordering},
+        thread,
+    };
+
+    // The first validate callback publishes the winner before load's strict create.
+    // This exercises a real generation conflict deterministically; no sleep is
+    // used to race two writers and no production-only injection hook is needed.
+    fn conflict(
+        metadata_limit: u64,
+        winner: &[u8],
+        reject_second: bool,
+        controlled: bool,
+    ) -> (Result<(Value, Vec<u8>)>, Cost, Cost, usize) {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let home = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.tmp/rust-definition-conflict-fixture")
+            .join(format!(
+                "{}-{}-{}",
+                std::process::id(),
+                storage::utc_now().replace([':', '.'], "-"),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+        workspace::initialize(&home).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/definition", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut connection = loop {
+                match listener.accept() {
+                    Ok((connection, _)) => break connection,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(2))
+                    }
+                    Err(error) => panic!("fixture HTTP accept: {error}"),
+                }
+            };
+            connection
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            connection
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                assert!(request.len() < 8192);
+                let mut byte = [0];
+                connection.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            connection
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n//x\n",
+                )
+                .unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let budget = Budget::new(
+            Cost {
+                metadata_bytes: metadata_limit,
+                ..Cost::defaults()
+            },
+            deadline,
+            None,
+        );
+        let mut validations = 0;
+        let control = OperationControl::uncancelable(deadline);
+        let result = load(
+            &home,
+            &url,
+            false,
+            deadline,
+            Some(&budget),
+            controlled.then_some(&control),
+            |raw| {
+                validations += 1;
+                // Equivalent to semantic comment-only text parsing: charge bytes,
+                // and prove the repeated parse receives the winning content.
+                budget.charge(Cost::metadata(raw.len()))?;
+                if validations == 1 {
+                    assert_eq!(raw, b"//x\n");
+                    let blob = evidence::publish_blob(&home, winner, 4 << 20)?;
+                    Metadata::open(&home, true)?.put(
+                        &format!("definition/{}", storage::sha256(url.as_bytes())),
+                        &Object {
+                            url: url.clone(),
+                            blob,
+                        },
+                        None,
+                    )?;
+                } else {
+                    assert_eq!(raw, winner);
+                    if reject_second {
+                        return Err(fault(
+                            "schema.invalid_definition",
+                            4,
+                            "second validation rejected",
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        );
+        server.join().unwrap();
+        (
+            result,
+            budget.logical_snapshot().unwrap(),
+            budget.snapshot().unwrap(),
+            validations,
+        )
+    }
+    #[test]
+    fn identical_publication_winner_recharges_and_revalidates() {
+        let (result, logical, safety, validations) = conflict(128 << 20, b"//x\n", false, true);
+        assert_eq!(result.unwrap().1, b"//x\n");
+        assert_eq!(validations, 2);
+        assert_eq!(
+            logical,
+            Cost {
+                retained_bytes: 40,
+                metadata_bytes: 40,
+                decode_work: 2,
+                network_requests: 1,
+                network_bytes: 4
+            }
+        );
+        assert_eq!(safety.retained_bytes, 72);
+        assert_eq!(safety.metadata_bytes, 40);
+    }
+    #[test]
+    fn conflict_reread_can_exhaust_metadata_before_second_validation() {
+        let (result, logical, safety, validations) = conflict(35, b"//x\n", false, true);
+        assert_eq!(result.unwrap_err().code, "records.query_resource_budget");
+        assert_eq!(validations, 1);
+        assert_eq!(logical.metadata_bytes, 20);
+        assert_eq!(logical.decode_work, 1);
+        assert_eq!(safety.retained_bytes, 36);
+    }
+    #[test]
+    fn conflict_second_validation_error_precedes_blob_comparison() {
+        let (result, logical, _, validations) = conflict(128 << 20, b"//y\n", true, true);
+        assert_eq!(result.unwrap_err().code, "schema.invalid_definition");
+        assert_eq!(validations, 2);
+        assert_eq!(logical.metadata_bytes, 40);
+        assert_eq!(logical.decode_work, 2);
+    }
+    #[test]
+    fn differing_valid_winner_is_revalidated_then_rejected() {
+        let (result, logical, _, validations) = conflict(128 << 20, b"//y\n", false, true);
+        assert_eq!(result.unwrap_err().code, "records.definition_identity");
+        assert_eq!(validations, 2);
+        assert_eq!(logical.metadata_bytes, 40);
+    }
+    #[test]
+    fn ordinary_publication_conflict_uses_the_same_reread_contract() {
+        let (result, logical, _, validations) = conflict(128 << 20, b"//x\n", false, false);
+        assert!(result.is_ok());
+        assert_eq!(validations, 2);
+        assert_eq!(logical.metadata_bytes, 40);
+        assert_eq!(logical.decode_work, 2);
     }
 }

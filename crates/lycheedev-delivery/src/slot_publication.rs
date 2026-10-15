@@ -126,7 +126,7 @@ impl RecordedInstallationIdentity {
     /// Lease acquisition checks the canonical path and current slot pool.
     /// Ordinary publication/input verification reads the current addon receipt.
     /// A path-only record cannot publish. New business publication needs a clean
-    /// VerifiedInstallation; original repair unbind needs RepairPublication.
+    /// VerifiedInstallation; original repair cleanup needs RepairPublication.
     pub fn from_authenticated_record(canonical_path: PathBuf) -> Result<Self> {
         if !canonical_path.is_absolute() {
             return Err(invalid("recorded installation identity is malformed").into());
@@ -146,13 +146,13 @@ impl From<&VerifiedInstallation> for RecordedInstallationIdentity {
     }
 }
 
-/// Cleanup-only authority for one exact original-CON unbind. The fields are
+/// Cleanup-only authority for one exact original-CON unbind or finalization. The fields are
 /// private and immutable: this cannot authorize bind, business execution, a new
 /// runtime, or an arbitrary replacement envelope. It is not an INPUT witness.
 ///
 /// As with RecordedInstallationIdentity, the caller authenticates provenance:
 /// read the original CON under its execution lease, durably request close, and
-/// supply that journal's exact unbind, original PID/creation-time consumer and
+/// supply that journal's exact cleanup transaction, original consumer and
 /// Identity.Release. Recheck the original client window and ownership before
 /// acquisition and again after admission, as Go connectionGuard(repair=true)
 /// does. Do not use the current CLI release or an unauthenticated descriptor.
@@ -187,6 +187,31 @@ impl RepairPublication {
             release: original_release.into(),
             consumer: original_consumer.into(),
             envelope: exact_unbind.clone(),
+        })
+    }
+    /// Finalization-only counterpart to the unbind constructor. The caller
+    /// must authenticate the exact durable original-CON transaction and its
+    /// operation: confirm_ready with validated report candidate for confirm;
+    /// release_ready after result artifact + result_durable for release.
+    /// This never grants prepare/commit or arbitrary envelope authority.
+    pub fn from_authenticated_finalization(
+        identity: &RecordedInstallationIdentity,
+        original_release: &str,
+        original_consumer: &str,
+        exact_finalization: &SlotEnvelope,
+    ) -> Result<Self> {
+        if original_release.is_empty()
+            || original_consumer.is_empty()
+            || !matches!(exact_finalization.action.as_str(), "confirm" | "release")
+        {
+            return Err(invalid("repair finalization requires original confirm or release").into());
+        }
+        payload(exact_finalization)?;
+        Ok(Self {
+            identity: identity.clone(),
+            release: original_release.into(),
+            consumer: original_consumer.into(),
+            envelope: exact_finalization.clone(),
         })
     }
     pub fn envelope(&self) -> &SlotEnvelope {
@@ -231,7 +256,7 @@ impl<'a> PublicationLease<'a> {
     }
     /// Restore an authenticated source identity without pretending that the
     /// addon is currently clean. Ordinary publish/pre-input verify require clean
-    /// addon bytes; repair-only unbind and retirement inspect the original pool.
+    /// addon bytes; repair-only cleanup and retirement inspect the original pool.
     pub fn acquire_recorded(
         identity: &RecordedInstallationIdentity,
         version: &str,
@@ -327,7 +352,7 @@ impl<'a> PublicationLease<'a> {
         let maintenance = close_maintenance(_maintenance);
         close_causes([receipt, publication, maintenance])
     }
-    /// Publish only the immutable unbind admitted from the original CON. No
+    /// Publish only the immutable cleanup transaction admitted from the original CON. No
     /// current addon receipt is needed: the validated slot inventory, exact
     /// reservation and original release still apply, matching Go CloseForRepair.
     pub fn publish_repair(&mut self, repair: &RepairPublication) -> Result<()> {

@@ -1,0 +1,147 @@
+{
+  "schema": "lycheedev.repair-finalization.test-map.v1",
+  "freezeSha256": "bb57f3757f26253b240708b4443f7375f196f2df690aa88ffbe7360ac4ffc437",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "mapping": [
+    {
+      "contract": "repair close original release/client/window owner",
+      "go": "internal/live/channel/project_windows.go:connectionGuard,driveMode,CloseForRepair",
+      "rust": [
+        "crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs",
+        "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform/repair.rs"
+      ]
+    },
+    {
+      "contract": "confirm report candidate; exact confirmation; standalone artifact before result_durable and release",
+      "go": "internal/live/channel/driver.go:Run",
+      "rust": [
+        "crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+        "crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs",
+        "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs"
+      ]
+    },
+    {
+      "contract": "mutable durable recovery budget and legacy initialization",
+      "go": "internal/live/channel/budget_driver.go",
+      "rust": [
+        "crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+        "crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs"
+      ]
+    },
+    {
+      "contract": "publication release/consumer/exact envelope, fresh INPUT and same lease through burst",
+      "go": "internal/live/channel/native_windows.go",
+      "rust": [
+        "crates/lycheedev-delivery/src/slot_publication.rs",
+        "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+        "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs"
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "file": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "test": "repair_capability_only_admits_exact_unbind_without_invented_wire_restrictions",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "test": "disk_repair_unbind_survives_missing_addon_but_ordinary_publication_stays_closed",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "test": "disk_repair_modified_addon_uses_original_release_and_exact_consumer",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "test": "disk_repair_rejects_other_target_and_preserves_foreign_reserved_metadata",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "test": "disk_repair_rechecks_actual_pool_payload_route_and_original_control",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "test": "repair_finalization_capability_rejects_business_and_copies_exact_envelope",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs",
+      "test": "repair_default_archive_uses_target_volume_and_explicit_paths_are_not_rewritten",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "test": "repair_closes_original_prepared_business_before_delivery_without_preparing_it",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "test": "explicit_reload_torn_current_log_never_repairs_even_with_completed_history",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "test": "repair_publication_authenticates_original_durable_close_and_exact_unbind",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "test": "repair_unknown_business_never_republishes_or_dispatches_before_delivery",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "test": "repair_finalization_requires_durable_exact_operation_and_release_artifact",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "test": "repair_modified_main_unbind_uses_real_publication_and_holds_lease_through_burst",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "test": "repair_rechecks_durable_authority_before_input_and_refuses_business_publish",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "test": "repair_freshness_changed_publication_and_cancelled_burst_never_replay",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "test": "repair_finalization_modified_main_requires_exact_authority_even_when_clean",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests/repair.rs",
+      "test": "repair_finalization_revocation_stops_before_burst",
+      "status": "NOT_RUN"
+    }
+  ],
+  "newCoverage": [
+    "modified main confirm/release exact authority",
+    "authority revocation prevents physical burst",
+    "wrong nonce/action/ticket/current operation/stage/fence/cleanup denied",
+    "missing, malformed, cross-operation result artifact denied",
+    "immutable artifact operation equality except monotonic same-origin budget projection",
+    "legacy budget initialization accepted only with valid legacy marker",
+    "completed historical runtime recovery accepted; Binding, ended process, unbound denied",
+    "large >2MiB valid standalone Go JSON artifact accepted",
+    "torn journal and removed close intent deny"
+  ],
+  "staticChecks": {
+    "rustfmt": "PASS owner-only skip_children edition2024",
+    "gitDiffCheck": "PASS"
+  },
+  "limitations": [
+    "All Rust tests NOT_RUN. No Cargo compile, Windows input, game, or performance run.",
+    "No changes to shared workflow, docs, Cargo, or release permissions."
+  ]
+}

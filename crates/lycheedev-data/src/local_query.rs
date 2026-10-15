@@ -653,8 +653,9 @@ fn sql_inner_after_execute(
     }
     // Go validates this flag even when only metadata sources are referenced.
     inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
-    let request = request::read(inv, &budget)?;
-    budget.charge(Cost::metadata(request.sql.len() * 64 + 4096))?;
+    let safety = budget.safety_only();
+    let request = request::read(inv, &safety)?;
+    safety.charge(Cost::metadata(request.sql.len() * 64 + 4096))?;
     let program = relational::Program::compile(&request.sql)?;
     if program.source_tables().len() > 32 {
         return Err(fault(
@@ -664,7 +665,7 @@ fn sql_inner_after_execute(
         ));
     }
     program.validate_parameters(&request.parameters)?;
-    request.admit_encoded(&budget)?;
+    request.admit_encoded(&safety)?;
     let pin = selection::resolve_pinned(inv)?;
     let data = pin.data.as_ref().ok_or_else(|| {
         fault(
@@ -677,6 +678,10 @@ fn sql_inner_after_execute(
     // Keep request size/name and pin admission earlier, but no provider error
     // may mask an invalid numeric scalar.
     let parameters = request.bindings()?;
+    // Go reserves the executor once before source preparation. Its separate
+    // 64 MiB Work limit still bounds Rust execution, whose actual allocations
+    // remain charged to the safety ledger rather than charged twice logically.
+    budget.charge_split(Cost::retained(64 << 20), Cost::default())?;
     let definitions_started = Instant::now();
     let mut bundles = vec![];
     let mut semantic_sources = BTreeMap::new();
@@ -800,7 +805,7 @@ fn sql_inner_after_execute(
                 ..Default::default()
             },
             budget.token(),
-            Some(&budget),
+            Some(&safety),
         )?;
         after_execute()?;
         query_result = Some((
@@ -824,23 +829,24 @@ fn sql_inner_after_execute(
     let (result, provenance, decoded_bytes, preparation_ms, execution_ms, effective_sources) =
         query_result.ok_or_else(|| fault("records.internal", 8, "SQL result missing"))?;
     let complete = result.complete;
-    let public_numbers = public_query_numbers(&request, &result.rows, &budget)?;
+    let resources = budget.logical_snapshot()?;
+    let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
     budget.check()?;
-    let mut reading = json!({"complete":complete,"partial":!complete,"query":request,"result":{"columns":result.columns,"rows":result.rows},"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"used":budget.snapshot()?,"remainingGaps":["SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+    let mut reading = json!({"resources":resources,"complete":complete,"partial":!complete,"query":request,"result":{"columns":result.columns,"rows":result.rows},"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
     if !semantic_provenance.is_empty() {
-        let size = capture::json_size(&semantic_provenance, &budget)?;
-        budget.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
+        let size = capture::json_size(&semantic_provenance, &safety)?;
+        safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
         reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
     }
     if !effective_sources.is_empty() {
-        reading["effectiveSources"] = effective::reports_value(&effective_sources, &budget)?;
+        reading["effectiveSources"] = effective::reports_value(&effective_sources, &safety)?;
     }
     let raw = capture::json_bytes(
         &request::CaptureBody {
             reading: &reading,
             request: &request,
         },
-        &budget,
+        &safety,
         16 << 20,
         || {
             fault(
@@ -850,7 +856,7 @@ fn sql_inner_after_execute(
             )
         },
     )?;
-    let request_digest = request.digest(&budget)?;
+    let request_digest = request.digest(&safety)?;
     let required_sources = if effective_sources.is_empty() {
         vec![]
     } else {
@@ -860,7 +866,7 @@ fn sql_inner_after_execute(
             .map(String::as_str)
             .collect::<Vec<_>>()
     };
-    let reference_accounting = effective::ReferenceAccounting::new(&budget, &inv.control);
+    let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
     let capture = evidence::commit_capture_budgeted_referencing(
         &inv.home,
         evidence::CaptureInput {
