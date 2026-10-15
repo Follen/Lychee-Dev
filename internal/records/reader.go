@@ -88,15 +88,12 @@ func (r *Reader) readFile(ctx context.Context, pin selection.DataPin, q FileQuer
 	if r == nil || r.store == nil || q.CDN && q.Installation != "" || !q.CDN && q.Installation == "" || q.FileDataID == 0 || q.MetadataBytes <= 0 || q.MetadataBytes > 1<<30 || q.ContentBytes <= 0 || q.ContentBytes > 1<<40 {
 		return FileReading{}, ErrMetadataLimit
 	}
-	q = ensureQueryBudget(q)
-	if !q.admitted {
-		lease, err := r.store.AcquireDataResources(ctx, vault.DataOrdinary)
-		if err != nil {
-			return FileReading{}, err
-		}
-		defer lease.Close()
-		q.admitted = true
-		q.downloadWorkers = lease.DownloadWorkers
+	q, admission, err := acquireQueryResources(ctx, r.store, q)
+	if err != nil {
+		return FileReading{}, err
+	}
+	if admission != nil {
+		defer admission.Close()
 	}
 	if err := ctx.Err(); err != nil {
 		return FileReading{}, err

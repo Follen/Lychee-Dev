@@ -22,15 +22,16 @@ type DataQuery struct {
 	Parameters map[string]any `json:"parameters,omitempty"`
 }
 type QueryResult struct {
-	Resources        resource.Usage    `json:"resources"`
-	EffectiveSources []EffectiveTable  `json:"effectiveSources,omitempty"`
-	Timings          QueryTimings      `json:"timings"`
-	SemanticSources  []SemanticBundle  `json:"semanticSources,omitempty"`
-	Complete         bool              `json:"complete"`
-	Partial          bool              `json:"partial"`
-	Query            DataQuery         `json:"query"`
-	Result           relational.Result `json:"result"`
-	Sources          []TableReading    `json:"sources"`
+	Resources        resource.Usage        `json:"resources"`
+	MemoryBudget     resource.MemoryBudget `json:"memoryBudget"`
+	EffectiveSources []EffectiveTable      `json:"effectiveSources,omitempty"`
+	Timings          QueryTimings          `json:"timings"`
+	SemanticSources  []SemanticBundle      `json:"semanticSources,omitempty"`
+	Complete         bool                  `json:"complete"`
+	Partial          bool                  `json:"partial"`
+	Query            DataQuery             `json:"query"`
+	Result           relational.Result     `json:"result"`
+	Sources          []TableReading        `json:"sources"`
 }
 
 // Timings are wall-clock observations, not optimizer estimates or peak memory.
@@ -96,14 +97,13 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		if _, _, err := selection.DataIdentity(*pin.Data); err != nil {
 			return QueryReading{}, err
 		}
-		files = ensureQueryBudget(files)
-		admission, err := store.AcquireDataResources(ctx, vault.DataOrdinary)
+		files, admission, err := acquireQueryResources(ctx, store, files)
 		if err != nil {
 			return QueryReading{}, err
 		}
-		defer admission.Close()
-		files.admitted = true
-		files.downloadWorkers = admission.DownloadWorkers
+		if admission != nil {
+			defer admission.Close()
+		}
 		// Reserve the executor's independently enforced memory limit inside
 		// the whole-query retained budget before any source is prepared.
 		if err := files.budget.Charge(resource.Cost{RetainedBytes: 64 << 20}); err != nil {
@@ -117,7 +117,6 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 		defer reader.Close()
 		files = reader.Query()
 		reading := QueryResult{Query: request, Sources: []TableReading{}, Complete: true}
-		remaining := int64(512 << 20)
 		resolve := func(ctx context.Context, use relational.TableUse) (relational.Source, error) {
 			started := time.Now()
 			if strings.EqualFold(use.Catalog, "meta") {
@@ -132,7 +131,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			if !strings.EqualFold(use.Catalog, "static") && !effective {
 				return relational.Source{}, relational.ErrUnsupported
 			}
-			if remaining <= 0 || len(reading.Sources) >= 32 {
+			if len(reading.Sources) >= 32 {
 				return relational.Source{}, relational.ErrBudget
 			}
 			bundle, err := definitions.Prepare(ctx, pin.Data.DefinitionCommit, use.Name, files.Offline)
@@ -141,17 +140,15 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 				return relational.Source{}, err
 			}
 			query := files
-			query.FileDataID, query.ContentBytes = bundle.Identity.DB2FileDataID, min(files.ContentBytes, remaining)
+			query.FileDataID = bundle.Identity.DB2FileDataID
 			started = time.Now()
 			view, provenance, err := reader.PrepareTable(ctx, *pin.Data, query, bundle)
 			reading.Timings.PreparationMS += float64(time.Since(started)) / float64(time.Millisecond)
 			if err != nil {
 				return relational.Source{}, err
 			}
-			remaining -= provenance.File.Content.Bytes
 			reading.Timings.DecodedSourceBytes += provenance.File.Content.Bytes
 			if provenance.File.PartialContent != nil {
-				remaining -= provenance.File.PartialContent.Bytes
 				reading.Timings.DecodedSourceBytes += provenance.File.PartialContent.Bytes
 				reading.Complete, reading.Partial = false, true
 			}
@@ -180,6 +177,7 @@ func QueryData(ctx context.Context, root, snapshot string, files FileQuery, requ
 			return QueryReading{}, err
 		}
 		reading.Resources = files.budget.Snapshot()
+		reading.MemoryBudget = files.budget.MemorySnapshot()
 		raw, err := json.Marshal(reading)
 		if err != nil {
 			return QueryReading{}, err

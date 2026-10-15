@@ -19,13 +19,14 @@ type Records struct {
 	source    io.ReaderAt
 	size      int64
 	columns   *Columns
-	locations map[uint32]recordLocation
+	locations map[uint32]uint32
+	physical  []recordLocation
 	budget    *resource.Budget
 }
 type recordLocation struct {
-	origin      uint32
-	partition   int
 	offset      int64
+	partition   int
+	origin      uint32
 	length      uint32
 	relation    uint32
 	hasRelation bool
@@ -73,14 +74,21 @@ func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, b
 	if int64(layout.Rows)+copiesCount > int64(budget.Rows) {
 		return nil, ErrLimit
 	}
-	// Reserve identity map, copies, sparse indexes and chain scratch space
-	// before insertion. This is a conservative query charge, not exact RSS.
-	allocation := (int64(layout.Rows)+copiesCount)*192 + int64(layout.Stride)
+	// Logical IDs map to compact physical-location indices; copies share the
+	// same location. Reserve the pre-sized ID/copy maps, physical locations,
+	// row IDs and copy-chain scratch before insertion. Sparse records also
+	// need an offset map, extents and normalized auxiliary bytes. These are
+	// conservative allocation estimates, not exact RSS.
+	allocation := (int64(layout.Rows)+copiesCount)*32 + int64(layout.Rows)*40 + copiesCount*72 + int64(layout.Stride)
+	if layout.Flags&1 != 0 {
+		allocation += int64(layout.Rows) * 80
+	}
 	if err := budget.Query.Charge(resource.Cost{RetainedBytes: allocation, MetadataBytes: allocation, DecodeWork: int64(layout.Rows) + copiesCount}); err != nil {
 		return nil, err
 	}
-	out := &Records{source: source, size: size, columns: columns, budget: budget.Query, locations: make(map[uint32]recordLocation)}
-	copies := make(map[uint32]uint32)
+	out := &Records{source: source, size: size, columns: columns, budget: budget.Query,
+		locations: make(map[uint32]uint32, int64(layout.Rows)+copiesCount), physical: make([]recordLocation, 0, layout.Rows)}
+	copies := make(map[uint32]uint32, copiesCount)
 	var auxiliary int64 = layout.MetadataEnd
 	for pi, p := range layout.Partitions {
 		if unavailable[pi] {
@@ -116,13 +124,14 @@ func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, b
 		if err != nil {
 			return nil, err
 		}
-		ids := make([]uint32, int(p.Rows))
+		var ids []uint32
 		if sparse {
 			ids, aux, err = out.indexSparse(ctx, pi, p, aux, budget.Rows)
 			if err != nil {
 				return nil, err
 			}
 		} else {
+			ids = make([]uint32, int(p.Rows))
 			row := make([]byte, int(layout.Stride))
 			for ordinal := uint32(0); ordinal < p.Rows; ordinal++ {
 				if err := ctx.Err(); err != nil {
@@ -161,7 +170,8 @@ func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, b
 				if _, exists := out.locations[id]; exists {
 					return nil, ErrFormat
 				}
-				out.locations[id] = recordLocation{origin: id, partition: pi, offset: offset, length: layout.Stride}
+				out.locations[id] = uint32(len(out.physical))
+				out.physical = append(out.physical, recordLocation{origin: id, partition: pi, offset: offset, length: layout.Stride})
 				ids[ordinal] = id
 			}
 		}
@@ -202,21 +212,16 @@ func OpenAvailableRecords(ctx context.Context, source io.ReaderAt, size int64, b
 					}
 					id = ids[ordinal]
 				}
-				location := out.locations[id]
-				if _, exists := out.locations[id]; !exists || location.partition != pi {
+				index, exists := out.locations[id]
+				if !exists || out.physical[index].partition != pi {
 					return nil, ErrFormat
 				}
+				location := &out.physical[index]
 				if location.hasRelation {
 					return nil, ErrFormat
 				}
 				location.relation, location.hasRelation = foreign, true
-				out.locations[id] = location
 			}
-		}
-	}
-	for id, location := range out.locations {
-		if location.origin != id {
-			out.locations[id] = out.locations[location.origin]
 		}
 	}
 	for id := range copies {
@@ -264,10 +269,11 @@ func (r *Records) Lookup(ctx context.Context, id uint32) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
-	location, ok := r.locations[id]
+	index, ok := r.locations[id]
 	if !ok {
 		return Record{}, ErrRecordMissing
 	}
+	location := r.physical[index]
 	data, err := r.read(ctx, location.offset, int64(location.length))
 	if err != nil {
 		return Record{}, err

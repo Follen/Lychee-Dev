@@ -349,6 +349,9 @@ func executeSelect(e *evaluation, root *retrieval, resolve Resolver, scope *quer
 					return err
 				}
 			}
+			if handled, err := inSelection(e, root.filter, fields, sources[0], yieldSource); handled || err != nil {
+				return err
+			}
 		}
 		return sources[0].Scan(ctx, yieldSource)
 	}

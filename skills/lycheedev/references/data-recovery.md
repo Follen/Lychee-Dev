@@ -44,7 +44,13 @@ a failure in one layer does not establish failure in another.
   `--timeout-seconds <1-3600>` within the task budget. A second deadline stops that
   branch; do not keep raising budgets. Hotfix uses its own scan/request bounds.
 - Shared resource budget (`records.query_resource_budget`): inspect the failing
-  dimension and narrow the required tables, relationships or source work.
+  dimension, used/requested amount and effective limit. Windows memory budgets
+  grow automatically within a ceiling computed after admission from available
+  physical/commit memory and concurrent-query capacity; growth checks fresh
+  headroom. SQL and navigation results include `memoryBudget`. A memory-pressure failure
+  can justify a bounded retry after competing work finishes; do not kill other
+  tasks or repeat an unchanged query while pressure remains. Otherwise narrow
+  required tables, relationships or source work when that preserves the request.
   Increasing `--timeout-seconds` or a per-file byte limit does not increase this
   budget. If failure is in shared metadata preparation before row selection,
   reducing `--limit`, using `--id` or narrowing WHERE cannot reduce that prerequisite.

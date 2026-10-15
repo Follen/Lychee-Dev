@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.2 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.3 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
@@ -59,6 +59,8 @@ Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631
 远端读取从指定产品和地区的 versions/cdns 固定配置；`--build` 精确匹配，CN 使用国服版本服务。来源缺失时返回缺口，不切到其他地区或产品。
 
 本地 CASC 按 pin 选择配置、索引和内容，优先读取 EKey 对应桶并验证完整键、代次和校验和。远端归档每查询默认最多并发八项，显式 download.workers 限制同工作区获准查询的总下载并发；按清单顺序确定结果，共享网络与内存预算，大索引使用稀疏读取。
+
+Windows Data查询在获得工作区slot后读取可用物理内存与进程提交/虚拟地址余量，取最小值的一半按并发容量分配本次上限。retained/scratch与metadata预算按实际计费扩容，每次扩容重读可用内存；同一查询的天花板保持不变，网络/工作量、单文件和SQL执行器限制独立。预算是保守逻辑计费，不是进程RSS限制。SQL和导航结果的memoryBudget报告模式、当前额度、天花板、扩容次数和scratch峰值。
 
 DB2、SQL、关联记录和资源导出共用固定数据身份。Hotfix 记录 provider、build、locale、过滤及分页范围。缺密钥、缺定义、截断或部分解码显式返回；原始内容和派生资源分别记录完整性。
 

@@ -115,17 +115,18 @@ type TableProvenance struct {
 // every table it read, every relation it derived, and whether the answer is
 // complete, truncated or partially covered.
 type DataContext struct {
-	Resources        resource.Usage    `json:"resources"`
-	Snapshot         string            `json:"snapshot"`
-	Pin              selection.DataPin `json:"pin"`
-	Source           string            `json:"source"`
-	Tables           []TableProvenance `json:"tables"`
-	Relations        []RelationLink    `json:"relations"`
-	Complete         bool              `json:"complete"`
-	Truncated        bool              `json:"truncated"`
-	TruncationReason string            `json:"truncationReason"`
-	Partial          bool              `json:"partial"`
-	PartialReasons   []string          `json:"partialReasons"`
+	Resources        resource.Usage        `json:"resources"`
+	MemoryBudget     resource.MemoryBudget `json:"memoryBudget"`
+	Snapshot         string                `json:"snapshot"`
+	Pin              selection.DataPin     `json:"pin"`
+	Source           string                `json:"source"`
+	Tables           []TableProvenance     `json:"tables"`
+	Relations        []RelationLink        `json:"relations"`
+	Complete         bool                  `json:"complete"`
+	Truncated        bool                  `json:"truncated"`
+	TruncationReason string                `json:"truncationReason"`
+	Partial          bool                  `json:"partial"`
+	PartialReasons   []string              `json:"partialReasons"`
 }
 
 // Reading pairs one use-case result with its committed evidence captures.
@@ -190,7 +191,6 @@ func openNavigator(ctx context.Context, store *vault.Store, metadata *vault.Meta
 	if _, _, err := selection.DataIdentity(*pin.Data); err != nil {
 		return nil, err
 	}
-	query = ensureQueryBudget(query)
 	reader, err := OpenReader(store).NewSession(ctx, *pin.Data, query)
 	if err != nil {
 		return nil, err
@@ -221,10 +221,6 @@ func (n *navigator) open(ctx context.Context, name string) (*preparedTable, erro
 	}
 	query := n.query
 	query.FileDataID = bundle.Identity.DB2FileDataID
-	query.ContentBytes = min(query.ContentBytes, query.budget.RemainingRetained())
-	if query.ContentBytes <= 0 {
-		return nil, ErrQueryResourceBudget
-	}
 	view, reading, err := n.reader.PrepareTable(ctx, n.pin, query, bundle)
 	if err != nil {
 		return nil, err
@@ -292,8 +288,9 @@ func (n *navigator) resultContext() DataContext {
 	}
 	partial := append([]string(nil), n.partial...)
 	return DataContext{
-		Resources: n.query.budget.Snapshot(),
-		Snapshot:  n.snapshot, Pin: n.pin, Source: n.source,
+		Resources:    n.query.budget.Snapshot(),
+		MemoryBudget: n.query.budget.MemorySnapshot(),
+		Snapshot:     n.snapshot, Pin: n.pin, Source: n.source,
 		Tables: tables, Relations: relations,
 		Complete:  !n.truncated && len(partial) == 0,
 		Truncated: n.truncated, TruncationReason: reason,

@@ -43,16 +43,9 @@ func (r *Reader) NewSession(ctx context.Context, pin selection.DataPin, q FileQu
 	if _, _, err := selection.DataIdentity(pin); err != nil {
 		return nil, err
 	}
-	q = ensureQueryBudget(q)
-	var admission *vault.DataResources
-	if !q.admitted {
-		var err error
-		admission, err = r.store.AcquireDataResources(ctx, vault.DataOrdinary)
-		if err != nil {
-			return nil, err
-		}
-		q.admitted = true
-		q.downloadWorkers = admission.DownloadWorkers
+	q, admission, err := acquireQueryResources(ctx, r.store, q)
+	if err != nil {
+		return nil, err
 	}
 	return &Reader{store: r.store, session: &readSession{pin: pin, query: q, views: make(map[string]preparedSessionTable), admission: admission}}, nil
 }

@@ -1,14 +1,33 @@
 package records
 
-import "github.com/follenfang/lycheedev/internal/records/resource"
+import (
+	"context"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
+	"github.com/follenfang/lycheedev/internal/vault"
+)
 
 var ErrQueryResourceBudget = resource.ErrBudget
 
-func ensureQueryBudget(q FileQuery) FileQuery {
-	if q.budget == nil {
-		q.budget = resource.New(resource.DefaultLimits())
+// Admission comes before the memory snapshot: a queued query can wait for up
+// to 30 seconds. Every nested reader reuses both admission and the same budget.
+func acquireQueryResources(ctx context.Context, store *vault.Store, q FileQuery) (FileQuery, *vault.DataResources, error) {
+	if q.admitted {
+		return q, nil, nil
 	}
-	return q
+	admission, err := store.AcquireDataResources(ctx, vault.DataOrdinary)
+	if err != nil {
+		return q, nil, err
+	}
+	if q.budget == nil {
+		q.budget, err = resource.NewQuery(admission.ConcurrentQueries)
+		if err != nil {
+			admission.Close()
+			return q, nil, err
+		}
+	}
+	q.admitted, q.downloadWorkers = true, admission.DownloadWorkers
+	return q, admission, nil
 }
 
 // Account retained navigation output conservatively before handing the row to

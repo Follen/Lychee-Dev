@@ -1,6 +1,21 @@
 更新日期：2026-10-15，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
 
-## 当前交付：3.2.2 发行
+## 当前交付：3.2.3 发行
+
+- 用户已授权合入并推送main、版号加一和发布npm。本轮目标3.2.3，沿用latest；沿用用户此前“npm发布之后，直接安装到本机”的要求，发行完成后通过受管update同步本机。文件安装不扩展为新增游戏输入或Live连接。
+- 当前改动位于main，已与origin/main核对一致，基线f298633；没有本任务PR，直接在当前分支提交。另一个Rust PR及保留worktree不属于本轮。主代理负责版本同步、完整套件、提交推送、版本标签和正式流水线；前述实现/实测/限定复核已经完成。
+- release/version.json及npm-channel清单与派生文件均为3.2.3。本地build/vet、Lua5.1必需完整Go套件（2947项pass事件、42项既有可选skip、0fail）、93项Node测试、版本/Skill/导入/发行输入检查全部通过。3.2.3包和远端标签尚不存在；本机更新plan确认1份Skill和7个客户端addon均为受管3.2.2。
+- 下一步：完整检查通过后提交main并推送，固定v3.2.3标签触发toolkit-release.yml，等发布及registry验收完成后更新本交接并清理本轮临时材料。
+
+## 当前任务：SpellName 查询元数据预算
+
+- 用户报告正式3.2.2对Retail CN zhCN 12.1.5.70391的SpellName查询报`records.query_resource_budget: metadata_bytes`，随后确认采用动态预算。沿用`main`（基线`f298633`），没有新PR。主代理完成预算/入口/索引/回归/文档及固定数据验证；pr13_review_data完成SQL IN优化，pr13_review_delivery完成限定只读复核，当前无待交接文件负责人。
+- 原触发点：source/定义准备计费97259207字节，SpellName索引再需79935940字节，超出128 MiB共享预算。紧凑ID索引让复制记录共享物理位置，索引计费降为37247372字节；WDC2隐式别名计费已补齐。SQL数值IN复用Source.Equal，避免35项列表整表逐行比较耗尽执行预算；两项均有先红后绿回归。
+- 固定384 MiB临时方案已替换：Windows在获得slot后按可用物理/提交/虚拟地址余量最小值的一半、除以并发容量，确定本查询天花板；初始retained/scratch512 MiB及metadata128 MiB按低内存缩减，随后按需扩容并重新查询内存余量。七处查询入口共用同一预算，去除导航和SQL提前固定截断；显式静态预算及非Windows开发保持原固定默认值。SQL/导航增加memoryBudget报告，失败保留维度及用量；网络/工作量、单文件、表头和SQL执行器限制独立。
+- 动态版本实际复验：固定pin原SQL返回35/35唯一ID，8组克隆名一致；SQL未需扩容，spell info441776元数据计费285567127字节、经3次扩容从128到320 MiB。本地441776和CDN JSONL begin/record/end、exit0均成功。SQL capture为`CAP-b8bfc33c69e405d45c366b15a4a7426137cfda44f8c1b1113a44c36199d635eb`，spell info为`CAP-05b016882eafdd457961201091310e5beb5f7fb149657660c25555864bab230b`；加密分区仍partial/complete=false，本批全部ID有名称。此前固定方案的CDN441144也已成功。
+- 实现阶段build/vet、Lua5.1必需的records/...、vault和command整包、Skill合同及生成命令检查通过。新增回归覆盖大表/scratch扩容、低内存、并发分额、计费原子性、OS读取失败、原生Windows读取和嵌套lease所有权；动态实现限定复核无可操作问题。完整Go/Lua套件和3.2.3交付进度以上方发行状态为准；`.tmp/dynamic-budget`和旧`.tmp/spellname-budget`均已清理，CLI captures保留。
+
+## 已完成交付：3.2.2 发行
 
 - 用户已授权提交3.2.2、合并main、发布npm，并在发布后直接安装到本机。沿用`latest`渠道，`next`仍为3.1.2；不改动已有发行产物。
 - 当前在`main`；[PR #16](https://github.com/Follen/Lychee-Dev/pull/16)已合并，实现提交`969fe48`，合并提交`0bec60e`。`v3.2.2`已固定该合并提交并推送。主代理负责最终发布及registry核验；此前功能实测和限定范围复核已完成。

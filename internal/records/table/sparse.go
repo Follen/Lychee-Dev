@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"sort"
+
+	"github.com/follenfang/lycheedev/internal/records/resource"
 )
 
 // indexSparse normalizes auxiliary ordering for the shared copy/relation reader.
@@ -42,7 +44,7 @@ func (r *Records) indexSparse(ctx context.Context, partition int, p Partition, a
 	ids := make([]uint32, 0, p.Rows)
 	type extent struct{ start, end int64 }
 	intervals := make([]extent, 0, p.Rows)
-	byOffset := make(map[int64]recordLocation)
+	byOffset := make(map[int64]uint32, p.Rows)
 	for i := int64(0); i < count; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -70,18 +72,27 @@ func (r *Records) indexSparse(ctx context.Context, partition int, p Partition, a
 		}
 		location := recordLocation{origin: id, partition: partition, offset: offset, length: length}
 		previous, alias := byOffset[offset]
+		index := uint32(len(r.physical))
 		if alias {
-			if previous.length != length {
+			if r.physical[previous].length != length {
 				return nil, nil, ErrFormat
 			}
 			if layout.Version == 2 {
-				location.origin = previous.origin
+				// WDC2 Rows counts unique physical records, so implicit aliases
+				// need their own ID-map charge beyond the upfront reservation.
+				if err := r.budget.Charge(resource.Cost{RetainedBytes: 32, MetadataBytes: 32}); err != nil {
+					return nil, nil, err
+				}
+				index = previous
 			}
 		} else {
-			byOffset[offset] = location
+			byOffset[offset] = index
 			intervals = append(intervals, extent{offset, offset + int64(length)})
 		}
-		r.locations[id] = location
+		if !alias || layout.Version >= 3 {
+			r.physical = append(r.physical, location)
+		}
+		r.locations[id] = index
 		if !alias || layout.Version >= 3 {
 			ids = append(ids, id)
 		}

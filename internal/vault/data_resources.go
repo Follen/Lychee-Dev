@@ -22,9 +22,11 @@ const (
 type DataResources struct {
 	// DownloadWorkers is this query's share of the workspace download cap.
 	DownloadWorkers int
-	once            sync.Once
-	leases          []*Lease
-	err             error
+	// ConcurrentQueries is admission capacity, not a racy count of holders.
+	ConcurrentQueries int
+	once              sync.Once
+	leases            []*Lease
+	err               error
 }
 
 func (r *DataResources) Close() error {
@@ -39,8 +41,8 @@ func (r *DataResources) Close() error {
 // AcquireDataResources uses kernel-owned leases (never an age-based expiry).
 // A process death closes its handles; PID reuse cannot steal a live holder.
 // Waiting does not open a SQLite connection or hold a metadata transaction.
-// Two conservative full-query reservations bound aggregate admission; a
-// configured download.workers=1 further serializes ordinary data queries.
+// Two query slots bound aggregate admission; download.workers=1 further
+// serializes ordinary data queries.
 func (s *Store) AcquireDataResources(ctx context.Context, policy DataResourcePolicy) (*DataResources, error) {
 	if s == nil {
 		return nil, ErrWorkspaceFormat
@@ -65,11 +67,13 @@ func (s *Store) AcquireDataResources(ctx context.Context, policy DataResourcePol
 	if cfg.Download.Workers == 1 {
 		slots = 1
 	}
+	out.ConcurrentQueries = slots
 	out.DownloadWorkers = 8
 	if cfg.Download.Workers > 0 {
 		out.DownloadWorkers = min(8, max(1, cfg.Download.Workers/slots))
 	}
 	if policy == DataMeasurement {
+		out.ConcurrentQueries = 1
 		for i := 0; i < dataResourceSlots; i++ {
 			lease, e := acquireDataLease(bounded, scope, fmt.Sprintf("slot:%d", i))
 			if e != nil {

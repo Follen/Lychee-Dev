@@ -42,14 +42,13 @@ func inspectData(ctx context.Context, root, snapshot, name string, query FileQue
 		if _, _, err := selection.DataIdentity(*pin.Data); err != nil {
 			return RecordReading{}, err
 		}
-		query = ensureQueryBudget(query)
-		admission, err := s.AcquireDataResources(ctx, vault.DataOrdinary)
+		query, admission, err := acquireQueryResources(ctx, s, query)
 		if err != nil {
 			return RecordReading{}, err
 		}
-		defer admission.Close()
-		query.admitted = true
-		query.downloadWorkers = admission.DownloadWorkers
+		if admission != nil {
+			defer admission.Close()
+		}
 		bundle, err := OpenDefinitions(s, m).WithBudget(query.budget).Prepare(ctx, pin.Data.DefinitionCommit, name, query.Offline)
 		if err != nil {
 			return RecordReading{}, err
@@ -99,14 +98,13 @@ func captureAsset(ctx context.Context, s *vault.Store, m *vault.Metadata, snapsh
 	if pin.Data == nil {
 		return AssetReading{}, nil, errors.New("records.data_pin_required")
 	}
-	query = ensureQueryBudget(query)
-	admission, err := s.AcquireDataResources(ctx, vault.DataOrdinary)
+	query, admission, err := acquireQueryResources(ctx, s, query)
 	if err != nil {
 		return AssetReading{}, nil, err
 	}
-	defer admission.Close()
-	query.admitted = true
-	query.downloadWorkers = admission.DownloadWorkers
+	if admission != nil {
+		defer admission.Close()
+	}
 	reading, err := OpenReader(s).ReadFile(ctx, *pin.Data, query)
 	if err != nil {
 		return AssetReading{}, nil, err

@@ -27,6 +27,9 @@ func TestDataResourcesCapacityCancellationAndMeasurement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
+	if first.ConcurrentQueries != 2 || second.ConcurrentQueries != 2 {
+		t.Fatal("ordinary admission lost memory shares")
+	}
 	for _, policy := range []DataResourcePolicy{DataOrdinary, DataMeasurement} {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 		blocked, err := store.AcquireDataResources(ctx, policy)
@@ -46,6 +49,9 @@ func TestDataResourcesCapacityCancellationAndMeasurement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer measure.Close()
+	if measure.ConcurrentQueries != 1 {
+		t.Fatal("exclusive measurement split its memory share")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
 	if _, err := store.AcquireDataResources(ctx, DataOrdinary); !errors.Is(err, context.DeadlineExceeded) {
@@ -69,6 +75,9 @@ func TestDataResourcesConfiguredSingleWorkerAndNoMetadataLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer holder.Close()
+	if holder.ConcurrentQueries != 1 {
+		t.Fatal("serialized admission split its memory share")
+	}
 	waiting, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 	done := make(chan error, 1)

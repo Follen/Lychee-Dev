@@ -29,6 +29,7 @@ type Budget struct {
 	limits               Limits
 	used                 Usage
 	scratch, peakScratch int64
+	memory               *adaptiveMemory
 }
 
 func New(limits Limits) *Budget { return &Budget{limits: limits} }
@@ -67,19 +68,26 @@ func (b *Budget) Charge(c Cost) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	maximum := b.limits
+	if b.memory != nil {
+		maximum.RetainedBytes, maximum.MetadataBytes = b.memory.ceiling, b.memory.ceiling
+	}
 	for _, d := range []struct {
 		name                string
 		current, add, limit int64
 	}{
-		{"retained_bytes", b.used.RetainedBytes + b.scratch, c.RetainedBytes, b.limits.RetainedBytes},
-		{"metadata_bytes", b.used.MetadataBytes, c.MetadataBytes, b.limits.MetadataBytes},
+		{"retained_bytes", b.used.RetainedBytes + b.scratch, c.RetainedBytes, maximum.RetainedBytes},
+		{"metadata_bytes", b.used.MetadataBytes, c.MetadataBytes, maximum.MetadataBytes},
 		{"decode_work", b.used.DecodeWork, c.DecodeWork, b.limits.DecodeWork},
 		{"network_requests", b.used.NetworkRequests, c.NetworkRequests, b.limits.NetworkRequests},
 		{"network_bytes", b.used.NetworkBytes, c.NetworkBytes, b.limits.NetworkBytes},
 	} {
 		if d.add < 0 || d.current > d.limit || d.add > d.limit-d.current {
-			return fmt.Errorf("%w: %s", ErrBudget, d.name)
+			return budgetError(d.name, d.current, d.add, d.limit)
 		}
+	}
+	if err := b.growMemory(b.used.RetainedBytes+b.scratch+c.RetainedBytes, b.used.MetadataBytes+c.MetadataBytes); err != nil {
+		return err
 	}
 	b.used.RetainedBytes += c.RetainedBytes
 	b.used.MetadataBytes += c.MetadataBytes
@@ -97,15 +105,28 @@ func (b *Budget) ReserveScratch(bytes int64) (func(), error) {
 		return func() {}, nil
 	}
 	b.mu.Lock()
-	if bytes < 0 || bytes > b.limits.RetainedBytes-b.used.RetainedBytes-b.scratch {
+	maximum := b.limits.RetainedBytes
+	if b.memory != nil {
+		maximum = b.memory.ceiling
+	}
+	current := b.used.RetainedBytes + b.scratch
+	if bytes < 0 || bytes > maximum-current {
 		b.mu.Unlock()
-		return nil, fmt.Errorf("%w: scratch_bytes", ErrBudget)
+		return nil, budgetError("scratch_bytes", current, bytes, maximum)
+	}
+	if err := b.growMemory(current+bytes, b.used.MetadataBytes); err != nil {
+		b.mu.Unlock()
+		return nil, err
 	}
 	b.scratch += bytes
 	b.peakScratch = max(b.peakScratch, b.scratch)
 	b.mu.Unlock()
 	var once sync.Once
 	return func() { once.Do(func() { b.mu.Lock(); b.scratch -= bytes; b.mu.Unlock() }) }, nil
+}
+
+func budgetError(dimension string, used, requested, limit int64) error {
+	return fmt.Errorf("%w: %s (used=%d requested=%d limit=%d)", ErrBudget, dimension, used, requested, limit)
 }
 
 func (b *Budget) PeakScratchBytes() int64 {
