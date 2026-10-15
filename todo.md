@@ -16,7 +16,7 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 ## Hard requirement: unmodified Emmy upstream
 
 - [ ] Inventory every remaining production hook and actual consumer, including shared ingestion, contextual inference, identity/cardinality and diagnostic receipts.
-- [ ] Execute the composed owned-session S1–S8 regressions (72 new Rust tests; the prior S1–S3 native oracle step failed and awaits sealed diagnosis), implement recursive backends, and connect real consumers before removing upstream hooks; the source-only slices are independently reviewed, not production equivalence.
+- [ ] Execute the composed owned-session S1–S8 regressions (72 new Rust tests; 498 S2 atomic passed; S3 successor regression remains failing, with all 448 comparisons retained), implement recursive backends, and connect real consumers before removing upstream hooks; the source-only slices are independently reviewed, not production equivalence.
 - [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
@@ -261,3 +261,10 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 - [ ] Validate Core source-single-pass staged publication (23 new tests) and scoped Session verified body (7 new tests), then connect actual asset/export/demux consumers. Preserve CKey-before-publication, original controls, known/unknown publication facts, callback-at-most-once and checked cleanup; extra bounded disk copy is an explicit cost.
 - [ ] Close repeated-Session Encoding/Root/Memo reuse and one-time rootStats/rootReported parity against fixed Go323; independent cold/warm query tests do not establish same-session equivalence. Finish existing workspace-open control and external Destination consuming-close gaps.
+
+### Current composed consumer validation (2026-10-15 17:32 UTC)
+
+- [ ] Execute R24.1 real admitted adaptive SQL/DB2/raw/asset inspect/stream/navigation consumers and exact public memoryBudget output (22 new Rust NOT_RUN); keep fixed-budget historical identities.
+- [ ] Execute repaired default effective SQL with genuine complete exact-pin cache captures and all invalid-input negatives; no production identity relaxation.
+- [ ] Recompile all targets after explicit Core blob-wait child test path fix; resolve Windows three-way tool identity setup before claiming any contract execution.
+- [ ] Complete actual owned Function/call successor and rerun all 448 S3 comparisons; the oracle correction is diagnostic, not a passing replacement.

@@ -19,6 +19,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+mod adaptive_tests;
 mod effective;
 mod file_bytes;
 pub use file_bytes::FileBytes;
@@ -76,13 +78,43 @@ pub fn read_files(
     ids: &[u32],
     deadline: Instant,
 ) -> Result<Vec<File>> {
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
-        deadline,
-        inv.control.clone(),
-    ));
-    read_files_budgeted(inv, pin, ids, &budget)
+    let budget = Arc::new(Budget::query_controlled(deadline, inv.control.clone()));
+    // Reader FileQuery errors precede admission; DataIdentity deliberately does
+    // not. Preserve original control before query checks or workspace IO.
+    inv.control.check()?;
+    budget.check()?;
+    validate_local_file_request(inv, ids)?;
+    let scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
+    let result = (|| {
+        scope.check_pin(pin)?;
+        read_files_budgeted(inv, pin, ids, &budget)
+    })();
+    scope.finish(result)
 }
+/// No IO, allocation admission, key preparation or pin lookup. Keep Go's
+/// variant-before-FileQuery order with the existing local multi-ID contract.
+fn validate_local_file_request(inv: &Invocation, ids: &[u32]) -> Result<usize> {
+    let variant = inv.flag("--content-variant").unwrap_or("");
+    if !["", "standard", "low-violence"].contains(&variant) {
+        return Err(fault("records.file_query", 2, "Invalid content variant"));
+    }
+    if inv.flag_bool("--cdn") || inv.flag("--installation").is_none_or(str::is_empty) {
+        return Err(fault(
+            "records.source_unavailable",
+            3,
+            "This local reader requires explicit --installation",
+        ));
+    }
+    if ids.is_empty() || ids.len() > 32 || ids.contains(&0) {
+        return Err(fault(
+            "records.file_query",
+            2,
+            "Require 1..32 positive file IDs",
+        ));
+    }
+    inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)
+}
+
 pub(crate) fn read_files_budgeted(
     inv: &Invocation,
     pin: &selection::DataPin,
@@ -177,7 +209,9 @@ fn read_batches(
     mode: ReadMode,
     callback: &mut dyn FnMut(Vec<ResolvedFile>) -> Result<Vec<u32>>,
 ) -> Result<()> {
+    inv.control.check()?;
     budget.check()?;
+    validate_local_file_request(inv, ids)?;
     let deadline = budget.deadline;
     let mut keys = keys::Context::prepare_budgeted(inv, deadline, Some(budget.clone()))?;
     let mut delivered = false;
@@ -223,25 +257,8 @@ fn read_files_with_keys(
     mode: ReadMode,
     callback: &mut dyn FnMut(Vec<ResolvedFile>) -> Result<Vec<u32>>,
 ) -> Result<()> {
-    if inv.flag_bool("--cdn") || inv.flag("--installation").is_none() {
-        return Err(fault(
-            "records.source_unavailable",
-            3,
-            "This local reader requires explicit --installation; CDN transport is pending parity",
-        ));
-    }
-    if ids.is_empty() || ids.len() > 32 || ids.contains(&0) {
-        return Err(fault(
-            "records.file_query",
-            2,
-            "Require 1..32 positive file IDs",
-        ));
-    }
+    let max = validate_local_file_request(inv, ids)?;
     let variant = inv.flag("--content-variant").unwrap_or("");
-    if !["", "standard", "low-violence"].contains(&variant) {
-        return Err(fault("records.file_query", 2, "Invalid content variant"));
-    }
-    let max = inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
     budget.charge(Cost::metadata(
         inv.required("--installation")?.len()
             + pin.product.len()
@@ -316,7 +333,6 @@ fn read_files_with_keys(
         evidence::publish_blob(&inv.home, &target.metadata.build_document.raw, 4 << 20)?;
     let cdn_blob = evidence::publish_blob(&inv.home, &target.metadata.cdn_document.raw, 4 << 20)?;
     let mask = locale(&pin.language)?;
-    let mut retained = root.bytes.len();
     let mut pending = ids.to_vec();
     let mut requested = 0usize;
     while !pending.is_empty() {
@@ -379,24 +395,9 @@ fn read_files_with_keys(
                     "Selected content exceeds byte budget",
                 ));
             }
-            if mode == ReadMode::Materialized {
-                retained = retained
-                    .checked_add(mapping.decoded_bytes as usize)
-                    .ok_or_else(|| {
-                        fault(
-                            "records.query_resource_budget",
-                            3,
-                            "Retained budget overflow",
-                        )
-                    })?;
-                if retained > 512 << 20 {
-                    return Err(fault(
-                        "records.query_resource_budget",
-                        3,
-                        "Aggregate retained content budget exceeded",
-                    ));
-                }
-            }
+            // Go 3.2.3 removed the cumulative raw-content cap. Each file
+            // retains its explicit maximum; shared logical/safety accounting
+            // admits real allocations and may grow only after a fresh probe.
             // Selected encoded and decoded lengths share --max-bytes; metadata
             // keeps its independent allowance. Pass the selected bound separately
             // so a 512 MiB allowance does not alter CASC allocation limits.
@@ -637,11 +638,19 @@ pub(crate) fn sql_inner_after_execute(
 ) -> Result<Outcome> {
     let started = Instant::now();
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         started + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
+    sql_inner_budgeted(inv, &budget, after_execute)
+}
+/// Keep explicit fixture budgets fixed while exercising the same consumer,
+/// admission, source checks, execution and capture as the default constructor.
+pub(crate) fn sql_inner_budgeted(
+    inv: &Invocation,
+    budget: &Arc<Budget>,
+    after_execute: &mut impl FnMut() -> Result<()>,
+) -> Result<Outcome> {
     let deadline = budget.deadline;
     budget.check()?;
     let csv = inv.flag("--encoding") == Some("csv");
@@ -669,17 +678,14 @@ pub(crate) fn sql_inner_after_execute(
     }
     program.validate_parameters(&request.parameters)?;
     request.admit_encoded(&safety)?;
-    let (mut remote, pin) = if inv.flag_bool("--cdn") {
-        let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
-        let (scope, pin) = opened.admit_pinned(fault(
+    // Ordinary SQL keeps Go's Metadata -> pin -> admission ordering for
+    // both physical sources. Only file IO branches on --cdn.
+    let (mut scope, pin) =
+        crate::remote::provider::OpenedScope::open(inv, budget)?.admit_pinned(fault(
             "records.data_pin_required",
             2,
             "SQL requires a fixed DataPin",
         ))?;
-        (Some(scope), pin)
-    } else {
-        (None, selection::resolve_pinned(inv)?)
-    };
     let result = (|| {
         let data = pin.data.as_ref().ok_or_else(|| {
             fault(
@@ -853,21 +859,20 @@ pub(crate) fn sql_inner_after_execute(
         // A lexical CTE can have no physical source and needs no CASC admission.
         if ids.is_empty() {
             execute(Vec::new())?;
-        } else if let Some(scope) = remote.as_mut() {
+        } else if inv.flag_bool("--cdn") {
             scope.read_batches(data, &ids, &mut execute)?;
         } else {
             read_file_batches_budgeted(inv, data, &ids, &budget, &mut execute)?;
         }
-        if let Some(scope) = remote.as_ref() {
-            scope.check()?;
-        }
+        scope.check_consumer(inv, budget)?;
         let (result, provenance, decoded_bytes, preparation_ms, execution_ms, effective_sources) =
             query_result.ok_or_else(|| fault("records.internal", 8, "SQL result missing"))?;
         let complete = result.complete;
         let resources = budget.logical_snapshot()?;
+        let memory_budget = budget.memory_snapshot()?;
         let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
         budget.check()?;
-        let mut reading = json!({"resources":resources,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+        let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
         if !semantic_provenance.is_empty() {
             let size = capture::json_size(&semantic_provenance, &safety)?;
             safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
@@ -932,21 +937,18 @@ pub(crate) fn sql_inner_after_execute(
         out.provenance = vec![capture];
         Ok(out)
     })();
-    match remote {
-        Some(scope) => scope.finish(result),
-        None => result,
-    }
+    scope.finish(result)
 }
 pub fn asset(inv: &Invocation) -> Result<Outcome> {
+    asset_after_finish(inv, &mut |result| result)
+}
+/// Observe the real checked finish after actual IO/capture. Tests may inject a
+/// typed close diagnostic; production forwards the actual owner result unchanged.
+pub(crate) fn asset_after_finish(
+    inv: &Invocation,
+    after_finish: &mut impl FnMut(Result<Outcome>) -> Result<Outcome>,
+) -> Result<Outcome> {
     inv.control.check()?;
-    let pin = selection::resolve_pinned(inv)?;
-    let data = pin.data.as_ref().ok_or_else(|| {
-        fault(
-            "records.data_pin_required",
-            2,
-            "Asset requires fixed data pin",
-        )
-    })?;
     let id = inv.required("--file-id")?.parse::<u32>().map_err(|_| {
         fault(
             "command.invalid_arguments",
@@ -954,30 +956,74 @@ pub fn asset(inv: &Invocation) -> Result<Outcome> {
             "File ID must be a positive u32",
         )
     })?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         inv.control.deadline(),
         inv.control.clone(),
     ));
-    let mut file = read_verified_file_budgeted(inv, data, id, &budget)?;
-    file.reading["resourceAccounting"] =
-        json!({"wholeQueryAccountingComplete":false,"used":budget.snapshot()?});
-    budget.check()?;
-    let capture = evidence::commit_verified_capture_budgeted(
-        &file.blob,
-        evidence::CaptureHeader {
-            media_type: "application/octet-stream",
-            provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",file.reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete: true,
-            truncated: false,
-        },
-        &inv.control,
-        budget.as_ref(),
-    )?;
-    let mut out = Outcome::new(file.reading);
-    out.selection = serde_json::to_value(pin)?;
-    out.provenance = vec![capture];
-    Ok(out)
+    // Asset reads resolve DataSome before admission, then validate DataIdentity
+    // inside the admitted Reader scope, exactly as fixed Go captureAsset does.
+    let (mut scope, pin) =
+        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit_asset()?;
+    let mut committed = None;
+    let result = (|| {
+        let data = pin.data.as_ref().expect("asset admission checked DataPin");
+        scope.check_pin(data)?;
+        let mut capture = |blob: &mut evidence::VerifiedBlob, reading: &Value| {
+            let bytes = usize::try_from(blob.reference().bytes)
+                .map_err(|_| fault("records.metadata_limit", 3, "Asset size overflow"))?;
+            budget.charge_split(Cost::retained(bytes), Cost::default())?;
+            let safety = budget.safety_only();
+            // The remote Session keeps its body/provenance; account the distinct
+            // returned report before cloning it. The body itself is never copied.
+            safety.charge(Cost::metadata(
+                capture::json_size(reading, &safety)?.saturating_mul(4),
+            ))?;
+            let mut reading = reading.clone();
+            reading["resourceAccounting"] =
+                json!({"wholeQueryAccountingComplete":false,"used":budget.snapshot()?});
+            let saved = evidence::commit_verified_capture_budgeted(
+                blob,
+                evidence::CaptureHeader {
+                    media_type: "application/octet-stream",
+                    provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
+                    complete: true,
+                    truncated: false,
+                },
+                &inv.control,
+                &safety,
+            )?;
+            // A successful commit cannot be rolled back by later Session/owner
+            // close failure. Keep its returned identity outside those fallible steps.
+            committed = Some(
+                saved["id"]
+                    .as_str()
+                    .expect("committed capture identity")
+                    .to_owned(),
+            );
+            let mut out = Outcome::new(reading);
+            out.selection = serde_json::to_value(&pin)?;
+            out.provenance = vec![saved];
+            Ok(out)
+        };
+        if inv.flag_bool("--cdn") {
+            scope.with_verified_file(data, id, &mut capture)
+        } else {
+            let mut file = read_verified_file_budgeted(inv, data, id, &budget)?;
+            capture(&mut file.blob, &file.reading)
+        }
+    })();
+    after_finish(scope.finish(result)).map_err(|mut error| {
+        if let Some(id) = committed {
+            let primary = error.clone();
+            error.details = json!({"schema":"lycheedev.asset-committed-error.v1", "primary":primary,
+                "completedCaptures":[id], "outputPublished":false});
+            error
+                .message
+                .push_str("\nasset captures already committed: ");
+            error.message.push_str(&id);
+        }
+        error
+    })
 }
 
 #[cfg(test)]

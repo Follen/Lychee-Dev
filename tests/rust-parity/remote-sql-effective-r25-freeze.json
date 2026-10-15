@@ -1,0 +1,198 @@
+{
+  "schema": "lycheedev.remote-sql-effective-fixture-freeze.v1",
+  "revision": "r25",
+  "reviewedFreezeSHA256": "52357a71b8509cef35883c3b36a061f7c9a74e26971ff8ae7cd0fe687466a7f9",
+  "baselineCommit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "owned": [
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests/default_sql.rs",
+      "bytes": 15339,
+      "sha256": "5e919cbfad8d8783e483ed5575484680a09bc93c31ddc3c47d8f5a9e3547f697"
+    },
+    {
+      "path": "default-sql-fixture.patch",
+      "bytes": 6789,
+      "sha256": "0049398fed564227c7aa6e103cb98b52b9c16ba7d5a01cb50dcb3be0fce26b78"
+    }
+  ],
+  "dependencies": [
+    {
+      "sourcePath": "crates/lycheedev-data/src/remote/session/tests/default_sql.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "052592bc46d972de6cc7db369ae5dd32e3264deb",
+      "path": "support/crates/lycheedev-data/src/remote/session/tests/default_sql.rs",
+      "bytes": 10672,
+      "sha256": "f5f2e933d9ffb53e7b97b32f3c8e6592aed9313816e7e0aba209b4bfe08c8f04"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/src/remote/session/tests.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "4a1fc3e08f79e88fced8bf67d0edb81e07aa4b49",
+      "path": "support/crates/lycheedev-data/src/remote/session/tests.rs",
+      "bytes": 23370,
+      "sha256": "916b00907c8d90ac160aeafe02c00ed336f3bb2ee478ceaef1a2e16e259642fc"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/tests/support/catalog_fixture.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "c6c4b309df68f54d005212741f6266cc4721f79e",
+      "path": "support/crates/lycheedev-data/tests/support/catalog_fixture.rs",
+      "bytes": 22421,
+      "sha256": "84f9fe0cccc3bdf04d7c455cd123160a6381f480f539872f015bfe477dbe77c1"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/src/local_query.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "65a470f057b586dcd545a745d2f3b234cc9a8a65",
+      "path": "support/crates/lycheedev-data/src/local_query.rs",
+      "bytes": 43213,
+      "sha256": "718bcf44047e2774dce5420bd612ee33e653fb35f20e134b4308c7e8f2f2b4b4"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/src/local_query/effective.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "2fe7d43cfaa82a611e3ef968cddbe61fbc2dbc29",
+      "path": "support/crates/lycheedev-data/src/local_query/effective.rs",
+      "bytes": 40576,
+      "sha256": "1c6f7185dc60079fb9e88966bd2c29f1804987f6fe8f469250314dade97e20a0"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/src/local_query/request.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "32c17eca2d2c19e4fed3e533ab20c61e6656006e",
+      "path": "support/crates/lycheedev-data/src/local_query/request.rs",
+      "bytes": 15998,
+      "sha256": "92ee7e7c663bda5736fcd8275833aab6d35af060be469d150d7f954e6629cf3b"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/src/hotfix.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "b8a8d9c714b4822f30e95fe62237195c91ea187e",
+      "path": "support/crates/lycheedev-data/src/hotfix.rs",
+      "bytes": 33334,
+      "sha256": "5330df8c1f74f7a82d917452aeae8f7a66d4282cbf87cda72b711bd2162438ac"
+    },
+    {
+      "sourcePath": "crates/lycheedev-core/src/evidence.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "621dd1291ad89f35db7d1142a59f463acb7ff6a0",
+      "path": "support/crates/lycheedev-core/src/evidence.rs",
+      "bytes": 21413,
+      "sha256": "82ed53c4a248ebda2797d87c31fc6594ae62e4c429f1c062df733745aee0b575"
+    },
+    {
+      "sourcePath": "crates/lycheedev-core/src/evidence/bounded.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "80fc7593d4b51619af16a7a37a8120b8615f6ca1",
+      "path": "support/crates/lycheedev-core/src/evidence/bounded.rs",
+      "bytes": 36383,
+      "sha256": "78c675ded0ff7370d5d6115da0219d1885bbe5f94ae468a31d8bb5f249eab528"
+    },
+    {
+      "sourcePath": "crates/lycheedev-core/src/evidence/budgeted.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "e2f052e2d7d7c07a44961a1c1db451db2f13b807",
+      "path": "support/crates/lycheedev-core/src/evidence/budgeted.rs",
+      "bytes": 19940,
+      "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151"
+    },
+    {
+      "sourcePath": "crates/lycheedev-core/src/selection.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "8bec8409b1d7745da37f2142c871de989232e95f",
+      "path": "support/crates/lycheedev-core/src/selection.rs",
+      "bytes": 26783,
+      "sha256": "f5d57baa0b286a7c254457f83b50a75cb746d204202f2497dbd9f79961087dea"
+    },
+    {
+      "sourcePath": "crates/lycheedev-data/tests/effective_sql_parity.rs",
+      "commit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+      "gitBlob": "aec12b283409137d1018bece4296b48b67a23938",
+      "path": "support/crates/lycheedev-data/tests/effective_sql_parity.rs",
+      "bytes": 20592,
+      "sha256": "701216521c4755a808bbebe5d7954e3bfee197765b701fafd37c962e84f91cd7"
+    }
+  ],
+  "oracle": [
+    {
+      "sourcePath": "internal/records/effective.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "6410835d05697d137300662904c7b9c0f1ae2e86",
+      "path": "oracle/internal/records/effective.go",
+      "bytes": 9169,
+      "sha256": "a6892e434a7c027ea66dfafbdee1802bed83713d85b1ddee81ea32c55f670310"
+    },
+    {
+      "sourcePath": "internal/records/hotfix_snapshots.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "a0f90734ab4de9e09da4658d6e1def6e63d44ef9",
+      "path": "oracle/internal/records/hotfix_snapshots.go",
+      "bytes": 2786,
+      "sha256": "69360bcabe3712c1370668222fc9d199514ef0a6fc3c3e3d87d789894147cf7b"
+    },
+    {
+      "sourcePath": "internal/records/hotfix.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "8b23fdc6e2dcd1af101349eb8a9d42c9d78738ed",
+      "path": "oracle/internal/records/hotfix.go",
+      "bytes": 8285,
+      "sha256": "9e3ebb62ea5d3914a270262a748fe55bbe39d36e394b3dde48597fcd0a3884c1"
+    },
+    {
+      "sourcePath": "internal/records/sql.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "ac281c5f2f41bc267bda545a79221aa885545cca",
+      "path": "oracle/internal/records/sql.go",
+      "bytes": 7579,
+      "sha256": "8b98d03fafc668730486aebef066cb6ccd567de50f8f1e4c9a8164a36a56434a"
+    },
+    {
+      "sourcePath": "internal/command/query.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "dbf0d14b5c08a8adf1b850c3aba96ff600cebf81",
+      "path": "oracle/internal/command/query.go",
+      "bytes": 13880,
+      "sha256": "a50ccac48f354b2ee3af493a1bce243f3f083318c98261ce1db053dca1330b48"
+    },
+    {
+      "sourcePath": "internal/command/query_hotfix_test.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "c2860a5159e4da839fd986647c33f5b26508a5bf",
+      "path": "oracle/internal/command/query_hotfix_test.go",
+      "bytes": 900,
+      "sha256": "d608008fe76bd5322406249482969cc6a0ba2de458117ed1bea473a3cbc0cfe0"
+    },
+    {
+      "sourcePath": "internal/records/navigatetest/effective_test.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "gitBlob": "a085867e598a0dc161c9e50829ff3aef2ba40f98",
+      "path": "oracle/internal/records/navigatetest/effective_test.go",
+      "bytes": 3523,
+      "sha256": "157469e5cf19449d9988f49b03ca19d354e68a79d9524bb12e6e5c54a89d3d6d"
+    }
+  ],
+  "rust": "NOT_RUN",
+  "productionChanged": false,
+  "testMap": {
+    "rust": "NOT_RUN",
+    "newTests": [
+      "default_remote_effective_requires_distinct_complete_exact_pin_cache_captures"
+    ],
+    "correctedTests": [
+      "default_remote_sql_static_and_effective_use_cached_authenticated_files_and_capture",
+      "default_remote_sql_explain_does_not_scan_invalid_base_or_effective_string_cells"
+    ],
+    "allOwnerTests": [
+      "default_remote_sql_static_and_effective_use_cached_authenticated_files_and_capture",
+      "default_remote_sql_meta_is_admitted_but_does_not_prepare_cdn_or_keys",
+      "default_remote_sql_explain_does_not_scan_invalid_base_or_effective_string_cells",
+      "default_remote_sql_holds_workspace_admission_through_execution_and_stops_before_capture",
+      "default_remote_sql_missing_cache_and_conflicting_physical_source_never_fallback_or_capture",
+      "default_remote_sql_original_deadline_after_execution_prevents_success_capture",
+      "default_remote_effective_requires_distinct_complete_exact_pin_cache_captures"
+    ],
+    "filter": "remote::session::tests::default_sql::",
+    "noIgnoredNewTests": true
+  }
+}

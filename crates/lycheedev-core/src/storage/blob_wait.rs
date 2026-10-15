@@ -60,6 +60,7 @@ impl ExclusiveLock {
 }
 
 #[cfg(test)]
+#[path = "blob_wait/tests.rs"]
 mod tests;
 
 #[cfg(test)]

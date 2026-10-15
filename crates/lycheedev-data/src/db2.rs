@@ -60,33 +60,43 @@ pub(crate) fn dispatch_after_read(
         inv.argument()?
     };
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    // Every remote wrapper first owns Metadata. inspectData then resolves its
-    // pin before admission; withNavigator admits before resolving its pin.
-    let (mut remote, resolved) = if inv.flag_bool("--cdn") {
-        let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
-        if inv.command == "data db2" {
-            let (scope, pin) =
-                opened.admit_pinned(fault("command.failed", 5, "records.data_pin_required"))?;
-            (Some(scope), Some(pin))
-        } else {
-            (Some(opened.admit()?), None)
-        }
+    // The shared owner is source-neutral. Ordinary record/page checks its pin
+    // before admission; navigator profiles check it only after admission.
+    let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
+    let (mut scope, resolved) = if inv.command == "data db2" {
+        let (scope, pin) =
+            opened.admit_pinned(fault("command.failed", 5, "records.data_pin_required"))?;
+        (scope, Some(pin))
     } else {
-        (None, None)
+        (opened.admit()?, None)
     };
     let result = (|| {
+        let resolved = match resolved {
+            Some(pin) => pin,
+            None => scope.resolve_pin()?,
+        };
+        let data = resolved
+            .data
+            .as_ref()
+            .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
+        scope.check_pin(data)?;
         let Prepared {
             pin,
             bundle,
             file,
             layout,
             definition,
-        } = prepare_scoped(inv, name, &budget, remote.as_mut(), resolved)?;
+        } = prepare_scoped(
+            inv,
+            name,
+            &budget,
+            inv.flag_bool("--cdn").then_some(&mut scope),
+            Some(resolved),
+        )?;
         let data = pin.data.as_ref().expect("prepare checked DataPin");
         let view = table::open_budgeted(
             &file.bytes,
@@ -309,11 +319,15 @@ pub(crate) fn dispatch_after_read(
             _ => return Err(fault("command.unsupported", 3, "Unknown DB2 profile")),
         };
         after_read()?;
-        if let Some(scope) = remote.as_ref() {
-            scope.check()?;
-        }
+        scope.check_consumer(inv, &budget)?;
         budget.check()?;
-        result["resources"] = serde_json::to_value(budget.snapshot()?)?;
+        if inv.command == "data db2" {
+            // Existing ordinary record/page diagnostics retain their shape.
+            result["resources"] = serde_json::to_value(budget.snapshot()?)?;
+        } else {
+            result["resources"] = serde_json::to_value(budget.logical_snapshot()?)?;
+            result["memoryBudget"] = serde_json::to_value(budget.memory_snapshot()?)?;
+        }
         result["resourceAccounting"] = json!({"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":view.admitted_metadata_bytes(),"remainingGaps":["uninterruptible single codec call"]});
         let raw = capture::json_bytes(&result, &budget, 16 << 20, || {
             fault(
@@ -351,10 +365,7 @@ pub(crate) fn dispatch_after_read(
         }
         Ok(outcome)
     })();
-    match remote {
-        Some(scope) => scope.finish(result),
-        None => result,
-    }
+    scope.finish(result)
 }
 fn uint(text: &str) -> Result<u32> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {

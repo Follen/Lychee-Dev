@@ -460,7 +460,7 @@ impl<'a> Navigator<'a> {
             .map(|t| &t.prepared.file.reading["verification"])
             .collect();
         Ok(
-            json!({"resources":self.budget.snapshot()?,"snapshot":pin.id,"pin":pin.data,"source":first.prepared.file.reading["source"],"tables":proofs,"relations":self.relations,"complete":self.partial.is_empty()&&self.truncation.is_none(),"truncated":self.truncation.is_some(),"truncationReason":self.truncation.unwrap_or("none"),"partial":!self.partial.is_empty(),"partialReasons":if self.partial.is_empty(){Value::Null}else{json!(self.partial)},"tableVerification":verified,"resourceAccounting":{"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":self.tables.iter().map(|t| t.view.admitted_metadata_bytes()).sum::<u64>(),"remainingGaps":["uninterruptible single codec call"]}}),
+            json!({"resources":self.budget.logical_snapshot()?,"memoryBudget":self.budget.memory_snapshot()?,"snapshot":pin.id,"pin":pin.data,"source":first.prepared.file.reading["source"],"tables":proofs,"relations":self.relations,"complete":self.partial.is_empty()&&self.truncation.is_none(),"truncated":self.truncation.is_some(),"truncationReason":self.truncation.unwrap_or("none"),"partial":!self.partial.is_empty(),"partialReasons":if self.partial.is_empty(){Value::Null}else{json!(self.partial)},"tableVerification":verified,"resourceAccounting":{"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":self.tables.iter().map(|t| t.view.admitted_metadata_bytes()).sum::<u64>(),"remainingGaps":["uninterruptible single codec call"]}}),
         )
     }
 }
@@ -616,17 +616,18 @@ pub(super) fn dispatch(
     }
     let request = Request::parse(inv)?;
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let mut remote = if inv.flag_bool("--cdn") {
-        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
-    } else {
-        None
-    };
+    let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
     let result = (|| {
+        let pin = scope.resolve_pin()?;
+        let data = pin
+            .data
+            .as_ref()
+            .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
+        scope.check_pin(data)?;
         let prepared = if matches!(
             request,
             Request::SpellInfo { .. }
@@ -642,8 +643,8 @@ pub(super) fn dispatch(
                 inv,
                 &tables[..1],
                 &budget,
-                remote.as_mut(),
-                None,
+                inv.flag_bool("--cdn").then_some(&mut scope),
+                Some(pin.clone()),
                 &mut |batch| {
                     // Go opens each table completely before resolving the next one.
                     // Keep that failure order in the one shared CASC read session.
@@ -658,8 +659,8 @@ pub(super) fn dispatch(
                 inv,
                 request.tables(),
                 &budget,
-                remote.as_mut(),
-                None,
+                inv.flag_bool("--cdn").then_some(&mut scope),
+                Some(pin.clone()),
                 &mut |_| Ok(Vec::new()),
             )?
         };
@@ -671,7 +672,13 @@ pub(super) fn dispatch(
             .extend(nav.context()?.as_object().expect("context object").clone());
         budget.check()?;
         after_read()?;
-        check_source(inv, &prepared[0], &budget, remote.as_ref())?;
+        scope.check_consumer(inv, &budget)?;
+        check_source(
+            inv,
+            &prepared[0],
+            &budget,
+            inv.flag_bool("--cdn").then_some(&scope),
+        )?;
         let raw = capture_bytes(&result, &budget)?;
         let complete = result["complete"] == true;
         let truncated = result["truncated"] == true;
@@ -702,10 +709,7 @@ pub(super) fn dispatch(
         }
         Ok(outcome)
     })();
-    match remote {
-        Some(scope) => scope.finish(result),
-        None => result,
-    }
+    scope.finish(result)
 }
 
 #[cfg(test)]

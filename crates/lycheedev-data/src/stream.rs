@@ -89,16 +89,11 @@ pub(crate) fn stream_after_finish(
     let filter_text = inv.flag("--filter").unwrap_or("");
     let filter = parse_filter(filter_text)?;
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let mut remote = if inv.flag_bool("--cdn") {
-        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
-    } else {
-        None
-    };
+    let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
     let mut started = false;
     let mut write_failed = false;
     let mut committed_captures = Vec::new();
@@ -112,13 +107,25 @@ pub(crate) fn stream_after_finish(
             }
             result
         };
+        let pin = scope.resolve_pin()?;
+        let data = pin
+            .data
+            .as_ref()
+            .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
+        scope.check_pin(data)?;
         let db2::Prepared {
             pin,
             bundle,
             file,
             layout,
             definition,
-        } = db2::prepare_scoped(inv, name, &budget, remote.as_mut(), None)?;
+        } = db2::prepare_scoped(
+            inv,
+            name,
+            &budget,
+            inv.flag_bool("--cdn").then_some(&mut scope),
+            Some(pin),
+        )?;
         let view = table::open_budgeted(
             &file.bytes,
             &definition,
@@ -189,9 +196,13 @@ pub(crate) fn stream_after_finish(
             budget.check()?;
             Ok(())
         })();
+        // Go snapshots the DataContext after walking and before the manifest
+        // capture. Begin/end frames intentionally have no memoryBudget fields.
+        let mut context = None;
         let publication = walk.and_then(|()| {
         inv.control.check()?;
-        if let Some(scope) = remote.as_ref() { scope.check_consumer(inv, &budget)?; }
+        scope.check_consumer(inv, &budget)?;
+        context = Some((budget.logical_snapshot()?, budget.memory_snapshot()?));
         let end = json!({"partial":false,"partialReasons":null,"count":count,"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"}});
         budget.check()?;
         let manifest = json!({"begin":begin,"end":end});
@@ -214,17 +225,15 @@ pub(crate) fn stream_after_finish(
         Ok(end)
     });
         let end = publication?;
-        let data = json!({"snapshot":pin.id,"pin":pin.data,"source":file.reading["source"],"tables":[proof],"relations":[],"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"},"partial":false,"partialReasons":null,"table":bundle.identity.name,"mode":"stream","limit":limit,"fields":fields,"filter":filter_text,"count":count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":budget.snapshot()?}});
+        let (resources, memory_budget) = context.expect("successful walk context");
+        let data = json!({"resources":resources,"memoryBudget":memory_budget,"snapshot":pin.id,"pin":pin.data,"source":file.reading["source"],"tables":[proof],"relations":[],"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"},"partial":false,"partialReasons":null,"table":bundle.identity.name,"mode":"stream","limit":limit,"fields":fields,"filter":filter_text,"count":count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":budget.snapshot()?}});
         let mut outcome = Outcome::new(data);
         outcome.complete = !extra;
         Ok((outcome, json!({"frame":"end","end":end})))
     })();
     // A success terminal is a promise about the whole owned operation. Hold the
     // scope through capture, then check every consuming close before making it.
-    let result = match remote {
-        Some(scope) => scope.finish(result),
-        None => result,
-    };
+    let result = scope.finish(result);
     let result = after_finish(result);
     let result = match result {
         Ok((mut outcome, terminal)) => match sink(&terminal) {

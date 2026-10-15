@@ -400,3 +400,5 @@ fn default_remote_navigation_admits_before_pin_and_rejects_conflicting_installat
     assert!(f.captures().is_empty());
     f.close();
 }
+
+mod adaptive;

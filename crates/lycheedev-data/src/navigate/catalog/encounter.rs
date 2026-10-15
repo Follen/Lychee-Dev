@@ -296,24 +296,25 @@ pub(super) fn dispatch(
     }
     let depth = if depth == 0 { MAX_DEPTH } else { depth as u32 };
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let mut remote = if inv.flag_bool("--cdn") {
-        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
-    } else {
-        None
-    };
+    let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
     let result = (|| {
+        let pin = scope.resolve_pin()?;
+        let data = pin
+            .data
+            .as_ref()
+            .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
+        scope.check_pin(data)?;
         let mut state = None;
         let prepared = db2::prepare_following_scoped(
             inv,
             &[SECTION],
             &budget,
-            remote.as_mut(),
-            None,
+            inv.flag_bool("--cdn").then_some(&mut scope),
+            Some(pin.clone()),
             &mut |batch| {
                 // Go completes every table's schema/WDC open before asking for the
                 // next table. Preserve error precedence as well as the success order.
@@ -368,7 +369,13 @@ pub(super) fn dispatch(
             ),
         ] {
             budget.check()?;
-            check_source(inv, &prepared[0], &budget, remote.as_ref())?;
+            scope.check_consumer(inv, &budget)?;
+            check_source(
+                inv,
+                &prepared[0],
+                &budget,
+                inv.flag_bool("--cdn").then_some(&scope),
+            )?;
             let raw = capture_bytes(value, &budget)?;
             captures.push(evidence::commit_capture_budgeted(&inv.home, CaptureInput { bytes: &raw, maximum_bytes: 16 << 20, media_type: "application/json", provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}), complete, truncated }, &inv.control, budget.as_ref())?);
         }
@@ -384,10 +391,7 @@ pub(super) fn dispatch(
         }
         Ok(outcome)
     })();
-    match remote {
-        Some(scope) => scope.finish(result),
-        None => result,
-    }
+    scope.finish(result)
 }
 
 #[cfg(test)]

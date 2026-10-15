@@ -115,6 +115,61 @@ impl SqlFixture {
             control: OperationControl::default(),
         }
     }
+    fn hotfix_capture(&self, snapshot: &str, complete: bool, truncated: bool) -> String {
+        // A complete empty XFTH cache is a real effective overlay input. Its
+        // build comes from this exact pin; an omitted capture list is invalid.
+        let build = self
+            .source
+            .pin
+            .full_build
+            .rsplit('.')
+            .next()
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        let mut raw = b"XFTH".to_vec();
+        raw.extend(9u32.to_le_bytes());
+        raw.extend(build.to_le_bytes());
+        raw.resize(44, 0);
+        let page = crate::hotfix::inspect(
+            &raw,
+            crate::hotfix::CacheFilter {
+                build,
+                limit: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(page.complete && !page.truncated && page.entries.is_empty());
+        evidence::commit_capture(
+            &self.source.home,
+            &raw,
+            "application/octet-stream",
+            json!({"kind":"hotfix-cache","locator":"fixture:remote-effective-empty",
+                "snapshot":snapshot,"dataBuild":self.source.pin.full_build}),
+            complete,
+            truncated,
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+    fn effective_invocation(&self, sql: &str, ids: &[String]) -> Invocation {
+        let path = self.source.home.join("remote-effective-query.json");
+        let mut request = json!({"sql":sql});
+        // Fixed command admission rejects an explicitly empty JSON hotfix
+        // array. Omit it to reach effective-provider missing-input validation.
+        if !ids.is_empty() {
+            request["hotfix"] = json!(ids);
+        }
+        std::fs::write(&path, serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut inv = self.invocation(sql);
+        inv.flags.remove("--sql");
+        inv.flags
+            .insert("--file".into(), path.to_string_lossy().into_owned());
+        inv
+    }
     fn captures(&self) -> Vec<Value> {
         let metadata = Metadata::open(&self.source.home, false).unwrap();
         let values = metadata.list::<Value>("capture/", 100).unwrap();
@@ -138,11 +193,27 @@ impl SqlFixture {
 #[test]
 fn default_remote_sql_static_and_effective_use_cached_authenticated_files_and_capture() {
     let f = SqlFixture::new(false, true);
+    let cache = f.hotfix_capture(&f.snapshot, true, false);
     for sql in [
         "SELECT ID, Name FROM static.RemoteSample",
         "SELECT ID, Name FROM effective.RemoteSample",
     ] {
-        let out = crate::dispatch(&f.invocation(sql)).unwrap();
+        let effective = sql.contains("effective.");
+        let inv = if effective {
+            f.effective_invocation(sql, std::slice::from_ref(&cache))
+        } else {
+            f.invocation(sql)
+        };
+        let out = crate::dispatch(&inv).unwrap();
+        if effective {
+            assert_eq!(out.data["effectiveSources"][0]["captures"][0]["id"], cache);
+            assert_eq!(out.data["effectiveSources"][0]["replacedOrAdded"], 0);
+            assert_eq!(out.data["effectiveSources"][0]["deleted"], 0);
+            // SQL validates source references at commit but fixed Go does not
+            // put them in an immutable capture dependencies field.
+            assert!(out.provenance[0].get("dependencies").is_none());
+            assert_eq!(out.data["query"]["hotfix"], json!([cache]));
+        }
         assert_eq!(
             out.data["result"]["rows"],
             json!([[7, "verified remote row"]])
@@ -186,16 +257,25 @@ fn default_remote_sql_meta_is_admitted_but_does_not_prepare_cdn_or_keys() {
 #[test]
 fn default_remote_sql_explain_does_not_scan_invalid_base_or_effective_string_cells() {
     let f = SqlFixture::new(true, true);
+    let cache = f.hotfix_capture(&f.snapshot, true, false);
     for catalog in ["static", "effective"] {
-        let out = crate::dispatch(
-            &f.invocation(&format!("EXPLAIN SELECT Name FROM {catalog}.RemoteSample")),
-        )
+        let invocation = |sql: &str| {
+            if catalog == "effective" {
+                f.effective_invocation(sql, std::slice::from_ref(&cache))
+            } else {
+                f.invocation(sql)
+            }
+        };
+        let out = crate::dispatch(&invocation(&format!(
+            "EXPLAIN SELECT Name FROM {catalog}.RemoteSample"
+        )))
         .unwrap();
         f.verify(&out);
         let before = f.captures().len();
-        let error =
-            crate::dispatch(&f.invocation(&format!("SELECT Name FROM {catalog}.RemoteSample")))
-                .unwrap_err();
+        let error = crate::dispatch(&invocation(&format!(
+            "SELECT Name FROM {catalog}.RemoteSample"
+        )))
+        .unwrap_err();
         assert_eq!(error.code, "table.invalid_format");
         assert_eq!(f.captures().len(), before);
     }
@@ -296,3 +376,51 @@ fn default_remote_sql_original_deadline_after_execution_prevents_success_capture
 mod default_db2;
 
 mod default_stream;
+
+#[test]
+fn default_remote_effective_requires_distinct_complete_exact_pin_cache_captures() {
+    let f = SqlFixture::new(false, true);
+    let valid = f.hotfix_capture(&f.snapshot, true, false);
+    let incomplete = f.hotfix_capture(&f.snapshot, false, false);
+    let truncated = f.hotfix_capture(&f.snapshot, false, true);
+    let mut other_data = f.source.pin.clone();
+    assert_ne!(other_data.region, "eu");
+    other_data.region = "eu".into();
+    let other = selection::pin_selection(
+        &f.source.home,
+        SelectionSpec {
+            data: Some(other_data),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let wrong_pin = f.hotfix_capture(&other.id, true, false);
+    let before = f.captures().len();
+    for ids in [
+        vec![],
+        vec![valid.clone(), valid],
+        vec![incomplete],
+        vec![truncated],
+        vec![wrong_pin],
+    ] {
+        for sql in [
+            "SELECT ID FROM effective.RemoteSample",
+            "EXPLAIN SELECT ID FROM effective.RemoteSample",
+        ] {
+            let error = crate::dispatch(&f.effective_invocation(sql, &ids)).unwrap_err();
+            assert_eq!(
+                error.code, "records.hotfix_identity",
+                "{sql}: {ids:?}: {error:?}"
+            );
+            assert_eq!(error.exit_code, 4);
+            assert_eq!(
+                f.captures().len(),
+                before,
+                "invalid overlay must not publish a query capture"
+            );
+        }
+    }
+    f.close();
+}
+
+mod adaptive;
