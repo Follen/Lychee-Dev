@@ -828,19 +828,27 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 合成候选保留c6b07c7的Live锁图边，实际组合Node35与Python46全部通过，owner `811060f8-3897-425a-95d3-fe2b1c4c451f`；只证明custody/runner静态fixtures，未跑组合Rust。先前协调者archive输出超过16MiB的准备失败原证据保留，未进入产品测试；改为owned archive文件后本次成功，不追认先前成功。
 - `95bd313`虽已推送但截至本节点未观察到Actions run；未空commit刷队列。c6b07c7普通push已触发fast事件。此真实产品批使用native marker再次请求完整验收，79ef在途保持；79ef的静态fullRetail已运行，实际内存数值仍待其最终封存artifact核验。
 
-### 历史显式退役与 SQL EXPLAIN/TopK 冻结待提交批（2026-10-15）
+### 历史显式退役与 SQL EXPLAIN/TopK 实现批（2026-10-15）
 
 - `ea3644ef445973606722c21d84eb09dc701cb616` 已推同草稿PR14，47远端blob与候选逐字节一致；native run `38678665448` 已实际产生并排队。旧 `95bd313` 无事件记录保留NOT_RUN。79ef原生批继续，真实multi-CLI session/failure-cleanup步骤success、Skill步骤failure；79ef现已终态failure，最终receipt/计数/内存值待下载sealed artifact核验。编译已解除，不能再说因编译未采样，也不能先报未经验证的内存数。
 - 历史 `live cancel`/`live abandon` 已接真实dispatch：OP只允许prepared+pending+空观察取消；unknown outcome不重放，显式owner abandon走abandoning→abandoned，两阶段状态与owner generation CAS在对应单事务提交；BTP保原字段、当前/window精确身份及固定Go SimpleFold。多文档CAS、原handle锁/close、partial Outcome与CLI错误投影均有回归。冻结 `legacy-retirement-freeze.json` SHA256 `5531ccfbde7c04b16bb80bed413b5e1d1dd36e6f86366a5fc23020e28d02d54e`，独审 `legacy-retirement-review.json` SHA256 `fb132309bbc2bd2cbca6c7fd8e0175cfae9e5d47425c8351f9e825b01ea3ae34`；20owner/1306deps/19Go/9toolchain核实，44新测试声明 **NOT_RUN**。静态注册84，不等于真实describe已通过；通用JSON/DEFLATE文案和workspace时间限制保留。
 - SQL新增schema-only EXPLAIN：验证绑定及源身份而不伪执行行，null列/行、plan/capture/CSV单LF保固定Go合同；TopK有界保稳定原序/NULL/精确整数/LIMIT0仍全输入校验，阈值/溢出回到完整合法排序。独审修复ON嵌套聚合、compound重复列，以及新Ordinal绕过分组验证三个P2；未分组Ordinal现与输入列同拒绝。R3冻结 `sql-explain-r3-freeze.json` SHA256 `7195c2f212c0aee787f4ba17ab761674a6354de64d96dedec38de6517110519a`，16owner/541deps/62Go核实，31新测试 **NOT_RUN**。ANALYZE仍明确unsupported，实际provider callback/cache/统一资源计费及剩余CAST/subquery诊断继续实施，不伪造运行计划实测。
 - 集成仅使用精确owner delta：legacy与SQL已有owner均匹配记录base；保留ea364的binding-contracts与Live依赖边，不覆盖新slot/Source/工具。workflow保留history::覆盖read/retire而不重复跑retire子集，新增CAS、EXPLAIN/TopK及受影响relational回归独立组，已有local_query组覆盖新增单元；实际YAML解析/前置step校验通过，接线不是Rust运行结果。本批普通push用于持久化，不额外挤新native长批。
-- Remote Data准入严格遵循3057的DataProduct/ValidateDataRelease六条，包括原forever映射；runtime产品可见性不能扩大Data支持合同。共享remote catalog/cache及Wago/Raidbots候选仍独审中：blocking HTTP取消/已读网络计量、Metadata初始化5s等待是已知整链缺口，正在最小共享接缝修复，不能标remote已齐。Emmy/XML增强的明确保留授权不扩展Data业务。
+- Remote Data准入按固定Go完整调用链：DataProduct/ValidateDataRelease先查7个DataProducts profile，再查baseline以兼容旧forever；此前只看baseline而写“六条”是调查遗漏，已纠正，不能削减两个beta入口。runtime/API baseline与Data profile不混为一表。共享remote catalog/cache及Wago/Raidbots候选仍独审中：blocking HTTP取消/已读网络计量、Metadata初始化5s等待是已知整链缺口，正在最小共享接缝修复，不能标remote已齐。Emmy/XML增强的明确保留授权不扩展Data业务。
 
 ### 当前目标升级至正式 Go 3.2.1（2026-10-15，文档先行）
 
-- 用户确认先更新文档。当前目标改为正式10b561db，历史3057产品/fixture证据不修改；当前冻结legacy/SQL代码仍按3057原审查范围随后提交，不冒充覆盖3.2.1。不合main、不改包版本、不发布。
+- 用户确认先更新文档。当前目标改为正式10b561db，历史3057产品/fixture证据不修改；legacy/SQL代码仍按3057原审查范围独立提交，不冒充覆盖3.2.1。不合main、不改包版本、不发布。
 - Retail新增12.1.5/120105并兼容12.1.0；ClientGate/TOC/runtime/slot/selection按产品+build一致选择/校验，固定Go新增测试逐项映射。键盘活动包括全部键盘VK（0x03–0xFE，排除鼠标/保留值0x04–0x07），全键释放并事件静默500ms后重新读INPUT；只存WH_KEYBOARD_LL最后活动时间，不记录键文/序列。已开始的chord完成并释放本attempt按下键再等静默，取消也只释放本attempt按下键，不新增活动中途打断机制；submitted/uncertain仍观察原receipt不重发，等待保原deadline。
 - 新增量矩阵G321-01–G321-06全部PENDING/NOT_RUN，Skill live-recovery及协议指引同步，Source增强、unsafe边界与Rust≤Go30%目标保留。性能比较将使用新固定Go候选重新确认结果等价；旧测试不替代新验收。实机键盘场景并入末尾H03，结果留空。
+
+### 79ef 全 Retail 实际 Windows 内存采样（2026-10-15）
+
+- 旧候选 `79ef742fcd74e08bfa6a5e641a31f2eb525633c5`，run `38672577841` 最终failure；artifact `11947067540` ZIP SHA256 `cf45f43584adad05cd4b8403a63f9caffdab2a72c691e190382d4258321292bb`。固定4036文档Retail输入，EXE `8c8ef92758ca69e4905b875701c47af760b2571b2ae6a7b92672ff89fbde4717`。static owner `8443c8e7-0b2e-487c-8229-0c48a82506d2` 的63sealed日志与native owner `c75245a2-d164-4330-96a8-441f9badb418` 的94日志、全部4份memory jsonl逐hash验证；两owner retired/reaped、active0。
+- 100ms同步成员采样，`sourceExecutableOnly`排除Node/Git/conhost，不叠加各进程各自峰值。static cold索引采样峰 WorkingSet **674.03 MiB** / PrivateBytes **783.07 MiB**；warm **226.31 / 326.80 MiB**；静态查询 **361.93 / 479.89 MiB**。native组同类cold/warm/query WS分别674.51/230.37/353.64 MiB，非独立20次性能样本。
+- 完整原生语义阶段采样峰，Source可执行进程合计 WS **2350.31 MiB（约2.30 GiB）** / PrivateBytes **2509.45 MiB**；整个owned Job（含测试控制器）为2723.82/2944.29 MiB，不可当纯工具占用。该组refs/context exit5、API命令exit0，整体失败；retained-session cold WS2084.27 MiB也exit5，warm/steady **NOT_MEASURED**，不能称稳定会话已成功。
+- 观测质量为`sampled_with_gaps`：这些是离散同步采样峰的下界，不是内核绝对峰或稳态占用。报告中的peakRSS/aggregateRSS仍not_measured，不能改名冒充此指标。此候选不含后续3ea线索索引/预算与binding拆分等修复；不能推断当前HEAD同值或优化已达标。没有同机Go样本或等价冷暖重复，Rust≤Go30%目标仍未测。
+- 新失败已定位实际断言：normal-invocation control fixture在parser阶段使用非法wait-seconds而unwrap，3pass1fail；definition conflict fixture Windows socket read返回10035 WouldBlock被unwrap，11pass1fail。正核最小fixture修复，保原失败不追认。其余失败/完整native输出继续按owner逐项诊断。
 
 ## 11. 最后执行：需要实际配合的测试清单
 
