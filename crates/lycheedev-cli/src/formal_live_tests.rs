@@ -676,8 +676,8 @@ fn default_cli_advertises_only_the_connected_formal_routes() {
     assert!(!implemented.iter().any(|d| d.path == "live report"));
     for route in ["live cancel", "live abandon"] {
         assert!(
-            !implemented.iter().any(|d| d.path == route),
-            "unfinished legacy route must not advertise completion"
+            implemented.iter().any(|d| d.path == route),
+            "historical disk-only retirement must have a real registered adapter"
         );
     }
 }
@@ -1287,3 +1287,6 @@ fn legacy_bootstrap_unmarshalable_time_fails_only_at_render_without_partial_fram
 
 #[path = "formal_live_history_tests.rs"]
 mod history;
+
+#[path = "formal_live_retire_tests.rs"]
+mod retirement;

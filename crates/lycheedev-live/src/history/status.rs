@@ -72,7 +72,7 @@ pub struct BusinessOutcome {
 fn is_zero(value: &i64) -> bool {
     *value == 0
 }
-fn pending(record: &WorkRecord) -> HistoricalOutcome {
+pub(super) fn pending(record: &WorkRecord) -> HistoricalOutcome {
     let cleanup = if record.stage == "abandoned" && record.status == "abandoned" {
         "abandoned"
     } else if record.stage == "cleaned"

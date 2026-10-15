@@ -6,8 +6,8 @@ pub(super) struct Link {
     pub table: String,
     pub alias: String,
     pub derived: Option<Box<Program>>,
-    left: bool,
-    condition: Option<Term>,
+    pub(super) left: bool,
+    pub(super) condition: Option<Term>,
 }
 pub(super) fn relation(
     relation: &TableFactor,
@@ -120,9 +120,6 @@ fn source<'a>(sources: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a 
         .iter()
         .any(|s| s.is_empty() || s.len() > 4096)
     {
-        return Err(binding());
-    }
-    if result.rows.iter().any(|r| r.len() != result.columns.len()) {
         return Err(binding());
     }
     let mut names = BTreeSet::new();
@@ -287,17 +284,40 @@ pub(super) fn prepare<'a>(
         if columns.len() > 1024 {
             return Err(budget());
         }
-        if let Some(condition) = &link.condition {
-            bind(condition, &columns, QUALIFIED, params)?;
-        }
-        let keys = index(link.condition.as_ref(), &columns, start, right, work)?;
         rights.push(Right {
             source: right,
             link,
             start,
             end: columns.len(),
-            keys,
+            keys: None,
         });
+    }
+    // Bind every ON expression against real schemas before touching any row.
+    // Aggregates are invalid at every nesting depth, including unreachable
+    // CASE branches, and cannot become valid when an input happens to be empty.
+    for right in &rights {
+        if let Some(condition) = &right.link.condition {
+            bind_with_aggregates(condition, &columns[..right.end], QUALIFIED, params, false)?;
+        }
+    }
+    if !work.planning {
+        for right in &mut rights {
+            if right
+                .source
+                .rows
+                .iter()
+                .any(|row| row.len() != right.source.columns.len())
+            {
+                return Err(binding());
+            }
+            right.keys = index(
+                right.link.condition.as_ref(),
+                &columns[..right.end],
+                right.start,
+                right.source,
+                work,
+            )?;
+        }
     }
     work.retain(
         columns.len()
@@ -333,9 +353,15 @@ pub(super) fn prepare<'a>(
     let mut capacities = vec![0usize; columns.len()];
     let mut start = 0;
     for input in std::iter::once(first).chain(rights.iter().map(|r| r.source)) {
+        if work.planning {
+            continue;
+        }
         for row in &input.rows {
             work.spend()?;
             // Projection does not authorize invalid unused scalar values.
+            if row.len() != input.columns.len() {
+                return Err(binding());
+            }
             row_cost(row)?;
             for (column, value) in row.iter().enumerate() {
                 if let Scalar::String(s) = value
@@ -405,7 +431,7 @@ fn select(term: &Term, columns: &[String], selected: &mut [bool]) {
                 select(t, columns, selected);
             }
         }
-        Term::Value(_) | Term::Parameter(_) => {}
+        Term::Value(_) | Term::Number(_) | Term::Ordinal(_) | Term::Parameter(_) => {}
     }
 }
 fn assign(

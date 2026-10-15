@@ -1,0 +1,273 @@
+{
+  "schema": "lycheedev.sql-explain-test-map.v1",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "tests": [
+    {
+      "path": "crates/lycheedev-data/tests/sql_explain_parity.rs",
+      "test": "explain_prepares_authentic_wdc_schema_without_decoding_bad_non_identity_field",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/sql_explain_parity.rs",
+      "test": "explain_still_rejects_duplicate_identity_indices",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/sql_explain_parity.rs",
+      "test": "explain_failure_is_no_capture_and_analyze_is_explicitly_incomplete",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/sql_explain_parity.rs",
+      "test": "explain_csv_publishes_one_newline_null_columns_and_two_captures",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/sql_explain_parity.rs",
+      "test": "explain_csv_conflict_preserves_pair_but_retains_successful_query_capture",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/topk_parity.rs",
+      "test": "bounded_top_rows_preserve_stable_pages_against_distinct_full_sort",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/topk_parity.rs",
+      "test": "topk_twenty_thousand_rows_fit_thirty_two_kib_retained_budget",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/topk_parity.rs",
+      "test": "topk_checks_late_bad_rows_and_types_even_with_zero_limit",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/topk_parity.rs",
+      "test": "topk_limit_threshold_overflow_falls_back_without_truncating",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/topk_parity.rs",
+      "test": "topk_typed_keys_keep_large_integers_exact",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_does_not_visit_rows_and_serializes_null_results",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_prefix_comments_case_with_and_trailing_statement_rules",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "analyze_is_explicitly_unavailable_without_fabricated_measurements",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_binds_unreachable_expressions_empty_relations_and_grouping",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_never_evaluates_projection_literals_but_checks_limit_values",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_cte_recursive_and_derived_names_never_leak_synthetic_inputs",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_union_suffix_belongs_to_last_real_branch",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_join_labels_describe_eligibility_not_a_fabricated_hash_use",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_group_having_distinct_order_and_slice_are_ordered",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_topk_description_is_conditional_and_offset_only_is_not_topk",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "explain_duplicate_columns_budget_deadline_and_cancellation_fail_closed",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "join_on_aggregates_fail_schema_preflight_for_plain_and_explain_with_any_rows",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "all_join_conditions_bind_before_an_earlier_right_source_is_indexed",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "compound_duplicate_output_names_use_internal_ordinals_in_both_modes",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "compound_duplicate_name_ordering_stays_ambiguous_with_empty_inputs",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "compound_ordinal_projection_keeps_unique_ordering_and_bounded_slice",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "join_on_schema_errors_keep_expression_traversal_order",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "compound_ordinal_outputs_reject_aggregate_ordering_in_both_modes",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/explain_parity.rs",
+      "test": "compound_ordinal_outputs_keep_branch_aggregates_and_named_ordering",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/regression_tests.rs",
+      "test": "explain_rechecks_source_after_binding_before_capture",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/effective.rs",
+      "test": "effective_explain_validates_patches_without_scanning_base_or_overlay_rows",
+      "status": "NOT_RUN"
+    }
+  ],
+  "goMappings": [
+    {
+      "go": "internal/records/relational/compound.go:98-107 internal ordinal column projection; internal/records/relational/group.go:prepareGroups inspectOutput rejects ungrouped column/star before scan",
+      "rust": [
+        "compound_ordinal_outputs_reject_aggregate_ordering_in_both_modes",
+        "compound_ordinal_outputs_keep_branch_aggregates_and_named_ordering"
+      ],
+      "status": "source-derived-review-regression-not-run"
+    },
+    {
+      "go": "internal/records/relational/execute.go:ON preflight; internal/records/relational/rows.go:bindTerm allowAggregate=false",
+      "rust": [
+        "join_on_aggregates_fail_schema_preflight_for_plain_and_explain_with_any_rows",
+        "all_join_conditions_bind_before_an_earlier_right_source_is_indexed",
+        "join_on_schema_errors_keep_expression_traversal_order"
+      ],
+      "status": "source-derived-review-regression-not-run"
+    },
+    {
+      "go": "internal/records/relational/compound.go:ordinal final output and named ORDER BY",
+      "rust": [
+        "compound_duplicate_output_names_use_internal_ordinals_in_both_modes",
+        "compound_duplicate_name_ordering_stays_ambiguous_with_empty_inputs",
+        "compound_ordinal_projection_keeps_unique_ordering_and_bounded_slice"
+      ],
+      "status": "source-derived-review-regression-not-run"
+    },
+    {
+      "go": "internal/records/relational/explain_test.go:TestExplainDoesNotScan",
+      "rust": [
+        "explain_does_not_visit_rows_and_serializes_null_results",
+        "explain_prepares_authentic_wdc_schema_without_decoding_bad_non_identity_field"
+      ],
+      "status": "implemented-not-run"
+    },
+    {
+      "go": "internal/records/relational/explain_test.go:TestAnalyzeActualScans",
+      "rust": [],
+      "status": "unimplemented-explicit-unsupported"
+    },
+    {
+      "go": "internal/records/navigatetest/sql_lookup_test.go:TestSQLIdentityLookupPreservesPartialCoverage",
+      "rust": [],
+      "status": "unimplemented-exact-provider-callbacks-required"
+    },
+    {
+      "go": "internal/records/relational/structure_test.go:TestCompilerCaseAndExplain",
+      "rust": [
+        "explain_prefix_comments_case_with_and_trailing_statement_rules",
+        "explain_binds_unreachable_expressions_empty_relations_and_grouping"
+      ],
+      "status": "partial-CAST-and-ANALYZE-not-implemented"
+    },
+    {
+      "go": "internal/records/relational/execution_fuzz_test.go:FuzzExecuteBounded",
+      "rust": [
+        "explain_duplicate_columns_budget_deadline_and_cancellation_fail_closed"
+      ],
+      "status": "partial-no-fuzz-run-no-ANALYZE"
+    },
+    {
+      "go": "internal/records/relational/preflight_test.go:TestPreflightDoesNotScanOnHiddenErrors",
+      "rust": [
+        "explain_binds_unreachable_expressions_empty_relations_and_grouping"
+      ],
+      "status": "partial-existing-subquery-gap"
+    },
+    {
+      "go": "internal/records/relational/topk_test.go:TestBoundedTopRowsPreserveStablePages",
+      "rust": [
+        "bounded_top_rows_preserve_stable_pages_against_distinct_full_sort"
+      ],
+      "status": "implemented-not-run"
+    },
+    {
+      "go": "internal/records/relational/topk_test.go:TestTopRowsBudgetAndLateError",
+      "rust": [
+        "topk_twenty_thousand_rows_fit_thirty_two_kib_retained_budget",
+        "topk_checks_late_bad_rows_and_types_even_with_zero_limit",
+        "explain_rechecks_source_after_binding_before_capture"
+      ],
+      "status": "partial-eager-provider-no-late-callback-fixture"
+    },
+    {
+      "go": "internal/records/sql.go:QueryData; internal/records/sql_export.go:ExportQueryCSV",
+      "rust": [
+        "explain_csv_publishes_one_newline_null_columns_and_two_captures",
+        "explain_csv_conflict_preserves_pair_but_retains_successful_query_capture",
+        "explain_failure_is_no_capture_and_analyze_is_explicitly_incomplete"
+      ],
+      "status": "source-derived-additional-regressions-not-run"
+    }
+  ],
+  "commands": [
+    "node tools/rust-cargo.mjs --owner ci-sql-explain --one-shot -- test --locked --offline -p lycheedev-data --test explain_parity --test sql_explain_parity --test topk_parity -j 1",
+    "node tools/rust-cargo.mjs --owner ci-sql-explain-source --one-shot -- test --locked --offline -p lycheedev-data --lib local_query::regression_tests -j 1",
+    "node tools/rust-cargo.mjs --owner ci-sql-explain-effective --one-shot -- test --locked --offline -p lycheedev-data --lib local_query::effective::tests -j 1"
+  ],
+  "requiredPreservedRegressionTargets": [
+    "relational_parity",
+    "joins_parity",
+    "aggregates_parity",
+    "compound_parity",
+    "cte_parity",
+    "recursive_parity",
+    "derived_parity",
+    "sql_csv_parity",
+    "sql_resource_parity",
+    "semantic_sql_parity",
+    "effective_sql_parity"
+  ],
+  "runStatus": "All Rust commands NOT_RUN; controlled Windows owner required. No Cargo/Go/compiler execution in this task."
+}

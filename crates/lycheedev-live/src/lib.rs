@@ -44,6 +44,8 @@ pub fn commands() -> &'static [&'static str] {
         "live status",
         "live session",
         "live resume",
+        "live cancel",
+        "live abandon",
         "live disconnect",
         "live reload",
         "live reload fallback",

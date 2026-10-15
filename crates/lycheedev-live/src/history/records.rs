@@ -474,7 +474,7 @@ impl<'de> DeserializeSeed<'de> for BytesSeed<'_> {
         d.deserialize_any(BytesVisitor(self.0))
     }
 }
-struct PointerSeed<'a, T>(&'a mut Option<T>);
+pub(super) struct PointerSeed<'a, T>(pub(super) &'a mut Option<T>);
 impl<'de, T: WireRecord + Default> DeserializeSeed<'de> for PointerSeed<'_, T> {
     type Value = ();
     fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> std::result::Result<(), D::Error> {

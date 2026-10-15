@@ -366,8 +366,8 @@ impl<'de> DeserializeSeed<'de> for OptionalSignalSeed<'_> {
 // decoding. Keep hidden slots through shrink/regrow; null and [] clear them.
 #[derive(Debug, Clone, Default)]
 pub(super) struct History {
-    storage: Vec<ReceiverAttempt>,
-    length: usize,
+    pub(super) storage: Vec<ReceiverAttempt>,
+    pub(super) length: usize,
 }
 impl History {
     fn is_empty(&self) -> bool {

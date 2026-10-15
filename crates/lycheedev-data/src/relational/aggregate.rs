@@ -219,6 +219,10 @@ impl Grouping {
                 });
                 Term::Column(column)
             }
+            // Internal compound ordinals are input columns, not literals.
+            // A matching group key was handled above; otherwise projecting
+            // one from an aggregate group is invalid even for empty input.
+            Term::Ordinal(_) => return Err(binding()),
             Term::Column(name) => {
                 if allow_alias && aliases.iter().any(|a| a.eq_ignore_ascii_case(name)) {
                     node.clone()

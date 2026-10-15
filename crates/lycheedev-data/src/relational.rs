@@ -14,8 +14,11 @@ use std::{
 };
 mod aggregate;
 mod compound;
+mod explain;
+pub use explain::{Explanation, PlanStep};
 mod joins;
 mod recursive;
+mod topk;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum Scalar {
@@ -206,6 +209,9 @@ fn rational_arithmetic(a: &Scalar, op: &BinaryOperator, b: &Scalar) -> Result<Sc
 #[derive(Clone, Debug, PartialEq)]
 enum Term {
     Value(Scalar),
+    Number(String),
+    // Internal compound output projection. Never produced by the SQL parser.
+    Ordinal(usize),
     Column(String),
     Parameter(String),
     Unary(UnaryOperator, Box<Term>),
@@ -234,7 +240,7 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
         Expr::Value(v) => match &v.value {
             Value::Null => Term::Value(Scalar::Null),
             Value::Boolean(v) => Term::Value(Scalar::Bool(*v)),
-            Value::Number(n, _) => Term::Value(literal(n)?),
+            Value::Number(n, _) => Term::Number(n.clone()),
             Value::SingleQuotedString(v) => Term::Value(Scalar::String(v.clone())),
             Value::Placeholder(name) if name.starts_with(':') && name.len() > 1 => {
                 parameters.insert(name[1..].into());
@@ -389,49 +395,63 @@ fn bind(
     alias: &str,
     params: &BTreeMap<String, Scalar>,
 ) -> Result<()> {
+    bind_with_aggregates(term, columns, alias, params, true)
+}
+fn bind_with_aggregates(
+    term: &Term,
+    columns: &[String],
+    alias: &str,
+    params: &BTreeMap<String, Scalar>,
+    allow_aggregates: bool,
+) -> Result<()> {
     match term {
+        Term::Ordinal(index) if *index >= columns.len() => return Err(binding()),
         Term::Column(name) => {
             column(columns, alias, name)?;
         }
         Term::Parameter(name) if !params.contains_key(name) => return Err(binding()),
-        Term::Unary(_, t) | Term::NullTest(t, _) => bind(t, columns, alias, params)?,
+        Term::Unary(_, t) | Term::NullTest(t, _) => {
+            bind_with_aggregates(t, columns, alias, params, allow_aggregates)?
+        }
         Term::Binary(a, _, b) => {
-            bind(a, columns, alias, params)?;
-            bind(b, columns, alias, params)?;
+            bind_with_aggregates(a, columns, alias, params, allow_aggregates)?;
+            bind_with_aggregates(b, columns, alias, params, allow_aggregates)?;
         }
         Term::Between(a, b, c, _) => {
             for t in [a, b, c] {
-                bind(t, columns, alias, params)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
             }
         }
         Term::In(t, list, _) => {
-            bind(t, columns, alias, params)?;
+            bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
             for t in list {
-                bind(t, columns, alias, params)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
             }
         }
-        Term::Aggregate(_, Some(input), _) => {
-            if aggregate::contains(input) {
+        Term::Aggregate(_, input, _) => {
+            if !allow_aggregates {
                 return Err(type_error());
             }
-            bind(input, columns, alias, params)?;
+            if let Some(input) = input {
+                bind_with_aggregates(input, columns, alias, params, false)?;
+            }
         }
         Term::Call(name, list) => {
             check_arity(name, list.len())?;
             for t in list {
-                bind(t, columns, alias, params)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
             }
         }
         Term::Case(operand, cases, fallback) => {
             if let Some(t) = operand {
-                bind(t, columns, alias, params)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
             }
             for (a, b) in cases {
-                bind(a, columns, alias, params)?;
-                bind(b, columns, alias, params)?;
+                bind_with_aggregates(a, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(b, columns, alias, params, allow_aggregates)?;
             }
             if let Some(t) = fallback {
-                bind(t, columns, alias, params)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
             }
         }
         _ => {}
@@ -570,6 +590,7 @@ struct Work<'a> {
     deadline: Instant,
     cancel: Option<&'a AtomicBool>,
     shared: Option<&'a crate::resource::Budget>,
+    planning: bool,
 }
 impl Work<'_> {
     fn spend(&mut self) -> Result<()> {
@@ -647,6 +668,8 @@ fn eval(
     match t {
         Term::Aggregate(_, _, _) => Err(binding()),
         Term::Value(v) => work.clone_scalar(v),
+        Term::Number(n) => literal(n),
+        Term::Ordinal(index) => work.clone_scalar(row.get(*index).ok_or_else(binding)?),
         Term::Column(name) => {
             work.clone_scalar(row.get(column(columns, alias, name)?).ok_or_else(binding)?)
         }
@@ -876,6 +899,23 @@ impl Source {
         cancel: Option<&AtomicBool>,
         shared: Option<&crate::resource::Budget>,
     ) -> Result<Self> {
+        Self::from_wdc_mode(table, limits, cancel, shared, false)
+    }
+    pub(crate) fn schema_from_wdc_budgeted(
+        table: &table::Table<'_>,
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        shared: Option<&crate::resource::Budget>,
+    ) -> Result<Self> {
+        Self::from_wdc_mode(table, limits, cancel, shared, true)
+    }
+    fn from_wdc_mode(
+        table: &table::Table<'_>,
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        shared: Option<&crate::resource::Budget>,
+        schema_only: bool,
+    ) -> Result<Self> {
         let mut columns = vec![];
         for field in table.columns() {
             if field.array {
@@ -896,7 +936,16 @@ impl Source {
             deadline: limits.deadline,
             cancel,
             shared,
+            planning: false,
         };
+        work.consume(0)?;
+        if schema_only {
+            return Ok(Self {
+                columns,
+                rows,
+                complete: table.coverage()["complete"] == true,
+            });
+        }
         for id in table.ids() {
             work.spend()?;
             let mut raw = table.row(id, 1 << 20)?;
@@ -959,12 +1008,18 @@ fn row_cost(row: &[Scalar]) -> Result<usize> {
     }
     Ok(cost)
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProjectionMode {
+    NamedSource,
+    CompoundOrdinals,
+}
 struct Projection {
     expr: Option<Term>,
     name: String,
 }
 type QuerySuffix = (Vec<(Term, bool, Option<bool>)>, Option<Term>, Option<Term>);
 pub struct Program {
+    explain: bool,
     recursive: bool,
     bindings: Vec<(String, Program)>,
     branches: Vec<Program>,
@@ -982,21 +1037,51 @@ pub struct Program {
     groups: Vec<Term>,
     having: Option<Term>,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub struct QueryResult {
+    pub plan: Option<Explanation>,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Scalar>>,
     pub complete: bool,
 }
+impl Serialize for QueryResult {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut output =
+            serializer.serialize_struct("Result", if self.plan.is_some() { 3 } else { 2 })?;
+        output.serialize_field("columns", &self.plan.is_none().then_some(&self.columns))?;
+        output.serialize_field("rows", &self.plan.is_none().then_some(&self.rows))?;
+        if let Some(plan) = &self.plan {
+            output.serialize_field("plan", plan)?;
+        }
+        output.end()
+    }
+}
+impl QueryResult {
+    pub(crate) fn public(&self) -> serde_json::Value {
+        if let Some(plan) = &self.plan {
+            serde_json::json!({"columns":null,"rows":null,"plan":plan})
+        } else {
+            serde_json::json!({"columns":self.columns,"rows":self.rows})
+        }
+    }
+}
 impl Program {
+    pub fn schema_only(&self) -> bool {
+        self.explain
+    }
     pub fn compile(sql: &str) -> Result<Self> {
         if sql.is_empty() || sql.len() > 1 << 20 {
             return Err(budget());
         }
-        compound::validate_all_keyword(sql)?;
+        let (explain, sql) = explain::prefix(sql)?;
+        compound::validate_all_keyword(&sql)?;
         let mut parser = Parser::new(&GenericDialect {})
             .with_recursion_limit(128)
-            .try_with_sql(sql)
+            .try_with_sql(&sql)
             .map_err(|e| problem("relational.invalid_syntax", &e.to_string()))?;
         let mut statements = parser
             .parse_statements()
@@ -1013,7 +1098,9 @@ impl Program {
                 "Only SELECT retrieval is permitted",
             ));
         };
-        Self::compile_query(*query, 0)
+        let mut program = Self::compile_query(*query, 0)?;
+        program.explain = explain;
+        Ok(program)
     }
     fn compile_query(mut query: Query, depth: usize) -> Result<Self> {
         if depth > 64 {
@@ -1068,6 +1155,7 @@ impl Program {
             let (order, limit, offset) =
                 Self::suffix(query.order_by, query.limit_clause, &mut parameters)?;
             return Ok(Self {
+                explain: false,
                 recursive,
                 bindings,
                 branches,
@@ -1195,6 +1283,7 @@ impl Program {
             parameters.extend(body.parameters.iter().cloned());
         }
         Ok(Self {
+            explain: false,
             recursive,
             bindings,
             branches: vec![],
@@ -1304,6 +1393,7 @@ impl Program {
             deadline: limits.deadline,
             cancel,
             shared,
+            planning: self.explain,
         };
         work.spend()?;
         if self
@@ -1321,7 +1411,17 @@ impl Program {
         for (name, source) in sources {
             inputs.insert(name.clone(), source);
         }
-        self.execute_scoped(&inputs, parameters, &mut work)
+        let result = self.execute_scoped(&inputs, parameters, &mut work)?;
+        if !self.explain {
+            return Ok(result);
+        }
+        let plan = explain::build(self, result.columns, &mut work)?;
+        Ok(QueryResult {
+            plan: Some(plan),
+            columns: vec![],
+            rows: vec![],
+            complete: result.complete,
+        })
     }
     fn execute_scoped(
         &self,
@@ -1337,6 +1437,15 @@ impl Program {
         sources: &BTreeMap<String, &Source>,
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
+    ) -> Result<QueryResult> {
+        self.execute_select_mode(sources, parameters, work, ProjectionMode::NamedSource)
+    }
+    fn execute_select_mode(
+        &self,
+        sources: &BTreeMap<String, &Source>,
+        parameters: &BTreeMap<String, Scalar>,
+        work: &mut Work<'_>,
+        projection_mode: ProjectionMode,
     ) -> Result<QueryResult> {
         let joined = if self.joins.is_empty() {
             None
@@ -1371,6 +1480,14 @@ impl Program {
                 return Err(binding());
             }
         }
+        if work.planning && projection_mode == ProjectionMode::NamedSource {
+            let mut names = BTreeSet::new();
+            for column in &source.columns {
+                if !names.insert(column.to_ascii_lowercase()) {
+                    return Err(binding());
+                }
+            }
+        }
         let mut ordering_terms = self.order.clone();
         let mut columns = vec![];
         let mut outputs = vec![];
@@ -1389,7 +1506,7 @@ impl Program {
                 });
             } else {
                 let mut selected = 0usize;
-                for column in &source.columns {
+                for (ordinal, column) in source.columns.iter().enumerate() {
                     if !p.name.is_empty() {
                         let qualifier = if joined.is_some() {
                             column.rsplit_once('.').map(|(q, _)| q).unwrap_or("")
@@ -1401,7 +1518,11 @@ impl Program {
                         }
                     }
                     selected += 1;
-                    outputs.push(Term::Column(column.clone()));
+                    outputs.push(if projection_mode == ProjectionMode::CompoundOrdinals {
+                        Term::Ordinal(ordinal)
+                    } else {
+                        Term::Column(column.clone())
+                    });
                     columns.push(if joined.is_some() {
                         column.rsplit('.').next().unwrap().into()
                     } else {
@@ -1449,6 +1570,32 @@ impl Program {
         };
         let limit = count(&self.limit, usize::MAX, work)?;
         let offset = count(&self.offset, 0, work)?;
+        if work.planning {
+            // Binding uses the real schema, validates all CASE branches,
+            // aggregate/group rules and LIMIT/OFFSET, but never visits a row.
+            if !self.groups.is_empty()
+                || self.having.is_some()
+                || outputs.iter().any(aggregate::contains)
+                || ordering_terms
+                    .iter()
+                    .any(|(t, _, _)| aggregate::contains(t))
+            {
+                aggregate::Grouping::new(
+                    &self.groups,
+                    &mut outputs,
+                    &mut ordering_terms,
+                    self.having.as_ref(),
+                    &columns,
+                    work,
+                )?;
+            }
+            return Ok(QueryResult {
+                plan: None,
+                columns,
+                rows: vec![],
+                complete: source.complete,
+            });
+        }
         let grouped = if !self.groups.is_empty()
             || self.having.is_some()
             || outputs.iter().any(aggregate::contains)
@@ -1491,6 +1638,18 @@ impl Program {
         };
         let source = grouped.as_ref().unwrap_or(source);
         let alias = if grouped.is_some() { "" } else { alias };
+        let mut bounded = topk::TopRows::new(self, grouped.is_some(), limit, offset);
+        if bounded.is_some() {
+            // One projected candidate remains live beside the retained heap.
+            // Admit its scalar-vector storage once; string payloads retain
+            // their existing, separately checked clone admission.
+            work.retain(
+                (outputs.len() + ordering_terms.len())
+                    .checked_mul(std::mem::size_of::<Scalar>())
+                    .and_then(|n| n.checked_add(2 * std::mem::size_of::<Vec<Scalar>>()))
+                    .ok_or_else(budget)?,
+            )?;
+        }
         let mut result: Vec<(Vec<Scalar>, Vec<Scalar>)> = vec![];
         let mut seen = BTreeSet::new();
         let mut project_row = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
@@ -1540,8 +1699,12 @@ impl Program {
                 };
                 ordering.push(v);
             }
-            work.retain(row_cost(&projected)? + row_cost(&ordering)? + 48)?;
-            result.push((projected, ordering));
+            if let Some(bounded) = &mut bounded {
+                bounded.add((projected, ordering), work)?;
+            } else {
+                work.retain(row_cost(&projected)? + row_cost(&ordering)? + 48)?;
+                result.push((projected, ordering));
+            }
             Ok(())
         };
         if grouped.is_none()
@@ -1552,6 +1715,20 @@ impl Program {
             for row in &source.rows {
                 project_row(row, work)?;
             }
+        }
+        if let Some(bounded) = bounded {
+            return Ok(QueryResult {
+                plan: None,
+                columns,
+                rows: bounded
+                    .finish(work)?
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .map(|r| r.0)
+                    .collect(),
+                complete: source.complete,
+            });
         }
         // Fallible stable merge sort: comparison errors never become a fake
         // ordering relation and no partial result is returned on failure.
@@ -1623,6 +1800,7 @@ impl Program {
             width = width.saturating_mul(2);
         }
         Ok(QueryResult {
+            plan: None,
             columns,
             rows: result
                 .into_iter()

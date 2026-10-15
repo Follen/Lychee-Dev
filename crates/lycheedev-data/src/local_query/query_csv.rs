@@ -29,7 +29,7 @@ struct Manifest<'a> {
     #[serde(rename = "sha256")]
     sha256: String,
     bytes: usize,
-    columns: &'a [String],
+    columns: Option<&'a [String]>,
     rows: usize,
     query_capture: &'a str,
     csv_capture: &'a str,
@@ -94,7 +94,7 @@ fn export_after_data(
         output: output::ordinary(data.path()).to_string_lossy().into_owned(),
         sha256: digest(&raw, budget)?,
         bytes: raw.len(),
-        columns: &result.columns,
+        columns: result.plan.is_none().then_some(result.columns.as_slice()),
         rows: result.rows.len(),
         query_capture: query_id,
         csv_capture: csv_id,
@@ -511,6 +511,7 @@ mod tests {
             .unwrap();
             evidence::remove_capture(&fx.home, query["id"].as_str().unwrap()).unwrap();
             let result = QueryResult {
+                plan: None,
                 columns: vec!["value".into()],
                 rows: vec![vec![Scalar::Int(1)]],
                 complete: true,
@@ -611,6 +612,7 @@ mod tests {
         (
             query,
             QueryResult {
+                plan: None,
                 columns: vec!["value".into()],
                 rows: vec![vec![Scalar::Int(value)]],
                 complete: true,

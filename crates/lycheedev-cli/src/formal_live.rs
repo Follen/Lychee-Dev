@@ -308,8 +308,10 @@ fn route_admission(inv: &Invocation) -> Result<()> {
             ));
         }
     }
-    if matches!(inv.command.as_str(), "live status" | "live session")
-        && inv.positional.as_deref().unwrap_or("").is_empty()
+    if matches!(
+        inv.command.as_str(),
+        "live status" | "live session" | "live cancel" | "live abandon"
+    ) && inv.positional.as_deref().unwrap_or("").is_empty()
     {
         return Err(ToolkitError::arguments(
             "missing selection file or record ID; use describe",
@@ -321,6 +323,8 @@ fn route_admission(inv: &Invocation) -> Result<()> {
             | "live disconnect"
             | "live execute"
             | "live status"
+            | "live cancel"
+            | "live abandon"
             | "live session"
             | "live resume"
             | "live reload"
@@ -346,6 +350,39 @@ pub fn dispatch_with<S: Services>(
 ) -> Response {
     if let Err(e) = route_admission(inv) {
         return Response::failure(e);
+    }
+    if matches!(inv.command.as_str(), "live cancel" | "live abandon") {
+        let id = inv
+            .positional
+            .as_deref()
+            .expect("admitted historical positional");
+        let mut response = Response {
+            operation_id: id.into(),
+            ..Response::default()
+        };
+        if inv.command == "live abandon" && id.starts_with("BTP-") {
+            let retired = lycheedev_live::history::abandon_bootstrap(&inv.home, id, &inv.control);
+            response.result = Some(LiveResult::Bootstrap(retired.attempt));
+            response.error = retired.error.map(|error| historical_failure(inv, error));
+        } else {
+            let retired = lycheedev_live::history::retire_operation(
+                &inv.home,
+                id,
+                inv.command == "live cancel",
+                &inv.control,
+            );
+            if !retired.outcome.operation_id.is_empty() {
+                response
+                    .context
+                    .insert("stage".into(), json!(retired.outcome.stage));
+                if retired.outcome.status == "abandoned" {
+                    response.warnings.push("Cleanup abandoned explicitly; available evidence retained; missing report results remain unknown. No game ACK or runtime unload was performed.".into());
+                }
+                response.result = Some(LiveResult::HistoricalOperation(retired.outcome));
+            }
+            response.error = retired.error.map(|error| historical_failure(inv, error));
+        }
+        return response;
     }
     if inv.command == "live doctor" {
         if let Err(e) =
@@ -397,32 +434,13 @@ pub fn dispatch_with<S: Services>(
                     response.warnings.push("Historical session evidence only; live window identity and readiness have not been refreshed.".into());
                 }
             }
-            Err(mut error) => {
+            Err(error) => {
                 // Fixed Go entry.go:773–776 clears failed status projections.
                 // The library retains partial evidence; the CLI does not emit it.
                 if inv.command == "live status" {
                     response.result = None;
                 }
-                if error.code == "vault.workspace_schema_newer" {
-                    error.code = "vault.unsupported_workspace".into();
-                }
-                if error.code == "vault.record_missing" {
-                    error.exit_code = 2;
-                    error.message = "vault.record_missing".into();
-                } else if !matches!(
-                    error.code.as_str(),
-                    "command.cancelled"
-                        | "command.deadline"
-                        | "live.deadline_pending"
-                        | "vault.legacy_detected"
-                        | "vault.unsupported_workspace"
-                        | "vault.workspace_schema_newer"
-                        | "vault.blob_integrity"
-                ) {
-                    error.code = "command.failed".into();
-                    error.exit_code = 5;
-                }
-                response.error = Some(super::command_fault(inv, error));
+                response.error = Some(historical_failure(inv, error));
             }
         }
         return response;
@@ -820,3 +838,55 @@ fn project_doctor_checks(report: DoctorResult) -> Vec<Value> {
 #[cfg(test)]
 #[path = "formal_live_tests.rs"]
 mod tests;
+
+fn historical_failure(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
+    // Go errors.Is searches every errors.Join leaf, in entry.go priority order.
+    // Only the core-owned complete aggregate schema permits traversal.
+    fn has(error: &ToolkitError, wanted: &str, depth: usize) -> bool {
+        if error.code == wanted {
+            return true;
+        }
+        if depth >= 32
+            || error.details.as_object().is_none_or(|o| o.len() != 4)
+            || error.details["schema"] != lycheedev_core::storage::FILE_CLEANUP_SCHEMA
+        {
+            return false;
+        }
+        ["primary", "cleanup", "control"].into_iter().any(|key| {
+            serde_json::from_value::<ToolkitError>(error.details[key].clone())
+                .is_ok_and(|nested| has(&nested, wanted, depth + 1))
+        })
+    }
+    let selected = [
+        ("journal.resource_busy", 3),
+        ("journal.invalid_transition", 3),
+        ("command.cancelled", 7),
+        ("command.deadline", 6),
+        ("live.deadline_pending", 6),
+        ("vault.legacy_detected", 3),
+        ("vault.unsupported_workspace", 4),
+        ("vault.workspace_schema_newer", 4),
+        ("vault.blob_integrity", 4),
+        ("vault.generation_conflict", 3),
+        ("vault.record_missing", 2),
+    ]
+    .into_iter()
+    .find(|(code, _)| has(&error, code, 0));
+    if let Some((code, exit)) = selected {
+        error.code = match code {
+            "vault.workspace_schema_newer" => "vault.unsupported_workspace",
+            "command.deadline" => "live.deadline_pending",
+            other => other,
+        }
+        .into();
+        error.exit_code = exit;
+        // A joined failure keeps its complete message, including the first cause.
+        if code == "vault.record_missing" && error.details.is_null() {
+            error.message = "vault.record_missing".into();
+        }
+    } else {
+        error.code = "command.failed".into();
+        error.exit_code = 5;
+    }
+    super::command_fault(inv, error)
+}

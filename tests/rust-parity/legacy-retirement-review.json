@@ -1,0 +1,131 @@
+{
+  "schema": "lycheedev.legacy-retire-independent-static-audit.v1",
+  "reviewedAt": "2026-10-15T03:56:09.432869+00:00",
+  "reviewer": "audit_legacy_retirement",
+  "candidate": {
+    "freezePath": ".tmp/legacy-retire-stage-20261015/stage-freeze.json",
+    "freezeSha256": "5531ccfbde7c04b16bb80bed413b5e1d1dd36e6f86366a5fc23020e28d02d54e",
+    "baseRustHead": "2ae19cb36431369ab2eaabc493b184f8b14711fe",
+    "fixedGoCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+    "state": "STAGED_NOT_RUN"
+  },
+  "decision": "NO_BLOCKING_FINDINGS_IN_SCOPED_STATIC_REVIEW",
+  "scope": "Changed historical metadata CAS, OP cancel/abandon, BTP abandon, exact disk ownership, raw/partial record preservation, CLI route/output/error projection, supporting test declarations and custody. This is not a whole-repository audit.",
+  "hashVerification": {
+    "ownedFiles": 20,
+    "dependencies": 1306,
+    "fixedGoSources": 19,
+    "goToolchainSourcesIncludingVersion": 9,
+    "supportingArtifacts": 5,
+    "compositionAndTestMetadata": 3,
+    "mismatches": [],
+    "snapshotInventoryExact": 1326,
+    "baseInventoryAndOwnerBaseHashes": "EXACT",
+    "implementationPatch": "Byte-exact regeneration from recorded owner base-files and frozen owners"
+  },
+  "sourceVerification": {
+    "fixedGoSources": "All 19 extracted files compared byte-for-byte with git show at fixed Go commit",
+    "toolchain": "All 9 files compared byte-for-byte with supplied go1.27.1 tree; VERSION go1.27.1",
+    "decodeGoSha256": "1632161a34c8286722716a48ba0b5e0c3d117a2e017e79ace676403808a16e6e",
+    "timeGoSha256": "7d992810b162f65e02cea4d60fd0d90af59b3cafa2c8926ca08083d5c73451dc"
+  },
+  "closedFindings": [
+    {
+      "issue": "Prepared admission parent used incomplete lowercase mapping, including false equivalence of U+0130 and ASCII i",
+      "resolution": "Reuses pinned Go SimpleFold UTF-16 helper; relevant positive and negative fixtures declared",
+      "currentSource": "crates/lycheedev-live/src/history/retire.rs:143",
+      "oracle": "internal/live/journal/window_owner.go:130; Go strings.EqualFold"
+    },
+    {
+      "issue": "BTP current/window reference decoding failed to retain the first ID for a null or empty second object",
+      "resolution": "merge_current decodes into the same Current; null, {}, null-id regressions declared",
+      "currentSource": "crates/lycheedev-live/src/history/retire.rs:465",
+      "oracle": "internal/live/history_bootstrap.go:126-135"
+    },
+    {
+      "issue": "Ordinary type errors discarded partially decoded OP/BTP result data",
+      "resolution": "Retirement-only partial typed decoder preserves ordinary saved errors, object/pointer merging, raw fields and history backing entries; original mutation remains blocked on error",
+      "currentSource": "crates/lycheedev-live/src/history/retire.rs:74; crates/lycheedev-live/src/history/retire_decode.rs",
+      "oracle": "internal/live/journal/book.go:InspectWork; internal/live/history_retire.go:retireLegacyOperation; internal/live/history_bootstrap.go:readBootstrapReceiver; Go encoding/json/decode.go"
+    },
+    {
+      "issue": "Joined later cancellation/deadline or generation causes did not influence public CLI classification",
+      "resolution": "Core retains a recognized full cause tree; historical_failure traverses typed leaves in fixed-Go priority while retaining original message",
+      "currentSource": "crates/lycheedev-core/src/metadata/historical_write.rs:22; crates/lycheedev-cli/src/formal_live.rs:842",
+      "oracle": "internal/command/entry.go:800-845"
+    },
+    {
+      "issue": "Partial decoder must distinguish fatal quoted-uint failures, saved type failures and inner unquoteBytes behavior",
+      "resolution": "Quoted uint uses literal-prefix classification and dedicated inner-string validity scanner; apostrophe escape, lone surrogate, trailing whitespace and invalid inner quote fixtures declared",
+      "currentSource": "crates/lycheedev-live/src/history/retire_decode.rs:145-199",
+      "oracle": "Go encoding/json/decode.go:757-763, 854-1040, 1197-1300"
+    },
+    {
+      "issue": "Failed repeated quoted time incorrectly retained prior timestamp",
+      "resolution": "Quoted parse failure resets timestamp to zero and stops outer decoding; non-string failure preserves prior timestamp; null remains no-op",
+      "currentSource": "crates/lycheedev-live/src/history/retire_decode.rs:94",
+      "oracle": "Go time/time.go:1604-1615; time/format_rfc3339.go:155-161"
+    },
+    {
+      "issue": "Partial decoding could absorb an observed cancellation into an earlier saved type error",
+      "resolution": "Cancellation/deadline are immediately fatal and final control check remains",
+      "currentSource": "crates/lycheedev-live/src/history/retire_decode.rs:62-90",
+      "oracle": "Existing OperationControl preservation requirement"
+    },
+    {
+      "issue": "SQLite schema batch retry and implicit rollback cleanup needed explicit transaction boundaries",
+      "resolution": "Version-0 setup and ordinary CAS use separate transaction/COMMIT retry; failed transactions explicitly roll back while preserving cleanup errors",
+      "currentSource": "crates/lycheedev-core/src/metadata/historical_write.rs:52,251",
+      "oracle": "internal/vault/metadata.go:openMetadata,CommitDocuments"
+    }
+  ],
+  "staticConclusions": [
+    "Terminal OP work and local ownership are changed in one SQLite expected-generation CAS transaction; stale second changes roll back the transaction.",
+    "OP uses operation/admission/execution leases, rechecks durable resource and intent, permits missing-claim reconstruction only for original prepared/pending admission, and preserves exact terminal owner rules.",
+    "BTP uses full exact owner identity where claimed, preserves shared current/window decode semantics, and changes only the attempt document through generation CAS.",
+    "Original request/observation raw JSON and unknown BTP raw fields remain represented without Value number/duplicate normalization.",
+    "No capture, game input, native service creation or business replay capability is introduced by these historical routes.",
+    "CLI registration and static implemented registry have 84 of 84 definitions, with exact cancel/abandon home/format flags and mutates metadata."
+  ],
+  "testEvidence": {
+    "state": "NOT_RUN",
+    "newDeclarations": 44,
+    "groups": [
+      {
+        "filter": "history::retire::tests",
+        "count": 28
+      },
+      {
+        "filter": "metadata::historical_write::tests",
+        "count": 9
+      },
+      {
+        "filter": "formal_live::tests::retirement",
+        "count": 7
+      }
+    ],
+    "mapping": "44 unique test-map names exactly match frozen source declarations and source hashes; referenced Go source files exist. This source map is not executable differential proof.",
+    "selectorReachability": "Actual cfg(test)/path module declarations confirmed; CLI retirement module is selected by existing formal_live workflow filter; two new explicit history/CAS workflow steps present.",
+    "yaml": "Independently parsed with PyYAML: 3 jobs, all run fields strings.",
+    "packageLock": "Package name/version/source/checksum set unchanged from recorded baseline.",
+    "cargo": "NOT_RUN",
+    "go": "NOT_RUN",
+    "rustTypecheck": "NOT_RUN",
+    "windowsRuntime": "NOT_RUN",
+    "executableDescribe": "NOT_RUN",
+    "performance": "NOT_MEASURED"
+  },
+  "remainingLimitations": [
+    "Known inherited generic JSON syntax/type diagnostic text and corrupt-DEFLATE wording/offset differences remain; neither this report nor partial-result fixes declares them passed.",
+    "The inherited workspace Value projection cannot reproduce every delayed Go time.MarshalJSON failure for accepted unusual offsets.",
+    "All 44 new and inherited 97 readonly declarations remain NOT_RUN. Rustfmt parsing reported by the implementation worker is not Rust typechecking.",
+    "No fault-injected close, Windows lock/filesystem, native/game, performance or full repository convergence validation is established.",
+    "Integration must preserve the documented HEAD/native-recovery/readonly-R2 composition and reconcile overlapping workflow/Cargo owners against newer parent edits."
+  ],
+  "reviewerActions": {
+    "productionOrFrozenSourceWrites": false,
+    "cargoOrGoExecution": false,
+    "pushOrPublication": false,
+    "reportOnlyWrite": true
+  }
+}

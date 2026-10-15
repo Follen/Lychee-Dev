@@ -247,7 +247,7 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-formal-live-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev formal_live -j 1
-      - name: Run historical operation bootstrap signal and session readonly fixtures
+      - name: Run historical read and explicit OP BTP retirement fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-history-read --one-shot -- test --locked --offline -p lycheedev-live --lib history:: -j 1
@@ -257,6 +257,9 @@ jobs:
       - name: Run controlled historical raw metadata read fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-history-metadata --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_read_tests -j 1
+      - name: Run historical multi-document transactional CAS fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-history-cas --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::historical_write::tests -j 1
       - name: Run ordered Lua compiler cancellation and retention fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -389,6 +392,12 @@ jobs:
       - name: Run SQL CSV public capture and publication fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-csv-public --one-shot -- test --locked --offline -p lycheedev-data --test sql_csv_parity -j 1
+      - name: Run SQL EXPLAIN schema and bounded TopK regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-sql-explain --one-shot -- test --locked --offline -p lycheedev-data --test explain_parity --test sql_explain_parity --test topk_parity -j 1
+      - name: Preserve relational binding grouping and compound regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-sql-relational-regressions --one-shot -- test --locked --offline -p lycheedev-data --test relational_parity --test joins_parity --test aggregates_parity --test compound_parity --test cte_parity --test recursive_parity --test derived_parity -j 1
       - name: Run SQL logical and safety ledger fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-logical-resource --one-shot -- test --locked --offline -p lycheedev-data --lib resource::logical_tests -j 1

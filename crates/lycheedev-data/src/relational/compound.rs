@@ -248,7 +248,8 @@ fn execute_body(
     let combined = combined.ok_or_else(binding)?;
     work.retain(program.table.len() + 96)?;
     let inputs = BTreeMap::from([(program.table.clone(), &combined)]);
-    // The synthetic output select binds ORDER BY against first-branch column
-    // names and applies LIMIT/OFFSET once after the full union is validated.
-    program.execute_select(&inputs, parameters, work)
+    // Internal result columns may repeat. Project them by ordinal rather
+    // than re-binding their names. ORDER BY still binds the first branch's
+    // public names and must reject an ambiguous duplicate name.
+    program.execute_select_mode(&inputs, parameters, work, ProjectionMode::CompoundOrdinals)
 }

@@ -123,6 +123,7 @@ pub(super) fn execute(
         rows.extend(block.rows);
     }
     Ok(QueryResult {
+        plan: None,
         columns,
         rows,
         complete,

@@ -1152,3 +1152,6 @@ mod historical_read_tests {
         }
     }
 }
+
+pub mod historical_write;
+pub use historical_write::{HistoricalMutation, HistoricalWriter};

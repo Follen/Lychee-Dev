@@ -248,3 +248,9 @@ pub fn inspect_session(
 }
 #[cfg(test)]
 mod status_tests;
+
+mod retire;
+mod retire_json;
+pub use retire::{abandon_bootstrap, retire_operation, BootstrapRetirement};
+
+mod retire_decode;

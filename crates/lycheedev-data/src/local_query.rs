@@ -776,18 +776,30 @@ fn sql_inner_after_execute(
                 deadline,
                 ..Default::default()
             };
-            let mut source = relational::Source::from_wdc_budgeted(
-                &table,
-                limits,
-                budget.token(),
-                Some(&budget),
-            )?;
+            let mut source = if program.schema_only() {
+                relational::Source::schema_from_wdc_budgeted(
+                    &table,
+                    limits,
+                    budget.token(),
+                    Some(&budget),
+                )?
+            } else {
+                relational::Source::from_wdc_budgeted(
+                    &table,
+                    limits,
+                    budget.token(),
+                    Some(&budget),
+                )?
+            };
             if name
                 .split_once('.')
                 .is_some_and(|(catalog, _)| catalog.eq_ignore_ascii_case("effective"))
             {
-                let (overlaid, report) =
-                    snapshots.apply(source, &definition, &bundle, &request.hotfix)?;
+                let (overlaid, report) = if program.schema_only() {
+                    snapshots.schema(source, &definition, &bundle, &request.hotfix)?
+                } else {
+                    snapshots.apply(source, &definition, &bundle, &request.hotfix)?
+                };
                 source = overlaid;
                 effective_sources.push(report);
             }
@@ -833,7 +845,7 @@ fn sql_inner_after_execute(
     let resources = budget.logical_snapshot()?;
     let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
     budget.check()?;
-    let mut reading = json!({"resources":resources,"complete":complete,"partial":!complete,"query":request,"result":{"columns":result.columns,"rows":result.rows},"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+    let mut reading = json!({"resources":resources,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
     if !semantic_provenance.is_empty() {
         let size = capture::json_size(&semantic_provenance, &safety)?;
         safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;

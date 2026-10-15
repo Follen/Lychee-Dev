@@ -145,3 +145,30 @@ fn sql_normalizes_numeric_parameters_after_pin_before_any_source_resolution() {
         before
     );
 }
+
+#[test]
+fn explain_rechecks_source_after_binding_before_capture() {
+    let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(1)]])]);
+    let inv = fx.invocation("data sql", &[("--sql", "EXPLAIN SELECT ID FROM Sample")]);
+    let catalog = fx.client.parent().unwrap().join(".build.info");
+    let original = fs::read(&catalog).unwrap();
+    let count = || {
+        Metadata::open(&fx.home, false)
+            .unwrap()
+            .list::<Value>("capture/", 100)
+            .unwrap()
+            .len()
+    };
+    let before = count();
+    let error = sql_inner_after_execute(&inv, &mut || {
+        let mut changed = original.clone();
+        changed.push(b'\n');
+        fs::write(&catalog, changed)?;
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "records.pinned_build_changed");
+    assert_eq!(count(), before);
+    fs::write(catalog, original).unwrap();
+    assert!(sql(&inv).unwrap().data["result"]["plan"].is_object());
+}

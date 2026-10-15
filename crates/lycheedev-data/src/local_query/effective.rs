@@ -281,6 +281,25 @@ impl<'a> Snapshots<'a> {
         bundle: &definitions::Bundle,
         ids: &[String],
     ) -> Result<(relational::Source, Report)> {
+        self.apply_mode(base, definition, bundle, ids, false)
+    }
+    pub fn schema(
+        &mut self,
+        base: relational::Source,
+        definition: &schema::Definition,
+        bundle: &definitions::Bundle,
+        ids: &[String],
+    ) -> Result<(relational::Source, Report)> {
+        self.apply_mode(base, definition, bundle, ids, true)
+    }
+    fn apply_mode(
+        &mut self,
+        base: relational::Source,
+        definition: &schema::Definition,
+        bundle: &definitions::Bundle,
+        ids: &[String],
+        schema_only: bool,
+    ) -> Result<(relational::Source, Report)> {
         self.budget.check()?;
         if ids.is_empty() || ids.len() > 16 {
             return Err(identity());
@@ -430,6 +449,27 @@ impl<'a> Snapshots<'a> {
             } else {
                 report.deleted += 1;
             }
+        }
+        if schema_only {
+            // Go validates/decodes patches while creating EffectiveSource;
+            // applying them to base records belongs to Scan, not preparation.
+            self.budget.charge(Cost::retained(
+                (base.columns.len() + 3) * size_of::<String>() + 128,
+            ))?;
+            let mut columns = base.columns;
+            columns.extend([
+                "__hotfix_source".into(),
+                "__hotfix_push".into(),
+                "__hotfix_index".into(),
+            ]);
+            return Ok((
+                relational::Source {
+                    columns,
+                    rows: vec![],
+                    complete: base.complete,
+                },
+                report,
+            ));
         }
         let augment = |row: Vec<relational::Scalar>,
                        patch: Option<&Patch>|
@@ -721,6 +761,45 @@ mod tests {
                 layout: 9,
                 tables: BTreeMap::from([(42, entries)]),
             },
+        );
+    }
+    #[test]
+    fn effective_explain_validates_patches_without_scanning_base_or_overlay_rows() {
+        let inv = invocation();
+        let pin = selection::DataPin::default();
+        let (definition, bundle) = schema_and_bundle(
+            "COLUMNS\nint ID\nint Value\n\nBUILD 12.1.0.69933\n$id$ID<u32>\nValue<u32>\n",
+        );
+        let budget = Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(30),
+            None,
+        );
+        let mut snapshots = Snapshots::new(&inv, &pin, &budget);
+        seed(
+            &mut snapshots,
+            [1u32.to_le_bytes(), 42u32.to_le_bytes()].concat(),
+            vec![entry(0, 8)],
+        );
+        let mut invalid_base = base();
+        invalid_base.rows = vec![vec![]];
+        invalid_base.complete = false;
+        let (schema, report) = snapshots
+            .schema(invalid_base, &definition, &bundle, &["CAP-fixture".into()])
+            .unwrap();
+        assert!(schema.rows.is_empty());
+        assert!(!schema.complete);
+        assert_eq!(schema.columns.len(), 5);
+        assert_eq!(report.replaced_or_added, 1);
+        assert_eq!(report.deleted, 0);
+        // Preparation still decodes selected patch payloads and refuses bad
+        // records before a plan can be published.
+        let mut snapshots = Snapshots::new(&inv, &pin, &budget);
+        seed(&mut snapshots, vec![0], vec![entry(0, 1)]);
+        assert!(
+            snapshots
+                .schema(base(), &definition, &bundle, &["CAP-fixture".into()])
+                .is_err()
         );
     }
     #[test]
