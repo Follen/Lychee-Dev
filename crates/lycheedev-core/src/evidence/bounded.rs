@@ -17,6 +17,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod optional;
+pub use optional::{
+    open_verified_blob_bounded_optional_with_check, read_blob_bounded_optional_with_check,
+};
+
 const BLOCK: usize = 65536;
 pub const DEFAULT_CAPTURE_BYTES: usize = 128 << 20;
 /// The producer chooses a smaller budget. Frozen Go
@@ -174,6 +179,7 @@ impl VerifiedBlob {
     ) -> Result<T> {
         let closed = close(self.opened.file).map_err(ToolkitError::from);
         let result = crate::metadata::historical_write::finish_historical(result, closed);
+        let result = optional::finish_directory(result, self.opened._directory);
         finish_check(result, stream_check(&self.control, &mut self.supplemental))
     }
 }
@@ -379,12 +385,20 @@ fn prepare_verified_blob(
         stream_check(control, supplemental)?;
     }
     workspace::open(home)?;
-    let mut opened = open_blob_with_check(
+    let opened = open_blob_with_check(
         home,
         admitted_ref(blob, maximum)?,
         Some(control),
         &mut || optional_check(supplemental),
     )?;
+    prepare_opened_verified_blob(opened, control, accept, supplemental)
+}
+fn prepare_opened_verified_blob(
+    mut opened: OpenBlob,
+    control: &OperationControl,
+    accept: impl FnMut(&[u8]) -> Result<()>,
+    supplemental: &mut Option<BlobCheck>,
+) -> Result<OpenBlob> {
     let result = (|| {
         // Preserve the existing observer order: pre-read stop, actual read,
         // post-read stop, SHA256 then format/work observer. This adds no claim
@@ -428,6 +442,7 @@ fn close_opened_blob<T>(
         result,
         lycheedev_windows::filesystem::close_file(opened.file).map_err(ToolkitError::from),
     );
+    let result = optional::finish_directory(result, opened._directory);
     finish_check(result, stream_check(control, supplemental))
 }
 
@@ -988,3 +1003,6 @@ mod supplemental_tests;
 
 #[cfg(test)]
 mod stream_supplemental_tests;
+
+#[cfg(test)]
+mod optional_tests;

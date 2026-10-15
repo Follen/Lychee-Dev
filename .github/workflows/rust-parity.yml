@@ -260,6 +260,9 @@ jobs:
       - name: Run CLI contract metadata and arity unit fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-cli-contract --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev contract::tests -j 1
+      - name: Run default remote target CLI resolution fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-remote-target-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev target_remote::tests -j 1
       - name: Run normal invocation ordered cancellation fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-cli-control --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::normal_invocation_control_ -j 1

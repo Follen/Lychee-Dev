@@ -1,0 +1,144 @@
+{
+  "schema": "lycheedev.core-optional-blob-tests.v2",
+  "baselineCommit": "66c2a5474341bda2301dcf8664c40f36128eeb10",
+  "oracleCommit": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "state": "NOT_RUN",
+  "mappedTestCount": 20,
+  "newRelativeToR3Count": 3,
+  "groups": [
+    {
+      "crate": "lycheedev-core",
+      "target": "--lib",
+      "filter": "evidence::bounded::optional",
+      "count": 20,
+      "state": "NOT_RUN"
+    }
+  ],
+  "affectedExistingFilters": [
+    "evidence::bounded::stream_supplemental_tests",
+    "evidence::bounded::supplemental_tests"
+  ],
+  "realDataAdaptation": "SEPARATE_OWNER_NOT_PROVEN_BY_CORE_FIXTURES",
+  "tests": [
+    {
+      "name": "evidence::bounded::optional::tests::identical_directory_close_events_are_retained_separately",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional.rs",
+      "sourceSHA256": "786728388a0203610d5f334b30f9fc5f5becf70e16060d0044e8bbfa458a7b4e",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional::tests::missing_result_does_not_hide_cleanup_or_either_stop",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional.rs",
+      "sourceSHA256": "786728388a0203610d5f334b30f9fc5f5becf70e16060d0044e8bbfa458a7b4e",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional::tests::controlled_directory_walk_observes_mid_walk_budget_and_releases_native_handles",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional.rs",
+      "sourceSHA256": "786728388a0203610d5f334b30f9fc5f5becf70e16060d0044e8bbfa458a7b4e",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional::tests::optional_native_entry_verification_checks_original_invocation_before_budget",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional.rs",
+      "sourceSHA256": "786728388a0203610d5f334b30f9fc5f5becf70e16060d0044e8bbfa458a7b4e",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional::tests::native_post_acquisition_stop_retains_typed_cause_and_drop_releases_file",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional.rs",
+      "sourceSHA256": "786728388a0203610d5f334b30f9fc5f5becf70e16060d0044e8bbfa458a7b4e",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_missing_shard_and_missing_entry_are_none_in_both_apis",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_required_workspace_and_blobs_parent_are_not_cache_misses",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_noop_matches_required_success_bytes_and_observer_order",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_invalid_reference_limit_and_integrity_match_required_errors",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_entry_disappearing_after_metadata_is_a_native_open_miss",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_entry_disappearing_before_metadata_is_a_native_inspection_miss",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_post_miss_stop_cannot_be_returned_as_none",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_pre_stopped_invocation_precedes_budget_and_path_io",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_held_owner_observes_later_stop_and_retains_typed_io_bridge",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_existing_writer_sharing_error_is_not_a_cache_miss",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_acquired_body_observer_error_is_not_miss_and_releases_owner",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_close_keeps_primary_file_cleanup_and_original_stop_priority",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_nonfile_and_wrong_length_entries_keep_integrity_diagnostics",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_native_stop_releases_core_owned_parent_shard_and_temporary_handles",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    },
+    {
+      "name": "evidence::bounded::optional_tests::optional_shard_that_is_a_regular_file_is_not_a_miss",
+      "source": "crates/lycheedev-core/src/evidence/bounded/optional_tests.rs",
+      "sourceSHA256": "f672e9534bf13296c2aa12382c9aa7c841ffacfeef43e4be863d0f6a4d3f73ae",
+      "state": "NOT_RUN"
+    }
+  ]
+}

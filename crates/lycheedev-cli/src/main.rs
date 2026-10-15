@@ -2,6 +2,7 @@
 
 mod contract;
 mod formal_live;
+mod target_remote;
 #[cfg(test)]
 mod hotfix_remote_tests;
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, VERSION};
@@ -261,6 +262,9 @@ fn parse(args: &[String]) -> Result<Invocation> {
             }
         }
     }
+    if command == "target resolve" {
+        target_remote::validate_flags(&flags)?;
+    }
     Ok(Invocation {
         command,
         positional,
@@ -415,6 +419,10 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
 }
 fn dispatch_target(inv: &Invocation) -> Result<Outcome> {
     inv.control.check()?;
+    target_remote::validate_flags(&inv.flags)?;
+    if let Some(outcome) = target_remote::direct(inv)? {
+        return Ok(outcome);
+    }
     if inv.flag("--file").is_some() {
         return lycheedev_core::workspace::dispatch(inv);
     }

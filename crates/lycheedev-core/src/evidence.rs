@@ -20,9 +20,10 @@ mod history_read;
 pub use bounded::{
     CaptureInput, DEFAULT_CAPTURE_BYTES, MAX_CAPTURE_BYTES, VerifiedBlob, commit_capture_bounded,
     commit_capture_bounded_with_check, commit_verified_capture, open_verified_blob_bounded,
-    open_verified_blob_bounded_with_check, publish_blob_bounded, publish_blob_bounded_with_check,
+    open_verified_blob_bounded_optional_with_check, open_verified_blob_bounded_with_check,
+    publish_blob_bounded, publish_blob_bounded_with_check,
     publish_blob_reader_bounded, publish_blob_reader_bounded_with_check, read_blob_bounded,
-    read_blob_bounded_with_check, verify_blob_bounded,
+    read_blob_bounded_optional_with_check, read_blob_bounded_with_check, verify_blob_bounded,
 };
 pub use budgeted::{
     CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,

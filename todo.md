@@ -74,14 +74,14 @@ This is an execution view, not a second evidence authority. A component being im
 
 ### Current validation cadence and new Source priorities
 
-- [ ] Apply the latest upstream-minimization direction: evaluate each remaining Emmy patch against the independent unpatched public-API matrix, prefer owned XML/business/adapter implementations, and replace every remaining upstream hook with equivalent owned behavior and consumer/regression evidence; no final hook exemption remains. Preserve all approved enhanced semantics; no automatic large rewrite, dynamic plugin framework or zero-maintenance promise. Session/epoch/source-map/ref provenance are not automatically engine-only responsibilities.
+- [ ] Apply the latest complete upstream-patch removal requirement: evaluate each remaining Emmy patch against the independent unpatched public-API matrix, prefer owned XML/business/adapter implementations, and replace every remaining upstream hook with equivalent owned behavior and consumer/regression evidence; no final hook exemption remains. Preserve all approved enhanced semantics; no automatic large rewrite, dynamic plugin framework or zero-maintenance promise. Session/epoch/source-map/ref provenance are not automatically engine-only responsibilities.
 
 
 - [ ] Run local real pure Rust/Node/Lua regressions first within valid owned channels; preserve results and promptly push each meaningful batch. Every push runs fast checks; explicit `[rust-native]` batch commits run full Windows/Emmy acceptance. Do not treat skipped native jobs as green product validation.
 - [ ] Finish Source process terminal proof and legacy luac caller retention, checked Windows process/job close and Closure I/O/control boundaries. An error with uncertain resource retirement must not trigger parent scratch deletion.
 - [ ] Record actual full-Retail cold/warm/native/session synchronized process-group WorkingSet and PrivateBytes, including workers, steady samples, sampling gaps and failed-run status; existing peakRSS is not_measured.
-- [ ] Validate and incrementally extend the implemented `lycheedev-emmy-adapter` and `lycheedev-binding-contracts` crates: dependency direction Source→adapter→pinned upstream, no back-reference/Graph copy/framework expansion. First move authenticated environment DTO/type conversion/domain provenance and reporting; preserve necessary recursive/session/unknown/cardinality/checker hooks.
-- [ ] Map all 29 current patch paths to production/example/test consumers and regression evidence. Validate API Type public-upstream alternative, file diagnostic opt-in and object reconstruction before reducing hooks; keep 35 existing engine regressions and complete fixed-Retail acceptance.
+- [ ] Validate and incrementally extend the implemented `lycheedev-emmy-adapter` and `lycheedev-binding-contracts` crates: dependency direction Source→adapter→pinned upstream, no back-reference/Graph copy/framework expansion. First move authenticated environment DTO/type conversion/domain provenance and reporting; replace the transitional recursive/session/unknown/cardinality/checker hooks without losing their contracts.
+- [ ] Maintain the current 31-path patch inventory (26 source, two manifest/lock, three test paths) against production/example/test consumers and regression evidence; the earlier 29-path count is historical. Validate API Type public-upstream alternative, file diagnostic opt-in and object reconstruction before reducing hooks; keep 35 existing engine regressions and complete fixed-Retail acceptance.
 - [ ] Document and test each upstream-version upgrade: fixed commit/archive/license, patch conflicts/replacements, cache identity, reproducibility, owned-adapter and full-Retail outputs/resources. No claim of zero-maintenance fork or measured performance gains from file movement.
 
 ### Newly ordered implementation work (2026-10-15)
@@ -108,7 +108,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Import and analyze the entire fixed Retail31c7f7b corpus (all Lua/XML/TOC and inline maps), run representative file/symbol/line/source queries, refs/context/flow, cold/warm/persistent session and resource cleanup against Go; small fixtures and historical Retail19 are not acceptance.
 - [ ] Complete Data DB2/SQL effective/table/scan Hotfix/providers/CASC/CDN/assets/relations and error paths.
 - [ ] Reuse the released addon; reconcile installation/500-slot/upgrade/rollback/modified-file protection.
-- [ ] Reuse the fixed Go3.2.1 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
+- [ ] Reuse the fixed Go3.2.2 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
 - [ ] Enforce no unsafe in owned business/cross-platform crates with suitable forbid/deny; inventory unavoidable Windows FFI/memory boundaries, use minimal safe wrappers with per-site SAFETY proofs and pointer/lifetime/thread tests; independently audit, no blanket module exemptions or performance shortcut. Report dependency unsafe separately.
 
 ## 3. Complete Mailbox protocol (no game needed yet)
@@ -220,6 +220,14 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Fix independently confirmed native incoming relation caller/reference-expression field ambiguity with exact source owner, anonymous/top-level uncertainty and cursor identity regression coverage; do not deduplicate proof rows or silently change existing pagination. Preserve full source-map evidence required by the enhanced contract while evaluating a separately compatible compact presentation.
 
 - [x] Synchronize the approved Rust 3.5.0/beta source and package configuration; exact Go 3.2.2 overlays and independent local package checks preserve historical evidence. No publication.
-- [ ] Compile and execute the composed 3.5.0 candidate, including repaired duplicate Boolean helper and real IPC peer assembly dependency; local Node checks do not replace Windows.
+- [ ] Retain exact-b16 successful Windows all-target/CLI builds, including the duplicate-helper repair; finish its actual IPC and product tests and compile later composed 3.5.0 changes independently. Local Node checks do not replace Windows.
 - [ ] Execute nineteen Core supplemental budget regressions and connect all five reviewed seams to actual Data consumers; separately complete controlled streaming consumption and checked Directory lifetime.
 - [ ] Execute R12.3 encoded-span regressions and existing range/installed consumers; verify retained peaks and zero-copy ownership with real composed product bytes before claiming end-to-end Data parity.
+
+## Immediate default Data integration order
+
+- [ ] Validate the integrated direct remote `dispatch_target` route with its seven actual CLI regressions; finish named targets through controlled configuration-only lookup and exact pin-reference/output behavior. Preserve local routing, original control/Budget, capture and provenance.
+- [ ] Validate the frozen decoded-alias Session candidate after its Core optional-blob dependency closes directory-walk cancellation review. Missing body alone may be a cache miss; encoded integrity, metadata mismatch, cancellation and cleanup failures remain errors.
+- [ ] Connect the same scoped provider to `local_query::read_batches` / `read_files_with_keys`, then DB2/SQL/navigation. Keep planning/definitions/execution/capture within real admission ownership; EXPLAIN/schema-only and metadata-only must not trigger content scans. Do not replay callbacks on retry.
+- [ ] Transfer retained body ownership without cloning complete remote buffers; preserve exact release accounting and actual source provenance. Connect streamed asset inspect/export/demux through the owned verified-blob lifetime, rather than materializing large assets.
+- [ ] Run real CLI usage quality and cold/warm/cache-failure paths on these default consumers; internal Session APIs alone do not close the remote Data acceptance rows.

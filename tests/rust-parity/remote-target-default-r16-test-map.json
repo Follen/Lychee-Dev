@@ -1,0 +1,51 @@
+{
+  "newCount": 7,
+  "tests": [
+    {
+      "name": "real_argv_preserves_fixed_target_selector_exclusions",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    },
+    {
+      "name": "direct_request_keeps_all_explicit_fields_and_never_takes_local_or_named_path",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    },
+    {
+      "name": "direct_validation_precedes_workspace_and_retains_command_exit_two",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    },
+    {
+      "name": "actual_default_offline_remote_target_returns_pin_context_capture_and_warning",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    },
+    {
+      "name": "actual_default_remote_preserves_parent_build_and_definition_inheritance",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    },
+    {
+      "name": "actual_default_offline_missing_observation_does_not_request_installation",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    },
+    {
+      "name": "actual_default_remote_original_cancel_and_deadline_precede_provider_io",
+      "path": "stage/crates/lycheedev-cli/src/target_remote/tests.rs",
+      "status": "NOT_RUN",
+      "network": false
+    }
+  ],
+  "actualDefaultOfflineTests": 3,
+  "onlineHTTP": "NOT_RUN",
+  "static": "Rustfmt parsed source; main full-context patch apply-check/application/equality PASS_STATIC; MD5 fixture names independently derived from declared exact public synthetic bytes with Python hashlib.",
+  "actualDefaultStopTest": 1
+}
