@@ -1330,3 +1330,6 @@ fn continuation_native_retirement_keeps_deadline_before_late_parent_cancellation
     assert!(!driver.state.closed);
     driver.backend.close().unwrap();
 }
+
+#[path = "tests/repair.rs"]
+mod repair;

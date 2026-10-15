@@ -4,6 +4,7 @@ use windows::{
     core::PCWSTR,
 };
 pub mod destination;
+pub mod owned_cleanup;
 pub use destination::{Destination, Directory};
 pub fn durable_replace(source: &Path, destination: &Path) -> crate::Result<()> {
     let src: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();

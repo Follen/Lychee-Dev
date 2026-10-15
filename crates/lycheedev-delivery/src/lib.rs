@@ -3,6 +3,7 @@
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError};
 pub mod addon_transaction;
 pub mod deploy;
+pub mod formal_repair;
 pub mod installation;
 pub mod npm_update;
 pub mod release;

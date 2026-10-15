@@ -488,3 +488,9 @@ impl RuntimeRetirementBackend for NativeConnectionBackend {
         self.inner.retire_replaced_runtime(c, e, p)
     }
 }
+
+#[path = "../activation_native.rs"]
+mod activation_native;
+
+#[path = "../doctor_native.rs"]
+mod doctor_native;

@@ -2,6 +2,9 @@ name: Rust parity foundation (Windows)
 
 # This branch has not converged with main; push coverage must not depend on a
 # mergeable pull-request merge ref. No publishing, secrets or game interaction.
+# Every push preserves work and runs fast checks. Add [rust-native] to a reviewed
+# batch commit to run complete Windows/Emmy acceptance; dispatch is optional.
+# Commit selection works on this branch without requiring workflow on main.
 on:
   push:
     branches: [rust-refactor]
@@ -11,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-parity-${{ github.ref }}
+  group: rust-parity-${{ github.ref }}-${{ (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]')) && 'native' || 'fast' }}
   # Preserve the current owned build and terminal evidence; newer batches queue.
   cancel-in-progress: false
 
@@ -76,7 +79,7 @@ jobs:
 
   windows-product-foundation:
     # Deliberately no needs: static parity gaps must not suppress real builds.
-    if: github.ref == 'refs/heads/rust-refactor'
+    if: github.ref == 'refs/heads/rust-refactor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]'))
     runs-on: windows-2025
     # Existing native groups (44.5m) plus bounded formal Lua build/run (10m + 20m).
     timeout-minutes: 150
@@ -183,6 +186,18 @@ jobs:
       - name: Run checked Core file cleanup and primary error fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-core-file-cleanup --one-shot -- test --locked --offline -p lycheedev-core --lib storage::checked_close_tests -j 1
+      - name: Run controlled repair lock and temporary ownership fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-repair-locks --one-shot -- test --locked --offline -p lycheedev-core --lib storage::controlled_lock_tests -j 1
+      - name: Run original-handle cleanup substitution fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-owned-cleanup --one-shot -- test --locked --offline -p lycheedev-windows --lib filesystem::owned_cleanup::tests -j 1
+      - name: Run managed repair snapshot and publication fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-formal-repair --one-shot -- test --locked --offline -p lycheedev-delivery --lib formal_repair:: -j 1
       - name: Run checked release validation file cleanup fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-release-file-cleanup --one-shot -- test --locked --offline -p lycheedev-delivery --lib release::checked_close_tests -j 1
@@ -412,7 +427,7 @@ jobs:
       # Nested upstream rust-toolchain.toml must not select moving stable.
       RUSTUP_TOOLCHAIN: '1.99.0'
     # Separate host/ownership channel: never reuse an unresolved local build lease.
-    if: github.ref == 'refs/heads/rust-refactor'
+    if: github.ref == 'refs/heads/rust-refactor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]'))
     runs-on: windows-2025
     timeout-minutes: 55
     defaults:

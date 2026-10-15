@@ -705,3 +705,18 @@ fn close_ended_state(state: &mut State) {
 
 #[cfg(test)]
 mod tests;
+
+#[path = "activation_service.rs"]
+pub mod activation_service;
+
+#[path = "activation_reload.rs"]
+mod activation_reload;
+
+#[path = "doctor_service.rs"]
+pub mod doctor_service;
+
+#[path = "doctor_repair.rs"]
+pub mod doctor_repair;
+
+#[path = "doctor_delivery.rs"]
+pub mod doctor_delivery;

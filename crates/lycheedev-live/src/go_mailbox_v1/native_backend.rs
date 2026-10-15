@@ -94,6 +94,15 @@ trait Publications {
         &self,
         control: &'a OperationControl,
     ) -> ChannelResult<Box<dyn Publication + 'a>>;
+    /// Action-aware acquisition lets repair retain ordinary clean-manifest
+    /// admission for non-unbind cleanup, before taking the same short lease.
+    fn acquire_for<'a>(
+        &self,
+        control: &'a OperationControl,
+        _envelope: &SlotEnvelope,
+    ) -> ChannelResult<Box<dyn Publication + 'a>> {
+        self.acquire(control)
+    }
 }
 trait Clock {
     fn now(&self) -> Instant;
@@ -475,7 +484,7 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
         envelope: &SlotEnvelope,
     ) -> ChannelResult<()> {
         self.check(control)?;
-        let mut lease = self.publications.acquire(control)?;
+        let mut lease = self.publications.acquire_for(control, envelope)?;
         let result = (|| {
             self.check(control)?;
             lease.publish(&self.consumer, envelope)
@@ -559,7 +568,12 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
         if let Err(cause) = self.check(control) {
             return not_sent("guard_failed", cause, false);
         }
-        let mut lease = match self.publications.acquire(control) {
+        let acquired = if kind == MailboxAction::Invoke {
+            self.publications.acquire_for(control, &action.envelope)
+        } else {
+            self.publications.acquire(control)
+        };
+        let mut lease = match acquired {
             Ok(lease) => Some(lease),
             Err(cause) => {
                 let retryable = cause.is_pending();
@@ -959,3 +973,6 @@ mod toolkit_error_tests {
         );
     }
 }
+
+#[path = "activation_backend.rs"]
+mod activation_backend;

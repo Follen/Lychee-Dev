@@ -340,6 +340,16 @@ pub(crate) fn static_matches(name: &str, actual: &[u8], want: &[u8]) -> bool {
     false
 }
 pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    read_bounded_controlled(path, limit, &OperationControl::default())
+}
+/// Bounded immutable read with the caller's original control and checked close.
+pub(crate) fn read_bounded_controlled(
+    path: &Path,
+    limit: usize,
+    control: &OperationControl,
+) -> Result<Vec<u8>> {
+    use std::io::{Seek, SeekFrom};
+    control.check()?;
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() || metadata.len() > limit as u64 {
         return Err(invalid("slot member is not a bounded regular file"));
@@ -349,15 +359,30 @@ pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
             .ok_or_else(|| invalid("slot member has no parent"))?,
         path,
     )?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    fs::File::open(path)?
-        .take(limit as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > limit {
-        return Err(invalid("slot member exceeds byte limit"));
-    }
-    Ok(bytes)
+    let (mut file, digest) = storage::locked_sha256(path, limit as u64, control)?;
+    let result = (|| {
+        file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        let mut block = [0u8; 65536];
+        loop {
+            control.check()?;
+            let count = file.read(&mut block)?;
+            if count == 0 {
+                break;
+            }
+            if count > limit.saturating_sub(bytes.len()) {
+                return Err(invalid("slot member exceeds byte limit"));
+            }
+            bytes.extend_from_slice(&block[..count]);
+        }
+        if storage::sha256(&bytes) != digest {
+            return Err(invalid("slot member changed during read"));
+        }
+        Ok(bytes)
+    })();
+    storage::finish_file(file, result, control)
 }
+
 fn absent(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(false),
@@ -383,15 +408,22 @@ fn exact_members(path: &Path) -> Result<()> {
     Ok(())
 }
 pub(crate) fn read_pool(parent: &Path) -> Result<SlotPool> {
+    read_pool_controlled(parent, &OperationControl::default())
+}
+pub(crate) fn read_pool_controlled(parent: &Path, control: &OperationControl) -> Result<SlotPool> {
+    control.check()?;
     let marker = parent.join(MARKER);
     storage::guard_path(parent, &marker)?;
-    let pool: SlotPool = serde_json::from_slice(&read_bounded(&marker, MANIFEST_LIMIT)?)
-        .map_err(|error| invalid(error.to_string()))?;
+    let pool: SlotPool =
+        serde_json::from_slice(&read_bounded_controlled(&marker, MANIFEST_LIMIT, control)?)
+            .map_err(|error| invalid(error.to_string()))?;
     if !pool.valid_shape() {
         return Err(invalid("slot inventory shape differs"));
     }
+    control.check()?;
     Ok(pool)
 }
+
 pub(crate) fn save_pool(parent: &Path, pool: &SlotPool, control: &OperationControl) -> Result<()> {
     control.check()?;
     let bytes = serde_json::to_vec_pretty(pool)?;
@@ -427,21 +459,26 @@ pub(crate) fn inspect_pool(
         for (name, want) in static_files((index + 1) as u16, version, &pool.schema) {
             if !static_matches(
                 &name,
-                &read_bounded(&target.join(&name), STATIC_LIMIT)?,
+                &read_bounded_controlled(&target.join(&name), STATIC_LIMIT, control)?,
                 &want,
             ) {
                 return Err(invalid("slot static file changed"));
             }
         }
-        let digest = storage::sha256(&read_bounded(&target.join("Payload.lua"), PAYLOAD_LIMIT)?);
+        let digest = storage::sha256(&read_bounded_controlled(
+            &target.join("Payload.lua"),
+            PAYLOAD_LIMIT,
+            control,
+        )?);
         if digest != entry.payload_hash && digest != entry.pending_hash {
             return Err(invalid("slot payload drift"));
         }
     }
     Ok(())
 }
-fn no_extension(parent: &Path, count: usize) -> Result<()> {
+fn no_extension(parent: &Path, count: usize, control: &OperationControl) -> Result<()> {
     for index in count + 1..=COUNT as usize {
+        control.check()?;
         if !absent(&directory(parent, index as u16))? {
             return Err(invalid(format!("unmanaged slot {index}")));
         }
@@ -508,7 +545,11 @@ fn upgrade_plan(
                 continue;
             }
             let payload = name == "Payload.lua";
-            let actual = read_bounded(&path, if payload { PAYLOAD_LIMIT } else { STATIC_LIMIT })?;
+            let actual = read_bounded_controlled(
+                &path,
+                if payload { PAYLOAD_LIMIT } else { STATIC_LIMIT },
+                control,
+            )?;
             if actual == want {
                 continue;
             }
@@ -540,9 +581,9 @@ pub fn preflight_controlled(
 ) -> Result<()> {
     control.check()?;
     if absent(&parent.join(MARKER))? {
-        return no_extension(parent, 0);
+        return no_extension(parent, 0, control);
     }
-    let mut pool = read_pool(parent)?;
+    let mut pool = read_pool_controlled(parent, control)?;
     if pool.state == "upgrading" {
         return upgrade_plan(parent, &pool, version, control).map(|_| ());
     }
@@ -556,7 +597,12 @@ pub fn preflight_controlled(
         for index in 1..=COUNT {
             for (name, expected) in static_files(index, version, SCHEMA) {
                 control.check()?;
-                if read_bounded(&directory(parent, index).join(name), STATIC_LIMIT)? != expected {
+                if read_bounded_controlled(
+                    &directory(parent, index).join(name),
+                    STATIC_LIMIT,
+                    control,
+                )? != expected
+                {
                     needs_upgrade = true;
                     break;
                 }
@@ -568,7 +614,7 @@ pub fn preflight_controlled(
     }
     if needs_upgrade {
         check_idle(&pool)?;
-        no_extension(parent, pool.files.len())?;
+        no_extension(parent, pool.files.len(), control)?;
         pool.source_schema = pool.schema;
         pool.schema = MIGRATION.into();
         pool.state = "upgrading".into();
@@ -590,7 +636,7 @@ pub fn install_controlled(
         return Err(invalid("slot version is empty"));
     }
     let mut pool = if absent(&parent.join(MARKER))? {
-        no_extension(parent, 0)?;
+        no_extension(parent, 0, control)?;
         let pool = SlotPool {
             schema: SCHEMA.into(),
             version: version.into(),
@@ -601,7 +647,7 @@ pub fn install_controlled(
         save_pool(parent, &pool, control)?;
         pool
     } else {
-        read_pool(parent)?
+        read_pool_controlled(parent, control)?
     };
     if pool.state == "upgrading"
         || pool.state == "ready"
@@ -624,7 +670,7 @@ pub fn install_controlled(
             if absent(&path)? && pool.state == "installing" {
                 storage::atomic_write_controlled(&path, &want, control)?;
             } else {
-                let actual = read_bounded(&path, STATIC_LIMIT)?;
+                let actual = read_bounded_controlled(&path, STATIC_LIMIT, control)?;
                 if actual != want {
                     if pool.state == "ready" && static_matches(&name, &actual, &want) {
                         return upgrade(parent, pool, version, control);
@@ -638,7 +684,7 @@ pub fn install_controlled(
             storage::atomic_write_controlled(&payload, INERT, control)?;
             INERT.to_vec()
         } else {
-            read_bounded(&payload, PAYLOAD_LIMIT)?
+            read_bounded_controlled(&payload, PAYLOAD_LIMIT, control)?
         };
         let entry = &mut pool.files[index - 1];
         let expected = if entry.payload_hash.is_empty() {
@@ -668,7 +714,7 @@ fn upgrade(
     if pool.state == "ready" {
         inspect_pool(parent, &pool, &pool.version, control)?;
         check_idle(&pool)?;
-        no_extension(parent, pool.files.len())?;
+        no_extension(parent, pool.files.len(), control)?;
         pool.source_schema = pool.schema;
         pool.schema = MIGRATION.into();
         pool.state = "upgrading".into();
@@ -728,7 +774,7 @@ pub(crate) fn inspect_typed(
     control: &OperationControl,
 ) -> Result<SlotPool> {
     control.check()?;
-    let pool = read_pool(parent)?;
+    let pool = read_pool_controlled(parent, control)?;
     if pool.schema != SCHEMA || pool.files.len() != COUNT as usize {
         return Err(invalid("business requires the current 500-slot inventory"));
     }

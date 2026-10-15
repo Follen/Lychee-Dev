@@ -1,0 +1,225 @@
+{
+  "schema": "lycheedev.formal-activation-doctor-freeze.v1",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "baseHEAD": "da66b8eed1cfb2bc1f9035666a5a62275acf6821",
+  "candidateSHA256": "a313949917df48d0cfb0260220f4dbf6759a9a5a0f1a73cfbbc00bcfec6bab6d",
+  "files": [
+    {
+      "path": "crates/lycheedev-delivery/src/installation/inspect_controlled.rs",
+      "sha256": "1b64a4439c3fccd48875c85f11ceac49c2f9213865f84affe211fc03ff35bd8b",
+      "bytes": 13022
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation.rs",
+      "sha256": "6d8c11d48405c47ac1b892db7dad14207981e9cc2f882d698996246aca6d4748",
+      "bytes": 6892
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_backend.rs",
+      "sha256": "1ff08aff556e73faa3cf79a3aebd4dad24513e74b408c0410751bd6579e695f8",
+      "bytes": 1476
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_history.rs",
+      "sha256": "c4e4df6db09c3030f588bac3cdb6168403700e217946bc273f9d99603c0ea319",
+      "bytes": 3278
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_native.rs",
+      "sha256": "5c52fe8f48d69f6da39d22af41f115312c9f13a4c6f875ffda8e0a44b046bb40",
+      "bytes": 867
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_reload.rs",
+      "sha256": "f430ed972f4be6a7e1af9d3633f5b6a4e7e7726e041aa408efba975b5aacf5d9",
+      "bytes": 6624
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_service.rs",
+      "sha256": "56c98a01555a680a0ce92f8168ab025cd8907e309cae1031506cf6e39093d47b",
+      "bytes": 25176
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_store.rs",
+      "sha256": "9bc310516178464b97f12015600b40558e1af4c48dca8d8643538fabc3a1175f",
+      "bytes": 12405
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs",
+      "sha256": "8a891e1f89f792608ab9424239fdd05c74b23976e008df4a953fbf6203999478",
+      "bytes": 29208
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor.rs",
+      "sha256": "ee092a158a07b5ba6e45f2048c7021b1f3232417a27498d70d3f0d02366c0eb5",
+      "bytes": 19352
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_delivery.rs",
+      "sha256": "c8380447965c944ef5e3b4cbc40dbc118fff368bb647c3620e58aa530435798e",
+      "bytes": 2393
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_native.rs",
+      "sha256": "a7ff278350d746600deaa3b279f2ce519e372bff0dc32699ee6235845bc7689d",
+      "bytes": 7270
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_repair.rs",
+      "sha256": "041d74b53a702b52d3a8eb4f60cd69fed5bd273f6f77b98901b26af44e0cc8e4",
+      "bytes": 12187
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_service.rs",
+      "sha256": "75366e404b0865002c904b9cb6a7c76078b8df703c486b6cf097fa389f92310e",
+      "bytes": 7972
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/doctor_tests.rs",
+      "sha256": "c5e96d8c90d8a765f1e0426d739d618b737e69586e7df841d6752baacc494826",
+      "bytes": 14029
+    },
+    {
+      "path": "tests/rust-parity/formal-activation-doctor-contract.md",
+      "sha256": "dece3d2a0d829585f295acaacb0f482b803c5db1c0bd117b3db90186806045e4",
+      "bytes": 8593
+    },
+    {
+      "path": "tests/rust-parity/formal-activation-doctor-test-map.json",
+      "sha256": "ec5173ce45c80eb934dcd3f914f58bc00a7b7ee225135eddada7fcbd8fa3baa9",
+      "bytes": 5335
+    }
+  ],
+  "dependencySnapshots": [
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "sha256": "69b15f0815828dbdb52e152e383196f388bdc27041c3b01eac5671802ad119a7",
+      "bytes": 2187
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/admission.rs",
+      "sha256": "0b889c661cf1703d839b819d8caeba6a5ffbc5a9f0a34ad1d38c4476df20951d",
+      "bytes": 34237
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection.rs",
+      "sha256": "46c94fcec766cbecd30f8f48e766ee386bfd02c9f9052aa8c4d17da9c5590767",
+      "bytes": 26395
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs",
+      "sha256": "6f3c1aa4fd3b90883bf46ac78ffc8bffaebe2b95dda105726c06e562dc16cd58",
+      "bytes": 17552
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+      "sha256": "0d44b9724228595698cbe098a8518d97ec228985cf498887cf338b2c4cb689ea",
+      "bytes": 6687
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+      "sha256": "a67790f55ab1382ead7ef1d026602ead91be2683d0136131e71973a54d71a522",
+      "bytes": 17084
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+      "sha256": "cdd49395edd3c0be0b0710bd67c24412c9b899cceeee58f8bafb3518a2a012e7",
+      "bytes": 37972
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+      "sha256": "0ac8038e3ad6ae50e5723d9279f41dcb88c0132f5dfe2c3509261b9e35e1ff97",
+      "bytes": 27900
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+      "sha256": "7d04ac6ed0da68e8ee04b809dbc9b455825b031d0fb72e75e71082c507e99b4e",
+      "bytes": 23531
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/reload.rs",
+      "sha256": "5d0a9544330834022a8bda44862eb3c8cd41a59e63bc29656cfb09cfa911544d",
+      "bytes": 18608
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "sha256": "16b89ee11887dbcfef4f3f23bcb43233edd37d020d6847154d7013f3bb97a99a",
+      "bytes": 35688
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_reader.rs",
+      "sha256": "2ac55d9837a706d20ac573ac94aad4fa522229f0ef63e75569673a369030bd96",
+      "bytes": 8088
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/input.rs",
+      "sha256": "87c9b8e7ec64f1d0aaf9d1a32678ab00c241ca2660d73ca6ced4613bbbefca4d",
+      "bytes": 12470
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/protocol.rs",
+      "sha256": "57716ef95466be867afed5e107f61b4a19b7faef1e9e7e49d40e48d6db7b8c36",
+      "bytes": 7805
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "sha256": "26f0d5b37ef7d1b6c9d9dfa166f38190e35e18492543c93f2a9d4b3e7cc917fe",
+      "bytes": 26359
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+      "sha256": "6c7700e910cac35d8a75a537b50ff08ce419e4f5711f3b24b1d7f799bfd64e20",
+      "bytes": 12034
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/installation.rs",
+      "sha256": "048df2553425cef1099a00fe7d66977df95a86a976597fdce4379af742c6545b",
+      "bytes": 9084
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slots.rs",
+      "sha256": "b8971b5e76e813f2f2423fd9b6816f15a670e958ccb3e246fd76ee2675538623",
+      "bytes": 28366
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+      "bytes": 20162
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "sha256": "81e60e8a62bf029be05049173bf6590132354a1382c58e2110bed07663703230",
+      "bytes": 23692
+    }
+  ],
+  "integrationStage": ".tmp/formal-activation-doctor-stage-20261015-002",
+  "integrationDeclarations": {
+    "crates/lycheedev-live/src/go_mailbox_v1/mod.rs": "\npub mod connection;\npub mod activation;\npub mod doctor;\n",
+    "crates/lycheedev-live/src/go_mailbox_v1/admission.rs": "\n#[path = \"activation_store.rs\"]\npub mod activation_store;\n",
+    "crates/lycheedev-live/src/go_mailbox_v1/connection.rs": "\n#[path = \"activation_service.rs\"]\npub mod activation_service;\n#[path = \"activation_reload.rs\"]\nmod activation_reload;\n#[path = \"doctor_service.rs\"]\npub mod doctor_service;\n#[path = \"doctor_repair.rs\"]\npub mod doctor_repair;\n#[path = \"doctor_delivery.rs\"]\npub mod doctor_delivery;\n",
+    "crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs": "\n#[path = \"../activation_native.rs\"]\nmod activation_native;\n#[path = \"../doctor_native.rs\"]\nmod doctor_native;\n",
+    "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs": "\n#[path = \"activation_backend.rs\"]\nmod activation_backend;\n",
+    "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs": "\n#[path = \"activation_history.rs\"]\npub mod activation_history;\n",
+    "crates/lycheedev-delivery/src/installation.rs": "\nmod inspect_controlled;\npub use inspect_controlled::inspect_main_controlled;\n"
+  },
+  "pendingDependencies": [
+    "Delivery formal_repair::AddonValidator and apply(selected,release,archive,version,&mut validator,control) independent implementation and export",
+    "Parent integration module/export declarations",
+    "CLI real TOC/XML/Lua AddonValidator adapter",
+    "Native modified-main exact-original-unbind RepairPublication adapter"
+  ],
+  "validation": {
+    "newRustTests": 32,
+    "rustTests": "NOT_RUN",
+    "compilation": "NOT_RUN; Cargo/rustc explicitly prohibited",
+    "rustfmtNewFiles": "PASS",
+    "rustfmtReachableStage": "PASS; parsing not type checking",
+    "whitespace": "PASS",
+    "Windows": "NOT_RUN",
+    "game": "NOT_RUN"
+  },
+  "remaining": [
+    "modified-main close_for_repair remains blocked by clean original-release verifier until reviewed native repair capability consumes RepairPublication",
+    "full Go JSON edge-case/cross-process/Windows/public CLI envelopes and performance not established"
+  ]
+}

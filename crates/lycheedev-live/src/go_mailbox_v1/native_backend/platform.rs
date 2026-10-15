@@ -1,19 +1,24 @@
 //! Thin safe production adapters; all Windows FFI remains in Windows crate.
 use super::*;
+mod repair;
 use lycheedev_delivery::slot_publication::{
     PublicationError, PublicationLease, RecordedInstallationIdentity, next_free_slot,
 };
 use lycheedev_windows::mailbox_input::{send_mailbox_action, uptime_millis};
+use repair::RepairAuthorization;
 
 pub(super) struct DiskPublications {
     identity: RecordedInstallationIdentity,
+    addon: PathBuf,
     parent: String,
     release: String,
+    repair: Option<RepairAuthorization>,
 }
 impl DiskPublications {
     pub(super) fn verified(installation: &VerifiedInstallation, release: &str) -> Self {
         Self {
             identity: installation.into(),
+            addon: installation.canonical_path.clone(),
             parent: installation
                 .canonical_path
                 .parent()
@@ -21,31 +26,69 @@ impl DiskPublications {
                 .display()
                 .to_string(),
             release: release.into(),
+            repair: None,
         }
     }
     pub(super) fn recorded(path: PathBuf, release: &str) -> ChannelResult<Self> {
         let parent = path.parent().unwrap_or(&path).display().to_string();
         Ok(Self {
+            addon: path.clone(),
             identity: RecordedInstallationIdentity::from_authenticated_record(path)
                 .map_err(publication_error)?,
             parent,
             release: release.into(),
+            repair: None,
         })
     }
 }
 struct DiskLease<'a> {
     lease: PublicationLease<'a>,
     parent: String,
+    repair: Option<RepairAuthorization>,
+    control: &'a OperationControl,
 }
 impl Publications for DiskPublications {
     fn acquire<'a>(
         &self,
         control: &'a OperationControl,
     ) -> ChannelResult<Box<dyn Publication + 'a>> {
-        match PublicationLease::acquire_recorded(&self.identity, &self.release, control) {
+        self.acquire_identity(&self.identity, control)
+    }
+    fn acquire_for<'a>(
+        &self,
+        control: &'a OperationControl,
+        envelope: &SlotEnvelope,
+    ) -> ChannelResult<Box<dyn Publication + 'a>> {
+        if self.repair.is_none() || envelope.action == "unbind" {
+            return self.acquire(control);
+        }
+        // A recorded path alone cannot authorize ordinary publication. Obtain
+        // the original release's clean receipt before the short lease; its
+        // digest is rechecked under that SAME lease before publication/burst.
+        let verified = lycheedev_delivery::installation::verify_main_addon_controlled(
+            &self.addon,
+            &self.release,
+            control,
+        )
+        .map_err(toolkit_error)?;
+        if verified.canonical_path != self.addon {
+            return Err(error("live.channel_repair_publication_invalid"));
+        }
+        self.acquire_identity(&RecordedInstallationIdentity::from(&verified), control)
+    }
+}
+impl DiskPublications {
+    fn acquire_identity<'a>(
+        &self,
+        identity: &RecordedInstallationIdentity,
+        control: &'a OperationControl,
+    ) -> ChannelResult<Box<dyn Publication + 'a>> {
+        match PublicationLease::acquire_recorded(identity, &self.release, control) {
             Ok(lease) => Ok(Box::new(DiskLease {
                 lease,
                 parent: self.parent.clone(),
+                repair: self.repair.clone(),
+                control,
             })),
             Err(cause) => {
                 let cause = publication_error(cause);
@@ -76,7 +119,14 @@ impl Publication for DiskLease<'_> {
         self.lease.inspect().map_err(publication_error)
     }
     fn publish(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()> {
-        match self.lease.publish(consumer, envelope) {
+        let result = match &self.repair {
+            Some(authority) if envelope.action == "unbind" => {
+                let capability = authority.authorize(consumer, envelope, self.control)?;
+                self.lease.publish_repair(&capability)
+            }
+            _ => self.lease.publish(consumer, envelope),
+        };
+        match result {
             Err(PublicationError::Reserved { reservation }) => {
                 // Both exact reservation and forward hint remain under this
                 // same lease; no post-unlock attribution to a later owner.
@@ -106,12 +156,26 @@ impl Publication for DiskLease<'_> {
         }
     }
     fn verify(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()> {
-        self.lease
-            .verify(consumer, envelope)
-            .map_err(publication_error)
+        if let Some(authority) = self.repair.as_ref().filter(|_| envelope.action == "unbind") {
+            let capability = authority.authorize(consumer, envelope, self.control)?;
+            self.lease
+                .verify_repair(&capability)
+                .map_err(publication_error)
+        } else {
+            self.lease
+                .verify(consumer, envelope)
+                .map_err(publication_error)
+        }
     }
     fn verify_route(&mut self, envelope: &SlotEnvelope) -> ChannelResult<()> {
-        self.lease.verify_route(envelope).map_err(publication_error)
+        if let Some(authority) = self.repair.as_ref().filter(|_| envelope.action == "unbind") {
+            let capability = authority.authorize(&authority.consumer, envelope, self.control)?;
+            self.lease
+                .verify_repair_route(&capability)
+                .map_err(publication_error)
+        } else {
+            self.lease.verify_route(envelope).map_err(publication_error)
+        }
     }
     fn consumed(&mut self, consumer: &str, envelope: &SlotEnvelope) -> ChannelResult<()> {
         self.lease

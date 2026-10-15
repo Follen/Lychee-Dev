@@ -255,3 +255,7 @@ pub fn verify_main_addon_controlled(
         generation: 1,
     })
 }
+
+mod inspect_controlled;
+
+pub use inspect_controlled::inspect_main_controlled;

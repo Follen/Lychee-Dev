@@ -3,6 +3,11 @@ use crate::{Result, ToolkitError};
 // own Win32 publication path or a direct platform dependency.
 pub use lycheedev_windows::filesystem::destination::{FileControl, FileCost};
 pub use lycheedev_windows::filesystem::{Destination, Directory, durable_move_noreplace};
+mod owned_cleanup;
+pub use owned_cleanup::{
+    AuthenticatedCleanup, authenticate_cleanup_directory, authenticate_cleanup_file,
+    hold_cleanup_ancestor,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
@@ -294,23 +299,25 @@ fn atomic_write_with_check_and_close(
         .parent()
         .ok_or_else(|| ToolkitError::invalid("destination has no parent"))?;
     fs::create_dir_all(parent)?;
+    // Bound uncertain residues per exact target, not across unrelated files in
+    // this directory. Active and foreign entries are never adopted or removed.
+    const TEMPORARY_SLOTS: u64 = 64;
+    let target_key = sha256(
+        path.file_name()
+            .ok_or_else(|| ToolkitError::invalid("destination has no filename"))?
+            .to_string_lossy()
+            .to_lowercase()
+            .as_bytes(),
+    );
+    let start = NEXT.fetch_add(1, Ordering::Relaxed) % TEMPORARY_SLOTS;
     let mut selected = None;
-    for _ in 0..64 {
+    for offset in 0..TEMPORARY_SLOTS {
         check()?;
         let temporary = parent.join(format!(
-            ".lycheedev-{}-{}-{}.tmp",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
+            ".lycheedev-{target_key}-{}.tmp",
+            (start + offset) % TEMPORARY_SLOTS
         ));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-        {
+        match owned_cleanup::OwnedTemporary::create(&temporary) {
             Ok(file) => {
                 selected = Some((temporary, file));
                 break;
@@ -319,31 +326,58 @@ fn atomic_write_with_check_and_close(
             Err(e) => return Err(e.into()),
         }
     }
-    let (temporary, mut file) = selected.ok_or_else(|| {
-        ToolkitError::new(
-            "vault.temporary_collision",
-            "temporary name collision budget exhausted",
-            5,
-        )
+    let (temporary, mut owned) = selected.ok_or_else(|| {
+        ToolkitError::new("vault.temporary_collision", "all bounded temporary slots for this target are occupied; preserve and inspect uncertain residues", 6)
+            .with_details(serde_json::json!({"target":path,"parent":parent,"maximumSlots":TEMPORARY_SLOTS,"namespace":format!(".lycheedev-{target_key}-") }))
     })?;
-    let result = (|| {
+    let written = (|| {
         for chunk in bytes.chunks(64 << 10) {
             check()?;
-            file.write_all(chunk)?;
+            owned.file_mut().write_all(chunk)?;
         }
-        file.sync_all()?;
-        check()?;
-        close(file)?;
-        check()?;
-        lycheedev_windows::durable_replace(&temporary, path)
-            .map_err(|e| ToolkitError::new("vault.publish", e, 5))?;
-        Ok(())
+        owned.file_mut().sync_all()?;
+        check()
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+    if let Err(primary) = written {
+        // CREATE_NEW supplied this token's exact identity. Discard it before
+        // close, by handle only; a substituted pathname is never deleted.
+        let (file, deleted) = owned.discard();
+        let delete_succeeded = deleted.is_ok();
+        let mut combined = primary.clone();
+        if let Err(error) = deleted {
+            combined.details = serde_json::json!({"schema":FILE_CLEANUP_SCHEMA,"primary":primary.clone(),"cleanup":ToolkitError::io(error),"control":null});
+        }
+        let result = finish_file_with::<()>(file, Err(combined), &mut check, close);
+        let error = result.expect_err("failed temporary write cannot succeed");
+        if delete_succeeded && serde_json::to_value(&error)? == serde_json::to_value(&primary)? {
+            return Err(error);
+        }
+        return Err(retained_temporary(
+            error,
+            &temporary,
+            "identity-bound deletion or close is unconfirmed",
+        ));
     }
-    result
+    // Once this original handle is consumed, no cleanup is allowed by path.
+    // A failed/uncertain close or late stop retains bounded, named evidence.
+    finish_file_with(owned.into_file(), Ok(()), &mut check, close)
+        .map_err(|e| retained_temporary(e, &temporary, "close or post-close control failed"))?;
+    check()
+        .map_err(|e| retained_temporary(e, &temporary, "stopped after original handle closed"))?;
+    lycheedev_windows::durable_replace(&temporary, path).map_err(|e| {
+        retained_temporary(
+            ToolkitError::new("vault.publish", e, 5),
+            &temporary,
+            "publication failed after original handle closed",
+        )
+    })?;
+    Ok(())
 }
+fn retained_temporary(mut error: ToolkitError, path: &Path, detail: &str) -> ToolkitError {
+    error.details = serde_json::json!({"schema":"lycheedev.atomic-temporary-retained.v1","temporary":path,"state":"unconfirmed","detail":detail,"cause":error.clone()});
+    error
+}
+
 pub fn safe_relative(root: &Path, relative: &str) -> Result<PathBuf> {
     let path = Path::new(relative);
     if path.is_absolute()
@@ -407,17 +441,61 @@ impl ExclusiveLock {
         Self::acquire(&scope.join(format!("{}.lock", sha256(resource.as_bytes()))))
     }
     pub fn acquire(path: &Path) -> Result<Self> {
+        // Historical callers impose no new clock/deadline. They still receive
+        // checked close if acquiring this handle fails.
+        Self::acquire_with(
+            path,
+            || Ok(()),
+            Self::lock_file,
+            lycheedev_windows::filesystem::close_file,
+        )
+    }
+    pub fn resource_controlled(
+        scope: &Path,
+        resource: &str,
+        control: &crate::control::OperationControl,
+    ) -> Result<Self> {
+        Self::acquire_controlled(
+            &scope.join(format!("{}.lock", sha256(resource.as_bytes()))),
+            control,
+        )
+    }
+    pub fn acquire_controlled(
+        path: &Path,
+        control: &crate::control::OperationControl,
+    ) -> Result<Self> {
+        Self::acquire_with(
+            path,
+            || control.check(),
+            Self::lock_file,
+            lycheedev_windows::filesystem::close_file,
+        )
+    }
+    fn lock_file(file: &File) -> Result<()> {
+        fs2::FileExt::try_lock_exclusive(file)
+            .map_err(|e| ToolkitError::new("workspace.busy", e.to_string(), 6))
+    }
+    fn acquire_with(
+        path: &Path,
+        mut check: impl FnMut() -> Result<()>,
+        lock: impl FnOnce(&File) -> Result<()>,
+        close: impl FnOnce(File) -> std::io::Result<()>,
+    ) -> Result<Self> {
+        check()?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
+        check()?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
             .open(path)?;
-        fs2::FileExt::try_lock_exclusive(&file)
-            .map_err(|e| ToolkitError::new("workspace.busy", e.to_string(), 6))?;
+        let result = lock(&file).and_then(|_| check());
+        if let Err(error) = result {
+            return finish_file_with(file, Err(error), check, close);
+        }
         Ok(Self { file: Some(file) })
     }
     /// Consume the handle and check its close result. Closing the last owning
@@ -545,7 +623,8 @@ mod controlled_publication_tests {
             control.check()
         })
         .unwrap_err();
-        assert_eq!(checks, 4);
+        // The failed write path also observes control after consuming close.
+        assert_eq!(checks, 5);
         assert_eq!(error.code, "command.cancelled");
         assert_eq!(error.exit_code, 7);
         assert_eq!(fs::read(&path).unwrap(), b"original");
@@ -583,7 +662,9 @@ mod controlled_publication_tests {
         assert_eq!(error.code, "external.io");
         assert_eq!(error.exit_code, 5);
         assert_eq!(fs::read(&path).unwrap(), b"original");
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        // The original handle has closed; its pathname is retained rather than
+        // risking deletion of a replacement object.
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -613,7 +694,9 @@ mod controlled_publication_tests {
         .unwrap_err();
         assert_eq!(error.exit_code, 7);
         assert_eq!(fs::read(&path).unwrap(), b"original");
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        // The original handle has closed; its pathname is retained rather than
+        // risking deletion of a replacement object.
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
         fs::remove_dir_all(root).unwrap();
     }
 }
@@ -621,3 +704,7 @@ mod controlled_publication_tests {
 #[cfg(test)]
 #[path = "storage/checked_close_tests.rs"]
 mod checked_close_tests;
+
+#[cfg(test)]
+#[path = "storage/controlled_lock_tests.rs"]
+mod controlled_lock_tests;

@@ -67,3 +67,7 @@ mod shared_contract_identity {
         );
     }
 }
+
+pub mod activation;
+
+pub mod doctor;

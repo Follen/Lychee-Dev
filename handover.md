@@ -688,6 +688,26 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 修正真实 ResultVerified 写结果时持久归一化 Operation 与 raw live 误比较：全Operation按实际持久表示比较，其他身份/结果不弱化，写同一编码；真实Driver→DurableChannelJournal→standalone结果→ReleaseReady/release intent回归保留raw与结果checksum，11种其他身份差异仍拒绝。另一新fixture改用正确记录publication后停止的backend，未削弱旧recovery-only Peer约束。
 - 新core字节组与现有formal Mailbox/共享payload/Delivery组接入CI；静态rustfmt/diff/身份映射通过，18项Rust及Windows **NOT_RUN**。现有core3行/Delivery1行fixture仅API适配，原断言保留。native RawReport非法UTF8准入/公开byte输出仍是下一批必修边界，不能凭此声称全字节合同通过。
 
+### 实现阶段验证节奏（用户2026-10-15修订）
+
+- 持久化推送与慢验收解耦：有意义小批及时push同PR，不等长CI。实现阶段优先本地可运行的真实纯Rust/Node/Lua/差分回归；Windows专属仍由Windows原生验证，不能用Linux或交叉编译冒充。
+- 每push保留快静态/合同门槛。需要完整Windows/Emmy验收的已审模块批次在提交消息显式含 `[rust-native]`；可选workflow_dispatch亦保留，但不依赖其是否存在于default branch。快/原生concurrency分开，不让快检查排在长组后。不取消正在运行的关键363d8d4证据。
+- 全仓长测、资源会话与性能集中到可用候选阶段；最终完整验收不删除。新本地Rust运行须恢复有效disk/process admission、原channel租约与证据保留，不按死PID/目录年龄夺取旧lease。此前本地Cargo禁止状态仅描述旧lease缺口，后续按实际安全准入更新。
+
+### Activation/Doctor 与受控 Repair Delivery 集成候选
+
+- Activation/Doctor R2 候选 `02474e47b64aa8777144e8b23760a52bac38c156678610c5db28d03f2088f15b`，freeze SHA256 `6a807a33be7ec344a377a69904f20f0c10733082bf79e6aca99a0f131d55dc13`；独立复审关闭三项 P2：reload 只读不恢复 torn journal、未知输入保留 waiting-runtime 投影、index 先于 owner 发布。source/reachable 各321项已核验，七处集成声明逐字纳入。
+- Native repair 重新读取原 CON 的 durable closing/未closed/原target-release-owner及精确unbind envelope；同一 publication lease 保留 fresh INPUT、单次 witness、route和burst保护。clean-main confirm/release 仍正常校验完整 inventory；modified-main confirm/release **仍待受精确原operation/result-durable条件约束的能力扩展**，未宣布完整修复完成。
+- Delivery R2 freeze `d541a32b475248e5e49ed87b1a4ded2579dc9d433594c3713da1263109d8dd98`；独审与14owner/16deps/38测试映射核验通过。真实流程为有界完整release快照→调用host validator→原client身份复核→window/maintenance/installation锁→不覆盖发布与500槽维护。CLI validator消费者仍待接入。
+- 两项P2已修：receipt资源先检查唯一path再按map比较；清理保留已认证原始文件/目录/祖先句柄直到句柄绑定删除与checked close，不按已关闭路径删除替换物。CREATE_NEW临时文件仅原句柄可清除；关闭结果不确定则留存。单一Windows FFI边界已独审，4个snapshot根/每目标64个临时slot的保留上限与容量错误明记，不能以自动删除不确定资源恢复容量。
+- 组合以a353固定依赖和已审Delivery R2构建；原Delivery快照core/lib含未携带的并发raw_json声明，因此组合明确采用a353该文件，不伪称原快照完整可编译。旧R1缺失依赖字节/失败stage与全部原证据保留。
+- 新40 activation/doctor＋38 repair回归全部 **NOT_RUN**。静态rustfmt与独立源码审查不等于Windows通过；新增三个独立CI组覆盖repair、controlled lock和owned-handle cleanup，activation由既有formal组覆盖。默认CLI还未切换，四阶段最终审计/性能仍未开始。
+
+### 363d8d4 首次修复后构建观察
+
+- run `38661264087` / product `116185104371` 仍在运行。all-target check、sealed CLI build/smoke实际成功；early artifact `11939886461` ZIP SHA256 `edc6efcaa1e562e3bd190cba1688adf39c4da1f55a52d7e6d9fee8a71afd8b1e` 已校验大小、路径和全部index文件hash。构建 source digest `71d0cb27744732d11d85e9e2060e1738d32f92b9c1f4f3e978a9c54e5dda04fa`，check owner `ecde983b-c525-440f-a73c-0e1d292a43ed`、build owner `819f7f56-ab79-4f74-9d93-dc19097295ff` exit0。
+- 固定Go Lua解释器build和profiles执行step首次SUCCESS；最终artifact的实际匹配数量/完整日志尚待核验，暂不宣称214项全部通过。真实describe差分仍失败，后续独立组继续执行。此树不包含本节新Activation/Repair候选，也不包含a353的Execute字节候选。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
