@@ -180,3 +180,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Execute 11 new independent Metadata budget/owner-cleanup tests and validate real Remote cache/target consumers.
 - [ ] Repair the actual gzip deflate-versus-limit difference and execute all 157 differential vectors plus all Rust regressions without fail-fast hiding later cases.
 - [ ] Diagnose full-Retail memory by concrete structure counts and ownership lifetimes; compare phase-matched sampled working set/private bytes after any optimization without dropping coverage or results.
+
+- [ ] Execute four Graph ownership-move differential regressions and full-Retail memory measurements on a tree containing the moves; 62d53b2/ce6dfe4 are earlier candidates, with no measured benefit attributable to this change.

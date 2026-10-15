@@ -927,6 +927,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - Original five findings and three subsequent findings were repaired and independently rereviewed. There are 24 cache and 20 target/definition regression declarations, all Rust NOT_RUN. Existing independent `remote::` and `definitions::` native groups cover these modules; no duplicate workflow groups added.
 - Default full remote Data/CDN reader is still NOT_CONNECTED. Metadata waits now receive independent caller checks; independent Budget cancellation inside remaining Core blob/pin/capture I/O remains an explicit gap. Actual CLI consumers normally share invocation control, which does not prove every independent-control API path complete. R9 fragment/CDN work continues separately.
 
+### Graph ownership moves: first focused memory candidate (2026-10-15)
+
+- Two reviewed ownership transfers replace deep copies in `native/graph.rs`: `harvest.raw` moves into GraphFacts once; completed native facts move only after every original construction/integrity check and the final control check. No result, source coverage, checks, logical charges, error text or completion condition is removed. Existing checkpoint Arcs were already shared; those are not counted as deep-copy savings.
+- Independent diagnosis and production diff review found no later raw consumer or custom Drop invariant preventing these moves. Four test-only real-Graph comparisons use the frozen 53-line old builder oracle and compare full serialized GraphFacts and actual construction-step deltas across complete/partial/legacy/entry/XML/checkpoint cases, including pre-cancelled paths. Existing `native::` execution includes them; no duplicate CI group added.
+- Candidate freeze `7005301ddea626b440faed1f74d09f140279cd7695efdcbf5a604b482dcdc6e2`; exact four owner files and prior bytes verified before integration. Syntax/patch/custody checks passed. Rust compilation, four test executions, optional pointer diagnostics and memory/time gains are NOT_RUN. The Source crate currently requires Windows; the available Linux pure-module and adapter harnesses do not execute Graph, and no Core stub was introduced to claim otherwise.
+- Both `62d53b2` and `ce6dfe4` native runs exclude these moves. Their memory observations cannot prove this candidate's effect. Later phase-matched full-Retail measurements must identify the exact candidate and distinguish sampled working set/private bytes from RSS or steady-state memory.
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

@@ -11,6 +11,19 @@ fn control() -> OperationControl {
     )
 }
 fn inputs(c: &OperationControl, flow: bool) -> Arc<SourceInputs> {
+    graph_fixture_inputs(
+        c,
+        flow,
+        "function F(x) return x end\nA=1\nHost()\n",
+        None,
+    )
+}
+fn graph_fixture_inputs(
+    c: &OperationControl,
+    flow: bool,
+    first_source: &str,
+    max_paths: Option<usize>,
+) -> Arc<SourceInputs> {
     let material = json!({"sourceExecution":false,"configExecution":false,"callables":[{
         "name":"Host","identity":"sharing-host","effect":"no_lua_heap_write","retainsArguments":false,"returnArity":0,"sourceExecution":false,
         "descriptor":{"kind":"function","name":"Host","raw":{"documentation":"完整 API evidence","nested":{"z":1,"a":[3,2,1]}}}
@@ -46,11 +59,12 @@ fn inputs(c: &OperationControl, flow: bool) -> Arc<SourceInputs> {
         limits = SourceLimits::default();
         limits.flow = Some(FlowBudget {
             max_millis: 30000,
+            max_paths: max_paths.unwrap_or(FlowBudget::default().max_paths),
             ..FlowBudget::default()
         });
     }
     let files = [
-        ("a.lua", "function F(x) return x end\nA=1\nHost()\n"),
+        ("a.lua", first_source),
         ("bom.lua", "\u{feff}local text='你好'\nB=A\n"),
     ]
     .into_iter()
@@ -92,6 +106,10 @@ fn inputs(c: &OperationControl, flow: bool) -> Arc<SourceInputs> {
     )
     .unwrap()
 }
+
+// Both files are compiled only through this cfg(test) module.
+include!("graph_move_copying_reference.rs");
+include!("graph_move_tests.rs");
 
 // The prior eager Value formulas are retained here as the compatibility oracle.
 // Equality checks bytes as well as Values, covering nested canonical key order.
