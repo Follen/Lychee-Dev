@@ -1532,3 +1532,638 @@ fn explicit_close_preserves_both_ordered_failure_causes() {
     assert_eq!(causes[0].message, "first");
     assert_eq!(causes[1].message, "second");
 }
+
+fn unbind() -> SlotEnvelope {
+    SlotEnvelope {
+        action: "unbind".into(),
+        ..envelope()
+    }
+}
+fn recorded(f: &DiskFixture) -> RecordedInstallationIdentity {
+    RecordedInstallationIdentity::from_authenticated_record(f.identity.canonical_path.clone())
+        .unwrap()
+}
+fn repair(f: &DiskFixture, e: &SlotEnvelope) -> RepairPublication {
+    RepairPublication::from_authenticated_record(&recorded(f), "3.2.0", "123/456", e).unwrap()
+}
+fn assert_receipt_held(path: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        assert!(fs::write(path, b"must remain locked").is_err());
+        assert!(fs::remove_file(path).is_err());
+    }
+    #[cfg(not(windows))]
+    let _ = path;
+}
+fn receipt_handle(file: &File) -> usize {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        file.as_raw_handle() as usize
+    }
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        file.as_raw_fd() as usize
+    }
+}
+
+#[test]
+fn repair_capability_only_admits_exact_unbind_without_invented_wire_restrictions() {
+    let identity =
+        RecordedInstallationIdentity::from_authenticated_record(std::env::temp_dir()).unwrap();
+    for action in [
+        "bind", "prepare", "commit", "confirm", "release", "", "execute",
+    ] {
+        let e = SlotEnvelope {
+            action: action.into(),
+            ..envelope()
+        };
+        code(
+            RepairPublication::from_authenticated_record(&identity, "3.2.0", "123/456", &e),
+            "delivery.invalid_installation",
+        );
+    }
+    for (release, consumer) in [("", "123/456"), ("3.2.0", "")] {
+        code(
+            RepairPublication::from_authenticated_record(&identity, release, consumer, &unbind()),
+            "delivery.invalid_installation",
+        );
+    }
+    let mut e = unbind();
+    e.nonce = "bad".into();
+    code(
+        RepairPublication::from_authenticated_record(&identity, "3.2.0", "123/456", &e),
+        "bridge.invalid_slot_token",
+    );
+    // Go's shared envelope admission does not forbid ignored unbind fields or
+    // demand a newly invented consumer/version format. Preserve them exactly.
+    e = unbind();
+    e.code = "-- ignored for unbind".into();
+    e.budget = 7;
+    e.guid = "original-guid".into();
+    let cap = RepairPublication::from_authenticated_record(
+        &identity,
+        "original-release",
+        "original-consumer",
+        &e,
+    )
+    .unwrap();
+    assert_eq!(cap.envelope(), &e);
+    assert_eq!(cap.consumer(), "original-consumer");
+    e.nonce = "5".repeat(32);
+    e.action = "commit".into();
+    assert_eq!(cap.envelope().action, "unbind");
+    assert_ne!(
+        cap.envelope().nonce,
+        e.nonce,
+        "no mutable alias into the capability"
+    );
+}
+
+#[test]
+fn disk_repair_unbind_survives_missing_addon_but_ordinary_publication_stays_closed() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let e = unbind();
+    let cap = repair(&f, &e);
+    fs::remove_dir_all(&f.identity.canonical_path).unwrap();
+    let mut lease = PublicationLease::acquire_recorded(&recorded(&f), "3.2.0", &c).unwrap();
+    code(
+        lease.publish("123/456", &e),
+        "delivery.installation_not_clean",
+    );
+    code(
+        lease.verify("123/456", &e),
+        "delivery.installation_not_clean",
+    );
+    lease.publish_repair(&cap).unwrap();
+    lease.verify_repair(&cap).unwrap();
+    lease.verify_repair_route(&cap).unwrap();
+    assert!(lease.store._receipt_file.is_none());
+    assert_eq!(
+        fs::read(slots::directory(&f.root, 1).join("Payload.lua")).unwrap(),
+        payload(&e).unwrap()
+    );
+    assert!(InstallationMaintenanceLease::acquire(&f.identity.canonical_path).is_err());
+    let row = lease.inspect().unwrap().files[0].clone();
+    assert_eq!(row.consumer, "123/456");
+    assert_eq!(row.runtime, e.runtime);
+    assert_eq!(row.nonce, e.nonce);
+    lease.close().unwrap();
+    assert_disk_locks_available(&f);
+    let mut resumed = PublicationLease::acquire_recorded(&recorded(&f), "3.2.0", &c).unwrap();
+    resumed.verify_repair(&cap).unwrap();
+    resumed.confirm_consumed("123/456", &e.expected()).unwrap();
+    code(
+        resumed.verify_repair(&cap),
+        "delivery.installation_conflict",
+    );
+    resumed.close().unwrap();
+}
+
+#[test]
+fn disk_repair_modified_addon_uses_original_release_and_exact_consumer() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let original_release = "3.1.9";
+    // This fixture models a valid recorded older pool. It is not evidence that
+    // Go 3.1.9 is the oracle; the oracle requires State.Identity.Release here.
+    for index in 1..=slots::COUNT {
+        for (name, bytes) in slots::files(index, original_release) {
+            fs::write(slots::directory(&f.root, index).join(name), bytes).unwrap();
+        }
+    }
+    let mut pool = empty_pool();
+    pool.version = original_release.into();
+    fs::write(
+        f.root.join(slots::MARKER),
+        serde_json::to_vec(&pool).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        f.identity.canonical_path.join("Core.lua"),
+        b"modified addon",
+    )
+    .unwrap();
+    fs::write(
+        f.identity.canonical_path.join(installation::MARKER),
+        b"modified receipt",
+    )
+    .unwrap();
+    let e = unbind();
+    let cap = RepairPublication::from_authenticated_record(
+        &recorded(&f),
+        original_release,
+        "123/456",
+        &e,
+    )
+    .unwrap();
+    let mut lease =
+        PublicationLease::acquire_recorded(&recorded(&f), original_release, &c).unwrap();
+    lease.publish_repair(&cap).unwrap();
+    lease.verify_repair(&cap).unwrap();
+    code(
+        verify(&mut lease.store, &c, "123/999", &e),
+        "delivery.installation_conflict",
+    );
+    let wrong_release = repair(&f, &e);
+    code(
+        lease.publish_repair(&wrong_release),
+        "delivery.installation_conflict",
+    );
+    code(
+        lease.verify_repair(&wrong_release),
+        "delivery.installation_conflict",
+    );
+    code(
+        lease.verify_repair_route(&wrong_release),
+        "delivery.installation_conflict",
+    );
+    lease.close().unwrap();
+    code(
+        PublicationLease::acquire_recorded(&recorded(&f), "3.2.0", &c)
+            .map(|lease| lease.close().unwrap()),
+        "delivery.invalid_installation",
+    );
+}
+
+#[test]
+fn disk_repair_rejects_other_target_and_preserves_foreign_reserved_metadata() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    lease.publish("other-instance", &envelope()).unwrap();
+    let mut e = unbind();
+    e.nonce = "9".repeat(32);
+    let wrong = RecordedInstallationIdentity::from_authenticated_record(f.root.join("Other addon"))
+        .unwrap();
+    let wrong_cap =
+        RepairPublication::from_authenticated_record(&wrong, "3.2.0", "123/456", &e).unwrap();
+    code(
+        lease.publish_repair(&wrong_cap),
+        "delivery.installation_conflict",
+    );
+    code(
+        lease.verify_repair(&wrong_cap),
+        "delivery.installation_conflict",
+    );
+    code(
+        lease.verify_repair_route(&wrong_cap),
+        "delivery.installation_conflict",
+    );
+    let primary = lease.publish_repair(&repair(&f, &e)).unwrap_err();
+    assert!(primary.is_code("delivery.slot_reserved"));
+    assert!(primary.is_code("delivery.installation_conflict"));
+    let PublicationError::Reserved { reservation } = &primary else {
+        panic!("captured reservation")
+    };
+    assert_eq!(reservation.consumer, "other-instance");
+    assert_eq!(reservation.nonce, envelope().nonce);
+    // Operation and checked-close results remain separate: a cleanup failure
+    // cannot erase or re-read the exact Reserved metadata. Native joins these.
+    let close = lease
+        .close_with(
+            |file, control| storage::finish_file(file, Ok(()), control),
+            |lock| {
+                lock.close()?;
+                Err(ToolkitError::new(
+                    "fixture.close",
+                    "model after real close",
+                    5,
+                ))
+            },
+            InstallationMaintenanceLease::close,
+        )
+        .unwrap_err();
+    assert!(close.is_code("fixture.close"));
+    assert!(primary.is_code("delivery.slot_reserved"));
+    assert_eq!(reservation.consumer, "other-instance");
+    assert_disk_locks_available(&f);
+}
+
+#[test]
+fn disk_repair_rechecks_actual_pool_payload_route_and_original_control() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let e = SlotEnvelope {
+        index: 2,
+        start_slot: 1,
+        ..unbind()
+    };
+    let cap = repair(&f, &e);
+    let mut lease = PublicationLease::acquire_recorded(&recorded(&f), "3.2.0", &c).unwrap();
+    lease.publish_repair(&cap).unwrap();
+    lease.verify_repair(&cap).unwrap();
+    lease.verify_repair_route(&cap).unwrap();
+    // A same-runtime earlier envelope blocks the route even with exact hashes.
+    let prior = envelope();
+    publish(&mut lease.store, &c, "123/456", &prior).unwrap();
+    code(
+        lease.verify_repair_route(&cap),
+        "delivery.installation_conflict",
+    );
+    let payload_path = slots::directory(&f.root, 2).join("Payload.lua");
+    fs::write(&payload_path, b"corrupt payload").unwrap();
+    code(lease.verify_repair(&cap), "delivery.invalid_installation");
+    fs::write(&payload_path, payload(&e).unwrap()).unwrap();
+    let loader = slots::directory(&f.root, 500).join("Loader.lua");
+    let original_loader = fs::read(&loader).unwrap();
+    fs::write(&loader, b"modified loader").unwrap();
+    code(lease.publish_repair(&cap), "delivery.invalid_installation");
+    fs::write(loader, original_loader).unwrap();
+    c.tracked_cancel_handle().unwrap().cancel();
+    code(lease.publish_repair(&cap), "command.cancelled");
+    code(lease.verify_repair(&cap), "command.cancelled");
+    code(lease.verify_repair_route(&cap), "command.cancelled");
+    lease.close().unwrap();
+    assert_disk_locks_available(&f);
+}
+
+#[test]
+fn receipt_success_retains_original_handle_through_revalidation_and_checked_close() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let path = f.identity.canonical_path.join(installation::MARKER);
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    let mut finishes = 0;
+    lease
+        .store
+        .verify_addon_with_finish(&c, |file, result| {
+            finishes += 1;
+            storage::finish_file(file, result, &c)
+        })
+        .unwrap();
+    assert_eq!(finishes, 0, "first success transfers its live owner");
+    let original = receipt_handle(lease.store._receipt_file.as_ref().unwrap());
+    assert_receipt_held(&path);
+    for _ in 0..2 {
+        lease
+            .store
+            .verify_addon_with_finish(&c, |file, result| {
+                finishes += 1;
+                assert_ne!(receipt_handle(&file), original);
+                assert_receipt_held(&path);
+                storage::finish_file(file, result, &c)
+            })
+            .unwrap();
+        assert_eq!(
+            receipt_handle(lease.store._receipt_file.as_ref().unwrap()),
+            original
+        );
+        assert_receipt_held(&path);
+    }
+    assert_eq!(finishes, 2);
+    let mut retained_finishes = 0;
+    lease
+        .close_with(
+            |file, control| {
+                retained_finishes += 1;
+                assert_eq!(receipt_handle(&file), original);
+                assert_receipt_held(&path);
+                storage::finish_file(file, Ok(()), control)
+            },
+            ExclusiveLock::close,
+            InstallationMaintenanceLease::close,
+        )
+        .unwrap();
+    assert_eq!(retained_finishes, 1);
+    fs::write(path, b"released after burst").unwrap();
+    assert_disk_locks_available(&f);
+}
+
+#[test]
+fn receipt_validation_failures_finish_once_without_retaining_or_hiding_errors() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let path = f.identity.canonical_path.join(installation::MARKER);
+    let original = fs::read(&path).unwrap();
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    for failure in [
+        "digest",
+        "json",
+        "schema",
+        "component",
+        "version",
+        "commit",
+        "inventory",
+    ] {
+        let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        match failure {
+            "schema" | "component" | "version" | "commit" => {
+                value[failure] = serde_json::json!("wrong")
+            }
+            "inventory" => value["resources"][0]["sha256"] = serde_json::json!("0".repeat(64)),
+            _ => (),
+        }
+        let bytes = if failure == "json" {
+            b"{".to_vec()
+        } else {
+            serde_json::to_vec(&value).unwrap()
+        };
+        fs::write(&path, &bytes).unwrap();
+        lease.store.manifest_sha256 = Some(if failure == "digest" {
+            "0".repeat(64)
+        } else {
+            storage::sha256(&bytes)
+        });
+        let mut finishes = 0;
+        let error = lease
+            .store
+            .verify_addon_with_finish(&c, |file, result| {
+                finishes += 1;
+                assert!(result.is_err());
+                assert_receipt_held(&path);
+                storage::finish_file(file, result, &c)
+            })
+            .unwrap_err();
+        assert_eq!(finishes, 1, "{failure}");
+        assert!(lease.store._receipt_file.is_none());
+        assert!(
+            matches!(
+                error.code.as_str(),
+                "delivery.invalid_installation" | "delivery.invalid_payload"
+            ),
+            "{failure}: {error:?}"
+        );
+        fs::write(&path, &original).unwrap();
+    }
+    lease.close().unwrap();
+}
+
+#[test]
+fn receipt_opened_read_error_and_control_stop_are_checked_before_return() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let path = f.identity.canonical_path.join(installation::MARKER);
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    let digest = f.identity.manifest_sha256.clone();
+    let mut finishes = 0;
+    // Real File, real read error: seek succeeds on a valid write-only file.
+    let write_only = fs::OpenOptions::new().write(true).open(&path).unwrap();
+    let error = lease
+        .store
+        .verify_opened_receipt(write_only, &digest, &c, |file, result| {
+            finishes += 1;
+            assert_eq!(result.as_ref().unwrap_err().code, "external.io");
+            storage::finish_file(file, result, &c)
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "external.io");
+    assert_eq!(finishes, 1);
+    let (file, digest) = storage::locked_sha256(&path, RECEIPT_LIMIT as u64, &c).unwrap();
+    c.tracked_cancel_handle().unwrap().cancel();
+    let stopped = lease
+        .store
+        .verify_opened_receipt(file, &digest, &c, |file, result| {
+            finishes += 1;
+            storage::finish_file(file, result, &c)
+        })
+        .unwrap_err();
+    assert_eq!(stopped.code, "command.cancelled");
+    assert_eq!(finishes, 2);
+    assert!(lease.store._receipt_file.is_none());
+    lease.close().unwrap();
+    fs::write(path, b"released").unwrap();
+}
+
+struct ReceiptReadFault {
+    cursor: std::io::Cursor<Vec<u8>>,
+    seek_fault: bool,
+    read_fault: bool,
+}
+impl Read for ReceiptReadFault {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        if self.read_fault {
+            Err(std::io::Error::other("model read fault"))
+        } else {
+            self.cursor.read(bytes)
+        }
+    }
+}
+impl Seek for ReceiptReadFault {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        if self.seek_fault {
+            Err(std::io::Error::other("model seek fault"))
+        } else {
+            self.cursor.seek(position)
+        }
+    }
+}
+#[test]
+fn receipt_seek_read_size_and_second_digest_validation_preserve_original_checks() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    let bytes = fs::read(f.identity.canonical_path.join(installation::MARKER)).unwrap();
+    for failure in ["seek", "read", "size", "second_digest"] {
+        let mut raw = bytes.clone();
+        if failure == "size" {
+            raw = vec![b' '; RECEIPT_LIMIT + 1];
+        }
+        if failure == "second_digest" {
+            raw.push(b' ');
+        }
+        let mut reader = ReceiptReadFault {
+            cursor: std::io::Cursor::new(raw),
+            seek_fault: failure == "seek",
+            read_fault: failure == "read",
+        };
+        let error = lease
+            .store
+            .validate_receipt(&mut reader, &f.identity.manifest_sha256, &c)
+            .unwrap_err();
+        assert_eq!(
+            error.code,
+            if matches!(failure, "seek" | "read") {
+                "external.io"
+            } else {
+                "delivery.invalid_installation"
+            }
+        );
+    }
+    lease.close().unwrap();
+}
+
+#[test]
+fn receipt_revalidation_finish_failure_retains_original_owner_until_burst_close() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let path = f.identity.canonical_path.join(installation::MARKER);
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    lease.publish("123/456", &envelope()).unwrap();
+    let original = receipt_handle(lease.store._receipt_file.as_ref().unwrap());
+    let injected = ToolkitError::new(
+        "fixture.checked_close",
+        "modeled close result, not kernel failure",
+        5,
+    );
+    let error = lease
+        .store
+        .verify_addon_with_finish(&c, |file, result| {
+            storage::finish_file(file, result, &c)?;
+            Err(injected.clone())
+        })
+        .unwrap_err();
+    assert_eq!(
+        serde_json::to_value(error).unwrap(),
+        serde_json::to_value(&injected).unwrap()
+    );
+    assert_eq!(
+        receipt_handle(lease.store._receipt_file.as_ref().unwrap()),
+        original
+    );
+    assert_receipt_held(&path);
+    lease.close().unwrap();
+    fs::write(path, b"released").unwrap();
+}
+
+#[test]
+fn receipt_failure_preserves_complete_nested_primary_cleanup_and_control_error() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    lease.store.manifest_sha256 = Some("0".repeat(64));
+    let mut expected = None;
+    let actual = lease
+        .store
+        .verify_addon_with_finish(&c, |file, result| {
+            let primary = result.unwrap_err();
+            storage::finish_file(file, Ok(()), &c)?;
+            // Injection at the checked-finish seam, after real successful close.
+            // Core separately tests the OS-close adapter's structured combiner.
+            let cleanup = ToolkitError::new("fixture.close", "modeled OS-close outcome", 5);
+            let mut joined = primary.clone();
+            joined.details = serde_json::json!({
+                "schema": storage::FILE_CLEANUP_SCHEMA,
+                "primary": primary,
+                "cleanup": cleanup,
+                "control": ToolkitError::new("command.cancelled", "model late stop", 7),
+            });
+            expected = Some(serde_json::to_value(&joined).unwrap());
+            Err(joined)
+        })
+        .unwrap_err();
+    assert_eq!(Some(serde_json::to_value(actual).unwrap()), expected);
+    assert!(lease.store._receipt_file.is_none());
+    lease.close().unwrap();
+}
+
+#[test]
+fn receipt_and_both_lock_close_faults_are_ordered_consumed_once_and_never_short_circuit() {
+    let f = DiskFixture::new();
+    for mask in 0u8..8 {
+        let c = OperationControl::default();
+        let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+        lease.store.verify_addon(&c).unwrap();
+        let events = RefCell::new(Vec::new());
+        let injected = |bit: u8, label: &str| {
+            if mask & bit != 0 {
+                Err(ToolkitError::new(
+                    format!("fixture.{label}"),
+                    "model after real checked close",
+                    5,
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        let result = lease.close_with(
+            |file, control| {
+                events.borrow_mut().push("receipt");
+                storage::finish_file(file, Ok(()), control)?;
+                injected(1, "receipt")
+            },
+            |lock| {
+                events.borrow_mut().push("publication");
+                lock.close()?;
+                injected(2, "publication")
+            },
+            |lock| {
+                events.borrow_mut().push("maintenance");
+                lock.close()?;
+                injected(4, "maintenance")
+            },
+        );
+        assert_eq!(*events.borrow(), ["receipt", "publication", "maintenance"]);
+        match result {
+            Ok(()) => assert_eq!(mask, 0),
+            Err(error) => {
+                for (bit, label) in [(1, "receipt"), (2, "publication"), (4, "maintenance")] {
+                    assert_eq!(error.is_code(&format!("fixture.{label}")), mask & bit != 0);
+                }
+                let causes = match &error {
+                    PublicationError::Failure(e) => vec![e],
+                    PublicationError::CloseFailures(es) => es.iter().collect(),
+                    _ => panic!("close cannot produce Reserved"),
+                };
+                let expected: Vec<_> = [(1, "receipt"), (2, "publication"), (4, "maintenance")]
+                    .into_iter()
+                    .filter(|(bit, _)| mask & bit != 0)
+                    .map(|(_, label)| format!("fixture.{label}"))
+                    .collect();
+                assert_eq!(
+                    causes.iter().map(|e| e.code.clone()).collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
+        assert_disk_locks_available(&f);
+    }
+}
+
+#[test]
+fn cancelled_receipt_close_still_releases_both_locks_and_preserves_control() {
+    let f = DiskFixture::new();
+    let c = OperationControl::default();
+    let mut lease = PublicationLease::acquire(&f.identity, "3.2.0", &c).unwrap();
+    lease.store.verify_addon(&c).unwrap();
+    c.tracked_cancel_handle().unwrap().cancel();
+    code(lease.close(), "command.cancelled");
+    assert_disk_locks_available(&f);
+    fs::write(
+        f.identity.canonical_path.join(installation::MARKER),
+        b"released",
+    )
+    .unwrap();
+}

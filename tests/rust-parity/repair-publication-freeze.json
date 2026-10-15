@@ -1,0 +1,94 @@
+{
+  "schema": "lycheedev.repair-publication.freeze.v1",
+  "createdAt": "2026-10-15T00:22:42.345948+00:00",
+  "baseRustHead": "cc47c55b8d4e771b18214826375025587f603f6d",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "ownedFiles": [
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 34907,
+      "sha256": "4afbea1ba8191d88c0265f14958428f0a5d755bae8d14d3f3dd61e633bd60170"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "bytes": 77607,
+      "sha256": "dae565c28bc6f86ef4a920283ef25afcef303399633d82b2edb003c14ef611ef"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 22397,
+      "sha256": "8cf24f46ce1af4b4445c529f4123c936df4d610bd8c42eff5f71e339bcb77c6d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/checked_close_tests.rs",
+      "bytes": 13317,
+      "sha256": "efa17acf2d0ba0a828522d5ebdd9a832493fcb78e1a827029a4a4bb4d76b5fd3"
+    },
+    {
+      "path": "crates/lycheedev-core/src/coordination.rs",
+      "bytes": 7144,
+      "sha256": "4130866ad72d52150f64e870f2e1c07a777c63518561dbd457fc539f1a809dc0"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox.rs",
+      "bytes": 7134,
+      "sha256": "f040ff6c469b33d845b78adb69e75ade64933ec40cac7ff514ec452b3f3791c3"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4772,
+      "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/installation.rs",
+      "bytes": 9084,
+      "sha256": "048df2553425cef1099a00fe7d66977df95a86a976597fdce4379af742c6545b"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/release.rs",
+      "bytes": 11237,
+      "sha256": "0db05b990994bb9311ab4f90963463c5e0575297c30e6a1ba33a395fc69bd6af"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slots.rs",
+      "bytes": 27106,
+      "sha256": "ee2b59101770213f149055979daff7826dbe7447ec487693e3e1d0cb8e7a39fc"
+    },
+    {
+      "path": "crates/lycheedev-delivery/Cargo.toml",
+      "bytes": 243,
+      "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "bytes": 10689,
+      "sha256": "c2e5ab6a3a014c298c91ed77535fd2c5017d23d824698fc84a27c2b7e59576d6"
+    }
+  ],
+  "testMapSha256": "0adb21f57847c0f23562af7533d0d9ea75f959087255308aa773dc067055e82d",
+  "staticChecks": {
+    "rustfmt": "PASS --edition 2024 --check (parse/format only)",
+    "gitDiffCheck": "PASS owned files",
+    "sharedPublicationAlgorithms": "PASS byte-identical fn slot_index onward",
+    "historicalTests": "PASS byte-identical original 38-test file prefix",
+    "newRustTestDeclarations": 13,
+    "totalRustTestDeclarations": 51
+  },
+  "execution": {
+    "cargoRustc": "NOT_RUN prohibited",
+    "rustTests": "NOT_RUN",
+    "windows": "NOT_RUN existing slot_publication::tests CI group",
+    "realOsCloseFault": "NOT_RUN helper-model injection only",
+    "gameDesktop": "NOT_RUN prohibited"
+  },
+  "review": "PENDING new independent frozen snapshot review; author static checks are not independent approval.",
+  "scope": "Only slot_publication.rs, slot_publication_tests.rs and these two new JSON evidence files. No native backend, CLI, installation, core storage, Windows, Cargo, tools, third_party or historical evidence edits. No commits/pushes by author. Parent owns integration/publication.",
+  "integrationCaveat": "Native/doctor adapter not in owned scope. It must choose this typed capability only after original-CON durable close intent and feed the original journaled unbind; ordinary PublicationLease::publish/verify continue to require current clean addon. Cross-batch consumer and dependency changes need independent integration review."
+}

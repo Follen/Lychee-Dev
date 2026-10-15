@@ -1,0 +1,161 @@
+{
+  "schema": "lycheedev.repair-publication.test-map.v1",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "rustExecution": "NOT_RUN",
+  "method": "Static source comparison, JSON integrity and rustfmt parse/format only. No Cargo/rustc/Go test or Windows/game/desktop execution.",
+  "newTests": {
+    "crates/lycheedev-delivery/src/slot_publication_tests.rs": [
+      "repair_capability_only_admits_exact_unbind_without_invented_wire_restrictions",
+      "disk_repair_unbind_survives_missing_addon_but_ordinary_publication_stays_closed",
+      "disk_repair_modified_addon_uses_original_release_and_exact_consumer",
+      "disk_repair_rejects_other_target_and_preserves_foreign_reserved_metadata",
+      "disk_repair_rechecks_actual_pool_payload_route_and_original_control",
+      "receipt_success_retains_original_handle_through_revalidation_and_checked_close",
+      "receipt_validation_failures_finish_once_without_retaining_or_hiding_errors",
+      "receipt_opened_read_error_and_control_stop_are_checked_before_return",
+      "receipt_seek_read_size_and_second_digest_validation_preserve_original_checks",
+      "receipt_revalidation_finish_failure_retains_original_owner_until_burst_close",
+      "receipt_failure_preserves_complete_nested_primary_cleanup_and_control_error",
+      "receipt_and_both_lock_close_faults_are_ordered_consumed_once_and_never_short_circuit",
+      "cancelled_receipt_close_still_releases_both_locks_and_preserves_control"
+    ]
+  },
+  "goSources": [
+    {
+      "path": "internal/live/channel/project_windows.go",
+      "gitBlob": "3746595ecc3c86f6b0ffd83e0b5ae59e7df734cd",
+      "bytes": 20287,
+      "sha256": "3c824507b764721a4830723868a6f6b9b70e36ec9fc53600b55818c4dfdfd7b5",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel/project_windows.go"
+    },
+    {
+      "path": "internal/live/channel/project_windows_test.go",
+      "gitBlob": "b1349dad6e5dea67da060072125bdbd4bbbb6bff",
+      "bytes": 9844,
+      "sha256": "7e2b4b767a1502ddab3cdf208da3dd22f2850a9b3a8b1f2cb9f4be11f5edc88a",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel/project_windows_test.go"
+    },
+    {
+      "path": "internal/live/channel/native_windows.go",
+      "gitBlob": "1cb0db6b7e00c132ea44e8797b04feb359feb68f",
+      "bytes": 10641,
+      "sha256": "6dc0d019ad3b72d5dbe4abe56fcbb8f735059d6ec060fbfe55d90017d0f4eada",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel/native_windows.go"
+    },
+    {
+      "path": "internal/live/channel/driver.go",
+      "gitBlob": "f433364512d37629e1d6ef0765a734812d239c65",
+      "bytes": 17426,
+      "sha256": "a7d818003d3ed19496400fb21fb0b00bb37ba0d1573905216b64150486de64c2",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel/driver.go"
+    },
+    {
+      "path": "internal/delivery/slots.go",
+      "gitBlob": "5f04500071bf708f6520c4271193e1ec8918bf92",
+      "bytes": 20149,
+      "sha256": "58ca862c2eaa55e8a39020ed7fdbf9838452957970f29d8b6d2ac2812faff461",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/delivery/slots.go"
+    },
+    {
+      "path": "internal/delivery/slots_test.go",
+      "gitBlob": "e4dabcbb5209271feef3bafee06f4d3ead1248c1",
+      "bytes": 8920,
+      "sha256": "b79f3917edecf2450724747f12d7c74c5068b7f03cab6b5dad1aa6b2d84faf2c",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/delivery/slots_test.go"
+    },
+    {
+      "path": "internal/delivery/slot_route.go",
+      "gitBlob": "4ae7963b4f1c77d2a81d90a68eef26213228b33d",
+      "bytes": 2010,
+      "sha256": "65ea23293500008a806e5bb7cc6bc9cff38d88e8e70ec21579e817436cdcc4df",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/delivery/slot_route.go"
+    },
+    {
+      "path": "internal/delivery/slot_route_test.go",
+      "gitBlob": "3f33ebc72cc545ad821abf5ab9d75774f6b3fb5f",
+      "bytes": 2198,
+      "sha256": "aee32129bb799ecb252343d5b4470c8e5a4a02750b80248419d689a23c442823",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/delivery/slot_route_test.go"
+    },
+    {
+      "path": "internal/bridge/slot.go",
+      "gitBlob": "7c14697c2ae7200d366daca3eeeb0806a33e05b8",
+      "bytes": 3245,
+      "sha256": "70cce1afd60888e6d87a69de6b61cb41e74606217bc3c220de9eab6ab6958803",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/bridge/slot.go"
+    }
+  ],
+  "mapping": [
+    {
+      "go": [
+        "internal/live/channel/project_windows.go:connectionGuard,driveMode,CloseForRepair,disconnectMode",
+        "internal/live/channel/project_windows_test.go:TestRepairCloseRetiresOriginalClosedConnection"
+      ],
+      "rustTests": [
+        "repair_capability_only_admits_exact_unbind_without_invented_wire_restrictions",
+        "disk_repair_unbind_survives_missing_addon_but_ordinary_publication_stays_closed",
+        "disk_repair_modified_addon_uses_original_release_and_exact_consumer",
+        "disk_repair_rejects_other_target_and_preserves_foreign_reserved_metadata",
+        "disk_repair_rechecks_actual_pool_payload_route_and_original_control"
+      ],
+      "contract": "Repair uses authenticated original CON, recorded State.Identity.Release and PID/creation-time consumer; only original unbind can use cleanup-only disk publication despite missing/modified main addon. The caller retains original client/window/CON guards and records disconnect intent before minting capability. The Go test covers already-closed old-release retirement; new Rust modified-disk fixtures are derived from the fixed production path, not claimed Go test executions."
+    },
+    {
+      "go": [
+        "internal/live/channel/native_windows.go:Publish,lockPublication,unlockPublication",
+        "internal/delivery/slots.go:PublishSlot,VerifySlotPublication",
+        "internal/delivery/slot_route.go:VerifySlotRoute"
+      ],
+      "rustTests": [
+        "repair_capability_only_admits_exact_unbind_without_invented_wire_restrictions",
+        "disk_repair_unbind_survives_missing_addon_but_ordinary_publication_stays_closed",
+        "disk_repair_modified_addon_uses_original_release_and_exact_consumer",
+        "disk_repair_rejects_other_target_and_preserves_foreign_reserved_metadata",
+        "disk_repair_rechecks_actual_pool_payload_route_and_original_control"
+      ],
+      "contract": "Same shared maintenance/publication admission, validated original-release pool, exact consumer/runtime/nonce/payload reservation, forward route bytes, idempotence and original control. Cleanup cap cannot authorize any bind/prepare/commit/confirm/release action. No main receipt check is added to the fixed repair path."
+    },
+    {
+      "go": [
+        "internal/live/channel/native_windows.go:Publish (errors.Join deferred unlock)",
+        "internal/delivery/slots.go:PublishSlot (ErrConflict plus ErrSlotReserved)"
+      ],
+      "rustTests": [
+        "disk_repair_rejects_other_target_and_preserves_foreign_reserved_metadata",
+        "receipt_success_retains_original_handle_through_revalidation_and_checked_close",
+        "receipt_validation_failures_finish_once_without_retaining_or_hiding_errors",
+        "receipt_opened_read_error_and_control_stop_are_checked_before_return",
+        "receipt_seek_read_size_and_second_digest_validation_preserve_original_checks",
+        "receipt_revalidation_finish_failure_retains_original_owner_until_burst_close",
+        "receipt_failure_preserves_complete_nested_primary_cleanup_and_control_error",
+        "receipt_and_both_lock_close_faults_are_ordered_consumed_once_and_never_short_circuit",
+        "cancelled_receipt_close_still_releases_both_locks_and_preserves_control"
+      ],
+      "contract": "Check all receipt failure closes, keep original successful receipt owner through physical burst, and consume it before both lock closes. Each full ToolkitError, including nested FILE_CLEANUP_SCHEMA primary/cleanup/control, remains intact. Reserved is still a separate operation error with captured owner, for native operation/close join."
+    }
+  ],
+  "productionApi": {
+    "constructor": "RepairPublication::from_authenticated_record(&RecordedInstallationIdentity, original_release, original_consumer, &exact_unbind)",
+    "leaseMethods": [
+      "PublicationLease::publish_repair(&RepairPublication)",
+      "PublicationLease::verify_repair(&RepairPublication)",
+      "PublicationLease::verify_repair_route(&RepairPublication)"
+    ],
+    "guardContract": [
+      "Authenticate original CON under its existing execution lease and persist RequestClose before first repair publication.",
+      "Use State.Identity.Release and original PID/creation-time consumer; the exact persisted unbind retains runtime/owner/fence/GUID/build/nonce/ticket/index/start_slot.",
+      "Confirm original client/window/ownership before publication lease acquisition and recheck after admission; do not call a clean-addon guard for repair.",
+      "Mint capability when the exact journaled unbind exists, not when the backend opens. It adds no pre-open close proof that the Go flow lacks.",
+      "Invoke repair methods on the already-held PublicationLease; never reacquire maintenance/publication while holding that lease.",
+      "Retain all native fresh INPUT, callback, exact receipt and route verification. Close before receipt wait and join operation/close errors without flattening Reserved."
+    ],
+    "integrationStatus": "Production delivery API implemented; native backend/doctor adapter consumption is a separately owned pending batch. This freeze does not claim modified-addon CloseForRepair works through the public CLI yet."
+  },
+  "differences": "Checked receipt close is authorized resource-safety hardening. Historical Rust replaced/dropped successful receipt owners and dropped early failure handles; this preserves original successful owner until burst close and explicitly finishes every opened rejection. The Go delivery repair path does not read the main addon receipt.",
+  "faultLimits": "Disk fixtures exercise production API/file layout. Read error uses a real valid write-only File. Seek/read/oversize validation uses an explicit model reader. Close failures are helper-injected after actual successful fixture closes, not kernel/CloseHandle failures; no native execution or Rust test pass is claimed.",
+  "historicalEvidence": "Existing 38 slot_publication tests preserved byte-for-byte; they were not all run historically and are not claimed passed here. This batch adds 13 declarations (51 total), all NOT_RUN.",
+  "ciCommands": [
+    "node tools/rust-cargo.mjs --owner ci-slot-publication --one-shot -- test --locked --offline -p lycheedev-delivery --lib slot_publication::tests -j 1"
+  ],
+  "ciIntegration": "Existing .github/workflows/rust-parity.yml slot-publication group runs the whole module; no workflow edit is needed for these declarations."
+}

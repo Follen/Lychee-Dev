@@ -38,9 +38,10 @@ pub enum PublicationError {
     Reserved {
         reservation: SlotFile,
     },
-    /// Ordered acquisition/close causes: the original acquisition failure, if
-    /// any, followed by publication then maintenance close failures. Acquisition
-    /// cannot produce Reserved, so its captured reservation is never flattened.
+    /// Ordered acquisition/close causes. Acquisition failures precede lock
+    /// closes; normal close reports receipt, publication, then maintenance.
+    /// Operations return Reserved separately, preserving its captured owner when
+    /// callers join an operation error with this checked-close result.
     CloseFailures(Vec<ToolkitError>),
 }
 pub type Result<T> = std::result::Result<T, PublicationError>;
@@ -123,9 +124,9 @@ impl RecordedInstallationIdentity {
     /// The caller authenticates the record and its selected installation before
     /// calling this. Structural validation here does not establish provenance.
     /// Lease acquisition checks the canonical path and current slot pool.
-    /// Only publication/input verification reads the current addon receipt.
-    /// A path-only record authorizes no publication. Obtain VerifiedInstallation
-    /// through the clean verifier to perform a new publish/pre-input check.
+    /// Ordinary publication/input verification reads the current addon receipt.
+    /// A path-only record cannot publish. New business publication needs a clean
+    /// VerifiedInstallation; original repair unbind needs RepairPublication.
     pub fn from_authenticated_record(canonical_path: PathBuf) -> Result<Self> {
         if !canonical_path.is_absolute() {
             return Err(invalid("recorded installation identity is malformed").into());
@@ -142,6 +143,65 @@ impl From<&VerifiedInstallation> for RecordedInstallationIdentity {
             canonical_path: identity.canonical_path.clone(),
             manifest_sha256: Some(identity.manifest_sha256.clone()),
         }
+    }
+}
+
+/// Cleanup-only authority for one exact original-CON unbind. The fields are
+/// private and immutable: this cannot authorize bind, business execution, a new
+/// runtime, or an arbitrary replacement envelope. It is not an INPUT witness.
+///
+/// As with RecordedInstallationIdentity, the caller authenticates provenance:
+/// read the original CON under its execution lease, durably request close, and
+/// supply that journal's exact unbind, original PID/creation-time consumer and
+/// Identity.Release. Recheck the original client window and ownership before
+/// acquisition and again after admission, as Go connectionGuard(repair=true)
+/// does. Do not use the current CLI release or an unauthenticated descriptor.
+#[derive(Debug, Clone)]
+pub struct RepairPublication {
+    identity: RecordedInstallationIdentity,
+    release: String,
+    consumer: String,
+    envelope: SlotEnvelope,
+}
+impl RepairPublication {
+    pub fn from_authenticated_record(
+        identity: &RecordedInstallationIdentity,
+        original_release: &str,
+        original_consumer: &str,
+        exact_unbind: &SlotEnvelope,
+    ) -> Result<Self> {
+        // Use the shared Go payload validator, not a stricter cleanup wire.
+        // Other action fields remain byte-exact, including fields Go ignores.
+        if original_release.is_empty()
+            || original_consumer.is_empty()
+            || exact_unbind.action != "unbind"
+        {
+            return Err(invalid(
+                "repair publication requires the original release, consumer and unbind",
+            )
+            .into());
+        }
+        payload(exact_unbind)?;
+        Ok(Self {
+            identity: identity.clone(),
+            release: original_release.into(),
+            consumer: original_consumer.into(),
+            envelope: exact_unbind.clone(),
+        })
+    }
+    pub fn envelope(&self) -> &SlotEnvelope {
+        &self.envelope
+    }
+    pub fn consumer(&self) -> &str {
+        &self.consumer
+    }
+    fn check_lease(&self, store: &DiskStore) -> Result<()> {
+        if self.identity.canonical_path != store.addon || self.release != store.version {
+            return Err(conflict(
+                "repair publication differs from the original installation or release",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -170,8 +230,8 @@ impl<'a> PublicationLease<'a> {
         Self::acquire_recorded(&identity.into(), version, control)
     }
     /// Restore an authenticated source identity without pretending that the
-    /// addon is currently clean. Only publish/pre-input verify require clean
-    /// addon bytes; receipt and retirement reconciliation inspect the pool.
+    /// addon is currently clean. Ordinary publish/pre-input verify require clean
+    /// addon bytes; repair-only unbind and retirement inspect the original pool.
     pub fn acquire_recorded(
         identity: &RecordedInstallationIdentity,
         version: &str,
@@ -235,21 +295,64 @@ impl<'a> PublicationLease<'a> {
     pub fn inspect(&mut self) -> Result<SlotPool> {
         Ok(self.store.inspect(self.control)?)
     }
-    /// End the short lease BEFORE a receipt wait and propagate both lock-close
-    /// failures. Construction errors also close explicitly; Drop is the unwind
-    /// or caller-omitted-close fallback. A close failure
-    /// never rolls back a possibly completed publication or authorizes replay.
+    /// End the short lease BEFORE a receipt wait. Consume the original retained
+    /// receipt first, then both locks, checking every close even after failure or
+    /// cancellation. Drop is only the unwind/caller-omitted-close fallback.
+    /// Join this result with the operation result without flattening Reserved.
+    /// A close failure never rolls back publication or authorizes replay.
     pub fn close(self) -> Result<()> {
+        self.close_with(
+            |file, control| storage::finish_file(file, Ok(()), control),
+            ExclusiveLock::close,
+            InstallationMaintenanceLease::close,
+        )
+    }
+    fn close_with(
+        self,
+        finish_receipt: impl FnOnce(File, &OperationControl) -> lycheedev_core::Result<()>,
+        close_publication: impl FnOnce(ExclusiveLock) -> lycheedev_core::Result<()>,
+        close_maintenance: impl FnOnce(InstallationMaintenanceLease) -> lycheedev_core::Result<()>,
+    ) -> Result<()> {
         let Self {
-            store,
+            mut store,
+            control,
             _publication,
             _maintenance,
-            ..
         } = self;
-        drop(store);
-        let publication = _publication.close();
-        let maintenance = _maintenance.close();
-        close_results(publication, maintenance)
+        let receipt = store
+            ._receipt_file
+            .take()
+            .map_or(Ok(()), |file| finish_receipt(file, control));
+        let publication = close_publication(_publication);
+        let maintenance = close_maintenance(_maintenance);
+        close_causes([receipt, publication, maintenance])
+    }
+    /// Publish only the immutable unbind admitted from the original CON. No
+    /// current addon receipt is needed: the validated slot inventory, exact
+    /// reservation and original release still apply, matching Go CloseForRepair.
+    pub fn publish_repair(&mut self, repair: &RepairPublication) -> Result<()> {
+        repair.check_lease(&self.store)?;
+        publish(
+            &mut self.store,
+            self.control,
+            &repair.consumer,
+            &repair.envelope,
+        )
+    }
+    /// Keep this SAME lease through fresh INPUT/route revalidation and the
+    /// physical burst. This only verifies disk intent, never authorizes input.
+    pub fn verify_repair(&mut self, repair: &RepairPublication) -> Result<()> {
+        repair.check_lease(&self.store)?;
+        verify(
+            &mut self.store,
+            self.control,
+            &repair.consumer,
+            &repair.envelope,
+        )
+    }
+    pub fn verify_repair_route(&mut self, repair: &RepairPublication) -> Result<()> {
+        repair.check_lease(&self.store)?;
+        verify_route(&mut self.store, self.control, &repair.envelope)
     }
     pub fn publish(&mut self, consumer: &str, envelope: &SlotEnvelope) -> Result<()> {
         self.store.verify_addon(self.control)?;
@@ -295,17 +398,18 @@ impl<'a> PublicationLease<'a> {
         )
     }
 }
+#[cfg(test)]
 fn close_results(
     publication: lycheedev_core::Result<()>,
     maintenance: lycheedev_core::Result<()>,
 ) -> Result<()> {
-    let mut causes = Vec::new();
-    if let Err(error) = publication {
-        causes.push(error);
-    }
-    if let Err(error) = maintenance {
-        causes.push(error);
-    }
+    close_causes([publication, maintenance])
+}
+fn close_causes<const N: usize>(results: [lycheedev_core::Result<()>; N]) -> Result<()> {
+    let mut causes: Vec<_> = results
+        .into_iter()
+        .filter_map(std::result::Result::err)
+        .collect();
     match causes.len() {
         0 => Ok(()),
         1 => Err(PublicationError::Failure(causes.remove(0))),
@@ -452,19 +556,65 @@ impl Store for DiskStore {
 }
 impl DiskStore {
     fn verify_addon(&mut self, control: &OperationControl) -> lycheedev_core::Result<()> {
+        self.verify_addon_with_finish(control, |file, result| {
+            storage::finish_file(file, result, control)
+        })
+    }
+    fn verify_addon_with_finish(
+        &mut self,
+        control: &OperationControl,
+        finish: impl FnOnce(File, lycheedev_core::Result<()>) -> lycheedev_core::Result<()>,
+    ) -> lycheedev_core::Result<()> {
         control.check()?;
-        let manifest_sha256 = self.manifest_sha256.as_ref().ok_or_else(|| {
+        // Fail before opening when this is only a recorded cleanup identity.
+        self.manifest_digest()?;
+        let marker = self.addon.join(installation::MARKER);
+        storage::guard_path(&self.addon, &marker)?;
+        let (receipt_file, digest) =
+            storage::locked_sha256(&marker, RECEIPT_LIMIT as u64, control)?;
+        self.verify_opened_receipt(receipt_file, &digest, control, finish)
+    }
+    fn manifest_digest(&self) -> lycheedev_core::Result<&str> {
+        self.manifest_sha256.as_deref().ok_or_else(|| {
             ToolkitError::new(
                 "delivery.installation_not_clean",
                 "publication requires an authenticated clean installation snapshot",
                 3,
             )
-        })?;
-        let marker = self.addon.join(installation::MARKER);
-        storage::guard_path(&self.addon, &marker)?;
-        let (mut receipt_file, digest) =
-            storage::locked_sha256(&marker, RECEIPT_LIMIT as u64, control)?;
-        if &digest != manifest_sha256 {
+        })
+    }
+    fn verify_opened_receipt(
+        &mut self,
+        mut file: File,
+        digest: &str,
+        control: &OperationControl,
+        finish: impl FnOnce(File, lycheedev_core::Result<()>) -> lycheedev_core::Result<()>,
+    ) -> lycheedev_core::Result<()> {
+        let result = self.validate_receipt(&mut file, digest, control);
+        match result {
+            Ok(()) if self._receipt_file.is_none() => {
+                // Transfer the original successful owner, not a cloned or
+                // reopened substitute. Keep it until the physical burst ends.
+                self._receipt_file = Some(file);
+                Ok(())
+            }
+            result => {
+                // Every normal rejection checks close, including digest, seek,
+                // read, parse, inventory and control failures. On revalidation,
+                // close this temporary handle; never replace/drop the original
+                // receipt retained across the successful publication and burst.
+                finish(file, result)
+            }
+        }
+    }
+    fn validate_receipt(
+        &self,
+        receipt_file: &mut (impl Read + Seek),
+        digest: &str,
+        control: &OperationControl,
+    ) -> lycheedev_core::Result<()> {
+        let manifest_sha256 = self.manifest_digest()?;
+        if digest != manifest_sha256 {
             return Err(invalid("installation receipt identity changed"));
         }
         receipt_file
@@ -485,7 +635,7 @@ impl DiskStore {
         }
         let receipt: Receipt = serde_json::from_slice(&bytes)
             .map_err(|error| invalid(&format!("invalid installation receipt: {error}")))?;
-        if &storage::sha256(&bytes) != manifest_sha256
+        if storage::sha256(&bytes) != manifest_sha256
             || receipt.schema != "lycheedev.installation.v1"
             || receipt.component != "addon"
             || receipt.version != self.version
@@ -502,10 +652,10 @@ impl DiskStore {
             Some("addon"),
             control,
         )?;
-        self._receipt_file = Some(receipt_file);
-        Ok(())
+        control.check()
     }
 }
+
 fn slot_index(pool: &SlotPool, index: i32) -> Result<usize> {
     if index < 1 || index as usize > pool.files.len() {
         return Err(invalid("slot index is outside the current inventory").into());

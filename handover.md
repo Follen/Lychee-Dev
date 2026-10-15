@@ -653,6 +653,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 结果与错误同时保留；ProjectResult/RawReport 的 duplicate keys 与数字词法不能转换成 Value 后输出。CLI typed writer/adapter 另批进行。发现 Go native `json.Valid` 允许 string 内非法 UTF-8 字节，而当前 Rust RawValue 边界拒绝，此为待修真实差异，不列作永久允许例外。
 - `pub mod connection` 按独审 stage 精确导出，新 44 回归（40 connection、1 error、3 NativeCore）进入现有正式 Mailbox CI 组。全部 Rust/Windows **NOT_RUN**，静态复核不是运行通过。原默认 CLI 尚未替换；activation/doctor/reload、modified repair publication、missing inventory 完整分类和后续资源边界须独立整合。四阶段审计和性能仍未开始。
 
+### 原 CON repair 专用解绑发布与 receipt 清理
+
+- 冻结 `b43757b85729c9ab6becb89d520435a3db3775b8d232d8752a26ff9805b498d8`（`tests/rust-parity/repair-publication-{freeze,test-map}.json`），全新独立复核两源码、11依赖、9个固定 Go 来源，无新增可行动 P1/P2。
+- 不可变 RepairPublication 只描述已认证原安装/原 release/consumer 的精确 unbind；同一 publication lease 检查路径/release、原 payload/reservation 与完整 route，不接受替换 envelope。普通 bind/execute 仍要求干净主 addon。此能力补齐 fixed Go CloseForRepair 不依赖 modified main receipt 的解绑条件，不能作为任意输入豁免。
+- receipt 第一次成功取得的 File 保留至 burst 结束；重验临时 File 检查关闭，不替换原持有者。全部正常错误路径 checked-close；lease 最后按 receipt/publication lock/maintenance lock 顺序都尝试关闭，不重试不确定 close、不丢组合错误。
+- 原38测试及共享 publication 算法字节未变，新增13有效回归进入现有 ci-slot-publication；rustfmt、身份、scoped diff 静态通过，全部新增 Rust/Windows **NOT_RUN**，关闭故障仅注入。Native/doctor 消费接口仍待独立接入，必须证明原 journal 身份、持久 close intent、fresh INPUT 与 same-lease input；完整 repair 尚未验收。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
