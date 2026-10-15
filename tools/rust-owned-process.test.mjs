@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -112,4 +113,153 @@ foreach($name in @('CL','_CL_','LINK','_LINK_')){
 `);
   const result=ownedSpawnSync('powershell.exe',['-NoProfile','-NonInteractive','-File',script],{...options,timeout:30000});
   assert.equal(result.error,undefined);assert.equal(result.status,0);assert.equal(result.handlesReaped,true);assert.deepEqual(JSON.parse(result.stdout),{passed:true,cases:10});
+});
+
+// These scheduled fixtures execute the actual C#/JavaScript-compatible decision
+// blocks with fake kernel calls. They do not execute PowerShell, Windows APIs,
+// signature checks, or real processes; unchanged strict retirement is pinned
+// separately below. A Windows run remains necessary for the actual Job race.
+const ownedWrapper=readFileSync(new URL('./rust-owned-process.ps1',import.meta.url),'utf8');
+function sourceBlock(marker){
+  const start=ownedWrapper.indexOf(marker);assert.ok(start>=0,`missing ${marker}`);
+  assert.equal(ownedWrapper.indexOf(marker,start+marker.length),-1,`duplicate ${marker}`);
+  const open=ownedWrapper.indexOf('{',start);let depth=0;
+  for(let index=open;index<ownedWrapper.length;index++){
+    if(ownedWrapper[index]==='{')depth++;
+    if(ownedWrapper[index]==='}'&&--depth===0)return ownedWrapper.slice(start,index+1);
+  }
+  assert.fail(`unterminated ${marker}`);
+}
+const rootDrainBlock=sourceBlock('if(result.rootReaped&&Active(job)>0)');
+const deadlineDrainBlock=sourceBlock('if(remaining<=0)');
+function executeDrainBlock(source,state){
+  // No translation or duplicated decision body: these two source blocks use a
+  // shared syntax subset. Math.Min is supplied with the same integer behavior.
+  const run=new Function('state',`
+    const {job,process,reviewedAuxiliary,result,clock,Active,Observe,
+      RetireReviewedAuxiliary,TerminateJobObject,Error}=state;
+    const Math={Min:globalThis.Math.min};
+    let {orphanDeadline,timeoutMs,orphanMs,readerError,remaining}=state;
+    do { ${source} } while(false);
+    state.orphanDeadline=orphanDeadline;
+  `);
+  run(state);
+}
+function drainFixture(){
+  const state={job:{owned:true},process:{process:{originalRoot:true}},
+    reviewedAuxiliary:['authenticated-helper'],clock:{ElapsedMilliseconds:0},
+    timeoutMs:1000,orphanMs:100,orphanDeadline:Infinity,readerError:null,remaining:1,
+    rootExitCode:0,members:[{pid:2,reviewed:false},{pid:3,reviewed:true}],events:[],
+    result:{rootReaped:false,creationFileTime:'134364964460103438',outputLimit:false,
+      error:null,forced:false,knownAuxiliaryCleanup:false,drainCompletedByAccounting:false}};
+  state.Active=job=>{assert.equal(job,state.job);return state.members.length;};
+  state.Observe=job=>{assert.equal(job,state.job);state.events.push('observe');state.onObserve?.();return state.members.map(row=>({...row}));};
+  state.RetireReviewedAuxiliary=(job,root,creation,reviewed,result)=>{
+    assert.deepEqual([job,root,creation,reviewed,result],[state.job,state.process.process,state.result.creationFileTime,state.reviewedAuxiliary,state.result]);
+    state.events.push('retire');
+    if(state.onRetire)return state.onRetire();
+    // Stub only the existing strict function's outcome for known/unknown sets.
+    // The source identity test below forbids weakening its actual implementation.
+    if(!state.result.rootReaped||state.rootExitCode!==0||state.members.length===0||state.members.some(row=>!row.reviewed))return false;
+    state.result.auxiliaryProcesses=state.members.map(row=>({...row}));
+    state.members=[];state.result.forced=true;return true;
+  };
+  state.TerminateJobObject=(job,exit)=>{assert.equal(job,state.job);assert.equal(exit,8);state.events.push('force-job');state.members=[];return true;};
+  state.Error=step=>new Error(step);
+  return state;
+}
+function rootExit(state,at=10){state.clock.ElapsedMilliseconds=at;state.result.rootReaped=true;executeDrainBlock(rootDrainBlock,state);}
+function drainDeadline(state,at=state.orphanDeadline){
+  state.clock.ElapsedMilliseconds=at;
+  state.remaining=Math.min(state.timeoutMs-at,state.orphanDeadline-at);
+  executeDrainBlock(deadlineDrainBlock,state);
+}
+
+test('strict auxiliary handle authentication and one-shot checked closes remain byte-exact',()=>{
+  const start=ownedWrapper.indexOf(' static bool RetireReviewedAuxiliary('),end=ownedWrapper.indexOf(' static string Quote(',start);
+  assert.ok(start>=0&&end>start);
+  assert.equal(createHash('sha256').update(ownedWrapper.slice(start,end)).digest('hex'),'b842ca8f89abc26f3928ae2c01e8cc92779c4bf660e70b46a21e80bef86ede2a');
+});
+test('scheduled root exit then ordinary-child exit retries strict helper retirement at the original drain deadline',()=>{
+  const state=drainFixture();rootExit(state);
+  assert.deepEqual(state.events,['retire']);assert.equal(state.orphanDeadline,110);
+  assert.equal(state.result.knownAuxiliaryCleanup,false);
+  state.clock.ElapsedMilliseconds=40;state.members=state.members.filter(row=>row.reviewed);
+  drainDeadline(state);
+  assert.deepEqual(state.events,['retire','observe','retire']);
+  assert.equal(state.result.knownAuxiliaryCleanup,true);assert.equal(state.result.forced,true);
+  assert.equal(state.members.length,0);assert.equal(state.result.deadlineHit,undefined);
+  assert.equal(state.orphanDeadline,110);assert.equal(state.timeoutMs,1000);
+  assert.deepEqual(state.result.atDrainDeadline,[{pid:3,reviewed:true}]);
+});
+test('an unknown descendant still alive at the drain deadline cannot become reviewed cleanup',()=>{
+  const state=drainFixture();rootExit(state);drainDeadline(state);
+  assert.deepEqual(state.events,['retire','observe','retire','force-job']);
+  assert.equal(state.result.knownAuxiliaryCleanup,false);assert.equal(state.result.forced,true);
+  assert.equal(state.result.deadlineHit,false);
+});
+test('hard deadline, output limit, reader failure, prior error, and a live root prohibit the deadline retry',()=>{
+  for(const [name,change] of [
+    ['hard deadline',state=>{state.timeoutMs=110;}],
+    ['output limit',state=>{state.result.outputLimit=true;}],
+    ['reader failure',state=>{state.readerError='fixture.reader_failure';}],
+    ['prior error',state=>{state.result.error='fixture.prior_error';}],
+    ['live root',state=>{state.result.rootReaped=false;}],
+  ]){
+    const state=drainFixture();rootExit(state);state.members=state.members.filter(row=>row.reviewed);change(state);drainDeadline(state);
+    assert.deepEqual(state.events,['retire','observe','force-job'],name);
+    assert.equal(state.result.knownAuxiliaryCleanup,false,name);assert.equal(state.result.forced,true,name);
+    assert.equal(state.result.deadlineHit,name==='hard deadline',name);
+  }
+});
+test('the hard deadline is rechecked after drain observation consumes the remaining budget',()=>{
+  const state=drainFixture();rootExit(state);state.members=state.members.filter(row=>row.reviewed);
+  state.onObserve=()=>{state.clock.ElapsedMilliseconds=state.timeoutMs;};drainDeadline(state);
+  assert.deepEqual(state.events,['retire','observe','force-job']);
+  assert.equal(state.result.deadlineHit,true);assert.equal(state.result.knownAuxiliaryCleanup,false);
+});
+test('a nonzero root exit cannot acquire successful helper cleanup at either decision point',()=>{
+  const state=drainFixture();state.rootExitCode=1;rootExit(state);state.members=state.members.filter(row=>row.reviewed);drainDeadline(state);
+  assert.deepEqual(state.events,['retire','observe','retire','force-job']);assert.equal(state.result.knownAuxiliaryCleanup,false);
+});
+test('accounting is rechecked after a refused retirement whose last member exited concurrently',()=>{
+  const state=drainFixture();rootExit(state);
+  state.onRetire=()=>{state.members=[];return false;};drainDeadline(state);
+  assert.deepEqual(state.events,['retire','observe','retire']);
+  assert.equal(state.result.drainCompletedByAccounting,true);assert.equal(state.result.forced,false);
+  assert.equal(state.result.knownAuxiliaryCleanup,false);
+});
+test('accounting completion before or during observation needs no retry or forced termination',()=>{
+  for(const phase of ['before','during']){
+    const state=drainFixture();rootExit(state);
+    if(phase==='before')state.members=[];else state.onObserve=()=>{state.members=[];};
+    drainDeadline(state);assert.equal(state.result.drainCompletedByAccounting,true);
+    assert.deepEqual(state.events,phase==='before'?['retire']:['retire','observe']);assert.equal(state.result.forced,false);
+  }
+});
+test('duplicate root notifications cannot restart either original deadline',()=>{
+  const state=drainFixture();rootExit(state);rootExit(state,50);
+  assert.equal(state.orphanDeadline,110);assert.equal(state.timeoutMs,1000);
+  state.members=state.members.filter(row=>row.reviewed);drainDeadline(state);
+  assert.deepEqual(state.events,['retire','retire','observe','retire']);assert.equal(state.result.knownAuxiliaryCleanup,true);
+});
+test('root notification retirement also rejects existing reader errors without waiting for the drain retry',()=>{
+  for(const field of ['readerError','error']){
+    const state=drainFixture();state.members=state.members.filter(row=>row.reviewed);
+    if(field==='readerError')state.readerError='fixture.reader_failure';else state.result.error='fixture.prior_error';
+    rootExit(state);drainDeadline(state);
+    assert.deepEqual(state.events,['observe','force-job']);assert.equal(state.result.knownAuxiliaryCleanup,false);
+  }
+});
+test('a strict-retirement close failure propagates rather than retrying the uncertain handle',()=>{
+  const state=drainFixture();state.onRetire=()=>{throw new Error('owned.close_auxiliary_handle');};
+  assert.throws(()=>rootExit(state),/owned.close_auxiliary_handle/);
+  assert.deepEqual(state.events,['retire']);assert.equal(state.result.knownAuxiliaryCleanup,false);
+});
+test('an ordinary-child exit before the drain deadline does not trigger an early deadline retry',()=>{
+  const state=drainFixture();rootExit(state);state.members=state.members.filter(row=>row.reviewed);
+  drainDeadline(state,50);
+  assert.deepEqual(state.events,['retire']);assert.equal(state.result.knownAuxiliaryCleanup,false);
+  assert.equal(state.orphanDeadline,110);assert.equal(state.timeoutMs,1000);
+  drainDeadline(state);assert.equal(state.result.knownAuxiliaryCleanup,true);
 });

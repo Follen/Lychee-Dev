@@ -674,6 +674,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - Skill实际26passed/2failed/1not_run；完整Retail native5passed/7failed，ordinary refs/context/API及session仍为旧API语法问题；quota/idle/lifetime在旧project-init非法home入口失败，实际寿命/额度仍未测。上述树不含231/1f2修复。原失败及已回收资源证据保留。
 - 后续 `e047c739a7fe40d4eecc8ada8b5fcb5fd22d2a87` run `38660112968` 的early artifact `11938129355` ZIP SHA256 `65ea398be04c72377689211a1e66b2bcf95388547906a16d5408732f4b7122a8` 提前暴露构建E0599：锁定windows0.62.2没有 `Error::from_win32`。候选改为WAIT_FAILED惰性即时 `GetLastError`→`HRESULT::from_win32`→`Error::from_hresult`，维持非失败零读取与失败一次读取、控制/关闭顺序；独立小diff复核及rustfmt通过，新Windows编译 **NOT_RUN**。e047依赖此crate的后续组未构建成功不能当执行覆盖。
 
+### 辅助进程 drain 竞态窄修复
+
+- 冻结 `b4cbc239ed47460076882c5892fbfaec2bf9fcd11aac6db1cd0d9b861fb6e918`，`tests/rust-parity/owned-process-auxiliary-drain-{freeze,test-map}.json`；正确HEAD工具在独立stage修改，历史冻结本地工具字节未动。全新独审核实4上传文件及5仅依赖文件，范围内无新增阻断。
+- orphan drain 到期时，仅根已回收、原hard timeout未到、无输出超限/reader或既有错误，重新调用原严格 helper retirement；随后再次检查Active会计为空再决定强制回收。原身份/成员/创建时间/已认证路径/文件锁/非零root退出与最终checked-close策略不变，不新增允许名单、不重设deadline。
+- 独立重跑14 Node通过、9既有Windows跳过；新增12为11个source-bound scheduled/fake-kernel决策回归＋1个严格函数身份回归。7个仅生产源mutation均按行为断言失败。它们不执行C#、Job或真实CloseHandle；可控Windows root→普通child→允许helper定序仍缺，后续构建观察不能冒充该精确覆盖。
+- 5a原catalog wrapper仍为失败；首次拒绝退休原因未记录，代码可成立的时序不能升级为历史事实。既有严格退休还含独立有界回收窗口，本补丁不宣称整个wrapper总耗时严格落在原hard timeout内。新Windows执行 **NOT_RUN**。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

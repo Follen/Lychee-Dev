@@ -1,0 +1,72 @@
+{
+  "schema": "lycheedev.owned-process-auxiliary-drain.freeze.v1",
+  "createdAt": "2026-10-15T00:42:37.209011+00:00",
+  "baseRustHead": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094",
+  "originalExportHead": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094",
+  "ownedFiles": [
+    {
+      "path": "tools/rust-owned-process.ps1",
+      "bytes": 30419,
+      "sha256": "9ddb5e3afbc1897f40ae494ce88f85b7ed3819b448e6903fb568d3e14e215b71",
+      "baseSHA256": "98e456784ed3fe5d107aa8422f1150057b30d026ec7a30e52672ced82a263955"
+    },
+    {
+      "path": "tools/rust-owned-process.test.mjs",
+      "bytes": 20326,
+      "sha256": "9c19c62b1620467d38e781249a937987346b1335ad6b12342ee19d4773805900",
+      "baseSHA256": "dbf47e0093d8dc1d4f52bb6bf6ba9ae8a457ef1a41d87b6edda20af17b8e714e"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "tools/rust-owned-process.mjs",
+      "bytes": 3734,
+      "sha256": "1ace37c9fc3bdd778b9fe5dbfc22fe2945ea6b9b152445472a08e5b6780375fb",
+      "commit": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094"
+    },
+    {
+      "path": "tools/rust-build-auxiliary.json",
+      "bytes": 2742,
+      "sha256": "1c709b9e9ceaded3fc5efb1306d08e1650470fe5fef08e6931c765d4614dbe7b",
+      "commit": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094"
+    },
+    {
+      "path": ".github/workflows/rust-parity.yml",
+      "bytes": 31303,
+      "sha256": "ce585c3625ce7ded34ee99c735ccd80c6a7f9e3d603da8c268905f1771ba5b33",
+      "commit": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094"
+    },
+    {
+      "path": ".github/workflows/rust-luac-rebuild.yml",
+      "bytes": 2237,
+      "sha256": "7d97adb74c1263c87f86105635b0ea391c4a2b9dc349d961622db6f56c0ec0e2",
+      "commit": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094"
+    },
+    {
+      "path": ".gitattributes",
+      "bytes": 333,
+      "sha256": "dcd1a26bb2ea8c0544841c12e28449e77ae2ffc7845d3582abb70014316b21f0",
+      "commit": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094"
+    }
+  ],
+  "testMapSha256": "a0350f666e5cdc3e895c2a802280cf66a655bf35ea2eb9f57305905897f61747",
+  "strictRetirementSHA256": "b842ca8f89abc26f3928ae2c01e8cc92779c4bf660e70b46a21e80bef86ede2a",
+  "staticChecks": {
+    "trackedFrozenToolFiles": "UNCHANGED, independently compared with pre-edit hashes",
+    "strictRetirementFunction": "BYTE-EXACT",
+    "admissionPolicyAndToolLocks": "BYTE-EXACT",
+    "originalDeadlines": "UNCHANGED; no refresh or extension",
+    "outputAndFinalCleanupSuffix": "BYTE-EXACT",
+    "nodeSyntax": "PASS",
+    "whitespaceDiffCheck": "PASS",
+    "sourceHashLineEndings": ".gitattributes exact dependency enforces LF on Windows checkout"
+  },
+  "execution": {
+    "nodeTests": "14 PASS, 0 FAIL, 9 Windows SKIP; 12 new tests",
+    "mutantTests": "7 rejected as expected",
+    "windows": "NOT_RUN",
+    "cargoRustc": "NOT_RUN prohibited",
+    "actualOSIdentityAndCloseFaults": "NOT_RUN; unchanged implementation identity plus fake outcomes only"
+  },
+  "handover": "The historical 5a0e3ed run remains a wrapper failure despite Cargo 13 pass/1 ignored. Its initial retirement refusal cause is not recorded. The new branch fixes the reproducible source-level drain race without establishing that specific prior cause."
+}

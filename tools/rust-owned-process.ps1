@@ -225,12 +225,23 @@ public static class ToolkitOwnedProcess {
    rootWatcher=Task.Run(()=>{if(WaitForSingleObject(process.process,0xffffffff)==0)PostQueuedCompletionStatus(port,0x80000001,job,new IntPtr(process.pid));});
    while(true){
     long remaining=Math.Min(timeoutMs-clock.ElapsedMilliseconds,orphanDeadline-clock.ElapsedMilliseconds);
-    if(remaining<=0){if(Active(job)==0){result.drainCompletedByAccounting=true;break;}result.atDrainDeadline=Observe(job);if(Active(job)==0){result.drainCompletedByAccounting=true;break;}result.forced=true;result.deadlineHit=clock.ElapsedMilliseconds>=timeoutMs;if(!TerminateJobObject(job,8))throw Error("owned.terminate_job");break;}
+    if(remaining<=0){
+     if(Active(job)==0){result.drainCompletedByAccounting=true;break;}
+     result.atDrainDeadline=Observe(job);
+     if(Active(job)==0){result.drainCompletedByAccounting=true;break;}
+     // Ordinary descendants may have exited since the root notification.
+     // Reuse the complete authenticated-handle review only within the original
+     // hard budget; unknown children and prior failures still fail closed.
+     if(result.rootReaped&&clock.ElapsedMilliseconds<timeoutMs&&!result.outputLimit&&readerError==null&&result.error==null&&RetireReviewedAuxiliary(job,process.process,result.creationFileTime,reviewedAuxiliary,result)){result.knownAuxiliaryCleanup=true;break;}
+     if(Active(job)==0){result.drainCompletedByAccounting=true;break;}
+     result.forced=true;result.deadlineHit=clock.ElapsedMilliseconds>=timeoutMs;
+     if(!TerminateJobObject(job,8))throw Error("owned.terminate_job");break;
+    }
     uint message;IntPtr key,value;bool received=GetQueuedCompletionStatus(port,out message,out key,out value,(uint)Math.Min(remaining,Int32.MaxValue));
     if(!received){int code=Marshal.GetLastWin32Error();if(code==258)continue;throw Error("owned.wait_job");}
     if(key!=job)throw new Exception("owned.foreign_completion");
     if(message==4)break;
-    if((message==7||message==8||message==0x80000001)&&(uint)value.ToInt64()==process.pid){result.rootReaped=WaitForSingleObject(process.process,0)==0;if(result.rootReaped&&Active(job)>0){result.parentExitedBeforeChildren=true;if(clock.ElapsedMilliseconds<timeoutMs&&!result.outputLimit&&RetireReviewedAuxiliary(job,process.process,result.creationFileTime,reviewedAuxiliary,result)){result.knownAuxiliaryCleanup=true;break;}orphanDeadline=Math.Min(orphanDeadline,clock.ElapsedMilliseconds+orphanMs);}}
+    if((message==7||message==8||message==0x80000001)&&(uint)value.ToInt64()==process.pid){result.rootReaped=WaitForSingleObject(process.process,0)==0;if(result.rootReaped&&Active(job)>0){result.parentExitedBeforeChildren=true;if(clock.ElapsedMilliseconds<timeoutMs&&!result.outputLimit&&readerError==null&&result.error==null&&RetireReviewedAuxiliary(job,process.process,result.creationFileTime,reviewedAuxiliary,result)){result.knownAuxiliaryCleanup=true;break;}orphanDeadline=Math.Min(orphanDeadline,clock.ElapsedMilliseconds+orphanMs);}}
    }
    if(result.forced){var deadline=clock.ElapsedMilliseconds+10000;while(Active(job)>0&&clock.ElapsedMilliseconds<deadline){uint message;IntPtr key,value;GetQueuedCompletionStatus(port,out message,out key,out value,(uint)Math.Max(1,deadline-clock.ElapsedMilliseconds));}}
    result.activeProcesses=Active(job);result.treeReaped=result.activeProcesses==0;result.rootReaped=WaitForSingleObject(process.process,10000)==0;

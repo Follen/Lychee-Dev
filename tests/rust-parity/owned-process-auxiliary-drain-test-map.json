@@ -1,0 +1,113 @@
+{
+  "schema": "lycheedev.owned-process-auxiliary-drain.test-map.v1",
+  "baseRustHead": "363d8d45fc8b9ccd6a98a26a70e2ac44f9464094",
+  "scope": "Bounded retry of the existing strict auxiliary retirement at the original orphan drain deadline.",
+  "candidateFiles": [
+    "tools/rust-owned-process.ps1",
+    "tools/rust-owned-process.test.mjs"
+  ],
+  "nodeCommand": "node --test tools/rust-owned-process.test.mjs",
+  "nodeVersion": "v24.19.0",
+  "nodePlatform": "linux",
+  "results": {
+    "declared": 23,
+    "passed": 14,
+    "failed": 0,
+    "skippedWindows": 9,
+    "newTestsPassed": 12
+  },
+  "newTests": [
+    {
+      "name": "strict auxiliary handle authentication and one-shot checked closes remain byte-exact",
+      "kind": "byte-exact strict implementation identity",
+      "status": "PASS"
+    },
+    {
+      "name": "scheduled root exit then ordinary-child exit retries strict helper retirement at the original drain deadline",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "an unknown descendant still alive at the drain deadline cannot become reviewed cleanup",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "hard deadline, output limit, reader failure, prior error, and a live root prohibit the deadline retry",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "the hard deadline is rechecked after drain observation consumes the remaining budget",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "a nonzero root exit cannot acquire successful helper cleanup at either decision point",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "accounting is rechecked after a refused retirement whose last member exited concurrently",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "accounting completion before or during observation needs no retry or forced termination",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "duplicate root notifications cannot restart either original deadline",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "root notification retirement also rejects existing reader errors without waiting for the drain retry",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "a strict-retirement close failure propagates rather than retrying the uncertain handle",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    },
+    {
+      "name": "an ordinary-child exit before the drain deadline does not trigger an early deadline retry",
+      "kind": "source-bound scheduled fake-kernel decision model",
+      "status": "PASS"
+    }
+  ],
+  "executionLimits": [
+    "Node fixtures execute exact extracted C#/JavaScript-compatible decision blocks with fake kernel and retirement outcomes, not Windows C# or kernel APIs.",
+    "The strict retirement function, policy, admission, file locks, handle identity checks, and checked-close implementation remain byte-exact to the pinned base.",
+    "All nine existing Windows owned-process fixtures were skipped; the real Windows root/ordinary-child/helper ordering was NOT_RUN.",
+    "No Cargo, rustc, Windows processes, game or user-desktop actions were executed."
+  ],
+  "sensitivity": {
+    "historicalDeadlineBranch": "FAIL as expected for root exit, then ordinary child exit, then only reviewed helper",
+    "omittedGuards": [
+      "rootReaped",
+      "original hard deadline",
+      "outputLimit",
+      "readerError",
+      "result.error",
+      "post-retirement accounting"
+    ],
+    "eachMutation": "FAIL as expected; local evidence preserves all seven rejected mutants"
+  },
+  "ciConsumers": [
+    ".github/workflows/rust-parity.yml: Test exact owned-process lifecycle and unknown-child rejection",
+    ".github/workflows/rust-luac-rebuild.yml: existing tools/rust-owned-process.test.mjs command"
+  ],
+  "historicalFailure": {
+    "commitPrefix": "5a0e3ed",
+    "evidenceOwner": "0922a6b9-e3fe-45fd-a566-7ccc5738ad27",
+    "cargoExit": 0,
+    "cargoPassed": 13,
+    "cargoIgnored": 1,
+    "wrapperError": "owned.forced_tree_termination",
+    "status": "FAIL preserved; not retroactively accepted",
+    "causeBoundary": "At the drain deadline, the observed sole remaining member matched an admitted helper path. The original root-exit refusal reason was not recorded, so an ordinary child at that earlier moment is a demonstrated possible race, not an established historical fact."
+  }
+}
