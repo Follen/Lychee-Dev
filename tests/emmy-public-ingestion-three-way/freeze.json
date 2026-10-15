@@ -1,13 +1,13 @@
 {
   "schema": "lycheedev.emmy-windows-contract-freeze.v1",
-  "state": "NOT_RUN; independent review required before execution",
+  "state": "Linux Node fixtures 31/31 passed; Windows runner and Rust NOT_RUN; independent review required",
   "scope": "Windows 31x3/450/6 contract-only; resources and product worker hard deadline NOT_RUN",
   "files": {
     ".gitattributes": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
     "Cargo-A.lock": "e4dbe781949666b293834260f894cb7333ab6ac1a6627d71a16ed63c9b1630f2",
     "Cargo-B.lock": "e4dbe781949666b293834260f894cb7333ab6ac1a6627d71a16ed63c9b1630f2",
     "Cargo-C.lock": "6ba0c3d78568ef93df4b7930c5c91d96aa4f46d3f34101d5e0ee13b62c7bebba",
-    "README.md": "c2226fc30dfa7353174027d53fc6f18b347e41bfe1ffb45e7d841e4ff26546d8",
+    "README.md": "7b6cc6fce8183e5fe9bfe0ecdb3159b1fe3c5e5aec06b2908621728868ddd9f9",
     "assertions.mjs": "6fc873d39a58831eb45c8aadf978ef0993f025162d4163035aea4cab9ff99df6",
     "assertions.test.mjs": "c0df417bf8a62fd602ebea2a51fb2a91b2871e5c4c2468c6679618672eafb911",
     "check_selected_cache.py": "af709a319c13f7b4b88c3325835f2b6b9cc6972ba316f9420efcecea3a1beec8",
@@ -34,7 +34,7 @@
     "official-cargo.json": "7ac7134329168a3f4eaf2fdbbffe2b643371a9f66dcddb913b55a98717e55b60",
     "prepare_inputs.py": "bdb9c04459b038a08809cf7065cd1e95119a03c5779d9b914dd4be41bcffcf1c",
     "release/rust-disk-policy.json": "672e33453bcb1333e6e7ab0cbe267249ae93e0d53ff0800d560f723543290b6d",
-    "run_windows_three_way.mjs": "2fdfe33221385e9bf5d65ae15f7279ed9c2c81ede9100ef3bed165f51b2d5836",
+    "run_windows_three_way.mjs": "da754fe900591c25b66c2551e0fbef9f64af8b2b853813a311045bda1a30522c",
     "stage-config.toml": "6fa161704379fee1eaa69404580679c61bfb2ce7d96655f9997c3f0a372897c7",
     "third_party/emmy/.gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
     "third_party/emmy/README.md": "b27376d51457e92594641bf565535ec17aef422bb79d138c4f82185856cb0483",
@@ -47,6 +47,9 @@
     "third_party/emmy/seal.py": "700d40ce1cd37bc3714035d9ce29e7bfd2ec53a7a9f98d80f7eb8062c3a3b18f",
     "third_party/emmy/standalone-Cargo.toml": "d91e5351aed1f37550198675e2efce32f1c47bdab4abe63685540b7c96415f57",
     "third_party/emmy/test_prepare.py": "4166cad5d64a52952af65f6500ae79be191f0eacbcb017f51c3dcaa64bf9eb04",
+    "tool-identity-policy.json": "de719120a24d6f45776f0ae172e6becdc5fa2a9d9705e8b897ab5f9532db6808",
+    "tool_identity.mjs": "1b124ab03f9415aa1e39222aba4e7961c2b11f9b2df553b625a38867f12de555",
+    "tool_identity.test.mjs": "9fc32b999ab64784089278717b067f4ad787324f88d63051c207de29f52fad2f",
     "tools/rust-build-auxiliary.json": "1837cdd1279571fc3c7e8b3ad1a5cde87aa3742c99e6809af52c0f926779e519",
     "tools/rust-disk.mjs": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
     "tools/rust-owned-process.mjs": "618b5cecea59b0860f41b91d5cb9adf88e3f580706ae695e183499f150fe253c",
@@ -61,10 +64,10 @@
     "tools/rust-owned-process.mjs",
     "tools/rust-owned-process.ps1"
   ],
-  "localExecution": false,
+  "localExecution": true,
   "ciExecution": false,
-  "revision": "R3: independent official Rust 1.99.0 MSVC Cargo component authentication; only copied auxiliary Cargo digest corrected",
-  "priorFreezeSHA256": "003f79868a395dd3853ac20dd2f992890e68a3a1891b377daef6171e92395d3d",
+  "revision": "R4: fixed hosted Python single-leaf alias identity with original-to-canonical mapping and bounded handle verification",
+  "priorFreezeSHA256": "d93fc9d5a206847611d2f480d7d3b8fdca32d2c851ce5c87ac21774945c3e88d",
   "officialCargoEvidence": "official-cargo.json",
   "reviewedAuxiliaryPolicyChange": {
     "path": "tools/rust-build-auxiliary.json",
@@ -72,5 +75,18 @@
     "before": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
     "after": "c9b44417dc8228b81923a1068a3c09e32d2793f2cced2a816789cf433c1f0d46",
     "evidence": "official-cargo.json"
+  },
+  "toolIdentityEvidence": "tool-identity-policy.json",
+  "localVerification": {
+    "platform": "linux",
+    "node": "v24.19.0",
+    "tests": 31,
+    "passed": 31,
+    "skipped": 0,
+    "newFilesystemAndPolicyFixtures": 19,
+    "existingParserFixtures": 12,
+    "runnerExecuted": false,
+    "cargoExecuted": false,
+    "ownerExecuted": false
   }
 }

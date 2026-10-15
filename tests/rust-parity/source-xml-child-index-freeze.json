@@ -1,0 +1,192 @@
+{
+  "schema": "lycheedev.source-xml-child-index-r1-freeze.v1",
+  "createdAt": "2026-10-15T17:32:07.337541+00:00",
+  "baseCommit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+  "state": "source frozen for independent review; Rust compilation and runtime NOT_RUN",
+  "ownedFiles": [
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "bytes": 38334,
+      "sha256": "10d677a89663e71e9eeaa234ada6da4889585cdc22a75156194536beb7980127"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load/children.rs",
+      "bytes": 7076,
+      "sha256": "ffaef8e515aca1f7475c6962c87f53f70452a627afd679925207b48c22a57ae6"
+    }
+  ],
+  "dependencies": {
+    "gitCommit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+    "directFiles": [
+      {
+        "path": "Cargo.toml",
+        "bytes": 1911,
+        "sha256": "6cb48b0496921b037ad627ff78096b1fd563b379d353448865cd2e6a9bb7b65b"
+      },
+      {
+        "path": "Cargo.lock",
+        "bytes": 79886,
+        "sha256": "d636c9796991b4f25d3ab8088887db7618648826170b89a760be04aee3429f02"
+      },
+      {
+        "path": "crates/lycheedev-source/Cargo.toml",
+        "bytes": 2311,
+        "sha256": "acf25af1cfd950f3d368038f9e7039b63ae8b1f6e55dc21a38d77866db3e9664"
+      },
+      {
+        "path": "crates/lycheedev-source/src/lib.rs",
+        "bytes": 15183,
+        "sha256": "1b67a163cb038283f29732e0710f5f9a00734bebadb7f91d764c91232d62cad3"
+      },
+      {
+        "path": "crates/lycheedev-source/src/xml_program.rs",
+        "bytes": 40741,
+        "sha256": "76acc66935e380ec3bac6cb5eb70c58ea7e9cd606d2d8621d3568d2fde0c1ad9"
+      },
+      {
+        "path": "crates/lycheedev-source/src/xml_inline.rs",
+        "bytes": 14051,
+        "sha256": "ce5672ff62c05244ceff34040d7f72ecbab12233edf8031e5aaad948841ac67d"
+      },
+      {
+        "path": "crates/lycheedev-source/src/xml_inline/source_map.rs",
+        "bytes": 11734,
+        "sha256": "84992c03153187f5df81bde85172fd52e8765fbd6b8422263ec3d1e4cbbb8e5c"
+      },
+      {
+        "path": "crates/lycheedev-source/src/native_research/xml.rs",
+        "bytes": 24105,
+        "sha256": "13f745c600aa5bd29178a84785ebfea6edd58e0986b17c1e23215df8d2343cef"
+      },
+      {
+        "path": "crates/lycheedev-source/src/native/inputs.rs",
+        "bytes": 18571,
+        "sha256": "347c38ea51e05624b3b867e17ac515256720d693d4c051925e2c83c6dffa1b5d"
+      },
+      {
+        "path": "crates/lycheedev-source/src/facts.rs",
+        "bytes": 14077,
+        "sha256": "80d2f7f8c0dc6635f8396dbc6f2ef221daa912125bdc8eefb389309c4d0def32"
+      },
+      {
+        "path": "crates/lycheedev-core/src/control.rs",
+        "bytes": 20162,
+        "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+      },
+      {
+        "path": "tests/rust-source-engine/xml-retail-UI.xsd",
+        "bytes": 70231,
+        "sha256": "3addc00906cd293304c48c5c2642bdd9962b4f6402b2605e21f4975c4254771c"
+      },
+      {
+        "path": "tests/rust-source-engine/xml-companion-manifest.json",
+        "bytes": 646,
+        "sha256": "ceaa4daf44e3450fc8db9842d3d506601e11191719397237e04bd94788b2dceb"
+      },
+      {
+        "path": "third_party/emmy/identity.json",
+        "bytes": 1861,
+        "sha256": "8da2e138a4ffac614b3ce73cff419f53db80a5da8e58053522cb46570d51ed38"
+      },
+      {
+        "path": "third_party/emmy/files.json",
+        "bytes": 153178,
+        "sha256": "92e9d62f03bfbfd20705b452d382f93a62a9ef53ffe3c1225c67605a91ccd6fb"
+      },
+      {
+        "path": "third_party/emmy/patches/0001-binding-context.patch",
+        "bytes": 195443,
+        "sha256": "f330a83f3ee6fc8ef53a11cda5ff837a95d1bbd9be6e7a808e8c87c7d57f11eb"
+      }
+    ],
+    "closure": "All other tracked source and test inputs are fixed by baseCommit. No upstream, adapter, session, manifest, lock, shared docs, main tree or workflow edits."
+  },
+  "goOracle": {
+    "version": "3.2.3",
+    "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+    "files": [
+      {
+        "path": "internal/command/dispatch_source.go",
+        "bytes": 3110,
+        "sha256": "d05973b0811e33a2a0f7e1a7acd8ce4b7dd072660f3d80cc2bf9342e42c0fcb6"
+      },
+      {
+        "path": "internal/command/source_broker.go",
+        "bytes": 22685,
+        "sha256": "22e1ce4cd379cce7d4108d257c13a1ab37fae5ee98d1f2fb9fb73814a969df84"
+      },
+      {
+        "path": "internal/codebase/relations.go",
+        "bytes": 22747,
+        "sha256": "21438713715d2c86b733b5ccef4a19639f8f933da8fdfe9e91081d87c11685e5"
+      },
+      {
+        "path": "internal/codebase/context.go",
+        "bytes": 18324,
+        "sha256": "074c945f25659e9135af95d4c95bd57d2e253c0a76c1d91b24347bcb1c37eb6d"
+      },
+      {
+        "path": "internal/luals/runtime.go",
+        "bytes": 12519,
+        "sha256": "f57f55f65adc2632d072804765cb1ae3ac1e45bdd9f9974fdb5be6569ca5893a"
+      },
+      {
+        "path": "internal/luals/lsp.go",
+        "bytes": 14696,
+        "sha256": "e8d59c56536f8cf27dcc824e0bb852ff3849e407cead24795003b4aeb9a02868"
+      }
+    ],
+    "note": "Original total Source deadline is 90 seconds. XML/Lua semantic enhancements are preserved Rust behavior; this patch does not replace them with Go structural-only behavior."
+  },
+  "actualEvidence": {
+    "commit": "498c2ea23ff7f71ee9c85cfc40402ad5e51fd83d",
+    "owner": "5fe95abb-5e6b-4091-8c23-3d704151ef4c",
+    "files": [
+      {
+        "path": "003-ordinary-warm-context.stderr.part0",
+        "bytes": 2719,
+        "sha256": "8127d55eb9319f94e0539585087f65c2fca829cf1c1ed4d8088eacf6a03a2f22"
+      },
+      {
+        "path": "005-api-native-type.stderr.part0",
+        "bytes": 3076,
+        "sha256": "c0db51d85e148d03968911f8952a372fce8e46892a5ba2882bc8322100b63dfb"
+      },
+      {
+        "path": "report.json",
+        "bytes": 35647,
+        "sha256": "bfce35d324bb2e62af3d8c0a59b0f7e1f885af34b786a9e09bfe582a9696eab6"
+      },
+      {
+        "path": "retail.material.gz.part0",
+        "bytes": 7963754,
+        "sha256": "f3d8f1d6b9d0524464bb710caf21e6bec369024404680488268ef7990097d223"
+      }
+    ],
+    "unchangedXmlLoad": {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "bytes": 30159,
+      "sha256": "bd60066d2a7a4a82a0185367f132eb29da1bce9fa428b9b3e6f2deae3aae1135"
+    },
+    "note": "Full semantic queries failed under original deadline. XML phase 11.7\u201311.9 seconds is a whole phase, not measured child-scan attribution."
+  },
+  "invariants": [
+    "Same extraction, complete sources, catalog and parsed XML identities.",
+    "Parent membership index preserves original occurrence order including synthetic handler references.",
+    "All original Walker step/action/object/file-load/include-depth charges and checks remain in their existing positions.",
+    "No construction-step credits are granted or reset. Added index construction polls original OperationControl.",
+    "Index arrays plus fill cursors use a 4 MiB per-Walker allocation cap; no-fit falls back to original complete scan. Existing per-document occurrence and file-load ceilings remain. The cap bounds backing arrays; fixed Option/Vec metadata is also bounded by the pre-existing parsed document/file-load count.",
+    "Parsed trees and child indices remain local to a single manifest Walker; no new cross-request/session cache, thread, unsafe code, filesystem I/O or deadline.",
+    "Returned Program serialization, originals, identity, gap ordering and traversal counts are expected byte-equivalent; performance and runtime equivalence not yet measured."
+  ],
+  "validation": {
+    "rustfmtParse": "PASS; rustfmt 1.10.0-stable (b940084d7e 2026-09-28), --edition 2024 --emit stdout",
+    "cargo": "NOT_RUN: existing unresolved symbols lease/process custody remains untouched",
+    "windowsTests": "NOT_RUN",
+    "fullRetailPerformance": "NOT_RUN",
+    "target": "Rust controllable elapsed <=30% of equivalent Go elapsed remains unmet; no performance claim"
+  },
+  "testMap": "test-map.json",
+  "review": "Independent source review passed; Rust and performance NOT_RUN",
+  "originalFreezeSHA256": "9aba5190b080cc2e4ccb4f60b7aa4a2757ffab28f521e21dbbec22d6dff821b4"
+}

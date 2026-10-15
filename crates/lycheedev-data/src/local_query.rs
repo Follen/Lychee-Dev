@@ -763,6 +763,7 @@ pub(crate) fn sql_inner_budgeted(
                 .take()
                 .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
             let mut provenance = vec![];
+            let mut equal_columns = BTreeMap::new();
             let mut decoded_bytes = 0;
             let mut snapshots = effective::Snapshots::new(inv, data, &budget);
             let mut effective_sources = vec![];
@@ -825,6 +826,18 @@ pub(crate) fn sql_inner_budgeted(
                     };
                     source = overlaid;
                     effective_sources.push(report);
+                } else if let Some(identity) = definition.fields.iter().find(|field| field.identity)
+                {
+                    // table::open has validated exactly one scalar identity.
+                    // Grant only the physical WDC capability in this adapter.
+                    // Effective patch-aware equality remains a separate path;
+                    // metadata never receives an implicit numeric lookup.
+                    safety.charge(Cost::retained(
+                        name.len()
+                            .saturating_add(identity.name.len())
+                            .saturating_add(256),
+                    ))?;
+                    equal_columns.insert(name.clone(), identity.name.clone());
                 }
                 sources.insert(name, source);
                 decoded_bytes += file.bytes.len();
@@ -832,7 +845,7 @@ pub(crate) fn sql_inner_budgeted(
             }
             let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
             let execution = Instant::now();
-            let result = program.execute_budgeted(
+            let result = program.execute_prepared_budgeted(
                 &sources,
                 &parameters,
                 relational::Limits {
@@ -842,6 +855,7 @@ pub(crate) fn sql_inner_budgeted(
                 },
                 budget.token(),
                 Some(&safety),
+                &equal_columns,
             )?;
             after_execute()?;
             query_result = Some((

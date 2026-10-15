@@ -18,6 +18,7 @@ mod explain;
 pub use explain::{Explanation, PlanStep};
 mod joins;
 mod recursive;
+mod selection;
 mod topk;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
@@ -591,6 +592,9 @@ struct Work<'a> {
     cancel: Option<&'a AtomicBool>,
     shared: Option<&'a crate::resource::Budget>,
     planning: bool,
+    // Only explicitly prepared physical inputs may use equality selection.
+    // Materialized CTE/derived/effective/meta sources never inherit a capability.
+    selection_sources: Vec<(&'a Source, usize)>,
 }
 impl Work<'_> {
     fn spend(&mut self) -> Result<()> {
@@ -937,6 +941,7 @@ impl Source {
             cancel,
             shared,
             planning: false,
+            selection_sources: Vec::new(),
         };
         work.consume(0)?;
         if schema_only {
@@ -1384,6 +1389,27 @@ impl Program {
         cancel: Option<&AtomicBool>,
         shared: Option<&crate::resource::Budget>,
     ) -> Result<QueryResult> {
+        self.execute_prepared_budgeted(
+            sources,
+            parameters,
+            limits,
+            cancel,
+            shared,
+            &BTreeMap::new(),
+        )
+    }
+    /// Only the physical source preparer can grant an identity-column lookup.
+    /// This preserves scan semantics for arbitrary public Source values and
+    /// for materialized CTEs, derived tables, effective overlays and metadata.
+    pub(crate) fn execute_prepared_budgeted<'a>(
+        &self,
+        sources: &'a BTreeMap<String, Source>,
+        parameters: &BTreeMap<String, Scalar>,
+        limits: Limits,
+        cancel: Option<&'a AtomicBool>,
+        shared: Option<&'a crate::resource::Budget>,
+        equal_columns: &BTreeMap<String, String>,
+    ) -> Result<QueryResult> {
         if limits.work == 0 || limits.memory_bytes == 0 || limits.memory_bytes > 1 << 30 {
             return Err(budget());
         }
@@ -1394,6 +1420,7 @@ impl Program {
             cancel,
             shared,
             planning: self.explain,
+            selection_sources: Vec::new(),
         };
         work.spend()?;
         if self
@@ -1405,6 +1432,24 @@ impl Program {
         }
         for name in &self.parameters {
             row_cost(std::slice::from_ref(&parameters[name]))?;
+        }
+        work.retain(
+            equal_columns
+                .len()
+                .checked_mul(std::mem::size_of::<(&Source, usize)>())
+                .ok_or_else(budget)?,
+        )?;
+        work.selection_sources = Vec::with_capacity(equal_columns.len());
+        for (name, field) in equal_columns {
+            let mut matches = sources
+                .iter()
+                .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(name));
+            let (_, source) = matches.next().ok_or_else(binding)?;
+            if matches.next().is_some() {
+                return Err(binding());
+            }
+            let index = column(&source.columns, "", field)?;
+            work.selection_sources.push((source, index));
         }
         let mut inputs = BTreeMap::new();
         work.retain(sources.keys().map(|s| s.len() + 96).sum())?;
@@ -1628,9 +1673,14 @@ impl Program {
             if let Some(plan) = &joined {
                 plan.visit(parameters, work, &mut add)?;
             } else {
-                for row in &source.rows {
-                    add(row, work)?;
-                }
+                selection::visit(
+                    source,
+                    self.filter.as_ref(),
+                    alias,
+                    parameters,
+                    work,
+                    &mut add,
+                )?;
             }
             Some(grouping.finish(source.complete, parameters, work)?)
         } else {
@@ -1711,6 +1761,15 @@ impl Program {
             && let Some(plan) = &joined
         {
             plan.visit(parameters, work, &mut project_row)?;
+        } else if grouped.is_none() {
+            selection::visit(
+                source,
+                self.filter.as_ref(),
+                alias,
+                parameters,
+                work,
+                &mut project_row,
+            )?;
         } else {
             for row in &source.rows {
                 project_row(row, work)?;

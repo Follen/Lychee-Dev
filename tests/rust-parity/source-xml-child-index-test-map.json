@@ -1,0 +1,91 @@
+{
+  "schema": "lycheedev.source-xml-child-index-r1-test-map.v1",
+  "newTests": 9,
+  "inheritedTests": 4,
+  "tests": [
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "indexed_walk_matches_scan_for_templates_occurrences_and_alternative_manifests",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "indexed_walk_preserves_every_construction_budget_boundary",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "exhausted_child_index_scratch_preserves_complete_walk_and_charges",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "indexed_walk_preserves_malformed_document_failure",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "repeated_xml_loads_create_instances_and_keep_empty_references",
+      "state": "NOT_RUN",
+      "scope": "inherited"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "unknown_handler_is_preserved_with_catalog_gap",
+      "state": "NOT_RUN",
+      "scope": "inherited"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "construction_actions_do_not_consume_file_load_budget",
+      "state": "NOT_RUN",
+      "scope": "inherited"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load.rs",
+      "name": "xml_nesting_does_not_consume_include_depth",
+      "state": "NOT_RUN",
+      "scope": "inherited"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load/children.rs",
+      "name": "indexed_children_match_complete_scan_for_every_parent",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load/children.rs",
+      "name": "wide_document_preserves_all_siblings_and_bounded_storage",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load/children.rs",
+      "name": "cancellation_remains_the_original_typed_control_error",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load/children.rs",
+      "name": "scratch_admission_falls_back_before_allocating_and_checks_control",
+      "state": "NOT_RUN",
+      "scope": "new"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_load/children.rs",
+      "name": "invalid_internal_identity_is_rejected_before_indexing",
+      "state": "NOT_RUN",
+      "scope": "new"
+    }
+  ],
+  "requiredRun": "Through the existing authorized rust-disk/rust-cargo Windows ownership path: test --locked --offline -p lycheedev-source --lib xml_load:: -j 1",
+  "workflowGap": "Current native_research:: and native:: filters do not select xml_load::. Coordinator must wire exact group; candidate does not edit workflow.",
+  "additionalRequiredValidation": [
+    "Existing native_research XML catalog/output equivalence tests.",
+    "Full pinned Retail original-budget refs/context/API and retained cold/warm session acceptance with exact artifacts and original checks."
+  ]
+}

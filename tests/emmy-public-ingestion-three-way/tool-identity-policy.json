@@ -1,0 +1,80 @@
+{
+  "schema": "lycheedev.emmy-windows-tool-identity-policy.v1",
+  "revision": "R4; single hosted Python alias only",
+  "trustedAliasRoot": "C:\\hostedtoolcache\\windows\\Python",
+  "acceptedVersionShape": "3.(12|13|14).<decimal patch>\\x64, matching the existing runtime version bounds",
+  "alias": "python3.exe",
+  "directTarget": "already-selected, independently inventoried sibling python.exe",
+  "trustBoundary": "Fixed GitHub-hosted toolcache layout plus initial file identities and SHA-256 continuity. Official installer source authenticates the alias layout, not the installed Python binary signature or whole hosted image.",
+  "policy": [
+    "Reject all linked ancestors and all links except this exact Python leaf alias.",
+    "Require the direct link target and canonical target to be the selected ordinary python.exe.",
+    "Record every original path, canonical target, raw link text and lstat identity; do not collapse alias mappings.",
+    "Compare open-handle identity with checked target; hash bounded bytes; compare handle, target and mapping identities afterward.",
+    "Recheck the complete inventory before and after every owned process and in final sealing, as before.",
+    "No source, payload, stage, configuration, Cargo cache or process-owner policy change."
+  ],
+  "historicalFailure": {
+    "archiveSHA256": "0b20e5dd8c209f8793941d5bb376cc63ecb048cbf9056bcbb9988572a1a998ac",
+    "runLogSHA256": "d21b8dfbee316a3b576f0a69ccddb1ff89b0cc0ce29f48ed9c78c7aa9d49654c",
+    "freezeSHA256": "d93fc9d5a206847611d2f480d7d3b8fdca32d2c851ce5c87ac21774945c3e88d",
+    "observed": "toolIdentities line 61 hash(path) rejected a link before beginScratch and any owned child or Rust execution.",
+    "requestedPath": "not recorded by the historical error",
+    "supportedCandidate": "C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python3.exe -> same directory\\python.exe",
+    "candidateStatus": "inference from exact enumeration and the official hosted installer, not a recovered per-file Windows observation",
+    "otherCandidates": "Other rust-manifest, Python-root or PowerShell-root files remain possible from the pathless stack alone. No PowerShell/.NET exception is inferred or granted."
+  },
+  "officialSources": [
+    {
+      "repository": "actions/python-versions",
+      "commit": "49858b91c92d27403416ee43117032e91d00ce24",
+      "path": "installers/win-setup-template.ps1",
+      "blob": "ad93a2dd38a9f5bacbf5cf1ef9c637f10a655e9b",
+      "url": "https://github.com/actions/python-versions/blob/49858b91c92d27403416ee43117032e91d00ce24/installers/win-setup-template.ps1",
+      "sha256": "271f2c175d692cf6a7d60d5774c6148c2cef48bfe3c0de522b5e38415103e030",
+      "bytes": 6712
+    },
+    {
+      "repository": "actions/runner-images",
+      "commit": "349014bb757f0dadea17d6caee1308189aa7ee6c",
+      "path": "images/windows/scripts/build/Install-Toolset.ps1",
+      "blob": "b0c3ae7491ca99b866f4deaa35d40f2183847d5d",
+      "url": "https://github.com/actions/runner-images/blob/349014bb757f0dadea17d6caee1308189aa7ee6c/images/windows/scripts/build/Install-Toolset.ps1",
+      "sha256": "fc74e010f39d662014142135bd49ad65c95ce2f5fc3feefe313339902d3fec4f",
+      "bytes": 2432
+    },
+    {
+      "repository": "actions/runner-images",
+      "commit": "349014bb757f0dadea17d6caee1308189aa7ee6c",
+      "path": "images/windows/scripts/build/Configure-Toolset.ps1",
+      "blob": "880f177e2739ff69af7ddc94d4d4e51f2642c1ee",
+      "url": "https://github.com/actions/runner-images/blob/349014bb757f0dadea17d6caee1308189aa7ee6c/images/windows/scripts/build/Configure-Toolset.ps1",
+      "sha256": "987d6bd4627ad3c5e124435694a5d969179348feb201067a3acb738cb048d22e",
+      "bytes": 2301
+    },
+    {
+      "repository": "actions/runner-images",
+      "commit": "349014bb757f0dadea17d6caee1308189aa7ee6c",
+      "path": "images/windows/toolsets/toolset-2025.json",
+      "blob": "3517fbc2a899e5944a7ee87b8aafd425afd65cdd",
+      "url": "https://github.com/actions/runner-images/blob/349014bb757f0dadea17d6caee1308189aa7ee6c/images/windows/toolsets/toolset-2025.json",
+      "sha256": "377867765049106ff924814a63303a86c1de55e8cbe4537c29a15c5b9d4d2e6a",
+      "bytes": 11680
+    },
+    {
+      "repository": "actions/runner-images",
+      "commit": "349014bb757f0dadea17d6caee1308189aa7ee6c",
+      "path": "images/windows/templates/variable.windows.pkr.hcl",
+      "blob": "5bd84380de1833608336dc2559dd6ee89cef27ca",
+      "url": "https://github.com/actions/runner-images/blob/349014bb757f0dadea17d6caee1308189aa7ee6c/images/windows/templates/variable.windows.pkr.hcl",
+      "sha256": "810782876e8f798b4f34747e72c0015fede46d398e8973b29f5b53ebebcd16cd",
+      "bytes": 4176
+    }
+  ],
+  "limitations": [
+    "Windows A/B/C and Node filesystem fixtures have not run for R4.",
+    "POSIX symlink/race tests are not Windows reparse/NTFS acceptance.",
+    "No claim of preventing every malicious hosted-OS filesystem race or reproducing a whole OS loader closure.",
+    "Unknown layouts/aliases still stop before an owned job and now name the requested path."
+  ]
+}

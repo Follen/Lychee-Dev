@@ -5,6 +5,9 @@
 //! Unknown or a raw contextual-inference fallback. This is not the production
 //! semantic-model replacement yet: notably selected objects cannot enter this
 //! public-LuaType-only carrier until the owned provenance carrier is implemented.
+mod call;
+mod signature;
+
 use super::{
     BindingDecision, BindingSite, DenseTupleBackend, DenseTupleProjection,
     ExpressionExecutionBackend, ExpressionValue, FunctionRef, ObjectRef, OwnedBindingSession,
@@ -24,6 +27,11 @@ use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc, sync::Arc};
 pub enum OwnedQueryCapability {
     Parameter,
     Function,
+    FunctionMetadata,
+    FunctionReturnType,
+    FunctionRawReturnFallback,
+    CallSignature,
+    CallReturnType,
     Object,
     DeclarationMetadata,
     ClosureEnvironment,
@@ -90,8 +98,9 @@ impl<K: Eq + Hash, V> Drop for PendingMemo<K, V> {
 /// are borrowed once; selected Expression origins construct a fresh scope even
 /// when their file equals this model's file, exactly like old model_for.
 ///
-/// A successful result currently excludes selected Object/Function/Parameter
-/// projections and general flow/member/call inference. Such a branch returns
+/// A successful result currently excludes selected Object/Parameter projections
+/// and general flow/member/call inference. Selected Function and direct
+/// DocFunction calls have explicit, checked subsets in child modules. Such a branch returns
 /// Continue before any plain LuaType can erase selected identity or provenance.
 /// This entry is not installed in Source or the diagnostic registry yet.
 pub struct OwnedQuery<'a, 'control, E> {
@@ -401,9 +410,16 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         _: &SelectedProjector<'_>,
         site: BindingSite,
-        _: &FunctionRef,
+        function: &FunctionRef,
     ) -> ProjectionResult<LuaType, Self::Error> {
-        self.continuation(OwnedQueryCapability::Function, Some(site), None, None)
+        // The fixed model_for creates a fresh scope even for the same file.
+        let mut foreign = OwnedQuery::new(
+            self.analysis,
+            self.session,
+            function.file_id,
+            &mut *self.check,
+        );
+        foreign.project_function_signature(site, function.closure)
     }
     fn object(
         &mut self,
@@ -504,12 +520,12 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        _: ExpressionValue<LuaType>,
-        _: Vec<ExpressionValue<LuaType>>,
-        _: bool,
-        _: &[LuaSyntaxId],
+        callee: ExpressionValue<LuaType>,
+        arguments: Vec<ExpressionValue<LuaType>>,
+        colon_call: bool,
+        generic_type_syntaxes: &[LuaSyntaxId],
     ) -> QueryResult<ExpressionValue<LuaType>, E> {
-        self.continuation(OwnedQueryCapability::Call, None, None, None)
+        self.call_plain_signature(callee, arguments, colon_call, generic_type_syntaxes)
     }
     fn logical_nullable_extra(
         &mut self,

@@ -1,0 +1,99 @@
+{
+  "schema": "lycheedev.indexed-in-freeze.v1",
+  "identity": "indexed-in-r25-r1-20261015",
+  "createdUtc": "2026-10-15T17:37:54.705508+00:00",
+  "baselineCommit": "36be4d22fbf2b28bd4b12d05be13180dad83454b",
+  "localQueryOverlay": {
+    "id": "adaptive-consumers-r24-1-20261015",
+    "freezeSha256": "bbe5cbf9be1cc044f0682f82097ed8885ecadc70de554539eca8c39453a30007",
+    "preimage": {
+      "bytes": 46165,
+      "sha256": "c74f4f682bbc74eae9261fa140b66cf6b8967b79ff442fe1277d07372a658570"
+    }
+  },
+  "oracle": {
+    "tag": "v3.2.3",
+    "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+    "sourceSnapshotFreezeSha256": "4b15fee5107292740241a35b62b3797997c14910aeea0e852079b82f9b3ce6cb",
+    "files": {
+      "internal/records/effective.go": {
+        "bytes": 9169,
+        "sha256": "a6892e434a7c027ea66dfafbdee1802bed83713d85b1ddee81ea32c55f670310"
+      },
+      "internal/records/prepared.go": {
+        "bytes": 5361,
+        "sha256": "cac844f824fc201c79cb09a9d3d9cc2583828a52f930edb5e4de0277e21cf65a"
+      },
+      "internal/records/relational/aggregate.go": {
+        "bytes": 3575,
+        "sha256": "d8bcde5c466a71d90e7c117c277dc661e4691f296945261f21bf4c6933cfdf9a"
+      },
+      "internal/records/relational/evaluate.go": {
+        "bytes": 7069,
+        "sha256": "a3f850a004532b90c2ad2029788f478aff08f145a459b9e31eedda8c4d66a6d3"
+      },
+      "internal/records/relational/execute.go": {
+        "bytes": 10980,
+        "sha256": "2983b0eba46d45bca8c7d60d17022c30432ecd3ae8923afad258f404ed23d851"
+      },
+      "internal/records/relational/selection.go": {
+        "bytes": 3605,
+        "sha256": "d434fc16bdd7966a9d4cf7e59c393346547cb894cece14a053d8387dd8636053"
+      },
+      "internal/records/relational/selection_in_test.go": {
+        "bytes": 6910,
+        "sha256": "26bee5e802542832024aadab2262c2ea799bbbb1a75b15b464b7c3420e59874e"
+      },
+      "internal/records/semantics.go": {
+        "bytes": 7695,
+        "sha256": "13e3104908c57f92ae45a929adf7d7e361060df8758edc57ac0c4def6242987e"
+      },
+      "internal/records/table/view.go": {
+        "bytes": 9033,
+        "sha256": "112e0f68551f5971f0de9c1478c020451af39a84bcbd76da5c7c3a9504b87fd0"
+      }
+    }
+  },
+  "sourceFiles": {
+    "crates/lycheedev-data/src/relational.rs": {
+      "bytes": 66958,
+      "sha256": "653471ef842885837273634ebc6f32ab220839c486de3325546e692dea4311d2"
+    },
+    "crates/lycheedev-data/src/relational/selection.rs": {
+      "bytes": 12628,
+      "sha256": "410a3df6f9c1de560facfd04a60cfe0c98d8a7ca9e77e3b0fe1cf16c8e85ed19"
+    },
+    "crates/lycheedev-data/src/relational/selection_tests.rs": {
+      "bytes": 23054,
+      "sha256": "805a1ec8a86b00bfd69ab89f50938aaf141f47d7d1fcca3fceedc3b3cd011015"
+    },
+    "crates/lycheedev-data/src/local_query.rs": {
+      "bytes": 46993,
+      "sha256": "4840c20fd3aac4db3425f763e613b871b922e6ed6aadd91a4cdc7c99a0660e3b"
+    }
+  },
+  "preimages": {
+    "crates/lycheedev-data/src/relational.rs": {
+      "bytes": 64729,
+      "sha256": "231722a5c10881ad1b8958c6c467dd969e9e00e500148846179688e2cd19c9ee"
+    },
+    "crates/lycheedev-data/src/relational/selection.rs": null,
+    "crates/lycheedev-data/src/relational/selection_tests.rs": null,
+    "crates/lycheedev-data/src/local_query.rs": {
+      "bytes": 46165,
+      "sha256": "c74f4f682bbc74eae9261fa140b66cf6b8967b79ff442fe1277d07372a658570"
+    }
+  },
+  "runtime": "NOT_RUN",
+  "windows": "NOT_RUN",
+  "performance": "NOT_RUN",
+  "newRustTests": 23,
+  "implementationScope": "Partial: explicit static-WDC capability and real row-backed numeric-IN selection; not lazy WDC/effective/full Go323 parity.",
+  "remainingGaps": [
+    "WDC rows remain eagerly materialized before indexed execution.",
+    "Go effective.go wraps base Equal; this patch does not yet grant that explicit capability.",
+    "The pre-existing Rust IN subquery compiler gap remains.",
+    "Index construction adds metered work/memory and may fall back earlier; no performance benefit is measured.",
+    "No native Rust compilation or execution under the unresolved local owner lease."
+  ]
+}

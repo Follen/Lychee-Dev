@@ -268,3 +268,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Execute repaired default effective SQL with genuine complete exact-pin cache captures and all invalid-input negatives; no production identity relaxation.
 - [ ] Recompile all targets after explicit Core blob-wait child test path fix; resolve Windows three-way tool identity setup before claiming any contract execution.
 - [ ] Complete actual owned Function/call successor and rerun all 448 S3 comparisons; the oracle correction is diagnostic, not a passing replacement.
+
+- [ ] 本批验证：XML child index 13 例、indexed IN 23 例、owned Function/call 11 例及原 448 比较；三方官方 Python 身份边界 Node 31 已过，Windows 尚待。IN 目前仅静态 eager provider，lazy/effective 继续；不据此勾选 G323-05 或零补丁完成。

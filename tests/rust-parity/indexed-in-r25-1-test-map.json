@@ -1,0 +1,80 @@
+{
+  "schema": "lycheedev.indexed-in-test-map.v1",
+  "identity": "indexed-in-r25-r1-20261015",
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "oracleTests": "internal/records/relational/selection_in_test.go",
+  "goTests": {
+    "TestIDInUsesEqualityCandidatesWithinWorkBudget": [
+      "real_program_uses_one_index_within_35_id_work_budget",
+      "fixed_go_35_candidate_provider_uses_35_lookups"
+    ],
+    "TestInEqualitySelectionMatchesScanSemantics": [
+      "supported_and_fallback_predicates_match_ordered_scan_results_or_errors",
+      "invalid_literal_on_empty_source_preserves_scan_error_timing"
+    ],
+    "TestInEqualitySelectionCopiesRowsAndDeduplicatesExactNumbers": [
+      "reused_provider_rows_are_owned_and_rounded_u64_is_not_deduplicated",
+      "exact_numeric_keys_match_rational_equality_and_go_lengths"
+    ],
+    "TestInEqualitySelectionBufferLimitFallsBackToStreaming": [
+      "half_buffer_exhaustion_discards_before_yield_and_refunds_its_memory",
+      "real_grouped_consumer_falls_back_to_streaming_when_index_will_not_fit"
+    ],
+    "TestInEqualitySelectionDeclineDiscardsEarlierCandidates": [
+      "late_provider_decline_discards_all_prior_candidates",
+      "capability_uses_bound_identity_ordinal_and_respects_aliases"
+    ]
+  },
+  "oracleCaseGap": {
+    "case": "ID IN (SELECT ID FROM t WHERE ID=2)",
+    "state": "PREEXISTING_UNSUPPORTED",
+    "note": "Rust compiler subquery IN remains unsupported; not counted covered."
+  },
+  "rustDeclarations": [
+    "exact_numeric_keys_match_rational_equality_and_go_lengths",
+    "real_program_uses_one_index_within_35_id_work_budget",
+    "fixed_go_35_candidate_provider_uses_35_lookups",
+    "real_program_preserves_candidate_then_provider_order_without_order_by",
+    "supported_and_fallback_predicates_match_ordered_scan_results_or_errors",
+    "reused_provider_rows_are_owned_and_rounded_u64_is_not_deduplicated",
+    "half_buffer_exhaustion_discards_before_yield_and_refunds_its_memory",
+    "real_grouped_consumer_falls_back_to_streaming_when_index_will_not_fit",
+    "late_provider_decline_discards_all_prior_candidates",
+    "provider_failure_is_fatal_without_yield_or_fallback",
+    "independent_budget_exhaustion_never_becomes_optional_fallback",
+    "cancellation_during_decline_is_fatal_and_shared_memory_is_released",
+    "work_limit_and_deadline_fail_without_lookup_or_fallback",
+    "unary_parameters_and_non_bare_predicates_never_request_lookup",
+    "invalid_literal_on_empty_source_preserves_scan_error_timing",
+    "real_provider_does_not_hide_heterogeneous_or_malformed_rows",
+    "output_charges_survive_scoped_candidate_refund",
+    "explain_binds_but_does_not_build_index_or_read_malformed_rows",
+    "unprepared_sources_never_acquire_implicit_equality_capability",
+    "cte_and_derived_rows_do_not_inherit_physical_lookup_capability",
+    "capability_uses_bound_identity_ordinal_and_respects_aliases",
+    "capability_does_not_hide_source_binding_failures",
+    "nonnumeric_parameter_decline_still_propagates_evaluation_budget_stop"
+  ],
+  "rustDeclarationCount": 23,
+  "runtime": "NOT_RUN",
+  "windows": "NOT_RUN",
+  "performance": "NOT_RUN",
+  "requiredControlledCommand": "node tools/rust-cargo.mjs --owner ci-indexed-in-selection --one-shot -- test --locked --offline -p lycheedev-data --lib relational::selection::tests:: -j 1",
+  "inheritedRegressionTargets": [
+    "relational_parity",
+    "aggregates_parity",
+    "cte_parity",
+    "derived_parity",
+    "joins_parity",
+    "explain_parity",
+    "effective_sql_parity",
+    "semantic_sql_parity",
+    "remote::session::tests::default_sql"
+  ],
+  "notes": [
+    "The row-backed index, explicit capabilities, fallback and Work consumers are real production paths.",
+    "Fixture equality loops are test doubles; only the real Program work-budget regression checks the row-backed indexed consumer.",
+    "No-order candidate order is derived from fixed Go production selection.go; fixed Go regression queries use explicit ORDER BY.",
+    "Effective patch-aware Equal and lazy WDC pushdown remain incomplete."
+  ]
+}

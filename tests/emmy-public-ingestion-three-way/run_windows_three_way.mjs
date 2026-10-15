@@ -33,11 +33,13 @@ payloadCheck();
 const {listedTests,suiteResult,traceRows,completeVariant,compareVariants}=await import('./assertions.mjs');
 const {beginScratch,acquireChannel,sha256}=await import('./tools/rust-disk.mjs');
 const {ownedSpawnSync}=await import('./tools/rust-owned-process.mjs');
+const {hostedPythonAlias,toolFileIdentities}=await import('./tool_identity.mjs');
 function application(name){for(const directory of (process.env.PATH??'').split(';').filter(Boolean)){const p=join(directory,name);if(existsSync(p)){noLinks(p);if(lstatSync(p).isFile())return realpathSync(p);}}throw Error(`windows-contract.tool_missing:${name}`);}
 const rustup=process.env.RUSTUP_HOME||join(process.env.USERPROFILE,'.rustup');
 const toolchain=realpathSync(join(rustup,`toolchains/1.99.0-${target}`)),bin=join(toolchain,'bin');
 const cargo=join(bin,'cargo.exe'),rustc=join(bin,'rustc.exe'),rustdoc=join(bin,'rustdoc.exe'),python=application('python.exe'),git=application('git.exe');
 const powershell=join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
+const pythonAlias=hostedPythonAlias(python);
 const auxiliary=JSON.parse(readFileSync(join(source,'tools/rust-build-auxiliary.json')));
 assert.equal(hash(cargo),auxiliary.cargoSHA256,'windows-contract.fixed_official_cargo');
 const compiler=auxiliary.msvcCompilers.find(row=>row.programFilesPath.includes('/Enterprise/'));
@@ -58,7 +60,7 @@ function toolIdentities(){
  const pyRoot=dirname(python);for(const directory of [join(pyRoot,'DLLs'),join(pyRoot,'Lib')])trees[realpathSync(directory)]=inventory(directory,{maxEntries:20000,maxBytes:256<<20,rejectEmptyDirectories:false,skip:p=>p.split('/').includes('site-packages')});
  for(const name of readdirSync(pyRoot))if(/\.(exe|dll|zip)$/i.test(name))files.add(join(pyRoot,name));
  for(const name of readdirSync(dirname(powershell)))if(/\.(exe|dll|config)$/i.test(name))files.add(join(dirname(powershell),name));
- return {files:ordered(Object.fromEntries([...files].sort().map(path=>[realpathSync(path),hash(path)]))),trees,systemRuntime:{imageOS:process.env.ImageOS??null,imageVersion:process.env.ImageVersion??null,runnerOS:process.env.RUNNER_OS,node:process.version,architecture:process.arch,sdkVersion,scope:'Windows system DLL/.NET loader are trusted hosted-OS runtime, not represented as a reproduced whole-OS closure'}};
+ return {...toolFileIdentities([...files],pythonAlias),trees,systemRuntime:{imageOS:process.env.ImageOS??null,imageVersion:process.env.ImageVersion??null,runnerOS:process.env.RUNNER_OS,node:process.version,architecture:process.arch,sdkVersion,scope:'Windows system DLL/.NET loader are trusted hosted-OS runtime, not represented as a reproduced whole-OS closure'}};
 }
 assert(/^v24\./.test(process.version)&&process.arch==='x64','windows-contract.node24_x64');
 const tools=toolIdentities();

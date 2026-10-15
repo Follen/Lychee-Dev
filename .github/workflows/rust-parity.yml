@@ -116,7 +116,7 @@ jobs:
           import {join} from "node:path";
           import {createHash} from "node:crypto";
           const root="tests/emmy-public-ingestion-three-way", hash=p=>createHash("sha256").update(readFileSync(p)).digest("hex");
-          assert.equal(hash(join(root,"freeze.json")),"d93fc9d5a206847611d2f480d7d3b8fdca32d2c851ce5c87ac21774945c3e88d");
+          assert.equal(hash(join(root,"freeze.json")),"cceccb0d574bd79d298b47a0563b109fd34b2f4bf532928ed104910be4f5f50d");
           const freeze=JSON.parse(readFileSync(join(root,"freeze.json"))), actual={}; let entries=0;
           function visit(p,rel=""){for(const n of readdirSync(p).sort()){assert(++entries<=8192);const q=join(p,n),r=rel?rel+"/"+n:n,s=lstatSync(q);assert(!s.isSymbolicLink());if(s.isDirectory())visit(q,r);else{assert(s.isFile()&&s.size<=32*1024*1024);if(r!=="freeze.json")actual[r]=hash(q);}}}
           visit(root); assert.deepEqual(Object.entries(actual).sort(),Object.entries(freeze.files).sort());
@@ -132,7 +132,7 @@ jobs:
         id: fixtures
         if: steps.rust.outcome == 'success'
         run: |
-          node --test tests/emmy-public-ingestion-three-way/assertions.test.mjs tests/emmy-public-ingestion-three-way/tools/rust-owned-process.test.mjs *> .tmp/emmy-public-contract-node-fixtures.log
+          node --test tests/emmy-public-ingestion-three-way/assertions.test.mjs tests/emmy-public-ingestion-three-way/tool_identity.test.mjs tests/emmy-public-ingestion-three-way/tools/rust-owned-process.test.mjs *> .tmp/emmy-public-contract-node-fixtures.log
           $status = $LASTEXITCODE
           Get-Content .tmp/emmy-public-contract-node-fixtures.log
           if ($status -ne 0) { exit $status }
@@ -143,7 +143,7 @@ jobs:
       - name: Run all three native Windows contract variants under one lease
         if: steps.fixtures.outcome == 'success'
         run: |
-          node tests/emmy-public-ingestion-three-way/run_windows_three_way.mjs contracts d93fc9d5a206847611d2f480d7d3b8fdca32d2c851ce5c87ac21774945c3e88d *> .tmp/emmy-public-contract-run.log
+          node tests/emmy-public-ingestion-three-way/run_windows_three_way.mjs contracts cceccb0d574bd79d298b47a0563b109fd34b2f4bf532928ed104910be4f5f50d *> .tmp/emmy-public-contract-run.log
           $status = $LASTEXITCODE
           Get-Content .tmp/emmy-public-contract-run.log
           exit $status
@@ -404,15 +404,19 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-native-preparation --one-shot -- test --locked --offline -p lycheedev-source --lib native:: -j 1
+      - name: Run bounded XML child index equivalence fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-xml-load-index --one-shot -- test --locked --offline -p lycheedev-source --lib xml_load:: -j 1
       - name: Run engine-independent owned binding contract fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-binding-contracts --one-shot -- test --locked --offline -p lycheedev-binding-contracts --test contracts -j 1
       - name: Run owned Emmy adapter declaration contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract --test declaration_rendering_contract --test selected_projector_contract --test selected_query_contract --test expression_plan_contract --test expression_execution_contract --test binary_core_contract --test dense_tuple_contract --test query_backend_contract -j 1
+        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract --test declaration_rendering_contract --test selected_projector_contract --test selected_query_contract --test expression_plan_contract --test expression_execution_contract --test binary_core_contract --test dense_tuple_contract --test query_backend_contract --test function_call_contract -j 1
       - name: Compare owned selected projection and queries against the fixed engine
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-emmy-selected-oracle --one-shot -- test --locked --offline -p lycheedev-source --test selected_projector_native_oracle --test selected_query_native_oracle --test expression_plan_native_oracle --test expression_execution_native_oracle --test binary_core_native_oracle --test dense_tuple_native_oracle --test query_backend_native_oracle -j 1 -- --nocapture
+        run: node tools/rust-cargo.mjs --owner ci-emmy-selected-oracle --one-shot -- test --locked --offline -p lycheedev-source --test selected_projector_native_oracle --test selected_query_native_oracle --test expression_plan_native_oracle --test expression_execution_native_oracle --test binary_core_native_oracle --test dense_tuple_native_oracle --test query_backend_native_oracle --test function_call_native_oracle -j 1 -- --nocapture
       - name: Run source batch admission ownership and budget fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-batch --one-shot -- test --locked --offline -p lycheedev-source --lib batch::tests -j 1
@@ -573,6 +577,10 @@ jobs:
       - name: Run SQL EXPLAIN schema and bounded TopK regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-explain --one-shot -- test --locked --offline -p lycheedev-data --test explain_parity --test sql_explain_parity --test topk_parity -j 1
+      - name: Run indexed IN buffered selection fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-indexed-in --one-shot -- test --locked --offline -p lycheedev-data --lib relational::selection::tests -j 1
       - name: Preserve relational binding grouping and compound regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-relational-regressions --one-shot -- test --locked --offline -p lycheedev-data --test relational_parity --test joins_parity --test aggregates_parity --test compound_parity --test cte_parity --test recursive_parity --test derived_parity -j 1
