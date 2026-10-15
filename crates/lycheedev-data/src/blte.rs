@@ -8,6 +8,8 @@ use lycheedev_core::Result;
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::BTreeMap, io::Read};
+mod span;
+pub use span::EncodedSpan;
 mod streaming;
 pub(crate) use streaming::{Reader as StreamingReader, stream_io_error};
 
@@ -41,21 +43,32 @@ impl ByteSource for Content {
 }
 /// Immutable physical section with bounded random reads.
 pub trait EncodedRead {
+    /// Observe the source's original scope without reading encoded bytes.
+    fn check_encoded(&self) -> Result<()> {
+        Ok(())
+    }
     fn encoded_size(&self) -> usize;
-    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>>;
+    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<EncodedSpan<'_>>;
 }
 enum RangeInput<'a> {
     Slice(&'a [u8]),
     Reader(&'a dyn EncodedRead),
 }
 impl RangeInput<'_> {
+    fn check(&self) -> Result<()> {
+        match self {
+            Self::Slice(_) => Ok(()),
+            Self::Reader(reader) => reader.check_encoded(),
+        }
+    }
     fn len(&self) -> usize {
         match self {
             Self::Slice(raw) => raw.len(),
             Self::Reader(reader) => reader.encoded_size(),
         }
     }
-    fn read(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>> {
+    fn read(&self, offset: usize, bytes: usize) -> Result<EncodedSpan<'_>> {
+        self.check()?;
         match self {
             Self::Slice(raw) => raw
                 .get(
@@ -63,7 +76,7 @@ impl RangeInput<'_> {
                         fault("container.invalid_format", 4, "Encoded range overflow")
                     })?,
                 )
-                .map(Cow::Borrowed)
+                .map(EncodedSpan::borrowed)
                 .ok_or_else(|| {
                     fault(
                         "container.invalid_format",
@@ -123,6 +136,10 @@ impl<'a> Ranges<'a> {
         keys: &'a BTreeMap<u64, Vec<u8>>,
         budget: Option<&'a Budget>,
     ) -> Result<Self> {
+        raw.check()?;
+        if let Some(budget) = budget {
+            budget.check()?;
+        }
         if limits.encoded_bytes == 0
             || raw.len() > limits.encoded_bytes
             || limits.decoded_bytes == 0
@@ -150,9 +167,17 @@ impl<'a> Ranges<'a> {
                 "Headerless BLTE has no range directory",
             ));
         }
-        if raw.len() < 12 {
+        if header < 12 || header > raw.len() {
             return malformed();
         }
+        if header > 12 + 24 * limits.chunks {
+            return exceeded();
+        }
+        // Go's logical header scratch is distinct from the real owned spans
+        // supplied by an encoded reader and refunded with those allocations.
+        let _header_scratch = budget
+            .map(|b| b.reserve_logical_scratch(header as u64))
+            .transpose()?;
         let prefix = raw.read(0, 12)?;
         if prefix[8] != 15 {
             return malformed();
@@ -217,6 +242,13 @@ impl<'a> Ranges<'a> {
             budget,
         })
     }
+    fn check(&self) -> Result<()> {
+        self.raw.check()?;
+        if let Some(budget) = self.budget {
+            budget.check()?;
+        }
+        Ok(())
+    }
     fn extent(&self, offset: usize, bytes: usize) -> Result<usize> {
         let end = offset
             .checked_add(bytes)
@@ -239,9 +271,13 @@ impl ByteSource for Ranges<'_> {
         self.size
     }
     fn read_span(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>> {
+        self.check()?;
         let end = self.extent(offset, bytes)?;
         if let Some(budget) = self.budget {
             budget.charge(Cost::retained(bytes))?;
+        }
+        if bytes == 0 {
+            return Ok(Cow::Owned(Vec::new()));
         }
         let mut result = Vec::with_capacity(bytes);
         for (index, s) in self.parts.iter().enumerate() {
@@ -300,20 +336,26 @@ impl ByteSource for Ranges<'_> {
         bytes: usize,
         expected: &[u8],
     ) -> Result<Cow<'_, [u8]>> {
-        let end = self.extent(offset, bytes)?;
-        if let Some(budget) = self.budget {
-            budget.check()?;
+        self.check()?;
+        if expected.len() != 16 || expected.iter().all(|b| *b == 0) {
+            return integrity();
         }
+        let end = self.extent(offset, bytes)?;
         // An authenticated logical-page digest permits bounded direct reads
         // inside N segments, even when their entire decoded segment is huge.
         for s in &self.parts {
-            if offset >= s.decoded
+            if bytes > 0
+                && offset >= s.decoded
                 && end <= s.decoded + s.part.decoded
                 && self.raw.read(s.encoded, 1)?[0] == b'N'
             {
                 if s.part.encoded != s.part.decoded + 1 {
-                    return malformed();
+                    return integrity();
                 }
+                let _scratch = self
+                    .budget
+                    .map(|b| b.reserve_logical_scratch(bytes as u64))
+                    .transpose()?;
                 let raw = self.raw.read(s.encoded + 1 + offset - s.decoded, bytes)?;
                 if expected.len() != 16
                     || expected.iter().all(|b| *b == 0)
@@ -321,7 +363,7 @@ impl ByteSource for Ranges<'_> {
                 {
                     return integrity();
                 }
-                return Ok(raw);
+                return raw.decoded_copy(self.budget, || self.check());
             }
         }
         let raw = self.read_span(offset, bytes)?;

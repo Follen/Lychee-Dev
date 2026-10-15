@@ -1,0 +1,202 @@
+{
+  "schema": "lycheedev.encoded-span-tests.v1",
+  "newTests": [
+    {
+      "name": "owned_span_holds_admission_through_forwarding_and_releases_only_storage",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "failed_fill_and_post_read_cancellation_refund_allocation_not_work",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "owned_decoded_copy_requires_real_double_live_peak_and_keeps_origin_ledger",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "borrowed_decoded_span_remains_zero_copy_and_unbudgeted_owned_uses_ranges_ledger",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "unbudgeted_ranges_preserve_budgeted_reader_n_output_and_integrity_failures_refund",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "independent_ranges_stop_still_blocks_owned_output_on_origin_ledger",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "ranges_with_different_budget_preserves_reader_output_accounting_and_range_stop",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "invalid_directory_releases_all_temporary_encoded_spans",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "local_reader_span_drop_refunds_encoded_storage_and_never_read_work",
+      "path": "stage/crates/lycheedev-data/src/casc/span_tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "remote_encoded_span_and_ranges_keep_origin_admission_until_each_owner_drops",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "checked_empty_ranges_do_not_read_source_and_bad_expected_precedes_extent_or_io",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "checked_n_declared_length_mismatch_is_integrity_and_original_stop_stays_first",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "logical_header_admission_precedes_header_flag_decode",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "original_reader_stop_precedes_empty_span_and_bad_digest_in_both_mixed_entries",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "original_reader_stop_during_n_copy_and_before_commit_refunds_both_allocations",
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "status": "NOT_RUN"
+    }
+  ],
+  "inheritedTouchedDeclarations": [
+    {
+      "name": "raw_zlib_nested_and_integrity",
+      "path": "stage/crates/lycheedev-data/src/blte.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "encrypted_keys_partial_and_no_placeholder_read",
+      "path": "stage/crates/lycheedev-data/src/blte.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "budgets_and_external_ckey",
+      "path": "stage/crates/lycheedev-data/src/blte.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "framed_zlib_range_keeps_the_budget_inside_the_decoder",
+      "path": "stage/crates/lycheedev-data/src/blte.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "loose_headerless_ekey_location_streaming_ckey_and_owned_block_drop",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "framed_ekey_checks_header_and_leaves_chunk_and_ckey_to_decoder",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "corrupted_headerless_ekey_never_publishes_location",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "archive_index_footer_toc_page_span_and_ekey_produce_one_verified_section",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "parallel_archive_join_preserves_order_and_all_actual_attempts",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "offline_old_index_footer_toc_page_fragments_do_not_require_whole_prefetch",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "failed_block_replacement_keeps_old_owner_and_reuses_it_without_new_fragment",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "invalid_cached_span_is_terminal_before_any_object_lookup",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "loose_http_uncertainty_is_not_rewritten_as_missing_by_later_indexes",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "location_go_duplicate_null_and_signed_shape_is_retained_until_consumption",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "joined_archive_workers_keep_original_cancellation_and_spent_attempts",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "worker_forks_share_build_and_route_values_but_refresh_is_local",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "sequential_read_returns_prefix_before_a_later_block_failure",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "joined_panicked_worker_preserves_its_and_later_workers_recorded_counters",
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "random_reader_rejects_short_reads_and_observes_only_requested_chunks",
+      "path": "stage/crates/lycheedev-data/tests/range_parity.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "huge_unvisited_and_missing_key_chunks_do_not_change_requested_range_coverage",
+      "path": "stage/crates/lycheedev-data/tests/range_parity.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "encoding_checked_pages_in_large_n_segment_and_corrupt_unused_page",
+      "path": "stage/crates/lycheedev-data/tests/range_parity.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "ckey_lookup_does_not_touch_unavailable_physical_ekey_directory",
+      "path": "stage/crates/lycheedev-data/tests/range_parity.rs",
+      "status": "NOT_RUN"
+    }
+  ],
+  "requiredExistingConsumers": [
+    "range_parity",
+    "installed_parity",
+    "blte::",
+    "remote::files::",
+    "casc::span_tests::"
+  ],
+  "rust": "NOT_RUN",
+  "windows": "NOT_RUN",
+  "clientTests": "NOT_RUN_REQUIRES_USER"
+}

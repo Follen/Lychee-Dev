@@ -10,7 +10,6 @@ use lycheedev_core::{Result, storage};
 use md5::{Digest, Md5};
 use serde::Serialize;
 use std::{
-    borrow::Cow,
     collections::BTreeMap,
     fs,
     io::{Read, Seek, SeekFrom},
@@ -44,14 +43,17 @@ impl LocalReader<'_> {
     }
 }
 impl blte::EncodedRead for LocalReader<'_> {
+    fn check_encoded(&self) -> Result<()> {
+        check(self.limits, self.cancel)?;
+        self.budget.map_or(Ok(()), Budget::check)
+    }
     fn encoded_size(&self) -> usize {
         (self.span.bytes - 30) as usize
     }
-    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>> {
+    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<blte::EncodedSpan<'_>> {
         check(self.limits, self.cancel)?;
         if let Some(budget) = self.budget {
             budget.charge(Cost {
-                retained_bytes: bytes as u64,
                 decode_work: bytes.div_ceil(65536) as u64,
                 ..Default::default()
             })?;
@@ -76,15 +78,19 @@ impl blte::EncodedRead for LocalReader<'_> {
             ));
         }
         file.seek(SeekFrom::Start(self.span.offset + 30 + offset as u64))?;
-        let mut raw = vec![0; bytes];
-        for chunk in raw.chunks_mut(65536) {
-            check(self.limits, self.cancel)?;
-            file.read_exact(chunk)?;
-        }
-        storage::guard_path(&self.root, &self.path)?;
-        self.io_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
-        self.io_reads.fetch_add(1, Ordering::Relaxed);
-        Ok(Cow::Owned(raw))
+        blte::EncodedSpan::read_owned(bytes, self.budget, |raw| {
+            for chunk in raw.chunks_mut(65536) {
+                check(self.limits, self.cancel)?;
+                if let Some(budget) = self.budget {
+                    budget.check()?;
+                }
+                file.read_exact(chunk)?;
+            }
+            storage::guard_path(&self.root, &self.path)?;
+            self.io_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
+            self.io_reads.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        })
     }
 }
 pub fn open_local_reader<'a>(
@@ -671,3 +677,6 @@ fn select_indices(
     }
     Ok(selected)
 }
+
+#[cfg(test)]
+mod span_tests;

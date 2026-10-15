@@ -7,7 +7,7 @@ use md5::{Digest, Md5};
 use std::collections::BTreeMap;
 #[test]
 fn random_reader_rejects_short_reads_and_observes_only_requested_chunks() {
-    use std::{borrow::Cow, cell::RefCell};
+    use std::cell::RefCell;
     struct Reader {
         raw: Vec<u8>,
         reads: RefCell<Vec<(usize, usize)>>,
@@ -21,11 +21,13 @@ fn random_reader_rejects_short_reads_and_observes_only_requested_chunks() {
             &self,
             offset: usize,
             bytes: usize,
-        ) -> lycheedev_core::Result<Cow<'_, [u8]>> {
+        ) -> lycheedev_core::Result<lycheedev_data::blte::EncodedSpan<'_>> {
             self.reads.borrow_mut().push((offset, bytes));
-            Ok(Cow::Owned(
-                self.raw[offset..offset + bytes - usize::from(self.short)].to_vec(),
-            ))
+            let source = &self.raw[offset..offset + bytes - usize::from(self.short)];
+            lycheedev_data::blte::EncodedSpan::read_owned(source.len(), None, |out| {
+                out.copy_from_slice(source);
+                Ok(())
+            })
         }
     }
     let raw = framed(&[(b"Nsmall".to_vec(), 5), (vec![b'N'; 4097], 4096)]);

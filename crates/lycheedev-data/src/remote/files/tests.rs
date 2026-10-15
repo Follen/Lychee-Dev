@@ -619,3 +619,44 @@ fn joined_panicked_worker_preserves_its_and_later_workers_recorded_counters() {
     );
     assert_eq!(budget.snapshot().unwrap().retained_bytes, retained);
 }
+
+#[test]
+fn remote_encoded_span_and_ranges_keep_origin_admission_until_each_owner_drops() {
+    use crate::blte::{ByteSource, EncodedRead};
+    let fixture = Fixture::new("");
+    let (key, raw) = framed(b"authenticated remote bytes");
+    let size = raw.len();
+    fixture.object(&key, raw);
+    let budget = Budget::controlled(
+        Cost::defaults(),
+        fixture.control.deadline(),
+        fixture.control.clone(),
+    );
+    let files = fixture.files(false, Some(&budget), 1);
+    let before_open = budget.snapshot().unwrap().retained_bytes;
+    let encoded = files.open(&key, size as i64).unwrap();
+    let base = budget.snapshot().unwrap().retained_bytes;
+    let span = encoded.read_encoded(0, 8).unwrap();
+    assert_eq!(&span[..4], b"BLTE");
+    assert_eq!(budget.snapshot().unwrap().retained_bytes, base + 8);
+    drop(span);
+    assert_eq!(budget.snapshot().unwrap().retained_bytes, base);
+    let keys = BTreeMap::new();
+    // This mixed API must not lose the reader's original ledger on the N path.
+    let ranges = blte::Ranges::open_reader(&encoded, blte::Limits::default(), &keys).unwrap();
+    assert_eq!(budget.snapshot().unwrap().retained_bytes, base);
+    let bytes = ranges
+        .read_checked_span(0, 13, &Md5::digest(b"authenticated"))
+        .unwrap();
+    assert_eq!(bytes.as_ref(), b"authenticated");
+    assert_eq!(budget.snapshot().unwrap().retained_bytes, base + 13);
+    drop(bytes);
+    drop(ranges);
+    let network = budget.snapshot().unwrap();
+    drop(encoded);
+    let after = budget.snapshot().unwrap();
+    assert_eq!(after.retained_bytes, before_open + 13);
+    assert_eq!(after.network_requests, network.network_requests);
+    assert_eq!(after.network_bytes, network.network_bytes);
+    assert!(after.network_requests > 0);
+}

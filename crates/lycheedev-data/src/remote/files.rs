@@ -568,6 +568,32 @@ impl Encoded<'_, '_> {
         )
     }
 }
+impl crate::blte::EncodedRead for Encoded<'_, '_> {
+    fn check_encoded(&self) -> Result<()> {
+        self.source.files.store.check()
+    }
+    fn encoded_size(&self) -> usize {
+        self.size
+    }
+    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<crate::blte::EncodedSpan<'_>> {
+        self.source.files.store.check()?;
+        offset
+            .checked_add(bytes)
+            .filter(|end| *end <= self.size)
+            .ok_or_else(range)?;
+        if bytes > 64 << 20 {
+            return Err(fault(
+                "container.resource_limit",
+                3,
+                "Encoded span allocation exceeds bound",
+            ));
+        }
+        crate::blte::EncodedSpan::read_owned(bytes, self.source.files.store.budget, |out| {
+            let result = self.read_at(out, offset);
+            self.source.files.store.finish(result, Ok(()))
+        })
+    }
+}
 impl Read for Encoded<'_, '_> {
     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
         self.source

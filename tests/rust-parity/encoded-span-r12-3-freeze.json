@@ -1,0 +1,267 @@
+{
+  "schema": "lycheedev.encoded-span-freeze.v1",
+  "revision": "r12.3",
+  "oracleCommit": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "baselineCommit": "e06d32c87a111b45daf9be08bd646228dd4ccab0",
+  "owned": [
+    {
+      "path": "stage/crates/lycheedev-data/src/blte/span/tests.rs",
+      "bytes": 15755,
+      "sha256": "2760e668cf608e483c880f27dff77469398a2a65da9dcd6965c48b6bdaa35c7f"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/blte/span.rs",
+      "bytes": 3358,
+      "sha256": "fb65bcbbacef6091bbf0421889b4e7c26dce95db7d70e721d38ea9cfd9445507"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/blte.rs",
+      "bytes": 31561,
+      "sha256": "35d552046adf01ffd128ea1c94b60ebfb773d48be5c739a589b708bdbdad1b08"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/casc/span_tests.rs",
+      "bytes": 1937,
+      "sha256": "0831e63a9944993941c97fe08415f99e1b855f2be3efe349e3ae086b1161540d"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/casc.rs",
+      "bytes": 22099,
+      "sha256": "fd02f0b25d2e59475680357643c8c4eaef8b64cfaed1c0456ed174cd084c17b7"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/files/tests.rs",
+      "bytes": 23985,
+      "sha256": "fad3309e27d8b6e15f43bb0a981f7abac409fa804f446b677ea0f2050d7a36d2"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/files.rs",
+      "bytes": 21394,
+      "sha256": "68642f0cb7097d8ce7807de48bdbf494020af15c6a651ff58ac264091f612128"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/tests/range_parity.rs",
+      "bytes": 6646,
+      "sha256": "0a224d7f162e2ff1e911d7d2c1f32505385b16eb187df99fab9dcfc48b51dbc1"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-blte.rs.patch",
+      "bytes": 5433,
+      "sha256": "35f1666a9b3c42466a1e1d11b43f19e7063f5bd6d3702bfa8c05e408662daa27"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-casc.rs.patch",
+      "bytes": 2208,
+      "sha256": "eda75a532ce91619e47c93633aaeb0dfda46f6c4e71676f19e3554fc4c86a1a5"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-remote-files-tests.rs.patch",
+      "bytes": 2028,
+      "sha256": "6b7af78db9ad8d2518188ead6de6fef02b5d22daa521704bcd0e52afb96ec49d"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-remote-files.rs.patch",
+      "bytes": 1183,
+      "sha256": "1cdd271852d36020622d0bb0e9e4584083031ff934fb806b4d6d8c79651779cb"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-tests-range_parity.rs.patch",
+      "bytes": 1170,
+      "sha256": "a0ce48b300ed772bac92d88f97836dffc467388b1b694b61c84f0231c613b684"
+    }
+  ],
+  "support": [
+    {
+      "path": "support/Cargo.lock",
+      "bytes": 79886,
+      "sha256": "8f4bd6072e61a78b9c42f945dcc861910e5dcfe21e7f398515db4b238705ffb4"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/evidence/bounded.rs",
+      "bytes": 18813,
+      "sha256": "7524e777e30708ea1a5a5358314b257464958e39969e2a28c490bd94ed0a7f1f"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/evidence/budgeted.rs",
+      "bytes": 19940,
+      "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/evidence.rs",
+      "bytes": 21093,
+      "sha256": "44570ad01313e8cff6101e390001819254f2665b61d473285edc549d9567337d"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/selection.rs",
+      "bytes": 24629,
+      "sha256": "5b09aa952b7bcd463b308865692bd6adc74ec02607586b4d4d88bdc7d17a8357"
+    },
+    {
+      "path": "support/crates/lycheedev-data/Cargo.toml",
+      "bytes": 1253,
+      "sha256": "7dd3639abb2897cac370b9d99b99924aeb354dcd9bfc49ce701bae0f4c108f6e"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/blte/streaming.rs",
+      "bytes": 8750,
+      "sha256": "c688d0ccc75c0e10ed29df60cef804b3f8b2884a286b33ca75754247278ce921"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/blte.rs",
+      "bytes": 30130,
+      "sha256": "e0537d2b4ddffb2d813d0e657b19f86ca39a44667c364e526a3a121b32c3bc73"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/casc.rs",
+      "bytes": 21817,
+      "sha256": "e6a987d72bc8a19674a8f6075bff647f0d3d90a4a4534fd35a97d7427a1a4589"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/installed.rs",
+      "bytes": 35949,
+      "sha256": "2e6c4f0679ff78ea96fdb7bec1cd356acc53877480d942a9dc783c1a029a2e92"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/lib.rs",
+      "bytes": 5085,
+      "sha256": "57dbb4e42fa36b7943003d3de2b316e169671197dc6209e66865411c6828a235"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/local_query.rs",
+      "bytes": 41445,
+      "sha256": "888607d6bd26626f9b555c7510048f9edc10ae836d1a77a44ed87bbf2c120c79"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/metadata_format.rs",
+      "bytes": 16531,
+      "sha256": "433afe1d4fe017decff547144c076bfe9b4a08214ccb5d09e7134e398690cf3d"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/cache.rs",
+      "bytes": 18388,
+      "sha256": "806ccfd4d3a50456c2bd4272d7271bcb3bfb984c3bf86294a9213fa45a790ccc"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/files/tests.rs",
+      "bytes": 22208,
+      "sha256": "c50a49cd417bd1ad683af5f1f8c6809e3fe0cd85a0ce34e97acafc0e36ed47dd"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/files.rs",
+      "bytes": 20497,
+      "sha256": "90239df4660f83c5e28223d8322a1de0fd92e5ed91c29809f206e1d517ef0f06"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/fragments.rs",
+      "bytes": 16113,
+      "sha256": "47b4cc10048b9dd00ab5930abb36b7d2fbb1c9cad5d894f65282c24f94f62700"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/target.rs",
+      "bytes": 10097,
+      "sha256": "d370fcc89ee87950790a5eceaf9eaa0aa1df538818c744f34f7f482d5b511129"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/resource.rs",
+      "bytes": 20194,
+      "sha256": "5eeffc80a694f62977bbae206b404025e49588b66f27dd71247fdc7a9067258f"
+    },
+    {
+      "path": "support/crates/lycheedev-data/tests/installed_parity.rs",
+      "bytes": 44655,
+      "sha256": "67ddc3c3bcee47fba287fc12ef88bb949ca54b6af07abf5081bf912a0d887f91"
+    },
+    {
+      "path": "support/crates/lycheedev-data/tests/range_parity.rs",
+      "bytes": 6509,
+      "sha256": "5c7cd8a40e13f1ce83693dab9520b7407c1373866a5bd1ece4c96033d2ff4876"
+    },
+    {
+      "path": "README.md",
+      "bytes": 7033,
+      "sha256": "bc1ca3fdc0309062132f20197105ef9b693fe690b92330145bb82bc71a868555"
+    },
+    {
+      "path": "NEXT-SESSION.md",
+      "bytes": 3389,
+      "sha256": "5b79d509efa4ee679872a13ce5d4d6d74337f84fc24e2fe0000c68e43422e60b"
+    },
+    {
+      "path": "dependencies.json",
+      "bytes": 8074,
+      "sha256": "c8f1a7fa1392a8e2eb78ebdbca5600cef5fd527d0b83bd69dd03ea992cd72986"
+    },
+    {
+      "path": "patch-inputs.json",
+      "bytes": 1894,
+      "sha256": "bd3980ad94bf2d10ca22685c1abe21ba5ada2595a83c511fa6868ad28aae9327"
+    },
+    {
+      "path": "test-map.json",
+      "bytes": 7372,
+      "sha256": "18d16f338cc3d16cb16a4d933983f53c27d44e8f0e4808b021b088885620aea4"
+    },
+    {
+      "path": "owner.json",
+      "bytes": 697,
+      "sha256": "8a833a8d0f78c3b6fdcea4d9de8185fca9fc1374845b698d16fa0945ceb43626"
+    }
+  ],
+  "oracle": [
+    {
+      "path": "oracle/internal/records/cdn_files.go",
+      "bytes": 14914,
+      "sha256": "07b5f8fa5d3772d112ba77d6f926bed078e8283acac2ec4da3ab70039f117d48"
+    },
+    {
+      "path": "oracle/internal/records/container/ranges.go",
+      "bytes": 7963,
+      "sha256": "8a19e10f8f06e54011fa52ffc66edcdebde2cf9dd3412ca5a68816a7dc6ffcc4"
+    },
+    {
+      "path": "oracle/internal/records/container/ranges_test.go",
+      "bytes": 12057,
+      "sha256": "1d6a5c14d6f80ab61ab72e04f634d9477574f94e09e857263c49571218ed5925"
+    },
+    {
+      "path": "oracle/internal/records/local_session.go",
+      "bytes": 3732,
+      "sha256": "23085c9c3ecfc4e8b471b61d38445f84c482fc6204b3dfbbf70171ee92eda3ff"
+    },
+    {
+      "path": "oracle/internal/records/resource/budget.go",
+      "bytes": 3461,
+      "sha256": "a26b9c547d113d3492b53017c450ce984ac23b6de82a70fd1903c75e92049701"
+    },
+    {
+      "path": "oracle/internal/records/resource/budget_test.go",
+      "bytes": 2427,
+      "sha256": "a3aac864a65be661ac5700a35a2136ab6c64783003f9f5bf1e79cfde1342b503"
+    }
+  ],
+  "predecessors": [
+    {
+      "path": ".tmp/remote-reader-r10-1-20261015/freeze.json",
+      "sha256": "488d817be5d6d388f2c3fbae889fa53680eeafab56e00e349e9cdc3b78eb75dc"
+    },
+    {
+      "path": ".tmp/data-admission-r11-1-20261015/freeze.json",
+      "sha256": "854c1243e33cd788f727687b6b4db22d6069e7c5a60bb24565570063447c8cc3"
+    },
+    {
+      "path": ".tmp/encoded-span-r12-20261015/freeze.json",
+      "sha256": "d88d7bc321b8bfe54636f0b55967862ebbef6de4f6429de4c26699aa070f94e4"
+    },
+    {
+      "path": ".tmp/encoded-span-r12-1-20261015/freeze.json",
+      "sha256": "bf98a6e7140f5257242ad7b82887157e6090bc1f91d159d0cb270f034ce3fffe"
+    },
+    {
+      "path": ".tmp/encoded-span-r12-2-20261015/freeze.json",
+      "sha256": "beb94c19364efff011a30c2d13dff2b0837932d9cd2a4a93cfcaea59be83166f"
+    }
+  ],
+  "rust": "NOT_RUN",
+  "windows": "NOT_RUN",
+  "defaultData": "NOT_CONNECTED"
+}

@@ -381,6 +381,18 @@ jobs:
       - name: Run real local Data installation and catalog fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-data-installation --one-shot -- test --locked --offline -p lycheedev-data --test installed_parity -j 1
+      - name: Run encoded range compatibility fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-range --one-shot -- test --locked --offline -p lycheedev-data --test range_parity -j 1
+      - name: Run BLTE span ownership and validation fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-blte --one-shot -- test --locked --offline -p lycheedev-data --lib blte:: -j 1
+      - name: Run local CASC encoded span ownership fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-casc-span --one-shot -- test --locked --offline -p lycheedev-data --lib casc::span_tests:: -j 1
       - name: Run local Data domain fixtures independently
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-data-domain --one-shot -- test --locked --offline -p lycheedev-data --test local_domain_parity -j 1
@@ -480,6 +492,9 @@ jobs:
       - name: Run controlled selection pin and parent read fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-selection-control --one-shot -- test --locked --offline -p lycheedev-core --lib selection::controlled_tests -j 1
+      - name: Run independent selection and typed row budget fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-selection-supplemental --one-shot -- test --locked --offline -p lycheedev-core --lib selection::supplemental_tests -j 1
       - name: Run target cancellation before symbolic resolution
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1

@@ -13,7 +13,9 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
 - Current behavioral oracle: tagged Go v3.2.2, peeled commit
   `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`, not moving main. Prior v3.2.1 `10b561db5706702cd42e047eaeed4ccb5e825351` and v3.2.0
   `3057a9666ab078270b63c7f06de748069b0d1f4b` remain historical test oracles.
-  Apply the cumulative 3.2.1 and 3.2.2 increment matrices without relabeling old results or changing release versions.
+  Apply the cumulative 3.2.1 and 3.2.2 increment matrices without relabeling old results. The user subsequently authorized Rust candidate version
+  3.5.0 with beta distribution configuration; this does not authorize publication,
+  tags or external npm channel changes, and does not change the Go behavior oracle.
 - Reuse existing Rust code when differential evidence supports it; decide
   retain/adapt/replace per module. Do not restart indiscriminately.
 - Only host language and Source engine change: Rust with EmmyLua direct analysis

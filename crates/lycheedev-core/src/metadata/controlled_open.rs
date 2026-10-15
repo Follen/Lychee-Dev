@@ -176,26 +176,51 @@ impl Metadata {
         key: &str,
         control: &OperationControl,
     ) -> Result<T> {
-        self.read_controlled_observed(key, control, || {})
+        self.read_controlled_with_check(key, control, || Ok(()))
     }
+    /// Preserve typed read diagnostics while checking an independent caller
+    /// budget inside every row-read wait. This does not extend the deadline.
+    pub fn read_controlled_with_check<T: DeserializeOwned>(
+        &self,
+        key: &str,
+        control: &OperationControl,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<T> {
+        self.read_controlled_observed_with_check(key, control, check, || {})
+    }
+    #[cfg(test)]
     fn read_controlled_observed<T: DeserializeOwned>(
         &self,
         key: &str,
         control: &OperationControl,
+        on_busy: impl FnMut(),
+    ) -> Result<T> {
+        self.read_controlled_observed_with_check(key, control, || Ok(()), on_busy)
+    }
+    fn read_controlled_observed_with_check<T: DeserializeOwned>(
+        &self,
+        key: &str,
+        control: &OperationControl,
+        mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
     ) -> Result<T> {
-        control.check()?;
+        metadata_check(control, &mut check)?;
         self.connection.busy_timeout(Duration::ZERO)?;
         let result = (|| {
-            let bytes: Option<Vec<u8>> =
-                checked_sql(control, control.deadline(), &mut on_busy, || {
+            let bytes: Option<Vec<u8>> = checked_sql_with_check(
+                control,
+                control.deadline(),
+                &mut check,
+                &mut on_busy,
+                || {
                     self.connection
                         .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
                             row.get(0)
                         })
                         .optional()
-                })?;
-            control.check()?;
+                },
+            )?;
+            metadata_check(control, &mut check)?;
             let value = match bytes {
                 Some(raw) => serde_json::from_slice(&raw)?,
                 None => {
@@ -206,7 +231,7 @@ impl Metadata {
                     ));
                 }
             };
-            control.check()?;
+            metadata_check(control, &mut check)?;
             Ok(value)
         })();
         let restore = self
