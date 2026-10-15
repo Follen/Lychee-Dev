@@ -7,6 +7,31 @@ import (
 	"time"
 )
 
+// Slot enablement belongs to the current goal and its original deadline. A
+// replacement runtime may request another reload before any bind publication;
+// retain the original control request and pending business evidence throughout.
+func (d *Driver) requestSlotReload(ctx context.Context) error {
+	runtime := d.State.Identity.Runtime
+	r := d.State.Reload
+	if r != nil && r.Phase != "complete" {
+		if r.From == runtime || r.Phase != "binding" {
+			return ErrPending
+		}
+		r.From, r.Phase, r.SlotEnablement = runtime, "intent", true
+	} else {
+		budget := d.State.ConnectBudget
+		if ref, _, _ := d.goalBudget(); ref != nil {
+			budget = *ref
+		}
+		d.State.Reload = &ReloadAttempt{Request: "slots-" + runtime, From: runtime, Phase: "intent", Automatic: true, SlotEnablement: true, ReconcilePending: true, RecoveryBudget: budget}
+	}
+	d.Waiting = ""
+	if err := d.Save(ctx, "slot_enable_reload_intent"); err != nil {
+		return err
+	}
+	return errProgress
+}
+
 // A queued key does not prove delivery. After the report is durable, a missing
 // release receipt can be reconciled by destroying the old runtime. Keep the
 // original exchange and deadline; the ordinary reload path still requires fresh

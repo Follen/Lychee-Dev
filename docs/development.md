@@ -84,7 +84,7 @@ stage 用于本机验证，不是可发布包。安装后通过公共 CLI 的 `l
 
 `release/version.json` 是版本来源，`node tools/version.mjs --write` 同步相关文件。当前开发基线名不会自动修改 TOC、CLI 或 npm 版本。
 
-`release/npm-channel.json` 固定发行渠道；用户已授权 3.2.1 直接发布到 `latest`。`latest` 渠道在发布后核验目标版本；`next` 渠道可用 `preserveLatest` 指定需要保持的正式版本。后续改变渠道仍须有用户明确授权。
+`release/npm-channel.json` 固定发行渠道；用户已授权 3.2.2 直接发布到 `latest`。`latest` 渠道在发布后核验目标版本；`next` 渠道可用 `preserveLatest` 指定需要保持的正式版本。后续改变渠道仍须有用户明确授权。
 
 发布使用 `.github/workflows/toolkit-release.yml`：固定干净提交，取得所需 CI 结果，校验许可和源码，构建 Windows 包及 corresponding source，完成重建比较、摘要封存和隔离安装；随后 OIDC 发布、回读 registry，再创建 GitHub Release。
 

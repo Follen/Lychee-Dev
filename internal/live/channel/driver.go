@@ -68,6 +68,7 @@ type State struct {
 
 type ReloadAttempt struct {
 	Automatic        bool           `json:"automatic,omitempty"`
+	SlotEnablement   bool           `json:"slotEnablement,omitempty"`
 	RecoveryBudget   *DurableBudget `json:"recoveryBudget,omitempty"`
 	ReconcilePending bool           `json:"reconcilePending,omitempty"`
 	Request          string         `json:"request"`
@@ -252,6 +253,17 @@ func (d *Driver) Connect(ctx context.Context) error {
 		return nil
 	}
 	if d.State.Transaction == nil {
+		// Startup can enable slots that this runtime still cannot load. Inspect
+		// before reserving a bind slot, including replacement-runtime recovery.
+		i := d.State.Identity
+		e := bridge.SlotEnvelope{Runtime: i.Runtime, Owner: d.State.Owner, Fence: 1, Index: i.NextSlot, GUID: i.GUID, Build: i.Build, Action: "bind"}
+		input, err := d.observeInput(ctx, e, 0)
+		if err != nil {
+			return err
+		}
+		if input.SlotReloadRequired {
+			return d.requestSlotReload(ctx)
+		}
 		if err := d.begin(ctx, "bind", d.State.Owner, nil); err != nil {
 			return err
 		}

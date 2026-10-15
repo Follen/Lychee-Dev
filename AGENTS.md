@@ -2,7 +2,7 @@
 
 ## Project baseline
 
-Lychee Dev Toolkit is a Go CLI, a Lua workbench addon, an Agent skill and an npm distribution. The current development baseline is 3.2.1; release/version.json remains the version authority. Windows amd64 is the shipped platform.
+Lychee Dev Toolkit is a Go CLI, a Lua workbench addon, an Agent skill and an npm distribution. The current development baseline is 3.2.2; release/version.json remains the version authority. Windows amd64 is the shipped platform.
 
 Read these current documents:
 
@@ -57,7 +57,7 @@ Run go build ./... and go vet ./... after code edit batches, followed by affecte
 
 Check tools/version.mjs --check and the Skill contract when their inputs change. Do not repeat successful checks unless a new change, actual failure or unresolved issue requires it.
 
-Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; the user authorized 3.2.1 on latest. Future channel changes require explicit user authorization. Published artifacts are immutable.
+Do not change npm tags while merging code or cleaning docs. Release through the pinned workflow and channel manifest; the user authorized 3.2.2 on latest. Future channel changes require explicit user authorization. Published artifacts are immutable.
 
 Temporary work belongs in ignored .tmp/<task>/ and is removed when the task ends. Keep reusable tests in tests/ and current documentation concise; do not create permanent run diaries or archive copies for routine work.
 

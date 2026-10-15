@@ -64,6 +64,7 @@ CLI 不硬编码发送默认值。缺少任一有效键时返回 `input_binding_
 | guid、build | 角色与构建 |
 | sampleMillis | 当前宿主 uptime 采样毫秒 |
 | inputBlocked、reason | 是否阻塞及具体原因；ready 时为 false 和空字符串 |
+| slotReloadRequired | 可选布尔；启动时启用过当前角色的受管槽，需由 CLI 重载后再绑定 |
 | bindings | 实际有效的 wake、reload 两键 |
 | escapeLimit | 固定为 0；任何正值不能授权当前输入 |
 | inputAttempt | 最近回调诊断，不是执行回执，也不授权重发 |
@@ -97,6 +98,17 @@ BootstrapMailbox 的 `bootstrap` 字段使用二进制记录 kind=6，包含 sch
 CLI 从当前 Lua 路径读取它；这些静态启动事实没有 INPUT 的新鲜度保证。
 只有当前 Mailbox.input 可以授权自动按键。
 
+主插件初始化槽运行时时，检查当前角色 GUID 下的 500 个槽启用设置。只处理槽编号、
+版本和协议元数据均匹配的受管槽；对禁用槽调用 EnableAddOn，复查成功后统一 SaveAddOns。
+检查不加载槽，不占用槽，也不新增轮询。启用或保存失败走启动错误诊断，不发布就绪 INPUT。
+bridge 关闭时仍准备启用设置，但不创建 INPUT 采样或 Mailbox。
+
+本次启动有成功保存的启用修改时，`Mailbox.input.slotReloadRequired=true` 保持到当前
+runtime 结束。它独立于 `inputBlocked`，不能阻止重载动作本身。CLI 在发布 bind 槽前读取
+这个状态，通过原连接记录重载意图，沿原期限取得新鲜 INPUT 并发送独立重载键；新 runtime
+再次检查后才绑定。已启用全部槽时不写设置、不请求重载。已有重载在新 runtime 又遇到该
+状态时继续原重载请求，保留最初的待恢复交易；已提交或结果未知的输入仍不重放。
+
 `live doctor` 默认只读：检查目标选择、受管安装、500 槽、窗口占用、内存定位、启动核、
 业务运行时、已发现槽数和输入状态。结果含逐项 state、detail、nextStep。
 指定 installation/PID 或 CON 时，顶层 `doctor` 复用相同检查，不实现另一套规则。
@@ -112,6 +124,7 @@ CLI 从当前 Lua 路径读取它；这些静态启动事实没有 INPUT 的新�
 | 原项目已有 CON | 恢复原连接及原请求，不新建竞争连接 |
 | 其他项目占用 | 报告原占用；不抢占、不删除日志或槽预约 |
 | 当前协议已加载且 INPUT ready | 正常绑定或通过独立重载键激活已安装的更新 |
+| INPUT 的 slotReloadRequired=true | 启动已启用受管槽；connect/resume 沿原 CON 和期限重载，再绑定新 runtime |
 | 改名前的二键运行时，INPUT 新鲜且 escapeLimit=0 | 读取实际 reload 绑定，记入原 CON 后发一次重载键；观察新协议后绑定 |
 | 未加载，或旧运行时没有可验证的二键 INPUT | 保留目标和 CON，返回 manual_reload_required；由用户在选定窗口手动 /reload 一次 |
 | 客户端尚未发现全部 500 槽 | 明确要求重启选定客户端，不循环 reload |

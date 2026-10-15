@@ -123,7 +123,7 @@ func (d *Driver) Continue(ctx context.Context) (result error) {
 				return observeErr
 			}
 			if observeErr == nil && candidate != nil {
-				if err = d.pendingObservation(d.RecoverRuntime(ctx, *candidate)); err == nil {
+				if err = d.pendingObservation(d.RecoverRuntime(ctx, *candidate)); err == nil || errors.Is(err, errProgress) {
 					continue
 				}
 				if errors.As(err, &blocked) {

@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.1 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.2 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
@@ -73,6 +73,8 @@ Wago 的 coverage.complete 表示当前窗口耗尽，本地 snapshot 保留完�
 Forever 扫描主模块 `.text` 的可读区间，保留短读前缀，对剩余部分按页有界补读。所有命中先解析 RIP，再按目标根去重并验证 Lua/Mailbox；多个有效根报告歧义。扫描缺口与读取失败写入覆盖证据，部分覆盖下成功定位不代表全范围唯一。
 
 **输入路径：** 500 个不可重用的 LoD 槽承载信封；正式执行键触发 prepare → challenge → commit，独立重载键负责切换运行时。普通编辑框透传两个有效绑定，CLI 使用新鲜 INPUT 授权输入，不发送 Esc 或聊天文字。玩家按键优先：所有键松开且连续500ms没有键盘事件后重新核验INPUT；已开始的组合键先完成并抬键，不在修饰键按下时等待。
+
+主插件启动时检查当前角色的受管槽启用设置，启用禁用槽并保存；有修改时通过 `Mailbox.input.slotReloadRequired` 请求 CLI 重载。CLI 在发布 bind 前处理请求，沿原 CON 和期限重载后重绑；已有重载和待恢复交易继续保留。启动检查不加载槽，不修改其他插件，也不增加轮询。
 
 **身份与竞争：** 先固定 installation、PID、进程创建时间、HWND、build 和 product，再绑定 GUID、runtime、owner、fence。每个进程独立连接；共享安装使用短发布锁和持久槽预约，等待执行或回执时不占发布锁。
 

@@ -223,6 +223,9 @@ func (r *DoctorResult) inspectInput(input InputObservation) {
 	} else {
 		r.add("live.input", "ok", "execute "+input.Bindings.Wake+", reload "+input.Bindings.Reload, "")
 	}
+	if input.SlotReloadRequired {
+		r.add("live.slot_activation", "blocked", "startup enabled managed slots for this character; reload required", "connect or resume the original CON to reload and bind a fresh runtime")
+	}
 	// The latest callback explains a failure even when current INPUT is ready.
 	// It is neither an execution receipt nor authorization to repeat input.
 	if attempt := input.InputDiagnostic; attempt != nil {

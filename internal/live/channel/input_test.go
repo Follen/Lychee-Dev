@@ -165,7 +165,8 @@ func TestFocusWaitResumesOriginalSlotWithoutEscape(t *testing.T) {
 	if err = d.Connect(context.Background()); !errors.Is(err, ErrPending) {
 		t.Fatal(err)
 	}
-	if b.sends != 1 || b.before != 2 {
+	// One startup-slot check plus blocked and resumed input observations.
+	if b.sends != 1 || b.before != 3 {
 		t.Fatal("unknown slot input was retried")
 	}
 }

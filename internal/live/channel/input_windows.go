@@ -116,7 +116,7 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 			return ErrPending
 		}
 
-		if *s.InputBlocked {
+		if *s.InputBlocked || slotAction && s.SlotReloadRequired {
 			return ErrPending
 		}
 		if a.Kind == "reload" {
