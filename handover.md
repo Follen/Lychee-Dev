@@ -1,11 +1,13 @@
-更新日期：2026-10-15，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+更新日期：2026-10-16，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
 
 ## 当前交付：3.2.3 发行
 
-- 用户已授权合入并推送main、版号加一和发布npm。本轮目标3.2.3，沿用latest；沿用用户此前“npm发布之后，直接安装到本机”的要求，发行完成后通过受管update同步本机。文件安装不扩展为新增游戏输入或Live连接。
-- 当前改动位于main，已与origin/main核对一致，基线f298633；没有本任务PR，直接在当前分支提交。另一个Rust PR及保留worktree不属于本轮。主代理负责版本同步、完整套件、提交推送、版本标签和正式流水线；前述实现/实测/限定复核已经完成。
-- release/version.json及npm-channel清单与派生文件均为3.2.3。本地build/vet、Lua5.1必需完整Go套件（2947项pass事件、42项既有可选skip、0fail）、93项Node测试、版本/Skill/导入/发行输入检查全部通过。3.2.3包和远端标签尚不存在；本机更新plan确认1份Skill和7个客户端addon均为受管3.2.2。
-- 下一步：完整检查通过后提交main并推送，固定v3.2.3标签触发toolkit-release.yml，等发布及registry验收完成后更新本交接并清理本轮临时材料。
+- 用户授权的合入并推送main、版号加一和npm发布已完成：3.2.3沿用latest。按用户此前“npm发布之后，直接安装到本机”的要求，正式发布后也已完成本机受管update。
+- 本次已直接提交并推送main，实现提交`3766f9c`；没有本任务PR，另一个Rust PR及保留worktree不属于本轮。`v3.2.3`固定同一提交；主代理完成正式流水线、registry核验、本机更新和正式包复验，当前没有待交接任务。
+- release/version.json及npm-channel清单与派生文件均为3.2.3。本地build/vet、Lua5.1必需完整Go套件（2947项pass事件、42项既有可选skip、0fail）、93项Node测试、版本/Skill/导入/发行输入检查全部通过。
+- [正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38762706792)全部成功，包含必需CI、CGO、正式包构建、源码重建、真实LuaLS/Source、Windows隔离安装、摘要门禁、OIDC发布及registry重新安装验收；[main CI](https://github.com/Follen/Lychee-Dev/actions/runs/38762648214)也全部成功。独立registry回读确认`latest=3.2.3`、`next=3.1.2`，integrity和provenance元数据存在，不声称完成provenance密码学验证。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.3)六项产物齐全。
+- 本机受管update返回`complete=true`，CLI、1份Skill和7个客户端addon均为`current`。PATH实际运行3.2.3、commit=`3766f9c`、workspaceDirty=false。Skill需新Agent上下文，游戏内addon需后续reload；本轮文件安装没有新增Live连接或游戏输入，不计入新的七产品实机覆盖。
+- 已安装正式CLI按原pin复验：35-ID SQL返回35个唯一ID、无缺失，8组克隆名一致；spell info441776返回“致命一击”，元数据预算经3次扩容从128到320 MiB。缺密钥分区仍为partial/complete=false。SQL capture为`CAP-513f9257a9e0de402211d45b8ae37ef156881045cfe5ef7589a3dd8f8a198737`，spell info为`CAP-462699f3c27acb457edf99f86b51ea568606d829b7f41c29060ac9f3e13cd49f`。已清理本轮`.tmp/release-3.2.3`，CLI captures保留；本次发行和本机更新全部完成。
 
 ## 当前任务：SpellName 查询元数据预算
 

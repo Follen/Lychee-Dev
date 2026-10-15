@@ -1,10 +1,10 @@
 # 待办与验证范围
 
-基线：3.2.3；更新日期：2026-10-15。发行版本源为 3.2.3，授权渠道为 `latest`。
+基线：3.2.3；更新日期：2026-10-16。发行版本源为 3.2.3，授权渠道为 `latest`。
 
 ## 待办
 
-- [x] SpellName查询修复：紧凑索引、SQL数值IN优化及Windows动态内存预算均已实现并验证。上限按可用内存和工作区并发容量确定，保留/元数据/临时缓冲按需扩容。原35-ID SQL返回35/35，8组克隆名一致；spell info实际元数据预算从128 MiB经3次扩容到320 MiB，本地单条和JSONL通过。build/vet、受影响Data/vault/CLI套件、Skill检查通过；缺密钥仍标partial。尚未提交或发布，本机正式CLI仍为原3.2.2。详见[当前任务](handover.md#当前任务spellname-查询元数据预算)。
+- [x] SpellName查询修复：紧凑索引、SQL数值IN优化及Windows动态内存预算均已实现并验证。上限按可用内存和工作区并发容量确定，保留/元数据/临时缓冲按需扩容。原35-ID SQL返回35/35，8组克隆名一致；spell info实际元数据预算从128 MiB经3次扩容到320 MiB，本地单条和JSONL通过。完整Lua必需Go套件和93项Node测试通过；缺密钥仍标partial。已随3.2.3提交`3766f9c`推送main并发布至latest，本机CLI、Skill及7个客户端addon受管更新完成；已安装正式CLI复验35-ID SQL和spell info通过，详见[当前交付](handover.md#当前交付323-发行)。
 
 - [x] 3.2.2发行：[PR #16](https://github.com/Follen/Lychee-Dev/pull/16)及必需CI通过，已合并main；`v3.2.2`固定`0bec60e`，[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38725056854)全部成功，registry回读确认`latest=3.2.2`、`next=3.1.2`，[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.2)六项产物齐全。
 - [x] 按用户授权，在3.2.2正式发布后完成本机受管更新：PATH CLI为3.2.2、commit=`0bec60e`、workspaceDirty=false，Skill及7个客户端addon均为current、complete=true；Skill需新Agent上下文，游戏内addon需后续reload，本轮不计作新的实机验收。
