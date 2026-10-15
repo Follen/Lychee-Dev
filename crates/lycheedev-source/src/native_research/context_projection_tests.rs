@@ -1,16 +1,29 @@
 // The original no-retention path is the byte-for-byte oracle. These tests do
 // not normalize rows, order, digest, analysis, XML maps or semantic receipts.
 fn context_projection_fixture() -> ResearchSession {
+    context_projection_load_fixture(true)
+}
+fn context_projection_load_fixture(complete_load:bool) -> ResearchSession {
     let control=OperationControl::default();
+    // Positive entry cases must finish loading before the explicit entry can
+    // run. Keep the former recursive/unknown-call and use-before-definition
+    // inputs below as negative cases rather than weakening the entry assertion.
+    let target=if complete_load {
+        "\u{feff}-- 中文 😀\r\nfunction Target(x)\r\n if x then Other(nil) end\r\n return Other(x)\r\nend; function Other(x) return x end\r\nAlias=Target\r\n"
+    } else {
+        "\u{feff}-- 中文 😀\r\nfunction Target(x)\r\n if x then Target(nil) end\r\n return Other(x)\r\nend\r\nAlias=Target\r\n"
+    };
+    let second=if complete_load {"target.lua\nalias.lua\nFrames.xml\na-callers.lua\nz-shadow.lua\n"}
+        else {"a-callers.lua\nFrames.xml\ntarget.lua\nz-shadow.lua\n"};
     let files=BTreeMap::from([
-        ("target.lua".into(),"\u{feff}-- 中文 😀\r\nfunction Target(x)\r\n if x then Target(nil) end\r\n return Other(x)\r\nend\r\nAlias=Target\r\n".into()),
+        ("target.lua".into(),target.into()),
         ("a-callers.lua".into(),"local Alias=Target\nAlias(1)\nTarget(2)\nlocal function Outer() Target(3) end\n".into()),
         ("alias.lua".into(),"Alias(4)\n".into()),
         ("z-shadow.lua".into(),"local function Target() end\nTarget()\nlocal function Caller() Target() end\n".into()),
     ]);
     let documents=BTreeMap::from([
         ("One.toc".into(),"target.lua\na-callers.lua\nalias.lua\nz-shadow.lua\nFrames.xml\n".into()),
-        ("Two.toc".into(),"a-callers.lua\nFrames.xml\ntarget.lua\nz-shadow.lua\n".into()),
+        ("Two.toc".into(),second.into()),
         ("Frames.xml".into(),"\u{feff}<Ui>\r\n<Frame name=\"Template\" virtual=\"true\"><Scripts><OnLoad>local s = &quot;😀&quot;&#10;Tar&#103;et(self)</OnLoad></Scripts></Frame>\r\n<Frame name=\"Actual\" inherits=\"Template\"/>\r\n</Ui>".into()),
     ]);
     ResearchSession::prepare(SnapshotRequest{files,load_documents:documents,environment_documents:BTreeMap::new(),
@@ -51,6 +64,7 @@ fn context_projection_preserves_all_rows_digests_coverage_unicode_xml_and_entrie
     assert_context_projection_equal(&session,&query,None);
     for program in &session.xml.programs {
         let graph=session.prepared.build_xml_plan("context-load",program.clone(),None,control).unwrap();
+        assert!(graph.native_invocations.as_ref().unwrap().control.complete,"positive fixture must finish loading before entry");
         assert_context_projection_equal(&session,&query,Some(&graph));
         let entry=session.prepared.entry_catalog(control).unwrap().iter().find(|entry|entry.closure.file=="target.lua"&&entry.start_line==2).unwrap();
         for argument in [EntryArgument::Nil,EntryArgument::Boolean(true)] {
@@ -59,6 +73,21 @@ fn context_projection_preserves_all_rows_digests_coverage_unicode_xml_and_entrie
             assert_eq!(graph.native_invocations.as_ref().unwrap().entries.len(),1);
             assert_context_projection_equal(&session,&query,Some(&graph));
         }
+    }
+}
+
+#[test]
+fn context_projection_incomplete_load_does_not_fabricate_an_explicit_entry() {
+    let session=context_projection_load_fixture(false);
+    let control=session.prepared.operation_control();
+    let entry=session.prepared.entry_catalog(control).unwrap().iter().find(|entry|entry.closure.file=="target.lua"&&entry.start_line==2).unwrap();
+    for program in &session.xml.programs {
+        let request=EntryRequest{candidate:entry.id.clone(),load_occurrence:None,creation_context:None,arguments:EntryArguments::Exact(vec![EntryArgument::Nil])};
+        let graph=session.prepared.build_xml_plan("incomplete-context-entry",program.clone(),Some(request),control).unwrap();
+        let facts=graph.native_invocations.as_ref().unwrap();
+        assert!(!facts.control.complete,"original load failure remains explicit");
+        assert!(!facts.control.boundaries.is_empty(),"incomplete loading must retain its reason");
+        assert!(facts.entries.is_empty(),"do not invent an entry after a stopped load");
     }
 }
 

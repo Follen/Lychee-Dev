@@ -22,7 +22,9 @@ async function install() {
   const token = randomBytes(8).toString('hex');
   const files = new Map();
   for (const name of ['LycheeInputLab.toc','Protocol.lua','Lab.lua']) files.set(name, await readFile(path.join(root,'tests/bridge-input/addon',name)));
-  files.set('MatrixSymbol.lua', await readFile(path.join(root,'addon/Bridge/MatrixSymbol.lua')));
+  const encoder = await readFile(path.join(root,'tests/fixtures/legacy-addon/MatrixSymbol.lua'));
+  if (sha(encoder) !== '53c774b4c9c789720396be1efc5892307c5340f75b0ef36eaa2195b5b36f5eb5') throw Error('Historical lab QR encoder identity changed');
+  files.set('MatrixSymbol.lua', encoder);
   files.set('Config.lua', Buffer.from(`local _, ns = ...\nns.Config = { token = "${token}" }\n`));
   // Refuse unknown or edited directories. This lab never writes into Lychee Dev.
   let exists = false;

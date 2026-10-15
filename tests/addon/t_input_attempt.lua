@@ -1,5 +1,6 @@
 local Env,client=...
 local ns=Env.LoadWorkbench()
+local loadInputSlot=ns.Compat.LoadInputSlot
 ns.Release="test"
 local state={options={bridgeEnabled=false}}
 ns.Persistence={Current=function()return state end,Bridge=function()return state end}
@@ -7,19 +8,18 @@ local ready=true
 ns.Platform={ObserveBuild=function()return {build="70000",product=client}end,
     ObserveActor=function()return {guid="Player-1-1",character="Tester",realm="Realm"}end,
     ObserveInputState=function()return ready,not ready and "input_keyboard_focus" or nil end}
-ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",submit="ALT-CTRL-SHIFT-F12",close="ALT-CTRL-["}end}
+ns.ReceiverBindings={Current=function()return {wake="ALT-CTRL-F12",reload="ALT-CTRL-F11"}end}
 ns.ActivityView={Receiving=function()end,Begin=function()end,Finish=function()end,Collecting=function()end}
-ns.StartupBeacon={Stop=function()end}
 IsPlayerInWorld=function()return true end
 C_Timer.NewTimer=function()return {Cancel=function()end}end
 ns.Compat.GetAddOnMetadata=function(name,key)
     if key=="Version" then return ns.Release end
-    if key=="X-Lychee-Transport" then return "memory-slot-v3" end
+    if key=="X-Lychee-Transport" then return "Lycheedev mailbox protocol v1" end
     return tostring(tonumber(name:match("(%d+)$")))
 end
 Env.LoadAddon("Modules/AutomationHistory.lua",ns)
 local frames=Env.framesCreated
-for _,file in ipairs({"MemoryProtocol","CaptureWriter","SlotProtocol","InputProtection","ProbeExecution","InputSignal","InputState","SlotRuntime"}) do Env.LoadAddon("Bridge/"..file..".lua",ns) end
+for _,file in ipairs({"MemoryProtocol","CaptureWriter","SlotProtocol","InputProtection","ProbeExecution","InputState","SlotRuntime"}) do Env.LoadAddon("Bridge/"..file..".lua",ns) end
 assert(Env.framesCreated==frames,"diagnostics introduced idle frames")
 assert(ns.SlotRuntime.Start() and not ns.Mailbox)
 assert(not ns.SlotRuntime.Wake() and Env.framesCreated==frames,"disabled wake created work")
@@ -27,10 +27,19 @@ state.options.bridgeEnabled=true
 assert(ns.SlotRuntime.Start())
 local function diagnostic()
     local d=ns.SlotRuntime.InputDiagnostic and ns.SlotRuntime.InputDiagnostic()
-    assert(d and d.schema=="lycheedev.input-attempt.v1","wake refusal lost its diagnostic")
+    assert(d and d.schema=="Lycheedev mailbox protocol v1","wake refusal lost its diagnostic")
     assert(ns.InputState.Snapshot():find('"inputAttempt":',1,true),"diagnostic missing from current INPUT")
     return d
 end
+local addonLoader=C_AddOns.LoadAddOn
+C_AddOns.LoadAddOn=function()return nil,"DISABLED" end
+ns.Compat.LoadInputSlot=loadInputSlot
+local disabled,disabledReason=ns.SlotRuntime.Wake()
+assert(not disabled and disabledReason=="slot_addon_disabled","disabled slot lost its stable cause")
+local disabledAttempt=diagnostic()
+assert(disabledAttempt.stage=="load_failed" and disabledAttempt.reason=="slot_addon_disabled" and not disabledAttempt.received and disabledAttempt.slot==1,
+    "disabled load became a generic diagnostic or receive evidence")
+C_AddOns.LoadAddOn=addonLoader
 ns.Compat.LoadInputSlot=function()return nil,"raw loader error: private suffix" end
 local ok,reason=ns.SlotRuntime.Wake()
 assert(not ok and reason=="raw loader error: private suffix","changed actual error")
@@ -56,7 +65,7 @@ assert(not ns.InputState.Snapshot():find("999999",1,true))
 local runtime=ns.SlotRuntime.InputDiagnostic().runtime
 ns.Compat.LoadInputSlot=function(name)
     local index=tonumber(name:match("(%d+)$"))
-    ns.SlotRuntime.Receive(index,{schema="lycheedev.slot.v3",index=index,runtime=runtime,owner=string.rep("2",32),fence=1,
+    ns.SlotRuntime.Receive(index,{schema="Lycheedev mailbox protocol v1",index=index,runtime=runtime,owner=string.rep("2",32),fence=1,
         nonce=string.rep("3",32),ticket=string.rep("0",32),action="bind",guid="Player-1-1",build="70000"})
     return true
 end

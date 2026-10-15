@@ -5,7 +5,7 @@ for _,name in ipairs({"CaptureWriter","MemoryProtocol","SlotProtocol"}) do
 end
 
 local runtime,owner,ticket=string.rep("1",32),string.rep("2",32),string.rep("3",32)
-local mailbox={schema="lycheedev.mailbox.v1",release="test",runtime=runtime}
+local mailbox={schema="Lycheedev mailbox protocol v1",release="test",runtime=runtime}
 local actor={guid="Player-1-1",character="Tester",realm="Realm"}
 local executions=0
 local engine=ns.SlotProtocol.Create({runtime=runtime,release="test",build="70000",product=client,mailbox=mailbox,
@@ -13,10 +13,14 @@ local engine=ns.SlotProtocol.Create({runtime=runtime,release="test",build="70000
     execute=function(fn,budget,done)executions=executions+1;done(true,fn())end})
 assert(engine.Describe()==mailbox.identity and type(mailbox.identity)=="string")
 assert(mailbox.receipts~=engine.Snapshot().receipts and mailbox.operations==nil and mailbox.fn==nil and mailbox.code==nil)
+assert(mailbox.receipts.schema==mailbox.schema and mailbox.bodies.schema==mailbox.schema,
+    "fresh public maps must retain a non-token schema key before any receipt")
+assert(mailbox.receipts[owner]==nil and mailbox.bodies[ticket]==nil and next(engine.Snapshot().receipts)==nil,
+    "map metadata became a receipt, BODY or private protocol fact")
 local serial=0
 local function envelope(action)
     serial=serial+1
-    return {schema="lycheedev.slot.v3",index=engine.NextSlot(),runtime=runtime,owner=owner,fence=1,
+    return {schema="Lycheedev mailbox protocol v1",index=engine.NextSlot(),runtime=runtime,owner=owner,fence=1,
         nonce=string.format("%032x",serial),ticket=ticket,action=action,guid=actor.guid,build="70000"}
 end
 local function send(e)
@@ -57,13 +61,17 @@ local record,reason=engine.Receive(duplicate.index,duplicate)
 assert(record==binding and reason=="slot_nonce_reused" and op.body==body)
 local confirm=envelope("confirm");local _,proof=send(confirm)
 assert(proof.state=="reported" and proof.reportBytes==op.bytes and proof.reportChecksum==op.checksum)
-local replacement={schema="lycheedev.mailbox.v1",release="test",runtime=runtime}
+local replacement={schema="Lycheedev mailbox protocol v1",release="test",runtime=runtime}
 engine.AttachMailbox(replacement);mailbox=replacement
 assert(mailbox.identity==engine.Snapshot().descriptor and mailbox.bodies[ticket]==body and mailbox.receipts[bind.nonce]==binding)
+assert(mailbox.receipts.schema==replacement.schema and mailbox.bodies.schema==replacement.schema,
+    "reattached public maps lost their structural metadata")
 local invalid=envelope("release");invalid.reportBytes=1;invalid.reportChecksum=0
 assert(select(2,send(invalid)).reason=="slot_release_mismatch" and mailbox.bodies[ticket]==body)
 local release=envelope("release");release.reportBytes=proof.reportBytes;release.reportChecksum=proof.reportChecksum
 assert(select(2,send(release)).state=="released" and mailbox.bodies[ticket]==nil and engine.Snapshot().operations[ticket].body==nil and op.body==body)
+assert(next(mailbox.bodies)=="schema" and next(mailbox.bodies,"schema")==nil,
+    "last BODY release removed the public map's schema key")
 assert(select(2,send(envelope("unbind"))).state=="unbound")
 assert(mailbox.identity==engine.Snapshot().descriptor and engine.Snapshot().owner==nil)
 for key,value in pairs(mailbox) do
@@ -72,35 +80,41 @@ for key,value in pairs(mailbox) do
 end
 local receiptCount=0
 for key,record in pairs(mailbox.receipts) do
-    assert(#key==32 and key:match("^[0-9a-f]+$") and type(record)=="string")
-    receiptCount=receiptCount+1
+    if key=="schema" then
+        assert(record==mailbox.schema and engine.Snapshot().receipts.schema==nil)
+    else
+        assert(#key==32 and key:match("^[0-9a-f]+$") and type(record)=="string")
+        receiptCount=receiptCount+1
+    end
 end
-assert(receiptCount<=200)
+assert(receiptCount<=ns.SlotProtocol.Count)
 -- One fresh table for another runtime, with no retained result/receipt history.
-local fresh={schema="lycheedev.mailbox.v1",release="test",runtime=string.rep("f",32)}
+local fresh={schema="Lycheedev mailbox protocol v1",release="test",runtime=string.rep("f",32)}
 local nextEngine=ns.SlotProtocol.Create({runtime=fresh.runtime,release="test",build="70000",product=client,mailbox=fresh,
     actor=function()return actor end,encode=ns.CaptureWriter.Encode})
 assert(nextEngine.Describe()==fresh.identity and fresh.identity~=mailbox.identity)
-assert(next(fresh.receipts)==nil and next(fresh.bodies)==nil and fresh.input==nil)
+assert(next(fresh.receipts)=="schema" and next(fresh.receipts,"schema")==nil
+    and next(fresh.bodies)=="schema" and next(fresh.bodies,"schema")==nil and fresh.input==nil)
 assert(fresh.identity:sub(1,8)=="LYCMEM06" and fresh.identity:find("LYCEND06",1,true))
-assert(fresh.identity:find('"schema":"lycheedev.slot.identity.v2"',1,true))
+assert(fresh.identity:find('"schema":"Lycheedev mailbox protocol v1"',1,true))
 -- Prior generations consume the physical slot but cannot bind or publish a receipt.
-for i,schema in ipairs({"lycheedev.slot.v1","lycheedev.slot.v2"}) do
+for i,schema in ipairs({"lycheedev.slot.v1","lycheedev.slot.v2","lycheedev.slot.v3"}) do
     local old=envelope("bind");old.schema=schema;old.runtime=fresh.runtime;old.index=i
     local record,reason=nextEngine.Receive(i,old)
     assert(not record and reason=="slot_envelope_invalid" and not nextEngine.Snapshot().owner)
-    assert(next(fresh.receipts)==nil and next(fresh.bodies)==nil and executions==1)
+    assert(next(fresh.receipts)=="schema" and next(fresh.receipts,"schema")==nil
+        and next(fresh.bodies)=="schema" and next(fresh.bodies,"schema")==nil and executions==1)
 end
 
 -- Public snapshots and caller-owned prepare tables must not retain authority.
 for _,source in ipairs({"snapshot","prepare"}) do
-    local public={schema="lycheedev.mailbox.v1",release="test",runtime=runtime}
+    local public={schema="Lycheedev mailbox protocol v1",release="test",runtime=runtime}
     local ran,forged=0,0
     local isolated=ns.SlotProtocol.Create({runtime=runtime,release="test",build="70000",product=client,mailbox=public,
         actor=function()return actor end,encode=ns.CaptureWriter.Encode,compile=loadstring,
         execute=function(fn,budget,done)ran=ran+1;assert(budget==10);done(true,fn())end})
     local function request(index,action,nonce)
-        return {schema="lycheedev.slot.v3",index=index,runtime=runtime,owner=owner,fence=1,
+        return {schema="Lycheedev mailbox protocol v1",index=index,runtime=runtime,owner=owner,fence=1,
             nonce=nonce,ticket=ticket,action=action,guid=actor.guid,build="70000"}
     end
     local binding=request(1,"bind",string.rep("4",32));assert(isolated.Receive(1,binding))

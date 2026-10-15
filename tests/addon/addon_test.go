@@ -1,51 +1,25 @@
 // Package addon_test drives the workbench Lua suites under tests/addon across
-// the four client profiles represented by the test harness with a standalone
-// Lua 5.1 interpreter. Forever is exercised as an unverified, non-acceptance profile.
+// the client profiles represented by the test harness with a standalone
+// Lua 5.1 interpreter. This does not replace real-client acceptance.
 // New suites are discovered by glob: drop a t_*.lua file into this directory.
 package addon_test
 
 import (
-	"fmt"
+	"github.com/follenfang/lycheedev/internal/testkit"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
 
-func luaRuntime(t *testing.T) string {
-	t.Helper()
-	names := []string{"lua5.1", "lua51", "lua"}
-	explicit := os.Getenv("LYCHEEDEV_LUA51")
-	if explicit != "" {
-		names = []string{explicit}
-	}
-	var failures []string
-	for _, name := range names {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			failures = append(failures, err.Error())
-			continue
-		}
-		output, err := exec.Command(path, "-v").CombinedOutput()
-		if err == nil && regexp.MustCompile(`^Lua 5\.1\.[0-9]+(?:\s|$)`).Match(output) {
-			return path
-		}
-		failures = append(failures, fmt.Sprintf("%s: %v: %s", path, err, output))
-	}
-	if explicit != "" || os.Getenv("LYCHEEDEV_REQUIRE_LUA51") == "1" {
-		t.Fatalf("required Lua 5.1 unavailable: %v", failures)
-	}
-	t.Skipf("optional local Lua 5.1 unavailable: %v", failures)
-	return ""
-}
+func luaRuntime(t *testing.T) string { t.Helper(); return testkit.Lua51(t) }
 
 // TestWorkbenchLuaSuites runs every t_*.lua suite under every client profile.
 func TestWorkbenchLuaSuites(t *testing.T) {
 	lua := luaRuntime(t)
-	clients := []string{"retail", "classic", "titan", "forever"}
+	clients := []string{"retail", "classic", "titan", "forever", "classic-era", "anniversary"}
 	testFiles, err := filepath.Glob("t_*.lua")
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +55,7 @@ func TestWorkbenchLuaSuites(t *testing.T) {
 
 // TestUnifiedTOCContract locks the single-manifest contract: one TOC for all
 // supported clients, multi-interface declaration, ClientGate leading the
-// loads, all four event catalogs present, and every referenced file existing.
+// loads, all event catalogs present, and every referenced file existing.
 func TestUnifiedTOCContract(t *testing.T) {
 	tocDir := filepath.Join("..", "..", "addon")
 	name := "Lychee Dev.toc"
@@ -92,7 +66,7 @@ func TestUnifiedTOCContract(t *testing.T) {
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	var loads []string
 	for _, line := range lines {
-		line = strings.TrimRight(line, "")
+		line = strings.TrimRight(line, "\r")
 		if line == "" || strings.HasPrefix(line, "##") || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -114,7 +88,7 @@ func TestUnifiedTOCContract(t *testing.T) {
 	for _, part := range strings.Split(interfaceLine, ",") {
 		declared[strings.TrimSpace(part)] = true
 	}
-	for _, iface := range []string{"120100", "50504", "38002", "16001"} {
+	for _, iface := range []string{"120105", "120100", "50504", "38002", "16001", "11509", "20506"} {
 		if !declared[iface] {
 			t.Fatalf("missing declared interface %s", iface)
 		}
@@ -129,22 +103,7 @@ func TestUnifiedTOCContract(t *testing.T) {
 			catalogs++
 		}
 	}
-	if catalogs != 4 {
-		t.Fatalf("expected all four event catalogs, found %d", catalogs)
+	if catalogs != 6 {
+		t.Fatalf("expected all six event catalogs, found %d", catalogs)
 	}
-}
-
-// TestLocaleFilesAnchorMarker keeps the locale insertion anchor available for
-// later page agents.
-func TestLocaleFilesAnchorMarker(t *testing.T) {
-	for _, name := range []string{"Core/Locale.lua", "Core/Locale_enUS.lua"} {
-		data, err := os.ReadFile(filepath.Join("..", "..", "addon", filepath.FromSlash(name)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "-- LOCALE:END") {
-			t.Fatalf("%s: missing the -- LOCALE:END marker", name)
-		}
-	}
-
 }

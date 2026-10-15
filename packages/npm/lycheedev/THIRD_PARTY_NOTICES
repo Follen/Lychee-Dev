@@ -27,7 +27,8 @@ Other files in the pinned LuaLS archive retain their upstream notices and
 licenses. The release inventory records every file's SHA-256 and byte length.
 
 ===============================================================================
-luaqrcode (adapted) - payload/addon/Bridge/MatrixSymbol.lua
+luaqrcode (adapted) - historical test/lab source only; not a runtime payload
+Source: tests/fixtures/legacy-addon/MatrixSymbol.lua
 https://github.com/speedata/luaqrcode
 License: BSD-3-Clause
 ===============================================================================

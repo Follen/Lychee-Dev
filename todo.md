@@ -1,3 +1,4 @@
+<!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Lua/Go/Rust execution and final four audit loops remain pending. -->
 # Rust migration checklist
 
 Authority for decisions, status and evidence: [handover.md](handover.md). This checklist gives execution order only. The first delivery is documentation; full implementation is now authorized. Unchecked work does not authorize game input, publication or main merge. Existing Rust code and historical passing tests do not check these boxes automatically.

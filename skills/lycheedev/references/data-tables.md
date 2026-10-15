@@ -161,20 +161,33 @@ EXPLAIN binds sources without scanning rows; it may still prepare table
 bytes and definitions. EXPLAIN ANALYZE executes and reports scan counts/work/
 charged bytes; charged bytes are not process peak memory.
 
-Budgets: at most 32 physical tables, 512 MiB cumulative raw table content,
-10 million execution work units, 64 MiB execution accounting and 16 MiB JSON
+Budgets: at most 32 physical tables, 10 million execution work units,
+64 MiB execution accounting and 16 MiB JSON
 evidence. Budget failures yield no partial query result. Narrow the query when
 appropriate to the request; do not change the pinned build or imply full
 coverage from a narrower successful query.
 
-These SQL limits sit alongside shared query-resource limits across preparation
-and reading: 512 MiB retained/scratch reservation, 128 MiB metadata, 100 million
-decode/work units, 4,096 network requests and 1 GiB response-body bytes.
+These SQL limits sit alongside one shared resource budget across preparation
+and reading. On Windows, after workspace admission, the query takes half the
+smaller available physical memory, process commit capacity and virtual address
+space, divided by the workspace's concurrent-query capacity (normally two;
+one for serialized or exclusive admission). This is the query's memory ceiling.
+Retained/scratch accounting starts at up to 512 MiB and metadata at up to
+128 MiB, each reduced when the ceiling is lower. They grow on demand, rounded to
+64 MiB boundaries within the ceiling and freshly checked headroom. The ceiling stays fixed
+for that query; unused capacity is not allocated. Non-Windows development uses
+the fixed 512/128 MiB defaults. Work/network caps remain 100 million decode/work
+units, 4,096 network requests and 1 GiB response-body bytes.
+For a single table, a numeric `IN` list of constants or parameters on its indexed
+identity column uses equality lookups; the table still needs shared preparation.
 Failed candidates consume work/network budget; a new table does not reset it.
 `records.query_resource_budget` (exit 3) identifies this shared limit, distinct
 from `query.budget_exceeded` in the SQL executor or `command.deadline`.
 The returned resource counts are logical charges, not wire bytes, peak heap or
-RSS. `--max-bytes` is a per-file bound, not a knob for raising these shared limits;
+RSS. `memoryBudget` reports the mode, concurrent capacity, memory ceiling,
+approved retained/metadata limits, growth count and peak scratch reservation.
+Limit errors include the dimension, used/requested bytes or units and effective
+limit. `--max-bytes` is a per-file bound, not a knob for raising these shared limits;
 narrowing output alone may not reduce source preparation costs.
 
 SQL errors use `error.stage: query` with `query.invalid_syntax` or

@@ -10,7 +10,7 @@ import (
 
 func TestLuaReadyReceiptAtSmallFractionalScale(t *testing.T) {
 	payload := `{"schema":"lycheedev.signal.v1","release":"2.0.5","kind":"ready","sessionNonce":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestId":"","product":"retail","build":"12.1.0.69933","character":"Paladin","realm":"Realm","guid":"Player-1-123","sequence":1,"inputReady":true,"runtimeEpoch":1}`
-	modules := runLuaEncoder(t, findLua51(t), "harness.lua", "../../addon/Bridge/MatrixSymbol.lua", []byte(payload))
+	modules := runLuaEncoder(t, findLua51(t), "harness.lua", "../fixtures/legacy-addon/MatrixSymbol.lua", []byte(payload))
 	cells := len(modules) + 8
 	for _, factor := range []float64{1.28, 1.42, 1.6, 1.8, 2, 2.35, 3} {
 		side := int(float64(cells) * factor)

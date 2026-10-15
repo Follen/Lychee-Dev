@@ -3,29 +3,6 @@ local ns = Env.LoadWorkbench()
 assert(ns.Persistence.Load(), "persistence did not load")
 local W = ns.Workbench
 local theme = ns.Theme
-local profile = { wake = "ALT-CTRL-]", submit = "ALT-CTRL-SHIFT-]", close = "ALT-CTRL-[" }
-ns.ReceiverBindings = {
-    Current = function() return profile end,
-    Display = function(action) return profile[action] end,
-    Configure = function(action, chord)
-        if chord == profile.close and action ~= "close" then
-            return nil, "receiver_binding_conflict"
-        end
-        profile[action] = chord
-        return profile
-    end,
-    ConfigureProfile = function(proposed)
-        if proposed.wake==proposed.close or proposed.submit==proposed.close then return nil,"receiver_binding_conflict" end
-        for key,value in pairs(proposed) do profile[key]=value end
-        return profile
-    end,
-    Reset = function()
-        profile.wake = "ALT-CTRL-]"
-        profile.submit = "ALT-CTRL-SHIFT-]"
-        profile.close = "ALT-CTRL-["
-        return profile
-    end,
-}
 assert(Env.framesCreated == 0, "theme or workbench built frames while disabled")
 assert(theme.window[1] == .055 and theme.text[1] == .940
     and theme.accent[1] == .835, "workbench tokens differ from Design.md")

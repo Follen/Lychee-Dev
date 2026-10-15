@@ -1,0 +1,19 @@
+{
+  "schema": "lycheedev.historical-addon-fixtures.v1",
+  "sourceCommit": "00fd643908badaf282a5ddbd1e06a88c0e291d29",
+  "state": "explicit_test_or_lab_only",
+  "files": [
+    {
+      "path": "tests/fixtures/legacy-addon/Definitions.lua",
+      "originalPath": "addon/Bridge/Definitions.lua",
+      "bytes": 82,
+      "sha256": "f40b7e3d6addf1b064c8e18a779fb5c1484ad1e7e1b21e1d36aa7ea509cd31da"
+    },
+    {
+      "path": "tests/fixtures/legacy-addon/MatrixSymbol.lua",
+      "originalPath": "addon/Bridge/MatrixSymbol.lua",
+      "bytes": 50208,
+      "sha256": "53c774b4c9c789720396be1efc5892307c5340f75b0ef36eaa2195b5b36f5eb5"
+    }
+  ]
+}

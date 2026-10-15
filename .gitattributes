@@ -1,5 +1,7 @@
 * text=auto eol=lf
-addon/Bridge/Definitions.lua text eol=lf
+tests/fixtures/legacy-addon/Definitions.lua text eol=lf
+# Historical source custody is byte-exact, including original line endings.
+tests/history/legacy-ui-00fd643/source/** -text
 # Research seals cover the original bytes, including captured JSON line endings.
 # Raw investigation evidence stays in Git, outside release source archives.
 docs/toolkit/research export-ignore

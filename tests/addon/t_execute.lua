@@ -87,3 +87,17 @@ assert(silentOk and silentResult == L.COMPLETED_NO_OUTPUT and silentTree == nil,
     "silent runs did not report completion")
 
 print("execute ok")
+
+for _,body in ipairs({
+    'error(setmetatable({}, {__tostring=function() error("format failure") end}))',
+    'local k=setmetatable({}, {__tostring=function() error("format failure") end}); return {[k]=1, [{}]=2}',
+}) do
+    _G.formatSideEffects=0
+    local callOK, ok, result = pcall(ns.Execute, 'formatSideEffects=formatSideEffects+1; print("before formatting"); '..body)
+    assert(callOK and not ok and result:find("before formatting",1,true) and result:find("format",1,true),
+        "formatting failure escaped the execution result boundary")
+    assert(_G.formatSideEffects==1,"formatting failure replayed chunk")
+end
+
+local fullOK,fullError=ns.Execute('print(string.rep("x",50000)); error(setmetatable({}, {__tostring=function() error("format failure") end}))')
+assert(not fullOK and #fullError<=44000 and fullError:find("format failure",1,true),"full output hid formatting diagnostic")

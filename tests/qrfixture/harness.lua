@@ -1,4 +1,4 @@
--- Offline harness for the real add-on QR encoder.
+-- Offline harness for the byte-pinned historical QR encoder fixture.
 --
 -- The first argument is the path to AutomationQR.lua. The payload is read from
 -- stdin so the process boundary preserves the fixture's UTF-8 bytes.

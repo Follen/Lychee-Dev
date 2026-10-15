@@ -1,4 +1,4 @@
--- Functional page activation only. Visual quality requires separate WGC review.
+-- Functional page activation only. Visual quality requires separate real-client review.
 local probe = ...
 assert(probe:Async(60))
 local ns = LycheeDevInternal
@@ -7,8 +7,7 @@ assert(ns.Persistence.Bridge() == LycheeToolkitBridgeDB, "wrong_report_scope")
 local timers, results = {}, {}
 local pages = { "runner", "objects", "events", "trace", "diagnostics", "exports", "automation", "about" }
 local function clear()
-    assert(not ns.Receiver.IsActive(), "receiver_active_during_execution")
-    assert(ns.ReceiptView.Current() == nil, "optical_overlay_during_execution")
+    assert(not ns.InputProtection.IsActive(), "input_protected_during_execution")
 end
 clear()
 assert(probe:OnCleanup(function()
@@ -25,12 +24,11 @@ for index, key in ipairs(pages) do
 end
 timers[#timers + 1] = C_Timer.NewTimer(45, assert(probe:Callback(function()
     clear()
-    assert(ns.Workbench.ShowSettings())
-    local page = assert(ns.Workbench.GetSettingsPage())
-    for _, action in ipairs({ "wake", "submit", "close" }) do
-        assert(page.bindings[action].button.label:GetText() == ns.ReceiverBindings.Display(action), "binding_display_mismatch")
+    local profile = assert(ns.ReceiverBindings.Current())
+    for _, action in ipairs({ "wake", "reload" }) do
+        assert(GetBindingAction(profile[action], true) == "LYCHEEDEV_" .. string.upper(action), "binding_action_mismatch")
     end
-    results[#results + 1] = "settings"
+    results[#results + 1] = "native_bindings"
 end)))
 timers[#timers + 1] = C_Timer.NewTimer(55, assert(probe:Callback(function()
     clear()

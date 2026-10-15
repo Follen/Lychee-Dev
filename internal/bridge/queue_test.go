@@ -72,14 +72,14 @@ func TestProbeQueueCodec(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestShippedQueueEmpty(t *testing.T) {
-	data, err := os.ReadFile("../../addon/Bridge/Definitions.lua")
+func TestHistoricalQueueFixtureEmpty(t *testing.T) {
+	data, err := os.ReadFile("../../tests/fixtures/legacy-addon/Definitions.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
 	definitions, err := DecodeProbeQueue(bytes.NewReader(data))
 	if err != nil || len(definitions) != 0 {
-		t.Fatalf("release queue is not canonical and empty: %v", err)
+		t.Fatalf("historical queue fixture is not canonical and empty: %v", err)
 	}
 }
 

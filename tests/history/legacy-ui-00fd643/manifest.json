@@ -1,0 +1,1051 @@
+{
+  "schema": "lycheedev.legacy-ui-source.v1",
+  "sourceCommit": "00fd643908badaf282a5ddbd1e06a88c0e291d29",
+  "currentGoOracle": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "currentRustVersion": "3.5.0",
+  "currentRustChannel": "beta",
+  "state": "historical_source_only",
+  "executableEntry": null,
+  "files": [
+    {
+      "originalPath": "addon/Bridge/Definitions.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/Definitions.lua.source",
+      "bytes": 82,
+      "originalSHA256": "f40b7e3d6addf1b064c8e18a779fb5c1484ad1e7e1b21e1d36aa7ea509cd31da",
+      "historicalSHA256": "f40b7e3d6addf1b064c8e18a779fb5c1484ad1e7e1b21e1d36aa7ea509cd31da",
+      "gitBlob": "c37c788790ed1877da860dc6040a3f5ec65db3d7",
+      "reason": "Only the historical queue codec source reader is redirected to exact test-only bytes. Optional installation queue guards and malicious/nonempty rejection tests remain. Current packaging explicitly rejects a Definitions source file.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/Identity.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/Identity.lua.source",
+      "bytes": 5124,
+      "originalSHA256": "7f449701afbe8ff31d05d9c4697fa3caa8816cf618d9ee3d1c08e86d5b1f0d11",
+      "historicalSHA256": "7f449701afbe8ff31d05d9c4697fa3caa8816cf618d9ee3d1c08e86d5b1f0d11",
+      "gitBlob": "cdf96c33bc69621723e00432369e2db28ba98d6c",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/InputProtocol.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/InputProtocol.lua.source",
+      "bytes": 4248,
+      "originalSHA256": "31ff9b147682e9fd7d8683443acb96db419bffe0f0b019a8a3409cfd9d2627d1",
+      "historicalSHA256": "31ff9b147682e9fd7d8683443acb96db419bffe0f0b019a8a3409cfd9d2627d1",
+      "gitBlob": "e221ab8f366b688bf110e33a858ac30d31eea072",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/InputSignal.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/InputSignal.lua.source",
+      "bytes": 1701,
+      "originalSHA256": "b08b9b1cb7196abb042ec8adcce38489d43c0dd5f0b98f092aaa946d56d35254",
+      "historicalSHA256": "b08b9b1cb7196abb042ec8adcce38489d43c0dd5f0b98f092aaa946d56d35254",
+      "gitBlob": "64dfa9252236e5a577e24d5492becc17ddbdcc49",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/Investigation.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/Investigation.lua.source",
+      "bytes": 8119,
+      "originalSHA256": "2c67c3065d49f18580edb0e654b1a0f2329778010fb121d9db25480e9f3cdb30",
+      "historicalSHA256": "2c67c3065d49f18580edb0e654b1a0f2329778010fb121d9db25480e9f3cdb30",
+      "gitBlob": "1bd55325147e3a70f62f5dac8d6f777a886ed1e0",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/MatrixSymbol.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/MatrixSymbol.lua.source",
+      "bytes": 50208,
+      "originalSHA256": "53c774b4c9c789720396be1efc5892307c5340f75b0ef36eaa2195b5b36f5eb5",
+      "historicalSHA256": "53c774b4c9c789720396be1efc5892307c5340f75b0ef36eaa2195b5b36f5eb5",
+      "gitBlob": "305cfd51852cfc8e2e3e04a9dfca83b7ec195c4a",
+      "reason": "QR decoder fixtures and the explicit bridge-input lab still need this encoder. They now read identical test-only source, with the BSD notice retained; the current addon does not load QR.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/ProbeQueue.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/ProbeQueue.lua.source",
+      "bytes": 11770,
+      "originalSHA256": "fcf480881340680511faa0f68194ae0c6ec812a057f6c1282630a61b639807aa",
+      "historicalSHA256": "fcf480881340680511faa0f68194ae0c6ec812a057f6c1282630a61b639807aa",
+      "gitBlob": "225055c7545a88b9c633d3c694df18b81ebdcc2a",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/ProbeRunner.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/ProbeRunner.lua.source",
+      "bytes": 17957,
+      "originalSHA256": "5e76bb8070039d9d12abbcb229567b957a0fb10f47c5628eff7e273383fb3471",
+      "historicalSHA256": "5e76bb8070039d9d12abbcb229567b957a0fb10f47c5628eff7e273383fb3471",
+      "gitBlob": "62b3c39a06755eee43a48499cc3c860d9d69cfd2",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/ReceiptView.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/ReceiptView.lua.source",
+      "bytes": 14677,
+      "originalSHA256": "ee4741bf18ffdcf32c7223054d6024309f9b1bdfe34aaa45f2e35b6772bfdeb3",
+      "historicalSHA256": "ee4741bf18ffdcf32c7223054d6024309f9b1bdfe34aaa45f2e35b6772bfdeb3",
+      "gitBlob": "d420864d5bd1b460f210cfab471c32a8cac07e81",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/Receiver.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/Receiver.lua.source",
+      "bytes": 16207,
+      "originalSHA256": "fd3b4b73e15414bfd33a62ac25133690bf423488369f6128591c93a2a8a3e868",
+      "historicalSHA256": "fd3b4b73e15414bfd33a62ac25133690bf423488369f6128591c93a2a8a3e868",
+      "gitBlob": "426b477f7b4a931657bb1f83be2ad923a41ee106",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/Reentry.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/Reentry.lua.source",
+      "bytes": 15794,
+      "originalSHA256": "657040e158ca079148a7c39c088b2bdef9cfbf772c83e296b51ccded1d49ff2d",
+      "historicalSHA256": "657040e158ca079148a7c39c088b2bdef9cfbf772c83e296b51ccded1d49ff2d",
+      "gitBlob": "d39981ebc053751c53e46efe3934b0fba52a0d89",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/ReportStore.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/ReportStore.lua.source",
+      "bytes": 13010,
+      "originalSHA256": "4ca09e53acc7a0df9ab78b2376d2e0bceb9ab3705ed857424fc79634b9293ca4",
+      "historicalSHA256": "4ca09e53acc7a0df9ab78b2376d2e0bceb9ab3705ed857424fc79634b9293ca4",
+      "gitBlob": "42419cdca0b4f3566d6cb6a4dd19d841759b8b4f",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/Session.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/Session.lua.source",
+      "bytes": 8677,
+      "originalSHA256": "4d50cd3a68fa6d2eb56b2da6843b454b7a55475d22df8f23d2d1fb9c06d98e9e",
+      "historicalSHA256": "4d50cd3a68fa6d2eb56b2da6843b454b7a55475d22df8f23d2d1fb9c06d98e9e",
+      "gitBlob": "1a4df3517862234706c25046e38424f2cec12352",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "addon/Bridge/StartupBeacon.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/addon/Bridge/StartupBeacon.lua.source",
+      "bytes": 2936,
+      "originalSHA256": "260d3ff2dfdd9163ac5aaf4304dd6cb4b0af08fc58db7d338111d9f9b59b2734",
+      "historicalSHA256": "260d3ff2dfdd9163ac5aaf4304dd6cb4b0af08fc58db7d338111d9f9b59b2734",
+      "gitBlob": "979634e702cd8ad70a1189e6fd7d8b73c1041f8e",
+      "reason": "Old optical/UI signal protocol module: official TOC and current Go323 Lua never select it; all explicit and constructed legacy loaders are archived together.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/addon/addon_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/addon_test.go.source",
+      "bytes": 4626,
+      "originalSHA256": "efd4333b88d4016ed1055ab45fbc9b1583037039a8b2f7c3bbb4d37ada8714d7",
+      "historicalSHA256": "efd4333b88d4016ed1055ab45fbc9b1583037039a8b2f7c3bbb4d37ada8714d7",
+      "gitBlob": "ab31f5c701243be52c6f70e20fa98b1bdedda589",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/env.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/env.lua.source",
+      "bytes": 18445,
+      "originalSHA256": "d7792feec3bb5a0e73d937975fc3ff6f8149da8f76fdefbc1c9d342ada0f7fef",
+      "historicalSHA256": "d7792feec3bb5a0e73d937975fc3ff6f8149da8f76fdefbc1c9d342ada0f7fef",
+      "gitBlob": "7519296ff4384cf9b77802ca391e5b292ce43e4b",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_automation.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_automation.lua.source",
+      "bytes": 21966,
+      "originalSHA256": "49d59ecf7a4f32d53b842aafc348f8800f702e92f68cd67513a7f42ecd79f8a0",
+      "historicalSHA256": "49d59ecf7a4f32d53b842aafc348f8800f702e92f68cd67513a7f42ecd79f8a0",
+      "gitBlob": "357dbfa59acf46c797e2232dbd31901dd875c1ca",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_automation_history.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_automation_history.lua.source",
+      "bytes": 4238,
+      "originalSHA256": "1c47bd103f0dad073dcb2d9f2ed8dd3256cc87bbebbe37bf947aad314e4be6b4",
+      "historicalSHA256": "1c47bd103f0dad073dcb2d9f2ed8dd3256cc87bbebbe37bf947aad314e4be6b4",
+      "gitBlob": "b2d0c34cae48a058710df2f9d890325e0c738e9f",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_events.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_events.lua.source",
+      "bytes": 14818,
+      "originalSHA256": "80afd44785be9524601242bc0b136c280a96022f9bc0b198f289f8cf95fb9f12",
+      "historicalSHA256": "80afd44785be9524601242bc0b136c280a96022f9bc0b198f289f8cf95fb9f12",
+      "gitBlob": "82e07bf94eee0f6b4be0c61b2d7d5ee1024faa15",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_execute.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_execute.lua.source",
+      "bytes": 4300,
+      "originalSHA256": "96f9b4000a3b9471095b91667fa9e6b277cf99186ee1ca8ebcaab58a5440b71e",
+      "historicalSHA256": "96f9b4000a3b9471095b91667fa9e6b277cf99186ee1ca8ebcaab58a5440b71e",
+      "gitBlob": "fb8b95bac9c5ebd7aaf2b9aa867192cc8ff927cc",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_input_attempt.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_input_attempt.lua.source",
+      "bytes": 5033,
+      "originalSHA256": "3920367a3b40542ee7b6076171aef4af9539bfb2f511275b0b9679f3bb8b3b57",
+      "historicalSHA256": "3920367a3b40542ee7b6076171aef4af9539bfb2f511275b0b9679f3bb8b3b57",
+      "gitBlob": "4da7a9aa92880c0edd387a30df752b43bb4b1b02",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_input_binding_gate.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_input_binding_gate.lua.source",
+      "bytes": 7739,
+      "originalSHA256": "33270737c2f5ff783a4375c7d0300fa96b0b0134c0fe494e8fe9de572bfcdb35",
+      "historicalSHA256": "33270737c2f5ff783a4375c7d0300fa96b0b0134c0fe494e8fe9de572bfcdb35",
+      "gitBlob": "d97f4747fd7b1092bda10bb63328008d2784787a",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_input_protection.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_input_protection.lua.source",
+      "bytes": 6429,
+      "originalSHA256": "2b6dbc04bcb477346c8e3a65001d9f408f22e42220dbc5958514e3e5aa565676",
+      "historicalSHA256": "2b6dbc04bcb477346c8e3a65001d9f408f22e42220dbc5958514e3e5aa565676",
+      "gitBlob": "8a761b9017369dbae3d0bc62af875ba4808437df",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_input_state.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_input_state.lua.source",
+      "bytes": 4020,
+      "originalSHA256": "4e378dd93ab344cb33d2b0f78bcc6a7b3b3d1ff1787ecf319418e9386063e45f",
+      "historicalSHA256": "4e378dd93ab344cb33d2b0f78bcc6a7b3b3d1ff1787ecf319418e9386063e45f",
+      "gitBlob": "787aa23bde8b0069b4caa501b513d8c321f5cdd9",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_locale.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_locale.lua.source",
+      "bytes": 5177,
+      "originalSHA256": "cbb930b88a9270f8e4dd5535ba9140196d37c59ef6376656e4005e7189a214bc",
+      "historicalSHA256": "cbb930b88a9270f8e4dd5535ba9140196d37c59ef6376656e4005e7189a214bc",
+      "gitBlob": "d9d7d764918397a2d2205c2c42ee091e38279778",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_mailbox.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_mailbox.lua.source",
+      "bytes": 9285,
+      "originalSHA256": "855b3b3c01e87c029bab2d3ee157b6e9346702c2259e8668fd81211ed7f85997",
+      "historicalSHA256": "855b3b3c01e87c029bab2d3ee157b6e9346702c2259e8668fd81211ed7f85997",
+      "gitBlob": "72392014ef4a27b8bd61d9181ab813c6d0b2092c",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_objects.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_objects.lua.source",
+      "bytes": 24933,
+      "originalSHA256": "9d6e2612c0ed0a80a3fcffd08c18b9520a87dabc7e89e8fcdd5e37c0e37f9913",
+      "historicalSHA256": "9d6e2612c0ed0a80a3fcffd08c18b9520a87dabc7e89e8fcdd5e37c0e37f9913",
+      "gitBlob": "f93fb63bc74ec83154edec797e19cab3dea5eef1",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_run.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_run.lua.source",
+      "bytes": 9970,
+      "originalSHA256": "e0f38c7162e7a7cbec5caa1f75c0df70a83e72f5a47c8b1f893e59a833ab194d",
+      "historicalSHA256": "e0f38c7162e7a7cbec5caa1f75c0df70a83e72f5a47c8b1f893e59a833ab194d",
+      "gitBlob": "5d0118f3b1cf333013a6218b06680fe79f4d66a4",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_shell.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_shell.lua.source",
+      "bytes": 7906,
+      "originalSHA256": "ad73efc9b30c5d1311ffd0d35cb9a176589a2f74c750506e7b79392d36e19d18",
+      "historicalSHA256": "ad73efc9b30c5d1311ffd0d35cb9a176589a2f74c750506e7b79392d36e19d18",
+      "gitBlob": "379ace5d183034fb8b8c0e15871f727dd8e984ba",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_slot_protocol.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_slot_protocol.lua.source",
+      "bytes": 5727,
+      "originalSHA256": "18789f2bd75ab05f2af3acd2b8ebe121333036d41caf7d5def43ca9d72812f6b",
+      "historicalSHA256": "18789f2bd75ab05f2af3acd2b8ebe121333036d41caf7d5def43ca9d72812f6b",
+      "gitBlob": "c9ea713717916a82b96fb78277fffa76464df3d5",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_slot_runtime.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_slot_runtime.lua.source",
+      "bytes": 10857,
+      "originalSHA256": "8e39d510e46b31b5b8d1803195c5afc92d4d0ba53587927deb76ff74700d5c1e",
+      "historicalSHA256": "8e39d510e46b31b5b8d1803195c5afc92d4d0ba53587927deb76ff74700d5c1e",
+      "gitBlob": "b4b6038f2df70be7b5ef0369280d0dbaf36a3076",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_stores.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_stores.lua.source",
+      "bytes": 9523,
+      "originalSHA256": "207ee2ae46bf51faa1b57b6a0784b27a9e4ee1b2d4d66bd7d7322b249db225a1",
+      "historicalSHA256": "207ee2ae46bf51faa1b57b6a0784b27a9e4ee1b2d4d66bd7d7322b249db225a1",
+      "gitBlob": "07ca11462f01d024009ab37bd79d3157ccc2475b",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_trace.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_trace.lua.source",
+      "bytes": 19692,
+      "originalSHA256": "fc90405ad3cd2719f437f92c99d58ba0099318b6d63dd4f08fbac7fa00b3dc3f",
+      "historicalSHA256": "fc90405ad3cd2719f437f92c99d58ba0099318b6d63dd4f08fbac7fa00b3dc3f",
+      "gitBlob": "3105f1221ae4e41f985a780ac4590bf77457d07b",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_visual.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_visual.lua.source",
+      "bytes": 4596,
+      "originalSHA256": "6d325b61aa175ae831d8b854eca35fc1e2db33da142de843af274a8b0a48e38d",
+      "historicalSHA256": "6d325b61aa175ae831d8b854eca35fc1e2db33da142de843af274a8b0a48e38d",
+      "gitBlob": "10bb5676d77b8b1e17c83e6b264791044a97b544",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_input_signal.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_input_signal.lua.source",
+      "bytes": 4459,
+      "originalSHA256": "d6157f278ac97adc5f638239c6d91b74ee3d0dcbe454fd841bd890fc4842e36e",
+      "historicalSHA256": "d6157f278ac97adc5f638239c6d91b74ee3d0dcbe454fd841bd890fc4842e36e",
+      "gitBlob": "86b02f7bd10f02895c81f7ec76cf6632fb17e12d",
+      "reason": "Automatic Lua suite for the retired optical InputSignal; replaced by fixed Go323 input-mailbox, binding, focus and input-state suites, six profiles.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/addon/t_refresh_cost.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_refresh_cost.lua.source",
+      "bytes": 3798,
+      "originalSHA256": "2b70dd5990a8cd1fe56cf055b8fcd2c8e3d8babc2713f6756cf974bcf026009c",
+      "historicalSHA256": "2b70dd5990a8cd1fe56cf055b8fcd2c8e3d8babc2713f6756cf974bcf026009c",
+      "gitBlob": "33bf1b7db4686580d332fb6db9752beb1772412d",
+      "reason": "Historical hidden-refresh optimization experiment requires zero hidden timers, unlike the fixed Go323 addon. Original failing expectation retained, not changed to pass or silently imposed on the same-addon contract.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/acknowledge.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/acknowledge.lua.source",
+      "bytes": 4604,
+      "originalSHA256": "76856e96cea2cf8cec53dc8b3389a083cf17a0ebd2514d6c11fcbe0217359662",
+      "historicalSHA256": "76856e96cea2cf8cec53dc8b3389a083cf17a0ebd2514d6c11fcbe0217359662",
+      "gitBlob": "e30f02242c55ebc35611065369d7efff5c3bf3ff",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/acknowledge_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/acknowledge_test.go.source",
+      "bytes": 1707,
+      "originalSHA256": "182be8e4d786a404c466f83746d2677793dade63d561bc91c84c3331cc6d949f",
+      "historicalSHA256": "182be8e4d786a404c466f83746d2677793dade63d561bc91c84c3331cc6d949f",
+      "gitBlob": "d4d85d4dbfb7d2c210b725045b53d9266ccbc14f",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/archival_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/archival_test.go.source",
+      "bytes": 2315,
+      "originalSHA256": "d546d9834ec6eef869720d775ceb61dc000c6b6f2174f267cae756cd1285fa12",
+      "historicalSHA256": "d546d9834ec6eef869720d775ceb61dc000c6b6f2174f267cae756cd1285fa12",
+      "gitBlob": "e1e85b9bf9f7cadadfd228572e203e8ed6058c60",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/atomic_live.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/atomic_live.lua.source",
+      "bytes": 5229,
+      "originalSHA256": "18067b74d31ffaef59433fe267e63c5bfc4abb1133f7312166283b287e8a0c92",
+      "historicalSHA256": "18067b74d31ffaef59433fe267e63c5bfc4abb1133f7312166283b287e8a0c92",
+      "gitBlob": "4d8cc61db59f70e375366f80b7d8c83250ee94db",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/atomic_live_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/atomic_live_test.go.source",
+      "bytes": 1321,
+      "originalSHA256": "2017a820fd7809bb03aa50ad173b043e889dafff1acbbe1195d9da073db900a9",
+      "historicalSHA256": "2017a820fd7809bb03aa50ad173b043e889dafff1acbbe1195d9da073db900a9",
+      "gitBlob": "d5d31cc8517d4bce73d41e42fc186b44486f5e03",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/cleanup.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/cleanup.lua.source",
+      "bytes": 4245,
+      "originalSHA256": "f40532a2d15c58d9b90111729b8e74c85a6d244675652ca084304124e231a4b0",
+      "historicalSHA256": "f40532a2d15c58d9b90111729b8e74c85a6d244675652ca084304124e231a4b0",
+      "gitBlob": "be19d109bcb048b773cf34ec7e3fbd89761c169f",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/cleanup_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/cleanup_test.go.source",
+      "bytes": 1177,
+      "originalSHA256": "479e0112117a5376240fb0bcbb86fe8a5ac458cd6964dc8a01bf9592974cec91",
+      "historicalSHA256": "479e0112117a5376240fb0bcbb86fe8a5ac458cd6964dc8a01bf9592974cec91",
+      "gitBlob": "621d5b483aa1ec3bb19ef31d00581935e93e693b",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/connect.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/connect.lua.source",
+      "bytes": 4330,
+      "originalSHA256": "431e0d03205dd9f467753e9b17bb04709979ecd9bb52482baa5cd54844f79e4f",
+      "historicalSHA256": "431e0d03205dd9f467753e9b17bb04709979ecd9bb52482baa5cd54844f79e4f",
+      "gitBlob": "7c29c20c14d25a752747d2bf42222d56e0764146",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/connect_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/connect_test.go.source",
+      "bytes": 1057,
+      "originalSHA256": "0636716733757ae8d0825160b8c8289b8926aae195fd357e720240103efbcff6",
+      "historicalSHA256": "0636716733757ae8d0825160b8c8289b8926aae195fd357e720240103efbcff6",
+      "gitBlob": "302a0d709ad017501c89b63e70bc7bca4cab8154",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/identity.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/identity.lua.source",
+      "bytes": 9004,
+      "originalSHA256": "2887611a3e6e84c0d7fcc699490b05453eeae6b5ef0668fbb1a0cf3d674f757c",
+      "historicalSHA256": "2887611a3e6e84c0d7fcc699490b05453eeae6b5ef0668fbb1a0cf3d674f757c",
+      "gitBlob": "6fab68facf0f210135d5c3762f7c077ec01fbd9e",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/identity_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/identity_test.go.source",
+      "bytes": 5554,
+      "originalSHA256": "b51a55023128b667ab3568e2b7a72826022c53f302944131720b4fea71ab5da9",
+      "historicalSHA256": "b51a55023128b667ab3568e2b7a72826022c53f302944131720b4fea71ab5da9",
+      "gitBlob": "1d38f09997f1437065ece29711a7e54ee891afb6",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/input_wait.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/input_wait.lua.source",
+      "bytes": 2919,
+      "originalSHA256": "37ed05494f991f300b351adee488750488f4844d516163570a6f5c26f91dafc7",
+      "historicalSHA256": "37ed05494f991f300b351adee488750488f4844d516163570a6f5c26f91dafc7",
+      "gitBlob": "dfd517a8573fd7aa04b6868e0adec090dca4867f",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/investigation.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/investigation.lua.source",
+      "bytes": 4468,
+      "originalSHA256": "ab5f13fdc4d7e4ba2142aa7743a2335ec90923a1ddb14819d0e7f1208c425991",
+      "historicalSHA256": "ab5f13fdc4d7e4ba2142aa7743a2335ec90923a1ddb14819d0e7f1208c425991",
+      "gitBlob": "ab49200799fd9565ea5916fc9b034e25149d8a49",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/investigation_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/investigation_test.go.source",
+      "bytes": 1284,
+      "originalSHA256": "6b30e32e8ea89e9ff6cd9ddb68bf37df141ec2ce6949adb671dc88529f6aa7dc",
+      "historicalSHA256": "6b30e32e8ea89e9ff6cd9ddb68bf37df141ec2ce6949adb671dc88529f6aa7dc",
+      "gitBlob": "7a2d0d9721c565ad71576dc31b8c8f24245a0aa5",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/lifecycle.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/lifecycle.lua.source",
+      "bytes": 9983,
+      "originalSHA256": "e328cab11cac4a52fd4e2ae6f19a7f5b450f23375195e2182388684ab346a022",
+      "historicalSHA256": "e328cab11cac4a52fd4e2ae6f19a7f5b450f23375195e2182388684ab346a022",
+      "gitBlob": "c900df13198dd38162dd7bc88bc104530430731f",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/lifecycle_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/lifecycle_test.go.source",
+      "bytes": 413,
+      "originalSHA256": "0608574abe6309ed8c53ba13a3265535c0a09afcb336d84bbd1d3af6980e5215",
+      "historicalSHA256": "0608574abe6309ed8c53ba13a3265535c0a09afcb336d84bbd1d3af6980e5215",
+      "gitBlob": "fd79c114dca63f11b783a8a744c79aae4674f74e",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/loaded_ready.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/loaded_ready.lua.source",
+      "bytes": 4012,
+      "originalSHA256": "ce9745e5d84b6d2bc0093966661067bcb54e03ea59750079841fe604093e3d0f",
+      "historicalSHA256": "ce9745e5d84b6d2bc0093966661067bcb54e03ea59750079841fe604093e3d0f",
+      "gitBlob": "a62437afed7998ded906ad82be053079a5a4d045",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/loaded_ready_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/loaded_ready_test.go.source",
+      "bytes": 1833,
+      "originalSHA256": "f70f83b351ff1d003fc57ab222d4c14c09baca3551874564581f8179314e45de",
+      "historicalSHA256": "f70f83b351ff1d003fc57ab222d4c14c09baca3551874564581f8179314e45de",
+      "gitBlob": "599a006ba0949985cd59f09eda274194af490171",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/optical_pair.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/optical_pair.lua.source",
+      "bytes": 1657,
+      "originalSHA256": "11bd6cf0c08866e201edc421bef5baf9871743e276ff97c7d11605adfaf166d1",
+      "historicalSHA256": "11bd6cf0c08866e201edc421bef5baf9871743e276ff97c7d11605adfaf166d1",
+      "gitBlob": "8e980ecb06b2ee9767420cf12938b5241096d95d",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/optical_pair_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/optical_pair_test.go.source",
+      "bytes": 1441,
+      "originalSHA256": "b9debd1b86fef8d08e4bbe1777cb18dd5067e4468c8a2a3c36aebd8b68e64ca5",
+      "historicalSHA256": "b9debd1b86fef8d08e4bbe1777cb18dd5067e4468c8a2a3c36aebd8b68e64ca5",
+      "gitBlob": "81fb07aed3b4d03339ddbea083e36ecf76b6da83",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/persistence.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/persistence.lua.source",
+      "bytes": 6740,
+      "originalSHA256": "d68c7697cd46682b7c5149083449ee1e60710740ae91374aced3481ed108d9ea",
+      "historicalSHA256": "d68c7697cd46682b7c5149083449ee1e60710740ae91374aced3481ed108d9ea",
+      "gitBlob": "064aab64e76456922bdc427c190c414d3d2bba38",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/persistence_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/persistence_test.go.source",
+      "bytes": 1281,
+      "originalSHA256": "31a941361125574994951621c447ce18297871bfe537f6eddd3cd7b2f423d98d",
+      "historicalSHA256": "31a941361125574994951621c447ce18297871bfe537f6eddd3cd7b2f423d98d",
+      "gitBlob": "0eb6ba7cbfde2b35c8b80f6897791e0d7e7264e1",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/probe.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/probe.lua.source",
+      "bytes": 13472,
+      "originalSHA256": "8d819736bfb8ea55630a4f40732f5c486ae4436a9ac186e4faecc03799d92bb7",
+      "historicalSHA256": "8d819736bfb8ea55630a4f40732f5c486ae4436a9ac186e4faecc03799d92bb7",
+      "gitBlob": "c3702d37aab67e164c0ff7fa71c0741103cce507",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/probe_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/probe_test.go.source",
+      "bytes": 2017,
+      "originalSHA256": "cf95539c596b11e06aa5cd70137e22e17a6c60e6af878f4eff325addc801c175",
+      "historicalSHA256": "cf95539c596b11e06aa5cd70137e22e17a6c60e6af878f4eff325addc801c175",
+      "gitBlob": "3f99b7fb7249d353288aecfa3ae4d58b1161635f",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/queue.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/queue.lua.source",
+      "bytes": 4283,
+      "originalSHA256": "603716fe71bae625175d388867baa121c7c94dad16ef172cddf4eae611961bbe",
+      "historicalSHA256": "603716fe71bae625175d388867baa121c7c94dad16ef172cddf4eae611961bbe",
+      "gitBlob": "6116d537df7ba65dff86e62154cf2b0aeaf5453e",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/queue_ack.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/queue_ack.lua.source",
+      "bytes": 4025,
+      "originalSHA256": "8c8af5a94140267007179c195d358c6c82cf3cfe7749d915fdcc815d51207f38",
+      "historicalSHA256": "8c8af5a94140267007179c195d358c6c82cf3cfe7749d915fdcc815d51207f38",
+      "gitBlob": "c3295266254bfd0a705ab478a5fa01d5af8b6b21",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/queue_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/queue_test.go.source",
+      "bytes": 4317,
+      "originalSHA256": "ed318d87397a55d5bed9d095c3e6c4e3361ec618bb754b73e30017905fdf1a3f",
+      "historicalSHA256": "ed318d87397a55d5bed9d095c3e6c4e3361ec618bb754b73e30017905fdf1a3f",
+      "gitBlob": "8d2189ae23ccd3d075c2ea9bf0bb6787618d1410",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receipt_hide.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receipt_hide.lua.source",
+      "bytes": 7468,
+      "originalSHA256": "55a60e9d6351dbdab8561c04035f2c918e3a8eb9fc5c5924fee370f04991ed96",
+      "historicalSHA256": "55a60e9d6351dbdab8561c04035f2c918e3a8eb9fc5c5924fee370f04991ed96",
+      "gitBlob": "8d9dff741db8387da4eac6d35cc2985c23ae53f3",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receipt_hide_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receipt_hide_test.go.source",
+      "bytes": 557,
+      "originalSHA256": "7c8b72b56b4a2f35b43fe43fbd193f6c9b412d637c1aa498e55ea27516fce83c",
+      "historicalSHA256": "7c8b72b56b4a2f35b43fe43fbd193f6c9b412d637c1aa498e55ea27516fce83c",
+      "gitBlob": "4f1e836cb59c2046c92fb4026b68c53eaedb9aef",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receipt_recovery.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receipt_recovery.lua.source",
+      "bytes": 10042,
+      "originalSHA256": "eacc51c935bfa90d06c169124cedaf27c5eb230f90c12c299e526d826a5c549d",
+      "historicalSHA256": "eacc51c935bfa90d06c169124cedaf27c5eb230f90c12c299e526d826a5c549d",
+      "gitBlob": "5669c32c75f933c29e4671045f7ae732f6334862",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receipt_recovery_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receipt_recovery_test.go.source",
+      "bytes": 282,
+      "originalSHA256": "db2e96be66056fc2b22f2a34a219c2203a74d56be19dac1bb548e1c673e1f693",
+      "historicalSHA256": "db2e96be66056fc2b22f2a34a219c2203a74d56be19dac1bb548e1c673e1f693",
+      "gitBlob": "7c889078c78b2206dede5895e14d5fc274c5abdb",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receipt_reset.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receipt_reset.lua.source",
+      "bytes": 7820,
+      "originalSHA256": "9c67bb58f4e023e6a3f992e09744ab05b4dbb3937ebb098f22ffea5d95e40c62",
+      "historicalSHA256": "9c67bb58f4e023e6a3f992e09744ab05b4dbb3937ebb098f22ffea5d95e40c62",
+      "gitBlob": "725273895df548145956559925f851d812a0cfbd",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receipt_reset_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receipt_reset_test.go.source",
+      "bytes": 606,
+      "originalSHA256": "00b02fb423a9e8d04a3158a4aa77b7d0c07064206ce454bdd29344a9ef004656",
+      "historicalSHA256": "00b02fb423a9e8d04a3158a4aa77b7d0c07064206ce454bdd29344a9ef004656",
+      "gitBlob": "500a729bbfbd3075c5ceb62f3ec1751be00acf03",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receiver.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receiver.lua.source",
+      "bytes": 16862,
+      "originalSHA256": "a604630c243d06bcaf29416b92c924f81a8d9a6c2a91b2397368c018f22ee730",
+      "historicalSHA256": "a604630c243d06bcaf29416b92c924f81a8d9a6c2a91b2397368c018f22ee730",
+      "gitBlob": "6eeafd2f9c27a1d77b9f802427725443c3bfec5d",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receiver_rollback.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receiver_rollback.lua.source",
+      "bytes": 6741,
+      "originalSHA256": "7766256643100778348f4e558e29b6b64c8d1886601b0ce430768d6401d02e11",
+      "historicalSHA256": "7766256643100778348f4e558e29b6b64c8d1886601b0ce430768d6401d02e11",
+      "gitBlob": "d51631631a2b0513554c8c299ec6b9190527ded7",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/receiver_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receiver_test.go.source",
+      "bytes": 851,
+      "originalSHA256": "56e4eceb4e484f044443619f2a9a54f460351df9d3b37aa011a6ea70173fa90e",
+      "historicalSHA256": "56e4eceb4e484f044443619f2a9a54f460351df9d3b37aa011a6ea70173fa90e",
+      "gitBlob": "6b6642f85fc9487cf724ce78af6619e3b1c81145",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/reentry.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/reentry.lua.source",
+      "bytes": 12928,
+      "originalSHA256": "2f2bfb2565fe5278f0982c43e39369fb08f1d17a26d8997d410d4e68f696828b",
+      "historicalSHA256": "2f2bfb2565fe5278f0982c43e39369fb08f1d17a26d8997d410d4e68f696828b",
+      "gitBlob": "f07572cf3dc5eb00a766ad05d58f4b45e7b30b56",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/reentry_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/reentry_test.go.source",
+      "bytes": 1314,
+      "originalSHA256": "14b4b3ec6a4a57b1ffcdd6f9ee74a77bed5439e310a01360842c26de68676455",
+      "historicalSHA256": "14b4b3ec6a4a57b1ffcdd6f9ee74a77bed5439e310a01360842c26de68676455",
+      "gitBlob": "74628cff78793294d2ec5bf1cddffafff89fe4e0",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/runtime_epoch.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/runtime_epoch.lua.source",
+      "bytes": 2156,
+      "originalSHA256": "854a3aa821d4e5661627b386c1e1576c17bce0f8f937561677bbd867fa989642",
+      "historicalSHA256": "854a3aa821d4e5661627b386c1e1576c17bce0f8f937561677bbd867fa989642",
+      "gitBlob": "a1651277388c63e3a16042f1b06b3109f5e38e95",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/runtime_epoch_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/runtime_epoch_test.go.source",
+      "bytes": 1131,
+      "originalSHA256": "be609392d9ae4e102dfc03bab4ed668bb333273ee4c224359c13b585ef0db99f",
+      "historicalSHA256": "be609392d9ae4e102dfc03bab4ed668bb333273ee4c224359c13b585ef0db99f",
+      "gitBlob": "ea34e4ba1f49b02448749220ec5aaa172935882c",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/signal_helpers_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/signal_helpers_test.go.source",
+      "bytes": 1275,
+      "originalSHA256": "1dce3cb216ac71bd08b70e56ef9edb749b4bd2d7c6d7089bce0e08f893c6a9ca",
+      "historicalSHA256": "1dce3cb216ac71bd08b70e56ef9edb749b4bd2d7c6d7089bce0e08f893c6a9ca",
+      "gitBlob": "3b48ee70ffadbc2a9ee2515e7ed65f17bed03442",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/startup_beacon.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/startup_beacon.lua.source",
+      "bytes": 3592,
+      "originalSHA256": "a803954de128adfa943a7319a030d46d7713bae838f156b305ea792c62af15e2",
+      "historicalSHA256": "a803954de128adfa943a7319a030d46d7713bae838f156b305ea792c62af15e2",
+      "gitBlob": "104a2ff96e74f85c1f9c183ac3aec1b1974d305d",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/startup_beacon_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/startup_beacon_test.go.source",
+      "bytes": 247,
+      "originalSHA256": "a8306c72272a7d5e15291ba751827110b48bfe32f6c17173bea12c9c1e3284c9",
+      "historicalSHA256": "a8306c72272a7d5e15291ba751827110b48bfe32f6c17173bea12c9c1e3284c9",
+      "gitBlob": "0553acdda9e161f21f329b2777a946a195632c55",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/symbol.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/symbol.lua.source",
+      "bytes": 6382,
+      "originalSHA256": "be370da147b2c242f4057c2eb27a0175db2f43af3d547f175c9c8ea6f2d14b93",
+      "historicalSHA256": "be370da147b2c242f4057c2eb27a0175db2f43af3d547f175c9c8ea6f2d14b93",
+      "gitBlob": "34bcebad64eab7b304d5e89b8c0e6553ae5d65a3",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/symbol_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/symbol_test.go.source",
+      "bytes": 4267,
+      "originalSHA256": "916464b22ace71bd8bd19657edc296d4d4e2bc7dbba03d7038241615e3acbb5f",
+      "historicalSHA256": "916464b22ace71bd8bd19657edc296d4d4e2bc7dbba03d7038241615e3acbb5f",
+      "gitBlob": "9be38147a6f8720ab32b42b364c11a817f89f348",
+      "reason": "Go automatically discovers this old UI/optical protocol root or helper; its real Session/Receiver/QR dependency closure is retired together. Current memory, writer, character, input/bindings and real Driver regressions remain.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tests/protocol/input_state_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/input_state_test.go.source",
+      "bytes": 592,
+      "originalSHA256": "b4ebf5e2798f742e8947c1040882cbaa8add7b54094ab7c0c7fde49ec8dfd441",
+      "historicalSHA256": "b4ebf5e2798f742e8947c1040882cbaa8add7b54094ab7c0c7fde49ec8dfd441",
+      "gitBlob": "fc1acfc18d510ee07ea77cfb0541180b4cf64073",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/protocol/receiver_bindings.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receiver_bindings.lua.source",
+      "bytes": 15782,
+      "originalSHA256": "7ce9b0f0fc2dd54ca0434b257d06069c3c94305d7d0037b6ad9b1a175d8644ec",
+      "historicalSHA256": "7ce9b0f0fc2dd54ca0434b257d06069c3c94305d7d0037b6ad9b1a175d8644ec",
+      "gitBlob": "4f03bea104a82519340917f9961b94a81e60fd69",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/protocol/receiver_bindings_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/protocol/receiver_bindings_test.go.source",
+      "bytes": 474,
+      "originalSHA256": "90a01383883339478ef3f8a0fb66e955bef911de781b49299e1347c11d3054f5",
+      "historicalSHA256": "90a01383883339478ef3f8a0fb66e955bef911de781b49299e1347c11d3054f5",
+      "gitBlob": "d632b4c66f830f17164b81520c066bea7bac84ae",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/baseline/probes/failure.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/baseline/probes/failure.lua.source",
+      "bytes": 232,
+      "originalSHA256": "46c07380109b7cfabced562f291badbb8f4d290e4d5c6c9d81c8711a7142c215",
+      "historicalSHA256": "46c07380109b7cfabced562f291badbb8f4d290e4d5c6c9d81c8711a7142c215",
+      "gitBlob": "fd4603731b5f62cd0ef1c85a370b7f9765177186",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/baseline/probes/sync.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/baseline/probes/sync.lua.source",
+      "bytes": 439,
+      "originalSHA256": "28a2e186b2bbce133f539837a9051298f45e3d7c9c01107b0f9b7b367f7788a5",
+      "historicalSHA256": "28a2e186b2bbce133f539837a9051298f45e3d7c9c01107b0f9b7b367f7788a5",
+      "gitBlob": "81180527dae4d4ae835335362c8bae9ac084856e",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/baseline/probes/ui_activity.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/baseline/probes/ui_activity.lua.source",
+      "bytes": 2624,
+      "originalSHA256": "b676bb8fbdaef1db92cb6767a02f4ca706e5f80441e2c48492546a53d6c988d5",
+      "historicalSHA256": "b676bb8fbdaef1db92cb6767a02f4ca706e5f80441e2c48492546a53d6c988d5",
+      "gitBlob": "d2731c8145e572e029483e391b902cd7d8bde796",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/baseline/probes/workbench.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/baseline/probes/workbench.lua.source",
+      "bytes": 1658,
+      "originalSHA256": "d07e1b65fb84be29025a80ea3150f46b8c64799ac8d3227d8082a0d77f8db5cd",
+      "historicalSHA256": "d07e1b65fb84be29025a80ea3150f46b8c64799ac8d3227d8082a0d77f8db5cd",
+      "gitBlob": "d1f1b4f39e0023ed10fa88bda774c93b54727ec2",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tools/live-baseline.mjs",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tools/live-baseline.mjs.source",
+      "bytes": 5798,
+      "originalSHA256": "3e7a152128006c6b56baccf7db628c6528761911ec83c2a92d754ed8e788ce25",
+      "historicalSHA256": "3e7a152128006c6b56baccf7db628c6528761911ec83c2a92d754ed8e788ce25",
+      "gitBlob": "abe1bf95656ae984cb2f68b86db45514ca62afd1",
+      "reason": "Explicit old OP/session/ACK/display runner cannot execute current Go323 CON mailbox probes. Archived as historical source, with no executable historical runner.",
+      "disposition": "retired_from_current_discovery"
+    },
+    {
+      "originalPath": "tools/baseline-common.mjs",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tools/baseline-common.mjs.source",
+      "bytes": 9050,
+      "originalSHA256": "52fc58e870aa26f0abad94d83b4b8f7dcf4ee40569f280794004a3ea0b5f3721",
+      "historicalSHA256": "52fc58e870aa26f0abad94d83b4b8f7dcf4ee40569f280794004a3ea0b5f3721",
+      "gitBlob": "7eaa9c4e5df41414ec1d06f683821239803e9f0b",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tools/baseline.test.mjs",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tools/baseline.test.mjs.source",
+      "bytes": 9420,
+      "originalSHA256": "a5441388ceb2a22522dfc1892b8aea44c5b7d11bedefad5ee1d694ccab620b01",
+      "historicalSHA256": "a5441388ceb2a22522dfc1892b8aea44c5b7d11bedefad5ee1d694ccab620b01",
+      "gitBlob": "8c86cb6403e86a1f564f56e67cc1401ef31b636b",
+      "reason": "Restore the fixed Go323 same-addon test contract; old assertions are evidence only, with no compatibility shim.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/baseline/catalog.mjs",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/baseline/catalog.mjs.source",
+      "bytes": 6076,
+      "originalSHA256": "10f94f8b617515a80fa702aa47381cb09d10fb25eafd2096c2a390e6b87a6547",
+      "historicalSHA256": "10f94f8b617515a80fa702aa47381cb09d10fb25eafd2096c2a390e6b87a6547",
+      "gitBlob": "e75b9b6b97f5544781f2e529dc135f7a22d74c47",
+      "reason": "Keep BASE-08/10/12 IDs but require explicit current Go323 Lua subtests on all six profiles; retire old live OP/ACK auto entry and use current manual boundaries.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "internal/bridge/queue_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/internal/bridge/queue_test.go.source",
+      "bytes": 4000,
+      "originalSHA256": "7bbd2b89be75bd8fa0e9c838d8c83cad9e4c08b4ada48c8d692be69c1d3db61f",
+      "historicalSHA256": "7bbd2b89be75bd8fa0e9c838d8c83cad9e4c08b4ada48c8d692be69c1d3db61f",
+      "gitBlob": "f264b6701f2437725edb590938a664d2a16eb8b6",
+      "reason": "Keep the exact historical empty queue codec test and all malicious/nonempty tests; stop claiming the current addon ships Definitions.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "packages/npm/lycheedev/test/install-smoke.mjs",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/packages/npm/lycheedev/test/install-smoke.mjs.source",
+      "bytes": 21020,
+      "originalSHA256": "f81b1e5a441f99551003c2d7cb2dc49995ac526137cd11ade48427f4aeb167c3",
+      "historicalSHA256": "f81b1e5a441f99551003c2d7cb2dc49995ac526137cd11ade48427f4aeb167c3",
+      "gitBlob": "0588adc8a6eb7233ac94caeea93dfaaf628101ab",
+      "reason": "Current source packaging rejects retired Definitions instead of requiring it. This change does not run build, npm, install or any game action.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/qrfixture/qrfixture_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/qrfixture/qrfixture_test.go.source",
+      "bytes": 4377,
+      "originalSHA256": "0c91e5e56c6d3d313f8ede591f08f40bdd2ce71972a9da117fbb115b0d094976",
+      "historicalSHA256": "0c91e5e56c6d3d313f8ede591f08f40bdd2ce71972a9da117fbb115b0d094976",
+      "gitBlob": "ec9bbbd872b0bb0f1cea16cd07c8fec3b047e841",
+      "reason": "Preserve the real QR decoder/encoder roundtrip with identical test-only encoder bytes.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/qrfixture/fractional_test.go",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/qrfixture/fractional_test.go.source",
+      "bytes": 1303,
+      "originalSHA256": "eb632f4e5d3eea43391b44920410520e14ebd6d84af54bdf8fb7eb10a05c83e5",
+      "historicalSHA256": "eb632f4e5d3eea43391b44920410520e14ebd6d84af54bdf8fb7eb10a05c83e5",
+      "gitBlob": "b9a04f4d09a82c1f1ae52c8843158a565c42b33a",
+      "reason": "Fractional QR sampling still uses the actual historical encoder, outside the production addon.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/qrfixture/harness.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/qrfixture/harness.lua.source",
+      "bytes": 2211,
+      "originalSHA256": "805dbb9a0f9d7676019bd8213afdb480c24d3eedc0a489a3d298873220e284d0",
+      "historicalSHA256": "805dbb9a0f9d7676019bd8213afdb480c24d3eedc0a489a3d298873220e284d0",
+      "gitBlob": "52480a5695e0e550f141b5b85ae077aad8b8952b",
+      "reason": "Clarify this active decoder fixture is historical QR, not shipped same-addon source.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/bridge-input/lab.mjs",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/bridge-input/lab.mjs.source",
+      "bytes": 3513,
+      "originalSHA256": "ec426d89a5113bcb686707b2d10142ff8e76e624a35db260335019a0f0144bb3",
+      "historicalSHA256": "ec426d89a5113bcb686707b2d10142ff8e76e624a35db260335019a0f0144bb3",
+      "gitBlob": "e1dc23daed5a6a88e432651dec709509b0309458",
+      "reason": "The explicit lab retains its actual QR source with a pinned hash, never silently reads the production addon. No lab action is executed here.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": ".gitattributes",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/.gitattributes.source",
+      "bytes": 333,
+      "originalSHA256": "dcd1a26bb2ea8c0544841c12e28449e77ae2ffc7845d3582abb70014316b21f0",
+      "historicalSHA256": "dcd1a26bb2ea8c0544841c12e28449e77ae2ffc7845d3582abb70014316b21f0",
+      "gitBlob": "60a69f7f58ca5f52c8f4f5500a57880e3fec2e74",
+      "reason": "Pin test fixture LF and prevent Git line-ending transforms of preserved historical source bytes.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "THIRD_PARTY_NOTICES.md",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/THIRD_PARTY_NOTICES.md.source",
+      "bytes": 7697,
+      "originalSHA256": "a6ee8d3aefa1bdcbe658136513c307626df4de0d603cc977655b2df201f00db9",
+      "historicalSHA256": "a6ee8d3aefa1bdcbe658136513c307626df4de0d603cc977655b2df201f00db9",
+      "gitBlob": "c030ccbe44b79f568282770cc95eca7cfc8c40e7",
+      "reason": "Retain the full upstream BSD attribution while identifying the relocated test/lab-only source; no license terms are removed.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "packages/npm/lycheedev/THIRD_PARTY_NOTICES",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/packages/npm/lycheedev/THIRD_PARTY_NOTICES.source",
+      "bytes": 42440,
+      "originalSHA256": "eb1e43de1dd5b024729f8ed7f7fe61933c852f39919b0d7fdf3981b88fb3f9c1",
+      "historicalSHA256": "eb1e43de1dd5b024729f8ed7f7fe61933c852f39919b0d7fdf3981b88fb3f9c1",
+      "gitBlob": "27a859ccf20097de72387dceaa4ab69be980f4be",
+      "reason": "Retain the full upstream BSD attribution while identifying the relocated test/lab-only source; no license terms are removed.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "protocol/README.md",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/protocol/README.md.source",
+      "bytes": 1926,
+      "originalSHA256": "50e6ba861233772ba2af0ffe3bfadf8ac7ab842489d5733c3644f24ef2928c0b",
+      "historicalSHA256": "50e6ba861233772ba2af0ffe3bfadf8ac7ab842489d5733c3644f24ef2928c0b",
+      "gitBlob": "a3c277249b014af9e8c52b9f57ef9ca9677953e1",
+      "reason": "Update the historical identity fixture citation; it has no current executable entry.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/baseline/README.md",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/baseline/README.md.source",
+      "bytes": 7858,
+      "originalSHA256": "12d857f1992ae928b7aa553d6ffcb36518f64ba8ec502a4d45866f510ec0d0fe",
+      "historicalSHA256": "12d857f1992ae928b7aa553d6ffcb36518f64ba8ec502a4d45866f510ec0d0fe",
+      "gitBlob": "d5b39276fa2d09550b7d955d1cb3a15c93b463bc",
+      "reason": "Replace obsolete instructions to run the retired OP/session/ACK tool; identify current offline test roots and retained manual acceptance without claiming execution.",
+      "disposition": "replaced_by_current_consumer"
+    },
+    {
+      "originalPath": "tests/addon/t_fields.lua",
+      "historicalPath": "tests/history/legacy-ui-00fd643/source/tests/addon/t_fields.lua.source",
+      "bytes": 3618,
+      "originalSHA256": "294889008688a00f2be99e461abbf8b16a9253569f771a3117622103b2a2f775",
+      "historicalSHA256": "294889008688a00f2be99e461abbf8b16a9253569f771a3117622103b2a2f775",
+      "gitBlob": "756936de620ae02b32f582ca87265d7098125930",
+      "reason": "Additional old widget assertions call CreateShortcutButton/SetShortcut, absent throughout the current fixed Go323 addon. Restore the current fields suite; retain the old assertions verbatim as historical evidence.",
+      "disposition": "replaced_by_current_consumer"
+    }
+  ]
+}

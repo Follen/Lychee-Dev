@@ -7,7 +7,7 @@ both parsers are tested against.
 - `signal.v1.schema.json` — JSON Schema for `lycheedev.signal.v1` receipts,
   including the session-free `identity` marker (correlated by `probeNonce`,
   `actorState`, and `sequence` fixed at 0).
-- `samples/` — cross-language sample set. `tests/protocol/identity.lua` emits
+- `samples/` — cross-language sample set. `tests/history/legacy-ui-00fd643/source/tests/protocol/identity.lua.source` (historical-only) emits
   Lua-encoded identity receipts whose key sets are asserted equal to these
   samples, and every sample is asserted to parse through `bridge.ParseSignal`
   and re-marshal to the same field set.

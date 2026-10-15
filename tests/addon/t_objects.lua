@@ -514,4 +514,10 @@ objectDef.shutdown(objectPage)
 assert(not pickerDock:IsShown(), "window teardown did not hide the mouse picker")
 
 print("Lychee Toolkit object tests passed")
-return true
+
+local _, ranked = ns.ObjectInspector.SearchValue({AlphaPrefix=1, Child={Alpha=2}}, "alpha", 1)
+assert(ranked.results[1].key=="Alpha", "prefix displaced scanned exact match")
+local many={Child={Alpha=2}}
+for i=1,200 do many["AlphaPrefix"..i]=i end
+local _, rankedMany=ns.ObjectInspector.SearchValue(many,"alpha",200)
+assert(rankedMany.results[1].key=="Alpha" and #rankedMany.results==200 and rankedMany.truncated)

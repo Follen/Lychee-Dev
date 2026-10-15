@@ -10,7 +10,7 @@ Go module versions are pinned in go.sum; the release includes corresponding sour
 
 ## luaqrcode
 
-`addon/Bridge/MatrixSymbol.lua` adapts Patrick Gundlach and contributors'
+`tests/fixtures/legacy-addon/MatrixSymbol.lua` (test/lab only, not the shipped addon) adapts Patrick Gundlach and contributors'
 `speedata/luaqrcode` (https://github.com/speedata/luaqrcode) from the repository's
 existing licensed copy at
 `add-on/Libs/AutomationQR.lua` (Lychee baseline

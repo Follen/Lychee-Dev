@@ -1,7 +1,7 @@
 # Rust candidate boundaries
 
-This candidate follows the fixed Go 3.2.2 Skill at
-`0bec60e4406f5d5dc155ee25cef44f9a710e37e8` and complete Lycheedev mailbox
+This candidate follows the fixed Go 3.2.3 Skill at
+`3766f9cacb52e93a803a626187e2a1d54a445468` and complete Lycheedev mailbox
 protocol v1 contract. The ordinary [Skill entry](../SKILL.md) and
 [source research](source-research.md) are the workflow; this page records only
 migration differences and current gaps. It does not define a reduced toolkit.
@@ -27,7 +27,7 @@ coverage, truncation and unresolved edges returned by each command.
 ## Open acceptance gaps
 
 - The `live doctor` and top-level selected-target diagnostics, including repair
-  and startup recovery, still require implementation/parity evidence. Use the
+  and startup recovery, are implemented but still require complete final-candidate parity evidence. Use the
   [startup contract](live-startup.md) as the target; missing diagnostics never
   authorize raw keys, manual claim edits or another transport.
 - `source batch` still requires the full fixed-Go request/file limits, ordered
@@ -37,8 +37,10 @@ coverage, truncation and unresolved edges returned by each command.
 - Source full-repository query, refs, context, flow, validation, worker/session
   lifecycle and output quality are not yet accepted. Small fixtures and command
   listings cannot establish correctness, complete coverage or performance.
-  In particular, the native session's current idle bound differs from Go's
-  required 60 seconds; lifetime/batch limits also need parity evidence.
+  Full-Retail ordinary refs/context/API have successful candidate runs; retained
+  sessions still have a cold-start failure and cannot supply warm/steady evidence.
+  Keep the required 60-second idle, original lifetime/batch bounds and exact-run
+  evidence distinct; a previous component pass is not final acceptance.
 - An independent agent must exercise this Skill against the real candidate CLI
   with fixed original sources and retain the actual call/output trail. The
   author and a static reference check cannot provide that acceptance.

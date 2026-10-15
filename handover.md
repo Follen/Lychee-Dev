@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 18:42 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`00fd643908badaf282a5ddbd1e06a88c0e291d29`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 18:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`104f67ffd00d916d0094cbfab6957fd8e6291b91`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -29,7 +29,7 @@
 
 当前已将公共miniz inflater接到实际gzip transport，保持现有前缀drain、独立取消/预算和已读字节计量，用于修复压缩错误与长度限制优先级。既有独立harness实际233向量一致、71/72测试通过（stalled-header peer-close失败保留），当前产品组合尚未运行；没有修改第三方源码，旧被拒本地重跑未执行。
 
-最新验证批 6699bbf 已保存 XML 子节点索引、静态 WDC IN 候选筛选、owned Function/call 与三方工具身份修复，run38781154924已开始，all-target与CLI构建因Data content::verified::read可见域错误失败；当前主树已最小修正到session域，尚待重编译。完整本地静态组重新通过各独立检查，仅真实21个旧addon差异仍失败；三方 Node 31/31通过。更早bc2的真实Driver→Lua桥、槽维护/移除/修复步骤现已成功，待最终sealed证据核具体用例；all-target曾因Core测试模块路径失败，6699已包含修复，不能泛化整轮通过。
+最新验证批 6699bbf 已保存 XML 子节点索引、静态 WDC IN 候选筛选、owned Function/call 与三方工具身份修复，run38781154924已开始，all-target与CLI构建因Data content::verified::read可见域错误失败；当前主树已最小修正到session域，尚待重编译。该次本地静态检查仍有历史addon差异；当前后继已将最后14个旧生产文件及全部旧自动发现消费者迁到原字节历史归档，正式Go323的36套Lua入口恢复到六profile，Node60/60通过且addon静态差异为0，Lua/Go/Rust实际执行待集中验证；三方 Node 31/31通过。更早bc2的真实Driver→Lua桥、槽维护/移除/修复步骤现已成功，待最终sealed证据核具体用例；all-target曾因Core测试模块路径失败，6699已包含修复，不能泛化整轮通过。
 
 本普通批将 owned Object/token/epoch/嵌套pack身份搬入自有carrier，并保存单次源字节与预算guard的owned接管、已认证Files状态的无深拷贝持有；均已独审，13+14+5新Rust仍NOT_RUN。Object member/typecheck/复杂返回后继未完，生产未切，Emmy仍31补丁路径/26生产源文件；Data Prepared/Session缓存复用仍在接线，不能把新增owner当已实现缓存。
 
@@ -91,7 +91,7 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 
 ## 4. 接下来按可交付批次执行
 
-1. 498已终态核176 owner/2763封存日志；继续bc2实际原生批与其真实失败修复。Source优先定位Emmy prepare在90秒内未完成，不以context复用替代该根因；继续验证SQL/DB2/navigation默认消费者。
+1. bc2普通refs/context/API已在90秒合同内成功；继续处理retained session冷启动接近2GiB上限的EOF与回收。6699编译可见域错误已修，集中重编译后验证。Data推进完整Prepared与lazy SQL默认链，Emmy推进真实摄取和诊断链及相应补丁退役，不再逐小片等待审查。
 2. 本地symbols因Emmy owner未确认回收而保留，不接管/新channel绕行；当前479e57 GNU完整输入已准备但未执行。独立Windows三方契约job已审，下一有意义原生批执行；未来Linux观察修正不追认历史owner。
 3. decoded alias与body owner已组合，接续真实DB2/SQL/static/effective/meta/JSONL外层admission到capture。EXPLAIN/schema-only不能扫描内容，callback不得重放；大资产保持流式。
 4. named target按固定Go配置-only分页lookup、pin-ref冲突和输出合同补齐，不复用旧show造成额外检查/错误。direct remote已接线但真实Rust/online仍待跑。

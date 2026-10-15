@@ -1,0 +1,356 @@
+{
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "files": [
+    {
+      "path": "tests/addon/addon_test.go",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "72f9c61e5729a0e80ad96727bbd72697d71ba05ff5a7b1495441fb952b659585",
+      "currentSHA256": "72f9c61e5729a0e80ad96727bbd72697d71ba05ff5a7b1495441fb952b659585",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/env.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "50b19abd7740c8a0673b69074f5b6ca5cdb26a531adf9f82f15b9afccc3b646a",
+      "currentSHA256": "f462a52baaa7643d5a6070db768cb265a6fde2d6297f2e7778d9122c2677fe63",
+      "substitution": "one release literal 3.2.3 -> 3.5.0"
+    },
+    {
+      "path": "tests/addon/run.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "1b986dd9336875ed3d01ddfb399acf56785d55235d8bf35d963f77d5ea188cb3",
+      "currentSHA256": "1b986dd9336875ed3d01ddfb399acf56785d55235d8bf35d963f77d5ea188cb3",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_about.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "556eedcc3b58dafd852342e1e41ceefa7a0e19ea54daf2c80d1fdce6defd8e7d",
+      "currentSHA256": "12a9bc81daf48d04b089010e30a7719dbda94afd2ebb0e2d0c821eeb315312da",
+      "substitution": "one release literal 3.2.3 -> 3.5.0"
+    },
+    {
+      "path": "tests/addon/t_activity.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "f9a398ca32f787871ff1f5dc6944bc54799878b9c430d9bdb19f7e04525c16f1",
+      "currentSHA256": "f9a398ca32f787871ff1f5dc6944bc54799878b9c430d9bdb19f7e04525c16f1",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_automation.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "36fbd4fcd161111c486bd4dc2b8de17fdb23e549f2bb952a25b46d881cfa9775",
+      "currentSHA256": "36fbd4fcd161111c486bd4dc2b8de17fdb23e549f2bb952a25b46d881cfa9775",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_automation_history.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "f0d8f42f32b11ab41c43b58d619418fd93f00b5ee2bdd71b9890d559f6e3defa",
+      "currentSHA256": "f0d8f42f32b11ab41c43b58d619418fd93f00b5ee2bdd71b9890d559f6e3defa",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_baseline_probes.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "32deb0d7d111048b431738d72e034ad030f4c174d0fe596825b580714d270eb2",
+      "currentSHA256": "32deb0d7d111048b431738d72e034ad030f4c174d0fe596825b580714d270eb2",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_bootstrap.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "fcecdb6d5bdac3e71c37f436c3baf49148449e43e10dbb8eed9f2e32406b0632",
+      "currentSHA256": "fcecdb6d5bdac3e71c37f436c3baf49148449e43e10dbb8eed9f2e32406b0632",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_bridge_status.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "22ed8b1ce6fefa163cb82f1629893cf707bec08dc207bf67a2c3409e5a7d7a55",
+      "currentSHA256": "22ed8b1ce6fefa163cb82f1629893cf707bec08dc207bf67a2c3409e5a7d7a55",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_client_gate.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "3b6841f367a2d034cacbcc91b22b72c748861807bff5e9aee4928a5025aa057e",
+      "currentSHA256": "3b6841f367a2d034cacbcc91b22b72c748861807bff5e9aee4928a5025aa057e",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_diagnostics.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "7036fa29d05e8a0d85a048941a062b2e26cbb51521afae57173218c15b6db25f",
+      "currentSHA256": "7036fa29d05e8a0d85a048941a062b2e26cbb51521afae57173218c15b6db25f",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_events.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "baac7566cd4293b7871b583e590be6b35fd747ae77fef95a169a4358157214f5",
+      "currentSHA256": "baac7566cd4293b7871b583e590be6b35fd747ae77fef95a169a4358157214f5",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_execute.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "a9702109f7ce4a5dbfc5450f738a98ec2ce669802221ffda3356fbaed005ea70",
+      "currentSHA256": "a9702109f7ce4a5dbfc5450f738a98ec2ce669802221ffda3356fbaed005ea70",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_focus_bindings.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "4df4a38b1b3586d9079ea3055665dc53b31fba11b12d1845c42353428110cff6",
+      "currentSHA256": "4df4a38b1b3586d9079ea3055665dc53b31fba11b12d1845c42353428110cff6",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_input_attempt.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "1bd3ea96c435e3bc7f2bb839049db3f92a098ddf241d4dbe0cf57c0db85692d5",
+      "currentSHA256": "1bd3ea96c435e3bc7f2bb839049db3f92a098ddf241d4dbe0cf57c0db85692d5",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_input_binding_gate.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "3bb5ca5774eaff171b44dfa45819b39c53c532d81aace2168610a3395e581348",
+      "currentSHA256": "3bb5ca5774eaff171b44dfa45819b39c53c532d81aace2168610a3395e581348",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_input_mailbox.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "c8be628072b68a001a8a98a62ccba48069c72b23b4607be4d3eb37a92a500121",
+      "currentSHA256": "c8be628072b68a001a8a98a62ccba48069c72b23b4607be4d3eb37a92a500121",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_input_protection.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "2919184d0d2c2db85a49e94b85994e8dc2b4a80b5886a547b7336508f8a5c8cb",
+      "currentSHA256": "2919184d0d2c2db85a49e94b85994e8dc2b4a80b5886a547b7336508f8a5c8cb",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_input_state.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "57f10c1fbf9ab115b5c3bce807dc4813ee3a64aa768daf3eb43743f9b0bfdbcb",
+      "currentSHA256": "57f10c1fbf9ab115b5c3bce807dc4813ee3a64aa768daf3eb43743f9b0bfdbcb",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_inspector.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "2ee5bab4bf0b1a7961d85fdf26cea09137704210d53d4a80ce1c1a4f2b8c5994",
+      "currentSHA256": "2ee5bab4bf0b1a7961d85fdf26cea09137704210d53d4a80ce1c1a4f2b8c5994",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_locale.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "b142aa0fe6622bccd349b148d1a23fa81e2a2e6d25cb45ac7e58e72a7129e996",
+      "currentSHA256": "b142aa0fe6622bccd349b148d1a23fa81e2a2e6d25cb45ac7e58e72a7129e996",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_mailbox.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "ad4aea2ad7a414b6aba85abfb8f142c5bc6abbec2d67693bce3691c77fc072ed",
+      "currentSHA256": "ad4aea2ad7a414b6aba85abfb8f142c5bc6abbec2d67693bce3691c77fc072ed",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_object_picker_combat.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "c87723c5c1cca24cc457ec4812a8efb5763d697a36cdb29643ed69ccb5388fd0",
+      "currentSHA256": "c87723c5c1cca24cc457ec4812a8efb5763d697a36cdb29643ed69ccb5388fd0",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_object_stream_errors.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "dd5e8125763ea7b16d47d47ccc650cf149c82f204cd4bd80f60cb1ac58658e9b",
+      "currentSHA256": "dd5e8125763ea7b16d47d47ccc650cf149c82f204cd4bd80f60cb1ac58658e9b",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_objects.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "fa335ed12316ac402d2784af9905706456f266bb24b9dcedd5f5c7f06f60275f",
+      "currentSHA256": "fa335ed12316ac402d2784af9905706456f266bb24b9dcedd5f5c7f06f60275f",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_probe_execution.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "fecebfcc487d43e9c778404e554432d93df184c0e66f25f25bf01968a057930a",
+      "currentSHA256": "fecebfcc487d43e9c778404e554432d93df184c0e66f25f25bf01968a057930a",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_records.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "c7d5a54af818ba1cfc3d4685f36176aeeabbd5404212b0aa7ebaad7900f77bca",
+      "currentSHA256": "c7d5a54af818ba1cfc3d4685f36176aeeabbd5404212b0aa7ebaad7900f77bca",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_run.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "182abc42d3ea22afaa3e85a3f54849d552cb0bb2a73aead8d9c305b0e5131b54",
+      "currentSHA256": "182abc42d3ea22afaa3e85a3f54849d552cb0bb2a73aead8d9c305b0e5131b54",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_serializer.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "09c8dea5017f50742b222d10edf95822dad8d16bd8d0db4f716a397fa5036aaa",
+      "currentSHA256": "09c8dea5017f50742b222d10edf95822dad8d16bd8d0db4f716a397fa5036aaa",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_shell.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "a778efff26f79487c592a0700cf936f866cb467f138972b08af8c541ec9cad7c",
+      "currentSHA256": "a778efff26f79487c592a0700cf936f866cb467f138972b08af8c541ec9cad7c",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_slot_enable.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "d71bb72464e49ecf2c2d26a0df3bafceae6f2a0840e03a65fec7355e0cf4a193",
+      "currentSHA256": "d71bb72464e49ecf2c2d26a0df3bafceae6f2a0840e03a65fec7355e0cf4a193",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_slot_protocol.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "9eb1eac0f17e7e369035d14d517e7c26343543ac91188a493be6d0465661c96c",
+      "currentSHA256": "9eb1eac0f17e7e369035d14d517e7c26343543ac91188a493be6d0465661c96c",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_slot_runtime.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "70043f9e5eb930645ed844de9eb9b5d8217db1c84a67047788b0159441d4ac0a",
+      "currentSHA256": "70043f9e5eb930645ed844de9eb9b5d8217db1c84a67047788b0159441d4ac0a",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_stores.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "780df4b3af27a89c1626fe8dfe9a43aeb6458cde1edd75eb0285b5f7abfa56dc",
+      "currentSHA256": "780df4b3af27a89c1626fe8dfe9a43aeb6458cde1edd75eb0285b5f7abfa56dc",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_trace.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "abc2f93f042f6721edc0f3bb6a00c0f34a3ab68663fab0e4142a261c9e9e98f1",
+      "currentSHA256": "abc2f93f042f6721edc0f3bb6a00c0f34a3ab68663fab0e4142a261c9e9e98f1",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_trace_owner.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "844a527292444647240e50caf78b7e49a1a1ee19fc07bce210725ba839d6e688",
+      "currentSHA256": "844a527292444647240e50caf78b7e49a1a1ee19fc07bce210725ba839d6e688",
+      "substitution": null
+    },
+    {
+      "path": "tests/addon/t_visual.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "2c62a1c2a42f70e8029ffe9c31d097c5d4295ebd605660d14442d4756f9d507f",
+      "currentSHA256": "2c62a1c2a42f70e8029ffe9c31d097c5d4295ebd605660d14442d4756f9d507f",
+      "substitution": null
+    },
+    {
+      "path": "internal/testkit/lua.go",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "24cb2f18916142c7bfc8a27819784a112171b73ceaf3737b06ae2418c11d5868",
+      "currentSHA256": "24cb2f18916142c7bfc8a27819784a112171b73ceaf3737b06ae2418c11d5868",
+      "substitution": null
+    },
+    {
+      "path": "tests/protocol/input_state.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "f07dcf499cccc81ede208aa26a4f8885d2e696093cc985cf8e3949584d649bad",
+      "currentSHA256": "f07dcf499cccc81ede208aa26a4f8885d2e696093cc985cf8e3949584d649bad",
+      "substitution": null
+    },
+    {
+      "path": "tests/protocol/input_state_test.go",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "274456974433c4e64d2bd6f549c23257a2d961341c3146048e70a2abd7d3861f",
+      "currentSHA256": "274456974433c4e64d2bd6f549c23257a2d961341c3146048e70a2abd7d3861f",
+      "substitution": null
+    },
+    {
+      "path": "tests/protocol/receiver_bindings.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "c3a8d67d91394c8b45f52eba8ce48632f98b8abeec3de46d718c544c9322567d",
+      "currentSHA256": "c3a8d67d91394c8b45f52eba8ce48632f98b8abeec3de46d718c544c9322567d",
+      "substitution": null
+    },
+    {
+      "path": "tests/protocol/receiver_bindings_test.go",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "dd072cd28605475cff454ddaa2402ce35aa16d914d65dd4fcfb4ae52b9f83f00",
+      "currentSHA256": "dd072cd28605475cff454ddaa2402ce35aa16d914d65dd4fcfb4ae52b9f83f00",
+      "substitution": null
+    },
+    {
+      "path": "tests/baseline/probes/failure.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "75d2effee30bb6fdda53fb57a3c9aeaf319c5247a7a9165415aacbfde5e5b9f2",
+      "currentSHA256": "75d2effee30bb6fdda53fb57a3c9aeaf319c5247a7a9165415aacbfde5e5b9f2",
+      "substitution": null
+    },
+    {
+      "path": "tests/baseline/probes/sync.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "9ffc86c9e55e5aae07593bce993b0508ec785fc98bbeeab5aced4abd75f267cb",
+      "currentSHA256": "9ffc86c9e55e5aae07593bce993b0508ec785fc98bbeeab5aced4abd75f267cb",
+      "substitution": null
+    },
+    {
+      "path": "tests/baseline/probes/ui_activity.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "9e821bbfda420ba38594ba1354680c99448cf8611881f51dbdefa712bc6b1c69",
+      "currentSHA256": "9e821bbfda420ba38594ba1354680c99448cf8611881f51dbdefa712bc6b1c69",
+      "substitution": null
+    },
+    {
+      "path": "tests/baseline/probes/workbench.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "53593ebc013a704a5e2d88218c2f84b845a292c1bdfb9ec9c4ae66ce3e9fb329",
+      "currentSHA256": "53593ebc013a704a5e2d88218c2f84b845a292c1bdfb9ec9c4ae66ce3e9fb329",
+      "substitution": null
+    },
+    {
+      "path": "tools/baseline-common.mjs",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "94806b7292c680a83c52520acbb7b38de32b443aeb458004ee1e27500a25e211",
+      "currentSHA256": "94806b7292c680a83c52520acbb7b38de32b443aeb458004ee1e27500a25e211",
+      "substitution": null
+    },
+    {
+      "path": "tools/baseline.test.mjs",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "0a53c603505428c67ccdd0c7b345ffa4e266a5b4f0f3d4a907c6365ad9d6834c",
+      "currentSHA256": "cbdd0562ad23c1a9b81a78c3a0287e2584e3db5e461035816ed5eb1b7452e582",
+      "substitution": null,
+      "adaptation": "Resolve exact current Lua suite/profile child names instead of requiring each subtest name to be a Go function; production baseline results still require actual child completion."
+    },
+    {
+      "path": "tests/addon/t_fields.lua",
+      "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "oracleSHA256": "5414a6c0a41209887574ee49ad77ead5bb61d2559ec1666bf7bb2489aa35044a",
+      "currentSHA256": "5414a6c0a41209887574ee49ad77ead5bb61d2559ec1666bf7bb2489aa35044a",
+      "substitution": null
+    }
+  ]
+}
