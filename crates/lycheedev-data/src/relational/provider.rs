@@ -33,6 +33,13 @@ impl RowProvider for Source {
         Ok(())
     }
 }
+/// Query-owned, stable physical roots. Resolution happens in the real schema
+/// traversal; neither compile-time dependency discovery nor a replay requests
+/// a source. The executor caches each resolved schema across both passes.
+pub(crate) trait RootResolver {
+    fn resolve(&self, table: SourceTableUse<'_>) -> Result<&Source>;
+    fn provider(&self, schema: &Source) -> Option<&dyn RowProvider>;
+}
 #[derive(Clone, Copy)]
 pub(crate) struct PreparedSource<'query> {
     pub(crate) schema: &'query Source,
@@ -43,6 +50,7 @@ pub(super) fn find<'a>(source: &Source, work: &Work<'a>) -> Option<&'a dyn RowPr
         .iter()
         .find(|entry| std::ptr::eq(entry.schema, source))
         .map(|entry| entry.provider)
+        .or_else(|| work.resolver.and_then(|resolver| resolver.provider(source)))
 }
 pub(super) fn visit(
     source: &Source,
@@ -68,7 +76,7 @@ pub(super) fn visit(
 
 /// Match Go neededColumns: stars, subqueries and unresolved output aliases
 /// retain full rows and must not call ScanSelected, even with all ordinals.
-pub(super) fn projectable(term: &Term, columns: &[String], alias: &str) -> bool {
+pub(super) fn projectable(term: &Term, columns: &[String], alias: ColumnOwners<'_>) -> bool {
     match term {
         Term::InSubquery(..) => false,
         Term::Column(name) => column(columns, alias, name).is_ok(),
@@ -93,7 +101,7 @@ pub(super) fn projectable(term: &Term, columns: &[String], alias: &str) -> bool 
         _ => true,
     }
 }
-pub(super) fn can_project(program: &Program, columns: &[String], alias: &str) -> bool {
+pub(super) fn can_project(program: &Program, columns: &[String], alias: ColumnOwners<'_>) -> bool {
     program.projection.iter().all(|p| {
         p.expr
             .as_ref()
@@ -112,7 +120,7 @@ pub(super) fn can_project(program: &Program, columns: &[String], alias: &str) ->
 pub(super) fn selected(
     program: &Program,
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     work: &mut Work<'_>,
 ) -> Result<Vec<usize>> {
     work.consume(0)?;

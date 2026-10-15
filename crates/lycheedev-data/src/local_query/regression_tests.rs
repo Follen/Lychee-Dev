@@ -172,3 +172,25 @@ fn explain_rechecks_source_after_binding_before_capture() {
     fs::write(catalog, original).unwrap();
     assert!(sql(&inv).unwrap().data["result"]["plan"].is_object());
 }
+
+#[test]
+fn sql_checked_close_error_preserves_actual_committed_capture_identities() {
+    let primary = fault("storage.close_failed", 5, "real close failure");
+    let ids = vec!["CAP-query".to_owned(), "CAP-csv".to_owned()];
+    let error = sql_committed_error(primary.clone(), &ids, true);
+    assert_eq!(error.code, primary.code);
+    assert_eq!(error.exit_code, primary.exit_code);
+    assert_eq!(
+        error.details["primary"],
+        serde_json::to_value(primary).unwrap()
+    );
+    assert_eq!(error.details["completedCaptures"], json!(ids));
+    assert_eq!(error.details["outputPublished"], true);
+    assert!(error.message.contains("CAP-query, CAP-csv"));
+    let early = fault("schema.definition_not_found", 3, "missing table");
+    let unchanged = sql_committed_error(early.clone(), &[], false);
+    assert_eq!(
+        serde_json::to_value(unchanged).unwrap(),
+        serde_json::to_value(early).unwrap()
+    );
+}

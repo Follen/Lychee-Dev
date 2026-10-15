@@ -184,12 +184,14 @@ fn visit_selection(
         planning: false,
         selection_sources: vec![],
         providers: &providers,
+        resolver: None,
+        roots: BTreeMap::new(),
     };
     selection::visit(
         source,
         None,
         program.filter.as_ref(),
-        "t",
+        ColumnOwners::Single("t"),
         &BTreeMap::new(),
         &mut work,
         emit,
@@ -920,6 +922,8 @@ fn schema_preflight_and_execution_share_the_original_remaining_work() {
         planning: true,
         selection_sources: vec![],
         providers: &registry,
+        resolver: None,
+        roots: BTreeMap::new(),
     };
     program
         .execute_scoped(&sources, &BTreeMap::new(), &mut work)
@@ -960,6 +964,8 @@ fn owned_join_right_rows_pay_the_same_full_copy_cost_as_provider_rows() {
             planning: false,
             selection_sources: vec![],
             providers: &[],
+            resolver: None,
+            roots: BTreeMap::new(),
         };
         let plan = joins::prepare(
             &program.table,
@@ -1090,11 +1096,16 @@ fn selected_column_helper_uses_the_actual_alias_and_marks_ordinals() {
     let columns = vec!["ID".into(), "Name".into(), "Unused".into()];
     let mut selected = vec![false; columns.len()];
     joins::select(
-        &Term::Column("actual.ID".into()),
+        &Term::Column(ColumnRef::qualified("actual", "ID")),
         &columns,
-        "actual",
+        ColumnOwners::Single("actual"),
         &mut selected,
     );
-    joins::select(&Term::Ordinal(1), &columns, "actual", &mut selected);
+    joins::select(
+        &Term::Ordinal(1),
+        &columns,
+        ColumnOwners::Single("actual"),
+        &mut selected,
+    );
     assert_eq!(selected, vec![true, true, false]);
 }

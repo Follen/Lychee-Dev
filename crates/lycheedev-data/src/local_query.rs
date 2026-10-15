@@ -2,7 +2,9 @@
 //! Encoding claims cover authenticated framing and requested pages only.
 use crate::{
     blte::{self, ByteSource},
-    capture, casc, decoded_cache, definitions, fault, installed, keys,
+    capture, casc, decoded_cache, definitions, fault,
+    hotfix::remote::equal_fold,
+    installed, keys,
     metadata_format::{self, Encoding},
     relational,
     resource::{Budget, Cost},
@@ -24,6 +26,8 @@ mod adaptive_tests;
 mod effective;
 mod file_bytes;
 mod provider;
+mod resolver;
+mod sql_reader;
 pub use file_bytes::FileBytes;
 pub(crate) mod query_csv;
 #[cfg(test)]
@@ -701,7 +705,7 @@ pub(crate) fn sql_inner_budgeted(
         ));
     }
     // Go validates this flag even when only metadata sources are referenced.
-    inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
+    let maximum = inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
     let safety = budget.safety_only();
     let request = request::read(inv, &safety)?;
     safety.charge(Cost::metadata(request.sql.len() * 64 + 4096))?;
@@ -723,6 +727,8 @@ pub(crate) fn sql_inner_budgeted(
             2,
             "SQL requires a fixed DataPin",
         ))?;
+    let mut committed = Vec::new();
+    let mut output_published = false;
     let mut execute_sql = |scope: &mut dyn crate::remote::provider::FileScope| -> Result<Outcome> {
         let data = pin.data.as_ref().ok_or_else(|| {
             fault(
@@ -737,352 +743,123 @@ pub(crate) fn sql_inner_budgeted(
         budget.charge_split(Cost::retained(64 << 20), Cost::default())?;
         // Canonical scalar errors still precede every source resolver.
         let parameters = request.bindings()?;
-        let definitions_started = Instant::now();
-        let mut bundles = vec![];
-        let mut semantic_sources = BTreeMap::new();
-        let mut semantic_provenance = vec![];
-        for name in program.source_tables() {
-            budget.check()?;
-            if let Some((catalog, table)) = name.split_once('.')
-                && catalog.eq_ignore_ascii_case("meta")
-            {
-                let (source, provenance) = definitions::semantics::source(
-                    &inv.home,
-                    &data.definition_commit,
-                    &data.full_build,
-                    table,
-                    inv.flag_bool("--offline"),
-                    &budget,
-                    &inv.control,
-                )?;
-                semantic_sources.insert(name.to_owned(), source);
-                semantic_provenance.push(provenance);
-                continue;
-            }
-            let canonical = if let Some((catalog, name)) = name.split_once('.') {
-                if !catalog.eq_ignore_ascii_case("static")
-                    && !catalog.eq_ignore_ascii_case("effective")
-                {
-                    return Err(fault(
-                        "relational.unsupported",
-                        3,
-                        "SQL catalog must be static, effective or meta",
-                    ));
-                }
-                name
-            } else {
-                name
-            };
-            bundles.push((
-                name.to_owned(),
-                definitions::prepare_controlled(
-                    &inv.home,
-                    &data.definition_commit,
-                    canonical,
-                    inv.flag_bool("--offline"),
-                    deadline,
-                    Some(&budget),
-                    &inv.control,
-                )?,
-            ));
-        }
-        let definitions_ms = definitions_started.elapsed().as_secs_f64() * 1000.0;
-        let ids = bundles
-            .iter()
-            .map(|(_, (bundle, _))| bundle.identity.db2_file_data_id)
-            .collect::<Vec<_>>();
-        let mut bundles = Some(bundles);
-        let mut query_result = None;
-        let mut semantic_sources = Some(semantic_sources);
-        let mut execute = |files: Vec<File>| -> Result<Vec<u32>> {
-            let prepared = Instant::now();
-            let semantic_sources = semantic_sources
-                .take()
-                .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
-            let bundles = bundles
-                .take()
-                .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
-            if bundles.len() != files.len() {
-                return Err(fault(
-                    "records.internal",
-                    8,
-                    "SQL source callback file count differs",
-                ));
-            }
-            // FileBytes retain local allocations or the authenticated remote
-            // shared body. Tables borrow this external vector, never themselves.
-            safety.charge(Cost::retained(
-                bundles
-                    .len()
-                    .checked_mul(size_of::<provider::PreparedInput<'_>>() + 256)
-                    .ok_or_else(|| {
-                        fault(
-                            "relational.resource_limit",
-                            3,
-                            "SQL provider allocation overflow",
-                        )
-                    })?,
-            ))?;
-            let mut physical: Vec<provider::PreparedInput<'_>> = Vec::new();
-            physical.try_reserve_exact(bundles.len()).map_err(|_| {
-                fault(
-                    "relational.resource_limit",
-                    3,
-                    "SQL provider allocation failed",
-                )
-            })?;
-            let mut decoded_bytes = 0usize;
-            let mut snapshots = effective::Snapshots::new(inv, data, &budget);
-            let mut effective_sources = vec![];
-            for ((name, (bundle, dbd)), file) in bundles.into_iter().zip(&files) {
-                budget.check()?;
-                // Fixed Go PreparedTable keys the complete definition bundle.
-                // Reuse only exact bundle identities within this same query;
-                // static/effective aliases still have independent schemas.
-                let cached = physical.iter().find(|input| {
-                    input.bundle.commit == bundle.commit
-                        && input.bundle.identity == bundle.identity
-                        && input.bundle.manifest == bundle.manifest
-                        && input.bundle.definition == bundle.definition
-                });
-                let (base, definition, layout_hash) = if let Some(cached) = cached {
-                    (
-                        cached.base.shared()?,
-                        cached.definition.clone(),
-                        cached.layout_hash,
-                    )
-                } else {
-                    let layout =
-                        table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
-                    if layout.table_hash != bundle.identity.hash {
-                        return Err(fault(
-                            "schema.invalid_format",
-                            4,
-                            "WDC table hash differs from manifest identity",
-                        ));
-                    }
-                    let definition = schema::Document::parse_with_check(&dbd, || {
-                        inv.control.check()?;
-                        budget.check()
-                    })?
-                    .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
-                    let table = table::open_budgeted(
-                        &file.bytes,
-                        &definition,
-                        Default::default(),
-                        &Default::default(),
-                        &[],
-                        budget.clone(),
-                    )?;
-                    safety.charge(Cost::retained(
-                        size_of::<schema::Definition>() + 2 * size_of::<usize>(),
-                    ))?;
-                    (
-                        provider::Physical::new(table, budget.clone())?,
-                        Arc::new(definition),
-                        layout.layout_hash,
-                    )
-                };
-                let overlay = if name
-                    .split_once('.')
-                    .is_some_and(|(catalog, _)| catalog.eq_ignore_ascii_case("effective"))
-                {
-                    let (plan, report) = snapshots.prepare(
-                        &base.schema().columns,
-                        base.schema().complete,
-                        &definition,
-                        &bundle,
-                        &request.hotfix,
-                    )?;
-                    effective_sources.push(report);
-                    Some(plan)
-                } else {
-                    None
-                };
-                decoded_bytes = decoded_bytes.checked_add(file.bytes.len()).ok_or_else(|| {
-                    fault("relational.resource_limit", 3, "SQL source size overflow")
-                })?;
-                physical.push(provider::PreparedInput {
-                    name,
-                    base,
-                    overlay,
-                    definition,
-                    bundle,
-                    layout_hash,
-                });
-            }
-            let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
+        let resolver = resolver::Resolver::new(inv, data, budget, scope, maximum, &request.hotfix);
+        let resolved = (|| {
             let execution = Instant::now();
-            let result = {
-                // Both maps borrow stable external owners for this call only.
-                // Materialized CTE/derived rows are distinct Source identities.
-                let bytes = semantic_sources
-                    .keys()
-                    .chain(physical.iter().map(|p| &p.name))
-                    .try_fold(0usize, |n, name| {
-                        n.checked_add(name.len() + 128).ok_or_else(|| {
-                            fault("relational.resource_limit", 3, "SQL provider map overflow")
-                        })
-                    })?;
-                safety.charge(Cost::retained(
-                    bytes + physical.len() * size_of::<relational::PreparedSource<'_>>(),
-                ))?;
-                let mut sources: BTreeMap<_, _> = semantic_sources
-                    .iter()
-                    .map(|(name, source)| (name.clone(), source))
-                    .collect();
-                let mut providers = Vec::new();
-                providers.try_reserve_exact(physical.len()).map_err(|_| {
+            let result = program.execute_resolved_budgeted(
+                &resolver,
+                &parameters,
+                relational::Limits {
+                    deadline,
+                    work: 10_000_000,
+                    ..Default::default()
+                },
+                // Work preserves the original ordered control through this Budget.
+                None,
+                Some(&safety),
+            )?;
+            after_execute()?;
+            resolver.check_source()?;
+            let resolver::Report {
+                provenance,
+                semantic: semantic_provenance,
+                effective: effective_sources,
+                decoded_bytes,
+                definitions_ms,
+                preparation_ms,
+            } = resolver.take_report()?;
+            let execution_ms =
+                (execution.elapsed().as_secs_f64() * 1000.0 - definitions_ms - preparation_ms)
+                    .max(0.0);
+            let physical_empty = provenance.is_empty();
+            let complete = result.complete;
+            let resources = budget.logical_snapshot()?;
+            let memory_budget = budget.memory_snapshot()?;
+            let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
+            budget.check()?;
+            let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+            if !semantic_provenance.is_empty() {
+                let size = capture::json_size(&semantic_provenance, &safety)?;
+                safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
+                reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
+            }
+            if !effective_sources.is_empty() {
+                reading["effectiveSources"] =
+                    effective::reports_value(&effective_sources, &safety)?;
+            }
+            let raw = capture::json_bytes(
+                &request::CaptureBody {
+                    reading: &reading,
+                    request: &request,
+                },
+                &safety,
+                16 << 20,
+                || {
                     fault(
                         "relational.resource_limit",
                         3,
-                        "SQL provider registry allocation failed",
+                        "SQL result exceeds evidence budget",
                     )
-                })?;
-                for input in &physical {
-                    sources.insert(input.name.clone(), input.schema());
-                    providers.push(relational::PreparedSource {
-                        schema: input.schema(),
-                        provider: input,
-                    });
-                }
-                program.execute_providers_budgeted(
-                    &sources,
-                    &providers,
-                    &parameters,
-                    relational::Limits {
-                        deadline,
-                        work: 10_000_000,
-                        ..Default::default()
-                    },
-                    // Work checks this exact shared Budget at every operation
-                    // boundary. Do not expose its ordered control as a raw token.
-                    None,
-                    Some(&safety),
-                )?
+                },
+            )?;
+            let request_digest = request.digest(&safety)?;
+            let required_sources = if effective_sources.is_empty() {
+                vec![]
+            } else {
+                request
+                    .hotfix
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
             };
-            after_execute()?;
-            let execution_ms = execution.elapsed().as_secs_f64() * 1000.0;
-            // Consume/drop every Table before moving its external FileBytes.
-            // Only owned result and metadata leave the authenticated callback.
-            safety.charge(Cost::retained(
-                physical
-                    .len()
-                    .checked_mul(
-                        size_of::<(bool, definitions::Bundle, Arc<schema::Definition>, u32)>()
-                            + size_of::<Value>()
-                            + 256,
-                    )
-                    .ok_or_else(|| {
-                        fault(
-                            "relational.resource_limit",
-                            3,
-                            "SQL provenance allocation overflow",
-                        )
-                    })?,
-            ))?;
-            let metadata: Vec<_> = physical
-                .into_iter()
-                .map(|input| {
-                    let complete = input.schema().complete;
-                    (complete, input.bundle, input.definition, input.layout_hash)
-                })
-                .collect();
-            let provenance: Vec<_> = metadata.into_iter().zip(files).map(|((complete, bundle, definition, layout_hash), file)| {
-                json!({"complete":complete,"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{layout_hash:08X}"),"schema":definition.as_ref()})
-            }).collect();
-            query_result = Some((
-                result,
-                provenance,
-                decoded_bytes,
-                preparation_ms,
-                execution_ms,
-                effective_sources,
-            ));
-            Ok(Vec::new())
-        };
-        // Run preparation/SQL inside the authenticated read session. Its final
-        // source check is after execution and before publishing any query capture.
-        // A lexical CTE can have no physical source and needs no CASC admission.
-        if ids.is_empty() {
-            execute(Vec::new())?;
-        } else if inv.flag_bool("--cdn") {
-            scope.read_batches(data, &ids, &mut execute)?;
-        } else {
-            read_file_batches_budgeted(inv, data, &ids, &budget, &mut execute)?;
-        }
-        scope.check_consumer(inv, budget)?;
-        let (result, provenance, decoded_bytes, preparation_ms, execution_ms, effective_sources) =
-            query_result.ok_or_else(|| fault("records.internal", 8, "SQL result missing"))?;
-        let complete = result.complete;
-        let resources = budget.logical_snapshot()?;
-        let memory_budget = budget.memory_snapshot()?;
-        let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
-        budget.check()?;
-        let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
-        if !semantic_provenance.is_empty() {
-            let size = capture::json_size(&semantic_provenance, &safety)?;
-            safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
-            reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
-        }
-        if !effective_sources.is_empty() {
-            reading["effectiveSources"] = effective::reports_value(&effective_sources, &safety)?;
-        }
-        let raw = capture::json_bytes(
-            &request::CaptureBody {
-                reading: &reading,
-                request: &request,
-            },
-            &safety,
-            16 << 20,
-            || {
-                fault(
-                    "relational.resource_limit",
-                    3,
-                    "SQL result exceeds evidence budget",
-                )
-            },
-        )?;
-        let request_digest = request.digest(&safety)?;
-        let required_sources = if effective_sources.is_empty() {
-            vec![]
-        } else {
-            request
-                .hotfix
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-        };
-        let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
-        let capture = evidence::commit_capture_budgeted_referencing(
-            &inv.home,
-            evidence::CaptureInput {
-                bytes: &raw,
-                maximum_bytes: 16 << 20,
-                media_type: "application/json",
-                provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
-                complete,
-                truncated: false,
-            },
-            &required_sources,
-            &inv.control,
-            &reference_accounting,
-        )?;
-        if csv {
-            let (manifest, csv_capture) =
-                query_csv::export(inv, &pin.id, &capture, &result, &safety)?;
-            let mut out = Outcome::new(manifest);
+            let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
+            // Reserve the small success identities before the commit; later
+            // checked close cannot erase an already-published capture.
+            safety.charge(Cost::retained(512))?;
+            let capture = evidence::commit_capture_budgeted_referencing(
+                &inv.home,
+                evidence::CaptureInput {
+                    bytes: &raw,
+                    maximum_bytes: 16 << 20,
+                    media_type: "application/json",
+                    provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
+                    complete,
+                    truncated: false,
+                },
+                &required_sources,
+                &inv.control,
+                &reference_accounting,
+            )?;
+            committed.push(
+                capture["id"]
+                    .as_str()
+                    .expect("committed SQL capture identity")
+                    .to_owned(),
+            );
+            if csv {
+                let (manifest, csv_capture) =
+                    query_csv::export(inv, &pin.id, &capture, &result, &safety)?;
+                committed.push(
+                    csv_capture["id"]
+                        .as_str()
+                        .expect("committed CSV capture identity")
+                        .to_owned(),
+                );
+                output_published = true;
+                let mut out = Outcome::new(manifest);
+                out.complete = complete;
+                out.selection = serde_json::to_value(&pin)?;
+                out.provenance = vec![capture, csv_capture];
+                return Ok(out);
+            }
+            let mut out = Outcome::new(reading);
+            out.public_numbers = public_numbers;
             out.complete = complete;
             out.selection = serde_json::to_value(&pin)?;
-            out.provenance = vec![capture, csv_capture];
-            return Ok(out);
-        }
-        let mut out = Outcome::new(reading);
-        out.public_numbers = public_numbers;
-        out.complete = complete;
-        out.selection = serde_json::to_value(&pin)?;
-        out.provenance = vec![capture];
-        Ok(out)
+            out.provenance = vec![capture];
+            Ok(out)
+        })();
+        resolver.close_after(resolved)
     };
     let result = if inv.flag_bool("--cdn") {
         match pin.data.as_ref() {
@@ -1096,7 +873,25 @@ pub(crate) fn sql_inner_budgeted(
     } else {
         execute_sql(&mut scope)
     };
-    scope.finish(result)
+    scope
+        .finish(result)
+        .map_err(|error| sql_committed_error(error, &committed, output_published))
+}
+fn sql_committed_error(
+    mut error: lycheedev_core::ToolkitError,
+    committed: &[String],
+    output_published: bool,
+) -> lycheedev_core::ToolkitError {
+    if !committed.is_empty() {
+        let primary = error.clone();
+        error.details = json!({"schema":"lycheedev.query-committed-error.v1", "primary":primary,
+            "completedCaptures":committed, "outputPublished":output_published});
+        error
+            .message
+            .push_str("\nquery captures already committed: ");
+        error.message.push_str(&committed.join(", "));
+    }
+    error
 }
 pub fn asset(inv: &Invocation) -> Result<Outcome> {
     asset_after_finish(inv, &mut |result| result)

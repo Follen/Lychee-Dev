@@ -53,7 +53,7 @@ fn after_blob(
 pub(crate) fn read_verified_content(
     home: &Path,
     root: &Path,
-    index: &Encoding<'_>,
+    index: &dyn crate::metadata_format::EncodingLookup,
     record: &EncodingRecord,
     limits: casc::Limits,
     maximum: usize,
@@ -88,8 +88,7 @@ pub(crate) fn read_verified_content(
     let _io_buffers = budget.reserve_retained(4 * 65536)?;
     let mut unavailable = None;
     for encoding_key in &record.encoding_keys {
-        let physical =
-            index.find_encoding_with_check(encoding_key, limits, None, || store.check())?;
+        let physical = index.physical(keys.keys(), encoding_key, limits, &mut || store.check())?;
         let encoded = usize::try_from(physical.encoded_bytes).map_err(|_| {
             fault(
                 "records.metadata_limit",
@@ -286,7 +285,7 @@ pub(crate) fn read_verified_content(
 pub(crate) fn read_content_controlled(
     home: &Path,
     root: &Path,
-    index: &Encoding<'_>,
+    index: &dyn crate::metadata_format::EncodingLookup,
     record: &EncodingRecord,
     limits: casc::Limits,
     keys: &mut keys::Context,

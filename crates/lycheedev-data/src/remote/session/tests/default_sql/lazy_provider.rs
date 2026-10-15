@@ -105,3 +105,93 @@ fn default_remote_static_and_effective_aliases_consume_one_bundle_with_independe
     f.verify(&out);
     f.close();
 }
+
+#[test]
+fn default_remote_quoted_physical_names_and_dotted_alias_preserve_equal_order() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    for sql in [
+        r#"SELECT "r.s"."ID" FROM "static"."RemoteSample" AS "r.s" WHERE "r.s"."ID" IN (9,7,9.0,NULL,8)"#,
+        r#"SELECT "RemoteSample"."ID" FROM "ſtatic"."RemoteSample" WHERE "RemoteSample"."ID" IN (9,7,9.0,NULL,8)"#,
+    ] {
+        let out = crate::dispatch(&f.invocation(sql)).unwrap();
+        assert_eq!(out.data["result"]["rows"], json!([[9], [7], [8]]), "{sql}");
+        f.verify(&out);
+    }
+    f.close();
+}
+
+#[test]
+fn default_remote_quoted_effective_names_keep_overlay_and_original_capture() {
+    let f = SqlFixture::new(false, true);
+    let cache = f.hotfix_capture(&f.snapshot, true, false);
+    let out = crate::dispatch(&f.effective_invocation(
+        r#"SELECT "e.f"."ID" FROM "effective"."RemoteSample" AS "e.f" WHERE "e.f"."ID" IN (7,99)"#,
+        std::slice::from_ref(&cache),
+    ))
+    .unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[7]]));
+    assert_eq!(out.data["effectiveSources"][0]["captures"][0]["id"], cache);
+    f.verify(&out);
+    f.close();
+}
+
+#[test]
+fn default_remote_quoted_meta_identifier_avoids_unrequested_physical_options() {
+    let f = SqlFixture::new(false, false);
+    let mut inv = f.invocation(r#"SELECT COUNT(*) FROM "meta"."RemoteSample" AS "m.n""#);
+    inv.flags
+        .insert("--installation".into(), "not-a-source-for-meta".into());
+    inv.flags
+        .insert("--key-file".into(), "missing-private-keys".into());
+    inv.flags
+        .insert("--content-variant".into(), "invalid-unread-variant".into());
+    let out = crate::dispatch(&inv).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[0]]));
+    assert_eq!(out.data["sources"], json!([]));
+    assert_eq!(out.data["semanticSources"].as_array().unwrap().len(), 1);
+    assert!(f.source.backend.calls.lock().unwrap().is_empty());
+    f.verify(&out);
+    f.close();
+}
+
+#[test]
+fn default_remote_schema_preflight_binding_precedes_later_missing_definition() {
+    let f = SqlFixture::new(true, true);
+    for sql in [
+        "WITH first AS (SELECT Missing FROM RemoteSample), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
+        "SELECT Missing FROM RemoteSample UNION ALL SELECT ID FROM NoSuchTable",
+    ] {
+        let before = f.captures().len();
+        let error = crate::dispatch(&f.invocation(sql)).unwrap_err();
+        assert_eq!(error.code, "query.unresolved_binding", "{sql}");
+        assert_eq!(f.captures().len(), before);
+    }
+    f.close();
+}
+
+#[test]
+fn default_remote_binding_only_cte_does_not_prepare_casc_or_keys() {
+    let f = SqlFixture::new(false, false);
+    let mut inv = f.invocation("WITH first AS (SELECT Missing), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later");
+    inv.flags
+        .insert("--installation".into(), "unrequested-installation".into());
+    inv.flags.insert("--keys".into(), "unrequested-keys".into());
+    let before = f.captures().len();
+    assert_eq!(
+        crate::dispatch(&inv).unwrap_err().code,
+        "query.unresolved_binding"
+    );
+    assert!(f.source.backend.calls.lock().unwrap().is_empty());
+    assert_eq!(f.captures().len(), before);
+    f.close();
+}
+
+#[test]
+fn default_remote_root_resolution_reuses_case_canonical_table_across_passes() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    let out = crate::dispatch(&f.invocation("SELECT ID FROM RemoteSample WHERE ID IN (9,7) UNION ALL SELECT ID FROM STATIC.remotesample WHERE ID=8")).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[9], [7], [8]]));
+    assert_eq!(out.data["sources"].as_array().unwrap().len(), 1);
+    f.verify(&out);
+    f.close();
+}

@@ -182,8 +182,23 @@ impl<'a> RowAllocation<'a> {
         }
     }
 }
+// An owned query body retains its exact allocation/verification owner. The
+// index stores offsets, so no field borrows this enum or another sibling.
+enum TableBytes<'a> {
+    Borrowed(&'a [u8]),
+    Owned(Box<dyn AsRef<[u8]> + Send + Sync>),
+}
+impl std::ops::Deref for TableBytes<'_> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Borrowed(raw) => raw,
+            Self::Owned(raw) => raw.as_ref().as_ref(),
+        }
+    }
+}
 struct Source<'a> {
-    raw: &'a [u8],
+    raw: TableBytes<'a>,
     missing: Vec<Range<usize>>,
     budget: Option<Arc<Budget>>,
     metadata_bytes: AtomicU64,
@@ -192,6 +207,14 @@ struct Source<'a> {
 impl<'a> Source<'a> {
     fn new(
         raw: &'a [u8],
+        missing: &[Range<usize>],
+        limits: TableLimits,
+        budget: Option<Arc<Budget>>,
+    ) -> Result<Self> {
+        Self::with_bytes(TableBytes::Borrowed(raw), missing, limits, budget)
+    }
+    fn with_bytes(
+        raw: TableBytes<'a>,
         missing: &[Range<usize>],
         limits: TableLimits,
         budget: Option<Arc<Budget>>,
@@ -241,7 +264,7 @@ impl<'a> Source<'a> {
         }
         Ok(())
     }
-    fn read(&self, offset: usize, length: usize) -> Result<&'a [u8]> {
+    fn read(&self, offset: usize, length: usize) -> Result<&[u8]> {
         if let Some(budget) = &self.budget {
             budget.check()?;
         }
@@ -261,6 +284,23 @@ impl<'a> Source<'a> {
             ));
         }
         Ok(&self.raw[offset..end])
+    }
+    // Index construction runs before an owned body is promoted into this
+    // source. Keeping its external borrow lets the index mutate disjoint owned
+    // maps while reading auxiliary bytes, without copying or self references.
+    fn index_read(&self, offset: usize, length: usize) -> Result<&'a [u8]> {
+        self.read(offset, length)?;
+        match &self.raw {
+            TableBytes::Borrowed(raw) => {
+                let raw = *raw;
+                Ok(&raw[offset..offset + length])
+            }
+            TableBytes::Owned(_) => Err(fault(
+                "records.internal",
+                8,
+                "WDC index cannot be rebuilt after ownership promotion",
+            )),
+        }
     }
 }
 fn u16at(raw: &[u8], offset: usize) -> Result<u16> {
@@ -284,7 +324,7 @@ struct Reader<'s, 'a> {
     budget: usize,
 }
 impl<'s, 'a> Reader<'s, 'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
+    fn take(&mut self, n: usize) -> Result<&'s [u8]> {
         if n > self.budget.saturating_sub(self.offset) {
             return limit();
         }
@@ -637,6 +677,83 @@ fn open_inner<'a>(
         return invalid();
     }
     let source = Source::new(raw, missing_ranges, limits, budget)?;
+    open_source(source, definition, limits, unavailable)
+}
+/// Own a previously authenticated immutable body without copying it. Its
+/// allocation/verification lease remains alive until the last Table owner drops.
+pub(crate) fn open_owned_budgeted<B>(
+    raw: B,
+    definition: &Definition,
+    limits: TableLimits,
+    unavailable: &BTreeSet<usize>,
+    missing_ranges: &[Range<usize>],
+    budget: Arc<Budget>,
+) -> Result<Table<'static>>
+where
+    B: AsRef<[u8]> + Send + Sync + 'static,
+{
+    // Build the index once while bytes are an external borrow, then move all
+    // owned metadata out before moving its body. No field borrows another field.
+    let Table {
+        source,
+        layout,
+        programs,
+        locations,
+        physical,
+        ids,
+        definition,
+        column_mapping,
+        unavailable,
+        work,
+        limits,
+    } = open_inner(
+        raw.as_ref(),
+        definition,
+        limits,
+        unavailable,
+        missing_ranges,
+        Some(budget),
+    )?;
+    let Source {
+        raw: _,
+        missing,
+        budget,
+        metadata_bytes,
+        metadata_limit,
+    } = source;
+    if let Some(budget) = &budget {
+        // The original body is already accounted. Only the wrapper is extra
+        // Rust safety memory; Vec and CDN allocation owners move unchanged.
+        budget
+            .safety_only()
+            .charge(Cost::retained(std::mem::size_of::<B>()))?;
+    }
+    Ok(Table {
+        source: Source {
+            raw: TableBytes::Owned(Box::new(raw)),
+            missing,
+            budget,
+            metadata_bytes,
+            metadata_limit,
+        },
+        layout,
+        programs,
+        locations,
+        physical,
+        ids,
+        definition,
+        column_mapping,
+        unavailable,
+        work,
+        limits,
+    })
+}
+fn open_source<'a>(
+    source: Source<'a>,
+    definition: &Definition,
+    limits: TableLimits,
+    unavailable: &BTreeSet<usize>,
+) -> Result<Table<'a>> {
     let layout = inspect_source(&source, limits)?;
     if layout.stride > 1 << 20 {
         return limit();
@@ -852,7 +969,7 @@ impl<'a> Table<'a> {
         // locations; every index remains valid for the table's lifetime.
         Ok(&self.physical[*index as usize])
     }
-    pub fn raw_record(&self, id: u32) -> Result<&'a [u8]> {
+    pub fn raw_record(&self, id: u32) -> Result<&[u8]> {
         let location = self.location(id)?;
         self.source.read(location.offset, location.length as usize)
     }
@@ -1131,7 +1248,7 @@ impl<'a> Table<'a> {
                     + p.rows as usize * self.layout.stride as usize
                     + p.string_bytes as usize
             };
-            let aux = self.source.read(position, aux_bytes as usize)?;
+            let aux = self.source.index_read(position, aux_bytes as usize)?;
             let (mut ids, copy_start, relation_start) = if sparse {
                 self.index_sparse(pi, &p, aux)?
             } else {

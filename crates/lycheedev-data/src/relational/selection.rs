@@ -231,7 +231,7 @@ const BUFFER_FULL: &str = "relational.selection_buffer_limit";
 fn collect<P: Equality>(
     filter: Option<&Term>,
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     parameters: &BTreeMap<String, Scalar>,
     provider: &mut P,
     work: &mut Work<'_>,
@@ -370,7 +370,7 @@ impl Equality for Direct<'_> {
 fn equality(
     source: &Source,
     filter: Option<&Term>,
-    alias: &str,
+    alias: ColumnOwners<'_>,
     parameters: &BTreeMap<String, Scalar>,
     provider: &dyn RowProvider,
     work: &mut Work<'_>,
@@ -406,7 +406,7 @@ pub(super) fn visit(
     source: &Source,
     selected: Option<&[usize]>,
     filter: Option<&Term>,
-    alias: &str,
+    alias: ColumnOwners<'_>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
     yield_row: &mut Yield<'_>,

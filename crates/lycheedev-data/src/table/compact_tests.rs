@@ -570,3 +570,120 @@ fn malformed_growth_bound_checks_overflow_and_large_capacity_cliffs() {
     // The charge is based on the whole future domain, not one extra row.
     assert!(peak > 1 << 20);
 }
+
+#[test]
+fn owned_table_moves_original_body_and_retains_it_through_shared_consumers() {
+    struct Body {
+        bytes: Vec<u8>,
+        dropped: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl AsRef<[u8]> for Body {
+        fn as_ref(&self) -> &[u8] {
+            &self.bytes
+        }
+    }
+    impl Drop for Body {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+    let raw = records(&[100, 10], &[1, 0, 0, 0, 0]);
+    let pointer = raw.as_ptr();
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let table = Arc::new(
+        open_owned_budgeted(
+            Body {
+                bytes: raw,
+                dropped: dropped.clone(),
+            },
+            &values_definition(),
+            TableLimits::default(),
+            &BTreeSet::new(),
+            &[],
+            budget(Cost::defaults()),
+        )
+        .unwrap(),
+    );
+    assert_eq!(table.source.raw.as_ptr(), pointer);
+    let borrowed = table.clone();
+    drop(table);
+    assert!(!dropped.load(Ordering::SeqCst));
+    assert_eq!(borrowed.row(100, 1 << 20).unwrap()["Value"], Value::Int(1));
+    drop(borrowed);
+    assert!(dropped.load(Ordering::SeqCst));
+}
+
+#[test]
+fn owned_table_does_not_rebuild_or_double_charge_compact_index() {
+    let raw = records(&[101, 100, 100, 10], &[1, 0, 0, 0, 0]);
+    let borrowed_budget = budget(Cost::defaults());
+    let owned_budget = budget(Cost::defaults());
+    let borrowed = open_budgeted(
+        &raw,
+        &values_definition(),
+        TableLimits::default(),
+        &BTreeSet::new(),
+        &[],
+        borrowed_budget.clone(),
+    )
+    .unwrap();
+    let owned = open_owned_budgeted(
+        raw.clone(),
+        &values_definition(),
+        TableLimits::default(),
+        &BTreeSet::new(),
+        &[],
+        owned_budget.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        borrowed_budget.logical_snapshot().unwrap(),
+        owned_budget.logical_snapshot().unwrap()
+    );
+    assert_eq!(
+        borrowed.ids().collect::<Vec<_>>(),
+        owned.ids().collect::<Vec<_>>()
+    );
+    assert_eq!(borrowed.physical.len(), owned.physical.len());
+    assert_eq!(owned.locations[&101], owned.locations[&10]);
+    for id in [10, 20, 100, 101] {
+        assert_eq!(
+            borrowed.row(id, 1 << 20).unwrap(),
+            owned.row(id, 1 << 20).unwrap()
+        );
+    }
+}
+
+#[test]
+fn owned_table_failure_drops_body_and_preserves_original_table_error() {
+    struct Body {
+        bytes: Vec<u8>,
+        dropped: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl AsRef<[u8]> for Body {
+        fn as_ref(&self) -> &[u8] {
+            &self.bytes
+        }
+    }
+    impl Drop for Body {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let error = open_owned_budgeted(
+        Body {
+            bytes: b"WDC3".to_vec(),
+            dropped: dropped.clone(),
+        },
+        &values_definition(),
+        TableLimits::default(),
+        &BTreeSet::new(),
+        &[],
+        budget(Cost::defaults()),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.code, "table.invalid_format");
+    assert!(dropped.load(Ordering::SeqCst));
+}

@@ -19,6 +19,8 @@ fn work(bytes: usize, units: u64) -> Work<'static> {
         planning: false,
         selection_sources: Vec::new(),
         providers: &[],
+        resolver: None,
+        roots: BTreeMap::new(),
     }
 }
 fn capabilities() -> BTreeMap<String, String> {
@@ -109,7 +111,7 @@ fn collected(
     let handled = collect(
         program.filter.as_ref(),
         &columns,
-        "t",
+        ColumnOwners::Single("t"),
         params,
         provider,
         work,
@@ -120,7 +122,7 @@ fn collected(
                 program.filter.as_ref().unwrap(),
                 row,
                 &columns,
-                "t",
+                ColumnOwners::Single("t"),
                 params,
                 work,
             )?)? == Some(true)
@@ -417,7 +419,7 @@ fn provider_failure_is_fatal_without_yield_or_fallback() {
     let error = collect(
         program.filter.as_ref(),
         &["ID".into(), "Name".into()],
-        "t",
+        ColumnOwners::Single("t"),
         &BTreeMap::new(),
         &mut provider,
         &mut work,
@@ -603,7 +605,7 @@ fn output_charges_survive_scoped_candidate_refund() {
         collect(
             program.filter.as_ref(),
             &["ID".into(), "Name".into()],
-            "t",
+            ColumnOwners::Single("t"),
             &BTreeMap::new(),
             &mut provider,
             &mut work,

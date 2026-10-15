@@ -6,9 +6,9 @@ pub(super) fn references(program: &Program, name: &str) -> usize {
     if program.bindings.iter().any(|(n, _)| equal_fold(n, name)) {
         return 0;
     }
-    let relation = |table: &str, body: &Option<Box<Program>>| {
+    let relation = |table: &RelationName, body: &Option<Box<Program>>| {
         body.as_ref().map_or(
-            usize::from(!table.contains('.') && equal_fold(table, name)),
+            usize::from(table.catalog.is_none() && equal_fold(&table.name, name)),
             |p| references(p, name),
         )
     };
@@ -53,8 +53,9 @@ fn delta_scope<'a>(
     })?;
     work.retain(bytes)?;
     let mut inputs = sources.clone();
-    inputs.retain(|n, _| identifier_lower(n) != identifier_lower(name));
-    inputs.insert(name.to_string(), delta);
+    let key = identifiers::lexical_key(name);
+    inputs.retain(|n, _| identifier_lower(n) != key);
+    inputs.insert(key, delta);
     Ok(inputs)
 }
 

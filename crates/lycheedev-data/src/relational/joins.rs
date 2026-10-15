@@ -1,10 +1,9 @@
 //! Ordered inner/left/cross joins. An optional equality index preserves the
 //! evaluator's heterogeneous-type error timing; residual predicates use loops.
 use super::*;
-pub(super) const QUALIFIED: &str = "<joined>";
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Link {
-    pub table: String,
+    pub table: RelationName,
     pub alias: String,
     pub derived: Option<Box<Program>>,
     pub(super) left: bool,
@@ -14,7 +13,7 @@ pub(super) fn relation(
     relation: &TableFactor,
     virtual_name: &str,
     depth: usize,
-) -> Result<(String, String, Option<Box<Program>>)> {
+) -> Result<(RelationName, String, Option<Box<Program>>)> {
     if let TableFactor::Derived {
         lateral,
         subquery,
@@ -30,7 +29,7 @@ pub(super) fn relation(
             .map(|a| a.name.value.clone())
             .unwrap_or_default();
         return Ok((
-            virtual_name.into(),
+            RelationName::internal(virtual_name),
             alias,
             Some(Box::new(Program::compile_query(
                 *subquery.clone(),
@@ -65,14 +64,11 @@ pub(super) fn relation(
     {
         return Err(unsupported());
     }
-    let table = name.to_string();
-    if table.is_empty() || table.len() > 512 || table.contains('\0') {
-        return Err(binding());
-    }
+    let table = RelationName::from_object(name)?;
     let alias = alias
         .as_ref()
         .map(|a| a.name.value.clone())
-        .unwrap_or_else(|| table.rsplit('.').next().unwrap().into());
+        .unwrap_or_else(|| table.name.clone());
     Ok((table, alias, None))
 }
 pub(super) fn compile(
@@ -108,8 +104,12 @@ pub(super) fn compile(
         condition: Some(term(on, parameters, depth)?),
     })
 }
-fn source<'a>(sources: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a Source> {
-    let result = compound::source(sources, name)?;
+fn source<'a, 'w: 'a>(
+    sources: &BTreeMap<String, &'a Source>,
+    name: &RelationName,
+    work: &mut Work<'w>,
+) -> Result<&'a Source> {
+    let result = compound::source(sources, name, work)?;
     if result.columns.is_empty() || result.columns.len() > 4096 {
         return Err(binding());
     }
@@ -131,6 +131,7 @@ fn source<'a>(sources: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a 
 fn equality_indices(
     condition: Option<&Term>,
     columns: &[String],
+    owners: &[String],
     boundary: usize,
 ) -> Option<(usize, usize)> {
     let Term::Binary(a, BinaryOperator::Eq, b) = condition? else {
@@ -140,8 +141,8 @@ fn equality_indices(
         return None;
     };
     let (mut a, mut b) = (
-        column(columns, QUALIFIED, a).ok()?,
-        column(columns, QUALIFIED, b).ok()?,
+        column(columns, ColumnOwners::PerColumn(owners), a).ok()?,
+        column(columns, ColumnOwners::PerColumn(owners), b).ok()?,
     );
     if a >= boundary && b < boundary {
         std::mem::swap(&mut a, &mut b);
@@ -171,11 +172,12 @@ type KeyIndex = (usize, Option<Scalar>, BTreeMap<String, Vec<usize>>);
 fn index(
     condition: Option<&Term>,
     columns: &[String],
+    owners: &[String],
     boundary: usize,
     right: &[Vec<Scalar>],
     work: &mut Work<'_>,
 ) -> Result<Option<KeyIndex>> {
-    let Some((left, right_column)) = equality_indices(condition, columns, boundary) else {
+    let Some((left, right_column)) = equality_indices(condition, columns, owners, boundary) else {
         return Ok(None);
     };
     let mut example = None;
@@ -234,6 +236,7 @@ struct Right<'a> {
 }
 pub(super) struct Plan<'a> {
     pub source: Source,
+    pub owners: Vec<String>,
     first: &'a Source,
     first_selected: Vec<usize>,
     projected: bool,
@@ -243,13 +246,13 @@ pub(super) struct Plan<'a> {
     // No cross product or intermediate join is materialized.
     selected: Vec<bool>,
 }
-pub(super) fn prepare<'a>(
-    first: &str,
+pub(super) fn prepare<'a, 'w: 'a>(
+    first: &RelationName,
     alias: &str,
     links: &'a [Link],
     sources: &BTreeMap<String, &'a Source>,
     params: &BTreeMap<String, Scalar>,
-    work: &mut Work<'_>,
+    work: &mut Work<'w>,
     program: &Program,
 ) -> Result<Plan<'a>> {
     prepare_scoped(
@@ -263,17 +266,17 @@ pub(super) fn prepare<'a>(
         &subquery::Context::new(sources, None),
     )
 }
-pub(super) fn prepare_scoped<'a>(
-    first: &str,
+pub(super) fn prepare_scoped<'a, 'w: 'a>(
+    first: &RelationName,
     alias: &str,
     links: &'a [Link],
     sources: &BTreeMap<String, &'a Source>,
     params: &BTreeMap<String, Scalar>,
-    work: &mut Work<'_>,
+    work: &mut Work<'w>,
     program: &Program,
     context: &subquery::Context<'_>,
 ) -> Result<Plan<'a>> {
-    let first = source(sources, first)?;
+    let first = source(sources, first, work)?;
     let mut aliases = BTreeSet::from([identifier_lower(alias)]);
     work.retain(
         first
@@ -282,11 +285,17 @@ pub(super) fn prepare_scoped<'a>(
             .map(|s| alias.len() + s.len() + 1 + std::mem::size_of::<String>())
             .sum(),
     )?;
-    let mut columns: Vec<_> = first
-        .columns
-        .iter()
-        .map(|c| format!("{alias}.{c}"))
-        .collect();
+    let mut columns: Vec<_> = first.columns.iter().cloned().collect();
+    // The existing logical schema charge owns alias/name bytes. The extra
+    // Rust String header is representation-only, not additional Go work.
+    if let Some(shared) = work.shared {
+        shared
+            .safety_only()
+            .charge(crate::resource::Cost::retained(
+                first.columns.len() * std::mem::size_of::<String>(),
+            ))?;
+    }
+    let mut owners = vec![alias.to_owned(); first.columns.len()];
     work.retain(links.len() * std::mem::size_of::<Right<'_>>())?;
     let mut rights = Vec::with_capacity(links.len());
     let mut complete = first.complete;
@@ -295,7 +304,7 @@ pub(super) fn prepare_scoped<'a>(
         if !aliases.insert(identifier_lower(&link.alias)) {
             return Err(binding());
         }
-        let right = source(sources, &link.table)?;
+        let right = source(sources, &link.table, work)?;
         let start = columns.len();
         complete &= right.complete;
         work.retain(
@@ -305,7 +314,15 @@ pub(super) fn prepare_scoped<'a>(
                 .map(|c| link.alias.len() + c.len() + 1 + std::mem::size_of::<String>())
                 .sum(),
         )?;
-        columns.extend(right.columns.iter().map(|c| format!("{}.{c}", link.alias)));
+        if let Some(shared) = work.shared {
+            shared
+                .safety_only()
+                .charge(crate::resource::Cost::retained(
+                    right.columns.len() * std::mem::size_of::<String>(),
+                ))?;
+        }
+        columns.extend(right.columns.iter().cloned());
+        owners.extend(std::iter::repeat_n(link.alias.clone(), right.columns.len()));
         if columns.len() > 4096 {
             return Err(binding());
         }
@@ -327,7 +344,7 @@ pub(super) fn prepare_scoped<'a>(
             bind_with_aggregates(
                 condition,
                 &columns[..right.end],
-                QUALIFIED,
+                ColumnOwners::PerColumn(&owners),
                 params,
                 false,
                 context,
@@ -347,10 +364,15 @@ pub(super) fn prepare_scoped<'a>(
     let mut selected = vec![false; columns.len()];
     for p in &program.projection {
         if let Some(expr) = &p.expr {
-            select(expr, &columns, QUALIFIED, &mut selected);
+            select(
+                expr,
+                &columns,
+                ColumnOwners::PerColumn(&owners),
+                &mut selected,
+            );
         } else {
-            for (i, name) in columns.iter().enumerate() {
-                let qualifier = name.rsplit_once('.').map_or("", |(q, _)| q);
+            for i in 0..columns.len() {
+                let qualifier = owners[i].as_str();
                 if p.name.is_empty() || equal_fold(qualifier, &p.name) {
                     selected[i] = true;
                 }
@@ -365,7 +387,12 @@ pub(super) fn prepare_scoped<'a>(
         .chain(program.groups.iter())
         .chain(program.having.iter())
     {
-        select(expr, &columns, QUALIFIED, &mut selected);
+        select(
+            expr,
+            &columns,
+            ColumnOwners::PerColumn(&owners),
+            &mut selected,
+        );
     }
     for right in &rights {
         if let Some(condition) = &right.link.condition {
@@ -374,7 +401,7 @@ pub(super) fn prepare_scoped<'a>(
             select(
                 condition,
                 &columns[..right.end],
-                QUALIFIED,
+                ColumnOwners::PerColumn(&owners),
                 &mut selected[..right.end],
             );
         }
@@ -391,10 +418,14 @@ pub(super) fn prepare_scoped<'a>(
             .filter_map(|(column, selected)| selected.then_some(column))
             .collect();
     }
-    let projected = provider::can_project(program, &columns, QUALIFIED)
+    let projected = provider::can_project(program, &columns, ColumnOwners::PerColumn(&owners))
         && rights.iter().all(|right| {
             right.link.condition.as_ref().is_none_or(|condition| {
-                provider::projectable(condition, &columns[..right.end], QUALIFIED)
+                provider::projectable(
+                    condition,
+                    &columns[..right.end],
+                    ColumnOwners::PerColumn(&owners),
+                )
             })
         });
     if !work.planning {
@@ -422,6 +453,7 @@ pub(super) fn prepare_scoped<'a>(
             right.keys = index(
                 right.link.condition.as_ref(),
                 &columns[..right.end],
+                &owners[..right.end],
                 right.start,
                 &right.rows,
                 work,
@@ -434,6 +466,7 @@ pub(super) fn prepare_scoped<'a>(
             rows: vec![],
             complete,
         },
+        owners,
         first,
         first_selected,
         projected,
@@ -441,7 +474,12 @@ pub(super) fn prepare_scoped<'a>(
         selected,
     })
 }
-pub(super) fn select(term: &Term, columns: &[String], alias: &str, selected: &mut [bool]) {
+pub(super) fn select(
+    term: &Term,
+    columns: &[String],
+    alias: ColumnOwners<'_>,
+    selected: &mut [bool],
+) {
     match term {
         Term::Column(name) => {
             if let Ok(i) = column(columns, alias, name) {
@@ -627,7 +665,7 @@ impl Plan<'_> {
                     scope: subquery::Scope {
                         fields: subquery::Fields {
                             columns: &self.source.columns[..right.end],
-                            alias: QUALIFIED,
+                            alias: ColumnOwners::PerColumn(&self.owners),
                         },
                         ..context.scope
                     },
@@ -637,7 +675,7 @@ impl Plan<'_> {
                     condition,
                     &values[..right.end],
                     &self.source.columns[..right.end],
-                    QUALIFIED,
+                    ColumnOwners::PerColumn(&self.owners),
                     params,
                     &context,
                     work,

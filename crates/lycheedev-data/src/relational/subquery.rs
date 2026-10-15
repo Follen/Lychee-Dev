@@ -94,22 +94,18 @@ pub(super) fn cardinality() -> lycheedev_core::ToolkitError {
 #[derive(Clone, Copy)]
 pub(super) struct Fields<'a> {
     pub columns: &'a [String],
-    pub alias: &'a str,
+    pub alias: ColumnOwners<'a>,
 }
 impl Fields<'_> {
     fn part(&self, index: usize) -> Result<(&str, &str)> {
         let column = self.columns.get(index).ok_or_else(binding)?;
-        Ok(if self.alias == joins::QUALIFIED {
-            column.rsplit_once('.').unwrap_or(("", column))
-        } else {
-            (self.alias, column.as_str())
-        })
+        Ok((self.alias.owner(index), column.as_str()))
     }
 }
 #[derive(Clone, Copy)]
 pub(super) struct Correlation<'a> {
     pub columns: &'a [String],
-    pub alias: &'a str,
+    pub alias: ColumnOwners<'a>,
     pub mapping: &'a [Option<usize>],
 }
 /// Go's saved evaluator state has a callback independently of an outer row.
@@ -129,7 +125,7 @@ impl Scope<'_> {
             callback: None,
             fields: Fields {
                 columns: &[],
-                alias: "",
+                alias: ColumnOwners::Single(""),
             },
             allowed: None,
         }
@@ -213,24 +209,19 @@ pub(super) enum Position<'a> {
     Local(usize),
     Outer(&'a Frame<'a>, usize),
 }
-fn local(columns: &[String], alias: &str, name: &str) -> Result<Option<usize>> {
-    let (qualifier, field) = name.split_once('.').unwrap_or(("", name));
-    local_parts(columns, alias, qualifier, field)
+fn local(columns: &[String], alias: ColumnOwners<'_>, name: &ColumnRef) -> Result<Option<usize>> {
+    local_parts(columns, alias, &name.qualifier, &name.name)
 }
 fn local_parts(
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     qualifier: &str,
     field: &str,
 ) -> Result<Option<usize>> {
     let mut found = None;
     let mut owned = false;
     for (index, column) in columns.iter().enumerate() {
-        let (owner, column) = if alias == joins::QUALIFIED {
-            column.rsplit_once('.').unwrap_or(("", column))
-        } else {
-            (alias, column.as_str())
-        };
+        let owner = alias.owner(index);
         if !qualifier.is_empty() && !equal_fold(qualifier, owner) {
             continue;
         }
@@ -244,19 +235,15 @@ fn local_parts(
         }
     }
     if owned && found.is_none() {
-        let name = if qualifier.is_empty() {
-            field.to_owned()
-        } else {
-            format!("{qualifier}.{field}")
-        };
+        let name = ColumnRef::qualified(qualifier, field);
         return Err(missing_column(columns, alias, &name));
     }
     Ok(found)
 }
 pub(super) fn resolve<'a>(
     columns: &[String],
-    alias: &str,
-    name: &str,
+    alias: ColumnOwners<'_>,
+    name: &ColumnRef,
     mut outer: Option<&'a Frame<'a>>,
 ) -> Result<Position<'a>> {
     if let Some(index) = local(columns, alias, name)? {
@@ -273,30 +260,22 @@ pub(super) fn resolve<'a>(
 }
 pub(super) fn display_column(
     columns: &[String],
-    alias: &str,
-    name: &str,
+    alias: ColumnOwners<'_>,
+    name: &ColumnRef,
     outer: Option<&Frame<'_>>,
 ) -> Result<Option<String>> {
     let Position::Local(index) = resolve(columns, alias, name, outer)? else {
         // Go's bound outer-column node is an expression, not a local column.
         return Ok(None);
     };
-    let column = &columns[index];
-    Ok(Some(
-        if alias == joins::QUALIFIED {
-            column.rsplit('.').next().unwrap()
-        } else {
-            column
-        }
-        .to_owned(),
-    ))
+    Ok(Some(columns[index].clone()))
 }
 
 pub(super) fn execute(
     query: &Program,
     row: &[Scalar],
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     parameters: &BTreeMap<String, Scalar>,
     context: &Context<'_>,
     work: &mut Work<'_>,
@@ -399,7 +378,7 @@ pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -
     let same = |a: &Term, b: &Term| same_group_expression(a, b, context);
     match (a, b) {
         (Term::Column(a), Term::Column(b)) => {
-            if !equal_fold(a.rsplit('.').next().unwrap(), b.rsplit('.').next().unwrap()) {
+            if !equal_fold(&a.name, &b.name) {
                 return false;
             }
             let Some(group) = context.group else {
@@ -451,7 +430,7 @@ pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -
 pub(super) fn group_mapping(
     keys: &[Term],
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     work: &mut Work<'_>,
 ) -> Result<Vec<Option<usize>>> {
     work.retain(

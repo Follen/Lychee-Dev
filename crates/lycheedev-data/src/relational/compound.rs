@@ -58,25 +58,29 @@ pub(super) fn validate_all_keyword(sql: &str) -> Result<()> {
 
 /// Physical roots have one resolver/cache identity. Lexical CTE keys remain
 /// unqualified, so an explicit catalog always bypasses lexical shadowing.
-pub(super) fn physical_key(name: &str) -> String {
-    let (catalog, name) = name.split_once('.').unwrap_or(("static", name));
-    format!("{}.{}", identifier_lower(catalog), identifier_lower(name))
+pub(super) fn physical_key(name: &str) -> Result<String> {
+    Ok(RelationName::from_key(name)?.physical_key())
 }
 pub(super) fn insert_root<'a>(
     inputs: &mut BTreeMap<String, &'a Source>,
     name: &str,
     source: &'a Source,
 ) -> Result<()> {
-    let key = physical_key(name);
+    let key = physical_key(name)?;
     if inputs.contains_key(&key) {
         return Err(binding());
     }
     inputs.insert(key, source);
     Ok(())
 }
-pub(super) fn source<'a>(inputs: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a Source> {
-    let key = identifier_lower(name);
-    if !name.contains('.') {
+pub(super) fn source<'a, 'w: 'a>(
+    inputs: &BTreeMap<String, &'a Source>,
+    name: &RelationName,
+    work: &mut Work<'w>,
+) -> Result<&'a Source> {
+    if let Some(key) = name.lexical_key() {
+        // Internal scoped callers may provide lexical keys directly. Root
+        // entrypoints canonicalize physical keys before entering this map.
         let mut lexical = inputs
             .iter()
             .filter(|(name, _)| identifier_lower(name) == key);
@@ -87,7 +91,10 @@ pub(super) fn source<'a>(inputs: &BTreeMap<String, &'a Source>, name: &str) -> R
             return Ok(*source);
         }
     }
-    inputs.get(&physical_key(name)).copied().ok_or_else(binding)
+    if let Some(source) = inputs.get(&name.physical_key()) {
+        return Ok(*source);
+    }
+    work.resolve_root(name)
 }
 static RESERVED_SOURCE: Source = Source {
     columns: Vec::new(),
@@ -98,7 +105,7 @@ static RESERVED_SOURCE: Source = Source {
 pub(super) fn dependencies<'a>(
     program: &'a Program,
     outer: &BTreeSet<String>,
-    tables: &mut Vec<&'a str>,
+    tables: &mut Vec<&'a RelationName>,
 ) {
     let mut names = outer.clone();
     for (name, _) in &program.bindings {
@@ -123,10 +130,10 @@ pub(super) fn dependencies<'a>(
             dependencies(body, &names, tables);
             continue;
         }
-        if !names.contains(&identifier_lower(table))
+        if !(table.catalog.is_none() && names.contains(&identifier_lower(&table.name)))
             && !tables
                 .iter()
-                .any(|n| physical_key(n) == physical_key(table))
+                .any(|n| n.physical_key() == table.physical_key())
         {
             tables.push(table);
         }
@@ -160,7 +167,7 @@ fn visible<'a>(
         map.insert(name.clone(), &RESERVED_SOURCE);
     }
     for (name, source) in results {
-        map.insert(identifier_lower(name), source);
+        map.insert(name.clone(), source);
     }
     Ok(map)
 }
@@ -184,13 +191,13 @@ pub(super) fn execute(
     let mut reserved: BTreeSet<_> = program
         .bindings
         .iter()
-        .map(|(n, _)| identifier_lower(n))
+        .map(|(n, _)| identifiers::lexical_key(n))
         .collect();
     reserved.extend(
         std::iter::once((&program.table, &program.derived))
             .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
             .filter(|(_, body)| body.is_some())
-            .map(|(name, _)| identifier_lower(name)),
+            .map(|(name, _)| name.lexical_key().expect("derived name is internal")),
     );
     let mut results = BTreeMap::new();
     for (name, body) in &program.bindings {
@@ -203,7 +210,7 @@ pub(super) fn execute(
         };
         work.retain(name.len() + 96)?;
         results.insert(
-            name.clone(),
+            identifiers::lexical_key(name),
             Source {
                 columns: result.columns,
                 rows: result.rows,
@@ -220,9 +227,9 @@ pub(super) fn execute(
         work.spend()?;
         let inputs = visible(sources, &reserved, &results, work)?;
         let result = body.execute_scoped_with(&inputs, scope.select(&inputs), parameters, work)?;
-        work.retain(name.len() + 96)?;
+        work.retain(name.key().len() + 96)?;
         results.insert(
-            name.clone(),
+            name.lexical_key().expect("derived name is internal"),
             Source {
                 columns: result.columns,
                 rows: result.rows,
@@ -298,52 +305,23 @@ fn execute_body(
             });
         }
     }
-    let mut combined = combined.ok_or_else(binding)?;
-    // Fixed Go gives compound output fields ordinal qualifiers ("0", "1", ...).
-    // Those identities matter when an inherited callback resolves an outer row.
-    let bytes = combined
-        .columns
-        .iter()
-        .enumerate()
-        .try_fold(0usize, |total, (index, name)| {
-            let digits = if index == 0 {
-                1
-            } else {
-                index.ilog10() as usize + 1
-            };
-            total
-                .checked_add(name.len() + digits + 1 + std::mem::size_of::<String>())
-                .ok_or_else(budget)
-        })?;
-    if let Some(shared) = work.shared {
-        shared
-            .safety_only()
-            .charge(crate::resource::Cost::retained(bytes))?;
-    }
-    let names = combined
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(index, name)| format!("{index}.{name}"))
-        .collect();
-    // Keep the original public names as owned metadata. A quoted name may
-    // contain dots, so stripping the internal qualifier cannot recover it.
-    let public_names = std::mem::replace(&mut combined.columns, names);
-    work.retain(program.table.len() + 96)?;
+    let combined = combined.ok_or_else(binding)?;
+    // Ordinal owners are installed by the compound tail without changing
+    // these raw public names (which may contain dots or escaped quotes).
+    work.retain(program.table.key().len() + 96)?;
 
     work.retain(sources.keys().map(|name| name.len() + 96).sum())?;
     let mut inputs = sources.clone();
-    inputs.insert(program.table.clone(), &combined);
+    inputs.insert(program.table.key().to_owned(), &combined);
     // Internal result columns may repeat. Project them by ordinal rather
     // than re-binding their names. ORDER BY still binds the first branch's
     // public names and must reject an ambiguous duplicate name.
-    let mut result = program.execute_select_mode(
+    let result = program.execute_select_mode(
         &inputs,
         scope,
         parameters,
         work,
         ProjectionMode::CompoundOrdinals,
     )?;
-    result.columns = public_names;
     Ok(result)
 }

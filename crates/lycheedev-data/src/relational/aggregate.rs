@@ -209,7 +209,7 @@ impl Grouping {
             .iter()
             .position(|t| subquery::same_group_expression(t, node, context))
         {
-            return Ok(Term::Column(self.columns[i].clone()));
+            return Ok(Term::Column(ColumnRef::new(self.columns[i].clone())));
         }
         let recurse = |this: &mut Self, t: &Term, work: &mut Work<'_>| {
             this.rewrite(t, allow_alias, aliases, params, context, work)
@@ -227,7 +227,7 @@ impl Grouping {
                     input: input.clone(),
                     distinct: *distinct,
                 });
-                Term::Column(column)
+                Term::Column(ColumnRef::new(column))
             }
             // Internal compound ordinals are input columns, not literals.
             // A matching group key was handled above; otherwise projecting
@@ -240,7 +240,11 @@ impl Grouping {
                         Ok(subquery::Position::Outer(..))
                     )
                 });
-                if outer || allow_alias && aliases.iter().any(|a| equal_fold(a, name)) {
+                if outer
+                    || allow_alias
+                        && name.qualifier.is_empty()
+                        && aliases.iter().any(|a| equal_fold(a, &name.name))
+                {
                     node.clone()
                 } else {
                     return Err(binding());
@@ -317,7 +321,7 @@ impl Grouping {
         &mut self,
         row: &[Scalar],
         columns: &[String],
-        alias: &str,
+        alias: ColumnOwners<'_>,
         params: &BTreeMap<String, Scalar>,
         context: &subquery::Context<'_>,
         work: &mut Work<'_>,
@@ -372,7 +376,7 @@ impl Grouping {
                     node,
                     &row,
                     &self.columns,
-                    "",
+                    ColumnOwners::Single(""),
                     params,
                     context,
                     work,

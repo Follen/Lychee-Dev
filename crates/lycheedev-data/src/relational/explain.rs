@@ -150,7 +150,7 @@ fn expression(
     Ok(())
 }
 fn input(
-    table: &str,
+    table: &RelationName,
     derived: Option<&Program>,
     parent: usize,
     plan: &mut Explanation,
@@ -159,7 +159,7 @@ fn input(
     if let Some(body) = derived {
         query(body, parent, plan, work)?;
     } else {
-        add(plan, work, parent, "input", table)?;
+        add(plan, work, parent, "input", &table.label())?;
     }
     Ok(())
 }

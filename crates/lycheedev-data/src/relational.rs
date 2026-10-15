@@ -17,9 +17,12 @@ mod aggregate;
 mod compound;
 mod explain;
 pub use explain::{Explanation, PlanStep};
+mod identifiers;
+pub(crate) use identifiers::SourceTableUse;
+use identifiers::{ColumnOwners, ColumnRef, RelationName};
 mod joins;
 mod provider;
-pub(crate) use provider::{EqualityOutcome, PreparedSource, RowProvider, RowYield};
+pub(crate) use provider::{EqualityOutcome, PreparedSource, RootResolver, RowProvider, RowYield};
 mod recursive;
 mod selection;
 mod subquery;
@@ -217,7 +220,7 @@ enum Term {
     Number(String),
     // Internal compound output projection. Never produced by the SQL parser.
     Ordinal(usize),
-    Column(String),
+    Column(ColumnRef),
     Parameter(String),
     Unary(UnaryOperator, Box<Term>),
     Binary(Box<Term>, BinaryOperator, Box<Term>),
@@ -235,14 +238,11 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
     }
     let mut nested = |e: &Expr| term(e, parameters, depth + 1);
     Ok(match expr {
-        Expr::Identifier(name) => Term::Column(name.value.clone()),
-        Expr::CompoundIdentifier(names) if names.len() == 2 => Term::Column(
-            names
-                .iter()
-                .map(|n| n.value.clone())
-                .collect::<Vec<_>>()
-                .join("."),
-        ),
+        Expr::Identifier(name) => Term::Column(ColumnRef::new(name.value.clone())),
+        Expr::CompoundIdentifier(names) if names.len() == 2 => Term::Column(ColumnRef::qualified(
+            names[0].value.clone(),
+            names[1].value.clone(),
+        )),
         Expr::Value(v) => match &v.value {
             Value::Null => Term::Value(Scalar::Null),
             Value::Boolean(v) => Term::Value(Scalar::Bool(*v)),
@@ -408,7 +408,7 @@ fn check_arity(name: &str, count: usize) -> Result<()> {
 fn bind(
     term: &Term,
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     params: &BTreeMap<String, Scalar>,
     context: &subquery::Context<'_>,
     work: &mut Work<'_>,
@@ -418,7 +418,7 @@ fn bind(
 fn bind_with_aggregates(
     term: &Term,
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     params: &BTreeMap<String, Scalar>,
     allow_aggregates: bool,
     context: &subquery::Context<'_>,
@@ -497,58 +497,32 @@ fn bind_with_aggregates(
     }
     Ok(())
 }
-fn column(columns: &[String], alias: &str, name: &str) -> Result<usize> {
-    if alias == joins::QUALIFIED {
-        let mut found = columns.iter().enumerate().filter(|(_, c)| {
-            if name.contains('.') {
-                equal_fold(c, name)
-            } else {
-                equal_fold(c.rsplit('.').next().unwrap(), name)
-            }
-        });
-        let index = found
-            .next()
-            .map(|(i, _)| i)
-            .ok_or_else(|| missing_column(columns, alias, name))?;
-        if found.next().is_some() {
-            return Err(binding());
-        }
-        return Ok(index);
-    }
-    let original = name;
-    let name = if let Some((qualifier, name)) = name.split_once('.') {
-        if !equal_fold(qualifier, alias) {
-            return Err(missing_column(columns, alias, original));
-        }
-        name
-    } else {
-        name
-    };
-    let mut indices = columns
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| equal_fold(c, name));
-    let Some((index, _)) = indices.next() else {
-        return Err(missing_column(columns, alias, original));
-    };
-    if indices.next().is_some() {
+fn column(columns: &[String], alias: ColumnOwners<'_>, name: &ColumnRef) -> Result<usize> {
+    let mut found = columns.iter().enumerate().filter(|(i, candidate)| {
+        (name.qualifier.is_empty() || equal_fold(&name.qualifier, alias.owner(*i)))
+            && equal_fold(candidate, &name.name)
+    });
+    let index = found
+        .next()
+        .map(|(i, _)| i)
+        .ok_or_else(|| missing_column(columns, alias, name))?;
+    if found.next().is_some() {
         return Err(binding());
     }
     Ok(index)
 }
-fn missing_column(columns: &[String], alias: &str, name: &str) -> lycheedev_core::ToolkitError {
-    let (qualifier, field) = name.split_once('.').unwrap_or(("", name));
+fn missing_column(
+    columns: &[String],
+    alias: ColumnOwners<'_>,
+    name: &ColumnRef,
+) -> lycheedev_core::ToolkitError {
     let mut candidates = Vec::<(usize, String)>::new();
-    for column in columns {
-        let (owner, candidate) = if alias == joins::QUALIFIED {
-            column.rsplit_once('.').unwrap_or(("", column))
-        } else {
-            (alias, column.as_str())
-        };
-        if !qualifier.is_empty() && !equal_fold(qualifier, owner) {
+    for (i, candidate) in columns.iter().enumerate() {
+        let owner = alias.owner(i);
+        if !name.qualifier.is_empty() && !equal_fold(&name.qualifier, owner) {
             continue;
         }
-        let distance = column_distance(field, candidate);
+        let distance = column_distance(&name.name, candidate);
         if distance > 3 {
             continue;
         }
@@ -565,12 +539,13 @@ fn missing_column(columns: &[String], alias: &str, name: &str) -> lycheedev_core
         }
     }
     let candidates: Vec<_> = candidates.into_iter().map(|(_, name)| name).collect();
+    let label = name.label();
     let mut error = binding();
     error.message = format!(
-        "relational.unresolved_binding: column {name}; candidates: {}",
+        "relational.unresolved_binding: column {label}; candidates: {}",
         candidates.join(", ")
     );
-    error.details = serde_json::json!({"column":name,"candidates":candidates});
+    error.details = serde_json::json!({"column":label,"candidates":candidates});
     error
 }
 fn column_distance(a: &str, b: &str) -> usize {
@@ -634,6 +609,39 @@ struct Work<'a> {
     // Materialized CTE/derived/effective/meta sources never inherit a capability.
     selection_sources: Vec<(&'a Source, usize)>,
     providers: &'a [PreparedSource<'a>],
+    resolver: Option<&'a dyn RootResolver>,
+    roots: BTreeMap<String, &'a Source>,
+}
+impl<'a> Work<'a> {
+    fn resolve_root(&mut self, name: &RelationName) -> Result<&'a Source> {
+        if name.name.starts_with('\0') {
+            return Err(binding());
+        }
+        let key = name.physical_key();
+        if let Some(source) = self.roots.get(&key) {
+            return Ok(*source);
+        }
+        let resolver = self.resolver.ok_or_else(binding)?;
+        self.consume(0)?;
+        let source = resolver.resolve(name.table_use())?;
+        // Go execute.go's cached resolver retains its immutable source schema
+        // once, before validating/using it in the real preflight. This is the
+        // original executor allowance, never a new Work or query replay.
+        let bytes = source.columns.iter().try_fold(
+            128usize
+                .checked_add(source.columns.len().checked_mul(32).ok_or_else(budget)?)
+                .ok_or_else(budget)?,
+            |bytes, name| bytes.checked_add(name.len()).ok_or_else(budget),
+        )?;
+        self.retain(bytes)?;
+        if let Some(shared) = self.shared {
+            shared
+                .safety_only()
+                .charge(crate::resource::Cost::retained(key.len() + 96))?;
+        }
+        self.roots.insert(key, source);
+        Ok(source)
+    }
 }
 impl Work<'_> {
     fn spend(&mut self) -> Result<()> {
@@ -702,7 +710,7 @@ fn eval(
     t: &Term,
     row: &[Scalar],
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     params: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<Scalar> {
@@ -714,7 +722,7 @@ fn eval_scoped(
     t: &Term,
     row: &[Scalar],
     columns: &[String],
-    alias: &str,
+    alias: ColumnOwners<'_>,
     params: &BTreeMap<String, Scalar>,
     context: &subquery::Context<'_>,
     work: &mut Work<'_>,
@@ -1022,6 +1030,8 @@ impl Source {
             planning: false,
             selection_sources: Vec::new(),
             providers: &[],
+            resolver: None,
+            roots: BTreeMap::new(),
         };
         work.consume(0)?;
         if schema_only {
@@ -1111,7 +1121,7 @@ pub struct Program {
     bindings: Vec<(String, Program)>,
     branches: Vec<Program>,
     derived: Option<Box<Program>>,
-    table: String,
+    table: RelationName,
     alias: String,
     projection: Vec<Projection>,
     filter: Option<Term>,
@@ -1260,7 +1270,7 @@ impl Program {
                 bindings,
                 branches,
                 derived: None,
-                table: "\0union:output".into(),
+                table: RelationName::internal("\0union:output"),
                 alias: String::new(),
                 projection: vec![Projection {
                     expr: None,
@@ -1346,7 +1356,10 @@ impl Program {
                     options,
                 ) if options == &WildcardAdditionalOptions::default() => Projection {
                     expr: None,
-                    name: name.to_string(),
+                    name: match name.0.as_slice() {
+                        [ObjectNamePart::Identifier(name)] => name.value.clone(),
+                        _ => return Err(unsupported()),
+                    },
                 },
                 _ => return Err(unsupported()),
             });
@@ -1453,10 +1466,25 @@ impl Program {
         Ok((order, limit, offset))
     }
     pub fn source_tables(&self) -> Vec<&str> {
+        self.source_table_uses()
+            .into_iter()
+            .map(|table| table.key)
+            .collect()
+    }
+    pub(crate) fn source_table_uses(&self) -> Vec<SourceTableUse<'_>> {
         let mut tables = vec![];
         compound::dependencies(self, &BTreeSet::new(), &mut tables);
-        tables.sort_by_cached_key(|name| compound::physical_key(name));
-        tables
+        tables.sort_by_cached_key(|name| {
+            (
+                format!(
+                    "{}.{}",
+                    identifier_lower(name.catalog.as_deref().unwrap_or("static")),
+                    identifier_lower(&name.name)
+                ),
+                name.physical_key(),
+            )
+        });
+        tables.into_iter().map(RelationName::table_use).collect()
     }
     pub(crate) fn validate_parameters<T>(&self, parameters: &BTreeMap<String, T>) -> Result<()> {
         if self.parameters.len() != parameters.len()
@@ -1519,6 +1547,8 @@ impl Program {
             planning: true,
             selection_sources: Vec::new(),
             providers: &[],
+            resolver: None,
+            roots: BTreeMap::new(),
         };
         work.spend()?;
         if self
@@ -1539,14 +1569,19 @@ impl Program {
         )?;
         work.selection_sources = Vec::with_capacity(equal_columns.len());
         for (name, field) in equal_columns {
+            let key = compound::physical_key(name)?;
             let mut matches = sources.iter().filter(|(candidate, _)| {
-                compound::physical_key(candidate) == compound::physical_key(name)
+                compound::physical_key(candidate).is_ok_and(|candidate| candidate == key)
             });
             let (_, source) = matches.next().ok_or_else(binding)?;
             if matches.next().is_some() {
                 return Err(binding());
             }
-            let index = column(&source.columns, "", field)?;
+            let index = column(
+                &source.columns,
+                ColumnOwners::Single(""),
+                &ColumnRef::new(field.clone()),
+            )?;
             work.selection_sources.push((source, index));
         }
         let mut inputs = BTreeMap::new();
@@ -1592,6 +1627,8 @@ impl Program {
             planning: true,
             selection_sources: Vec::new(),
             providers,
+            resolver: None,
+            roots: BTreeMap::new(),
         };
         work.spend()?;
         if self
@@ -1654,6 +1691,58 @@ impl Program {
         let mut actual = self.execute_scoped(&inputs, parameters, &mut work)?;
         actual.complete &= bound.complete;
         Ok(actual)
+    }
+    /// Resolve physical roots lazily in the actual schema traversal, sharing
+    /// immutable schemas and the original executor allowance with execution.
+    pub(crate) fn execute_resolved_budgeted<'a>(
+        &self,
+        resolver: &'a dyn RootResolver,
+        parameters: &BTreeMap<String, Scalar>,
+        limits: Limits,
+        cancel: Option<&'a AtomicBool>,
+        shared: Option<&'a crate::resource::Budget>,
+    ) -> Result<QueryResult> {
+        if limits.work == 0 || limits.memory_bytes == 0 || limits.memory_bytes > 1 << 30 {
+            return Err(budget());
+        }
+        let mut work = Work {
+            left: limits.work,
+            bytes: limits.memory_bytes,
+            deadline: limits.deadline,
+            cancel,
+            shared,
+            planning: true,
+            selection_sources: Vec::new(),
+            providers: &[],
+            resolver: Some(resolver),
+            roots: BTreeMap::new(),
+        };
+        work.spend()?;
+        if self
+            .parameters
+            .iter()
+            .any(|name| !parameters.contains_key(name))
+        {
+            return Err(binding());
+        }
+        for name in &self.parameters {
+            row_cost(std::slice::from_ref(&parameters[name]))?;
+        }
+        let inputs = BTreeMap::new();
+        let bound = self.execute_scoped(&inputs, parameters, &mut work)?;
+        if self.explain {
+            let plan = explain::build(self, bound.columns, &mut work)?;
+            return Ok(QueryResult {
+                plan: Some(plan),
+                columns: vec![],
+                rows: vec![],
+                complete: bound.complete,
+            });
+        }
+        work.planning = false;
+        let mut result = self.execute_scoped(&inputs, parameters, &mut work)?;
+        result.complete &= bound.complete;
+        Ok(result)
     }
     fn execute_scoped(
         &self,
@@ -1720,12 +1809,28 @@ impl Program {
                 &context,
             )?)
         };
-        let alias = if joined.is_some() || projection_mode == ProjectionMode::CompoundOrdinals {
-            joins::QUALIFIED
+        let base_source = compound::source(sources, &self.table, work)?;
+        let ordinal_owners: Vec<String> = if projection_mode == ProjectionMode::CompoundOrdinals {
+            let count = base_source.columns.len();
+            if let Some(shared) = work.shared {
+                let bytes = count
+                    .checked_mul(std::mem::size_of::<String>() + 20)
+                    .ok_or_else(budget)?;
+                shared
+                    .safety_only()
+                    .charge(crate::resource::Cost::retained(bytes))?;
+            }
+            (0..count).map(|index| index.to_string()).collect()
         } else {
-            self.alias.as_str()
+            Vec::new()
         };
-        let base_source = compound::source(sources, &self.table)?;
+        let alias = if let Some(joined) = &joined {
+            ColumnOwners::PerColumn(&joined.owners)
+        } else if projection_mode == ProjectionMode::CompoundOrdinals {
+            ColumnOwners::PerColumn(&ordinal_owners)
+        } else {
+            ColumnOwners::Single(&self.alias)
+        };
         let source = joined.as_ref().map(|p| &p.source).unwrap_or(base_source);
         if source.columns.is_empty() || source.columns.len() > 4096 {
             return Err(binding());
@@ -1737,8 +1842,8 @@ impl Program {
         }
         if work.planning && projection_mode == ProjectionMode::NamedSource {
             let mut names = BTreeSet::new();
-            for column in &source.columns {
-                if !names.insert(identifier_lower(column)) {
+            for (i, column) in source.columns.iter().enumerate() {
+                if !names.insert((identifier_lower(alias.owner(i)), identifier_lower(column))) {
                     return Err(binding());
                 }
             }
@@ -1770,11 +1875,7 @@ impl Program {
                 let mut selected = 0usize;
                 for (ordinal, column) in source.columns.iter().enumerate() {
                     if !p.name.is_empty() {
-                        let qualifier = if joined.is_some() {
-                            column.rsplit_once('.').map(|(q, _)| q).unwrap_or("")
-                        } else {
-                            alias
-                        };
+                        let qualifier = alias.owner(ordinal);
                         if !equal_fold(qualifier, &p.name) {
                             continue;
                         }
@@ -1783,15 +1884,9 @@ impl Program {
                     outputs.push(if projection_mode == ProjectionMode::CompoundOrdinals {
                         Term::Ordinal(ordinal)
                     } else {
-                        Term::Column(column.clone())
+                        Term::Column(ColumnRef::qualified(alias.owner(ordinal), column.clone()))
                     });
-                    columns.push(
-                        if joined.is_some() || projection_mode == ProjectionMode::CompoundOrdinals {
-                            column.rsplit('.').next().unwrap().into()
-                        } else {
-                            column.clone()
-                        },
-                    );
+                    columns.push(column.clone());
                 }
                 if selected == 0 {
                     return Err(binding());
@@ -1813,23 +1908,45 @@ impl Program {
             }
             bind(key, &source.columns, alias, parameters, &context, work)?;
         }
-        for (t, _, _) in &ordering_terms {
-            match bind(t, &source.columns, alias, parameters, &context, work) {
-                Ok(()) => {}
-                Err(error) if error.code == "relational.invalid_binding" => {
-                    bind(t, &columns, alias, parameters, &context, work)?
+        for (t, _, _) in &mut ordering_terms {
+            // Go resolves a bare ORDER BY output name before binding against
+            // source fields. Quoted dots remain part of that single name.
+            let output = if let Term::Column(name) = &*t
+                && name.qualifier.is_empty()
+            {
+                let mut matches = columns
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, candidate)| equal_fold(candidate, &name.name));
+                let found = matches.next().map(|(index, _)| index);
+                if matches.next().is_some() {
+                    return Err(binding());
                 }
-                Err(error) => return Err(error),
+                found
+            } else {
+                None
+            };
+            if let Some(index) = output {
+                *t = outputs[index].clone();
             }
+            bind(t, &source.columns, alias, parameters, &context, work)?;
         }
         for t in self.limit.iter().chain(self.offset.iter()) {
-            bind(t, &[], "", parameters, &context, work)?;
+            bind(t, &[], ColumnOwners::Single(""), parameters, &context, work)?;
         }
         let count = |term: &Option<Term>, default: usize, work: &mut Work<'_>| -> Result<usize> {
             let Some(t) = term else {
                 return Ok(default);
             };
-            let v = eval_scoped(t, &[], &[], "", parameters, &context, work)?;
+            let v = eval_scoped(
+                t,
+                &[],
+                &[],
+                ColumnOwners::Single(""),
+                parameters,
+                &context,
+                work,
+            )?;
             let n = int(&v).filter(|n| *n >= 0).ok_or_else(type_error)?;
             usize::try_from(n).map_err(|_| budget())
         };
@@ -1963,7 +2080,11 @@ impl Program {
             &context
         };
         let source = grouped.as_ref().unwrap_or(source);
-        let alias = if grouped.is_some() { "" } else { alias };
+        let alias = if grouped.is_some() {
+            ColumnOwners::Single("")
+        } else {
+            alias
+        };
         let mut bounded = topk::TopRows::new(self, grouped.is_some(), limit, offset);
         if bounded.is_some() {
             // One projected candidate remains live beside the retained heap.
@@ -2052,7 +2173,7 @@ impl Program {
                         t,
                         &projected,
                         &columns,
-                        alias,
+                        alias.output(),
                         parameters,
                         output_context,
                         work,
@@ -2183,3 +2304,11 @@ impl Program {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "relational/identifier_tests.rs"]
+mod identifier_tests;
+
+#[cfg(test)]
+#[path = "relational/resolver_tests.rs"]
+mod resolver_tests;

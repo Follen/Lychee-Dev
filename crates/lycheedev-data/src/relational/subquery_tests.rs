@@ -714,6 +714,8 @@ fn subquery_uses_one_work_and_memory_allowance_including_preflight() {
         planning: true,
         selection_sources: vec![],
         providers: &providers,
+        resolver: None,
+        roots: BTreeMap::new(),
     };
     program
         .execute_scoped(&inputs, &BTreeMap::new(), &mut work)
@@ -1057,7 +1059,7 @@ fn explicit_static_root_bypasses_cte_but_forward_reserved_names_never_fall_throu
         query
             .source_tables()
             .into_iter()
-            .map(compound::physical_key)
+            .map(|name| compound::physical_key(name).unwrap())
             .collect::<BTreeSet<_>>(),
         BTreeSet::from(["static.a".into(), "static.b".into()])
     );
