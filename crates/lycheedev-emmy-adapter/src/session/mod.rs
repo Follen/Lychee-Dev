@@ -12,6 +12,7 @@ mod expression;
 pub use expression::{ExpressionInstruction, ExpressionPlan};
 mod projector;
 mod query;
+mod tuple;
 pub use evidence::*;
 pub use projector::{ProjectionResult, SelectedProjectionBackend, SelectedProjector};
 pub use query::SelectedExpressionBackend;
@@ -19,6 +20,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
+pub use tuple::{DenseTupleBackend, DenseTupleProjection};
 
 const MAX_COVERAGE_ROWS: usize = 16_384;
 const MAX_ACTIVE: usize = 64;

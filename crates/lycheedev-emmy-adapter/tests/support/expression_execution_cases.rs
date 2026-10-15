@@ -2,7 +2,8 @@
 //! transport, never general name/member/flow/call/binary inference equivalence.
 #![allow(dead_code)]
 use emmylua_code_analysis::{
-    EmmyLuaAnalysis, FileId, LuaMemberKey, LuaType, SemanticId, VariadicType,
+    EmmyLuaAnalysis, FileId, LuaMemberKey, LuaTupleStatus, LuaTupleType, LuaType, SemanticId,
+    VariadicType,
 };
 use emmylua_parser::{BinaryOperator, LuaAstNode, LuaExpr, LuaSyntaxId};
 use lycheedev_emmy_adapter::session::*;
@@ -77,6 +78,7 @@ pub struct Backend {
     pub flow_markers: HashMap<String, Arc<Marker>>,
     pub nullable: bool,
     pub primitive_binary: bool,
+    pub dense_table_logical: bool,
     pub recursive_initializers: bool,
     pub last_arguments: Vec<ExpressionValue<Value>>,
     pub last_callee: Option<ExpressionValue<Value>>,
@@ -94,6 +96,7 @@ impl Backend {
             flow_markers: HashMap::new(),
             nullable: false,
             primitive_binary: false,
+            dense_table_logical: false,
             recursive_initializers: false,
             last_arguments: vec![],
             last_callee: None,
@@ -327,8 +330,24 @@ impl ExpressionExecutionBackend for Backend {
         if self.primitive_binary {
             return match projector.project_primitive_binary(file_id, op, left, right, self)? {
                 PrimitiveBinaryProjection::Complete(value) => Ok(value),
-                PrimitiveBinaryProjection::DeferredLogical { .. } => {
-                    panic!("general logical backend is not implemented by this fixture")
+                PrimitiveBinaryProjection::DeferredLogical { op, left, right } => {
+                    assert!(
+                        self.dense_table_logical,
+                        "general logical backend is not implemented by this fixture"
+                    );
+                    let right = match projector.project_dense_table_tuple(file_id, right, self)? {
+                        DenseTupleProjection::Projected(value)
+                        | DenseTupleProjection::Unchanged(value) => value,
+                    };
+                    // The fixture only implements these final no-union choices.
+                    // Ambiguous truthy/falsy/type-coverage work is not claimed.
+                    if op == BinaryOperator::OpAnd && left.ty.is_always_truthy()
+                        || op == BinaryOperator::OpOr && left.ty.is_always_falsy()
+                    {
+                        Ok(right)
+                    } else {
+                        panic!("logical union and coverage are not implemented by this fixture")
+                    }
                 }
             };
         }
@@ -339,6 +358,34 @@ impl ExpressionExecutionBackend for Backend {
             "fixture binary inputs outside the declared subset"
         );
         Ok(Value::plain(LuaType::Number))
+    }
+}
+
+impl DenseTupleBackend for Backend {
+    fn expression_value(
+        &mut self,
+        projector: &SelectedProjector<'_>,
+        site: BindingSite,
+    ) -> Result<Value, Stop> {
+        self.event(format!(
+            "tuple-field:{:?}:{}",
+            site.file_id,
+            u32::from(site.syntax.get_range().start())
+        ));
+        // Test-only uncached expression body. Production must supply its exact
+        // root-query cache/in-progress owner, which this fixture does not prove.
+        projector.evaluate_expression(site, self)
+    }
+    fn tuple_value(&mut self, slots: Vec<Value>, status: LuaTupleStatus) -> Result<Value, Stop> {
+        self.event(format!("tuple:{}", slots.len()));
+        Ok(Value {
+            ty: LuaType::Tuple(Arc::new(LuaTupleType::new(
+                slots.iter().map(|value| value.ty.clone()).collect(),
+                status,
+            ))),
+            marker: None,
+            slots,
+        })
     }
 }
 

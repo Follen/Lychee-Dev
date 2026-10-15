@@ -1,0 +1,51 @@
+{
+  "schema": "lycheedev.source-candidate-freeze.v1",
+  "baselineCommit": "66c2a5474341bda2301dcf8664c40f36128eeb10",
+  "status": "SOURCE_READY_FOR_INDEPENDENT_REVIEW_NOT_PRODUCTION",
+  "productFiles": [
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/mod.rs",
+      "beforeSHA256": "b7acd9536f2da87b8e4c7ba146d108b946e236122a63dc3f7c87e310b0d2e631",
+      "candidateSHA256": "b38a288a086ba51a410bc7d39a7b8fcd130011c6be8a4c2247f7b502bbced57b",
+      "bytes": 9534
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/tuple.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "b0f3726ad2c3c16ff73c0da0812d0effc0583abbf67d8d8b930900df70981f45",
+      "bytes": 4230
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/dense_tuple_contract.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "7a0cbc6e341a83abb1891bc6a73e01dafd6e1ac06fb7f09408778266fa63fec9",
+      "bytes": 10007
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/support/expression_execution_cases.rs",
+      "beforeSHA256": "29097f2871818fd7a8c37c7bbfb7d7ced8657d159709c4e2471ed065e0ad85ce",
+      "candidateSHA256": "273d9c6886dbc9a53108c8300ba8434cc73c11bcb9c1538d939c24eefafc8668",
+      "bytes": 14505
+    },
+    {
+      "path": "crates/lycheedev-source/tests/dense_tuple_native_oracle.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "5947e0be2c5f3193b3c448b8d13f5d11031ecd88a58abe8535a0050bd15283d7",
+      "bytes": 8188
+    }
+  ],
+  "patchSHA256": "fbaaa125b69b6e3c936bdde2f68cfa99a0320af3721fc491738c935002dc8c1e",
+  "remainingPatchPaths": 31,
+  "newRustTests": "8 NOT_RUN",
+  "carriedS1ThroughS6Tests": "50 NOT_RUN",
+  "oldAlgorithmSources": {
+    "semantic_model/infer/vm.rs": "19f37fcd0f75c27ba30538cfb15c0b539b4aa6589534b610fecf8e04ca9a3602"
+  },
+  "cleanPublicApiSources": {
+    "semantic_model/signature.rs": "5113b809ef79607cf9c844a84286f1355354da3b02eb4962a7cb457e5ce95a64",
+    "semantic_model/access.rs": "c883bc94f0510259209286fceeac339e33fc95231906449249feee8b7d7eae02",
+    "semantic_db/facade.rs": "7c4ee0d03b4e298eb5be0fd77ca1e0b47be6ab09e0b99cdf7bd1d4b56f124732"
+  },
+  "sourceBaseFreezeSHA256": "bfb695316ed0180107ce15cd38d13d464b206576b606566ab7a67dafdf5f6a56",
+  "independentReview": "complete static review passed; actual Rust NOT_RUN"
+}
