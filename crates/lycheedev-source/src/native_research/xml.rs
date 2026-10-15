@@ -15,6 +15,7 @@ pub(crate) struct XmlResearch {
 impl XmlResearch {
     pub fn prepare(files:&mut BTreeMap<String,String>,documents:BTreeMap<String,String>,plans:&[LoadEvidence],source:&Value,control:&OperationControl)->Result<Self>{
         let mut scripts=BTreeMap::new();let mut gaps=Vec::new();let mut declaration_owners=BTreeMap::new();
+        let mut originals=BTreeMap::new();
         // Local to this preparation: the immutable built-in catalog is verified
         // lazily once. Retain a failed verification too, preserving each original
         // document/manifest gap without reparsing or silently accepting it.
@@ -35,26 +36,28 @@ impl XmlResearch {
                     Ok(extracted)=>{
                         if objects.is_none(){objects=Some(catalog.as_ref().and_then(|catalog|catalog.as_ref().ok()).expect("successful production catalog").object_elements());}
                         declaration_owners.extend(Self::declaration_owners(&program,objects.as_ref().expect("object catalog"),control)?);
-                        for script in extracted{files.insert(script.key.clone(),script.compiler.text.clone());scripts.insert(script.key.clone(),script);}
+                        for script in extracted{originals.entry(script.path.clone()).or_insert_with(||script.original_shared());files.insert(script.key.clone(),script.compiler.text.clone());scripts.insert(script.key.clone(),script);}
                     },
                     Err(error)=>gaps.push(json!({"code":error.code,"detail":error.message,"path":path})),
                 },
                 Err(error)=>gaps.push(json!({"code":error.code,"detail":error.message,"path":path})),
             }
         }
+        // Script maps seed this request-local pool. Other XML originals enter
+        // lazily when a manifest loads them, avoiding new retention for unused files.
         let mut programs=Vec::new();
         let sources=files.iter().filter(|(path,_)|!scripts.contains_key(*path)).chain(documents.iter()).map(|(path,text)|(path.as_str(),text.as_bytes())).collect::<BTreeMap<_,_>>();
         let paths=xml_load::LoadPaths::new(sources.keys().copied(),control)?;
         for plan in plans {
             control.check()?;
             let program=catalog.get_or_insert_with(crate::xml_program::catalog).as_ref().map_err(|error|ToolkitError::new("codebase.xml_invalid",error.clone(),4))
-                .and_then(|catalog|xml_load::Program::from_indexed_sources_with_catalog(&plan.manifest,&sources,&paths,Some(source),control,catalog));
+                .and_then(|catalog|xml_load::Program::from_indexed_sources_with_originals(&plan.manifest,&sources,&paths,Some(source),control,catalog,Some(&mut originals)));
             match program{
                 Ok(program)=>programs.push(Arc::new(program)),
                 Err(error)=>{control.check()?;gaps.push(json!({"code":error.code,"detail":error.message,"manifest":plan.manifest}));}
             }
         }
-        drop(paths);drop(sources);
+        drop(paths);drop(sources);drop(originals);
         let mut owners:BTreeMap<String,Vec<(String,xml_load::XmlOrigin)>>=BTreeMap::new();
         for program in &programs{
             let objects=program.actions().iter().filter_map(|action|if let xml_load::Action::Object{instance,origin,name:Some(name),..}=action{Some((instance,(name,origin)))}else{None}).collect::<BTreeMap<_,_>>();

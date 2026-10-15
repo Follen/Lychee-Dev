@@ -217,9 +217,14 @@ impl Program {
         Self::from_indexed_sources_with_catalog(manifest,sources,paths,source,control,&catalog)
     }
     pub(crate) fn from_indexed_sources_with_catalog<'a>(manifest:&str,sources:&BTreeMap<&'a str,&'a[u8]>,paths:&LoadPaths<'a>,source:Option<&Value>,control:&OperationControl,catalog:&crate::xml_program::Catalog)->Result<Self>{
+        Self::from_indexed_sources_with_originals(manifest,sources,paths,source,control,catalog,None)
+    }
+    /// Immutable source text may be shared across manifests from this same preparation.
+    /// Parsed programs, templates, actions and load contexts remain independent.
+    pub(crate) fn from_indexed_sources_with_originals<'a>(manifest:&str,sources:&BTreeMap<&'a str,&'a[u8]>,paths:&LoadPaths<'a>,source:Option<&Value>,control:&OperationControl,catalog:&crate::xml_program::Catalog,originals:Option<&mut BTreeMap<String,Arc<str>>>)->Result<Self>{
         control.check()?;
         let context=LoadContext::for_manifest(manifest,sources.get(manifest).copied().unwrap_or_default(),source);
-        let mut walker=Walker{sources,paths,catalog,parsed:BTreeMap::new(),templates:BTreeMap::new(),intrinsics:BTreeMap::new(),active:BTreeSet::new(),
+        let mut walker=Walker{sources,paths,catalog,shared_originals:originals,parsed:BTreeMap::new(),templates:BTreeMap::new(),intrinsics:BTreeMap::new(),active:BTreeSet::new(),
             result:Self{rules:RULES,manifest:manifest.into(),context,actions:vec![],documents:BTreeMap::new(),gaps:vec![],originals:BTreeMap::new()},control,objects:0,file_loads:0,include_depth:0,construction_steps:0,limits:crate::native::SourceLimits::research(),
             object_elements:catalog.object_elements(),child_index_remaining:CHILD_INDEX_BYTES,
             #[cfg(test)] scan_children:false};
@@ -249,6 +254,7 @@ impl ParsedXml {
 }
 struct Walker<'a,'c,'s>{
     catalog:&'s crate::xml_program::Catalog,
+    shared_originals:Option<&'s mut BTreeMap<String,Arc<str>>>,
     sources:&'s BTreeMap<&'a str,&'a [u8]>, paths:&'s LoadPaths<'a>,parsed:BTreeMap<String,Arc<ParsedXml>>,
     templates:BTreeMap<String,(String,usize)>,intrinsics:BTreeMap<String,(String,usize)>,active:BTreeSet<String>,
     result:Program,control:&'c OperationControl,objects:usize,object_elements:BTreeSet<String>,
@@ -318,7 +324,16 @@ impl Walker<'_,'_,'_>{
                 if let Some(children)=&children{self.child_index_remaining-=children.retained_bytes();}
                 self.parsed.insert(path.into(),Arc::new(ParsedXml{program,children,
                     #[cfg(test)] scan_children:self.scan_children}));
-                self.result.originals.insert(path.into(),std::str::from_utf8(raw).expect("extractor admitted UTF8").into());
+                let original=if let Some(originals)=self.shared_originals.as_deref_mut(){
+                    if let Some(shared)=originals.get(path){
+                        if shared.as_bytes()!=raw{return Err(ToolkitError::new("source.native_invalid_input","XML original changed within one preparation",4));}
+                        Arc::clone(shared)
+                    }else{
+                        let shared:Arc<str>=std::str::from_utf8(raw).expect("extractor admitted UTF8").into();
+                        originals.insert(path.into(),Arc::clone(&shared));shared
+                    }
+                }else{std::str::from_utf8(raw).expect("extractor admitted UTF8").into()};
+                self.result.originals.insert(path.into(),original);
             }
             let program=self.parsed[path].clone();
             for root in program.children(None).iter().copied(){self.node(&program,root,None,None,0)?;}
@@ -430,12 +445,41 @@ mod tests{
         let source=json!({"repository":"wow-ui-source","product":"retail"});
         let context=LoadContext::for_manifest(manifest,sources.get(manifest).copied().unwrap_or_default(),Some(&source));
         let mut limits=crate::native::SourceLimits::research();limits.construction_steps=construction_steps;
-        let mut walker=Walker{sources,paths:&paths,catalog:&catalog,parsed:BTreeMap::new(),templates:BTreeMap::new(),intrinsics:BTreeMap::new(),active:BTreeSet::new(),
+        let mut walker=Walker{sources,paths:&paths,catalog:&catalog,shared_originals:None,parsed:BTreeMap::new(),templates:BTreeMap::new(),intrinsics:BTreeMap::new(),active:BTreeSet::new(),
             result:Program{rules:RULES,manifest:manifest.into(),context,actions:vec![],documents:BTreeMap::new(),gaps:vec![],originals:BTreeMap::new()},
             control:&control,objects:0,file_loads:0,include_depth:0,construction_steps:0,limits,object_elements:catalog.object_elements(),child_index_remaining:index_budget,scan_children};
         let loaded=walker.load(manifest,0);
         let counters=(walker.construction_steps,walker.file_loads,walker.objects,walker.include_depth);
         (loaded.map(|()|walker.result),counters)
+    }
+    #[test]
+    fn manifest_originals_share_script_storage_without_changing_program_or_mapping(){
+        let control=OperationControl::default();
+        let raw="<Ui><Frame name=\"Frame界\"><Scripts><OnLoad>local value = 1 &lt; 2</OnLoad></Scripts></Frame></Ui>";
+        let sources=BTreeMap::from([("Main.toc",b"Frame.xml\n".as_slice()),("Other.toc",b"Frame.xml\n".as_slice()),("Frame.xml",raw.as_bytes())]);
+        let paths=LoadPaths::new(sources.keys().copied(),&control).unwrap();
+        let catalog=crate::xml_program::catalog().unwrap();
+        let source=json!({"repository":"wow-ui-source","product":"retail"});
+        let script=crate::xml_inline::extract("Frame.xml",raw.as_bytes()).unwrap().remove(0);
+        let original=script.original_shared();let map_before=script.mapping_manifest();
+        let mut shared=BTreeMap::from([("Frame.xml".into(),Arc::clone(&original))]);
+        for manifest in ["Main.toc","Other.toc"]{
+            let baseline=Program::from_indexed_sources_with_catalog(manifest,&sources,&paths,Some(&source),&control,&catalog).unwrap();
+            let program=Program::from_indexed_sources_with_originals(manifest,&sources,&paths,Some(&source),&control,&catalog,Some(&mut shared)).unwrap();
+            assert!(Arc::ptr_eq(&program.originals["Frame.xml"],&original));
+            assert_eq!(program.original("Frame.xml"),Some(raw));
+            assert_eq!(serde_json::to_value(&program).unwrap(),serde_json::to_value(&baseline).unwrap());
+            assert_eq!(script.mapping_manifest(),map_before);
+        }
+        let mut lazy=BTreeMap::new();
+        let first=Program::from_indexed_sources_with_originals("Main.toc",&sources,&paths,Some(&source),&control,&catalog,Some(&mut lazy)).unwrap();
+        let second=Program::from_indexed_sources_with_originals("Other.toc",&sources,&paths,Some(&source),&control,&catalog,Some(&mut lazy)).unwrap();
+        assert_eq!(lazy.len(),1);
+        assert!(Arc::ptr_eq(&first.originals["Frame.xml"],&second.originals["Frame.xml"]));
+        let mut mismatch=BTreeMap::from([("Frame.xml".into(),Arc::<str>::from("changed"))]);
+        assert_eq!(Program::from_indexed_sources_with_originals("Main.toc",&sources,&paths,Some(&source),&control,&catalog,Some(&mut mismatch)).unwrap_err().code,"source.native_invalid_input");
+        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(Program::from_indexed_sources_with_originals("Main.toc",&sources,&paths,Some(&source),&control,&catalog,Some(&mut shared)).unwrap_err().code,"command.cancelled");
     }
     fn assert_child_walk_equivalent(sources:&BTreeMap<&str,&[u8]>,manifest:&str,steps:usize){
         let (indexed,indexed_counts)=walk_with_child_mode(sources,manifest,false,steps);

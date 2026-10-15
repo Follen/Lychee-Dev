@@ -28,6 +28,7 @@ fn span(value:&Value)->Span{
 impl Script {
     /// Generated text has one owner; compiler and semantic consumers borrow the same bytes.
     pub fn source_bytes(&self)->&[u8]{self.compiler.text.as_bytes()}
+    pub(crate) fn original_shared(&self)->Arc<str>{Arc::clone(&self.raw)}
     /// The only generated root closure spans the authenticated decoded body.
     /// Nested user closures cannot cross either synthetic wrapper boundary.
     pub(crate) fn is_syntax_wrapper(&self,start:usize,end:usize)->bool{
