@@ -90,6 +90,79 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  windows-emmy-public-contracts:
+    if: github.ref == 'refs/heads/rust-refactor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]'))
+    runs-on: windows-2025
+    timeout-minutes: 240
+    # No needs: product failures must not suppress the independent A/B/C test.
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Check the exact reviewed contract payload before importing it
+        id: payload
+        run: |
+          New-Item -ItemType Directory -Force .tmp | Out-Null
+          node --input-type=module -e '
+          import assert from "node:assert/strict";
+          import {readFileSync,readdirSync,lstatSync} from "node:fs";
+          import {join} from "node:path";
+          import {createHash} from "node:crypto";
+          const root="tests/emmy-public-ingestion-three-way", hash=p=>createHash("sha256").update(readFileSync(p)).digest("hex");
+          assert.equal(hash(join(root,"freeze.json")),"003f79868a395dd3853ac20dd2f992890e68a3a1891b377daef6171e92395d3d");
+          const freeze=JSON.parse(readFileSync(join(root,"freeze.json"))), actual={}; let entries=0;
+          function visit(p,rel=""){for(const n of readdirSync(p).sort()){assert(++entries<=8192);const q=join(p,n),r=rel?rel+"/"+n:n,s=lstatSync(q);assert(!s.isSymbolicLink());if(s.isDirectory())visit(q,r);else{assert(s.isFile()&&s.size<=32*1024*1024);if(r!=="freeze.json")actual[r]=hash(q);}}}
+          visit(root); assert.deepEqual(Object.entries(actual).sort(),Object.entries(freeze.files).sort());
+          console.log(JSON.stringify({state:"reviewed-payload-matches",files:Object.keys(actual).length}));'
+          exit $LASTEXITCODE
+      - name: Install the fixed official Rust toolchain
+        id: rust
+        if: steps.payload.outcome == 'success'
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          exit $LASTEXITCODE
+      - name: Test exact parser assertions and frozen Windows owner
+        id: fixtures
+        if: steps.rust.outcome == 'success'
+        run: |
+          node --test tests/emmy-public-ingestion-three-way/assertions.test.mjs tests/emmy-public-ingestion-three-way/tools/rust-owned-process.test.mjs *> .tmp/emmy-public-contract-node-fixtures.log
+          $status = $LASTEXITCODE
+          Get-Content .tmp/emmy-public-contract-node-fixtures.log
+          if ($status -ne 0) { exit $status }
+          python -I -B -S tests/emmy-public-ingestion-three-way/check_selected_cache_test.py *> .tmp/emmy-public-contract-cache-fixtures.log
+          $status = $LASTEXITCODE
+          Get-Content .tmp/emmy-public-contract-cache-fixtures.log
+          exit $status
+      - name: Run all three native Windows contract variants under one lease
+        if: steps.fixtures.outcome == 'success'
+        run: |
+          node tests/emmy-public-ingestion-three-way/run_windows_three_way.mjs contracts 003f79868a395dd3853ac20dd2f992890e68a3a1891b377daef6171e92395d3d *> .tmp/emmy-public-contract-run.log
+          $status = $LASTEXITCODE
+          Get-Content .tmp/emmy-public-contract-run.log
+          exit $status
+      - name: Preserve complete and failed evidence without changing the job outcome
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: emmy-public-contracts-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            .tmp/emmy-public-contract-*.log
+            .tmp/rust-disk/evidence/
+            .tmp/rust-disk/channels/
+            .tmp/rust-process-test-*/
+            .tmp/rust-scratch/
+            !.tmp/rust-scratch/**/cargo-home/**
+            !.tmp/rust-scratch/**/tmp/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   windows-product-foundation:
     # Deliberately no needs: static parity gaps must not suppress real builds.
     if: github.ref == 'refs/heads/rust-refactor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]'))

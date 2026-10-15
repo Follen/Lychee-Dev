@@ -1,0 +1,6 @@
+# Minimal root for a dependency-only custody stage. Full-source stages retain
+# their original workspace manifest. The engine is its own upstream workspace.
+[workspace]
+members = ["crates/lycheedev-binding-contracts"]
+exclude = [".tmp/emmy-reconstruction-v1/upstream"]
+resolver = "2"

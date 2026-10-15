@@ -1,0 +1,86 @@
+[
+  {
+    "case": "empty",
+    "outcome": {
+      "created": true
+    }
+  },
+  {
+    "case": "selected-string",
+    "outcome": {
+      "coverage": [
+        {
+          "operation": "resolve",
+          "proof": "ingestion/原始证据",
+          "reason": null,
+          "state": "bound"
+        }
+      ],
+      "declarations": [],
+      "known": true,
+      "rendered": "fun(value: string) -> ()"
+    }
+  },
+  {
+    "case": "unicode-crlf",
+    "outcome": {
+      "coverage": [
+        {
+          "operation": "resolve",
+          "proof": "ingestion/原始证据",
+          "reason": null,
+          "state": "bound"
+        }
+      ],
+      "declarations": [],
+      "known": true,
+      "rendered": "fun(value: string) -> ()"
+    }
+  },
+  {
+    "case": "chunk-boundary",
+    "outcome": {
+      "coverage": [
+        {
+          "operation": "resolve",
+          "proof": "ingestion/原始证据",
+          "reason": null,
+          "state": "bound"
+        }
+      ],
+      "declarations": [],
+      "known": true,
+      "rendered": "fun(value: string) -> ()"
+    }
+  },
+  {
+    "case": "malformed",
+    "outcome": {
+      "parse": {
+        "count": 4,
+        "first": {
+          "kind": "SyntaxError",
+          "range": {
+            "end": 17,
+            "start": 16
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "malformed-after-chunk",
+    "outcome": {
+      "parse": {
+        "count": 4,
+        "first": {
+          "kind": "SyntaxError",
+          "range": {
+            "end": 16405,
+            "start": 16404
+          }
+        }
+      }
+    }
+  }
+]

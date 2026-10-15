@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 15:39 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`bc85a4c22734f57e2fa6395165b9214afa34ddb7`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 15:45 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`0a907372e05bf74e2afb940d4d8bd2d7ba834c26`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -36,7 +36,7 @@
 当前补丁31路径：26源文件、2 manifest/lock、3测试。六组真实职责为共享摄取、context递归推断、object/member身份、call/return/generic checker、诊断range/selection、session/coverage。全部必须外移后恢复原版来源，不能以包装crate冒充零补丁。
 
 1. 已完成 public declaration rendering 的局部替代，历史27+27/450 trace证明只属于其冻结输入。
-2. DeclarationModel摄取后继已独审，三方 A旧构造/B新构造/C完全原版公开API的prepare-lock已完成，150registry+5local每侧身份核验一致，实际验证已启动：A31通过，B编译与projection11/declaration11通过；随后B callback列表进程exit0但namespace回收观察遇EACCES，无法确认完整树回收，owner中断且symbols lease保留。C及近8MiB资源组未运行；后继本地Cargo暂停，准备独立Windows三方证据链，不能追认旧owner。公开parse/index合并了原阶段边界回调（原实现也无逐token回调）、增加文本持有是待测取舍，不能宣称等价或减内存。
+2. DeclarationModel摄取后继已独审，三方 A旧构造/B新构造/C完全原版公开API的prepare-lock已完成，150registry+5local每侧身份核验一致，实际验证已启动：A31通过，B编译与projection11/declaration11通过；随后B callback列表进程exit0但namespace回收观察遇EACCES，无法确认完整树回收，owner中断且symbols lease保留。C及近8MiB资源组未运行；后继本地Cargo暂停，独立Windows三方契约runner R2已完成独审并接入单独job，固定49文件身份；本地parser11/缓存checker4项实际通过，31×3/450trace/6构造结果尚未在Windows执行，资源probe未接入，不能追认旧owner。公开parse/index合并了原阶段边界回调（原实现也无逐token回调）、增加文本持有是待测取舍，不能宣称等价或减内存。
 3. owned session/coverage ledger、selected-decision与DerivedNumber/EnvironmentCallable/EnvironmentReturn、call/return query编排三片已分别独审并累计组合12个源文件；21新增Rust仍NOT_RUN，已接准确测试目标。递归后端尚未完成，未切生产、未删除现有hook，不能以新增自有代码冒充零补丁完成。旧callability首候选存在enable/coverage顺序差异，未集成。全部43个registry入口按真实消费者核对，不能删除nil/unknown/denied-call能力换取无补丁。
 4. 其余推断、identity、cardinality与checker随后按真实消费者逐片替换。最后核未修改上游完整文件身份、产品锁、全Retail和全部增强回归。
 
@@ -60,7 +60,7 @@
 ## 4. 接下来按可交付批次执行
 
 1. 跟进479e57当前Windows批：真实release读取/Source入口、完整Retail语义、常驻退出/IPC及同口径内存，不放宽90秒合同。持久化已审R17.1 SQL组合并继续默认DB2等消费者。
-2. 本地symbols因Emmy owner未确认回收而保留，不接管/新channel绕行；当前479e57 GNU完整输入已准备但未执行。独立Windows三方方案先审再运行；未来Linux观察修正不追认历史owner。
+2. 本地symbols因Emmy owner未确认回收而保留，不接管/新channel绕行；当前479e57 GNU完整输入已准备但未执行。独立Windows三方契约job已审，下一有意义原生批执行；未来Linux观察修正不追认历史owner。
 3. decoded alias与body owner已组合，接续真实DB2/SQL/static/effective/meta/JSONL外层admission到capture。EXPLAIN/schema-only不能扫描内容，callback不得重放；大资产保持流式。
 4. named target按固定Go配置-only分页lookup、pin-ref冲突和输出合同补齐，不复用旧show造成额外检查/错误。direct remote已接线但真实Rust/online仍待跑。
 5. 继续全部Emmy hook实际外移、真实Source可读性、Skill/Data使用质量及旧消费者替代；完成后依次执行下列四阶段审计。
