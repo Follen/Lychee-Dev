@@ -1,0 +1,17 @@
+{
+  "schema": "lycheedev.fixed-go-contract.v1",
+  "commit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "path": "internal/records/relational/compile.go",
+  "sha256": "76b9de02f6e9a7e4447ca68e7c22eff79332313cccf0cb144f4ff6bcbfcacaa3",
+  "lines": [
+    119,
+    124
+  ],
+  "rule": "SELECT requires FROM; absent FROM is syntax failure, not an unsupported Rust expression.",
+  "rust": "crates/lycheedev-data/tests/sql_resource_parity.rs",
+  "tests": [
+    "source_free_select_is_go_syntax_error_and_creates_no_capture",
+    "projection_and_publication_do_not_change_same_source_logical_usage"
+  ],
+  "runtime": "NOT_RUN"
+}

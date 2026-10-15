@@ -20,6 +20,7 @@ use std::{
 };
 
 mod effective;
+mod query_csv;
 #[cfg(test)]
 mod regression_tests;
 mod request;
@@ -641,14 +642,14 @@ fn sql_inner_after_execute(
     ));
     let deadline = budget.deadline;
     budget.check()?;
-    if inv.flag("--encoding").is_some()
-        || inv.flag("--output").is_some()
-        || inv.flag_bool("--overwrite")
+    let csv = inv.flag("--encoding") == Some("csv");
+    if (csv && inv.flag("--output").is_none_or(str::is_empty))
+        || (!csv
+            && (inv.flag("--output").is_some_and(|path| !path.is_empty())
+                || inv.flag_bool("--overwrite")))
     {
-        return Err(fault(
-            "relational.unsupported",
-            3,
-            "CSV export is pending parity",
+        return Err(lycheedev_core::ToolkitError::arguments(
+            "data sql CSV export requires --encoding csv and --output; --overwrite is CSV-only",
         ));
     }
     // Go validates this flag even when only metadata sources are referenced.
@@ -881,6 +882,14 @@ fn sql_inner_after_execute(
         &inv.control,
         &reference_accounting,
     )?;
+    if csv {
+        let (manifest, csv_capture) = query_csv::export(inv, &pin.id, &capture, &result, &safety)?;
+        let mut out = Outcome::new(manifest);
+        out.complete = complete;
+        out.selection = serde_json::to_value(&pin)?;
+        out.provenance = vec![capture, csv_capture];
+        return Ok(out);
+    }
     let mut out = Outcome::new(reading);
     out.public_numbers = public_numbers;
     out.complete = complete;

@@ -1,6 +1,6 @@
 //! Root status, pipe results and joined threads are separate ownership facts.
 //! No channel event, failed wait or termination request establishes completion.
-use super::{Event, Result, ToolkitError};
+use super::{Event, ProcessControl, Result, ToolkitError};
 use std::{
     io::{Read, Write},
     sync::mpsc,
@@ -179,6 +179,8 @@ pub(super) struct Retirement {
     pub job_empty: Option<bool>,
     pub deadline_exceeded: bool,
     pub errors: Vec<String>,
+    pub first_worker_error: Option<ToolkitError>,
+    pub completion_error: Option<ToolkitError>,
 }
 impl Retirement {
     pub fn complete(&self) -> bool {
@@ -210,16 +212,62 @@ fn observe(
     workers: &mut WorkerSet,
     state: &mut ProcessState,
     cleanup: &mut Retirement,
+    completion: &mut Option<(ProcessControl<'_>, Instant)>,
 ) {
     if state.status.is_none()
         && let Err(error) = state.observe_wait(owner.try_wait())
     {
         record_error(&mut cleanup.errors, format!("wait: {error}"));
     }
+    // Root reap moved this pending-worker interval out of RUN. Preserve its
+    // control-before-collect boundary, without cancelling ownership cleanup.
+    if let Some((control, deadline)) = *completion {
+        let result = control.check().and_then(|()| {
+            if Instant::now() >= deadline {
+                Err(control.expired())
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = result {
+            cleanup.completion_error.get_or_insert(error);
+            *completion = None;
+        }
+    }
     // collect processes every finished worker even when another worker failed.
-    let _ = workers.collect(state);
+    if let Err(error) = workers.collect(state) {
+        if completion.is_some() {
+            cleanup
+                .completion_error
+                .get_or_insert_with(|| error.clone());
+            *completion = None;
+        }
+        cleanup.first_worker_error.get_or_insert(error);
+    }
     for error in &state.errors {
         record_error(&mut cleanup.errors, error.clone());
+    }
+    if workers.complete() {
+        if let Some((control, _)) = *completion {
+            // This is the old RUN completion boundary: select a final control
+            // stop or successful-root stdin failure before later Job cleanup.
+            let result = control.check_complete().and_then(|()| {
+                if state.status == Some(0)
+                    && let Some(error) = state.input_error.take()
+                {
+                    return Err(ToolkitError::new(
+                        "luals.check_failed",
+                        format!("Process stdin failed: {error}"),
+                        5,
+                    ));
+                }
+                Ok(())
+            });
+            if let Err(error) = result {
+                cleanup.completion_error.get_or_insert(error);
+            }
+        }
+        *completion = None;
     }
     cleanup.reaped = state.status.is_some();
     cleanup.stdin_complete = workers.input_complete();
@@ -232,9 +280,46 @@ pub(super) fn retire(
     rx: &mpsc::Receiver<()>,
     deadline: Instant,
 ) -> Retirement {
+    retire_inner(owner, workers, state, rx, deadline, None)
+}
+
+pub(super) fn retire_completing(
+    owner: &mut impl ProcessOwner,
+    workers: &mut WorkerSet,
+    state: &mut ProcessState,
+    rx: &mpsc::Receiver<()>,
+    deadline: Instant,
+    control: ProcessControl<'_>,
+    execution_deadline: Instant,
+) -> Retirement {
+    retire_inner(
+        owner,
+        workers,
+        state,
+        rx,
+        deadline,
+        Some((control, execution_deadline)),
+    )
+}
+
+fn retire_inner(
+    owner: &mut impl ProcessOwner,
+    workers: &mut WorkerSet,
+    state: &mut ProcessState,
+    rx: &mpsc::Receiver<()>,
+    mut deadline: Instant,
+    mut completion: Option<(ProcessControl<'_>, Instant)>,
+) -> Retirement {
     let mut cleanup = Retirement::default();
+    let mut error_grace_started = false;
     owner.close_parent_pipes();
-    observe(owner, workers, state, &mut cleanup);
+    observe(owner, workers, state, &mut cleanup, &mut completion);
+    if cleanup.completion_error.is_some() && !error_grace_started {
+        // One transition from execution to error cleanup, never a renewed
+        // execution budget or a per-iteration grace extension.
+        deadline = Instant::now() + CLEANUP_GRACE;
+        error_grace_started = true;
+    }
     let mut no_job = false;
     match owner.job_empty() {
         Ok(value) => {
@@ -256,7 +341,13 @@ pub(super) fn retire(
         }
     }
     loop {
-        observe(owner, workers, state, &mut cleanup);
+        observe(owner, workers, state, &mut cleanup, &mut completion);
+        if cleanup.completion_error.is_some() && !error_grace_started {
+            // One transition from execution to error cleanup, never a renewed
+            // execution budget or a per-iteration grace extension.
+            deadline = Instant::now() + CLEANUP_GRACE;
+            error_grace_started = true;
+        }
         if !no_job && cleanup.job_empty != Some(true) {
             match owner.job_empty() {
                 Ok(value) => {
@@ -277,4 +368,178 @@ pub(super) fn retire(
         wait_for_progress(rx, remaining.min(POLL_INTERVAL));
     }
     cleanup
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct Exited;
+    impl ProcessOwner for Exited {
+        fn close_parent_pipes(&mut self) {}
+        fn try_wait(&mut self) -> std::io::Result<Option<i32>> {
+            Ok(Some(0))
+        }
+        fn terminate_job(&mut self) -> std::result::Result<bool, String> {
+            Ok(true)
+        }
+        fn kill_root(&mut self) -> std::io::Result<()> {
+            panic!("root already reaped")
+        }
+        fn job_empty(&mut self) -> std::result::Result<Option<bool>, String> {
+            Ok(Some(true))
+        }
+    }
+    fn wait_finished(workers: &WorkerSet, slot: usize) {
+        let limit = Instant::now() + Duration::from_secs(5);
+        while !workers.handles[slot].as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < limit);
+            thread::yield_now();
+        }
+    }
+    #[test]
+    fn legacy_pending_completion_checks_stop_before_join_but_cleanup_finishes() {
+        for cancel in [false, true] {
+            let raw = AtomicBool::new(cancel);
+            let (wake, rx) = mpsc::channel();
+            let mut workers = WorkerSet::default();
+            workers
+                .spawn(1, wake, || {
+                    Event::Output(0, b"tail".to_vec(), Ok(()), false)
+                })
+                .unwrap();
+            wait_finished(&workers, 1);
+            let mut state = ProcessState::default();
+            state.status = Some(0);
+            let deadline = if cancel {
+                Instant::now() + Duration::from_secs(10)
+            } else {
+                Instant::now()
+            };
+            let cleanup = retire_completing(
+                &mut Exited,
+                &mut workers,
+                &mut state,
+                &rx,
+                Instant::now() + Duration::from_secs(5),
+                ProcessControl::Legacy(Some(&raw)),
+                deadline,
+            );
+            assert!(cleanup.complete());
+            assert_eq!(
+                cleanup.completion_error.unwrap().code,
+                if cancel {
+                    "process.cancelled"
+                } else {
+                    "luals.check_failed"
+                }
+            );
+            assert_eq!(state.outputs[0].as_deref(), Some(b"tail".as_slice()));
+        }
+    }
+    #[test]
+    fn observed_worker_failure_survives_later_control_while_second_worker_is_held() {
+        for overflow in [false, true] {
+            let control = super::super::OperationControl::default();
+            let (wake, _rx) = mpsc::channel();
+            let (release, gate) = mpsc::channel();
+            let mut workers = WorkerSet::default();
+            workers
+                .spawn(1, wake.clone(), move || {
+                    Event::Output(
+                        0,
+                        vec![1],
+                        if overflow {
+                            Ok(())
+                        } else {
+                            Err(std::io::Error::other("first reader error"))
+                        },
+                        overflow,
+                    )
+                })
+                .unwrap();
+            workers
+                .spawn(2, wake, move || {
+                    gate.recv().unwrap();
+                    Event::Output(1, b"second-tail".to_vec(), Ok(()), false)
+                })
+                .unwrap();
+            wait_finished(&workers, 1);
+            let mut state = ProcessState::default();
+            state.status = Some(0);
+            let mut cleanup = Retirement::default();
+            let mut completion = Some((ProcessControl::Complete(&control), control.deadline()));
+            observe(
+                &mut Exited,
+                &mut workers,
+                &mut state,
+                &mut cleanup,
+                &mut completion,
+            );
+            assert!(!workers.complete());
+            assert!(completion.is_none());
+            control.tracked_cancel_handle().unwrap().cancel();
+            release.send(()).unwrap();
+            wait_finished(&workers, 2);
+            observe(
+                &mut Exited,
+                &mut workers,
+                &mut state,
+                &mut cleanup,
+                &mut completion,
+            );
+            cleanup.job_empty = Some(true);
+            let error = super::super::finish_retired_result(
+                Ok(()),
+                ProcessControl::Complete(&control),
+                &mut state,
+                &cleanup,
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.code,
+                if overflow {
+                    "luals.input_budget"
+                } else {
+                    "luals.check_failed"
+                }
+            );
+            assert_eq!(state.outputs[1].as_deref(), Some(b"second-tail".as_slice()));
+        }
+    }
+    #[test]
+    fn joined_legacy_interval_does_not_start_a_new_cancellation_boundary() {
+        let raw = AtomicBool::new(false);
+        let (wake, _rx) = mpsc::channel();
+        let mut workers = WorkerSet::default();
+        workers
+            .spawn(1, wake, || Event::Output(0, vec![], Ok(()), false))
+            .unwrap();
+        wait_finished(&workers, 1);
+        let mut state = ProcessState::default();
+        state.status = Some(0);
+        let mut cleanup = Retirement::default();
+        let mut completion = Some((
+            ProcessControl::Legacy(Some(&raw)),
+            Instant::now() + Duration::from_secs(10),
+        ));
+        observe(
+            &mut Exited,
+            &mut workers,
+            &mut state,
+            &mut cleanup,
+            &mut completion,
+        );
+        assert!(completion.is_none());
+        raw.store(true, Ordering::Release);
+        observe(
+            &mut Exited,
+            &mut workers,
+            &mut state,
+            &mut cleanup,
+            &mut completion,
+        );
+        assert!(cleanup.completion_error.is_none());
+    }
 }

@@ -82,14 +82,53 @@ fn sixteen_mebibyte_comment_definitions_admit_with_exact_go_resources() {
     );
 }
 #[test]
-fn source_free_executor_and_publication_do_not_change_go_usage() {
+fn projection_and_publication_do_not_change_same_source_logical_usage() {
     let fx = fixture();
+    // Go requires FROM. Keep a real one-row source fixed while varying the
+    // projected output; this checks executor/publication accounting, not full
+    // physical-provider Go parity (which has its own remaining audit).
+    let mut expected_resources = None;
+    for (sql, expected_row) in [
+        ("SELECT 1 FROM Sample", json!([1])),
+        ("SELECT 1 + 2 FROM Sample", json!([3])),
+        (
+            "SELECT 'longer output string' FROM Sample",
+            json!(["longer output string"]),
+        ),
+    ] {
+        let out = lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+            .unwrap_or_else(|error| panic!("{sql}: {error:?}"));
+        assert_eq!(out.data["result"]["rows"], json!([expected_row]), "{sql}");
+        if let Some(expected) = &expected_resources {
+            assert_eq!(&out.data["resources"], expected, "{sql}");
+        } else {
+            assert!(out.data["resources"]["retainedBytes"].as_u64().unwrap() >= 64 << 20);
+            expected_resources = Some(out.data["resources"].clone());
+        }
+    }
+}
+#[test]
+fn source_free_select_is_go_syntax_error_and_creates_no_capture() {
+    let fx = fixture();
+    let captures = || {
+        Metadata::open(&fx.home, false)
+            .unwrap()
+            .list::<Value>("capture/", 1000)
+            .unwrap()
+            .len()
+    };
+    let before = captures();
     for sql in ["SELECT 1", "SELECT 1 + 2", "SELECT 'longer output string'"] {
-        let out = lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let error = match lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)])) {
+            Ok(_) => panic!("{sql}: Go requires FROM"),
+            Err(error) => error,
+        };
         assert_eq!(
-            out.data["resources"],
-            json!({"retainedBytes":64 << 20,"metadataBytes":0,"decodeWork":0,"networkRequests":0,"networkBytes":0})
+            (error.code.as_str(), error.exit_code),
+            ("query.invalid_syntax", 2),
+            "{sql}"
         );
+        assert_eq!(captures(), before, "{sql}");
     }
 }
 

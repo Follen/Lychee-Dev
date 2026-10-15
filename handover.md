@@ -789,6 +789,16 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - CI新增独立 history::tests 8项与 metadata::historical_read_tests 4项，另4项由现有 formal_live 模块过滤覆盖；实际PyYAML解析3jobs及run字段。此为测试接线，不是Windows执行通过。
 - 仍缺 OP status、历史 SESSION 验证、prepared-only OP cancel、显式 owner OP/BTP abandon、原有 workspace诊断；下一只读两路需要真正的历史 signal/report/capture 身份与证据验证，不能拿现代 mailbox Identity 替代。未来变更两文档必须原子 expected-generation CAS，不能顺序独立put冒充事务。完整历史兼容尚未交付。
 
+### 2026-10-15：原生编译解除、CSV 与失败回归修复候选
+
+- `79ef742f` run `38672577841` 的 all-target、sealed CLI build 和实际 version/help/describe 均已成功，前述 serde 编译阻断已在真实 Windows 消除。early artifact `11945054051`（ZIP SHA256 `c479f0ecb083977b53397319ca56065fb998138a7ffa987429825df7e9ee0678`）152 条索引文件核 hash；describe owner `9122d74a-b496-4212-afa6-2c3720e6e25a` 的实际差分是 84 期望/82 实际，只缺尚未实现的 live cancel/live abandon，顺序一致。真实 EXE SHA256 `8c8ef92758ca69e4905b875701c47af760b2571b2ae6a7b92672ff89fbde4717`。本 run 继续独立测试；缺命令仍失败，不以空 handler 凑齐。完整 Retail 内存尚未取得实测，性能和四阶段审计尚未验收。
+- `8a57231e` 最终 product artifact `11945332540`（ZIP SHA256 `a2a2fffc456d5168ecec4420fd1d8033cbc46390502cea7345ce471189c952e0`）123 owner/641 sealed logs 逐一核 hash。除已修编译根因外，七组真实失败分别为 Core 清理错误测试读取错误 JSON 层、combined addon 重试遇 slot 残留、removal 测试目录名碰撞、SQL 无 FROM 场景错误预期、Source TimerCallback 未投影、Source root 已退出但继承管道阻止 EOF、六项 formal repair 长 DOS 路径。原失败保留；不能用后续修复追认通过。Emmy artifact `11944549162` 证实旧配方 35 项通过，不能覆盖新 callback/owned-crate 配方。
+- CSV R4 已独立审查：保留 query capture、双目标 preflight、32MiB 输出边界、CSV capture 依赖事务、规范路径成对租约和 CSV→manifest 发布顺序；manifest 失败不回滚已发布 CSV。真实第二 exporter 竞争用例先产生自己的 capture、在父持锁期间不得发布 pair，释放后校验最终 pair。冻结 `sql-csv-r4-freeze.json` 与测试映射保留；19 声明含 1 helper，即 18 回归，全部 **NOT_RUN**。相关 Core 锁分类只将 fs2 的真实竞争 OS 码映射 busy；其他 I/O 立即保留原因，不能吞为超时。新增分类/一次尝试一次 close 回归尚 NOT_RUN。
+- SQL 固定 Go compile.go119–124 强制 FROM，见 `sql-from-required-oracle.json`。Rust 仅补缺 FROM 的 syntax 分类；测试改用合法一行 Sample 的三种 projection 验证同一 source 的逻辑资源不变，并新增三种无 FROM 均 exit2/无 capture。原16MiB定义和 exact Go 资源用例保留。此窄修复不宣称全 SQL 诊断文本/physical provider 计费已经等价。
+- Source root-retirement R2 在 root 真正退出后主动退休 owned Job，随后严格完成 drain/join/Job-empty；不再等继承管道 EOF 才退休。独审要求恢复 pending-worker 期间 control/deadline 检查，并锁定首次错误避免后续取消覆盖，均已进入冻结 `source-root-retirement-r2-freeze.json`。新增 completion_tests 单独接 CI；真实 Windows 运行仍 **NOT_RUN**。
+- Windows move 路径 R3 对普通 DOS/UNC 先作词法展开再进入 extended namespace，显式 verbatim/device/native NT `\??\` 保留原始 UTF16，未使用生产 filesystem canonicalize；flags/no-replace 绝对路径限制不变。独审 R2 发现 native NT 前缀会被误作当前盘根路径，R3 已修并加实际替换回归。removal 仅改测试目录名唯一计数器。4 项 Windows 路径测试与原失败组仍 **NOT_RUN**。
+- combined addon 的第四个残留来自失败发布后的保留临时对象，但原首次失败日志没有保存 raw OS code。不能推断32/33必定无发布副作用，也不能据此删除未知对象。slot-only 父层受控 staging 仍在设计独审，本批不宣称已修复该项。历史维护/卸载须继续不认领未知残留。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

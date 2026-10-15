@@ -1092,6 +1092,12 @@ impl Program {
         let SetExpr::Select(select) = *query.body else {
             return Err(unsupported());
         };
+        // Fixed Go 3.2 compiler requires FROM after every SELECT projection.
+        // sqlparser accepts source-free SELECT, but that is a syntax error in
+        // our public language rather than an unimplemented Rust expression.
+        if select.from.is_empty() {
+            return Err(problem("relational.invalid_syntax", "expected FROM"));
+        }
         if select.from.len() != 1
             || select.into.is_some()
             || select.top.is_some()

@@ -257,7 +257,10 @@ fn run_with_limits_inner(
                         .map(|status| status.map(|s| s.code().unwrap_or(-1))),
                 )?;
             }
-            if state.status.is_some() && workers.complete() {
+            // A reaped root can leave descendants holding inherited pipe handles.
+            // Retire the exact Job before waiting for their EOF; retirement
+            // still drains and joins every started worker within the old budget.
+            if state.status.is_some() {
                 break;
             }
             // Worker messages are wakeups only. A wakeup/EOF is not terminal
@@ -268,9 +271,12 @@ fn run_with_limits_inner(
     })();
     let result = result.and_then(|()| {
         // Preserve the existing final control-before-stdin-error ordering.
+        // With pending readers, defer stdin failure until their cap/IO results
+        // are known: those errors preceded stdin validation in the old loop.
         // Stops observed here use the same error grace as stops in the loop.
         control.check_complete()?;
-        if state.status == Some(0)
+        if workers.complete()
+            && state.status == Some(0)
             && let Some(error) = state.input_error.take()
         {
             return Err(ToolkitError::new(
@@ -294,8 +300,20 @@ fn run_with_limits_inner(
         child: &mut child,
         job: Some(&job),
     };
-    let cleanup = lifetime::retire(&mut owned, &mut workers, &mut state, &rx, cleanup_deadline);
-    finish_result(result, control, &cleanup)?;
+    let cleanup = if result.is_ok() && !workers.complete() {
+        lifetime::retire_completing(
+            &mut owned,
+            &mut workers,
+            &mut state,
+            &rx,
+            cleanup_deadline,
+            control,
+            deadline,
+        )
+    } else {
+        lifetime::retire(&mut owned, &mut workers, &mut state, &rx, cleanup_deadline)
+    };
+    finish_retired_result(result, control, &mut state, &cleanup)?;
     Ok(Output {
         status: state
             .status
@@ -303,6 +321,33 @@ fn run_with_limits_inner(
         stdout: state.outputs[0].take().expect("joined stdout reader"),
         stderr: state.outputs[1].take().expect("joined stderr reader"),
     })
+}
+fn finish_retired_result(
+    result: Result<()>,
+    control: ProcessControl<'_>,
+    state: &mut ProcessState,
+    cleanup: &Retirement,
+) -> Result<()> {
+    let result = result.and_then(|()| {
+        if let Some(error) = &cleanup.completion_error {
+            return Err(error.clone());
+        }
+        control.check_complete()?;
+        if let Some(error) = &cleanup.first_worker_error {
+            return Err(error.clone());
+        }
+        if state.status == Some(0)
+            && let Some(error) = state.input_error.take()
+        {
+            return Err(ToolkitError::new(
+                "luals.check_failed",
+                format!("Process stdin failed: {error}"),
+                5,
+            ));
+        }
+        Ok(())
+    });
+    finish_result(result, control, cleanup)
 }
 fn finish_result(
     result: Result<()>,
@@ -402,7 +447,10 @@ mod tests {
                 std::thread::sleep(Duration::from_secs(30));
                 drop(held);
             }
-            "spawn-pipe-descendant" | "spawn-silent-descendant" => {
+            "spawn-pipe-descendant"
+            | "spawn-silent-descendant"
+            | "spawn-inherited-descendant"
+            | "spawn-nonzero-descendant" => {
                 // The production stdin worker starts only after Job attach.
                 // Requiring its byte removes the attach race from this fixture.
                 let mut gate = [0];
@@ -413,6 +461,8 @@ mod tests {
                 );
                 let mut command = helper("descendant-block");
                 command.stdin(Stdio::null());
+                // NUL redirects stdio; Windows may still inherit other pipe
+                // handles. Neither this mode nor root exit proves reader EOF.
                 if mode == "spawn-silent-descendant" {
                     command.stdout(Stdio::null()).stderr(Stdio::null());
                 }
@@ -424,6 +474,18 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 assert!(ready.is_file(), "post-attachment descendant started");
+                std::io::stdout()
+                    .write_all(b"root-tail-before-exit")
+                    .unwrap();
+                if mode == "spawn-pipe-descendant" {
+                    // This fixture tests cancellation, not a race between root
+                    // success and the notifier. Only cancellation retires it.
+                    std::thread::sleep(Duration::from_secs(30));
+                }
+                if mode == "spawn-nonzero-descendant" {
+                    std::io::stderr().write_all(b"nonzero-stderr-tail").unwrap();
+                    std::process::exit(17);
+                }
             }
             _ => panic!("unknown helper mode"),
         }

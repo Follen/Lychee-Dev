@@ -1,0 +1,84 @@
+{
+  "schema": "lycheedev.source-root-exit-freeze.v2",
+  "head": "2ae19cb36431369ab2eaabc493b184f8b14711fe",
+  "files": [
+    {
+      "path": "crates/lycheedev-source/src/process.rs",
+      "sha256": "4f897758b37e4a7c19ca48363612879ca81aac9957dbf3a40c4ecc8a585a8998",
+      "owner": true
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/lifetime.rs",
+      "sha256": "e93351d814b52a16a7b6743fbd738919d62f027335ca2e01c333b942f755aef6",
+      "owner": true
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/tests/lifetime_tests.rs",
+      "sha256": "1965180706dd340bd5e20c389fe44fce04d5833ce33364277a96cc1e78c8cb76",
+      "owner": true
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/stderr_observation.rs",
+      "sha256": "78ddbe9c95de3d45d63168abd3dab2498071cd47b40becf886a151ffa0982fb1",
+      "owner": false
+    },
+    {
+      "path": "crates/lycheedev-windows/src/job.rs",
+      "sha256": "ad62bb8cc208eae27f08e00d6b509ba7ade3b072b3afabd5c31453a2b0a33495",
+      "owner": false
+    },
+    {
+      "path": "crates/lycheedev-windows/src/detached.rs",
+      "sha256": "8ee14288e14b12e13b52057b687e0e330a68b9e4f8150b1808e79fb8b5de502d",
+      "owner": false
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "sha256": "beb975bb9f3836cd89e9b69d14404cd47421c2a7d02aca2d779f94b86a157fb1",
+      "owner": false
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "aa9f6aea8ecda7ce1e3876360a31f9ca53cdf6ff23eceb01bae1c90a13fd9b48",
+      "owner": false
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "b01de2b2207c4415bdfdfde590f68c549dd66920862feb53fbd3eac72085acbe",
+      "owner": false
+    }
+  ],
+  "originalEvidence": {
+    "manifest": "/tmp/lychee-source-process-root-exit-r1/original-evidence.json",
+    "sha256": "e65ba1efb8dc931733846c884af5a688e67c9b67a296161c3b8ba40aaaf97371",
+    "files": 9
+  },
+  "validation": {
+    "rustfmt": "PASS parse/format only",
+    "gitDiffCheck": "PASS",
+    "runtime": "NOT_RUN; no Cargo/native commands"
+  },
+  "priorRuntime": "8a57231: 22 pass, 1 fail; root-descendant success execution deadline at20s; retirement proved root/job/readers/writer terminal",
+  "matrix": [
+    "Preserve RUN selected primary and existing all-workers-complete retirement ordering.",
+    "For successful root reap with pending workers only, each retirement observe checks original Legacy/Complete control and execution deadline before collect.",
+    "First control/worker error is latched as completion_error and cannot be overwritten during remaining strict cleanup.",
+    "At actual join completion preserve final Complete-control then status=0 stdin selection; nonzero status still ignores stdin errors.",
+    "A newly selected error grants existing5s cleanup grace exactly once, never renews execution budget; successful cleanup retains min(original deadline,5s).",
+    "After pending interval joins, Legacy polling stops as before; Complete final cleanup check remains for previously successful completion.",
+    "No unknown child or unjoined worker can become success."
+  ],
+  "scope": "3 owners; no Windows boundary or unsafe change; R4 observation test retained",
+  "limitations": [
+    "Runtime root/pipe causal sequence not individually traced by8a receipt; inherited handle mechanism supported by local official Rust Windows Command implementation.",
+    "All added tests require Windows CI and remain NOT_RUN."
+  ],
+  "priorFreeze": {
+    "path": "/tmp/lychee-source-process-root-exit-r1/freeze.json",
+    "sha256": "eccb6e37a0de5243dc7ea422f008cee9744c99ef88641708ee56ddb5564311fa"
+  },
+  "tests": {
+    "process::tests": "existing+R1 integration and matrix tests, NOT_RUN",
+    "process::lifetime::completion_tests": "3 deterministic private-state tests; NOT_RUN; requires extra CI filter or process::"
+  }
+}

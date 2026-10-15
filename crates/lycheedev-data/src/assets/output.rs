@@ -75,6 +75,34 @@ pub fn publication_error(error: io::Error, path: &Path) -> ToolkitError {
     }
 }
 pub fn destination(home: &Path, output: &Path, overwrite: bool) -> Result<Destination> {
+    let destination = open_destination(output, overwrite)?;
+    outside(
+        home,
+        destination
+            .path()
+            .parent()
+            .expect("validated output parent"),
+    )?;
+    Ok(destination)
+}
+/// SQL CSV must check both existing entries before rejecting a managed-workspace
+/// target. Keep both original parent-handle chains until pair publication ends.
+pub(crate) fn destination_pair(
+    home: &Path,
+    data: &Path,
+    manifest: &Path,
+    overwrite: bool,
+) -> Result<(Destination, Destination)> {
+    let data = open_destination(data, overwrite)?;
+    let manifest = open_destination(manifest, overwrite)?;
+    outside(home, data.path().parent().expect("validated output parent"))?;
+    outside(
+        home,
+        manifest.path().parent().expect("validated output parent"),
+    )?;
+    Ok((data, manifest))
+}
+fn open_destination(output: &Path, overwrite: bool) -> Result<Destination> {
     if output.as_os_str().is_empty()
         || matches!(output.as_os_str().encode_wide().last(), Some(47 | 92))
     {
@@ -103,7 +131,6 @@ pub fn destination(home: &Path, output: &Path, overwrite: bool) -> Result<Destin
             path_error(error.to_string())
         }
     })?;
-    outside(home, &parent)?;
     Ok(destination)
 }
 pub fn publish(
@@ -127,9 +154,13 @@ pub fn publish_reader(
     length: u64,
     maximum: usize,
 ) -> Result<()> {
-    destination.publish_reader(reader, length, maximum as u64, || {
-        inv.control.check().map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))
-    }).map_err(|error| publication_error(error, destination.path()))
+    destination
+        .publish_reader(reader, length, maximum as u64, || {
+            inv.control
+                .check()
+                .map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))
+        })
+        .map_err(|error| publication_error(error, destination.path()))
 }
 pub struct OutputDirectory {
     pub path: PathBuf,

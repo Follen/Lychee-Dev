@@ -21,7 +21,7 @@ This is an execution view, not a second evidence authority. A component being im
 
 - [ ] Foundation: retain reproducible public Emmy reconstruction and official Windows build; finish independent corresponding-source rebuilds and complete clean package acceptance.
 - [ ] Source: retain fixed full Retail static import/query and real multi-CLI session evidence; validate newly repaired XML owner plans and source batch on the next exact candidate. Complete full Retail native analysis/refs/context/flow, real quota/idle/lifetime, cancellation, identity changes, readable source locations and independent Source evaluator.
-- [ ] Data: retain installation/catalog/relations and named Hotfix components; validate corrected numeric archive/field budgets, new capture dependencies and scan checkpoint/resume on the exact Windows candidate. Validate the reviewed effective SQL overlay/reference candidate on Windows; finish SQL meta/CSV/EXPLAIN/output/resource/deadline gaps, remote provider, remaining DB2/CASC/CDN/assets boundaries and all fixed-Go test mapping.
+- [ ] Data: retain installation/catalog/relations and named Hotfix components; validate corrected numeric archive/field budgets, new capture dependencies and scan checkpoint/resume on the exact Windows candidate. Validate the reviewed effective SQL overlay/reference candidate on Windows; validate reviewed CSV pair publication and finish SQL meta/EXPLAIN/output/resource/deadline gaps, remote provider, remaining DB2/CASC/CDN/assets boundaries and all fixed-Go test mapping.
 - [ ] Delivery: retain formal 500-slot publication, journal and maintenance/rollback components; finish integrated runtime receipt/retirement, old200 upgrade, disabled/empty-map, shared-installation and complete package/install smoke on the final candidate.
 - [ ] Skill/CLI: retain Go-based payload, real packaged CLI task runner and command registration fixes; close actual describe differences and complete all arguments/errors/JSONL/business output equivalence. Public number formatting must distinguish typed floats from raw JSON tokens. Re-run the independent actual Skill flow after the current semantic fixes.
 
@@ -66,7 +66,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Collect actual full Retail memory by phase using synchronized authenticated Job membership; report current WorkingSet/PrivateBytes sampled group peaks and steady observations, sampling gaps and failed/incomplete operations separately. Historical `not_measured` remains unchanged.
 - [ ] Create owned Emmy adapter crate with one-way Source→adapter→Emmy dependencies and real diagnostics/API-type consumers, then move domain DTO/projection/provenance/reporting out of upstream patches in small reviewed batches. Preserve the entire enhanced XML/Lua design per explicit user decision; label it separately from Go-equivalent behavior.
 - [ ] Map each remaining Emmy patch to consumers and tests; preserve 35 contextual regressions/full Retail acceptance. Pin upgrades, check official public API replacements, review uncertainty/identity/cardinality boundaries and remove only proven-redundant hooks. Do not count a wrapper-only crate as completed decoupling.
-- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV transaction and EXPLAIN remain separate required gaps.
+- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV R4 is independently reviewed but native NOT_RUN; EXPLAIN remains a required implementation gap.
 
 ## 1. Reproducible foundation (no user interaction)
 
@@ -129,3 +129,12 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Re-run 4036-document native queries/Skill/session on the fixed candidate; inspect phase timings before further optimization.
 - [ ] Measure cold/warm/semantic/session process-group working set and private bytes; current full-corpus values remain not_measured.
 - [ ] Close legacy OP/session read-only and cancel/abandon compatibility, CSV/EXPLAIN/provider-resource gaps, then complete all four audit stages.
+
+## Native recovery batch checkpoint (2026-10-15)
+
+- [x] Confirm 79ef real Windows all-target and sealed CLI build; actual describe still fails on missing cancel/abandon.
+- [ ] Execute reviewed CSV R4 (18 regressions plus 1 helper), Core lock-error classification, SQL required-FROM and Source root-retirement R2 on the exact composed candidate.
+- [ ] Resolve slot publication residue safely: neither OS error names nor expected bytes authorize deletion; parent staging needs ACL/permission/ancestry proof before use.
+- [ ] Validate native lexical path repair and removal fixture uniqueness; keep original failed run evidence.
+- [ ] Independently review lower-level binding-contracts extraction and its complete stage custody, then execute new crate/adapter/engine regressions.
+- [ ] Obtain actual full Retail cold/warm/native/session memory and phase timing; sampler implementation and successful compilation are not measurements.

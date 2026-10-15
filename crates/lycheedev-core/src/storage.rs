@@ -472,8 +472,18 @@ impl ExclusiveLock {
         )
     }
     fn lock_file(file: &File) -> Result<()> {
-        fs2::FileExt::try_lock_exclusive(file)
-            .map_err(|e| ToolkitError::new("workspace.busy", e.to_string(), 6))
+        fs2::FileExt::try_lock_exclusive(file).map_err(Self::lock_error)
+    }
+    fn lock_error(error: std::io::Error) -> ToolkitError {
+        // fs2 0.4.3 Windows uses ERROR_LOCK_VIOLATION for contention.
+        // Access/handle/filesystem errors must not become retryable contention.
+        if error.raw_os_error().is_some()
+            && error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+        {
+            ToolkitError::new("workspace.busy", error.to_string(), 6)
+        } else {
+            ToolkitError::io(error)
+        }
     }
     fn acquire_with(
         path: &Path,

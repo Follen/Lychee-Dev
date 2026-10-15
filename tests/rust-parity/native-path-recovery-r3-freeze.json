@@ -1,0 +1,24 @@
+{
+  "schema": "lycheedev.native-path-recovery.v1",
+  "baseCommit": "2ae19cb36431369ab2eaabc493b184f8b14711fe",
+  "owners": [
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "sha256": "984808cd538aab2b860d71c9f29a23299feef92ca132d46c0983761447d7335f",
+      "bytes": 19433
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/removal.rs",
+      "sha256": "41a5280d0416d0cacf4946cd89b7d272ba2e5b2e7e20a77e238b2fc3ecf841d2",
+      "bytes": 32270
+    }
+  ],
+  "replacesCandidate": "R2 retained; missing native NT prefix corrected in R3 before integration",
+  "review": "R3 independent incremental review passed; R2 native NT prefix P2 closed; runtime NOT_RUN",
+  "tests": {
+    "declarations": 4,
+    "status": "NOT_RUN",
+    "selector": "filesystem::native_move_path_tests"
+  },
+  "semantics": "Lexical DOS/UNC path handling before extended prefix; raw explicit namespaces including native NT preserved; no filesystem canonicalization; move flags and no-replace absolute restriction unchanged. Removal fixture unique atomic suffix only."
+}

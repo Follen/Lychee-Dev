@@ -1,0 +1,111 @@
+{
+  "freezeSha256": "3da6413d4be827b1722a9e59d38d33e3423a8f7cbed67179738becb117fca5ef",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "status": "ALL_RUST_NOT_RUN",
+  "mappings": [
+    {
+      "rust": [
+        "sql_csv_end_to_end_pair_exact_bytes_and_capture_dependency"
+      ],
+      "goTests": [
+        "internal/records/navigatetest/sql_export_test.go:TestQueryCSVExportRetainsQueryUntilExportCaptureRemoved"
+      ],
+      "production": [
+        "internal/records/sql_export.go:ExportQueryCSV"
+      ]
+    },
+    {
+      "rust": [
+        "sql_csv_missing_query_never_publishes_existing_or_new_pair"
+      ],
+      "goTests": [
+        "internal/records/navigatetest/sql_export_test.go:TestQueryCSVExportRequiresLiveQueryCapture"
+      ]
+    },
+    {
+      "rust": [
+        "sql_csv_lf_escaping_and_go_whitespace",
+        "sql_csv_scalars_keep_integer_precision_and_go_general_floats",
+        "sql_csv_headers_duplicates_and_zero_columns_match_go_writer",
+        "sql_csv_width_limit_and_nonfinite_are_errors",
+        "sql_csv_manifest_go_html_and_js_escapes"
+      ],
+      "goTests": [],
+      "production": [
+        "internal/records/sql_export.go:ExportQueryCSV",
+        "internal/records/sql_export.go:queryCSVCell",
+        "internal/records/relational/values.go:canonicalScalar"
+      ],
+      "note": "Source-derived encoding boundary fixtures; no claim these are existing Go test equivalences."
+    },
+    {
+      "rust": [
+        "sql_csv_conflict_does_not_modify_either_destination_or_archive_csv",
+        "sql_csv_existing_manifest_prevents_data_publication",
+        "sql_csv_explicit_overwrite_replaces_both_files",
+        "sql_csv_rejects_workspace_and_directory_targets",
+        "sql_csv_manifest_conflict_precedes_workspace_rejection"
+      ],
+      "goTests": [
+        "internal/records/export_destination_test.go:TestExportDestinationRejectsExistingTargetWithoutOverwrite",
+        "internal/records/export_destination_test.go:TestOpenExportDestinationRefusesDirectoryAndSymlinkTargets"
+      ],
+      "production": [
+        "internal/records/export_destination.go:openExportDestination",
+        "internal/records/export_destination.go:outsideExportWorkspace"
+      ],
+      "note": "Directory/conflict covered by new source fixtures; full symlink/hardlink behavior also relies on existing asset tests, not claimed newly executed."
+    },
+    {
+      "rust": [
+        "sql_csv_manifest_failure_keeps_published_data_and_releases_lease",
+        "sql_csv_pair_holds_lease_through_manifest_and_preserves_cancel",
+        "sql_csv_cancel_preserves_typed_cause"
+      ],
+      "goTests": [
+        "internal/records/export_destination_test.go:TestExportDestinationCancellationPreservesTarget"
+      ],
+      "production": [
+        "internal/records/export_destination.go:publishCSVPair"
+      ],
+      "note": "Deterministic in-process seam; DOES NOT replace Go cross-process full exporter fixture."
+    },
+    {
+      "rust": [
+        "sql_csv_flag_errors_precede_query_selection",
+        "sql_csv_empty_output_without_csv_keeps_normal_query"
+      ],
+      "goTests": [],
+      "production": [
+        "internal/command/entry.go:data sql switch branch"
+      ]
+    },
+    {
+      "rust": [
+        "sql_csv_serializes_complete_pair_across_workspaces_and_processes",
+        "sql_csv_cross_workspace_process_helper"
+      ],
+      "goTests": [
+        "internal/records/navigatetest/sql_export_test.go:TestQueryCSVExportSerializesDataAndManifestAcrossWorkspaces",
+        "internal/records/navigatetest/sql_export_test.go:TestQueryCSVExportHelperProcess"
+      ],
+      "note": "Parent exporter pauses after data publication while holding canonical pair lease. Child from distinct home proves busy then immediately enters actual exporter. Parent observes child CSV capture committed and no pair completion before releasing; child finishes through existing Core owned process runner. First result verifies immutable capture to avoid racing overwrite. Both actual Windows tests remain NOT_RUN."
+    }
+  ],
+  "notCovered": [
+    "EXPLAIN and EXPLAIN ANALYZE",
+    "All runtime Windows execution and actual performance"
+  ],
+  "affectedExistingTests": [
+    "crates/lycheedev-data/tests/assets_business.rs",
+    "crates/lycheedev-data/tests/image_export_business.rs",
+    "crates/lycheedev-data/tests/cli_local_parity.rs",
+    "crates/lycheedev-data/tests/effective_sql_parity.rs",
+    "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+    "crates/lycheedev-data/tests/sql_resource_parity.rs"
+  ],
+  "declarations": {
+    "regressions": 18,
+    "helper": 1
+  }
+}

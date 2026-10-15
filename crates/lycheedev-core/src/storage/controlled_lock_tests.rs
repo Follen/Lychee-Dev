@@ -148,10 +148,14 @@ fn atomic_publication_write_stop_and_close_failure_retain_both_causes() {
     assert!(!path.exists());
     assert_eq!(error.code, "command.deadline");
     assert_eq!(
-        error.details["cause"]["primary"]["code"],
-        "command.deadline"
+        error.details["schema"],
+        "lycheedev.atomic-temporary-retained.v1"
     );
-    assert_eq!(error.details["cause"]["cleanup"]["code"], "external.io");
+    let cause = &error.details["cause"];
+    assert_eq!(cause["code"], "command.deadline");
+    assert_eq!(cause["details"]["schema"], FILE_CLEANUP_SCHEMA);
+    assert_eq!(cause["details"]["primary"]["code"], "command.deadline");
+    assert_eq!(cause["details"]["cleanup"]["code"], "external.io");
 }
 #[test]
 fn atomic_publication_retains_closed_temporary_without_path_cleanup() {
@@ -242,4 +246,48 @@ fn atomic_uncertain_residues_are_bounded_per_target_not_directory() {
     atomic_write_with_check(&other, b"valid parallel namespace", || Ok(())).unwrap();
     assert_eq!(fs::read(other).unwrap(), b"valid parallel namespace");
     assert_eq!(fs::read_dir(&f.0).unwrap().count(), 65);
+}
+
+#[test]
+fn only_kernel_lock_contention_is_retryable() {
+    let busy = ExclusiveLock::lock_error(fs2::lock_contended_error());
+    assert_eq!((busy.code.as_str(), busy.exit_code), ("workspace.busy", 6));
+    for raw in [5, 6, 87] {
+        let error = std::io::Error::from_raw_os_error(raw);
+        let expected = error.to_string();
+        let actual = ExclusiveLock::lock_error(error);
+        assert_eq!((actual.code.as_str(), actual.exit_code), ("external.io", 5));
+        assert_eq!(actual.message, expected);
+    }
+    assert_eq!(
+        ExclusiveLock::lock_error(std::io::Error::other("synthetic I/O")).code,
+        "external.io"
+    );
+}
+#[test]
+fn non_contention_lock_failure_closes_once_without_retries() {
+    let f = Fixture::new();
+    let attempts = Cell::new(0);
+    let closes = Cell::new(0);
+    let error = match ExclusiveLock::acquire_with(
+        &f.0.join("io-lock"),
+        || Ok(()),
+        |_| {
+            attempts.set(attempts.get() + 1);
+            Err(ExclusiveLock::lock_error(
+                std::io::Error::from_raw_os_error(5),
+            ))
+        },
+        |file| {
+            closes.set(closes.get() + 1);
+            lycheedev_windows::filesystem::close_file(file)
+        },
+    ) {
+        Ok(_) => panic!("injected lock I/O failure must not acquire"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "external.io");
+    assert_eq!(attempts.get(), 1);
+    assert_eq!(closes.get(), 1);
+    assert_eq!(error.details, serde_json::Value::Null);
 }

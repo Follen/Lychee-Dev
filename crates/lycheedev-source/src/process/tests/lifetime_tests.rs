@@ -488,3 +488,147 @@ fn original_and_observed_events_match_at_overflow_boundary() {
         _ => panic!("unexpected reader event"),
     }
 }
+
+#[test]
+fn root_exit_retires_inherited_pipes_and_preserves_status_and_tail() {
+    for (mode, status) in [
+        ("spawn-inherited-descendant", 0),
+        ("spawn-nonzero-descendant", 17),
+    ] {
+        let root = directory(mode);
+        let ready = root.join("held");
+        let mut command = super::helper(mode);
+        command.env("LYCHEEDEV_SOURCE_TEST_READY", &ready);
+        let output =
+            run_with_input(command, 4096, Duration::from_secs(20), Some(vec![b'G'])).unwrap();
+        assert_eq!(output.status, status);
+        if status == 17 {
+            assert!(output.stderr.ends_with(b"nonzero-stderr-tail"));
+        }
+        assert!(
+            output
+                .stdout
+                .windows(b"root-tail-before-exit".len())
+                .any(|v| v == b"root-tail-before-exit")
+        );
+        assert!(ready.is_file());
+        std::fs::rename(&ready, root.join("released")).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn late_worker_errors_keep_their_original_cause_after_root_exit() {
+    for status in [0, 17] {
+        for overflow in [false, true] {
+            let (wake, rx) = mpsc::channel();
+            let (release, gate) = mpsc::channel();
+            let mut workers = WorkerSet::default();
+            let mut state = ProcessState::default();
+            state.status = Some(status);
+            workers
+                .spawn(1, wake, move || {
+                    gate.recv().unwrap();
+                    Event::Output(
+                        0,
+                        b"tail".to_vec(),
+                        if overflow {
+                            Ok(())
+                        } else {
+                            Err(io::Error::other("late reader failure"))
+                        },
+                        overflow,
+                    )
+                })
+                .unwrap();
+            assert!(!workers.complete());
+            release.send(()).unwrap();
+            let mut owner = Owner::new(Wait::Exited(status), Some(true));
+            let cleanup = retire(
+                &mut owner,
+                &mut workers,
+                &mut state,
+                &rx,
+                Instant::now() + Duration::from_secs(5),
+            );
+            assert!(cleanup.complete());
+            assert_eq!(state.outputs[0].as_deref(), Some(b"tail".as_slice()));
+            let error = super::finish_retired_result(
+                Ok(()),
+                ProcessControl::Legacy(None),
+                &mut state,
+                &cleanup,
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.code,
+                if overflow {
+                    "luals.input_budget"
+                } else {
+                    "luals.check_failed"
+                }
+            );
+            if !overflow {
+                assert!(error.message.contains("late reader failure"));
+            }
+            let primary = ToolkitError::io(io::Error::other("original root wait failure"));
+            let error = super::finish_retired_result(
+                Err(primary.clone()),
+                ProcessControl::Legacy(None),
+                &mut state,
+                &cleanup,
+            )
+            .unwrap_err();
+            assert_eq!((error.code, error.message), (primary.code, primary.message));
+        }
+    }
+}
+
+#[test]
+fn retired_completion_preserves_control_stdin_and_nonzero_precedence() {
+    let cleanup = Retirement {
+        reaped: true,
+        stdin_complete: true,
+        outputs_complete: true,
+        job_empty: Some(true),
+        ..Retirement::default()
+    };
+    for status in [0, 17] {
+        let mut state = ProcessState::default();
+        state.status = Some(status);
+        state.input_error = Some(io::Error::other("late stdin failure"));
+        let result = super::finish_retired_result(
+            Ok(()),
+            ProcessControl::Legacy(None),
+            &mut state,
+            &cleanup,
+        );
+        if status == 0 {
+            assert!(result.unwrap_err().message.contains("late stdin failure"));
+        } else {
+            result.unwrap();
+        }
+    }
+    let control = OperationControl::default();
+    control.tracked_cancel_handle().unwrap().cancel();
+    let mut state = ProcessState::default();
+    state.status = Some(0);
+    let error = super::finish_retired_result(
+        Ok(()),
+        ProcessControl::Complete(&control),
+        &mut state,
+        &cleanup,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "process.cancelled");
+    let incomplete = Retirement::default();
+    assert!(
+        super::finish_retired_result(
+            Ok(()),
+            ProcessControl::Legacy(None),
+            &mut state,
+            &incomplete
+        )
+        .is_err()
+    );
+}
