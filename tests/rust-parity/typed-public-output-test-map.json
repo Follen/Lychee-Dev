@@ -1,0 +1,333 @@
+{
+  "schema": "lycheedev.typed-public-output-test-map.v1",
+  "oracle": {
+    "release": "Go v3.2.0",
+    "commit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+    "toolchain": "go1.27.1",
+    "execution": "NOT_RUN; fixed application Git objects and matching locally saved toolchain sources inspected only"
+  },
+  "scope": "Add borrowed typed compact/pretty Serialize public writer entrypoints for ProjectResult/envelopes. Existing Value+NumberLayout implementation is byte-identical after removing module export. No CLI dispatch, Live state, persistence or dependency edits in this batch.",
+  "apis": [
+    "lycheedev_core::public_json::write_serializable_line",
+    "lycheedev_core::public_json::write_pretty_serializable_line"
+  ],
+  "contract": {
+    "configuration": "internal/command/entry.go render: SetEscapeHTML(false), compact JSON/JSONL, SetIndent(\"\", \"  \") for successful text result; exactly one trailing newline",
+    "raw": "RawValue remains borrowed. Duplicate fields, order, large integers, negative zero, exponent spelling, original string escapes, surrogate escape spellings and literal HTML/U+2028/U+2029 survive; remove only insignificant JSON whitespace. Pretty raw content participates in enclosing formatter indentation.",
+    "typed": "Normal strings retain PublicFormatter escaping, including U+2028/U+2029 escaping and literal HTML. Only actual f32/f64 serializer events use corresponding finite float formatting. Arbitrary_precision Number tokens and RawValue tokens are never coerced to binary64.",
+    "preflight": "Same deterministic Serialize value and format serializes to sink before output. Preflight validation errors emit no record. Second pass writes directly then newline; no Value conversion, full output buffer or report clone in encoder. Stable Serialize and already-compatible schema/key order/byte representation are producer requirements.",
+    "io": "Real writer errors and WriteZero map to external.io / exit 5 and may leave partial output. Formatter/raw serialization errors map to input.invalid / exit 4. Interrupted writes retry. There is no OS-atomic record guarantee.",
+    "statefulSerialize": "A custom serializer changing/failing between passes can leave partial output. This is documented and regression-covered; it is not concealed as an unconditional atomicity guarantee.",
+    "limits": "No public frame/report byte cap. Fixed Go MemoryMaxPayload = 512 << 10 (524288 bytes), enforced upstream for native reports. 8 << 20 is Rust journal checkpoint size, not report size. Raw validator/formatter use iterative stacks bounded by actual Go scanner maxNestingDepth=10000; compact RawMessage depth is independent, pretty final-document depth includes typed enclosing containers.",
+    "performance": "NOT_RUN. Two serialization passes, borrowed raw validation and iterative formatting have unmeasured CPU cost. No performance-target claim."
+  },
+  "goldens": [
+    {
+      "name": "typed-envelope-compact",
+      "evidence": "Static expectation derived from fixed render and Go1.27.1 marshalerEncoder/appendCompact(false); not captured runtime output",
+      "rawInput": " { \"z\": 9007199254740993, \"z\": 1E+00, \"n\": -0, \"list\": [ { }, [ ], { \"x\": 1e400 } ], \"s\": \"<>&  \\u003C\\/\" } \r\n",
+      "typedInput": "<>&  ",
+      "expected": "{\"schema\":\"lycheedev.result.v1\",\"result\":{\"report\":{\"z\":9007199254740993,\"z\":1E+00,\"n\":-0,\"list\":[{},[],{\"x\":1e400}],\"s\":\"<>&  \\u003C\\/\"},\"typed\":\"<>&\\u2028\\u2029\",\"after\":true}}\n"
+    },
+    {
+      "name": "typed-envelope-pretty",
+      "evidence": "Static expectation derived from fixed render and Go1.27.1 Encoder.Encode/appendIndent; not captured runtime output",
+      "rawInput": " { \"z\": 9007199254740993, \"z\": 1E+00, \"n\": -0, \"list\": [ { }, [ ], { \"x\": 1e400 } ], \"s\": \"<>&  \\u003C\\/\" } \r\n",
+      "typedInput": "<>&  ",
+      "expected": "{\n  \"schema\": \"lycheedev.result.v1\",\n  \"result\": {\n    \"report\": {\n      \"z\": 9007199254740993,\n      \"z\": 1E+00,\n      \"n\": -0,\n      \"list\": [\n        {},\n        [],\n        {\n          \"x\": 1e400\n        }\n      ],\n      \"s\": \"<>&  \\u003C\\/\"\n    },\n    \"typed\": \"<>&\\u2028\\u2029\",\n    \"after\": true\n  }\n}\n"
+    }
+  ],
+  "tests": [
+    {
+      "rustTest": "public_json::typed::tests::typed_compact_keeps_duplicate_raw_fields_and_lexemes",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "internal/command/entry.go:render",
+        "internal/live/channel/project_windows.go:ProjectResult.Report",
+        "go1.27.1/src/encoding/json/encode.go:marshalerEncoder",
+        "go1.27.1/src/encoding/json/indent.go:appendCompact"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::typed_pretty_formats_raw_at_the_envelope_depth",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "internal/command/entry.go:render",
+        "go1.27.1/src/encoding/json/stream.go:Encoder.Encode",
+        "go1.27.1/src/encoding/json/indent.go:appendIndent"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::raw_scalar_whitespace_and_string_escapes_are_not_reencoded",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/indent.go:appendCompact",
+        "go1.27.1/src/encoding/json/scanner.go:stateInStringEscU"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::typed_strings_keep_html_and_escape_separators_and_controls",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "internal/command/entry.go:render",
+        "go1.27.1/src/encoding/json/encode.go:appendString"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::typed_float_width_does_not_coerce_raw_or_unknown_number_tokens",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/encode.go:floatEncoder.encode",
+        "go1.27.1/src/encoding/json/encode.go:stringEncoder json.Number branch",
+        "go1.27.1/src/encoding/json/indent.go:appendCompact"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::typed_float32_go_thresholds_and_negative_zero",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/encode.go:floatEncoder.encode bits==32"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::typed_float64_go_thresholds_and_negative_zero",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/encode.go:floatEncoder.encode bits==64"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::raw_arrays_objects_and_multiple_reports_share_formatter_state",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/indent.go:appendIndent"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::raw_depth_uses_go_limit_not_value_recursion_limit",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/scanner.go:maxNestingDepth/pushParseState",
+        "go1.27.1/src/encoding/json/indent.go:appendCompact/appendIndent"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::nonfinite_floats_fail_preflight_at_all_nested_serde_shapes",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/encode.go:floatEncoder.encode",
+        "go1.27.1/src/encoding/json/stream.go:Encoder.Encode e.marshal before enc.w.Write"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::late_custom_serialization_and_invalid_map_keys_emit_no_record",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/stream.go:Encoder.Encode e.marshal before enc.w.Write",
+        "Rust-specific nested Serialize preflight coverage"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::malformed_raw_fragments_fail_preflight_without_any_output",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/encode.go:marshalerEncoder",
+        "go1.27.1/src/encoding/json/indent.go:appendCompact",
+        "go1.27.1/src/encoding/json/encode_test.go:TestMarshalRawMessageValue"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::borrowed_report_bytes_fail_preflight_when_invalid",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "internal/live/channel/project_windows.go:ProjectResult.Report",
+        "internal/live/channel/state_test.go:TestResultPersistenceKeepsExactWhitespaceAndHTMLBytes",
+        "Go persistence-byte test is not claimed as a public encoding golden"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::stable_serializers_are_called_twice_without_frame_size_cap",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/stream.go:Encoder.Encode",
+        "Rust-specific two-pass/no-full-frame-buffer implementation contract, not same Go internal algorithm",
+        "internal/bridge/memory_record.go:MemoryMaxPayload is upstream report cap only"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::actual_output_failures_preserve_partial_bytes_and_io_classification",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/stream.go:Encoder.Encode enc.w.Write failure",
+        "crates/lycheedev-core/src/lib.rs:ToolkitError.io"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::write_zero_is_io_and_interrupted_writes_are_retried",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "Rust std::io::Write::write_all contract and core ToolkitError.io; Rust-specific failure classification coverage"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::unstable_second_pass_failure_is_not_misclassified_as_writer_io",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "Rust-specific documented stable-Serialize precondition; no equivalence claim for stateful custom serializers"
+      ]
+    },
+    {
+      "rustTest": "public_json::typed::tests::arbitrary_precision_marker_cannot_inject_non_number_json",
+      "status": "NOT_RUN",
+      "oracleSources": [
+        "go1.27.1/src/encoding/json/encode.go:stringEncoder json.Number branch",
+        "Rust-specific serde arbitrary_precision marker hardening"
+      ]
+    }
+  ],
+  "requiredFollowup": [
+    "Fresh independent review and exact-tree controlled Cargo compilation plus Rust unit execution; rustfmt parse is not type checking.",
+    "Fixed-Go runtime differential for these raw, float32/float64, failure and deep nesting cases; source-derived expected output is not a captured Go pass.",
+    "Formal CLI integration must retain typed borrowed ProjectResult throughout compact JSON, JSONL record/end/error-with-result and pretty text; existing to_value dispatch is not repaired by merely adding this API.",
+    "Run all existing public_json Value/NumberLayout numeric tests and affected Data parity tests.",
+    "Resolve invalid-UTF8 native report parity at admission/state/RawReport byte boundary; not an accepted permanent difference.",
+    "Measure two-pass/raw-format CPU and peak memory against the same fixed Go output and input."
+  ],
+  "unresolvedNativeUtf8": {
+    "status": "CONFIRMED_SOURCE_GAP; runtime differential NOT_RUN; not fixed by this UTF-8 RawValue writer",
+    "fixtureHex": "7b2273223a22ff227d",
+    "fixtureMeaning": "JSON object with key s and a string containing byte 0xff",
+    "goNativeAdmission": "internal/live/channel/observations.go:93 uses json.Valid(record.Payload); channel/state.go:181 uses json.Valid, max length and checksum. No utf8.Valid in native channel or memory. Go1.27.1 scanner.go stateInString accepts bytes >=0x20; raw marshaler appendCompact(false) preserves those bytes.",
+    "separateLegacyGate": "internal/bridge/report.go VerifyReport explicitly checks utf8.Valid(body), but native channel observations/state do not call that function. Its stricter behavior must not be substituted for native acceptance.",
+    "rustBoundary": "go_mailbox_v1/state.rs validates Box<RawValue> from slice; connection/projection.rs RawReport converts borrowed bytes to &RawValue, which requires UTF-8. Arbitrary invalid UTF-8 is therefore rejected before this writer.",
+    "next": "Repair the native raw-byte validation/presentation boundary with exact fixed-Go byte semantics and regression coverage before claiming full native parity. Do not infer validity from usual addon output."
+  },
+  "checks": {
+    "rustfmt": "PASS syntax parse only",
+    "gitDiffCheck": "PASS scoped tracked file",
+    "pythonStaticGoldens": "PASS two source-derived exact expected strings and unchanged old-writer body; no Go/Rust code execution",
+    "cargo": "NOT_RUN prohibited local build lease",
+    "rustc": "NOT_RUN",
+    "go": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "game": "NOT_RUN"
+  },
+  "goFiles": [
+    {
+      "path": "go.mod",
+      "bytes": 751,
+      "sha256": "99351c6ffe4251990055ba52f5d501be04af2682264ab8d037b7d6ad6c9c9119"
+    },
+    {
+      "path": "internal/command/entry.go",
+      "bytes": 59149,
+      "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b"
+    },
+    {
+      "path": "internal/command/entry_test.go",
+      "bytes": 6012,
+      "sha256": "5052cf493a6564184c5821f655b68082ff4e933614f31673affd89251ddee54b"
+    },
+    {
+      "path": "internal/live/channel/project_windows.go",
+      "bytes": 20287,
+      "sha256": "3c824507b764721a4830723868a6f6b9b70e36ec9fc53600b55818c4dfdfd7b5"
+    },
+    {
+      "path": "internal/live/channel/observations.go",
+      "bytes": 3825,
+      "sha256": "e41a608a9a0198e5c0bb5b5e6c5a80c45e6a1bb7490e34e9e54a3d9a5605aef2"
+    },
+    {
+      "path": "internal/live/channel/state.go",
+      "bytes": 5613,
+      "sha256": "a734d05ac4784c7034fa694a86f0f3a5455b67556adce9908609f99b24eeb5f1"
+    },
+    {
+      "path": "internal/live/channel/state_test.go",
+      "bytes": 1670,
+      "sha256": "40bcf7d6b1db63d54c22267dab0bc928d5ac712c4c45de9574387209eb7e4fc8"
+    },
+    {
+      "path": "internal/bridge/memory_record.go",
+      "bytes": 3074,
+      "sha256": "cbd932f27b2fb38ab374e8ac90450aea66cc54989261c5131f386d4910220e74"
+    },
+    {
+      "path": "internal/bridge/report.go",
+      "bytes": 2896,
+      "sha256": "4aead498330f51b9f3a3ce5a7fa241bdcc76bae4f1ed2031e7df0820fbf76fe2"
+    }
+  ],
+  "goStandardLibrary": {
+    "source": "Existing locally saved Go1.27.1 source snapshot; VERSION matches fixed go.mod toolchain. No download/build/run done in this batch. Snapshot hashes identify inspected source, not a newly authenticated distribution.",
+    "localRoot": "/workspace/scratch/f27ee7d61331/lycheedev-linux/toolchain/go",
+    "files": [
+      {
+        "path": "VERSION",
+        "bytes": 35,
+        "sha256": "25eb74b09036e1ad894fb63b86cb0f0ee53342df8d2e2e860da4ff5079607758"
+      },
+      {
+        "path": "src/encoding/json/encode.go",
+        "bytes": 40011,
+        "sha256": "8ff45e82c60c6e29d11fe57ce0c59d79f40ef0d53be28ac36617482a7463b217"
+      },
+      {
+        "path": "src/encoding/json/indent.go",
+        "bytes": 5523,
+        "sha256": "9ef9eac29fc4cc9d94bf305976891eb5e78a2644acd4f07ed7a0c186991ac908"
+      },
+      {
+        "path": "src/encoding/json/stream.go",
+        "bytes": 13862,
+        "sha256": "065501364e4954cf1c8f1887900248d4c0983593b8c058b2fe7997d9635b793d"
+      },
+      {
+        "path": "src/encoding/json/scanner.go",
+        "bytes": 16569,
+        "sha256": "2b16dd215274dfa8e0806b53cca144684d5b9c8a02319cf5ce10120c50e6eef2"
+      },
+      {
+        "path": "src/encoding/json/encode_test.go",
+        "bytes": 35020,
+        "sha256": "f29e24f20175687c700c09a83a8770472d659445c99454ec903b7791abd64983"
+      },
+      {
+        "path": "src/encoding/json/stream_test.go",
+        "bytes": 18001,
+        "sha256": "4e53c3806c93ee825cf29810b479424a5f14da37394c7d585dacb041dc1b45a4"
+      }
+    ]
+  },
+  "serdeImplementation": {
+    "localRoot": "/workspace/shared/rust-dev/cargo/registry/src/index.crates.io-1949cf8c6b5b557f",
+    "files": [
+      {
+        "path": "serde_json-1.0.151/src/ser.rs",
+        "bytes": 63877,
+        "sha256": "f2b8cc0b97e30c49dbc58698fa22c14a7d56ea616cdb57b067835a59af49a75f"
+      },
+      {
+        "path": "serde_json-1.0.151/src/de.rs",
+        "bytes": 86840,
+        "sha256": "4998d7e252eb513be85b298e287048b4fb283882e9ba7df905f572f07200f3f3"
+      },
+      {
+        "path": "serde_json-1.0.151/src/read.rs",
+        "bytes": 33041,
+        "sha256": "17a2efe49e5a6937c8d7d4a5c0b9eac84453de0f86bf8e7ee421387e82341bb3"
+      },
+      {
+        "path": "serde_json-1.0.151/src/raw.rs",
+        "bytes": 23498,
+        "sha256": "0e6ae2ade492a3c5c090dfaf31f03ff4e54123a5a47b59def5f1b3dcc035a2e3"
+      },
+      {
+        "path": "serde_core-1.0.229/src/ser/mod.rs",
+        "bytes": 65231,
+        "sha256": "ec097d92c8545356961e977a4c9650361cadd1d3a243d805ae7b0e0e589ae803"
+      }
+    ]
+  }
+}

@@ -5,6 +5,9 @@
 //! This does not undo normalization already performed by an upstream parser.
 //! Producers may supply a structural layout only while they still know the
 //! numeric type. This encoder is not used for archives, cache keys or journals.
+mod typed;
+pub use typed::{write_pretty_serializable_line, write_serializable_line};
+
 use crate::{Result, ToolkitError};
 use serde::{
     Serialize,

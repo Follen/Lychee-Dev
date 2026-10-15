@@ -1,0 +1,226 @@
+{
+  "schema": "lycheedev.typed-public-output-freeze.v1",
+  "createdAt": "2026-10-15T00:26:44.974813+00:00",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "baseHead": "18911712ec075fd72a56319070b9bf1224942a22",
+  "revision": 1,
+  "status": "FROZEN_FOR_FRESH_INDEPENDENT_REVIEW; not type-checked; compile/Rust/Go/Windows/performance NOT_RUN",
+  "meaning": "Exact per-file shared-worktree bytes only. Concurrent sibling changes are not included as owned files. No self hash. Parent integrates/commits/pushes. Review applies only to these hashes plus identified dependency snapshots.",
+  "files": [
+    {
+      "path": "crates/lycheedev-core/src/public_json.rs",
+      "bytes": 25956,
+      "sha256": "bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed.rs",
+      "bytes": 13007,
+      "sha256": "d33e3c1dda9744d1ec37139a1316e973ab109f3774d09cec943a7691271bb27b"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed/checked.rs",
+      "bytes": 7255,
+      "sha256": "bb5aee679b41949d0becc9a6486738cd649c514e26b4a47122c5d0e88accbc04"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed/tests.rs",
+      "bytes": 15884,
+      "sha256": "7eb18b3bea7eeeac5cafe41c3bd30c2d14c5fc712188c532c91cb17e2e1a4fc5"
+    },
+    {
+      "path": "tests/rust-parity/typed-public-output-test-map.json",
+      "bytes": 16925,
+      "sha256": "4d400d1d9363ead7b54ff8fa77a0370909651e101fb39ef1c6daef683eee856a"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "Cargo.toml",
+      "bytes": 1840,
+      "sha256": "0e00a44fd16a0de1697a3e0c7158cbaf010f09ace305b285f33f841fc3c5831d"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 71426,
+      "sha256": "a0d3f014709d3364d0ee28bc6ad58f260410ea7df81e8dc99fdebb35b4d45a6b"
+    },
+    {
+      "path": "crates/lycheedev-core/Cargo.toml",
+      "bytes": 376,
+      "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4772,
+      "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+      "bytes": 6687,
+      "sha256": "0d44b9724228595698cbe098a8518d97ec228985cf498887cf338b2c4cb689ea"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "bytes": 26101,
+      "sha256": "34f73480297f98b661fd577d787707dde9ab2042099719f942e2cc88b83cdb23"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/wire.rs",
+      "bytes": 6702,
+      "sha256": "6a174b9bd738d35edc29d542b30812576e63a97a0074f839fb5813c54e16b4ee"
+    }
+  ],
+  "goApplicationFiles": [
+    {
+      "path": "go.mod",
+      "bytes": 751,
+      "sha256": "99351c6ffe4251990055ba52f5d501be04af2682264ab8d037b7d6ad6c9c9119"
+    },
+    {
+      "path": "internal/command/entry.go",
+      "bytes": 59149,
+      "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b"
+    },
+    {
+      "path": "internal/command/entry_test.go",
+      "bytes": 6012,
+      "sha256": "5052cf493a6564184c5821f655b68082ff4e933614f31673affd89251ddee54b"
+    },
+    {
+      "path": "internal/live/channel/project_windows.go",
+      "bytes": 20287,
+      "sha256": "3c824507b764721a4830723868a6f6b9b70e36ec9fc53600b55818c4dfdfd7b5"
+    },
+    {
+      "path": "internal/live/channel/observations.go",
+      "bytes": 3825,
+      "sha256": "e41a608a9a0198e5c0bb5b5e6c5a80c45e6a1bb7490e34e9e54a3d9a5605aef2"
+    },
+    {
+      "path": "internal/live/channel/state.go",
+      "bytes": 5613,
+      "sha256": "a734d05ac4784c7034fa694a86f0f3a5455b67556adce9908609f99b24eeb5f1"
+    },
+    {
+      "path": "internal/live/channel/state_test.go",
+      "bytes": 1670,
+      "sha256": "40bcf7d6b1db63d54c22267dab0bc928d5ac712c4c45de9574387209eb7e4fc8"
+    },
+    {
+      "path": "internal/bridge/memory_record.go",
+      "bytes": 3074,
+      "sha256": "cbd932f27b2fb38ab374e8ac90450aea66cc54989261c5131f386d4910220e74"
+    },
+    {
+      "path": "internal/bridge/report.go",
+      "bytes": 2896,
+      "sha256": "4aead498330f51b9f3a3ce5a7fa241bdcc76bae4f1ed2031e7df0820fbf76fe2"
+    }
+  ],
+  "goStandardLibraryFiles": [
+    {
+      "path": "VERSION",
+      "bytes": 35,
+      "sha256": "25eb74b09036e1ad894fb63b86cb0f0ee53342df8d2e2e860da4ff5079607758"
+    },
+    {
+      "path": "src/encoding/json/encode.go",
+      "bytes": 40011,
+      "sha256": "8ff45e82c60c6e29d11fe57ce0c59d79f40ef0d53be28ac36617482a7463b217"
+    },
+    {
+      "path": "src/encoding/json/indent.go",
+      "bytes": 5523,
+      "sha256": "9ef9eac29fc4cc9d94bf305976891eb5e78a2644acd4f07ed7a0c186991ac908"
+    },
+    {
+      "path": "src/encoding/json/stream.go",
+      "bytes": 13862,
+      "sha256": "065501364e4954cf1c8f1887900248d4c0983593b8c058b2fe7997d9635b793d"
+    },
+    {
+      "path": "src/encoding/json/scanner.go",
+      "bytes": 16569,
+      "sha256": "2b16dd215274dfa8e0806b53cca144684d5b9c8a02319cf5ce10120c50e6eef2"
+    },
+    {
+      "path": "src/encoding/json/encode_test.go",
+      "bytes": 35020,
+      "sha256": "f29e24f20175687c700c09a83a8770472d659445c99454ec903b7791abd64983"
+    },
+    {
+      "path": "src/encoding/json/stream_test.go",
+      "bytes": 18001,
+      "sha256": "4e53c3806c93ee825cf29810b479424a5f14da37394c7d585dacb041dc1b45a4"
+    }
+  ],
+  "serdeImplementationFiles": [
+    {
+      "path": "serde_json-1.0.151/src/ser.rs",
+      "bytes": 63877,
+      "sha256": "f2b8cc0b97e30c49dbc58698fa22c14a7d56ea616cdb57b067835a59af49a75f"
+    },
+    {
+      "path": "serde_json-1.0.151/src/de.rs",
+      "bytes": 86840,
+      "sha256": "4998d7e252eb513be85b298e287048b4fb283882e9ba7df905f572f07200f3f3"
+    },
+    {
+      "path": "serde_json-1.0.151/src/read.rs",
+      "bytes": 33041,
+      "sha256": "17a2efe49e5a6937c8d7d4a5c0b9eac84453de0f86bf8e7ee421387e82341bb3"
+    },
+    {
+      "path": "serde_json-1.0.151/src/raw.rs",
+      "bytes": 23498,
+      "sha256": "0e6ae2ade492a3c5c090dfaf31f03ff4e54123a5a47b59def5f1b3dcc035a2e3"
+    },
+    {
+      "path": "serde_core-1.0.229/src/ser/mod.rs",
+      "bytes": 65231,
+      "sha256": "ec097d92c8545356961e977a4c9650361cadd1d3a243d805ae7b0e0e589ae803"
+    }
+  ],
+  "declaredTests": 18,
+  "checks": {
+    "rustfmt": "PASS syntax parse only",
+    "gitDiffCheck": "PASS scoped tracked file",
+    "pythonStaticGoldens": "PASS two source-derived exact expected strings and unchanged old-writer body; no Go/Rust code execution",
+    "cargo": "NOT_RUN prohibited local build lease",
+    "rustc": "NOT_RUN",
+    "go": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "game": "NOT_RUN"
+  },
+  "staticGoldenChecker": {
+    "path": "/tmp/lycheedev-typed-public-static.py",
+    "bytes": 8307,
+    "sha256": "ea129d35a22581fbffa7451045482b2a7b8a94f4057962a2969131438a039069"
+  },
+  "nonChanges": [
+    "No CLI/main.rs edits",
+    "No Live or delivery edits",
+    "No Cargo/Emmy/tool/workflow changes",
+    "No gameplay or desktop operation",
+    "No commit/push/publish/merge",
+    "Existing Value+NumberLayout writer body unchanged"
+  ],
+  "openGates": [
+    "Fresh independent review and exact-tree controlled Cargo compilation plus Rust unit execution; rustfmt parse is not type checking.",
+    "Fixed-Go runtime differential for these raw, float32/float64, failure and deep nesting cases; source-derived expected output is not a captured Go pass.",
+    "Formal CLI integration must retain typed borrowed ProjectResult throughout compact JSON, JSONL record/end/error-with-result and pretty text; existing to_value dispatch is not repaired by merely adding this API.",
+    "Run all existing public_json Value/NumberLayout numeric tests and affected Data parity tests.",
+    "Resolve invalid-UTF8 native report parity at admission/state/RawReport byte boundary; not an accepted permanent difference.",
+    "Measure two-pass/raw-format CPU and peak memory against the same fixed Go output and input."
+  ],
+  "bounds": "No public frame/report byte cap. Fixed Go MemoryMaxPayload = 512 << 10 (524288 bytes), enforced upstream for native reports. 8 << 20 is Rust journal checkpoint size, not report size. Raw validator/formatter use iterative stacks bounded by actual Go scanner maxNestingDepth=10000; compact RawMessage depth is independent, pretty final-document depth includes typed enclosing containers.",
+  "unresolvedNativeUtf8": {
+    "status": "CONFIRMED_SOURCE_GAP; runtime differential NOT_RUN; not fixed by this UTF-8 RawValue writer",
+    "fixtureHex": "7b2273223a22ff227d",
+    "fixtureMeaning": "JSON object with key s and a string containing byte 0xff",
+    "goNativeAdmission": "internal/live/channel/observations.go:93 uses json.Valid(record.Payload); channel/state.go:181 uses json.Valid, max length and checksum. No utf8.Valid in native channel or memory. Go1.27.1 scanner.go stateInString accepts bytes >=0x20; raw marshaler appendCompact(false) preserves those bytes.",
+    "separateLegacyGate": "internal/bridge/report.go VerifyReport explicitly checks utf8.Valid(body), but native channel observations/state do not call that function. Its stricter behavior must not be substituted for native acceptance.",
+    "rustBoundary": "go_mailbox_v1/state.rs validates Box<RawValue> from slice; connection/projection.rs RawReport converts borrowed bytes to &RawValue, which requires UTF-8. Arbitrary invalid UTF-8 is therefore rejected before this writer.",
+    "next": "Repair the native raw-byte validation/presentation boundary with exact fixed-Go byte semantics and regression coverage before claiming full native parity. Do not infer validity from usual addon output."
+  }
+}
