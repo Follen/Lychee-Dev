@@ -13,6 +13,14 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 
 - [x] Push the reviewed documentation to rust-refactor and create/reuse its own draft PR (#14); subsequent authorized code batches update that same PR promptly, without waiting for all validation or opening one PR per batch.
 
+## Current release increment: Go 3.2.1
+
+- [x] Pin current target to released 10b561db5706702cd42e047eaeed4ccb5e825351; retain 3057a966 as historical evidence. See [increment matrix](docs/toolkit/rust-go-3.2.1-increment.md).
+- [ ] Implement and verify Retail 12.1.5/120105 plus 12.1.0 compatibility across ClientGate, TOCs, runtime/slot catalogs and product/build selection.
+- [ ] Implement and verify all-key release plus 500 ms keyboard-activity quiet time, fresh INPUT, chord release, no replay and original deadlines; retain timestamp only, no keystroke history.
+- [ ] Synchronize fixed 3.2.1 Skill/protocol guidance and rebuild current oracle/test mappings; do not rename old passing evidence.
+- [ ] Complete G321-01–G321-06 automatically first; user/game checks remain at handover’s end.
+
 ## Current module work queue (derived from handover; no percentage claims)
 
 This is an execution view, not a second evidence authority. A component being implemented or independently source-reviewed does not check its complete parity box. Exact run/commit/hash evidence and limitations remain in handover.md.
@@ -52,7 +60,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Run local real pure Rust/Node/Lua regressions first within valid owned channels; preserve results and promptly push each meaningful batch. Every push runs fast checks; explicit `[rust-native]` batch commits run full Windows/Emmy acceptance. Do not treat skipped native jobs as green product validation.
 - [ ] Finish Source process terminal proof and legacy luac caller retention, checked Windows process/job close and Closure I/O/control boundaries. An error with uncertain resource retirement must not trigger parent scratch deletion.
 - [ ] Record actual full-Retail cold/warm/native/session synchronized process-group WorkingSet and PrivateBytes, including workers, steady samples, sampling gaps and failed-run status; existing peakRSS is not_measured.
-- [ ] Introduce narrow owned `lycheedev-emmy` adapter crate after default CLI integration: dependency direction Source→adapter→pinned upstream, no back-reference/Graph copy/framework expansion. First move authenticated environment DTO/type conversion/domain provenance and reporting; preserve necessary recursive/session/unknown/cardinality/checker hooks.
+- [ ] Validate and incrementally extend the implemented `lycheedev-emmy-adapter` and `lycheedev-binding-contracts` crates: dependency direction Source→adapter→pinned upstream, no back-reference/Graph copy/framework expansion. First move authenticated environment DTO/type conversion/domain provenance and reporting; preserve necessary recursive/session/unknown/cardinality/checker hooks.
 - [ ] Map all 29 current patch paths to production/example/test consumers and regression evidence. Validate API Type public-upstream alternative, file diagnostic opt-in and object reconstruction before reducing hooks; keep 35 existing engine regressions and complete fixed-Retail acceptance.
 - [ ] Document and test each upstream-version upgrade: fixed commit/archive/license, patch conflicts/replacements, cache identity, reproducibility, owned-adapter and full-Retail outputs/resources. No claim of zero-maintenance fork or measured performance gains from file movement.
 
@@ -60,11 +68,11 @@ This is an execution view, not a second evidence authority. A component being im
 
 - [x] Push reviewed formal activation/doctor/repair and default CON CLI wiring in b83a4d3/da546758. This checks delivery of code, not runtime equivalence; legacy OP/BTP and remaining cleanup cases stay open.
 - [ ] Finish Source process terminal ownership and both ordered/legacy luac caller retention; independently review, locally test pure portions, then run automated Windows process fixtures.
-- [ ] Publish independently reviewed local pure Rust runner; continue exact production module tests locally. Keep frequent persistence pushes separate from explicit `[rust-native]` batch acceptance.
+- [ ] Retain the published independently reviewed local pure Rust runner and actual 21+5 results; continue exact production module tests locally. Keep frequent persistence pushes separate from explicit `[rust-native]` batch acceptance.
 - [ ] Collect actual full Retail memory by phase using synchronized authenticated Job membership; report current WorkingSet/PrivateBytes sampled group peaks and steady observations, sampling gaps and failed/incomplete operations separately. Historical `not_measured` remains unchanged.
-- [ ] Create owned Emmy adapter crate with one-way Source→adapter→Emmy dependencies and real diagnostics/API-type consumers, then move domain DTO/projection/provenance/reporting out of upstream patches in small reviewed batches. Preserve the entire enhanced XML/Lua design per explicit user decision; label it separately from Go-equivalent behavior.
+- [ ] Extend the implemented owned Emmy adapter with one-way Source→adapter→Emmy dependencies and real diagnostics/API-type consumers, then move domain DTO/projection/provenance/reporting out of upstream patches in small reviewed batches. Preserve the entire enhanced XML/Lua design per explicit user decision; label it separately from Go-equivalent behavior.
 - [ ] Map each remaining Emmy patch to consumers and tests; preserve 35 contextual regressions/full Retail acceptance. Pin upgrades, check official public API replacements, review uncertainty/identity/cardinality boundaries and remove only proven-redundant hooks. Do not count a wrapper-only crate as completed decoupling.
-- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV R4 is independently reviewed but native NOT_RUN; EXPLAIN remains a required implementation gap.
+- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV R4 is independently reviewed but native NOT_RUN; EXPLAIN/TopK R3 is implemented and independently reviewed, with 31 new tests NOT_RUN; ANALYZE/provider callback and resource gaps remain.
 
 ## 1. Reproducible foundation (no user interaction)
 
@@ -80,7 +88,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Import and analyze the entire fixed Retail31c7f7b corpus (all Lua/XML/TOC and inline maps), run representative file/symbol/line/source queries, refs/context/flow, cold/warm/persistent session and resource cleanup against Go; small fixtures and historical Retail19 are not acceptance.
 - [ ] Complete Data DB2/SQL effective/table/scan Hotfix/providers/CASC/CDN/assets/relations and error paths.
 - [ ] Reuse the released addon; reconcile installation/500-slot/upgrade/rollback/modified-file protection.
-- [ ] Reuse the fixed Go3.2.0 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
+- [ ] Reuse the fixed Go3.2.1 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
 - [ ] Enforce no unsafe in owned business/cross-platform crates with suitable forbid/deny; inventory unavoidable Windows FFI/memory boundaries, use minimal safe wrappers with per-site SAFETY proofs and pointer/lifetime/thread tests; independently audit, no blanket module exemptions or performance shortcut. Report dependency unsafe separately.
 
 ## 3. Complete Mailbox protocol (no game needed yet)
@@ -134,14 +142,14 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Execute reviewed CSV R4 (18 regressions plus 1 helper), Core lock-error classification, SQL required-FROM and Source root-retirement R2 on the exact composed candidate.
 - [ ] Resolve slot publication residue safely: neither OS error names nor expected bytes authorize deletion; parent staging needs ACL/permission/ancestry proof before use.
 - [ ] Validate native lexical path repair and removal fixture uniqueness; keep original failed run evidence.
-- [ ] Independently review lower-level binding-contracts extraction and its complete stage custody, then execute new crate/adapter/engine regressions.
+- [ ] Retain independently reviewed binding-contracts extraction and its complete stage custody, plus actual 5/5 crate tests; execute new adapter/engine regressions.
 - [ ] Obtain actual full Retail cold/warm/native/session memory and phase timing; sampler implementation and successful compilation are not measurements.
 
 ## Historical read R2 checkpoint
 
 - [ ] Execute reviewed OP/SESSION/signal/report/capture read chain and shared workspace admission on Windows; 97 new declarations remain NOT_RUN.
 - [ ] Close residual Go JSON/corrupt-DEFLATE diagnostics and deferred timestamp marshal semantics.
-- [ ] Finish prepared-only cancel and explicit-owner abandon with multi-document generation CAS, then verify actual 84-command describe.
+- [ ] Validate implemented prepared-only cancel and explicit-owner abandon with multi-document generation CAS (44 new tests NOT_RUN), then verify actual 84-command describe.
 
 ## Confirmed remaining business implementations (2026-10-15)
 

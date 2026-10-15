@@ -1,15 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-14 UTC。分支：`rust-refactor`。本次首批提交仅文档，用户随后已授权按本计划全量实施；产品迁移尚未完成。
+更新：2026-10-15 UTC。分支：`rust-refactor`。本次首批提交仅文档，用户随后已授权按本计划全量实施；产品迁移尚未完成。
 
 ## 1. 当前决定与不可漂移基线
 
-- 唯一验收目标：以正式 **Go 3.2.0** 为行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
-- Go tag `v3.2.0` 的 tag object：`93849f43f34d8ff1d6f4539c5a3496ab941ef229`；peeled commit：**`3057a9666ab078270b63c7f06de748069b0d1f4b`**。本次通过远端 tag 查询及本地 fetch 核实。所有下文 Go 文件引用均固定于该 commit，不跟随 main。
+- 唯一验收目标：以正式 **Go 3.2.1** 为当前行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
+- 当前 Go tag `v3.2.1` 的 tag object：`637584b8b976966c3863c1889e9ff86fe55493d4`；peeled release commit：**`10b561db5706702cd42e047eaeed4ccb5e825351`**。2026-10-15 通过远端 tag object 与本地精确 fetch 核实。main 的后续文档提交 `1ee747e021da74a53643ec91ebdb16f6ad22e03c` 不是行为 pin。
+- 原 v3.2.0 tag object `93849f43f34d8ff1d6f4539c5a3496ab941ef229`、commit **`3057a9666ab078270b63c7f06de748069b0d1f4b`** 及既有fixture/测试/失败记录保持原身份，不能升级标签冒充3.2.1通过。3.2.1业务增量 `83463a03ac99050f6d9e15d9f27849cde53dab10` 的新测试与迁移见[增量矩阵](docs/toolkit/rust-go-3.2.1-increment.md)。
 - Rust 调查起点：`5443314c536e925801d3f0360110db946181d1b3`。它是复用基础，不是完成声明。按模块差分决定保留/替换/补齐，不从零丢弃已有成果，不沿用不符目标的旧协议。
 - unsafe约束：自有业务/跨平台Rust代码默认禁止unsafe，用适当crate级forbid/deny守住；确有必要的Windows FFI/内存边界必须最小化安全封装、逐处SAFETY理由和指针/生命周期/线程约束与测试，独立审查，不整模块无限豁免，不为性能目标放开unsafe。第三方依赖另列审计，不能宣称整个依赖图无unsafe。
 - 内部设计应体现Rust特点，不逐行翻译Go：合理所有权/借用减少复制，enum/类型状态、Result、RAII和有界安全并发按实际收益使用，避免过度抽象/炫技。对外合同不变，unsafe边界不放松，性能仍实测；纳入独立架构验收。
-- Skill尽量复用固定Go3.2.0版本；仅Emmy引擎、安装和真实诊断等必要差异修改，不因换语言重造工作流。
+- Skill尽量复用固定Go3.2.1版本；仅Emmy引擎、安装和真实诊断等必要差异修改，不因换语言重造工作流。
 - 性能：可控耗时减少至少 70%，即 **Rust ≤ Go 30%**，排除下载与不可控外部等待；同机同数据、输出与校验等价，cold/warm 分开独立重复，逐路径记录。未测不能保证达标。
 - 所有需要用户、实际游戏或特定本机互动配合的测试放在本文最后；离线与可自动执行的 Windows CI 先做。Windows 专属测试不自动等于游戏测试。
 - 首批交付仅文档；随后已获准全量实施本计划。仍不操作游戏、不发布、不合 main，不修改 Go PR #13 或其他项目。只保留本文件，不创建 `handoff` 文件或第二份交接事实来源。
@@ -17,17 +18,17 @@
 
 [DESIGN.md](DESIGN.md)解释目标结构，[todo.md](todo.md)给执行顺序，两者从本文件派生；更新状态与证据首先改这里。旧 `docs/toolkit/` 和历史 README/UI 设计是原受测范围的记录，不得覆盖本节。历史“Go3.1.2替换”“Rust≤Go50%”“重新设计四槽exact-COMMIT”与旧输入合同已被本次目标替代；历史测试通过仍只证明原始候选。
 
-## 2. 固定 Go 合同索引
+## 2. 当前 Go 3.2.1 合同索引（历史证据仍各自固定）
 
 | 合同 | 固定来源 | 使用方式 |
 | --- | --- | --- |
-| 产品/架构/业务 | [Design.md](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/Design.md) | 提取模块和产品合同，不复制其运行状态为 Rust 状态 |
-| 全量命令、参数、输出 | [command_contract.go](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/command/command_contract.go) | 固定 release binary 的 describe/help/正常及错误 golden；不能沿用旧89命令数量 |
-| 协议全貌 | [docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/live-protocol.md) | 全部8节与实现/测试共同组成验收，不只移植定位 |
-| 协议实现 | [channel](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel)、[memory](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/memory)、[bridge](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/bridge)、[desktop](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/desktop)、[addon Bridge](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/addon/Bridge) | 原样保留语义及边界，差分正常/失败/中断 |
-| Agent 工作流 | [Skill](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/skills/lycheedev/SKILL.md) | 比对公开业务步骤、命令/flag和错误恢复；只改真实引擎/构建说明 |
-| 开发/发行/许可 | [development](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/development.md)、[licensing](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/licensing.md)、[release](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/release) | 固定包身份、对应源码、清单和自动验证 |
-| Go 原始验收范围 | [todo](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/todo.md)、[handover](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/handover.md) | 参考已知限制与故障，不把 Go 实机通过转记成 Rust 通过 |
+| 产品/架构/业务 | [Design.md](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/Design.md) | 提取模块和产品合同，不复制其运行状态为 Rust 状态 |
+| 全量命令、参数、输出 | [command_contract.go](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/command/command_contract.go) | 固定 release binary 的 describe/help/正常及错误 golden；不能沿用旧89命令数量 |
+| 协议全貌 | [docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/live-protocol.md) | 全部8节与实现/测试共同组成验收，不只移植定位 |
+| 协议实现 | [channel](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/live/channel)、[memory](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/live/memory)、[bridge](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/bridge)、[desktop](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/desktop)、[addon Bridge](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/addon/Bridge) | 原样保留语义及边界，差分正常/失败/中断 |
+| Agent 工作流 | [Skill](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/skills/lycheedev/SKILL.md) | 比对公开业务步骤、命令/flag和错误恢复；只改真实引擎/构建说明 |
+| 开发/发行/许可 | [development](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/development.md)、[licensing](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/licensing.md)、[release](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/release) | 固定包身份、对应源码、清单和自动验证 |
+| Go 原始验收范围 | [todo](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/todo.md)、[handover](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/handover.md) | 参考已知限制与故障，不把 Go 实机通过转记成 Rust 通过 |
 
 Go 基线若需要变更，必须明确记录新目标、精确 commit、原因和差分范围，再重建受影响 oracle。不能因远端 main 前进而自动滚动。
 
@@ -132,7 +133,7 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 用户要求的执行顺序是下列四阶段，每阶段均循环，并非各审一次。阶段内执行：独立审计 → 记录可行动finding → 修复 → 受影响及必要全套验证 → 独立复审。当前阶段收敛后才进入下一阶段；每批改动及时推同一Rust草稿PR，更新本文件的证据与剩余项。
 
 1. **架构、全部业务bug、Skill及全部代码相关问题。** 包括自有unsafe清单、crate禁用策略、必要Windows安全边界和依赖unsafe范围的独立审计。 以固定Go业务/协议合同为准，覆盖错误恢复、诊断、输入、平台/打包路径，不能只看编译或单元通过。
-2. **测试覆盖充分性与冗余测试。** 固定Go3.2.0测试也是行为场景oracle：建立Go测试→Rust对应/不适用理由/未覆盖映射，保留错误恢复、未知结果不重放、事务、取消、协议、空map、槽迁移等有效边界；不机械复制冗余平台夹具或旧死实现测试，不以数量堆覆盖。 检查关键分支、失败/恢复/状态组合及真实断言质量，补有效回归；只有证明无独立价值才删重复测试。修后实测覆盖，保留分母、排除项、平台范围与报告；覆盖率数字本身不是充分性证明。
+2. **测试覆盖充分性与冗余测试。** 固定Go3.2.1测试是当前行为场景oracle，既有Go3.2.0映射作为历史基底保留：建立Go测试→Rust对应/不适用理由/未覆盖映射，保留错误恢复、未知结果不重放、事务、取消、协议、空map、槽迁移等有效边界；不机械复制冗余平台夹具或旧死实现测试，不以数量堆覆盖。 检查关键分支、失败/恢复/状态组合及真实断言质量，补有效回归；只有证明无独立价值才删重复测试。修后实测覆盖，保留分母、排除项、平台范围与报告；覆盖率数字本身不是充分性证明。
 3. **死代码专项。** 核查真实消费者、动态入口、feature/平台条件、CLI/Skill/生成器/打包与工具调用，确认后清理并回归，重复直到无新可行动项。
 4. **前三维度联合全仓审计。** 架构/业务/Skill、测试充分性/冗余、死代码一起看，循环修复和验证，直到当前固定树无新可行动finding。
 
@@ -144,7 +145,7 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 
 ### 独立Source与Skill实际任务质量验收
 
-Source与Skill分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用固定Go3.2.0合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
+Source与Skill分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用当前固定Go3.2.1合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
 
 - **Source独立验收**：代表性真实查询须准确、易读，能够可靠拿到正确文件、符号、行号及源码；覆盖中文、大结果、无结果、错误、refs/context输出、分页/截断/coverage/uncertainty。记录输入pin、完整命令、预期、原始输出、定位证据、问题与复测；不将实现者的解释当成CLI输出证据。
 - **Skill独立验收**：由新代理实际按Skill完成调查，检查入口发现、参数正确、步骤简洁、恢复边界和无旧协议；Source优先使用工具内固定版本来源，不随意改搜GitHub raw代替既定source pin。遇阻应按真实错误/恢复合同处理，不绕过约束。记录实际调用轨迹、失败点、修改和独立复用结果。
@@ -827,6 +828,20 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 合成候选保留c6b07c7的Live锁图边，实际组合Node35与Python46全部通过，owner `811060f8-3897-425a-95d3-fe2b1c4c451f`；只证明custody/runner静态fixtures，未跑组合Rust。先前协调者archive输出超过16MiB的准备失败原证据保留，未进入产品测试；改为owned archive文件后本次成功，不追认先前成功。
 - `95bd313`虽已推送但截至本节点未观察到Actions run；未空commit刷队列。c6b07c7普通push已触发fast事件。此真实产品批使用native marker再次请求完整验收，79ef在途保持；79ef的静态fullRetail已运行，实际内存数值仍待其最终封存artifact核验。
 
+### 历史显式退役与 SQL EXPLAIN/TopK 冻结待提交批（2026-10-15）
+
+- `ea3644ef445973606722c21d84eb09dc701cb616` 已推同草稿PR14，47远端blob与候选逐字节一致；native run `38678665448` 已实际产生并排队。旧 `95bd313` 无事件记录保留NOT_RUN。79ef原生批继续，真实multi-CLI session/failure-cleanup步骤success、Skill步骤failure；79ef现已终态failure，最终receipt/计数/内存值待下载sealed artifact核验。编译已解除，不能再说因编译未采样，也不能先报未经验证的内存数。
+- 历史 `live cancel`/`live abandon` 已接真实dispatch：OP只允许prepared+pending+空观察取消；unknown outcome不重放，显式owner abandon走abandoning→abandoned，两阶段状态与owner generation CAS在对应单事务提交；BTP保原字段、当前/window精确身份及固定Go SimpleFold。多文档CAS、原handle锁/close、partial Outcome与CLI错误投影均有回归。冻结 `legacy-retirement-freeze.json` SHA256 `5531ccfbde7c04b16bb80bed413b5e1d1dd36e6f86366a5fc23020e28d02d54e`，独审 `legacy-retirement-review.json` SHA256 `fb132309bbc2bd2cbca6c7fd8e0175cfae9e5d47425c8351f9e825b01ea3ae34`；20owner/1306deps/19Go/9toolchain核实，44新测试声明 **NOT_RUN**。静态注册84，不等于真实describe已通过；通用JSON/DEFLATE文案和workspace时间限制保留。
+- SQL新增schema-only EXPLAIN：验证绑定及源身份而不伪执行行，null列/行、plan/capture/CSV单LF保固定Go合同；TopK有界保稳定原序/NULL/精确整数/LIMIT0仍全输入校验，阈值/溢出回到完整合法排序。独审修复ON嵌套聚合、compound重复列，以及新Ordinal绕过分组验证三个P2；未分组Ordinal现与输入列同拒绝。R3冻结 `sql-explain-r3-freeze.json` SHA256 `7195c2f212c0aee787f4ba17ab761674a6354de64d96dedec38de6517110519a`，16owner/541deps/62Go核实，31新测试 **NOT_RUN**。ANALYZE仍明确unsupported，实际provider callback/cache/统一资源计费及剩余CAST/subquery诊断继续实施，不伪造运行计划实测。
+- 集成仅使用精确owner delta：legacy与SQL已有owner均匹配记录base；保留ea364的binding-contracts与Live依赖边，不覆盖新slot/Source/工具。workflow保留history::覆盖read/retire而不重复跑retire子集，新增CAS、EXPLAIN/TopK及受影响relational回归独立组，已有local_query组覆盖新增单元；实际YAML解析/前置step校验通过，接线不是Rust运行结果。本批普通push用于持久化，不额外挤新native长批。
+- Remote Data准入严格遵循3057的DataProduct/ValidateDataRelease六条，包括原forever映射；runtime产品可见性不能扩大Data支持合同。共享remote catalog/cache及Wago/Raidbots候选仍独审中：blocking HTTP取消/已读网络计量、Metadata初始化5s等待是已知整链缺口，正在最小共享接缝修复，不能标remote已齐。Emmy/XML增强的明确保留授权不扩展Data业务。
+
+### 当前目标升级至正式 Go 3.2.1（2026-10-15，文档先行）
+
+- 用户确认先更新文档。当前目标改为正式10b561db，历史3057产品/fixture证据不修改；当前冻结legacy/SQL代码仍按3057原审查范围随后提交，不冒充覆盖3.2.1。不合main、不改包版本、不发布。
+- Retail新增12.1.5/120105并兼容12.1.0；ClientGate/TOC/runtime/slot/selection按产品+build一致选择/校验，固定Go新增测试逐项映射。键盘活动包括全部键盘VK（0x03–0xFE，排除鼠标/保留值0x04–0x07），全键释放并事件静默500ms后重新读INPUT；只存WH_KEYBOARD_LL最后活动时间，不记录键文/序列。已开始的chord完成并释放本attempt按下键再等静默，取消也只释放本attempt按下键，不新增活动中途打断机制；submitted/uncertain仍观察原receipt不重发，等待保原deadline。
+- 新增量矩阵G321-01–G321-06全部PENDING/NOT_RUN，Skill live-recovery及协议指引同步，Source增强、unsafe边界与Rust≤Go30%目标保留。性能比较将使用新固定Go候选重新确认结果等价；旧测试不替代新验收。实机键盘场景并入末尾H03，结果留空。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
@@ -835,7 +850,7 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 | --- | --- | --- | --- | --- |
 | H01 | 用户指定真实安装和角色；七产品逐一可用 | Retail、Classic、Classic Era、Titan、Forever Asia Beta、Forever CN Beta、Anniversary独立identify/connect/execute/report/cleanup/disconnect | 同candidate各产品身份、完整精确receipt和清理；两beta不按同build合并；不能以Source/Data成功代替Live | |
 | H02 | 选定未安装或旧200槽真实客户端，用户可手动reload/重启 | 首装/升级后doctor；无可验证INPUT时手动reload；未发现500槽时重启；原CON resume | 未盲发输入、原目标/CON不变，旧200仅升级识别，500发现/启用/加载事实分别记录 | |
-| H03 | 用户允许安全编辑框/聊天焦点和键位冲突场景 | 测两实际绑定、已有绑定保留、聊天/普通EditBox透传、secure/protected拒绝、UIParent隐藏、最小化和物理键按住 | 不改文字/光标/焦点，不抢前台，不Esc/Enter；恢复handler，INPUT/回调/精确receipt各自证据 | |
+| H03 | 用户允许安全编辑框/聊天焦点和键位冲突场景 | 测两实际绑定、已有绑定保留、聊天/普通EditBox透传、secure/protected拒绝、UIParent隐藏、最小化和全部键盘VK按住/释放、500ms静默中再次活动、活动与已开始chord重叠、仅释放本attempt按键 | 不改文字/光标/焦点，不抢前台，不Esc/Enter；恢复handler，500ms后新鲜INPUT、原deadline不延长、submitted/uncertain不重放及精确receipt各自证据 | |
 | H04 | 同安装双实例、跨build并行及混合多实例就绪 | 分别连接/执行/关闭，交错共享槽发布和选定实例reload/doctor --fix；至少Retail双实例，其他产品依声明范围补齐 | 独立身份/owner/fence/CON，短锁预约不串线，其他实例不被授权/升级结果冒认 | |
 | H05 | 用户允许真实容量与reload/relogin验证 | 连续运行触发500槽完整操作容量边界，先日志后reload/重绑同请求；reload/relogin前后验证 | 旧槽不复用、预算不延长、目标固定、exact报告与清理，运行时退役明确 | |
 | H06 | 用户同意可控故障与恢复窗口 | bind无回执关闭、submitted/uncertain中断、发布替换、release无回执5秒cleanup reload、退出/重开CLI、opaque与observation区别 | 无未知业务重发；原request/ticket/期限/attempt保留；报告可用和cleanup分离，退役后才runtime_destroyed | |

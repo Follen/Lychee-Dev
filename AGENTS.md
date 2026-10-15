@@ -10,8 +10,10 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
 `handoff` document or competing handover. All older guidance below and in
 `docs/toolkit/` is historical where it conflicts with this section.
 
-- Behavioral oracle: released Go v3.2.0, peeled commit
-  `3057a9666ab078270b63c7f06de748069b0d1f4b`, not moving main or Go v3.1.2.
+- Current behavioral oracle: released Go v3.2.1, peeled commit
+  `10b561db5706702cd42e047eaeed4ccb5e825351`, not moving main. Prior v3.2.0
+  `3057a9666ab078270b63c7f06de748069b0d1f4b` remains a historical test oracle.
+  Apply the 3.2.1 increment matrix without relabeling old results or changing release versions.
 - Reuse existing Rust code when differential evidence supports it; decide
   retain/adapt/replace per module. Do not restart indiscriminately.
 - Only host language and Source engine change: Rust with EmmyLua direct analysis
@@ -23,7 +25,7 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
   forbid/deny. Only unavoidable Windows FFI/memory boundaries may use minimal
   reviewed unsafe with per-site SAFETY, pointer/lifetime/thread invariants and
   tests. No blanket module exemptions or performance-driven unsafe. Inventory
-  dependency unsafe separately. Reuse Go3.2.0 Skill with only necessary changes.
+  dependency unsafe separately. Reuse Go3.2.1 Skill with only necessary changes.
 - Performance target: controllable elapsed Rust <= 30% of Go (at least 70% less),
   excluding separately recorded downloads and uncontrollable external waits.
   Same machine/data and equivalent results/checks; independent cold/warm repeats

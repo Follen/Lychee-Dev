@@ -4,9 +4,15 @@ Current decision/status authority: [handover.md](handover.md). This file specifi
 
 ## 1. Contract and migration strategy
 
-Go release `3057a9666ab078270b63c7f06de748069b0d1f4b` (v3.2.0) defines observable behavior. Compare each existing Rust module with that immutable oracle and classify it as retain / adapt / replace / missing / unverified. Retain code only with evidence for the current contract, not its age, number of tests or registration in `describe`. The Rust snapshot is an implementation starting point, not a second behavioral oracle.
+Go release `10b561db5706702cd42e047eaeed4ccb5e825351` (v3.2.1) defines current observable behavior. The prior v3.2.0 oracle `3057a9666ab078270b63c7f06de748069b0d1f4b` remains the source of historical tests; it is not silently relabeled as 3.2.1 evidence. Compare each existing Rust module with that immutable oracle and classify it as retain / adapt / replace / missing / unverified. Retain code only with evidence for the current contract, not its age, number of tests or registration in `describe`. The Rust snapshot is an implementation starting point, not a second behavioral oracle.
 
 The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
+
+### Released 3.2.1 increment and input ownership
+
+Follow [the fixed increment matrix](docs/toolkit/rust-go-3.2.1-increment.md), not moving main. Retail 12.1.5 / interface 120105 remains compatible with 12.1.0; ClientGate, TOCs, runtime/slot catalogs and selection validate the exact product/build pairing. Do not infer Data support from the broader runtime product list.
+
+Before sending input, all keyboard virtual keys (VK 0x03–0xFE, excluding mouse/reserved VK 0x04–0x07) must be released and keyboard activity quiet for at least 500 ms; then revalidate fresh INPUT and identity. The minimal WH_KEYBOARD_LL hook records the last activity time only, never text or a key history. Let an already-started chord finish and release its owned keys before waiting; cancellation releases only keys pressed by that attempt. Submitted/uncertain operations observe the original receipt without retransmission; every wait retains the original deadline. Offline state-machine tests and owned Windows fixtures precede user/game validation. Existing Rust tests do not prove this new increment.
 
 ### Idiomatic Rust, equivalent external behavior
 
@@ -28,7 +34,7 @@ Crate placement is not a new external interface. Shared addon reuse means no alt
 
 ### Rust safety boundary
 
-Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.0 Skill workflow, changing only necessary Emmy/install/diagnostic details.
+Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.1 Skill workflow, changing only necessary Emmy/install/diagnostic details.
 
 ## 3. Source: preserve and finish the direct-library path
 
@@ -76,7 +82,7 @@ The first reviewed slice moves 135 existing contract lines, reducing added patch
 
 ## 4. Live: implement the complete released state machine
 
-The canonical specification is [Go 3.2.0 docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/docs/live-protocol.md), alongside its Lua/Go implementation and tests at that commit. Protocol literal: `Lycheedev mailbox protocol v1`. Import/port complete cases into a Rust/Lua differential fixture suite; do not substitute the branch's old RUN/RECEIVED exact-COMMIT design.
+The canonical specification is [Go 3.2.1 docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/docs/live-protocol.md), alongside its Lua/Go implementation and tests at that commit. Protocol literal: `Lycheedev mailbox protocol v1`. Import/port complete cases into a Rust/Lua differential fixture suite; do not substitute the branch's old RUN/RECEIVED exact-COMMIT design.
 
 Read-only memory lookup uses current mapped runtime instructions and RIP-derived roots, guarded current Lua paths and publication validation. Observation-only results do not authorize keys. Input requires exact target/actor/runtime/owner/fence, fresh INPUT, actual two bindings and revalidation immediately before sending. Native input is bounded PostMessage to the fixed HWND; no Esc, Enter, chat typing, focus stealing or blind fallback.
 
