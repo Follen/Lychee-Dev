@@ -20,7 +20,13 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 - [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
-## Current tagged increment: Go 3.2.2
+## Current tagged increment: Go 3.2.3
+
+- [x] Pin v3.2.3 tag `7a24532cf0fe294faeb96e8224797b6fe69386d5` to `3766f9cacb52e93a803a626187e2a1d54a445468`. Keep 320/321/322 source, tests and results unchanged; Rust stays 3.5.0 beta.
+- [ ] Implement G323-01–G323-06 in the [increment matrix](docs/toolkit/rust-go-3.2.3-increment.md): admission capacity, adaptive Windows memory/scratch, shared consumers, compact records, IN selection and Skill/oracle integration.
+- [ ] Map fixed Go323 tests and run exact-candidate local/Windows/independent Data usage checks. Current fixed-cost Rust candidates are prior implementation evidence, not new adaptive acceptance.
+
+## Cumulative prior increment: Go 3.2.2
 
 - [x] Pin v3.2.2 to `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`; preserve both prior oracles and all results. Tag/main checked, Release API assets not verified. See [increment matrix](docs/toolkit/rust-go-3.2.2-increment.md).
 - [ ] Implement GUID-scoped managed-slot enable/verify/save without LoadAddOn or slot consumption; retain foreign-addon and partial-failure behavior.
@@ -109,7 +115,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Import and analyze the entire fixed Retail31c7f7b corpus (all Lua/XML/TOC and inline maps), run representative file/symbol/line/source queries, refs/context/flow, cold/warm/persistent session and resource cleanup against Go; small fixtures and historical Retail19 are not acceptance.
 - [ ] Complete Data DB2/SQL effective/table/scan Hotfix/providers/CASC/CDN/assets/relations and error paths.
 - [ ] Reuse the released addon; reconcile installation/500-slot/upgrade/rollback/modified-file protection.
-- [ ] Reuse the fixed Go3.2.2 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
+- [ ] Reuse the fixed Go3.2.3 Skill and launcher workflow; change only necessary Emmy/install/diagnostic details and actual implemented command/flag contracts.
 - [ ] Enforce no unsafe in owned business/cross-platform crates with suitable forbid/deny; inventory unavoidable Windows FFI/memory boundaries, use minimal safe wrappers with per-site SAFETY proofs and pointer/lifetime/thread tests; independently audit, no blanket module exemptions or performance shortcut. Report dependency unsafe separately.
 
 ## 3. Complete Mailbox protocol (no game needed yet)

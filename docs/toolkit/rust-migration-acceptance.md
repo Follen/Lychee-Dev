@@ -1,18 +1,18 @@
 # Rust migration acceptance contracts
 
-Derived acceptance detail, not a second status ledger. [handover](../../handover.md) is the sole current decision/status source; [todo](../../todo.md) orders the work. Historical evidence stays separately pinned. The original full functionality, protocol, performance and audit matrices are retained here; current behavior oracle is Go3.2.2.
+Derived acceptance detail, not a second status ledger. [handover](../../handover.md) is the sole current decision/status source; [todo](../../todo.md) orders the work. Historical evidence stays separately pinned. The original full functionality, protocol, performance and audit matrices are retained here; current behavior oracle is Go3.2.3.
 
-## 2. 当前 Go 3.2.2 合同索引（历史证据仍各自固定）
+## 2. 当前 Go 3.2.3 合同索引（历史证据仍各自固定）
 
 | 合同 | 固定来源 | 使用方式 |
 | --- | --- | --- |
-| 产品/架构/业务 | [Design.md](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/Design.md) | 提取模块和产品合同，不复制其运行状态为 Rust 状态 |
-| 全量命令、参数、输出 | [command_contract.go](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/command/command_contract.go) | 固定 tag 对应候选 binary 的 describe/help/正常及错误 golden；不能沿用旧89命令数量 |
-| 协议全貌 | [docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/live-protocol.md) | 全部8节与实现/测试共同组成验收，不只移植定位 |
-| 协议实现 | [channel](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/live/channel)、[memory](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/live/memory)、[bridge](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/bridge)、[desktop](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/internal/desktop)、[addon Bridge](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/addon/Bridge) | 原样保留语义及边界，差分正常/失败/中断 |
-| Agent 工作流 | [Skill](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/skills/lycheedev/SKILL.md) | 比对公开业务步骤、命令/flag和错误恢复；只改真实引擎/构建说明 |
-| 开发/发行/许可 | [development](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/development.md)、[licensing](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/docs/licensing.md)、[release](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/release) | 固定包身份、对应源码、清单和自动验证 |
-| Go 原始验收范围 | [todo](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/todo.md)、[handover](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/handover.md) | 参考已知限制与故障，不把 Go 实机通过转记成 Rust 通过 |
+| 产品/架构/业务 | [Design.md](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/Design.md) | 提取模块和产品合同，不复制其运行状态为 Rust 状态 |
+| 全量命令、参数、输出 | [command_contract.go](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/command/command_contract.go) | 固定 tag 对应候选 binary 的 describe/help/正常及错误 golden；不能沿用旧89命令数量 |
+| 协议全貌 | [docs/live-protocol.md](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/docs/live-protocol.md) | 全部8节与实现/测试共同组成验收，不只移植定位 |
+| 协议实现 | [channel](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/live/channel)、[memory](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/live/memory)、[bridge](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/bridge)、[desktop](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/desktop)、[addon Bridge](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/addon/Bridge) | 原样保留语义及边界，差分正常/失败/中断 |
+| Agent 工作流 | [Skill](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/skills/lycheedev/SKILL.md) | 比对公开业务步骤、命令/flag和错误恢复；只改真实引擎/构建说明 |
+| 开发/发行/许可 | [development](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/docs/development.md)、[licensing](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/docs/licensing.md)、[release](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/release) | 固定包身份、对应源码、清单和自动验证 |
+| Go 原始验收范围 | [todo](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/todo.md)、[handover](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/handover.md) | 参考已知限制与故障，不把 Go 实机通过转记成 Rust 通过 |
 
 Go 基线若需要变更，必须明确记录新目标、精确 commit、原因和差分范围，再重建受影响 oracle。不能因远端 main 前进而自动滚动。
 
@@ -98,7 +98,7 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 用户要求的执行顺序是下列四阶段，每阶段均循环，并非各审一次。阶段内执行：独立审计 → 记录可行动finding → 修复 → 受影响及必要全套验证 → 独立复审。当前阶段收敛后才进入下一阶段；每批改动及时推同一Rust草稿PR，更新本文件的证据与剩余项。
 
 1. **架构、全部业务bug、Skill及全部代码相关问题。** 包括自有unsafe清单、crate禁用策略、必要Windows安全边界和依赖unsafe范围的独立审计。 以固定Go业务/协议合同为准，覆盖错误恢复、诊断、输入、平台/打包路径，不能只看编译或单元通过。
-2. **测试覆盖充分性与冗余测试。** 固定Go3.2.2测试是当前行为场景oracle，既有Go3.2.0映射作为历史基底保留：建立Go测试→Rust对应/不适用理由/未覆盖映射，保留错误恢复、未知结果不重放、事务、取消、协议、空map、槽迁移等有效边界；不机械复制冗余平台夹具或旧死实现测试，不以数量堆覆盖。 检查关键分支、失败/恢复/状态组合及真实断言质量，补有效回归；只有证明无独立价值才删重复测试。修后实测覆盖，保留分母、排除项、平台范围与报告；覆盖率数字本身不是充分性证明。
+2. **测试覆盖充分性与冗余测试。** 固定Go3.2.3测试是当前行为场景oracle，既有Go3.2.0映射作为历史基底保留：建立Go测试→Rust对应/不适用理由/未覆盖映射，保留错误恢复、未知结果不重放、事务、取消、协议、空map、槽迁移等有效边界；不机械复制冗余平台夹具或旧死实现测试，不以数量堆覆盖。 检查关键分支、失败/恢复/状态组合及真实断言质量，补有效回归；只有证明无独立价值才删重复测试。修后实测覆盖，保留分母、排除项、平台范围与报告；覆盖率数字本身不是充分性证明。
 3. **死代码专项。** 核查真实消费者、动态入口、feature/平台条件、CLI/Skill/生成器/打包与工具调用，确认后清理并回归，重复直到无新可行动项。
 4. **前三维度联合全仓审计。** 架构/业务/Skill、测试充分性/冗余、死代码一起看，循环修复和验证，直到当前固定树无新可行动finding。
 
@@ -110,7 +110,7 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 
 ### 独立Source、Skill与Data实际任务质量循环验收
 
-Source、Skill与Data分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用当前固定Go3.2.2合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
+Source、Skill与Data分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用当前固定Go3.2.3合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
 
 - **Source独立验收**：代表性真实查询须准确、易读，能够可靠拿到正确文件、符号、行号及源码；覆盖中文、大结果、无结果、错误、refs/context输出、分页/截断/coverage/uncertainty。记录输入pin、完整命令、预期、原始输出、定位证据、问题与复测；不将实现者的解释当成CLI输出证据。
 - **Skill独立验收**：由新代理实际按Skill完成调查，检查入口发现、参数正确、步骤简洁、恢复边界和无旧协议；Source优先使用工具内固定版本来源，不随意改搜GitHub raw代替既定source pin。遇阻应按真实错误/恢复合同处理，不绕过约束。记录实际调用轨迹、失败点、修改和独立复用结果。

@@ -10,10 +10,10 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
 `handoff` document or competing handover. All older guidance below and in
 `docs/toolkit/` is historical where it conflicts with this section.
 
-- Current behavioral oracle: tagged Go v3.2.2, peeled commit
-  `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`, not moving main. Prior v3.2.1 `10b561db5706702cd42e047eaeed4ccb5e825351` and v3.2.0
+- Current behavioral oracle: tagged Go v3.2.3, peeled commit
+  `3766f9cacb52e93a803a626187e2a1d54a445468`, not moving main. Prior v3.2.2 `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`, v3.2.1 `10b561db5706702cd42e047eaeed4ccb5e825351` and v3.2.0
   `3057a9666ab078270b63c7f06de748069b0d1f4b` remain historical test oracles.
-  Apply the cumulative 3.2.1 and 3.2.2 increment matrices without relabeling old results. The user subsequently authorized Rust candidate version
+  Apply the cumulative 3.2.1, 3.2.2 and 3.2.3 increment matrices without relabeling old results. The user subsequently authorized Rust candidate version
   3.5.0 with beta distribution configuration; this does not authorize publication,
   tags or external npm channel changes, and does not change the Go behavior oracle.
 - Latest 2026-10-15 requirement: final Emmy dependency must use unmodified upstream source. Replace every current patch with equivalent owned-crate/public-API behavior while preserving all approved XML/Lua enhancements. Earlier minimal-hook exceptions are historical; transitional patches do not satisfy final acceptance.
@@ -28,7 +28,7 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
   forbid/deny. Only unavoidable Windows FFI/memory boundaries may use minimal
   reviewed unsafe with per-site SAFETY, pointer/lifetime/thread invariants and
   tests. No blanket module exemptions or performance-driven unsafe. Inventory
-  dependency unsafe separately. Reuse Go3.2.2 Skill with only necessary changes.
+  dependency unsafe separately. Reuse Go3.2.3 Skill with only necessary changes.
 - Performance target: controllable elapsed Rust <= 30% of Go (at least 70% less),
   excluding separately recorded downloads and uncontrollable external waits.
   Same machine/data and equivalent results/checks; independent cold/warm repeats

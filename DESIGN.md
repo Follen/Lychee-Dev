@@ -4,13 +4,19 @@ Current decision/status authority: [handover.md](handover.md). This file specifi
 
 ## 1. Contract and migration strategy
 
-Go tagged baseline `0bec60e4406f5d5dc155ee25cef44f9a710e37e8` (v3.2.2) defines current observable behavior. Prior v3.2.1 `10b561db5706702cd42e047eaeed4ccb5e825351` and v3.2.0 `3057a9666ab078270b63c7f06de748069b0d1f4b` remain historical test oracles; no existing result is relabeled. Compare each Rust module against this immutable source and classify retain / adapt / replace / missing / unverified. The Rust snapshot is an implementation starting point, not a second behavioral oracle. Tag/main identity is verified; release assets remain unverified.
+Go tagged baseline `3766f9cacb52e93a803a626187e2a1d54a445468` (v3.2.3) defines current observable behavior. Prior v3.2.2 `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`, v3.2.1 `10b561db5706702cd42e047eaeed4ccb5e825351` and v3.2.0 `3057a9666ab078270b63c7f06de748069b0d1f4b` remain historical test oracles; no existing result is relabeled. Compare each Rust module against this immutable source and classify retain / adapt / replace / missing / unverified. The Rust snapshot is an implementation starting point, not a second behavioral oracle. Tag/main identity is verified; release assets remain unverified.
 
 The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
 
 ### Independent candidate package identity
 
-The user selected Rust package version **3.5.0** and the **beta** npm distribution configuration, while Go **3.2.2** remains the behavior oracle. The version is not `3.5.0-beta.1`. Version synchronization covers nine owned crates, addon and npm metadata, owned dependency pins and reconstruction custody. Exact full-file release-field overlays permit only the approved Runtime/TOC version literals and restore the original Go bytes for comparison; historical oracle artifacts retain their identities. This configuration does not publish, tag, alter external channels or move `latest` from its retained 2.5.1 value.
+The user selected Rust package version **3.5.0** and the **beta** npm distribution configuration, while Go **3.2.3** remains the behavior oracle. The version is not `3.5.0-beta.1`. Version synchronization covers nine owned crates, addon and npm metadata, owned dependency pins and reconstruction custody. Exact full-file release-field overlays permit only the approved Runtime/TOC version literals and restore the original Go bytes for comparison; historical oracle artifacts retain their identities. This configuration does not publish, tag, alter external channels or move `latest` from its retained 2.5.1 value.
+
+### Tagged 3.2.3 adaptive Data memory
+
+Follow the [3.2.3 increment matrix](docs/toolkit/rust-go-3.2.3-increment.md). Acquire the real workspace query capacity before sampling Windows available physical/commit/virtual memory. Fix the query ceiling at half the minimum available amount divided by admitted capacity; initial retained/metadata limits remain capped at 512/128 MiB. At growth boundaries, resample available headroom and round growth within the original ceiling in 64 MiB steps. Temporary scratch participates in retained accounting. The public memoryBudget report describes accounting limits and observed scratch, not RSS or allocated heap.
+
+All query, SQL, reader/session and navigation consumers share this admitted budget. Keep non-memory limits, cancellation and typed cleanup; remove only the superseded cumulative raw SQL cap and per-file RemainingRetained restriction. Use compact record locations and shared alias locations without changing logical record identity. Indexed single-table numeric IN collects and validates candidates before yielding; NULL, duplicates, residual predicates and fallback semantics remain exact. Budget/cancellation failures do not fall back to a scan. Implement in idiomatic Rust and preserve Windows unsafe boundaries; test actual memory behavior rather than assuming a larger accounting ceiling improves performance.
 
 ### Tagged 3.2.2 managed-slot activation and recovery
 
@@ -42,7 +48,7 @@ Crate placement is not a new external interface. Shared addon reuse means no alt
 
 ### Rust safety boundary
 
-Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.2 Skill workflow, changing only necessary Emmy/install/diagnostic details.
+Owned business and cross-platform Rust code defaults to no unsafe, enforced with suitable crate-level forbid/deny. Unavoidable Windows FFI/memory operations live behind minimal safe wrappers with per-site SAFETY arguments, pointer validity, ownership/lifetime/thread requirements and focused tests plus independent audit. Do not exempt entire modules indiscriminately or introduce unsafe to chase the performance target. Third-party dependencies require a separate inventory; this policy is not a claim that the dependency graph contains no unsafe. Reuse the fixed Go3.2.3 Skill workflow, changing only necessary Emmy/install/diagnostic details.
 
 ## 3. Source: preserve and finish the direct-library path
 

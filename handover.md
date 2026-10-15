@@ -1,18 +1,19 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 16:10 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6d1ec158f67331bd5fdbb8b3ad1535cb96c84a32`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 16:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`888de5ff2432e80c11c87649654962894363b140`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
-- 唯一验收目标：以固定 **Go 3.2.2** tag 源码为当前行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
-- 当前 Go tag `v3.2.2`：tag object `97890b267a620a166889db0934e57a826d72a872`，peeled commit **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`**；2026-10-15 精确远端对象与本地 fetch 已核，检查时 main 同 commit。Release API 当时返回 404，不能声称发行二进制/资产已验证。业务增量 `969fe480fdb38eb038401044c3327b04ccaaee81`，详见[3.2.2 增量矩阵](docs/toolkit/rust-go-3.2.2-increment.md)。
+- 唯一验收目标：以固定 **Go 3.2.3** tag 源码为当前行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
+- 当前 Go tag `v3.2.3`：tag object `7a24532cf0fe294faeb96e8224797b6fe69386d5`，peeled commit **`3766f9cacb52e93a803a626187e2a1d54a445468`**；2026-10-15远端tag/main与本地精确对象已核。322→323为2提交、41文件；业务在该正式提交，另一个提交为322发布文档。新增自适应Data内存/准入容量、紧凑记录、IN选择及Data Skill，详见[323增量矩阵](docs/toolkit/rust-go-3.2.3-increment.md)。新增验收PENDING；未验证发行二进制/资产。
+- 历史 Go tag `v3.2.2`：tag object `97890b267a620a166889db0934e57a826d72a872`，peeled commit **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`**；2026-10-15 精确远端对象与本地 fetch 已核，检查时 main 同 commit。Release API 当时返回 404，不能声称发行二进制/资产已验证。业务增量 `969fe480fdb38eb038401044c3327b04ccaaee81`，详见[3.2.2 增量矩阵](docs/toolkit/rust-go-3.2.2-increment.md)。
 - 前 v3.2.1 tag object `637584b8b976966c3863c1889e9ff86fe55493d4` / commit **`10b561db5706702cd42e047eaeed4ccb5e825351`** 和 v3.2.0 tag object `93849f43f34d8ff1d6f4539c5a3496ab941ef229` / commit **`3057a9666ab078270b63c7f06de748069b0d1f4b`** 的源码、fixture、二进制、测试/失败证据均保留原身份，不能重标为3.2.2通过。未完成的[3.2.1 累积增量](docs/toolkit/rust-go-3.2.1-increment.md)仍须完成。
 - 2026-10-15 用户最新版本决定：未发布 Rust 候选源码/包版本 **3.5.0**，发行配置渠道 **beta**（版本与 npm dist-tag 分开，不自动改成 `3.5.0-beta.1`）。Go 行为 oracle 仍为上述 3.2.2；只获准同步源码和配置，未执行发布、tag 或 npm 渠道变更。版本同步已完成源码集成及本地包合同检查；精确 b16a 候选已通过 Windows all-target 编译和 CLI 构建，后续提交及完整产品验证仍按各自证据记录。
 - 2026-10-15 13:39 用户明确要求“全量替换”：最终验收必须移除全部 Emmy 上游源码补丁，使用未修改的固定上游公开 API，自有 crate 承接完整 XML/Lua 增强、类型/诊断/来源/取消与资源合同。此前“尽可能减少、必要时保留最小 hook”的最终豁免已被此要求取代；已有补丁仅属过渡实现，不能作为交付完成。逐 production hook→实际消费者→自有替代→差分/全仓证据列迁移表并分批实施，不另写整个 LuaLS、不削功能或假造 checker coverage。现有原版5/5小样及 public rendering27+27/450trace证据只覆盖各自范围，不能宣称全量零补丁已完成。
 - Rust 调查起点：`5443314c536e925801d3f0360110db946181d1b3`。它是复用基础，不是完成声明。按模块差分决定保留/替换/补齐，不从零丢弃已有成果，不沿用不符目标的旧协议。
 - unsafe约束：自有业务/跨平台Rust代码默认禁止unsafe，用适当crate级forbid/deny守住；确有必要的Windows FFI/内存边界必须最小化安全封装、逐处SAFETY理由和指针/生命周期/线程约束与测试，独立审查，不整模块无限豁免，不为性能目标放开unsafe。第三方依赖另列审计，不能宣称整个依赖图无unsafe。
 - 内部设计应体现Rust特点，不逐行翻译Go：合理所有权/借用减少复制，enum/类型状态、Result、RAII和有界安全并发按实际收益使用，避免过度抽象/炫技。对外合同不变，unsafe边界不放松，性能仍实测；纳入独立架构验收。
-- Skill尽量复用固定Go3.2.2版本；仅Emmy引擎、安装和真实诊断等必要差异修改，不因换语言重造工作流。
+- Skill尽量复用固定Go3.2.3版本；仅Emmy引擎、安装和真实诊断等必要差异修改，不因换语言重造工作流。
 - 性能：可控耗时减少至少 70%，即 **Rust ≤ Go 30%**，排除下载与不可控外部等待；同机同数据、输出与校验等价，cold/warm 分开独立重复，逐路径记录。未测不能保证达标。
 - 所有需要用户、实际游戏或特定本机互动配合的测试放在本文最后；离线与可自动执行的 Windows CI 先做。Windows 专属测试不自动等于游戏测试。
 - 首批交付仅文档；随后已获准全量实施本计划。仍不操作游戏、不发布、不合 main，不修改 Go PR #13 或其他项目。只保留本文件，不创建 `handoff` 文件或第二份交接事实来源。
@@ -30,6 +31,8 @@
 | Data | 本地 DB2/CASC/SQL/Hotfix；可取消 HTTP、remote catalog/target/encoded Session；direct remote target 已接实际 CLI；decoded alias 与共享 body 的 retained 责任转交已组合；Core 原控制贯通 blob/pin/capture | named target、streamed assets；JSONL scoped输出已组合待实际验证，SQL/DB2/navigation默认provider及外层Metadata已接，内部Store/Fragments/target预算错误身份修复已组合，自动pin/effective旧等待与实际使用仍待闭合；archive计量、gzip边界、合法raw-URI差异仍有缺口 |
 | Skill | 固定 Go 工作流及实际 CLI 验收入口 | Source长语义阻塞后的完整任务复测；Source/Skill/Data各自独立真实使用循环未收敛 |
 | 清理 / 质量 | 逐批独立源码审与回归持续执行，旧证据保留 | 21个旧 addon 额外文件仍有真实动态消费者；不能只删文件让静态门槛变绿。最终四阶段审计尚未开始收敛 |
+
+当前Data新增323自适应资源合同尚未实现验收。先在真实workspace准入后采样；保同预算贯通、取消、错误与输出，不能将旧固定成本候选改标通过。
 
 ### Emmy 全量替换当前顺序
 
@@ -53,7 +56,7 @@
 - **b0fe353 definitions组合**：R3把原invocation与独立Budget贯通metadata等待、可取消HTTP、解析及发布；实际已读网络先记账、consumer留存后准入、原30秒request上限/4MiB+1前缀和Go逻辑计量保持。R1/R2已发现的取消fixture竞态与解析错误被stop覆盖均已独审修正；24新增Rust未运行。现有definitions::和remote::组覆盖，无重复新job；实际SQL/DB2调用已在当前R18.3组合改接；Core隐藏publication Directory checked-close与既有gzip优先级缺口仍保留。
 - **bc85a4c DB2组合**：R18.3接实际record/page/schema/search/FK远程provider，outer Metadata→pin/lease顺序逐Go命令保持，owner持至capture。独审修正两项：外层/读pin直接保原invocation+Budget回调；资源cleanup-only后统一stop，避免把同一stop当close event。15新增/11继承Rust未运行。后继6文件已独审修复Store/Fragments/target内部Budget child错误身份，保target真实120秒上限与独立预算，7新增/2修Rust未跑；normalizer内部回调、资源lock单次同步边界及capture/Directory隐藏close仍未全部闭合。
 - **当前navigation组合**：R19实际item/spell/decor/creature/encounter远程路径共享Metadata→admission→pin→Session→capture；encounter仍保两个独立capture。6新增Rust未跑，local aura/summon补充source复核已明确，不能冒称整个远程业务验收。
-- **498c2ea三方契约**：51文件已逐SHA/长度读回，独立Windows run `38763797404` 已排队；该focused锁实验和产品all-target/业务组各自报告，31×3未运行不得写通过。
+- **498c2ea三方契约**：51文件已逐SHA/长度读回，独立Windows run `38763797404` 产品组运行中；三方契约组已在Cargo身份认证前置失败，官方组件身份修复待核，未执行三方测试；该focused锁实验和产品all-target/业务组各自报告，31×3未运行不得写通过。
 - **479新语义及内存**：refs/context/API均约90.47秒exit5，retained cold约90.21秒deadline；worker完成XML约15.94–15.97秒、source admission约31.19秒，但Emmy prepare尚未完成。source-process采样working set1957.62MiB/private2062.78MiB，retained cold1897.12/1999.23MiB；warm/steady未测。此候选含Graph/XML优化，但原90秒更早终止、执行阶段不完整，不能将低于旧ce6约2356.48MiB解释为已证实内存降幅。100ms采样有缺口，是观测下界而非RSS/绝对峰；整体性能仍未验收。
 - **479测试入口修复**：真实Lua桥首例因verbatim路径进入Lua5.1 C文件API而启动失败，后八例被安全guard阻断；候选在全部Lua参数/payload边界转普通路径并重验canonical身份。IPC三组因C#反射字段CS0649导致Add-Type失败，候选显式初始化required字段，未禁warning或放宽schema。本地IPC Node26/26通过；两项实际Windows仍NOT_RUN。
 - **当前Source context R2b**：仅同scope内证明无outgoing的文件move复用incoming行，XML尾部原路；独审发现混合charge重放step的return-reserve边缘缺陷，已用收费前安全域检查/边缘原路fallback修正（同时修旧incoming）。9新增Rust未跑；复用改变poll频率，不承诺异步取消竞态逐counter同构，保原control/deadline/typed stop，未实测耗时收益。
@@ -74,12 +77,12 @@
 
 ## 5. 验收与循环审计
 
-完整[F01–F13功能、P01–P14协议、B01–B07性能和Go来源合同](docs/toolkit/rust-migration-acceptance.md)保留；[321增量](docs/toolkit/rust-go-3.2.1-increment.md)、[322增量](docs/toolkit/rust-go-3.2.2-increment.md)是累积要求。代码已实现、静态已审、某树历史通过、当前实际通过必须分开。
+完整[F01–F13功能、P01–P14协议、B01–B07性能和Go来源合同](docs/toolkit/rust-migration-acceptance.md)保留；[321增量](docs/toolkit/rust-go-3.2.1-increment.md)、[322增量](docs/toolkit/rust-go-3.2.2-increment.md)与[323增量](docs/toolkit/rust-go-3.2.3-increment.md)是累积要求。代码已实现、静态已审、某树历史通过、当前实际通过必须分开。
 
 - 固定Retail数据为Gethe/wow-ui-source `31c7f7b9cc79e56c986b365c06a6afbcf3c9177b`：4036 Lua/XML/TOC，32,269,051字节。每次核身份后全仓分析/代表查询/源码定位/refs/context/flow/cold-warm/session/释放，不以小fixture代替。
 - Source、Skill、Data分别由独立使用者执行真实CLI任务，记录输入、完整输出、正确性/可读性/来源/错误和复测。实现者不自评通过，无法运行时记blocked。
 - 全量实现后的四阶段**顺序循环**：①架构/全业务/Skill/全部代码；②有效覆盖与无独立价值冗余；③真实消费者确认后的死代码；④前三维度联合全仓。每阶段独审→修复→实际验证→独立复审至无新可行动finding，再进下一阶段。每批源码审不等于最终收敛。
-- Go322测试映射为差分oracle，320/321原证据保留；尤其未知结果不重放、事务、取消、空map、槽迁移与错误恢复。记录固定树、覆盖分母、平台排除与停止条件，不保证数学零bug。
+- Go323测试映射为当前差分oracle，Go322映射仍保留，320/321原证据保留；尤其未知结果不重放、事务、取消、空map、槽迁移与错误恢复。记录固定树、覆盖分母、平台排除与停止条件，不保证数学零bug。
 - 性能必须同机同数据/结果与校验等价，独立cold/warm逐路径重复；可控耗时Rust≤Go30%，外部等待另列。当前仍未达成验收，不能把缓存预热或删校验当提速。
 
 ## 11. 最后执行：需要实际配合的测试清单
