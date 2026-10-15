@@ -21,3 +21,10 @@ num-traits = "=0.2.19"
 ureq = { version = "=3.1.2", default-features = false, features = ["native-tls"] }
 png = "=0.18.1"
 image-webp = "=0.2.4"
+
+# Operation-owned cancellable HTTP, with platform TLS and explicit policies.
+reqwest = { version = "=0.12.24", default-features = false, features = ["native-tls", "stream", "socks"] }
+tokio = { version = "=1.53.2", default-features = false, features = ["rt", "net", "time", "io-util", "macros"] }
+tokio-util = { version = "=0.7.19", default-features = false, features = ["io"] }
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+idna = "=1.1.0"

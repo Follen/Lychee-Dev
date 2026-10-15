@@ -246,6 +246,42 @@ impl Budget {
         }
         Ok(())
     }
+    /// Remaining admitted transfer budget. A concurrent reader may observe
+    /// the same snapshot; atomic charging still rejects overspend.
+    pub(crate) fn remaining_network_bytes(&self) -> Result<u64> {
+        self.check()?;
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
+        self.limits
+            .network_bytes
+            .checked_sub(state.used.network_bytes)
+            .ok_or_else(|| {
+                fault(
+                    "records.internal",
+                    8,
+                    "Network resource ledger exceeds its limit",
+                )
+            })
+    }
+    /// Record body bytes already consumed, including a read that completed
+    /// concurrently with cancellation/deadline. This intentionally does not
+    /// call check(): it admits no future work and cannot refund observed I/O.
+    /// A limit failure retains the ordinary atomic-charge rule (no mutation).
+    pub(crate) fn charge_observed_network_bytes(&self, bytes: u64) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
+        self.admit(
+            &mut state,
+            Cost {
+                network_bytes: bytes,
+                ..Cost::default()
+            },
+        )
+    }
     pub fn snapshot(&self) -> Result<Cost> {
         let state = self
             .state
@@ -484,5 +520,82 @@ mod logical_tests {
             "operation.cancelled"
         );
         assert_eq!(cancelled.logical_snapshot().unwrap(), Cost::default());
+    }
+}
+
+#[cfg(test)]
+mod network_observed_tests {
+    use super::*;
+    use std::time::Duration;
+    #[test]
+    fn remaining_network_keeps_u64_max_and_rejects_corrupt_ledger() {
+        let b = Budget::new(
+            Cost {
+                network_bytes: u64::MAX,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(5),
+            None,
+        );
+        assert_eq!(b.remaining_network_bytes().unwrap(), u64::MAX);
+        b.charge_observed_network_bytes(5).unwrap();
+        assert_eq!(b.remaining_network_bytes().unwrap(), u64::MAX - 5);
+        let b = Budget::new(
+            Cost {
+                network_bytes: 3,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(5),
+            None,
+        );
+        b.state.lock().unwrap().used.network_bytes = 4;
+        assert_eq!(
+            b.remaining_network_bytes().unwrap_err().code,
+            "records.internal"
+        );
+    }
+    #[test]
+    fn completed_network_read_is_charged_after_cancellation_but_overshoot_is_atomic() {
+        let token = Arc::new(AtomicBool::new(true));
+        let b = Budget::new(
+            Cost {
+                network_bytes: 3,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(5),
+            Some(token),
+        );
+        assert!(
+            b.charge(Cost {
+                network_bytes: 1,
+                ..Cost::default()
+            })
+            .is_err()
+        );
+        b.charge_observed_network_bytes(3).unwrap();
+        assert_eq!(b.snapshot().unwrap().network_bytes, 3);
+        assert_eq!(b.logical_snapshot().unwrap().network_bytes, 3);
+        assert_eq!(
+            b.charge_observed_network_bytes(1).unwrap_err().code,
+            "records.query_resource_budget"
+        );
+        assert_eq!(b.snapshot().unwrap().network_bytes, 3);
+    }
+    #[test]
+    fn concurrent_snapshots_do_not_grant_two_atomic_admissions() {
+        let b = Budget::new(
+            Cost {
+                network_bytes: 3,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(5),
+            None,
+        );
+        let same = b.safety_only();
+        assert_eq!(b.remaining_network_bytes().unwrap(), 3);
+        assert_eq!(same.remaining_network_bytes().unwrap(), 3);
+        b.charge_observed_network_bytes(3).unwrap();
+        assert!(same.charge_observed_network_bytes(3).is_err());
+        assert_eq!(b.snapshot().unwrap().network_bytes, 3);
     }
 }

@@ -156,8 +156,8 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 ## Confirmed remaining business implementations (2026-10-15)
 
-- [ ] Implement Wago remote Hotfix and explicitly supplied Raidbots snapshot providers; local dbcache table/scan are already dispatched.
-- [ ] Implement remote target resolution and shared CDN read backend for DB2/SQL/navigation/assets, preserving fixed Go identity, cache, transport and resource contracts.
+- [ ] Validate default Wago and supplied Raidbots Hotfix providers now committed in 62d53b2; complete Wago cancellable shared HTTP integration and actual provider/error/cache tests. Local dbcache table/scan remain dispatched; implementation is not complete provider acceptance.
+- [ ] Implement remote target resolution and shared CDN read backend for DB2/SQL/navigation/assets, preserving fixed Go identity, cache, transport and resource contracts. R4.3 HTTP has 49 actual local passes; R6.1 gzip/redirect successor is source-reviewed but not yet runtime-validated, cache/target candidates still require repair and independent review. The final CLI consumers and complete CDN reader remain open.
 - [ ] Connect existing partial-encrypted BLTE/DB2 primitives through production consumers, retaining missing-span and partial-capture provenance instead of rejecting every absent key.
 
 ## Owned contracts and slot preflight checkpoint

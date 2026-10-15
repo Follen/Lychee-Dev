@@ -17,6 +17,7 @@ pub mod local_query;
 pub mod metadata_format;
 pub mod navigate;
 pub mod relational;
+pub mod remote;
 pub mod resource;
 pub mod schema;
 pub mod stream;

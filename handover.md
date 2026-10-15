@@ -895,6 +895,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - HTTP R4.3 独立受控 Linux 实跑 49/49（0 ignored / filtered），owner `d504f1fc-3f88-4cbe-b921-e6795939d92b`，源码/工具/131 registry 依赖前后核验、进程回收完成。R5.2 gzip 官方 Go 1.27.1 差分 157/157 通过，owner `e7aedafd-6d1b-4b72-9ce3-4154bd5b639d`；对应 Rust 61 项尚未运行，离线解析缺 flate2 index，不是测试通过。
 - 本原生批暂不携带尚未完成工作区锁解析的 R4 async 依赖/模块，相关本地工作保留。独立 R6 审查发现 CGI proxy 解析顺序、Wago Content-Length 读前预拒、redirect drain 超预算后继续三项，待后继修复和实际验证。完整 CDN/cache/target resolve 接线继续，不等待这些新增工作才验证已合入的 Go 3.2.1 / Hotfix / Source 批。
 
+### Remote HTTP 后继与锁依赖持久化（2026-10-15）
+
+- `62d53b228e1aeb837424d6cc65d8dc53934aa0dd` 已推送同一草稿 PR，52 个 blob 逐个 SHA 核验；Windows run `38717013080` 已实际启动，不能把启动当通过。static addon 对齐仍失败，product / Emmy 两组独立运行。
+- R6.1 对先前 CGI / Content-Length / redirect drain 预算问题和失效 deadline 先计尝试问题做精确修复，独审无剩余该范围 blocker；72 项 Rust 声明仍 NOT_RUN。gzip 157 组 Go 已测输入以 SHA `ae7fe0ea1828e33d9b1a5885c5fa20e12daff979034d332fe5ae8e0f4fe6c3c7` 随测试 include，不能漏掉 fixture 只提交模块。
+- 官方 Cargo 工作区解析 owner `bc80b3b4-c750-4c94-a9ed-e76031b2042f` 成功，锁 `8f4bd6072e61a78b9c42f945dcc861910e5dcfe21e7f398515db4b238705ffb4`：303→332 包，29 新增、0删除/升级，既有 package 身份/source/checksum 与依赖边保留；320 registry checksum 匹配官方 sparse index。只解析，不是产品编译或测试成功；完整 clean checkout 的 115 个既有 archive 尚需官方获取。
+- 新共享 HTTP/catalog/gzip 模块及原始期限/实际网络计量 seam 已本地合成，Wago 真正改接此异步路径、cache/target resolve/CDN reader 正分片继续。先前49项证据仅R4.3，不能自动覆盖R6.1。后续有意义原生批覆盖新增 remote:: 目标，普通持久化 push 不重复启动长测。
+- static 后续 unsafe、历史/current oracle 和真实差异报告改独立运行；addon失败仍使job失败，未使用 continue-on-error 或扩大例外。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

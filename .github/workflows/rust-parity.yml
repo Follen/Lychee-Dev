@@ -59,16 +59,20 @@ jobs:
       - name: Check exact Go addon resources and delivery templates
         run: node --test tests/rust-parity/addon-delivery-3.2.1.test.mjs tests/rust-parity/release-321-increment.test.mjs tests/rust-parity/release-321-keyboard.test.mjs tests/rust-parity/release-321-guidance.test.mjs
       - name: Test unsafe inventory and enforce owned business guards
+        if: ${{ !cancelled() }}
         run: |
           node --test tools/rust-unsafe-boundaries.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tools/rust-unsafe-boundaries.mjs --check
           exit $LASTEXITCODE
       - name: Authenticate historical 3.2.0 fixture independently
+        if: ${{ !cancelled() }}
         run: node tests/rust-parity/run.mjs --verify-fixture
       - name: Authenticate current 3.2.1 source-derived fixture
+        if: ${{ !cancelled() }}
         run: node tests/rust-parity/run-3.2.1.mjs --verify-fixture
       - name: Report actual parity gaps without allowlisting them
+        if: ${{ !cancelled() }}
         run: |
           node tests/rust-parity/run-3.2.1.mjs --json | Out-File -Encoding utf8 rust-parity-report.json
           exit $LASTEXITCODE
@@ -380,6 +384,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-hotfix-decode --one-shot -- test --locked --offline -p lycheedev-data --lib hotfix:: -j 1
+      - name: Run remote catalog cancellable HTTP and gzip fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-remote --one-shot -- test --locked --offline -p lycheedev-data --lib remote:: -j 1
       - name: Run Hotfix CLI provider argument contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-hotfix-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev hotfix_remote_tests -j 1

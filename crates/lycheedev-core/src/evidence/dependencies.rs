@@ -642,10 +642,22 @@ deserialize_object!(Scan, Page, Export, Demux, Frame, EmbeddedCapture);
 // chrono's general parser. That fallback also accepts a one-digit hour,
 // comma fractions, and offsets with hour=24 or minute=60. JSON escape bytes
 // are NOT unescaped by Time.UnmarshalJSON (go.dev/issue/47353).
-struct GoTimestamp {
+pub struct GoTimestamp {
     canonical: Option<String>,
     zero: bool,
 }
+impl GoTimestamp {
+    /// Go JSON marshal form, absent when a parsed timezone cannot be marshalled.
+    pub fn canonical(&self) -> Option<&str> {
+        self.canonical.as_deref()
+    }
+
+    /// Whether the represented UTC instant is Go's zero time.
+    pub fn is_zero(&self) -> bool {
+        self.zero
+    }
+}
+
 impl Default for GoTimestamp {
     fn default() -> Self {
         Self {
@@ -661,7 +673,10 @@ impl<'de> Deserialize<'de> for GoTimestamp {
             .ok_or_else(|| serde::de::Error::custom("invalid Go capture timestamp"))
     }
 }
-fn parse_go_timestamp(value: &str) -> Option<GoTimestamp> {
+/// Parse the raw interior bytes of a Go time.Time JSON string token without JSON-unescaping them.
+/// Callers must preserve the original token: JSON escape sequences are not
+/// accepted by Go's time reader. Parse success does not imply marshal success.
+pub fn parse_go_timestamp(value: &str) -> Option<GoTimestamp> {
     fn number(raw: &[u8]) -> Option<u32> {
         if raw.is_empty() || !raw.iter().all(u8::is_ascii_digit) {
             return None;
