@@ -5,6 +5,9 @@ use lycheedev_core::{Result, control::OperationControl, evidence, metadata::Meta
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub(crate) mod semantics;
+mod remote_revision;
+pub use remote_revision::resolve_revision_controlled;
+pub(crate) use remote_revision::normalized_reference;
 
 use std::{
     collections::{BTreeMap, BTreeSet},

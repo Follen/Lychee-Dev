@@ -1,6 +1,8 @@
 //! Immutable remote data identities and strictly bounded CDN transport.
 //! Catalog observations are not content authentication: decoded bytes must
 //! still pass their EKey/chunk/CKey checks in the consuming reader.
+pub(crate) mod cache;
+pub mod target;
 pub mod catalog;
 mod proxy;
 pub mod transport;
