@@ -30,6 +30,43 @@ export function nativePipeName(canonicalHome,logonSid){
   return `lycheedev-native-source-${sha256(Buffer.from(`${identity}\0${logonSid}`)).slice(0,32)}`;
 }
 export function tinySource(){return 'function Caller()\n'+Array.from({length:128},(_,n)=>` missing${n}()\n`).join('')+'end\nfunction Empty()\nend\n';}
+// Public bootstrap only: the direct IPC fixtures intentionally retain their
+// original empty environment and unknown-load-scope contracts.
+export const BOOTSTRAP_API_PATH='Interface/AddOns/Blizzard_APIDocumentationGenerated/NativeSessionDocumentation.lua';
+export function bootstrapApiSource(){return 'local API = {\n'+
+  ' Name = "NativeSession", Type = "System", Namespace = "C_NativeSession",\n'+
+  ' Functions = {{Name = "Value", Type = "Function", Returns = {{Name = "value", Type = "number"}}}},\n'+
+  '}\nAPIDocumentation:AddDocumentationTable(API)\n';}
+export function bootstrapEnvironmentInputSHA256(){
+  const raw=bootstrapApiSource();
+  return sha256(`${Buffer.byteLength(BOOTSTRAP_API_PATH)}:${BOOTSTRAP_API_PATH}:${Buffer.byteLength(raw)}:${raw}`);
+}
+export function assertBootstrapEnvironment(result,selection){
+  assert.equal(result?.repository,selection.source.repository,'bootstrap environment repository');
+  assert.equal(result.product,selection.source.product,'bootstrap environment product');
+  assert.equal(result.commit,selection.source.exactCommit,'bootstrap environment source commit');
+  assert.equal(result.snapshot,selection.id,'bootstrap environment snapshot');
+  assert.equal(result.symbol?.kind,'declaration','bootstrap declaration kind');
+  assert.equal(result.symbol.name,'Caller','bootstrap declaration name');
+  assert.equal(result.symbol.path,'a.lua','bootstrap declaration path');
+  assert.equal(result.symbol.line,1,'bootstrap declaration line');
+  assert.equal(result.symbol.endLine,130,'bootstrap declaration end');
+  assert.equal(result.coverage?.structural,'complete','bootstrap structural coverage');
+  assert.equal(result.coverage.environment,'ready','bootstrap environment coverage');
+  assert.equal(result.coverage.scannedFacts,1,'bootstrap declaration must be unambiguous');
+  assert.equal(result.truncated,false,'bootstrap preflight truncation');
+  const manifest=result.environmentManifest;
+  assert.equal(manifest?.schema,'lycheedev.source-environment.v1','bootstrap environment schema');
+  assert.equal(manifest.identity?.repository,selection.source.repository,'bootstrap manifest repository');
+  assert.equal(manifest.identity.commit,selection.source.exactCommit,'bootstrap manifest commit');
+  assert.equal(manifest.identity.client,selection.source.product,'bootstrap manifest client');
+  assert.equal(typeof manifest.identity.generatorVersion,'string','bootstrap environment generator');
+  assert(manifest.identity.generatorVersion.length>0,'bootstrap environment generator');
+  assert.equal(manifest.documents,1,'bootstrap generated API document count');
+  assert.equal(manifest.inputSHA256,bootstrapEnvironmentInputSHA256(),'bootstrap authenticated API input digest');
+  for(const field of ['definitionsSHA256','factsSHA256'])assert.match(manifest[field],/^[a-f0-9]{64}$/,'bootstrap generated API digest');
+  return manifest;
+}
 export function tinySnapshot(variant,luac){
   assert(/^[a-z0-9_-]+$/.test(variant));
   return {files:{'a.lua':tinySource()},load_documents:{},environment_documents:{},
@@ -62,7 +99,8 @@ function releaseLuac(release){
 
 /** Public CLI bootstrap over a tiny local Git fixture. No startup-token or
  * SQLite writes: --project validates the fixture lock and admits its pin via
- * the ordinary public source index path before source refs opens the owner. invoke(caseId,args,options) is the
+ * the ordinary public source index path. Static-only refs extracts/authenticates
+ * the generated API literals before native refs opens the owner. invoke(caseId,args,options) is the
  * caller's bounded, evidence-recording CLI launcher (it supplies --home/json).
  */
 // project init is path-local in the fixed Go public contract and has no --home.
@@ -79,6 +117,8 @@ export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke
   const repository=join(home,'tmp','native-session-bootstrap');assert(!existsSync(repository),'fresh tiny fixture required');
   mkdirSync(repository,{recursive:true});writeNew(join(repository,'a.lua'),tinySource());
   writeNew(join(repository,'Main.toc'),'a.lua\n');
+  mkdirSync(dirname(join(repository,BOOTSTRAP_API_PATH)),{recursive:true});
+  writeNew(join(repository,BOOTSTRAP_API_PATH),bootstrapApiSource());
   const environment={...process.env};for(const key of Object.keys(environment))if(/^GIT_/i.test(key)||key==='GCM_INTERACTIVE')delete environment[key];
   Object.assign(environment,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',
     GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1',GIT_AUTHOR_NAME:'Native acceptance fixture',
@@ -96,7 +136,7 @@ export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke
       error.fatalProcessFailure=true;throw error;}
     assert.equal(result.status,0,`git ${args}: ${result.stderr}`);return result.stdout.trim();
   }
-  git(['init','--initial-branch=native-acceptance']);git(['add','a.lua','Main.toc']);git(['commit','-m','fixed native session acceptance source']);
+  git(['init','--initial-branch=native-acceptance']);git(['add','a.lua','Main.toc',BOOTSTRAP_API_PATH]);git(['commit','-m','fixed native session acceptance source']);
   const commit=git(['rev-parse','HEAD']),mirror=join(home,'mirrors','wow-ui-source.git');
   assert(!existsSync(mirror),'tiny bootstrap cannot replace an existing source mirror');
   git(['clone','--bare','--no-hardlinks','--','.',mirror]);
@@ -105,16 +145,38 @@ export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke
   writeNew(join(repository,'lycheedev.lock.json'),pretty(lock));
   writeNew(join(evidenceDir,'bootstrap-fixture.json'),pretty({binary,home,repository,mirror,commit,selection,
     sourceExecuted:false,files:[{path:'a.lua',sha256:sha256(tinySource()),bytes:Buffer.byteLength(tinySource())},
-      {path:'Main.toc',sha256:sha256('a.lua\n'),bytes:6}],lock}));
+      {path:'Main.toc',sha256:sha256('a.lua\n'),bytes:6},
+      {path:BOOTSTRAP_API_PATH,sha256:sha256(bootstrapApiSource()),bytes:Buffer.byteLength(bootstrapApiSource())}],lock}));
   writeNew(join(evidenceDir,'bootstrap-a.lua'),tinySource());
+  writeNew(join(evidenceDir,'bootstrap-api.lua'),bootstrapApiSource());
   // Index resolves and registers the project lock through the public CLI. Refs
   // requires an explicit snapshot before its relation validation can proceed.
   const indexed=command('session-bootstrap-index',['source','index','--project',repository]);
   const snapshot=indexed.envelope?.context?.snapshot;
   assert.equal(snapshot,selection.id,'public source index did not return the fixture snapshot');
+  // This is the same production environment::from_pin route used by native
+  // research. It reads authenticated Git blobs, parses static literals and
+  // emits declarations without executing documentation Lua. The harness never
+  // injects a generated manifest, declaration record or cache/store entry.
+  const environmentResult=command('session-bootstrap-environment',['source','refs','--snapshot',snapshot,'--symbol','Caller',
+    '--direction','incoming','--limit','25','--static-only']);
+  const preflight=environmentResult.result??environmentResult.envelope?.result;
+  const environmentManifest=assertBootstrapEnvironment(preflight,selection);
+  assert.equal(preflight.coverage.semantic,'unavailable','static preflight must not start semantic work');
+  assert.equal(preflight.complete,false,'static preflight is not native acceptance');
+  assert.equal(preflight.nativeResearch,undefined,'static preflight must not open an owner');
+  writeNew(join(evidenceDir,'bootstrap-environment.json'),pretty({selection:selection.id,sourceExecuted:false,
+    input:{path:BOOTSTRAP_API_PATH,sha256:sha256(bootstrapApiSource()),bytes:Buffer.byteLength(bootstrapApiSource())},environmentManifest}));
   const opened=command('session-bootstrap-open',['source','refs','--snapshot',snapshot,'--symbol','Caller',
     '--direction','incoming','--limit','25','--session-reuse','--release',release]);
-  const native=opened.result?.nativeResearch??opened.envelope?.result?.nativeResearch;
+  const result=opened.result??opened.envelope?.result;
+  assert.deepEqual(assertBootstrapEnvironment(result,selection),environmentManifest,'native public environment changed');
+  const native=result.nativeResearch;
+  assert.equal(native?.schema,'lycheedev.source-native-research.v1','native bootstrap schema');
+  assert.deepEqual(native.environmentManifest,environmentManifest,'native worker environment changed');
+  assert.equal(native.analysis?.engine,'native_common_facts','native bootstrap engine');
+  assert.equal(native.analysis.sourceExecution,false,'bootstrap source must not execute');
+  assert.equal(native.analysis.sourceFiles,2,'both authenticated Lua documents reach native worker');
   assert(native?.nativeSession?.workerPid>0,'public CLI did not open a native session');
   assert.equal(native.nativeSession.snapshotTransfer,'full');
   return {ownerPid:native.nativeSession.workerPid,selection,repository,commit,elapsedMs:performance.now()-started,opened};

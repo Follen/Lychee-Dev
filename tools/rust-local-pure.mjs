@@ -13,6 +13,7 @@ export const sourcePaths=Object.freeze([
   'crates/lycheedev-core/src/mailbox/code_bytes.rs',
   'crates/lycheedev-core/src/mailbox/code_bytes_tests.rs',
   'crates/lycheedev-source/src/native/original_lines.rs',
+  'crates/lycheedev-source/src/native/research_projection.rs',
   'crates/lycheedev-source/src/process/stderr_observation.rs',
 ]);
 export const bindingContractPaths=Object.freeze([
@@ -23,6 +24,7 @@ export const bindingContractPaths=Object.freeze([
 // Fixed reviewed production-to-harness mapping; arbitrary paths are never accepted.
 export function harnessSourcePath(name) {
   if (!sourcePaths.includes(name)) throw new Error('local.unknown_source');
+  if (name === 'crates/lycheedev-source/src/native/research_projection.rs') return 'research_projection.rs';
   if (name === 'crates/lycheedev-source/src/process/stderr_observation.rs') return 'stderr_observation.rs';
   return name === 'crates/lycheedev-source/src/native/original_lines.rs'
     ? 'original_lines.rs' : name.slice('crates/lycheedev-core/src/'.length);

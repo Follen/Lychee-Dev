@@ -2,6 +2,8 @@
 
 mod contract;
 mod formal_live;
+#[cfg(test)]
+mod hotfix_remote_tests;
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, VERSION};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, io::Write, path::PathBuf};
@@ -166,6 +168,9 @@ fn parse(args: &[String]) -> Result<Invocation> {
             // Other command families retain their existing validation path.
             if command.starts_with("live ") || command == "doctor" {
                 formal_live::validate_option(key, &value)?;
+            }
+            if command == "data hotfix" {
+                lycheedev_data::hotfix::remote::validate_option(key, &value)?;
             }
             flag_order.push((key.to_owned(), value.clone()));
             if let Some(previous) = flags.insert(key.into(), value.clone()) {
@@ -1543,6 +1548,18 @@ fn main() {
                         lycheedev_data::stream::stream(inv, &mut |frame| stream.emit(frame));
                     yielded = stream.yielded;
                     result.map_err(|error| stream_fault(error, yielded))
+                } else if inv.command == "data hotfix"
+                    && matches!(inv.flag("--source"), Some("wago" | "raidbots"))
+                    && inv.flag("--encoding") != Some("csv")
+                    && !inv.flag_bool("--help")
+                {
+                    let result = lycheedev_data::hotfix::remote::render(inv, data_timeout_seconds(inv)?, &mut stdout);
+                    yielded = result.is_ok();
+                    if let Err(error) = &result && error.code == "command.output_failed" {
+                        let _ = writeln!(std::io::stderr(), "command.output_failed: {}", error.message);
+                        yielded = true;
+                    }
+                    result
                 } else {
                     dispatch(inv)
                 }

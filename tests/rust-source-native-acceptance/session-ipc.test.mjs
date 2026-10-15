@@ -3,10 +3,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {bootstrapTinyOwner,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
+import {bootstrapApiSource,bootstrapEnvironmentInputSHA256,assertBootstrapEnvironment,BOOTSTRAP_API_PATH,bootstrapTinyOwner,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const luac={version:'5.1.5',platform:'windows-amd64',executable_sha256:'a'.repeat(64),executable_bytes:1};
@@ -89,38 +90,134 @@ test('bootstrap project uses fixed path-local CLI contract without home while so
   assert(bootstrap.includes("'--product','retail'],{useHome:false})"));
 });
 
-// Executes only fixture Git operations, never the CLI/native owner or Lua.
-for (const returnedSnapshot of ['valid','missing','different']) {
-  test(`bootstrap indexes the project before refs and requires returned snapshot: ${returnedSnapshot}`,async()=>{
+test('all bootstrap public commands and flags exist in the fixed production contract',()=>{
+  const contract=JSON.parse(readFileSync(new URL('../../crates/lycheedev-cli/src/commands.json',import.meta.url),'utf8'));
+  const commands={init:['--home','--format'],'project init':['--product','--path','--format'],
+    'source index':['--project','--home','--format'],
+    'source refs':['--snapshot','--symbol','--direction','--limit','--static-only','--session-reuse','--release','--home','--format']};
+  for(const [path,flags] of Object.entries(commands)){
+    const command=contract.find(row=>row.path===path);assert(command,path);
+    const allowed=new Set(command.flags.map(flag=>flag.split(' ')[0]));
+    for(const flag of flags)assert(allowed.has(flag),`${path} ${flag}`);
+  }
+  assert(!contract.find(row=>row.path==='project init').flags.some(flag=>flag.startsWith('--home ')));
+  const refs=contract.find(row=>row.path==='source refs');
+  assert(refs.flags.includes('--direction <incoming|outgoing|both>'));
+  assert(refs.flags.includes('--limit <1-200>'));
+});
+
+function environmentResult(selection){
+  return {repository:'wow-ui-source',product:'retail',commit:selection.source.exactCommit,snapshot:selection.id,
+    symbol:{kind:'declaration',name:'Caller',path:'a.lua',line:1,endLine:130},
+    truncated:false,complete:false,coverage:{structural:'complete',semantic:'unavailable',environment:'ready',scannedFacts:1},
+    environmentManifest:{schema:'lycheedev.source-environment.v1',identity:{repository:'wow-ui-source',
+      commit:selection.source.exactCommit,client:'retail',generatorVersion:'test-observation-only'},
+      inputSHA256:bootstrapEnvironmentInputSHA256(),definitionsSHA256:'d'.repeat(64),factsSHA256:'f'.repeat(64),documents:1}};
+}
+function nativeResult(selection){const result=environmentResult(selection);
+  result.coverage.semantic='partial';
+  result.nativeResearch={schema:'lycheedev.source-native-research.v1',environmentManifest:structuredClone(result.environmentManifest),
+    analysis:{engine:'native_common_facts',sourceExecution:false,sourceFiles:2},nativeSession:{workerPid:42,snapshotTransfer:'full'}};
+  return result;
+}
+test('bootstrap API is a distinct literal source document and matches the production input hash framing',()=>{
+  const raw=bootstrapApiSource();
+  assert.equal(BOOTSTRAP_API_PATH,'Interface/AddOns/Blizzard_APIDocumentationGenerated/NativeSessionDocumentation.lua');
+  assert.equal(raw,'local API = {\n'+
+    ' Name = "NativeSession", Type = "System", Namespace = "C_NativeSession",\n'+
+    ' Functions = {{Name = "Value", Type = "Function", Returns = {{Name = "value", Type = "number"}}}},\n'+
+    '}\nAPIDocumentation:AddDocumentationTable(API)\n');
+  const input=createHash('sha256').update(`${Buffer.byteLength(BOOTSTRAP_API_PATH)}:${BOOTSTRAP_API_PATH}:${Buffer.byteLength(raw)}:`).update(raw).digest('hex');
+  assert.equal(bootstrapEnvironmentInputSHA256(),input);
+  const direct=tinySnapshot('exact-256',luac);
+  assert.deepEqual(direct.files,{'a.lua':tinySource()});assert.deepEqual(direct.environment_documents,{});
+  assert.deepEqual(direct.api,[]);assert.equal(direct.environment_manifest,null);assert.deepEqual(direct.load_documents,{});
+});
+test('environment result validation rejects absent, partial, foreign and unauthenticated inputs',()=>{
+  const selection=fixtureSelection('1'.repeat(40));
+  assert.deepEqual(assertBootstrapEnvironment(environmentResult(selection),selection),environmentResult(selection).environmentManifest);
+  const mutations=[
+    value=>{delete value.environmentManifest;},
+    value=>{value.coverage.environment='partial';},
+    value=>{value.coverage.structural='partial';},
+    value=>{value.coverage.scannedFacts=2;},
+    value=>{value.snapshot=fixtureSelection('2'.repeat(40)).id;},
+    value=>{value.environmentManifest.identity.commit='2'.repeat(40);},
+    value=>{value.environmentManifest.identity.repository='other';},
+    value=>{value.environmentManifest.identity.client='classic';},
+    value=>{value.environmentManifest.identity.generatorVersion='';},
+    value=>{value.environmentManifest.documents=0;},
+    value=>{value.environmentManifest.inputSHA256='0'.repeat(64);},
+    value=>{value.environmentManifest.definitionsSHA256='not-a-digest';},
+    value=>{value.environmentManifest.factsSHA256='not-a-digest';},
+    value=>{value.symbol.path='other.lua';},
+    value=>{value.symbol.name='Empty';},
+    value=>{value.truncated=true;},
+  ];
+  for(const mutate of mutations){const result=environmentResult(selection);mutate(result);assert.throws(()=>assertBootstrapEnvironment(result,selection));}
+});
+
+// These tests execute real local Git operations and the JavaScript controller.
+// CLI observations below are injected fixtures, not Rust/parser/Windows proof.
+for (const scenario of ['valid','missing-snapshot','different-snapshot','missing-environment','partial-environment','wrong-environment-input',
+  'preflight-opened-owner','native-mismatched-environment','native-missing-document','native-missing-owner']) {
+  test(`bootstrap commits API input and fails closed through public preflight: ${scenario}`,async()=>{
     const root=mkdtempSync(join(tmpdir(),'lycheedev-bootstrap-contract-'));
     const home=join(root,'home'),release=join(root,'release'),evidenceDir=join(root,'evidence');
     const repository=join(home,'tmp','native-session-bootstrap'),calls=[];
     let selection;
+    const invalidSnapshot=scenario.endsWith('-snapshot'),invalidEnvironment=['missing-environment','partial-environment','wrong-environment-input','preflight-opened-owner'].includes(scenario);
     const invoke=(id,args,options)=>{
       calls.push({id,args:acceptanceCliArgs(args,home,options),options});
       if(id==='session-bootstrap-init')mkdirSync(join(home,'mirrors'),{recursive:true});
       if(id==='session-bootstrap-index'){
         selection=JSON.parse(readFileSync(join(repository,'lycheedev.lock.json'),'utf8')).selection;
         assert.deepEqual(args,['source','index','--project',repository]);
-        const snapshot=returnedSnapshot==='valid'?selection.id:returnedSnapshot==='different'?'PIN-'+'f'.repeat(64):undefined;
+        const snapshot=scenario==='missing-snapshot'?undefined:scenario==='different-snapshot'?'PIN-'+'f'.repeat(64):selection.id;
         return {result:{complete:true},envelope:{context:{snapshot}}};
       }
+      if(id==='session-bootstrap-environment'){
+        assert(!invalidSnapshot,'environment must not run after invalid index response');
+        assert.deepEqual(args,['source','refs','--snapshot',selection.id,'--symbol','Caller',
+          '--direction','incoming','--limit','25','--static-only']);
+        const result=environmentResult(selection);
+        if(scenario==='missing-environment')delete result.environmentManifest;
+        if(scenario==='partial-environment')result.coverage.environment='partial';
+        if(scenario==='wrong-environment-input')result.environmentManifest.inputSHA256='0'.repeat(64);
+        if(scenario==='preflight-opened-owner')result.nativeResearch={nativeSession:{workerPid:42}};
+        return {result};
+      }
       if(id==='session-bootstrap-open'){
-        assert.equal(returnedSnapshot,'valid','refs must not run after invalid index response');
+        assert(!invalidSnapshot&&!invalidEnvironment,'native owner must not open after failed preflight');
         assert.deepEqual(args,['source','refs','--snapshot',selection.id,'--symbol','Caller',
           '--direction','incoming','--limit','25','--session-reuse','--release',release]);
-        return {result:{nativeResearch:{nativeSession:{workerPid:42,snapshotTransfer:'full'}}}};
+        const result=nativeResult(selection);
+        if(scenario==='native-mismatched-environment')result.nativeResearch.environmentManifest.definitionsSHA256='0'.repeat(64);
+        if(scenario==='native-missing-document')result.nativeResearch.analysis.sourceFiles=1;
+        if(scenario==='native-missing-owner')delete result.nativeResearch.nativeSession;
+        return {result};
       }
       return {result:{}};
     };
     try{
       const run=bootstrapTinyOwner({binary:'not-executed',home,release,evidenceDir,invoke});
-      if(returnedSnapshot==='valid'){
+      if(scenario==='valid'){
         const opened=await run;assert.equal(opened.ownerPid,42);assert.deepEqual(opened.selection,selection);
-      }else await assert.rejects(run,/public source index did not return the fixture snapshot/);
+        const manifest=JSON.parse(readFileSync(join(evidenceDir,'bootstrap-environment.json'),'utf8'));
+        assert.deepEqual(manifest.environmentManifest,environmentResult(selection).environmentManifest);
+        assert.equal(manifest.sourceExecuted,false);
+      }else await assert.rejects(run,/bootstrap|preflight|native worker environment changed|authenticated Lua|public source index|native session/);
       const ids=['session-bootstrap-init','session-bootstrap-project','session-bootstrap-index'];
-      if(returnedSnapshot==='valid')ids.push('session-bootstrap-open');
+      if(!invalidSnapshot)ids.push('session-bootstrap-environment');
+      if(!invalidSnapshot&&!invalidEnvironment)ids.push('session-bootstrap-open');
       assert.deepEqual(calls.map(call=>call.id),ids);
+      const fixture=JSON.parse(readFileSync(join(evidenceDir,'bootstrap-fixture.json'),'utf8'));
+      assert.equal(fixture.sourceExecuted,false);assert.equal(fixture.files.length,3);
+      const git=(...args)=>{const value=spawnSync('git',['--git-dir',fixture.mirror,...args],{encoding:'utf8',timeout:5000,maxBuffer:1<<20});assert.equal(value.status,0,value.stderr);return value.stdout;};
+      assert.deepEqual(git('ls-tree','-r','--name-only',fixture.commit).trim().split('\n').sort(),['a.lua','Main.toc',BOOTSTRAP_API_PATH].sort());
+      for(const row of fixture.files){const raw=git('show',`${fixture.commit}:${row.path}`);assert.equal(sha(raw),row.sha256);assert.equal(Buffer.byteLength(raw),row.bytes);}
+      assert.equal(git('show',`${fixture.commit}:${BOOTSTRAP_API_PATH}`),bootstrapApiSource());
+      assert.equal(readFileSync(join(evidenceDir,'bootstrap-api.lua'),'utf8'),bootstrapApiSource());
       for(const call of calls){
         assert.equal(call.options.phase,'local');assert(call.options.timeout>0&&call.options.timeout<=45_000);
         assert.deepEqual(call.args.slice(-2),['--format','json']);

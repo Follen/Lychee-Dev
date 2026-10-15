@@ -276,7 +276,7 @@ fn scan_query_identity_freezes_every_filter_and_the_derived_snapshot() {
     let original = fixture.resume(&first);
     for (flag, value) in [
         ("--record", "42"),
-        ("--table-hash", "42"),
+        ("--table-hash", "0000002A"),
         ("--table", "Example"),
         ("--push", "-3"),
         ("--region-id", "3"),

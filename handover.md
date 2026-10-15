@@ -885,6 +885,16 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - Go3.2.1 B2键盘静默与C Skill、E真实journal600/601状态测试已按冻结字节本地合成，Node分别8/8和5/5通过。E使用真实journal但transport/clock仍fixture，不能声称真实键盘/host claim通过。B/E Rust/Windows仍NOT_RUN。
 - Remote async R4.3 在官方锁定131registry依赖下真实Linux `--no-run`编译成功，5分20秒；owner`80a957e5-aedc-41ed-9cec-8004d56d4ee7` sealed succeeded、namespace回收，依赖与源码/工具前后核验一致。49项运行待受控channel可用；尚未默认接通完整远端Data。
 
+### Hotfix / Source / 当前 oracle 原生验收批（2026-10-15）
+
+- 远端已保存 `c7592045` 的 legacy 恢复 / SQL EXPLAIN 和 `5152cc90` 的 Go 3.2.1 A/B/C/E、metadata 控制链及既有失败修复。PR #14 已刷新为 Go 3.2.1 目标并保持草稿；这些提交本身不代表 Windows 验收通过。
+- 本批纳入独审后的 Hotfix R3：Wago/Raidbots 默认分派、字段/版本/JSON 深度/预算合同和 50 项声明测试（43 provider、7 CLI）。Windows 尚 NOT_RUN；Wago 现有阻塞 HTTP 的取消接线仍待后续受控 async transport，不把新增 provider 当完整远程 Data 完成。
+- 当前 10b561db oracle / Skill D2 已合成，保留历史 3057 来源。新 oracle 仍真实报告 21 个额外旧 addon 文件差异，不能先删未核消费者的文件来换绿。集成后相关 Node 16/16 通过。
+- IPC bootstrap 使用真实提交的 API Lua fixture，经公开 index → static refs 生成环境，再走 native；没有手工注入 store token。Node 24/24 通过，真实 CLI / Windows IPC 仍 NOT_RUN。
+- Source 同 scope incoming projection 复用候选已独审：同一 prepared/query/graph/XML 身份与完成计划认证后移动一次结果，重放相同逻辑计费和取消检查；超过 1 MiB 序列化保留门槛走原重算，不删结果。此门槛不是内存上限，结果延长存活的代价待测。本地纯模块 26/26 实过，owner `a2ff736c-2fd2-4da0-8567-a6d82f316948`；全 Retail 语义、正确性、耗时和内存仍需新原生证据。
+- HTTP R4.3 独立受控 Linux 实跑 49/49（0 ignored / filtered），owner `d504f1fc-3f88-4cbe-b921-e6795939d92b`，源码/工具/131 registry 依赖前后核验、进程回收完成。R5.2 gzip 官方 Go 1.27.1 差分 157/157 通过，owner `e7aedafd-6d1b-4b72-9ce3-4154bd5b639d`；对应 Rust 61 项尚未运行，离线解析缺 flate2 index，不是测试通过。
+- 本原生批暂不携带尚未完成工作区锁解析的 R4 async 依赖/模块，相关本地工作保留。独立 R6 审查发现 CGI proxy 解析顺序、Wago Content-Length 读前预拒、redirect drain 超预算后继续三项，待后继修复和实际验证。完整 CDN/cache/target resolve 接线继续，不等待这些新增工作才验证已合入的 Go 3.2.1 / Hotfix / Source 批。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

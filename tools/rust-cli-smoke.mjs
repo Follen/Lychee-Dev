@@ -5,15 +5,11 @@ import { join, resolve } from 'node:path';
 import { verifyArtifact } from './rust-build.mjs';
 import { beginScratch } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
-import { buildFixture, readBounded, sha256 } from '../tests/rust-parity/oracle.mjs';
-import { compareDescribeContract } from '../tests/rust-parity/describe-contract.mjs';
+import { GO_COMMIT } from '../tests/rust-parity/oracle.mjs';
+import { loadCurrentFixture } from '../tests/rust-parity/oracle-3.2.1.mjs';
+import { compareDescribeContract, compareCurrentDescribeContract } from '../tests/rust-parity/describe-contract.mjs';
 
-function frozenOracle(root) {
-  const oracle = buildFixture(root);
-  const bytes = readBounded(root, 'tests/rust-parity/go-3.2.0.manifest.json');
-  if (!bytes.equals(Buffer.from(JSON.stringify(oracle, null, 2) + '\n'))) throw new Error('cli-smoke.oracle_fixture_changed');
-  return {oracle, fixtureSHA256: sha256(bytes)};
-}
+const frozenOracle = loadCurrentFixture;
 
 // Dependency injection is only for controlled Node checker/fault fixtures.
 // The executable entrypoint below always uses the real custody/process tools.
@@ -33,7 +29,7 @@ export function runCliSmoke(root, recordPath, {mode = 'admission', verify = veri
         : 'read-only version/help/describe; no business parity claim'};
   try {
     const frozen = mode === 'contract' ? loadOracle(root) : null;
-    if (frozen) report.fixtureSHA256 = frozen.fixtureSHA256;
+    if (frozen) { report.fixtureSHA256 = frozen.fixtureSHA256; report.oracle = frozen.oracle.oracle; }
     const commands = mode === 'doctor' ? [
       ['init', '--home', join(job.directory, 'home'), '--format=json'],
       ['doctor', '--home', join(job.directory, 'home'), '--offline', '--format=json'],
@@ -55,7 +51,10 @@ export function runCliSmoke(root, recordPath, {mode = 'admission', verify = veri
       if (!handlesReaped || result.error || result.status !== 0) throw new Error(`cli-smoke.execution:${result.error?.message ?? result.status}`);
       const envelope = JSON.parse(readFileSync(stdout, 'utf8'));
       if (mode === 'contract') {
-        contract = {...compareDescribeContract(frozen.oracle, envelope),
+        // Explicit historical injection remains available to old checker fixtures;
+        // production loadCurrentFixture always authenticates the current 10b oracle.
+        const compareContract = frozen.oracle.oracle.commit === GO_COMMIT ? compareDescribeContract : compareCurrentDescribeContract;
+        contract = {...compareContract(frozen.oracle, envelope),
           binarySHA256: artifact.binarySHA256, sourceTreeSHA256: artifact.inputHashes?.sourceTree,
           fixtureSHA256: frozen.fixtureSHA256, observation: observations[index]};
         const path = join(job.evidence, 'cli-contract.json');

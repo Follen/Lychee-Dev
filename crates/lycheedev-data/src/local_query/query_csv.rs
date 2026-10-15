@@ -156,7 +156,7 @@ fn escape_manifest(raw: &mut Vec<u8>, budget: &Budget) -> Result<Vec<u8>> {
     out.finish()
 }
 
-fn publish_pair_after_data(
+pub(crate) fn publish_pair_after_data(
     inv: &Invocation,
     data: &Destination,
     sidecar: &Destination,
@@ -205,7 +205,7 @@ fn publish_pair_after_data(
 
 fn publish(destination: &Destination, raw: &[u8], budget: &Budget) -> Result<()> {
     destination
-        .publish(raw, MAX_BYTES as u64, || {
+        .publish(raw, raw.len().max(MAX_BYTES) as u64, || {
             budget
                 .check()
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Interrupted, error))

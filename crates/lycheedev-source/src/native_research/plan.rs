@@ -123,8 +123,8 @@ pub(crate) struct ResearchExecution<'a> {
 }
 impl<'a> ResearchExecution<'a> {
     pub(crate) fn new(plan:&'a ResearchPlan)->Self {Self{plan,completed:vec![true;plan.batch_count()],unexecuted_operations:0,answers:Vec::new(),scopes:0,unavailable_scopes:0,uncertain_answers:0,evidence_bytes:0}}
-    pub(crate) fn scope(&mut self,scope:Value,completion:crate::native::ResearchScopeCompletion)->Result<()> {
-        let (answers,performed)=completion.consume(self.plan)?;
+    pub(crate) fn scope<'b>(&mut self,scope:Value,completion:crate::native::ResearchScopeCompletion<'b>)->Result<Option<crate::native::ResearchProjection<'b>>> {
+        let (answers,performed,projection)=completion.consume(self.plan)?;
         // Match the existing worker output ceiling without allocating a second
         // serialization of all scope answers while their JSON trees are live.
         struct Counter(usize);
@@ -145,7 +145,7 @@ impl<'a> ResearchExecution<'a> {
         self.uncertain_answers+=answers.iter().filter(|answer|answer["state"]!="known"&&answer["state"]!="known_declaration").count();
         self.scopes+=1;
         self.answers.push(serde_json::json!({"scope":scope,"operations":answers}));
-        Ok(())
+        Ok(projection)
     }
     pub(crate) fn unavailable_scope(&mut self,reason:Value) {
         self.unavailable_scopes+=1;

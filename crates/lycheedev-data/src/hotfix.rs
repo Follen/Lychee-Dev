@@ -8,6 +8,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod local;
+pub mod remote;
 mod scan;
 pub(crate) fn dispatch(
     inv: &lycheedev_core::Invocation,
@@ -17,6 +18,20 @@ pub(crate) fn dispatch(
     } else {
         local::dispatch(inv)
     }
+}
+// The CLI contract accepts exactly eight unprefixed hexadecimal digits.
+// Keep this separate from decimal record/region/index parsing.
+pub(super) fn parse_table_hash(value: &str) -> lycheedev_core::Result<u32> {
+    if value.len() != 8 {
+        return Err(lycheedev_core::ToolkitError::arguments(
+            "--table-hash requires eight hexadecimal digits",
+        ));
+    }
+    if !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(lycheedev_core::ToolkitError::arguments("invalid --table-hash"));
+    }
+    u32::from_str_radix(value, 16)
+        .map_err(|_| lycheedev_core::ToolkitError::arguments("invalid --table-hash"))
 }
 use lycheedev_core::Result;
 use serde::{Deserialize, Serialize};

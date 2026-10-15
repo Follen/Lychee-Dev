@@ -95,6 +95,33 @@ native owner; the harness does not modify the metadata database, use a private
 server-start bypass, or inject a starting batch count. This fixture is separate
 from full Retail and cannot satisfy any full-corpus claim.
 
+The committed fixture contains `a.lua`, `Main.toc`, and one literal
+`Interface/AddOns/Blizzard_APIDocumentationGenerated/NativeSessionDocumentation.lua`.
+The documentation is an analysis input, not an executed TOC entry. Public
+`source index --project` registers the exact project lock; its returned snapshot
+must match that lock. Public `source refs --snapshot ... --symbol Caller
+--direction incoming --limit 25 --static-only` then runs the production API
+extraction/authentication path. The preflight requires one unambiguous source
+declaration, ready environment coverage, the exact source/client/commit, one API
+document, and the independently computed original-input digest. Its semantic
+coverage remains unavailable and its overall completeness remains false.
+
+Only afterward does the existing `source refs --session-reuse --release ...`
+open the native owner. The public and worker environment manifests must agree
+with the preflight, and both committed Lua documents must reach the native
+analysis. Raw source inputs, their file hashes, and the observed environment
+manifest are retained alongside the command logs. No generated API, cache,
+metadata database, startup token, or batch counter is injected. The direct
+`tinySnapshot` wire fixtures retain their original empty API environment and
+unknown load-scope inputs; their quota and timing expectations are unchanged.
+
+Offline Node tests run the JavaScript bootstrap with real local Git commits and
+mirrors but injected CLI observations. They check input custody, command order,
+and rejection behavior only. They do not prove Rust API extraction, actual
+Windows owner startup, named-pipe traffic, quota, idle, or lifetime acceptance.
+All those product outcomes remain `NOT_RUN` for this change until a sealed
+Windows candidate executes the corresponding group.
+
 The authenticated peer holds the named pipe and corresponding process handles,
 checks the operating-system pipe server PID, exact process creation time,
 image path and held executable SHA256 against Hello, and records requests,

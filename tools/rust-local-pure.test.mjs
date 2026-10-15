@@ -6,10 +6,12 @@ import {beginScratch,sha256} from './rust-disk.mjs';
 import {localOwnedSpawn} from './rust-local-owned-process.mjs';
 import {sourcePaths,bindingContractPaths,harnessPaths,harnessSourcePath,snapshotInputs,verifyTestResults,checkedAdmissionRepository} from './rust-local-pure.mjs';
 test('minimal harness compiles actual unmodified production module/test paths',()=>{
-  assert.equal(sourcePaths.length,7);
+  assert.equal(sourcePaths.length,8);
   const source=readFileSync('tests/rust-local-pure/src/lib.rs','utf8');
   assert.match(source,/pub mod raw_json;/);
   assert.match(source,/pub mod original_lines;/);
+  assert.match(source,/pub mod research_projection;/);
+  assert.equal(harnessSourcePath('crates/lycheedev-source/src/native/research_projection.rs'),'research_projection.rs');
   assert.match(source,/pub mod stderr_observation;/);
   assert.equal(harnessSourcePath('crates/lycheedev-source/src/process/stderr_observation.rs'),'stderr_observation.rs');
   assert.equal(harnessSourcePath('crates/lycheedev-source/src/native/original_lines.rs'),'original_lines.rs');
@@ -17,7 +19,7 @@ test('minimal harness compiles actual unmodified production module/test paths',(
   assert.throws(()=>harnessSourcePath('../original_lines.rs'));
   assert.equal(new Set(sourcePaths.map(harnessSourcePath)).size,sourcePaths.length);
   assert.equal(source.includes('fn '),false);
-  assert.equal(Object.keys(snapshotInputs(process.cwd(),[...sourcePaths,...harnessPaths])).length,10);
+  assert.equal(Object.keys(snapshotInputs(process.cwd(),[...sourcePaths,...harnessPaths])).length,11);
 });
 test('harness has isolated pinned official deps and a real optimized symbols profile',()=>{
   const manifest=readFileSync('tests/rust-local-pure/Cargo.toml','utf8');
@@ -58,7 +60,7 @@ test('owned integration target uses the actual path dependency and original test
   const stdout=names.map(name=>`test ${name} ... ok`).join('\n')+'\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;';
   assert.equal(verifyTestResults(stdout,names).passed,5);
   for(const bad of [stdout.replace('5 passed','0 passed'),stdout.replace('0 ignored','1 ignored'),stdout.replace(names[0],'other'),stdout+'\n'+stdout])assert.throws(()=>verifyTestResults(bad,names));
-  assert.equal(Object.keys(snapshotInputs(process.cwd(),[...sourcePaths,...bindingContractPaths,...harnessPaths])).length,13);
+  assert.equal(Object.keys(snapshotInputs(process.cwd(),[...sourcePaths,...bindingContractPaths,...harnessPaths])).length,14);
 });
 test('shared admission accepts only an exact preserved registered stage',()=>{
   const root=process.cwd();assert.equal(checkedAdmissionRepository(root),root);

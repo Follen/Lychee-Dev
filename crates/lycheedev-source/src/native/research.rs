@@ -1,3 +1,12 @@
+#[path = "research_projection.rs"]
+mod research_projection;
+pub(crate) type ResearchProjection<'a> = research_projection::RetainedProjection<'a, PreparedSnapshot, crate::native_research::QueryRequest, Graph, crate::native_research::XmlResearch>;
+
+#[cfg(test)]
+thread_local! { static RESEARCH_PROJECTION_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn research_projection_passes()->usize {RESEARCH_PROJECTION_PASSES.with(|count|count.get())}
+
 // Production projection over the same syntax identities and abstract value facts.
 impl PreparedSnapshot {
     /// The session owner calls this only between requests on its single worker thread.
@@ -158,11 +167,12 @@ impl PreparedSnapshot {
         self.inputs.shared_steps.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub(crate) fn execute_research_operations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>)->lycheedev_core::Result<ResearchScopeCompletion> {
+    pub(crate) fn execute_research_operations<'a>(&'a self,plan:&crate::native_research::plan::ResearchPlan,query:&'a crate::native_research::QueryRequest,graph:Option<&'a Graph>,origins:&'a crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>)->lycheedev_core::Result<ResearchScopeCompletion<'a>> {
         use crate::native_research::plan::LogicalOperation;
         self.validate_research_plan(plan,query)?;
         let mut answers=Vec::with_capacity(plan.operations().len());
         let mut performed=Vec::with_capacity(plan.operations().len());
+        let mut projection=None;
         for (batch,operations) in plan.operations().chunks(crate::native_research::plan::BATCH_QUERIES).enumerate(){
             for operation in operations {
                 self.control.check()?;self.inputs.charge(1)?;
@@ -174,11 +184,17 @@ impl PreparedSnapshot {
                 }
                 let mut answer=match operation {
                     LogicalOperation::References(_)=>{
+                        let before=self.research_steps();
                         let result=self.research_relations(&query.symbol,"incoming",graph,origins)?;
+                        let steps=self.research_steps().checked_sub(before).ok_or_else(||input_error("projection step counter moved backwards"))?;
                         let rows=result["relations"].as_array().ok_or_else(||input_error("reference projection rows missing"))?;
-                        json!({"kind":"references","state":if result["analysis"]["state"]=="complete"{"known"}else{"partial"},
+                        let answer=json!({"kind":"references","state":if result["analysis"]["state"]=="complete"{"known"}else{"partial"},
                             "result":{"relationsSHA256":digest(&rows),"relationCount":rows.len(),"analysis":result["analysis"]},
-                            "evidence":"full relation projection digest and coverage; source research retains independently projected rows"})
+                            "evidence":"full relation projection digest and coverage; source research retains the complete projected rows"});
+                        if query.direction=="incoming"&&projection.is_none(){
+                            projection=ResearchProjection::new(self,query,graph,origins,result,steps,||self.control.check())?;
+                        }
+                        answer
                     },
                     LogicalOperation::Definition(_)=>{
                         let facade=self.source_queries(&self.control)?;
@@ -215,11 +231,30 @@ impl PreparedSnapshot {
         }
         self.control.check()?;
         let (identity,owner)=plan.execution_identity();
-        Ok(ResearchScopeCompletion{identity,owner,answers,performed})
+        Ok(ResearchScopeCompletion{identity,owner,answers,performed,projection})
+    }
+
+    /// Only the immediately completed incoming operation can supply these rows.
+    /// Exact borrowed inputs bind source, request/options, graph and XML maps;
+    /// the plan still authenticates execution and the original control remains live.
+    pub(crate) fn project_research_relations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>)->lycheedev_core::Result<Value> {
+        self.validate_research_plan(plan,query)?;
+        if let Some(projection)=projection {
+            if query.direction!="incoming"||!projection.matches(self,query,graph,origins){return Err(input_error("relation projection belongs to another source, query or scope"));}
+            let facade=self.source_queries(&self.control)?;
+            let _selected=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
+            // research_relations charges only facade.definitions' query step.
+            // Replay those logical costs with the same reserve/error policy so
+            // intervening type/definition work cannot hide later exhaustion.
+            return projection.finish(||self.control.check(),||facade.step());
+        }
+        self.research_relations(&query.symbol,&query.direction,graph,origins)
     }
 
     pub(crate) fn research_relations(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<Value> {
         self.control.check()?;
+        #[cfg(test)]
+        RESEARCH_PROJECTION_PASSES.with(|count|count.set(count.get()+1));
         let target=self.syntax.declarations.iter().filter(|decl|decl.name==symbol.name.rsplit(['.',':']).next().unwrap_or(&symbol.name)
             && origins.matches_location(self,symbol,&decl.site.public(&self.inputs)).unwrap_or(false)).map(|decl|decl.id.as_str()).collect::<std::collections::BTreeSet<_>>();
         let target_values=graph.map(|graph|self.research_target_values(graph,symbol,origins)).transpose()?.unwrap_or_default();
@@ -400,11 +435,11 @@ impl PreparedSnapshot {
 
 /// Constructed only by the native operation executor. JSON projections alone
 /// cannot mint execution credit or change the bound request after execution.
-pub(crate) struct ResearchScopeCompletion {
-    identity:String, owner:Arc<()>, answers:Vec<Value>, performed:Vec<bool>,
+pub(crate) struct ResearchScopeCompletion<'a> {
+    identity:String, owner:Arc<()>, answers:Vec<Value>, performed:Vec<bool>, projection:Option<ResearchProjection<'a>>,
 }
-impl ResearchScopeCompletion {
-    pub(crate) fn consume(self,plan:&crate::native_research::plan::ResearchPlan)->lycheedev_core::Result<(Vec<Value>,Vec<bool>)> {
+impl<'a> ResearchScopeCompletion<'a> {
+    pub(crate) fn consume(self,plan:&crate::native_research::plan::ResearchPlan)->lycheedev_core::Result<(Vec<Value>,Vec<bool>,Option<ResearchProjection<'a>>)> {
         use crate::native_research::plan::{LogicalOperation,BATCH_QUERIES};
         plan.validate_execution_identity(&self.identity,&self.owner)?;
         if self.answers.len()!=plan.operations().len()||self.performed.len()!=self.answers.len(){return Err(input_error("semantic completion operation count differs"));}
@@ -414,7 +449,7 @@ impl ResearchScopeCompletion {
                 return Err(input_error("semantic completion operation identity or order differs"));
             }
         }
-        Ok((self.answers,self.performed))
+        Ok((self.answers,self.performed,self.projection))
     }
 }
 
@@ -426,10 +461,10 @@ mod research_completion_identity_tests {
         let mut plan=ResearchPlan::new("source",&query,owner);
         for n in 0..2 {plan.definition(AuthenticatedSite{site:Site{file:"a.lua".into(),start:n,end:n+1},file_sha256:"a".repeat(64),position:Value::Null,material:json!({"kind":"source"})});}plan.finish()
     }
-    fn completion(plan:&ResearchPlan)->ResearchScopeCompletion {
+    fn completion(plan:&ResearchPlan)->ResearchScopeCompletion<'static> {
         let(identity,owner)=plan.execution_identity();
         let answers=plan.operations().iter().enumerate().map(|(index,operation)|json!({"kind":"definition","state":"unavailable","executed":true,"operation":index,"batch":0,"operationIdentity":digest(operation)})).collect();
-        ResearchScopeCompletion{identity,owner,answers,performed:vec![true;2]}
+        ResearchScopeCompletion{identity,owner,answers,performed:vec![true;2],projection:None}
     }
     #[test]
     fn completion_rejects_duplicate_reordered_missing_and_foreign_answers() {

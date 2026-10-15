@@ -5,3 +5,4 @@ pub mod raw_json;
 pub mod mailbox;
 pub mod original_lines;
 pub mod stderr_observation;
+pub mod research_projection;

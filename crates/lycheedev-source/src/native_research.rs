@@ -148,9 +148,9 @@ impl ResearchSession {
                 }}else{loaded.take().expect("load-only graph")};
                 observer("query_execute_operations");
                 let answers=self.prepared.execute_research_operations(&semantic_plan,&query,Some(&graph),&self.xml,self.snapshot.api_definitions.as_ref())?;
-                execution.scope(json!({"manifest":program.manifest,"snapshot":graph.snapshot_key}),answers)?;
+                let projection=execution.scope(json!({"manifest":program.manifest,"snapshot":graph.snapshot_key}),answers)?;
                 observer("query_project");
-                let mut result=self.prepared.research_relations(&query.symbol,&query.direction,Some(&graph),&self.xml)?;
+                let mut result=self.prepared.project_research_relations(&semantic_plan,&query,Some(&graph),&self.xml,projection)?;
                 observer("query_projected");
                 complete&=result["analysis"]["state"]=="complete";analysis=result["analysis"].clone();
                 if let Some(native)=&graph.native_invocations{entry_facts.extend(native.entries.iter().map(|entry|json!(entry)));}
@@ -165,9 +165,9 @@ impl ResearchSession {
             gaps.push(json!({"code":"load_order_unknown","detail":"no TOC/XML program contains the selected declaration"}));
             observer("query_execute_operations");
             let answers=self.prepared.execute_research_operations(&semantic_plan,&query,None,&self.xml,self.snapshot.api_definitions.as_ref())?;
-            execution.scope(json!({"kind":"unknown_load_order"}),answers)?;
+            let projection=execution.scope(json!({"kind":"unknown_load_order"}),answers)?;
             observer("query_project");
-            let mut result=self.prepared.research_relations(&query.symbol,&query.direction,None,&self.xml)?;
+            let mut result=self.prepared.project_research_relations(&semantic_plan,&query,None,&self.xml,projection)?;
             observer("query_projected");
             rows=take_relation_rows(&mut result);analysis=result["analysis"].take();complete=false;
         }
@@ -394,6 +394,99 @@ mod projection_tests {
     fn planned_query(name:&str,path:&str,line:usize,end_line:usize,category:&str,direction:&str)->QueryRequest {
         QueryRequest{symbol:index::Symbol{id:String::new(),kind:"declaration".into(),name:name.into(),target:String::new(),category:category.into(),confidence:String::new(),path:path.into(),line,end_line,signature:String::new(),scope:String::new(),ordinal:0},direction:direction.into()}
     }
+    #[test]
+    fn incoming_projection_moves_exact_rows_and_replays_shared_costs() {
+        let control=OperationControl::default();
+        let files=BTreeMap::from([("logic.lua".into(),"\u{feff}-- 中文 😀\r\nfunction Target(x) return x end\r\nAlias=Target\r\nTarget(1)\r\nAlias(2)\r\n".into())]);
+        let documents=BTreeMap::from([
+            ("Main.toc".into(),"logic.lua\nFrames.xml\n".into()),
+            ("Frames.xml".into(),"\u{feff}<Ui>\r\n<Frame name=\"Frame\"><Scripts><OnLoad>local s = &quot;😀&quot;&#10;Target(self)</OnLoad></Scripts></Frame>\r\n</Ui>".into()),
+        ]);
+        let session=ResearchSession::prepare(SnapshotRequest{files,load_documents:documents,environment_documents:BTreeMap::new(),source:json!({"repository":"reuse-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec!["logic.lua".into()],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+        let graph=session.prepared.build_xml_plan("reuse-test",session.xml.programs[0].clone(),None,&control).unwrap();
+        for selected in [None,Some(&graph)] {
+            for direction in ["incoming","outgoing","both"] {
+                let query=planned_query("Target","logic.lua",2,2,"function",direction);
+                let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
+                let before=research_projection_passes();
+                let completion=session.prepared.execute_research_operations(&plan,&query,selected,&session.xml,None).unwrap();
+                assert_eq!(research_projection_passes()-before,usize::from(direction!="outgoing"));
+                let mut execution=plan::ResearchExecution::new(&plan);
+                let projection=execution.scope(json!({"kind":"reuse-test"}),completion).unwrap();
+                assert_eq!(projection.is_some(),direction=="incoming");
+                let (answers,receipt)=execution.finish();
+                if selected.is_none(){assert_eq!(receipt.completed_batches,0);}
+                let before=session.prepared.research_steps();
+                let expected=session.prepared.research_relations(&query.symbol,direction,selected,&session.xml).unwrap();
+                let cost=session.prepared.research_steps()-before;
+                let before=session.prepared.research_steps();let passes=research_projection_passes();
+                let actual=session.prepared.project_research_relations(&plan,&query,selected,&session.xml,projection).unwrap();
+                assert_eq!(session.prepared.research_steps()-before,cost,"logical charges must match");
+                assert_eq!(research_projection_passes()-passes,usize::from(direction!="incoming"),"incoming must not reconstruct any source projection");
+                assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap());
+                if direction=="incoming" {
+                    assert_eq!(answers["answers"][0]["operations"][0]["result"]["relationsSHA256"],digest(&actual["relations"]));
+                    assert_eq!(answers["answers"][0]["operations"][0]["result"]["relationCount"],actual["relations"].as_array().unwrap().len());
+                    assert_eq!(answers["answers"][0]["operations"][0]["result"]["analysis"],actual["analysis"]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn incoming_projection_rejects_foreign_query_graph_and_later_cancellation() {
+        let session=planner_fixture(BTreeMap::from([("logic.lua".into(),"function Target() end\nTarget()\n".into())]),BTreeMap::new(),None);
+        let query=planned_query("Target","logic.lua",1,1,"function","incoming");
+        let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
+        let control=session.prepared.operation_control().clone();
+        let program=crate::xml_load::Program::from_sources("Main.toc",[("Main.toc",b"logic.lua\n".as_slice()),("logic.lua",session.prepared.inputs().original("logic.lua").unwrap().as_bytes())],&control).unwrap();
+        let graph=session.prepared.build_xml_plan("same-scope",std::sync::Arc::new(program),None,&control).unwrap();
+        let projection=||session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap().2;
+        let identical_query=query.clone();
+        assert!(session.prepared.project_research_relations(&plan,&identical_query,None,&session.xml,projection()).is_err());
+        assert!(session.prepared.project_research_relations(&plan,&query,Some(&graph),&session.xml,projection()).is_err());
+        let retained=projection();assert!(retained.is_some());
+        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        assert_eq!(session.prepared.project_research_relations(&plan,&query,None,&session.xml,retained).unwrap_err().code,"command.cancelled");
+    }
+
+    #[test]
+    fn incoming_projection_preserves_budget_failure_after_operation_completion() {
+        let session=planner_fixture(BTreeMap::from([("logic.lua".into(),"function Target() end\nTarget()\n".into())]),BTreeMap::new(),None);
+        let query=planned_query("Target","logic.lua",1,1,"function","incoming");
+        let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
+        let (_,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();
+        assert!(projection.is_some());
+        let control=session.prepared.operation_control();
+        let remaining=session.prepared.inputs().limits().construction_steps-session.prepared.research_steps();
+        session.prepared.carry_research_steps(remaining,control).unwrap();
+        let before=session.prepared.research_steps();
+        let cached=session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap_err();
+        let fresh=session.prepared.research_relations(&query.symbol,"incoming",None,&session.xml).unwrap_err();
+        assert_eq!(cached.code,"source.native_query_budget");assert_eq!(cached.code,fresh.code);
+        assert_eq!(session.prepared.research_steps(),before,"failed steps do not reset or add credit");
+    }
+
+    #[test]
+    fn incoming_projection_large_result_falls_back_without_dropping_rows() {
+        let text=format!("function Target() end\n{}","Target()\n".repeat(2000));
+        let session=planner_fixture(BTreeMap::from([("logic.lua".into(),text)]),BTreeMap::new(),None);
+        let query=planned_query("Target","logic.lua",1,1,"function","incoming");
+        let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
+        let (answers,_,projection)=session.prepared.execute_research_operations(&plan,&query,None,&session.xml,None).unwrap().consume(&plan).unwrap();
+        assert!(projection.is_none(),"large result uses the original reconstruction path");
+        let before=research_projection_passes();
+        let result=session.prepared.project_research_relations(&plan,&query,None,&session.xml,projection).unwrap();
+        assert_eq!(research_projection_passes()-before,1);
+        assert!(serde_json::to_vec(&result).unwrap().len()>1<<20);
+        assert!(result["relations"].as_array().unwrap().len()>=2000);
+        assert_eq!(result["relations"].as_array().unwrap().iter().filter(|row|row["kind"]=="call").count(),2000);
+        assert_eq!(answers[0]["result"]["relationsSHA256"],digest(&result["relations"]));
+        assert_eq!(answers[0]["result"]["relationCount"],result["relations"].as_array().unwrap().len());
+    }
+
     #[test]
     fn outgoing_plan_excludes_nested_callers_and_stops_at_first_cut_edge() {
         let nested=(0..130).map(|n|format!(" nested{n}()\n")).collect::<String>();
@@ -681,7 +774,8 @@ mod projection_tests {
         assert!(session.prepared.research_steps()>planned_steps,"graph construction must retain planning charges");
         session.prepared.validate_research_plan(&plan,&query).unwrap();
         let answers=session.prepared.execute_research_operations(&plan,&query,Some(&_graph),&session.xml,session.snapshot.api_definitions.as_ref()).unwrap();
-        let (answers,performed)=answers.consume(&plan).unwrap();
+        let (answers,performed,projection)=answers.consume(&plan).unwrap();
+        assert!(projection.is_none());drop(projection);
         assert!(performed.iter().all(|done|*done));
         assert_eq!(answers.len(),130);
         assert_eq!(answers[127]["batch"],0);assert_eq!(answers[128]["batch"],1);assert_eq!(answers[129]["batch"],1);

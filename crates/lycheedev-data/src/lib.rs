@@ -106,8 +106,12 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     if inv.command == "asset inspect" {
         return local_query::asset(inv);
     }
-    if inv.command == "data hotfix" && inv.required("--source")? == "dbcache" {
-        return hotfix::dispatch(inv);
+    if inv.command == "data hotfix" {
+        return match inv.required("--source")? {
+            "dbcache" => hotfix::dispatch(inv),
+            "wago" | "raidbots" => hotfix::remote::dispatch(inv),
+            _ => Err(ToolkitError::arguments("--source must be wago, dbcache, or raidbots")),
+        };
     }
     Err(fault(
         "command.unsupported",

@@ -16,6 +16,14 @@ export const APPROVED_ENGINE_SUMMARIES = Object.freeze([
 
 export function compareDescribeContract(oracle, envelope) {
   if (oracle?.oracle?.commit !== GO_COMMIT) throw new Error('describe-contract.wrong_oracle');
+  return compareAuthorizedDescribe(oracle, envelope);
+}
+// Separate current entrypoint; the historical function retains its original pin.
+export function compareCurrentDescribeContract(oracle, envelope) {
+  if (oracle?.oracle?.commit !== '10b561db5706702cd42e047eaeed4ccb5e825351') throw new Error('describe-contract.wrong_current_oracle');
+  return compareAuthorizedDescribe(oracle, envelope);
+}
+function compareAuthorizedDescribe(oracle, envelope) {
   validateCommands(oracle.commands);
   const report = {schema: 'lycheedev.executed-describe-contract.v1', oracle: oracle.oracle,
     scope: 'Executed public command names and exact ordered metadata; no handler, parser execution, Skill, mailbox, performance or game parity claim',

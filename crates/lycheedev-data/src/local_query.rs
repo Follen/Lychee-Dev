@@ -20,7 +20,7 @@ use std::{
 };
 
 mod effective;
-mod query_csv;
+pub(crate) mod query_csv;
 #[cfg(test)]
 mod regression_tests;
 mod request;

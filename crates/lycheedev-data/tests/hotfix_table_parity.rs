@@ -494,7 +494,7 @@ fn named_hotfix_failures_never_publish_cache_or_changes_and_recover() {
 fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
     let fixture = Fixture::new(&cache(7, &[(42, 1, 1, b"ok\0")]));
     for (flag, value, code) in [
-        ("--table-hash", "42", "records.hotfix_identity"),
+        ("--table-hash", "0000002A", "records.hotfix_identity"),
         ("--after-index", "0", "records.hotfix_identity"),
         ("--cursor", "0", "command.invalid_arguments"),
         ("--region-id", "3", "records.hotfix_filter_unsupported"),
@@ -552,7 +552,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
     }
     let mut raw = fixture.inv();
     raw.flags.remove("--table");
-    raw.flags.insert("--table-hash".into(), "42".into());
+    raw.flags.insert("--table-hash".into(), "0000002A".into());
     let result = lycheedev_data::dispatch(&raw).unwrap();
     assert!(result.data["page"]["entries"][0].get("fields").is_none());
     assert!(

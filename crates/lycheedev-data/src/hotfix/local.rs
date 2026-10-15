@@ -48,6 +48,13 @@ impl storage::FileControl for Files<'_> {
     }
 }
 fn read_file(path: &Path, maximum: usize, budget: &Budget) -> Result<Vec<u8>> {
+    read_file_inner(path, maximum, budget, true)
+}
+/// Raidbots is a separately bounded input blob, not JSON metadata.
+pub(super) fn read_source_file(path:&Path,maximum:usize,budget:&Budget)->Result<Vec<u8>> {
+    read_file_inner(path, maximum, budget, false)
+}
+fn read_file_inner(path: &Path, maximum: usize, budget: &Budget, metadata:bool) -> Result<Vec<u8>> {
     budget.check()?;
     let mut files = Files {
         budget,
@@ -100,7 +107,7 @@ fn read_file(path: &Path, maximum: usize, budget: &Budget) -> Result<Vec<u8>> {
             result => result?,
         };
         budget.charge(Cost {
-            metadata_bytes: count as u64,
+            metadata_bytes: if metadata {count as u64}else{0},
             decode_work: count.div_ceil(65536) as u64 + 1,
             ..Default::default()
         })?;
@@ -496,7 +503,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     budget.check()?;
     let mut filter = CacheFilter {
         build: 0,
-        table_hash: number(inv, "--table-hash")?,
+        table_hash: inv.flag("--table-hash").map(super::parse_table_hash).transpose()?,
         record_id: number(inv, "--record")?,
         push: inv
             .flag("--push")

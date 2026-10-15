@@ -236,7 +236,7 @@ fn request(inv: &Invocation) -> Result<Request> {
         max_bytes: request_limit(inv, "--max-bytes", 128 << 20, 512 << 20)? as i64,
         filter: RequestFilter {
             build: 0,
-            table_hash: number(inv, "--table-hash")?,
+            table_hash: inv.flag("--table-hash").map(super::parse_table_hash).transpose()?,
             record_id: number(inv, "--record")?,
             push: inv
                 .flag("--push")
