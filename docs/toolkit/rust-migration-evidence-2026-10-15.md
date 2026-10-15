@@ -1091,3 +1091,8 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 2. DeclarationModel摄取后继已独审，三方 A旧构造/B新构造/C完全原版公开API的prepare-lock已完成，150registry+5local每侧身份核验一致，实际验证已启动：A31通过，B编译与projection11/declaration11通过；随后B callback列表进程exit0但namespace回收观察遇EACCES，无法确认完整树回收，owner中断且symbols lease保留。C及近8MiB资源组未运行；后继本地Cargo暂停，独立Windows三方契约runner R2已完成独审并接入单独job，固定49文件身份；本地parser11/缓存checker4项实际通过，31×3/450trace/6构造结果尚未在Windows执行，资源probe未接入，不能追认旧owner。公开parse/index合并了原阶段边界回调（原实现也无逐token回调）、增加文本持有是待测取舍，不能宣称等价或减内存。
 3. owned session/coverage ledger、selected-decision与DerivedNumber/EnvironmentCallable/EnvironmentReturn、call/return query编排三片已分别独审并累计组合12个源文件；21新增Rust仍NOT_RUN，已接准确测试目标。后继S4两阶段表达式plan已独审组合，保selected编译期与raw执行期顺序，新增8Rust未跑；S5栈执行/unary已独审组合，保两阶段producer顺序与carrier身份，12新增Rust未跑；后继S6一般非逻辑binary与两个context短路已独审组合，9新增Rust未跑，其他logical继续move交待实现后台；S7 dense RHS table tuple已独审组合，8新增Rust未跑，保原member查询顺序后排序/密度校验和已有ledger前缀；S8已独审组合真实owned query/cache→表达式执行→Name initializer与严格普通local shell，14新增Rust/57比较未跑；Object/Parameter/Function/general flow/member/call仍明确Continue待实现，不假raw成功；498的S2 atomic oracle实际通过；S3把NotManaged-call误回落到无context普通推断，丢失仍Bound的callee。当前定位测试保留全部448组合，434 Some完整比较、14 None走真实OwnedQuery后继；Function/call后继尚未完成，修订测试仍预期失败，不能称S3已修好。通用递归后端尚未完成，未切生产、未删除现有hook，不能以新增自有代码冒充零补丁完成。旧callability首候选存在enable/coverage顺序差异，未集成。全部43个registry入口按真实消费者核对，不能删除nil/unknown/denied-call能力换取无补丁。
 4. 其余推断、identity、cardinality与checker随后按真实消费者逐片替换。最后核未修改上游完整文件身份、产品锁、全Retail和全部增强回归。
+
+
+## bc2 终态前的原记录（后续终态见 handover）
+
+- **bc2在途**：all-target因cfg(test)子模块路径E0583失败，CLI/describe/静态Retail仍通过；最小显式测试路径已审待新编译。三方摄取验证在工具身份检查拒绝reparse处提前停止，尚未执行三方Rust。修复候选保持源/缓存无链接边界。498的两个失败组还伴有vctip辅助进程drain强制回收，真实断言失败与生命周期问题均保留，不能只修断言就宣称整组通过。

@@ -29,11 +29,19 @@ impl<E> OwnedQuery<'_, '_, E> {
         id: &LuaSignatureId,
     ) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
-        let closure = self
-            .model
-            .file_facts_of(id.get_file_id())
-            .and_then(|facts| facts.signature_by_position(id.get_position()))
-            .map(|signature| signature.closure_syntax);
+        // FileFacts exposes signatures but its positional index is private.
+        // Reproduce the index's last-insertion-wins rule, including collisions,
+        // without another upstream visibility patch or contextual inference.
+        let mut closure = None;
+        if let Some(facts) = self.model.file_facts_of(id.get_file_id()) {
+            for signature in facts.signatures.iter().rev() {
+                self.checkpoint()?;
+                if signature.closure_syntax.get_range().start() == id.get_position() {
+                    closure = Some(signature.closure_syntax);
+                    break;
+                }
+            }
+        }
         let Some(closure) = closure else {
             return Ok(None);
         };

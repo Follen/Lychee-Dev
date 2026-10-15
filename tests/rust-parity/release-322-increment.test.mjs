@@ -67,12 +67,14 @@ test('current product is exactly the frozen increment on its authenticated Rust 
   }
   for (const row of manifest.productChanges) {
     let current = read(row.path);
-    // This generated fixture's sole release string follows the independently
-    // approved candidate. Preserve and authenticate the original 322 record.
+    // Legacy consumer retirement restored the complete fixed Go 3.2.3 test
+    // environment. Authenticate it separately and keep the original 322 record.
     if (row.path === 'tests/addon/env.lua') {
       const text = current.toString();
       assert.equal(text.split('return "3.5.0"').length, 2);
-      current = Buffer.from(text.replace('return "3.5.0"', 'return "3.1.2"'));
+      assert.deepEqual(Buffer.from(text.replace('return "3.5.0"', 'return "3.2.3"')),
+        blob('3766f9cacb52e93a803a626187e2a1d54a445468', row.path));
+      current = blob('351fcfdaceb4c064179bad3839b5dc1e01aa2043', row.path);
     }
     if (row.path === 'crates/lycheedev-live/src/go_mailbox_v1/input.rs') {
       const text = current.toString();

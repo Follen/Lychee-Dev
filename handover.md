@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 19:54 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`94c462d2198cfd0ad6198fd526f5ab0ab7ff45ff`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 20:28 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`cd576917e24cc7d367ba605ce5d29886884ae903`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+集中验证 [38801126956](https://github.com/Follen/Lychee-Dev/actions/runs/38801126956) 已针对 cd576 启动。context 组实际编译失败：owned signature 调用上游私有 `signature_by_position`，后继已改为公开 signatures 逆序按位置查找，保原索引重复位置 last-wins 及 typed checkpoint，不新增引擎补丁；product all-target 亦失败，完整 stderr 尚待该组封存。静态入口测试仍把已更新的 Skill 判为 Go3.2.2，后继已改为精确323并证明命令表来源与322字节相同；历史322 Lua环境测试也改为分别认证原351记录与现323全源，仅应用已授权3.5版本字段。71项本地首组及其余142项Node检查已通过，3项Windows launcher在Linux准确跳过；这些修正未包含在 cd576，Rust修正尚未编译。冻结三方实验本轮按独立触发策略跳过，既有6699成功仍仅证明其冻结输入。
 
 内存当前实际实现：API定义原文副本在验证重建后立即释放；身份唯一性临时sets在syntax索引前释放；managed reads/calls冻结上下文共享Arc而不深拷贝；XML生成文本去掉Script重复Vec，仅compiler文本保有并供现消费者读取。后继把同一请求的 XML 原文 Arc 在 Script 与各 manifest Program 之间共享，避免每个 manifest 重建原文分配；每份 AST、模板、动作和加载上下文仍独立。原行映射/hash/未知处理不变，Rust与完整Retail降幅均待集中实测。
 
@@ -96,8 +98,6 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 - **当前JSONL R20.2**：实际remote stream持外层admission至capture与checked finish，首次sink失败后不再写；已知capture已提交而后失败时message明确真实ID、typed内部保多因，不新增公开frame字段。9新增Rust未跑；capture内部旧Metadata/Directory Drop及unknown commit未返回ID仍是明确缺口，不能据外层finish宣称全部checked-close完成。
 - **Source历史失败**：62d cold refs在约182秒runner成功但不满足Go90秒总预算；context超时、retained worker EOF仍是实质缺口。ce6全部长语义路径失败。新90秒、phase、Graph/XML修改不能在新全仓结果出来前宣称修复。
 - **执行/写入边界**：被明确拒绝的重复gzip验证未重跑；PR14标题/正文刷新两次拒绝后保持暂停。代码、文档与其它已授权验证继续，不改rules、不换路绕过。未发布、未合main。
-
-- **bc2在途**：all-target因cfg(test)子模块路径E0583失败，CLI/describe/静态Retail仍通过；最小显式测试路径已审待新编译。三方摄取验证在工具身份检查拒绝reparse处提前停止，尚未执行三方Rust。修复候选保持源/缓存无链接边界。498的两个失败组还伴有vctip辅助进程drain强制回收，真实断言失败与生命周期问题均保留，不能只修断言就宣称整组通过。
 
 所有旧批次、owner/hash、失败与修复来源见[历史证据记录](docs/toolkit/rust-migration-evidence-2026-10-15.md)。旧状态按原树/时间理解，不覆盖本文现状。
 
