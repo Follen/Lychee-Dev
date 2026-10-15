@@ -383,3 +383,110 @@ fn local_default_preparer_uses_go_table_limits_before_later_format_errors() {
         assert_eq!(captures(&f), before);
     }
 }
+
+#[test]
+fn local_default_scalar_and_exists_share_lazy_physical_source_and_capture() {
+    let f = Fixture::new(&[table(
+        "Sample",
+        201,
+        &[("ID", "uint"), ("Value", "uint")],
+        &[vec![Cell::U(1), Cell::U(10)], vec![Cell::U(2), Cell::U(20)]],
+    )]);
+    let sql = "SELECT s.ID,(SELECT x.Value FROM Sample x WHERE x.ID=s.ID),EXISTS (SELECT x.ID,x.Value FROM Sample x WHERE x.ID=s.ID),NOT EXISTS (SELECT ID FROM Sample x WHERE x.ID=99) FROM Sample s ORDER BY s.ID";
+    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    assert_eq!(
+        out.data["result"]["rows"],
+        json!([[1, 10, true, true], [2, 20, true, true]])
+    );
+    assert_eq!(out.data["sources"].as_array().unwrap().len(), 1);
+    verify(&f, &out);
+}
+#[test]
+fn local_default_analyze_reports_real_numeric_in_lookup_and_commits_plan_only() {
+    let f = Fixture::new(&[table(
+        "Sample",
+        201,
+        &[("ID", "uint")],
+        &[vec![Cell::U(1)], vec![Cell::U(2)], vec![Cell::U(3)]],
+    )]);
+    let inv = f.invocation(
+        "data sql",
+        &[(
+            "--sql",
+            "EXPLAIN ANALYZE SELECT ID FROM Sample WHERE ID IN (3,1,3.0,NULL,2)",
+        )],
+    );
+    let out = lycheedev_data::dispatch(&inv).unwrap();
+    assert_eq!(out.data["result"]["columns"], Value::Null);
+    assert_eq!(out.data["result"]["rows"], Value::Null);
+    let measured = &out.data["result"]["plan"]["measured"];
+    assert_eq!(measured["outputRows"], 3);
+    assert_eq!(
+        measured["scans"],
+        json!([{"table":{"catalog":"static","name":"sample"},"calls":4,"rows":3,"lookups":4}])
+    );
+    assert!(measured["workUnits"].as_u64().unwrap() > 0);
+    assert!(measured["chargedBytes"].as_u64().unwrap() > 0);
+    assert!(inv.control.stop_cause().unwrap().is_none());
+    inv.control
+        .ordered_child(inv.control.deadline())
+        .unwrap()
+        .check()
+        .unwrap();
+    verify(&f, &out);
+}
+#[test]
+fn local_default_scalar_cardinality_and_analyze_decode_failure_publish_no_capture() {
+    let f = Fixture::new(&[table(
+        "Sample",
+        201,
+        &[("ID", "uint"), ("Name", "text")],
+        &[
+            vec![Cell::U(1), Cell::Text("valid".into())],
+            vec![Cell::U(2), Cell::BadString],
+        ],
+    )]);
+    for sql in [
+        "SELECT (SELECT ID,Name FROM Sample WHERE ID=99) FROM Sample WHERE FALSE",
+        "EXPLAIN ANALYZE SELECT Name FROM Sample",
+        "SELECT EXISTS (SELECT ID FROM Sample) FROM Sample WHERE ID=1",
+    ] {
+        let before = captures(&f);
+        assert!(
+            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).is_err(),
+            "{sql}"
+        );
+        assert_eq!(captures(&f), before);
+    }
+}
+
+#[test]
+fn local_default_cast_and_unicode_like_use_real_projected_rows_and_capture() {
+    let f = Fixture::new(&[table(
+        "Sample",
+        201,
+        &[("ID", "uint"), ("Name", "text")],
+        &[
+            vec![Cell::U(1), Cell::Text("猫犬".into())],
+            vec![Cell::U(2), Cell::Text("Warrior".into())],
+        ],
+    )]);
+    for (sql, want) in [
+        (
+            "SELECT CAST(ID AS TEXT),Name FROM Sample WHERE Name LIKE '_犬'",
+            json!([["1", "猫犬"]]),
+        ),
+        (
+            "SELECT CAST(ID AS REAL),CAST('true' AS BOOL) FROM Sample WHERE Name NOT LIKE 'W%'",
+            json!([[1.0, true]]),
+        ),
+        (
+            "SELECT CAST((SELECT ID FROM Sample b WHERE b.ID=a.ID) AS TEXT) FROM Sample a WHERE CAST(a.ID AS TEXT) LIKE '2'",
+            json!([["2"]]),
+        ),
+    ] {
+        let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+        assert_eq!(out.data["result"]["rows"], want, "{sql}");
+        verify(&f, &out);
+    }
+}

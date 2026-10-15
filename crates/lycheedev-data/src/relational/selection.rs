@@ -210,8 +210,11 @@ impl Equality for Rows<'_> {
         emit: &mut Yield<'_>,
     ) -> Result<bool> {
         work.spend()?;
+        let measurement = work.scan_index(self.source);
+        work.scan_call(measurement, true);
         if let Some(ordinals) = self.buckets.get(&Key::of(value)?) {
             for ordinal in ordinals {
+                work.scan_row(measurement);
                 emit(&self.source.rows[*ordinal], work)?;
             }
         }
@@ -349,7 +352,7 @@ fn collect<P: Equality>(
 /// an index, scan records, or decline before candidate evaluation has completed.
 struct Direct<'a> {
     provider: &'a dyn RowProvider,
-    columns: &'a [String],
+    source: &'a Source,
 }
 impl Equality for Direct<'_> {
     fn prepare(&mut self, _: usize, _: &mut Temporary<'_>, _: &mut Work<'_>) -> Result<bool> {
@@ -362,9 +365,15 @@ impl Equality for Direct<'_> {
         work: &mut Work<'_>,
         emit: &mut Yield<'_>,
     ) -> Result<bool> {
-        self.provider
-            .equal(&self.columns[column], value, &mut |row| emit(row, work))
-            .map(|outcome| outcome == EqualityOutcome::Handled)
+        provider::equal(
+            self.source,
+            self.provider,
+            &self.source.columns[column],
+            value,
+            work,
+            emit,
+        )
+        .map(|outcome| outcome == EqualityOutcome::Handled)
     }
 }
 fn equality(
@@ -394,7 +403,7 @@ fn equality(
         return Ok(false);
     };
     let value = eval(value, &[], &source.columns, alias, parameters, work)?;
-    let result = provider.equal(&source.columns[index], &value, &mut |row| emit(row, work))?;
+    let result = provider::equal(source, provider, &source.columns[index], &value, work, emit)?;
     // A decline never erases a stop observed at its boundary.
     if result == EqualityOutcome::Declined {
         work.consume(0)?;
@@ -417,10 +426,7 @@ pub(super) fn visit(
             if equality(source, filter, alias, parameters, provider, work, yield_row)? {
                 return Ok(());
             }
-            let mut direct = Direct {
-                provider,
-                columns: &source.columns,
-            };
+            let mut direct = Direct { provider, source };
             if collect(
                 filter,
                 &source.columns,
@@ -440,10 +446,7 @@ pub(super) fn visit(
         .iter()
         .find_map(|(prepared, column)| std::ptr::eq(*prepared, source).then_some(*column));
     let Some(identity_column) = identity_column else {
-        for row in &source.rows {
-            yield_row(row, work)?;
-        }
-        return Ok(());
+        return provider::visit(source, selected, work, yield_row);
     };
     let mut provider = Rows {
         source,
@@ -462,9 +465,7 @@ pub(super) fn visit(
     // Drop optional index allocations before starting a fallback scan.
     drop(provider);
     if !handled {
-        for row in &source.rows {
-            yield_row(row, work)?;
-        }
+        provider::visit(source, selected, work, yield_row)?;
     }
     Ok(())
 }

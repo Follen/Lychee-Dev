@@ -59,8 +59,13 @@ pub(super) fn visit(
     emit: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
 ) -> Result<()> {
     work.consume(0)?;
+    let measurement = work.scan_index(source);
+    work.scan_call(measurement, false);
     if let Some(provider) = find(source, work) {
-        let mut visit = |row: &[Scalar]| emit(row, work);
+        let mut visit = |row: &[Scalar]| {
+            work.scan_row(measurement);
+            emit(row, work)
+        };
         if let Some(selected) = selected {
             provider.scan_selected(selected, &mut visit)?;
         } else {
@@ -68,23 +73,50 @@ pub(super) fn visit(
         }
     } else {
         for row in &source.rows {
+            work.scan_row(measurement);
             emit(row, work)?;
         }
     }
     work.consume(0)
 }
 
+/// Instrument the real equality callback, including rows yielded before a
+/// speculative IN buffer failure and subsequent fallback. No callback replay.
+pub(super) fn equal(
+    source: &Source,
+    provider: &dyn RowProvider,
+    column: &str,
+    value: &Scalar,
+    work: &mut Work<'_>,
+    emit: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
+) -> Result<EqualityOutcome> {
+    let measurement = work.scan_index(source);
+    let result = provider.equal(column, value, &mut |row| {
+        work.scan_row(measurement);
+        emit(row, work)
+    });
+    // Error-only outcomes return no public plan, except the internal bounded
+    // IN-buffer signal. That error came from a handled provider callback.
+    if !matches!(&result, Ok(EqualityOutcome::Declined)) {
+        work.scan_call(measurement, true);
+    }
+    result
+}
+
 /// Match Go neededColumns: stars, subqueries and unresolved output aliases
 /// retain full rows and must not call ScanSelected, even with all ordinals.
 pub(super) fn projectable(term: &Term, columns: &[String], alias: ColumnOwners<'_>) -> bool {
     match term {
-        Term::InSubquery(..) => false,
+        Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) => false,
         Term::Column(name) => column(columns, alias, name).is_ok(),
         Term::Ordinal(index) => *index < columns.len(),
-        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Aggregate(_, Some(t), _) => {
-            projectable(t, columns, alias)
+        Term::Unary(_, t)
+        | Term::NullTest(t, _)
+        | Term::Cast(t, _)
+        | Term::Aggregate(_, Some(t), _) => projectable(t, columns, alias),
+        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
+            projectable(a, columns, alias) && projectable(b, columns, alias)
         }
-        Term::Binary(a, _, b) => projectable(a, columns, alias) && projectable(b, columns, alias),
         Term::Between(a, b, c, _) => [a, b, c].iter().all(|t| projectable(t, columns, alias)),
         Term::In(t, args, _) => {
             projectable(t, columns, alias) && args.iter().all(|t| projectable(t, columns, alias))

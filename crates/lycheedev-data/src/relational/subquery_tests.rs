@@ -716,6 +716,8 @@ fn subquery_uses_one_work_and_memory_allowance_including_preflight() {
         providers: &providers,
         resolver: None,
         roots: BTreeMap::new(),
+        measure: false,
+        scans: Vec::new(),
     };
     program
         .execute_scoped(&inputs, &BTreeMap::new(), &mut work)
@@ -1232,4 +1234,217 @@ fn incomplete_nested_source_marks_outer_result_incomplete() {
     let result = owned("SELECT ID FROM a WHERE ID IN (SELECT ID FROM b)", &sources).unwrap();
     assert_eq!(result.rows, ids(&[1, 3]));
     assert!(!result.complete);
+}
+
+#[test]
+fn scalar_and_exists_match_fixed_go_expression_cases() {
+    for (sql, expected) in [
+        (
+            "SELECT (SELECT Name FROM b WHERE ID=3) FROM a WHERE ID=1",
+            vec![vec![Scalar::String("z".into())]],
+        ),
+        (
+            "SELECT (SELECT Name FROM b WHERE ID=9) FROM a WHERE ID=1",
+            vec![vec![Scalar::Null]],
+        ),
+        (
+            "SELECT ID FROM a WHERE EXISTS (SELECT ID,Name FROM b WHERE ID=3) ORDER BY ID",
+            ids(&[1, 2, 3]),
+        ),
+        (
+            "SELECT ID FROM a WHERE NOT EXISTS (SELECT ID FROM b WHERE b.ID=a.ID) ORDER BY ID",
+            ids(&[2]),
+        ),
+        (
+            "SELECT EXISTS (SELECT NULL FROM b), NOT EXISTS (SELECT NULL FROM b WHERE FALSE) FROM a WHERE ID=1",
+            vec![vec![Scalar::Bool(true), Scalar::Bool(true)]],
+        ),
+    ] {
+        assert_eq!(run(sql).unwrap().rows, expected, "{sql}");
+    }
+}
+#[test]
+fn scalar_cardinality_and_empty_input_schema_are_not_deferred() {
+    for sql in [
+        "SELECT (SELECT ID FROM b) FROM a",
+        "SELECT (SELECT ID,Name FROM b WHERE ID=9) FROM a",
+        "SELECT (SELECT ID,Name FROM b) FROM a WHERE FALSE",
+        "SELECT CASE WHEN FALSE THEN (SELECT ID,Name FROM b) ELSE ID END FROM a",
+    ] {
+        assert_eq!(
+            run(sql).unwrap_err().code,
+            "relational.invalid_cardinality",
+            "{sql}"
+        );
+    }
+    // More than one row is only a runtime violation; plain EXPLAIN remains schema-only.
+    assert!(run("EXPLAIN SELECT (SELECT ID FROM b) FROM a").is_ok());
+}
+#[test]
+fn scalar_and_exists_preserve_group_visibility_and_aggregate_input_scope() {
+    for (sql, expected) in [
+        (
+            "SELECT a.ID,COUNT(*),(SELECT COUNT(*) FROM b WHERE b.ID=a.ID) FROM a GROUP BY a.ID ORDER BY a.ID",
+            vec![vec![1, 1, 2], vec![2, 1, 0], vec![3, 1, 1]],
+        ),
+        (
+            "SELECT a.ID,COUNT(*) FROM a GROUP BY a.ID HAVING EXISTS (SELECT ID FROM b WHERE b.ID=a.ID) ORDER BY a.ID",
+            vec![vec![1, 1], vec![3, 1]],
+        ),
+        (
+            "SELECT COUNT(*),(SELECT COUNT(*) FROM b) FROM a WHERE ID=9",
+            vec![vec![0, 3]],
+        ),
+        (
+            "SELECT a.ID,COUNT(*) FROM a GROUP BY a.ID ORDER BY (SELECT COUNT(*) FROM b WHERE b.ID=a.ID) DESC",
+            vec![vec![1, 1], vec![3, 1], vec![2, 1]],
+        ),
+        (
+            "SELECT SUM((SELECT COUNT(*) FROM b WHERE b.ID=a.ID)) FROM a",
+            vec![vec![3]],
+        ),
+        (
+            "SELECT (SELECT COUNT(*) FROM b WHERE b.ID=a.ID) AS n,COUNT(*) FROM a GROUP BY (SELECT COUNT(*) FROM b WHERE b.ID=a.ID) ORDER BY n",
+            vec![vec![0, 1], vec![1, 1], vec![2, 1]],
+        ),
+    ] {
+        assert_eq!(
+            run(sql).unwrap().rows,
+            expected
+                .into_iter()
+                .map(|row| row.into_iter().map(Scalar::Int).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            "{sql}"
+        );
+    }
+    for sql in [
+        "SELECT COUNT(*),(SELECT a.Name FROM b WHERE ID=3) FROM a",
+        "SELECT a.ID,(SELECT a.Name FROM b WHERE ID=3) FROM a GROUP BY a.ID",
+        "SELECT COUNT(*) FROM a HAVING EXISTS (SELECT ID FROM b WHERE b.Name=a.Name)",
+    ] {
+        assert_eq!(
+            run(sql).unwrap_err().code,
+            "relational.invalid_binding",
+            "{sql}"
+        );
+    }
+}
+#[test]
+fn exists_and_scalar_finish_provider_before_returning_boolean_or_cardinality() {
+    for sql in [
+        "SELECT EXISTS (SELECT ID FROM b) FROM a WHERE ID=1",
+        "SELECT (SELECT ID FROM b) FROM a WHERE ID=1",
+    ] {
+        let (_, a, mut b) = providers();
+        b.fail_after = Some(2);
+        assert_eq!(
+            lazy(sql, &a, &b, Limits::default(), None, None)
+                .unwrap_err()
+                .code,
+            "fixture.rhs_error"
+        );
+        assert_eq!(b.scans(), 1);
+    }
+}
+#[test]
+fn scalar_and_exists_bind_unreachable_nested_sources_without_scan() {
+    for sql in [
+        "SELECT CASE WHEN FALSE THEN EXISTS (SELECT Missing FROM b) ELSE TRUE END FROM a",
+        "SELECT (SELECT Missing FROM b) FROM a WHERE FALSE",
+    ] {
+        let (trace, a, b) = providers();
+        assert_eq!(
+            lazy(sql, &a, &b, Limits::default(), None, None)
+                .unwrap_err()
+                .code,
+            "relational.invalid_binding"
+        );
+        assert!(trace.borrow().is_empty());
+    }
+}
+#[test]
+fn scalar_exists_dependencies_parameters_and_explain_nodes_are_complete() {
+    let sql = "EXPLAIN SELECT (SELECT :scalar FROM b WHERE b.ID=a.ID),EXISTS (SELECT ID,Name FROM b WHERE ID=:exists) FROM a";
+    let program = Program::compile(sql).unwrap();
+    assert_eq!(
+        program.parameters,
+        BTreeSet::from(["exists".into(), "scalar".into()])
+    );
+    assert_eq!(program.source_tables(), vec!["a", "b"]);
+    let (trace, a, b) = providers();
+    let result = lazy(
+        "EXPLAIN SELECT (SELECT Name FROM b WHERE ID=3),EXISTS (SELECT ID,Name FROM b) FROM a",
+        &a,
+        &b,
+        Limits::default(),
+        None,
+        None,
+    )
+    .unwrap();
+    let details = result
+        .plan
+        .unwrap()
+        .steps
+        .into_iter()
+        .filter(|s| s.operation == "expression-subquery")
+        .map(|s| s.detail)
+        .collect::<Vec<_>>();
+    assert_eq!(details, vec!["subquery", "exists"]);
+    assert!(trace.borrow().is_empty());
+}
+#[test]
+fn exists_respects_nested_cancel_and_independent_work_limit() {
+    let (_, a, mut b) = providers();
+    let cancel = Arc::new(AtomicBool::new(false));
+    b.cancel = Some(cancel.clone());
+    assert_eq!(
+        lazy(
+            "SELECT EXISTS (SELECT ID FROM b) FROM a",
+            &a,
+            &b,
+            Limits::default(),
+            Some(&cancel),
+            None
+        )
+        .unwrap_err()
+        .code,
+        "operation.cancelled"
+    );
+    assert_eq!(b.scans(), 1);
+    let (_, a, b) = providers();
+    assert_eq!(
+        lazy(
+            "SELECT EXISTS (SELECT ID FROM b) FROM a",
+            &a,
+            &b,
+            Limits {
+                work: 1,
+                ..Limits::default()
+            },
+            None,
+            None
+        )
+        .unwrap_err()
+        .code,
+        "relational.resource_limit"
+    );
+}
+#[test]
+fn analyze_correlated_queries_measure_actual_complete_callback_counts() {
+    let (_, a, b) = providers();
+    let result=lazy("EXPLAIN ANALYZE SELECT a.ID,EXISTS (SELECT ID FROM b WHERE b.ID=a.ID),(SELECT COUNT(*) FROM b WHERE b.ID=a.ID) FROM a ORDER BY a.ID",&a,&b,Limits::default(),None,None).unwrap();
+    assert!(result.columns.is_empty() && result.rows.is_empty());
+    let measured = result.plan.unwrap().measured.unwrap();
+    assert_eq!(measured.output_rows, 3);
+    assert_eq!(
+        measured
+            .scans
+            .iter()
+            .map(|s| (s.table.name.as_str(), s.calls, s.rows, s.lookups))
+            .collect::<Vec<_>>(),
+        vec![("a", 1, 3, 0), ("b", 6, 18, 0)]
+    );
+    assert!(measured.work_units > 0 && measured.charged_bytes > 0);
+    assert_eq!(a.scans(), 1);
+    assert_eq!(b.scans(), 6);
 }

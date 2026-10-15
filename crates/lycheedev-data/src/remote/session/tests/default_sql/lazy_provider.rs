@@ -195,3 +195,84 @@ fn default_remote_root_resolution_reuses_case_canonical_table_across_passes() {
     f.verify(&out);
     f.close();
 }
+
+#[test]
+fn default_remote_scalar_exists_and_analyze_use_one_session_and_original_capture() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    let sql = "SELECT r.ID,(SELECT x.ID FROM RemoteSample x WHERE x.ID=r.ID),EXISTS (SELECT ID FROM RemoteSample x WHERE x.ID=r.ID) FROM RemoteSample r ORDER BY r.ID";
+    let out = crate::dispatch(&f.invocation(sql)).unwrap();
+    assert_eq!(
+        out.data["result"]["rows"],
+        json!([[7, 7, true], [8, 8, true], [9, 9, true]])
+    );
+    assert_eq!(out.data["sources"].as_array().unwrap().len(), 1);
+    f.verify(&out);
+    let inv =
+        f.invocation("EXPLAIN ANALYZE SELECT ID FROM RemoteSample WHERE ID IN (9,7,9.0,NULL,8)");
+    let out = crate::dispatch(&inv).unwrap();
+    assert_eq!(out.data["result"]["rows"], Value::Null);
+    assert_eq!(
+        out.data["result"]["plan"]["measured"]["scans"],
+        json!([{"table":{"catalog":"static","name":"remotesample"},"calls":4,"rows":3,"lookups":4}])
+    );
+    assert_eq!(out.data["result"]["plan"]["measured"]["outputRows"], 3);
+    assert!(inv.control.stop_cause().unwrap().is_none());
+    inv.control
+        .ordered_child(inv.control.deadline())
+        .unwrap()
+        .check()
+        .unwrap();
+    f.verify(&out);
+    f.close();
+}
+#[test]
+fn default_remote_effective_analyze_uses_true_overlay_lookup_and_capture_identity() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    let cache = f.hotfix_capture(&f.snapshot, true, false);
+    let out = crate::dispatch(&f.effective_invocation(
+        "EXPLAIN ANALYZE SELECT ID FROM effective.RemoteSample WHERE ID IN (9,7,9.0,NULL,8)",
+        std::slice::from_ref(&cache),
+    ))
+    .unwrap();
+    assert_eq!(
+        out.data["result"]["plan"]["measured"]["scans"],
+        json!([{"table":{"catalog":"effective","name":"remotesample"},"calls":4,"rows":3,"lookups":4}])
+    );
+    assert_eq!(out.data["effectiveSources"][0]["captures"][0]["id"], cache);
+    f.verify(&out);
+    f.close();
+}
+#[test]
+fn default_remote_analyze_and_scalar_failures_return_no_partial_capture() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    for sql in [
+        "SELECT (SELECT ID FROM RemoteSample) FROM RemoteSample",
+        "EXPLAIN ANALYZE SELECT (SELECT ID FROM RemoteSample) FROM RemoteSample",
+        "SELECT (SELECT ID,ID FROM RemoteSample WHERE FALSE) FROM RemoteSample WHERE FALSE",
+    ] {
+        let before = f.captures().len();
+        assert!(crate::dispatch(&f.invocation(sql)).is_err(), "{sql}");
+        assert_eq!(f.captures().len(), before);
+    }
+    f.close();
+}
+
+#[test]
+fn default_remote_cast_like_complete_lazy_scan_and_capture() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    let out=crate::dispatch(&f.invocation("SELECT CAST(ID AS TEXT),CAST('true' AS BOOLEAN) FROM RemoteSample WHERE CAST(ID AS TEXT) LIKE '9'")).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([["9", true]]));
+    f.verify(&out);
+    let out =
+        crate::dispatch(&f.invocation(
+            "EXPLAIN ANALYZE SELECT ID FROM RemoteSample WHERE CAST(ID AS TEXT) LIKE '_'",
+        ))
+        .unwrap();
+    assert_eq!(out.data["result"]["plan"]["measured"]["outputRows"], 3);
+    assert_eq!(
+        out.data["result"]["plan"]["measured"]["scans"][0]["rows"],
+        3
+    );
+    f.verify(&out);
+    f.close();
+}

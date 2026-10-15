@@ -302,34 +302,9 @@ impl<'a> Buffer<'a> {
     }
 }
 fn scalar(value: &Scalar) -> Result<Cow<'_, str>> {
-    Ok(match value {
-        Scalar::Null => Cow::Borrowed(""),
-        Scalar::String(s) => Cow::Borrowed(s),
-        Scalar::Bool(true) => Cow::Borrowed("true"),
-        Scalar::Bool(false) => Cow::Borrowed("false"),
-        Scalar::Int(n) => Cow::Owned(n.to_string()),
-        Scalar::UInt(n) => Cow::Owned(n.to_string()),
-        Scalar::Float(n) => {
-            if !n.is_finite() {
-                return Err(fault("relational.numeric_range", 4, "Nonfinite SQL scalar"));
-            }
-            let absolute = n.abs();
-            let text = if absolute != 0.0 && !(1e-4..1e6).contains(&absolute) {
-                let scientific = format!("{n:e}");
-                let (mantissa, exponent) = scientific
-                    .split_once('e')
-                    .ok_or_else(|| fault("records.internal", 8, "Missing exponent"))?;
-                let exponent: i32 = exponent
-                    .parse()
-                    .map_err(|_| fault("records.internal", 8, "Invalid exponent"))?;
-                format!("{mantissa}e{exponent:+03}")
-            } else {
-                n.to_string()
-            };
-            Cow::Owned(text)
-        }
-    })
+    crate::relational::scalar_text(value)
 }
+
 fn encode(
     columns: &[String],
     rows: &[Vec<Scalar>],

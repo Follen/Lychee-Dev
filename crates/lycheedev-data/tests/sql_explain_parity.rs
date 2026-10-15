@@ -70,7 +70,7 @@ fn explain_still_rejects_duplicate_identity_indices() {
     assert_eq!(count(&fx), before);
 }
 #[test]
-fn explain_failure_is_no_capture_and_analyze_is_explicitly_incomplete() {
+fn explain_failure_is_no_capture_and_analyze_commits_real_measurements() {
     let fx = fixture(false);
     let before = count(&fx);
     for sql in [
@@ -81,12 +81,21 @@ fn explain_failure_is_no_capture_and_analyze_is_explicitly_incomplete() {
         assert!(run(&fx, sql).is_err(), "{sql}");
         assert_eq!(count(&fx), before);
     }
-    let error = run(&fx, "EXPLAIN ANALYZE SELECT ID FROM Sample").unwrap_err();
+    let out = run(&fx, "EXPLAIN ANALYZE SELECT ID FROM Sample").unwrap();
+    let measured = &out.data["result"]["plan"]["measured"];
+    assert_eq!(measured["outputRows"], 1);
     assert_eq!(
-        (error.code.as_str(), error.exit_code),
-        ("query.unsupported_expression", 3)
+        measured["scans"],
+        json!([{"table":{"catalog":"static","name":"sample"},"calls":1,"rows":1}])
     );
-    assert_eq!(count(&fx), before);
+    assert_eq!(count(&fx), before + 1);
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &evidence::read_blob(&fx.home, &out.provenance[0]["blob"], 16 << 20).unwrap()
+        )
+        .unwrap(),
+        out.data
+    );
     verify(&fx, &run(&fx, "EXPLAIN SELECT ID FROM Sample").unwrap());
 }
 #[test]

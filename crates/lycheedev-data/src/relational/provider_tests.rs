@@ -186,6 +186,8 @@ fn visit_selection(
         providers: &providers,
         resolver: None,
         roots: BTreeMap::new(),
+        measure: false,
+        scans: Vec::new(),
     };
     selection::visit(
         source,
@@ -924,6 +926,8 @@ fn schema_preflight_and_execution_share_the_original_remaining_work() {
         providers: &registry,
         resolver: None,
         roots: BTreeMap::new(),
+        measure: false,
+        scans: Vec::new(),
     };
     program
         .execute_scoped(&sources, &BTreeMap::new(), &mut work)
@@ -966,6 +970,8 @@ fn owned_join_right_rows_pay_the_same_full_copy_cost_as_provider_rows() {
             providers: &[],
             resolver: None,
             roots: BTreeMap::new(),
+            measure: false,
+            scans: Vec::new(),
         };
         let plan = joins::prepare(
             &program.table,
@@ -1108,4 +1114,142 @@ fn selected_column_helper_uses_the_actual_alias_and_marks_ordinals() {
         &mut selected,
     );
     assert_eq!(selected, vec![true, true, false]);
+}
+
+#[test]
+fn analyze_equal_and_numeric_in_report_only_actual_handled_callbacks() {
+    for (predicate, calls, rows) in [("ID=2", 1, 1), ("ID IN (3,1,3.0,NULL,2)", 4, 3)] {
+        let trace = Trace::default();
+        let source = schema(&["ID", "Name"]);
+        let provider = Fixture::new("t", &trace, vec![row(1, "a"), row(2, "b"), row(3, "c")]);
+        let result = run(
+            &format!("EXPLAIN ANALYZE SELECT ID FROM t WHERE {predicate}"),
+            &[("t", &source, &provider)],
+            &BTreeMap::new(),
+            Limits::default(),
+            None,
+        )
+        .unwrap();
+        let measured = result.plan.unwrap().measured.unwrap();
+        assert_eq!(
+            (
+                measured.scans[0].calls,
+                measured.scans[0].rows,
+                measured.scans[0].lookups
+            ),
+            (calls, rows, calls)
+        );
+        assert_eq!(measured.output_rows, rows as usize);
+        assert_eq!(provider.scans(), 0);
+    }
+}
+#[test]
+fn analyze_decline_counts_handled_rows_then_one_real_fallback_scan() {
+    let trace = Trace::default();
+    let source = schema(&["ID", "Name"]);
+    let mut provider = Fixture::new("t", &trace, vec![row(1, "a"), row(2, "b"), row(3, "c")]);
+    provider.decline_on = Some(2);
+    let result = run(
+        "EXPLAIN ANALYZE SELECT ID FROM t WHERE ID IN (1,2,3)",
+        &[("t", &source, &provider)],
+        &BTreeMap::new(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
+    let measured = result.plan.unwrap().measured.unwrap();
+    let scan = &measured.scans[0];
+    assert_eq!((scan.calls, scan.rows, scan.lookups), (2, 4, 1));
+    assert_eq!(measured.output_rows, 3);
+    assert_eq!(provider.scans(), 1);
+    assert_eq!(provider.lookups.borrow().len(), 2);
+}
+#[test]
+fn analyze_buffer_failure_counts_partial_lookup_and_fallback_without_replay() {
+    let trace = Trace::default();
+    let source = schema(&["ID", "Name"]);
+    let mut provider = Fixture::new("t", &trace, vec![row(1, "a"), row(2, "b")]);
+    provider.lookup_rows = Some((0..100).map(|_| row(1, &"x".repeat(1024))).collect());
+    let result = run(
+        "EXPLAIN ANALYZE SELECT ID FROM t WHERE ID IN (1,2)",
+        &[("t", &source, &provider)],
+        &BTreeMap::new(),
+        Limits {
+            memory_bytes: 16 << 10,
+            ..Limits::default()
+        },
+        None,
+    )
+    .unwrap();
+    let measured = result.plan.unwrap().measured.unwrap();
+    let scan = &measured.scans[0];
+    let lookup_rows = trace
+        .borrow()
+        .iter()
+        .filter(|s| s.ends_with("lookup_row"))
+        .count() as u64;
+    assert!(lookup_rows > 0 && lookup_rows < 100);
+    assert_eq!(
+        (scan.calls, scan.rows, scan.lookups),
+        (2, lookup_rows + 2, 1)
+    );
+    assert_eq!(measured.output_rows, 2);
+    assert_eq!(provider.scans(), 1);
+    assert_eq!(provider.lookups.borrow().len(), 1);
+}
+#[test]
+fn analyze_join_and_selected_scan_count_physical_callbacks_only() {
+    let trace = Trace::default();
+    let a = schema(&["ID", "Name"]);
+    let b = schema(&["ID", "Name"]);
+    let left = Fixture::new("a", &trace, vec![row(1, "a"), row(2, "b"), row(3, "c")]);
+    let right = Fixture::new("b", &trace, vec![row(1, "x"), row(1, "y"), row(3, "z")]);
+    let result = run(
+        "EXPLAIN ANALYZE SELECT a.ID FROM a LEFT JOIN b ON a.ID=b.ID ORDER BY a.ID LIMIT 2",
+        &[("a", &a, &left), ("b", &b, &right)],
+        &BTreeMap::new(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
+    let measured = result.plan.unwrap().measured.unwrap();
+    assert_eq!(measured.output_rows, 2);
+    assert_eq!(measured.scans.len(), 2);
+    for scan in &measured.scans {
+        assert_eq!((scan.calls, scan.rows, scan.lookups), (1, 3, 0));
+    }
+    assert_eq!(left.scans(), 1);
+    assert_eq!(right.scans(), 1);
+    assert!(!left.selections.borrow().is_empty());
+}
+#[test]
+fn analyze_cte_and_derived_rows_do_not_create_physical_scan_measurements() {
+    let trace = Trace::default();
+    let source = schema(&["ID", "Name"]);
+    let provider = Fixture::new("t", &trace, vec![row(1, "a"), row(2, "b")]);
+    let result=run("EXPLAIN ANALYZE WITH x AS (SELECT ID FROM t) SELECT ID FROM (SELECT ID FROM x UNION ALL SELECT ID FROM x) d",&[("t",&source,&provider)],&BTreeMap::new(),Limits::default(),None).unwrap();
+    let measured = result.plan.unwrap().measured.unwrap();
+    assert_eq!(measured.output_rows, 4);
+    assert_eq!(measured.scans.len(), 1);
+    assert_eq!((measured.scans[0].calls, measured.scans[0].rows), (1, 2));
+    assert_eq!(provider.scans(), 1);
+}
+#[test]
+fn analyze_preflight_is_complete_before_any_real_execution() {
+    let trace = Trace::default();
+    let source = schema(&["ID", "Name"]);
+    let provider = Fixture::new("t", &trace, vec![row(1, "a")]);
+    assert_eq!(
+        run(
+            "EXPLAIN ANALYZE SELECT CASE WHEN FALSE THEN Missing ELSE ID END FROM t",
+            &[("t", &source, &provider)],
+            &BTreeMap::new(),
+            Limits::default(),
+            None
+        )
+        .unwrap_err()
+        .code,
+        "relational.invalid_binding"
+    );
+    assert!(trace.borrow().is_empty());
 }

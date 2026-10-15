@@ -129,8 +129,8 @@ fn equal_key(value: &Scalar, work: &mut Work<'_>) -> Result<String> {
 pub(super) fn contains(term: &Term) -> bool {
     match term {
         Term::Aggregate(..) => true,
-        Term::Unary(_, t) | Term::NullTest(t, _) => contains(t),
-        Term::Binary(a, _, b) => contains(a) || contains(b),
+        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => contains(t),
+        Term::Binary(a, _, b) | Term::Like(a, b, _) => contains(a) || contains(b),
         Term::Between(a, b, c, _) => contains(a) || contains(b) || contains(c),
         Term::In(t, args, _) => contains(t) || args.iter().any(contains),
         // Inner aggregates belong to the nested query, not this group.
@@ -256,6 +256,15 @@ impl Grouping {
                 op.clone(),
                 Box::new(recurse(self, b, work)?),
             ),
+            Term::Cast(t, kind) => {
+                scalar::cast_kind(kind)?;
+                Term::Cast(Box::new(recurse(self, t, work)?), kind.clone())
+            }
+            Term::Like(a, b, negated) => Term::Like(
+                Box::new(recurse(self, a, work)?),
+                Box::new(recurse(self, b, work)?),
+                *negated,
+            ),
             Term::NullTest(t, n) => Term::NullTest(Box::new(recurse(self, t, work)?), *n),
             Term::Between(a, b, c, n) => Term::Between(
                 Box::new(recurse(self, a, work)?),
@@ -270,12 +279,46 @@ impl Grouping {
                     .collect::<Result<Vec<_>>>()?,
                 *n,
             ),
+            Term::ScalarSubquery(query) | Term::Exists(query) => {
+                if work.planning {
+                    if matches!(node, Term::Exists(_)) {
+                        subquery::execute_any(
+                            query,
+                            &[],
+                            &[],
+                            ColumnOwners::Single(""),
+                            params,
+                            context,
+                            work,
+                        )?;
+                    } else {
+                        subquery::execute(
+                            query,
+                            &[],
+                            &[],
+                            ColumnOwners::Single(""),
+                            params,
+                            context,
+                            work,
+                        )?;
+                    }
+                }
+                node.clone()
+            }
             Term::InSubquery(input, query, negated) => {
                 if work.planning {
                     // Only direct GROUP BY columns are visible to correlated
                     // output/HAVING/order subqueries. Never retain or expose a
                     // representative input row to make a query appear valid.
-                    subquery::execute(query, &[], &[], "", params, context, work)?;
+                    subquery::execute(
+                        query,
+                        &[],
+                        &[],
+                        ColumnOwners::Single(""),
+                        params,
+                        context,
+                        work,
+                    )?;
                 }
                 Term::InSubquery(
                     Box::new(recurse(self, input, work)?),

@@ -21,6 +21,8 @@ fn work(bytes: usize, units: u64) -> Work<'static> {
         providers: &[],
         resolver: None,
         roots: BTreeMap::new(),
+        measure: false,
+        scans: Vec::new(),
     }
 }
 fn capabilities() -> BTreeMap<String, String> {

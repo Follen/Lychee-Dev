@@ -491,8 +491,10 @@ pub(super) fn select(
                 *selected = true;
             }
         }
-        Term::Unary(_, t) | Term::NullTest(t, _) => select(t, columns, alias, selected),
-        Term::Binary(a, _, b) => {
+        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
+            select(t, columns, alias, selected)
+        }
+        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
             select(a, columns, alias, selected);
             select(b, columns, alias, selected);
         }
@@ -509,7 +511,7 @@ pub(super) fn select(
         }
         // Correlations can reference any current input field. Like Go's
         // neededColumns, a nested query disables projection of this scope.
-        Term::InSubquery(..) => selected.fill(true),
+        Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) => selected.fill(true),
         Term::Aggregate(_, Some(input), _) => select(input, columns, alias, selected),
         Term::Aggregate(_, None, _) => {}
         Term::Call(_, items) => {

@@ -92,6 +92,7 @@ pub(super) fn source<'a, 'w: 'a>(
         }
     }
     if let Some(source) = inputs.get(&name.physical_key()) {
+        work.measure_root(name)?;
         return Ok(*source);
     }
     work.resolve_root(name)

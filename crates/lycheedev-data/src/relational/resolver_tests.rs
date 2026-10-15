@@ -183,6 +183,8 @@ fn schema_memory_is_charged_once_to_original_executor_allowance() {
         providers: &[],
         resolver: Some(&resolver),
         roots: BTreeMap::new(),
+        measure: false,
+        scans: Vec::new(),
     };
     let first = work
         .resolve_root(&RelationName::from_key("z").unwrap())

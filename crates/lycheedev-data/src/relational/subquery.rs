@@ -1,6 +1,6 @@
 //! Expression-local query scopes. Frames borrow the current callback/group
 //! row; neither frames nor short-lived lexical Sources enter the shared Work.
-//! Go 3.2.3 evaluates each IN query completely on each expression evaluation.
+//! Go 3.2.3 completes each expression query on each evaluation.
 use super::*;
 
 /// Bound total compiled syntax after removing the old 1024-column/group
@@ -46,15 +46,19 @@ pub(super) fn validate_nodes(program: &Program) -> Result<()> {
                 pending.extend(query.terms().map(Node::Term));
             }
             Node::Term(term) => match term {
+                Term::ScalarSubquery(query) | Term::Exists(query) => {
+                    pending.push(Node::Query(query));
+                }
                 Term::InSubquery(input, query, _) => {
                     pending.push(Node::Query(query));
                     pending.push(Node::Term(input));
                 }
-                Term::Unary(_, t) | Term::NullTest(t, _) | Term::Aggregate(_, Some(t), _) => {
-                    pending.push(Node::Term(t))
-                }
+                Term::Unary(_, t)
+                | Term::NullTest(t, _)
+                | Term::Cast(t, _)
+                | Term::Aggregate(_, Some(t), _) => pending.push(Node::Term(t)),
                 Term::Aggregate(_, None, _) => count += 1,
-                Term::Binary(a, _, b) => {
+                Term::Binary(a, _, b) | Term::Like(a, b, _) => {
                     pending.push(Node::Term(a));
                     pending.push(Node::Term(b));
                 }
@@ -88,7 +92,7 @@ pub(super) fn validate_nodes(program: &Program) -> Result<()> {
 pub(super) fn cardinality() -> lycheedev_core::ToolkitError {
     problem(
         "relational.invalid_cardinality",
-        "IN subquery must return exactly one column",
+        "Subquery must return one column and scalar subqueries at most one row",
     )
 }
 #[derive(Clone, Copy)]
@@ -280,6 +284,21 @@ pub(super) fn execute(
     context: &Context<'_>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
+    let result = execute_any(query, row, columns, alias, parameters, context, work)?;
+    if result.columns.len() != 1 {
+        return Err(cardinality());
+    }
+    Ok(result)
+}
+pub(super) fn execute_any(
+    query: &Program,
+    row: &[Scalar],
+    columns: &[String],
+    alias: ColumnOwners<'_>,
+    parameters: &BTreeMap<String, Scalar>,
+    context: &Context<'_>,
+    work: &mut Work<'_>,
+) -> Result<QueryResult> {
     work.consume(0)?;
     let sources = context.scope.callback.ok_or_else(unsupported)?;
     let resolver = context
@@ -318,21 +337,20 @@ pub(super) fn execute(
     {
         complete.set(false);
     }
-    if result.columns.len() != 1 {
-        return Err(cardinality());
-    }
     Ok(result)
 }
 pub(super) fn visit_queries<'a>(term: &'a Term, emit: &mut impl FnMut(&'a Program)) {
     match term {
+        Term::ScalarSubquery(query) | Term::Exists(query) => emit(query),
         Term::InSubquery(input, query, _) => {
             emit(query);
             visit_queries(input, emit);
         }
-        Term::Unary(_, term) | Term::NullTest(term, _) | Term::Aggregate(_, Some(term), _) => {
-            visit_queries(term, emit)
-        }
-        Term::Binary(a, _, b) => {
+        Term::Unary(_, term)
+        | Term::NullTest(term, _)
+        | Term::Cast(term, _)
+        | Term::Aggregate(_, Some(term), _) => visit_queries(term, emit),
+        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
             visit_queries(a, emit);
             visit_queries(b, emit);
         }
@@ -399,6 +417,8 @@ pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -
         (Term::Binary(a, op, b), Term::Binary(c, other, d)) => {
             op == other && same(a, c) && same(b, d)
         }
+        (Term::Cast(a, kind), Term::Cast(b, other)) => kind == other && same(a, b),
+        (Term::Like(a, b, n), Term::Like(c, d, m)) => n == m && same(a, c) && same(b, d),
         (Term::NullTest(a, n), Term::NullTest(b, m)) => n == m && same(a, b),
         (Term::Between(a, b, c, n), Term::Between(d, e, f, m)) => {
             n == m && same(a, d) && same(b, e) && same(c, f)

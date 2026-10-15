@@ -16,7 +16,7 @@ use std::{
 mod aggregate;
 mod compound;
 mod explain;
-pub use explain::{Explanation, PlanStep};
+pub use explain::{ExecutionMeasurement, Explanation, MeasuredTable, PlanStep, ScanMeasurement};
 mod identifiers;
 pub(crate) use identifiers::SourceTableUse;
 use identifiers::{ColumnOwners, ColumnRef, RelationName};
@@ -24,6 +24,8 @@ mod joins;
 mod provider;
 pub(crate) use provider::{EqualityOutcome, PreparedSource, RootResolver, RowProvider, RowYield};
 mod recursive;
+mod scalar;
+pub(crate) use scalar::text as scalar_text;
 mod selection;
 mod subquery;
 mod topk;
@@ -84,6 +86,9 @@ fn integer(value: i128) -> Result<Scalar> {
 pub(crate) fn literal(text: &str) -> Result<Scalar> {
     if text.len() > 1024 {
         return Err(numeric());
+    }
+    if !scalar::decimal_literal(text) {
+        return Err(type_error());
     }
     if text.contains(['.', 'e', 'E']) {
         let v = text.parse::<f64>().map_err(|_| numeric())?;
@@ -225,9 +230,13 @@ enum Term {
     Unary(UnaryOperator, Box<Term>),
     Binary(Box<Term>, BinaryOperator, Box<Term>),
     NullTest(Box<Term>, bool),
+    Cast(Box<Term>, String),
+    Like(Box<Term>, Box<Term>, bool),
     Between(Box<Term>, Box<Term>, Box<Term>, bool),
     In(Box<Term>, Vec<Term>, bool),
     InSubquery(Box<Term>, std::sync::Arc<Program>, bool),
+    ScalarSubquery(std::sync::Arc<Program>),
+    Exists(std::sync::Arc<Program>),
     Call(String, Vec<Term>),
     Aggregate(String, Option<Box<Term>>, bool),
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
@@ -288,6 +297,23 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
                 Box::new(nested(right)?),
             )
         }
+        Expr::Cast {
+            kind: CastKind::Cast,
+            expr,
+            data_type,
+            format: None,
+        } => Term::Cast(Box::new(nested(expr)?), scalar::cast_name(data_type)?),
+        Expr::Like {
+            negated,
+            any: false,
+            expr,
+            pattern,
+            escape_char: None,
+        } => Term::Like(
+            Box::new(nested(expr)?),
+            Box::new(nested(pattern)?),
+            *negated,
+        ),
         Expr::IsNull(e) => Term::NullTest(Box::new(nested(e)?), false),
         Expr::IsNotNull(e) => Term::NullTest(Box::new(nested(e)?), true),
         Expr::Between {
@@ -320,6 +346,22 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
             parameters.extend(query.parameters.iter().cloned());
             Term::InSubquery(Box::new(input), std::sync::Arc::new(query), *negated)
         }
+        Expr::Subquery(subquery) | Expr::Exists { subquery, .. } => {
+            let query = Program::compile_query(*subquery.clone(), depth + 1)?;
+            parameters.extend(query.parameters.iter().cloned());
+            let query = std::sync::Arc::new(query);
+            match expr {
+                Expr::Exists { negated, .. } => {
+                    let exists = Term::Exists(query);
+                    if *negated {
+                        Term::Unary(UnaryOperator::Not, Box::new(exists))
+                    } else {
+                        exists
+                    }
+                }
+                _ => Term::ScalarSubquery(query),
+            }
+        }
         Expr::Function(function) => {
             if function.over.is_some()
                 || function.filter.is_some()
@@ -335,7 +377,7 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
             if !args.clauses.is_empty() {
                 return Err(unsupported());
             }
-            let name = function.name.to_string().to_ascii_uppercase();
+            let name = scalar::name(&function.name)?;
             if ["COUNT", "MIN", "MAX", "SUM", "AVG"].contains(&name.as_str()) {
                 if args.args.len() != 1 {
                     return Err(type_error());
@@ -433,7 +475,7 @@ fn bind_with_aggregates(
         Term::Unary(_, t) | Term::NullTest(t, _) => {
             bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?
         }
-        Term::Binary(a, _, b) => {
+        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
             bind_with_aggregates(a, columns, alias, params, allow_aggregates, context, work)?;
             bind_with_aggregates(b, columns, alias, params, allow_aggregates, context, work)?;
         }
@@ -457,6 +499,30 @@ fn bind_with_aggregates(
             if work.planning {
                 subquery::execute(query, &[], columns, alias, params, context, work)?;
             }
+            bind_with_aggregates(
+                input,
+                columns,
+                alias,
+                params,
+                allow_aggregates,
+                context,
+                work,
+            )?;
+        }
+        Term::ScalarSubquery(query) | Term::Exists(query) => {
+            if context.scope.callback.is_none() {
+                return Err(unsupported());
+            }
+            if work.planning {
+                if matches!(term, Term::Exists(_)) {
+                    subquery::execute_any(query, &[], columns, alias, params, context, work)?;
+                } else {
+                    subquery::execute(query, &[], columns, alias, params, context, work)?;
+                }
+            }
+        }
+        Term::Cast(input, kind) => {
+            scalar::cast_kind(kind)?;
             bind_with_aggregates(
                 input,
                 columns,
@@ -611,8 +677,45 @@ struct Work<'a> {
     providers: &'a [PreparedSource<'a>],
     resolver: Option<&'a dyn RootResolver>,
     roots: BTreeMap<String, &'a Source>,
+    measure: bool,
+    scans: Vec<(&'a Source, explain::ScanMeasurement)>,
 }
 impl<'a> Work<'a> {
+    fn measure_source(&mut self, name: &RelationName, source: &'a Source) -> Result<()> {
+        if !self.measure {
+            return Ok(());
+        }
+        let table = explain::MeasuredTable {
+            catalog: identifier_lower(name.table_use().catalog),
+            name: identifier_lower(&name.name),
+        };
+        if self.scans.iter().any(|(_, scan)| scan.table == table) {
+            return Ok(());
+        }
+        if let Some(shared) = self.shared {
+            shared
+                .safety_only()
+                .charge(crate::resource::Cost::retained(
+                    256 + table.catalog.len() + table.name.len(),
+                ))?;
+        }
+        self.scans.push((
+            source,
+            explain::ScanMeasurement {
+                table,
+                calls: 0,
+                rows: 0,
+                lookups: 0,
+            },
+        ));
+        Ok(())
+    }
+    fn measure_root(&mut self, name: &RelationName) -> Result<()> {
+        if let Some(source) = self.roots.get(&name.physical_key()).copied() {
+            self.measure_source(name, source)?;
+        }
+        Ok(())
+    }
     fn resolve_root(&mut self, name: &RelationName) -> Result<&'a Source> {
         if name.name.starts_with('\0') {
             return Err(binding());
@@ -639,11 +742,41 @@ impl<'a> Work<'a> {
                 .safety_only()
                 .charge(crate::resource::Cost::retained(key.len() + 96))?;
         }
+        self.measure_source(name, source)?;
         self.roots.insert(key, source);
         Ok(source)
     }
 }
 impl Work<'_> {
+    fn scan_index(&self, source: &Source) -> Option<usize> {
+        self.scans
+            .iter()
+            .position(|(root, _)| std::ptr::eq(*root, source))
+    }
+    fn scan_call(&mut self, index: Option<usize>, lookup: bool) {
+        if let Some(index) = index {
+            self.scans[index].1.calls += 1;
+            self.scans[index].1.lookups += u64::from(lookup);
+        }
+    }
+    fn scan_row(&mut self, index: Option<usize>) {
+        if let Some(index) = index {
+            self.scans[index].1.rows += 1;
+        }
+    }
+    fn measured(&mut self, limits: &Limits, output_rows: usize) -> explain::ExecutionMeasurement {
+        let mut scans: Vec<_> = std::mem::take(&mut self.scans)
+            .into_iter()
+            .map(|(_, scan)| scan)
+            .collect();
+        scans.sort_by(|a, b| a.table.cmp(&b.table));
+        explain::ExecutionMeasurement {
+            scans,
+            work_units: limits.work - self.left,
+            charged_bytes: limits.memory_bytes - self.bytes,
+            output_rows,
+        }
+    }
     fn spend(&mut self) -> Result<()> {
         self.consume(1)
     }
@@ -672,7 +805,13 @@ impl Work<'_> {
             if text.len() > 1 << 20 {
                 return Err(budget());
             }
-            self.retain(text.len())?;
+            // Go scalars share immutable strings; row/group ownership has its
+            // own logical charge. Only Rust's necessary clone is additional.
+            if let Some(shared) = self.shared {
+                shared
+                    .safety_only()
+                    .charge(crate::resource::Cost::retained(text.len()))?;
+            }
         }
         Ok(value.clone())
     }
@@ -687,7 +826,7 @@ fn case_text(text: &str, upper: bool, work: &mut Work<'_>) -> Result<String> {
     let mut bytes = 0usize;
     for (i, c) in text.chars().enumerate() {
         if i % 4096 == 0 {
-            work.spend()?;
+            work.consume(0)?;
         }
         bytes = bytes
             .checked_add(crate::unicode_simple::map(c, upper).len_utf8())
@@ -696,11 +835,15 @@ fn case_text(text: &str, upper: bool, work: &mut Work<'_>) -> Result<String> {
     if bytes > 1 << 20 {
         return Err(budget());
     }
-    work.retain(bytes)?;
+    if let Some(shared) = work.shared {
+        shared
+            .safety_only()
+            .charge(crate::resource::Cost::retained(bytes))?;
+    }
     let mut output = String::with_capacity(bytes);
     for (i, c) in text.chars().enumerate() {
         if i % 4096 == 0 {
-            work.spend()?;
+            work.consume(0)?;
         }
         output.push(crate::unicode_simple::map(c, upper));
     }
@@ -892,6 +1035,35 @@ fn eval_scoped(
                 Scalar::Bool(*negated)
             })
         }
+        Term::Cast(input, kind) => {
+            let input = value(input)?;
+            scalar::cast(input, kind, work)
+        }
+        Term::Like(input, pattern, negated) => {
+            let input = value(input)?;
+            let pattern = value(pattern)?;
+            scalar::like(&input, &pattern, *negated, work)
+        }
+        Term::ScalarSubquery(query) => {
+            let result = subquery::execute(query, row, columns, alias, params, context, work)?;
+            if result.rows.len() > 1 {
+                return Err(subquery::cardinality());
+            }
+            // The nested executor already owns and canonicalizes its scalar.
+            // Move it out rather than cloning/recharging a returned string.
+            Ok(result
+                .rows
+                .into_iter()
+                .next()
+                .and_then(|row| row.into_iter().next())
+                .unwrap_or(Scalar::Null))
+        }
+        Term::Exists(query) => {
+            // Go completes the query, even after the first row. Later provider,
+            // type, cancellation and budget failures cannot be hidden by EXISTS.
+            let result = subquery::execute_any(query, row, columns, alias, params, context, work)?;
+            Ok(Scalar::Bool(!result.rows.is_empty()))
+        }
         Term::Case(operand, cases, fallback) => {
             let operand = operand.as_ref().map(|v| value(v)).transpose()?;
             for (test, result) in cases {
@@ -927,46 +1099,55 @@ fn eval_scoped(
                 }
                 return Ok(Scalar::Null);
             }
-            work.retain(
-                args.len()
-                    .checked_mul(std::mem::size_of::<Scalar>())
-                    .ok_or_else(budget)?,
-            )?;
-            let values = args
-                .iter()
-                .map(|arg| eval_scoped(arg, row, columns, alias, params, context, work))
-                .collect::<Result<Vec<_>>>()?;
-            if name == "NULLIF" && values.len() == 2 {
+            if matches!(name.as_str(), "HAS_FLAG" | "BIT_AND") {
+                // Go validates each argument before evaluating the next. A
+                // first NULL suppresses the second; a first bad type wins over
+                // a later NULL, provider failure or numeric-range error.
+                let mut bits = [0u64; 2];
+                for (index, arg) in args.iter().enumerate() {
+                    let scalar = value(arg)?;
+                    if scalar == Scalar::Null {
+                        return Ok(Scalar::Null);
+                    }
+                    bits[index] = int(&scalar).ok_or_else(type_error)? as u64;
+                }
+                return Ok(if name == "HAS_FLAG" {
+                    Scalar::Bool(bits[0] & bits[1] == bits[1])
+                } else {
+                    Scalar::UInt(bits[0] & bits[1])
+                });
+            }
+            let left = value(&args[0])?;
+            if name == "NULLIF" {
+                let right = value(&args[1])?;
                 return Ok(
-                    if values[0] != Scalar::Null
-                        && values[1] != Scalar::Null
-                        && compare(&values[0], &values[1])? == Ordering::Equal
+                    if left != Scalar::Null
+                        && right != Scalar::Null
+                        && compare(&left, &right)? == Ordering::Equal
                     {
                         Scalar::Null
                     } else {
-                        work.clone_scalar(&values[0])?
+                        left
                     },
                 );
             }
-            if values.contains(&Scalar::Null) {
+            if left == Scalar::Null {
                 return Ok(Scalar::Null);
             }
-            match (name.as_str(), values.as_slice()) {
-                ("LOWER", [Scalar::String(v)]) => Ok(Scalar::String(case_text(v, false, work)?)),
-                ("UPPER", [Scalar::String(v)]) => Ok(Scalar::String(case_text(v, true, work)?)),
-                ("LENGTH", [Scalar::String(v)]) => {
-                    work.consume(v.len())?;
-                    Ok(Scalar::Int(v.chars().count() as i64))
+            let Scalar::String(text) = left else {
+                return Err(type_error());
+            };
+            match name.as_str() {
+                "LOWER" => Ok(Scalar::String(case_text(&text, false, work)?)),
+                "UPPER" => Ok(Scalar::String(case_text(&text, true, work)?)),
+                "LENGTH" => {
+                    if text.len() > 1 << 20 {
+                        return Err(budget());
+                    }
+                    work.consume(text.len())?;
+                    Ok(Scalar::Int(text.chars().count() as i64))
                 }
-                ("HAS_FLAG" | "BIT_AND", [a, b]) if int(a).is_some() && int(b).is_some() => {
-                    let (a, b) = (int(a).unwrap() as u64, int(b).unwrap() as u64);
-                    Ok(if name == "HAS_FLAG" {
-                        Scalar::Bool(a & b == b)
-                    } else {
-                        Scalar::UInt(a & b)
-                    })
-                }
-                _ => Err(type_error()),
+                _ => Err(unsupported()),
             }
         }
     }
@@ -1032,6 +1213,8 @@ impl Source {
             providers: &[],
             resolver: None,
             roots: BTreeMap::new(),
+            measure: false,
+            scans: Vec::new(),
         };
         work.consume(0)?;
         if schema_only {
@@ -1117,6 +1300,7 @@ type QuerySuffix = (Vec<(Term, bool, Option<bool>)>, Option<Term>, Option<Term>)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     explain: bool,
+    analyze: bool,
     recursive: bool,
     bindings: Vec<(String, Program)>,
     branches: Vec<Program>,
@@ -1186,7 +1370,7 @@ impl Program {
         if sql.is_empty() || sql.len() > 1 << 20 {
             return Err(budget());
         }
-        let (explain, sql) = explain::prefix(sql)?;
+        let (explain, analyze, sql) = explain::prefix(sql)?;
         compound::validate_all_keyword(&sql)?;
         let mut parser = Parser::new(&GenericDialect {})
             .with_recursion_limit(128)
@@ -1210,6 +1394,7 @@ impl Program {
         let mut program = Self::compile_query(*query, 0)?;
         subquery::validate_nodes(&program)?;
         program.explain = explain;
+        program.analyze = analyze;
         Ok(program)
     }
     fn compile_query(mut query: Query, depth: usize) -> Result<Self> {
@@ -1266,6 +1451,7 @@ impl Program {
                 Self::suffix(query.order_by, query.limit_clause, &mut parameters, depth)?;
             return Ok(Self {
                 explain: false,
+                analyze: false,
                 recursive,
                 bindings,
                 branches,
@@ -1397,6 +1583,7 @@ impl Program {
         }
         Ok(Self {
             explain: false,
+            analyze: false,
             recursive,
             bindings,
             branches: vec![],
@@ -1549,6 +1736,8 @@ impl Program {
             providers: &[],
             resolver: None,
             roots: BTreeMap::new(),
+            measure: self.analyze,
+            scans: Vec::new(),
         };
         work.spend()?;
         if self
@@ -1588,22 +1777,18 @@ impl Program {
         work.retain(sources.keys().map(|s| s.len() + 103).sum())?;
         for (name, source) in sources {
             compound::insert_root(&mut inputs, name, source)?;
+            if work.measure {
+                if let Some(shared) = work.shared {
+                    shared
+                        .safety_only()
+                        .charge(crate::resource::Cost::retained(name.len() + 103))?;
+                }
+                work.roots.insert(compound::physical_key(name)?, source);
+            }
         }
-        let result = self.execute_scoped(&inputs, parameters, &mut work)?;
-        if self.explain {
-            let plan = explain::build(self, result.columns, &mut work)?;
-            return Ok(QueryResult {
-                plan: Some(plan),
-                columns: vec![],
-                rows: vec![],
-                complete: result.complete,
-            });
-        }
-        work.planning = false;
-        let mut actual = self.execute_scoped(&inputs, parameters, &mut work)?;
-        actual.complete &= result.complete;
-        Ok(actual)
+        self.execute_and_explain(&inputs, parameters, limits, &mut work)
     }
+
     /// Query-scoped lazy roots. Owners remain in the caller; lexical computed
     /// Sources cannot inherit these capabilities by name or schema.
     pub(crate) fn execute_providers_budgeted<'a>(
@@ -1629,6 +1814,8 @@ impl Program {
             providers,
             resolver: None,
             roots: BTreeMap::new(),
+            measure: self.analyze,
+            scans: Vec::new(),
         };
         work.spend()?;
         if self
@@ -1676,22 +1863,18 @@ impl Program {
         let mut inputs = BTreeMap::new();
         for (name, source) in sources {
             compound::insert_root(&mut inputs, name, source)?;
+            if work.measure {
+                if let Some(shared) = work.shared {
+                    shared
+                        .safety_only()
+                        .charge(crate::resource::Cost::retained(name.len() + 103))?;
+                }
+                work.roots.insert(compound::physical_key(name)?, source);
+            }
         }
-        let bound = self.execute_scoped(&inputs, parameters, &mut work)?;
-        if self.explain {
-            let plan = explain::build(self, bound.columns, &mut work)?;
-            return Ok(QueryResult {
-                plan: Some(plan),
-                columns: vec![],
-                rows: vec![],
-                complete: bound.complete,
-            });
-        }
-        work.planning = false;
-        let mut actual = self.execute_scoped(&inputs, parameters, &mut work)?;
-        actual.complete &= bound.complete;
-        Ok(actual)
+        self.execute_and_explain(&inputs, parameters, limits, &mut work)
     }
+
     /// Resolve physical roots lazily in the actual schema traversal, sharing
     /// immutable schemas and the original executor allowance with execution.
     pub(crate) fn execute_resolved_budgeted<'a>(
@@ -1716,6 +1899,8 @@ impl Program {
             providers: &[],
             resolver: Some(resolver),
             roots: BTreeMap::new(),
+            measure: self.analyze,
+            scans: Vec::new(),
         };
         work.spend()?;
         if self
@@ -1729,19 +1914,42 @@ impl Program {
             row_cost(std::slice::from_ref(&parameters[name]))?;
         }
         let inputs = BTreeMap::new();
-        let bound = self.execute_scoped(&inputs, parameters, &mut work)?;
-        if self.explain {
-            let plan = explain::build(self, bound.columns, &mut work)?;
+        self.execute_and_explain(&inputs, parameters, limits, &mut work)
+    }
+
+    fn execute_and_explain(
+        &self,
+        inputs: &BTreeMap<String, &Source>,
+        parameters: &BTreeMap<String, Scalar>,
+        limits: Limits,
+        work: &mut Work<'_>,
+    ) -> Result<QueryResult> {
+        let bound = self.execute_scoped(inputs, parameters, work)?;
+        work.planning = false;
+        let mut plan = if self.explain {
+            Some(explain::build(self, bound.columns, work)?)
+        } else {
+            None
+        };
+        if self.explain && !self.analyze {
             return Ok(QueryResult {
-                plan: Some(plan),
+                plan,
                 columns: vec![],
                 rows: vec![],
                 complete: bound.complete,
             });
         }
-        work.planning = false;
-        let mut result = self.execute_scoped(&inputs, parameters, &mut work)?;
+        let mut result = self.execute_scoped(inputs, parameters, work)?;
         result.complete &= bound.complete;
+        if let Some(explanation) = &mut plan {
+            explanation.measured = Some(work.measured(&limits, result.rows.len()));
+            return Ok(QueryResult {
+                plan,
+                columns: vec![],
+                rows: vec![],
+                complete: result.complete,
+            });
+        }
         Ok(result)
     }
     fn execute_scoped(

@@ -63,17 +63,24 @@ fn explain_prefix_comments_case_with_and_trailing_statement_rules() {
     }
 }
 #[test]
-fn analyze_is_explicitly_unavailable_without_fabricated_measurements() {
-    let error = match Program::compile("EXPLAIN ANALYZE SELECT ID FROM a") {
-        Ok(_) => panic!("unverified ANALYZE must not publish"),
-        Err(e) => e,
+fn analyze_executes_real_input_and_plain_explain_has_no_measurement() {
+    let source = Source {
+        columns: vec!["ID".into()],
+        rows: vec![vec![S::Int(1)], vec![S::Int(2)]],
+        complete: true,
     };
-    assert_eq!(
-        (error.code.as_str(), error.exit_code),
-        ("relational.unsupported", 3)
-    );
+    let sources = BTreeMap::from([("a".into(), source)]);
+    let result = Program::compile("/* 界 */ EXPLAIN /* plan */ AnAlYzE SELECT ID FROM a LIMIT 1")
+        .unwrap()
+        .execute(&sources, &BTreeMap::new(), Limits::default(), None)
+        .unwrap();
+    let measured = result.plan.unwrap().measured.unwrap();
+    assert_eq!(measured.output_rows, 1);
+    assert_eq!((measured.scans[0].calls, measured.scans[0].rows), (1, 2));
+    assert!(measured.work_units > 0 && measured.charged_bytes > 0);
     assert!(plan("EXPLAIN SELECT ID FROM a").get("measured").is_none());
 }
+
 #[test]
 fn explain_binds_unreachable_expressions_empty_relations_and_grouping() {
     for sql in [

@@ -1,6 +1,5 @@
-//! Go 3.2.0 execution-shape descriptions. EXPLAIN binds schemas without
-//! executing expressions or visiting source rows. ANALYZE remains unavailable
-//! until provider callbacks and Go logical accounting have an exact contract.
+//! Go 3.2.3 plans and actual query-scoped callback measurements.
+//! Plain EXPLAIN binds schemas without evaluating or visiting source rows.
 use super::*;
 use std::borrow::Cow;
 
@@ -17,9 +16,35 @@ pub struct PlanStep {
 pub struct Explanation {
     pub output_columns: Vec<String>,
     pub steps: Vec<PlanStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured: Option<ExecutionMeasurement>,
+}
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MeasuredTable {
+    pub catalog: String,
+    pub name: String,
+}
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct ScanMeasurement {
+    pub table: MeasuredTable,
+    pub calls: u64,
+    pub rows: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lookups: u64,
+}
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionMeasurement {
+    pub scans: Vec<ScanMeasurement>,
+    pub work_units: u64,
+    pub charged_bytes: usize,
+    pub output_rows: usize,
 }
 
-pub(super) fn prefix(sql: &str) -> Result<(bool, Cow<'_, str>)> {
+pub(super) fn prefix(sql: &str) -> Result<(bool, bool, Cow<'_, str>)> {
     use sqlparser::tokenizer::{Token, Tokenizer};
     let tokens = Tokenizer::new(&GenericDialect {}, sql)
         .tokenize_with_location()
@@ -28,44 +53,34 @@ pub(super) fn prefix(sql: &str) -> Result<(bool, Cow<'_, str>)> {
         .iter()
         .filter(|t| !matches!(t.token, Token::Whitespace(_)));
     let is_word = |token: &Token, expected: &str| matches!(token, Token::Word(w) if w.quote_style.is_none() && w.value.eq_ignore_ascii_case(expected));
-    let Some(first) = significant.next() else {
-        return Ok((false, Cow::Borrowed(sql)));
+    let Some(first) = significant.next().filter(|t| is_word(&t.token, "EXPLAIN")) else {
+        return Ok((false, false, Cow::Borrowed(sql)));
     };
-    if !is_word(&first.token, "EXPLAIN") {
-        return Ok((false, Cow::Borrowed(sql)));
-    }
-    if significant
-        .next()
-        .is_some_and(|t| is_word(&t.token, "ANALYZE"))
-    {
-        return Err(fault(
-            "relational.unsupported",
-            3,
-            "EXPLAIN ANALYZE requires verified provider scan and Go resource measurements",
-        ));
-    }
-    // Mask only the keyword, retaining comments, byte offsets and line numbers
-    // for the normal parser. Never accept sqlparser's extra EXPLAIN options.
-    let location = first.span.start;
-    let (mut line, mut column) = (1u64, 1u64);
-    let mut offset = None;
-    for (at, ch) in sql.char_indices() {
-        if line == location.line && column == location.column {
-            offset = Some(at);
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    let offset =
-        offset.ok_or_else(|| problem("relational.invalid_syntax", "Missing EXPLAIN keyword"))?;
+    let analyze = significant.next().filter(|t| is_word(&t.token, "ANALYZE"));
+    // Mask only the recognized keywords, retaining comments and parser offsets.
+    // Extra sqlparser EXPLAIN options still go through normal SELECT rejection.
     let mut masked = sql.to_owned();
-    masked.replace_range(offset..offset + 7, "       ");
-    Ok((true, Cow::Owned(masked)))
+    for token in std::iter::once(first).chain(analyze) {
+        let location = token.span.start;
+        let (mut line, mut column) = (1u64, 1u64);
+        let mut offset = None;
+        for (at, ch) in sql.char_indices() {
+            if line == location.line && column == location.column {
+                offset = Some(at);
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        let offset = offset
+            .ok_or_else(|| problem("relational.invalid_syntax", "Missing EXPLAIN keyword"))?;
+        masked.replace_range(offset..offset + 7, "       ");
+    }
+    Ok((true, analyze.is_some(), Cow::Owned(masked)))
 }
 
 pub(super) fn build(
@@ -76,6 +91,7 @@ pub(super) fn build(
     let mut plan = Explanation {
         output_columns,
         steps: vec![],
+        measured: None,
     };
     query(program, 0, &mut plan, work)?;
     Ok(plan)
@@ -106,8 +122,10 @@ fn expression(
 ) -> Result<()> {
     work.spend()?;
     match term {
-        Term::Unary(_, t) | Term::NullTest(t, _) => expression(t, parent, plan, work)?,
-        Term::Binary(a, _, b) => {
+        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
+            expression(t, parent, plan, work)?
+        }
+        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
             expression(a, parent, plan, work)?;
             expression(b, parent, plan, work)?;
         }
@@ -121,6 +139,15 @@ fn expression(
             for t in terms {
                 expression(t, parent, plan, work)?;
             }
+        }
+        Term::ScalarSubquery(body) | Term::Exists(body) => {
+            let detail = if matches!(term, Term::Exists(_)) {
+                "exists"
+            } else {
+                "subquery"
+            };
+            let child = add(plan, work, parent, "expression-subquery", detail)?;
+            query(body, child, plan, work)?;
         }
         Term::InSubquery(input, body, _) => {
             let child = add(plan, work, parent, "expression-subquery", "operator")?;
