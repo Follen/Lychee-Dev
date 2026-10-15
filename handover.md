@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 15:04 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`479e57a6e2c422c854891af8f3ecf163b4dc0c39`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 15:15 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`9ba0bd1f0cd4901035b9ba026885ff6dc5d630fa`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -47,8 +47,9 @@
 - **b16a2d87**：Windows run `38740832295` 已结束失败。精确 all-target 编译、sealed CLI build、真实 describe、静态 full Retail 成功；final artifact `11981206048` 的168 owner/2655 sealed logs逐hash核验。真实native refs/context/API/session及IPC bootstrap在约27–31ms即被`delivery.invalid_release`拒绝：Rust delivery reader仍硬编码next，与获准3.5.0 beta包绑定冲突，分析器没有开始，本轮没有Graph/XML优化后的完整语义内存/耗时样本。现候选共享既有精确version→channel函数，公开manifest读取与update的5组合回归已写，Rust仍NOT_RUN。normal control和Mailbox的三项fixture偏差已独审修正，原失败保留。66c2/311250/8e2dc后续新增不在b16编译证明内。
 - **本地GNU typecheck**：fixed b16首轮600秒冷编译超时并完整回收；暖轮因git archive漏掉export-ignore的4份真实profile而exit101。已按完整Git blobs重建5244文件闭包并独审，173处include无缺失；第三轮在原600秒上限内实际exit0（Cargo 5m10s），完整前后305官方包/源码/工具/config复核、16封存日志核hash及进程回收通过；owner `bdfa539a-0c87-4ca6-8abb-bd20c81fc2b4`，receipt SHA256 `b34ef64e2402887d6e8ec6e75042fe9a7edd60fc3aa267cd540aae8b50ac2362`。GNU检查不等于MSVC或Windows运行。
 - **b16正式Lua与静态内存**：固定Go322正式Lua的220项observations实际通过，输入未变且全部句柄回收；不等于真实游戏通过。静态Retail source-process采样working set冷索引675.54MiB/暖索引224.04MiB/查询362.52MiB，private bytes783.52/329.69/539.76MiB；与未启动的全语义路径严格分开。
-- **479e57a6**：31文件已推并逐SHA/长度读回一致，含R13c2/R13d2、beta准入及三项fixture修正。run `38754201940` 当前all-target/CLI前置成功、静态Retail运行中；Emmy独立job成功，static仅最终21旧addon差异失败。完整产品/native结果仍待终态。
-- **当前SQL组合**：R17.1实际`--cdn --snapshot`静态/effective/meta SQL及EXPLAIN/CSV走scoped remote provider，持有admission至capture并借用Session共享body；六项真实consumer测试仍NOT_RUN，现有remote测试组会匹配。local同受64MiB executor reservation与bindings提前的错误优先级调整。Go外层Metadata生命周期、definitions内部控制、自动pin/effective旧等待仍未完成，不宣称完整SQL准入闭合。
+- **479e57a6**：31文件已推并逐SHA/长度读回一致，含R13c2/R13d2、beta准入及三项fixture修正。run `38754201940` 当前all-target/CLI/静态Retail成功；真实Driver对正式Lua peer步骤失败，尚待封存日志定位；Emmy独立job成功，static仅最终21旧addon差异失败。完整产品/native结果仍待终态。
+- **9ba0bd1 SQL组合**：R17.1实际`--cdn --snapshot`静态/effective/meta SQL及EXPLAIN/CSV走scoped remote provider，持有admission至capture并借用Session共享body；六项真实consumer测试仍NOT_RUN，现有remote测试组会匹配。local同受64MiB executor reservation与bindings提前的错误优先级调整。Go外层Metadata生命周期、自动pin/effective旧等待仍未完成，不宣称完整SQL准入闭合。
+- **当前definitions组合**：R3把原invocation与独立Budget贯通metadata等待、可取消HTTP、解析及发布；实际已读网络先记账、consumer留存后准入、原30秒request上限/4MiB+1前缀和Go逻辑计量保持。R1/R2已发现的取消fixture竞态与解析错误被stop覆盖均已独审修正；24新增Rust未运行。现有definitions::和remote::组覆盖，无重复新job；实际SQL/DB2调用改接由后继组合完成，Core隐藏publication Directory checked-close与既有gzip优先级缺口仍保留。
 - **最新完整旧语义内存**：ce6 sampled source-process group working set约2356.48MiB、private bytes2489.39MiB；retained cold失败，warm/steady未测。62d约2355.94MiB，79ef约2350.31MiB；均未含后续Graph/XML改动，不能称有下降。100ms采样有缺口，是观测下界，不是RSS/内核绝对峰或稳定占用。
 - **Source历史失败**：62d cold refs在约182秒runner成功但不满足Go90秒总预算；context超时、retained worker EOF仍是实质缺口。ce6全部长语义路径失败。新90秒、phase、Graph/XML修改不能在新全仓结果出来前宣称修复。
 - **执行/写入边界**：被明确拒绝的重复gzip验证未重跑；PR14标题/正文刷新两次拒绝后保持暂停。代码、文档与其它已授权验证继续，不改rules、不换路绕过。未发布、未合main。

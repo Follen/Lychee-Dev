@@ -78,10 +78,22 @@ fn table_matches(selected: &str, canonical: &str) -> bool {
     }
     selected.next().is_none()
 }
+#[cfg(test)]
 fn parse_mappings(raw: &[u8], table: &str, budget: &Budget) -> Result<Vec<Mapping>> {
+    parse_mappings_with_check(raw, table, budget, || Ok(()))
+}
+fn parse_mappings_with_check(
+    raw: &[u8],
+    table: &str,
+    budget: &Budget,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Vec<Mapping>> {
+    check()?;
+
     let text = text(raw, budget)?;
     let mut mappings = Vec::new();
     for line in text.split_terminator('\n') {
+        check()?;
         budget.check()?;
         let code = line.split_once("//").map_or(line, |(code, _)| code);
         // Only enough tokens to reject the grammar, even for a huge bad line.
@@ -129,6 +141,7 @@ fn parse_mappings(raw: &[u8], table: &str, budget: &Budget) -> Result<Vec<Mappin
             condition_value: condition_value.into(),
         });
     }
+    check()?;
     Ok(mappings)
 }
 fn number(text: &str) -> Result<Scalar> {
@@ -157,10 +170,22 @@ fn number(text: &str) -> Result<Scalar> {
             .map_err(|_| identity())
     }
 }
+#[cfg(test)]
 fn parse_values(raw: &[u8], build: &str, budget: &Budget) -> Result<Vec<Vec<Scalar>>> {
+    parse_values_with_check(raw, build, budget, || Ok(()))
+}
+fn parse_values_with_check(
+    raw: &[u8],
+    build: &str,
+    budget: &Budget,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Vec<Vec<Scalar>>> {
+    check()?;
+
     let text = text(raw, budget)?;
     let mut rows = Vec::new();
     for line in text.split_terminator('\n') {
+        check()?;
         budget.check()?;
         let (code, comment) = line.split_once("//").unwrap_or((line, ""));
         let mut code = code.trim();
@@ -197,6 +222,7 @@ fn parse_values(raw: &[u8], build: &str, budget: &Budget) -> Result<Vec<Vec<Scal
             Scalar::String(comment.trim().into()),
         ]);
     }
+    check()?;
     Ok(rows)
 }
 
@@ -209,7 +235,7 @@ pub(crate) fn source(
     budget: &Budget,
     control: &OperationControl,
 ) -> Result<(Source, SemanticBundle)> {
-    budget.check()?;
+    check_definition(budget.deadline, Some(budget), control)?;
     // The pinned table's ordinary definition is required even for empty meta.
     let (definition, _) = prepare_many_controlled(
         home,
@@ -232,7 +258,7 @@ pub(crate) fn source(
         Some(budget),
         Some(control),
         |raw| {
-            mappings = parse_mappings(raw, &table, budget)?;
+            mappings = parse_mappings_with_check(raw, &table, budget, || control.check())?;
             Ok(())
         },
     )?;
@@ -247,7 +273,7 @@ pub(crate) fn source(
     let mut rows = Vec::new();
     let mut retained = 0usize;
     for mapping in mappings {
-        budget.check()?;
+        check_definition(budget.deadline, Some(budget), control)?;
         let path = if mapping.kind == "FLAGS" {
             format!("flags/{}.dbdf", mapping.name)
         } else {
@@ -266,7 +292,7 @@ pub(crate) fn source(
                 Some(budget),
                 Some(control),
                 |raw| {
-                    values = parse_values(raw, build, budget)?;
+                    values = parse_values_with_check(raw, build, budget, || control.check())?;
                     Ok(())
                 },
             )?;
@@ -278,7 +304,7 @@ pub(crate) fn source(
             cache.insert(path.clone(), values);
         }
         for value in &cache[&path] {
-            budget.check()?;
+            check_definition(budget.deadline, Some(budget), control)?;
             if rows.len() >= 100_000 {
                 return Err(limit());
             }
@@ -322,7 +348,7 @@ pub(crate) fn source(
             ]);
         }
     }
-    budget.check()?;
+    check_definition(budget.deadline, Some(budget), control)?;
     Ok((
         Source {
             columns: [

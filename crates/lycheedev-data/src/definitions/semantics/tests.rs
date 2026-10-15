@@ -341,3 +341,36 @@ fn go_semantic_table_filter_preserves_ascii_unicode_simple_fold_classes() {
         "records.definition_identity"
     );
 }
+
+#[test]
+fn semantic_parsers_keep_independent_invocation_checks_inside_rows() {
+    let ledger = budget(Cost::defaults());
+    let raw = b"ENUM Sample::Value Values\nENUM Sample::Other Values\n";
+    let mut checks = 0;
+    let result = parse_mappings_with_check(raw, "Sample", &ledger, || {
+        checks += 1;
+        if checks == 3 {
+            Err(fault("fixture.invocation", 7, "invocation stopped"))
+        } else {
+            Ok(())
+        }
+    });
+    assert!(matches!(result, Err(error) if error.code == "fixture.invocation"));
+    assert_eq!(checks, 3);
+    assert_eq!(ledger.logical_snapshot().unwrap().decode_work, 1);
+    assert!(ledger.check().is_ok());
+    let ledger = budget(Cost::defaults());
+    let mut checks = 0;
+    let result = parse_values_with_check(b"1 FIRST\n2 SECOND\n", "12.1.0.69933", &ledger, || {
+        checks += 1;
+        if checks == 3 {
+            Err(fault("fixture.invocation", 7, "invocation stopped"))
+        } else {
+            Ok(())
+        }
+    });
+    assert!(matches!(result, Err(error) if error.code == "fixture.invocation"));
+    assert_eq!(checks, 3);
+    assert_eq!(ledger.logical_snapshot().unwrap().decode_work, 1);
+    assert!(ledger.check().is_ok());
+}

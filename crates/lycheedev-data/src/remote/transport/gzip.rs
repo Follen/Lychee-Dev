@@ -190,6 +190,16 @@ pub(super) async fn collect(
     budget: Option<&Budget>,
     deadline: Instant,
 ) -> Result<Vec<u8>> {
+    collect_admitted(input, limit, control, budget, deadline, &mut |_| Ok(())).await
+}
+pub(super) async fn collect_admitted(
+    input: impl AsyncRead + Unpin,
+    limit: ReadLimit,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+    deadline: Instant,
+    admit: &mut dyn FnMut(usize) -> Result<()>,
+) -> Result<Vec<u8>> {
     let mut reader = Gzip {
         input,
         control,
@@ -217,6 +227,7 @@ pub(super) async fn collect(
         if produced == 0 {
             return Ok(raw);
         }
+        admit(produced)?;
         append(&mut raw, &output[..produced], limit.maximum())?;
     }
 }

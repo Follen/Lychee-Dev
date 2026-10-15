@@ -110,6 +110,13 @@ pub fn matches_build(build: &str, constraints: &str) -> Result<bool> {
 }
 impl Document {
     pub fn parse(raw: &[u8]) -> Result<Self> {
+        Self::parse_with_check(raw, || Ok(()))
+    }
+    pub(crate) fn parse_with_check(
+        raw: &[u8],
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        check()?;
         if raw.len() > 4 << 20 {
             return limit();
         }
@@ -121,6 +128,7 @@ impl Document {
         let mut chunks = Vec::<Vec<&str>>::new();
         let mut chunk = Vec::new();
         for rawline in text.split('\n') {
+            check()?;
             if rawline.len() >= 64 << 10 {
                 return limit();
             }
@@ -150,6 +158,7 @@ impl Document {
         let mut columns = BTreeMap::<String, Field>::new();
         let mut variants = Vec::new();
         for chunk in chunks {
+            check()?;
             if chunk[0] == "COLUMNS" {
                 if !columns.is_empty() || !variants.is_empty() || chunk.len() == 1 {
                     return invalid();
@@ -158,6 +167,7 @@ impl Document {
                     return limit();
                 }
                 for line in &chunk[1..] {
+                    check()?;
                     let c = col.captures(line).ok_or_else(|| {
                         fault("schema.invalid_definition", 4, "Invalid DBD column")
                     })?;
@@ -197,6 +207,7 @@ impl Document {
             let mut identity = false;
             let mut layout_seen = false;
             for line in chunk {
+                check()?;
                 if line.starts_with("COMMENT ") {
                     continue;
                 }
@@ -213,6 +224,7 @@ impl Document {
                     }
                     layout_seen = true;
                     for key in value.split(',') {
+                        check()?;
                         v.layouts.push(layout(key.trim())?);
                     }
                     continue;
@@ -230,6 +242,7 @@ impl Document {
                 if let Some(a) = c.get(1) {
                     let mut annotations = BTreeSet::new();
                     for a in a.as_str().split(',').map(str::trim) {
+                        check()?;
                         if !annotations.insert(a) {
                             return invalid();
                         }
@@ -306,8 +319,14 @@ impl Document {
         if columns.is_empty() || variants.is_empty() {
             return invalid();
         }
+        let mut digest = Sha256::new();
+        for block in raw.chunks(65536) {
+            check()?;
+            digest.update(block);
+        }
+        check()?;
         Ok(Self {
-            digest: format!("{:x}", Sha256::digest(raw)),
+            digest: format!("{:x}", digest.finalize()),
             variants,
         })
     }

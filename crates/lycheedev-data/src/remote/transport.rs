@@ -268,11 +268,21 @@ async fn read_bounded(
     .await
 }
 async fn collect(
+    body: impl AsyncRead + Unpin,
+    limit: ReadLimit,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+    deadline: Instant,
+) -> Result<Vec<u8>> {
+    collect_admitted(body, limit, control, budget, deadline, &mut |_| Ok(())).await
+}
+async fn collect_admitted(
     mut body: impl AsyncRead + Unpin,
     limit: ReadLimit,
     control: &OperationControl,
     budget: Option<&Budget>,
     deadline: Instant,
+    admit: &mut dyn FnMut(usize) -> Result<()>,
 ) -> Result<Vec<u8>> {
     let mut raw = Vec::new();
     let mut buffer = [0u8; 8192];
@@ -291,6 +301,9 @@ async fn collect(
         if count == 0 {
             return Ok(raw);
         }
+        // Network delivery is already recorded, including on a stop. The
+        // consumer admits only allocation/work before these bytes are retained.
+        admit(count)?;
         append(&mut raw, &buffer[..count], limit.maximum())?;
     }
 }
@@ -336,7 +349,38 @@ pub(crate) async fn read_response_prefix(
     budget: Option<&Budget>,
     deadline: Instant,
 ) -> Result<Vec<u8>> {
-    collect_response(response, policy, ReadLimit::Prefix(maximum), control, budget, deadline).await
+    collect_response(
+        response,
+        policy,
+        ReadLimit::Prefix(maximum),
+        control,
+        budget,
+        deadline,
+    )
+    .await
+}
+/// Same Go LimitReader prefix contract, with per-delivery consumer admission.
+/// The callback never owns network accounting and is not invoked on a failed
+/// delivery, at EOF, or after the requested prefix is complete.
+pub(crate) async fn read_response_prefix_with_admission(
+    response: reqwest::Response,
+    policy: BodyPolicy,
+    maximum: usize,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+    deadline: Instant,
+    admit: &mut dyn FnMut(usize) -> Result<()>,
+) -> Result<Vec<u8>> {
+    collect_response_admitted(
+        response,
+        policy,
+        ReadLimit::Prefix(maximum),
+        control,
+        budget,
+        deadline,
+        admit,
+    )
+    .await
 }
 async fn collect_response(
     response: reqwest::Response,
@@ -346,13 +390,33 @@ async fn collect_response(
     budget: Option<&Budget>,
     deadline: Instant,
 ) -> Result<Vec<u8>> {
+    collect_response_admitted(
+        response,
+        policy,
+        limit,
+        control,
+        budget,
+        deadline,
+        &mut |_| Ok(()),
+    )
+    .await
+}
+async fn collect_response_admitted(
+    response: reqwest::Response,
+    policy: BodyPolicy,
+    limit: ReadLimit,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+    deadline: Instant,
+    admit: &mut dyn FnMut(usize) -> Result<()>,
+) -> Result<Vec<u8>> {
     let gzip = automatic_gzip(&response, policy);
     let reader = StreamReader::new(response.bytes_stream().map_err(std::io::Error::other));
     tokio::pin!(reader);
     if gzip {
-        gzip::collect(reader, limit, control, budget, deadline).await
+        gzip::collect_admitted(reader, limit, control, budget, deadline, admit).await
     } else {
-        collect(reader, limit, control, budget, deadline).await
+        collect_admitted(reader, limit, control, budget, deadline, admit).await
     }
 }
 /// The Go redirect branch discards at most2KiB, without an extra limit probe.
@@ -690,3 +754,6 @@ mod tests;
 
 #[cfg(test)]
 mod redirect_tests;
+
+#[cfg(test)]
+mod admission_tests;

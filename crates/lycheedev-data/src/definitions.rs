@@ -4,10 +4,12 @@ use crate::{fault, schema};
 use lycheedev_core::{Result, control::OperationControl, evidence, metadata::Metadata, storage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+mod loading;
 pub(crate) mod semantics;
+use loading::{check_definition, load};
 mod remote_revision;
-pub use remote_revision::resolve_revision_controlled;
 pub(crate) use remote_revision::normalized_reference;
+pub use remote_revision::resolve_revision_controlled;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -52,6 +54,13 @@ pub struct Manifest {
 }
 impl Manifest {
     pub fn parse(raw: &[u8]) -> Result<Self> {
+        Self::parse_with_check(raw, || Ok(()))
+    }
+    pub(crate) fn parse_with_check(
+        raw: &[u8],
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        check()?;
         if raw.len() > 4 << 20 {
             return Err(fault(
                 "schema.limit_exceeded",
@@ -61,16 +70,21 @@ impl Manifest {
         }
         // Struct deserialization rejects duplicate fields; optional file IDs
         // still require explicit non-null integers when the field is present.
-        let entries: Vec<Entry> = serde_json::from_slice(raw).map_err(|_| invalid())?;
+        let parsed = serde_json::from_slice(raw).map_err(|_| invalid());
+        let entries: Vec<Entry> = parsed?;
+        check()?;
         if entries.is_empty() || entries.len() > 16384 {
             return Err(invalid());
         }
         // Preserve field presence independently of Option's null semantics.
-        let presence: Vec<Value> = serde_json::from_slice(raw).map_err(|_| invalid())?;
+        let parsed = serde_json::from_slice(raw).map_err(|_| invalid());
+        let presence: Vec<Value> = parsed?;
+        check()?;
         let mut tables = BTreeMap::new();
         let mut modern = BTreeSet::new();
         let mut legacy = BTreeSet::new();
         for (entry, object) in entries.into_iter().zip(presence) {
+            check()?;
             if !valid_name(&entry.name)
                 || entry.hash.len() != 8
                 || !entry.hash.bytes().all(|b| b.is_ascii_hexdigit())
@@ -96,6 +110,7 @@ impl Manifest {
                 return Err(invalid());
             }
         }
+        check()?;
         Ok(Self { tables })
     }
     pub fn lookup(&self, name: &str) -> Result<TableIdentity> {
@@ -292,224 +307,6 @@ pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
         .build()
         .new_agent()
 }
-// Both ordinary hits and publication conflicts must rehash, charge and parse.
-// Go definitions.load calls its read closure again before comparing the winner.
-fn read_cached_definition(
-    home: &Path,
-    metadata: &mut Metadata,
-    key: &str,
-    url: &str,
-    budget: Option<&crate::resource::Budget>,
-    control: Option<&OperationControl>,
-    validate: &mut dyn FnMut(&[u8]) -> Result<()>,
-) -> Result<(Value, Vec<u8>)> {
-    if let Some(control) = control {
-        control.check()?;
-    }
-    if let Some(budget) = budget {
-        budget.check()?;
-    }
-    let object: Object = metadata.read(key)?;
-    if object.url != url {
-        return Err(fault(
-            "records.definition_identity",
-            4,
-            "Cached definition URL differs",
-        ));
-    }
-    if let Some(budget) = budget {
-        let bytes = object.blob["bytes"]
-            .as_u64()
-            .filter(|v| *v <= 4 << 20)
-            .ok_or_else(|| {
-                fault(
-                    "records.definition_identity",
-                    4,
-                    "Invalid cached definition size",
-                )
-            })?;
-        budget.charge_split(
-            definition_cost(bytes),
-            crate::resource::Cost {
-                retained_bytes: bytes * 8,
-                ..definition_cost(bytes)
-            },
-        )?;
-    }
-    let raw = match control {
-        Some(control) => evidence::read_blob_bounded(home, &object.blob, 4 << 20, control)?,
-        None => evidence::read_blob(home, &object.blob, 4 << 20)?,
-    };
-    if let Some(control) = control {
-        control.check()?;
-    }
-    if let Some(budget) = budget {
-        budget.check()?;
-    }
-    validate(&raw)?;
-    if let Some(control) = control {
-        control.check()?;
-    }
-    if let Some(budget) = budget {
-        budget.check()?;
-    }
-    Ok((object.blob, raw))
-}
-
-fn load(
-    home: &Path,
-    url: &str,
-    offline: bool,
-    deadline: Instant,
-    budget: Option<&crate::resource::Budget>,
-    control: Option<&OperationControl>,
-    mut validate: impl FnMut(&[u8]) -> Result<()>,
-) -> Result<(Value, Vec<u8>)> {
-    let check = || -> Result<()> {
-        if let Some(control) = control {
-            control.check()?;
-        }
-        if let Some(budget) = budget {
-            budget.check()?;
-        }
-        Ok(())
-    };
-    check()?;
-    let remaining = deadline
-        .checked_duration_since(Instant::now())
-        .ok_or_else(|| fault("records.resource_limit", 3, "Definition deadline exceeded"))?;
-    let key = format!("definition/{}", storage::sha256(url.as_bytes()));
-    let mut metadata = Metadata::open(home, true)?;
-    match read_cached_definition(
-        home,
-        &mut metadata,
-        &key,
-        url,
-        budget,
-        control,
-        &mut validate,
-    ) {
-        Ok(cached) => return Ok(cached),
-        Err(error) if error.code == "vault.record_missing" => {}
-        Err(error) => return Err(error),
-    }
-    if offline {
-        return Err(fault(
-            "records.definition_unavailable_offline",
-            3,
-            "Exact definition resource has not been cached",
-        ));
-    }
-    let agent = http_agent(remaining.min(Duration::from_secs(30)));
-    if let Some(budget) = budget {
-        budget.charge(crate::resource::Cost {
-            network_requests: 1,
-            ..Default::default()
-        })?;
-    }
-    check()?;
-    let response = agent.get(url).header("Accept-Encoding", "identity").call();
-    check()?;
-    let mut response = response.map_err(|e| fault("records.definition_http", 5, e.to_string()))?;
-    if response.status().as_u16() != 200 {
-        return Err(fault(
-            "records.definition_http",
-            5,
-            format!("Definition HTTP status {}", response.status()),
-        ));
-    }
-    let logical_scratch = budget
-        .map(|budget| budget.reserve_logical_scratch(8 << 20))
-        .transpose()?;
-    let mut raw = Vec::new();
-    let mut reader = response.body_mut().as_reader().take((4 << 20) + 1);
-    let mut chunk = [0; 65536];
-    loop {
-        check()?;
-        let read = reader.read(&mut chunk);
-        check()?;
-        let n = match read {
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            result => result?,
-        };
-        if n == 0 {
-            break;
-        }
-        if let Some(budget) = budget {
-            budget.charge_split(
-                crate::resource::Cost {
-                    network_bytes: n as u64,
-                    ..Default::default()
-                },
-                crate::resource::Cost {
-                    retained_bytes: n as u64 * 8,
-                    metadata_bytes: 0,
-                    network_bytes: n as u64,
-                    ..Default::default()
-                },
-            )?;
-        }
-        raw.extend_from_slice(&chunk[..n]);
-    }
-    if raw.len() > 4 << 20 {
-        return Err(fault(
-            "records.metadata_limit",
-            3,
-            "Definition byte budget exceeded",
-        ));
-    }
-    if let Some(budget) = budget {
-        let logical = definition_cost(raw.len() as u64);
-        budget.charge_split(
-            logical,
-            crate::resource::Cost {
-                retained_bytes: 0,
-                ..logical
-            },
-        )?;
-    }
-    drop(logical_scratch);
-    check()?;
-    validate(&raw)?;
-    check()?;
-    let blob = match control {
-        Some(control) => evidence::publish_blob_bounded(home, &raw, 4 << 20, control)?,
-        None => evidence::publish_blob(home, &raw, 4 << 20)?,
-    };
-    check()?;
-    let object = Object {
-        url: url.to_owned(),
-        blob: blob.clone(),
-    };
-    let published = match control {
-        Some(control) => metadata.create_controlled(&key, &object, control),
-        None => metadata.create(&key, &object),
-    };
-    match published {
-        Ok(()) => {}
-        Err(error) if error.code == "vault.generation_conflict" => {
-            let (other, _) = read_cached_definition(
-                home,
-                &mut metadata,
-                &key,
-                url,
-                budget,
-                control,
-                &mut validate,
-            )?;
-            if other != blob {
-                return Err(fault(
-                    "records.definition_identity",
-                    4,
-                    "Concurrent definition content differs",
-                ));
-            }
-        }
-        Err(error) => return Err(error),
-    }
-    check()?;
-    Ok((blob, raw))
-}
 pub fn prepare(home: &Path, commit: &str, name: &str, offline: bool) -> Result<(Bundle, Vec<u8>)> {
     prepare_until(
         home,
@@ -539,6 +336,28 @@ pub fn prepare_budgeted(
     Ok(prepare_many_budgeted(home, commit, &[name], offline, deadline, budget)?.remove(0))
 }
 
+/// Actual invocation scope is kept distinct from the Data budget's owner.
+pub(crate) fn prepare_controlled(
+    home: &Path,
+    commit: &str,
+    name: &str,
+    offline: bool,
+    deadline: Instant,
+    budget: Option<&crate::resource::Budget>,
+    control: &OperationControl,
+) -> Result<(Bundle, Vec<u8>)> {
+    Ok(prepare_many_controlled(
+        home,
+        commit,
+        &[name],
+        offline,
+        deadline,
+        budget,
+        Some(control),
+    )?
+    .remove(0))
+}
+
 /// One fixed manifest read and one definition read per distinct table. A domain
 /// request shares its caller's deadline and admission ledger across the batch.
 pub(crate) fn prepare_many_budgeted(
@@ -562,7 +381,7 @@ fn definition_cost(bytes: u64) -> crate::resource::Cost {
     }
 }
 
-fn prepare_many_controlled(
+pub(crate) fn prepare_many_controlled(
     home: &Path,
     commit: &str,
     names: &[&str],
@@ -571,12 +390,10 @@ fn prepare_many_controlled(
     budget: Option<&crate::resource::Budget>,
     control: Option<&OperationControl>,
 ) -> Result<Vec<(Bundle, Vec<u8>)>> {
-    if let Some(control) = control {
-        control.check()?;
-    }
-    if let Some(budget) = budget {
-        budget.check()?;
-    }
+    let fallback = OperationControl::uncancelable(deadline);
+    let control = control.unwrap_or(&fallback);
+    let check = || check_definition(deadline, budget, control);
+    check()?;
     if !lycheedev_core::selection::valid_digest(commit, 40)
         || names.is_empty()
         || names.len() > 32
@@ -589,22 +406,24 @@ fn prepare_many_controlled(
         ));
     }
     let base = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/");
-    let (manifest, raw) = load(
+    let mut catalog = None;
+    let (manifest, _) = load(
         home,
         &format!("{base}manifest.json"),
         offline,
         deadline,
         budget,
-        control,
-        |raw| Manifest::parse(raw).map(|_| ()),
+        Some(control),
+        |raw| {
+            catalog = Some(Manifest::parse_with_check(raw, check)?);
+            Ok(())
+        },
     )?;
-    let catalog = Manifest::parse(&raw)?;
+    let catalog = catalog.expect("successful load validates the selected manifest");
     let mut result = Vec::with_capacity(names.len());
     let mut seen = BTreeSet::new();
     for name in names {
-        if let Some(budget) = budget {
-            budget.check()?;
-        }
+        check()?;
         let identity = catalog.lookup(name)?;
         if !seen.insert(identity.name.clone()) {
             continue;
@@ -615,8 +434,8 @@ fn prepare_many_controlled(
             offline,
             deadline,
             budget,
-            control,
-            |raw| schema::Document::parse(raw).map(|_| ()),
+            Some(control),
+            |raw| schema::Document::parse_with_check(raw, check).map(|_| ()),
         )?;
         result.push((
             Bundle {
@@ -628,6 +447,7 @@ fn prepare_many_controlled(
             raw,
         ));
     }
+    check()?;
     Ok(result)
 }
 

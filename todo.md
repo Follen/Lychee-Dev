@@ -239,3 +239,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] b16 normal control及Mailbox三项fixture合同修正已独审，原4/1和340/2结果保留，新候选待运行。
 
 - [ ] 本地Emmy三方A31及B部分通过，但namespace回收EACCES未验证，保留symbols lease；C/资源与当前GNU未运行。完成独立Windows验证方案审核，不绕本地未回收owner。
+
+- [ ] definitions控制R3已静态独审并集成：原invocation/独立Budget、HTTP和解析/发布贯通；24新增Rust待真实运行。把SQL/DB2实际调用改接此接口，保外层Metadata与Core隐藏Directory close缺口，不能只凭API存在标完成。
