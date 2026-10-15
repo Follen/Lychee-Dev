@@ -76,6 +76,7 @@ pub struct Backend {
     pub flow_types: HashMap<String, LuaType>,
     pub flow_markers: HashMap<String, Arc<Marker>>,
     pub nullable: bool,
+    pub primitive_binary: bool,
     pub recursive_initializers: bool,
     pub last_arguments: Vec<ExpressionValue<Value>>,
     pub last_callee: Option<ExpressionValue<Value>>,
@@ -92,6 +93,7 @@ impl Backend {
             flow_types: HashMap::new(),
             flow_markers: HashMap::new(),
             nullable: false,
+            primitive_binary: false,
             recursive_initializers: false,
             last_arguments: vec![],
             last_callee: None,
@@ -315,13 +317,21 @@ impl ExpressionExecutionBackend for Backend {
     }
     fn binary(
         &mut self,
-        _: &SelectedProjector<'_>,
-        _: FileId,
+        projector: &SelectedProjector<'_>,
+        file_id: FileId,
         op: BinaryOperator,
         left: Value,
         right: Value,
     ) -> Result<Value, Stop> {
         self.event(format!("binary:{op:?}"));
+        if self.primitive_binary {
+            return match projector.project_primitive_binary(file_id, op, left, right, self)? {
+                PrimitiveBinaryProjection::Complete(value) => Ok(value),
+                PrimitiveBinaryProjection::DeferredLogical { .. } => {
+                    panic!("general logical backend is not implemented by this fixture")
+                }
+            };
+        }
         // This oracle fixture covers only Nil+Nil -> Number, not a production
         // binary backend. Any other operands are intentionally not interpreted.
         assert!(

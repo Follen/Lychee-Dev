@@ -3,6 +3,8 @@
 //! This foundation is not wired to production yet. Every selected producer must
 //! append here at its actual execution point before the engine ledger can be
 //! removed; merging separate completed ledgers cannot preserve its contract.
+mod binary;
+pub use binary::PrimitiveBinaryProjection;
 mod evidence;
 mod execution;
 pub use execution::{ExpressionExecutionBackend, ExpressionValue};
