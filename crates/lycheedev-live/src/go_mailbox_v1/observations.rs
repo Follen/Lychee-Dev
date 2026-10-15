@@ -32,6 +32,17 @@ pub enum ChannelError {
     Rejected {
         reason: String,
     },
+    /// Structured application failure. Preserve original exit/details through
+    /// native/publication adapters; public channel mapping still takes priority.
+    Toolkit {
+        code: String,
+        message: String,
+        exit_code: i32,
+        details: serde_json::Value,
+        /// Recognized cleanup aggregates expose their actual typed leaves.
+        /// The outer original error/details remain available to presentation.
+        causes: Vec<ChannelError>,
+    },
     /// Preserve independent cancellation, identity, transport and I/O causes.
     External {
         causes: Vec<String>,
@@ -41,6 +52,52 @@ pub type ChannelResult<T> = std::result::Result<T, ChannelError>;
 impl From<ContractError> for ChannelError {
     fn from(e: ContractError) -> Self {
         Self::Contract(e)
+    }
+}
+impl From<lycheedev_core::ToolkitError> for ChannelError {
+    fn from(error: lycheedev_core::ToolkitError) -> Self {
+        Self::from_toolkit(error, 0)
+    }
+}
+impl ChannelError {
+    fn from_toolkit(error: lycheedev_core::ToolkitError, depth: usize) -> Self {
+        if error.details.is_null() {
+            match error.code.as_str() {
+                "command.cancelled" => return Self::Cancelled,
+                "command.deadline" => return Self::DeadlineExceeded,
+                _ => (),
+            }
+        }
+        // Only the core-owned, complete schema authorizes cause expansion.
+        // Malformed, opaque or excessive-depth details remain a non-pure leaf;
+        // they must not be mistaken for a suppressible optional timeout.
+        let unpack = || -> Option<Vec<Self>> {
+            let object = error.details.as_object()?;
+            if depth >= 32
+                || object.len() != 4
+                || object.get("schema")?.as_str()? != lycheedev_core::storage::FILE_CLEANUP_SCHEMA
+            {
+                return None;
+            }
+            let mut causes = Vec::new();
+            for key in ["primary", "cleanup", "control"] {
+                let value = object.get(key)?;
+                if !value.is_null() {
+                    let nested: lycheedev_core::ToolkitError =
+                        serde_json::from_value(value.clone()).ok()?;
+                    causes.push(Self::from_toolkit(nested, depth + 1));
+                }
+            }
+            (causes.len() >= 2).then_some(causes)
+        };
+        let causes = unpack().unwrap_or_default();
+        Self::Toolkit {
+            code: error.code,
+            message: error.message,
+            exit_code: error.exit_code,
+            details: error.details,
+            causes,
+        }
     }
 }
 impl std::fmt::Display for ChannelError {
@@ -70,6 +127,21 @@ impl std::fmt::Display for ChannelError {
                 Ok(())
             }
             Self::Rejected { reason } => write!(f, "live.channel_rejected: {reason}"),
+            Self::Toolkit {
+                code,
+                message,
+                causes,
+                ..
+            } => {
+                let first = format!("{code}: {message}");
+                f.write_str(&first)?;
+                for cause in causes {
+                    if cause.to_string() != first {
+                        write!(f, "\n{cause}")?;
+                    }
+                }
+                Ok(())
+            }
             Self::External { causes } => f.write_str(&causes.join("\n")),
         }
     }
@@ -98,6 +170,15 @@ impl ChannelError {
         }
         match self {
             Self::Joined { causes } => causes.iter().any(|c| c.any_cause(predicate)),
+            Self::Toolkit { code, causes, .. } => {
+                let control = match code.as_str() {
+                    "command.cancelled" => Some(Self::Cancelled),
+                    "command.deadline" => Some(Self::DeadlineExceeded),
+                    _ => None,
+                };
+                control.as_ref().is_some_and(predicate)
+                    || causes.iter().any(|c| c.any_cause(predicate))
+            }
             Self::SlotAvailable { blocker, .. } => {
                 Self::Blocked(blocker.clone()).any_cause(predicate)
             }
@@ -114,6 +195,9 @@ impl ChannelError {
             }
             Self::SlotAvailable { blocker, .. } | Self::Blocked(blocker) => {
                 Self::blocker_cause(blocker).all_causes(predicate)
+            }
+            Self::Toolkit { causes, .. } if !causes.is_empty() => {
+                causes.iter().all(|c| c.all_causes(predicate))
             }
             leaf => predicate(leaf),
         }
@@ -142,13 +226,7 @@ impl ChannelError {
     }
 }
 pub fn check_control(control: &OperationControl) -> ChannelResult<()> {
-    control.check().map_err(|e| match e.code.as_str() {
-        "command.cancelled" => ChannelError::Cancelled,
-        "command.deadline" => ChannelError::DeadlineExceeded,
-        _ => ChannelError::External {
-            causes: vec![e.code, e.message],
-        },
-    })
+    control.check().map_err(Into::into)
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObservationKind {

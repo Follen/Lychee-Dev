@@ -4,6 +4,7 @@
 //! These decoders do not establish publication stability, process identity,
 //! readiness or permission to send input. Native integration remains separate.
 pub mod admission;
+pub mod connection;
 pub mod driver;
 pub mod durable_journal;
 pub mod native_reader;

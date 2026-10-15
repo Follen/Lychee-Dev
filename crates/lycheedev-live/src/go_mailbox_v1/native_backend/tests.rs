@@ -1181,3 +1181,152 @@ fn native_driver_recovery_watermark_can_tighten_same_witness_at_exact_future_bou
     );
     assert_eq!(events.iter().filter(|e| e.as_str() == "send").count(), 1);
 }
+
+// These traverse the actual continuation and actual NativeCore replacement
+// adapter together. FakeSource replaces only OS reads; ordered-child admission
+// and guarded two-sample retirement are the production implementations.
+fn retirement_driver(
+    core: Core,
+) -> crate::go_mailbox_v1::driver::Driver<
+    Core,
+    crate::go_mailbox_v1::recovery::test_support::Journal,
+    crate::go_mailbox_v1::recovery::test_support::FakeClock,
+    crate::go_mailbox_v1::recovery::test_support::Tokens,
+> {
+    use crate::go_mailbox_v1::{driver::Driver, recovery::test_support as support};
+    let mut driver = Driver::new(
+        identity(&"1".repeat(32)),
+        core,
+        support::Journal::default(),
+        support::FakeClock(Rc::new(std::cell::Cell::new(1000))),
+        support::Tokens(10),
+    )
+    .unwrap();
+    driver.state.bound = true;
+    driver.state.identity.owner = driver.state.owner.clone();
+    driver.state.identity.fence = 1;
+    driver
+}
+#[test]
+fn continuation_to_actual_native_retirement_keeps_ordered_parent_and_shortest_deadline() {
+    use crate::go_mailbox_v1::{
+        recovery::test_support::Schedule, runtime_retirement::RetirementTarget,
+    };
+    let current = identity(&"2".repeat(32));
+    let mut core = make_core(replacement_records(&current, 10_000, 11_100));
+    let parent = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
+    let deadline = parent.deadline();
+    let observed = Rc::new(std::cell::Cell::new(0));
+    let checked = observed.clone();
+    core.guard = Box::new(move |control| {
+        assert_eq!(control.deadline(), deadline);
+        control
+            .ordered_child(Instant::now() + Duration::from_secs(60))
+            .map_err(toolkit_error)?;
+        checked.set(checked.get() + 1);
+        check_control(control)
+    });
+    let mut driver = retirement_driver(core);
+    driver.request_close(&parent).unwrap();
+    let close_deadline = driver.state.close_budget.as_ref().unwrap().deadline_ms;
+    driver
+        .continue_or_retire(
+            &parent,
+            RetirementTarget {
+                process_id: 41,
+                process_started_at: 99,
+            },
+            true,
+            &mut Schedule::default(),
+        )
+        .unwrap();
+    assert!(driver.state.closed && driver.state.runtime_end.is_some());
+    assert_eq!(
+        driver.state.close_budget.as_ref().unwrap().deadline_ms,
+        close_deadline
+    );
+    assert!(observed.get() >= 2);
+    assert!(
+        !events(&driver.backend)
+            .iter()
+            .any(|event| event == "send" || event == "acquire")
+    );
+    driver.backend.close().unwrap();
+}
+#[test]
+fn continuation_native_retirement_observes_original_parent_cancellation() {
+    use crate::go_mailbox_v1::{
+        recovery::test_support::Schedule, runtime_retirement::RetirementTarget,
+    };
+    let current = identity(&"2".repeat(32));
+    let mut core = make_core(replacement_records(&current, 10_000, 11_100));
+    let signal = TrackedCancellation::new();
+    let parent = OperationControl::tracked(Instant::now() + Duration::from_secs(5), signal.clone());
+    let observed = Rc::new(std::cell::Cell::new(false));
+    let checked = observed.clone();
+    core.guard = Box::new(move |control| {
+        // Called after both production ordered_child boundaries, not before.
+        checked.set(true);
+        signal.cancel();
+        check_control(control)
+    });
+    let mut driver = retirement_driver(core);
+    driver.request_close(&parent).unwrap();
+    let result = driver
+        .continue_or_retire(
+            &parent,
+            RetirementTarget {
+                process_id: 41,
+                process_started_at: 99,
+            },
+            true,
+            &mut Schedule::default(),
+        )
+        .unwrap_err();
+    assert!(observed.get());
+    assert!(result.any_cause(&|e| matches!(e, ChannelError::Cancelled)));
+    assert!(!driver.state.closed);
+    assert!(driver.state.runtime_end.is_none());
+    assert!(!events(&driver.backend).iter().any(|event| event == "send"));
+    driver.backend.close().unwrap();
+}
+#[test]
+fn continuation_native_retirement_keeps_deadline_before_late_parent_cancellation() {
+    use crate::go_mailbox_v1::{
+        recovery::test_support::Schedule, runtime_retirement::RetirementTarget,
+    };
+    let current = identity(&"2".repeat(32));
+    let mut core = make_core(replacement_records(&current, 10_000, 11_100));
+    let signal = TrackedCancellation::new();
+    let parent = OperationControl::tracked(Instant::now() + Duration::from_secs(1), signal.clone());
+    let deadline = parent.deadline();
+    let observed = Rc::new(std::cell::Cell::new(false));
+    let checked = observed.clone();
+    core.guard = Box::new(move |control| {
+        assert_eq!(control.deadline(), deadline);
+        checked.set(true);
+        std::thread::sleep(
+            deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
+        );
+        signal.cancel();
+        check_control(control)
+    });
+    let mut driver = retirement_driver(core);
+    driver.request_close(&parent).unwrap();
+    let result = driver
+        .continue_or_retire(
+            &parent,
+            RetirementTarget {
+                process_id: 41,
+                process_started_at: 99,
+            },
+            true,
+            &mut Schedule::default(),
+        )
+        .unwrap_err();
+    assert!(observed.get());
+    assert!(result.any_cause(&|e| matches!(e, ChannelError::DeadlineExceeded)));
+    assert!(!result.any_cause(&|e| matches!(e, ChannelError::Cancelled)));
+    assert!(!driver.state.closed);
+    driver.backend.close().unwrap();
+}

@@ -66,11 +66,7 @@ fn external(cause: impl Into<String>) -> ChannelError {
     }
 }
 fn toolkit_error(e: lycheedev_core::ToolkitError) -> ChannelError {
-    match e.code.as_str() {
-        "command.cancelled" => ChannelError::Cancelled,
-        "command.deadline" => ChannelError::DeadlineExceeded,
-        _ => external(e.to_string()),
-    }
+    e.into()
 }
 
 /// Checked-close native readers and test sources share this narrow interface.
@@ -939,3 +935,27 @@ impl RuntimeRetirementBackend for NativeBackend {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod toolkit_error_tests {
+    use super::*;
+    #[test]
+    fn application_error_keeps_exit_details_and_ordered_control() {
+        let details = serde_json::json!({"installation":"selected","reason":"modified"});
+        let mapped = toolkit_error(
+            lycheedev_core::ToolkitError::new("delivery.invalid_payload", "bad digest", 4)
+                .with_details(details.clone()),
+        );
+        assert!(
+            matches!(mapped, ChannelError::Toolkit { code, exit_code:4, details:actual, .. } if code == "delivery.invalid_payload" && actual == details)
+        );
+        assert_eq!(
+            toolkit_error(lycheedev_core::ToolkitError::new(
+                "command.cancelled",
+                "stop",
+                7
+            )),
+            ChannelError::Cancelled
+        );
+    }
+}

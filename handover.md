@@ -645,6 +645,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 12 Rust 文件静态 rustfmt/身份/差分核验通过；32 Rust 回归、Windows 和固定 Go 运行差分全部 **NOT_RUN**。新增四独立 CI 组覆盖 local_query、scoped资源、effective integration、capture引用；既有 Hotfix/关系/依赖组继续运行。
 - 尚未齐：remote/CDN、SQL meta/CSV、resources/resourceAccounting 与 EXPLAIN、完整输出字段排序、部分既有 I/O 的 deadline 贯穿和单次 codec/plan 临时内存计量。此批不代表全 SQL/Data 等价。固定 Go 不把查询引用当永久生命周期依赖，因此只在发布事务中防删除/ABA，不永久禁止后续删除来源。性能未测。
 
+### 正式 CON 应用服务候选与已导出的测试入口
+
+- R2 冻结 `cd3fb4289aa5e39ca9acbcbef491606eb29a9f20a439cccda66a2b898098770b`，`tests/rust-parity/formal-connection-{freeze,test-map}.json` 与 `formal-connection-contract.md` 记录 API/差分/余缺。独立复审闭合原 1 P1＋4 P2，另修真实 IO/close 分类、无效 fixture 与 `Interface/AddOns/Lychee Dev` 路径；14 owner、22 个固定依赖逐项核验。
+- ConnectionService 将 CON admission/journal/Driver/NativeBackend/原 PID 生命周期接成 connect/status/resume/execute/history/disconnect；history 在 input 前和锁内重查，unknown 绝不重放。torn-tail 仅在原 claim/执行锁内归档原字节后恢复合法前缀；legacy unfinished unbind 继续原终态退役，不误开新进程。
+- 退役观察保留原 ordered control lineage 与最短 deadline，3 个新增回归直接经过 Driver→实际 NativeCore；组合错误保留完整 typed control/close 叶，IO/close 不被抑制为单纯 timeout。安装发现投影沿用原 Discovery，不重扫制造选择竞态。
+- 结果与错误同时保留；ProjectResult/RawReport 的 duplicate keys 与数字词法不能转换成 Value 后输出。CLI typed writer/adapter 另批进行。发现 Go native `json.Valid` 允许 string 内非法 UTF-8 字节，而当前 Rust RawValue 边界拒绝，此为待修真实差异，不列作永久允许例外。
+- `pub mod connection` 按独审 stage 精确导出，新 44 回归（40 connection、1 error、3 NativeCore）进入现有正式 Mailbox CI 组。全部 Rust/Windows **NOT_RUN**，静态复核不是运行通过。原默认 CLI 尚未替换；activation/doctor/reload、modified repair publication、missing inventory 完整分类和后续资源边界须独立整合。四阶段审计和性能仍未开始。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

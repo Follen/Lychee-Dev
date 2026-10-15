@@ -156,6 +156,24 @@ fn selection_error(kind: &str, product: &str, report: &InstallationDiscovery) ->
         .with_details(serde_json::json!({"__commandContext":{"installationSelection":report,"requestedProduct":product}}))
 }
 
+/// Project the fixed selection error from an already observed discovery.
+/// Native window selection may retain multiple candidates for PID filtering;
+/// this helper does not rescan, choose a client, or reject that valid case.
+pub fn require_discovered_candidates(report: &InstallationDiscovery) -> Result<()> {
+    if !report.candidates.is_empty() {
+        return Ok(());
+    }
+    Err(selection_error(
+        if report.issues.is_empty() {
+            "installation_missing"
+        } else {
+            "installation_metadata_conflict"
+        },
+        "",
+        report,
+    ))
+}
+
 /// Inspect an explicit client or at most 256 immediate entries under a game root.
 /// Catalog rows never invent installed clients. Directory ownership guards remain
 /// held during the scan, and reparse entries are not traversed from a root scan.

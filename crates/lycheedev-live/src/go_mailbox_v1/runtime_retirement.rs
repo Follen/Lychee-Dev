@@ -13,10 +13,7 @@ use super::state::{
     State,
 };
 use lycheedev_core::control::OperationControl;
-use std::{
-    sync::{Arc, atomic::AtomicBool},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 /// Independent selected-process identity supplied by the owning coordinator.
 /// Never derive this target from an observed or persisted replacement proof.
@@ -219,10 +216,9 @@ impl<B: RuntimeRetirementBackend, J: StateJournal, C: Clock, T: TokenSource> Dri
             || self.state.closing
             || self.continuation().kind == "budget_exhausted"
         {
-            let probe = control.child(
-                Instant::now() + Duration::from_secs(30),
-                Arc::new(AtomicBool::new(false)),
-            );
+            let probe = control
+                .ordered_child(Instant::now() + Duration::from_secs(30))
+                .map_err(ChannelError::from)?;
             match self.close_replaced_runtime(&probe, target) {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}

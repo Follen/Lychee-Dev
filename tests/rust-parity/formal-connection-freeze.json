@@ -1,0 +1,236 @@
+{
+  "schema": "lycheedev.formal-connection-freeze.v1",
+  "revision": 2,
+  "createdAt": "2026-10-15T00:20:45.956705+00:00",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "baseHead": "cc47c55b8d4e771b18214826375025587f603f6d",
+  "previousFreezeSha256": "6f8f83f87aacfe35fffb288dd2c712100e947082b1c8d75df1e7ea366a098b5a",
+  "previousSnapshot": "/tmp/lycheedev-formal-connection-review-r1",
+  "status": "frozen_for_independent_rereview; fixes are candidates, not independently approved; compile/Rust/Windows NOT_RUN",
+  "files": [
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection.rs",
+      "bytes": 26383,
+      "sha256": "52dec03e3c641d720ee9ce83cb7099f54d9893b01f46c9708e0a04dbf714d644"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/errors.rs",
+      "bytes": 4533,
+      "sha256": "f5edf0900bb33251a97741388bef845c615d20d2bcaaa0ff38a06881b4be501d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/native.rs",
+      "bytes": 17552,
+      "sha256": "6f3c1aa4fd3b90883bf46ac78ffc8bffaebe2b95dda105726c06e562dc16cd58"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/projection.rs",
+      "bytes": 6687,
+      "sha256": "0d44b9724228595698cbe098a8518d97ec228985cf498887cf338b2c4cb689ea"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "bytes": 43637,
+      "sha256": "3bb20e6ce2a850835a10df9fe7bde14b896c534e0cd4b2a133dbcc81ece84a9d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+      "bytes": 37972,
+      "sha256": "cdd49395edd3c0be0b0710bd67c24412c9b899cceeee58f8bafb3518a2a012e7"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+      "bytes": 17084,
+      "sha256": "a67790f55ab1382ead7ef1d026602ead91be2683d0136131e71973a54d71a522"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "bytes": 35688,
+      "sha256": "16b89ee11887dbcfef4f3f23bcb43233edd37d020d6847154d7013f3bb97a99a"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/installation.rs",
+      "bytes": 9084,
+      "sha256": "048df2553425cef1099a00fe7d66977df95a86a976597fdce4379af742c6545b"
+    },
+    {
+      "path": "tests/rust-parity/formal-connection-test-map.json",
+      "bytes": 18752,
+      "sha256": "3d31b52910b0289de3badfef34ebffa9691cdf85ff34aad7e3784fde5c90ffd7"
+    },
+    {
+      "path": "tests/rust-parity/formal-connection-contract.md",
+      "bytes": 7990,
+      "sha256": "9ab5a7f7dc209ca35c09a461165d5179ba68f284210223205546df09c21c2f4a"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/runtime_retirement.rs",
+      "bytes": 9141,
+      "sha256": "f30a44cb4443c279f77698b7c0d7cd4fbdae963641f10306ee390b0ed429d3b9"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "bytes": 46305,
+      "sha256": "c894205c77c79060634809a3626c9a522cf9474ef21d32bb9dc4c5ff1f54558d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/installation_selection.rs",
+      "bytes": 37840,
+      "sha256": "3cb63d5de67df1f47dafb8216ff874597845c2c11e6520ea5851940ba637f0b9"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/admission.rs",
+      "bytes": 34237,
+      "sha256": "0b889c661cf1703d839b819d8caeba6a5ffbc5a9f0a34ad1d38c4476df20951d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+      "bytes": 27802,
+      "sha256": "ed3a02224ec4f20388af6728229aa0d49e47b6b515f566c961204e8371be6c5e"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery.rs",
+      "bytes": 23531,
+      "sha256": "7d04ac6ed0da68e8ee04b809dbc9b455825b031d0fb72e75e71082c507e99b4e"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/reload.rs",
+      "bytes": 18608,
+      "sha256": "5d0a9544330834022a8bda44862eb3c8cd41a59e63bc29656cfb09cfa911544d"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+      "bytes": 12316,
+      "sha256": "96c855612dd47da066a2b54b7b01c7849f3bf54463b9c0f4da7e2324feb4c4cb"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "bytes": 26101,
+      "sha256": "34f73480297f98b661fd577d787707dde9ab2042099719f942e2cc88b83cdb23"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/platform.rs",
+      "bytes": 8491,
+      "sha256": "1ad164ed4f1c1ec8a41985c4bf3919cfce4d38af685416430c8680900b75e589"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/trace.rs",
+      "bytes": 8512,
+      "sha256": "3f303fe3f1f6cec4f3e2e2119af2214677c8d18617ff28bc6da0f82d915ddb21"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/recovery_test_support.rs",
+      "bytes": 13461,
+      "sha256": "a46e13e3be23e5e16d858f47af1c6dbd85003d8ee7c960082920cdd39b360b59"
+    },
+    {
+      "path": "crates/lycheedev-live/Cargo.toml",
+      "bytes": 516,
+      "sha256": "df1e3caa6a0e4bebe441483a3ddab212b002e2442aeb97ee922836baf0d0b533"
+    },
+    {
+      "path": "crates/lycheedev-delivery/Cargo.toml",
+      "bytes": 243,
+      "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/release.rs",
+      "bytes": 11237,
+      "sha256": "0db05b990994bb9311ab4f90963463c5e0575297c30e6a1ba33a395fc69bd6af"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 28654,
+      "sha256": "8b020c7cfeebb8829076b787562d0d40b0974fc3af85d501336294edb5bb8645"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 22397,
+      "sha256": "8cf24f46ce1af4b4445c529f4123c936df4d610bd8c42eff5f71e339bcb77c6d"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process.rs",
+      "bytes": 43150,
+      "sha256": "eb25f8ea338fab09b9af1a54bffb892d33d2f89a2faa572a097eb3fe8b9a3b32"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/process/lifetime.rs",
+      "bytes": 7532,
+      "sha256": "2cf066d9ab82c2351958e2b3a5dff52ad547e55009a32fbd32c016d1804f1e7a"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input.rs",
+      "bytes": 11042,
+      "sha256": "d77340c11be92b2ae0cfdbd67be6fccf9fbb93b2f98bcfeaa3db1e8169dc7458"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/mailbox_input/equal_fold.rs",
+      "bytes": 2910,
+      "sha256": "79324615b034362aea88a5ce6189a744bf45d07038f43155e95ff208ae33b874"
+    },
+    {
+      "path": "tests/rust-parity/process-lifetime-freeze.json",
+      "bytes": 4463,
+      "sha256": "1f7db61f6f1624007676673fa547b6aa12b0921dfed1ff1a7d0957994c87d9ec"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "crates/lycheedev-core/src/client.rs",
+      "bytes": 73334,
+      "sha256": "bb1694eb93ec8d097d6df8775319f85a71a2983552437f98dca5a21d45248dcf"
+    },
+    {
+      "path": "tests/rust-parity/release-resource-cleanup-freeze.json",
+      "bytes": 2855,
+      "sha256": "b5f98d1ac623b648607f405d4ea51ef723fa57870e5428ec79205a04e9110406"
+    }
+  ],
+  "dependencySource": "Exact git object bytes at baseHead, not mutable working tree; apply owned files and stagedIntegration onto baseHead for review/compile",
+  "stagedIntegration": [
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "bytes": 2187,
+      "sha256": "69b15f0815828dbdb52e152e383196f388bdc27041c3b01eac5671802ad119a7",
+      "baseSha256": "41ece43d8f17b8fe087d88265316623cd69a900fd082fc078f17fb944708b108",
+      "change": "only add pub mod connection; after pub mod admission; parent applies; shared worktree untouched"
+    }
+  ],
+  "snapshot": "/tmp/lycheedev-formal-connection-review-r2",
+  "checks": {
+    "rustfmtSyntaxParse": "PASS (no type checking)",
+    "gitDiffCheck": "PASS",
+    "testMapDeclarationCheck": "PASS",
+    "rustTests": "NOT_RUN",
+    "cargo": "NOT_RUN",
+    "rustc": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "game": "NOT_RUN"
+  },
+  "declaredTests": 44,
+  "reviewFixes": [
+    "P1: ordered retirement probe preserves original tracked cancellation and shortest deadline; 3 actual Driver-to-NativeCore boundary regressions",
+    "P2: complete typed Toolkit control+cleanup cause expansion and exact details retained, bounded schema validation",
+    "P2: torn-tail fixture records log path before corruption",
+    "P2: legacy unfinished unbind Resume follows Disconnect original-process check before native open",
+    "P2: native discovery reuses actual core selection missing/conflict projection with observed Discovery",
+    "Additional: invalid zero-fence/empty-ticket cleanup fixture corrected",
+    "Additional: main-addon explicit finish_file and non-clean-only mapping retain IO/control/cleanup failures",
+    "Additional: native deployment and original-process retirement use fixed-Go spaced Lychee Dev path"
+  ],
+  "notes": [
+    "Parent owns shared mod.rs/CLI/workflow/handover/commit/push; exact single export staged for compilation registration",
+    "All 44 new Rust declarations (40 connection including helper, 1 structured error, 3 native integration) NOT_RUN",
+    "Existing original native_backend34 and entire go_mailbox_v1 group must rerun with nonzero matched counts on controlled Windows",
+    "Resource cleanup dependency independently reviewed and committed cc47c55; receipt/test evidence still NOT_RUN",
+    "Publication private receipt-error checked close and modified-addon repair-only policy remain separate active work",
+    "Full modified/missing-inventory-resource state classification awaits controlled inspection integration",
+    "RawReport typed serialization mandatory; public CLI default dispatch and encoder integration not implemented here",
+    "No Cargo.lock/Cargo.toml edits; no commit or push"
+  ]
+}

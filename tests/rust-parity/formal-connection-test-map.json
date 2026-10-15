@@ -1,0 +1,447 @@
+{
+  "schema": "lycheedev.formal-connection-test-map.v1",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "execution": "NOT_RUN",
+  "goFiles": [
+    {
+      "path": "internal/live/channel/project_windows.go",
+      "bytes": 20287,
+      "sha256": "3c824507b764721a4830723868a6f6b9b70e36ec9fc53600b55818c4dfdfd7b5",
+      "tests": []
+    },
+    {
+      "path": "internal/live/channel/project_windows_test.go",
+      "bytes": 9844,
+      "sha256": "7e2b4b767a1502ddab3cdf208da3dd22f2850a9b3a8b1f2cb9f4be11f5edc88a",
+      "tests": [
+        "TestRecoveryReloadCompletionSurvivesPendingDisconnect",
+        "TestClosedProjectRetiresClaimAfterCrashWithoutGame",
+        "TestPendingCloseDoesNotInheritBoundCompletion",
+        "TestClosingUnknownOperationDoesNotInventCompletion",
+        "TestCompletedRequestRetryNeverTouchesGameOrReplacesLaterOperation",
+        "TestCopiedProjectCannotClaimOriginalConnection",
+        "TestHistoricalReloadRetryDoesNotRepeatAfterLaterReload",
+        "TestActivationStatusHasNoInventedRuntimeAndRejectsInvalidPhase",
+        "TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory",
+        "TestRepairCloseRetiresOriginalClosedConnection"
+      ]
+    },
+    {
+      "path": "internal/live/channel/request.go",
+      "bytes": 999,
+      "sha256": "63dab567c9edeb63c0339dcdfe29cb91a9caafa3bff10cc2863e700dccaabe4f",
+      "tests": []
+    },
+    {
+      "path": "internal/live/channel/process_end_windows.go",
+      "bytes": 2941,
+      "sha256": "35e824f107bad764733cbecda42dac83b95b9dfa19758075831d8d50e83137b0",
+      "tests": []
+    },
+    {
+      "path": "internal/live/channel/process_end_windows_test.go",
+      "bytes": 3128,
+      "sha256": "58207597e85e51ad9143d3b8bbe65172d9ad31d653f37d725acf0da4fdf2928d",
+      "tests": [
+        "TestDisconnectEndedLifetimeRetiresOnlyExactOwnerAndIsIdempotent",
+        "TestProcessEndNeverPromotesUnconfirmedResult"
+      ]
+    },
+    {
+      "path": "internal/live/channel/continuation.go",
+      "bytes": 4094,
+      "sha256": "c5e4e37a25125455447ee928de9f70657934812cb27927cb3b8c5d3ad54c7ea0",
+      "tests": []
+    },
+    {
+      "path": "internal/live/channel/wait.go",
+      "bytes": 7741,
+      "sha256": "5c2d7718ed09dedb7c10861ffa31b847630f4c4a70291d394e3117ee2174d74f",
+      "tests": []
+    },
+    {
+      "path": "internal/live/client_window.go",
+      "bytes": 4436,
+      "sha256": "6f4dec4c6e5a8dc4ee54d52a208f1357089976de138c070e4bfa0f13322086fa",
+      "tests": []
+    },
+    {
+      "path": "internal/live/journal/memory_log.go",
+      "bytes": 5944,
+      "sha256": "1ecad44ea2b6e4fdc998eb3e04421a0b676798bd2a90e194aeecdb570fc0cc35",
+      "tests": []
+    },
+    {
+      "path": "internal/command/live_channel_error.go",
+      "bytes": 2249,
+      "sha256": "3dc09d489d8a06cf0f2326f845e08350cfe99aaacc7348c511262dcc059f46e7",
+      "tests": []
+    },
+    {
+      "path": "internal/command/live_channel_error_test.go",
+      "bytes": 1776,
+      "sha256": "18274ec74ba68602707cd62e187a966d9ce78d21b676a16099d9add8e0a231ba",
+      "tests": [
+        "TestChannelTraceFlushFailureHasPriority",
+        "TestChannelResultWithoutFlushFailureKeepsClassification"
+      ]
+    },
+    {
+      "path": "internal/live/channel/runtime_retirement.go",
+      "bytes": 1780,
+      "sha256": "3f14094c4cdc2799d33fb805780a83e6c847d7759ab7bd73056781798f344ba4",
+      "tests": []
+    },
+    {
+      "path": "internal/delivery/addon_install.go",
+      "bytes": 5468,
+      "sha256": "7c515ff67d08b17bc1f11fa1eb9972148f4774d3fb82913d14504b20191cf974",
+      "tests": []
+    },
+    {
+      "path": "internal/delivery/installation.go",
+      "bytes": 3837,
+      "sha256": "d3776660ffe823990d93b4974fb0606b95274053a9c2b9e92c4f8d04ee9cee8b",
+      "tests": []
+    }
+  ],
+  "rustTests": [
+    {
+      "name": "completed_history_precedes_native_open_and_keeps_later_operation",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "history_conflicts_are_readonly_for_code_budget_and_policy",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "report_and_status_do_not_need_a_claim_or_game_handle",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "verified_report_and_failed_report_ok_remain_independent_of_cleanup",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "closed_unknown_never_inherits_connection_completion",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "unknown_retry_preserves_operation_ticket_and_never_sends_input",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "active_execution_lease_blocks_second_service_before_native_open",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "backend_open_failure_explicitly_releases_execution_lease",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "successful_turn_still_returns_checked_close_failure_and_releases_lease",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "durable_deadline_is_not_restarted_by_another_invocation",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "cancelled_invocation_does_not_restart_or_close_original_connection",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "process_end_model_rechecks_under_lease_and_preserves_unknown_evidence",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "ended_process_promotes_only_already_verified_report",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "cleanup_failure_keeps_observed_end_and_original_transaction",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "torn_tail_is_archived_before_terminal_retry_without_native_open",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "malformed_complete_record_and_empty_prefix_are_never_repaired",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "pending_close_projection_keeps_bound_separate_from_complete",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "copied_project_metadata_is_not_ownership",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "completed_request_is_readable_in_a_fresh_process_model",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_child_process"
+    },
+    {
+      "name": "fresh_process_history_helper",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "subprocess_helper"
+    },
+    {
+      "name": "public_error_mapping_preserves_trace_priority_and_full_causes",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "request_conflict_mapping_and_raw_report_keep_public_contract",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "terminal_history_survives_rotation_and_missing_archive_is_not_a_new_request",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "main_addon_guard_never_inspects_shared_slots",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "real_owned_process_creation_mismatch_retires_con_without_any_game",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "native_owned_process"
+    },
+    {
+      "name": "connect_existing_selection_resumes_original_connection",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "fresh_connect_persists_claim_then_binds_with_checked_resource_closes",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "connect_filter_mismatch_never_opens_a_native_backend",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "toolkit_exit_and_details_survive_service_and_public_projection",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "toolkit_control_remains_typed_in_joined_service_failure",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "filesystem_and_protocol_model"
+    },
+    {
+      "name": "legacy_unfinished_unbind_resume_checks_original_process_before_native_open",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_filesystem_production_adapter"
+    },
+    {
+      "name": "discovery_empty_and_conflicting_branches_keep_core_code_exit_and_report",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_filesystem_production_adapter"
+    },
+    {
+      "name": "discovery_retains_multiple_candidates_for_later_pid_filtering",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_filesystem_production_adapter"
+    },
+    {
+      "name": "structured_cancel_close_and_deadline_close_keep_every_typed_cause_and_details",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "typed_error_projection"
+    },
+    {
+      "name": "nested_file_cleanup_tree_cannot_be_misclassified_as_pure_timeout",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_filesystem_production_adapter"
+    },
+    {
+      "name": "opaque_control_details_never_disappear_or_authorize_optional_timeout_suppression",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "typed_error_projection"
+    },
+    {
+      "name": "structured_pure_control_aggregate_still_exposes_only_real_timeout_leaves",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "typed_error_projection"
+    },
+    {
+      "name": "deployment_error_mapping_does_not_call_io_or_close_failure_a_dirty_installation",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "typed_error_projection"
+    },
+    {
+      "name": "main_addon_absent_unmanaged_and_malformed_receipt_have_distinct_failures",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_filesystem_production_adapter"
+    },
+    {
+      "name": "recorded_addon_directory_matches_fixed_go_and_core_destination",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/connection/tests.rs",
+      "kind": "owned_filesystem_production_adapter"
+    },
+    {
+      "name": "application_error_keeps_exit_details_and_ordered_control",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs",
+      "kind": "typed_error_projection"
+    },
+    {
+      "name": "continuation_to_actual_native_retirement_keeps_ordered_parent_and_shortest_deadline",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "kind": "actual_driver_to_nativecore_with_modeled_os_source"
+    },
+    {
+      "name": "continuation_native_retirement_observes_original_parent_cancellation",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "kind": "actual_driver_to_nativecore_with_modeled_os_source"
+    },
+    {
+      "name": "continuation_native_retirement_keeps_deadline_before_late_parent_cancellation",
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/native_backend/tests.rs",
+      "kind": "actual_driver_to_nativecore_with_modeled_os_source"
+    }
+  ],
+  "mapping": [
+    {
+      "go": "TestCompletedRequestRetryNeverTouchesGameOrReplacesLaterOperation",
+      "rust": [
+        "completed_history_precedes_native_open_and_keeps_later_operation",
+        "history_conflicts_are_readonly_for_code_budget_and_policy",
+        "completed_request_is_readable_in_a_fresh_process_model"
+      ]
+    },
+    {
+      "go": "TestClosedProjectRetiresClaimAfterCrashWithoutGame",
+      "rust": [
+        "closed_unknown_never_inherits_connection_completion",
+        "report_and_status_do_not_need_a_claim_or_game_handle"
+      ]
+    },
+    {
+      "go": "TestPendingCloseDoesNotInheritBoundCompletion",
+      "rust": [
+        "pending_close_projection_keeps_bound_separate_from_complete"
+      ]
+    },
+    {
+      "go": "TestClosingUnknownOperationDoesNotInventCompletion",
+      "rust": [
+        "closed_unknown_never_inherits_connection_completion",
+        "unknown_retry_preserves_operation_ticket_and_never_sends_input"
+      ]
+    },
+    {
+      "go": "TestConnectionHistoryRotationPreservesOldRequestsAndRejectsMissingHistory",
+      "rust": [
+        "terminal_history_survives_rotation_and_missing_archive_is_not_a_new_request"
+      ]
+    },
+    {
+      "go": "TestCopiedProjectCannotClaimOriginalConnection",
+      "rust": [
+        "copied_project_metadata_is_not_ownership"
+      ]
+    },
+    {
+      "go": "TestDisconnectEndedLifetimeRetiresOnlyExactOwnerAndIsIdempotent",
+      "rust": [
+        "real_owned_process_creation_mismatch_retires_con_without_any_game",
+        "process_end_model_rechecks_under_lease_and_preserves_unknown_evidence",
+        "torn_tail_is_archived_before_terminal_retry_without_native_open"
+      ]
+    },
+    {
+      "go": "TestProcessEndNeverPromotesUnconfirmedResult",
+      "rust": [
+        "ended_process_promotes_only_already_verified_report",
+        "cleanup_failure_keeps_observed_end_and_original_transaction"
+      ]
+    },
+    {
+      "go": "internal/live/channel/project_windows.go:481 legacy unfinished unbind Resume delegates Disconnect",
+      "rust": [
+        "legacy_unfinished_unbind_resume_checks_original_process_before_native_open"
+      ]
+    },
+    {
+      "go": "internal/live/channel/runtime_retirement.go and continuation.go: parent-controlled retirement probe",
+      "rust": [
+        "continuation_to_actual_native_retirement_keeps_ordered_parent_and_shortest_deadline",
+        "continuation_native_retirement_observes_original_parent_cancellation",
+        "continuation_native_retirement_keeps_deadline_before_late_parent_cancellation"
+      ]
+    },
+    {
+      "go": "internal/live/channel/project_windows.go checkClientDeployment; internal/delivery/addon_install.go AddonDirectory",
+      "rust": [
+        "main_addon_guard_never_inspects_shared_slots",
+        "deployment_error_mapping_does_not_call_io_or_close_failure_a_dirty_installation",
+        "main_addon_absent_unmanaged_and_malformed_receipt_have_distinct_failures",
+        "recorded_addon_directory_matches_fixed_go_and_core_destination"
+      ]
+    },
+    {
+      "go": "internal/command/live_channel_error.go typed joined cause precedence; core file-cleanup schema is a Rust explicit-close boundary",
+      "rust": [
+        "structured_cancel_close_and_deadline_close_keep_every_typed_cause_and_details",
+        "nested_file_cleanup_tree_cannot_be_misclassified_as_pure_timeout",
+        "opaque_control_details_never_disappear_or_authorize_optional_timeout_suppression",
+        "structured_pure_control_aggregate_still_exposes_only_real_timeout_leaves"
+      ]
+    },
+    {
+      "go": "internal/live/channel/project_windows.go resolveWindow + existing core installation discovery diagnostic projection",
+      "rust": [
+        "discovery_empty_and_conflicting_branches_keep_core_code_exit_and_report",
+        "discovery_retains_multiple_candidates_for_later_pid_filtering"
+      ]
+    }
+  ],
+  "additionalRegression": "go_mailbox_v1:: entire group including original 34 native_backend tests, 3 actual continuation-to-NativeCore regression tests, new native_backend::toolkit_error_tests (1), admission/durable journal/recovery/runtime retirement; stage pub mod connection before running and require nonzero matched counts",
+  "notImplemented": [
+    "activation/doctor/repair",
+    "explicit public reload API/history",
+    "public CLI default dispatch cutover"
+  ],
+  "limits": [
+    "Rust tests, compile and Windows execution NOT_RUN; rustfmt syntax parsing only",
+    "owned child process runs the test executable/library service, not the public CLI",
+    "publication private receipt error-exit checked close and modified-repair publication policy are separate pending work",
+    "full fixed-Go modified inventory inspection (including missing resource state) awaits separate controlled inspection integration"
+  ],
+  "declarations": 44,
+  "structuredErrorScope": [
+    "observations.rs: Toolkit leaf and From<ToolkitError>, Display/check_control",
+    "durable_journal.rs: storage_error delegates typed From",
+    "native_backend.rs: toolkit_error delegates typed From; platform.rs calls this helper unchanged",
+    "connection/errors.rs: fixed-Go priority/classification then original Toolkit code/exit/details",
+    "ChannelError Toolkit causes expands only exact bounded core file-cleanup schema; opaque control details remain non-pure and cannot suppress close failures"
+  ],
+  "revision": 2
+}

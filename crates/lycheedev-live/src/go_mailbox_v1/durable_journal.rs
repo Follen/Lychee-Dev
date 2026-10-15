@@ -8,7 +8,6 @@
 //! Locks coordinate cooperating processes; they are not hostile-filesystem
 //! isolation. Every uncertain write poisons this instance until lease release
 //! and a fresh load. Torn tails are retained and never repaired implicitly.
-#[cfg(test)]
 use super::journal::read_log_bytes;
 use super::journal::{
     CHECKPOINT_BYTES, CHECKPOINT_EVENTS, MAX_EVENT_BYTES, MAX_EVENTS, MAX_HISTORY_SEGMENTS,
@@ -42,13 +41,7 @@ pub(super) fn io_error(e: std::io::Error) -> ChannelError {
     }
 }
 pub(super) fn storage_error(e: ToolkitError) -> ChannelError {
-    match e.code.as_str() {
-        "command.cancelled" => ChannelError::Cancelled,
-        "command.deadline" => ChannelError::DeadlineExceeded,
-        _ => ChannelError::External {
-            causes: vec![e.code, e.message],
-        },
-    }
+    e.into()
 }
 pub(super) fn joined(results: impl IntoIterator<Item = ChannelResult<()>>) -> ChannelResult<()> {
     let mut causes: Vec<_> = results.into_iter().filter_map(Result::err).collect();
@@ -535,6 +528,62 @@ pub fn historical_request(
     history(paths, request, control)
 }
 
+/// Recover only a nonempty verified prefix followed by an unterminated final
+/// event. The exact original claim/execution lease is acquired before rereading.
+/// Archive every original byte durably before replacing the active log; a
+/// malformed complete event, empty prefix, or oversized tail is never repaired.
+/// This does not authorize replay: callers reload the normal journal afterward.
+pub fn recover_tail(
+    paths: ChannelPaths,
+    addon_parent: &Path,
+    owner: WindowOwner,
+    control: &OperationControl,
+) -> ChannelResult<()> {
+    let mut journal =
+        DurableChannelJournal::acquire_mode(paths, addon_parent, owner, control, true)?;
+    journal.close()
+}
+fn recover_owned_tail(paths: &ChannelPaths, control: &OperationControl) -> ChannelResult<()> {
+    let bytes = read_file(
+        &paths.log,
+        MAX_LOG_BYTES,
+        "journal.memory_log_limit",
+        control,
+    )?
+    .ok_or_else(|| error("live.channel_journal_missing"))?;
+    let read = read_log_bytes(&bytes);
+    check_control(control)?;
+    match read.failure {
+        None => return Ok(()),
+        Some(e) if e.0 == "journal.memory_torn_tail" && !read.events.is_empty() => (),
+        Some(e) => return Err(e.into()),
+    }
+    let end = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map(|i| i + 1)
+        .ok_or_else(|| error("journal.memory_log_corrupt"))?;
+    let hash = storage::sha256(&bytes);
+    let backup = paths.log.with_file_name(format!(
+        "{}.torn-{}",
+        paths
+            .log
+            .file_name()
+            .ok_or_else(|| error("live.channel_project_invalid"))?
+            .to_string_lossy(),
+        &hash[..16]
+    ));
+    if let Some(prior) = read_file(&backup, MAX_LOG_BYTES, "journal.memory_log_limit", control)? {
+        if prior != bytes {
+            return Err(error("journal.memory_checkpoint_conflict"));
+        }
+    } else {
+        storage::atomic_write_controlled(&backup, &bytes, control).map_err(storage_error)?;
+    }
+    check_control(control)?;
+    storage::atomic_write_controlled(&paths.log, &bytes[..end], control).map_err(storage_error)
+}
+
 pub struct DurableChannelJournal {
     paths: ChannelPaths,
     scope: PathBuf,
@@ -554,6 +603,15 @@ impl DurableChannelJournal {
         addon_parent: &Path,
         owner: WindowOwner,
         control: &OperationControl,
+    ) -> ChannelResult<Self> {
+        Self::acquire_mode(paths, addon_parent, owner, control, false)
+    }
+    fn acquire_mode(
+        paths: ChannelPaths,
+        addon_parent: &Path,
+        owner: WindowOwner,
+        control: &OperationControl,
+        recover: bool,
     ) -> ChannelResult<Self> {
         check_control(control)?;
         if owner.schema != OWNER_SCHEMA
@@ -589,6 +647,11 @@ impl DurableChannelJournal {
             },
             Err(e) => return joined([Err(e), gate_close]).map(|_| unreachable!()),
         };
+        if recover {
+            if let Err(e) = recover_owned_tail(&paths, control) {
+                return joined([Err(e), lease.close()]).map(|_| unreachable!());
+            }
+        }
         let segment = match read_segment(&paths.log, control) {
             Ok(segment) => segment,
             Err(e) => return joined([Err(e), lease.close()]).map(|_| unreachable!()),
