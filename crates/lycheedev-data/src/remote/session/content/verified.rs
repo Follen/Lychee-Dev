@@ -134,7 +134,7 @@ pub(in crate::remote::session) fn completed_body(
     error
 }
 
-pub(super) fn read(
+pub(in crate::remote::session) fn read(
     files: &Files<'_>,
     index: &Encoding<'_>,
     record: &EncodingRecord,

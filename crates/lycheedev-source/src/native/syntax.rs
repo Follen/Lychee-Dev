@@ -43,6 +43,35 @@ struct IndexedReference {
 }
 #[derive(Clone, Debug)]
 struct IndexedCall { id:String, site:SyntaxSite, callee:SyntaxSite }
+// Temporary counts from the already-required identity walk of the same immutable
+// admitted trees. No syntax nodes, source bytes, or public result rows are copied.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SourceSyntaxCounts { nodes:usize, references:usize, calls:usize }
+impl SourceSyntaxCounts {
+    fn for_files(files:usize,admitted:usize)->Result<Box<[Self]>> {
+        // The existing admitted file ceiling is the bound, not a new quota.
+        // Payload is size_of::<Self>() * files (24 * files on Windows x64),
+        // at most 480000 bytes for the 20000-file research ceiling. Allocator
+        // overhead is additional. This fixed slice dies when syntax indexing ends.
+        if files>admitted{return Err("syntax counts exceed admitted file count".into());}
+        let _payload_bytes=files.checked_mul(std::mem::size_of::<Self>()).ok_or("syntax count payload overflow")?;
+        Ok(vec![Self::default();files].into_boxed_slice())
+    }
+    fn observe(&mut self,node:&emmylua_parser::LuaSyntaxNode) {
+        self.nodes+=1;
+        if matches!(LuaExpr::cast(node.clone()),Some(LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_))){self.references+=1;}
+        if let Some(call)=emmylua_parser::LuaCallExpr::cast(node.clone()) && call.get_prefix_expr().is_some(){self.calls+=1;}
+    }
+    fn replay(&self,count:&mut usize,limit:usize,mut check:impl FnMut()->Result<()>)->Result<()> {
+        // Retain every original syntax-stage control-before-node-limit check,
+        // after this file's declarations. Only repeat Rowan traversal is removed;
+        // construction row charging remains at the original final boundary.
+        for _ in 0..self.nodes {
+            check()?;*count+=1;if *count>limit{return Err("syntax index AST bound".into());}
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Default)]
 struct SourceSyntaxIndex {
     declarations:Vec<IndexedDeclaration>, declaration_ranges:Vec<std::ops::Range<usize>>,
@@ -76,7 +105,8 @@ fn unparen(mut expr:LuaExpr)->LuaExpr {
     while let LuaExpr::ParenExpr(ref paren)=expr {let Some(inner)=paren.get_expr()else{break};expr=inner;}expr
 }
 impl PreparedSnapshot {
-    fn build_syntax_index(&self)->Result<SourceSyntaxIndex> {
+    fn build_syntax_index(&self,counts:&[SourceSyntaxCounts])->Result<SourceSyntaxIndex> {
+        assert_eq!(counts.len(),self.inputs.corpus.files.len(),"same immutable admitted file set");
         let mut index=SourceSyntaxIndex::default();let mut count=0usize;
         for (file_index,source) in self.inputs.corpus.files.iter().enumerate() {
             self.control.check().map_err(|e|e.to_string())?;
@@ -98,11 +128,9 @@ impl PreparedSnapshot {
             index.declaration_ranges.push(declaration_start..index.declarations.len());
             // Admit the same complete row count without retaining or hashing
             // every reference and call before any query needs them.
-            for node in root.descendants(){
-                self.control.check().map_err(|e|e.to_string())?;count+=1;if count>self.inputs.corpus.limits.ast_nodes{return Err("syntax index AST bound".into())}
-                if matches!(LuaExpr::cast(node.clone()),Some(LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_))){index.reference_count+=1;}
-                if let Some(call)=emmylua_parser::LuaCallExpr::cast(node) && call.get_prefix_expr().is_some(){index.call_count+=1;}
-            }
+            counts[file_index].replay(&mut count,self.inputs.corpus.limits.ast_nodes,||self.control.check().map_err(|e|e.to_string()))?;
+            index.reference_count+=counts[file_index].references;
+            index.call_count+=counts[file_index].calls;
         }
         let rows=index.declarations.len()+index.reference_count+index.call_count;
         if rows>if self.inputs.corpus.limits.research{5000000}else{12000}{return Err("syntax index row bound".into())}
@@ -198,3 +226,9 @@ pub struct StorageFact { pub cell:String, pub owner:StorageOwner }
 pub struct CaptureFact { pub closure:usize, pub declaration:Site, pub cell:String, pub creation_context:String }
 #[derive(Clone, Debug, Serialize)]
 pub struct UseStorageFact { pub use_fact:usize, pub cell:String }
+
+#[cfg(test)]
+mod syntax_count_tests {
+    use super::*;
+    include!("syntax_count_tests.rs");
+}

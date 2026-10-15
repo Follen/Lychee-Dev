@@ -2,6 +2,10 @@
 
 Authority for decisions, status and evidence: [handover.md](handover.md). This checklist gives execution order only. The first delivery is documentation; full implementation is now authorized. Unchecked work does not authorize game input, publication or main merge. Existing Rust code and historical passing tests do not check these boxes automatically.
 
+## Current implementation rhythm (user decision, 2026-10-15 18:24 UTC)
+
+Complete end-to-end production behavior first, then add the corresponding tests and run them in consolidated batches. Do not block each small implementation slice on a self-imposed freeze, independent review or CI gate. Persist meaningful batches to the same draft PR promptly. Preserve actual safety/ownership rules and single-writer boundaries; monitor existing CI alongside implementation. The four final sequential audit/fix/test/review loops remain mandatory after full implementation.
+
 ## 0. Documentation scope
 
 - [x] Freeze Go v3.2.0 at 3057a9666ab078270b63c7f06de748069b0d1f4b and record Rust starting HEAD.

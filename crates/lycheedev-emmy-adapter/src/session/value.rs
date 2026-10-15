@@ -144,6 +144,14 @@ impl OwnedValue {
     pub fn is_context_free(&self) -> bool {
         self.evidence.is_none()
     }
+    pub(crate) fn object_belongs_to(&self, session: &super::OwnedBindingSession) -> bool {
+        match self.evidence.as_deref() {
+            Some(ValueEvidence::Object { binding, .. }) => {
+                binding.token == session.token && binding.context == session.identity()
+            }
+            _ => false,
+        }
+    }
     pub fn object_info(&self) -> Option<OwnedObjectInfo<'_>> {
         let ValueEvidence::Object { binding, .. } = self.evidence.as_deref()? else {
             return None;

@@ -4,7 +4,9 @@
 //! append here at its actual execution point before the engine ledger can be
 //! removed; merging separate completed ledgers cannot preserve its contract.
 mod backend;
-pub use backend::{OwnedQuery, OwnedQueryCapability, OwnedQueryContinuation, OwnedQueryFailure};
+pub use backend::{
+    OwnedMemberInfo, OwnedQuery, OwnedQueryCapability, OwnedQueryContinuation, OwnedQueryFailure,
+};
 mod binary;
 pub use binary::PrimitiveBinaryProjection;
 mod evidence;

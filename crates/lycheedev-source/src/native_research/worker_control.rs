@@ -139,6 +139,9 @@ fn allowed(phase: &str) -> bool {
             | "query_assemble_reply"
             | "query_reply_assembled"
             | "queried"
+            | "reply_serialized"
+            | "reply_written"
+            | "reply_values_released"
             | "worker_complete"
             | "worker_error"
     )
@@ -283,6 +286,19 @@ mod tests {
         assert!(allowed("emmy_indexed"));
         assert!(!allowed("source.lua"));
         assert!(serde_json::from_str::<Event>(r#"{"schema":"x","phase":"emmy_indexed","elapsed_ms":1,"phase_ms":1,"omitted":0,"source":"private"}"#).is_err());
+    }
+    #[test]
+    fn reply_boundaries_are_canonical_observations_inside_existing_caps() {
+        for phase in ["reply_serialized","reply_written","reply_values_released"] {
+            assert!(allowed(phase));
+            let event=Event{schema:PHASE_SCHEMA.into(),phase:phase.into(),elapsed_ms:u64::MAX,phase_ms:u64::MAX,omitted:usize::MAX};
+            let bytes=serde_json::to_vec(&event).unwrap();
+            assert!((bytes.len()+1)*RECORD_LIMIT<=BYTE_LIMIT as usize);
+            let mut line=bytes.clone();line.push(b'\n');
+            assert_eq!(canonical_phase(&bytes),Some(line.clone()));
+            assert_eq!(phase_records(&line).collect::<Vec<_>>(),vec![line]);
+        }
+        assert!(!allowed("reply_acknowledged"));
     }
     #[test]
     fn private_control_accepts_unknown_fields_without_changing_request_schema() {

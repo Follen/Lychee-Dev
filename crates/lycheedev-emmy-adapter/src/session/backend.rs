@@ -6,6 +6,8 @@
 //! semantic-model replacement yet. Selected objects retain owned identity and
 //! nested carriers; unimplemented structural/member consumers remain explicit.
 mod call;
+mod member;
+pub use member::OwnedMemberInfo;
 mod signature;
 
 use super::{
@@ -42,6 +44,7 @@ pub enum OwnedQueryCapability {
     UnresolvedName,
     IndexMember,
     IndexDynamic,
+    MemberCallable,
     ExpressionFlow,
     Call,
     LogicalNullableMember,
@@ -99,8 +102,9 @@ impl<K: Eq + Hash, V> Drop for PendingMemo<K, V> {
 /// are borrowed once; selected Expression origins construct a fresh scope even
 /// when their file equals this model's file, exactly like old model_for.
 ///
-/// A successful result currently excludes selected Function/Parameter projections
-/// and general flow/member/call inference. Object identity and nested carriers
+/// Selected Function signatures and restricted calls are implemented. Parameter
+/// projection and general Function/flow/member/call inference remain incomplete.
+/// Object identity and nested carriers
 /// remain owned through the accepted expression, declaration and tuple paths.
 /// This entry is not installed in Source or the diagnostic registry yet.
 pub struct OwnedQuery<'a, 'control, E> {
@@ -508,19 +512,19 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        _: ExpressionValue<OwnedValue>,
-        _: &LuaMemberKey,
+        owner: ExpressionValue<OwnedValue>,
+        key: &LuaMemberKey,
     ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.continuation(OwnedQueryCapability::IndexMember, None, None, None)
+        self.index_selected_member(owner, key)
     }
     fn index_dynamic(
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        _: ExpressionValue<OwnedValue>,
-        _: ExpressionValue<OwnedValue>,
+        owner: ExpressionValue<OwnedValue>,
+        key: ExpressionValue<OwnedValue>,
     ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.continuation(OwnedQueryCapability::IndexDynamic, None, None, None)
+        self.index_selected_dynamic(owner, key)
     }
     fn expression_at(
         &mut self,

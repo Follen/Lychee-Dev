@@ -85,9 +85,10 @@ impl PreparedSnapshot {
         control.check().map_err(|e|e.to_string())?;
         let config=inputs.corpus.config.clone();
         let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],original_lines:BTreeMap::new(),parameters:BTreeMap::new(),managed_reads:HashSet::new(),managed_calls:HashSet::new()};
+        let mut syntax_counts=SourceSyntaxCounts::for_files(input.inputs.corpus.files.len(),input.inputs.corpus.limits.files)?;
         let mut line_index_remaining=64usize * 1024 * 1024;
         let mut nodes=0;let mut ids=HashSet::new();let mut uris=HashSet::new();
-        for source in &input.inputs.corpus.files {
+        for (file_index,source) in input.inputs.corpus.files.iter().enumerate() {
             control.check().map_err(|e|e.to_string())?;let name=source.path.as_str();
             let uri=file_path_to_uri(&input.inputs.corpus.root.join(name)).ok_or("source URI")?;
             let file_id=input.analysis.get_file_id(&uri).ok_or("source file identity")?;
@@ -103,6 +104,7 @@ impl PreparedSnapshot {
             let root=model.syntax_tree().ok_or("source syntax tree")?.get_red_root();
             for node in root.descendants() {
                 control.check().map_err(|e|e.to_string())?;nodes+=1;if nodes>input.inputs.corpus.limits.ast_nodes{return Err("native identity AST budget exceeded".into())}
+                syntax_counts[file_index].observe(&node);
                 if let Some(expr)=LuaExpr::cast(node.clone()) {
                     let syntax=expr.get_syntax_id();let site=BindingSite{file_id,syntax};
                     let range=input.inputs.original_range(name,expr.get_range()).expect("admitted parser range");
@@ -119,7 +121,8 @@ impl PreparedSnapshot {
         }
         observer("source_identity_indexed");
         control.check().map_err(|e|e.to_string())?;
-        input.syntax=input.build_syntax_index()?;
+        input.syntax=input.build_syntax_index(&syntax_counts)?;
+        drop(syntax_counts);
         observer("source_syntax_indexed");
         control.check().map_err(|e|e.to_string())?;
         Ok(input)

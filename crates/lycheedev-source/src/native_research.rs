@@ -291,9 +291,17 @@ pub fn worker_stdio()->Result<()> {
     let result=session.query_observed(request.query,&control,|phase|phases.record(phase))?;
     phases.record("queried");
     let bytes=serde_json::to_vec(&result)?;
+    phases.record("reply_serialized");
     control.check()?;
     if bytes.len()>32<<20{return Err(ToolkitError::new("source.native_budget","native worker result exceeds budget",3));}
-    std::io::stdout().write_all(&bytes)?;Ok(())
+    std::io::stdout().write_all(&bytes)?;
+    phases.record("reply_written");
+    // Preserve the original reverse-local destruction order. These phase
+    // boundaries are observations only: neither write completion nor freeing
+    // the reply proves process exit, parent pipe completion, or Job retirement.
+    drop(bytes);drop(result);
+    phases.record("reply_values_released");
+    drop(session);Ok(())
     })();
     phases.record(if result.is_ok(){"worker_complete"}else{"worker_error"});
     result.map_err(worker_control::report_stop)

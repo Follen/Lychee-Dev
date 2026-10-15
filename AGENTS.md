@@ -39,6 +39,7 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
   Rust draft PR, updating handover. After implementation, complete its four
   sequential audit/fix/verify/independent-review loops to convergence; record
   exact trees and evidence, never promise mathematical zero bugs.
+- Latest user execution order (2026-10-15 18:24 UTC): complete end-to-end production implementation first, then supplement tests and validate in consolidated batches. Do not impose a per-small-slice freeze/review/CI prerequisite. Keep meaningful batch pushes, real safety/ownership constraints and the final four audit loops.
 - Run independent offline and automated Windows checks before tests requiring
   user/game/specific interactive-machine cooperation. Keep all such tests in
   the final section of handover.md. Windows-only does not mean game-dependent.
