@@ -1,0 +1,29 @@
+{
+  "schema": "lycheedev.test-only-fixture-correction.v1",
+  "path": "crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs",
+  "originalSHA256": "fd6365885a39dee412e2f443b5b958e32f464aa1c884a77db634606dd10b8093",
+  "candidateSHA256": "863ff23a7144f733ec8254a3653119baaba60aa25be98e4b7051edc63ecac27f",
+  "reason": "Actual b16 fixture failures: fresh 322 readiness shifts fake uptime; budget exhaustion is a Pending cause. Production unchanged. Rust rerun NOT_RUN.",
+  "replacements": [
+    {
+      "original": "        reason: String::new(),\n        retryable: false,\n    });\n    d.backend.sample_override = Some((1200, 1200));\n    assert!(\n        d.run(&OperationControl::default())\n            .unwrap_err()\n",
+      "replacement": "        reason: String::new(),\n        retryable: false,\n    });\n    // Go 3.2.2 observes input readiness before bind, advancing fixture uptime.\n    // Start after the actual bind input; do not accidentally test stale prepare.\n    let recovered_at = d.backend.uptime + 100;\n    d.backend.sample_override = Some((recovered_at, recovered_at));\n    assert!(\n        d.run(&OperationControl::default())\n            .unwrap_err()\n"
+    },
+    {
+      "original": "        d.state.operation.as_ref().unwrap().stage,\n        OperationStage::CommitReady\n    );\n    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, 1200);\n    let sends = d.backend.inputs.len();\n    let mut d = reload(d);\n    assert_eq!(\n",
+      "replacement": "        d.state.operation.as_ref().unwrap().stage,\n        OperationStage::CommitReady\n    );\n    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, recovered_at);\n    let sends = d.backend.inputs.len();\n    let mut d = reload(d);\n    assert_eq!(\n"
+    },
+    {
+      "original": "            .observed_at_millis,\n        0\n    );\n    d.backend.sample_override = Some((1299, 1300));\n    assert!(\n        d.run(&OperationControl::default())\n            .unwrap_err()\n            .is_pending()\n    );\n    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, 1200);\n    assert_eq!(d.backend.inputs.len(), sends);\n    assert_eq!(\n        d.journal\n",
+      "replacement": "            .observed_at_millis,\n        0\n    );\n    d.backend.sample_override = Some((recovered_at + 99, recovered_at + 100));\n    assert!(\n        d.run(&OperationControl::default())\n            .unwrap_err()\n            .is_pending()\n    );\n    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, recovered_at);\n    assert_eq!(d.backend.inputs.len(), sends);\n    assert_eq!(\n        d.journal\n"
+    },
+    {
+      "original": "        1\n    );\n    d.backend.sample_override = None;\n    d.backend.uptime = 1300;\n    d.run(&OperationControl::default()).unwrap();\n}\n\n",
+      "replacement": "        1\n    );\n    d.backend.sample_override = None;\n    d.backend.uptime = recovered_at + 100;\n    d.run(&OperationControl::default()).unwrap();\n}\n\n"
+    },
+    {
+      "original": "    }\n    assert_eq!(d.backend.0.observations, 2);\n    d.clock.0.set(deadline);\n    assert!(error_is(\n        &held_key_journal_turn(&mut d).unwrap_err(),\n        \"live.channel_budget_exhausted\"\n    ));\n    assert!(\n        d.state\n            .operation\n",
+      "replacement": "    }\n    assert_eq!(d.backend.0.observations, 2);\n    d.clock.0.set(deadline);\n    let exhausted = held_key_journal_turn(&mut d).unwrap_err();\n    assert!(exhausted.is_pending(), \"{exhausted:?}\");\n    // Durable budget exhaustion is a Pending cause, not a Contract variant.\n    assert!(super::super::recovery::has_code(\n        &exhausted,\n        \"live.channel_budget_exhausted\"\n    ), \"{exhausted:?}\");\n    assert!(\n        d.state\n            .operation\n"
+    }
+  ]
+}

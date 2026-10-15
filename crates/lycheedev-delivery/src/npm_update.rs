@@ -74,7 +74,7 @@ fn read(path: &Path, max: u64) -> Result<Value> {
     storage::read_json(path)
 }
 // Release channels are explicitly version-bound; historical fixtures stay on next.
-fn release_channel(version: &str) -> &'static str {
+pub(crate) fn release_channel(version: &str) -> &'static str {
     if version == "3.5.0" {
         "beta"
     } else {

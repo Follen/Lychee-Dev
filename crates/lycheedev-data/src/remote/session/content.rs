@@ -1,18 +1,31 @@
 //! Complete materialized content for scoped metadata/DB2 consumers. This lower
-//! boundary does not yet implement persistent decoded-alias reuse or large
-//! VerifiedBlob output. It never labels partial encrypted bytes complete.
+//! boundary authenticates persistent decoded aliases and keeps allocation owners
+//! through the scoped consumer. It never labels partial bytes complete.
 use super::*;
 use crate::{
-    blte::StreamingReader, decoded_cache::Stats, metadata_format::EncodingRecord,
-    resource::RetainedReservation,
+    blte::StreamingReader,
+    decoded_cache::Stats,
+    metadata_format::EncodingRecord,
+    resource::{OwnedRetainedReservation, RetainedReservation},
 };
 use std::io::Read;
 
-pub(super) struct Materialized<'a> {
-    pub content: blte::Content,
+mod alias;
+pub(super) use alias::Memo;
+pub(crate) struct SharedContent {
+    value: blte::Content,
+    _allocation: OwnedRetainedReservation,
+}
+impl std::ops::Deref for SharedContent {
+    type Target = blte::Content;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+pub(super) struct Materialized {
+    pub content: Arc<SharedContent>,
     pub blob: evidence::BlobRef,
     pub encoding_key: String,
-    _allocation: RetainedReservation<'a>,
 }
 fn retryable(error: &ToolkitError) -> bool {
     // A simultaneous resource/stop/cleanup cause must remain terminal even if
@@ -28,8 +41,9 @@ pub(super) fn materialize<'a>(
     limits: casc::Limits,
     keys: &mut keys::Context,
     stats: &mut Stats,
-    budget: &'a Budget,
-) -> Result<Materialized<'a>> {
+    budget: &'a Arc<Budget>,
+    memo: &mut Memo,
+) -> Result<Materialized> {
     let decoded = usize::try_from(record.decoded_bytes).map_err(|_| limit())?;
     if decoded > maximum {
         return Err(limit());
@@ -60,6 +74,18 @@ pub(super) fn materialize<'a>(
         let attempt = (|| {
             let mut source =
                 files.open(key, physical.encoded_bytes.try_into().map_err(|_| limit())?)?;
+            let alias = alias::key(files, &mut source, &record.content_key, keys, stats, budget)?;
+            if let Some((blob, content)) =
+                memo.read(&files.store, alias.as_deref(), record, keys, stats, budget)?
+            {
+                stats.hits += 1;
+                stats.reused_bytes += blob.bytes;
+                return Ok(Materialized {
+                    content,
+                    blob,
+                    encoding_key: key.clone(),
+                });
+            }
             let mut decode =
                 |keys: &keys::Context| -> Result<(blte::Content, RetainedReservation<'a>)> {
                     files.store.check()?;
@@ -124,12 +150,26 @@ pub(super) fn materialize<'a>(
             };
             stats.extracted_bytes += content.bytes.len() as u64;
             let blob = files.store.publish_blob(&content.bytes, maximum.max(1))?;
+            // The published complete body becomes the Go verified-byte owner.
+            // Drop temporary decode storage before admitting the authenticated
+            // readback; neither permanent work nor network charges are refunded.
+            drop(content);
+            drop(allocation);
+            memo.save(
+                &files.store,
+                alias.as_deref(),
+                record,
+                &blob,
+                keys,
+                stats,
+                budget,
+            )?;
+            let content = memo.published(&files.store, &blob, stats, budget)?;
             files.store.check()?;
             Ok(Materialized {
                 content,
                 blob,
                 encoding_key: key.clone(),
-                _allocation: allocation,
             })
         })();
         match attempt {

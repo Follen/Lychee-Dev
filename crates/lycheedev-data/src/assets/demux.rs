@@ -79,7 +79,7 @@ pub fn run(inv: &Invocation) -> Result<Outcome> {
         )?;
         let source = json!({"kind":"file","input":path,"path":canonical,"bytes":bytes.len(),"sha256":source_capture["blob"]["sha256"]});
         (
-            bytes,
+            bytes.into(),
             source,
             source_capture,
             String::new(),

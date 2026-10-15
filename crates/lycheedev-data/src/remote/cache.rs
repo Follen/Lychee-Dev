@@ -162,7 +162,7 @@ impl Store<'_> {
     }
     // Refresh CAS needs only document identity/generation. Go does not decode
     // or revalidate the old alias value here, unlike initial route preparation.
-    fn generation(&self, key: &str) -> Result<Option<i64>> {
+    pub(crate) fn generation(&self, key: &str) -> Result<Option<i64>> {
         self.controlled(|control| {
             match Metadata::read_document_raw_controlled_with_check(self.home, key, control, || {
                 self.check()
@@ -239,6 +239,21 @@ impl Store<'_> {
     pub fn read_blob<T: Serialize>(&self, reference: &T, maximum: usize) -> Result<Vec<u8>> {
         self.controlled(|control| {
             evidence::read_blob_bounded_with_check(
+                self.home,
+                &serde_json::to_value(reference)?,
+                maximum,
+                control,
+                || self.check(),
+            )
+        })
+    }
+    pub fn read_blob_optional<T: Serialize>(
+        &self,
+        reference: &T,
+        maximum: usize,
+    ) -> Result<Option<Vec<u8>>> {
+        self.controlled(|control| {
+            evidence::read_blob_bounded_optional_with_check(
                 self.home,
                 &serde_json::to_value(reference)?,
                 maximum,

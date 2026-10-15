@@ -1129,7 +1129,10 @@ fn go_mailbox_v1_driver_post_receipt_unknown_time_bound_is_persisted_once() {
         reason: String::new(),
         retryable: false,
     });
-    d.backend.sample_override = Some((1200, 1200));
+    // Go 3.2.2 observes input readiness before bind, advancing fixture uptime.
+    // Start after the actual bind input; do not accidentally test stale prepare.
+    let recovered_at = d.backend.uptime + 100;
+    d.backend.sample_override = Some((recovered_at, recovered_at));
     assert!(
         d.run(&OperationControl::default())
             .unwrap_err()
@@ -1140,7 +1143,7 @@ fn go_mailbox_v1_driver_post_receipt_unknown_time_bound_is_persisted_once() {
         d.state.operation.as_ref().unwrap().stage,
         OperationStage::CommitReady
     );
-    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, 1200);
+    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, recovered_at);
     let sends = d.backend.inputs.len();
     let mut d = reload(d);
     assert_eq!(
@@ -1154,13 +1157,13 @@ fn go_mailbox_v1_driver_post_receipt_unknown_time_bound_is_persisted_once() {
             .observed_at_millis,
         0
     );
-    d.backend.sample_override = Some((1299, 1300));
+    d.backend.sample_override = Some((recovered_at + 99, recovered_at + 100));
     assert!(
         d.run(&OperationControl::default())
             .unwrap_err()
             .is_pending()
     );
-    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, 1200);
+    assert_eq!(d.state.input.as_ref().unwrap().recovery_after_millis, recovered_at);
     assert_eq!(d.backend.inputs.len(), sends);
     assert_eq!(
         d.journal
@@ -1171,7 +1174,7 @@ fn go_mailbox_v1_driver_post_receipt_unknown_time_bound_is_persisted_once() {
         1
     );
     d.backend.sample_override = None;
-    d.backend.uptime = 1300;
+    d.backend.uptime = recovered_at + 100;
     d.run(&OperationControl::default()).unwrap();
 }
 
@@ -1741,10 +1744,13 @@ fn go_321_durable_keyboard_retries_preserve_archive_capacity_and_original_deadli
     }
     assert_eq!(d.backend.0.observations, 2);
     d.clock.0.set(deadline);
-    assert!(error_is(
-        &held_key_journal_turn(&mut d).unwrap_err(),
+    let exhausted = held_key_journal_turn(&mut d).unwrap_err();
+    assert!(exhausted.is_pending(), "{exhausted:?}");
+    // Durable budget exhaustion is a Pending cause, not a Contract variant.
+    assert!(super::super::recovery::has_code(
+        &exhausted,
         "live.channel_budget_exhausted"
-    ));
+    ), "{exhausted:?}");
     assert!(
         d.state
             .operation

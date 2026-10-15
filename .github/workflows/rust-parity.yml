@@ -449,6 +449,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-sql-resource-lifetime --one-shot -- test --locked --offline -p lycheedev-data --lib resource::temporary_tests -j 1
+      - name: Run owned remote decoded-body resource lifetimes
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-remote-body-lifetime --one-shot -- test --locked --offline -p lycheedev-data --lib resource::owned_retained_tests -j 1
       - name: Run SQL semantic catalogs and source mapping fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-semantic-sql --one-shot -- test --locked --offline -p lycheedev-data --test semantic_sql_parity -j 1

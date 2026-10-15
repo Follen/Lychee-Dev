@@ -84,6 +84,18 @@ test('current product is exactly the frozen increment on its authenticated Rust 
       current = Buffer.from(text.replace(anchor,
         "}\nfn is_false(value: &bool) -> bool { !*value }\n\nimpl<'de> Deserialize<'de> for InputObservation {"));
     }
+    if (row.path === 'crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs') {
+      const correction = JSON.parse(read('tests/rust-parity/b16-mailbox-fixture-corrections.json'));
+      assert.equal(correction.path, row.path);
+      assert.equal(correction.originalSHA256, row.sha256);
+      assert.equal(hash(current), correction.candidateSHA256);
+      let restored = current.toString();
+      for (const part of correction.replacements) {
+        assert.equal(restored.split(part.replacement).length, 2);
+        restored = restored.replace(part.replacement, part.original);
+      }
+      current = Buffer.from(restored);
+    }
     assert.equal(hash(current), row.sha256, row.path);
     if (row.beforeSHA256 !== null) assert.equal(hash(blob(manifest.candidateBaseCommit, row.path)), row.beforeSHA256, row.path);
   }

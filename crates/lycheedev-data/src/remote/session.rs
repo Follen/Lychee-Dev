@@ -20,6 +20,7 @@ use lycheedev_core::{Result, ToolkitError, evidence, selection::DataPin};
 use std::{borrow::Cow, sync::Arc};
 mod content;
 use content::Materialized;
+pub(crate) use content::SharedContent;
 
 pub(super) struct Options {
     pub offline: bool,
@@ -28,12 +29,15 @@ pub(super) struct Options {
     pub metadata_bytes: usize,
     pub content_bytes: usize,
 }
-pub(super) struct File<'a> {
+pub(super) struct File {
     pub entry: metadata_format::RootRecord,
     pub reading: serde_json::Value,
-    materialized: Materialized<'a>,
+    materialized: Materialized,
 }
-impl File<'_> {
+impl File {
+    pub fn into_parts(self) -> (Arc<SharedContent>, serde_json::Value) {
+        (self.materialized.content, self.reading)
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.materialized.content.bytes
     }
@@ -161,12 +165,12 @@ impl<'a, 'scope> Session<'a, 'scope> {
         self.files = Some(Files::new(fragments, admitted.download_workers())?);
         self.check()
     }
-    /// Each callback borrows complete bytes and may request one subsequent
+    /// Each callback owns complete shared bytes and may request one subsequent
     /// bounded batch. Once any callback ran, errors never replay that callback.
     pub fn read_batches(
         &mut self,
         ids: &[u32],
-        callback: &mut dyn FnMut(&[File<'_>]) -> Result<Vec<u32>>,
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
     ) -> Result<()> {
         self.check()?;
         if ids.is_empty() || ids.len() > 32 || ids.contains(&0) {
@@ -193,10 +197,10 @@ impl<'a, 'scope> Session<'a, 'scope> {
     fn read_prepared(
         &mut self,
         progress: &mut BatchProgress,
-        callback: &mut dyn FnMut(&[File<'_>]) -> Result<Vec<u32>>,
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
     ) -> Result<()> {
         let admitted = self.admitted;
-        let budget = self.budget.as_ref();
+        let budget = self.budget;
         let keys = self.keys.as_mut().expect("prepared keys");
         let files = self.files.as_ref().expect("prepared files");
         let build = &files.build;
@@ -245,6 +249,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 admitted.check()
             })?;
         let mut stats = Stats::default();
+        let mut decoded = content::Memo::default();
         let root = content::materialize(
             files,
             &index,
@@ -255,6 +260,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
             keys,
             &mut stats,
             budget,
+            &mut decoded,
         )?;
         let build_blob = files
             .store
@@ -321,6 +327,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
                     keys,
                     &mut stats,
                     budget,
+                    &mut decoded,
                 )?;
                 let reading = serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key,"content":content.blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats});
                 output.push(File {
@@ -331,7 +338,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 stats = Stats::default();
             }
             admitted.check()?;
-            progress.deliver(|| callback(&output))?;
+            progress.deliver(|| callback(output))?;
             admitted.check()?;
         }
         admitted.check()

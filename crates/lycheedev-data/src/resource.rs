@@ -74,6 +74,21 @@ pub(crate) struct RetainedReservation<'a> {
     bytes: u64,
     committed: bool,
 }
+/// The same admitted allocation after it crosses a scoped provider boundary.
+/// Not Clone: an Arc around the body, rather than the guard, shares ownership.
+pub(crate) struct OwnedRetainedReservation {
+    budget: Arc<Budget>,
+    bytes: u64,
+}
+impl Drop for OwnedRetainedReservation {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.budget.state.lock()
+            && let Some(remaining) = state.used.retained_bytes.checked_sub(self.bytes)
+        {
+            state.used.retained_bytes = remaining;
+        }
+    }
+}
 /// Go logical scratch is separate from Rust allocation ownership and is never
 /// included in the public lifetime-usage snapshot.
 pub(crate) struct LogicalScratch<'a> {
@@ -88,6 +103,24 @@ impl Drop for LogicalScratch<'_> {
     }
 }
 impl RetainedReservation<'_> {
+    /// Transfer one existing refund obligation without changing either ledger.
+    /// A different Budget cannot acquire or refund this allocation's charge.
+    pub(crate) fn into_owned(mut self, budget: &Arc<Budget>) -> Result<OwnedRetainedReservation> {
+        if !std::ptr::eq(self.budget, budget.as_ref()) {
+            return Err(fault(
+                "records.internal",
+                8,
+                "Retained owner budget differs",
+            ));
+        }
+        let owned = OwnedRetainedReservation {
+            budget: budget.clone(),
+            bytes: self.bytes,
+        };
+        self.committed = true;
+        Ok(owned)
+    }
+
     /// Extend only this owner's refundable allocation. Failed admission leaves
     /// both the guard and the shared ledger unchanged.
     pub(crate) fn grow(&mut self, bytes: usize) -> Result<()> {
@@ -599,3 +632,6 @@ mod network_observed_tests {
         assert_eq!(b.snapshot().unwrap().network_bytes, 3);
     }
 }
+
+#[cfg(test)]
+mod owned_retained_tests;

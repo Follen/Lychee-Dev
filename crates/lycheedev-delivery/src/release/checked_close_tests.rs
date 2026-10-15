@@ -315,3 +315,34 @@ fn inventory_directory_scan_still_rejects_unlisted_files_after_checked_closes() 
     assert_eq!(error.message, "unlisted file: addon/extra");
     assert_released(&fixture.0.join("addon/a"));
 }
+
+#[test]
+fn manifest_runtime_channel_uses_the_same_version_binding_as_update() {
+    for (version, tag, accepted) in [
+        ("3.5.0", "beta", true),
+        ("3.5.0", "next", false),
+        ("3.5.0", "latest", false),
+        ("3.1.2", "next", true),
+        ("3.1.2", "beta", false),
+    ] {
+        let fixture = Fixture::new();
+        let path = fixture.manifest();
+        let mut raw: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        raw["version"] = json!(version);
+        raw["runtime"] = json!("rust");
+        raw["npmChannel"] = json!({
+            "schema": "lycheedev.npm-channel.v1", "version": version,
+            "distTag": tag, "preserveLatest": "2.5.1"
+        });
+        fs::write(&path, serde_json::to_vec(&raw).unwrap()).unwrap();
+        let result = read_manifest_with_control(&fixture.0, version, &OperationControl::default());
+        assert_eq!(result.is_ok(), accepted, "{version}/{tag}: {result:?}");
+        assert_eq!(crate::npm_update::binding(&fixture.0, version).is_ok(), accepted);
+        if let Err(error) = result {
+            assert_eq!(error.code, "delivery.invalid_release");
+            assert_eq!(error.exit_code, 4);
+            assert_eq!(error.message, "runtime/channel binding differs from the owner release contract");
+        }
+        assert_released(&path);
+    }
+}

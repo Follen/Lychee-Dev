@@ -34,11 +34,11 @@ fn maximum_content_allowance_small_file_cold_and_warm() {
     let (fx, expected) = input();
     let inv = fx.invocation("asset inspect", &[("--max-bytes", "536870912")]);
     let cold = read(&inv).unwrap().remove(0);
-    assert_eq!(cold.bytes, expected);
+    assert_eq!(cold.bytes.as_ref(), expected.as_slice());
     assert_eq!(cold.reading["decodedCache"]["hits"], 0);
     assert_eq!(cold.reading["decodedCache"]["contentDecodeCalls"], 2);
     let warm = read(&inv).unwrap().remove(0);
-    assert_eq!(warm.bytes, expected);
+    assert_eq!(warm.bytes.as_ref(), expected.as_slice());
     assert_eq!(warm.reading["decodedCache"]["hits"], 2);
     assert_eq!(warm.reading["decodedCache"]["contentDecodeCalls"], 0);
     assert_eq!(
@@ -159,7 +159,7 @@ fn selected_encoded_and_decoded_lengths_are_bounded_on_cold_and_warm_reads() {
     let max = (expected.len() + 9).to_string();
     let inv = fx.invocation("asset inspect", &[("--max-bytes", &max)]);
     for _ in 0..2 {
-        assert_eq!(read(&inv).unwrap()[0].bytes, expected);
+        assert_eq!(read(&inv).unwrap()[0].bytes.as_ref(), expected.as_slice());
     }
     for too_small in [expected.len() - 1, expected.len(), expected.len() + 8] {
         let maximum = too_small.to_string();

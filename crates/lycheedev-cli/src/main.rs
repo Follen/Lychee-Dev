@@ -2823,7 +2823,13 @@ mod tests {
         }
         let live = parse(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
         assert_eq!(operation_seconds(&live).unwrap(), 660);
-        let invalid = parse(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap();
+        let invalid = parse(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap_err();
+        assert_eq!(invalid.exit_code, 2);
+        assert_eq!(invalid.code, "command.invalid_arguments");
+        assert_eq!(invalid.message, "--wait-seconds must be between 1 and 600");
+        // Internal callers still receive the same rejection if they bypass argv.
+        let mut invalid = live.clone();
+        invalid.flags.insert("--wait-seconds".into(), "-1".into());
         assert_eq!(operation_seconds(&invalid).unwrap_err().exit_code, 2);
         let deadline = ToolkitError::new("command.deadline", "exhausted", 5);
         let pending = command_fault(&live, deadline.clone());

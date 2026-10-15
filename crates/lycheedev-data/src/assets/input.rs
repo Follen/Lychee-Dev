@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::{fs, io::Read, path::Path, sync::Arc};
 
 pub struct CascInput {
-    pub bytes: Vec<u8>,
+    pub bytes: local_query::FileBytes,
     pub reading: Value,
     pub capture: Value,
     pub snapshot: String,

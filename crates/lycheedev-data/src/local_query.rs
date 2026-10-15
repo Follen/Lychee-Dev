@@ -20,13 +20,15 @@ use std::{
 };
 
 mod effective;
+mod file_bytes;
+pub use file_bytes::FileBytes;
 pub(crate) mod query_csv;
 #[cfg(test)]
 mod regression_tests;
 mod request;
 
 pub struct File {
-    pub bytes: Vec<u8>,
+    pub bytes: FileBytes,
     pub reading: Value,
 }
 pub(crate) struct VerifiedFile {
@@ -116,7 +118,7 @@ pub(crate) fn read_file_batches_budgeted(
                 .into_iter()
                 .map(|file| match file.content {
                     SelectedContent::Bytes(bytes) => Ok(File {
-                        bytes,
+                        bytes: bytes.into(),
                         reading: file.reading,
                     }),
                     SelectedContent::Blob(_) => Err(fault(
