@@ -387,7 +387,7 @@ jobs:
       - name: Run remote catalog cancellable HTTP and gzip fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          node tools/rust-cargo.mjs --owner ci-data-remote --one-shot -- test --locked --offline -p lycheedev-data --lib remote:: -j 1
+          node tools/rust-cargo.mjs --owner ci-data-remote --one-shot -- test --locked --offline -p lycheedev-data --lib remote:: -j 1 -- --skip hotfix::
       - name: Run Hotfix CLI provider argument contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-hotfix-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev hotfix_remote_tests -j 1

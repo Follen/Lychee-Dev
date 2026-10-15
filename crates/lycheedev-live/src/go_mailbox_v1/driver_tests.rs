@@ -1673,7 +1673,14 @@ fn go_321_durable_keyboard_retries_preserve_archive_capacity_and_original_deadli
             .push_back(expected_outcome.clone());
         d.backend.0.input_error = Some(error(reason));
         let err = held_key_journal_turn(&mut d).unwrap_err();
-        assert!(err.is_pending(), "turn {turn}: {err:?}");
+        // Go input_journal_test.go checks ErrPending only for known-zero
+        // retries. The final uncertain submission keeps its original error;
+        // subsequent resumes below must wait without sending it again.
+        if turn == 600 {
+            assert!(!err.is_pending(), "uncertain submission was rewritten: {err:?}");
+        } else {
+            assert!(err.is_pending(), "turn {turn}: {err:?}");
+        }
         assert!(error_is(&err, reason), "turn {turn}: {err:?}");
         let operation = d.state.operation.as_ref().unwrap();
         assert_eq!(

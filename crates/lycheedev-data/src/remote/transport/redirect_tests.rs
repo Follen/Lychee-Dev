@@ -5,6 +5,8 @@ fn policy() -> GetPolicy<'static> {
         body: BodyPolicy::GoAutomaticGzip,
         accept: Some("text/html,application/xhtml+xml"),
         referer: None,
+        user_agent: None,
+        authorization: None,
     }
 }
 fn response(length: Option<usize>, body: &[u8], extra: &str) -> Vec<u8> {
@@ -336,4 +338,67 @@ fn original_request_timeout_is_checked_before_accounting_another_hop() {
     .unwrap_err();
     assert_eq!(error.message, "remote request timeout");
     assert_eq!(budget.snapshot().unwrap().network_requests, 0);
+}
+
+#[test]
+fn fixed_consumer_headers_reject_injection_before_attempt() {
+    for (user_agent, authorization) in [
+        (Some("other"), None),
+        (Some("Go-http-client/1.1\r\nX-Injected: yes"), None),
+        (None, Some("Bearer abc")),
+        (None, Some("Basic Og==\r\nX-Injected: yes")),
+        (None, Some("Basic ")),
+    ] {
+        let control = OperationControl::default();
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
+        let error = run(async {
+            let deadline = request_deadline(&control, Some(&budget))?;
+            get_once(
+                "http://127.0.0.1:1/",
+                GetPolicy {
+                    user_agent,
+                    authorization,
+                    ..policy()
+                },
+                &control,
+                Some(&budget),
+                deadline,
+            )
+            .await
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "records.remote_http");
+        assert_eq!(budget.snapshot().unwrap().network_requests, 0);
+    }
+}
+
+#[test]
+fn absent_network_budget_allows_go_page_bound_beyond_shared_default_caps() {
+    let control = OperationControl::default();
+    let unrelated = Budget::controlled(
+        Cost {
+            network_requests: 0,
+            network_bytes: 0,
+            ..Cost::defaults()
+        },
+        control.deadline(),
+        control.clone(),
+    );
+    // Controlled helper only: simulate three hops for each of the 2048 allowed
+    // Wago pages without opening 6144 sockets. Production Wago passes None at
+    // the same get_once/drain/read call sites (checked in the frozen excerpt).
+    let mut attempts = 0;
+    for _ in 0..2048 {
+        for _ in 0..3 {
+            attempt(None).unwrap();
+            delivered(2048, None, &control, None).unwrap();
+            attempts += 1;
+        }
+    }
+    assert_eq!(attempts, 6144);
+    // Even an observed amount above the unrelated 1GiB default is no quota
+    // event when no ledger was requested; this does not allocate that amount.
+    delivered((1 << 30) + 1, None, &control, None).unwrap();
+    assert_eq!(unrelated.snapshot().unwrap(), Cost::default());
+    assert_eq!(unrelated.logical_snapshot().unwrap(), Cost::default());
 }

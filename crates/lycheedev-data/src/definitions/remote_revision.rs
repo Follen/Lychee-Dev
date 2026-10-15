@@ -115,6 +115,8 @@ impl Fetch for Public {
                     body: BodyPolicy::GoAutomaticGzip,
                     accept: Some("application/vnd.github.sha"),
                     referer: None,
+                    user_agent: None,
+                    authorization: None,
                 },
                 control,
                 budget,

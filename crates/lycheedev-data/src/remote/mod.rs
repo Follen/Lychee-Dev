@@ -3,6 +3,7 @@
 //! still pass their EKey/chunk/CKey checks in the consuming reader.
 pub(crate) mod cache;
 pub mod target;
+pub(crate) mod fragments;
 pub mod catalog;
 mod proxy;
 pub mod transport;

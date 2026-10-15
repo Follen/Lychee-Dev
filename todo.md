@@ -191,3 +191,10 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Diagnose full-Retail memory by concrete structure counts and ownership lifetimes; compare phase-matched sampled working set/private bytes after any optimization without dropping coverage or results.
 
 - [ ] Execute four Graph ownership-move differential regressions and full-Retail memory measurements on a tree containing the moves; 62d53b2/ce6dfe4 are earlier candidates, with no measured benefit attributable to this change.
+
+## Current remote integration follow-through
+
+- [ ] Validate integrated fragment R9.1 (17 declared tests) and Wago R3/header seam against the exact product lock on Windows; declarations/static review are not runtime acceptance.
+- [ ] Complete encoded/index/decoded/default Data consumers plus real workspace download-worker admission; preserve scoped refundable ownership.
+- [ ] Resolve retained-session cold worker/pipe failure and both-direction context duplicate work with full output/coverage/budget equivalence; retain the exact 62d failure evidence.
+- [ ] Measure Graph ownership moves on full Retail under the same sampled working-set/private-byte protocol; 62d excludes them and proves no reduction.

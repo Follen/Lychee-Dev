@@ -383,6 +383,9 @@ pub(crate) struct GetPolicy<'a> {
     pub body: BodyPolicy,
     pub accept: Option<&'a str>,
     pub referer: Option<&'a str>,
+    pub user_agent: Option<&'a str>,
+    /// Caller-owned per-request header; never copied between redirect URLs.
+    pub authorization: Option<&'a str>,
 }
 pub(crate) async fn get_once(
     locator: &str,
@@ -426,6 +429,29 @@ pub(crate) async fn get_once(
     if let Some(referer) = policy.referer {
         request = request.header("Referer", referer);
     }
+    if let Some(user_agent) = policy.user_agent {
+        if user_agent != "Go-http-client/1.1" {
+            return Err(http("unsupported fixed user agent"));
+        }
+        request = request.header("User-Agent", user_agent);
+    }
+    if let Some(authorization) = policy.authorization {
+        let encoded = authorization
+            .strip_prefix("Basic ")
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() % 4 == 0
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
+            })
+            .ok_or_else(|| http("invalid fixed Basic authorization"))?;
+        let _ = encoded; // The consumer encoded bytes; no arbitrary header input.
+        let mut value = reqwest::header::HeaderValue::from_str(authorization)
+            .map_err(|_| http("invalid authorization header"))?;
+        value.set_sensitive(true);
+        request = request.header(reqwest::header::AUTHORIZATION, value);
+    }
     check(control, budget)?;
     if Instant::now() >= deadline {
         return Err(http("remote request timeout"));
@@ -457,6 +483,8 @@ pub fn fetch_metadata(
                 body: BodyPolicy::GoAutomaticGzip,
                 accept: None,
                 referer: None,
+                user_agent: None,
+                authorization: None,
             },
             control,
             budget,

@@ -38,7 +38,7 @@ pub struct RemoteTarget {
 fn selection_error(code: &str) -> ToolkitError {
     fault(code, 4, code)
 }
-fn product(value: &str) -> Result<(&'static str, &'static str)> {
+pub(crate) fn product(value: &str) -> Result<(&'static str, &'static str)> {
     let profile = client::product(value)
         .ok_or_else(|| selection_error("selection.unsupported_data_product"))?;
     Ok((
@@ -71,7 +71,7 @@ impl Request {
         Ok(())
     }
 }
-fn release_product(product: &str, build: &str) -> Result<()> {
+pub(crate) fn release_product(product: &str, build: &str) -> Result<()> {
     let profile = client::product(product)
         .ok_or_else(|| selection_error("selection.unsupported_data_product"))?;
     if profile.reused_slot

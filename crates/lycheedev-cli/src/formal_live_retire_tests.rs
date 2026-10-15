@@ -136,6 +136,19 @@ fn cancel_and_abandon_con_or_missing_id_reject_before_workspace_or_native_factor
             if let Some(id) = id {
                 words.push(id);
             }
+            if id.is_none() {
+                // Missing positional arguments are rejected by the real parser,
+                // before an Invocation or a native service factory exists.
+                let mut args = words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+                args.extend(["--home".into(), f.0.join("home").to_string_lossy().into_owned()]);
+                let err = crate::parse(&args).err().expect("missing operation ID must fail parsing");
+                assert_eq!(err.code, "command.invalid_arguments");
+                assert_eq!(err.exit_code, 2);
+                let argument = if route == "cancel" { "<operation-id>" } else { "<operation-or-bootstrap-id>" };
+                assert_eq!(err.message, format!("missing required argument {argument}"));
+                assert!(!f.0.join("home").exists());
+                continue;
+            }
             let inv = invocation(&words, &f.0);
             let response = execute(&inv);
             assert_eq!(response.exit_code(), 2);
