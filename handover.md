@@ -36,4 +36,4 @@
 - 3.2.1发布流水线完成合并提交CI、真实LuaLS/Source、源码重建、Windows正式包安装运行、摘要校验、OIDC发布、registry回读和重新安装验证；[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.1)六项产物齐全。独立registry回读确认版本、latest渠道、integrity与provenance元数据存在，不声称完成provenance密码学验证。
 - 七产品干净首次安装、重新登录及完整升级矩阵仍见[todo.md](todo.md)。当前没有新确认缺陷或活动游戏连接。
 - 本次实现、审查、合并、发布及本机正式包更新均已完成；当前无需继续代码修改。游戏内addon等待用户下次reload，七产品剩余实机范围按todo.md保留。
-- 本轮结果与本地重装包保留于忽略的`.tmp/keyboard-priority/`；观察程序已删除。构建stage、缓存与LuaLS下载包的清理被自动审批策略拒绝，暂留。保留用户此前要求留下的材料、原ZIP、恢复记录及`.worktrees/rust-refactor`，不清理其他任务资源。
+- 本轮临时目录`.tmp/keyboard-priority/`已按用户要求通过限定绝对路径的脚本删除；清理前已确认实验连接关闭、报告verified/released，无待恢复操作。删除1368个文件，共90338196字节，清理脚本随后移除。用户此前要求留下的其他任务材料、原ZIP、恢复记录及`.worktrees/rust-refactor`继续保留。
