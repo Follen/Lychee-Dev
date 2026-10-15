@@ -1,6 +1,6 @@
 [package]
 name = "lycheedev-binding-contracts"
-version = "3.1.2"
+version = "3.5.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.99"

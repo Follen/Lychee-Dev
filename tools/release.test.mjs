@@ -22,7 +22,7 @@ test('current release channel never moves latest and rejects stale policy',()=>{
   const {version}=JSON.parse(readFileSync(new URL('../release/version.json',import.meta.url),'utf8'));
   assert.equal(channel.version,version);
   assert.equal(channel.preserveLatest,'2.5.1');
-  assert.equal(distTagFor(version),'next');
+  assert.equal(distTagFor(version),'beta');
   assert.equal(distTagFor('2.5.1'),'latest');
   assert.equal(validateNpmChannel(channel,version),channel);
   for(const bad of [null,[],{...channel,extra:true},{...channel,distTag:'latest'},
@@ -31,15 +31,15 @@ test('current release channel never moves latest and rejects stale policy',()=>{
     assert.throws(()=>validateNpmChannel(bad,version),/invalid_npm_channel/);
   }
   assert.throws(()=>validateNpmChannel(channel,'0.0.0'),/invalid_npm_channel/);
-  assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:'0.0.0'},channel,version,'next','before').ok);
-  assert.ok(verifyNpmChannelTags({latest:'2.5.1',next:version},channel,version,'next','after').ok);
+  assert.ok(verifyNpmChannelTags({latest:'2.5.1',beta:'0.0.0'},channel,version,'beta','before').ok);
+  assert.ok(verifyNpmChannelTags({latest:'2.5.1',beta:version},channel,version,'beta','after').ok);
   for(const [tags,tag,phase] of [
-    [{latest:version,next:version},'next','before'],
-    [{latest:version,next:version},'next','after'],
-    [{latest:'2.5.1',next:'0.0.0'},'next','after'],
-    [{latest:'2.5.1',next:version},'latest','before'],
-    [{},'next','before'],[null,'next','before'],
-    [{latest:'2.5.1'},'next','invalid'],
+    [{latest:version,beta:version},'beta','before'],
+    [{latest:version,beta:version},'beta','after'],
+    [{latest:'2.5.1',beta:'0.0.0'},'beta','after'],
+    [{latest:'2.5.1',beta:version},'latest','before'],
+    [{},'beta','before'],[null,'beta','before'],
+    [{latest:'2.5.1'},'beta','invalid'],
   ]) assert.throws(()=>verifyNpmChannelTags(tags,channel,version,tag,phase),/npm_channel_mismatch/);
 });
 
@@ -425,4 +425,13 @@ test('a missing LICENSE fails with the license decision pending error', t => {
   const audit = auditTgz(entries, { version: '2.0.0', expectedCommit: 'a'.repeat(40), sourceRoot: root });
   assert.equal(audit.ok, false);
   assert.match(audit.violations.join(), /license decision pending/);
+});
+
+test('independent Rust 3.5.0 is a stable package on beta only; historical next remains explicit', () => {
+  const channel = {schema:'lycheedev.npm-channel.v1', version:'3.5.0',distTag:'beta',preserveLatest:'2.5.1'};
+  assert.equal(parseTag('v3.5.0'),'3.5.0');
+  assert.equal(policyFor('3.5.0').npmDistTag,'beta');
+  for (const distTag of ['next','latest','3.5.0-beta.1']) assert.throws(()=>validateNpmChannel({...channel,distTag}),/invalid_npm_channel/);
+  assert.equal(validateNpmChannel({...channel,version:'3.1.2',distTag:'next'}).distTag,'next');
+  assert.throws(()=>validateNpmChannel({...channel,version:'3.2.2'}),/invalid_npm_channel/);
 });

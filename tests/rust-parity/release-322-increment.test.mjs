@@ -47,11 +47,40 @@ test('current product is exactly the frozen increment on its authenticated Rust 
     assert.equal(bytes.length, row.bytes, row.path); assert.equal(hash(bytes), row.sha256, row.path);
   }
   for (const row of manifest.productChanges) {
-    assert.equal(hash(read(row.path)), row.sha256, row.path);
+    let current = read(row.path);
+    // This generated fixture's sole release string follows the independently
+    // approved candidate. Preserve and authenticate the original 322 record.
+    if (row.path === 'tests/addon/env.lua') {
+      const text = current.toString();
+      assert.equal(text.split('return "3.5.0"').length, 2);
+      current = Buffer.from(text.replace('return "3.5.0"', 'return "3.1.2"'));
+    }
+    if (row.path === 'crates/lycheedev-live/src/go_mailbox_v1/input.rs') {
+      const text = current.toString();
+      const anchor = "}\n\nimpl<'de> Deserialize<'de> for InputObservation {";
+      assert.equal((text.match(/fn is_false\(/g) ?? []).length, 1);
+      assert.equal(text.split(anchor).length, 2);
+      // 351's real E0428 came from this duplicate helper. Authenticate the
+      // exact one-line removal against the immutable failed candidate.
+      current = Buffer.from(text.replace(anchor,
+        "}\nfn is_false(value: &bool) -> bool { !*value }\n\nimpl<'de> Deserialize<'de> for InputObservation {"));
+    }
+    assert.equal(hash(current), row.sha256, row.path);
     if (row.beforeSHA256 !== null) assert.equal(hash(blob(manifest.candidateBaseCommit, row.path)), row.beforeSHA256, row.path);
   }
   for (const path of ['release/version.json','packages/npm/lycheedev/package.json','packages/npm/lycheedev/package-lock.json','release/npm-channel.json']) {
-    assert.deepEqual(read(path), blob(manifest.candidateBaseCommit, path), path);
+    const before = JSON.parse(blob(manifest.candidateBaseCommit, path));
+    const actual = JSON.parse(read(path));
+    assert.equal(actual.version, '3.5.0', path);
+    actual.version = before.version;
+    if (path.endsWith('package-lock.json')) {
+      assert.equal(actual.packages[''].version, '3.5.0');
+      actual.packages[''].version = before.packages[''].version;
+    }
+    if (path === 'release/npm-channel.json') {
+      assert.equal(actual.distTag, 'beta'); actual.distTag = before.distTag;
+    }
+    assert.deepEqual(actual, before, path);
   }
 });
 

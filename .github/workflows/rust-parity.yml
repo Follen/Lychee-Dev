@@ -365,6 +365,12 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: >-
           node tools/rust-cargo.mjs --owner ci-trusted-runtime --one-shot -- test --locked --offline -p lycheedev-windows --lib process::runtime_ -j 1
+      - name: Run held directory admission and checked close fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-directory-admission --one-shot -- test --locked --offline -p lycheedev-windows --lib filesystem::destination::admission_tests -j 1
+      - name: Run candidate beta self-update binding regression
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-beta-update-binding --one-shot -- test --locked --offline -p lycheedev-delivery --lib npm_update::tests::independent_rust_350_requires_beta_and_rejects_other_channels -j 1
       - name: Run exact process lifetime classification fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: >-

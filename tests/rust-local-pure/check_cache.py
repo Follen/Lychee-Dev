@@ -54,8 +54,9 @@ def verify_owned(lock, identity):
     if actual != OWNED_PATHS:
         raise ValueError("cache.owned_inventory")
     manifest = tomllib.loads(bounded(root / "Cargo.toml", 65536).decode())
-    if manifest.get("package", {}).get("name") != "lycheedev-binding-contracts" or manifest["package"].get("version") != "3.1.2":
+    if manifest.get("package", {}).get("name") != "lycheedev-binding-contracts" or not isinstance(manifest["package"].get("version"), str):
         raise ValueError("cache.owned_package")
+    return manifest["package"]["version"]
 
 
 def verify(lock, home, owned=None):
@@ -67,8 +68,7 @@ def verify(lock, home, owned=None):
     local_packages = {"lycheedev-local-pure": "0.0.0"}
     local_seen = set()
     if owned is not None:
-        verify_owned(lock, owned)
-        local_packages["lycheedev-binding-contracts"] = "3.1.2"
+        local_packages["lycheedev-binding-contracts"] = verify_owned(lock, owned)
     for package in packages:
         if "source" not in package:
             name = package["name"]

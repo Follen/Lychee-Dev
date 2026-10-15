@@ -238,17 +238,24 @@ impl Store<'_> {
     }
     pub fn read_blob<T: Serialize>(&self, reference: &T, maximum: usize) -> Result<Vec<u8>> {
         self.controlled(|control| {
-            evidence::read_blob_bounded(
+            evidence::read_blob_bounded_with_check(
                 self.home,
                 &serde_json::to_value(reference)?,
                 maximum,
                 control,
+                || self.check(),
             )
         })
     }
     pub fn publish_blob(&self, bytes: &[u8], maximum: usize) -> Result<BlobRef> {
         self.controlled(|control| {
-            let reference = evidence::publish_blob_bounded(self.home, bytes, maximum, control)?;
+            let reference = evidence::publish_blob_bounded_with_check(
+                self.home,
+                bytes,
+                maximum,
+                control,
+                || self.check(),
+            )?;
             serde_json::from_value(reference).map_err(Into::into)
         })
     }

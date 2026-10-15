@@ -93,7 +93,6 @@ pub struct InputObservation {
     #[serde(skip)]
     pub observed_at_millis: i64,
 }
-fn is_false(value: &bool) -> bool { !*value }
 
 impl<'de> Deserialize<'de> for InputObservation {
     fn deserialize<D: serde::Deserializer<'de>>(

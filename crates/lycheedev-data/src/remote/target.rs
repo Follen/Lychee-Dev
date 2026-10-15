@@ -161,7 +161,10 @@ fn resolve_with(
     let mut expected_build = request.full_build.clone();
     let mut reference = request.definitions.clone();
     if !request.parent.is_empty() {
-        let parent = selection::load_pinned_controlled(home, &request.parent, &control)?;
+        let parent =
+            selection::load_pinned_controlled_with_check(home, &request.parent, &control, || {
+                store.check()
+            })?;
         if parent
             .source
             .as_ref()
@@ -216,7 +219,7 @@ fn resolve_with(
         store.configuration(&route, &release.cdn_config, request.offline, fetch)?;
     cache::complete_build(slot, &release, build, cdn)?;
     let commit = definitions.resolve(home, &reference, request.offline, &control, budget)?;
-    let pin = selection::pin_selection_controlled(
+    let pin = selection::pin_selection_controlled_with_check(
         home,
         SelectionSpec {
             parent: request.parent.clone(),
@@ -232,6 +235,7 @@ fn resolve_with(
             ..Default::default()
         },
         &control,
+        || store.check(),
     )?;
     let observation = if request.offline {
         let (mut observation, _) = remembered.ok_or_else(cache::offline)?;
@@ -275,7 +279,7 @@ fn resolve_with(
         offline: request.offline,
     })?;
     store.check()?;
-    let capture = evidence::commit_capture_bounded(
+    let capture = evidence::commit_capture_bounded_with_check(
         home,
         evidence::CaptureInput {
             bytes: &raw,
@@ -286,6 +290,7 @@ fn resolve_with(
             provenance: serde_json::json!({"kind":"remote-target","locator":versions_url,"snapshot":pin.id,"dataBuild":release.full_build}),
         },
         &control,
+        || store.check(),
     )?;
     let capture = serde_json::from_value(capture)?;
     store.check()?;

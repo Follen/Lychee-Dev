@@ -1,3 +1,4 @@
+import {CANDIDATE_RELEASE_FIELDS} from '../rust-3.5.0-release-fields.mjs';
 // This checker authenticates inputs and observations. It never substitutes for Lua execution.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -47,7 +48,8 @@ export function manifest(root) {
   assert.equal(value.oracle.commit, ORACLE);
   assert.deepEqual(value.profiles, PROFILES);
   assert.equal(value.fixtures.length, 58); assert.equal(value.candidateAddon.length, 55);
-  return value;
+  // Keep the authenticated frozen manifest bytes; apply the separate approved candidate identity.
+  return {...value, retainedReleaseFields: CANDIDATE_RELEASE_FIELDS};
 }
 export function authenticate(root) {
   const expected = manifest(root);

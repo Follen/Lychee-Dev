@@ -1,3 +1,4 @@
+import {CANDIDATE_RELEASE_FIELDS as RETAINED_RELEASE_FIELDS} from './rust-3.5.0-release-fields.mjs';
 // Current oracle and fault tests. Synthetic comparisons are not product passes.
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
@@ -7,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {loadCandidate, sha256, GO_COMMIT} from './oracle.mjs';
-import {CURRENT_GO_COMMIT, CURRENT_FIXTURE, RETAINED_RELEASE_FIELDS, loadCurrentFixture, extractCurrentProducts, compareCurrent} from './oracle-3.2.2.mjs';
+import {CURRENT_GO_COMMIT, CURRENT_FIXTURE, loadCurrentFixture, extractCurrentProducts, compareCurrent} from './oracle-3.2.2.mjs';
 import {APPROVED_ENGINE_SUMMARIES, compareDescribeContract, compareRelease322DescribeContract} from './describe-contract.mjs';
 import {runCliSmoke} from '../../tools/rust-cli-smoke.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');

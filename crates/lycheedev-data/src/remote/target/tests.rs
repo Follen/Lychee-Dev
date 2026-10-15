@@ -508,3 +508,54 @@ fn target_child_uses_shorter_independent_budget_deadline_for_pin_and_capture() {
     assert!(child.deadline() < control.deadline());
     assert!(child.stop_cause().unwrap().is_none());
 }
+
+#[test]
+fn independent_budget_stop_after_definitions_prevents_pin_and_capture_publication() {
+    struct StopDefinitions(lycheedev_core::control::TrackedCancellation);
+    impl DefinitionResolver for StopDefinitions {
+        fn resolve(
+            &self,
+            _: &Path,
+            _: &str,
+            _: bool,
+            _: &OperationControl,
+            _: Option<&Budget>,
+        ) -> Result<String> {
+            self.0.cancel();
+            Ok("a".repeat(40))
+        }
+    }
+    let fixture = Fixture::new();
+    let token = lycheedev_core::control::TrackedCancellation::new();
+    let independent =
+        OperationControl::tracked(Instant::now() + Duration::from_secs(5), token.clone());
+    let budget = Budget::controlled(
+        crate::resource::Cost::defaults(),
+        independent.deadline(),
+        independent,
+    );
+    let fetch = inputs("retail", "12.1.5.70000");
+    let error = resolve_with(
+        &fixture.home,
+        &request(),
+        &fixture.control,
+        Some(&budget),
+        &fetch,
+        &StopDefinitions(token),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    fixture.control.check().unwrap();
+    assert_eq!(fetch.calls.borrow().len(), 4);
+    let metadata =
+        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
+            .unwrap();
+    assert!(metadata.list::<PinnedSet>("pin/", 10).unwrap().is_empty());
+    assert!(
+        metadata
+            .list::<serde_json::Value>("capture/", 10)
+            .unwrap()
+            .is_empty()
+    );
+    metadata.close().unwrap();
+}

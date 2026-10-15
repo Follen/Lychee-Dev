@@ -4,6 +4,8 @@
 
 `rust-refactor` 是**尚未完成的 Rust 实现**，目标行为与固定 Go 3.2.2 一致，不是新发行版，也不表示功能或性能已经通过验收。
 
+未发布 Rust 候选版本为 **3.5.0**，发行配置渠道为 **beta**。包版本与 Go 3.2.2 行为基线分别固定；本次没有执行发布或 npm dist-tag 操作。
+
 ## 唯一目标与固定基线
 
 基线为 **v3.2.2**，发布 tag 解析后的精确提交 **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`**（[发行源码](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/README.md)）。不得用滚动 main、Go 3.1.2、任意开发二进制或之后的修复替代。

@@ -73,18 +73,26 @@ fn read(path: &Path, max: u64) -> Result<Value> {
     }
     storage::read_json(path)
 }
+// Release channels are explicitly version-bound; historical fixtures stay on next.
+fn release_channel(version: &str) -> &'static str {
+    if version == "3.5.0" {
+        "beta"
+    } else {
+        "next"
+    }
+}
 pub fn binding(root: &Path, version: &str) -> Result<()> {
     let manifest = read(&root.join("release.json"), 1 << 20)?;
     let channel = &manifest["npmChannel"];
     if manifest["runtime"] != "rust"
         || channel["schema"] != "lycheedev.npm-channel.v1"
         || channel["version"] != version
-        || channel["distTag"] != "next"
+        || channel["distTag"] != release_channel(version)
         || channel["preserveLatest"] != "2.5.1"
     {
         return Err(fault(
             "update.runtime_incompatible",
-            "self-update requires a verified Rust release bound to next; latest remains 2.5.1",
+            "self-update requires the version-bound Rust release channel; latest remains 2.5.1",
             3,
         ));
     }
@@ -378,12 +386,13 @@ pub fn prepare(
         }
         record
     } else {
+        let package = format!("lycheedev@{}", release_channel(env!("CARGO_PKG_VERSION")));
         let bytes = call(
             node,
             &npm,
             &[
                 "pack",
-                "lycheedev@next",
+                &package,
                 "--ignore-scripts",
                 "--json",
                 "--pack-destination",
@@ -711,6 +720,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(binding(&temp.0, "3.1.2").unwrap_err().exit_code, 3);
+        assert!(!temp.0.join(".lycheedev-update").exists());
+    }
+    #[test]
+    fn independent_rust_350_requires_beta_and_rejects_other_channels() {
+        let temp = fixture();
+        for tag in ["beta", "next", "latest"] {
+            storage::atomic_json(
+                &temp.0.join("release.json"),
+                &json!({"runtime":"rust","npmChannel":{
+                    "schema":"lycheedev.npm-channel.v1","version":"3.5.0",
+                    "distTag":tag,"preserveLatest":"2.5.1"
+                }}),
+            )
+            .unwrap();
+            assert_eq!(binding(&temp.0, "3.5.0").is_ok(), tag == "beta");
+            assert!(binding(&temp.0, "3.2.2").is_err());
+        }
         assert!(!temp.0.join(".lycheedev-update").exists());
     }
     #[cfg(windows)]

@@ -295,6 +295,34 @@ impl Directory {
     pub fn open_shared(directory: &Path) -> io::Result<Self> {
         Self::open_mode(directory, false)
     }
+    /// The same shared identity policy under the caller's original control.
+    pub fn open_shared_controlled<C: FileControl>(
+        directory: &Path,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
+        Self::open_mode_controlled(directory, false, control)
+    }
+    /// Consume every held ancestor in reverse order. Equal errors from separate
+    /// close operations remain separate events; no consumed handle is retried.
+    pub fn close(self) -> Result<(), Vec<io::Error>> {
+        self.close_with(super::close_file)
+    }
+    fn close_with(
+        mut self,
+        mut close: impl FnMut(File) -> io::Result<()>,
+    ) -> Result<(), Vec<io::Error>> {
+        let mut errors = Vec::new();
+        while let Some(file) = self._directories.pop() {
+            if let Err(error) = close(file) {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
     fn open_mode(directory: &Path, deny_write: bool) -> io::Result<Self> {
         Self::open_mode_controlled(directory, deny_write, &mut Uncontrolled)
     }
@@ -990,3 +1018,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "destination/admission_tests.rs"]
+mod admission_tests;

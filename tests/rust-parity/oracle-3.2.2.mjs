@@ -1,3 +1,4 @@
+import {CANDIDATE_RELEASE_FIELDS} from './rust-3.5.0-release-fields.mjs';
 // Current source-derived oracle. Historical oracle.mjs and its fixture stay immutable.
 import {execFileSync} from 'node:child_process';
 import {isDeepStrictEqual} from 'node:util';
@@ -84,7 +85,7 @@ export function compareCurrent(oracle, candidate) {
   const profiles = diffByKey(oracle.products, candidate.products.map(p => ({product: p.id, family: p.family, productCode: p.catalog_product, folder: p.folder, buildSeries: p.series, reusedSlot: p.reused_slot})), 'product', ['family', 'productCode', 'folder', 'buildSeries', 'reusedSlot']);
   const acceptedReleaseFields = [], unapprovedAddonChanges = [];
   for (const change of raw.addon.changed) {
-    const allowed = RETAINED_RELEASE_FIELDS.find(row => row.path === change.path);
+    const allowed = CANDIDATE_RELEASE_FIELDS.find(row => row.path === change.path);
     const expected = oracle.addon.find(row => row.path === change.path), actual = candidate.addon.find(row => row.path === change.path);
     if (allowed && isDeepStrictEqual(expected, {path: allowed.path, ...allowed.expected}) && isDeepStrictEqual(actual, {path: allowed.path, ...allowed.retained})) acceptedReleaseFields.push(allowed);
     else unapprovedAddonChanges.push(change);

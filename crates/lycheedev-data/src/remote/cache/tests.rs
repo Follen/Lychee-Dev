@@ -714,3 +714,44 @@ fn refresh_reads_only_generation_of_changed_alias_but_initial_prepare_validates_
         cdns("tpr/refreshed")
     );
 }
+
+#[test]
+fn bounded_blob_consumers_keep_independent_stop_and_do_not_rebill_cached_network() {
+    let fixture = Fixture::new();
+    let token = lycheedev_core::control::TrackedCancellation::new();
+    let independent =
+        OperationControl::tracked(Instant::now() + Duration::from_secs(5), token.clone());
+    let budget = Budget::controlled(
+        crate::resource::Cost::defaults(),
+        independent.deadline(),
+        independent,
+    );
+    let store = Store {
+        home: &fixture.home,
+        control: &fixture.control,
+        budget: Some(&budget),
+    };
+    let bytes = vec![42; 65537];
+    let blob = store.publish_blob(&bytes, bytes.len()).unwrap();
+    assert_eq!(store.read_blob(&blob, bytes.len()).unwrap(), bytes);
+    let used = budget.snapshot().unwrap();
+    assert_eq!((used.network_bytes, used.network_requests), (0, 0));
+    token.cancel();
+    assert_eq!(
+        store.read_blob(&blob, bytes.len()).unwrap_err().code,
+        "command.cancelled"
+    );
+    assert_eq!(
+        store
+            .publish_blob(b"must not publish", 64)
+            .unwrap_err()
+            .code,
+        "command.cancelled"
+    );
+    assert!(
+        !evidence::blob_path(&fixture.home, &storage::sha256(b"must not publish"))
+            .unwrap()
+            .exists()
+    );
+    fixture.control.check().unwrap();
+}

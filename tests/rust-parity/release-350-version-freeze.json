@@ -1,0 +1,1727 @@
+{
+  "schema": "lycheedev.rust-version-candidate-freeze.v1",
+  "baseCommit": "e06d32c87a111b45daf9be08bd646228dd4ccab0",
+  "version": "3.5.0",
+  "npmDistTag": "beta",
+  "behaviorOracle": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "changes": [
+    {
+      "path": "Cargo.lock",
+      "before": {
+        "bytes": 79886,
+        "sha256": "8f4bd6072e61a78b9c42f945dcc861910e5dcfe21e7f398515db4b238705ffb4"
+      },
+      "candidate": {
+        "bytes": 79886,
+        "sha256": "d636c9796991b4f25d3ab8088887db7618648826170b89a760be04aee3429f02"
+      }
+    },
+    {
+      "path": "Cargo.toml",
+      "before": {
+        "bytes": 1911,
+        "sha256": "c95b3231c73ddcd7d93fddc6e7040e2ee176826b4b619b1f189fca1b0ec1d587"
+      },
+      "candidate": {
+        "bytes": 1911,
+        "sha256": "6cb48b0496921b037ad627ff78096b1fd563b379d353448865cd2e6a9bb7b65b"
+      }
+    },
+    {
+      "path": "addon/Core/Runtime.lua",
+      "before": {
+        "bytes": 2615,
+        "sha256": "27a38b0933e3a73dd03efd985063be326669ea17d2de445bf1431b6935897d95"
+      },
+      "candidate": {
+        "bytes": 2615,
+        "sha256": "e43dd852d0447774215da803391bf7a130c384d2265b4cb402e1baa8bcebc0bd"
+      }
+    },
+    {
+      "path": "addon/Lychee Dev.toc",
+      "before": {
+        "bytes": 2005,
+        "sha256": "5c0a6ef52611166a32c61b6be440d4371543fb03be724feb6a139b3563a76d64"
+      },
+      "candidate": {
+        "bytes": 2005,
+        "sha256": "7d2594d5676dbe8e10c7a644873cd2e00b8cb26f4a539eb19ebbc81a1595d09c"
+      }
+    },
+    {
+      "path": "crates/lycheedev-binding-contracts/Cargo.toml",
+      "before": {
+        "bytes": 290,
+        "sha256": "416794ef42b23e120be1ef9ed60606ae7b0be726dd8a5465462ce424e7a983ce"
+      },
+      "candidate": {
+        "bytes": 290,
+        "sha256": "d9ab9f5e535132c6b4d49a12042c49181a25dc0d387004b4106c1c1ab1a7493e"
+      }
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/npm_update.rs",
+      "before": {
+        "bytes": 27616,
+        "sha256": "04b2c0246bfd1c514ec6a8aa250220053c7ebb819d9a4e63b5e6767ecf5bf4ca"
+      },
+      "candidate": {
+        "bytes": 28632,
+        "sha256": "806fb0b9fbe75f0db1320e1ebc40ee1c8ded4ac72724f63b9fcbfee38fb0f6b9"
+      }
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/Cargo.toml",
+      "before": {
+        "bytes": 627,
+        "sha256": "c4d572f340039c561eedb582b039d76adba721dd5c0cd70fd48ef696fed6bce4"
+      },
+      "candidate": {
+        "bytes": 627,
+        "sha256": "e94aea2115fa4ece8accb6e4c493668b3bf8a6514f01de47e612e07f54e5af98"
+      }
+    },
+    {
+      "path": "internal/buildinfo/version.go",
+      "before": {
+        "bytes": 96,
+        "sha256": "f9c49be84a7bd635dc25c7c62dc69a31c0ba6abdde0fb9d726ad4f5e0fced662"
+      },
+      "candidate": {
+        "bytes": 96,
+        "sha256": "37e9a023b6db29e465d97eba948692109f1b4d53c0602af49a570742f520da80"
+      }
+    },
+    {
+      "path": "packages/npm/lycheedev/package-lock.json",
+      "before": {
+        "bytes": 333,
+        "sha256": "9240d6b69d03cdc48fcf9e4e3f4b1bd6855d3f9898335bbc0d95b681ecd647ea"
+      },
+      "candidate": {
+        "bytes": 333,
+        "sha256": "9d5a5cc2f4e4dc34c7210c1c9ee0cb03153ff2a69062f5e05c33f7a6e13f21ac"
+      }
+    },
+    {
+      "path": "packages/npm/lycheedev/package.json",
+      "before": {
+        "bytes": 668,
+        "sha256": "b0ac58e90e55f30808dbb159a893ae5ba70631d28b76a539764ebd47382a688e"
+      },
+      "candidate": {
+        "bytes": 668,
+        "sha256": "08d05dd58737172c3591825d232795344a513ffecff57f2c5de0099bd49c2576"
+      }
+    },
+    {
+      "path": "protocol/samples/identity.actor_restricted.json",
+      "before": {
+        "bytes": 300,
+        "sha256": "bc19af092ed7ecd7a65fd93ed3267388f93987436b4b17139b993ddf1efcdb4f"
+      },
+      "candidate": {
+        "bytes": 300,
+        "sha256": "e31355638a1dbb42896c28684d2806bcbd3280c6712f80798bfd6482df480307"
+      }
+    },
+    {
+      "path": "protocol/samples/identity.no_actor.json",
+      "before": {
+        "bytes": 333,
+        "sha256": "1d6a16b4943e2b38f7059e10900b2254451041c9ffeb877e7516872a0074ba8a"
+      },
+      "candidate": {
+        "bytes": 333,
+        "sha256": "a2a0a1fca81e11ab1bf11e0b02f83bfc378c6e085d518856395886b5eea93763"
+      }
+    },
+    {
+      "path": "protocol/samples/identity.ok.json",
+      "before": {
+        "bytes": 358,
+        "sha256": "7c298a5b609f09a61a8fd86fe73ed9f0bc7b6c06339ad1043ae7f47fc98b5fe7"
+      },
+      "candidate": {
+        "bytes": 358,
+        "sha256": "8380f23d97bf3a13357a19998e144d903cffccbc0143edf602c81a072dcbf6bd"
+      }
+    },
+    {
+      "path": "protocol/samples/identity.unready.json",
+      "before": {
+        "bytes": 400,
+        "sha256": "204e733b97e2688f531521fb6314da6c3bca3f0e57785d054d76afef8cca8704"
+      },
+      "candidate": {
+        "bytes": 400,
+        "sha256": "ca9fcad37a1732c87abd7077f41c1383b74381df16d52a039533fbc43eb48058"
+      }
+    },
+    {
+      "path": "protocol/samples/ready.json",
+      "before": {
+        "bytes": 313,
+        "sha256": "abe4e8a4d8b6a43e2c460256fc50292ff3864a1ec5f7f1b6ae32350a6a49c245"
+      },
+      "candidate": {
+        "bytes": 313,
+        "sha256": "6d635320cf85a9c23c4b651bd64abb75921a0adf6fe958ce2ab9be706471edcd"
+      }
+    },
+    {
+      "path": "release/npm-channel.json",
+      "before": {
+        "bytes": 115,
+        "sha256": "e62fa3f40a55b0281184fb2efac509bc54b65921aacd2fab8488811889d613fa"
+      },
+      "candidate": {
+        "bytes": 115,
+        "sha256": "35c0745a360ceb483978322516271c1290b64ef6255f6c53c284c9e1f7ecf1b8"
+      }
+    },
+    {
+      "path": "release/version.json",
+      "before": {
+        "bytes": 61,
+        "sha256": "4717110f8ff40db4d3ff0dc52db8641a8c2386a350552f822bfc87961e26d916"
+      },
+      "candidate": {
+        "bytes": 61,
+        "sha256": "2d94bbc4e0e53a8e9180058c2b7d1daf63bacfeeb56e33b7c626df9eeadee9f2"
+      }
+    },
+    {
+      "path": "tests/addon/env.lua",
+      "before": {
+        "bytes": 18445,
+        "sha256": "e7d96bb89a9d14204c50f4f4a6a17afb6b88a22cc20540b4cc5e4893649d29d2"
+      },
+      "candidate": {
+        "bytes": 18445,
+        "sha256": "d7792feec3bb5a0e73d937975fc3ff6f8149da8f76fdefbc1c9d342ada0f7fef"
+      }
+    },
+    {
+      "path": "tests/addon/t_about.lua",
+      "before": {
+        "bytes": 3720,
+        "sha256": "f52c9dad4347bfcb686f8caa673e8bfff88ed9a51006b50101e53f3cc608efd6"
+      },
+      "candidate": {
+        "bytes": 3720,
+        "sha256": "12a9bc81daf48d04b089010e30a7719dbda94afd2ebb0e2d0c821eeb315312da"
+      }
+    },
+    {
+      "path": "tests/protocol/acknowledge.lua",
+      "before": {
+        "bytes": 4604,
+        "sha256": "dd3fd422b092ee760f51cdf0588e90f05ee87027a18a7ace589c627bf4790814"
+      },
+      "candidate": {
+        "bytes": 4604,
+        "sha256": "76856e96cea2cf8cec53dc8b3389a083cf17a0ebd2514d6c11fcbe0217359662"
+      }
+    },
+    {
+      "path": "tests/protocol/identity.lua",
+      "before": {
+        "bytes": 9004,
+        "sha256": "14b7864f670faed57bfa658ffa8780c382c669bcc3030ebf139de74678946d95"
+      },
+      "candidate": {
+        "bytes": 9004,
+        "sha256": "2887611a3e6e84c0d7fcc699490b05453eeae6b5ef0668fbb1a0cf3d674f757c"
+      }
+    },
+    {
+      "path": "tests/protocol/investigation.lua",
+      "before": {
+        "bytes": 4468,
+        "sha256": "fb6363573f638a7d1d655ed6660c6dba4c237a5815fb73656609697cccaae54a"
+      },
+      "candidate": {
+        "bytes": 4468,
+        "sha256": "ab5f13fdc4d7e4ba2142aa7743a2335ec90923a1ddb14819d0e7f1208c425991"
+      }
+    },
+    {
+      "path": "tests/protocol/loaded_ready.lua",
+      "before": {
+        "bytes": 4012,
+        "sha256": "2e2b4f0e386cf804b9e24f8fa88c56f27c2601c3e72ac002b38e326df4df79c1"
+      },
+      "candidate": {
+        "bytes": 4012,
+        "sha256": "ce9745e5d84b6d2bc0093966661067bcb54e03ea59750079841fe604093e3d0f"
+      }
+    },
+    {
+      "path": "tests/protocol/persistence.lua",
+      "before": {
+        "bytes": 6740,
+        "sha256": "10ec407912ce3d9aa454f0bce87d3450a1973cb42519cac04509cd3f2edcdc07"
+      },
+      "candidate": {
+        "bytes": 6740,
+        "sha256": "d68c7697cd46682b7c5149083449ee1e60710740ae91374aced3481ed108d9ea"
+      }
+    },
+    {
+      "path": "tests/protocol/queue.lua",
+      "before": {
+        "bytes": 4283,
+        "sha256": "c6811c8435e49a4039f9523059b6f7282b1bdd046b1d4868ee6b0391b4e85127"
+      },
+      "candidate": {
+        "bytes": 4283,
+        "sha256": "603716fe71bae625175d388867baa121c7c94dad16ef172cddf4eae611961bbe"
+      }
+    },
+    {
+      "path": "tests/protocol/queue_ack.lua",
+      "before": {
+        "bytes": 4025,
+        "sha256": "8fb8bef5c14b5b084ff1cc41282a0cf387dc8a6bab3cfdce99d2189b5fdcced5"
+      },
+      "candidate": {
+        "bytes": 4025,
+        "sha256": "8c8af5a94140267007179c195d358c6c82cf3cfe7749d915fdcc815d51207f38"
+      }
+    },
+    {
+      "path": "tests/protocol/receiver.lua",
+      "before": {
+        "bytes": 16862,
+        "sha256": "2dff85db815cc85d8b433cdec3adb9a8af0eb65c2f88aeec43a53ef027014814"
+      },
+      "candidate": {
+        "bytes": 16862,
+        "sha256": "a604630c243d06bcaf29416b92c924f81a8d9a6c2a91b2397368c018f22ee730"
+      }
+    },
+    {
+      "path": "tests/protocol/receiver_rollback.lua",
+      "before": {
+        "bytes": 6741,
+        "sha256": "8eb7756ced2e9b057f1f93b30b7151bf7ccbbb6a07a327ab52c701c07fc5f23c"
+      },
+      "candidate": {
+        "bytes": 6741,
+        "sha256": "7766256643100778348f4e558e29b6b64c8d1886601b0ce430768d6401d02e11"
+      }
+    },
+    {
+      "path": "tests/protocol/reentry.lua",
+      "before": {
+        "bytes": 12928,
+        "sha256": "ca101a9ac3853fd90a17b4853b7bc98533a502bfd4f0e97498f937481794bdd0"
+      },
+      "candidate": {
+        "bytes": 12928,
+        "sha256": "2f2bfb2565fe5278f0982c43e39369fb08f1d17a26d8997d410d4e68f696828b"
+      }
+    },
+    {
+      "path": "tests/protocol/report.lua",
+      "before": {
+        "bytes": 870,
+        "sha256": "b5d35133c49177bdf47fbe5dae241b4ec19d135b07ed153aea5d988082c1a7cd"
+      },
+      "candidate": {
+        "bytes": 870,
+        "sha256": "227ad81db21598ef66c6053dd0c0d868ecfb7db72de73123f89a22268f039aae"
+      }
+    },
+    {
+      "path": "tests/protocol/runtime_epoch.lua",
+      "before": {
+        "bytes": 2156,
+        "sha256": "de3dff5eadf2436af43b734e15d0dffc80f77196a12e934e8202e182c2527527"
+      },
+      "candidate": {
+        "bytes": 2156,
+        "sha256": "854a3aa821d4e5661627b386c1e1576c17bce0f8f937561677bbd867fa989642"
+      }
+    },
+    {
+      "path": "tests/rust-local-pure/Cargo.lock",
+      "before": {
+        "bytes": 3016,
+        "sha256": "a7039b64e21b00c0db5916323fdb85ddf70b072d2678bf6ffbaaf2f7c56c1649"
+      },
+      "candidate": {
+        "bytes": 3016,
+        "sha256": "31ddf3168b8a7f14899b82417b8740861f34fde74a45f5bfe367057b52e3f4a9"
+      }
+    },
+    {
+      "path": "tests/rust-local-pure/check_cache.py",
+      "before": {
+        "bytes": 6993,
+        "sha256": "18737c172c548558e3d60115e7018b4f003a7143573679d0c0a6c237d587cc6f"
+      },
+      "candidate": {
+        "bytes": 7029,
+        "sha256": "b6e76a7bf425265b3206a94933e94d23293dfeeea96ecb4c567622f67d6f7bb5"
+      }
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/assertions.mjs",
+      "before": {
+        "bytes": 16109,
+        "sha256": "f9c327359d8178aaa9b074cc9ab761ec1db087987a770b6a34b221ad311f47df"
+      },
+      "candidate": {
+        "bytes": 16337,
+        "sha256": "7d8f24c0994947f64849760e65dc93575fc4218d3dd493edf83b6d911c597953"
+      }
+    },
+    {
+      "path": "tests/rust-parity/oracle-3.2.2.mjs",
+      "before": {
+        "bytes": 9694,
+        "sha256": "6c53160eb61dc9d415327ec4e6fafd00a4c1fe74cc675a4bd89a1cfb85b0a0f7"
+      },
+      "candidate": {
+        "bytes": 9769,
+        "sha256": "cd6d86904f20d40b95984aa63cf8b71bfa1973a95de86e229653c3d7e7798201"
+      }
+    },
+    {
+      "path": "tests/rust-parity/oracle-3.2.2.test.mjs",
+      "before": {
+        "bytes": 8609,
+        "sha256": "ed309bb1f87fe70bec27cc1bc9d4255216db5f2089d354598c89dfcaae933692"
+      },
+      "candidate": {
+        "bytes": 8685,
+        "sha256": "eecfc2043b3fe189fc2232200b1caa52fa41046bfb9664a105b67fb916beffa9"
+      }
+    },
+    {
+      "path": "tests/rust-parity/release-322-increment.test.mjs",
+      "before": {
+        "bytes": 6541,
+        "sha256": "c9a502d5d045fa19f5d8d03068e601b89d9f1d04c33adfb5ad61ce78b72fdaf8"
+      },
+      "candidate": {
+        "bytes": 7423,
+        "sha256": "3b92409477cb8f79b4ed75b8ae4aa99fc9a31e96c9704d9a97c7fbdfe5b95e9e"
+      }
+    },
+    {
+      "path": "third_party/emmy/files.json",
+      "before": {
+        "bytes": 153178,
+        "sha256": "95935a23c250a295f5b55a5c11ad985cc57362c4919ba3b4380b6f265f2aa445"
+      },
+      "candidate": {
+        "bytes": 153178,
+        "sha256": "92e9d62f03bfbfd20705b452d382f93a62a9ef53ffe3c1225c67605a91ccd6fb"
+      }
+    },
+    {
+      "path": "third_party/emmy/identity.json",
+      "before": {
+        "bytes": 1861,
+        "sha256": "0904d43a49ac2074544a30e51933a51ab74a89080dbc511ae8f0d2995d3b28a2"
+      },
+      "candidate": {
+        "bytes": 1861,
+        "sha256": "8da2e138a4ffac614b3ce73cff419f53db80a5da8e58053522cb46570d51ed38"
+      }
+    },
+    {
+      "path": "third_party/emmy/patches/0001-binding-context.patch",
+      "before": {
+        "bytes": 195443,
+        "sha256": "9dc250421ba94d7bca6079a5c0619ef9b197625f72bd42bc8e0215391982bd68"
+      },
+      "candidate": {
+        "bytes": 195443,
+        "sha256": "f330a83f3ee6fc8ef53a11cda5ff837a95d1bbd9be6e7a808e8c87c7d57f11eb"
+      }
+    },
+    {
+      "path": "tools/release.mjs",
+      "before": {
+        "bytes": 58118,
+        "sha256": "4547b3b6b22f54735316ec5968a2ce90b371626dc03bb740436e0c8ecb93b727"
+      },
+      "candidate": {
+        "bytes": 58157,
+        "sha256": "040a038c033f9dc455373b9768d90ce414d19770bba8a7a8171a37a2f314b73f"
+      }
+    },
+    {
+      "path": "tools/release.test.mjs",
+      "before": {
+        "bytes": 24548,
+        "sha256": "f7a37ba93e76a16eea1bc0934bb04d3fcdcb1423d10fc7f865fa2b9a1b9e4c9a"
+      },
+      "candidate": {
+        "bytes": 25197,
+        "sha256": "24c3a2ffe5f207194583c014effdf4e3f6a04ae9611e0ed5992eb771120f0ff1"
+      }
+    },
+    {
+      "path": "tools/rust-formal-lua.mjs",
+      "before": {
+        "bytes": 18598,
+        "sha256": "b8bffcbae4526e7a08b4b0c91e3058d5f90dc97d3bdf7b6775c60cc52f897069"
+      },
+      "candidate": {
+        "bytes": 18649,
+        "sha256": "08d6250ac2180a3c98fe9ca39ece79879cf93ebf895a49790daf2fdfb68a8b59"
+      }
+    },
+    {
+      "path": "tools/version.mjs",
+      "before": {
+        "bytes": 5297,
+        "sha256": "d5db941e6376acf6d617601baff7c9e24d760b6c40e24e8517e095a08dce1f79"
+      },
+      "candidate": {
+        "bytes": 6766,
+        "sha256": "c8d03f631177cdd5b69e070e8ca5fc80a495090bdeba81e4a82e03377b967e98"
+      }
+    },
+    {
+      "path": "tools/version.test.mjs",
+      "before": {
+        "bytes": 3110,
+        "sha256": "85ff9ba911a309105085371df64b13e761675aa2bd8c1d03f88b75ff532c3c14"
+      },
+      "candidate": {
+        "bytes": 6425,
+        "sha256": "cf12314a4b374024d3520c8d92a200dbb24827947c834265966cae3d819bf8c1"
+      }
+    },
+    {
+      "path": "tests/rust-parity/rust-3.5.0-release-fields.mjs",
+      "before": null,
+      "candidate": {
+        "bytes": 1209,
+        "sha256": "de5f159ca60c96d38ba38e1ab43ed1cfd1f750abbd56ee5364d12100127af020"
+      }
+    }
+  ],
+  "preservedHistorical": [
+    {
+      "path": "tests/rust-parity/adapter-native-integration.json",
+      "sha256": "4ff8c72f5c5577410131cf2554dc87eacda370d7894d0d7f1b78ff76f5d7da28"
+    },
+    {
+      "path": "tests/rust-parity/binding-contracts-extraction-entries.json",
+      "sha256": "1ca56de31071e647cd4069675ecdc62c332aadf3fe799e6d56130ef76aa05e76"
+    },
+    {
+      "path": "tests/rust-parity/binding-contracts-extraction-report.json",
+      "sha256": "7e6e7cbbda77053900c7b86076cb00cb3df799e7808a140ea76aee872b43cb27"
+    },
+    {
+      "path": "tests/rust-parity/binding-slot-integration.json",
+      "sha256": "c15e3919e4833bcdbfb5ebc62c78853119c3cd96aec19474c03252d5cc003d92"
+    },
+    {
+      "path": "tests/rust-parity/effective-sql-freeze.json",
+      "sha256": "fa076be395dbb23c6607d642eaca6c783556c84b6924e0c952ca29a761afa03e"
+    },
+    {
+      "path": "tests/rust-parity/effective-sql-test-map.json",
+      "sha256": "ff0a6ba99ac60bd55e0cfc39b053a33bc87b319a81e6028dee4b9e613c6346a1"
+    },
+    {
+      "path": "tests/rust-parity/execute-code-bytes-freeze.json",
+      "sha256": "d989d512a54cb3e7857285ceeed8386d2108f591b51ddd15cbd9553b6dd9bb2a"
+    },
+    {
+      "path": "tests/rust-parity/execute-code-bytes-test-map.json",
+      "sha256": "9d310bbdca58e7811bdc7401083154628526c27eb34e55d50f98c5f61fdc0dd8"
+    },
+    {
+      "path": "tests/rust-parity/formal-activation-doctor-freeze-r2.json",
+      "sha256": "6a807a33be7ec344a377a69904f20f0c10733082bf79e6aca99a0f131d55dc13"
+    },
+    {
+      "path": "tests/rust-parity/formal-activation-doctor-freeze.json",
+      "sha256": "87fa7650c610e3784c9f0af9d4018c67e93185f338b81dbcf3a4ccc2fa1e4972"
+    },
+    {
+      "path": "tests/rust-parity/formal-activation-doctor-test-map-r2.json",
+      "sha256": "d40bcf854bf2edbfc906f5906b2df067d52cdcdb7e7248d542953e5b5a10cf3f"
+    },
+    {
+      "path": "tests/rust-parity/formal-activation-doctor-test-map.json",
+      "sha256": "ec5173ce45c80eb934dcd3f914f58bc00a7b7ee225135eddada7fcbd8fa3baa9"
+    },
+    {
+      "path": "tests/rust-parity/formal-cli-integration.json",
+      "sha256": "be989696f225130f2366bc1de063984315d32f6d8fe3861cbeb5e9974a3ee320"
+    },
+    {
+      "path": "tests/rust-parity/formal-connection-freeze.json",
+      "sha256": "cd3fb4289aa5e39ca9acbcbef491606eb29a9f20a439cccda66a2b898098770b"
+    },
+    {
+      "path": "tests/rust-parity/formal-connection-test-map.json",
+      "sha256": "3d31b52910b0289de3badfef34ebffa9691cdf85ff34aad7e3784fde5c90ffd7"
+    },
+    {
+      "path": "tests/rust-parity/formal-live-cli-freeze.json",
+      "sha256": "6d7fc1eb25703c2d29fb91bd90c5da6a2261aa81171b4dc0cbefe7909f6cd238"
+    },
+    {
+      "path": "tests/rust-parity/formal-live-cli-test-map.json",
+      "sha256": "4bdb0e9f7a743cbbc822c21fccd0ab355c50839b626a9ac509833408abb123be"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/go-test-map.json",
+      "sha256": "c70f40ca2c079f733c92248645f9c5ac9f6915bbeb44354f7bad76d17dca9c67"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/manifest.json",
+      "sha256": "14e3c384f157c2e7d5194ef5ce054d41f1dffa84ac41659a89f117d10935a482"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/internal/testkit/lua.go",
+      "sha256": "24cb2f18916142c7bfc8a27819784a112171b73ceaf3737b06ae2418c11d5868"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/addon_test.go",
+      "sha256": "72f9c61e5729a0e80ad96727bbd72697d71ba05ff5a7b1495441fb952b659585"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/env.lua",
+      "sha256": "023a6bcf2d9280c647cd7a3920da550abf6ed3ddc910736e1629e1942e85ecc4"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/run.lua",
+      "sha256": "1b986dd9336875ed3d01ddfb399acf56785d55235d8bf35d963f77d5ea188cb3"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_about.lua",
+      "sha256": "dc05cd12b842b17a985d69e4f63f0d8160b8f5d81da36525ca1b57266ff66557"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_activity.lua",
+      "sha256": "f9a398ca32f787871ff1f5dc6944bc54799878b9c430d9bdb19f7e04525c16f1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_automation.lua",
+      "sha256": "36fbd4fcd161111c486bd4dc2b8de17fdb23e549f2bb952a25b46d881cfa9775"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_automation_history.lua",
+      "sha256": "f0d8f42f32b11ab41c43b58d619418fd93f00b5ee2bdd71b9890d559f6e3defa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_baseline_probes.lua",
+      "sha256": "32deb0d7d111048b431738d72e034ad030f4c174d0fe596825b580714d270eb2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_bootstrap.lua",
+      "sha256": "fcecdb6d5bdac3e71c37f436c3baf49148449e43e10dbb8eed9f2e32406b0632"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_bridge_status.lua",
+      "sha256": "22ed8b1ce6fefa163cb82f1629893cf707bec08dc207bf67a2c3409e5a7d7a55"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_client_gate.lua",
+      "sha256": "3b6841f367a2d034cacbcc91b22b72c748861807bff5e9aee4928a5025aa057e"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_diagnostics.lua",
+      "sha256": "7036fa29d05e8a0d85a048941a062b2e26cbb51521afae57173218c15b6db25f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_events.lua",
+      "sha256": "baac7566cd4293b7871b583e590be6b35fd747ae77fef95a169a4358157214f5"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_execute.lua",
+      "sha256": "a9702109f7ce4a5dbfc5450f738a98ec2ce669802221ffda3356fbaed005ea70"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_fields.lua",
+      "sha256": "5414a6c0a41209887574ee49ad77ead5bb61d2559ec1666bf7bb2489aa35044a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_focus_bindings.lua",
+      "sha256": "4df4a38b1b3586d9079ea3055665dc53b31fba11b12d1845c42353428110cff6"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_input_attempt.lua",
+      "sha256": "1bd3ea96c435e3bc7f2bb839049db3f92a098ddf241d4dbe0cf57c0db85692d5"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_input_binding_gate.lua",
+      "sha256": "3bb5ca5774eaff171b44dfa45819b39c53c532d81aace2168610a3395e581348"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_input_mailbox.lua",
+      "sha256": "c8be628072b68a001a8a98a62ccba48069c72b23b4607be4d3eb37a92a500121"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_input_protection.lua",
+      "sha256": "2919184d0d2c2db85a49e94b85994e8dc2b4a80b5886a547b7336508f8a5c8cb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_input_state.lua",
+      "sha256": "57f10c1fbf9ab115b5c3bce807dc4813ee3a64aa768daf3eb43743f9b0bfdbcb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_inspector.lua",
+      "sha256": "2ee5bab4bf0b1a7961d85fdf26cea09137704210d53d4a80ce1c1a4f2b8c5994"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_locale.lua",
+      "sha256": "b142aa0fe6622bccd349b148d1a23fa81e2a2e6d25cb45ac7e58e72a7129e996"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_mailbox.lua",
+      "sha256": "ad4aea2ad7a414b6aba85abfb8f142c5bc6abbec2d67693bce3691c77fc072ed"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_object_picker_combat.lua",
+      "sha256": "c87723c5c1cca24cc457ec4812a8efb5763d697a36cdb29643ed69ccb5388fd0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_object_stream_errors.lua",
+      "sha256": "dd5e8125763ea7b16d47d47ccc650cf149c82f204cd4bd80f60cb1ac58658e9b"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_objects.lua",
+      "sha256": "fa335ed12316ac402d2784af9905706456f266bb24b9dcedd5f5c7f06f60275f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_probe_execution.lua",
+      "sha256": "fecebfcc487d43e9c778404e554432d93df184c0e66f25f25bf01968a057930a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_records.lua",
+      "sha256": "c7d5a54af818ba1cfc3d4685f36176aeeabbd5404212b0aa7ebaad7900f77bca"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_run.lua",
+      "sha256": "182abc42d3ea22afaa3e85a3f54849d552cb0bb2a73aead8d9c305b0e5131b54"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_serializer.lua",
+      "sha256": "09c8dea5017f50742b222d10edf95822dad8d16bd8d0db4f716a397fa5036aaa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_shell.lua",
+      "sha256": "a778efff26f79487c592a0700cf936f866cb467f138972b08af8c541ec9cad7c"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_slot_protocol.lua",
+      "sha256": "9eb1eac0f17e7e369035d14d517e7c26343543ac91188a493be6d0465661c96c"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_slot_runtime.lua",
+      "sha256": "70043f9e5eb930645ed844de9eb9b5d8217db1c84a67047788b0159441d4ac0a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_stores.lua",
+      "sha256": "780df4b3af27a89c1626fe8dfe9a43aeb6458cde1edd75eb0285b5f7abfa56dc"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_trace.lua",
+      "sha256": "abc2f93f042f6721edc0f3bb6a00c0f34a3ab68663fab0e4142a261c9e9e98f1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_trace_owner.lua",
+      "sha256": "844a527292444647240e50caf78b7e49a1a1ee19fc07bce210725ba839d6e688"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/addon/t_visual.lua",
+      "sha256": "2c62a1c2a42f70e8029ffe9c31d097c5d4295ebd605660d14442d4756f9d507f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/baseline/probes/failure.lua",
+      "sha256": "75d2effee30bb6fdda53fb57a3c9aeaf319c5247a7a9165415aacbfde5e5b9f2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/baseline/probes/sync.lua",
+      "sha256": "9ffc86c9e55e5aae07593bce993b0508ec785fc98bbeeab5aced4abd75f267cb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/baseline/probes/ui_activity.lua",
+      "sha256": "9e821bbfda420ba38594ba1354680c99448cf8611881f51dbdefa712bc6b1c69"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/baseline/probes/workbench.lua",
+      "sha256": "53593ebc013a704a5e2d88218c2f84b845a292c1bdfb9ec9c4ae66ce3e9fb329"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/lib/wow_globals.lua",
+      "sha256": "220182dd40ff43cf2ed962a44fe5665e1c81c856858753ae56ab5b9547103148"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/character_state.lua",
+      "sha256": "5f9f20468abb4b0c7ed61921413225ef580b088218ac6769a014de082d9986cd"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/character_state_test.go",
+      "sha256": "6c07f6fcd00a32667f7c3f29268ae23580a933c125c79081f4ff25d4f78b71d0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/input_state.lua",
+      "sha256": "f07dcf499cccc81ede208aa26a4f8885d2e696093cc985cf8e3949584d649bad"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/input_state_test.go",
+      "sha256": "274456974433c4e64d2bd6f549c23257a2d961341c3146048e70a2abd7d3861f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/lua_test.go",
+      "sha256": "82bf1e651c472b700e7016709d07c90bd8ecfeed245045bf243d75b54bd99d37"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/memory_record_test.go",
+      "sha256": "4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/numeric_report_test.go",
+      "sha256": "f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/receiver_bindings.lua",
+      "sha256": "c3a8d67d91394c8b45f52eba8ce48632f98b8abeec3de46d718c544c9322567d"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/receiver_bindings_test.go",
+      "sha256": "dd072cd28605475cff454ddaa2402ce35aa16d914d65dd4fcfb4ae52b9f83f00"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/slot_driver_test.go",
+      "sha256": "5cc95a2e1aac012b406688c6306f727091167818e91d94f55589aa8df7547e3d"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/slot_server.lua",
+      "sha256": "4974bce0f2aec5272795bc5504753b308baba2b0e39c89b720c09fd9efdc8f53"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/writer.lua",
+      "sha256": "b111c2e2e5e253118c30e1e131ca6a8f30612d27c68d28bcfe48e571849d380e"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.1/oracle/tests/protocol/writer_test.go",
+      "sha256": "480027beaa767c14d855cf93b865adbded835b2c32b730cbee7f7b1b1c528b46"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/go-test-map.json",
+      "sha256": "6980d5ce976dafff5a4f6aa7e2126dcfb65eee96ef353bb3c7b1419fecdea0f8"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/manifest.json",
+      "sha256": "9a4ffc0a482b0543bacb3065a56a79657ff7935b4d03b5ab2b9e321bce04f140"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/internal/testkit/lua.go",
+      "sha256": "24cb2f18916142c7bfc8a27819784a112171b73ceaf3737b06ae2418c11d5868"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/addon_test.go",
+      "sha256": "72f9c61e5729a0e80ad96727bbd72697d71ba05ff5a7b1495441fb952b659585"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/env.lua",
+      "sha256": "d577d40b0d726e6bb335bf9d7367ebc8f14df6e20accb5dd5f536ef53132db64"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/run.lua",
+      "sha256": "1b986dd9336875ed3d01ddfb399acf56785d55235d8bf35d963f77d5ea188cb3"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_about.lua",
+      "sha256": "d64ca8ffd0f309181e355a04ca0594474bf77e62daea035393be00e67888d454"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_activity.lua",
+      "sha256": "f9a398ca32f787871ff1f5dc6944bc54799878b9c430d9bdb19f7e04525c16f1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_automation.lua",
+      "sha256": "36fbd4fcd161111c486bd4dc2b8de17fdb23e549f2bb952a25b46d881cfa9775"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_automation_history.lua",
+      "sha256": "f0d8f42f32b11ab41c43b58d619418fd93f00b5ee2bdd71b9890d559f6e3defa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_baseline_probes.lua",
+      "sha256": "32deb0d7d111048b431738d72e034ad030f4c174d0fe596825b580714d270eb2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_bootstrap.lua",
+      "sha256": "fcecdb6d5bdac3e71c37f436c3baf49148449e43e10dbb8eed9f2e32406b0632"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_bridge_status.lua",
+      "sha256": "22ed8b1ce6fefa163cb82f1629893cf707bec08dc207bf67a2c3409e5a7d7a55"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_client_gate.lua",
+      "sha256": "3b6841f367a2d034cacbcc91b22b72c748861807bff5e9aee4928a5025aa057e"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_diagnostics.lua",
+      "sha256": "7036fa29d05e8a0d85a048941a062b2e26cbb51521afae57173218c15b6db25f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_events.lua",
+      "sha256": "baac7566cd4293b7871b583e590be6b35fd747ae77fef95a169a4358157214f5"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_execute.lua",
+      "sha256": "a9702109f7ce4a5dbfc5450f738a98ec2ce669802221ffda3356fbaed005ea70"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_fields.lua",
+      "sha256": "5414a6c0a41209887574ee49ad77ead5bb61d2559ec1666bf7bb2489aa35044a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_focus_bindings.lua",
+      "sha256": "4df4a38b1b3586d9079ea3055665dc53b31fba11b12d1845c42353428110cff6"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_input_attempt.lua",
+      "sha256": "1bd3ea96c435e3bc7f2bb839049db3f92a098ddf241d4dbe0cf57c0db85692d5"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_input_binding_gate.lua",
+      "sha256": "3bb5ca5774eaff171b44dfa45819b39c53c532d81aace2168610a3395e581348"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_input_mailbox.lua",
+      "sha256": "c8be628072b68a001a8a98a62ccba48069c72b23b4607be4d3eb37a92a500121"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_input_protection.lua",
+      "sha256": "2919184d0d2c2db85a49e94b85994e8dc2b4a80b5886a547b7336508f8a5c8cb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_input_state.lua",
+      "sha256": "57f10c1fbf9ab115b5c3bce807dc4813ee3a64aa768daf3eb43743f9b0bfdbcb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_inspector.lua",
+      "sha256": "2ee5bab4bf0b1a7961d85fdf26cea09137704210d53d4a80ce1c1a4f2b8c5994"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_locale.lua",
+      "sha256": "b142aa0fe6622bccd349b148d1a23fa81e2a2e6d25cb45ac7e58e72a7129e996"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_mailbox.lua",
+      "sha256": "ad4aea2ad7a414b6aba85abfb8f142c5bc6abbec2d67693bce3691c77fc072ed"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_object_picker_combat.lua",
+      "sha256": "c87723c5c1cca24cc457ec4812a8efb5763d697a36cdb29643ed69ccb5388fd0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_object_stream_errors.lua",
+      "sha256": "dd5e8125763ea7b16d47d47ccc650cf149c82f204cd4bd80f60cb1ac58658e9b"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_objects.lua",
+      "sha256": "fa335ed12316ac402d2784af9905706456f266bb24b9dcedd5f5c7f06f60275f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_probe_execution.lua",
+      "sha256": "fecebfcc487d43e9c778404e554432d93df184c0e66f25f25bf01968a057930a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_records.lua",
+      "sha256": "c7d5a54af818ba1cfc3d4685f36176aeeabbd5404212b0aa7ebaad7900f77bca"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_run.lua",
+      "sha256": "182abc42d3ea22afaa3e85a3f54849d552cb0bb2a73aead8d9c305b0e5131b54"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_serializer.lua",
+      "sha256": "09c8dea5017f50742b222d10edf95822dad8d16bd8d0db4f716a397fa5036aaa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_shell.lua",
+      "sha256": "a778efff26f79487c592a0700cf936f866cb467f138972b08af8c541ec9cad7c"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_slot_enable.lua",
+      "sha256": "d71bb72464e49ecf2c2d26a0df3bafceae6f2a0840e03a65fec7355e0cf4a193"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_slot_protocol.lua",
+      "sha256": "9eb1eac0f17e7e369035d14d517e7c26343543ac91188a493be6d0465661c96c"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_slot_runtime.lua",
+      "sha256": "70043f9e5eb930645ed844de9eb9b5d8217db1c84a67047788b0159441d4ac0a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_stores.lua",
+      "sha256": "780df4b3af27a89c1626fe8dfe9a43aeb6458cde1edd75eb0285b5f7abfa56dc"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_trace.lua",
+      "sha256": "abc2f93f042f6721edc0f3bb6a00c0f34a3ab68663fab0e4142a261c9e9e98f1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_trace_owner.lua",
+      "sha256": "844a527292444647240e50caf78b7e49a1a1ee19fc07bce210725ba839d6e688"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/addon/t_visual.lua",
+      "sha256": "2c62a1c2a42f70e8029ffe9c31d097c5d4295ebd605660d14442d4756f9d507f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/baseline/probes/failure.lua",
+      "sha256": "75d2effee30bb6fdda53fb57a3c9aeaf319c5247a7a9165415aacbfde5e5b9f2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/baseline/probes/sync.lua",
+      "sha256": "9ffc86c9e55e5aae07593bce993b0508ec785fc98bbeeab5aced4abd75f267cb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/baseline/probes/ui_activity.lua",
+      "sha256": "9e821bbfda420ba38594ba1354680c99448cf8611881f51dbdefa712bc6b1c69"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/baseline/probes/workbench.lua",
+      "sha256": "53593ebc013a704a5e2d88218c2f84b845a292c1bdfb9ec9c4ae66ce3e9fb329"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/lib/wow_globals.lua",
+      "sha256": "220182dd40ff43cf2ed962a44fe5665e1c81c856858753ae56ab5b9547103148"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/character_state.lua",
+      "sha256": "5f9f20468abb4b0c7ed61921413225ef580b088218ac6769a014de082d9986cd"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/character_state_test.go",
+      "sha256": "6c07f6fcd00a32667f7c3f29268ae23580a933c125c79081f4ff25d4f78b71d0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/input_state.lua",
+      "sha256": "f07dcf499cccc81ede208aa26a4f8885d2e696093cc985cf8e3949584d649bad"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/input_state_test.go",
+      "sha256": "274456974433c4e64d2bd6f549c23257a2d961341c3146048e70a2abd7d3861f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/lua_test.go",
+      "sha256": "82bf1e651c472b700e7016709d07c90bd8ecfeed245045bf243d75b54bd99d37"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/memory_record_test.go",
+      "sha256": "4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/numeric_report_test.go",
+      "sha256": "f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/receiver_bindings.lua",
+      "sha256": "c3a8d67d91394c8b45f52eba8ce48632f98b8abeec3de46d718c544c9322567d"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/receiver_bindings_test.go",
+      "sha256": "dd072cd28605475cff454ddaa2402ce35aa16d914d65dd4fcfb4ae52b9f83f00"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/slot_driver_test.go",
+      "sha256": "5cc95a2e1aac012b406688c6306f727091167818e91d94f55589aa8df7547e3d"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/slot_server.lua",
+      "sha256": "4974bce0f2aec5272795bc5504753b308baba2b0e39c89b720c09fd9efdc8f53"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/writer.lua",
+      "sha256": "b111c2e2e5e253118c30e1e131ca6a8f30612d27c68d28bcfe48e571849d380e"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/writer_test.go",
+      "sha256": "480027beaa767c14d855cf93b865adbded835b2c32b730cbee7f7b1b1c528b46"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/freeze.json",
+      "sha256": "047ccb1723f378bba868adc6fb12d4e1570d06a803aa2cc3dd54671c4a56d93f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/go-test-map.json",
+      "sha256": "4a08e422d9b42baa257514625e62ccd975bdbba3db6fdf1540745cc5291315e1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/manifest.json",
+      "sha256": "a7b2f3716b7a8c75cd7a60c786c32787cc1452e13490f9753b160dcf114d8a92"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/internal/testkit/lua.go",
+      "sha256": "24cb2f18916142c7bfc8a27819784a112171b73ceaf3737b06ae2418c11d5868"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/addon_test.go",
+      "sha256": "f4a80d5f483ef188afc0ba3634f9d429b2e763f5fe3eae046c392bef73bf90fa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/env.lua",
+      "sha256": "17e9575149bbb0eff3deab6f361537e71143e8df7b3b0ae74fa0e69ad2e53d59"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/run.lua",
+      "sha256": "1b986dd9336875ed3d01ddfb399acf56785d55235d8bf35d963f77d5ea188cb3"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_about.lua",
+      "sha256": "94120232f16f8222326024e33f8d00adc5eeb4a9f287d2b0b21e75ea4c510df6"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_activity.lua",
+      "sha256": "f9a398ca32f787871ff1f5dc6944bc54799878b9c430d9bdb19f7e04525c16f1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_automation.lua",
+      "sha256": "36fbd4fcd161111c486bd4dc2b8de17fdb23e549f2bb952a25b46d881cfa9775"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_automation_history.lua",
+      "sha256": "f0d8f42f32b11ab41c43b58d619418fd93f00b5ee2bdd71b9890d559f6e3defa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_baseline_probes.lua",
+      "sha256": "32deb0d7d111048b431738d72e034ad030f4c174d0fe596825b580714d270eb2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_bootstrap.lua",
+      "sha256": "fcecdb6d5bdac3e71c37f436c3baf49148449e43e10dbb8eed9f2e32406b0632"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_bridge_status.lua",
+      "sha256": "22ed8b1ce6fefa163cb82f1629893cf707bec08dc207bf67a2c3409e5a7d7a55"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_client_gate.lua",
+      "sha256": "408baf05822004fd586b0a7dbec1ddd0d66e68b0752629630df1ce250ed5bc12"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_diagnostics.lua",
+      "sha256": "7036fa29d05e8a0d85a048941a062b2e26cbb51521afae57173218c15b6db25f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_events.lua",
+      "sha256": "baac7566cd4293b7871b583e590be6b35fd747ae77fef95a169a4358157214f5"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_execute.lua",
+      "sha256": "a9702109f7ce4a5dbfc5450f738a98ec2ce669802221ffda3356fbaed005ea70"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_fields.lua",
+      "sha256": "5414a6c0a41209887574ee49ad77ead5bb61d2559ec1666bf7bb2489aa35044a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_focus_bindings.lua",
+      "sha256": "4df4a38b1b3586d9079ea3055665dc53b31fba11b12d1845c42353428110cff6"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_input_attempt.lua",
+      "sha256": "1bd3ea96c435e3bc7f2bb839049db3f92a098ddf241d4dbe0cf57c0db85692d5"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_input_binding_gate.lua",
+      "sha256": "3bb5ca5774eaff171b44dfa45819b39c53c532d81aace2168610a3395e581348"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_input_mailbox.lua",
+      "sha256": "c8be628072b68a001a8a98a62ccba48069c72b23b4607be4d3eb37a92a500121"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_input_protection.lua",
+      "sha256": "2919184d0d2c2db85a49e94b85994e8dc2b4a80b5886a547b7336508f8a5c8cb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_input_state.lua",
+      "sha256": "57f10c1fbf9ab115b5c3bce807dc4813ee3a64aa768daf3eb43743f9b0bfdbcb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_inspector.lua",
+      "sha256": "2ee5bab4bf0b1a7961d85fdf26cea09137704210d53d4a80ce1c1a4f2b8c5994"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_locale.lua",
+      "sha256": "b142aa0fe6622bccd349b148d1a23fa81e2a2e6d25cb45ac7e58e72a7129e996"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_mailbox.lua",
+      "sha256": "ad4aea2ad7a414b6aba85abfb8f142c5bc6abbec2d67693bce3691c77fc072ed"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_object_picker_combat.lua",
+      "sha256": "c87723c5c1cca24cc457ec4812a8efb5763d697a36cdb29643ed69ccb5388fd0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_object_stream_errors.lua",
+      "sha256": "dd5e8125763ea7b16d47d47ccc650cf149c82f204cd4bd80f60cb1ac58658e9b"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_objects.lua",
+      "sha256": "fa335ed12316ac402d2784af9905706456f266bb24b9dcedd5f5c7f06f60275f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_probe_execution.lua",
+      "sha256": "fecebfcc487d43e9c778404e554432d93df184c0e66f25f25bf01968a057930a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_records.lua",
+      "sha256": "c7d5a54af818ba1cfc3d4685f36176aeeabbd5404212b0aa7ebaad7900f77bca"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_run.lua",
+      "sha256": "182abc42d3ea22afaa3e85a3f54849d552cb0bb2a73aead8d9c305b0e5131b54"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_serializer.lua",
+      "sha256": "09c8dea5017f50742b222d10edf95822dad8d16bd8d0db4f716a397fa5036aaa"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_shell.lua",
+      "sha256": "a778efff26f79487c592a0700cf936f866cb467f138972b08af8c541ec9cad7c"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_slot_protocol.lua",
+      "sha256": "9eb1eac0f17e7e369035d14d517e7c26343543ac91188a493be6d0465661c96c"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_slot_runtime.lua",
+      "sha256": "70043f9e5eb930645ed844de9eb9b5d8217db1c84a67047788b0159441d4ac0a"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_stores.lua",
+      "sha256": "780df4b3af27a89c1626fe8dfe9a43aeb6458cde1edd75eb0285b5f7abfa56dc"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_trace.lua",
+      "sha256": "abc2f93f042f6721edc0f3bb6a00c0f34a3ab68663fab0e4142a261c9e9e98f1"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_trace_owner.lua",
+      "sha256": "844a527292444647240e50caf78b7e49a1a1ee19fc07bce210725ba839d6e688"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/addon/t_visual.lua",
+      "sha256": "2c62a1c2a42f70e8029ffe9c31d097c5d4295ebd605660d14442d4756f9d507f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/baseline/probes/failure.lua",
+      "sha256": "75d2effee30bb6fdda53fb57a3c9aeaf319c5247a7a9165415aacbfde5e5b9f2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/baseline/probes/sync.lua",
+      "sha256": "9ffc86c9e55e5aae07593bce993b0508ec785fc98bbeeab5aced4abd75f267cb"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/baseline/probes/ui_activity.lua",
+      "sha256": "9e821bbfda420ba38594ba1354680c99448cf8611881f51dbdefa712bc6b1c69"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/baseline/probes/workbench.lua",
+      "sha256": "53593ebc013a704a5e2d88218c2f84b845a292c1bdfb9ec9c4ae66ce3e9fb329"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/lib/wow_globals.lua",
+      "sha256": "220182dd40ff43cf2ed962a44fe5665e1c81c856858753ae56ab5b9547103148"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/character_state.lua",
+      "sha256": "5f9f20468abb4b0c7ed61921413225ef580b088218ac6769a014de082d9986cd"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/character_state_test.go",
+      "sha256": "6c07f6fcd00a32667f7c3f29268ae23580a933c125c79081f4ff25d4f78b71d0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/input_state.lua",
+      "sha256": "f07dcf499cccc81ede208aa26a4f8885d2e696093cc985cf8e3949584d649bad"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/input_state_test.go",
+      "sha256": "274456974433c4e64d2bd6f549c23257a2d961341c3146048e70a2abd7d3861f"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/lua_test.go",
+      "sha256": "82bf1e651c472b700e7016709d07c90bd8ecfeed245045bf243d75b54bd99d37"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/memory_record_test.go",
+      "sha256": "4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/numeric_report_test.go",
+      "sha256": "f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/receiver_bindings.lua",
+      "sha256": "c3a8d67d91394c8b45f52eba8ce48632f98b8abeec3de46d718c544c9322567d"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/receiver_bindings_test.go",
+      "sha256": "dd072cd28605475cff454ddaa2402ce35aa16d914d65dd4fcfb4ae52b9f83f00"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/slot_driver_test.go",
+      "sha256": "5cc95a2e1aac012b406688c6306f727091167818e91d94f55589aa8df7547e3d"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/slot_server.lua",
+      "sha256": "4974bce0f2aec5272795bc5504753b308baba2b0e39c89b720c09fd9efdc8f53"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/writer.lua",
+      "sha256": "b111c2e2e5e253118c30e1e131ca6a8f30612d27c68d28bcfe48e571849d380e"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua/oracle/tests/protocol/writer_test.go",
+      "sha256": "480027beaa767c14d855cf93b865adbded835b2c32b730cbee7f7b1b1c528b46"
+    },
+    {
+      "path": "tests/rust-parity/formal-repair-delivery-freeze.json",
+      "sha256": "d541a32b475248e5e49ed87b1a4ded2579dc9d433594c3713da1263109d8dd98"
+    },
+    {
+      "path": "tests/rust-parity/formal-repair-delivery-r1-freeze.json",
+      "sha256": "63047a33728e7745c4d8a6b0441504ee30f6f617c222b969b609492daa819b16"
+    },
+    {
+      "path": "tests/rust-parity/formal-repair-delivery-r1-test-map.json",
+      "sha256": "21c2efe94224da2b7b079cd0b93266bdc90bd03d158b2c9062c9dcc3794f5fd3"
+    },
+    {
+      "path": "tests/rust-parity/formal-repair-delivery-test-map.json",
+      "sha256": "878f62ebceded8e845e0388cd5553ef907184c596384ba00dab605990569f6c9"
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.0.manifest.json",
+      "sha256": "78e04b069c1760da67caf7dc192fda93b51b56df5769c479c530554496bb363c"
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.1-increment-oracle.json",
+      "sha256": "d019abaed1bceaadf55a59a93790fac486a4427d39e1255f81e18d411dc26635"
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.1.manifest.json",
+      "sha256": "d951f11ef6eed76b36d33c364ef6975908aa28a58e6ce45fc60f3fe2a15a95f0"
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.2-increment-oracle.json",
+      "sha256": "5fa4b3ed2f600bfe1b1ce1fe367972c8f47760c53843c88cb9b1d28940252701"
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.2.manifest.json",
+      "sha256": "2a3320c254562eea1c5b29741207ae31999abc985d619866da2b3586296a2ec8"
+    },
+    {
+      "path": "tests/rust-parity/go-test-map.json",
+      "sha256": "79d571535b0d72a1fb946195bd609e0eefcb79a67c2351b19545d9d9e0e084e4"
+    },
+    {
+      "path": "tests/rust-parity/legacy-luac-retention-freeze.json",
+      "sha256": "3938346b93b8b1d525c4ffe56cea8f6152cc5bf9f10c1e3d7f467f3b607f05d9"
+    },
+    {
+      "path": "tests/rust-parity/legacy-luac-retention-test-map.json",
+      "sha256": "80d3fbe1a95d2f24bbc504cdbe4342ec283386fef2e6ad65bef56b4d3ae129d7"
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-freeze.json",
+      "sha256": "4e3bd1aa066ad13b9c5fa9190ddfbb839281a0e074df08cfff454edb0b6adac1"
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-integration.json",
+      "sha256": "fa176fc078aee458ab5d201804c61a756e4eee07980c514196530910b320c3c3"
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-stage-r2-freeze.json",
+      "sha256": "a05d2db91e072591c9916f7c5c9f22c9071cdb39050d74b54f7db1313c38e348"
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-stage-r2-review.json",
+      "sha256": "de81157ae36b9a12a3de367d49bc4e70c4a7244775cadbf14cc5e56d919ba535"
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-r2-workspace-impact.json",
+      "sha256": "1915f331d405988df129fd870b66112756d187ed8e0e7ce885866563af61d77f"
+    },
+    {
+      "path": "tests/rust-parity/legacy-read-test-map.json",
+      "sha256": "dbe879f46a482942f7e99a9d775a3f0f3a9f33c8c38a63ee0367ad7b9dcdc497"
+    },
+    {
+      "path": "tests/rust-parity/legacy-retirement-freeze.json",
+      "sha256": "5531ccfbde7c04b16bb80bed413b5e1d1dd36e6f86366a5fc23020e28d02d54e"
+    },
+    {
+      "path": "tests/rust-parity/legacy-retirement-review.json",
+      "sha256": "fb132309bbc2bd2cbca6c7fd8e0175cfae9e5d47425c8351f9e825b01ea3ae34"
+    },
+    {
+      "path": "tests/rust-parity/legacy-retirement-test-map.json",
+      "sha256": "fb1745ae933a75f7c2c863267577cc338a662e621571fa0c2af73da3772a3b04"
+    },
+    {
+      "path": "tests/rust-parity/mailbox-input-freeze.json",
+      "sha256": "7d2dbe76e3cb4f4e3cecb91da4d385fe3b81ac96e22396e5d662fa8061df5325"
+    },
+    {
+      "path": "tests/rust-parity/mailbox-input-test-map.json",
+      "sha256": "dae4fb8ac590563ea864d1287c5e6c5ab163b0b00377db3eb7b42f52f19ac21f"
+    },
+    {
+      "path": "tests/rust-parity/mailbox-journal-golden.json",
+      "sha256": "fb8d65431b568c2eccf09d357bca32b106595a18c8b8fa39bc71a229e71fc997"
+    },
+    {
+      "path": "tests/rust-parity/metadata-consumers-r2-freeze.json",
+      "sha256": "733cafdf6d17b3fef2ff499857a37b08ba3c73563eab6a8a9b3fc92990be1857"
+    },
+    {
+      "path": "tests/rust-parity/metadata-consumers-r2-review.json",
+      "sha256": "50e7adc1086cced24e3d94ecbc57ab7d300b2bb368043004eecafe09125cc9f7"
+    },
+    {
+      "path": "tests/rust-parity/metadata-consumers-r2-test-map.json",
+      "sha256": "7abe6a3d7f7a0217c26f92ce29363d867b0cdd5c5b4bdf1a0e3e362a3886f0f0"
+    },
+    {
+      "path": "tests/rust-parity/metadata-open-r1-freeze.json",
+      "sha256": "415a9efa511fea65c3c8c5e93158abf1e1ef3f81269c5534b87a8773d5846149"
+    },
+    {
+      "path": "tests/rust-parity/metadata-open-r1-test-map.json",
+      "sha256": "4c090cb63f87befe78b920d8bf393ec99e111790b940c326ef576e5977e1bdfc"
+    },
+    {
+      "path": "tests/rust-parity/native-backend-freeze.json",
+      "sha256": "661e797863f4b42de0ee1f70d18d3ea9794ad8d01dae89c1d63427913ccad5e1"
+    },
+    {
+      "path": "tests/rust-parity/native-backend-test-map.json",
+      "sha256": "8b4b01d7e9f0d5d681f402fd4d21b9995cd6ab6135dc9c2a02723aa62186270f"
+    },
+    {
+      "path": "tests/rust-parity/native-path-recovery-r3-freeze.json",
+      "sha256": "16a30c8b3085aa1940f8c83ddf902de03ebb766fab6d2efc0d46990bb4eb7753"
+    },
+    {
+      "path": "tests/rust-parity/native-recovery-integration.json",
+      "sha256": "b88f404bd928116cbcd3b210ba81a8d6f22e68ba077113d7431e58f28f99afcc"
+    },
+    {
+      "path": "tests/rust-parity/native-regression-fixture-freeze.json",
+      "sha256": "613a3852500ad096cb91cd5cde02f5d6bc9cf2f24b2cbc9e3c45150a398d96f2"
+    },
+    {
+      "path": "tests/rust-parity/native-regression-fixture-test-map.json",
+      "sha256": "0c1f9f180f1721343270e85c9880c946b25b07585227b8e29369896515b7bd0f"
+    },
+    {
+      "path": "tests/rust-parity/native-regression-fixture-validation.json",
+      "sha256": "fdaa478a8b97b6146d92240f3f7843957e9eb9cac10ba504441b0fac0b6ce20d"
+    },
+    {
+      "path": "tests/rust-parity/native-report-bytes-freeze.json",
+      "sha256": "1d5c2c61ac1b2a8f38e004afb5f2c8464a4ab24f5f73bf04b3da0872e9b70d28"
+    },
+    {
+      "path": "tests/rust-parity/native-report-bytes-test-map.json",
+      "sha256": "dbd95239c62102b4ffebca5ab8e053918839a735ea1d28dcc0c8090dbd730bf2"
+    },
+    {
+      "path": "tests/rust-parity/owned-emmy-adapter-freeze.json",
+      "sha256": "2676850e0d11683846579ddc1a3b9a494a224943b1c44f7319408e494b347a29"
+    },
+    {
+      "path": "tests/rust-parity/owned-emmy-adapter-validation.json",
+      "sha256": "08772cc1845eac92e97e9b6c6887db49ab69ca57b0b6d9c9172c50c24b4fb16f"
+    },
+    {
+      "path": "tests/rust-parity/owned-emmy-callback-freeze.json",
+      "sha256": "64cb056338ba37640dd67ebec2cdf0be6cf9e1f31d87c6a92c2d6a6cfcef1481"
+    },
+    {
+      "path": "tests/rust-parity/owned-original-lines-r2-freeze.json",
+      "sha256": "e07a42f8c805a73e00c4b19af89bedb6ade96f29e1144ce59dbb505e506bd07a"
+    },
+    {
+      "path": "tests/rust-parity/owned-original-lines-r2-test-map.json",
+      "sha256": "2cc479010239fde8e23f25d2c1f88b9a39037d335d47da5c71d9bafe516602ea"
+    },
+    {
+      "path": "tests/rust-parity/owned-process-auxiliary-drain-freeze.json",
+      "sha256": "b4cbc239ed47460076882c5892fbfaec2bf9fcd11aac6db1cd0d9b861fb6e918"
+    },
+    {
+      "path": "tests/rust-parity/owned-process-auxiliary-drain-test-map.json",
+      "sha256": "a0350f666e5cdc3e895c2a802280cf66a655bf35ea2eb9f57305905897f61747"
+    },
+    {
+      "path": "tests/rust-parity/process-lifetime-freeze.json",
+      "sha256": "1f7db61f6f1624007676673fa547b6aa12b0921dfed1ff1a7d0957994c87d9ec"
+    },
+    {
+      "path": "tests/rust-parity/process-lifetime-test-map.json",
+      "sha256": "bb7d99a6c41071d96b8e304275570d10b8c6d2579fbc39bfc5b881e87a3f8984"
+    },
+    {
+      "path": "tests/rust-parity/public-json-number-freeze.json",
+      "sha256": "36e947e82c5c6c2e0fcbdd144755c2faee5f8aa5e12752bc78c93fd83c6c725d"
+    },
+    {
+      "path": "tests/rust-parity/public-json-number-test-map.json",
+      "sha256": "2e4783f2b9cc418f3d63031a3b215cd5a6f91c9bfd76cf34a5a2338f1a68cd94"
+    },
+    {
+      "path": "tests/rust-parity/publication-acquire-cleanup-freeze.json",
+      "sha256": "6e59929a75ed3af6e2a29582e7bdfebffcd5ae55632eea8e4ff176bf5df46c83"
+    },
+    {
+      "path": "tests/rust-parity/publication-acquire-cleanup-test-map.json",
+      "sha256": "207e056b2ef0436f70d3d909ff8b1df833188add436cfb911d055a821f35b435"
+    },
+    {
+      "path": "tests/rust-parity/release-321-guidance-freeze.json",
+      "sha256": "b41d846eddbb0806ed7f916b1e92b3370fdab3b6268251bbf3a8a9aaf412abcb"
+    },
+    {
+      "path": "tests/rust-parity/release-321-increment-freeze.json",
+      "sha256": "b76fe3f5525f252c0e387f2aeeee3c4204ccbb4de5c2b908c8951e4b6f8f558e"
+    },
+    {
+      "path": "tests/rust-parity/release-321-increment-test-map.json",
+      "sha256": "01cbec864f6b8267852f501f2c1c66af15483a6b26a8d2fb456dd9de3df8d984"
+    },
+    {
+      "path": "tests/rust-parity/release-321-journal-freeze.json",
+      "sha256": "89369b1d753034ecf7d953f582648737f78470bd10cb990ead1dddf2742cd329"
+    },
+    {
+      "path": "tests/rust-parity/release-321-journal-test-map.json",
+      "sha256": "11eeedc4fc4b4d7a90f763b5ac5e52864d634c802aafed5e9857928a206c4a59"
+    },
+    {
+      "path": "tests/rust-parity/release-321-keyboard-freeze.json",
+      "sha256": "17d9ce34f210fe8e6fae15a5ab544e8f66e251f22142ea02c4abe8e038a601f2"
+    },
+    {
+      "path": "tests/rust-parity/release-321-keyboard-test-map.json",
+      "sha256": "f2599c7cde4546d8eb43b38738467d9341f8d7d17ad573ba86a00185b70b2dc9"
+    },
+    {
+      "path": "tests/rust-parity/release-321-oracle-freeze.json",
+      "sha256": "d2bf9ae46f8147ba1f6dabed1d3b051b482834948c27252424f8e0af8dbe84d9"
+    },
+    {
+      "path": "tests/rust-parity/release-321-oracle-observation.json",
+      "sha256": "fed2986df1aea789633e6b618fb57be4b0a9dab06ee7adabccd64cab178e6d73"
+    },
+    {
+      "path": "tests/rust-parity/release-321-oracle-test-map.json",
+      "sha256": "ab715e0ca2f73cf0a2d3b26bf82785cfce7426ac2215ebaa18b900be06d547fd"
+    },
+    {
+      "path": "tests/rust-parity/release-resource-cleanup-freeze.json",
+      "sha256": "b5f98d1ac623b648607f405d4ea51ef723fa57870e5428ec79205a04e9110406"
+    },
+    {
+      "path": "tests/rust-parity/release-resource-cleanup-test-map.json",
+      "sha256": "a71e0ce65b17a6c5a7bd0772b085b278a6330cb9dbc41912fa8f647e34640189"
+    },
+    {
+      "path": "tests/rust-parity/repair-finalization-freeze.json",
+      "sha256": "bb57f3757f26253b240708b4443f7375f196f2df690aa88ffbe7360ac4ffc437"
+    },
+    {
+      "path": "tests/rust-parity/repair-finalization-integration-snapshot.json",
+      "sha256": "051ce8cacb8375147d97cad6303fbcff5c3541dfaa5317bd7f9957e4aefa8572"
+    },
+    {
+      "path": "tests/rust-parity/repair-finalization-test-map.json",
+      "sha256": "07a205bdcf78c0fb5ea5a4389b782c3acca7ba10c3b07ecae13c809b2de82d7e"
+    },
+    {
+      "path": "tests/rust-parity/repair-publication-freeze.json",
+      "sha256": "b43757b85729c9ab6becb89d520435a3db3775b8d232d8752a26ff9805b498d8"
+    },
+    {
+      "path": "tests/rust-parity/repair-publication-test-map.json",
+      "sha256": "0adb21f57847c0f23562af7533d0d9ea75f959087255308aa773dc067055e82d"
+    },
+    {
+      "path": "tests/rust-parity/runtime-reader-freeze.json",
+      "sha256": "32ba5e3c00e9adbd01a44ccc2796fd038d601ff964bcf07971d44616956350c1"
+    },
+    {
+      "path": "tests/rust-parity/runtime-reader-test-map.json",
+      "sha256": "b15d167d6372bea9e0ed8d492b4f578bbde0999872442d57b1815cc10a915230"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-freeze.json",
+      "sha256": "fd60c7a5dda8532722b2b64e93c47c962af7eaa0247fd0d332885ddef9920e21"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-r1-freeze.json",
+      "sha256": "af1bcdef51e39282bdb8f65952de280b19db821d94509139309f823c094e611f"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-r1-test-map.json",
+      "sha256": "df3cf15612538a4e41e3a0d987fabd07615cab636abed06e72dd6196394d1745"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-resource-gap.json",
+      "sha256": "01405a13fa2f7aaddb1de2a038e0626b7ac1edaeba3f9636cd9205f96a3da6d1"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-review-supplement.json",
+      "sha256": "e00d426b2ab4e8d5b6438de561d5b107407954f2aa0cf61407458f5072138357"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-test-map.json",
+      "sha256": "0de9d721c6e155807bf480fbcea696e6bc7ae504768206895dc684466ec2b310"
+    },
+    {
+      "path": "tests/rust-parity/session-bootstrap-freeze.json",
+      "sha256": "e33b902193bae1bea3e2c3746ad3a5add343e33db9b7442a846a23a88f8fdea5"
+    },
+    {
+      "path": "tests/rust-parity/slot-sharing-preflight-freeze.json",
+      "sha256": "39d6177e41ae50b5964a2c4711a60122f3adfe184aa464f6779fdf798bb90f83"
+    },
+    {
+      "path": "tests/rust-parity/slot-sharing-preflight-test-map.json",
+      "sha256": "26551d175cf56b6cabefed8056c3bc8d52226b1972f492668f461231ff306555"
+    },
+    {
+      "path": "tests/rust-parity/source-api-return-label-freeze.json",
+      "sha256": "f3b543f34ce682f24e6a9aa649fe1eebca812b4a38c67a5803d04030bb1d73e4"
+    },
+    {
+      "path": "tests/rust-parity/source-api-return-label-test-map.json",
+      "sha256": "1b6cf689ccddaea0d6e06728f16a3f8b0904a7adc3ef633faccee981adbb48fa"
+    },
+    {
+      "path": "tests/rust-parity/source-memory-r1-freeze.json",
+      "sha256": "a4be7aacdf080b9ea87ed32a1bc8db8345860c3f5d54d0c9e60ee1057df08df0"
+    },
+    {
+      "path": "tests/rust-parity/source-memory-r2-freeze.json",
+      "sha256": "a1300d2c76e07d8c8ba937b4c6d8e2bd087412b445a2cfe245fa7ebdd1282899"
+    },
+    {
+      "path": "tests/rust-parity/source-native-control-r4-freeze.json",
+      "sha256": "5a23083bb4de75ea92a667d169af3f2b3d250c86ceb2cc4fab10dfc956794b48"
+    },
+    {
+      "path": "tests/rust-parity/source-native-control-r4-test-map.json",
+      "sha256": "8ca59dee259157291e92a66035fff5a883ee4f933e0b35df572eccc2607c4424"
+    },
+    {
+      "path": "tests/rust-parity/source-process-lifetime-freeze.json",
+      "sha256": "76b8a6eeb5595b204c2fda6e2f6d024576c3694becaf146364b22b3b1d5eee44"
+    },
+    {
+      "path": "tests/rust-parity/source-process-lifetime-test-map.json",
+      "sha256": "c1841fb2659b3d420fa780b0dc86f8f0926d942991391f4623adccb0cae8a864"
+    },
+    {
+      "path": "tests/rust-parity/source-quality-integration-snapshot.json",
+      "sha256": "ecd5080e22765296fed652ffe29a12cc759430830d545dcc66ef5df67c27bdc2"
+    },
+    {
+      "path": "tests/rust-parity/source-root-retirement-r2-freeze.json",
+      "sha256": "024da2caa95904a4f6df52dc7301744bb68732ec752d9ffcef661217dddbc969"
+    },
+    {
+      "path": "tests/rust-parity/sql-csv-r4-freeze.json",
+      "sha256": "3da6413d4be827b1722a9e59d38d33e3423a8f7cbed67179738becb117fca5ef"
+    },
+    {
+      "path": "tests/rust-parity/sql-csv-r4-test-map.json",
+      "sha256": "3ba73d8edc5b8f67f493e0d9fb29d18af2f318e00fdf747f2ffbcf95a0f3bfd1"
+    },
+    {
+      "path": "tests/rust-parity/sql-explain-oracle.json",
+      "sha256": "e1596a123301de4348937ea4ce4334c466b6eddddc1afd831fbf34e6ddd4ac41"
+    },
+    {
+      "path": "tests/rust-parity/sql-explain-r3-freeze.json",
+      "sha256": "7195c2f212c0aee787f4ba17ab761674a6354de64d96dedec38de6517110519a"
+    },
+    {
+      "path": "tests/rust-parity/sql-explain-test-map.json",
+      "sha256": "143b000f901cea6d0219e2598c3c9dc290832b53a6f248f5d71d60e43220ef2a"
+    },
+    {
+      "path": "tests/rust-parity/sql-from-required-oracle.json",
+      "sha256": "13ecc6915ec5d11980b60b841ea01e61679462987da317bde90d2e787f4b5010"
+    },
+    {
+      "path": "tests/rust-parity/sql-resource-freeze.json",
+      "sha256": "1c7ca1769e21a677947f926962506b73ffa76beb8b1c4f1fe587a779b101f05a"
+    },
+    {
+      "path": "tests/rust-parity/sql-resource-r2-freeze.json",
+      "sha256": "df3e862104288b481210f1cb48a38ae23f98e9abf129949230f945d7249ba5f2"
+    },
+    {
+      "path": "tests/rust-parity/sql-resource-r2-test-map.json",
+      "sha256": "09dfc985e2c1bef7da0ff815cf24a97ea924ee13e0349a3b7107698e3ef7d8ac"
+    },
+    {
+      "path": "tests/rust-parity/sql-resource-test-map.json",
+      "sha256": "e150433f01e0e02464c9af292e8c35f468638e88bc25e22881f7467a51fe77c7"
+    },
+    {
+      "path": "tests/rust-parity/typed-public-output-freeze.json",
+      "sha256": "1b28361dbbfa53bdec2de5a6464ea9204320f4d6aae18aaea6c0942ebdb85ba6"
+    },
+    {
+      "path": "tests/rust-parity/typed-public-output-test-map.json",
+      "sha256": "4d400d1d9363ead7b54ff8fa77a0370909651e101fb39ef1c6daef683eee856a"
+    }
+  ],
+  "ownedCrates": [
+    "lycheedev-binding-contracts",
+    "lycheedev-cli",
+    "lycheedev-core",
+    "lycheedev-data",
+    "lycheedev-delivery",
+    "lycheedev-emmy-adapter",
+    "lycheedev-live",
+    "lycheedev-source",
+    "lycheedev-windows"
+  ],
+  "thirdPartyLockPackagesUnchanged": true,
+  "execution": {
+    "rustCompilation": "NOT_RUN",
+    "rustTests": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "game": "NOT_RUN",
+    "publication": "NOT_RUN"
+  },
+  "notes": [
+    "Node checks are source/tool/fixture checks, not business runtime acceptance.",
+    "Original Go320/321/322 fixture/manifests are immutable. Separate overlay declares two exact approved Rust release identities.",
+    "Old npm handoff/console harnesses retain frozen3.1.2 artifacts; not evidence for3.5.0@beta.",
+    "Version synchronizer covers9owned crates plus local-pure lock. Emmy recipe source custody is resealed separately; any future version change requires its corresponding reseal."
+  ]
+}

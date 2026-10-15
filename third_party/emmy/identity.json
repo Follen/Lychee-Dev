@@ -6,7 +6,7 @@
     {
       "path": "crates/lycheedev-binding-contracts/Cargo.toml",
       "bytes": 290,
-      "sha256": "416794ef42b23e120be1ef9ed60606ae7b0be726dd8a5465462ce424e7a983ce"
+      "sha256": "d9ab9f5e535132c6b4d49a12042c49181a25dc0d387004b4106c1c1ab1a7493e"
     },
     {
       "path": "crates/lycheedev-binding-contracts/src/lib.rs",
@@ -19,7 +19,7 @@
       "sha256": "3f30c9eda56137c6fee36cd0bbfa1ee0eea537afe56c3c15da42e96b60ba7e9f"
     }
   ],
-  "ownedTreeSHA256": "c65c038f9f3917adbf024db3425672eab8e3b0b4031a3727f467514dc78ba3ec",
+  "ownedTreeSHA256": "3819fc5d5c4dabfd2d20132cd4d01ddcc8048642c8daabf3fc42bbf1ec011975",
   "base": {
     "repository": "https://github.com/CppCXY/emmylua-analyzer-rust",
     "commit": "08b0873962e83bb8307e9a81052e3f41578fbc78",
@@ -39,10 +39,10 @@
   "patches": [
     {
       "path": "patches/0001-binding-context.patch",
-      "sha256": "9dc250421ba94d7bca6079a5c0619ef9b197625f72bd42bc8e0215391982bd68"
+      "sha256": "f330a83f3ee6fc8ef53a11cda5ff837a95d1bbd9be6e7a808e8c87c7d57f11eb"
     }
   ],
-  "patchedTreeSHA256": "7ff78eaddedce4c7090037e0c3b70f73114ff0b15e95ed71766054f9d5d0f0a7",
+  "patchedTreeSHA256": "5fd1358357d7480d40e6ace0884300235780c04060a503f6fc12035dd6be30d6",
   "files": 853,
   "bytes": 8520921
 }

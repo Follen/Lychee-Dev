@@ -13,7 +13,7 @@
  
  [[package]]
 +name = "lycheedev-binding-contracts"
-+version = "3.1.2"
++version = "3.5.0"
 +dependencies = [
 + "serde",
 + "serde_json",
@@ -30,7 +30,7 @@
  
  [dependencies]
 +# Five parents reach the custody snapshot root; this owned crate is shipped with it.
-+lycheedev-binding-contracts = { path = "../../../../../crates/lycheedev-binding-contracts", version = "=3.1.2" }
++lycheedev-binding-contracts = { path = "../../../../../crates/lycheedev-binding-contracts", version = "=3.5.0" }
  # local
  emmylua_parser.workspace = true
  emmylua_diagnostic_macro.workspace = true

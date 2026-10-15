@@ -66,7 +66,7 @@ export function validateNpmChannel(value, version) {
   const stable = /^\d+\.\d+\.\d+$/;
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join(',') !== 'distTag,preserveLatest,schema,version' ||
-      value.schema !== 'lycheedev.npm-channel.v1' || value.distTag !== 'next' ||
+      value.schema !== 'lycheedev.npm-channel.v1' || value.distTag !== (value.version === '3.5.0' ? 'beta' : 'next') ||
       typeof value.version !== 'string' || typeof value.preserveLatest !== 'string' ||
       !stable.test(value.version) || !stable.test(value.preserveLatest) ||
       value.version === value.preserveLatest || (version !== undefined && value.version !== version)) {

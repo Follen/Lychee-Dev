@@ -7,7 +7,7 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $utf8=New-Object Text.UTF8Encoding($false)
-Add-Type -ReferencedAssemblies System.dll,System.Core.dll,System.Runtime.Serialization.dll -TypeDefinition @'
+Add-Type -ReferencedAssemblies System.dll,System.Core.dll,System.Runtime.Serialization.dll,System.Xml.dll -TypeDefinition @'
 using System;
 using System.IO;
 using System.IO.Pipes;

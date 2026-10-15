@@ -704,7 +704,7 @@ C_AddOns = {
     end,
     GetAddOnMetadata = function(addonName, key)
         if addonName == "Lychee Dev" and key == "Version" then
-            return "3.1.2"
+            return "3.5.0"
         end
         return ""
     end,

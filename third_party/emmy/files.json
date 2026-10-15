@@ -72,7 +72,7 @@
   {
     "path": "Cargo.lock",
     "bytes": 71180,
-    "sha256": "d4644ff54ec4a9579db7529a86b81fa6151c2c54802566fe253067fdcb65e019"
+    "sha256": "503f368170ac3a3ad5d7c405061c74e932d329adab45fe9c2eff28be29fddfc6"
   },
   {
     "path": "Cargo.toml",
@@ -162,7 +162,7 @@
   {
     "path": "crates/emmylua_code_analysis/Cargo.toml",
     "bytes": 1571,
-    "sha256": "f42df028779486a0bbe3fda888f7b662daac5a140b32a81088dac7321d0130f6"
+    "sha256": "7e8da712e7cfd39158a78f9ceb0cf9bcc342a604fb4f3ecf394a65f3ec578ebd"
   },
   {
     "path": "crates/emmylua_code_analysis/README.md",

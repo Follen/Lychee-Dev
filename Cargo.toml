@@ -4,7 +4,7 @@ exclude = [".tmp/emmy-reconstruction-v1/upstream", ".tmp/emmy-reconstruction-v1/
 resolver = "2"
 
 [workspace.package]
-version = "3.1.2"
+version = "3.5.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.99"

@@ -67,6 +67,14 @@ test('bridge source binds pipe handle PID and held process creation/image to exa
     'FileShare.Read','WaitForSingleObject(ownerHandle','peer.owner_generation_changed'])assert(ps.includes(text),text);
   assert(!ps.includes('TerminateProcess'));assert(!ps.includes('CreateProcess'));
 });
+test('PowerShell serializer peer names its framework XML assembly dependency',()=>{
+  const ps=readFileSync(new URL('./peer.ps1',import.meta.url),'utf8');
+  const references=/Add-Type -ReferencedAssemblies ([^\r\n]+) -TypeDefinition/.exec(ps)?.[1].split(',');
+  assert(references, 'peer assembly list missing');
+  for(const assembly of ['System.dll','System.Core.dll','System.Runtime.Serialization.dll','System.Xml.dll']) assert(references.includes(assembly),assembly);
+  assert.equal(new Set(references).size,references.length);
+  assert(ps.includes('DataContractJsonSerializer'));
+});
 test('quota path has real requests for all cumulative boundaries and distinct miss/full paths',()=>{
   const js=readFileSync(new URL('./session-ipc.mjs',import.meta.url),'utf8');
   assert(js.includes('for(let total=2;total<=last;total++)'));
