@@ -197,32 +197,57 @@ impl Metadata {
     ) -> Result<T> {
         self.read_controlled_observed_with_check(key, control, || Ok(()), on_busy)
     }
+    pub(crate) fn read_bytes_controlled_with_check(
+        &self,
+        key: &str,
+        control: &OperationControl,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<Vec<u8>> {
+        self.read_projected_controlled_with_check(key, control, check, || {}, Ok)
+    }
     fn read_controlled_observed_with_check<T: DeserializeOwned>(
+        &self,
+        key: &str,
+        control: &OperationControl,
+        check: impl FnMut() -> Result<()>,
+        on_busy: impl FnMut(),
+    ) -> Result<T> {
+        self.read_projected_controlled_with_check(key, control, check, on_busy, |bytes| {
+            serde_json::from_slice(&bytes).map_err(Into::into)
+        })
+    }
+    fn read_projected_controlled_with_check<T>(
         &self,
         key: &str,
         control: &OperationControl,
         mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
+        decode: impl FnOnce(Vec<u8>) -> Result<T>,
     ) -> Result<T> {
         metadata_check(control, &mut check)?;
         self.connection.busy_timeout(Duration::ZERO)?;
         let result = (|| {
-            let bytes: Option<Vec<u8>> = checked_sql_with_check(
+            let bytes: Option<(i64, Option<Vec<u8>>)> = checked_sql_with_check(
                 control,
                 control.deadline(),
                 &mut check,
                 &mut on_busy,
                 || {
                     self.connection
-                        .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
-                            row.get(0)
+                        .query_row("SELECT length(CAST(value AS BLOB)),CASE WHEN length(CAST(value AS BLOB))<=1048576 THEN CAST(value AS BLOB) ELSE NULL END FROM documents WHERE key=?1", [key], |row| {
+                            Ok((row.get(0)?,row.get(1)?))
                         })
                         .optional()
                 },
             )?;
             metadata_check(control, &mut check)?;
             let value = match bytes {
-                Some(raw) => serde_json::from_slice(&raw)?,
+                Some((length, Some(raw)))
+                    if (0..=1048576).contains(&length) && raw.len() as i64 == length =>
+                {
+                    decode(raw)?
+                }
+                Some(_) => return Err(ToolkitError::invalid("metadata document exceeds 1 MiB")),
                 None => {
                     return Err(ToolkitError::new(
                         "vault.record_missing",

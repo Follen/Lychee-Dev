@@ -3,7 +3,9 @@
 use super::*;
 use crate::control::OperationControl;
 use std::{ffi::OsStr, io::Read};
+mod management;
 mod wire;
+pub(super) use management::{dispatch, inspect_value, optional};
 
 fn error(code: &str) -> ToolkitError {
     ToolkitError::new(
@@ -90,6 +92,14 @@ fn find<C: FnMut() -> Result<()>>(start: &Path, scope: &mut Scope<'_, C>) -> Res
     }
     Err(error("selection.project_missing"))
 }
+pub(super) fn find_controlled(start: &Path, control: &OperationControl) -> Result<PathBuf> {
+    let mut scope = Scope {
+        control,
+        supplemental: || Ok(()),
+    };
+    let result = find(start, &mut scope);
+    scope.finish(result, [])
+}
 fn regular(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
@@ -154,30 +164,10 @@ fn read_file<T, C: FnMut() -> Result<()>>(
     scope.finish(result, cleanup)
 }
 fn inspect<C: FnMut() -> Result<()>>(path: &Path, scope: &mut Scope<'_, C>) -> Result<PinnedSet> {
-    scope.check()?;
-    let path = absolute(path)?;
-    if !fs::metadata(&path)?.is_dir() {
-        return Err(format());
-    }
-    let directory = storage::Directory::open_shared_controlled(&path, scope)?;
-    let result = (|| {
-        let product = read_file(&directory, &path, "lycheedev.json", scope, wire::project)?
-            .ok_or_else(|| error("selection.project_missing"))?;
-        let pin = read_file(&directory, &path, "lycheedev.lock.json", scope, wire::lock)?
-            .ok_or_else(|| error("selection.project_unlocked"))?;
-        if pin_product(&pin.spec) != Some(product.as_str()) {
-            return Err(error("selection.project_conflict"));
-        }
-        scope.check()?;
-        Ok(pin)
-    })();
-    let cleanup = directory
-        .close()
-        .err()
-        .into_iter()
-        .flatten()
-        .map(ToolkitError::from);
-    scope.finish(result, cleanup)
+    management::inspect(path, scope)?
+        .lock
+        .map(|lock| lock.selection)
+        .ok_or_else(|| error("selection.project_unlocked"))
 }
 
 pub fn resolve_pinned_controlled_with_check(
@@ -190,7 +180,7 @@ pub fn resolve_pinned_controlled_with_check(
     };
     let result = (|| {
         scope.check()?;
-        if let Some(id) = inv.flag("--snapshot") {
+        if let Some(id) = inv.flag("--snapshot").filter(|id| !id.is_empty()) {
             return load_pinned_controlled_with_check(&inv.home, id, &inv.control, || {
                 (scope.supplemental)()
             });
@@ -215,9 +205,9 @@ pub fn resolve_pinned_controlled_with_check(
                 Err(error) if pure(&error, "vault.generation_conflict") => {}
                 Err(error) => return Err(error),
             }
-            let winner = metadata
-                .read_controlled_with_check(&key, &inv.control, || (scope.supplemental)())?;
-            let winner = validate_loaded_pin(winner, &pin.id)?;
+            let raw = metadata
+                .read_bytes_controlled_with_check(&key, &inv.control, || (scope.supplemental)())?;
+            let winner = super::file::stored_pin(&raw, &pin.id, &inv.control)?;
             scope.check()?;
             Ok(winner)
         })();

@@ -1,6 +1,9 @@
 use super::*;
 use crate::control::TrackedCancellation;
-use std::{sync::atomic::{AtomicU64, Ordering}, time::Instant};
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Instant,
+};
 
 struct Fixture(std::path::PathBuf);
 impl Fixture {
@@ -158,6 +161,111 @@ fn controlled_idempotence_and_conflict_both_release_transaction() {
     assert!(metadata.connection.is_autocommit());
     assert_eq!(metadata.generation("pin/id").unwrap(), Some(1));
     let blocker = f.blocker("BEGIN EXCLUSIVE");
+    blocker.execute_batch("ROLLBACK").unwrap();
+    blocker.close().unwrap();
+    metadata.close().unwrap();
+}
+
+#[test]
+fn same_owner_raw_projection_preserves_duplicate_and_invalid_utf8_without_extra_decode() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let metadata = Metadata::open_controlled(&f.home(), true, &control).unwrap();
+    let raw = b"{\"schema\":\"old\",\"schema\":\"new\",\"unknown\":\"\xff\"}";
+    metadata
+        .connection
+        .execute(
+            "INSERT INTO documents VALUES('pin/raw',1,?1)",
+            [raw.as_slice()],
+        )
+        .unwrap();
+    assert_eq!(
+        metadata
+            .read_bytes_controlled_with_check("pin/raw", &control, || Ok(()))
+            .unwrap(),
+        raw
+    );
+    assert!(
+        metadata
+            .read_controlled::<serde_json::Value>("pin/raw", &control)
+            .is_err()
+    );
+    let timeout: i64 = metadata
+        .connection
+        .pragma_query_value(None, "busy_timeout", |r| r.get(0))
+        .unwrap();
+    assert_eq!(timeout, 5000);
+    metadata.close().unwrap();
+}
+#[test]
+fn same_owner_projection_bounds_corrupt_rows_and_keeps_raw_stop_and_missing_diagnostics() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let metadata = Metadata::open_controlled(&f.home(), true, &control).unwrap();
+    metadata.connection.execute_batch("PRAGMA ignore_check_constraints=ON;INSERT INTO documents VALUES('large',1,zeroblob(1048577))").unwrap();
+    assert_eq!(
+        metadata
+            .read_bytes_controlled_with_check("large", &control, || Ok(()))
+            .unwrap_err()
+            .code,
+        "input.invalid"
+    );
+    let raw = metadata
+        .read_bytes_controlled_with_check("missing", &control, || Ok(()))
+        .unwrap_err();
+    let typed = metadata
+        .read_controlled::<bool>("missing", &control)
+        .unwrap_err();
+    assert_eq!(
+        serde_json::to_value(raw).unwrap(),
+        serde_json::to_value(typed).unwrap()
+    );
+    let stop = TrackedCancellation::new();
+    let cancelled =
+        OperationControl::tracked(Instant::now() + Duration::from_secs(30), stop.clone());
+    stop.cancel();
+    assert_eq!(
+        metadata
+            .read_bytes_controlled_with_check("large", &cancelled, || Ok(()))
+            .unwrap_err()
+            .code,
+        "command.cancelled"
+    );
+    metadata.close().unwrap();
+}
+#[test]
+fn raw_projection_real_busy_callback_preserves_independent_stop_and_original_control() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let metadata = Metadata::open_controlled(&f.home(), false, &control).unwrap();
+    let blocker = f.blocker("BEGIN EXCLUSIVE");
+    let stopped = std::cell::Cell::new(false);
+    let error = metadata
+        .read_projected_controlled_with_check(
+            "missing",
+            &control,
+            || {
+                if stopped.get() {
+                    Err(ToolkitError::new(
+                        "records.query_resource_budget",
+                        "independent stop",
+                        3,
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            || stopped.set(true),
+            Ok,
+        )
+        .unwrap_err();
+    assert!(stopped.get());
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    control.check().unwrap();
+    control.ordered_child(control.deadline()).unwrap();
     blocker.execute_batch("ROLLBACK").unwrap();
     blocker.close().unwrap();
     metadata.close().unwrap();

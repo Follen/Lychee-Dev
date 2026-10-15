@@ -371,196 +371,27 @@ fn inherit_parent(spec: &mut SelectionSpec, parent: PinnedSet) -> Result<()> {
     Ok(())
 }
 pub fn find_project(start: &Path) -> Result<PathBuf> {
-    for parent in start.ancestors() {
-        if parent.join("lycheedev.json").exists() {
-            return Ok(parent.into());
-        }
-    }
-    Err(ToolkitError::new(
-        "selection.project_missing",
-        "no parent project declaration found",
-        2,
-    ))
+    find_project_controlled(start, &crate::control::OperationControl::default())
+}
+pub fn find_project_controlled(start: &Path, control: &crate::control::OperationControl) -> Result<PathBuf> {
+    project_controlled::find_controlled(start, control)
 }
 pub fn inspect_project(path: &Path) -> Result<Value> {
-    let project: Value = storage::read_json(&path.join("lycheedev.json"))?;
-    if project["schema"] != "lycheedev.project.v1"
-        || !valid_product(project["product"].as_str().unwrap_or(""))
-    {
-        return Err(ToolkitError::new(
-            "selection.project_format",
-            "invalid project declaration",
-            4,
-        ));
-    }
-    let mut result = json!({"directory":path,"project":project,"state":"unlocked"});
-    if path.join("lycheedev.lock.json").exists() {
-        let lock: Value = storage::read_json(&path.join("lycheedev.lock.json"))?;
-        let pin: PinnedSet = serde_json::from_value(lock["selection"].clone())?;
-        validate(&pin.spec)?;
-        if lock["schema"] != "lycheedev.project-lock.v1" || identity(&pin)? != pin.id {
-            return Err(ToolkitError::new(
-                "selection.project_format",
-                "invalid project lock",
-                4,
-            ));
-        }
-        if pin_product(&pin.spec) != project["product"].as_str() {
-            return Err(ToolkitError::new(
-                "selection.project_conflict",
-                "project product differs from lock",
-                4,
-            ));
-        }
-        result["state"] = json!("locked");
-        result["lock"] = lock;
-    }
-    Ok(result)
+    inspect_project_controlled(path, &crate::control::OperationControl::default())
+}
+pub fn inspect_project_controlled(path: &Path, control: &crate::control::OperationControl) -> Result<Value> {
+    project_controlled::inspect_value(path, control)
 }
 pub fn resolve_pinned(inv: &Invocation) -> Result<PinnedSet> {
-    if let Some(id) = inv.flag("--snapshot") {
-        return load_pinned(&inv.home, id);
-    }
-    let path = inv
-        .flag("--project")
-        .map(PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(|| find_project(&inv.cwd))?;
-    let status = inspect_project(&path)?;
-    if status["state"] != "locked" {
-        return Err(ToolkitError::new(
-            "selection.project_unlocked",
-            "project has no fixed lock",
-            2,
-        ));
-    }
-    let pin: PinnedSet = serde_json::from_value(status["lock"]["selection"].clone())?;
-    Metadata::open(&inv.home, true)?.put(&format!("pin/{}", pin.id), &pin, None)?;
-    Ok(pin)
+    resolve_pinned_controlled_with_check(inv, || Ok(()))
 }
-
-/// Public snapshot consumers try the nearest project before checking their
-/// required source/selector flags. No nearby declaration is an absent fallback;
-/// an explicitly selected or discovered unlocked project is an error.
+/// Nearest-project fallback for actual Source/catalog consumers, sharing the
+/// controlled Data path and exact immutable import/winner authentication.
 pub fn resolve_optional_project(inv: &Invocation) -> Result<Option<(PathBuf, PinnedSet)>> {
-    inv.control.check()?;
-    if inv.flag("--snapshot").is_some_and(|id| !id.is_empty()) {
-        return Ok(None);
-    }
-    let path = if let Some(path) = inv.flag("--project").filter(|path| !path.is_empty()) {
-        std::path::absolute(inv.cwd.join(path))?
-    } else {
-        match find_project(&inv.cwd) {
-            Ok(path) => std::path::absolute(path)?,
-            Err(error) if error.code == "selection.project_missing" => return Ok(None),
-            Err(error) => return Err(error),
-        }
-    };
-    if !fs::metadata(&path)?.is_dir() {
-        return Err(ToolkitError::new(
-            "selection.project_format",
-            "selection.project_format",
-            4,
-        ));
-    }
-    match fs::symlink_metadata(path.join("lycheedev.json")) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(ToolkitError::new(
-                "selection.project_missing",
-                "selection.project_missing",
-                3,
-            ));
-        }
-        Err(error) => return Err(error.into()),
-        Ok(_) => {}
-    }
-    let status = inspect_project(&path).map_err(|mut error| {
-        if error.code.starts_with("selection.project_") {
-            error.message = error.code.clone();
-        }
-        error
-    })?;
-    if status["state"] != "locked" {
-        return Err(ToolkitError::new(
-            "selection.project_unlocked",
-            "selection.project_unlocked",
-            3,
-        ));
-    }
-    let pin: PinnedSet = serde_json::from_value(status["lock"]["selection"].clone())?;
-    inv.control.check()?;
-    Metadata::open(&inv.home, true)?.put(&format!("pin/{}", pin.id), &pin, None)?;
-    Ok(Some((path, pin)))
+    project_controlled::optional(inv)
 }
 pub fn dispatch_project(inv: &Invocation) -> Result<Outcome> {
-    let path = inv
-        .flag("--path")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| inv.cwd.clone());
-    match inv.command.as_str() {
-        "project init" => {
-            let product = inv.required("--product")?;
-            if !valid_product(product) {
-                return Err(ToolkitError::arguments("unsupported product"));
-            }
-            fs::create_dir_all(&path)?;
-            let _lock = ExclusiveLock::acquire(&path.join(".lycheedev-locks/project.lock"))?;
-            if path.join("lycheedev.json").exists() {
-                let status = inspect_project(&path)?;
-                if status["project"]["product"] != product {
-                    return Err(ToolkitError::new(
-                        "selection.project_conflict",
-                        "project already declares another product",
-                        4,
-                    ));
-                }
-                return Ok(Outcome::new(status));
-            }
-            if path.join("lycheedev.lock.json").exists() {
-                return Err(ToolkitError::new(
-                    "selection.project_conflict",
-                    "orphan project lock exists",
-                    4,
-                ));
-            }
-            storage::atomic_json(
-                &path.join("lycheedev.json"),
-                &json!({"schema":"lycheedev.project.v1","product":product}),
-            )?;
-            Ok(Outcome::new(inspect_project(&path)?))
-        }
-        "project status" => Ok(Outcome::new(inspect_project(
-            &if inv.flag("--path").is_some() {
-                path
-            } else {
-                find_project(&inv.cwd)?
-            },
-        )?)),
-        "project lock" => {
-            let path = if inv.flag("--path").is_some() {
-                path
-            } else {
-                find_project(&inv.cwd)?
-            };
-            let _lock = ExclusiveLock::acquire(&path.join(".lycheedev-locks/project.lock"))?;
-            let status = inspect_project(&path)?;
-            let pin = load_pinned(&inv.home, inv.required("--snapshot")?)?;
-            let product = pin_product(&pin.spec);
-            if product != status["project"]["product"].as_str() {
-                return Err(ToolkitError::new(
-                    "selection.project_conflict",
-                    "pin product differs",
-                    4,
-                ));
-            }
-            storage::atomic_json(
-                &path.join("lycheedev.lock.json"),
-                &json!({"schema":"lycheedev.project-lock.v1","selection":pin}),
-            )?;
-            Ok(Outcome::new(inspect_project(&path)?))
-        }
-        _ => Err(ToolkitError::arguments("unknown project verb")),
-    }
+    project_controlled::dispatch(inv)
 }
 
 #[cfg(test)]

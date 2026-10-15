@@ -271,28 +271,39 @@ pub(super) fn lock<C: FnMut() -> Result<()>>(
     if schema != "lycheedev.project-lock.v1" {
         return Err(format());
     }
-    // Existing general pin APIs retain their historical validator. Project
-    // decoding applies Go's digit-only build spelling before that validator.
-    for build in pin
-        .spec
-        .data
-        .iter()
-        .map(|p| p.full_build.as_str())
-        .chain(pin.spec.changes.iter().map(|p| p.full_build.as_str()))
-    {
-        if !build
-            .split('.')
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    // Go validatePinnedSet checks the outer identity before individual pins.
+    // Reuse the specification validator without re-decoding the strict project
+    // object or weakening duplicate/unknown-field admission.
+    let checked = (|| {
+        if pin.schema != "lycheedev.selection.v1"
+            || !pin
+                .id
+                .strip_prefix("PIN-")
+                .is_some_and(|id| valid_digest(id, 64))
         {
-            return Err(format());
+            return Err(ToolkitError::new(
+                "command.failed",
+                "selection.invalid_pin",
+                5,
+            ));
         }
-    }
-    let id = pin.id.clone();
-    validate_loaded_pin(pin, &id).map_err(|cause| {
+        super::super::file::validate_spec(&pin.spec)?;
+        if identity(&pin)? != pin.id {
+            return Err(ToolkitError::new(
+                "command.failed",
+                "selection.pin_integrity",
+                5,
+            ));
+        }
+        Ok(())
+    })();
+    checked.map_err(|cause| {
         ToolkitError::new(
             "selection.project_format",
             format!("selection.project_format: {}", cause.message),
             4,
         )
-    })
+    })?;
+    scope.check()?;
+    Ok(pin)
 }

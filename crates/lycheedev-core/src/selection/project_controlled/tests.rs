@@ -296,11 +296,23 @@ fn project_shared_file_survives_atomic_lock_replacement() {
         .unwrap()
         .unwrap();
     let original = fs::read(path.join(name)).unwrap();
-    storage::atomic_write(&path.join(name), b"replacement").unwrap();
+    let mut spec = f.pin.spec.clone();
+    spec.source.as_mut().unwrap().exact_commit = "b".repeat(40);
+    let replacement =
+        pin_selection_controlled(&f.invocation.home, spec, &f.invocation.control).unwrap();
+    let mut lock = f.invocation.clone();
+    lock.command = "project lock".into();
+    lock.flags
+        .insert("--path".into(), path.to_string_lossy().into_owned());
+    lock.flags
+        .insert("--snapshot".into(), replacement.id.clone());
+    dispatch_project(&lock).unwrap();
     let mut bytes = Vec::new();
     old.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, original);
-    assert_eq!(fs::read(path.join(name)).unwrap(), b"replacement");
+    let current: Value = serde_json::from_slice(&fs::read(path.join(name)).unwrap()).unwrap();
+    assert_eq!(current["selection"]["id"], replacement.id);
+    assert_ne!(replacement.id, f.pin.id);
     storage::close_file(old).unwrap();
     directory.close().unwrap();
     f.cleanup();

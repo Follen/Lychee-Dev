@@ -980,6 +980,7 @@ fn regional_projects_lock_shared_source_and_preserve_exact_data_identity() {
             product
         );
         let path = temp.0.join(product);
+        std::fs::create_dir_all(&path).unwrap();
         let path = path.to_str().unwrap();
         selection::dispatch_project(&inv(
             temp.0.clone(),

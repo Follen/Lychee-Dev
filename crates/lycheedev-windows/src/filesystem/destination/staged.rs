@@ -75,6 +75,16 @@ impl<'a> StagedFile<'a> {
     ) -> Result<StagedPublication, C::Error> {
         self.publish_name_with(name, control, |stage, path| stage.rename(path, false))
     }
+    /// Replace one existing same-directory entry using the established POSIX
+    /// rename. Open project readers keep the old file; later readers see the
+    /// complete replacement. This does not allow any cross-directory move.
+    pub fn replace_name<C: FileControl>(
+        &mut self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<StagedPublication, C::Error> {
+        self.publish_name_with(name, control, |stage, path| stage.rename(path, true))
+    }
     fn publish_name_with<C: FileControl>(
         &mut self,
         name: &std::ffi::OsStr,

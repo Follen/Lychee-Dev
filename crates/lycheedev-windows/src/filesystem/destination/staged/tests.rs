@@ -220,3 +220,50 @@ fn private_spool_post_acquisition_stop_still_has_discard_and_close_owner() {
     assert!(!path.exists());
     directory.close().unwrap();
 }
+
+#[test]
+fn project_replacement_is_same_directory_and_old_project_reader_keeps_original_bytes() {
+    let f = Fixture::new();
+    let name = std::ffi::OsStr::new("lycheedev.lock.json");
+    fs::write(f.0.join(name), b"original").unwrap();
+    let directory = Directory::open_shared_controlled(&f.0, &mut Uncontrolled).unwrap();
+    let mut old = directory
+        .open_optional_project_file_controlled(name, &mut Uncontrolled)
+        .unwrap()
+        .unwrap();
+    let mut stage = staged(&directory);
+    let temporary = f.0.join(stage.name());
+    assert!(fs::rename(&f.0, f.0.with_extension("moved")).is_err());
+    assert_eq!(
+        stage.replace_name(name, &mut Uncontrolled).unwrap(),
+        StagedPublication::Published
+    );
+    assert!(stage.close().is_empty());
+    assert!(!temporary.exists());
+    let mut original = Vec::new();
+    old.read_to_end(&mut original).unwrap();
+    assert_eq!(original, b"original");
+    assert_eq!(fs::read(f.0.join(name)).unwrap(), b"body");
+    super::super::super::close_file(old).unwrap();
+    directory.close().unwrap();
+}
+#[test]
+fn project_replacement_unknown_completion_never_replays_or_discards_the_new_entry() {
+    let f = Fixture::new();
+    let name = std::ffi::OsStr::new("lycheedev.lock.json");
+    fs::write(f.0.join(name), b"old").unwrap();
+    let directory = Directory::open_shared_controlled(&f.0, &mut Uncontrolled).unwrap();
+    let mut stage = staged(&directory);
+    let error = stage
+        .publish_name_with(name, &mut Uncontrolled, |stage, path| {
+            stage.rename(path, true)?;
+            Err(io::Error::other("lost replacement completion"))
+        })
+        .unwrap_err();
+    assert_eq!(error.to_string(), "lost replacement completion");
+    assert_eq!(stage.publication(), StagedPublication::Unknown);
+    assert!(stage.replace_name(name, &mut Uncontrolled).is_err());
+    assert!(stage.close().is_empty());
+    assert_eq!(fs::read(f.0.join(name)).unwrap(), b"body");
+    directory.close().unwrap();
+}

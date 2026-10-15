@@ -1096,3 +1096,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 ## bc2 终态前的原记录（后续终态见 handover）
 
 - **bc2在途**：all-target因cfg(test)子模块路径E0583失败，CLI/describe/静态Retail仍通过；最小显式测试路径已审待新编译。三方摄取验证在工具身份检查拒绝reparse处提前停止，尚未执行三方Rust。修复候选保持源/缓存无链接边界。498的两个失败组还伴有vctip辅助进程drain强制回收，真实断言失败与生命周期问题均保留，不能只修断言就宣称整组通过。
+
+
+## cd576 concentrated run final (2026-10-15 21:24 UTC)
+
+Head `cd576917e24cc7d367ba605ce5d29886884ae903`, run `38801126956`, product artifact `12006948845`; ZIP SHA256 `b2dbe2d5ef44cc0fdbb66e539d76892f7592b28caf73c8dba7ae474a37a2793e`. All 171 disk-owner receipts and 1011 sealed log hashes verified. Product/static/context failed; frozen public-contract job deliberately skipped, not passed.
+
+- All-target/CLI and dependent Source tests share E0624 at the old private signature lookup (later 8eb correction); Data lib tests share E0282 for the ambiguous BTreeMap key in subquery_tests.rs:688. Neither implies dozens of separate business failures.
+- Project pin owner `1ee822d1-2d0f-4aa1-bd39-43eec0c35c66`: 9 passed, one old atomic replacement/held-reader AccessDenied. SQL relational owner `1427d7ef-42f7-44f1-aacd-38aba6d41762`: aggregate 3 passed; compound 2 passed/1 failed because a success oracle received an error before its test diagnostic unwrap. New revisions still require actual rerun.
+- Slot maintenance `aaf736d4-dee8-4244-b5e5-1d84511341f6` 16/1; removal `4fe91fc2-600a-4cb1-a0c9-c7a4bf433c41` 4/4; formal repair `4d7fcc33-2dfa-4feb-84ca-031fa4e90924` 21/4. The failures hit the original 180-second deadline during full 500-slot setup or repair apply. Four instrumented phases overlap; later two parallel setup phases succeed around 101 seconds, and one repair apply around 54.69 seconds. This supports disk-contention investigation, not proof of a sole cause or permission to extend deadlines/remove durability checks.
+- Mailbox owner `8a3fd56b-6d95-4269-bceb-973544f209da`: one fixture and 342 library tests passed, retired/reaped. Other Core and independent Data suites ran; full Retail, IPC and real Skill were not launched after CLI build failure. No new memory/performance result.

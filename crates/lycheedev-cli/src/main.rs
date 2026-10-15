@@ -836,8 +836,10 @@ fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
         },
         lycheedev_source::native_research::one_shot,
     )?;
-    if let Ok(project) = lycheedev_core::selection::find_project(&inv.cwd)
-        .and_then(|directory| lycheedev_core::selection::inspect_project(&directory))
+    let project = lycheedev_core::selection::find_project_controlled(&inv.cwd, &inv.control)
+        .and_then(|directory| lycheedev_core::selection::inspect_project_controlled(&directory, &inv.control));
+    inv.control.check()?;
+    if let Ok(project) = project
         && let Some(product) = project["project"]["product"].as_str()
     {
         let observed = lycheedev_source::git::mirror_health_with_control(
@@ -1219,6 +1221,17 @@ fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     if inv.command == "target resolve" && inv.flag("--file").is_some() && error.code == "vault.workspace_schema_newer" {
         error.code = "vault.unsupported_workspace".into();
     }
+    if inv.command.starts_with("project ") {
+        if matches!(error.code.as_str(), "selection.project_missing" | "selection.project_unlocked" | "selection.project_format" | "selection.project_conflict") {
+            if !error.details.is_object() { error.details = if error.details.is_null() { json!({}) } else { json!({"primaryDetails":error.details}) }; }
+            error.details["stage"] = json!("selection");
+        } else if matches!(error.code.as_str(), "external.io" | "input.invalid" | "vault.metadata") {
+            error.code = "command.failed".into();
+            error.exit_code = 5;
+        } else if error.code == "vault.workspace_schema_newer" {
+            error.code = "vault.unsupported_workspace".into();
+        }
+    }
     // Go entry.queryFault projects installation selection errors for every
     // command, including addon handlers, rather than only catalog queries.
     if matches!(error.code.as_str(), "selection.installation_missing" | "selection.installation_ambiguous" | "selection.installation_product_mismatch" | "selection.installation_metadata_conflict") {
@@ -1559,6 +1572,9 @@ fn main() {
     drop(console);
     std::process::exit(exit);
 }
+
+#[cfg(test)]
+mod project_tests;
 
 #[cfg(test)]
 mod tests {

@@ -39,7 +39,7 @@ fn read(file: &mut impl Read, control: &OperationControl) -> Result<Vec<u8>> {
 }
 // Use the shared validation rules and preserve Go's plain-error messages at
 // this new consumer. Digit-only build admission is stricter than Rust parsing.
-fn validate_spec(spec: &SelectionSpec) -> Result<()> {
+pub(super) fn validate_spec(spec: &SelectionSpec) -> Result<()> {
     // Source errors precede the other fields in fixed validatePins.
     let mut validation = spec.clone();
     if let Some(data) = validation.data.as_mut() {
@@ -80,7 +80,7 @@ fn validate_spec(spec: &SelectionSpec) -> Result<()> {
         }
     })
 }
-fn stored_pin(raw: &[u8], requested: &str, control: &OperationControl) -> Result<PinnedSet> {
+pub(super) fn stored_pin(raw: &[u8], requested: &str, control: &OperationControl) -> Result<PinnedSet> {
     let (pin, unmarshal_only) = wire::stored(raw, control)?;
     if pin.id != requested
         || pin.schema != "lycheedev.selection.v1"
