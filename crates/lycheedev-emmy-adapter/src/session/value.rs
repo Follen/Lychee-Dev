@@ -510,6 +510,13 @@ impl OwnedValue {
     }
     pub(crate) fn result_slot(&self, index: usize) -> Option<Self> {
         if let Some(evidence) = &self.evidence {
+            if let ValueEvidence::Structural(children) = evidence.as_ref()
+                && matches!(&self.ty, LuaType::Variadic(value) if matches!(value.as_ref(), VariadicType::Base(_)))
+            {
+                // Upstream returns Base itself for every slot (without applying
+                // another result-slot operation to a nested Base/pack).
+                return children.first().cloned();
+            }
             if let ValueEvidence::Pack(slots) = evidence.as_ref() {
                 let last = slots.len().checked_sub(1)?;
                 if index < last {

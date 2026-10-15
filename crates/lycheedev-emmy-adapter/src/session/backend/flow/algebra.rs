@@ -13,46 +13,7 @@ pub(super) fn from_components(mut values: Vec<OwnedValue>) -> OwnedValue {
         _ => OwnedValue::raw_union(values),
     }
 }
-pub(super) fn widen(value: OwnedValue) -> OwnedValue {
-    match value.structural_type() {
-        LuaType::IntegerConst(_) | LuaType::DocIntegerConst(_) => {
-            OwnedValue::plain(LuaType::Integer)
-        }
-        LuaType::FloatConst(_) => OwnedValue::plain(LuaType::Number),
-        LuaType::StringConst(_) | LuaType::DocStringConst(_) => OwnedValue::plain(LuaType::String),
-        LuaType::Union(_) => {
-            // LuaType::from_vec flattens one union layer and de-duplicates.
-            let mut values = Vec::new();
-            for member in components(value) {
-                for widened in components(widen(member)) {
-                    if !values.contains(&widened) {
-                        values.push(widened);
-                    }
-                }
-            }
-            from_components(values)
-        }
-        LuaType::Variadic(variadic) => match variadic.as_ref() {
-            VariadicType::Base(base) => {
-                OwnedValue::plain(LuaType::Variadic(Arc::new(VariadicType::Base(
-                    widen(OwnedValue::plain(base.clone()))
-                        .structural_type()
-                        .clone(),
-                ))))
-            }
-            VariadicType::Multi(types) => OwnedValue::pack(
-                value
-                    .carried_slots()
-                    .map(|s| s.to_vec())
-                    .unwrap_or_else(|| types.iter().cloned().map(OwnedValue::plain).collect())
-                    .into_iter()
-                    .map(widen)
-                    .collect(),
-            ),
-        },
-        _ => value,
-    }
-}
+
 fn broader(broad: &OwnedValue, narrow: &OwnedValue) -> bool {
     matches!(
         (broad.structural_type(), narrow.structural_type()),
@@ -100,6 +61,58 @@ fn removed_by(component: &OwnedValue, removed: &OwnedValue) -> bool {
         )
 }
 impl<E> OwnedQuery<'_, '_, E> {
+    pub(in crate::session::backend) fn widen_flow_const(
+        &mut self,
+        value: OwnedValue,
+    ) -> QueryResult<OwnedValue, E> {
+        self.checkpoint()?;
+        Ok(match value.structural_type() {
+            LuaType::IntegerConst(_) | LuaType::DocIntegerConst(_) => {
+                OwnedValue::plain(LuaType::Integer)
+            }
+            LuaType::FloatConst(_) => OwnedValue::plain(LuaType::Number),
+            LuaType::StringConst(_) | LuaType::DocStringConst(_) => {
+                OwnedValue::plain(LuaType::String)
+            }
+            LuaType::Union(_) => {
+                let mut values = Vec::new();
+                for member in components(value) {
+                    for widened in components(self.widen_flow_const(member)?) {
+                        self.checkpoint()?;
+                        if !values.contains(&widened) {
+                            values.push(widened);
+                        }
+                    }
+                }
+                from_components(values)
+            }
+            LuaType::Variadic(variadic) => match variadic.as_ref() {
+                VariadicType::Base(base) => {
+                    let base = self.owned_child(&value, 0, base);
+                    let base = self.widen_flow_const(base)?;
+                    OwnedValue::with_structural_children(
+                        LuaType::Variadic(Arc::new(VariadicType::Base(
+                            base.structural_type().clone(),
+                        ))),
+                        vec![base],
+                    )
+                }
+                VariadicType::Multi(types) => {
+                    let slots = value
+                        .carried_slots()
+                        .map(|s| s.to_vec())
+                        .unwrap_or_else(|| types.iter().cloned().map(OwnedValue::plain).collect());
+                    let mut values = Vec::new();
+                    for slot in slots {
+                        values.push(self.widen_flow_const(slot)?);
+                    }
+                    OwnedValue::pack(values)
+                }
+            },
+            _ => value,
+        })
+    }
+
     pub(super) fn flow_merge(
         &mut self,
         left: OwnedValue,
@@ -229,6 +242,6 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(value);
         }
         self.checkpoint()?;
-        Ok(widen(value))
+        self.widen_flow_const(value)
     }
 }

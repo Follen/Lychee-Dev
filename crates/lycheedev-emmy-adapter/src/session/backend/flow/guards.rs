@@ -78,20 +78,39 @@ impl<E> OwnedQuery<'_, '_, E> {
                         } else {
                             emmylua_code_analysis::LuaArrayLen::Min(*max)
                         };
-                        OwnedValue::plain(LuaType::Array(Arc::new(
-                            emmylua_code_analysis::LuaArrayType::new(array.get_base().clone(), len),
-                        )))
+                        let base = self.owned_child(&value, 0, array.get_base());
+                        OwnedValue::with_structural_children(
+                            LuaType::Array(Arc::new(emmylua_code_analysis::LuaArrayType::new(
+                                base.structural_type().clone(),
+                                len,
+                            ))),
+                            vec![base],
+                        )
                     } else {
                         value
                     }
                 }
-                _ => {
-                    return self.continuation(
-                        OwnedQueryCapability::DeclarationFlow,
-                        None,
-                        None,
-                        None,
-                    );
+                Narrowing::Member { key, literal, keep } => {
+                    self.filter_flow_member(value, key, Some(literal), *keep)?
+                }
+                Narrowing::MemberTruthy { key, keep } => {
+                    self.filter_flow_member(value, key, None, *keep)?
+                }
+                Narrowing::Correlated {
+                    matching,
+                    candidates,
+                } => {
+                    let matching =
+                        OwnedValue::union_checked(matching.clone(), || self.checkpoint())?;
+                    let narrowed = self.narrow_flow_intersect(value.clone(), matching)?;
+                    if narrowed.structural_type().is_never() {
+                        value
+                    } else {
+                        let candidates =
+                            OwnedValue::union_checked(candidates.clone(), || self.checkpoint())?;
+                        let remaining = self.flow_remove(value, &candidates)?;
+                        self.flow_merge(narrowed, remaining)?
+                    }
                 }
             };
         }
@@ -274,7 +293,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         }
         Ok(())
     }
-    pub(super) fn apply_expr_casts(
+    pub(in crate::session::backend) fn apply_expr_casts(
         &mut self,
         syntax: LuaSyntaxId,
         mut value: OwnedValue,
@@ -372,24 +391,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         if let Some(value) = self.alias_narrowing(declaration, &expr, truthy, prior)? {
             return Ok(Some(value));
         }
-        // The aliases and correlated multi-return stage must use this same CFG
-        // and owned inference. Until that implementation lands, only a real
-        // correlation/alias dependency leaves through the development boundary.
-        let mut names = Vec::new();
-        self.condition_names(&expr, &mut names)?;
-        if names
-            .iter()
-            .any(|name| tree.has_shared_multi_return_refs(name, declaration))
-        {
-            return self.continuation(
-                OwnedQueryCapability::DeclarationFlow,
-                Some(self.site(ptr.get_syntax_id())),
-                Some(flow.0),
-                Some(declaration.clone()),
-            );
-        }
-        Ok(None)
+        self.correlated_flow_narrowing(tree, declaration, &expr, truthy, flow)
     }
+
     pub(super) fn direct_decl_narrowing(
         &mut self,
         declaration: &SemanticId,
@@ -430,10 +434,23 @@ impl<E> OwnedQuery<'_, '_, E> {
                     {
                         Some(Narrowing::Truthy)
                     }
-                    (
-                        UnaryOperator::OpNot,
-                        inner @ (LuaExpr::CallExpr(_) | LuaExpr::IndexExpr(_)),
-                    ) => return self.direct_decl_narrowing(declaration, &inner, !truthy, prior),
+                    (UnaryOperator::OpNot, LuaExpr::CallExpr(call)) => {
+                        if let Some(value) =
+                            self.call_cast_narrowing(&call, declaration, !truthy, prior, false)?
+                        {
+                            return Ok(Some(value));
+                        }
+                        if !truthy
+                            && let Some((arg, guard)) = self.type_guard_target(&call)?
+                            && self.is_decl_name(&arg, declaration)
+                        {
+                            return Ok(Some(Narrowing::Replace(guard)));
+                        }
+                        None
+                    }
+                    (UnaryOperator::OpNot, inner @ LuaExpr::IndexExpr(_)) => {
+                        return self.direct_decl_narrowing(declaration, &inner, !truthy, prior);
+                    }
                     _ => None,
                 }
             }
@@ -444,6 +461,22 @@ impl<E> OwnedQuery<'_, '_, E> {
                 };
                 let op = op.get_op();
                 let equals = (op == BinaryOperator::OpEq) == truthy;
+                if matches!(op, BinaryOperator::OpEq | BinaryOperator::OpNe)
+                    && let Some((target, key, literal)) =
+                        self.flow_member_discriminant(&left, &right)?
+                    && &target == declaration
+                {
+                    return Ok(Some(Narrowing::Member {
+                        key,
+                        literal,
+                        keep: equals,
+                    }));
+                }
+                if let Some(value) =
+                    self.binary_guard_narrowing(&left, &right, op, declaration, truthy, prior)?
+                {
+                    return Ok(Some(value));
+                }
                 if let LuaExpr::CallExpr(call) = &left
                     && let Some(LuaExpr::NameExpr(callee)) = call.get_prefix_expr()
                     && callee.get_name_text().as_deref() == Some("type")
@@ -522,15 +555,23 @@ impl<E> OwnedQuery<'_, '_, E> {
                 None
             }
             LuaExpr::CallExpr(call) => {
-                let mut names = Vec::new();
-                self.condition_names(expr, &mut names)?;
-                if names.contains(declaration) {
-                    return self.continuation(
-                        OwnedQueryCapability::DeclarationFlow,
-                        Some(self.site(call.get_syntax_id())),
-                        None,
-                        Some(declaration.clone()),
-                    );
+                if truthy && !self.call_may_narrow(call, declaration)? {
+                    return Ok(None);
+                }
+                if let Some(value) =
+                    self.call_cast_narrowing(call, declaration, truthy, prior, !truthy)?
+                {
+                    return Ok(Some(value));
+                }
+                if truthy
+                    && call
+                        .get_args_list()
+                        .and_then(|list| list.get_args().next())
+                        .is_some_and(|arg| self.is_decl_name(&arg, declaration))
+                    && let Some((arg, guard)) = self.type_guard_target(call)?
+                    && self.is_decl_name(&arg, declaration)
+                {
+                    return Ok(Some(Narrowing::Replace(guard)));
                 }
                 None
             }
@@ -540,14 +581,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     .as_ref()
                     .is_some_and(|prefix| self.is_decl_name(prefix, declaration))
                 {
-                    return self.continuation(
-                        OwnedQueryCapability::DeclarationFlow,
-                        Some(self.site(index.get_syntax_id())),
-                        None,
-                        Some(declaration.clone()),
-                    );
+                    self.flow_member_key(index)?
+                        .map(|key| Narrowing::MemberTruthy { key, keep: truthy })
+                } else {
+                    None
                 }
-                None
             }
             _ => None,
         };
@@ -556,7 +594,11 @@ impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn is_decl_name(&self, expr: &LuaExpr, declaration: &SemanticId) -> bool {
         matches!(expr,LuaExpr::NameExpr(name) if self.model.resolve_name(name.get_position()).as_ref()==Some(declaration))
     }
-    fn condition_names(&mut self, expr: &LuaExpr, out: &mut Vec<SemanticId>) -> QueryResult<(), E> {
+    pub(super) fn condition_names(
+        &mut self,
+        expr: &LuaExpr,
+        out: &mut Vec<SemanticId>,
+    ) -> QueryResult<(), E> {
         let mut stack = vec![expr.clone()];
         while let Some(expr) = stack.pop() {
             self.checkpoint()?;
@@ -812,7 +854,7 @@ pub(super) fn literal_type(lit: &emmylua_parser::LuaLiteralExpr) -> Option<LuaTy
         _ => None,
     }
 }
-fn singleton(ty: &LuaType) -> bool {
+pub(super) fn singleton(ty: &LuaType) -> bool {
     matches!(
         ty,
         LuaType::Nil

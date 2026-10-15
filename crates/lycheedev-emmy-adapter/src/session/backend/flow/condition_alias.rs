@@ -78,7 +78,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             _ => None,
         })
     }
-    fn local_initializer(&self, name: &LuaNameExpr) -> Option<LuaExpr> {
+    pub(super) fn local_initializer(&self, name: &LuaNameExpr) -> Option<LuaExpr> {
         let decl = self.model.resolve_name(name.get_position())?;
         let SemanticId::Decl(key) = &decl else {
             return None;

@@ -142,8 +142,8 @@ impl<E> OwnedQuery<'_, '_, E> {
                     LuaType::Mapped(_) | LuaType::Call(_) | LuaType::Conditional(_)
                 )
             {
-                // This public API is exactly expand_alias_generic, the original
-                // producer. Generic is a context-free carrier variant.
+                // Expand the original alias producer while preserving selected
+                // descendants carried by generic arguments.
                 self.checkpoint()?;
                 let expanded = self.expand_aliases(source.clone())?;
                 self.checkpoint()?;

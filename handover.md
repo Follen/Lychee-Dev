@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 20:35 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`8eb9f09b8f75be34620ef54ef4dd45d2a61d5879`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 20:39 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`8765bea087558176437e1956b9fa708600aa83f0`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -33,7 +33,7 @@
 
 6699终态产物168 owner/987 sealed日志全SHA核验；owned binary4/dense3/execution3/plan2/function5实际通过，query backend4通过1失败，正常局部变量触发尚缺的DeclarationFlow，后续selected448未执行。此缺口正按完整flow链实现，不改成Unknown掩盖。Data旧可见域错误与三处adaptive测试移出PinnedSet的E0507已最小修；Core旧immediate-busy测试已按真实blob等待合同改取消，历史metadata测试目录加唯一序号。新测试均未运行；同候选旧context fixture失败已在c8后继保存正负用例。
 
-owned查询后端已保存完整累计源码：单文件按需CFG、局部声明flow/赋值/join/基本guard/casts、三种类型关系、member producer与结构化carrier、substitution和本地/跨文件signature。32 Rust源仅完成语法检查，未编译；仍须补完整closure environment、一般call/generic、member flow/复杂相关窄化与统一checker，再切Source实际诊断。当前不新增生产patch删除，不宣称6699正常局部变量失败已修复。依赖只增加既有锁定rowan0.17.0的adapter直接边，无新包或版本升级。
+owned查询后端已保存完整累计源码：单文件按需CFG、局部声明flow/赋值/join/基本guard/casts、三种类型关系、member producer与结构化carrier、substitution和本地/跨文件signature。后继33个Rust源已组合通用call、重载/generic、回调参数环境、builtins/返回转换、迭代变量、member flow与相关窄化、来源carrier，均仅通过语法检查，未编译。真实batch现携带贡献顺序Arc，供显式owned构造使用；旧开发构造缺该事实时保IntakeOrder未完成状态，现有oracle还需集中迁移，不能当兼容通过。raw TypeShell后继与统一checker仍继续，尚未切Source实际诊断。当前不新增生产patch删除，不宣称6699正常局部变量失败已修复。依赖只增加既有锁定rowan0.17.0的adapter直接边，无新包或版本升级。
 
 当前完整生产批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限，完整语义/诊断仍继续迁移，未达到零补丁。
 

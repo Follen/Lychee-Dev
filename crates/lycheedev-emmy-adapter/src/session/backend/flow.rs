@@ -4,8 +4,15 @@
 mod algebra;
 mod assignments;
 mod condition_alias;
+mod correlation;
+mod discriminants;
 mod guards;
+mod index_flow;
+mod member_flow;
+mod return_cast;
 mod signature_return;
+pub(super) use return_cast::ReturnCast;
+mod type_guard;
 use super::{OwnedQuery, OwnedQueryCapability, OwnedQueryFailure, QueryResult, cfg};
 use crate::session::{OwnedValue, SelectedProjectionBackend, SelectedProjector};
 use cfg::{FlowAntecedent, FlowEffect, FlowId, FlowNodeKind, FlowTree};
@@ -296,7 +303,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                         let value_ty = if value_ty.structural_type().is_unknown()
                             && !matches!(before.structural_type(), LuaType::Unknown | LuaType::Any)
                         {
-                            algebra::widen(before.clone())
+                            self.widen_flow_const(before.clone())?
                         } else {
                             value_ty
                         };
@@ -307,7 +314,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                             return Ok(Some(if before.structural_type().is_never() {
                                 before
                             } else {
-                                algebra::widen(before)
+                                self.widen_flow_const(before)?
                             }));
                         }
                         return Ok(Some(result));
@@ -433,7 +440,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             let value = if value.structural_type().is_unknown()
                 && !matches!(before.structural_type(), LuaType::Unknown | LuaType::Any)
             {
-                algebra::widen(before.clone())
+                self.widen_flow_const(before.clone())?
             } else {
                 value
             };
@@ -442,7 +449,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 if before.structural_type().is_never() {
                     return Ok(Some(before));
                 }
-                result = algebra::widen(before);
+                result = self.widen_flow_const(before)?;
             } else {
                 result = assigned;
             }
@@ -535,14 +542,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                     Some(decl) => self.type_of_decl_at(&decl, offset)?,
                     None => self.type_of_expr(syntax)?,
                 },
-                Some(LuaExpr::IndexExpr(_)) => {
-                    return self.continuation(
-                        OwnedQueryCapability::ExpressionFlow,
-                        Some(self.site(syntax)),
-                        Some(offset),
-                        None,
-                    );
-                }
+                Some(LuaExpr::IndexExpr(index)) => self.flow_index_expr(&index, offset)?,
                 Some(LuaExpr::ClosureExpr(closure)) => {
                     let value = match self.signature_local(closure.get_syntax_id())? {
                         Some(value) => value,

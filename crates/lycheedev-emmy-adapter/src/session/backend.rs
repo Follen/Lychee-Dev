@@ -7,12 +7,26 @@
 //! nested carriers; unimplemented structural/member consumers remain explicit.
 mod aliases;
 mod call;
+mod call_bindings;
+mod call_builtins;
+mod call_candidates;
+mod call_inference;
+mod call_match;
+mod call_return;
+mod call_unify;
+mod callable;
 mod cfg;
+mod declaration;
+mod environment;
 mod flow;
+mod index_general;
+mod iteration;
 mod logical;
 mod member;
 pub use member::OwnedMemberInfo;
 mod member_general;
+mod resolver;
+pub use resolver::OwnedResolvedMember;
 mod relation;
 mod relation_assign;
 mod relation_complex;
@@ -41,6 +55,7 @@ use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc, sync::Arc};
 /// These are development continuation labels, not product diagnostics/coverage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OwnedQueryCapability {
+    IntakeOrder,
     Parameter,
     Function,
     FunctionMetadata,
@@ -127,16 +142,21 @@ pub struct OwnedQuery<'a, 'control, E> {
     session: &'a OwnedBindingSession,
     model: SemanticModel<'a>,
     check: &'control mut dyn FnMut() -> Result<(), E>,
+    contribution_order: Option<Arc<[FileId]>>,
     expressions: Memo<LuaSyntaxId, OwnedValue>,
     declarations: Memo<(FileId, SemanticId), Option<OwnedValue>>,
     members: Memo<(FileId, SemanticId), Option<OwnedValue>>,
     member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,
+    resolved_members: HashMap<(FileId, LuaSyntaxId), Option<OwnedResolvedMember>>,
     // This cache's owner is the immutable analysis/session borrow, not FileId
     // alone. Fresh semantic scopes share CFGs but never their inference caches.
     flow_trees: Rc<RefCell<HashMap<FileId, Arc<cfg::FlowTree>>>>,
     flow_declarations: HashMap<(FileId, SemanticId, cfg::FlowId), OwnedValue>,
     flow_expressions: HashMap<(LuaSyntaxId, u32), OwnedValue>,
     type_relations: HashMap<(OwnedValue, OwnedValue), bool>,
+    environments: environment::Environments,
+    closure_returns: Rc<RefCell<std::collections::HashSet<LuaSyntaxId>>>,
+    return_casts: HashMap<(FileId, LuaSyntaxId), Option<flow::ReturnCast>>,
 }
 
 impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
@@ -151,14 +171,43 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             session,
             model: analysis.semantic_model(file_id),
             check,
+            contribution_order: None,
             expressions: Rc::new(RefCell::new(HashMap::new())),
             declarations: Rc::new(RefCell::new(HashMap::new())),
             members: Rc::new(RefCell::new(HashMap::new())),
             member_lists: HashMap::new(),
+            resolved_members: HashMap::new(),
             flow_trees: Rc::new(RefCell::new(HashMap::new())),
             flow_declarations: HashMap::new(),
             flow_expressions: HashMap::new(),
             type_relations: HashMap::new(),
+            environments: Rc::new(RefCell::new(Vec::new())),
+            closure_returns: Rc::new(RefCell::new(std::collections::HashSet::new())),
+            return_casts: HashMap::new(),
+        }
+    }
+
+    /// Full-batch owners supply the contribution order captured immediately
+    /// after their public BatchChange rebuild. The analysis must remain that
+    /// immutable snapshot for the entire query/session borrow. Incremental
+    /// editor models must not reuse a stale full-batch order.
+    pub fn new_with_contribution_order(
+        analysis: &'a EmmyLuaAnalysis,
+        session: &'a OwnedBindingSession,
+        file_id: FileId,
+        check: &'control mut dyn FnMut() -> Result<(), E>,
+        contribution_order: Arc<[FileId]>,
+    ) -> Self {
+        let mut query = Self::new(analysis, session, file_id, check);
+        query.contribution_order = Some(contribution_order);
+        query
+    }
+
+    fn owner_contribution_order(&mut self) -> QueryResult<Arc<[FileId]>, E> {
+        self.checkpoint()?;
+        match &self.contribution_order {
+            Some(order) => Ok(Arc::clone(order)),
+            None => self.continuation(OwnedQueryCapability::IntakeOrder, None, None, None),
         }
     }
 
@@ -207,7 +256,10 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             key: Some(syntax),
         };
         let projector = SelectedProjector::new(self.analysis, self.session);
-        let value = projector.evaluate_expression(self.site(syntax), self)?;
+        let value = {
+            let _scope = self.enter_execution(HashMap::new());
+            projector.evaluate_expression(self.site(syntax), self)?
+        };
         self.checkpoint()?;
         pending.commit(value.clone());
         Ok(value)
@@ -287,88 +339,6 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         }
     }
 
-    fn declaration_body(&mut self, declaration: &SemanticId) -> QueryResult<Option<OwnedValue>, E> {
-        if let Some(facts) = self.model.file_facts()
-            && let Some(info) = facts.decl_by_id(declaration)
-        {
-            if let Some(syntax) = info.value_expr_syntax
-                && self.manages_initializer(syntax)?
-            {
-                // Selected initializer takes priority even over a doc annotation.
-                let ty = self.type_of_expr(syntax)?;
-                return Ok(Some(Self::initializer_slot(ty, info.multi_return_index)));
-            }
-            let site = info.owner_syntax.map(|syntax| self.site(syntax));
-            if !matches!(info.kind, DeclKind::Local { is_iter: false, .. })
-                || info.doc_type_syntax.is_some()
-                || info.module_path.is_some()
-                || info.delayed_definition
-                || info
-                    .owner_syntax
-                    .is_some_and(|owner| facts.type_def_by_owner_syntax(owner).is_some())
-            {
-                return self.continuation(
-                    OwnedQueryCapability::DeclarationMetadata,
-                    site,
-                    None,
-                    Some(declaration.clone()),
-                );
-            }
-            if let Some(syntax) = info.value_expr_syntax {
-                let node = self
-                    .model
-                    .syntax_tree()
-                    .and_then(|tree| syntax.to_node_from_root(&tree.get_red_root()));
-                if node.clone().and_then(LuaClosureExpr::cast).is_some() {
-                    return self.continuation(
-                        OwnedQueryCapability::Function,
-                        Some(self.site(syntax)),
-                        None,
-                        Some(declaration.clone()),
-                    );
-                }
-                if node.and_then(LuaIndexExpr::cast).is_some() {
-                    return self.continuation(
-                        OwnedQueryCapability::ExpressionFlow,
-                        Some(self.site(syntax)),
-                        None,
-                        Some(declaration.clone()),
-                    );
-                }
-                let ty = self.type_of_expr(syntax)?;
-                return Ok(Some(Self::initializer_slot(ty, info.multi_return_index)));
-            }
-            // Only this already-validated uninitialized local can reuse the
-            // unmodified public decl query: there is no initializer, annotation,
-            // module, class, iteration, parameter or delayed-definition branch
-            // left which could observe selected context. The raw method reaches
-            // exactly the old final shell projection without contextual work.
-            self.checkpoint()?;
-            let value = self.model.type_of_decl(declaration).map(OwnedValue::plain);
-            self.checkpoint()?;
-            return Ok(value);
-        }
-        let file = match declaration {
-            SemanticId::Decl(key) => key.file_id,
-            _ => self.model.file_id(),
-        };
-        if file != self.model.file_id() {
-            let mut foreign = OwnedQuery::new(self.analysis, self.session, file, &mut *self.check);
-            if let Some(value) = {
-                foreign.flow_trees = Rc::clone(&self.flow_trees);
-                foreign.type_of_decl(declaration)?
-            } {
-                return Ok(Some(value));
-            }
-        }
-        self.continuation(
-            OwnedQueryCapability::DeclarationShell,
-            None,
-            None,
-            Some(declaration.clone()),
-        )
-    }
-
     fn declaration_at(
         &mut self,
         declaration: &SemanticId,
@@ -399,21 +369,37 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
             origin.file_id,
             &mut *self.check,
         );
+        foreign.contribution_order = self.contribution_order.clone();
         foreign.flow_trees = Rc::clone(&self.flow_trees);
         foreign.type_of_expr(origin.syntax).map(Ok)
     }
     fn parameter(
         &mut self,
         _: &SelectedProjector<'_>,
-        site: BindingSite,
+        _: BindingSite,
         parameter: &SemanticId,
     ) -> ProjectionResult<OwnedValue, Self::Error> {
-        self.continuation(
-            OwnedQueryCapability::Parameter,
-            Some(site),
-            None,
-            Some(parameter.clone()),
-        )
+        self.checkpoint()?;
+        let SemanticId::Decl(key) = parameter else {
+            return Ok(Err("selected_parameter_not_declaration"));
+        };
+        let mut foreign =
+            OwnedQuery::new(self.analysis, self.session, key.file_id, &mut *self.check);
+        foreign.contribution_order = self.contribution_order.clone();
+        foreign.flow_trees = Rc::clone(&self.flow_trees);
+        let Some(declaration) = foreign
+            .model
+            .file_facts()
+            .and_then(|facts| facts.decl_by_id(parameter))
+        else {
+            return Ok(Err("selected_parameter_missing"));
+        };
+        if declaration.kind != DeclKind::Param {
+            return Ok(Err("selected_parameter_not_parameter"));
+        }
+        foreign
+            .type_of_decl(parameter)
+            .map(|value| value.ok_or("selected_parameter_type_unavailable"))
     }
     fn function(
         &mut self,
@@ -427,6 +413,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
             function.file_id,
             &mut *self.check,
         );
+        foreign.contribution_order = self.contribution_order.clone();
         foreign.flow_trees = Rc::clone(&self.flow_trees);
         foreign.project_function_signature(site, function.closure)
     }
@@ -465,42 +452,10 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        _: &str,
+        name: &str,
         offset: u32,
     ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.checkpoint()?;
-        let declaration = self.model.resolve_name(offset.into());
-        self.checkpoint()?;
-        let Some(declaration) = declaration else {
-            return self.continuation(
-                OwnedQueryCapability::UnresolvedName,
-                None,
-                Some(offset),
-                None,
-            );
-        };
-        let facts = self.model.file_facts();
-        let info = facts.and_then(|facts| facts.decl_by_id(&declaration));
-        if info.is_some_and(|info| info.kind == DeclKind::Param) {
-            return self.continuation(
-                OwnedQueryCapability::ClosureEnvironment,
-                None,
-                Some(offset),
-                Some(declaration),
-            );
-        }
-        let mut ty = self.declaration_at(&declaration, offset)?;
-        if matches!(ty.structural_type(), LuaType::Unknown)
-            && info.is_some_and(|info| is_uninitialized_local(info, facts.unwrap()))
-        {
-            ty = OwnedValue::plain(LuaType::Nil);
-        }
-        Ok(ExpressionValue {
-            value: ty,
-            owner: Some(declaration),
-            closure_syntax: None,
-            receiver: None,
-        })
+        self.owned_load_name(name, offset)
     }
     fn index_member(
         &mut self,
@@ -509,7 +464,7 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         owner: ExpressionValue<OwnedValue>,
         key: &LuaMemberKey,
     ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.index_selected_member(owner, key)
+        self.index_member_general(owner, key)
     }
     fn index_dynamic(
         &mut self,
@@ -518,7 +473,7 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         owner: ExpressionValue<OwnedValue>,
         key: ExpressionValue<OwnedValue>,
     ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.index_selected_dynamic(owner, key)
+        self.index_dynamic_general(owner, key)
     }
     fn expression_at(
         &mut self,
@@ -545,24 +500,36 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         site: BindingSite,
     ) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
-        let member = self
+        let index = self
             .model
             .syntax_tree()
             .and_then(|tree| site.syntax.to_node_from_root(&tree.get_red_root()))
-            .and_then(LuaIndexExpr::cast)
-            .is_some();
-        self.checkpoint()?;
-        if member {
-            self.continuation(
-                OwnedQueryCapability::LogicalNullableMember,
-                Some(site),
-                None,
-                None,
-            )
-        } else {
-            Ok(None)
+            .and_then(LuaIndexExpr::cast);
+        let Some(index) = index else {
+            return Ok(None);
+        };
+        let Some(resolved) = self.resolve_owned_member(&index)? else {
+            return Ok(None);
+        };
+        if resolved.member_type.is_some() {
+            return Ok(None);
         }
+        let Some(member) = resolved.member_id else {
+            return Ok(None);
+        };
+        let file = match &member {
+            SemanticId::Member(key) => key.file_id,
+            _ => self.model.file_id(),
+        };
+        let nullable = self
+            .model
+            .file_facts_of(file)
+            .and_then(|facts| facts.member_by_id(&member))
+            .is_some_and(|member| member.is_nullable);
+        self.checkpoint()?;
+        Ok(nullable.then(|| OwnedValue::plain(LuaType::Nil)))
     }
+
     fn merge_value(&mut self, left: OwnedValue, extra: OwnedValue) -> QueryResult<OwnedValue, E> {
         OwnedValue::union_checked(vec![left, extra], || self.checkpoint())
     }

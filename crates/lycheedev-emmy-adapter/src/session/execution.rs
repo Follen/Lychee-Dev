@@ -11,7 +11,7 @@ use emmylua_parser::{BinaryOperator, LuaSyntaxId, UnaryOperator};
 /// closure or receiver must not erase an object's session token/epoch/provenance
 /// retained inside `value`. No Clone bound or structural identity shortcut is
 /// imposed on the carrier.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExpressionValue<V> {
     pub value: V,
     pub owner: Option<SemanticId>,

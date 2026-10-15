@@ -3,8 +3,8 @@
 use super::{CacheEntry, OwnedMemberInfo, OwnedQuery, PendingMemo, QueryResult};
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
-    DeclKind, FileId, GenericTplId, InFiled, LuaMemberKey, LuaType, LuaTypeDeclId, Member,
-    MemberRef, SemanticId, TypeDef, TypeDefKind, VariadicType,
+    DeclKind, FileId, GenericTplId, InFiled, LuaMemberKey, LuaType, Member, MemberRef, SemanticId,
+    TypeDef, TypeDefKind, VariadicType,
 };
 use emmylua_parser::{
     LuaAstNode, LuaExpr, LuaIndexKey, LuaLiteralExpr, LuaLiteralToken, LuaTableExpr, LuaTableField,
@@ -55,14 +55,14 @@ impl<E> OwnedQuery<'_, '_, E> {
     ) -> QueryResult<Option<OwnedValue>, E> {
         if file != self.model.file_id() {
             let mut foreign = OwnedQuery::new(self.analysis, self.session, file, &mut *self.check);
+            foreign.contribution_order = self.contribution_order.clone();
             return foreign.type_of_member(id);
         }
         self.checkpoint()?;
-        let member = self
-            .model
-            .file_facts_of(file)
-            .and_then(|facts| facts.member_by_id(id))
-            .cloned();
+        let Some(facts) = self.model.file_facts_of(file) else {
+            return Ok(None);
+        };
+        let member = facts.member_by_id(id).cloned();
         if let Some(syntax) = member.as_ref().and_then(|member| member.value_syntax)
             && self.manages_initializer(syntax)?
         {
@@ -251,6 +251,23 @@ impl<E> OwnedQuery<'_, '_, E> {
             .map(|info| info.map(|info| info.typ))
     }
 
+    pub fn member_info(
+        &mut self,
+        value: &OwnedValue,
+        key: &LuaMemberKey,
+    ) -> QueryResult<Option<OwnedMemberInfo>, E> {
+        self.checkpoint()?;
+        let cache_key = (value.clone(), key.clone());
+        if let Some(info) = self.member_items.get(&cache_key).cloned() {
+            self.checkpoint()?;
+            return Ok(info);
+        }
+        let info = self.member_info_uncached(value, key)?;
+        self.checkpoint()?;
+        self.member_items.insert(cache_key, info.clone());
+        Ok(info)
+    }
+
     pub(super) fn member_info_uncached(
         &mut self,
         value: &OwnedValue,
@@ -259,52 +276,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if let Some(members) = self.selected_members(value)? {
             return Ok(members.into_iter().find(|info| &info.key == key));
         }
-        // The fixed member_info -> impl -> direct sequence probes selected
-        // membership at each producer. Only a positive probe emits a receipt.
-        if let Some(members) = self.selected_members(value)? {
-            return Ok(members.into_iter().find(|info| &info.key == key));
-        }
-        if let Some(info) = self.direct_owned_member(value, key)? {
-            return Ok(Some(info));
-        }
-        if let LuaType::Intersection(types) = value.structural_type() {
-            let mut distinct = Vec::new();
-            let mut first = None;
-            for (index, ty) in types.get_types().iter().enumerate() {
-                let component = self.owned_child(value, index, ty);
-                if let Some(info) = self.member_info_uncached(&component, key)? {
-                    if !distinct.contains(&info.typ) {
-                        distinct.push(info.typ.clone());
-                    }
-                    if first.is_none() {
-                        first = Some(info);
-                    }
-                }
-            }
-            let Some(mut first) = first else {
-                return Ok(None);
-            };
-            first.typ = if distinct.len() == 1 {
-                distinct.remove(0)
-            } else {
-                OwnedValue::plain(LuaType::Never)
-            };
-            return Ok(Some(first));
-        }
-        if let Some(info) = self
-            .member_infos_uncached(value)?
-            .into_iter()
-            .find(|info| &info.key == key)
-        {
-            return Ok(Some(info));
-        }
-        if let LuaType::TableConst(table) = value.structural_type()
-            && let Some(index) = self.table_metatable_index_info(table)?
-            && let Some(ret) = index.typ.function_return()
-        {
-            return Ok(Some(synthetic_member(key.clone(), ret)));
-        }
-        Ok(None)
+        self.member_info_impl_owned(value, key)
     }
 
     pub(super) fn table_metatable_type(
@@ -315,6 +287,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if table.file_id != self.model.file_id() {
             let mut foreign =
                 OwnedQuery::new(self.analysis, self.session, table.file_id, &mut *self.check);
+            foreign.contribution_order = self.contribution_order.clone();
             return foreign.table_metatable_type(table);
         }
         let calls = self
@@ -774,7 +747,52 @@ impl<E> OwnedQuery<'_, '_, E> {
         value: &OwnedValue,
         key: &LuaMemberKey,
     ) -> QueryResult<Option<OwnedMemberInfo>, E> {
-        self.member_info_uncached(value, key)
+        // The fixed member_info -> impl -> direct sequence probes selected
+        // membership at each producer. Only a positive probe emits a receipt.
+        if let Some(members) = self.selected_members(value)? {
+            return Ok(members.into_iter().find(|info| &info.key == key));
+        }
+        if let Some(info) = self.direct_owned_member(value, key)? {
+            return Ok(Some(info));
+        }
+        if let LuaType::Intersection(types) = value.structural_type() {
+            let mut distinct = Vec::new();
+            let mut first = None;
+            for (index, ty) in types.get_types().iter().enumerate() {
+                let component = self.owned_child(value, index, ty);
+                if let Some(info) = self.member_info_uncached(&component, key)? {
+                    if !distinct.contains(&info.typ) {
+                        distinct.push(info.typ.clone());
+                    }
+                    if first.is_none() {
+                        first = Some(info);
+                    }
+                }
+            }
+            let Some(mut first) = first else {
+                return Ok(None);
+            };
+            first.typ = if distinct.len() == 1 {
+                distinct.remove(0)
+            } else {
+                OwnedValue::plain(LuaType::Never)
+            };
+            return Ok(Some(first));
+        }
+        if let Some(info) = self
+            .member_infos_uncached(value)?
+            .into_iter()
+            .find(|info| &info.key == key)
+        {
+            return Ok(Some(info));
+        }
+        if let LuaType::TableConst(table) = value.structural_type()
+            && let Some(index) = self.table_metatable_index_info(table)?
+            && let Some(ret) = index.typ.function_return()
+        {
+            return Ok(Some(synthetic_member(key.clone(), ret)));
+        }
+        Ok(None)
     }
 
     fn collect_owned_members(
@@ -1116,7 +1134,7 @@ fn member_bound_parent(
 }
 
 impl<E> OwnedQuery<'_, '_, E> {
-    fn type_runtime_owners(&mut self, def: &TypeDef) -> QueryResult<Vec<SemanticId>, E> {
+    pub(super) fn type_runtime_owners(&mut self, def: &TypeDef) -> QueryResult<Vec<SemanticId>, E> {
         self.checkpoint()?;
         let mut out = vec![def.id.clone()];
         if let SemanticId::TypeDef(key) = &def.id
@@ -1128,17 +1146,36 @@ impl<E> OwnedQuery<'_, '_, E> {
         {
             push_owner(&mut out, primary.id.clone());
         }
+        // Reproduce WorkspaceDeclIndex::type_def_location: the first export
+        // contribution for this scoped identity wins, not whichever duplicate
+        // TypeDef the caller happened to resolve. The immutable intake supplies
+        // the exact per-workspace contribution order.
+        let order = self.owner_contribution_order()?;
+        let mut location = None;
+        for &file in order.iter() {
+            self.checkpoint()?;
+            if let Some(exported) = self
+                .model
+                .file_exports(file)
+                .and_then(|exports| exports.types.iter().find(|exported| exported.id == def.id))
+            {
+                location = Some((exported.file_id, exported.name.clone()));
+                break;
+            }
+        }
+        let Some((file, bare_name)) = location else {
+            return Ok(out);
+        };
         // The public export contribution is precisely the index's per-file
-        // runtime_values input; no type inference or declaration approximation.
+        // runtime_values input; its first matching entry wins (or_insert).
         let runtime = self
             .model
-            .file_exports(def.file_id)
+            .file_exports(file)
             .and_then(|exports| {
                 exports
                     .runtime_values
                     .iter()
-                    .rev()
-                    .find(|(name, _)| name == &def.name)
+                    .find(|(name, _)| name == &bare_name)
             })
             .map(|(_, id)| id.clone());
         if let Some(runtime) = runtime {
@@ -1157,9 +1194,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         }
         let associated = self
             .model
-            .file_facts_of(def.file_id)
+            .file_facts_of(file)
             .and_then(|facts| {
-                def.owner_syntax.map(|syntax| {
+                facts.type_def_by_id(&def.id)?.owner_syntax.map(|syntax| {
                     facts
                         .decls_by_owner_syntax(syntax)
                         .map(|decl| decl.id.clone())
@@ -1176,7 +1213,10 @@ impl<E> OwnedQuery<'_, '_, E> {
         Ok(out)
     }
 
-    fn canonical_runtime_owner(&mut self, id: &SemanticId) -> QueryResult<Option<SemanticId>, E> {
+    pub(super) fn canonical_runtime_owner(
+        &mut self,
+        id: &SemanticId,
+    ) -> QueryResult<Option<SemanticId>, E> {
         use emmylua_code_analysis::ModuleExport;
         self.checkpoint()?;
         let file = match id {

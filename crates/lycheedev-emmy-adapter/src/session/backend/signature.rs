@@ -111,15 +111,10 @@ impl<E> OwnedQuery<'_, '_, E> {
             && signature.docs.is_none()
             && file == self.model.file_id()
         {
-            return self.continuation(
-                OwnedQueryCapability::FunctionRawReturnFallback,
-                Some(BindingSite {
-                    file_id: file,
-                    syntax: closure,
-                }),
-                None,
-                None,
-            );
+            let inferred = self.closure_return_with_env(closure)?;
+            if !matches!(inferred.structural_type(), LuaType::Unknown | LuaType::Any) {
+                ret = inferred;
+            }
         }
         if signature.docs.is_none() {
             (params, ret) = self.table_field_signature_override(file, closure, params, ret)?;
@@ -203,6 +198,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(OwnedValue::plain(LuaType::Unknown));
         };
         let mut body = OwnedQuery::new(self.analysis, session, file, &mut *self.check);
+        body.contribution_order = self.contribution_order.clone();
         body.flow_trees = std::rc::Rc::clone(&self.flow_trees);
         body.contextual_closure_return(signature.closure_syntax)
     }

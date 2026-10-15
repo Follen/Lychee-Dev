@@ -88,7 +88,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                             | LuaType::DocBooleanConst(_)
                     )
                 {
-                    return Ok(algebra::widen(value));
+                    return self.widen_flow_const(value);
                 }
             }
         }

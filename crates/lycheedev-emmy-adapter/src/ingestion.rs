@@ -20,6 +20,9 @@ pub struct IngestionTextCost {
 #[derive(Debug)]
 pub struct IngestedBatch {
     pub file_ids: Vec<FileId>,
+    /// Lookup order for this completed full rebuild, shared by immutable owned
+    /// query scopes. This is not valid after an incremental database mutation.
+    pub contribution_order: Arc<[FileId]>,
     pub text_cost: IngestionTextCost,
 }
 
@@ -95,8 +98,25 @@ pub fn ingest_public_batch<E>(
         .db
         .apply_batch_with_ids(BatchChange { files: mapped });
     check().map_err(IngestionFailure::Interrupted)?;
+    // Fixed upstream rebuilds each workspace index in VFS FileId order.
+    // Public configuration registers libraries in increasing IDs, and only
+    // clears them as a whole; its stable lookup order is main/libraries/std/
+    // remote. Preserve the VFS order within each individual workspace.
+    let mut contribution_order = analysis.db.file_ids();
+    check().map_err(IngestionFailure::Interrupted)?;
+    contribution_order.sort_by_key(|file| {
+        let workspace = analysis.db.workspace_id_of(*file);
+        match workspace {
+            Some(id) if id.is_main() => (0, 0),
+            Some(id) if id.is_library() => (1, id.id),
+            Some(id) if id.is_std() => (2, 0),
+            _ => (3, 0),
+        }
+    });
+    check().map_err(IngestionFailure::Interrupted)?;
     Ok(IngestedBatch {
         file_ids,
+        contribution_order: Arc::from(contribution_order),
         text_cost: cost,
     })
 }
