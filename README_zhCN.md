@@ -25,9 +25,11 @@
 
 ## 当前代码与构建边界
 
-`crates/` 已有 cli、core、source、data、live、delivery、windows 七个 crate。Source 默认 `emmy-prototype`，真实直接链接 EmmyLua 分析库，其依赖仍指向被忽略的 `.tmp/rust-source-binding-context-01/upstream` 修改版目录。Git checkout 尚不包含完整依赖字节，必须先恢复、固定对应源码和补丁清单才能证明可复建；这不等于用户本地文件丢失。
+`crates/` 已有 cli、core、source、data、live、delivery、windows 七个 crate。Source 默认 `emmy-prototype` 并直接链接 EmmyLua。原先缺失的修改版依赖已由公开上游固定 commit `08b0873962e83bb8307e9a81052e3f41578fbc78` 加可审补丁重新构建，对应源码、补丁和许可证清单在 [third_party/emmy](third_party/emmy/README.md)。这是独立标识的新重建版本，不冒称恢复旧私有字节。准备脚本物化被忽略的依赖目录，Windows CI 已能构建并测试封存候选。
 
-目前不能宣传干净 checkout 可构建、完整 Source 成功、Live 已就绪或可替换发行包。具体缺口见 handover。交付平台仍为 Windows amd64；Source/Data/资源调查不依赖运行游戏，真实客户端只用于最后的 Live 验收。
+组件实际通过不等于完整 Source、默认 Live、最终安装包或性能已验收。完整 Retail 原生分析已暴露真实 API 生成错误，新修复须在精确候选上复跑；正式 runtime/input/backend 正在接入公共生命周期。精确通过/失败/未运行证据见 [handover.md](handover.md)，剩余模块见 [todo.md](todo.md)。独立可复建和最终打包门槛仍未完成。
+
+交付平台仍为 Windows amd64；Source/Data/资源调查不依赖运行游戏，真实客户端只用于最后的 Live 验收。
 
 ## 本次范围
 

@@ -1,4 +1,6 @@
 use crate::Result;
+mod lifetime;
+pub use lifetime::{ProcessLifetime, observe_lifetime};
 mod runtime_module;
 pub use runtime_module::{
     RuntimeBudget, RuntimeControl, RuntimeCost, RuntimeImageGuard, RuntimeImageLayout,

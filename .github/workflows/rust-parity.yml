@@ -78,8 +78,8 @@ jobs:
     # Deliberately no needs: static parity gaps must not suppress real builds.
     if: github.ref == 'refs/heads/rust-refactor'
     runs-on: windows-2025
-    # Existing product groups plus four independently bounded native groups (44.5m total).
-    timeout-minutes: 120
+    # Existing native groups (44.5m) plus bounded formal Lua build/run (10m + 20m).
+    timeout-minutes: 150
     defaults:
       run:
         shell: pwsh
@@ -146,6 +146,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+      - name: Test fixed Go Lua acceptance authentication and stop boundaries
+        if: ${{ !cancelled() }}
+        run: node --test tools/rust-formal-lua.test.mjs
+      - name: Build official Lua 5.1 interpreter for formal addon assertions
+        id: formal_lua
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' }}
+        run: node tools/rust-formal-lua.mjs build .tmp/ci-formal-lua-runtime
+      - name: Execute fixed Go Lua addon profiles and pure protocol fixtures
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' && steps.formal_lua.outcome == 'success' }}
+        run: node tools/rust-formal-lua.mjs run .tmp/ci-formal-lua-runtime/build-report.json .tmp/ci-cli-artifact/artifact.json
       - name: Run client metadata filesystem fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-client-fixtures --one-shot -- test --locked --offline -p lycheedev-core --lib client::tests -j 1
@@ -258,6 +268,13 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: >-
           node tools/rust-cargo.mjs --owner ci-trusted-runtime --one-shot -- test --locked --offline -p lycheedev-windows --lib process::runtime_ -j 1
+      - name: Run exact process lifetime classification fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          node tools/rust-cargo.mjs --owner ci-process-lifetime-unit --one-shot -- test --locked --offline -p lycheedev-windows --lib process::lifetime:: -j 1
+      - name: Run owned child process lifetime observations
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-process-lifetime-child --one-shot -- test --locked --offline -p lycheedev-windows --test process_lifetime -j 1
       - name: Run owned Windows runtime memory fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-runtime-memory --one-shot -- test --locked --offline -p lycheedev-windows --test runtime_module -j 1
@@ -359,6 +376,7 @@ jobs:
             .tmp/ci-package-luac/
             .tmp/ci-source-candidate/
             .tmp/ci-source-native-temp/
+            .tmp/ci-formal-lua-runtime/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

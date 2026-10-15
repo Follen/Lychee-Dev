@@ -8,7 +8,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-pub const GENERATOR: &str = "environment-ts-v2-script-object-owners";
+pub const GENERATOR: &str = "environment-ts-v3-emmy-return-labels";
 pub const DECLARATION_RULES: &str = "api-script-object-owner-v1";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

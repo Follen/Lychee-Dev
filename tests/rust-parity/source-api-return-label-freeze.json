@@ -1,0 +1,85 @@
+{
+  "schema": "lycheedev.source-api-return-label-freeze.v1",
+  "baseline": {
+    "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+    "emmyPublicCommit": "08b0873962e83bb8307e9a81052e3f41578fbc78",
+    "retailCommit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"
+  },
+  "failureEvidence": {
+    "commit": "e38851d",
+    "run": 38650383333,
+    "job": 116148400586,
+    "artifact": 11936886255,
+    "zipSHA256": "40eb97deee89c42e41cae59028b188364df4cd656a000b78e7c99c87ffaed911",
+    "owners": [
+      {
+        "id": "8fb3107b-9c03-4151-be43-1061a32a04b5",
+        "logHashesVerified": 90
+      },
+      {
+        "id": "6405f369-7af0-4fbc-9b6a-d8d150c44c16",
+        "logHashesVerified": 67
+      }
+    ],
+    "processReceipts": {
+      "forced": false,
+      "rootReaped": true,
+      "treeReaped": true,
+      "handlesClosed": true,
+      "outputReadersComplete": true,
+      "activeProcesses": 0,
+      "exitCode": 1
+    },
+    "rawMaterialSHA256": "da260620baad9ba0a3fcb62a2bc4fa3b204fc773b4f468505e158b138c97d63f"
+  },
+  "rootCause": {
+    "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/ConnectionDocumentation.lua",
+    "sourceLine": 45,
+    "callable": "GetNetStats",
+    "originalReturnName": "in",
+    "generatedLine": 20911,
+    "reason": "Emitter interpolated metadata return label as an Emmy type operator. The fixed parser tokenizes in as TkIn and requires a right-hand type operand."
+  },
+  "staticReplay": {
+    "state": "passed_static_only",
+    "method": "Replay the changed return-label transformation over the authenticated generated definitions; verify every original environment document against the independently fixed archive. This is not Rust/Emmy execution.",
+    "sourceDocuments": 4036,
+    "environmentDocumentsVerifiedAgainstArchive": 612,
+    "definitionBytesBefore": 1041398,
+    "definitionBytesAfter": 1041400,
+    "definitionsSHA256Before": "d64e1ac44c331632213377251cd78cb26ff1c72113dd8a273df4e2eb51c8372f",
+    "definitionsSHA256AfterProjected": "1d6e1f79c1aea00e873aca50f9cad761990dd15605ee88f15e48a855d00b2cd3",
+    "returnAnnotations": 5159,
+    "mappingsChecked": 5873,
+    "changes": [
+      {
+        "line": 20911,
+        "before": "---@return number in",
+        "after": "---@return number # in"
+      }
+    ]
+  },
+  "validation": {
+    "rustfmtSyntax": "passed",
+    "scopedDiffCheck": "passed",
+    "rustCompile": "not_run",
+    "rustTests": "not_run",
+    "fullRetailSemantic": "not_run_after_fix",
+    "independentReview": "pending"
+  },
+  "preserved": {
+    "fullSourceCoverage": true,
+    "strictRebuildManifestAndFacts": true,
+    "strictVfsTextAndParseChecks": true,
+    "budgets": true,
+    "xmlResearchRules": "source-native-research-v7-xml-script-ancestry",
+    "thirdPartyPatch": "unchanged"
+  },
+  "files": {
+    "crates/lycheedev-source/src/environment.rs": "3b18a3dfd5538feb42381381f3bbbb426333f4f84fae62fe698e5904a4b76635",
+    "crates/lycheedev-source/src/environment/emit.rs": "da02454bfb756ed6c94aa1316597cb646899b81dac491e9ae60be90dbab486e5",
+    "crates/lycheedev-source/src/native_research/plan.rs": "52e33b022850bd1d39f12e88e5ba6dfeebfb3397b5711ea70f16f8774e693b8e",
+    "crates/lycheedev-source/src/native_research/plan_api_tests.rs": "246eb504e6e73e4367879f9bfe44f08c87437bc74c0f2d670ff1109fa195a9b6",
+    "tests/rust-source-data/retail-api-return-labels.json": "780509fc0a8f4109cf5ca477331db1d859f001de19e59efc7737bfe42411a4e4"
+  }
+}

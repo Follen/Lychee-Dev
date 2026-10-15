@@ -1,0 +1,160 @@
+{
+  "schema": "lycheedev.process-lifetime-test-map.v1",
+  "oracle": {
+    "release": "Go v3.2.0",
+    "commit": "3057a9666ab078270b63c7f06de748069b0d1f4b"
+  },
+  "execution": "NOT_RUN",
+  "method": "Fixed Git objects and current Rust assertions inspected. rustfmt parses only. No Cargo, rustc, Rust/Go tests, Windows/game/desktop execution.",
+  "goFiles": [
+    {
+      "path": "internal/desktop/process_windows.go",
+      "bytes": 1332,
+      "sha256": "fc6dd11c2df9c3395bec06e4e296031dc26a350a774982d5235eaf49a648f074",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/desktop/process_windows.go",
+      "tests": []
+    },
+    {
+      "path": "internal/desktop/process_windows_test.go",
+      "bytes": 1592,
+      "sha256": "d6c8a0f216fc311cfc4a4cc0ab29460815d8e3ca6bf2b4b729e7933be8512791",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/desktop/process_windows_test.go",
+      "tests": [
+        "TestProcessEndedUsesLifetimeNotWindow"
+      ]
+    },
+    {
+      "path": "internal/live/channel/process_end_windows.go",
+      "bytes": 2941,
+      "sha256": "35e824f107bad764733cbecda42dac83b95b9dfa19758075831d8d50e83137b0",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel/process_end_windows.go",
+      "tests": []
+    },
+    {
+      "path": "internal/live/channel/process_end_windows_test.go",
+      "bytes": 3128,
+      "sha256": "58207597e85e51ad9143d3b8bbe65172d9ad31d653f37d725acf0da4fdf2928d",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/live/channel/process_end_windows_test.go",
+      "tests": [
+        "TestDisconnectEndedLifetimeRetiresOnlyExactOwnerAndIsIdempotent",
+        "TestProcessEndNeverPromotesUnconfirmedResult"
+      ]
+    }
+  ],
+  "mappings": [
+    {
+      "go": "internal/desktop/process_windows_test.go:TestProcessEndedUsesLifetimeNotWindow",
+      "scope": "Lifetime-only contract; fixed Go uses PID+creation and never requires HWND. Rust child exits through owned stdin EOF instead of ping/kill. A retained Child handle proves Exited rather than accepting any nonempty end reason.",
+      "rust": [
+        "running_and_signaled_lifetimes_have_exact_bounded_os_order",
+        "only_open_invalid_parameter_is_absence_all_other_errors_keep_original_code",
+        "absent_pid_never_reads_waits_or_closes_a_nonexistent_handle",
+        "reused_pid_uses_original_creation_and_never_waits_on_replacement",
+        "missing_identity_is_not_process_end_and_cancellation_precedes_validation",
+        "pre_cancelled_request_never_opens_a_process",
+        "open_failure_and_post_open_control_error_both_survive_without_close",
+        "absence_cannot_be_issued_after_cancellation_during_open",
+        "every_post_open_cancel_point_closes_once_and_never_returns_exit",
+        "creation_mismatch_is_not_issued_after_post_query_cancellation",
+        "times_error_including_invalid_parameter_never_becomes_absence",
+        "failed_wait_preserves_os_error_and_unexpected_states_are_not_exit",
+        "original_os_failure_close_and_control_causes_survive_in_order_once",
+        "close_failure_blocks_every_successful_opened_lifetime",
+        "checked_close_disarms_drop_before_success_or_failure_without_retry",
+        "lifetime_child_fixture",
+        "own_process_is_running_without_any_window_and_reuse_is_not_continuity",
+        "owned_child_natural_exit_is_observed_with_its_exact_lifetime_still_held",
+        "pre_cancelled_observation_does_not_promote_owned_child_exit"
+      ]
+    },
+    {
+      "go": "internal/live/channel/process_end_windows_test.go:TestDisconnectEndedLifetimeRetiresOnlyExactOwnerAndIsIdempotent",
+      "scope": "Only its PID+creation lifetime prerequisite is provided here. CON journal/owner/retirement/idempotence remain the separate service batch; not claimed by these tests.",
+      "rust": [
+        "reused_pid_uses_original_creation_and_never_waits_on_replacement",
+        "own_process_is_running_without_any_window_and_reuse_is_not_continuity"
+      ]
+    },
+    {
+      "go": "internal/live/channel/process_end_windows_test.go:TestProcessEndNeverPromotesUnconfirmedResult",
+      "scope": "Service state transition is out of this Windows observation scope. This API only prevents errors/cancellation/close failures from becoming terminal facts; it never mutates operation state.",
+      "rust": []
+    }
+  ],
+  "extensions": [
+    {
+      "contract": "Only OpenProcess ERROR_INVALID_PARAMETER means absent; access denial, times/wait errors and unexpected wait state retain failures.",
+      "rust": [
+        "only_open_invalid_parameter_is_absence_all_other_errors_keep_original_code",
+        "absent_pid_never_reads_waits_or_closes_a_nonexistent_handle",
+        "times_error_including_invalid_parameter_never_becomes_absence",
+        "failed_wait_preserves_os_error_and_unexpected_states_are_not_exit"
+      ]
+    },
+    {
+      "contract": "Same supplied control before open, after each OS operation and around mandatory one-attempt checked-close. Retain primary/native/cleanup/control causes.",
+      "rust": [
+        "missing_identity_is_not_process_end_and_cancellation_precedes_validation",
+        "pre_cancelled_request_never_opens_a_process",
+        "open_failure_and_post_open_control_error_both_survive_without_close",
+        "absence_cannot_be_issued_after_cancellation_during_open",
+        "every_post_open_cancel_point_closes_once_and_never_returns_exit",
+        "creation_mismatch_is_not_issued_after_post_query_cancellation",
+        "original_os_failure_close_and_control_causes_survive_in_order_once",
+        "close_failure_blocks_every_successful_opened_lifetime",
+        "checked_close_disarms_drop_before_success_or_failure_without_retry"
+      ]
+    },
+    {
+      "contract": "Expose the existing pinned Go Unicode simple-fold UTF16 helper without changing its algorithm or generated table. This is a safe value comparison, not an input or identity capability.",
+      "rust": [
+        "public_utf16_equality_keeps_the_pinned_go_relation"
+      ],
+      "unchangedTable": {
+        "path": "crates/lycheedev-windows/src/mailbox_input/equal_fold_data.rs",
+        "bytes": 39587,
+        "sha256": "e474990232cd2f59245987171cee4d7bc417e5d6a04ffa881e77425ffff85ef2"
+      }
+    }
+  ],
+  "rustTests": {
+    "unit": [
+      "running_and_signaled_lifetimes_have_exact_bounded_os_order",
+      "only_open_invalid_parameter_is_absence_all_other_errors_keep_original_code",
+      "absent_pid_never_reads_waits_or_closes_a_nonexistent_handle",
+      "reused_pid_uses_original_creation_and_never_waits_on_replacement",
+      "missing_identity_is_not_process_end_and_cancellation_precedes_validation",
+      "pre_cancelled_request_never_opens_a_process",
+      "open_failure_and_post_open_control_error_both_survive_without_close",
+      "absence_cannot_be_issued_after_cancellation_during_open",
+      "every_post_open_cancel_point_closes_once_and_never_returns_exit",
+      "creation_mismatch_is_not_issued_after_post_query_cancellation",
+      "times_error_including_invalid_parameter_never_becomes_absence",
+      "failed_wait_preserves_os_error_and_unexpected_states_are_not_exit",
+      "original_os_failure_close_and_control_causes_survive_in_order_once",
+      "close_failure_blocks_every_successful_opened_lifetime",
+      "checked_close_disarms_drop_before_success_or_failure_without_retry"
+    ],
+    "integration": [
+      "lifetime_child_fixture",
+      "own_process_is_running_without_any_window_and_reuse_is_not_continuity",
+      "owned_child_natural_exit_is_observed_with_its_exact_lifetime_still_held",
+      "pre_cancelled_observation_does_not_promote_owned_child_exit",
+      "public_utf16_equality_keeps_the_pinned_go_relation"
+    ],
+    "ignoredChild": "lifetime_child_fixture",
+    "declaredRunnable": 19,
+    "declaredIgnoredFixture": 1,
+    "allResults": "NOT_RUN"
+  },
+  "ciCommandsRequired": [
+    "cargo test -p lycheedev-windows process::lifetime:: --lib -- --nocapture",
+    "cargo test -p lycheedev-windows --test process_lifetime -- --nocapture"
+  ],
+  "limits": [
+    "Actual access-denied/PID-reuse OS race/close-failure injection is modeled through the shared production decision helpers; not an OS permission manipulation test.",
+    "No game, user desktop, foreign process or external program is touched. Only this integration-test executable may be spawned by its fixture.",
+    "CloseHandle failure retains the failure and never retries; no claim that the OS resource was reclaimed after a failed close.",
+    "This is a bounded point-in-time fact, not a process lock or proof that a running process will remain alive."
+  ]
+}

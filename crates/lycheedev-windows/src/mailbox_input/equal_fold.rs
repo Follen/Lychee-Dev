@@ -10,7 +10,10 @@ fn representative(value: char) -> u32 {
         Err(_) => code,
     }
 }
-pub(crate) fn equal_fold_utf16(left: &[u16], right: &[u16]) -> bool {
+/// Compare already-delimited UTF-16 slices using the pinned Go simple-fold
+/// relation. Callers supply string contents without a trailing NUL terminator.
+/// This applies neither full case folding nor Unicode normalization.
+pub fn equal_fold_utf16(left: &[u16], right: &[u16]) -> bool {
     // Go windows.UTF16ToString decodes ill-formed units as RuneError too.
     // Length-changing full folds and canonical normalization are not applied.
     char::decode_utf16(left.iter().copied())

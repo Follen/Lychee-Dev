@@ -1,0 +1,118 @@
+{
+  "schema": "lycheedev.formal-lua-go-test-map.v1",
+  "oracle": {
+    "release": "Go v3.2.0",
+    "commit": "3057a9666ab078270b63c7f06de748069b0d1f4b"
+  },
+  "manifestSHA256": "a7b2f3716b7a8c75cd7a60c786c32787cc1452e13490f9753b160dcf114d8a92",
+  "entry": "node tools/rust-formal-lua.mjs run <interpreter-build-report.json> <sealed-rust-artifact.json>",
+  "originalFixtureDirectories": {
+    "tests/addon": 38,
+    "tests/protocol": 13,
+    "tests/lib": 1,
+    "tests/baseline/probes": 4,
+    "internal/testkit/lua.go": 1
+  },
+  "executionCases": 214,
+  "profiles": [
+    "retail",
+    "classic",
+    "titan",
+    "forever",
+    "classic-era",
+    "anniversary"
+  ],
+  "tests": [
+    {
+      "goTest": "TestWorkbenchLuaSuites",
+      "goSource": "tests/addon/addon_test.go",
+      "sourceSHA256": "f4a80d5f483ef188afc0ba3634f9d429b2e763f5fe3eae046c392bef73bf90fa",
+      "sourceGitBlob": "96c4aa5f7e4243f366a3515d49ddcfa306b20486",
+      "mode": "real-lua",
+      "target": "35 byte-identical t_*.lua suites × 6 exact Go harness profiles = 210 independent processes",
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "Six mocked profiles, not seven live product acceptances."
+    },
+    {
+      "goTest": "TestUnifiedTOCContract",
+      "goSource": "tests/addon/addon_test.go",
+      "sourceSHA256": "f4a80d5f483ef188afc0ba3634f9d429b2e763f5fe3eae046c392bef73bf90fa",
+      "sourceGitBlob": "96c4aa5f7e4243f366a3515d49ddcfa306b20486",
+      "mode": "static-translation",
+      "target": "assertions.mjs verifyUnifiedTOC",
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "Only static load and interface contract; not a Lua execution."
+    },
+    {
+      "goTest": "TestCharacterBridgeStorageDoesNotImportAccountExecution",
+      "goSource": "tests/protocol/character_state_test.go",
+      "sourceSHA256": "6c07f6fcd00a32667f7c3f29268ae23580a933c125c79081f4ff25d4f78b71d0",
+      "sourceGitBlob": "a0971561fc86a1e3852d1dbe71ec3cc9eeaadf14",
+      "mode": "real-lua",
+      "target": "character_state.lua",
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "Original Lua bytes and original Go output conditions; original Go host is not executed."
+    },
+    {
+      "goTest": "TestInputStateObservation",
+      "goSource": "tests/protocol/input_state_test.go",
+      "sourceSHA256": "274456974433c4e64d2bd6f549c23257a2d961341c3146048e70a2abd7d3861f",
+      "sourceGitBlob": "b92748331cdc3d5978145561c5105b5c0c374a98",
+      "mode": "real-lua",
+      "target": "input_state.lua",
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "Original Lua bytes and original Go output conditions; original Go host is not executed."
+    },
+    {
+      "goTest": "TestMemoryRecordLuaParity",
+      "goSource": "tests/protocol/memory_record_test.go",
+      "sourceSHA256": "4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2",
+      "sourceGitBlob": "de05983e08a1547a2780f8e77481ec54343d36ea",
+      "mode": "deferred-rust-host-integration",
+      "target": null,
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "NOT_RUN. Requires faithful Rust channel/memory/driver bridge integration; standalone Lua execution is insufficient."
+    },
+    {
+      "goTest": "TestSlotDriverLuaReportPreservesFiniteNumbers",
+      "goSource": "tests/protocol/numeric_report_test.go",
+      "sourceSHA256": "f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b",
+      "sourceGitBlob": "9152c80a1dd887e780743bb147ca9a0ecf0875c3",
+      "mode": "deferred-rust-host-integration",
+      "target": null,
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "NOT_RUN. Requires faithful Rust channel/memory/driver bridge integration; standalone Lua execution is insufficient."
+    },
+    {
+      "goTest": "TestLuaReceiverBindings",
+      "goSource": "tests/protocol/receiver_bindings_test.go",
+      "sourceSHA256": "dd072cd28605475cff454ddaa2402ce35aa16d914d65dd4fcfb4ae52b9f83f00",
+      "sourceGitBlob": "dd770936a462d3b5fccef544cc38d25c2c42fd07",
+      "mode": "real-lua",
+      "target": "receiver_bindings.lua",
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "Original Lua bytes and original Go output conditions; original Go host is not executed."
+    },
+    {
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay",
+      "goSource": "tests/protocol/slot_driver_test.go",
+      "sourceSHA256": "5cc95a2e1aac012b406688c6306f727091167818e91d94f55589aa8df7547e3d",
+      "sourceGitBlob": "420e93789f725a4029f5e46130dc50823b2b2472",
+      "mode": "deferred-rust-host-integration",
+      "target": null,
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "NOT_RUN. Requires faithful Rust channel/memory/driver bridge integration; standalone Lua execution is insufficient."
+    },
+    {
+      "goTest": "TestLuaCaptureWriter",
+      "goSource": "tests/protocol/writer_test.go",
+      "sourceSHA256": "480027beaa767c14d855cf93b865adbded835b2c32b730cbee7f7b1b1c528b46",
+      "sourceGitBlob": "dea23ac11975a603b1556cfba0685c0abe7df47d",
+      "mode": "real-lua",
+      "target": "writer.lua",
+      "executionEvidence": "NOT_RUN until real Windows evidence is sealed",
+      "limit": "Original Lua bytes and original Go output conditions; original Go host is not executed."
+    }
+  ],
+  "scope": "An additive fixed-oracle entrance. Old tests, extra addon files, dynamic closures and packaging consumers remain untouched. The map does not make the complete Go or Rust product suite pass."
+}

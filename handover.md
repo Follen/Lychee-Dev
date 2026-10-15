@@ -608,6 +608,28 @@ run38650383333/job116148400586终态失败；artifact11936886255 ZIP SHA256 40eb
 
 三IPC组的project init现显式不附--home，其他workspace命令仍强制隔离home，helper拒绝对source等命令省略home。metadata过滤改为源码实际controlled_tests，避免0项绿灯；旧--scan unsupported断言替为实际成功dispatch、returned=1与hotfix-scan捕获类型断言，其他非法参数/取消和既有scan回归不减。五文件另一个独立视角复核无阻断，43/43 Node实际通过/0skip，diff检查通过。Windows IPC、metadata与scan Rust新候选均NOT_RUN；本次修的是已证实错误调用/过期预期，不改变CLI准入来迎合runner。
 
+### 原进程生命周期事实接口
+
+新增safe observe_lifetime，以原PID/creation进行最小QUERY_LIMITED_INFORMATION|SYNCHRONIZE查询：只有OpenProcess ERROR_INVALID_PARAMETER为Absent，access denied/查询错误/异常wait不冒充终态；先核creation再Wait(0)，返回Running/Absent/Exited/PidReused。所有取得句柄的正常路径checked-close一次，原OS/control/cleanup原因保留；不依HWND猜退出、不读取游戏内存、不终止外来进程。固定Go UTF16 EqualFold只公开安全函数，算法/表不变，供正式service真实选择使用。
+
+7文件独审无P1/P2阻断，freeze SHA256 1f7db61f6f1624007676673fa547b6aa12b0921dfed1ff1a7d0957994c87d9ec；15unit+4integration+1 ignored自有子进程入口声明对应test-map，均Rust/Windows NOT_RUN。fixture仅启动当前测试程序，以stdin EOF正常退出，fallback只用自身Child句柄；真实权限错误/PID复用竞争/内核close故障仍只有模型覆盖。CI新增两个独立原生组，不能把本接口审核当service owner退休或完整Live验收。
+
+### 固定Go正式Lua验收独立入口
+
+新增独立tests/rust-parity/formal-lua固定夹具闭包，不覆盖仍有消费者的旧v3/v4测试。57个Go原文件逐Git blob/SHA/长度认证（addon38、protocol13、wow_globals1、probes4、testkit1），正式55 addon同样认证。计划实际执行35原Lua断言套件×6profile加4纯Lua协议，共214项；slot_server及3项Go-host桥接明确NOT_RUN，后续移植正式Rust端到端，六profile不冒称七产品实机。
+
+官方Lua5.1.5固定源码及官方MSVC构建独立interpreter，复用既有owned-process/disk归属；build≤10min、run≤20min。普通断言失败独立收集，超时/取消/forced/未知回收或身份漂移停止后续并记not_run，原日志保留。解释器及Rust artifact全部同owner有界sealedLogs、命令/proof/output、sourceRoot/sourceDigest前后核验；逐fixture继续核原Lua/addon/解释器身份，不反复全仓扫描。
+
+三轮独审修复预算检查后仍launch、真实deadlineHit后继续、缺封存源码身份、遗漏其他sealed日志及cargo命令前缀五项P2；最后与真实HEAD producer和418已下载artifact逐形状复核。freeze SHA256 047ccb1723f378bba868adc6fb12d4e1570d06a803aa2cc3dd54671c4a56d93f，63文件/9依赖独审吻合，31/31 Node checker独立通过，仅checker证据。Windows解释器构建、214 Lua实际执行、3host桥均NOT_RUN。
+
+CI新增独立checker/build/run并保留最终artifact，长job从120到150min仅容纳明确新增10+20min组上界，不放大单组预算、不使其他失败短路。README双语同步已经固定公开依赖重建并实际Windows构建的现状，仍不声称全Source/defaultLive/package/performance已验收。
+
+### 完整Retail API模型实际失败修复候选
+
+真实固定Retail ConnectionDocumentation.lua:45 的GetNetStats首个返回标签in，被旧生成器直接写成“---@return number in”；固定Emmy词法将in作为二元类型运算符，缺右项导致整个环境解析失败。现在普通标签字节保持，危险标签移到“# description”，原facts名称/类型/位置/顺序不变；generator升environment-ts-v3-emmy-return-labels使material/session/cursor旧身份失效。保留manifest/facts/VFS精确文本/parse全部拒绝链，诊断只给有限hash/错误数量/偏移，不泄露完整源。
+
+独立审核核全部4036文档、612环境文件、完整原fixture及固定Emmy6个grammar文件；对真实生成定义5159 return与5873 mapping逐项对齐，唯一变化第20911行，预测1,041,400B、SHA256 1d6e1f79c1aea00e873aca50f9cad761990dd15605ee88f15e48a855d00b2cd3。freeze SHA256 f3b543f34ce682f24e6a9aa649fe1eebca812b4a38c67a5803d04030bb1d73e4，本批静态独审无阻断。六新Rust回归仅声明NOT_RUN，现有native_research::会执行；必须在同一新Windows封存EXE重跑完整普通refs/context/APItype、持久cold/warm及真实IPC，静态重放和代表fixture不代替全仓验收。未改XML v7、third_party、预算或裁剪源输入。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

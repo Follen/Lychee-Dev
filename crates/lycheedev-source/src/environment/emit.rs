@@ -31,6 +31,18 @@ fn identifier(s: &str) -> bool {
 fn type_name(s: &str) -> bool {
     !s.is_empty() && s.split('.').all(identifier)
 }
+fn return_label(name: &str) -> String {
+    // Return labels are metadata, not part of the type expression. In Emmy's
+    // annotation grammar `number in` starts a binary type expression, so the
+    // real GetNetStats return named `in` invalidated the entire API model.
+    // Keep ordinary labels byte-identical and put non-name tokens behind the
+    // description delimiter. The original name/ordinal/type remain in facts.
+    if identifier(name) && !["keyof", "extends", "as"].contains(&name) {
+        name.into()
+    } else {
+        format!("# {}", name.replace(['\r', '\n'], " "))
+    }
+}
 fn issue(record: &ApiRecord, line: usize, code: &str, detail: &str) -> Gap {
     Gap {
         path: record.path.clone(),
@@ -281,7 +293,7 @@ pub(super) fn definitions(
             let t = types.slot(record, slot);
             w.write(&format!(
                 "---@return {t} {}",
-                slot.name.replace(['\r', '\n'], " ")
+                return_label(&slot.name)
             ))?;
         }
         if record
