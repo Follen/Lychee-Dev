@@ -136,7 +136,7 @@ pub(in crate::remote::session) fn completed_body(
 
 pub(in crate::remote::session) fn read(
     files: &Files<'_>,
-    index: &Encoding<'_>,
+    index: &dyn metadata_format::EncodingLookup,
     record: &EncodingRecord,
     maximum: usize,
     limits: casc::Limits,
@@ -153,7 +153,7 @@ pub(in crate::remote::session) fn read(
     let mut unavailable = None;
     for key in &record.encoding_keys {
         files.store.check()?;
-        let physical = index.find_encoding_with_check(key, limits, None, || files.store.check())?;
+        let physical = index.physical(keys.keys(), key, limits, &mut || files.store.check())?;
         let encoded = usize::try_from(physical.encoded_bytes).map_err(|_| limit())?;
         if encoded > maximum {
             return Err(limit());

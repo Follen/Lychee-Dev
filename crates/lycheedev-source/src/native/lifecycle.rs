@@ -16,7 +16,7 @@ impl Graph {
 #[derive(Clone, Copy)]
 pub enum EvaluatorProfile { Native, LegacyV7 }
 
-/// Batch parsing and indexing share the caller's cancellation/deadline checks.
+/// Text conversion shares the caller's original cancellation/deadline checks.
 /// The owned-process hard deadline still bounds any individual synchronous stage.
 /// No executable/config loader or implicit standard library is used here.
 pub fn prepare(inputs:Arc<SourceInputs>,control:&OperationControl)->lycheedev_core::Result<PreparedSnapshot> {
@@ -36,12 +36,25 @@ pub fn prepare_observed(inputs:Arc<SourceInputs>,control:&OperationControl,mut o
     }
     // Only this local analysis is mutated. Cancellation propagates its original
     // ToolkitError and drops all incomplete parser/index state before returning.
-    analysis.update_files_by_path_shared_checked(files,||control.check())?;
+    // The public batch API retains its own text allocation. Admission covers
+    // all input bytes before copying; no subset, per-file rebuild, new deadline
+    // or second analysis graph is used. Parsing/indexing remain synchronous.
+    let ingested=lycheedev_emmy_adapter::ingest_public_batch(
+        &mut analysis,files,inputs.corpus.limits.input_bytes,||control.check(),
+    ).map_err(|failure|match failure {
+        lycheedev_emmy_adapter::IngestionFailure::Interrupted(error)=>error,
+        lycheedev_emmy_adapter::IngestionFailure::InvalidInput(message)=>input_error(message),
+        lycheedev_emmy_adapter::IngestionFailure::Allocation(error)=>ToolkitError::new("source.native_budget",error.to_string(),3),
+    })?;
+    debug_assert!(ingested.text_cost.retained_bytes<=inputs.corpus.limits.input_bytes);
     observer("emmy_indexed");
     control.check()?;
-    public_result(PreparedSnapshot::prepare_inner(inputs,control,analysis,&mut observer),control)
+    public_result(PreparedSnapshot::prepare_inner(inputs,control,analysis,ingested.text_cost,&mut observer),control)
 }
 impl PreparedSnapshot {
+    /// Additional engine-owned source text, excluding parser/index allocations.
+    /// The original source corpus stays shared by graph/request views.
+    pub fn engine_text_cost(&self)->lycheedev_emmy_adapter::IngestionTextCost{self.engine_text_cost}
     pub fn inputs(&self)->&SourceInputs{&self.inputs}
     pub fn operation_control(&self)->&OperationControl{&self.control}
     /// Low-level adapter access. Raw resolvers are not an authoritative managed-value fallback.

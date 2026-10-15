@@ -68,6 +68,7 @@ pub struct PreparedSnapshot {
     control: OperationControl,
     owner: Arc<()>,
     analysis: EmmyLuaAnalysis,
+    engine_text_cost: lycheedev_emmy_adapter::IngestionTextCost,
     config: Emmyrc,
     files: BTreeMap<String, FileId>,
     // Public sites use original-source byte offsets; keep their path only once
@@ -81,10 +82,10 @@ pub struct PreparedSnapshot {
     managed_calls: HashSet<BindingSite>,
 }
 impl PreparedSnapshot {
-    fn prepare_inner(inputs:Arc<SourceInputs>,control:&OperationControl,analysis:EmmyLuaAnalysis,observer:&mut impl FnMut(&'static str))->Result<Self> {
+    fn prepare_inner(inputs:Arc<SourceInputs>,control:&OperationControl,analysis:EmmyLuaAnalysis,engine_text_cost:lycheedev_emmy_adapter::IngestionTextCost,observer:&mut impl FnMut(&'static str))->Result<Self> {
         control.check().map_err(|e|e.to_string())?;
         let config=inputs.corpus.config.clone();
-        let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],original_lines:BTreeMap::new(),parameters:BTreeMap::new(),managed_reads:HashSet::new(),managed_calls:HashSet::new()};
+        let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,engine_text_cost,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],original_lines:BTreeMap::new(),parameters:BTreeMap::new(),managed_reads:HashSet::new(),managed_calls:HashSet::new()};
         let mut syntax_counts=SourceSyntaxCounts::for_files(input.inputs.corpus.files.len(),input.inputs.corpus.limits.files)?;
         let mut line_index_remaining=64usize * 1024 * 1024;
         let mut nodes=0;let mut ids=HashSet::new();let mut uris=HashSet::new();

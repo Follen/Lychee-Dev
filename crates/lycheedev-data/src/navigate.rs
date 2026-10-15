@@ -188,86 +188,110 @@ pub(crate) fn dispatch_after_read(
     } else {
         None
     };
-    let result = (|| {
-        let prepared = db2::prepare_scoped(inv, "SpellEffect", &budget, remote.as_mut(), None)?;
-        let view = table::open_budgeted(
-            &prepared.file.bytes,
-            &prepared.definition,
-            Default::default(),
-            &Default::default(),
-            &[],
-            budget.clone(),
-        )?;
-        let field = prepared
-            .definition
-            .fields
-            .iter()
-            .find(|f| f.name == "SpellID")
-            .ok_or_else(|| fault("records.field_unknown", 4, "records.field_unknown: SpellID"))?;
-        if field.kind != "int" {
-            return Err(fault(
-                "records.field_type_mismatch",
-                2,
-                format!("records.field_type_mismatch: SpellID is {}", field.kind),
-            ));
-        }
-        let mut effects = SpellEffects::new(spell, npc, summon);
-        for id in view.ids() {
-            budget.charge(Cost::work(1))?;
-            // Full decoding preserves corrupt unused values and schema coverage.
-            let row = view.row(id, 1 << 20)?;
-            if !effects.accept(id, row, &budget)? {
-                break;
+    let mut execute =
+        |mut remote: Option<&mut dyn crate::remote::provider::FileScope>,
+         resolved: Option<lycheedev_core::selection::PinnedSet>| {
+            let prepared = db2::prepare_scoped(
+                inv,
+                "SpellEffect",
+                &budget,
+                match remote.as_mut() {
+                    Some(scope) => Some(&mut **scope),
+                    None => None,
+                },
+                resolved,
+            )?;
+            let view = table::open_budgeted(
+                &prepared.file.bytes,
+                &prepared.definition,
+                Default::default(),
+                &Default::default(),
+                &[],
+                budget.clone(),
+            )?;
+            let field = prepared
+                .definition
+                .fields
+                .iter()
+                .find(|f| f.name == "SpellID")
+                .ok_or_else(|| {
+                    fault("records.field_unknown", 4, "records.field_unknown: SpellID")
+                })?;
+            if field.kind != "int" {
+                return Err(fault(
+                    "records.field_type_mismatch",
+                    2,
+                    format!("records.field_type_mismatch: SpellID is {}", field.kind),
+                ));
             }
-        }
-        let partial = view.coverage()["complete"] != true;
-        let mut result = effects.result();
-        let data = prepared
-            .pin
-            .data
-            .as_ref()
-            .expect("prepare checked fixed DataPin");
-        let proof = json!({"contentVerified":true,"keySource":prepared.file.reading["keySource"],"name":prepared.bundle.identity.name,"identity":prepared.bundle.identity,"layoutHash":format!("{:08X}",prepared.layout.layout_hash),"definitionSHA256":prepared.definition.sha256,"fileDataID":prepared.bundle.identity.db2_file_data_id,"contentKey":prepared.file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
-        let context = json!({"resources":budget.snapshot()?,"snapshot":prepared.pin.id,"pin":data,"source":prepared.file.reading["source"],"tables":[proof],"relations":effects.relations,"complete":!partial&&!effects.truncated,"truncated":effects.truncated,"truncationReason":if effects.truncated{"row_budget"}else{"none"},"partial":partial,"partialReasons":if partial{json!(["table_unavailable"])}else{Value::Null}});
-        result
-            .as_object_mut()
-            .unwrap()
-            .extend(context.as_object().unwrap().clone());
-        result["tableVerification"] = json!([prepared.file.reading["verification"]]);
-        result["resourceAccounting"] = json!({"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":view.admitted_metadata_bytes(),"remainingGaps":["uninterruptible single codec call"]});
-        budget.check()?;
-        after_read()?;
-        catalog::check_source(inv, &prepared, &budget, remote.as_ref())?;
-        let raw = capture::json_bytes(&result, &budget, 16 << 20, || {
-            fault(
-                "records.query_resource_budget",
-                3,
-                "Domain evidence byte budget exceeded",
-            )
-        })?;
-        let verb = if summon { "summons" } else { "auras" };
-        let capture = evidence::commit_capture_budgeted(
-            &inv.home,
-            evidence::CaptureInput {
-                bytes: &raw,
-                maximum_bytes: 16 << 20,
-                media_type: "application/json",
-                provenance: json!({"kind":format!("spell-{verb}"),"locator":format!("spell:{verb}:{spell}"),"snapshot":prepared.pin.id,"dataBuild":data.full_build}),
-                complete: !partial && !effects.truncated,
-                truncated: effects.truncated,
-            },
-            &inv.control,
-            budget.as_ref(),
-        )?;
-        let mut outcome = Outcome::new(result);
-        outcome.complete = !partial && !effects.truncated;
-        outcome.selection = serde_json::to_value(prepared.pin)?;
-        outcome.provenance = vec![capture];
-        if effects.truncated {
-            outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
-        }
-        Ok(outcome)
-    })();
+            let mut effects = SpellEffects::new(spell, npc, summon);
+            for id in view.ids() {
+                budget.charge(Cost::work(1))?;
+                // Full decoding preserves corrupt unused values and schema coverage.
+                let row = view.row(id, 1 << 20)?;
+                if !effects.accept(id, row, &budget)? {
+                    break;
+                }
+            }
+            let partial = view.coverage()["complete"] != true;
+            let mut result = effects.result();
+            let data = prepared
+                .pin
+                .data
+                .as_ref()
+                .expect("prepare checked fixed DataPin");
+            let proof = json!({"contentVerified":true,"keySource":prepared.file.reading["keySource"],"name":prepared.bundle.identity.name,"identity":prepared.bundle.identity,"layoutHash":format!("{:08X}",prepared.layout.layout_hash),"definitionSHA256":prepared.definition.sha256,"fileDataID":prepared.bundle.identity.db2_file_data_id,"contentKey":prepared.file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
+            let context = json!({"resources":budget.snapshot()?,"snapshot":prepared.pin.id,"pin":data,"source":prepared.file.reading["source"],"tables":[proof],"relations":effects.relations,"complete":!partial&&!effects.truncated,"truncated":effects.truncated,"truncationReason":if effects.truncated{"row_budget"}else{"none"},"partial":partial,"partialReasons":if partial{json!(["table_unavailable"])}else{Value::Null}});
+            result
+                .as_object_mut()
+                .unwrap()
+                .extend(context.as_object().unwrap().clone());
+            result["tableVerification"] = json!([prepared.file.reading["verification"]]);
+            result["resourceAccounting"] = json!({"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":view.admitted_metadata_bytes(),"remainingGaps":["uninterruptible single codec call"]});
+            budget.check()?;
+            after_read()?;
+            catalog::check_source(inv, &prepared, &budget, remote.as_deref())?;
+            let raw = capture::json_bytes(&result, &budget, 16 << 20, || {
+                fault(
+                    "records.query_resource_budget",
+                    3,
+                    "Domain evidence byte budget exceeded",
+                )
+            })?;
+            let verb = if summon { "summons" } else { "auras" };
+            let capture = evidence::commit_capture_budgeted(
+                &inv.home,
+                evidence::CaptureInput {
+                    bytes: &raw,
+                    maximum_bytes: 16 << 20,
+                    media_type: "application/json",
+                    provenance: json!({"kind":format!("spell-{verb}"),"locator":format!("spell:{verb}:{spell}"),"snapshot":prepared.pin.id,"dataBuild":data.full_build}),
+                    complete: !partial && !effects.truncated,
+                    truncated: effects.truncated,
+                },
+                &inv.control,
+                budget.as_ref(),
+            )?;
+            let mut outcome = Outcome::new(result);
+            outcome.complete = !partial && !effects.truncated;
+            outcome.selection = serde_json::to_value(prepared.pin)?;
+            outcome.provenance = vec![capture];
+            if effects.truncated {
+                outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
+            }
+            Ok(outcome)
+        };
+    let result = match remote.as_mut() {
+        Some(scope) => (|| {
+            let pin = scope.resolve_pin()?;
+            let data = pin
+                .data
+                .as_ref()
+                .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
+            scope.with_session(data, |reader| execute(Some(reader), Some(pin.clone())))
+        })(),
+        None => execute(None, None),
+    };
     match remote {
         Some(scope) => scope.finish(result),
         None => result,

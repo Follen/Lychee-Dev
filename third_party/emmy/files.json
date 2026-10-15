@@ -911,8 +911,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/src/lib.rs",
-    "bytes": 11287,
-    "sha256": "3e741eb328a705d0001e235207a294a02c0f2dbf65c9a0d644f20109a06443b8"
+    "bytes": 9883,
+    "sha256": "1424a558e3eb945094b8162ac57f81c53fde0af48a10531358f39367ebda5543"
   },
   {
     "path": "crates/emmylua_code_analysis/src/locale/mod.rs",
@@ -1166,8 +1166,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/src/semantic_db/mod.rs",
-    "bytes": 33984,
-    "sha256": "455ad89c0877faf30f22248a758940131437f59fad7cdd86686bec1a83f8c5d9"
+    "bytes": 32830,
+    "sha256": "89abf259b50338cf1eaabb5417ad29788a85e4d8df4dd0e0b9e939cf04ffb883"
   },
   {
     "path": "crates/emmylua_code_analysis/src/semantic_db/phase_tests/fix_tests.rs",
@@ -1631,28 +1631,13 @@
   },
   {
     "path": "crates/emmylua_code_analysis/src/vfs/mod.rs",
-    "bytes": 8309,
-    "sha256": "84e6e69344ccc0fa2915992252d555adb84d94be5a98a79989f6b3567c54b1ab"
+    "bytes": 8264,
+    "sha256": "63052fd57c64d4adedb0aac9ba988eaf85402b4f07a77eed7f8d204977f93443"
   },
   {
     "path": "crates/emmylua_code_analysis/src/vfs/virtual_url.rs",
     "bytes": 727,
     "sha256": "607fd0510ecba4aab7431a43bfbb0f8b131a1427366e8e2771ae1e55881d0fd6"
-  },
-  {
-    "path": "crates/emmylua_code_analysis/tests/lychee_cardinality.rs",
-    "bytes": 17665,
-    "sha256": "b102636ae153023e273a90a924e2dae27ea2c70f50aefaa69685385bb7280daf"
-  },
-  {
-    "path": "crates/emmylua_code_analysis/tests/lychee_checker_guards.rs",
-    "bytes": 10966,
-    "sha256": "6c9b043ef7cb139333622ef26942348682e876326328a6d5046968b4865dba17"
-  },
-  {
-    "path": "crates/emmylua_code_analysis/tests/lychee_context.rs",
-    "bytes": 35719,
-    "sha256": "173a7f14b71dbaa4bc8e524a029a112f19520c4ad21f2124f8b9dc93a98e96e2"
   },
   {
     "path": "crates/emmylua_diagnostic_macro/Cargo.toml",

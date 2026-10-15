@@ -3,7 +3,7 @@ use crate::{
     ParseIssues, TypeProjection,
 };
 use emmylua_code_analysis::{
-    EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaType,
+    BatchChange, EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaType, file_path_to_uri,
     humanize_semantic_type_detailed,
 };
 use emmylua_parser::{LuaAstNode, LuaExpr};
@@ -40,12 +40,22 @@ impl DeclarationModel {
             "/lycheedev/authenticated-environment-types"
         });
         analysis.add_main_workspace(root.clone());
-        let ids = analysis
-            .update_files_by_path_shared_checked(
-                vec![(root.join("definitions.lua"), Some(definitions.clone()))],
-                &mut check,
-            )
-            .map_err(DeclarationFailure::Interrupted)?;
+        // Public upstream ingestion accepts owned String input. Copy only this
+        // separately bounded declaration document; Source workspace ingestion
+        // has a different sharing contract and must not be routed through here.
+        let text = copy_definitions(&definitions, &mut check)?;
+        let uri = file_path_to_uri(&root.join("definitions.lua")).ok_or_else(|| {
+            DeclarationFailure::InvalidInput("API semantic input path is invalid".into())
+        })?;
+        check().map_err(DeclarationFailure::Interrupted)?;
+        // Use the public batch entry even for one document. It preserves the
+        // previous full-cache-rebuild semantics, unlike the incremental entry.
+        // Parsing and indexing are one synchronous upstream call. This callback
+        // cannot interrupt that call; the existing owned worker hard deadline
+        // remains required. On a stop observed afterwards, drop this whole model.
+        let (_, ids) = analysis.db.apply_batch_with_ids(BatchChange {
+            files: vec![(uri, Some(text))],
+        });
         check().map_err(DeclarationFailure::Interrupted)?;
         let [file_id] = ids.as_slice() else {
             return Err(DeclarationFailure::InvalidInput(
@@ -185,4 +195,27 @@ impl DeclarationModel {
             }],
         }))
     }
+}
+
+/// Bound cooperative work while adapting the immutable admitted bytes to the
+/// public upstream String API. Chunks end on UTF-8 boundaries; input is neither
+/// normalized nor executed. No callback or partly built model escapes failure.
+fn copy_definitions<E>(
+    definitions: &str,
+    check: &mut impl FnMut() -> Result<(), E>,
+) -> Result<String, DeclarationFailure<E>> {
+    check().map_err(DeclarationFailure::Interrupted)?;
+    let mut text = String::with_capacity(definitions.len());
+    let mut start = 0;
+    while start < definitions.len() {
+        check().map_err(DeclarationFailure::Interrupted)?;
+        let mut end = (start + 16_384).min(definitions.len());
+        while !definitions.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.push_str(&definitions[start..end]);
+        start = end;
+    }
+    check().map_err(DeclarationFailure::Interrupted)?;
+    Ok(text)
 }

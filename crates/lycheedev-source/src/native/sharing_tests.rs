@@ -175,7 +175,7 @@ fn assert_graph(graph: &Graph, c: &OperationControl, native: bool, scope: Option
 }
 
 #[test]
-fn admitted_text_host_and_evidence_are_shared_without_changing_json() {
+fn public_engine_text_is_copied_and_host_and_evidence_remain_shared() {
     let c = control();
     let input = inputs(&c, false);
     assert_identity(&input, &c);
@@ -186,9 +186,11 @@ fn admitted_text_host_and_evidence_are_shared_without_changing_json() {
             .db
             .get_file_text(prepared.files[&file.path])
             .unwrap();
-        assert_eq!(actual.as_ptr(), file.analysis.as_ptr());
+        assert_ne!(actual.as_ptr(), file.analysis.as_ptr());
         assert_eq!(actual, file.analysis.as_ref());
     }
+    assert_eq!(prepared.engine_text_cost().retained_bytes, input.corpus.files.iter().map(|file|file.analysis.len()).sum::<usize>());
+    assert_eq!(prepared.engine_text_cost().largest_file_bytes, input.corpus.files.iter().map(|file|file.analysis.len()).max().unwrap_or(0));
     let binding = input.host.bindings()[0].clone();
     assert!(Arc::ptr_eq(&binding.data, &input.host.bindings()[0].data));
     assert!(std::ptr::eq(
@@ -333,63 +335,39 @@ fn shared_corpus_does_not_share_request_ownership_or_cancellation() {
 }
 
 #[test]
-fn shared_emmy_batch_matches_string_entry_and_propagates_interruptions() {
-    let root = std::env::current_dir().unwrap().join("logical-shared-emmy");
+fn public_emmy_batch_matches_upstream_facts_and_propagates_owned_checkpoints() {
+    use lycheedev_emmy_adapter::{IngestionFailure, ingest_public_batch};
+    let root = std::env::current_dir().unwrap().join("logical-public-emmy");
     let path = root.join("a.lua");
     let text: Arc<str> = Arc::from("local a=1\nreturn a\n");
-    let mut shared = EmmyLuaAnalysis::new();
-    let mut owned = EmmyLuaAnalysis::new();
-    for analysis in [&mut shared, &mut owned] {
+    let mut actual = EmmyLuaAnalysis::new();
+    let mut ordinary = EmmyLuaAnalysis::new();
+    for analysis in [&mut actual, &mut ordinary] {
         analysis.add_main_workspace(root.clone());
     }
-    let shared_ids = shared
-        .update_files_by_path_shared_checked(vec![(path.clone(), Some(text.clone()))], || {
-            Ok::<_, &str>(())
-        })
-        .unwrap();
-    let owned_ids = owned
-        .update_files_by_path_checked(vec![(path.clone(), Some(text.to_string()))], || {
-            Ok::<_, &str>(())
-        })
-        .unwrap();
-    assert_eq!(shared_ids, owned_ids);
-    assert_eq!(
-        shared.db.get_file_text(shared_ids[0]).unwrap().as_ptr(),
-        text.as_ptr()
-    );
-    assert_eq!(
-        shared.semantic_model(shared_ids[0]).file_facts(),
-        owned.semantic_model(owned_ids[0]).file_facts()
-    );
-    shared
-        .update_files_by_path_shared_checked(vec![(path.clone(), None)], || Ok::<_, &str>(()))
-        .unwrap();
-    assert!(shared.db.get_file_text(shared_ids[0]).is_none());
+    let batch = ingest_public_batch(&mut actual, vec![(path.clone(), Some(text.clone()))], text.len(), || Ok::<_, &str>(())).unwrap();
+    let expected = ordinary.update_files_by_path(vec![(path.clone(), Some(text.to_string()))]);
+    assert_eq!(batch.file_ids, expected);
+    assert_eq!(batch.text_cost.retained_bytes, text.len());
+    assert_eq!(batch.text_cost.largest_file_bytes, text.len());
+    assert_eq!(actual.db.get_file_text(batch.file_ids[0]), Some(text.as_ref()));
+    assert_ne!(actual.db.get_file_text(batch.file_ids[0]).unwrap().as_ptr(), text.as_ptr());
+    assert_eq!(actual.semantic_model(batch.file_ids[0]).file_facts(), ordinary.semantic_model(expected[0]).file_facts());
+    ingest_public_batch(&mut actual, vec![(path.clone(), None)], text.len(), || Ok::<_, &str>(())).unwrap();
+    assert!(actual.db.get_file_text(batch.file_ids[0]).is_none());
     let mut completed_checks = 0usize;
-    let mut successful = EmmyLuaAnalysis::new();
-    successful
-        .update_files_by_path_shared_checked(vec![(path.clone(), Some(text.clone()))], || {
-            completed_checks += 1;
-            Ok::<_, &str>(())
-        })
-        .unwrap();
-    for stop in [1, 3, completed_checks] {
+    ingest_public_batch(&mut EmmyLuaAnalysis::new(), vec![(path.clone(), Some(text.clone()))], text.len(), || { completed_checks += 1; Ok::<_, &str>(()) }).unwrap();
+    for stop in 1..=completed_checks {
         let mut interrupted = EmmyLuaAnalysis::new();
         let mut checks = 0;
-        let result = interrupted.update_files_by_path_shared_checked(
-            vec![(path.clone(), Some(text.clone()))],
-            || {
-                checks += 1;
-                if checks == stop {
-                    Err("original cancellation")
-                } else {
-                    Ok(())
-                }
-            },
-        );
-        assert_eq!(result, Err("original cancellation"));
+        let result = ingest_public_batch(&mut interrupted, vec![(path.clone(), Some(text.clone()))], text.len(), || {
+            checks += 1;
+            if checks == stop { Err("original cancellation") } else { Ok(()) }
+        });
+        assert!(matches!(result, Err(IngestionFailure::Interrupted("original cancellation"))));
         assert_eq!(checks, stop);
-        // Interrupted analyses are intentionally dropped without a query.
+        // This checks actual owned boundaries, not cancellation inside the
+        // synchronous public batch. Interrupted analyses are discarded.
     }
 }
 

@@ -89,63 +89,19 @@ impl<'a> Encoding<'a> {
         supplemental()?;
         check(limits, cancel)?;
         let h = content.read_span(0, 22)?;
-        if &h[..2] != b"EN" || h[2..5] != [1, 16, 16] || h[17] != 0 {
-            return Err(invalid());
-        }
-        let page_size = be16(&h[5..]) * 1024;
-        let encoded_size = be16(&h[7..]) * 1024;
-        let pages = be32(&h[9..]);
-        let encoded_pages = be32(&h[13..]);
-        let spec = be32(&h[18..]);
-        if page_size == 0
-            || page_size > 1 << 20
-            || pages > 1 << 20
-            || spec > 64 << 20
-            || encoded_pages > 1 << 20
-            || encoded_size > 1 << 20
-            || (encoded_pages > 0 && encoded_size == 0)
-        {
-            return Err(exceeded());
-        }
-        let directory_start = 22usize.checked_add(spec).ok_or_else(exceeded)?;
-        let directory_bytes = product(pages, 32)?;
-        let pages_start = directory_start
-            .checked_add(directory_bytes)
-            .ok_or_else(exceeded)?;
-        let encoded_start = pages_start
-            .checked_add(product(pages, page_size)?)
-            .ok_or_else(exceeded)?;
-        let end = encoded_start
-            .checked_add(product(encoded_pages, 32 + encoded_size)?)
-            .ok_or_else(exceeded)?;
-        if end > content.size() {
-            return Err(invalid());
-        }
-        if directory_bytes
-            .checked_add(product(encoded_pages, 32)?)
-            .is_none_or(|n| n > limits.index_bytes)
-        {
-            return Err(exceeded());
-        }
+        let geometry = encoding_geometry(&h, content.size(), limits)?;
+        let EncodingGeometry {
+            directory_start,
+            directory_bytes,
+            page_size,
+            pages_start,
+            encoded_directory_start: encoded_start,
+            encoded_page_count: encoded_pages,
+            encoded_page_size: encoded_size,
+            ..
+        } = geometry;
         let directory = content.read_span(directory_start, directory_bytes)?;
-        let mut previous: Option<&[u8]> = None;
-        for (i, entry) in directory.as_chunks::<32>().0.iter().enumerate() {
-            if i.is_multiple_of(1024) {
-                supplemental()?;
-                check(limits, cancel)?;
-            }
-            if previous.is_some_and(|p| p >= &entry[..16]) {
-                return Err(invalid());
-            }
-            if entry[16..].iter().all(|b| *b == 0) {
-                return Err(fault(
-                    "container.integrity_mismatch",
-                    4,
-                    "Encoding page digest omitted",
-                ));
-            }
-            previous = Some(&entry[..16]);
-        }
+        validate_content_directory(&directory, limits, cancel, &mut supplemental)?;
         supplemental()?;
         Ok(Self {
             content,
@@ -181,94 +137,16 @@ impl<'a> Encoding<'a> {
             self.encoded_directory_start,
             product(self.encoded_page_count, 32)?,
         )?;
-        let mut previous: Option<&[u8]> = None;
-        for (i, entry) in encoded_directory.as_chunks::<32>().0.iter().enumerate() {
-            if i.is_multiple_of(1024) {
-                supplemental()?;
-                check(limits, cancel)?;
-            }
-            if previous.is_some_and(|p| p >= &entry[..16]) {
-                return Err(invalid());
-            }
-            if entry[16..].iter().all(|b| *b == 0) {
-                return Err(fault(
-                    "container.integrity_mismatch",
-                    4,
-                    "Encoding physical page digest omitted",
-                ));
-            }
-            previous = Some(&entry[..16]);
-        }
-        let requested = casc::key(key)?;
-        let pages = encoded_directory.len() / 32;
-        let (mut low, mut high) = (0, pages);
-        while low < high {
-            let mid = low + (high - low) / 2;
-            if encoded_directory[mid * 32..mid * 32 + 16] <= requested[..] {
-                low = mid + 1;
-            } else {
-                high = mid;
-            }
-        }
-        let absent = || {
-            fault(
-                "records.encoding_not_found",
-                3,
-                "Encoding key not found in verified metadata",
-            )
-        };
-        let page = low.checked_sub(1).ok_or_else(absent)?;
-        let entry = &encoded_directory[page * 32..page * 32 + 32];
-        let raw = self.content.read_checked_span(
-            self.encoded_pages_start + page * self.encoded_page_size,
+        find_physical(
+            &encoded_directory,
             self.encoded_page_size,
-            &entry[16..],
-        )?;
-        if Md5::digest(&raw).as_slice() != &entry[16..] {
-            return Err(fault(
-                "container.integrity_mismatch",
-                4,
-                "Encoding physical page MD5 differs",
-            ));
-        }
-        let mut pos = 0;
-        let mut previous: Option<&[u8]> = None;
-        let mut result = None;
-        while pos < raw.len() {
-            if raw[pos..].iter().all(|b| *b == 0) {
-                break;
-            }
-            if raw.len() - pos < 25 {
-                return Err(invalid());
-            }
-            let current = &raw[pos..pos + 16];
-            if previous.is_none() && current != &entry[..16]
-                || previous.is_some_and(|p| p >= current)
-                || page + 1 < pages
-                    && current >= &encoded_directory[(page + 1) * 32..(page + 1) * 32 + 16]
-            {
-                return Err(invalid());
-            }
-            let bytes = ((raw[pos + 20] as u64) << 32) | be32(&raw[pos + 21..]) as u64;
-            if bytes < 8 {
-                return Err(invalid());
-            }
-            if current == requested {
-                result = Some(EncodedRecord {
-                    encoding_key: key.into(),
-                    encoded_bytes: bytes,
-                    specification: be32(&raw[pos + 16..]) as u32,
-                });
-            }
-            previous = Some(current);
-            pos += 25;
-        }
-        supplemental()?;
-        check(limits, cancel)?;
-        if previous.is_none() {
-            return Err(invalid());
-        }
-        result.ok_or_else(absent)
+            self.encoded_pages_start,
+            key,
+            limits,
+            cancel,
+            supplemental,
+            |offset, bytes, expected| self.content.read_checked_span(offset, bytes, expected),
+        )
     }
     pub fn find(
         &self,
@@ -285,96 +163,16 @@ impl<'a> Encoding<'a> {
         cancel: Option<&AtomicBool>,
         mut supplemental: impl FnMut() -> Result<()>,
     ) -> Result<EncodingRecord> {
-        supplemental()?;
-        check(limits, cancel)?;
-        let requested = casc::key(key)?;
-        let pages = self.directory.len() / 32;
-        let mut low = 0;
-        let mut high = pages;
-        while low < high {
-            let mid = low + (high - low) / 2;
-            if self.directory[mid * 32..mid * 32 + 16] <= requested[..] {
-                low = mid + 1
-            } else {
-                high = mid
-            }
-        }
-        let Some(page) = low.checked_sub(1) else {
-            return Err(fault(
-                "records.content_not_found",
-                3,
-                "Content key not found",
-            ));
-        };
-        let entry = &self.directory[page * 32..page * 32 + 32];
-        let raw = self.content.read_checked_span(
-            self.pages_start + page * self.page_size,
+        find_content(
+            &self.directory,
             self.page_size,
-            &entry[16..],
-        )?;
-        if Md5::digest(&raw).as_slice() != &entry[16..] {
-            return Err(fault(
-                "container.integrity_mismatch",
-                4,
-                "Encoding page MD5 differs",
-            ));
-        }
-        let mut pos = 0;
-        let mut previous: Option<&[u8]> = None;
-        let mut result = None;
-        while pos < raw.len() {
-            let count = raw[pos] as usize;
-            pos += 1;
-            if count == 0 {
-                if raw[pos..].iter().any(|b| *b != 0) {
-                    return Err(invalid());
-                }
-                break;
-            }
-            let length = 21 + count * 16;
-            if length > raw.len() - pos {
-                return Err(invalid());
-            }
-            let current = &raw[pos + 5..pos + 21];
-            if previous.is_none() {
-                if current != &entry[..16] {
-                    return Err(invalid());
-                }
-            } else if previous.is_some_and(|p| p >= current) {
-                return Err(invalid());
-            }
-            if page + 1 < pages && current >= &self.directory[(page + 1) * 32..(page + 1) * 32 + 16]
-            {
-                return Err(invalid());
-            }
-            previous = Some(current);
-            if current == requested {
-                result = Some(EncodingRecord {
-                    content_key: key.into(),
-                    decoded_bytes: ((raw[pos] as u64) << 32) | be32(&raw[pos + 1..]) as u64,
-                    encoding_keys: raw[pos + 21..pos + length]
-                        .as_chunks::<16>()
-                        .0
-                        .iter()
-                        .map(|chunk| casc::hex(chunk))
-                        .collect(),
-                    page,
-                });
-            }
-            pos += length;
-        }
-        supplemental()?;
-        check(limits, cancel)?;
-        if previous.is_none() {
-            return Err(invalid());
-        }
-        result.ok_or_else(|| {
-            fault(
-                "records.content_not_found",
-                3,
-                "Content key not found in verified page",
-            )
-        })
+            self.pages_start,
+            key,
+            limits,
+            cancel,
+            supplemental,
+            |offset, bytes, expected| self.content.read_checked_span(offset, bytes, expected),
+        )
     }
 }
 #[derive(Clone, Copy)]
@@ -423,6 +221,17 @@ pub(crate) fn lookup_root_with_check(
     cancel: Option<&AtomicBool>,
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<Vec<RootRecord>> {
+    scan_root(content, ids, limits, cancel, supplemental, None, None)
+}
+fn scan_root(
+    content: &Content,
+    ids: &[u32],
+    limits: RootLimits,
+    cancel: Option<&AtomicBool>,
+    mut supplemental: impl FnMut() -> Result<()>,
+    mut collect: Option<&mut Vec<root_index::Group>>,
+    budget: Option<&std::sync::Arc<crate::resource::Budget>>,
+) -> Result<Vec<RootRecord>> {
     supplemental()?;
     check(limits.operation, cancel)?;
     if content.size() > limits.bytes
@@ -433,7 +242,7 @@ pub(crate) fn lookup_root_with_check(
         || limits.groups > 1 << 20
         || limits.matches == 0
         || limits.matches > 1 << 20
-        || ids.is_empty()
+        || (collect.is_none() && ids.is_empty())
         || ids.len() > 4096
     {
         return Err(exceeded());
@@ -483,6 +292,11 @@ pub(crate) fn lookup_root_with_check(
         if records > limits.records {
             return Err(exceeded());
         }
+        if let Some(budget) = budget {
+            budget.charge(crate::resource::Cost::work(
+                count.checked_add(1).ok_or_else(exceeded)?,
+            ))?;
+        }
         pos += header;
         let has_name = classic || !(allow_nameless && flags & 0x10000000 != 0);
         let key_stride = if classic { 24 } else { 16 };
@@ -493,6 +307,31 @@ pub(crate) fn lookup_root_with_check(
         }
         let keys_start = pos + product(count, 4)?;
         let names_start = keys_start + product(count, key_stride)?;
+        let mut collected = if collect.is_some() {
+            let budget = budget.expect("prepared Root has query budget");
+            let bytes = product(count, 4)?.checked_add(256).ok_or_else(exceeded)?;
+            budget.charge_split(
+                crate::resource::Cost::metadata(bytes),
+                crate::resource::Cost {
+                    metadata_bytes: bytes as u64,
+                    ..Default::default()
+                },
+            )?;
+            let allocation = budget.reserve_retained(bytes)?.into_owned(budget)?;
+            Some(root_index::Group {
+                ids: Vec::with_capacity(count),
+                keys_start,
+                names_start,
+                key_stride,
+                has_name,
+                flags,
+                locale,
+                group,
+                _allocation: allocation,
+            })
+        } else {
+            None
+        };
         let deltas = content.checked_span(pos, product(count, 4)?)?;
         let mut next = 0u64;
         for (ordinal, delta) in deltas.as_chunks::<4>().0.iter().enumerate() {
@@ -505,6 +344,10 @@ pub(crate) fn lookup_root_with_check(
                 return Err(invalid());
             }
             next = id + 1;
+            if let Some(collected) = &mut collected {
+                collected.ids.push(id as u32);
+                continue;
+            }
             if !wanted.contains(&(id as u32)) {
                 continue;
             }
@@ -532,6 +375,12 @@ pub(crate) fn lookup_root_with_check(
                 group,
             });
         }
+        if let Some(collected) = collected {
+            collect
+                .as_mut()
+                .expect("prepared collector")
+                .push(collected);
+        }
         pos += extent;
         group += 1;
     }
@@ -539,3 +388,316 @@ pub(crate) fn lookup_root_with_check(
     check(limits.operation, cancel)?;
     Ok(result)
 }
+
+#[derive(Clone, Copy)]
+struct EncodingGeometry {
+    directory_start: usize,
+    directory_bytes: usize,
+    page_size: usize,
+    pages_start: usize,
+    encoded_directory_start: usize,
+    encoded_page_count: usize,
+    encoded_page_size: usize,
+    encoded_pages_start: usize,
+}
+fn encoding_geometry(h: &[u8], size: usize, limits: Limits) -> Result<EncodingGeometry> {
+    if h.len() != 22 {
+        return Err(invalid());
+    }
+    if &h[..2] != b"EN" || h[2..5] != [1, 16, 16] || h[17] != 0 {
+        return Err(invalid());
+    }
+    let page_size = be16(&h[5..]) * 1024;
+    let encoded_size = be16(&h[7..]) * 1024;
+    let pages = be32(&h[9..]);
+    let encoded_pages = be32(&h[13..]);
+    let spec = be32(&h[18..]);
+    if page_size == 0
+        || page_size > 1 << 20
+        || pages > 1 << 20
+        || spec > 64 << 20
+        || encoded_pages > 1 << 20
+        || encoded_size > 1 << 20
+        || (encoded_pages > 0 && encoded_size == 0)
+    {
+        return Err(exceeded());
+    }
+    let directory_start = 22usize.checked_add(spec).ok_or_else(exceeded)?;
+    let directory_bytes = product(pages, 32)?;
+    let pages_start = directory_start
+        .checked_add(directory_bytes)
+        .ok_or_else(exceeded)?;
+    let encoded_start = pages_start
+        .checked_add(product(pages, page_size)?)
+        .ok_or_else(exceeded)?;
+    let end = encoded_start
+        .checked_add(product(encoded_pages, 32 + encoded_size)?)
+        .ok_or_else(exceeded)?;
+    if end > size {
+        return Err(invalid());
+    }
+    if directory_bytes
+        .checked_add(product(encoded_pages, 32)?)
+        .is_none_or(|n| n > limits.index_bytes)
+    {
+        return Err(exceeded());
+    }
+    Ok(EncodingGeometry {
+        directory_start,
+        directory_bytes,
+        page_size,
+        pages_start,
+        encoded_directory_start: encoded_start,
+        encoded_page_count: encoded_pages,
+        encoded_page_size: encoded_size,
+        encoded_pages_start: encoded_start + encoded_pages * 32,
+    })
+}
+
+fn find_content<T: AsRef<[u8]>>(
+    directory: &[u8],
+    page_size: usize,
+    pages_start: usize,
+    key: &str,
+    limits: Limits,
+    cancel: Option<&AtomicBool>,
+    mut supplemental: impl FnMut() -> Result<()>,
+    mut read: impl FnMut(usize, usize, &[u8]) -> Result<T>,
+) -> Result<EncodingRecord> {
+    supplemental()?;
+    check(limits, cancel)?;
+    let requested = casc::key(key)?;
+    let pages = directory.len() / 32;
+    let mut low = 0;
+    let mut high = pages;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if directory[mid * 32..mid * 32 + 16] <= requested[..] {
+            low = mid + 1
+        } else {
+            high = mid
+        }
+    }
+    let Some(page) = low.checked_sub(1) else {
+        return Err(fault(
+            "records.content_not_found",
+            3,
+            "Content key not found",
+        ));
+    };
+    let entry = &directory[page * 32..page * 32 + 32];
+    let raw = read(pages_start + page * page_size, page_size, &entry[16..])?;
+    if Md5::digest(raw.as_ref()).as_slice() != &entry[16..] {
+        return Err(fault(
+            "container.integrity_mismatch",
+            4,
+            "Encoding page MD5 differs",
+        ));
+    }
+    let raw = raw.as_ref();
+    let mut pos = 0;
+    let mut previous: Option<&[u8]> = None;
+    let mut result = None;
+    while pos < raw.len() {
+        let count = raw[pos] as usize;
+        pos += 1;
+        if count == 0 {
+            if raw[pos..].iter().any(|b| *b != 0) {
+                return Err(invalid());
+            }
+            break;
+        }
+        let length = 21 + count * 16;
+        if length > raw.len() - pos {
+            return Err(invalid());
+        }
+        let current = &raw[pos + 5..pos + 21];
+        if previous.is_none() {
+            if current != &entry[..16] {
+                return Err(invalid());
+            }
+        } else if previous.is_some_and(|p| p >= current) {
+            return Err(invalid());
+        }
+        if page + 1 < pages && current >= &directory[(page + 1) * 32..(page + 1) * 32 + 16] {
+            return Err(invalid());
+        }
+        previous = Some(current);
+        if current == requested {
+            result = Some(EncodingRecord {
+                content_key: key.into(),
+                decoded_bytes: ((raw[pos] as u64) << 32) | be32(&raw[pos + 1..]) as u64,
+                encoding_keys: raw[pos + 21..pos + length]
+                    .as_chunks::<16>()
+                    .0
+                    .iter()
+                    .map(|chunk| casc::hex(chunk))
+                    .collect(),
+                page,
+            });
+        }
+        pos += length;
+    }
+    supplemental()?;
+    check(limits, cancel)?;
+    if previous.is_none() {
+        return Err(invalid());
+    }
+    result.ok_or_else(|| {
+        fault(
+            "records.content_not_found",
+            3,
+            "Content key not found in verified page",
+        )
+    })
+}
+
+fn find_physical<T: AsRef<[u8]>>(
+    encoded_directory: &[u8],
+    page_size: usize,
+    pages_start: usize,
+    key: &str,
+    limits: Limits,
+    cancel: Option<&AtomicBool>,
+    mut supplemental: impl FnMut() -> Result<()>,
+    mut read: impl FnMut(usize, usize, &[u8]) -> Result<T>,
+) -> Result<EncodedRecord> {
+    let mut previous: Option<&[u8]> = None;
+    for (i, entry) in encoded_directory.as_chunks::<32>().0.iter().enumerate() {
+        if i.is_multiple_of(1024) {
+            supplemental()?;
+            check(limits, cancel)?;
+        }
+        if previous.is_some_and(|p| p >= &entry[..16]) {
+            return Err(invalid());
+        }
+        if entry[16..].iter().all(|b| *b == 0) {
+            return Err(fault(
+                "container.integrity_mismatch",
+                4,
+                "Encoding physical page digest omitted",
+            ));
+        }
+        previous = Some(&entry[..16]);
+    }
+    let requested = casc::key(key)?;
+    let pages = encoded_directory.len() / 32;
+    let (mut low, mut high) = (0, pages);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if encoded_directory[mid * 32..mid * 32 + 16] <= requested[..] {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    let absent = || {
+        fault(
+            "records.encoding_not_found",
+            3,
+            "Encoding key not found in verified metadata",
+        )
+    };
+    let page = low.checked_sub(1).ok_or_else(absent)?;
+    let entry = &encoded_directory[page * 32..page * 32 + 32];
+    let raw = read(pages_start + page * page_size, page_size, &entry[16..])?;
+    if Md5::digest(raw.as_ref()).as_slice() != &entry[16..] {
+        return Err(fault(
+            "container.integrity_mismatch",
+            4,
+            "Encoding physical page MD5 differs",
+        ));
+    }
+    let raw = raw.as_ref();
+    let mut pos = 0;
+    let mut previous: Option<&[u8]> = None;
+    let mut result = None;
+    while pos < raw.len() {
+        if raw[pos..].iter().all(|b| *b == 0) {
+            break;
+        }
+        if raw.len() - pos < 25 {
+            return Err(invalid());
+        }
+        let current = &raw[pos..pos + 16];
+        if previous.is_none() && current != &entry[..16]
+            || previous.is_some_and(|p| p >= current)
+            || page + 1 < pages
+                && current >= &encoded_directory[(page + 1) * 32..(page + 1) * 32 + 16]
+        {
+            return Err(invalid());
+        }
+        let bytes = ((raw[pos + 20] as u64) << 32) | be32(&raw[pos + 21..]) as u64;
+        if bytes < 8 {
+            return Err(invalid());
+        }
+        if current == requested {
+            result = Some(EncodedRecord {
+                encoding_key: key.into(),
+                encoded_bytes: bytes,
+                specification: be32(&raw[pos + 16..]) as u32,
+            });
+        }
+        previous = Some(current);
+        pos += 25;
+    }
+    supplemental()?;
+    check(limits, cancel)?;
+    if previous.is_none() {
+        return Err(invalid());
+    }
+    result.ok_or_else(absent)
+}
+
+fn validate_content_directory(
+    directory: &[u8],
+    limits: Limits,
+    cancel: Option<&AtomicBool>,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    let mut previous: Option<&[u8]> = None;
+    for (i, entry) in directory.as_chunks::<32>().0.iter().enumerate() {
+        if i.is_multiple_of(1024) {
+            supplemental()?;
+            check(limits, cancel)?;
+        }
+        if previous.is_some_and(|p| p >= &entry[..16]) {
+            return Err(invalid());
+        }
+        if entry[16..].iter().all(|b| *b == 0) {
+            return Err(fault(
+                "container.integrity_mismatch",
+                4,
+                "Encoding page digest omitted",
+            ));
+        }
+        previous = Some(&entry[..16]);
+    }
+    Ok(())
+}
+
+pub(crate) trait EncodingLookup {
+    fn physical(
+        &self,
+        keys: &std::collections::BTreeMap<u64, Vec<u8>>,
+        key: &str,
+        limits: Limits,
+        check: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<EncodedRecord>;
+}
+impl EncodingLookup for Encoding<'_> {
+    fn physical(
+        &self,
+        keys: &std::collections::BTreeMap<u64, Vec<u8>>,
+        key: &str,
+        limits: Limits,
+        check: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<EncodedRecord> {
+        let _ = keys;
+        self.find_encoding_with_check(key, limits, None, check)
+    }
+}
+mod prepared;
+pub(crate) use prepared::PreparedEncoding;
+mod root_index;
+pub(crate) use root_index::{RootContent, RootIndex};

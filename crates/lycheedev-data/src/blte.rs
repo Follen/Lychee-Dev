@@ -12,6 +12,8 @@ mod span;
 pub use span::EncodedSpan;
 pub(crate) use span::OwnedDecodedSpan;
 mod guarded;
+mod prepared;
+pub(crate) use prepared::PreparedRanges;
 mod streaming;
 pub(crate) use streaming::{Reader as StreamingReader, stream_io_error};
 
@@ -101,17 +103,32 @@ struct Segment {
     decoded: usize,
     part: Part,
 }
+enum RangeParts<'a> {
+    Owned(Vec<Segment>),
+    Borrowed(&'a [Segment]),
+}
+impl std::ops::Deref for RangeParts<'_> {
+    type Target = [Segment];
+    fn deref(&self) -> &[Segment] {
+        match self {
+            Self::Owned(parts) => parts,
+            Self::Borrowed(parts) => parts,
+        }
+    }
+}
 /// General immutable framed BLTE range reader. Admission validates the whole
 /// directory; chunk limits apply to visited chunks, not untouched segments.
 /// The caller authenticates the framing EKey. Reading a range is not whole
 /// decoded CKey authentication.
 pub struct Ranges<'a> {
     raw: RangeInput<'a>,
-    parts: Vec<Segment>,
+    parts: RangeParts<'a>,
     size: usize,
     limits: Limits,
     keys: &'a BTreeMap<u64, Vec<u8>>,
     budget: Option<&'a Budget>,
+    session: bool,
+    parts_allocation: Option<crate::resource::RetainedReservation<'a>>,
 }
 impl<'a> Ranges<'a> {
     pub fn open(raw: &'a [u8], limits: Limits, keys: &'a BTreeMap<u64, Vec<u8>>) -> Result<Self> {
@@ -137,6 +154,15 @@ impl<'a> Ranges<'a> {
         limits: Limits,
         keys: &'a BTreeMap<u64, Vec<u8>>,
         budget: Option<&'a Budget>,
+    ) -> Result<Self> {
+        Self::from_policy(raw, limits, keys, budget, false)
+    }
+    fn from_policy(
+        raw: RangeInput<'a>,
+        limits: Limits,
+        keys: &'a BTreeMap<u64, Vec<u8>>,
+        budget: Option<&'a Budget>,
+        session: bool,
     ) -> Result<Self> {
         raw.check()?;
         if let Some(budget) = budget {
@@ -180,30 +206,66 @@ impl<'a> Ranges<'a> {
         let _header_scratch = budget
             .map(|b| b.reserve_logical_scratch(header as u64))
             .transpose()?;
-        let prefix = raw.read(0, 12)?;
-        if prefix[8] != 15 {
+        let session_directory = if session {
+            Some(raw.read(8, header - 8)?)
+        } else {
+            None
+        };
+        let prefix = if session {
+            None
+        } else {
+            Some(raw.read(0, 12)?)
+        };
+        let descriptor = if let Some(directory) = &session_directory {
+            &directory[..4]
+        } else {
+            &prefix.as_ref().expect("public prefix")[8..12]
+        };
+        if descriptor[0] != 15 {
             return malformed();
         }
-        if header == 0 {
-            return Err(fault(
-                "container.unsupported_encoding",
-                3,
-                "Headerless BLTE has no range directory",
-            ));
-        }
-        let count =
-            ((prefix[9] as usize) << 16) | ((prefix[10] as usize) << 8) | prefix[11] as usize;
-        if count == 0 || count > limits.chunks || header != 12 + 24 * count || header > raw.len() {
+        let count = ((descriptor[1] as usize) << 16)
+            | ((descriptor[2] as usize) << 8)
+            | descriptor[3] as usize;
+        if count == 0 || count > limits.chunks || header != 12 + 24 * count {
             return malformed();
         }
         let (mut encoded, mut decoded) = (header, 0usize);
+        let mut parts_allocation = None;
         if let Some(budget) = budget {
-            budget.charge(Cost::metadata(count * std::mem::size_of::<Segment>()))?;
+            if session {
+                budget.charge_split(
+                    Cost {
+                        retained_bytes: (count * 32) as u64,
+                        metadata_bytes: (count * 32) as u64,
+                        decode_work: count as u64,
+                        ..Default::default()
+                    },
+                    Cost {
+                        metadata_bytes: (count * std::mem::size_of::<Segment>()) as u64,
+                        decode_work: count as u64,
+                        ..Default::default()
+                    },
+                )?;
+                parts_allocation =
+                    Some(budget.reserve_retained(count * std::mem::size_of::<Segment>())?);
+            } else {
+                budget.charge(Cost::metadata(count * std::mem::size_of::<Segment>()))?;
+            }
         }
-        let directory = raw.read(0, header)?;
+        let public_directory = if session {
+            None
+        } else {
+            Some(raw.read(0, header)?)
+        };
+        let directory = if let Some(directory) = &session_directory {
+            directory
+        } else {
+            public_directory.as_ref().expect("public directory")
+        };
         let mut parts = Vec::with_capacity(count);
         for i in 0..count {
-            let at = 12 + 24 * i;
+            let at = (if session { 4 } else { 12 }) + 24 * i;
             let p = Part {
                 encoded: u32::from_be_bytes(directory[at..at + 4].try_into().unwrap()) as usize,
                 decoded: u32::from_be_bytes(directory[at + 4..at + 8].try_into().unwrap()) as usize,
@@ -218,7 +280,7 @@ impl<'a> Ranges<'a> {
             let logical = decoded
                 .checked_add(p.decoded)
                 .ok_or_else(|| fault("container.resource_limit", 3, "Decoded extent overflow"))?;
-            if next > raw.len() || logical > limits.decoded_bytes {
+            if (!session && next > raw.len()) || logical > limits.decoded_bytes {
                 return exceeded();
             }
             parts.push(Segment {
@@ -229,19 +291,27 @@ impl<'a> Ranges<'a> {
             encoded = next;
             decoded = logical;
         }
+        if session {
+            if let Some(budget) = budget {
+                budget.charge_split(Cost::metadata((count + 1) * 16), Cost::default())?;
+            }
+        }
         if encoded != raw.len() {
             return malformed();
         }
-        drop(directory);
+        drop(public_directory);
+        drop(session_directory);
         drop(prefix);
         drop(short);
         Ok(Self {
             raw,
-            parts,
+            parts: RangeParts::Owned(parts),
             size: decoded,
             limits,
             keys,
             budget,
+            session,
+            parts_allocation,
         })
     }
     fn check(&self) -> Result<()> {
@@ -273,6 +343,7 @@ impl<'a> Ranges<'a> {
             return Ok(Vec::new());
         }
         let mut result = Vec::with_capacity(bytes);
+        let mut visited_chunks = self.parts.len();
         for (index, s) in self.parts.iter().enumerate() {
             let last = s.decoded + s.part.decoded;
             if offset >= last || end <= s.decoded {
@@ -282,26 +353,60 @@ impl<'a> Ranges<'a> {
             {
                 return exceeded();
             }
+            if self.session && s.part.digest == [0; 16] {
+                return integrity();
+            }
+            let _logical_chunk = if self.session {
+                self.budget
+                    .map(|budget| {
+                        budget.reserve_logical_scratch(
+                            (2 * s.part.encoded + 2 * self.limits.chunk_bytes + 1024) as u64,
+                        )
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
             let raw = self.raw.read(s.encoded, s.part.encoded)?;
+            let safety = self
+                .budget
+                .filter(|_| self.session)
+                .map(Budget::safety_only);
+            let _temporary = if self.session {
+                self.budget
+                    .map(|budget| budget.reserve_retained(s.part.decoded * 2))
+                    .transpose()?
+            } else {
+                None
+            };
             if let Some(budget) = self.budget {
-                budget.charge(Cost {
-                    retained_bytes: s.part.decoded as u64 * 2,
-                    decode_work: (s.part.encoded + s.part.decoded).div_ceil(65536) as u64,
-                    ..Default::default()
-                })?;
+                if self.session {
+                    budget.safety_only().charge(Cost::work(
+                        (s.part.encoded + s.part.decoded).div_ceil(65536),
+                    ))?;
+                } else {
+                    budget.charge(Cost {
+                        retained_bytes: s.part.decoded as u64 * 2,
+                        decode_work: (s.part.encoded + s.part.decoded).div_ceil(65536) as u64,
+                        ..Default::default()
+                    })?;
+                }
             }
             if Md5::digest(&raw).as_slice() != s.part.digest {
                 return integrity();
             }
+            let source_check = || self.check();
             let mut d = Decoder {
                 limits: self.limits,
                 keys: self.keys,
-                chunks: 1,
+                chunks: if self.session { visited_chunks } else { 1 },
                 allow_missing: false,
                 // The extent reservation covers the output/copy and digest
                 // work. Decoder scratch, nested/cipher buffers and codec-loop
                 // work still belong to this same ledger and cancellation tree.
-                budget: self.budget,
+                budget: safety.as_ref().or(self.budget),
+                logical_layout: self.budget.filter(|_| self.session),
+                source_check: Some(&source_check),
             };
             let content = d.unpack(
                 &raw,
@@ -310,6 +415,7 @@ impl<'a> Ranges<'a> {
                 index,
                 Some(s.part.decoded),
             )?;
+            visited_chunks = d.chunks;
             if content.bytes.len() != s.part.decoded {
                 return integrity();
             }
@@ -338,7 +444,7 @@ impl<'a> Ranges<'a> {
         let end = self.extent(offset, bytes)?;
         // An authenticated logical-page digest permits bounded direct reads
         // inside N segments, even when their entire decoded segment is huge.
-        for s in &self.parts {
+        for s in self.parts.iter() {
             if bytes > 0
                 && offset >= s.decoded
                 && end <= s.decoded + s.part.decoded
@@ -522,6 +628,8 @@ pub fn decode_available(
         chunks: 0,
         allow_missing,
         budget: None,
+        logical_layout: None,
+        source_check: None,
     };
     d.expand(raw, 1, limits.decoded_bytes)
 }
@@ -531,9 +639,14 @@ struct Decoder<'a> {
     chunks: usize,
     allow_missing: bool,
     budget: Option<&'a Budget>,
+    logical_layout: Option<&'a Budget>,
+    source_check: Option<&'a dyn Fn() -> Result<()>>,
 }
 impl Decoder<'_> {
     fn check(&self) -> Result<()> {
+        if let Some(check) = self.source_check {
+            check()?;
+        }
         self.budget.map_or(Ok(()), Budget::check)
     }
     fn expand(&mut self, raw: &[u8], depth: usize, allowance: usize) -> Result<Content> {
@@ -545,8 +658,26 @@ impl Decoder<'_> {
             return malformed();
         }
         let header = u32::from_be_bytes(raw[4..8].try_into().unwrap()) as usize;
+        let mut layout_allocation = None;
         let mut parts = Vec::new();
         let start = if header == 0 {
+            if let Some(budget) = self.logical_layout {
+                budget.charge_split(
+                    Cost {
+                        retained_bytes: 32,
+                        metadata_bytes: 32,
+                        decode_work: 1,
+                        ..Default::default()
+                    },
+                    Cost {
+                        metadata_bytes: 32,
+                        decode_work: 1,
+                        ..Default::default()
+                    },
+                )?;
+                layout_allocation = Some(budget.reserve_retained(std::mem::size_of::<Part>())?);
+                parts.reserve_exact(1);
+            }
             parts.push(Part {
                 encoded: raw.len() - 8,
                 decoded: 0,
@@ -563,6 +694,24 @@ impl Decoder<'_> {
             }
             if count > self.limits.chunks.saturating_sub(self.chunks) {
                 return exceeded();
+            }
+            if let Some(budget) = self.logical_layout {
+                budget.charge_split(
+                    Cost {
+                        retained_bytes: (count * 32) as u64,
+                        metadata_bytes: (count * 32) as u64,
+                        decode_work: count as u64,
+                        ..Default::default()
+                    },
+                    Cost {
+                        metadata_bytes: (count * std::mem::size_of::<Part>()) as u64,
+                        decode_work: count as u64,
+                        ..Default::default()
+                    },
+                )?;
+                layout_allocation =
+                    Some(budget.reserve_retained(count * std::mem::size_of::<Part>())?);
+                parts.reserve_exact(count);
             }
             let mut total = 0usize;
             let mut extent = header;
@@ -660,6 +809,8 @@ impl Decoder<'_> {
                 Err(e) => return Err(e),
             }
         }
+        drop(parts);
+        drop(layout_allocation);
         Ok(content)
     }
     fn unpack(
@@ -685,7 +836,10 @@ impl Decoder<'_> {
                 raw[1..].to_vec()
             }
             b'Z' => {
-                let _state = self.budget.map(|budget| budget.reserve_retained(128 << 10)).transpose()?;
+                let _state = self
+                    .budget
+                    .map(|budget| budget.reserve_retained(128 << 10))
+                    .transpose()?;
                 let mut decoder = flate2::bufread::ZlibDecoder::new(&raw[1..]);
                 // Exact framed chunk size is admitted before decompression;
                 // reserve once instead of repeatedly growing/copying large Z chunks.
@@ -694,12 +848,19 @@ impl Decoder<'_> {
                 loop {
                     self.check()?;
                     let requested = block.len().min(allowance.saturating_sub(bytes.len()) + 1);
-                    let n = decoder.read(&mut block[..requested])
-                        .map_err(|_| fault("container.invalid_format", 4, "Invalid zlib payload"))?;
+                    let n = decoder.read(&mut block[..requested]).map_err(|_| {
+                        fault("container.invalid_format", 4, "Invalid zlib payload")
+                    })?;
                     self.check()?;
-                    if n == 0 { break; }
-                    if n > allowance - bytes.len() { return exceeded(); }
-                    if let Some(budget) = self.budget { budget.charge(Cost::work(1))?; }
+                    if n == 0 {
+                        break;
+                    }
+                    if n > allowance - bytes.len() {
+                        return exceeded();
+                    }
+                    if let Some(budget) = self.budget {
+                        budget.charge(Cost::work(1))?;
+                    }
                     bytes.extend_from_slice(&block[..n]);
                 }
                 if decoder.total_in() as usize != raw.len() - 1 {
@@ -708,11 +869,17 @@ impl Decoder<'_> {
                 bytes
             }
             b'F' => {
-                let _nested = self.budget.map(|budget| budget.reserve_retained(allowance.saturating_mul(2))).transpose()?;
+                let _nested = self
+                    .budget
+                    .map(|budget| budget.reserve_retained(allowance.saturating_mul(2)))
+                    .transpose()?;
                 return self.expand(&raw[1..], depth + 1, allowance);
             }
             b'E' => {
-                let _cipher = self.budget.map(|budget| budget.reserve_retained(raw.len())).transpose()?;
+                let _cipher = self
+                    .budget
+                    .map(|budget| budget.reserve_retained(raw.len()))
+                    .transpose()?;
                 let decoded = self.unlock(&raw[1..], index)?;
                 return self.unpack(&decoded, depth + 1, allowance, index, declared);
             }
@@ -766,10 +933,19 @@ impl Decoder<'_> {
         for (n, b) in nonce[..4].iter_mut().enumerate() {
             *b ^= (index >> (n * 8)) as u8;
         }
-        salsa(&raw[11 + iv..], key, nonce, self.budget)
+        salsa_checked(&raw[11 + iv..], key, nonce, self.budget, self.source_check)
     }
 }
 fn salsa(raw: &[u8], key: &[u8], nonce: [u8; 8], budget: Option<&Budget>) -> Result<Vec<u8>> {
+    salsa_checked(raw, key, nonce, budget, None)
+}
+fn salsa_checked(
+    raw: &[u8],
+    key: &[u8],
+    nonce: [u8; 8],
+    budget: Option<&Budget>,
+    check: Option<&dyn Fn() -> Result<()>>,
+) -> Result<Vec<u8>> {
     let mut state = [0u32; 16];
     let constant = if key.len() == 16 {
         b"expand 16-byte k"
@@ -786,10 +962,18 @@ fn salsa(raw: &[u8], key: &[u8], nonce: [u8; 8], budget: Option<&Budget>) -> Res
     }
     state[6] = u32::from_le_bytes(nonce[..4].try_into().unwrap());
     state[7] = u32::from_le_bytes(nonce[4..].try_into().unwrap());
+    if let Some(check) = check {
+        check()?;
+    }
     let mut out = vec![0; raw.len()];
     for start in (0..raw.len()).step_by(64) {
-        if start % 65536 == 0 && let Some(budget) = budget {
-            budget.charge(Cost::work(1))?;
+        if start % 65536 == 0 {
+            if let Some(check) = check {
+                check()?;
+            }
+            if let Some(budget) = budget {
+                budget.charge(Cost::work(1))?;
+            }
         }
         let mut x = state;
         for _ in 0..10 {
@@ -914,14 +1098,37 @@ mod tests {
         let raw = frame(&payload, expected.len());
         let keys = BTreeMap::new();
 
-        let budget = Budget::new(Cost::defaults(), Instant::now() + Duration::from_secs(5), None);
-        let ranges = Ranges::from_input(RangeInput::Slice(&raw), Limits::default(), &keys, Some(&budget)).unwrap();
+        let budget = Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(5),
+            None,
+        );
+        let ranges = Ranges::from_input(
+            RangeInput::Slice(&raw),
+            Limits::default(),
+            &keys,
+            Some(&budget),
+        )
+        .unwrap();
         assert_eq!(&*ranges.read_span(0, expected.len()).unwrap(), expected);
 
         // Framing and extent admission fit. Actual zlib-loop work must still
         // stop under the same budget rather than silently decoding unmetered.
-        let limited = Budget::new(Cost { decode_work: 3, ..Cost::defaults() }, Instant::now() + Duration::from_secs(5), None);
-        let ranges = Ranges::from_input(RangeInput::Slice(&raw), Limits::default(), &keys, Some(&limited)).unwrap();
+        let limited = Budget::new(
+            Cost {
+                decode_work: 3,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(5),
+            None,
+        );
+        let ranges = Ranges::from_input(
+            RangeInput::Slice(&raw),
+            Limits::default(),
+            &keys,
+            Some(&limited),
+        )
+        .unwrap();
         let error = ranges.read_span(0, expected.len()).unwrap_err();
         assert_eq!(error.code, "records.query_resource_budget");
         assert_eq!(error.message, "Whole query decode_work budget exceeded");

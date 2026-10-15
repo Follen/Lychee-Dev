@@ -44,8 +44,8 @@ fn consume(file: &mut VerifiedFile) -> Result<(u64, String)> {
 fn independent_verified_cold_warm_sessions_keep_digest_identity_and_go_counters() {
     let f = Fixture::new();
     let mut statistics = Vec::new();
-    // Independent query owners match Go NewSession/Close. Reusing one Rust
-    // Session still reconstructs Root/Encoding, an inherited separate gap.
+    // Independent query owners match Go NewSession/Close. Same-session ready
+    // reuse has separate regression coverage.
     for _ in 0..2 {
         let mut admission = f.admission();
         let mut session = Session::borrowed_with(
@@ -94,7 +94,9 @@ fn independent_verified_cold_warm_sessions_keep_digest_identity_and_go_counters(
 fn cold_multichunk_verified_body_succeeds_without_payload_sized_retained_allocation() {
     let mut f = Fixture::with_framing(false, None, vec![b'x'; 8 << 20], framed_chunks);
     let mut limits = Cost::defaults();
-    limits.retained_bytes = 4 << 20;
+    // Go ReadSpan reserves 2*ChunkBytes plus encoded bytes for metadata,
+    // even though the physical decoded body mode uses bounded live buffers.
+    limits.retained_bytes = 160 << 20;
     f.budget = Arc::new(Budget::controlled(
         limits,
         f.control.deadline(),
@@ -116,7 +118,7 @@ fn cold_multichunk_verified_body_succeeds_without_payload_sized_retained_allocat
     session
         .with_verified(7, &mut |file| {
             assert_eq!(consume(file)?, (8 << 20, expected.clone()));
-            assert!(f.budget.snapshot()?.retained_bytes < f.payload.len() as u64);
+            assert!(f.budget.snapshot()?.retained_bytes < 4 << 20);
             Ok(())
         })
         .unwrap();
@@ -281,7 +283,7 @@ fn verified_cache_native_missing_body_decodes_once_but_wrong_ckey_is_terminal() 
         .with_verified(7, &mut |file| {
             assert_eq!(file.blob.reference().sha256, reference.sha256);
             assert_eq!(file.reading["decodedCache"]["contentDecodeCalls"], 1);
-            assert_eq!(file.reading["decodedCache"]["hits"], 1); // Root only.
+            assert_eq!(file.reading["decodedCache"]["hits"], 0); // Ready Root is not re-extracted.
             Ok(())
         })
         .unwrap();

@@ -1,3 +1,4 @@
+<!-- Production integration: public Emmy ingestion replaces four shared/checked hooks (26 recipe paths remain); default Data Prepared/Session chain implemented. Rust execution pending; continue complete semantic and lazy SQL chains before consolidated tests. -->
 <!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Lua/Go/Rust execution and final four audit loops remain pending. -->
 # Rust migration checklist
 

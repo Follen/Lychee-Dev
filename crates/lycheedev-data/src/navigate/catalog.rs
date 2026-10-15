@@ -557,7 +557,7 @@ pub(super) fn check_source(
     inv: &Invocation,
     prepared: &db2::Prepared,
     budget: &Arc<Budget>,
-    remote: Option<&crate::remote::provider::Scope<'_>>,
+    remote: Option<&dyn crate::remote::provider::FileScope>,
 ) -> Result<()> {
     inv.control.check()?;
     budget.check()?;
@@ -628,86 +628,93 @@ pub(super) fn dispatch(
             .as_ref()
             .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
         scope.check_pin(data)?;
-        let prepared = if matches!(
-            request,
-            Request::SpellInfo { .. }
-                | Request::ItemModels { .. }
-                | Request::ItemGeosets(_)
-                | Request::ItemTextures(_)
-                | Request::CreatureDisplay { .. }
-                | Request::CreatureModel(_)
-        ) {
-            let tables = request.tables();
-            let mut next = 1;
-            db2::prepare_following_scoped(
+        let mut execute = |reader: &mut dyn crate::remote::provider::FileScope| {
+            let prepared = if matches!(
+                request,
+                Request::SpellInfo { .. }
+                    | Request::ItemModels { .. }
+                    | Request::ItemGeosets(_)
+                    | Request::ItemTextures(_)
+                    | Request::CreatureDisplay { .. }
+                    | Request::CreatureModel(_)
+            ) {
+                let tables = request.tables();
+                let mut next = 1;
+                db2::prepare_following_scoped(
+                    inv,
+                    &tables[..1],
+                    &budget,
+                    inv.flag_bool("--cdn").then_some(&mut *reader),
+                    Some(pin.clone()),
+                    &mut |batch| {
+                        // Go opens each table completely before resolving the next one.
+                        // Keep that failure order in the one shared CASC read session.
+                        Navigator::open(batch, budget.clone())?;
+                        let names = tables.get(next).copied().into_iter().collect();
+                        next += 1;
+                        Ok(names)
+                    },
+                )?
+            } else {
+                db2::prepare_following_scoped(
+                    inv,
+                    request.tables(),
+                    &budget,
+                    inv.flag_bool("--cdn").then_some(&mut *reader),
+                    Some(pin.clone()),
+                    &mut |_| Ok(Vec::new()),
+                )?
+            };
+            let mut nav = Navigator::open(&prepared, budget.clone())?;
+            let mut result = nav.evaluate(&request)?;
+            result
+                .as_object_mut()
+                .expect("domain object")
+                .extend(nav.context()?.as_object().expect("context object").clone());
+            budget.check()?;
+            after_read()?;
+            reader.check_consumer(inv, &budget)?;
+            check_source(
                 inv,
-                &tables[..1],
+                &prepared[0],
                 &budget,
-                inv.flag_bool("--cdn").then_some(&mut scope),
-                Some(pin.clone()),
-                &mut |batch| {
-                    // Go opens each table completely before resolving the next one.
-                    // Keep that failure order in the one shared CASC read session.
-                    Navigator::open(batch, budget.clone())?;
-                    let names = tables.get(next).copied().into_iter().collect();
-                    next += 1;
-                    Ok(names)
+                inv.flag_bool("--cdn").then_some(&*reader),
+            )?;
+            let raw = capture_bytes(&result, &budget)?;
+            let complete = result["complete"] == true;
+            let truncated = result["truncated"] == true;
+            let (kind, locator) = request.capture();
+            let pin = &prepared[0].pin;
+            let capture = evidence::commit_capture_budgeted(
+                &inv.home,
+                CaptureInput {
+                    bytes: &raw,
+                    maximum_bytes: 16 << 20,
+                    media_type: "application/json",
+                    provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}),
+                    complete,
+                    truncated,
                 },
-            )?
-        } else {
-            db2::prepare_following_scoped(
-                inv,
-                request.tables(),
-                &budget,
-                inv.flag_bool("--cdn").then_some(&mut scope),
-                Some(pin.clone()),
-                &mut |_| Ok(Vec::new()),
-            )?
+                &inv.control,
+                budget.as_ref(),
+            )?;
+            let mut outcome = Outcome::new(result);
+            outcome.complete = complete;
+            outcome.selection = serde_json::to_value(pin)?;
+            outcome.provenance = vec![capture];
+            if truncated {
+                outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
+            }
+            if !nav.partial.is_empty() {
+                outcome.warnings.push(json!("This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."));
+            }
+            Ok(outcome)
         };
-        let mut nav = Navigator::open(&prepared, budget.clone())?;
-        let mut result = nav.evaluate(&request)?;
-        result
-            .as_object_mut()
-            .expect("domain object")
-            .extend(nav.context()?.as_object().expect("context object").clone());
-        budget.check()?;
-        after_read()?;
-        scope.check_consumer(inv, &budget)?;
-        check_source(
-            inv,
-            &prepared[0],
-            &budget,
-            inv.flag_bool("--cdn").then_some(&scope),
-        )?;
-        let raw = capture_bytes(&result, &budget)?;
-        let complete = result["complete"] == true;
-        let truncated = result["truncated"] == true;
-        let (kind, locator) = request.capture();
-        let pin = &prepared[0].pin;
-        let capture = evidence::commit_capture_budgeted(
-            &inv.home,
-            CaptureInput {
-                bytes: &raw,
-                maximum_bytes: 16 << 20,
-                media_type: "application/json",
-                provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}),
-                complete,
-                truncated,
-            },
-            &inv.control,
-            budget.as_ref(),
-        )?;
-        let mut outcome = Outcome::new(result);
-        outcome.complete = complete;
-        outcome.selection = serde_json::to_value(pin)?;
-        outcome.provenance = vec![capture];
-        if truncated {
-            outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
+        if inv.flag_bool("--cdn") {
+            scope.with_session(data, |reader| execute(reader))
+        } else {
+            execute(&mut scope)
         }
-        if !nav.partial.is_empty() {
-            outcome.warnings.push(json!("This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."));
-        }
-        Ok(outcome)
     })();
     scope.finish(result)
 }

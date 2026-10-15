@@ -113,95 +113,96 @@ pub(crate) fn stream_after_finish(
             .as_ref()
             .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
         scope.check_pin(data)?;
-        let db2::Prepared {
-            pin,
-            bundle,
-            file,
-            layout,
-            definition,
-        } = db2::prepare_scoped(
-            inv,
-            name,
-            &budget,
-            inv.flag_bool("--cdn").then_some(&mut scope),
-            Some(pin),
-        )?;
-        let view = table::open_budgeted(
-            &file.bytes,
-            &definition,
-            Default::default(),
-            &Default::default(),
-            &[],
-            budget.clone(),
-        )?;
-        let fields: Vec<String> = match inv.flag("--fields").filter(|s| !s.is_empty()) {
-            Some(text) => text.split(',').map(|v| v.trim().to_owned()).collect(),
-            None => definition.fields.iter().map(|f| f.name.clone()).collect(),
-        };
-        if fields.len() > 1024 {
-            return Err(fault(
-                "records.query_resource_budget",
-                3,
-                "Stream projection field budget exceeded",
-            ));
-        }
-        for name in fields
-            .iter()
-            .map(String::as_str)
-            .chain(filter.iter().map(|(name, _)| *name))
-        {
-            if !definition.fields.iter().any(|f| f.name == name) {
-                return Err(field_error(name));
+        let mut execute = |reader: &mut dyn crate::remote::provider::FileScope| {
+            let db2::Prepared {
+                pin,
+                bundle,
+                file,
+                layout,
+                definition,
+            } = db2::prepare_scoped(
+                inv,
+                name,
+                &budget,
+                inv.flag_bool("--cdn").then_some(&mut *reader),
+                Some(pin.clone()),
+            )?;
+            let view = table::open_budgeted(
+                &file.bytes,
+                &definition,
+                Default::default(),
+                &Default::default(),
+                &[],
+                budget.clone(),
+            )?;
+            let fields: Vec<String> = match inv.flag("--fields").filter(|s| !s.is_empty()) {
+                Some(text) => text.split(',').map(|v| v.trim().to_owned()).collect(),
+                None => definition.fields.iter().map(|f| f.name.clone()).collect(),
+            };
+            if fields.len() > 1024 {
+                return Err(fault(
+                    "records.query_resource_budget",
+                    3,
+                    "Stream projection field budget exceeded",
+                ));
             }
-        }
-        let proof = json!({"contentVerified":true,"keySource":file.reading["keySource"],"name":name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"definitionSHA256":definition.sha256,"fileDataID":bundle.identity.db2_file_data_id,"contentKey":file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
-        let begin = json!({"tables":[proof.clone()],"snapshot":pin.id,"source":file.reading["source"],"table":bundle.identity.name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"fields":fields,"filter":filter_text,"limit":limit});
-        budget.check()?;
-        emit(&json!({"frame":"begin","begin":begin}))?;
-        let mut count = 0;
-        let mut extra = false;
-        let walk = (|| -> Result<()> {
-            for id in view.ids() {
-                budget.check()?;
-                let mut row = view.row(id, 1 << 20)?;
-                if let Some((field, value)) = filter
-                    && !matches(row.get(field).ok_or_else(|| field_error(field))?, value)
-                {
-                    continue;
+            for name in fields
+                .iter()
+                .map(String::as_str)
+                .chain(filter.iter().map(|(name, _)| *name))
+            {
+                if !definition.fields.iter().any(|f| f.name == name) {
+                    return Err(field_error(name));
                 }
-                if count == limit {
-                    extra = true;
-                    break;
-                }
-                budget.charge(Cost::metadata(fields.len().checked_mul(128).ok_or_else(
-                    || {
-                        fault(
-                            "records.query_resource_budget",
-                            3,
-                            "Stream projection size overflow",
-                        )
-                    },
-                )?))?;
-                let mut projected = BTreeMap::new();
-                for field in &fields {
-                    if let Some(value) = row.remove(field) {
-                        projected.insert(field.clone(), value);
-                    }
-                }
-                let frame = json!({"frame":"record","record":{"index":count,"recordID":id,"row":projected}});
-                budget.check()?;
-                count += 1;
-                emit(&frame)?;
             }
+            let proof = json!({"contentVerified":true,"keySource":file.reading["keySource"],"name":name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"definitionSHA256":definition.sha256,"fileDataID":bundle.identity.db2_file_data_id,"contentKey":file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
+            let begin = json!({"tables":[proof.clone()],"snapshot":pin.id,"source":file.reading["source"],"table":bundle.identity.name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"fields":fields,"filter":filter_text,"limit":limit});
             budget.check()?;
-            Ok(())
-        })();
-        // Go snapshots the DataContext after walking and before the manifest
-        // capture. Begin/end frames intentionally have no memoryBudget fields.
-        let mut context = None;
-        let publication = walk.and_then(|()| {
+            emit(&json!({"frame":"begin","begin":begin}))?;
+            let mut count = 0;
+            let mut extra = false;
+            let walk = (|| -> Result<()> {
+                for id in view.ids() {
+                    budget.check()?;
+                    let mut row = view.row(id, 1 << 20)?;
+                    if let Some((field, value)) = filter
+                        && !matches(row.get(field).ok_or_else(|| field_error(field))?, value)
+                    {
+                        continue;
+                    }
+                    if count == limit {
+                        extra = true;
+                        break;
+                    }
+                    budget.charge(Cost::metadata(fields.len().checked_mul(128).ok_or_else(
+                        || {
+                            fault(
+                                "records.query_resource_budget",
+                                3,
+                                "Stream projection size overflow",
+                            )
+                        },
+                    )?))?;
+                    let mut projected = BTreeMap::new();
+                    for field in &fields {
+                        if let Some(value) = row.remove(field) {
+                            projected.insert(field.clone(), value);
+                        }
+                    }
+                    let frame = json!({"frame":"record","record":{"index":count,"recordID":id,"row":projected}});
+                    budget.check()?;
+                    count += 1;
+                    emit(&frame)?;
+                }
+                budget.check()?;
+                Ok(())
+            })();
+            // Go snapshots the DataContext after walking and before the manifest
+            // capture. Begin/end frames intentionally have no memoryBudget fields.
+            let mut context = None;
+            let publication = walk.and_then(|()| {
         inv.control.check()?;
-        scope.check_consumer(inv, &budget)?;
+        reader.check_consumer(inv, &budget)?;
         context = Some((budget.logical_snapshot()?, budget.memory_snapshot()?));
         let end = json!({"partial":false,"partialReasons":null,"count":count,"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"}});
         budget.check()?;
@@ -224,12 +225,18 @@ pub(crate) fn stream_after_finish(
         budget.check()?;
         Ok(end)
     });
-        let end = publication?;
-        let (resources, memory_budget) = context.expect("successful walk context");
-        let data = json!({"resources":resources,"memoryBudget":memory_budget,"snapshot":pin.id,"pin":pin.data,"source":file.reading["source"],"tables":[proof],"relations":[],"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"},"partial":false,"partialReasons":null,"table":bundle.identity.name,"mode":"stream","limit":limit,"fields":fields,"filter":filter_text,"count":count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":budget.snapshot()?}});
-        let mut outcome = Outcome::new(data);
-        outcome.complete = !extra;
-        Ok((outcome, json!({"frame":"end","end":end})))
+            let end = publication?;
+            let (resources, memory_budget) = context.expect("successful walk context");
+            let data = json!({"resources":resources,"memoryBudget":memory_budget,"snapshot":pin.id,"pin":pin.data,"source":file.reading["source"],"tables":[proof],"relations":[],"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"},"partial":false,"partialReasons":null,"table":bundle.identity.name,"mode":"stream","limit":limit,"fields":fields,"filter":filter_text,"count":count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":budget.snapshot()?}});
+            let mut outcome = Outcome::new(data);
+            outcome.complete = !extra;
+            Ok((outcome, json!({"frame":"end","end":end})))
+        };
+        if inv.flag_bool("--cdn") {
+            scope.with_session(data, |reader| execute(reader))
+        } else {
+            execute(&mut scope)
+        }
     })();
     // A success terminal is a promise about the whole owned operation. Hold the
     // scope through capture, then check every consuming close before making it.

@@ -6,6 +6,8 @@
 //! results without exposing Emmy identities or executing studied code.
 //! The initial slice covers authenticated API declaration type queries only.
 mod declaration;
+mod ingestion;
+pub use ingestion::{IngestedBatch, IngestionFailure, IngestionTextCost, ingest_public_batch};
 mod projection;
 mod types;
 

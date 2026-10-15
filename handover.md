@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 18:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`104f67ffd00d916d0094cbfab6957fd8e6291b91`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 18:57 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c8dc6ec275111f45cdfbcc776630ea99dfb91852`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,10 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+当前完整生产批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限，完整语义/诊断仍继续迁移，未达到零补丁。
+
+Data当前批已将实际默认DB2/navigation/JSONL消费者接入同一lexical Session：owned Encoding双目录、≤8MiB page cache、Root compact index/Memo、首成功读取统计和capture持有贯通。保持页缓存超大不插入也不清旧缓存、原独立控制/预算；18源文件已组合，Rust未执行。SQL完整lazy provider正在组合及集中补测试，仍需闭合标识符Unicode、IN子查询及临时对象收费。
 
 最新实际结果：bc2终态产物177个owner、7059份sealed日志已逐SHA核验。该精确候选完整Retail ordinary refs约78.53秒、context约78.92秒、API约65.14秒已成功；仍失败的是retained session冷启动EOF/回收，后续常驻warm/steady未测。这些成功不包含后来XML子索引/统计复用，不能归因后续优化，也未证明≤Go30%或内存目标。真实Driver→正式Lua桥9/9通过；其他范围按各自结果，不称全仓绿。
 

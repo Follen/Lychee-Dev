@@ -1,23 +1,25 @@
-//! Scoped remote provider. The stack owns Encoded→Ranges→Encoding through all
-//! callback batches, avoiding self-reference and whole-Encoding materialization.
+//! Query-scoped owned Encoding/Root preparation. Temporary range views borrow
+//! immutable geometry; no self-reference or whole-Encoding materialization.
 use super::{
     admission::AdmittedWorkspace,
     availability_failure,
     cache::{MetadataFetcher, PublicMetadata},
-    files::Files,
+    files::{Files, OwnedEncoded},
     fragments::{self, Fragments, PublicRanges, RangeFetcher},
     invalid, limit,
 };
+#[cfg(test)]
+use crate::metadata_format::Encoding;
 use crate::{
     blte::{self, ByteSource},
     casc,
     decoded_cache::Stats,
     fault, keys,
-    metadata_format::{self, Encoding},
+    metadata_format::{self, PreparedEncoding, RootIndex},
     resource::{Budget, Cost},
 };
 use lycheedev_core::{Result, ToolkitError, evidence, selection::DataPin};
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 mod content;
 use content::Materialized;
 pub(crate) use content::SharedContent;
@@ -81,13 +83,27 @@ impl SelectedBody {
         }
     }
 }
+struct Prepared<'a> {
+    index: PreparedEncoding<OwnedEncoded<'a>>,
+    root_index: RootIndex<Arc<SharedContent>>,
+    root: Materialized,
+    root_stats: Stats,
+    root_reported: bool,
+    decoded: content::Memo,
+}
+impl metadata_format::RootContent for Arc<SharedContent> {
+    fn content(&self) -> &blte::Content {
+        self.as_ref()
+    }
+}
 pub(super) struct Session<'a, 'scope> {
     admitted: &'a AdmittedWorkspace<'scope>,
     pin: &'a DataPin,
     options: Options,
     budget: &'a Arc<Budget>,
     keys: Option<keys::Context>,
-    files: Option<Files<'a>>,
+    prepared: Option<Prepared<'a>>,
+    files: Option<Arc<Files<'a>>>,
     metadata: &'a (dyn MetadataFetcher + Sync),
     ranges: &'a dyn RangeFetcher,
     closed: bool,
@@ -136,6 +152,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
             options,
             budget,
             keys: None,
+            prepared: None,
             files: None,
             metadata,
             ranges,
@@ -146,6 +163,9 @@ impl<'a, 'scope> Session<'a, 'scope> {
         self.admitted.check()?;
         if self.closed {
             return Err(fault("records.file_query", 4, "Session is closed"));
+        }
+        if let Some(prepared) = &self.prepared {
+            prepared.index.check()?;
         }
         Ok(())
     }
@@ -198,7 +218,10 @@ impl<'a, 'scope> Session<'a, 'scope> {
         {
             return Err(limit());
         }
-        self.files = Some(Files::new(fragments, admitted.download_workers())?);
+        self.files = Some(Arc::new(Files::new(
+            fragments,
+            admitted.download_workers(),
+        )?));
         self.check()
     }
     /// Each callback owns complete shared bytes and may request one subsequent
@@ -304,8 +327,8 @@ impl<'a, 'scope> Session<'a, 'scope> {
             self.check()?;
             if rebuild {
                 let keys = self.keys.as_mut().expect("prepared keys");
-                // Content may already have loaded the document while the old
-                // Encoding stack still borrowed its empty snapshot.
+                // Retry only the undelivered batch. Every range view borrows
+                // this same query Context at the time of its read.
                 if keys.source.state != "loaded" {
                     keys.ensure_public()?;
                 }
@@ -313,61 +336,42 @@ impl<'a, 'scope> Session<'a, 'scope> {
             self.read_prepared(progress, mode, callback)
         })
     }
-    fn read_prepared(
-        &mut self,
-        progress: &mut BatchProgress,
-        mode: ContentMode,
-        callback: &mut dyn FnMut(Vec<SelectedFile>) -> Result<Vec<u32>>,
-    ) -> Result<()> {
+    fn prepare_ready(&mut self) -> Result<()> {
+        self.check()?;
+        if self.prepared.is_some() {
+            return Ok(());
+        }
         let admitted = self.admitted;
         let budget = self.budget;
         let keys = self.keys.as_mut().expect("prepared keys");
         let files = self.files.as_ref().expect("prepared files");
         let build = &files.build;
-        // Immutable range keys must outlive Encoding while content can lazily
-        // load public keys. Admit the actual snapshot including map/node slack.
-        let snapshot_bytes = keys
-            .keys()
-            .iter()
-            .try_fold(0usize, |sum, (_, value)| sum.checked_add(128 + value.len()))
-            .ok_or_else(limit)?;
-        let _key_snapshot = budget.reserve_retained(snapshot_bytes)?;
-        admitted.check()?;
-        let range_keys = keys.keys().clone();
-        admitted.check()?;
-        let encoded = files.open(
+        let before = files.counters()?;
+        let encoded = files.open_owned(
             &build.encoding_key,
             build.encoding_bytes.try_into().map_err(|_| limit())?,
         )?;
-        let ranges = blte::Ranges::open_reader_budgeted(
-            &encoded,
+        let ranges = blte::PreparedRanges::open(
+            encoded,
             blte::Limits {
                 encoded_bytes: build.encoding_bytes,
                 decoded_bytes: build.content_bytes,
                 ..Default::default()
             },
-            &range_keys,
-            budget,
+            budget.clone(),
         )?;
         if ranges.size() != build.content_bytes {
             return Err(invalid());
         }
-        let metered = MetadataSource {
-            inner: &ranges,
-            files,
-            budget,
-        };
         let limits = casc::Limits {
             encoded_bytes: self.options.metadata_bytes,
             deadline: budget.deadline.min(admitted.control().deadline()),
             ..Default::default()
         };
-        // Each metadata check point already runs the original scope callback.
-        // Exporting its writable AtomicBool would irreversibly discard ordered
-        // cancellation provenance even though the parser only reads the token.
-        let index = Encoding::open_with_check(&metered, limits, None, || files.store.check())?;
-        let root_mapping =
-            index.find_with_check(&build.root_content_key, limits, None, || admitted.check())?;
+        let index = PreparedEncoding::open(ranges, keys.keys(), limits, budget.clone())?;
+        let root_mapping = index.find(keys.keys(), &build.root_content_key, limits, || {
+            admitted.check()
+        })?;
         let mut stats = Stats::default();
         let mut decoded = content::Memo::default();
         let root = content::materialize(
@@ -382,10 +386,58 @@ impl<'a, 'scope> Session<'a, 'scope> {
             budget,
             &mut decoded,
         )?;
-        let build_blob = files
-            .store
-            .publish_blob(&build.build_document.raw, 4 << 20)?;
-        let cdn_blob = files.store.publish_blob(&build.cdn_document.raw, 4 << 20)?;
+        let root_index = RootIndex::open(
+            root.content.clone(),
+            metadata_format::RootLimits {
+                bytes: self.options.metadata_bytes,
+                records: 10_000_000,
+                groups: 65536,
+                matches: 4096,
+                operation: limits,
+            },
+            budget.clone(),
+            || admitted.check(),
+        )?;
+        let counters = files.counters()?;
+        stats.fragment_loads = counters
+            .fragment_loads
+            .checked_sub(before.fragment_loads)
+            .ok_or_else(internal)?;
+        stats.block_cache_hits = counters
+            .block_cache_hits
+            .checked_sub(before.block_cache_hits)
+            .ok_or_else(internal)?;
+        admitted.check()?;
+        self.prepared = Some(Prepared {
+            index,
+            root_index,
+            root,
+            root_stats: stats,
+            root_reported: false,
+            decoded,
+        });
+        Ok(())
+    }
+    fn read_prepared(
+        &mut self,
+        progress: &mut BatchProgress,
+        mode: ContentMode,
+        callback: &mut dyn FnMut(Vec<SelectedFile>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.prepare_ready()?;
+        let admitted = self.admitted;
+        let budget = self.budget;
+        let keys = self.keys.as_mut().expect("prepared keys");
+        let files = self.files.as_ref().expect("prepared files");
+        let build = &files.build;
+        let prepared = self.prepared.as_mut().expect("ready session");
+        let index = &prepared.index;
+        let root = &prepared.root;
+        let limits = casc::Limits {
+            encoded_bytes: self.options.metadata_bytes,
+            deadline: budget.deadline.min(admitted.control().deadline()),
+            ..Default::default()
+        };
         let mask = locale(&self.pin.language)?;
         while !progress.pending.is_empty() {
             admitted.check()?;
@@ -400,21 +452,13 @@ impl<'a, 'scope> Session<'a, 'scope> {
             let mut output = Vec::with_capacity(progress.pending.len());
             for id in &progress.pending {
                 admitted.check()?;
-                // Fixed Go RootIndex.Lookup caps matches for one requested ID,
-                // not the combined number of locale candidates in the batch.
-                let entries = metadata_format::lookup_root_with_check(
-                    &root.content,
-                    &[*id],
-                    metadata_format::RootLimits {
-                        bytes: self.options.metadata_bytes,
-                        records: 10_000_000,
-                        groups: 65536,
-                        matches: 4096,
-                        operation: limits,
-                    },
-                    None,
-                    || files.store.check(),
-                )?;
+                let mut stats = if prepared.root_reported {
+                    Stats::default()
+                } else {
+                    prepared.root_stats.clone()
+                };
+                let before = files.counters()?;
+                let entries = prepared.root_index.lookup(*id, || files.store.check())?;
                 let matching = entries
                     .iter()
                     .enumerate()
@@ -441,11 +485,11 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 }
                 let entry = entries[matching[0]].clone();
                 let mapping =
-                    index.find_with_check(&entry.content_key, limits, None, || admitted.check())?;
+                    index.find(keys.keys(), &entry.content_key, limits, || admitted.check())?;
                 let content = match mode {
                     ContentMode::Materialized => SelectedBody::Materialized(content::materialize(
                         files,
-                        &index,
+                        index,
                         &mapping,
                         self.options.content_bytes,
                         false,
@@ -453,11 +497,11 @@ impl<'a, 'scope> Session<'a, 'scope> {
                         keys,
                         &mut stats,
                         budget,
-                        &mut decoded,
+                        &mut prepared.decoded,
                     )?),
                     ContentMode::Verified => SelectedBody::Verified(content::read_verified(
                         files,
-                        &index,
+                        index,
                         &mapping,
                         self.options.content_bytes,
                         limits,
@@ -466,13 +510,56 @@ impl<'a, 'scope> Session<'a, 'scope> {
                         budget,
                     )?),
                 };
-                let reading = serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key(),"content":content.reference(),"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats});
+                // Go publishes both configurations after each extracted body.
+                // Close a streaming owner on every failure after its publication.
+                let after_content = (|| {
+                    let build_blob = files
+                        .store
+                        .publish_blob(&build.build_document.raw, 4 << 20)?;
+                    let cdn_blob = files.store.publish_blob(&build.cdn_document.raw, 4 << 20)?;
+                    admitted.check()?;
+                    let after = files.counters()?;
+                    stats.fragment_loads = stats
+                        .fragment_loads
+                        .checked_add(
+                            after
+                                .fragment_loads
+                                .checked_sub(before.fragment_loads)
+                                .ok_or_else(internal)?,
+                        )
+                        .ok_or_else(internal)?;
+                    stats.block_cache_hits = stats
+                        .block_cache_hits
+                        .checked_add(
+                            after
+                                .block_cache_hits
+                                .checked_sub(before.block_cache_hits)
+                                .ok_or_else(internal)?,
+                        )
+                        .ok_or_else(internal)?;
+                    Ok(
+                        serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key(),"content":content.reference(),"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats}),
+                    )
+                })();
+                let reading = match after_content {
+                    Ok(reading) => reading,
+                    Err(error) => {
+                        output.push(SelectedFile {
+                            entry,
+                            reading: serde_json::Value::Null,
+                            body: content,
+                        });
+                        return close_selected(output, Err(error));
+                    }
+                };
+                // First successful FileReading consumes root statistics even
+                // when the caller's following callback subsequently fails.
+                prepared.root_reported = true;
                 output.push(SelectedFile {
                     entry,
                     reading,
                     body: content,
                 });
-                stats = Stats::default();
             }
             if let Err(error) = admitted.check() {
                 return close_selected(output, Err(error));
@@ -484,6 +571,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
     }
     pub fn close(mut self) -> Result<()> {
         self.closed = true;
+        self.prepared = None;
         self.files = None;
         self.keys = None;
         // The external root/lease owner is only borrowed, never closed here.
@@ -615,37 +703,6 @@ fn locale(language: &str) -> Result<u32> {
             ));
         }
     })
-}
-struct MetadataSource<'a, 'f> {
-    inner: &'a dyn ByteSource,
-    files: &'a Files<'f>,
-    budget: &'a Budget,
-}
-impl ByteSource for MetadataSource<'_, '_> {
-    fn size(&self) -> usize {
-        self.inner.size()
-    }
-    fn read_span(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>> {
-        self.files.store.check()?;
-        self.budget.charge(Cost {
-            metadata_bytes: bytes as u64,
-            ..Cost::default()
-        })?;
-        self.inner.read_span(offset, bytes)
-    }
-    fn read_checked_span(
-        &self,
-        offset: usize,
-        bytes: usize,
-        expected: &[u8],
-    ) -> Result<Cow<'_, [u8]>> {
-        self.files.store.check()?;
-        self.budget.charge(Cost {
-            metadata_bytes: bytes as u64,
-            ..Cost::default()
-        })?;
-        self.inner.read_checked_span(offset, bytes, expected)
-    }
 }
 #[cfg(test)]
 mod tests;

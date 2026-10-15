@@ -39,10 +39,10 @@
   "patches": [
     {
       "path": "patches/0001-binding-context.patch",
-      "sha256": "f330a83f3ee6fc8ef53a11cda5ff837a95d1bbd9be6e7a808e8c87c7d57f11eb"
+      "sha256": "c54f788d34f276e692f5dc93b9a2b0f212d2b015bde63b5a22eb2c23e4d033f1"
     }
   ],
-  "patchedTreeSHA256": "5fd1358357d7480d40e6ace0884300235780c04060a503f6fc12035dd6be30d6",
-  "files": 853,
-  "bytes": 8520921
+  "patchedTreeSHA256": "cc0a3496bad44f2dfede0799b86175dc3b3332587097bacf6ed691648130fcff",
+  "files": 850,
+  "bytes": 8453968
 }

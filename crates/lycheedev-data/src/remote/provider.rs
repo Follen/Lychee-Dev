@@ -125,30 +125,29 @@ impl<'a> Scope<'a> {
         self.check()?;
         resolve_pin(self.invocation, self.budget)
     }
-    fn file_options(&self) -> Result<Options> {
-        self.check()?;
-        let variant = self.invocation.flag("--content-variant").unwrap_or("");
-        if !["", "standard", "low-violence"].contains(&variant) {
-            return Err(crate::fault("records.file_query", 4, "records.file_query"));
+    /// One lexical query reader owns preparation through scans and capture.
+    /// Creating it is lazy; no file/keys/Encoding IO happens before a read.
+    pub fn with_session<T>(
+        &mut self,
+        pin: &DataPin,
+        work: impl FnOnce(&mut SessionScope<'_, 'a>) -> Result<T>,
+    ) -> Result<T> {
+        self.check_pin(pin)?;
+        let mut reader = SessionScope {
+            session: None,
+            admitted: Some(&mut self.admitted),
+            invocation: self.invocation,
+            budget: self.budget,
+            pin,
+        };
+        let result = work(&mut reader);
+        let cleanup = reader.close();
+        Store {
+            home: self.admitted.home(),
+            control: self.admitted.control(),
+            budget: Some(self.budget),
         }
-        // Fixed Go validates this physical-source conflict only when a file is
-        // read. Definition-only queries do not prepare CDN or require keys.
-        if self
-            .invocation
-            .flag("--installation")
-            .is_some_and(|path| !path.is_empty())
-        {
-            return Err(super::limit());
-        }
-        Ok(Options {
-            offline: self.invocation.flag_bool("--offline"),
-            key_file: self.invocation.flag("--key-file").map(str::to_owned),
-            variant: variant.to_owned(),
-            metadata_bytes: 512 << 20,
-            content_bytes: self
-                .invocation
-                .usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?,
-        })
+        .finish(result, cleanup)
     }
     pub fn read_batches(
         &mut self,
@@ -156,12 +155,145 @@ impl<'a> Scope<'a> {
         ids: &[u32],
         callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
     ) -> Result<()> {
-        let options = self.file_options()?;
+        self.with_session(pin, |reader| reader.read_batches(pin, ids, callback))
+    }
+    /// The caller borrows the complete immutable body through capture/output.
+    /// Session retains its descriptor and checks close before this method returns.
+    pub fn with_verified_file<R>(
+        &mut self,
+        pin: &DataPin,
+        id: u32,
+        callback: &mut dyn FnMut(
+            &mut lycheedev_core::evidence::VerifiedBlob,
+            &serde_json::Value,
+        ) -> Result<R>,
+    ) -> Result<R> {
+        self.with_session(pin, |reader| {
+            reader
+                .prepare_reader()?
+                .with_verified(id, &mut |file| callback(&mut file.blob, &file.reading))
+        })
+    }
+    pub fn finish<T>(self, result: Result<T>) -> Result<T> {
+        self.admitted.finish(result)
+    }
+}
+
+/// Only these source-neutral operations are lent to DB2/navigation consumers.
+/// It does not own or release workspace leases.
+pub(crate) trait FileScope {
+    fn check(&self) -> Result<()>;
+    fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()>;
+    fn check_pin(&self, pin: &DataPin) -> Result<()>;
+    fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet>;
+    fn read_batches(
+        &mut self,
+        pin: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()>;
+}
+impl FileScope for Scope<'_> {
+    fn check(&self) -> Result<()> {
+        Scope::check(self)
+    }
+    fn check_consumer(&self, i: &Invocation, b: &Arc<Budget>) -> Result<()> {
+        Scope::check_consumer(self, i, b)
+    }
+    fn check_pin(&self, p: &DataPin) -> Result<()> {
+        Scope::check_pin(self, p)
+    }
+    fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet> {
+        Scope::resolve_pin(self)
+    }
+    fn read_batches(
+        &mut self,
+        p: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        Scope::read_batches(self, p, ids, callback)
+    }
+}
+pub(crate) struct SessionScope<'a, 'scope> {
+    session: Option<Session<'a, 'scope>>,
+    admitted: Option<&'a mut AdmittedWorkspace<'scope>>,
+    invocation: &'scope Invocation,
+    budget: &'scope Arc<Budget>,
+    pin: &'a DataPin,
+}
+impl<'a, 'scope> SessionScope<'a, 'scope> {
+    fn prepare_reader(&mut self) -> Result<&mut Session<'a, 'scope>> {
+        self.check()?;
+        if self.session.is_none() {
+            let options = file_options(self.invocation)?;
+            let admitted = self.admitted.take().expect("unopened reader admission");
+            self.session = Some(Session::borrowed(admitted, self.pin, options, self.budget)?);
+        }
+        Ok(self.session.as_mut().expect("prepared reader"))
+    }
+    fn close(self) -> Result<()> {
+        match self.session {
+            Some(session) => session.close(),
+            None => match self.admitted {
+                Some(admitted) => admitted.check(),
+                None => {
+                    self.invocation.control.check()?;
+                    self.budget.check()
+                }
+            },
+        }
+    }
+}
+impl FileScope for SessionScope<'_, '_> {
+    fn check(&self) -> Result<()> {
+        match &self.session {
+            Some(session) => session.check(),
+            None => match self.admitted.as_ref() {
+                Some(admitted) => admitted.check(),
+                None => Err(crate::fault(
+                    "records.file_query",
+                    4,
+                    "Reader initialization previously failed",
+                )),
+            },
+        }
+    }
+    fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()> {
+        self.check()?;
+        if !std::ptr::eq(self.invocation, invocation) || !Arc::ptr_eq(self.budget, budget) {
+            return Err(crate::fault(
+                "records.file_query",
+                4,
+                "Consumer differs from admitted invocation/budget",
+            ));
+        }
+        Ok(())
+    }
+    fn check_pin(&self, pin: &DataPin) -> Result<()> {
+        self.check()?;
+        if pin != self.pin {
+            return Err(crate::fault(
+                "records.file_query",
+                4,
+                "Prepared session pin differs",
+            ));
+        }
+        Ok(())
+    }
+    fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet> {
+        self.check()?;
+        resolve_pin(self.invocation, self.budget)
+    }
+    fn read_batches(
+        &mut self,
+        pin: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.check_pin(pin)?;
         let budget = self.budget;
-        let mut session = Session::borrowed(&mut self.admitted, pin, options, budget)?;
-        let result = session.read_batches(ids, &mut |files| {
-            // The public wrapper Vec is distinct from the Session Vec. Admit its
-            // bounded descriptors without copying authenticated body/provenance.
+        self.prepare_reader()?.read_batches(ids, &mut |files| {
             budget
                 .safety_only()
                 .charge(Cost::metadata(files.len() * size_of::<File>() + 256))?;
@@ -177,38 +309,29 @@ impl<'a> Scope<'a> {
                     })
                     .collect(),
             )
-        });
-        let cleanup = session.close();
-        Store {
-            home: self.admitted.home(),
-            control: self.admitted.control(),
-            budget: Some(self.budget),
-        }
-        .finish(result, cleanup)
+        })
     }
-    /// The caller borrows the complete immutable body through capture/output.
-    /// Session retains its descriptor and checks close before this method returns.
-    pub fn with_verified_file<R>(
-        &mut self,
-        pin: &DataPin,
-        id: u32,
-        callback: &mut dyn FnMut(
-            &mut lycheedev_core::evidence::VerifiedBlob,
-            &serde_json::Value,
-        ) -> Result<R>,
-    ) -> Result<R> {
-        let options = self.file_options()?;
-        let mut session = Session::borrowed(&mut self.admitted, pin, options, self.budget)?;
-        let result = session.with_verified(id, &mut |file| callback(&mut file.blob, &file.reading));
-        let cleanup = session.close();
-        Store {
-            home: self.admitted.home(),
-            control: self.admitted.control(),
-            budget: Some(self.budget),
-        }
-        .finish(result, cleanup)
+}
+
+fn file_options(invocation: &Invocation) -> Result<Options> {
+    invocation.control.check()?;
+    let variant = invocation.flag("--content-variant").unwrap_or("");
+    if !["", "standard", "low-violence"].contains(&variant) {
+        return Err(crate::fault("records.file_query", 4, "records.file_query"));
     }
-    pub fn finish<T>(self, result: Result<T>) -> Result<T> {
-        self.admitted.finish(result)
+    // Fixed Go validates this physical-source conflict only when a file is
+    // read. Definition-only queries do not prepare CDN or require keys.
+    if invocation
+        .flag("--installation")
+        .is_some_and(|path| !path.is_empty())
+    {
+        return Err(super::limit());
     }
+    Ok(Options {
+        offline: invocation.flag_bool("--offline"),
+        key_file: invocation.flag("--key-file").map(str::to_owned),
+        variant: variant.to_owned(),
+        metadata_bytes: 512 << 20,
+        content_bytes: invocation.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?,
+    })
 }

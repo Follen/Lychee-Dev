@@ -734,9 +734,9 @@ jobs:
           node third_party/emmy/check.mjs --verify
           exit $LASTEXITCODE
       - name: Fetch locked integration-test dependencies under ownership controls
-        run: node third_party/emmy/check.mjs fetch --locked
-      - name: Execute public context and cardinality integration tests
-        run: node third_party/emmy/check.mjs test --offline --locked -p emmylua_code_analysis --test lychee_context --test lychee_cardinality --test lychee_checker_guards -j 1
+        run: node tools/rust-cargo.mjs --owner ci-emmy-context --one-shot -- fetch --locked
+      - name: Execute owned context and cardinality integration tests
+        run: node tools/rust-cargo.mjs --owner ci-emmy-context --one-shot -- test --offline --locked -p lycheedev-emmy-adapter --test lychee_context --test lychee_cardinality --test lychee_checker_guards --test public_ingestion_contract --test declaration_ingestion_contract -j 1
       - name: Preserve exact recipe and owned execution evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

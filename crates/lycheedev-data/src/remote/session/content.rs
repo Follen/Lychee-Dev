@@ -36,7 +36,7 @@ fn retryable(error: &ToolkitError) -> bool {
 }
 pub(super) fn materialize<'a>(
     files: &Files<'_>,
-    index: &Encoding<'_>,
+    index: &dyn metadata_format::EncodingLookup,
     record: &EncodingRecord,
     maximum: usize,
     metadata: bool,
@@ -61,7 +61,7 @@ pub(super) fn materialize<'a>(
     let mut unavailable = None;
     for key in &record.encoding_keys {
         files.store.check()?;
-        let physical = index.find_encoding_with_check(key, limits, None, || files.store.check())?;
+        let physical = index.physical(keys.keys(), key, limits, &mut || files.store.check())?;
         let encoded = usize::try_from(physical.encoded_bytes).map_err(|_| limit())?;
         if encoded > maximum {
             return Err(limit());
@@ -144,7 +144,6 @@ pub(super) fn materialize<'a>(
                         && keys.source.state != "loaded" =>
                 {
                     keys.ensure_public()?;
-                    stats.content_decode_calls += 1;
                     decode(keys)?
                 }
                 Err(error) => return Err(error),
