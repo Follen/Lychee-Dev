@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 16:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1e922dd444f75a1a363da1909828a5efe5905832`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 17:02 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`0aa2671f22eed63c3aa4777f5235639da0d8e172`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -34,7 +34,7 @@
 
 Core单遍流式发布与Session scoped verified body已独审组合：只解码一次，原句柄暂存后追加有界磁盘copy并同目录发布；23+7新增Rust尚未运行，默认asset/export接线另片。额外磁盘读写及最多两份decoded暂存是真实成本，未证明性能收益。现workspace::open整读、外部Destination Drop仍有受控关闭缺口；同Session重复调用重建Encoding/Root/Memo，尚未对齐Go ready/rootReported复用与统计，独立cold/warm fixture不能代替该合同。
 
-当前Data新增323自适应资源合同尚未实现验收。先在真实workspace准入后采样；保同预算贯通、取消、错误与输出，不能将旧固定成本候选改标通过。
+Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样Windows可用内存，配置容量分摊、固定ceiling与按需增长、scratch峰值及独立安全账；growth probe后复核原控制与独立预算，取消不批准新分配，已发生网络账仍保留。26新增Rust未运行；默认SQL/DB2/navigation/asset消费者与公开memoryBudget输出正在另片接线，尚未完成新合同验收。固定预算历史证据不改标。见[源码清单](tests/rust-parity/adaptive-query-r23-1-freeze.json)与[Go测试映射](tests/rust-parity/adaptive-query-r23-1-test-map.json)。
 
 ### Emmy 全量替换当前顺序
 

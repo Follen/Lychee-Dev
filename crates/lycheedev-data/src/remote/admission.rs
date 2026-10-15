@@ -126,7 +126,16 @@ impl<'a> OpenWorkspace<'a> {
                     resources: Some(resources),
                     workspace: self,
                 };
-                match owner.check() {
+                let initialized = (|| {
+                    owner.check()?;
+                    if let Some(budget) = owner.budget() {
+                        budget.initialize_admitted(
+                            owner.resources.as_ref().expect("live admission lease"),
+                        )?;
+                    }
+                    owner.check()
+                })();
+                match initialized {
                     Ok(()) => Ok(owner),
                     Err(error) => owner.finish(Err(error)),
                 }

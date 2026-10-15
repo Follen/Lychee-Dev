@@ -1,6 +1,8 @@
 //! One query's shared conservative allocation/work/network ledger. Counters
 //! describe admitted work, not process RSS or an optimizer's cost estimate.
 use crate::fault;
+mod adaptive;
+pub use adaptive::MemoryBudget;
 use lycheedev_core::{Result, control::OperationControl};
 use serde::Serialize;
 use std::{
@@ -52,15 +54,18 @@ impl Cost {
         }
     }
 }
-#[derive(Default)]
 struct State {
+    limits: Cost,
+    safety_limits: Cost,
+    memory: Option<adaptive::AdaptiveMemory>,
+    pending: Option<adaptive::MemorySource>,
+    peak_scratch: u64,
     used: Cost,
     logical: Cost,
     logical_scratch: u64,
     once: BTreeSet<String>,
 }
 pub struct Budget {
-    limits: Cost,
     state: Arc<Mutex<State>>,
     safety_only: bool,
     pub deadline: Instant,
@@ -131,17 +136,13 @@ impl RetainedReservation<'_> {
                 "Retained allocation overflow",
             )
         })?;
-        let total = self
-            .bytes
-            .checked_add(bytes)
-            .filter(|total| *total <= self.budget.limits.retained_bytes)
-            .ok_or_else(|| {
-                fault(
-                    "records.query_resource_budget",
-                    3,
-                    "Retained allocation overflow",
-                )
-            })?;
+        let total = self.bytes.checked_add(bytes).ok_or_else(|| {
+            fault(
+                "records.query_resource_budget",
+                3,
+                "Retained allocation overflow",
+            )
+        })?;
         self.budget.charge_split(
             Cost::default(),
             Cost {
@@ -169,8 +170,17 @@ impl Drop for RetainedReservation<'_> {
 impl Budget {
     pub fn new(limits: Cost, deadline: Instant, cancel: Option<Arc<AtomicBool>>) -> Self {
         Self {
-            limits,
-            state: Arc::new(Mutex::new(State::default())),
+            state: Arc::new(Mutex::new(State {
+                limits,
+                safety_limits: limits,
+                memory: None,
+                pending: None,
+                peak_scratch: 0,
+                used: Cost::default(),
+                logical: Cost::default(),
+                logical_scratch: 0,
+                once: BTreeSet::new(),
+            })),
             safety_only: false,
             deadline,
             cancel,
@@ -188,7 +198,6 @@ impl Budget {
     /// but excluding Rust-only request/executor/publication costs from Go usage.
     pub(crate) fn safety_only(&self) -> Self {
         Self {
-            limits: self.limits,
             state: self.state.clone(),
             safety_only: true,
             deadline: self.deadline,
@@ -215,11 +224,7 @@ impl Budget {
         } else {
             logical
         };
-        let next_logical = self.admitted_logical(&state, logical)?;
-        let next_safety = self.admitted(state.used, safety)?;
-        state.logical = next_logical;
-        state.used = next_safety;
-        Ok(())
+        self.admit_split(&mut state, logical, safety)
     }
     pub(crate) fn reserve_logical_scratch(&self, bytes: u64) -> Result<LogicalScratch<'_>> {
         self.check()?;
@@ -228,30 +233,38 @@ impl Budget {
             .lock()
             .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
         let bytes = if self.safety_only { 0 } else { bytes };
-        let current = state.logical.retained_bytes + state.logical_scratch;
-        if bytes > self.limits.retained_bytes - current {
-            return Err(fault(
-                "records.query_resource_budget",
-                3,
-                "Whole query scratch_bytes budget exceeded",
-            ));
+        if state.pending.is_some() && bytes != 0 {
+            return Err(adaptive::not_admitted());
         }
+        let maximum = state.maximum(state.limits);
+        let current = state
+            .logical
+            .retained_bytes
+            .checked_add(state.logical_scratch)
+            .ok_or_else(|| adaptive::overflow("scratch_bytes"))?;
+        if current > maximum.retained_bytes || bytes > maximum.retained_bytes - current {
+            return Err(adaptive::overflow("scratch_bytes"));
+        }
+        let next = current + bytes;
+        let growth = state.growth(
+            next,
+            state.logical.metadata_bytes,
+            state.used.retained_bytes,
+            state.used.metadata_bytes,
+        )?;
+        // A fresh OS observation is a new synchronous boundary. A stop that
+        // arrived inside that probe cannot authorize the next allocation.
+        // No-growth observed-network accounting must still record past I/O.
+        if growth.sampled_memory {
+            self.check()?;
+        }
+        state.apply_growth(growth);
         state.logical_scratch += bytes;
+        state.peak_scratch = state.peak_scratch.max(state.logical_scratch);
         Ok(LogicalScratch {
             budget: self,
             bytes,
         })
-    }
-    fn admitted_logical(&self, state: &State, cost: Cost) -> Result<Cost> {
-        let next = self.admitted(state.logical, cost)?;
-        if state.logical_scratch > self.limits.retained_bytes - next.retained_bytes {
-            return Err(fault(
-                "records.query_resource_budget",
-                3,
-                "Whole query scratch_bytes budget exceeded",
-            ));
-        }
-        Ok(next)
     }
     pub fn token(&self) -> Option<&AtomicBool> {
         self.control
@@ -287,7 +300,8 @@ impl Budget {
             .state
             .lock()
             .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
-        self.limits
+        state
+            .safety_limits
             .network_bytes
             .checked_sub(state.used.network_bytes)
             .ok_or_else(|| {
@@ -364,51 +378,75 @@ impl Budget {
         } else {
             cost
         };
-        let next_logical = self.admitted_logical(&state, logical)?;
-        let next_safety = self.admitted(state.used, cost)?;
+        self.admit_split(state, logical, cost)
+    }
+    fn admit_split(&self, state: &mut State, logical: Cost, safety: Cost) -> Result<()> {
+        if state.pending.is_some() && logical != Cost::default() {
+            return Err(adaptive::not_admitted());
+        }
+        // First validate every hard dimension in both overlapping ledgers. A
+        // Rust allocation failure cannot publish Go growth or partial charges.
+        let mut current_logical = state.logical;
+        current_logical.retained_bytes = current_logical
+            .retained_bytes
+            .checked_add(state.logical_scratch)
+            .ok_or_else(|| adaptive::overflow("scratch_bytes"))?;
+        let mut next_logical =
+            Self::admitted(current_logical, logical, state.maximum(state.limits))?;
+        let next_safety = Self::admitted(state.used, safety, state.maximum(state.safety_limits))?;
+        let growth = state.growth(
+            next_logical.retained_bytes,
+            next_logical.metadata_bytes,
+            next_safety.retained_bytes,
+            next_safety.metadata_bytes,
+        )?;
+        next_logical.retained_bytes -= state.logical_scratch;
+        // A fresh OS observation is a new synchronous boundary. A stop that
+        // arrived inside that probe cannot authorize the next allocation.
+        // No-growth observed-network accounting must still record past I/O.
+        if growth.sampled_memory {
+            self.check()?;
+        }
+        state.apply_growth(growth);
         state.logical = next_logical;
         state.used = next_safety;
         Ok(())
     }
-    fn admitted(&self, mut next: Cost, cost: Cost) -> Result<Cost> {
+    fn admitted(mut next: Cost, cost: Cost, limits: Cost) -> Result<Cost> {
         for (used, limit, add, name) in [
             (
                 &mut next.retained_bytes,
-                self.limits.retained_bytes,
+                limits.retained_bytes,
                 cost.retained_bytes,
                 "retained_bytes",
             ),
             (
                 &mut next.metadata_bytes,
-                self.limits.metadata_bytes,
+                limits.metadata_bytes,
                 cost.metadata_bytes,
                 "metadata_bytes",
             ),
             (
                 &mut next.decode_work,
-                self.limits.decode_work,
+                limits.decode_work,
                 cost.decode_work,
                 "decode_work",
             ),
             (
                 &mut next.network_requests,
-                self.limits.network_requests,
+                limits.network_requests,
                 cost.network_requests,
                 "network_requests",
             ),
             (
                 &mut next.network_bytes,
-                self.limits.network_bytes,
+                limits.network_bytes,
                 cost.network_bytes,
                 "network_bytes",
             ),
         ] {
             if *used > limit || add > limit - *used {
-                return Err(fault(
-                    "records.query_resource_budget",
-                    3,
-                    format!("Whole query {name} budget exceeded"),
-                ));
+                return Err(adaptive::overflow(name));
             }
             *used += add;
         }

@@ -49,9 +49,14 @@ impl Lease {
 pub struct DataResources {
     leases: Vec<Lease>,
     download_workers: usize,
+    concurrent_queries: usize,
     control: OperationControl,
 }
 impl DataResources {
+    /// Admission capacity, never a racy count of current holders.
+    pub fn concurrent_queries(&self) -> usize {
+        self.concurrent_queries
+    }
     pub fn download_workers(&self) -> usize {
         self.download_workers
     }
@@ -230,6 +235,11 @@ pub fn acquire_with_check(
     let mut owner = DataResources {
         leases: vec![gate],
         download_workers: width,
+        concurrent_queries: if policy == Policy::Measurement {
+            1
+        } else {
+            slots
+        },
         control: control.clone(),
     };
     let result = (|| {
@@ -296,6 +306,7 @@ mod cleanup_tests {
                 })
                 .collect(),
             download_workers: 1,
+            concurrent_queries: 1,
             control,
         };
         let errors = owner.close_cleanup();
@@ -305,4 +316,12 @@ mod cleanup_tests {
             assert!(same(&actual, &error));
         }
     }
+}
+
+/// Minimal safe bridge to the existing Windows FFI crate. Query owners decide
+/// when to observe memory; this function does not acquire or infer admission.
+#[cfg(windows)]
+pub fn available_query_memory() -> Result<u64> {
+    lycheedev_windows::memory::available_memory()
+        .map_err(|error| ToolkitError::new("windows.memory_status", error, 3))
 }

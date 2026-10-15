@@ -12,6 +12,7 @@ pub mod inventory;
 pub mod job;
 pub mod legacy_digest;
 pub mod mailbox_input;
+pub mod memory;
 pub mod process;
 pub mod random;
 pub mod watch;

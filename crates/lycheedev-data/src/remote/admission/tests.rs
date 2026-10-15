@@ -267,3 +267,233 @@ fn actual_admitted_cleanup_retains_distinct_original_and_independent_budget_stop
     );
     fs::remove_dir_all(home).unwrap();
 }
+
+#[test]
+fn adaptive_query_observes_only_after_actual_queued_admission() {
+    let home = home();
+    let original = OperationControl::default();
+    let held = data_resources::acquire(&home, Policy::Measurement, &original).unwrap();
+    let calls = std::sync::Arc::new(AtomicU64::new(0));
+    let available = std::sync::Arc::new(AtomicU64::new(4 << 30));
+    let budget = Budget::query_with_probe(original.deadline(), original.clone(), {
+        let calls = calls.clone();
+        let available = available.clone();
+        std::sync::Arc::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(available.load(Ordering::SeqCst))
+        })
+    });
+    let short = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
+    let error = OpenWorkspace::open_metadata(&home, &short, Some(&budget))
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .err()
+        .expect("held measurement blocks admission");
+    assert_eq!(error.code, "command.deadline");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    available.store(512 << 20, Ordering::SeqCst);
+    held.close().unwrap();
+    let owner = OpenWorkspace::open_metadata(&home, &original, Some(&budget))
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .unwrap();
+    assert!(std::ptr::eq(owner.budget().unwrap(), &budget));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(budget.memory_snapshot().unwrap().ceiling_bytes, 128 << 20);
+    owner.finish(Ok(())).unwrap();
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn adaptive_probe_runs_under_real_owner_and_reuse_never_reacquires() {
+    let home = home();
+    let control = OperationControl::default();
+    let calls = std::sync::Arc::new(AtomicU64::new(0));
+    let budget = Budget::query_with_probe(control.deadline(), control.clone(), {
+        let home = home.clone();
+        let calls = calls.clone();
+        std::sync::Arc::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let short = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
+            let error = data_resources::acquire(&home, Policy::Measurement, &short)
+                .err()
+                .expect("memory observation requires an already-held real slot");
+            assert_eq!(error.code, "command.deadline");
+            Ok(4 << 30)
+        })
+    });
+    let owner = OpenWorkspace::open_metadata(&home, &control, Some(&budget))
+        .unwrap()
+        .acquire(Policy::Ordinary)
+        .unwrap();
+    budget
+        .initialize_admitted(owner.resources.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    budget.charge(Cost::retained(1)).unwrap();
+    assert_eq!(
+        owner
+            .budget()
+            .unwrap()
+            .logical_snapshot()
+            .unwrap()
+            .retained_bytes,
+        1
+    );
+    owner.finish(Ok(())).unwrap();
+    data_resources::acquire(&home, Policy::Measurement, &control)
+        .unwrap()
+        .close()
+        .unwrap();
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn failed_adaptive_activation_closes_real_slots_metadata_and_root() {
+    for fail_probe in [false, true] {
+        let home = home();
+        let control = OperationControl::default();
+        let budget = Budget::query_with_probe(
+            control.deadline(),
+            control.clone(),
+            std::sync::Arc::new(move || {
+                if fail_probe {
+                    Err(fault("test.memory_status", 5, "probe unavailable"))
+                } else {
+                    Ok(128 << 20)
+                }
+            }),
+        );
+        budget
+            .safety_only()
+            .charge(Cost::retained(64 << 20))
+            .unwrap();
+        let error = OpenWorkspace::open_metadata(&home, &control, Some(&budget))
+            .unwrap()
+            .acquire(Policy::Ordinary)
+            .err()
+            .expect("fresh ceiling/probe failure denies activation");
+        assert_eq!(error.code, "records.query_resource_budget");
+        if fail_probe {
+            assert_eq!(error.details["cause"]["code"], "test.memory_status");
+        }
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 64 << 20);
+        assert!(budget.memory_snapshot().is_err());
+        control.check().unwrap();
+        data_resources::acquire(&home, Policy::Measurement, &control)
+            .unwrap()
+            .close()
+            .unwrap();
+        let moved = home.with_extension("failed-adaptive-closed");
+        fs::rename(&home, &moved).unwrap();
+        fs::rename(
+            moved.join("state/toolkit.sqlite"),
+            moved.join("state/closed.sqlite"),
+        )
+        .unwrap();
+        fs::remove_dir_all(moved).unwrap();
+    }
+}
+
+#[test]
+fn adaptive_activation_preserves_independent_budget_deadline_before_probe() {
+    let home = home();
+    let original = OperationControl::default();
+    let calls = std::sync::Arc::new(AtomicU64::new(0));
+    let budget = Budget::query_with_probe(Instant::now(), original.clone(), {
+        let calls = calls.clone();
+        std::sync::Arc::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(4 << 30)
+        })
+    });
+    let error = OpenWorkspace::open_metadata(&home, &original, Some(&budget))
+        .err()
+        .unwrap();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    original.check().unwrap();
+    data_resources::acquire(&home, Policy::Measurement, &original)
+        .unwrap()
+        .close()
+        .unwrap();
+    fs::remove_dir_all(home).unwrap();
+}
+
+// Go: TestQueryAdmissionSharesBudgetAndPreservesLeaseOwner, using the actual
+// lazy Rust Session and real workspace locks, with no network or fake session.
+#[test]
+fn adaptive_nested_session_shares_budget_and_preserves_outer_lease() {
+    use crate::remote::session::{Options, Session};
+    use lycheedev_core::selection::DataPin;
+    use std::sync::Arc;
+    let home = home();
+    let control = OperationControl::default();
+    let mut config = lycheedev_core::workspace::default_config();
+    config["download"]["workers"] = serde_json::json!(1);
+    storage::atomic_json(&home.join("config.json"), &config).unwrap();
+    let pin = DataPin {
+        product: "retail".into(),
+        region: "cn".into(),
+        language: "zhCN".into(),
+        full_build: "12.1.5.70000".into(),
+        build_config: "a".repeat(32),
+        cdn_config: "b".repeat(32),
+        definition_commit: "c".repeat(40),
+    };
+    let options = || Options {
+        offline: true,
+        key_file: None,
+        variant: String::new(),
+        metadata_bytes: 512 << 20,
+        content_bytes: 128 << 20,
+    };
+    let budget = Arc::new(Budget::query_with_probe(
+        control.deadline(),
+        control.clone(),
+        Arc::new(|| Ok(4 << 30)),
+    ));
+    let mut owner =
+        AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, Some(&budget)).unwrap();
+    assert_eq!(budget.memory_snapshot().unwrap().concurrent_queries, 1);
+    assert!(std::ptr::eq(owner.budget().unwrap(), budget.as_ref()));
+    Session::borrowed(&mut owner, &pin, options(), &budget)
+        .unwrap()
+        .close()
+        .unwrap();
+    let short = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
+    assert_eq!(
+        data_resources::acquire(&home, Policy::Ordinary, &short)
+            .err()
+            .unwrap()
+            .code,
+        "command.deadline"
+    );
+    owner.finish(Ok(())).unwrap();
+    let fixed = Arc::new(Budget::controlled(
+        Cost {
+            retained_bytes: 4,
+            metadata_bytes: 4,
+            ..Cost::default()
+        },
+        control.deadline(),
+        control.clone(),
+    ));
+    let mut owner =
+        AdmittedWorkspace::acquire(&home, Policy::Ordinary, &control, Some(&fixed)).unwrap();
+    Session::borrowed(&mut owner, &pin, options(), &fixed)
+        .unwrap()
+        .close()
+        .unwrap();
+    assert_eq!(fixed.memory_snapshot().unwrap().mode, "fixed");
+    assert_eq!(fixed.memory_snapshot().unwrap().retained_bytes, 4);
+    owner.finish(Ok(())).unwrap();
+    data_resources::acquire(&home, Policy::Measurement, &control)
+        .unwrap()
+        .close()
+        .unwrap();
+    fs::remove_dir_all(home).unwrap();
+}

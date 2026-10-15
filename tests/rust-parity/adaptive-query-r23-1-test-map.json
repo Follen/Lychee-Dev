@@ -1,0 +1,337 @@
+{
+  "goVersion": "v3.2.3",
+  "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "status": "NOT_RUN",
+  "tests": [
+    {
+      "name": "TestIDInUsesEqualityCandidatesWithinWorkBudget",
+      "sourcePath": "internal/records/relational/selection_in_test.go",
+      "line": 13,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestInEqualitySelectionMatchesScanSemantics",
+      "sourcePath": "internal/records/relational/selection_in_test.go",
+      "line": 84,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestInEqualitySelectionCopiesRowsAndDeduplicatesExactNumbers",
+      "sourcePath": "internal/records/relational/selection_in_test.go",
+      "line": 123,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestInEqualitySelectionBufferLimitFallsBackToStreaming",
+      "sourcePath": "internal/records/relational/selection_in_test.go",
+      "line": 153,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestInEqualitySelectionDeclineDiscardsEarlierCandidates",
+      "sourcePath": "internal/records/relational/selection_in_test.go",
+      "line": 169,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestAdaptiveMemoryHandlesLargeTablesAndDecoderScratch",
+      "sourcePath": "internal/records/resource/adaptive_test.go",
+      "line": 19,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "resource::adaptive::tests::large_tables_and_decoder_scratch_grow_only_on_demand"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestAdaptiveMemoryPressureAndOtherDimensionsRejectAtomically",
+      "sourcePath": "internal/records/resource/adaptive_test.go",
+      "line": 53,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "resource::adaptive::tests::pressure_hard_dimensions_and_overflow_are_atomic"
+      ],
+      "scope": "R23 adaptive/admission foundation",
+      "difference": "Go negative Cost cannot be represented by existing Rust u64 Cost; checked max/overflow cases included, no signed-input parity claimed."
+    },
+    {
+      "name": "TestAdaptiveMemoryDividesConcurrentCapacityAndBoundsLowMemory",
+      "sourcePath": "internal/records/resource/adaptive_test.go",
+      "line": 94,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "resource::adaptive::tests::capacity_low_memory_and_zero_have_no_fixed_floor"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestAdaptiveMemoryConcurrentGrowthAndProbeFailure",
+      "sourcePath": "internal/records/resource/adaptive_test.go",
+      "line": 122,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "resource::adaptive::tests::concurrent_growth_and_failed_probe_preserve_both_ledgers",
+        "resource::adaptive::tests::initial_probe_failure_and_unsigned_overflow_never_activate"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestWindowsQueryMemoryUsesNativeAvailability",
+      "sourcePath": "internal/records/resource/memory_windows_test.go",
+      "line": 10,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "resource::adaptive::tests::native_query_activates_after_real_admission",
+        "memory::tests::windows_query_memory_uses_native_availability"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestQueryAdmissionSharesBudgetAndPreservesLeaseOwner",
+      "sourcePath": "internal/records/resource_budget_test.go",
+      "line": 14,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "remote::admission::tests::adaptive_nested_session_shares_budget_and_preserves_outer_lease",
+        "remote::admission::tests::adaptive_query_observes_only_after_actual_queued_admission"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestQueryBudgetSharedAcrossPreparedTablesAndRows",
+      "sourcePath": "internal/records/table/resource_test.go",
+      "line": 14,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestQueryBudgetRejectsIndexBeforeReadingRecords",
+      "sourcePath": "internal/records/table/resource_test.go",
+      "line": 37,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestCompactRecordIndexFitsLargeTableAfterSourcePreparation",
+      "sourcePath": "internal/records/table/resource_test.go",
+      "line": 50,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestSparseAliasesShareLocationsAndConsumeQueryBudget",
+      "sourcePath": "internal/records/table/resource_test.go",
+      "line": 94,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [],
+      "scope": "OUT_OF_SCOPE: SQL IN or compact/sparse table consumer work"
+    },
+    {
+      "name": "TestDataResourcesCapacityCancellationAndMeasurement",
+      "sourcePath": "internal/vault/data_resources_test.go",
+      "line": 15,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "workspace::data_resources::tests::actual_kernel_slots_and_configured_per_query_width",
+        "workspace::data_resources::tests::measurement_holds_both_slots_and_blocks_new_ordinary_without_metadata_lock"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestDataResourcesConfiguredSingleWorkerAndNoMetadataLock",
+      "sourcePath": "internal/vault/data_resources_test.go",
+      "line": 62,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "workspace::data_resources::tests::actual_kernel_slots_and_configured_per_query_width",
+        "workspace::data_resources::tests::measurement_holds_both_slots_and_blocks_new_ordinary_without_metadata_lock"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestDataResourcesCrossProcessAndKilledOwner",
+      "sourcePath": "internal/vault/data_resources_test.go",
+      "line": 104,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "workspace::data_resources::tests::cross_process_measurement_and_killed_owner_release_actual_kernel_locks"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    },
+    {
+      "name": "TestDataResourceHelperProcess",
+      "sourcePath": "internal/vault/data_resources_test.go",
+      "line": 154,
+      "status": "NOT_RUN",
+      "authority": "exact fixed Go test declaration; no execution in this snapshot",
+      "rustTests": [
+        "workspace::data_resources::tests::data_resource_helper_process"
+      ],
+      "scope": "R23 adaptive/admission foundation"
+    }
+  ],
+  "newRustTests": [
+    {
+      "path": "crates/lycheedev-windows/src/memory.rs",
+      "name": "minimum_uses_each_available_field_and_not_totals",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/memory.rs",
+      "name": "windows_query_memory_uses_native_availability",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "large_tables_and_decoder_scratch_grow_only_on_demand",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "pressure_hard_dimensions_and_overflow_are_atomic",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "capacity_low_memory_and_zero_have_no_fixed_floor",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "concurrent_growth_and_failed_probe_preserve_both_ledgers",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "public_report_has_exact_fixed_fields_and_shared_peak",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "safety_growth_never_inflates_go_report_and_uses_same_ceiling",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "safety_failure_does_not_publish_logical_growth",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "rounding_clips_to_fresh_headroom_and_original_ceiling",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "deferred_state_keeps_original_stop_and_explicit_budget_fixed",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "initialized_views_never_resample_or_reset_original_ceiling",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "deferred_safety_charges_survive_activation_and_low_ceiling_rejects",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "native_query_activates_after_real_admission",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "development_platform_preserves_fixed_defaults_after_real_admission",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "initial_probe_failure_and_unsigned_overflow_never_activate",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "live_scratch_peak_is_shared_and_each_guard_releases_only_itself",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "growth_probe_tracked_cancellation_rejects_all_future_allocation_paths_atomically",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "growth_probe_independent_deadline_rejects_all_future_allocation_paths_atomically",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "cancelled_growth_does_not_extend_or_refund_existing_retained_owner",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "name": "observed_network_after_cancelled_growth_remains_recorded_without_another_probe",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission/tests.rs",
+      "name": "adaptive_query_observes_only_after_actual_queued_admission",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission/tests.rs",
+      "name": "adaptive_probe_runs_under_real_owner_and_reuse_never_reacquires",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission/tests.rs",
+      "name": "failed_adaptive_activation_closes_real_slots_metadata_and_root",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission/tests.rs",
+      "name": "adaptive_activation_preserves_independent_budget_deadline_before_probe",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission/tests.rs",
+      "name": "adaptive_nested_session_shares_budget_and_preserves_outer_lease",
+      "status": "NOT_RUN"
+    }
+  ],
+  "newRustDeclarationCount": 26
+}

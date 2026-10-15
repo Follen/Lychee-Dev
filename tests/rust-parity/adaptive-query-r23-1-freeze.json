@@ -1,0 +1,69 @@
+{
+  "schema": "lycheedev.adaptive-query-foundation.v1",
+  "goOracle": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "sourceFreezeSha256": "42ec62a76c857fdd4b45fe52c5235e64c0e5c63834c2904b8174ff75e9b019e9",
+  "rust": "NOT_RUN",
+  "newRustDeclarations": 26,
+  "sources": [
+    {
+      "path": "crates/lycheedev-core/src/workspace/data_resources/tests.rs",
+      "beforeSha256": "18b0023d3798767390b77ddde906f027061a8b8b6a6a08b32593c64f4a8683f4",
+      "bytes": 12692,
+      "sha256": "2f1b103f7e69435963f8366969309de5719a7f79a21961867c7aecf9b61f0dfa"
+    },
+    {
+      "path": "crates/lycheedev-core/src/workspace/data_resources.rs",
+      "beforeSha256": "b888cbad1267c3202dfe48f84d8772047c9cc4081cc81c38c713e114be65ff91",
+      "bytes": 11067,
+      "sha256": "27da92608f32165280f9da559c280b7f22ff4a516ebf1cff4000a6ebd0a787c9"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission/tests.rs",
+      "beforeSha256": "44e7696a493ba19681e8768f13d7a822c86cb82eb2308926ff0bae45c65e712d",
+      "bytes": 18839,
+      "sha256": "1eae1d1a28a392c0baea0025aa8fd89184d2108338db10306f51eb5091b8cfcf"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/admission.rs",
+      "beforeSha256": "f6ce54078e875bbec294670f92a47fc42576d3278d7048ca7972d2c0491390d3",
+      "bytes": 7758,
+      "sha256": "f8aa629baee2187146d182b0ba039de696a1d109cf6e93f43de8ed42b69ff389"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive/tests.rs",
+      "beforeSha256": null,
+      "bytes": 22418,
+      "sha256": "8fc5300890d0c3ac0b9a48746732720aa872a83904706aa0c7f9d363802f433a"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource/adaptive.rs",
+      "beforeSha256": null,
+      "bytes": 10773,
+      "sha256": "b950acb2e59d906d9bb13fd8ba66b2b2e270d99348ec668421c5ae95f95de2d0"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource.rs",
+      "beforeSha256": "3ae99b91dd2caf3ea5007e7302f5adc8fa3bf4ac76dae730fca23f92cc8cfb5b",
+      "bytes": 23188,
+      "sha256": "6c82dac8271c69a4af4db0f276757361cb63bc3fca418bc15a3e6d4451701415"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/lib.rs",
+      "beforeSha256": "fe50f5e682262b911a9f3cabfc852ba3ec90c396ef19e9214d01f07a32470271",
+      "bytes": 624,
+      "sha256": "65483768fd2d2c882c4efcc6efa35c1c1e5d615323095da92e0ea7601c394b57"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/memory.rs",
+      "beforeSha256": null,
+      "bytes": 1757,
+      "sha256": "aef99e02e02423726456fab5ca6e2dcaae46f4b12ddc8c55dae1b0f34f6da19c"
+    }
+  ],
+  "review": "independent complete static review passed, including post-growth-probe ordered stop checks",
+  "limits": [
+    "Default query consumers and public result wiring are a subsequent slice.",
+    "Fixed explicit budgets retain their existing behavior.",
+    "Observed network bytes remain charged even when a growth probe observes cancellation."
+  ]
+}

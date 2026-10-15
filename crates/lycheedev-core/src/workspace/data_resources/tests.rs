@@ -41,8 +41,11 @@ fn actual_kernel_slots_and_configured_per_query_width() {
         let control = OperationControl::default();
         let first = acquire(&home, Policy::Ordinary, &control).unwrap();
         assert_eq!(first.download_workers(), width);
+        assert_eq!(first.concurrent_queries(), slots);
         let second = if slots == 2 {
-            Some(acquire(&home, Policy::Ordinary, &control).unwrap())
+            let second = acquire(&home, Policy::Ordinary, &control).unwrap();
+            assert_eq!(second.concurrent_queries(), slots);
+            Some(second)
         } else {
             None
         };
@@ -79,6 +82,7 @@ fn measurement_holds_both_slots_and_blocks_new_ordinary_without_metadata_lock() 
     first.close().unwrap();
     second.close().unwrap();
     let measurement = acquire(&home, Policy::Measurement, &control).unwrap();
+    assert_eq!(measurement.concurrent_queries(), 1);
     std::thread::scope(|scope| {
         let child = scope.spawn(|| acquire(&home, Policy::Ordinary, &short()));
         let mut metadata =

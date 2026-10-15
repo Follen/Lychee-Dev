@@ -525,6 +525,14 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-effective-sql-unit --one-shot -- test --locked --offline -p lycheedev-data --lib local_query:: -j 1
+      - name: Run admitted adaptive query memory and scratch contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-adaptive-query-memory --one-shot -- test --locked --offline -p lycheedev-data --lib resource::adaptive:: -j 1
+      - name: Run Windows available-memory query contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-available-memory --one-shot -- test --locked --offline -p lycheedev-windows --lib memory::tests -j 1
       - name: Run scoped SQL retained resource lifetime fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

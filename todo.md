@@ -24,6 +24,7 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 
 - [x] Pin v3.2.3 tag `7a24532cf0fe294faeb96e8224797b6fe69386d5` to `3766f9cacb52e93a803a626187e2a1d54a445468`. Keep 320/321/322 source, tests and results unchanged; Rust stays 3.5.0 beta.
 - [ ] Implement G323-01–G323-06 in the [increment matrix](docs/toolkit/rust-go-3.2.3-increment.md): admission capacity, adaptive Windows memory/scratch, shared consumers, compact records, IN selection and Skill/oracle integration.
+- [ ] Execute the reviewed R23.1 adaptive/admission foundation (26 new Rust tests), connect real default query consumers and exact memoryBudget output; foundation composition alone does not complete G323-01–03.
 - [ ] Map fixed Go323 tests and run exact-candidate local/Windows/independent Data usage checks. Current fixed-cost Rust candidates are prior implementation evidence, not new adaptive acceptance.
 
 ## Cumulative prior increment: Go 3.2.2
