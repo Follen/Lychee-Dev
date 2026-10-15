@@ -74,8 +74,20 @@ pub fn locked_sha256(
     maximum: u64,
     control: &crate::control::OperationControl,
 ) -> Result<(File, String)> {
-    use std::io::Read;
-    control.check()?;
+    locked_sha256_with(
+        path,
+        maximum,
+        || control.check(),
+        lycheedev_windows::filesystem::close_file,
+    )
+}
+fn locked_sha256_with(
+    path: &Path,
+    maximum: u64,
+    mut check: impl FnMut() -> Result<()>,
+    close: impl FnOnce(File) -> std::io::Result<()>,
+) -> Result<(File, String)> {
+    check()?;
     if !fs::symlink_metadata(path)?.file_type().is_file() {
         return Err(ToolkitError::invalid("identity file is a link"));
     }
@@ -86,7 +98,28 @@ pub fn locked_sha256(
         use std::os::windows::fs::OpenOptionsExt;
         options.share_mode(1);
     }
-    let mut file = options.open(path)?;
+    let file = options.open(path)?;
+    authenticate_locked_file(file, maximum, check, close)
+}
+fn authenticate_locked_file(
+    mut file: File,
+    maximum: u64,
+    mut check: impl FnMut() -> Result<()>,
+    close: impl FnOnce(File) -> std::io::Result<()>,
+) -> Result<(File, String)> {
+    match hash_locked_file(&mut file, maximum, &mut check) {
+        // Identity consumers retain the original deny-write/delete handle
+        // through their dependent operation. Do not shorten that lifetime.
+        Ok(digest) => Ok((file, digest)),
+        Err(error) => finish_file_with(file, Err(error), check, close),
+    }
+}
+fn hash_locked_file(
+    file: &mut File,
+    maximum: u64,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<String> {
+    use std::io::Read;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > maximum {
         return Err(ToolkitError::invalid("identity file exceeds admission"));
@@ -95,7 +128,7 @@ pub fn locked_sha256(
     let mut read_bytes = 0u64;
     let mut buffer = [0u8; 65536];
     loop {
-        control.check()?;
+        check()?;
         let n = file.read(&mut buffer)?;
         if n == 0 {
             break;
@@ -111,8 +144,80 @@ pub fn locked_sha256(
     if read_bytes != metadata.len() {
         return Err(ToolkitError::invalid("identity length changed during read"));
     }
-    control.check()?;
-    Ok((file, hex::encode(digest.finalize())))
+    check()?;
+    Ok(hex::encode(digest.finalize()))
+}
+
+/// Stable details discriminator for a file operation with multiple error causes.
+pub const FILE_CLEANUP_SCHEMA: &str = "lycheedev.file-cleanup.v1";
+
+/// Finish work that has retained a File, checking its close exactly once even
+/// after cancellation or failure. The caller must retain the handle until its
+/// last identity-dependent operation, then pass that operation's result here.
+/// A final control check cannot suppress cleanup or publish a late success.
+///
+/// A lone error is unchanged. For multiple errors, the first error's public
+/// code/message/exit are retained and details use `lycheedev.file-cleanup.v1`:
+/// `primary`, `cleanup`, `control` are each the full ToolkitError or null. The
+/// primary's original details are retained inside it, including nested joins.
+/// Consumers must preserve these details even for cancellation/deadline codes.
+pub fn finish_file<T>(
+    file: File,
+    result: Result<T>,
+    control: &crate::control::OperationControl,
+) -> Result<T> {
+    finish_file_with(
+        file,
+        result,
+        || control.check(),
+        lycheedev_windows::filesystem::close_file,
+    )
+}
+fn finish_file_with<T>(
+    file: File,
+    result: Result<T>,
+    check: impl FnOnce() -> Result<()>,
+    close: impl FnOnce(File) -> std::io::Result<()>,
+) -> Result<T> {
+    // Consume before consulting control: cleanup never needs fresh admission.
+    // No File or numeric handle remains here to retry an uncertain close.
+    let cleanup = close(file).map_err(ToolkitError::io).err();
+    let mut stopped = check().err();
+    let (value, primary) = match result {
+        Ok(value) => (Some(value), None),
+        Err(error) => (None, Some(error)),
+    };
+    // The same sticky stop observed both during work and after close is one
+    // cause. Keep the original error byte-for-byte when cleanup succeeded.
+    if let (Some(primary), Some(control)) = (&primary, &stopped)
+        && primary.code == control.code
+        && primary.message == control.message
+        && primary.exit_code == control.exit_code
+        && primary.details == control.details
+    {
+        stopped = None;
+    }
+    let count = usize::from(primary.is_some())
+        + usize::from(cleanup.is_some())
+        + usize::from(stopped.is_some());
+    if count == 0 {
+        return Ok(value.expect("successful file operation retained its value"));
+    }
+    let mut first = primary
+        .as_ref()
+        .or(cleanup.as_ref())
+        .or(stopped.as_ref())
+        .expect("failed file operation has a cause")
+        .clone();
+    if count > 1 {
+        first.details = serde_json::json!({
+            "schema": FILE_CLEANUP_SCHEMA,
+            "primary": primary,
+            "cleanup": cleanup,
+            "control": stopped,
+        });
+    }
+    Err(first)
 }
 pub fn sha512_integrity(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha512};
@@ -512,3 +617,7 @@ mod controlled_publication_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "storage/checked_close_tests.rs"]
+mod checked_close_tests;

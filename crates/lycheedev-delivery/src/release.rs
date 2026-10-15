@@ -44,98 +44,112 @@ pub fn read_manifest_with_control(
     version: &str,
     control: &OperationControl,
 ) -> Result<Release> {
+    read_manifest_with_finish(root, version, control, |file, result| {
+        storage::finish_file(file, result, control)
+    })
+}
+fn read_manifest_with_finish(
+    root: &Path,
+    version: &str,
+    control: &OperationControl,
+    finish: impl FnOnce(fs::File, Result<Release>) -> Result<Release>,
+) -> Result<Release> {
     control.check()?;
     storage::guard_path(root, &root.join("release.json"))?;
     let mut file = read_locked(&root.join("release.json"))?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > 1 << 20 {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "release manifest exceeds 1 MiB",
-            4,
-        ));
-    }
-    let mut raw = Vec::new();
-    (&mut file).take((1 << 20) + 1).read_to_end(&mut raw)?;
-    if raw.len() as u64 != metadata.len() {
-        return Err(ToolkitError::invalid(
-            "release manifest changed during bounded read",
-        ));
-    }
-    control.check()?;
-    let release: Release = serde_json::from_slice(&raw)?;
-    if release.runtime.is_some() != release.npm_channel.is_some()
-        || release
-            .runtime
-            .as_deref()
-            .is_some_and(|runtime| runtime != "rust")
-        || release.npm_channel.as_ref().is_some_and(|channel| {
-            channel["schema"] != "lycheedev.npm-channel.v1"
-                || channel["version"] != release.version
-                || channel["distTag"] != "next"
-                || channel["preserveLatest"] != "2.5.1"
-        })
-    {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "runtime/channel binding differs from the owner release contract",
-            4,
-        ));
-    }
-    if release.schema != "lycheedev.release.v1"
-        || release.version != version
-        || !valid_digest(&release.commit, 40)
-    {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "release identity or version mismatch",
-            4,
-        ));
-    }
-    if release.binaries.len() != 1 || !release.binaries.contains_key("windows-amd64") {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "product requires exactly Windows amd64 binary",
-            4,
-        ));
-    }
-    let binary = &release.binaries["windows-amd64"];
-    if binary.path != "native/windows-amd64/lycheedev.exe"
-        || binary.bytes == 0
-        || !valid_digest(&binary.sha256, 64)
-    {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "invalid binary manifest",
-            4,
-        ));
-    }
-    if let Some(source) = &release.corresponding_source
-        && (source["commit"] != release.commit
-            || !valid_digest(source["sha256"].as_str().unwrap_or(""), 64)
-            || source["archive"]
-                .as_str()
-                .is_none_or(|s| s.contains(['/', '\\'])))
-    {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "corresponding source identity differs",
-            4,
-        ));
-    }
-    if !release.resources.iter().any(|r| r.path == "skill/SKILL.md")
-        || !release
-            .resources
-            .iter()
-            .any(|r| r.path == "addon/Lychee Dev.toc")
-    {
-        return Err(ToolkitError::new(
-            "delivery.invalid_release",
-            "missing mandatory addon/skill",
-            4,
-        ));
-    }
-    Ok(release)
+    // Keep manifest ownership throughout parsing and every identity check.
+    let result = (|| {
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() > 1 << 20 {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "release manifest exceeds 1 MiB",
+                4,
+            ));
+        }
+        let mut raw = Vec::new();
+        (&mut file).take((1 << 20) + 1).read_to_end(&mut raw)?;
+        if raw.len() as u64 != metadata.len() {
+            return Err(ToolkitError::invalid(
+                "release manifest changed during bounded read",
+            ));
+        }
+        control.check()?;
+        let release: Release = serde_json::from_slice(&raw)?;
+        if release.runtime.is_some() != release.npm_channel.is_some()
+            || release
+                .runtime
+                .as_deref()
+                .is_some_and(|runtime| runtime != "rust")
+            || release.npm_channel.as_ref().is_some_and(|channel| {
+                channel["schema"] != "lycheedev.npm-channel.v1"
+                    || channel["version"] != release.version
+                    || channel["distTag"] != "next"
+                    || channel["preserveLatest"] != "2.5.1"
+            })
+        {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "runtime/channel binding differs from the owner release contract",
+                4,
+            ));
+        }
+        if release.schema != "lycheedev.release.v1"
+            || release.version != version
+            || !valid_digest(&release.commit, 40)
+        {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "release identity or version mismatch",
+                4,
+            ));
+        }
+        if release.binaries.len() != 1 || !release.binaries.contains_key("windows-amd64") {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "product requires exactly Windows amd64 binary",
+                4,
+            ));
+        }
+        let binary = &release.binaries["windows-amd64"];
+        if binary.path != "native/windows-amd64/lycheedev.exe"
+            || binary.bytes == 0
+            || !valid_digest(&binary.sha256, 64)
+        {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "invalid binary manifest",
+                4,
+            ));
+        }
+        if let Some(source) = &release.corresponding_source
+            && (source["commit"] != release.commit
+                || !valid_digest(source["sha256"].as_str().unwrap_or(""), 64)
+                || source["archive"]
+                    .as_str()
+                    .is_none_or(|s| s.contains(['/', '\\'])))
+        {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "corresponding source identity differs",
+                4,
+            ));
+        }
+        if !release.resources.iter().any(|r| r.path == "skill/SKILL.md")
+            || !release
+                .resources
+                .iter()
+                .any(|r| r.path == "addon/Lychee Dev.toc")
+        {
+            return Err(ToolkitError::new(
+                "delivery.invalid_release",
+                "missing mandatory addon/skill",
+                4,
+            ));
+        }
+        Ok(release)
+    })();
+    finish(file, result)
 }
 pub fn receipt(release: &Release, component: &str) -> Receipt {
     Receipt {
@@ -163,6 +177,17 @@ pub fn verify_inventory_with_control(
     resources: &[Resource],
     component: Option<&str>,
     control: &OperationControl,
+) -> Result<()> {
+    verify_inventory_with_finish(root, resources, component, control, |file, result| {
+        storage::finish_file(file, result, control)
+    })
+}
+fn verify_inventory_with_finish(
+    root: &Path,
+    resources: &[Resource],
+    component: Option<&str>,
+    control: &OperationControl,
+    mut finish: impl FnMut(fs::File, Result<()>) -> Result<()>,
 ) -> Result<()> {
     if resources.is_empty() || resources.len() > 32768 {
         return Err(ToolkitError::new(
@@ -205,21 +230,27 @@ pub fn verify_inventory_with_control(
         let path = storage::safe_relative(root, relative)?;
         storage::guard_path(root, &path)?;
         let (file, digest) = storage::locked_sha256(&path, resource.bytes, control)?;
-        let info = file.metadata()?;
-        if !info.is_file() || info.len() != resource.bytes {
-            return Err(ToolkitError::new(
-                "delivery.invalid_payload",
-                format!("file shape differs: {relative}"),
-                4,
-            ));
-        }
-        if digest != resource.sha256 {
-            return Err(ToolkitError::new(
-                "delivery.invalid_payload",
-                format!("digest differs: {relative}"),
-                4,
-            ));
-        }
+        // Keep the same file locked through the final shape/digest decisions.
+        // Every normal result, including rejection/cancellation, consumes it.
+        let result = (|| {
+            let info = file.metadata()?;
+            if !info.is_file() || info.len() != resource.bytes {
+                return Err(ToolkitError::new(
+                    "delivery.invalid_payload",
+                    format!("file shape differs: {relative}"),
+                    4,
+                ));
+            }
+            if digest != resource.sha256 {
+                return Err(ToolkitError::new(
+                    "delivery.invalid_payload",
+                    format!("digest differs: {relative}"),
+                    4,
+                ));
+            }
+            Ok(())
+        })();
+        finish(file, result)?;
     }
     let mut stack = vec![root.to_path_buf()];
     let mut count = 0usize;
@@ -274,3 +305,7 @@ fn read_locked(path: &Path) -> Result<fs::File> {
     }
     Ok(options.open(path)?)
 }
+
+#[cfg(test)]
+#[path = "release/checked_close_tests.rs"]
+mod checked_close_tests;

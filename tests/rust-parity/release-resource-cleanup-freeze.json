@@ -1,0 +1,68 @@
+{
+  "schema": "lycheedev.release-resource-cleanup.freeze.v1",
+  "createdAt": "2026-10-15T00:10:29.065474+00:00",
+  "baseRustHead": "231384002a730799c4086e57218d656c80e4ed1d",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "ownedFiles": [
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 22397,
+      "sha256": "8cf24f46ce1af4b4445c529f4123c936df4d610bd8c42eff5f71e339bcb77c6d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/checked_close_tests.rs",
+      "bytes": 13317,
+      "sha256": "efa17acf2d0ba0a828522d5ebdd9a832493fcb78e1a827029a4a4bb4d76b5fd3"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/release.rs",
+      "bytes": 11237,
+      "sha256": "0db05b990994bb9311ab4f90963463c5e0575297c30e6a1ba33a395fc69bd6af"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/release/checked_close_tests.rs",
+      "bytes": 11027,
+      "sha256": "08a4214772d40627382b01f178888e6871c92ec27dade5199cdd787be1985c22"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "crates/lycheedev-core/Cargo.toml",
+      "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "sha256": "c2e5ab6a3a014c298c91ed77535fd2c5017d23d824698fc84a27c2b7e59576d6"
+    },
+    {
+      "path": "crates/lycheedev-delivery/Cargo.toml",
+      "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90"
+    }
+  ],
+  "testMapSha256": "a71e0ce65b17a6c5a7bd0772b085b278a6330cb9dbc41912fa8f647e34640189",
+  "staticChecks": {
+    "rustfmt": "PASS --edition 2024 --check (parse/format only)",
+    "gitDiffCheck": "PASS owned files",
+    "storageUnrelatedSuffix": "PASS byte-exact sha512_integrity onward, excluding new test-module hook",
+    "manifestValidation": "PASS whitespace-normalized original validation body unchanged",
+    "inventoryDirectoryScan": "PASS byte-exact",
+    "newCoreTestDeclarations": 13,
+    "newReleaseTestDeclarations": 9
+  },
+  "execution": {
+    "cargoRustc": "NOT_RUN prohibited",
+    "rustTests": "NOT_RUN",
+    "windows": "NOT_RUN parent must add independent CI groups listed in test map",
+    "realOsCloseFault": "NOT_RUN helper injection only"
+  },
+  "review": "PENDING independent frozen snapshot audit",
+  "scope": "No changes to storage atomic writer/ExclusiveLock, core lib/public_json/evidence/budgeted, Delivery installation/slot_publication, Live service, Windows code, Cargo dependencies or supporting tools. Successful locked_sha256 ownership and sharing unchanged."
+}

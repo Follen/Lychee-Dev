@@ -630,6 +630,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 
 独立审核核全部4036文档、612环境文件、完整原fixture及固定Emmy6个grammar文件；对真实生成定义5159 return与5873 mapping逐项对齐，唯一变化第20911行，预测1,041,400B、SHA256 1d6e1f79c1aea00e873aca50f9cad761990dd15605ee88f15e48a855d00b2cd3。freeze SHA256 f3b543f34ce682f24e6a9aa649fe1eebca812b4a38c67a5803d04030bb1d73e4，本批静态独审无阻断。六新Rust回归仅声明NOT_RUN，现有native_research::会执行；必须在同一新Windows封存EXE重跑完整普通refs/context/APItype、持久cold/warm及真实IPC，静态重放和代表fixture不代替全仓验收。未改XML v7、third_party、预算或裁剪源输入。
 
+### 身份文件与 release 验证的显式资源清理
+
+- 冻结 `b5f98d1ac623b648607f405d4ea51ef723fa57870e5428ec79205a04e9110406`，对应 `tests/rust-parity/release-resource-cleanup-{freeze,test-map}.json`。独立只读复审核实 4 个源码文件、5 个依赖、6 个固定 Go 来源，无新增可行动阻断。
+- `storage::locked_sha256` 构造失败显式关闭，成功仍把原 deny-write/delete 句柄交给调用者保留；`storage::finish_file` 先消费关闭一次再检查原 control，单错误保真，多错误以固定 `lycheedev.file-cleanup.v1` 保存 primary/cleanup/control 的完整 ToolkitError。release inventory 与 manifest 的取得句柄后成功、失败和取消路径均接入，原验证体及扫描规则保留。
+- 作者 rustfmt、独审身份/映射/固定基线与 diff 检查通过；新增 13 core + 9 release 回归及两独立 Windows CI 组均 **NOT_RUN**。注入关闭结果仅验证模型，不能冒称真实 OS 关闭故障已测。固定 Go 的对应路径仍是 unchecked defer Close，本批为安全强化；下游 service 的组合错误消费仍需其独立验收。
+- publication 内部 receipt 的跨 burst 句柄与其其他错误路径不在本批范围；不得为了复用早关闭 helper 缩短身份保护期。正式 Live 默认 CLI、repair/activation 全接线、性能与四阶段审计仍未完成。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
