@@ -238,6 +238,16 @@ function assertNativeExecution(result, oracle) {
   assert.equal(evidence.relations, undefined, 'native evidence does not bypass public pagination');
   return evidence;
 }
+export function assertNativeCaller(row, callsite) {
+  assert.equal(row.source, callsite.source, 'native call source is its authenticated caller');
+  assert.equal(row.referenceExpression, callsite.referenceExpression, 'original reference expression retained');
+  assert.equal(row.caller?.kind, callsite.caller.kind, 'explicit caller kind');
+  assert.equal(row.caller?.name, callsite.caller.name, 'authenticated callable name');
+  assert.equal(row.caller?.position?.path, callsite.path, 'caller original source path');
+  assert.equal(row.caller?.position?.coveringRange?.start?.line, callsite.caller.line - 1, 'caller original declaration line');
+  assert.equal(row.caller?.syntaxClosure?.file, callsite.site.file, 'caller admitted syntax file');
+  assert(row.caller?.syntaxClosure && row.caller.syntaxClosure.start < row.site.start && row.caller.syntaxClosure.end >= row.site.end, 'nearest callable syntax contains callsite');
+}
 export function assertNativeEvidence(result, oracle, callsite) {
   const evidence = assertNativeExecution(result, oracle);
   // Production intentionally removes nativeResearch.relations and projects
@@ -247,6 +257,7 @@ export function assertNativeEvidence(result, oracle, callsite) {
   const rows = result.relations.filter(row => ['path', 'line', 'kind', 'target'].every(key => row[key] === callsite[key]) && row.basis?.includes('native_common_source_facts'));
   assert(rows.length > 0, 'exact original callsite must have native-origin evidence');
   for (const row of rows) {
+    assertNativeCaller(row, callsite);
     assert.deepEqual(row.site, callsite.site, 'native callsite exact original byte range');
     assert(['resolved', 'static_candidate'].includes(row.state), 'native relation strength remains explicit');
     assert.equal(typeof row.proof, 'string'); assert(row.proof.length > 0, 'native reference proof identity');

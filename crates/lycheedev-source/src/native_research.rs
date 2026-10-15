@@ -10,7 +10,7 @@ pub(crate) mod plan;
 mod xml;
 mod worker_control;
 pub(crate) use xml::XmlResearch;
-pub const RESEARCH_RULES:&str="source-native-research-v7-xml-script-ancestry";
+pub const RESEARCH_RULES:&str="source-native-research-v8-incoming-callers";
 #[derive(Clone,Serialize,Deserialize)]
 pub struct LoadEvidence { pub manifest:String,pub ordered:Vec<String>,pub issues:Vec<Value> }
 #[derive(Clone,Serialize,Deserialize)]
@@ -34,7 +34,9 @@ impl SnapshotRequest {
             fn flush(&mut self)->std::io::Result<()>{Ok(())}
         }
         let mut writer=HashWriter{hash:Sha256::new(),control};
-        let result=serde_json::to_writer(&mut writer,self);control.check()?;result?;
+        // Both client and owner use this streamed key. A rule change is a
+        // cache miss; the unchanged full snapshot remains valid input.
+        let result=serde_json::to_writer(&mut writer,&(RESEARCH_RULES,self));control.check()?;result?;
         Ok(format!("{:x}",writer.hash.finalize()))
     }
 }
@@ -383,6 +385,21 @@ pub fn one_shot(inv:&lycheedev_core::Invocation,request:WorkerRequest)->Result<V
 #[cfg(test)]
 mod projection_tests {
     use super::*;
+    include!("native_research/caller_tests.rs");
+
+    // This exact inverse applies only to the newly labelled incoming call rows.
+    // The old eager/full-scan implementations remain unchanged, including row
+    // traversal order. No sorting or other field normalization is allowed.
+    fn original_call_labels(mut value:Value)->Value {
+        for row in value["relations"].as_array_mut().unwrap() {
+            if let Some(expression)=row.as_object_mut().unwrap().remove("referenceExpression") {
+                assert_eq!(row["kind"],"call");
+                assert!(row.as_object_mut().unwrap().remove("caller").is_some());
+                row["source"]=expression;
+            }
+        }
+        value
+    }
 
     fn planner_fixture(files:BTreeMap<String,String>,environment_documents:BTreeMap<String,String>,api:Option<environment::Environment>)->ResearchSession {
         let control=OperationControl::default();
@@ -814,7 +831,7 @@ mod projection_tests {
                 let before=session.prepared.research_steps();
                 let actual=session.prepared.research_relations(&symbol,direction,graph,&session.xml).unwrap();
                 assert_eq!(session.prepared.research_steps()-before,expected_cost);
-                assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap(),"{direction}");
+                assert_eq!(serde_json::to_vec(&original_call_labels(actual.clone())).unwrap(),serde_json::to_vec(&expected).unwrap(),"{direction}");
                 if direction=="incoming"&&graph.is_some_and(|graph|std::ptr::eq(graph,&graphs[0])) {
                     assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="alias.lua"),"selected alias without target spelling survives");
                     assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="unknown.lua"),"unloaded candidate survives");
@@ -854,7 +871,7 @@ mod projection_tests {
             for direction in ["incoming","outgoing","both"]{
                 let old=session.prepared.eager_research_relations(&symbol,direction,Some(&graph),&session.xml).unwrap();
                 let new=session.prepared.research_relations(&symbol,direction,Some(&graph),&session.xml).unwrap();
-                assert_eq!(serde_json::to_vec(&new).unwrap(),serde_json::to_vec(&old).unwrap(),"{name} {direction}");
+                assert_eq!(serde_json::to_vec(&original_call_labels(new.clone())).unwrap(),serde_json::to_vec(&old).unwrap(),"{name} {direction}");
                 if name=="Target"&&direction=="incoming"{assert!(new["relations"].as_array().unwrap().iter().any(|row|row["path"]=="outside.lua"),"unloaded source references remain visible");}
                 if name=="Actual"&&direction=="outgoing"{assert!(new["relations"].as_array().unwrap().iter().any(|row|row["path"]=="Templates.xml"),"inherited handler keeps original XML source and selected owner");}
             }

@@ -39,7 +39,7 @@ impl IndexedDeclaration {
 #[derive(Clone, Debug)]
 struct IndexedReference {
     id:String, site:SyntaxSite, declaration:Option<usize>,
-    roles:Vec<ReferenceRole>,
+    roles:Vec<ReferenceRole>, closure:Option<SyntaxSite>,
 }
 #[derive(Clone, Debug)]
 struct IndexedCall { id:String, site:SyntaxSite, callee:SyntaxSite }
@@ -60,6 +60,8 @@ impl SourceSyntaxIndex {
 struct SourceFileSyntax {
     references:Vec<IndexedReference>, calls:Vec<IndexedCall>,
     references_by_site:BTreeMap<SyntaxSite,usize>,
+    // Query-local syntax owners, never a second session-wide AST or graph.
+    callable_owners:BTreeMap<SyntaxSite,Option<SyntaxSite>>,
 }
 impl SourceFileSyntax {
     fn reference_at(&self,inputs:&SourceInputs,site:&Site)->Option<&IndexedReference> {
@@ -111,7 +113,15 @@ impl PreparedSnapshot {
         let file=self.inputs.corpus.files[file_index].path.as_str();
         let model=self.analysis.semantic_model(self.files[file]);
         let facts=model.file_facts().ok_or("syntax facts missing")?;
-        let root=model.syntax_tree().ok_or("syntax tree missing")?.get_red_root();
+        let tree=model.syntax_tree().ok_or("syntax tree missing")?;
+        let root=tree.get_red_root();
+        // Errors can be reported out of source order. Retain only distinct
+        // syntax-error positions for bounded declaration checks, not messages.
+        let mut syntax_errors=std::collections::BTreeSet::new();
+        for error in tree.get_errors() {
+            self.control.check().map_err(|e|e.to_string())?;
+            if error.kind==emmylua_parser::LuaParseErrorKind::SyntaxError{syntax_errors.insert(error.range.start());}
+        }
         let source_site=|range|SyntaxSite::at(file_index,self.inputs.original_range(file,range).expect("admitted parser range"));
         let mut local_bindings=BTreeMap::new();
         // Use the same Emmy NameUse records and visibility rule as admission.
@@ -124,6 +134,7 @@ impl PreparedSnapshot {
         let mut index=SourceFileSyntax::default();let mut writes=HashSet::new();let mut callees=BTreeMap::new();
         for node in root.descendants(){
             self.control.check().map_err(|e|e.to_string())?;
+            self.index_research_callables(file_index,&node,&syntax_errors,&mut index.callable_owners)?;
             if let Some(stat)=emmylua_parser::LuaAssignStat::cast(node.clone()) {for expr in stat.get_var_and_expr_list().0 {writes.insert(source_site(expr.to_expr().get_range()));}}
             if let Some(stat)=emmylua_parser::LuaFuncStat::cast(node.clone()) && let Some(name)=stat.get_func_name(){writes.insert(source_site(name.to_expr().get_range()));}
             if let Some(call)=emmylua_parser::LuaCallExpr::cast(node.clone()) && let Some(prefix)=call.get_prefix_expr(){
@@ -145,7 +156,7 @@ impl PreparedSnapshot {
                 if !(site.file==owner.file&&site.start>=owner.start&&site.end<=owner.end){roles.push(ReferenceRole::Capture)}
             }
             index.references_by_site.insert(site,index.references.len());
-            index.references.push(IndexedReference{id:digest(&(self.inputs.identity_sha256(),"syntax_reference",site.public(&self.inputs))),site,declaration,roles});
+            index.references.push(IndexedReference{id:digest(&(self.inputs.identity_sha256(),"syntax_reference",site.public(&self.inputs))),site,declaration,roles,closure});
         }
         Ok(index)
     }

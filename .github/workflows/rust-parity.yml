@@ -175,6 +175,12 @@ jobs:
       - name: Execute fixed Go Lua addon profiles and pure protocol fixtures
         if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' && steps.formal_lua.outcome == 'success' }}
         run: node tools/rust-formal-lua.mjs run .tmp/ci-formal-lua-runtime/build-report.json .tmp/ci-cli-artifact/artifact.json
+      - name: Check formal Lua bridge selection and completion assertions
+        if: ${{ !cancelled() }}
+        run: node --test tools/rust-formal-lua-bridge.test.mjs
+      - name: Execute real Driver against authenticated formal Lua peer
+        if: ${{ !cancelled() && steps.cli_binary.outcome == 'success' && steps.formal_lua.outcome == 'success' }}
+        run: node tools/rust-formal-lua-bridge.mjs
       - name: Run client metadata filesystem fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -312,6 +318,9 @@ jobs:
         # and reply_assembly_tests; native_research::tests matched zero tests.
         run: |
           node tools/rust-cargo.mjs --owner ci-source-research --one-shot -- test --locked --offline -p lycheedev-source --lib native_research:: -j 1
+      - name: Run incoming caller cursor and page identity regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-incoming-caller-cursor --one-shot -- test --locked --offline -p lycheedev-source --lib relations::incoming_caller_cursor_tests -j 1
       - name: Run native preparation and original line mapping regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

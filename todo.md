@@ -30,6 +30,8 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 - [ ] Synchronize fixed 3.2.1 Skill/protocol guidance and rebuild current oracle/test mappings; do not rename old passing evidence.
 - [ ] Complete G321-01–G321-06 automatically first; user/game checks remain at handover’s end.
 
+- [ ] Execute the reviewed v8 incoming-caller identity/cursor regressions and real Driver/formal-Lua nine-case bridge on the exact composed candidate; retain unresolved-owner and version-overlay boundaries.
+
 ## Current module work queue (derived from handover; no percentage claims)
 
 This is an execution view, not a second evidence authority. A component being implemented or independently source-reviewed does not check its complete parity box. Exact run/commit/hash evidence and limitations remain in handover.md.

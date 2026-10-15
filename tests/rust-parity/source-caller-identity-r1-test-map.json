@@ -1,0 +1,84 @@
+{
+  "schema": "lycheedev.source-caller-test-map.v1",
+  "baseCommit": "351fcfdaceb4c064179bad3839b5dc1e01aa2043",
+  "goOracle": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "tests": [
+    {
+      "name": "incoming_callers_distinguish_actual_owners_recursion_and_noncall_rows",
+      "path": "crates/lycheedev-source/src/native_research/caller_tests.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native_research::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "incoming_callers_stop_at_anonymous_and_recognize_exact_assignment_slots",
+      "path": "crates/lycheedev-source/src/native_research/caller_tests.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native_research::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "incoming_alias_calls_keep_reference_spelling_and_nearest_definition",
+      "path": "crates/lycheedev-source/src/native_research/caller_tests.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native_research::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "incoming_xml_callers_distinguish_wrappers_nested_functions_and_original_maps",
+      "path": "crates/lycheedev-source/src/native_research/caller_tests.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native_research::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "incoming_callers_match_authenticated_complete_retail_documents",
+      "path": "crates/lycheedev-source/src/native_research/caller_tests.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native_research::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "incoming_caller_missing_owner_is_explicit_and_cancellation_wins",
+      "path": "crates/lycheedev-source/src/native/sharing_tests.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "research_rule_cache_key_miss_accepts_unchanged_full_input_then_reuses",
+      "path": "crates/lycheedev-source/src/native_session.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "native_session::",
+      "wiring": "existing filter"
+    },
+    {
+      "name": "incoming_caller_v7_cursor_rejected_v8_pages_keep_every_proof_row",
+      "path": "crates/lycheedev-source/src/relations.rs",
+      "status": "NOT_RUN",
+      "windowsFilter": "relations::incoming_caller_cursor_tests",
+      "wiring": "coordinator add filter"
+    }
+  ],
+  "retainedRegressions": [
+    "impossible_file_filter_matches_full_scan_rows_charges_and_scope",
+    "indexed_projection_preserves_eager_rows_and_cross_xml_owners",
+    "incoming_projection_moves_exact_rows_and_replays_shared_costs",
+    "incoming_projection_large_result_falls_back_without_dropping_rows"
+  ],
+  "nodeCheckerExecution": {
+    "command": [
+      "node",
+      "--test",
+      "tests/rust-skill-usage/runner.test.mjs",
+      "tests/rust-source-native-acceptance/runner.test.mjs"
+    ],
+    "passed": 65,
+    "failed": 0,
+    "skipped": 0,
+    "scope": "checker-only; not Rust/CLI/source execution"
+  },
+  "rustSyntaxParsing": "rustfmt emit stdout only; nine files; exit 0; no type checking",
+  "productExecution": "NOT_RUN",
+  "sourceExecution": false
+}

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertExecutionAccounting, assertFullNative, assertNestedControllerRetired, extractXmlMaps, mappingDigest, rebuildXmlInventory, semanticOperationDigest, semanticPlanDigest, assertMaterial, assertPrerequisite, assertReuse, fixturePin, groupBudget} from './assertions.mjs';
 import {corpusDigest, sha256} from '../rust-source-full-corpus/assertions.mjs';
-const commit = 'a'.repeat(40), callsite = {path: 'a.lua', line: 2, kind: 'call', target: 'Helper', site: {file: 'a.lua', start: 20, end: 26}};
+const commit = 'a'.repeat(40), callsite = {source: 'Caller', referenceExpression: 'Helper', caller: {kind: 'named', name: 'Caller', line: 1}, path: 'a.lua', line: 2, kind: 'call', target: 'Helper', site: {file: 'a.lua', start: 20, end: 26}};
 const source = {'a.lua': 'function Caller()\n   Helper()\nend\n', 'Interface/AddOns/Blizzard_APIDocumentationGenerated/API.lua': 'local API = {}\n', 'Main.toc': 'a.lua\nui.xml\n', 'ui.xml': '<Ui><Frame><Scripts><OnLoad>print(1)</OnLoad></Scripts></Frame></Ui>\n'};
 const files = Object.entries(source).map(([path, text]) => ({path, bytes: Buffer.byteLength(text), sha256: sha256(Buffer.from(text))}));
 const originals = new Map(Object.entries(source).map(([path, text]) => [path, Buffer.from(text)]));
@@ -22,7 +22,7 @@ function sample(mode = 'session') {
   native.semanticExecution.answers = [{scope: {manifest: 'Main.toc', snapshot: 'e'.repeat(64)}, operations: native.semanticPlan.plan.operations.map((operation, index) => ({kind: operation.kind, operation: index, batch: 0, executed: index === 0, state: index === 0 ? 'partial' : 'unavailable', operationIdentity: semanticOperationDigest(operation)}))}];
   if (mode === 'one_shot') { delete native.nativeSession; native.lifecycle = {owner: 'source_owned_process', mode: 'one_shot', retired: true}; }
   return {commit, repository: oracle.repository, product: oracle.product, complete: false, truncated: false, coverage: {semantic: 'partial'}, semanticRuntime: {engine: 'native-common-source', rulesVersion: 'fixture'}, semanticAnalysis: structuredClone(analysis), nativeResearch: native,
-    relations: [{...structuredClone(callsite), basis: ['native_common_source_facts'], state: 'static_candidate', proof: 'proof', lexical: {state: 'known'}, observations: []}]};
+    relations: [{...structuredClone(callsite), caller: {kind: 'named', name: 'Caller', position: {path: 'a.lua', coveringRange: {start: {line: 0}}}, syntaxClosure: {file: 'a.lua', start: 15, end: 32}}, basis: ['native_common_source_facts'], state: 'static_candidate', proof: 'proof', lexical: {state: 'known'}, observations: []}]};
 }
 function material() { return {schema: 'lycheedev.source-research-material.v3', snapshot: {source: {exactCommit: commit, repository: oracle.repository, product: oracle.product}, files: Object.fromEntries(Object.entries(source).filter(([path]) => path.endsWith('.lua'))), load_documents: {'Main.toc': source['Main.toc'], 'ui.xml': source['ui.xml']}, environment_documents: {[files[1].path]: source[files[1].path]}, environment_manifest: {documents: 1}}}; }
 test('groups are bounded and never accept unknown or combined work', () => {
@@ -39,6 +39,9 @@ for (const [name, change] of [
   ['omitted TOC planning', r => { r.nativeResearch.loadEvidence = []; }],
   ['changed API environment', r => { r.nativeResearch.environmentManifest.identity.commit = '0'.repeat(40); }],
   ['static substitute', r => { r.relations[0].basis = ['static-extraction']; }],
+  ['false native self caller', r => { r.relations[0].source = 'Helper'; }],
+  ['missing native expression', r => { delete r.relations[0].referenceExpression; }],
+  ['wrong native caller location', r => { r.relations[0].caller.position.coveringRange.start.line++; }],
   ['wrong native byte site', r => { r.relations[0].site.start++; }],
   ['false resolved relation', r => { r.relations[0].state = 'resolved'; }],
   ['planned batches called executed', r => { r.nativeResearch.semanticPlan.resourceAccounting.executedSemanticBatches = 1; }],

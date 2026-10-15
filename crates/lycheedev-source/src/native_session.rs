@@ -980,6 +980,28 @@ mod semantic_admission_tests {
         QueryRequest{symbol:crate::index::Symbol{id:String::new(),kind:"declaration".into(),name:"Caller".into(),target:String::new(),category:"function".into(),confidence:String::new(),path:"a.lua".into(),line:1,end_line:130,signature:String::new(),scope:String::new(),ordinal:0},direction:direction.into()}
     }
     #[test]
+    fn research_rule_cache_key_miss_accepts_unchanged_full_input_then_reuses() {
+        let control=OperationControl::default();let mut snapshot=material();
+        snapshot.files.insert("a.lua".into(),"function Caller() return 1 end\n".into());
+        let old_key=storage::sha256(&serde_json::to_vec(&snapshot).unwrap());
+        let key=snapshot.cache_key(&control).unwrap();
+        assert_eq!(key,storage::sha256(&serde_json::to_vec(&(crate::native_research::RESEARCH_RULES,&snapshot)).unwrap()));
+        assert_ne!(key,old_key);
+        assert_ne!(key,storage::sha256(&serde_json::to_vec(&("source-native-research-v7-xml-script-ancestry",&snapshot)).unwrap()));
+        let mut cached=None;
+        let first=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        assert_eq!(first["nativeSession"]["cacheHit"],false);
+        assert_eq!(cached.as_ref().unwrap().key,key);
+        let phases=std::cell::RefCell::new(Vec::new());
+        let miss=execute_cached_query(&mut cached,None,Some(CachedQuery{key:old_key,query:query("incoming")}),&control,42,|phase,_|phases.borrow_mut().push(phase.to_owned())).unwrap_err();
+        assert_eq!(miss.code,"source.native_snapshot_missing");assert!(!phases.borrow().iter().any(|phase|phase=="querying"));
+        let restored=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();
+        assert_eq!(restored["nativeSession"]["cacheHit"],false);
+        let reused=execute_cached_query(&mut cached,None,Some(CachedQuery{key,query:query("incoming")}),&control,42,|_,_|{}).unwrap();
+        assert_eq!(reused["nativeSession"]["cacheHit"],true);assert_eq!(reused["nativeSession"]["snapshotTransfer"],"identity_only");
+        assert_eq!(restored["inputIdentity"],reused["inputIdentity"]);assert_eq!(restored["relations"],reused["relations"]);
+    }
+    #[test]
     fn cached_partial_queries_reach_quota_retire_analysis_and_allow_full_resend() {
         let control=OperationControl::default();let snapshot=material();let key=snapshot.cache_key(&control).unwrap();let mut cached=None;
         let value=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot:snapshot.clone(),query:query("incoming")}),None,&control,42,|_,_|{}).unwrap();

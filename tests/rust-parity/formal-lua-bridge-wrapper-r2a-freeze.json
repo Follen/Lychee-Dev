@@ -1,0 +1,156 @@
+{
+  "schema": "lycheedev.formal-lua-bridge-wrapper-freeze.v1",
+  "revision": 2,
+  "createdAt": "2026-10-15T12:59:23.350500+00:00",
+  "baseHead": "e06d32c87a111b45daf9be08bd646228dd4ccab0",
+  "stage": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-scratch/64f336cd-dd46-4437-80f6-54499b7e860e/stage-r2",
+  "status": "frozen_for_independent_review; pure Node selector/completion tests passed 21/21; Cargo/Lua/Windows/wrapper execution NOT_RUN",
+  "files": [
+    {
+      "path": "tools/rust-formal-lua-bridge.mjs",
+      "bytes": 13850,
+      "sha256": "5d114423434853351b04b342ce005a1e8e9bc12dfe2cf0bd3461bafb07997c6f"
+    },
+    {
+      "path": "tools/rust-formal-lua-bridge.test.mjs",
+      "bytes": 3297,
+      "sha256": "e4764474bb2f6a863b437ca1463ed53e2e84c978f566dc929bef93553a6d3f74"
+    }
+  ],
+  "references": [
+    {
+      "path": "release/rust-disk-policy.json",
+      "bytes": 160,
+      "sha256": "672e33453bcb1333e6e7ab0cbe267249ae93e0d53ff0800d560f723543290b6d",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    },
+    {
+      "path": "release/tools/luac.json",
+      "bytes": 929,
+      "sha256": "7dcd8631fcb97c713921a529caa0f9a8bb302dbd86d8ba23b03fa93d1918a1c9",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/assertions.mjs",
+      "bytes": 16337,
+      "sha256": "7d8f24c0994947f64849760e65dc93575fc4218d3dd493edf83b6d911c597953",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/go-test-map.json",
+      "bytes": 5897,
+      "sha256": "6980d5ce976dafff5a4f6aa7e2126dcfb65eee96ef353bb3c7b1419fecdea0f8",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/manifest.json",
+      "bytes": 26981,
+      "sha256": "9a4ffc0a482b0543bacb3065a56a79657ff7935b4d03b5ab2b9e321bce04f140",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    },
+    {
+      "path": "tests/rust-parity/rust-3.5.0-release-fields.mjs",
+      "bytes": 1209,
+      "sha256": "de5f159ca60c96d38ba38e1ab43ed1cfd1f750abbd56ee5364d12100127af020",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "tools/luac.mjs",
+      "bytes": 14228,
+      "sha256": "55e95cedf9ae3fc503623469fcd118d0feb41aef24d7bc2cc3e325408ffa7b94",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-build-auxiliary.json",
+      "bytes": 2742,
+      "sha256": "1c709b9e9ceaded3fc5efb1306d08e1650470fe5fef08e6931c765d4614dbe7b",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    },
+    {
+      "path": "tools/rust-build.mjs",
+      "bytes": 11915,
+      "sha256": "c73fbfe34ccc8069f641f8cbae3af17ea1261bb475cd865e9840171d727cb839",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-cargo.mjs",
+      "bytes": 1047,
+      "sha256": "8258a482d0e18ab0ee224b644bc27b23435a87b2c52e5cc462bab6c8c2a33914",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    },
+    {
+      "path": "tools/rust-disk.mjs",
+      "bytes": 11567,
+      "sha256": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-emmy-identity.mjs",
+      "bytes": 10193,
+      "sha256": "ecf1efe6a59d20b03427822ade8a2a29236ee97bb2750697218c7f38a064aa2c",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-formal-lua.mjs",
+      "bytes": 18649,
+      "sha256": "08d6250ac2180a3c98fe9ca39ece79879cf93ebf895a49790daf2fdfb68a8b59",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "tools/rust-owned-process.mjs",
+      "bytes": 3996,
+      "sha256": "618b5cecea59b0860f41b91d5cb9adf88e3f580706ae695e183499f150fe253c",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-owned-process.ps1",
+      "bytes": 41634,
+      "sha256": "1d55db6a6ba238122f6398b075ecaf1a2160ef4c0cd0fdb5c6c22e640e824fcf",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0",
+      "role": "runtime_identity_reference"
+    }
+  ],
+  "runtimeInterface": {
+    "command": "node tools/rust-formal-lua-bridge.mjs",
+    "arguments": "none accepted; fixed CI artifact paths",
+    "sequence": "existing sealed official Lua + sealed CLI candidate verification; existing runCargo --no-run captures unique exact compiler-artifact; copy/hash/seal test exe; separate registered bridge scratch/materialize/admission; existing ownedSpawnSync executes --test-threads=1 --nocapture; exactly nine tests with zero ignored/filtered; check inner lifetime proofs; seal journal/result/binary-record/pipe evidence; cleanup success only, retain all failures"
+  },
+  "limitations": [
+    "Version candidate and Rust R2 require independent review before integration.",
+    "Actual Rust build, official Lua, test executable and Windows lifetime cases NOT_RUN.",
+    "Inner Child/pipe/JobGuard checked-close gap remains explicitly reported.",
+    "Only the two owned wrapper files are integration candidates; reference files are never uploaded from this stage."
+  ],
+  "supersedesForAcceptance": {
+    "path": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/64f336cd-dd46-4437-80f6-54499b7e860e/wrapper-freeze-r1.json",
+    "sha256": "a26f2d8f564c5bdcab55aba6fcaa041587c359d6fedb87f8cbe4c5a1a4e9513c",
+    "priorOwnedFilesUnchanged": true
+  },
+  "changes": [
+    "All imported references rebuilt from exact e06 Git bytes, except explicitly identified version candidate formal-Lua/assertions/overlay composition.",
+    "Original R1 impure references retained as rejected evidence and excluded from candidate integration.",
+    "Add exact approved version overlay identity to support and admission; do not change original Go manifest."
+  ],
+  "checks": {
+    "nodeCheck": "passed",
+    "controllerTests": "21 passed; 0 failed/skipped/todo; parser-only; exact Git/version import closure",
+    "log": {
+      "path": "controller-tests-r2.log",
+      "bytes": 1050,
+      "sha256": "b648baa92077a352c696d1ebfcea1605486870ec44bc853f27f6869563ce7194"
+    },
+    "actualBuildLuaWindowsCI": "NOT_RUN"
+  },
+  "metadataRevision": "r2a",
+  "replacesMetadataOnly": {
+    "path": ".tmp/rust-disk/evidence/64f336cd-dd46-4437-80f6-54499b7e860e/wrapper-freeze-r2.json",
+    "sha256": "9bed88ee583b21e3186115da60f077213128a46f5b2a8b9a244aeed1e64804b5",
+    "reason": "R2 inherited stale R1 references alongside correct referenceFiles; r2a keeps only exact current references; candidate bytes/test execution unchanged"
+  }
+}

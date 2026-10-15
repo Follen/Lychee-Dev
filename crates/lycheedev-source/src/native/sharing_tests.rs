@@ -440,3 +440,90 @@ fn entry_line_lookup_preserves_typed_stop_causes() {
     assert_eq!(polls, 2);
     assert_eq!((actual.code, actual.exit_code), (expected.code, expected.exit_code));
 }
+
+#[test]
+fn incoming_caller_missing_owner_is_explicit_and_cancellation_wins() {
+    let control=control();
+    let input=graph_fixture_inputs(&control,false,"function Caller() Host() end\n",None);
+    let prepared=prepare(input,&control).unwrap();
+    let mut syntax=prepared.file_syntax(prepared.inputs.corpus.index["a.lua"]).unwrap();
+    let reference=syntax.references.iter().find(|reference|reference.roles.contains(&ReferenceRole::Call)).unwrap().clone();
+    assert!(reference.closure.is_some());syntax.callable_owners.clear();
+    let origins=crate::native_research::XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::new(),&[],&json!({}),&control).unwrap();
+    let mut row=json!({"source":"Host","target":"Host","kind":"call","proof":"unchanged"});
+    prepared.project_incoming_caller(&mut row,&syntax,&reference,&origins).unwrap();
+    assert_eq!(row["source"],"<unknown>");assert_eq!(row["caller"]["kind"],"unknown");assert!(row["caller"].get("name").is_none());
+    assert_eq!(row["referenceExpression"],"Host");assert_eq!(row["proof"],"unchanged");
+    control.cancel_handle().store(true,Ordering::Release);
+    assert_eq!(prepared.project_incoming_caller(&mut row,&syntax,&reference,&origins).unwrap_err().code,"command.cancelled");
+}
+
+// Defense-in-depth tests use the actual admitted parser and production name
+// predicate directly. ResearchSession still rejects these malformed documents;
+// this is not a fabricated successful native snapshot or product relation run.
+#[test]
+fn incoming_function_binding_rejects_parser_recovery_names() {
+    use emmylua_parser::{LuaLanguageLevel,LuaParser,ParserConfig,LuaParseErrorKind};
+    let cases=[
+        "function Obj.() Target() end",
+        "function Obj:() Target() end",
+        "function Obj[key]() Target() end",
+        "function Obj().Run() Target() end",
+        "function Obj()() Target() end",
+        "function Obj a) Target() end",
+        "function Obj(a Target() end",
+        "local function Obj.() Target() end",
+        "local function Obj[key]() Target() end",
+        "local function Obj()() Target() end",
+        "function BodyBroken() local x = ; Target() end",
+    ];
+    for malformed in cases {
+        let source=format!("function HealthyBefore() Target() end\nfunction Outer()\n{malformed}\nend\nfunction HealthyAfter() Target() end\n");
+        let tree=LuaParser::parse(&source,ParserConfig::with_level(LuaLanguageLevel::Lua51));
+        assert!(tree.has_syntax_errors(),"fixture must exercise real recovery: {malformed}");
+        let root=tree.get_red_root();
+        let errors=tree.get_errors().iter().filter(|error|error.kind==LuaParseErrorKind::SyntaxError).map(|error|error.range.start()).collect::<std::collections::BTreeSet<_>>();
+        let call_sites=||root.descendants().filter_map(emmylua_parser::LuaCallExpr::cast).filter(|call|{
+            matches!(call.get_prefix_expr(),Some(LuaExpr::NameExpr(name)) if name.get_name_text().as_deref()==Some("Target"))
+        }).map(|call|call.get_range()).collect::<Vec<_>>();
+        let before=call_sites();assert_eq!(before.len(),3,"recovery must retain each original Target call: {malformed}");
+        let control=control();
+        if ["function Obj.()","function Obj:()","function Obj[key]()","function Obj a)"].iter().any(|prefix|malformed.starts_with(prefix)) {
+            let offset=source.find(malformed).unwrap();
+            let stat=root.descendants().filter_map(LuaStat::cast).find(|stat|usize::from(stat.get_range().start())==offset).unwrap();
+            assert!(PreparedSnapshot::research_function_binding(&control,stat,&std::collections::BTreeSet::new()).unwrap().is_none(),"shape/header authentication is independently conservative: {malformed}");
+        }
+        let mut named=Vec::new();let mut unbound=0;
+        for stat in root.descendants().filter_map(LuaStat::cast).filter(|stat|matches!(stat,LuaStat::FuncStat(_)|LuaStat::LocalFuncStat(_))) {
+            match PreparedSnapshot::research_function_binding(&control,stat,&errors).unwrap() {
+                Some((_,name))=>named.push(source[usize::from(name.start())..usize::from(name.end())].to_string()),
+                None=>unbound+=1,
+            }
+        }
+        assert_eq!(named,["HealthyBefore","HealthyAfter"],"neither recovered name nor outer name is proven: {malformed}");
+        assert_eq!(unbound,2,"malformed function and containing declaration conservatively remain unbound");
+        assert_eq!(call_sites(),before,"name projection cannot remove, reorder, or mutate recovered syntax calls");
+        let middle=before[1];
+        let call=root.descendants().filter_map(emmylua_parser::LuaCallExpr::cast).find(|call|call.get_range()==middle).unwrap();
+        let nearest=call.syntax().ancestors().find_map(LuaClosureExpr::cast).unwrap();
+        let stat=nearest.syntax().parent().and_then(LuaStat::cast).unwrap();
+        assert!(PreparedSnapshot::research_function_binding(&control,stat,&errors).unwrap().is_none(),"do not inherit an outer callable for a recovered nearest closure");
+    }
+}
+
+#[test]
+fn incoming_function_binding_accepts_complete_headers_and_honors_control() {
+    use emmylua_parser::{LuaLanguageLevel,LuaParser,ParserConfig};
+    let source="function Plain(a, ...) Target(a) end\nfunction Obj.Deep:Method(a) Target(a) end\nlocal function Local() Target() end\nfunction Commented -- header comment\n(a) Target(a) end\n";
+    let tree=LuaParser::parse(source,ParserConfig::with_level(LuaLanguageLevel::Lua51));
+    assert!(!tree.has_syntax_errors());
+    let root=tree.get_red_root();let errors=std::collections::BTreeSet::new();let control=control();
+    let stats=root.descendants().filter_map(LuaStat::cast).filter(|stat|matches!(stat,LuaStat::FuncStat(_)|LuaStat::LocalFuncStat(_))).collect::<Vec<_>>();
+    let names=stats.iter().cloned().map(|stat|{
+        let(_,name)=PreparedSnapshot::research_function_binding(&control,stat,&errors).unwrap().expect("complete static function declaration");
+        &source[usize::from(name.start())..usize::from(name.end())]
+    }).collect::<Vec<_>>();
+    assert_eq!(names,["Plain","Obj.Deep:Method","Local","Commented"]);
+    control.cancel_handle().store(true,Ordering::Release);
+    assert!(PreparedSnapshot::research_function_binding(&control,stats[0].clone(),&errors).is_err());
+}

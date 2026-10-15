@@ -1,0 +1,311 @@
+{
+  "schema": "lycheedev.formal-lua-bridge-freeze.v1",
+  "revision": 2,
+  "createdAt": "2026-10-15T12:58:36.480964+00:00",
+  "baseHead": "e06d32c87a111b45daf9be08bd646228dd4ccab0",
+  "oracle": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "status": "frozen_for_independent_review; Rust/Cargo/Lua/Windows/CI NOT_RUN",
+  "stage": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-scratch/fedb440e-e623-48c1-88d8-31efe696462a/stage-r2",
+  "reference": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-scratch/fedb440e-e623-48c1-88d8-31efe696462a/reference-r2",
+  "files": [
+    {
+      "path": "crates/lycheedev-live/tests/formal_lua_bridge.rs",
+      "bytes": 13037,
+      "sha256": "7665e2f99f519bcb0ef18561e409b959615f966ec3271e5f7f0ad29727ffff49"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/support/formal_lua_fixture.rs",
+      "bytes": 14751,
+      "sha256": "81330c19ad27fc4bb82a9a668de08beb614861bb5e95dfe2586a022a6739d3f7"
+    },
+    {
+      "path": "crates/lycheedev-live/tests/support/formal_lua_peer.rs",
+      "bytes": 23609,
+      "sha256": "408ac17ae453e70c40f6af4ee6482b21e2e3c1879e2d86b474c9d9bb7dbeec7e"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "Cargo.toml",
+      "bytes": 1911,
+      "sha256": "6cb48b0496921b037ad627ff78096b1fd563b379d353448865cd2e6a9bb7b65b",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 79886,
+      "sha256": "d636c9796991b4f25d3ab8088887db7618648826170b89a760be04aee3429f02",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "crates/lycheedev-live/Cargo.toml",
+      "bytes": 618,
+      "sha256": "dac6417f895e8e979569e7f815e8389b63abd433661422562b4fe35b41d138ee",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/mailbox.rs",
+      "bytes": 30314,
+      "sha256": "232d35440bee4acdd8a233c3823bfc5470f5e13b57b8e1194a7ed61a760ef4f9",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/mod.rs",
+      "bytes": 2262,
+      "sha256": "a24eff63f54e0c0e1aafab36f6cc71201f727b9b304528b4075df921d81688d1",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/driver.rs",
+      "bytes": 28680,
+      "sha256": "d8fe24415b28de399f70280d9a9e3bf7ef3c7d2381ff8724773313f629ab61d8",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/transactions.rs",
+      "bytes": 22746,
+      "sha256": "c40197f28efb16f42862ad22b54e2dc5a734091d13be9f3207cd55a9fcb98d40",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/observations.rs",
+      "bytes": 17052,
+      "sha256": "e6e65e71147a12359155e6effd32afeb1dd9f929f0d9826d8e88b10291883a81",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/state.rs",
+      "bytes": 27318,
+      "sha256": "e5276dca7b365d86c69df778581caa2280dbdf4fbb06bf8fe2eb467afc287df8",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/protocol.rs",
+      "bytes": 7805,
+      "sha256": "57716ef95466be867afed5e107f61b4a19b7faef1e9e7e49d40e48d6db7b8c36",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/input.rs",
+      "bytes": 13075,
+      "sha256": "ddb6378bde8799242e5aafddbda05678bf42d2b21597dffe48da6a426ae99293",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/wire.rs",
+      "bytes": 6702,
+      "sha256": "6a174b9bd738d35edc29d542b30812576e63a97a0074f839fb5813c54e16b4ee",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
+      "bytes": 12097,
+      "sha256": "255e2095bcda4da14233ee3a3793bb1a38490395edc0456638ae0446f6923652",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
+      "bytes": 39018,
+      "sha256": "d2ad72743b697f7f4c2368ae948fe5f3c4b4b73c5169e157b814da6ebe36780f",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/guarded_spawn.rs",
+      "bytes": 11733,
+      "sha256": "2715043e528e85a96aea813cb4f338623eff741a790ee82bf37b4c9cac9b9744",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/job.rs",
+      "bytes": 9109,
+      "sha256": "ad62bb8cc208eae27f08e00d6b509ba7ade3b072b3afabd5c31453a2b0a33495",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "bytes": 19456,
+      "sha256": "d0c2ad56d5122c07a4bb72e72f943342202af2ada3555d0ba1541324203e07d2",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-formal-lua.mjs",
+      "bytes": 18649,
+      "sha256": "08d6250ac2180a3c98fe9ca39ece79879cf93ebf895a49790daf2fdfb68a8b59",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "tools/rust-build.mjs",
+      "bytes": 11915,
+      "sha256": "c73fbfe34ccc8069f641f8cbae3af17ea1261bb475cd865e9840171d727cb839",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-cargo.mjs",
+      "bytes": 1047,
+      "sha256": "8258a482d0e18ab0ee224b644bc27b23435a87b2c52e5cc462bab6c8c2a33914",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tools/rust-disk.mjs",
+      "bytes": 11567,
+      "sha256": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/assertions.mjs",
+      "bytes": 16337,
+      "sha256": "7d8f24c0994947f64849760e65dc93575fc4218d3dd493edf83b6d911c597953",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/manifest.json",
+      "bytes": 26981,
+      "sha256": "9a4ffc0a482b0543bacb3065a56a79657ff7935b4d03b5ab2b9e321bce04f140",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/slot_driver_test.go",
+      "bytes": 8370,
+      "sha256": "5cc95a2e1aac012b406688c6306f727091167818e91d94f55589aa8df7547e3d",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tests/rust-parity/formal-lua-3.2.2/oracle/tests/protocol/slot_server.lua",
+      "bytes": 1639,
+      "sha256": "4974bce0f2aec5272795bc5504753b308baba2b0e39c89b720c09fd9efdc8f53",
+      "origin": "git:e06d32c87a111b45daf9be08bd646228dd4ccab0"
+    },
+    {
+      "path": "tests/rust-parity/rust-3.5.0-release-fields.mjs",
+      "bytes": 1209,
+      "sha256": "de5f159ca60c96d38ba38e1ab43ed1cfd1f750abbd56ee5364d12100127af020",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "addon/Core/Runtime.lua",
+      "bytes": 2615,
+      "sha256": "e43dd852d0447774215da803391bf7a130c384d2265b4cb402e1baa8bcebc0bd",
+      "origin": "version-350-beta-r1/stage"
+    },
+    {
+      "path": "addon/Lychee Dev.toc",
+      "bytes": 2005,
+      "sha256": "7d2594d5676dbe8e10c7a644873cd2e00b8cb26f4a539eb19ebbc81a1595d09c",
+      "origin": "version-350-beta-r1/stage"
+    }
+  ],
+  "dependencyScope": "Direct public API and fixture/runner identity references only; not a complete Cargo corresponding-source snapshot",
+  "tests": [
+    {
+      "name": "formal_lua_recovery_normal",
+      "fault": "normal",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_after_bind",
+      "fault": "bind",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_after_prepare",
+      "fault": "prepare",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_after_commit",
+      "fault": "commit",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_after_confirm",
+      "fault": "confirm",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_after_release",
+      "fault": "release",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_reload_bind",
+      "fault": "reload_bind",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_compile_error",
+      "fault": "compile_error",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    },
+    {
+      "name": "formal_lua_recovery_cleanup_error",
+      "fault": "cleanup_error",
+      "goTest": "TestSlotDriverLuaRecoveryWithoutBusinessReplay"
+    }
+  ],
+  "scope": [
+    "real formal Driver, shared slot_payload, codec and observe_records",
+    "real DurableChannelJournal close/acquire/load and durable operation result before release",
+    "unchanged authenticated fixed Go slot_server.lua and candidate addon",
+    "explicit fixture-only wall clock/readiness/input transport; no game/HWND/native input"
+  ],
+  "gaps": [
+    "TestMemoryRecordLuaParity NOT_RUN",
+    "TestSlotDriverLuaReportPreservesFiniteNumbers NOT_RUN",
+    "Inner Child/pipe/JobGuard use standard Drop-close semantics; independently checked inner handle closes unavailable",
+    "Parent input queue closes before Job termination; writer-owned actual stdin closes when blocked write is released and worker finishes",
+    "Expected-case lifetime controls are implemented but timeout/pipe-fault ownership behavior remains NOT_RUN"
+  ],
+  "runner": {
+    "proposedPath": "tools/rust-formal-lua-bridge.mjs",
+    "state": "separate wrapper R2 candidate ready for review; actual runtime NOT_RUN",
+    "build": "runCargo test --locked --offline -p lycheedev-live --test formal_lua_bridge --no-run --message-format=json-render-diagnostics -j 1; exact executable sealed before bridge runtime",
+    "execute": "existing ownedSpawnSync of exact sealed formal_lua_bridge executable with --test-threads=1; expected 9 passed, 0 failed, 0 ignored, 0 filtered",
+    "environment": "LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION",
+    "admission": {
+      "interpreter": {
+        "report": "existing official interpreter build-report.json",
+        "reportSHA256": "verifyInterpreter.reportSHA256",
+        "buildReceiptSHA256": "verifyInterpreter.buildReceiptSHA256"
+      },
+      "fixture": {
+        "root": "materialize into this bridge owner",
+        "manifestSHA256": "existing authenticated fixed Go manifest",
+        "releaseFieldsSHA256": "de5f159ca60c96d38ba38e1ab43ed1cfd1f750abbd56ee5364d12100127af020"
+      },
+      "scratch": {
+        "receipt": "this bridge beginScratch receipt",
+        "cases": "exclusive directory inside same bridge owner"
+      }
+    },
+    "validationResponsibility": "Existing verifyInterpreter owns full official-source/compiler/receipt authentication; existing authenticate/materialize owns fixed fixture closure. Rust pins their exact identities and permitted source literals; no PATH lookup or arbitrary executable/fixture consumer. Wrapper must pre/post verify source/executable/fixture identities, seal failures, retain failed or unresolved scratch."
+  },
+  "staticChecks": {
+    "rustfmt": "passed --check for all three; one earlier command had a path typo and did not inspect a file",
+    "overlayExtractionAndReverseWholeFileProof": "passed static only",
+    "caseCount": 9,
+    "unsafe": "all three forbid unsafe",
+    "R1OwnedFiles": "unchanged byte for byte",
+    "mainProductFilesEdited": false,
+    "CargoRustcLuaWindowsCI": "NOT_RUN"
+  },
+  "supersedesForAcceptance": {
+    "path": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/fedb440e-e623-48c1-88d8-31efe696462a/bridge-freeze-r1.json",
+    "sha256": "8965b61dc0a9084fcaf58b696d95c83494a323e9b743204fa581ddc93ec887ec",
+    "priorOwnedFilesUnchanged": true
+  },
+  "changes": [
+    "Set unresolved before launch and catch setup/exercise together; only explicit verified retirement clears the blocker.",
+    "Retain exact existing OwnedPeer independently via small PeerOwner Rc; Driver rejection or missing slot cannot discard the only process owner.",
+    "Restart completes fallible journal reopen/load/state comparison before moving the original Backend.",
+    "Never infer successful cleanup from absent Driver/owner or Drop; case-outcome retains setup and cleanup facts.",
+    "First close attempt is terminal; failed retirement cannot renew its deadline in Drop.",
+    "Keep original Go manifest bytes and verify separately pinned exact 3.5.0 overlay plus reverse whole-file Go hashes."
+  ],
+  "compositionStatus": "Version overlay candidate still requires coordinator independent acceptance; direct reference set is not a complete Cargo build tree."
+}

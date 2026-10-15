@@ -75,6 +75,13 @@
       "end": 3960
     },
     "siteText": "GetActionButtonForID",
-    "scope": "Native original use token. Incoming native source labels describe the reference expression; structural caller identity ActionButtonDown remains separately checked."
+    "scope": "Native call source is the nearest syntax-authenticated callable; referenceExpression keeps the original callee token. Caller identity does not strengthen selected-value observations or completeness.",
+    "source": "ActionButtonDown",
+    "referenceExpression": "GetActionButtonForID",
+    "caller": {
+      "kind": "named",
+      "name": "ActionButtonDown",
+      "line": 136
+    }
   }
 }

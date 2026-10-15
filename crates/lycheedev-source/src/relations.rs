@@ -299,27 +299,7 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             data["semanticAnalysis"] = json!({"state":analysis["state"],"cacheHit":analysis["cacheHit"]==true,"queryCount":analysis["results"].as_array().map_or(0,Vec::len),"queryBatches":analysis["queryBatches"],"workspaceCoverage":analysis["coverage"],"positionCoverage":analysis["positionCoverage"]});
             relations.extend(semantic);
         }
-        relations.sort_by(|a, b| {
-            a["path"]
-                .as_str()
-                .cmp(&b["path"].as_str())
-                .then(a["line"].as_u64().cmp(&b["line"].as_u64()))
-                .then(a["kind"].as_str().cmp(&b["kind"].as_str()))
-                .then(a["source"].as_str().cmp(&b["source"].as_str()))
-                .then(a["target"].as_str().cmp(&b["target"].as_str()))
-        });
-        if offset > relations.len() {
-            return Err(invalid(
-                "codebase.invalid_search_cursor",
-                "relation cursor exceeds available results",
-            ));
-        }
-        let end = relations.len().min(offset + limit);
-        data["truncated"] = json!(end < relations.len() || overflow);
-        if end < relations.len() {
-            data["nextCursor"] = json!(format!("{key}:{end}"));
-        }
-        data["relations"] = json!(&relations[offset..end]);
+        project_relation_page(&mut data,&mut relations,offset,&key,limit,overflow)?;
         if overflow {
             reasons.push("matching structural relations exceeded 10000-entry budget");
         }
@@ -354,6 +334,32 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
         environment: client_environment,
         load_facts,
     })
+}
+// Keep proof rows independent, sorted before the unchanged public page cut.
+// Factored only so the real pagination path is exercised by the caller tests.
+fn project_relation_page(data:&mut Value,relations:&mut Vec<Value>,offset:usize,key:&str,limit:usize,overflow:bool)->Result<()> {
+        relations.sort_by(|a, b| {
+            a["path"]
+                .as_str()
+                .cmp(&b["path"].as_str())
+                .then(a["line"].as_u64().cmp(&b["line"].as_u64()))
+                .then(a["kind"].as_str().cmp(&b["kind"].as_str()))
+                .then(a["source"].as_str().cmp(&b["source"].as_str()))
+                .then(a["target"].as_str().cmp(&b["target"].as_str()))
+        });
+        if offset > relations.len() {
+            return Err(invalid(
+                "codebase.invalid_search_cursor",
+                "relation cursor exceeds available results",
+            ));
+        }
+        let end = relations.len().min(offset + limit);
+        data["truncated"] = json!(end < relations.len() || overflow);
+        if end < relations.len() {
+            data["nextCursor"] = json!(format!("{key}:{end}"));
+        }
+        data["relations"] = json!(&relations[offset..end]);
+    Ok(())
 }
 fn relation_cursor(
     inv: &Invocation, source: &selection::SourcePin, limit: usize, direction: &str,
@@ -826,5 +832,51 @@ mod cache_tests {
         drop(store);
         drop(cache);
         std::fs::remove_dir_all(&home).unwrap();
+    }
+}
+
+#[cfg(all(test,feature="emmy-prototype"))]
+mod incoming_caller_cursor_tests {
+    use super::*;
+    fn fixture()->(Invocation,selection::SourcePin) {
+        (Invocation{command:"source refs".into(),positional:None,flags:std::collections::BTreeMap::from([("--symbol".into(),"GetActionButtonForID".into())]),home:Default::default(),cwd:Default::default(),control:Default::default()},
+         selection::SourcePin{repository:"wow-ui-source".into(),product:"retail".into(),requested_ref:"fixed".into(),exact_commit:"31c7f7b9cc79e56c986b365c06a6afbcf3c9177b".into(),parser_revision:"source-v1".into()})
+    }
+    #[test]
+    fn incoming_caller_v7_cursor_rejected_v8_pages_keep_every_proof_row() {
+        let (mut inv,source)=fixture();let rules=crate::native_research::RESEARCH_RULES;
+        let(_,old)=relation_cursor(&inv,&source,2,"incoming","source-native-research-v7-xml-script-ancestry",None).unwrap();
+        let(_,key)=relation_cursor(&inv,&source,2,"incoming",rules,None).unwrap();assert_ne!(old,key);
+        inv.flags.insert("--cursor".into(),format!("{old}:2"));
+        assert_eq!(relation_cursor(&inv,&source,2,"incoming",rules,None).unwrap_err().code,"codebase.invalid_search_cursor");
+        inv.flags.remove("--cursor");
+        // Same corrected caller across two independent scopes is intentionally
+        // still two native rows plus its structural proof. Source ties preserve
+        // append order under Rust's stable sort; no deduplication is permitted.
+        let mut input=Vec::new();
+        for(path,line,name)in [("ActionButton.lua",141,"ActionButtonDown"),("ActionButton.lua",156,"ActionButtonUp"),("Keybindings.lua",318,"KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame")] {
+            for basis in ["static","classic","mainline"] {
+                input.push(json!({"path":path,"line":line,"kind":"call","source":name,"target":"GetActionButtonForID","proof":format!("{name}:{basis}"),"basis":[basis]}));
+            }
+        }
+        // A source-name tie-breaker really participates in the production sort.
+        input.push(json!({"path":"ActionButton.lua","line":141,"kind":"call","source":"AFirst","target":"GetActionButtonForID","proof":"ordered-first"}));
+        input.insert(0,json!({"path":"ActionButton.lua","line":141,"kind":"call","source":"ZLast","target":"GetActionButtonForID","proof":"ordered-last"}));
+        let expected=["ordered-first","ActionButtonDown:static","ActionButtonDown:classic","ActionButtonDown:mainline","ordered-last","ActionButtonUp:static","ActionButtonUp:classic","ActionButtonUp:mainline","KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame:static","KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame:classic","KeyBindingFrameBindingTemplateMixin:DetermineHighlightFrame:mainline"];
+        let mut collected=Vec::new();let mut pages=0;
+        loop {
+            let(offset,current)=relation_cursor(&inv,&source,2,"incoming",rules,None).unwrap();assert_eq!(current,key);
+            let mut rows=input.clone();let mut data=json!({"coverage":{"semantic":"partial"},"complete":false});
+            project_relation_page(&mut data,&mut rows,offset,&key,2,false).unwrap();pages+=1;
+            assert_eq!(data["coverage"]["semantic"],"partial");assert_eq!(data["complete"],false);
+            let page=data["relations"].as_array().unwrap();assert!(page.len()<=2);
+            collected.extend(page.iter().map(|row|row["proof"].as_str().unwrap().to_owned()));
+            if let Some(next)=data["nextCursor"].as_str(){assert_eq!(data["truncated"],true);inv.flags.insert("--cursor".into(),next.into());}
+            else{assert_eq!(data["truncated"],false);break;}
+        }
+        assert_eq!(pages,6);assert_eq!(collected,expected);
+        let mut rows=input;let mut data=json!({});project_relation_page(&mut data,&mut rows,0,&key,200,true).unwrap();
+        assert_eq!(data["relations"].as_array().unwrap().len(),11);assert_eq!(data["truncated"],true);
+        assert_eq!(project_relation_page(&mut data,&mut rows,12,&key,2,false).unwrap_err().code,"codebase.invalid_search_cursor");
     }
 }

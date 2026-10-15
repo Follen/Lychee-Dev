@@ -109,7 +109,7 @@ test('truncation and unavailable semantics cannot be reported complete', () => {
 function nativeResult() {
   const analysis = {engine: 'native_common_facts', state: 'partial', inputIdentity: 'a'.repeat(64), sourceFiles: oracle.counts['.lua'], sourceExecution: false};
   return {complete: false, truncated: false, coverage: {semantic: 'partial'}, semanticRuntime: {engine: 'native-common-source', rulesVersion: 'synthetic-checker-rules'}, semanticAnalysis: structuredClone(analysis),
-    relations: [{path: workflow.nativeCallsite.path, line: workflow.nativeCallsite.line, target: workflow.nativeCallsite.target, kind: 'call', state: 'static_candidate',
+    relations: [{source: workflow.nativeCallsite.source, referenceExpression: workflow.nativeCallsite.referenceExpression, caller: {kind: 'named', name: workflow.nativeCallsite.source, position: {path: workflow.nativeCallsite.path, coveringRange: {start: {line: 135}}}, syntaxClosure: {file: workflow.nativeCallsite.path, start: 3850, end: 4100}}, path: workflow.nativeCallsite.path, line: workflow.nativeCallsite.line, target: workflow.nativeCallsite.target, kind: 'call', state: 'static_candidate',
       basis: ['native_common_source_facts'], site: structuredClone(workflow.nativeCallsite.site), proof: 'synthetic-reference-identity', lexical: {state: 'unavailable', reason: 'synthetic partial fixture'}, observations: []}],
     nativeResearch: {schema: 'lycheedev.source-native-research.v1', entryEvidence: {sourceExecution: false}, analysis, inputIdentity: analysis.inputIdentity,
       lifecycle: {owner: 'source_owned_process', mode: 'one_shot', retired: true}}};
@@ -142,6 +142,9 @@ test('native metadata plus structural-only rows cannot impersonate native-origin
     row => { row.relations = []; }, row => { row.relations[0].basis = ['static-extraction']; },
     row => { row.relations[0].line++; }, row => { row.relations[0].kind = 'reference'; }, row => { row.relations[0].target = 'Other'; },
     row => { row.relations[0].site.start++; }, row => { row.relations[0].site.end++; }, row => { row.relations[0].site.file = 'other.lua'; },
+    row => { row.relations[0].source = row.relations[0].target; }, row => { delete row.relations[0].referenceExpression; },
+    row => { delete row.relations[0].caller; }, row => { row.relations[0].caller.kind = 'anonymous'; }, row => { row.relations[0].caller.name = 'Wrong'; },
+    row => { row.relations[0].caller.position.coveringRange.start.line++; }, row => { row.relations[0].caller.syntaxClosure.start = row.relations[0].site.start; },
     row => { delete row.relations[0].proof; }, row => { delete row.relations[0].lexical; }, row => { delete row.relations[0].observations; },
     row => { row.relations[0].state = 'resolved'; },
     row => { row.relations[0].state = 'resolved'; row.relations[0].observations = [{proof: 'fixture-proof', occurrence: {kind: 'entry'}, selected: {state: 'unavailable'}}]; },

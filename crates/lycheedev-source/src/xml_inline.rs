@@ -27,6 +27,11 @@ fn span(value:&Value)->Span{
     Span::new(value["start"].as_u64().expect("serialized span start")as usize,value["end"].as_u64().expect("serialized span end")as usize)
 }
 impl Script {
+    /// The only generated root closure spans the authenticated decoded body.
+    /// Nested user closures cannot cross either synthetic wrapper boundary.
+    pub(crate) fn is_syntax_wrapper(&self,start:usize,end:usize)->bool{
+        matches!(self.kind.as_str(),"handler"|"binding")&&start<self.body.start&&end>self.body.end
+    }
     pub fn body_text(&self)->&str{&self.compiler.text[self.body.start..self.body.end]}
     /// Tree-sitter fact rows count LF bytes. Project that decoded body line
     /// through the same segments as native generated sites, including entities.

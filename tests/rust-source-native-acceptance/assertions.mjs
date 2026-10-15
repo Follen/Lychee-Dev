@@ -2,7 +2,7 @@
 // corpus manifest and actual public CLI/native-session observations.
 import assert from 'node:assert/strict';
 import {assertCorpus, corpusDigest, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {assertBoundedCoverage, assertNativeEvidence} from '../rust-skill-usage/assertions.mjs';
+import {assertBoundedCoverage, assertNativeCaller, assertNativeEvidence} from '../rust-skill-usage/assertions.mjs';
 
 export const GROUPS = Object.freeze({full: 1200000, quota: 600000, idle: 150000, lifetime: 720000});
 export function groupBudget(group) { assert(Object.hasOwn(GROUPS, group), 'unknown acceptance group'); return GROUPS[group]; }
@@ -58,8 +58,10 @@ export function assertFullNative(result, oracle, manifest, callsite, {mode = 'on
     assert(native.nativeSession.batches >= plan.batch_sizes.length && native.nativeSession.batches <= 256);
     assert.equal(native.nativeSession.analysisRetired, native.nativeSession.batches === 256);
     if (callsite) {
-    const row = result.relations.find(row => row.basis?.includes('native_common_source_facts') && ['path', 'line', 'kind', 'target'].every(key => row[key] === callsite[key]));
-    assert(row, 'exact native original callsite'); assert.deepEqual(row.site, callsite.site);
+    const rows = result.relations.filter(row => row.basis?.includes('native_common_source_facts') && ['path', 'line', 'kind', 'target'].every(key => row[key] === callsite[key]));
+    assert(rows.length > 0, 'exact native original callsite');
+    for (const row of rows) {
+    assert.deepEqual(row.site, callsite.site); assertNativeCaller(row, callsite);
     assert(['resolved', 'static_candidate'].includes(row.state));
     assert(typeof row.proof === 'string' && row.proof.length > 0);
     assert(['known', 'known_absent', 'unavailable', 'not_applicable', 'selector_required'].includes(row.lexical?.state));
@@ -70,6 +72,7 @@ export function assertFullNative(result, oracle, manifest, callsite, {mode = 'on
       assert(['known', 'known_absent', 'unavailable', 'not_applicable', 'selector_required'].includes(observation.selected?.state));
     }
     if (row.state === 'resolved') assert(row.observations.length > 0 && row.observations.every(observation => observation.selected?.state === 'known'));
+    }
     }
   }
   return native;
