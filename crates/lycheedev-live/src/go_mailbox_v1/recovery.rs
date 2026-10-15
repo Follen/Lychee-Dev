@@ -9,7 +9,7 @@ use super::observations::{Backend, ChannelError, ChannelResult};
 use super::state::{
     Blocker, CleanupMethod, DEFAULT_CLOSE_MILLIS, DEFAULT_CONNECT_MILLIS, DEFAULT_RECOVERY_MILLIS,
     DurableBudget, OperationPolicy, OperationStage, RecoveryPhase, ReloadPhase, ResultBytes,
-    RuntimeRecovery, State,
+    RuntimeRecovery, SlotBudgetSource, State,
 };
 use super::transactions::join_errors;
 use lycheedev_core::control::OperationControl;
@@ -39,6 +39,11 @@ pub(super) fn budget_exhausted(rollback: bool) -> ChannelError {
 /// views explicitly. Only this operation's named automatic reload is linked;
 /// an older completed reload must not contaminate a later operation's budget.
 pub(super) fn synchronize_automatic_budget(state: &mut State) -> ChannelResult<bool> {
+    // New slot activation borrows a pre-existing goal. JSON loses Go's pointer
+    // alias, so merge only the exact origin/deadline, never mint a new budget.
+    if state.reload.as_ref().is_some_and(|r| r.automatic && r.slot_enablement && r.request.starts_with("slots-")) {
+        return synchronize_slot_budget(state);
+    }
     let (Some(op), Some(reload)) = (&state.operation, &state.reload) else {
         return Ok(false);
     };
@@ -80,6 +85,41 @@ pub(super) fn synchronize_automatic_budget(state: &mut State) -> ChannelResult<b
     let changed = op.recovery_budget.as_ref() != Some(&merged)
         || reload.recovery_budget.as_ref() != Some(&merged);
     state.operation.as_mut().unwrap().recovery_budget = Some(merged.clone());
+    state.reload.as_mut().unwrap().recovery_budget = Some(merged);
+    Ok(changed)
+}
+
+fn synchronize_slot_budget(state: &mut State) -> ChannelResult<bool> {
+    let reload = state.reload.as_ref().unwrap();
+    // Exact Go Load JSON has no source marker and restores independent values.
+    // Keep those values independent; missing metadata never authorizes guessing.
+    let Some(source) = reload.slot_budget_source.as_ref() else { return Ok(false); };
+    let selected = match source {
+        SlotBudgetSource::Connect => Goal::Connect,
+        SlotBudgetSource::Close => Goal::Close,
+        SlotBudgetSource::Operation { operation_id } => {
+            if !state.operation.as_ref().is_some_and(|op| &op.id == operation_id) {
+                return Ok(false);
+            }
+            Goal::Operation
+        }
+    };
+    let Some(reload_budget) = reload.recovery_budget.as_ref() else { return Ok(false); };
+    let Some(original) = goal_budget(state, selected) else { return Ok(false); };
+    if original.started_at_ms != reload_budget.started_at_ms || original.deadline_ms != reload_budget.deadline_ms {
+        return Ok(false);
+    }
+    original.validate()?; reload_budget.validate()?;
+    let merged = DurableBudget {
+        started_at_ms: original.started_at_ms, deadline_ms: original.deadline_ms,
+        last_observed_ms: original.last_observed_ms.max(reload_budget.last_observed_ms),
+        exhausted: original.exhausted || reload_budget.exhausted,
+        clock_rollback: original.clock_rollback || reload_budget.clock_rollback,
+        legacy: original.legacy || reload_budget.legacy,
+    };
+    merged.validate()?;
+    let changed = original != &merged || reload_budget != &merged;
+    *goal_budget_mut(state, selected) = Some(merged.clone());
     state.reload.as_mut().unwrap().recovery_budget = Some(merged);
     Ok(changed)
 }
@@ -173,7 +213,7 @@ pub(super) fn terminal_operation(stage: OperationStage) -> bool {
         OperationStage::Complete | OperationStage::Cancelled | OperationStage::ExecutionUnknown
     )
 }
-fn goal_budget(state: &State, goal: Goal) -> Option<&DurableBudget> {
+pub(super) fn goal_budget(state: &State, goal: Goal) -> Option<&DurableBudget> {
     match goal {
         Goal::Reload => state
             .reload
@@ -422,6 +462,17 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             .is_some_and(|r| r.phase != RecoveryPhase::Complete)
         {
             if candidate_matches(&self.state.identity, &candidate) {
+                let activation_before_bind = self.state.reload.as_ref().is_some_and(|r| {
+                    r.slot_enablement && r.from == self.state.identity.runtime
+                        && matches!(r.phase, ReloadPhase::Intent | ReloadPhase::InputAttempted)
+                }) && !self.state.bound && self.state.transaction.is_none()
+                    && self.state.recovery.as_ref().unwrap().phase == RecoveryPhase::Binding;
+                if activation_before_bind {
+                    self.state.identity = candidate;
+                    self.state.reload.as_mut().unwrap().phase = ReloadPhase::Binding;
+                    self.save(control, "slot_enable_recovery_candidate")?;
+                    return self.finish_recovery(control);
+                }
                 return Err(ChannelError::Blocked(Blocker {
                     kind: "runtime_changed_during_recovery".into(),
                     runtime: candidate.runtime,

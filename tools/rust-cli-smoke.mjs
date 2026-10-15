@@ -6,8 +6,8 @@ import { verifyArtifact } from './rust-build.mjs';
 import { beginScratch } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { GO_COMMIT } from '../tests/rust-parity/oracle.mjs';
-import { loadCurrentFixture } from '../tests/rust-parity/oracle-3.2.1.mjs';
-import { compareDescribeContract, compareCurrentDescribeContract } from '../tests/rust-parity/describe-contract.mjs';
+import { loadCurrentFixture } from '../tests/rust-parity/oracle-3.2.2.mjs';
+import { compareDescribeContract, compareCurrentDescribeContract, compareRelease322DescribeContract } from '../tests/rust-parity/describe-contract.mjs';
 
 const frozenOracle = loadCurrentFixture;
 
@@ -52,8 +52,9 @@ export function runCliSmoke(root, recordPath, {mode = 'admission', verify = veri
       const envelope = JSON.parse(readFileSync(stdout, 'utf8'));
       if (mode === 'contract') {
         // Explicit historical injection remains available to old checker fixtures;
-        // production loadCurrentFixture always authenticates the current 10b oracle.
-        const compareContract = frozen.oracle.oracle.commit === GO_COMMIT ? compareDescribeContract : compareCurrentDescribeContract;
+        // production loadCurrentFixture always authenticates the current 0bec oracle.
+        const compareContract = frozen.oracle.oracle.commit === GO_COMMIT ? compareDescribeContract
+          : frozen.oracle.oracle.commit === '10b561db5706702cd42e047eaeed4ccb5e825351' ? compareCurrentDescribeContract : compareRelease322DescribeContract;
         contract = {...compareContract(frozen.oracle, envelope),
           binarySHA256: artifact.binarySHA256, sourceTreeSHA256: artifact.inputHashes?.sourceTree,
           fixtureSHA256: frozen.fixtureSHA256, observation: observations[index]};

@@ -6,13 +6,13 @@ use super::driver::{Clock, Driver, TokenSource, budget, error, pending};
 use super::journal::StateJournal;
 use super::observations::{Backend, ChannelError, ChannelResult};
 use super::recovery::{
-    InvocationStop, budget_exhausted, find_blocker, goal, has_code, join_result, terminal_operation,
+    Goal, InvocationStop, budget_exhausted, find_blocker, goal, goal_budget, has_code, join_result, terminal_operation,
 };
 use super::runtime_retirement::{RetirementTarget, RuntimeRetirementBackend, retirement_pending};
 use super::slot_allocation::operation_needs_reload;
 use super::state::{
     CleanupMethod, DEFAULT_RECOVERY_MILLIS, InputKind, OperationStage, RecoveryPhase,
-    ReloadAttempt, ReloadPhase, SlotEnvelope, State, validate_request,
+    ReloadAttempt, ReloadPhase, SlotBudgetSource, SlotEnvelope, State, validate_request,
 };
 use super::transactions::join_errors;
 use lycheedev_core::control::OperationControl;
@@ -79,6 +79,45 @@ fn known_input_blocker(reason: &str) -> bool {
 }
 
 impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
+    /// Fixed Go 3.2.2 startup activation borrows the original goal deadline.
+    /// Later unbound runtimes can request another reload without replacing the
+    /// original explicit request, business evidence or recovery transaction.
+    pub(super) fn request_slot_reload(&mut self, control: &OperationControl) -> ChannelResult<()> {
+        self.check(control)?;
+        let runtime = self.state.identity.runtime.clone();
+        if let Some(reload) = self.state.reload.as_mut().filter(|r| r.phase != ReloadPhase::Complete) {
+            if reload.from == runtime || reload.phase != ReloadPhase::Binding {
+                return Err(pending());
+            }
+            reload.from = runtime;
+            reload.phase = ReloadPhase::Intent;
+            reload.slot_enablement = true;
+        } else {
+            let selected = goal(&self.state).unwrap_or(Goal::Connect);
+            let original_budget = goal_budget(&self.state, selected).cloned();
+            let source = match selected {
+                Goal::Connect => SlotBudgetSource::Connect,
+                Goal::Close => SlotBudgetSource::Close,
+                Goal::Operation => SlotBudgetSource::Operation {
+                    operation_id: self.state.operation.as_ref().unwrap().id.clone(),
+                },
+                // An active reload was handled above; never invent another link.
+                Goal::Reload => return Err(error("live.channel_budget_invalid")),
+            };
+            self.state.reload = Some(ReloadAttempt {
+                request: format!("slots-{runtime}"), from: runtime,
+                phase: ReloadPhase::Intent, automatic: true, slot_enablement: true,
+                // A nil Go pointer creates no alias to a future migrated budget.
+                slot_budget_source: original_budget.as_ref().map(|_| source),
+                reconcile_pending: true, recovery_budget: original_budget,
+                input_step: 0, patch_transitions: 0,
+            });
+        }
+        self.waiting.clear();
+        self.save(control, "slot_enable_reload_intent")?;
+        Err(error("live.channel_progress"))
+    }
+
     /// Explicit control intent preserves any uncertain exchange. Closing an
     /// unconfirmed initial bind is allowed, but never binds the replacement.
     pub fn request_reload(
@@ -123,6 +162,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
         }
         self.state.reload = Some(ReloadAttempt {
             automatic: false,
+            slot_enablement: false, slot_budget_source: None,
             recovery_budget: Some(budget(self.clock.unix_millis(), DEFAULT_RECOVERY_MILLIS)?),
             reconcile_pending: reconcile,
             request: request.into(),
@@ -290,6 +330,7 @@ impl<B: RuntimeRetirementBackend, J: StateJournal, C: Clock, T: TokenSource> Dri
             if let Some(request) = request {
                 self.state.reload = Some(ReloadAttempt {
                     automatic: true,
+                    slot_enablement: false, slot_budget_source: None,
                     recovery_budget: op.recovery_budget.clone(),
                     reconcile_pending: false,
                     request,
@@ -447,6 +488,7 @@ impl<B: RuntimeRetirementBackend, J: StateJournal, C: Clock, T: TokenSource> Dri
                         Ok(()) => continue,
                         Err(err) => {
                             let err = pending_observation(&self.state, err);
+                            if progress(&err) { continue; }
                             if has_code(&err, "live.channel_execution_unknown") && err.all_causes(&|c| matches!(c, ChannelError::Contract(e) if e.0 == "live.channel_execution_unknown"))
                                 && self.state.reload.as_ref().is_some_and(|r| r.phase == ReloadPhase::Binding) { continue; }
                             if !retryable_pending(&self.state, &err) {

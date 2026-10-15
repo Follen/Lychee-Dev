@@ -108,6 +108,15 @@ fn verify_status_owner(status: &Value, expected_owner: u32) -> Result<()> {
     Ok(())
 }
 
+/// Project the already-issued wire deadline onto the caller's monotonic clock.
+/// Sample Instant before UTC; serialization, startup and queue waits consume the
+/// same budget. The caller's original hard deadline is always the upper bound.
+fn exchange_deadline(wire_deadline:u64,now_unix_ms:u64,observed:Instant,caller:Instant)->Result<Instant> {
+    let remaining=admitted_request_remaining(wire_deadline,now_unix_ms)
+        .ok_or_else(||fault("Invalid native Source request deadline"))?;
+    Ok(caller.min(observed.checked_add(remaining).ok_or_else(||fault("Native request deadline range"))?))
+}
+
 fn reply_reserve(deadline: Instant) -> Duration {
     REPLY_RESERVE.min(deadline.saturating_duration_since(Instant::now()) / 4)
 }
@@ -226,7 +235,11 @@ fn execute_cached_query(cached:&mut Option<Cached>,work:Option<WorkerRequest>,re
         control.check()?;
         Ok(value)
     })();
-    if result.is_err()||cached.as_ref().is_some_and(|value|value.admission.exhausted()){*cached=None;}
+    if result.is_err()||cached.as_ref().is_some_and(|value|value.admission.exhausted()){
+        record("retiring_analysis",result.as_ref().err());
+        *cached=None;
+        record("analysis_retired",result.as_ref().err());
+    }
     result
 }
 
@@ -335,9 +348,11 @@ fn request(inv: &Invocation, action: Action, work: Option<WorkerRequest>) -> Res
 }
 fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<Option<Value>> {
     inv.control.check()?;
+    let observed=Instant::now();
+    let deadline=exchange_deadline(request.deadline_unix_ms,utc_ms()?,observed,inv.control.deadline())?;
     let scope = BrokerScope::for_native_source(&inv.home).map_err(platform)?;
     let mut stream =
-        match BrokerStream::connect(&scope, inv.control.deadline(), inv.control.cancel_handle()) {
+        match BrokerStream::connect(&scope, deadline, inv.control.cancel_handle()) {
             Ok(stream) => stream,
             Err(message) if message.starts_with("broker.not_found:") => return Ok(None),
             Err(message) => return Err(platform(message)),
@@ -367,10 +382,8 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
     write_frame(&mut stream, request, REQUEST_BYTES)?;
     // Leave retirement time inside the caller's original deadline. An observer
     // timeout is never a caller cancellation or permission to extend its budget.
-    let response_deadline = inv
-        .control
-        .deadline()
-        .checked_sub(reply_reserve(inv.control.deadline()) / 2)
+    let response_deadline = deadline
+        .checked_sub(reply_reserve(deadline) / 2)
         .unwrap_or_else(Instant::now);
     stream.set_deadline(response_deadline, inv.control.cancel_handle());
     let response: Response = match read_frame(&mut stream, RESPONSE_BYTES) {
@@ -382,7 +395,7 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
             let retired = retirement.retire(inv.control.deadline());
             let primary = inv.control.check().err().unwrap_or_else(|| ToolkitError::new(
                 "command.deadline",
-                "Source request exceeded its original deadline",
+                "Source request exceeded its original caller or wire deadline",
                 5,
             ));
             return Err(peer_failure(
@@ -761,16 +774,40 @@ fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
             idle_deadline = lifetime.idle_deadline(Instant::now());
         }
     })();
+    // Preserve the actual owner failure before destruction can consume the
+    // remaining reply budget. This diagnostic does not grant extra time or
+    // replace the authenticated transport outcome.
+    let terminal=inv.home.join("tmp/source-native-last-terminal.json");
+    let cleanup_started=Instant::now();
+    let terminal_record=|phase:&str,cleanup_error:Option<&ToolkitError>| {
+        let _=storage::atomic_json(&terminal,&json!({"schema":"lycheedev.native-source-terminal-diagnostic.v1",
+            "workerPid":own.identity().pid,"workerCreated":own.identity().created,"phase":phase,
+            "cleanupElapsedMs":cleanup_started.elapsed().as_millis(),"error":run.as_ref().err(),
+            "cleanupError":cleanup_error,"processMemory":own.memory().ok()}));
+    };
+    terminal_record("retiring_analysis",None);
     // Retire analysis before releasing the process ownership boundary on every
     // exit, including owner expiry, transport failure and cancellation.
     drop(cached.take());
-    job.disarm().map_err(platform)?;
+    let disarmed=job.disarm().map_err(platform);
+    terminal_record("owner_terminal",disarmed.as_ref().err());
+    disarmed?;
     run
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_exchange_never_waits_past_the_issued_wire_budget() {
+        let now=Instant::now();let caller=now+Duration::from_secs(180);
+        assert_eq!(exchange_deadline(91_000,11_000,now,caller).unwrap(),now+Duration::from_secs(80));
+        assert_eq!(exchange_deadline(91_000,11_000,now,now+Duration::from_secs(20)).unwrap(),now+Duration::from_secs(20));
+        assert_eq!(exchange_deadline(91_000,91_001,now,caller).unwrap(),now);
+        assert!(exchange_deadline(91_001,1_000,now,caller).is_err());
+        assert!(exchange_deadline(0,1_000,now,caller).is_err());
+    }
 
     #[test]
     fn unknown_request_field_is_rejected_by_production_frame_reader() {

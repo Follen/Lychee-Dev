@@ -8,7 +8,7 @@ import { beginScratch, contained } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { fixedToolchain, luaSource, selectCompiler, verifySystemImports } from './luac.mjs';
 import { sourceDigest, verifyArtifact } from './rust-build.mjs';
-import { BASE, BRIDGE_GAPS, LIMITS, ORACLE, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.1/assertions.mjs';
+import { BASE, BRIDGE_GAPS, LIMITS, ORACLE, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_ARGUMENTS = Object.freeze(['/nologo', '/Bv', '/O2', '/MT', '/Brepro', '/TC']);

@@ -268,17 +268,49 @@ fn raidbots_latest_is_signed_batch_before_cursor_paging() {
         ("--limit".into(), "1".into()),
     ]);
     let first = dispatch(&f.inv).unwrap();
+    assert_eq!(first.data["records"].as_array().unwrap().len(), 1);
     assert_eq!(first.data["records"][0]["recordId"], 2);
     assert_eq!(first.data["coverage"]["selectedPush"], 4);
+    assert!(!first.complete);
+    assert_eq!(first.data["complete"], false);
     assert_eq!(first.data["truncated"], true);
+    assert_eq!(first.data["coverage"]["complete"], false);
+    assert_eq!(first.data["coverage"]["fullQueryComplete"], false);
+    assert_eq!(first.data["coverage"]["matched"], 2);
+    assert_eq!(first.data["coverage"]["returned"], 1);
     f.inv.flags.insert(
         "--cursor".into(),
         first.data["nextCursor"].as_str().unwrap().into(),
     );
     let second = dispatch(&f.inv).unwrap();
+    assert_eq!(second.data["records"].as_array().unwrap().len(), 1);
     assert_eq!(second.data["records"][0]["recordId"], 3);
-    assert_eq!(second.data["complete"], true);
+    // Go 3.2.2 cache_scan.go:135 requires no AfterIndex for Complete.
+    // Reaching the tail ends pagination; it does not make this response the
+    // entire selected batch or establish Raidbots server coverage.
+    assert!(!second.complete);
+    assert_eq!(second.data["complete"], false);
+    assert_eq!(second.data["truncated"], false);
+    assert!(second.data.get("nextCursor").is_none());
+    assert_eq!(second.data["coverage"]["selectedPush"], 4);
     assert_eq!(second.data["coverage"]["complete"], false);
+    assert_eq!(second.data["coverage"]["fullQueryComplete"], false);
+    assert_eq!(second.data["coverage"]["truncated"], false);
+    assert_eq!(second.data["coverage"]["matched"], 2);
+    assert_eq!(second.data["coverage"]["returned"], 1);
+
+    f.inv.flags.remove("--cursor");
+    f.inv.flags.insert("--limit".into(), "2".into());
+    let whole = dispatch(&f.inv).unwrap();
+    assert_eq!(whole.data["records"].as_array().unwrap().len(), 2);
+    assert_eq!(whole.data["records"][0], first.data["records"][0]);
+    assert_eq!(whole.data["records"][1], second.data["records"][0]);
+    assert!(whole.complete);
+    assert_eq!(whole.data["complete"], true);
+    assert_eq!(whole.data["truncated"], false);
+    assert!(whole.data.get("nextCursor").is_none());
+    assert_eq!(whole.data["coverage"]["complete"], false);
+    assert_eq!(whole.data["coverage"]["fullQueryComplete"], false);
 }
 #[test]
 fn raidbots_stale_snapshot_refused() {

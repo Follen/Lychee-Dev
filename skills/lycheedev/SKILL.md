@@ -10,8 +10,8 @@ The CLI owns preparation, integrity checks, game transport and recovery. This
 skill chooses the investigation and interprets results; it does not implement
 a second transport or require an investigation to use every mode.
 
-This Rust migration candidate reuses the Go 3.2.1 workflow contract at
-`10b561db5706702cd42e047eaeed4ccb5e825351`. It is not yet a complete accepted
+This Rust migration candidate reuses the Go 3.2.2 workflow contract at
+`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`. It is not yet a complete accepted
 release. Read the [candidate boundaries](references/source-candidate.md) before
 using this candidate; a documented command or listed handler is not acceptance
 evidence. Source uses EmmyLua direct analysis libraries, native workers and

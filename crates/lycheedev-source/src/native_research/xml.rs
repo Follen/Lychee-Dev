@@ -15,6 +15,10 @@ pub(crate) struct XmlResearch {
 impl XmlResearch {
     pub fn prepare(files:&mut BTreeMap<String,String>,documents:BTreeMap<String,String>,plans:&[LoadEvidence],source:&Value,control:&OperationControl)->Result<Self>{
         let mut scripts=BTreeMap::new();let mut gaps=Vec::new();let mut declaration_owners=BTreeMap::new();
+        // Local to this preparation: the immutable built-in catalog is verified
+        // lazily once. Retain a failed verification too, preserving each original
+        // document/manifest gap without reparsing or silently accepting it.
+        let mut catalog=None;
         let mut objects=None;
         for(path,text)in &documents{
             control.check()?;
@@ -22,13 +26,14 @@ impl XmlResearch {
             // Keep the exact occurrence -> script -> nearest object relation
             // from the same production parse used to generate admitted Lua.
             // Query planning must not reparse XML with a fresh local timeout.
-            let parsed=crate::xml_program::extract_production(path,text.as_bytes())
+            let parsed=catalog.get_or_insert_with(crate::xml_program::catalog).as_ref().map_err(Clone::clone)
+                .and_then(|catalog|crate::xml_program::extract_production_with_catalog(path,text.as_bytes(),catalog))
                 .map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4));
             control.check()?;
             match parsed{
                 Ok(program)=>match xml_inline::scripts(&program,text.as_bytes()){
                     Ok(extracted)=>{
-                        if objects.is_none(){objects=Some(crate::xml_program::catalog().map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4))?.object_elements());}
+                        if objects.is_none(){objects=Some(catalog.as_ref().and_then(|catalog|catalog.as_ref().ok()).expect("successful production catalog").object_elements());}
                         declaration_owners.extend(Self::declaration_owners(&program,objects.as_ref().expect("object catalog"),control)?);
                         for script in extracted{files.insert(script.key.clone(),String::from_utf8(script.source.clone()).expect("extracted UTF8"));scripts.insert(script.key.clone(),script);}
                     },
@@ -42,7 +47,9 @@ impl XmlResearch {
         let paths=xml_load::LoadPaths::new(sources.keys().copied(),control)?;
         for plan in plans {
             control.check()?;
-            match xml_load::Program::from_indexed_sources(&plan.manifest,&sources,&paths,Some(source),control){
+            let program=catalog.get_or_insert_with(crate::xml_program::catalog).as_ref().map_err(|error|ToolkitError::new("codebase.xml_invalid",error.clone(),4))
+                .and_then(|catalog|xml_load::Program::from_indexed_sources_with_catalog(&plan.manifest,&sources,&paths,Some(source),control,catalog));
+            match program{
                 Ok(program)=>programs.push(Arc::new(program)),
                 Err(error)=>{control.check()?;gaps.push(json!({"code":error.code,"detail":error.message,"manifest":plan.manifest}));}
             }
@@ -200,6 +207,64 @@ fn hash_sequence<T:Serialize>(header:&Value,items:impl IntoIterator<Item=T>,cont
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn request_catalog_is_verified_once_without_changing_production_xml_evidence(){
+        let catalog=crate::xml_program::catalog().unwrap();
+        for (path,text) in [
+            ("Frames.xml","\u{feff}<Ui>\r\n<Frame name=\"A\" virtual=\"true\"><Scripts><OnLoad>local s=&quot;😀&quot;&#10;Target(self)</OnLoad><OnFuture method=\"Run\"/></Scripts></Frame></Ui>"),
+            ("Bindings.xml","<Bindings><Binding name=\"CLICK_界\" header=\"H\">Target(keystate)</Binding></Bindings>"),
+            ("Bad.xml","<Ui><Frame></Ui>"),
+        ] {
+            let expected=crate::xml_program::extract_production(path,text.as_bytes());
+            let before=crate::xml_program::catalog_verifications();
+            let actual=crate::xml_program::extract_production_with_catalog(path,text.as_bytes(),&catalog);
+            assert_eq!(crate::xml_program::catalog_verifications(),before);
+            match (expected,actual) {
+                (Ok(expected),Ok(actual))=>assert_eq!(serde_json::to_vec(&expected).unwrap(),serde_json::to_vec(&actual).unwrap()),
+                (Err(expected),Err(actual))=>assert_eq!(expected,actual),
+                _=>panic!("production extraction result changed"),
+            }
+        }
+    }
+    #[test]
+    fn request_catalog_is_shared_across_all_documents_and_manifest_alternatives(){
+        let control=OperationControl::default();
+        let documents=BTreeMap::from([
+            ("One.toc".into(),"Frames.xml\nFrames.xml\n".into()),
+            ("Two.toc".into(),"Frames.xml\nObjects.xml\n".into()),
+            ("Frames.xml".into(),"<Ui><Frame name=\"Template\" virtual=\"true\"><Scripts><OnLoad>Target(self)</OnLoad><OnFuture method=\"Run\"/></Scripts></Frame></Ui>".into()),
+            ("Objects.xml".into(),"<Ui><Frame name=\"Object\" inherits=\"Template\"/></Ui>".into()),
+            ("Broken.xml".into(),"<Ui><Frame></Ui>".into()),
+        ]);
+        let plans=["One.toc","Two.toc"].map(|manifest|LoadEvidence{manifest:manifest.into(),ordered:vec![],issues:vec![]});
+        let source=json!({"repository":"catalog-test","product":"retail"});
+        let before=crate::xml_program::catalog_verifications();
+        let mut files=BTreeMap::new();
+        let xml=XmlResearch::prepare(&mut files,documents.clone(),&plans,&source,&control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications()-before,1,"one request verifies the complete immutable catalog once");
+        assert_eq!(xml.programs.len(),2);assert!(!xml.scripts.is_empty());
+        assert!(xml.gaps.iter().any(|gap|gap["path"]=="Broken.xml"&&gap["code"]=="codebase.xml_invalid"));
+        let sources=documents.iter().map(|(path,text)|(path.as_str(),text.as_bytes())).collect::<BTreeMap<_,_>>();
+        let paths=xml_load::LoadPaths::new(sources.keys().copied(),&control).unwrap();
+        for (plan,actual) in plans.iter().zip(&xml.programs) {
+            let expected=xml_load::Program::from_indexed_sources(&plan.manifest,&sources,&paths,Some(&source),&control).unwrap();
+            assert_eq!(serde_json::to_vec(&expected).unwrap(),serde_json::to_vec(actual.as_ref()).unwrap());
+        }
+        let before=crate::xml_program::catalog_verifications();
+        XmlResearch::prepare(&mut BTreeMap::new(),documents,&plans,&source,&control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications()-before,1,"a later request verifies its own catalog");
+    }
+    #[test]
+    fn request_catalog_remains_lazy_and_preserves_cancellation(){
+        let control=OperationControl::default();
+        let before=crate::xml_program::catalog_verifications();
+        XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::new(),&[],&json!({}),&control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(),before);
+        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        let error=XmlResearch::prepare(&mut BTreeMap::new(),BTreeMap::from([("x.xml".into(),"<Ui/>".into())]),&[],&json!({}),&control).err().unwrap();
+        assert_eq!(error.code,"command.cancelled");
+        assert_eq!(crate::xml_program::catalog_verifications(),before);
+    }
     #[test]
     fn declaration_owner_walk_keeps_original_cancellation(){
         let program=crate::xml_program::extract_production("Frame.xml",b"<Ui><Frame name=\"A\" virtual=\"true\"><Scripts><OnLoad>Own()</OnLoad></Scripts></Frame></Ui>").unwrap();

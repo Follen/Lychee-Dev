@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
-import {CURRENT_GO_COMMIT, CURRENT_FIXTURE} from './oracle-3.2.1.mjs';
+import {CURRENT_GO_COMMIT, CURRENT_FIXTURE} from './oracle-3.2.2.mjs';
 import {GO_COMMIT} from './oracle.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const read = path => readFileSync(resolve(root, path), 'utf8');
@@ -16,7 +16,7 @@ const entries = [
 function checkEntry(text, pattern) {
   const declarations = [...text.matchAll(pattern)];
   assert.equal(declarations.length, 1, 'exactly one active target declaration');
-  assert.equal(declarations[0][1], '3.2.1', 'current released Go version');
+  assert.equal(declarations[0][1], '3.2.2', 'current released Go version');
   assert.equal(declarations[0][2], CURRENT_GO_COMMIT, 'current peeled release commit');
 }
 test('all three active Skill entrypoints name the exact current machine oracle', () => {
@@ -29,7 +29,7 @@ test('every entrypoint rejects stale, mixed, missing or duplicate target identit
   for (const [path, pattern] of entries) {
     const text = read(path);
     for (const changed of [
-      text.replace('Go 3.2.1', 'Go 3.2.0'),
+      text.replace('Go 3.2.2', 'Go 3.2.0'),
       text.replace(CURRENT_GO_COMMIT, GO_COMMIT),
       text.replace(CURRENT_GO_COMMIT, 'f'.repeat(40)),
       text.replace(CURRENT_GO_COMMIT, ''),

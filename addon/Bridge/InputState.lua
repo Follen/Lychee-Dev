@@ -34,6 +34,9 @@ local function sample()
     identity.inputBlocked=ready~=true
     identity.reason=reason or ""
     identity.escapeLimit=0
+    if ns.SlotRuntime and ns.SlotRuntime.SlotReloadRequired then
+        identity.slotReloadRequired=ns.SlotRuntime.SlotReloadRequired() or nil
+    end
     -- Always obtain a detached private snapshot; public mailbox values never
     -- drive the attempt sequence or any input/receipt authorization.
     if ns.SlotRuntime and ns.SlotRuntime.InputDiagnostic then identity.inputAttempt=ns.SlotRuntime.InputDiagnostic() end

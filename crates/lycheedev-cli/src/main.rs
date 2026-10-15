@@ -1184,7 +1184,7 @@ fn data_timeout_seconds(inv: &Invocation) -> Result<Option<u64>> {
     }
 }
 fn operation_seconds(inv: &Invocation) -> Result<u64> {
-    if inv.command == "source batch" { return Ok(90); }
+    if matches!(inv.command.as_str(), "source refs" | "source context" | "source batch") { return Ok(90); }
     if inv.command == "update" {
         return Ok(600);
     }
@@ -2784,7 +2784,8 @@ mod tests {
         assert!(!selected.join("LycheeDev").exists());
     }
     #[test]
-    fn public_operation_budget_honors_entire_query_and_explicit_live_wait_limits() {
+    fn normal_invocation_control_public_operation_budget_honors_entire_query_and_explicit_live_wait_limits() {
+        use std::time::{Duration, Instant};
         let query = parse(&args(&[
             "data",
             "sql",
@@ -2795,6 +2796,23 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(operation_seconds(&query).unwrap(), 3600);
+        // Fixed Go 3.2.2 dispatch_source.go gives all three research routes
+        // one 90-second total budget, including static mode and preparation.
+        for words in [
+            vec!["source", "refs", "--snapshot", "fixture", "--symbol", "Target"],
+            vec!["source", "context", "--snapshot", "fixture", "--symbol", "Target"],
+            vec!["source", "refs", "--snapshot", "fixture", "--symbol", "Target", "--static-only"],
+            vec!["source", "batch", "--snapshot", "fixture", "--file", "fixture.json"],
+        ] {
+            let source = parse(&args(&words)).unwrap();
+            assert_eq!(operation_seconds(&source).unwrap(), 90, "{:?}", words);
+            let mut parsed = Ok(source);
+            let before = Instant::now();
+            assert!(install_invocation_control(&mut parsed, |_| Ok(())).is_some());
+            let deadline = parsed.as_ref().unwrap().control.deadline();
+            assert!(deadline >= before + Duration::from_secs(90));
+            assert!(deadline <= Instant::now() + Duration::from_secs(90));
+        }
         let live = parse(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
         assert_eq!(operation_seconds(&live).unwrap(), 660);
         let invalid = parse(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap();

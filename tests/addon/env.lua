@@ -690,6 +690,9 @@ function GetScreenHeight()
 end
 
 C_AddOns = {
+    GetAddOnEnableState = function() return 2 end,
+    EnableAddOn = function() end,
+    SaveAddOns = function() end,
     GetNumAddOns = function()
         return 1
     end,

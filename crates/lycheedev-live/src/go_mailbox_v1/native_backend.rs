@@ -724,9 +724,9 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> NativeCore<R, P, S, C> {
                 });
                 if current.is_none_or(|s| {
                     s.sample_millis != sample.sample_millis
-                        || !s.valid_bindings()
-                        || s.bindings != sample.bindings
+                        || !s.same_input_profile(sample)
                         || s.input_blocked != Some(false)
+                        || action.kind == InputKind::Invoke && s.slot_reload_required
                 }) {
                     return Err(pending());
                 }

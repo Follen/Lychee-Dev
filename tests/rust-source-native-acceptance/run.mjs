@@ -11,6 +11,7 @@ import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/r
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {jsonFile} from '../rust-skill-usage/assertions.mjs';
 import {acceptanceCliArgs} from './session-ipc.mjs';
+import {snapshotDiagnostics,captureDiagnostics} from './diagnostics.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
 
 const [binaryArg, releaseArg, scratchArg, evidenceArg, group, ...extra] = process.argv.slice(2);
@@ -36,6 +37,8 @@ function command(caseId, executable, args, {timeout = 210000, phase = 'local', i
   const remaining = Math.floor(deadline - performance.now());
   if (remaining < 1000 || sequence >= 100 || outputBytes >= 384 << 20) { fatal = true; throw new Error('native-acceptance.controller_budget'); }
   const prefix = `${String(sequence++).padStart(3, '0')}-${caseId}`, time = performance.now();
+  const captureNative=executable===binary&&(args.includes('--session-reuse')||(args[0]==='source'&&args[1]==='session'));
+  const beforeDiagnostics=captureNative?snapshotDiagnostics(home):null;
   const memoryPhase = beginMemoryPhase(nativeMemoryPhase(caseId), caseId);
   const run = spawnSync(executable, args, {cwd, env: environment, input, windowsHide: true, shell: false, timeout: Math.min(timeout, remaining), maxBuffer});
   endMemoryPhase(memoryPhase);
@@ -51,6 +54,9 @@ function command(caseId, executable, args, {timeout = 210000, phase = 'local', i
   const stdoutFiles = preserve('stdout', stdout), stderrFiles = preserve('stderr', stderr);
   const observation = {caseId, pid: run.pid, memoryPhase, executable, args, cwd, phase, wallMillis: performance.now() - time, exit: run.status, signal: run.signal, error: run.error?.message,
     stdoutFiles, stderrFiles, stdoutSHA256: sha256(stdout), stderrSHA256: sha256(stderr), stdoutBytes: stdout.length, stderrBytes: stderr.length};
+  // Save both latest request and owner terminal records before any exit/assertion
+  // check, including EOF, deadline and process failures. Identity is explicit.
+  if(captureNative) observation.nativeDiagnostics=captureDiagnostics({home,out,prefix,stdout,before:beforeDiagnostics});
   if (input !== undefined) observation.inputSHA256 = sha256(Buffer.from(input));
   report.commands.push(observation); if (run.error || run.signal || outputBytes > 384 << 20) fatal = true; save();
   assert(!run.error && run.signal === null, `owned command failed: ${caseId}: ${run.error?.message ?? run.signal}`);

@@ -335,37 +335,61 @@ fn admitted_source_and_encoding_fail_in_argv_order_without_io() {
 fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
     use lycheedev_core::{evidence, metadata::Metadata, storage};
     let f = Fixture::new();
-    // Offline transport fixture uses the exact provider identity and receipt schema.
-    let identity_bytes = br#"{"provider":"wago","parser":"lycheedev-wago-inertia-v1","product":"retail","fullBuild":"12.0.7.68974","region":"us","locale":"enUS","search":"","page":1}"#;
+    let base = words(&[
+        "data",
+        "hotfix",
+        "--source",
+        "wago",
+        "--home",
+        f.home.to_str().unwrap(),
+        "--product",
+        "retail",
+        "--build",
+        "12.0.7.68974",
+        "--region",
+        "us",
+        "--locale",
+        "enUS",
+        "--offline",
+        "--format",
+        "json",
+    ]);
+    let inv = parse(&base).unwrap();
+    // Go 3.2.2 hotfix_wago.go:535-546 narrows an otherwise unfiltered
+    // request by build number. The receipt key and request URL must agree.
+    let identity_bytes = br#"{"provider":"wago","parser":"lycheedev-wago-inertia-v1","product":"retail","fullBuild":"12.0.7.68974","region":"us","locale":"enUS","search":"68974","page":1}"#;
     let identity: Value = serde_json::from_slice(identity_bytes).unwrap();
     let key = format!("hotfix-wago-page/{}", storage::sha256(identity_bytes));
     let page = br#"<html><div id="app" data-page='{"component":"Hotfixes","props":{"hotfixes":{"current_page":1,"last_page":1,"per_page":25,"total":0,"data":[],"next_page_url":null}}}'></div></html>"#;
     let blob = evidence::publish_blob(&f.home, page, 16 << 20).unwrap();
-    let receipt = json!({"schema":"lycheedev.wago-page.v1","identity":identity,"requestUrl":"https://wago.tools/hotfixes?page=1","response":blob,"capturedAt":"2026-08-05T22:09:07Z","currentPage":1,"lastPage":1,"perPage":25,"total":0});
+    let receipt = json!({"schema":"lycheedev.wago-page.v1","identity":identity,"requestUrl":"https://wago.tools/hotfixes?page=1&search=68974","response":blob,"capturedAt":"2026-08-05T22:09:07Z","currentPage":1,"lastPage":1,"perPage":25,"total":0});
+
+    // Preserve the original failing seed as a negative case: another scope
+    // must miss offline even when its response bytes are present and valid.
+    let unscoped_bytes = br#"{"provider":"wago","parser":"lycheedev-wago-inertia-v1","product":"retail","fullBuild":"12.0.7.68974","region":"us","locale":"enUS","search":"","page":1}"#;
+    let unscoped_key = format!("hotfix-wago-page/{}", storage::sha256(unscoped_bytes));
+    assert_ne!(key, unscoped_key);
+    let mut unscoped_receipt = receipt.clone();
+    unscoped_receipt["identity"] = serde_json::from_slice(unscoped_bytes).unwrap();
+    unscoped_receipt["requestUrl"] = json!("https://wago.tools/hotfixes?page=1");
+    let mut metadata = Metadata::open(&f.home, true).unwrap();
+    let generation = metadata.generation(&unscoped_key).unwrap();
+    metadata
+        .put(&unscoped_key, &unscoped_receipt, generation)
+        .unwrap();
+    drop(metadata);
+    let mut bytes = Vec::new();
+    let error = lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap_err();
+    assert_eq!(error.code, "records.hotfix_offline");
+    assert_eq!(error.exit_code, 3);
+    assert!(bytes.is_empty());
+
     let mut metadata = Metadata::open(&f.home, true).unwrap();
     let generation = metadata.generation(&key).unwrap();
     metadata.put(&key, &receipt, generation).unwrap();
     drop(metadata);
     for max_bytes in [None, Some("268435456")] {
-        let mut a = words(&[
-            "data",
-            "hotfix",
-            "--source",
-            "wago",
-            "--home",
-            f.home.to_str().unwrap(),
-            "--product",
-            "retail",
-            "--build",
-            "12.0.7.68974",
-            "--region",
-            "us",
-            "--locale",
-            "enUS",
-            "--offline",
-            "--format",
-            "json",
-        ]);
+        let mut a = base.clone();
         if let Some(value) = max_bytes {
             a.extend(words(&["--max-bytes", value]));
         }
@@ -386,4 +410,15 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
         assert_eq!(fetch["bytes"], 0);
         assert_eq!(public["result"]["coverage"]["fullQueryComplete"], true);
     }
+
+    // A hit is still required to verify the receipt's embedded identity.
+    let mut metadata = Metadata::open(&f.home, true).unwrap();
+    let generation = metadata.generation(&key).unwrap();
+    metadata.put(&key, &unscoped_receipt, generation).unwrap();
+    drop(metadata);
+    let mut bytes = Vec::new();
+    let error = lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap_err();
+    assert_eq!(error.code, "records.hotfix_cache_corrupt");
+    assert_eq!(error.exit_code, 4);
+    assert!(bytes.is_empty());
 }

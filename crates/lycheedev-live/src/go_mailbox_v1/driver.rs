@@ -300,6 +300,18 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             return Ok(());
         }
         if self.state.transaction.is_none() {
+            // The startup check must precede reservation/publication, including
+            // replacement runtimes. It is not the later send-time authority.
+            let i = &self.state.identity;
+            let envelope = SlotEnvelope {
+                runtime: i.runtime.clone(), owner: self.state.owner.clone(),
+                fence: 1, index: i.next_slot, guid: i.guid.clone(),
+                build: i.build.clone(), action: "bind".into(),
+                ..SlotEnvelope::default()
+            };
+            if self.observe_input(control, &envelope, 0)?.slot_reload_required {
+                return self.request_slot_reload(control);
+            }
             self.begin(control, "bind", self.state.owner.clone(), |_| {})?;
         }
         let receipt = self.advance(control)?;
@@ -442,6 +454,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
                                         phase: ReloadPhase::Intent,
                                         recovery_budget: op.recovery_budget.clone(),
                                         automatic: true,
+                                        slot_enablement: false, slot_budget_source: None,
                                         reconcile_pending: false,
                                         input_step: 0,
                                         patch_transitions: 0,

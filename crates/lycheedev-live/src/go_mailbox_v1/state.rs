@@ -199,11 +199,24 @@ pub struct InputAttempt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_diagnostic: Option<InputDiagnostic>,
 }
+/// Persist the actual Rust budget link; equal timestamps are not identity.
+/// Absent on Go records: Go Load restores independent budget values, not aliases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SlotBudgetSource {
+    Connect,
+    Close,
+    Operation { operation_id: String },
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReloadAttempt {
     #[serde(default, skip_serializing_if = "no")]
     pub automatic: bool,
+    #[serde(default, skip_serializing_if = "no")]
+    pub slot_enablement: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_budget_source: Option<SlotBudgetSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_budget: Option<DurableBudget>,
     #[serde(default, skip_serializing_if = "no")]
@@ -647,6 +660,15 @@ impl State {
         if let Some(r) = &self.reload {
             validate_request(&r.request).map_err(|_| bad())?;
             parse_token(&r.from).map_err(|_| bad())?;
+            if let Some(source) = &r.slot_budget_source {
+                if !r.automatic || !r.slot_enablement || !r.request.starts_with("slots-") {
+                    return Err(bad());
+                }
+                if let SlotBudgetSource::Operation { operation_id } = source {
+                    parse_token(operation_id.strip_prefix("LMO-").ok_or_else(bad)?)
+                        .map_err(|_| bad())?;
+                }
+            }
             if !(0..=16).contains(&r.input_step) || !(0..=2).contains(&r.patch_transitions) {
                 return Err(bad());
             }

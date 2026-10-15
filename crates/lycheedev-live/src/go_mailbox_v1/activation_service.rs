@@ -463,6 +463,7 @@ where
                         let mut state = selected_state(id, candidate.clone(), a.budget.clone());
                         state.reload = Some(ReloadAttempt {
                             automatic: false,
+                            slot_enablement: false, slot_budget_source: None,
                             recovery_budget: a.budget.clone(),
                             reconcile_pending: false,
                             request: a.request.clone(),

@@ -252,6 +252,7 @@ impl Backend for FakeBackend {
             build: e.build.clone(),
             sample_millis: sample,
             input_blocked: Some(self.input_blocked.is_some()),
+            slot_reload_required: false,
             reason: self.input_blocked.clone().unwrap_or_default(),
             escape_limit: 0,
             input_attempt: None,

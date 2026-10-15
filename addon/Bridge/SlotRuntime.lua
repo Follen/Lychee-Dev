@@ -1,6 +1,7 @@
 local _, ns = ...
 
 local engine,receiving,inputLease,expectedSlot,skipLoaded,mailbox,runtimeToken
+local slotReloadRequired,slotEnableSavePending=false,false
 local LIMIT=ns.SlotProtocol.Count
 local zero=string.rep("0",32)
 -- Latest private callback outcome only. This is diagnostic data, never a
@@ -72,13 +73,22 @@ local function start()
     state.memoryEpoch=epoch+1
     local runtime=string.format("%08x%08x%04x%04x%04x%04x",epoch+1,math.floor(clock),math.random(0,65535),math.random(0,65535),math.random(0,65535),math.random(0,65535))
     runtimeToken=runtime
-    local available=0
+    local available,enableFailure=0,nil
     for i=1,LIMIT do
         local name=string.format("Lychee Dev Slot %02d",i)
         if ns.Compat.GetAddOnMetadata(name,"X-Lychee-Slot")==tostring(i)
             and ns.Compat.GetAddOnMetadata(name,"Version")==ns.Release
-            and ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")=="Lycheedev mailbox protocol v1" then available=available+1 end
+            and ns.Compat.GetAddOnMetadata(name,"X-Lychee-Transport")=="Lycheedev mailbox protocol v1" then
+            available=available+1
+            local changed,failure=ns.Compat.EnsureInputSlotEnabled(name,actor.guid)
+            if changed then slotEnableSavePending=true elseif changed==nil then enableFailure=enableFailure or failure end
+        end
     end
+    if slotEnableSavePending then
+        local saved,failure=ns.Compat.SaveInputSlots()
+        if saved then slotReloadRequired,slotEnableSavePending=true,false else enableFailure=failure end
+    end
+    if enableFailure then return nil,enableFailure end
     ns.AutomationHistory.Begin(runtime,{character=actor.character,realm=actor.realm,guid=actor.guid,build=build.build,product=build.product})
     engine=ns.SlotProtocol.Create({runtime=runtime,build=build.build,product=build.product,release=ns.Release,inventory=available,
         inputState=ns.InputState and "Lycheedev mailbox protocol v1" or nil,
@@ -163,6 +173,7 @@ ns.SlotRuntime={
     Start=start,Wake=guardedWake,Close=close,
     IsActive=function()return ns.InputProtection.IsActive()end,
     InputDiagnostic=attemptSnapshot,
+    SlotReloadRequired=function()return slotReloadRequired end,
     Receive=function(index,envelope)
         if not engine or index~=expectedSlot then return nil,"slot_not_requested" end
         attemptReceived=true

@@ -418,11 +418,12 @@ pub(crate) fn complete_build(
 
 /// One route refresh per prepared reader. Only cdns is fetched; versions and
 /// immutable config keys cannot change through this type.
+#[derive(Clone)]
 pub(crate) struct Route {
-    pub current: Distribution,
-    key: String,
-    region: String,
-    locator: String,
+    pub current: Arc<Distribution>,
+    key: Arc<str>,
+    region: Arc<str>,
+    locator: Arc<str>,
     offline: bool,
     refreshed: bool,
 }
@@ -438,13 +439,13 @@ impl Route {
         let locator = catalog_url(region, slot, "cdns")?;
         let key = format!("cdn-route/{product}/{region}");
         let mut route = Self {
-            current: Distribution {
+            current: Arc::new(Distribution {
                 path: String::new(),
                 hosts: Vec::new(),
-            },
-            key,
+            }),
+            key: key.into(),
             region: region.into(),
-            locator,
+            locator: locator.into(),
             offline: is_offline,
             refreshed: false,
         };
@@ -460,7 +461,7 @@ impl Route {
         } else {
             route.fetch(store, fetch)?
         };
-        route.current = catalog::distribution(&raw, region)?;
+        route.current = Arc::new(catalog::distribution(&raw, region)?);
         Ok(route)
     }
     fn fetch(&self, store: &Store<'_>, fetch: &dyn MetadataFetcher) -> Result<Vec<u8>> {
@@ -486,7 +487,7 @@ impl Route {
         store.check()?;
         self.refreshed = true;
         let raw = self.fetch(store, fetch)?;
-        self.current = catalog::distribution(&raw, &self.region)?;
+        self.current = Arc::new(catalog::distribution(&raw, &self.region)?);
         Ok(true)
     }
 }

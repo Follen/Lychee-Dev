@@ -71,3 +71,6 @@ mod shared_contract_identity {
 pub mod activation;
 
 pub mod doctor;
+
+#[cfg(test)]
+mod slot_reload_tests;

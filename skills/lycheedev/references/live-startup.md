@@ -49,6 +49,7 @@ need [installation](installation.md) diagnosis, not an overlay copy.
 | Result | Continue |
 | --- | --- |
 | Ready runtime, clean installation | Connect and keep the returned CON |
+| INPUT slotReloadRequired=true | Startup enabled managed slots for this character; connect or resume lets the CLI reload within the original CON and deadline before binding |
 | Two formal bindings loaded under the previous protocol name | Let fix/resume send the verified reload key once, then bind the current protocol; do not ask for manual reload merely because the name changed |
 | Existing connection in this project | Resume its original request; pending input is not replaced |
 | Foreign project owns the PID | Continue from the owning project; do not delete its claim |
@@ -62,6 +63,15 @@ This path accepts clean prior managed files for cleanup and never starts pending
 instance’s claim can block the shared-directory update; retain the original IDs.
 Each process sharing the installation must load and verify the new runtime
 independently. One PID’s successful reload never activates another PID.
+
+At startup the main addon checks the current character's managed slots, enables
+disabled ones and saves the settings without loading slots. A changed setting
+sets `Mailbox.input.slotReloadRequired` until reload. This is separate from
+physical input readiness: combat, restricted focus and keyboard activity still
+delay the reload. Already enabled slots cause no settings write or reload.
+The CLI retains any existing reload request and pending business evidence;
+the flag never authorizes replay of submitted or unknown input. Read-only doctor
+reports this state as `live.slot_activation`; it does not send the reload itself.
 
 ## First installation and reload
 

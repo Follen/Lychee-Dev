@@ -145,7 +145,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [x] Execute 21 exact production pure tests locally, plus 11 runner tests; record exact receipts.
 - [ ] Compile the composed Source candidate and run all adapter/worker-control/native preparation/process integration regressions.
 - [ ] Re-run 4036-document native queries/Skill/session on the fixed candidate; inspect phase timings before further optimization.
-- [ ] Measure cold/warm/semantic/session process-group working set and private bytes; current full-corpus values remain not_measured.
+- [ ] Measure cold/warm/semantic/session process-group working set and private bytes; preserve historical not_measured values and the later measured 79ef/62d sampled observations separately; retained warm/steady remain unmeasured.
 - [ ] Close legacy OP/session read-only and cancel/abandon compatibility, CSV/EXPLAIN/provider-resource gaps, then complete all four audit stages.
 
 ## Native recovery batch checkpoint (2026-10-15)
@@ -198,3 +198,11 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Complete encoded/index/decoded/default Data consumers plus real workspace download-worker admission; preserve scoped refundable ownership.
 - [ ] Resolve retained-session cold worker/pipe failure and both-direction context duplicate work with full output/coverage/budget equivalence; retain the exact 62d failure evidence.
 - [ ] Measure Graph ownership moves on full Retail under the same sampled working-set/private-byte protocol; 62d excludes them and proves no reduction.
+
+### Latest integrated candidate and remaining execution gates (2026-10-15)
+
+- [ ] Execute cumulative Go 3.2.2 R4 slot activation/recovery regressions (21 declarations), current 220-case formal Lua suite and actual Skill/CLI against the exact next Windows commit. Explicit budget-source identity, nil-budget and historical Go journal compatibility are implemented and independently reviewed, not yet runtime-accepted.
+- [ ] Validate the corrected shared 90-second Source refs/context/batch total budget with actual public CLI calls. The old 182-second refs success does not satisfy this contract. Measure request-local XML catalog reuse, conservative relation filtering and Graph ownership moves on the full corpus; retain every result/check and report failures.
+- [ ] Complete remote workspace admission and default provider consumers after the reviewed R10.1 encoded-reader integration. Run new/inherited reader tests and preserve all counter, ownership and independent-cancellation evidence.
+- [ ] Close the local gzip candidate's one stalled-header deadline test failure before full acceptance; all 233 fixed-Go vectors matched, but full Rust result is 71/72. Do not relabel the old 60/61 or 152/157 results.
+- [ ] Diagnose Windows 500-slot fixture timeouts with actual concurrency and single-operation timing; cargo compilation jobs do not bound test threads. Do not extend production deadlines or remove durable writes/checks to obtain green tests.

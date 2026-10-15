@@ -1,7 +1,7 @@
 # Rust candidate boundaries
 
-This candidate follows the fixed Go 3.2.1 Skill at
-`10b561db5706702cd42e047eaeed4ccb5e825351` and complete Lycheedev mailbox
+This candidate follows the fixed Go 3.2.2 Skill at
+`0bec60e4406f5d5dc155ee25cef44f9a710e37e8` and complete Lycheedev mailbox
 protocol v1 contract. The ordinary [Skill entry](../SKILL.md) and
 [source research](source-research.md) are the workflow; this page records only
 migration differences and current gaps. It does not define a reduced toolkit.

@@ -194,6 +194,13 @@ impl DoctorResult {
                 "wait for a fresh input sample; check bindings and bridge state",
             );
         }
+        if input.slot_reload_required {
+            self.add(
+                "live.slot_activation", "blocked",
+                "startup enabled managed slots for this character; reload required",
+                "connect or resume the original CON to reload and bind a fresh runtime",
+            );
+        }
         if let Some(attempt) = &input.input_attempt {
             if matches!(
                 attempt.stage.as_str(),

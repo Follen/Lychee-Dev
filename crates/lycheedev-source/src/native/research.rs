@@ -255,18 +255,35 @@ impl PreparedSnapshot {
         self.control.check()?;
         #[cfg(test)]
         RESEARCH_PROJECTION_PASSES.with(|count|count.set(count.get()+1));
+        let mut target_files=std::collections::BTreeSet::new();
         let target=self.syntax.declarations.iter().filter(|decl|decl.name==symbol.name.rsplit(['.',':']).next().unwrap_or(&symbol.name)
-            && origins.matches_location(self,symbol,&decl.site.public(&self.inputs)).unwrap_or(false)).map(|decl|decl.id.as_str()).collect::<std::collections::BTreeSet<_>>();
+            && origins.matches_location(self,symbol,&decl.site.public(&self.inputs)).unwrap_or(false)).map(|decl|{target_files.insert(decl.site.file);decl.id.as_str()}).collect::<std::collections::BTreeSet<_>>();
         let target_values=graph.map(|graph|self.research_target_values(graph,symbol,origins)).transpose()?.unwrap_or_default();
         let is_target=|decision:&Decision|matches!(decision,Decision::Bound(value) if target_values.contains(value));
         let facade=self.source_queries(&self.control)?;
         let query=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
         let mut uses=BTreeMap::<(&str,u32,u32),Vec<&UseFact>>::new();
-        if let Some(graph)=graph{for fact in &graph.uses{if fact.host_return_slot.is_none(){uses.entry((fact.site.file.as_str(),fact.site.start,fact.site.end)).or_default().push(fact);}}}
+        let mut selected_files=std::collections::BTreeSet::new();
+        if let Some(graph)=graph{for fact in &graph.uses{if fact.host_return_slot.is_none(){
+            self.control.check()?;
+            if is_target(&fact.decision){selected_files.insert(fact.site.file.as_str());}
+            uses.entry((fact.site.file.as_str(),fact.site.start,fact.site.end)).or_default().push(fact);
+        }}}
         let mut relations=Vec::new();let mut unresolved=0usize;
         for file in 0..self.inputs.corpus.files.len() {
             self.control.check()?;
-            if direction=="outgoing"&&!origins.may_contain_outgoing(symbol,&self.inputs.corpus.files[file].path){continue;}
+            let path=self.inputs.corpus.files[file].path.as_str();
+            let outgoing_file=direction!="incoming"&&origins.may_contain_outgoing(symbol,path);
+            // Every incoming predicate below is covered: a lexical reference
+            // uses a file-local declaration, selected abstract values carry an
+            // observed site, and candidate/uncertain references require the
+            // exact original spelling. Generated XML Lua is admitted here too.
+            // This only excludes impossible files; rows, charges, ordering,
+            // XML references/copies and complete-corpus counts stay unchanged.
+            let incoming_file=direction!="outgoing"&&(target_files.contains(&file)
+                ||selected_files.contains(path)||self.inputs.original(path)?.contains(&symbol.name));
+            self.control.check()?;
+            if !incoming_file&&!outgoing_file{continue;}
             let syntax=public_result(self.file_syntax(file),&self.control)?;
             for reference in &syntax.references {
             self.control.check()?;
@@ -479,3 +496,6 @@ mod research_completion_identity_tests {
         assert!(completion(&plan).consume(&plan).is_ok());
     }
 }
+
+#[cfg(test)]
+include!("research_full_scan_reference.rs");

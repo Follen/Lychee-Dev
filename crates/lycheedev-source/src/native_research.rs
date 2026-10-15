@@ -788,6 +788,46 @@ mod projection_tests {
     }
 
     #[test]
+    fn impossible_file_filter_matches_full_scan_rows_charges_and_scope(){
+        let control=OperationControl::default();
+        let files=BTreeMap::from([
+            ("target.lua".into(),"\u{feff}-- 😀 界\r\nfunction Target(x) return x end\r\nAlias=Target\r\n".into()),
+            ("alias.lua".into(),"Alias(2)\n".into()),
+            ("unknown.lua".into(),"local candidate=Target\nTarget(3)\n".into()),
+            ("noise.lua".into(),"function Noise(x) return x end\nNoise(1)\n".into()),
+        ]);
+        let documents=BTreeMap::from([
+            ("One.toc".into(),"target.lua\nalias.lua\nnoise.lua\nFrames.xml\n".into()),
+            ("Two.toc".into(),"noise.lua\n".into()),
+            ("Frames.xml".into(),"<Ui><Frame name=\"Object\"><Scripts><OnLoad>Tar&#103;et(self)</OnLoad></Scripts></Frame></Ui>".into()),
+        ]);
+        let session=ResearchSession::prepare(SnapshotRequest{files,load_documents:documents,environment_documents:BTreeMap::new(),source:json!({"repository":"filter-test","product":"retail"}),
+            luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},api:vec![],environment_manifest:None,
+            load_plans:["One.toc","Two.toc"].map(|manifest|LoadEvidence{manifest:manifest.into(),ordered:vec![],issues:vec![]}).to_vec(),input_gaps:vec![]},&control).unwrap();
+        let graphs=session.xml.programs.iter().map(|program|session.prepared.build_xml_plan("filter-test",program.clone(),None,&control).unwrap()).collect::<Vec<_>>();
+        for graph in [None,Some(&graphs[0]),Some(&graphs[1])] {
+            for direction in ["incoming","outgoing","both"] {
+                let symbol=planned_query("Target","target.lua",2,2,"function",direction).symbol;
+                let before=session.prepared.research_steps();
+                let expected=session.prepared.full_scan_research_relations(&symbol,direction,graph,&session.xml).unwrap();
+                let expected_cost=session.prepared.research_steps()-before;
+                let before=session.prepared.research_steps();
+                let actual=session.prepared.research_relations(&symbol,direction,graph,&session.xml).unwrap();
+                assert_eq!(session.prepared.research_steps()-before,expected_cost);
+                assert_eq!(serde_json::to_vec(&actual).unwrap(),serde_json::to_vec(&expected).unwrap(),"{direction}");
+                if direction=="incoming"&&graph.is_some_and(|graph|std::ptr::eq(graph,&graphs[0])) {
+                    assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="alias.lua"),"selected alias without target spelling survives");
+                    assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="unknown.lua"),"unloaded candidate survives");
+                    assert!(actual["relations"].as_array().unwrap().iter().any(|row|row["path"]=="Frames.xml"),"decoded entity spelling maps back to XML");
+                }
+            }
+        }
+        control.cancel_handle().store(true,std::sync::atomic::Ordering::Release);
+        let symbol=planned_query("Missing","none.lua",1,1,"function","both").symbol;
+        assert_eq!(session.prepared.research_relations(&symbol,"both",None,&session.xml).unwrap_err().code,"command.cancelled");
+    }
+
+    #[test]
     fn indexed_projection_preserves_eager_rows_and_cross_xml_owners() {
         let control=OperationControl::default();
         let files=BTreeMap::from([

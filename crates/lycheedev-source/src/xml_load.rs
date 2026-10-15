@@ -207,15 +207,21 @@ impl Program {
         Self::from_indexed_sources(manifest,&sources,&paths,source,control)
     }
     pub(crate) fn from_indexed_sources<'a>(manifest:&str,sources:&BTreeMap<&'a str,&'a[u8]>,paths:&LoadPaths<'a>,source:Option<&Value>,control:&OperationControl)->Result<Self>{
+        let catalog=crate::xml_program::catalog().map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4))?;
+        Self::from_indexed_sources_with_catalog(manifest,sources,paths,source,control,&catalog)
+    }
+    pub(crate) fn from_indexed_sources_with_catalog<'a>(manifest:&str,sources:&BTreeMap<&'a str,&'a[u8]>,paths:&LoadPaths<'a>,source:Option<&Value>,control:&OperationControl,catalog:&crate::xml_program::Catalog)->Result<Self>{
+        control.check()?;
         let context=LoadContext::for_manifest(manifest,sources.get(manifest).copied().unwrap_or_default(),source);
-        let mut walker=Walker{sources,paths,parsed:BTreeMap::new(),templates:BTreeMap::new(),intrinsics:BTreeMap::new(),active:BTreeSet::new(),
+        let mut walker=Walker{sources,paths,catalog,parsed:BTreeMap::new(),templates:BTreeMap::new(),intrinsics:BTreeMap::new(),active:BTreeSet::new(),
             result:Self{rules:RULES,manifest:manifest.into(),context,actions:vec![],documents:BTreeMap::new(),gaps:vec![],originals:BTreeMap::new()},control,objects:0,file_loads:0,include_depth:0,construction_steps:0,limits:crate::native::SourceLimits::research(),
-            object_elements:crate::xml_program::catalog().map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4))?.object_elements()};
+            object_elements:catalog.object_elements()};
         walker.load(manifest,0)?;
         Ok(walker.result)
     }
 }
 struct Walker<'a,'c,'s>{
+    catalog:&'s crate::xml_program::Catalog,
     sources:&'s BTreeMap<&'a str,&'a [u8]>, paths:&'s LoadPaths<'a>,parsed:BTreeMap<String,Arc<XmlProgram>>,
     templates:BTreeMap<String,(String,usize)>,intrinsics:BTreeMap<String,(String,usize)>,active:BTreeSet<String>,
     result:Program,control:&'c OperationControl,objects:usize,object_elements:BTreeSet<String>,
@@ -278,7 +284,7 @@ impl Walker<'_,'_,'_>{
                 }
         }else if path.to_ascii_lowercase().ends_with(".xml"){
             if !self.parsed.contains_key(path){
-                let program=crate::xml_program::extract_production(path,raw).map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4))?;
+                let program=crate::xml_program::extract_production_with_catalog(path,raw,self.catalog).map_err(|error|ToolkitError::new("codebase.xml_invalid",error,4))?;
                 self.parsed.insert(path.into(),Arc::new(program));
                 self.result.originals.insert(path.into(),std::str::from_utf8(raw).expect("extractor admitted UTF8").into());
             }

@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writ
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.1/assertions.mjs';
+import { BASE, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
 import { sourceDigest } from './rust-build.mjs';
 import { verifyCandidateArtifact } from './rust-formal-lua.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,25 +16,25 @@ const result = row => ({ status: 0, handlesReaped: true, proof: proof(), stdout:
 function scratch(fn) { const dir = mkdtempSync(join(tmpdir(), 'lycheedev-formal-lua-checker-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } }
 function copied(fn) { return scratch(dir => { cpSync(join(root, BASE), join(dir, BASE), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
 
-test('manifest and all 112 source records match immutable Git objects byte for byte', () => {
+test('manifest and all 113 source records match immutable Git objects byte for byte', () => {
   const m = manifest(root); assert.equal(hash(readFileSync(join(root, BASE, 'manifest.json'))), MANIFEST_SHA256);
   for (const row of [...m.fixtures, ...m.candidateAddon]) {
     const bytes = execFileSync('git', ['--no-pager', '--no-optional-locks', '-c', 'core.fsmonitor=false', 'cat-file', 'blob', `${ORACLE}:${row.path}`], { cwd: root, timeout: 10000, maxBuffer: LIMITS.file });
     assert.equal(bytes.length, row.bytes, row.path); assert.equal(hash(bytes), row.sha256, row.path); assert.equal(gitBlob(bytes), row.gitBlob, row.path);
   }
 });
-test('original 38 addon and 13 protocol sets are complete, not selected old test names', () => {
+test('original 39 addon and 13 protocol sets are complete, not selected old test names', () => {
   const m = manifest(root);
-  for (const [prefix, expected] of [['tests/addon/', 38], ['tests/protocol/', 13]]) {
+  for (const [prefix, expected] of [['tests/addon/', 39], ['tests/protocol/', 13]]) {
     const actual = m.fixtures.filter(row => row.path.startsWith(prefix)).map(row => row.path);
-    const original = execFileSync('git', ['ls-tree', '-r', '--name-only', ORACLE, prefix], { cwd: root, timeout: 10000, maxBuffer: 65536 }).toString().trim().split('\n');
+    const original = execFileSync('git', ['ls-tree', '--full-tree', '-r', '--name-only', ORACLE, `:(top)${prefix}`], { cwd: root, timeout: 10000, maxBuffer: 65536 }).toString().trim().split('\n');
     assert.equal(actual.length, expected); assert.deepEqual(actual, original);
   }
 });
 test('every addon fixture runs independently under all six exact profiles', () => {
-  assert.equal(plan.length, 214); assert.equal(new Set(plan.map(row => row.id)).size, 214);
+  assert.equal(plan.length, 220); assert.equal(new Set(plan.map(row => row.id)).size, 220);
   for (const profile of PROFILES) {
-    const rows = plan.filter(row => row.profile === profile); assert.equal(rows.length, 35);
+    const rows = plan.filter(row => row.profile === profile); assert.equal(rows.length, 36);
     for (const row of rows) assert.deepEqual(row.args, ['run.lua', row.id.split('/')[2], profile, '../../addon']);
   }
   assert.equal(plan.filter(row => row.kind === 'protocol').length, 4);
@@ -86,15 +86,15 @@ test('writer has exact original output condition; CRLF is accepted without weake
   assert.equal(evaluate(row, { ...result(row), stdout: Buffer.from(row.completion.replaceAll('\n', '\r\n')) }).state, 'passed');
   assert.equal(evaluate(row, { ...result(row), stdout: Buffer.from(`prefix ${row.completion}`) }).state, 'failed');
 });
-test('ordinary failed fixture does not prevent any of the remaining 213 executions', () => {
+test('ordinary failed fixture does not prevent any of the remaining 219 executions', () => {
   let launches = 0;
   const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { launches++; return { ...result(row), status: launches === 1 ? 1 : 0 }; } });
-  assert.equal(launches, 214); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'passed'));
+  assert.equal(launches, 220); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'passed'));
 });
-test('unverified process cleanup blocks all later launches and preserves 214 explicit outcomes', () => {
+test('unverified process cleanup blocks all later launches and preserves 220 explicit outcomes', () => {
   let launches = 0;
   const rows = runCases(plan, { deadline: 1000000, now: () => 0, checkIdentity() {}, execute(row) { launches++; return { ...result(row), handlesReaped: false }; } });
-  assert.equal(launches, 1); assert.equal(rows.length, 214); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'not_run'));
+  assert.equal(launches, 1); assert.equal(rows.length, 220); assert.equal(rows[0].state, 'failed'); assert(rows.slice(1).every(row => row.state === 'not_run'));
 });
 test('contradictory handlesReaped boolean cannot override failed process proof', () => {
   let launches = 0;
@@ -246,9 +246,9 @@ test('artifact command uses the actual producer cargo prefix exactly once', () =
 });
 
 // Current release authentication never weakens source-byte custody.
-test('3.2.1 has only two exact retained release literals and unchanged historical oracle', () => {
+test('3.2.2 has only two exact retained release literals and unchanged historical oracle', () => {
   const m = manifest(root);
-  assert.equal(m.oracle.commit, '10b561db5706702cd42e047eaeed4ccb5e825351');
+  assert.equal(m.oracle.commit, '0bec60e4406f5d5dc155ee25cef44f9a710e37e8');
   assert.deepEqual(m.retainedReleaseFields.map(row => row.path), ['addon/Core/Runtime.lua', 'addon/Lychee Dev.toc']);
   assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), m.historicalOracle.manifestSHA256);
   assert.deepEqual(fixed.retainedReleaseFields, m.retainedReleaseFields);

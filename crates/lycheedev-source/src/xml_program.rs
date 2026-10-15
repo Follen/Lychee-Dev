@@ -240,7 +240,14 @@ impl Catalog {
     }
 }
 
+#[cfg(test)]
+thread_local! { static CATALOG_VERIFICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn catalog_verifications()->usize {CATALOG_VERIFICATIONS.with(|value|value.get())}
+
 pub fn catalog() -> Result<Catalog> {
+    #[cfg(test)]
+    CATALOG_VERIFICATIONS.with(|value|value.set(value.get()+1));
     let identity: Value = serde_json::from_str(COMPANION).map_err(|e| e.to_string())?;
     if identity["commit"] != COMMIT || identity["bytes"] != XSD.len()
         || identity["sha256"] != hash(XSD) || identity["originalDocumentCount"] != 4036
@@ -506,7 +513,13 @@ pub fn extract(path: &str, raw: &[u8]) -> Result<XmlProgram> {
 }
 
 pub fn extract_production(path: &str, raw: &[u8]) -> Result<XmlProgram> {
-    extract_profile(path,raw,&catalog()?,None,&ExtractionLimits::default(),true)
+    extract_production_with_catalog(path,raw,&catalog()?)
+}
+
+/// The caller may borrow one verified immutable catalog for a single preparation.
+/// The production profile, limits and complete per-document evidence are unchanged.
+pub(crate) fn extract_production_with_catalog(path:&str,raw:&[u8],catalog:&Catalog)->Result<XmlProgram> {
+    extract_profile(path,raw,catalog,None,&ExtractionLimits::default(),true)
 }
 
 pub fn extract_with_deadline(path: &str, raw: &[u8], catalog: &Catalog, deadline: Option<Instant>, limits:&ExtractionLimits) -> Result<XmlProgram> {

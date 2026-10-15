@@ -1415,3 +1415,40 @@ fn native_monitor_start_failure_precedes_publication_and_close_joins_reader_erro
     assert_eq!(core.sender.closes, 1);
     assert!(events(&core).iter().any(|e| e == "reader_close"));
 }
+
+#[test]
+fn go_322_native_slot_flag_blocks_invoke_but_allows_reload() {
+    for action_name in ["prepare", "reload"] {
+        let e = envelope(action_name);
+        let mut s: InputObservation = serde_json::from_slice(&input_record(&e, 10_000, 1).payload).unwrap();
+        s.slot_reload_required = true;
+        let r = record(Kind::Input, &s, &e.runtime, 1);
+        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+        let c = control(); let a = action(&mut core, &c, &e); let out = core.input(&c, &a);
+        if action_name == "reload" {
+            assert_eq!(out.outcome.disposition, InputDisposition::Submitted);
+            assert!(out.outcome.messages_queued > 0);
+        } else {
+            assert_eq!(out.outcome.messages_queued, 0);
+            assert_eq!(out.outcome.disposition, InputDisposition::NotSent);
+            assert!(out.error.unwrap().is_pending());
+        }
+    }
+}
+
+#[test]
+fn go_322_native_equal_timestamp_changed_slot_flag_loses_authority() {
+    for action_name in ["prepare", "reload"] {
+        for initial in [false, true] {
+            let e = envelope(action_name);
+            let mut s: InputObservation = serde_json::from_slice(&input_record(&e, 10_000, 1).payload).unwrap();
+            s.slot_reload_required = initial;
+            let original = record(Kind::Input, &s, &e.runtime, 1);
+            s.slot_reload_required = !initial;
+            let changed = record(Kind::Input, &s, &e.runtime, 1);
+            let mut core = make_core(vec![Ok(vec![original]), Ok(vec![changed])]);
+            let c = control(); let a = action(&mut core, &c, &e); let out = core.input(&c, &a);
+            assert_eq!(out.outcome.messages_queued, 0); assert!(out.error.unwrap().is_pending());
+        }
+    }
+}

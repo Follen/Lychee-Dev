@@ -592,6 +592,7 @@ fn explicit_reload_completed_history_is_read_only_after_later_reload() {
     for key in ["first-reload", "later-reload"] {
         record.state.reload = Some(ReloadAttempt {
             automatic: false,
+            slot_enablement: false, slot_budget_source: None,
             recovery_budget: Some(budget(1000, DEFAULT_RECOVERY_MILLIS).unwrap()),
             reconcile_pending: false,
             request: key.into(),
@@ -902,6 +903,7 @@ fn explicit_reload_torn_current_log_never_repairs_even_with_completed_history() 
     let (mut record, mut journal) = book.acquire(&id, &OperationControl::default()).unwrap();
     record.state.reload = Some(ReloadAttempt {
         automatic: false,
+        slot_enablement: false, slot_budget_source: None,
         recovery_budget: Some(budget(1000, DEFAULT_RECOVERY_MILLIS).unwrap()),
         reconcile_pending: false,
         request: "completed".into(),

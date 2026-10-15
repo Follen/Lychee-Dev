@@ -46,8 +46,8 @@ for (const command of describe()) {
 }
 // Recognize documented commands from the immutable target as well as the
 // candidate. A missing entire group must not make its references disappear.
-const target = JSON.parse(readFileSync(join(repository, 'tests/rust-parity/go-3.2.1.manifest.json'), 'utf8'));
-if (target.oracle?.commit !== '10b561db5706702cd42e047eaeed4ccb5e825351') throw new Error('unexpected target oracle');
+const target = JSON.parse(readFileSync(join(repository, 'tests/rust-parity/go-3.2.2.manifest.json'), 'utf8'));
+if (target.oracle?.commit !== '0bec60e4406f5d5dc155ee25cef44f9a710e37e8') throw new Error('unexpected target oracle');
 const knownPaths = new Set([...target.commands.map(command => command.path), ...contracts.keys()]);
 const oneTokenPaths = new Set([...knownPaths].filter(path => !path.includes(' ')));
 

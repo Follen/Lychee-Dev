@@ -4,6 +4,8 @@
 pub(crate) mod cache;
 pub mod target;
 pub(crate) mod fragments;
+pub(crate) mod files;
+pub(crate) mod index;
 pub mod catalog;
 mod proxy;
 pub mod transport;

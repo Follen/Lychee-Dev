@@ -280,28 +280,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
                     });
             }
         }
-        let observation = match self.backend.observe_input(
-            control,
-            envelope,
-            after,
-            &self.state.identity.input_state,
-        ) {
-            Ok(s) => s,
-            Err(err) => {
-                self.waiting = if stale_observation(&err) {
-                    "input_observation_stale"
-                } else {
-                    "input_observation_unavailable"
-                }
-                .into();
-                return Err(err);
-            }
-        };
-        check_control(control)?;
-        if !observation.valid_readiness() || !observation.valid_bindings() {
-            self.waiting = "input_observation_unavailable".into();
-            return Err(pending());
-        }
+        let observation = self.observe_input(control, envelope, after)?;
         if observation.input_blocked == Some(true) {
             self.waiting = observation.reason;
             return Err(pending());
@@ -323,6 +302,12 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
                     causes: vec!["live.channel_input_observation_stale"],
                 });
             }
+        }
+        self.waiting.clear();
+        // Unknown/submitted same-exchange input returned above, before this
+        // flag. A reload never gates itself on the slot-activation request.
+        if kind == InputKind::Invoke && observation.slot_reload_required {
+            return self.request_slot_reload(control);
         }
         let action = InputAction {
             kind,
@@ -346,6 +331,33 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
             return Err(err);
         }
         Ok(())
+    }
+
+    pub(super) fn observe_input(
+        &mut self,
+        control: &OperationControl,
+        envelope: &SlotEnvelope,
+        after: i64,
+    ) -> ChannelResult<super::InputObservation> {
+        let observation = match self.backend.observe_input(
+            control, envelope, after, &self.state.identity.input_state,
+        ) {
+            Ok(s) => s,
+            Err(err) => {
+                self.waiting = if stale_observation(&err) {
+                    "input_observation_stale"
+                } else {
+                    "input_observation_unavailable"
+                }.into();
+                return Err(err);
+            }
+        };
+        check_control(control)?;
+        if !observation.valid_readiness() || !observation.valid_bindings() {
+            self.waiting = "input_observation_unavailable".into();
+            return Err(pending());
+        }
+        Ok(observation)
     }
 
     fn perform(
@@ -482,6 +494,7 @@ impl<B: Backend, J: StateJournal, C: Clock, T: TokenSource> Driver<B, J, C, T> {
                     phase: ReloadPhase::Intent,
                     recovery_budget: op.recovery_budget.clone(),
                     automatic: true,
+                    slot_enablement: false, slot_budget_source: None,
                     reconcile_pending: true,
                     input_step: 0,
                     patch_transitions: 0,

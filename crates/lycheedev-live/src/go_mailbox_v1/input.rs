@@ -83,6 +83,8 @@ pub struct InputObservation {
     pub build: String,
     pub sample_millis: i64,
     pub input_blocked: Option<bool>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub slot_reload_required: bool,
     pub reason: String,
     pub escape_limit: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,6 +93,8 @@ pub struct InputObservation {
     #[serde(skip)]
     pub observed_at_millis: i64,
 }
+fn is_false(value: &bool) -> bool { !*value }
+
 impl<'de> Deserialize<'de> for InputObservation {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
@@ -111,6 +115,7 @@ impl<'de> Deserialize<'de> for InputObservation {
             build: String,
             sample_millis: i64,
             input_blocked: Option<bool>,
+            slot_reload_required: Option<bool>,
             reason: String,
             escape_limit: i32,
             input_attempt: Option<Box<serde_json::value::RawValue>>,
@@ -130,6 +135,7 @@ impl<'de> Deserialize<'de> for InputObservation {
             build: w.build,
             sample_millis: w.sample_millis,
             input_blocked: w.input_blocked,
+            slot_reload_required: w.slot_reload_required.unwrap_or(false),
             reason: w.reason,
             escape_limit: w.escape_limit,
             input_attempt,
@@ -138,6 +144,12 @@ impl<'de> Deserialize<'de> for InputObservation {
     }
 }
 impl InputObservation {
+    /// An equal timestamp does not authorize a changed activation/key profile.
+    pub fn same_input_profile(&self, stored: &Self) -> bool {
+        self.valid_bindings() && stored.valid_bindings()
+            && self.bindings.is_some() && self.bindings == stored.bindings
+            && self.slot_reload_required == stored.slot_reload_required
+    }
     pub fn valid_readiness(&self) -> bool {
         self.input_blocked
             .is_some_and(|blocked| blocked != self.reason.is_empty())

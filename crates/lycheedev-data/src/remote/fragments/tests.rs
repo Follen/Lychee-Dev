@@ -267,9 +267,7 @@ fn failed_mirror_and_refresh_attempts_are_precharged_and_preserve_uncertainty() 
     let f = Fixture::new();
     let key = "a".repeat(32);
     let mut reader = f.prepare(false);
-    reader
-        .route
-        .current
+    Arc::make_mut(&mut reader.route.current)
         .hosts
         .push("second.example.test".into());
     f.fetch.metadata(
@@ -361,9 +359,7 @@ fn invalid_range_reply_is_not_cached_or_retried_at_another_host() {
         let f = Fixture::new();
         let key = "a".repeat(32);
         let mut reader = f.prepare(false);
-        reader
-            .route
-            .current
+        Arc::make_mut(&mut reader.route.current)
             .hosts
             .push("second.example.test".into());
         f.fetch

@@ -40,24 +40,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git cat-file -e '10b561db5706702cd42e047eaeed4ccb5e825351^{commit}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git cat-file -e '0bec60e4406f5d5dc155ee25cef44f9a710e37e8^{commit}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the differential runner (not product parity)
-        run: node --test tests/rust-parity/oracle.test.mjs tests/rust-parity/oracle-3.2.1.test.mjs tests/rust-parity/skill-entrypoint-identity.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs tests/rust-parity/describe-contract.test.mjs tools/rust-early-evidence.test.mjs
+        run: node --test tests/rust-parity/oracle.test.mjs tests/rust-parity/oracle-3.2.2.test.mjs tests/rust-parity/skill-entrypoint-identity.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs tests/rust-parity/describe-contract.test.mjs tools/rust-early-evidence.test.mjs
       - name: Test full Skill packaging and Windows launcher fixtures
         run: |
           node --test tools/skill-contract.test.mjs tools/skill-launcher.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tools/skill-commands.mjs --target --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tools/skill-contract.mjs --contract-file tests/rust-parity/go-3.2.1.manifest.json
+          node tools/skill-contract.mjs --contract-file tests/rust-parity/go-3.2.2.manifest.json
           exit $LASTEXITCODE
       - name: Test fixed full-corpus acceptance runner
         run: node --test tests/rust-source-full-corpus/runner.test.mjs
       - name: Test independent real Skill acceptance assertions
         run: node --test tests/rust-skill-usage/runner.test.mjs
       - name: Test full native and real IPC acceptance assertions
-        run: node --test tests/rust-source-native-acceptance/runner.test.mjs tests/rust-source-native-acceptance/session-ipc.test.mjs
+        run: node --test tests/rust-source-native-acceptance/runner.test.mjs tests/rust-source-native-acceptance/session-ipc.test.mjs tests/rust-source-native-acceptance/diagnostics.test.mjs
       - name: Check exact Go addon resources and delivery templates
-        run: node --test tests/rust-parity/addon-delivery-3.2.1.test.mjs tests/rust-parity/release-321-increment.test.mjs tests/rust-parity/release-321-keyboard.test.mjs tests/rust-parity/release-321-guidance.test.mjs
+        run: node --test tests/rust-parity/addon-delivery-3.2.2.test.mjs tests/rust-parity/release-321-increment.test.mjs tests/rust-parity/release-322-keyboard.test.mjs tests/rust-parity/release-322-increment.test.mjs tests/rust-parity/release-321-guidance.test.mjs
       - name: Test unsafe inventory and enforce owned business guards
         if: ${{ !cancelled() }}
         run: |
@@ -68,13 +70,16 @@ jobs:
       - name: Authenticate historical 3.2.0 fixture independently
         if: ${{ !cancelled() }}
         run: node tests/rust-parity/run.mjs --verify-fixture
-      - name: Authenticate current 3.2.1 source-derived fixture
+      - name: Authenticate historical 3.2.1 source-derived fixture
         if: ${{ !cancelled() }}
         run: node tests/rust-parity/run-3.2.1.mjs --verify-fixture
+      - name: Authenticate current 3.2.2 source-derived fixture
+        if: ${{ !cancelled() }}
+        run: node tests/rust-parity/run-3.2.2.mjs --verify-fixture
       - name: Report actual parity gaps without allowlisting them
         if: ${{ !cancelled() }}
         run: |
-          node tests/rust-parity/run-3.2.1.mjs --json | Out-File -Encoding utf8 rust-parity-report.json
+          node tests/rust-parity/run-3.2.2.mjs --json | Out-File -Encoding utf8 rust-parity-report.json
           exit $LASTEXITCODE
       - name: Preserve parity report even when the candidate differs
         if: always()

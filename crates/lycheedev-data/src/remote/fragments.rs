@@ -132,6 +132,26 @@ pub(crate) struct Fragments<'a> {
     ranges: &'a dyn RangeFetcher,
 }
 impl<'a> Fragments<'a> {
+    /// Archive workers share immutable route/build data and the original
+    /// atomic Budget; refreshed route values and counters remain worker-local.
+    pub(crate) fn fork_for_lookup(&self) -> Self {
+        Self {
+            store: Store {
+                home: self.store.home,
+                control: self.store.control,
+                budget: self.store.budget,
+            },
+            route: self.route.clone(),
+            build: self.build.clone(),
+            offline: self.offline,
+            requests: self.requests,
+            transferred: self.transferred,
+            fragment_loads: 0,
+            metadata: self.metadata,
+            ranges: self.ranges,
+        }
+    }
+
     pub fn prepare(
         home: &'a Path,
         pin: &DataPin,
@@ -150,7 +170,7 @@ impl<'a> Fragments<'a> {
         )
     }
     #[allow(clippy::too_many_arguments)]
-    fn prepare_with(
+    pub(super) fn prepare_with(
         home: &'a Path,
         pin: &DataPin,
         offline: bool,
