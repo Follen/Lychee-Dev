@@ -18,13 +18,13 @@ pub const ACTIVATION_SCHEMA: &str = "lycheedev.channel-activation.v3";
 #[serde(rename_all = "snake_case")]
 pub enum ActivationPhase {
     Prepared,
-    #[default]
-    #[serde(other)]
-    Invalid,
     WaitingManualReload,
     InputAttempted,
     RuntimeSelected,
     Cancelled,
+    #[default]
+    #[serde(other)]
+    Invalid,
 }
 impl ActivationPhase {
     fn name(self) -> &'static str {

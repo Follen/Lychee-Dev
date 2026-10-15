@@ -766,6 +766,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - run38670108226的Emmy job116210989364已SUCCESS，最终日志数量尚待artifact核验。product all-target及sealed CLI build均失败；不是采样正在正常进行。early artifact11944491855 ZIP SHA256 `361c8a6af8999558e6423075ff210fc88088b4b81385c0110a290dbd9ef51b59` 及119条index文件hash已核。
 - 两个失败均为Delivery formal_repair/publication.rs100 的E0282：闭包result的错误类型在map_err字段访问前无法推断。最小修复为第67行显式 `let result: Result<bool>`，不改变闭包、原cause或retention语义，父独立窄核通过；当前尚未重新编译，不能称编译修复已验证。原错误日志保留。由于无sealed CLI，本批不能提供所需完整Retail内存结果；修后再次原生验证，不以预算推算占用。
 
+### 2026-10-15：编译恢复 checkpoint 与本地 Source 纯逻辑实测
+
+- `ca7830a9` 的原生 workflow 因 plain scalar 中 `definitions:: ` 的冒号未启动产品 job；失败保留，`8a57231e` 改用 block scalar，并实际解析 YAML（3 jobs）后启动 run `38671670245`。后续每次 workflow 修改均须真实解析，不能只用 diff-check。
+- `8a57231e` early artifact `11944552995` ZIP SHA256 `0a447562362389eab992f109a4948cfc5a6d2f2204586439f92fd567f5a88a11`，119 个索引文件逐一核 hash。all-target owner `5956a70f-ec82-4608-a4df-b9f755e2e614` 与 CLI owner `bd092958-f245-4efd-a40d-e5227ba9a0ff` 的完整 stderr 均显示一个根因：`ActivationPhase` 的 `#[serde(other)]` 不在最后，令 derive 失败并产生四条级联 trait 错误。前一 Delivery `Result<bool>` 错误不再出现。本次仅移动 Invalid variant 至末位，保留 snake_case、default 与 unknown 映射；修后 Windows 编译仍待新 run，不声明已编译。
+- 当前 `8a57231e` Emmy job `116215966932` success；产品独立组继续运行，但 CLI 构建失败使 full Retail/内存测量不能开始。内存数值仍 **not_measured**，不能将主机总内存或预算作实际占用。
+- 后续尚未合入的 Source 行索引/有界 stderr 观测候选已实际通过 Linux 本地纯模块 21 项（原 10、行索引 4、观测 7），0 failed/ignored/filtered，编译 22.92 秒、测试 0.06 秒。owner `d2608611-bb54-49d1-a490-d3dec35db9b4`，receipt SHA256 `35cbac7277d2cb5174d0fc8fa155e277a8cde22ca6587709b1288586a46e23b7`，17 sealed logs 核 hash。其先前错误包含真实 process 集成测试、无法在纯模块 crate 编译的失败 owner `9fb69182-7bd9-4cbc-a981-3136fbbbc6f6` 保留；原集成测试完整移动至真实 process::tests，由既有 Windows selector 覆盖，仍 NOT_RUN。这 21 项不是全 Source、Windows、性能或全 Retail 通过。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
