@@ -426,102 +426,12 @@ fn dispatch_target(inv: &Invocation) -> Result<Outcome> {
     if inv.flag("--file").is_some() {
         return lycheedev_core::workspace::dispatch(inv);
     }
-    let mut selected = inv.clone();
-    let mut config = Value::Null;
-    if let Some(name) = inv.flag("--target") {
-        if inv.flag("--installation").is_some()
-            || inv.flag("--product").is_some()
-            || inv.flag("--region").is_some()
-            || inv.flag("--locale").is_some()
-        {
-            return Err(ToolkitError::arguments(
-                "named target resolve cannot combine direct target selectors",
-            ));
-        }
-        let mut show = inv.clone();
-        show.command = "target show".into();
-        show.positional = Some(name.into());
-        config = lycheedev_core::workspace::dispatch(&show)?.data["config"].clone();
-        for (key, field) in [
-            ("--installation", "installation"),
-            ("--product", "product"),
-            ("--region", "region"),
-            ("--locale", "locale"),
-            ("--build", "fullBuild"),
-            ("--definitions", "definitions"),
-        ] {
-            if selected.flag(key).is_none()
-                && let Some(value) = config[field].as_str().filter(|value| !value.is_empty())
-            {
-                selected.flags.insert(key.into(), value.into());
-            }
-        }
-        if config["source"] != "installation" {
-            return Err(ToolkitError::new(
-                "records.remote_provider_required",
-                "remote target preparation remains a data-provider profile",
-                3,
-            )
-            .with_details(json!({"target":config})));
-        }
+    if let Some(name) = inv.flag("--target").filter(|name| !name.is_empty()) {
+        return target_remote::named(inv, name);
     }
-    let installation = selected.required("--installation")?;
-    let definition = lycheedev_data::definitions::resolve_revision(
-        &inv.home,
-        selected.flag("--definitions").unwrap_or(""),
-        selected.flag_bool("--offline"),
-    )?;
-    let request = lycheedev_data::installed::LocalTargetRequest {
-        installation: installation.into(),
-        product: selected.flag("--product").map(str::to_owned),
-        full_build: selected.flag("--build").map(str::to_owned),
-        region: selected.required("--region")?.into(),
-        language: selected.required("--locale")?.into(),
-        definition_commit: definition,
-    };
-    let budget = lycheedev_data::resource::Budget::controlled(
-        lycheedev_data::resource::Cost::defaults(), inv.control.deadline(), inv.control.clone(),
-    );
-    let resolved = lycheedev_data::installed::resolve_target_budgeted(&request, Some(&budget))?;
-    let pin = lycheedev_core::selection::pin_selection(
-        &inv.home,
-        lycheedev_core::selection::SelectionSpec {
-            parent: inv.flag("--from").unwrap_or("").into(),
-            data: Some(resolved.data.clone()),
-            ..Default::default()
-        },
-    )?;
-    let capture = lycheedev_core::evidence::commit_capture(
-        &inv.home,
-        &serde_json::to_vec(&resolved)?,
-        "application/json",
-        json!({"kind":"local-target","locator":resolved.installation,"snapshot":pin.id,"dataBuild":resolved.data.full_build}),
-        true,
-        false,
-    )?;
-    let mut outcome = if config.is_null() {
-        Outcome::new(serde_json::to_value(&pin)?)
-    } else {
-        let name = config["name"]
-            .as_str()
-            .ok_or_else(|| ToolkitError::invalid("target config name missing"))?;
-        let at = lycheedev_core::storage::utc_now();
-        let mut metadata = lycheedev_core::metadata::Metadata::open(&inv.home, true)?;
-        if metadata.generation(&format!("target/{name}"))?.is_none() {
-            return Err(ToolkitError::new(
-                "selection.target_missing",
-                "named target was removed during preparation; immutable pin retained",
-                2,
-            )
-            .with_details(json!({"result":pin})));
-        }
-        metadata.put(&format!("target-ref/{name}/pin/{}",pin.id),&json!({"schema":"lycheedev.target-ref.v1","name":name,"kind":"pin","id":pin.id,"createdAt":at}),None)?;
-        Outcome::new(json!({"config":config,"pin":pin,"resolvedAt":at}))
-    };
-    outcome.selection = json!({"snapshot":pin.id,"installation":resolved.installation});
-    outcome.provenance.push(capture);
-    Ok(outcome)
+    target_remote::local(inv)
 }
+
 #[derive(Clone)]
 struct DeliveryAdapter;
 impl lycheedev_live::managed::ManagedInstallation for DeliveryAdapter {
@@ -1278,6 +1188,9 @@ fn asset_committed_context(error: &ToolkitError) -> bool {
         })
 }
 fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
+    if inv.command == "target resolve" && inv.flag("--target").is_some_and(|name| !name.is_empty()) {
+        error = target_remote::named_fault(error);
+    }
     // Go entry.queryFault projects installation selection errors for every
     // command, including addon handlers, rather than only catalog queries.
     if matches!(error.code.as_str(), "selection.installation_missing" | "selection.installation_ambiguous" | "selection.installation_product_mismatch" | "selection.installation_metadata_conflict") {

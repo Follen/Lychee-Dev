@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 20:28 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`cd576917e24cc7d367ba605ce5d29886884ae903`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 20:35 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`8eb9f09b8f75be34620ef54ef4dd45d2a61d5879`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,7 +25,9 @@
 
 ## 2. 当前实现与未闭环事项
 
-集中验证 [38801126956](https://github.com/Follen/Lychee-Dev/actions/runs/38801126956) 已针对 cd576 启动。context 组实际编译失败：owned signature 调用上游私有 `signature_by_position`，后继已改为公开 signatures 逆序按位置查找，保原索引重复位置 last-wins 及 typed checkpoint，不新增引擎补丁；product all-target 亦失败，完整 stderr 尚待该组封存。静态入口测试仍把已更新的 Skill 判为 Go3.2.2，后继已改为精确323并证明命令表来源与322字节相同；历史322 Lua环境测试也改为分别认证原351记录与现323全源，仅应用已授权3.5版本字段。71项本地首组及其余142项Node检查已通过，3项Windows launcher在Linux准确跳过；这些修正未包含在 cd576，Rust修正尚未编译。冻结三方实验本轮按独立触发策略跳过，既有6699成功仍仅证明其冻结输入。
+默认 named target 现已组合完整配置-only分页查找、严格解码/名称匹配、真实local/remote pin准备及create-only引用；不读取旧引用历史，不因准备期间配置删除拒绝已认证目标，named结果不冒认底层capture为公开provenance。默认local同时恢复固定Go的client/build→parent/definitions→复查→pin→配置blob→capture顺序。12源与17项新Rust测试已写，未编译执行；原目录/客户端读取的native Drop边界仍待后续收口。
+
+集中验证 [38801126956](https://github.com/Follen/Lychee-Dev/actions/runs/38801126956) 已针对 cd576 启动。context 组实际编译失败：owned signature 调用上游私有 `signature_by_position`，后继已改为公开 signatures 逆序按位置查找，保原索引重复位置 last-wins 及 typed checkpoint，不新增引擎补丁；product all-target 亦失败，早期51个receipt/72份sealed日志已核，all-target/CLI均仅上述E0624。静态入口测试仍把已更新的 Skill 判为 Go3.2.2，后继已改为精确323并证明命令表来源与322字节相同；历史322 Lua环境测试也改为分别认证原351记录与现323全源，仅应用已授权3.5版本字段。71项本地首组及其余142项Node检查已通过，3项Windows launcher在Linux准确跳过；这些修正未包含在 cd576，Rust修正尚未编译。另Lua checker旧21个addon extra断言已随完整退役收紧为0，本地34/34通过，真实Lua运行仍待测。冻结三方实验本轮按独立触发策略跳过，既有6699成功仍仅证明其冻结输入。
 
 内存当前实际实现：API定义原文副本在验证重建后立即释放；身份唯一性临时sets在syntax索引前释放；managed reads/calls冻结上下文共享Arc而不深拷贝；XML生成文本去掉Script重复Vec，仅compiler文本保有并供现消费者读取。后继把同一请求的 XML 原文 Arc 在 Script 与各 manifest Program 之间共享，避免每个 manifest 重建原文分配；每份 AST、模板、动作和加载上下文仍独立。原行映射/hash/未知处理不变，Rust与完整Retail降幅均待集中实测。
 
@@ -108,7 +110,7 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 1. bc2普通refs/context/API已在90秒合同内成功；继续处理retained session冷启动接近2GiB上限的EOF与回收。6699编译可见域错误已修，集中重编译后验证。Data推进完整Prepared与lazy SQL默认链，Emmy推进真实摄取和诊断链及相应补丁退役，不再逐小片等待审查。
 2. 本地symbols因Emmy owner未确认回收而保留，不接管/新channel绕行；当前479e57 GNU完整输入已准备但未执行。独立Windows三方契约job已真实成功，资源压力和产品deadline仍需后继验证；未来Linux观察修正不追认历史owner。
 3. decoded alias与body owner已组合，接续真实DB2/SQL/static/effective/meta/JSONL外层admission到capture。EXPLAIN/schema-only不能扫描内容，callback不得重放；大资产保持流式。
-4. named target按固定Go配置-only分页lookup、pin-ref冲突和输出合同补齐，不复用旧show造成额外检查/错误。direct remote已接线但真实Rust/online仍待跑。
+4. named target完整local/remote默认链已组合，下一集中批验证真实分页、历史坏配置、准备期间删除/引用冲突及CLI输出。SQL继续修typed quoted identifiers与按schema preflight顺序的按需根源解析，旧EXISTS/标量子查询/EXPLAIN ANALYZE缺口仍未完成。
 5. 继续全部Emmy hook实际外移、真实Source可读性、Skill/Data使用质量及旧消费者替代；完成后依次执行下列四阶段审计。
 6. 每批及时普通push保留工作。只有有意义的验证批使用 `[rust-native]`；fast成功/长组skip不等于产品通过。只维护此handover，历史细节移至证据文档而不持续堆叠当前页。
 

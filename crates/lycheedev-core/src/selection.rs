@@ -12,6 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub mod target;
 mod project_controlled;
 pub use project_controlled::resolve_pinned_controlled_with_check;
 
@@ -269,7 +270,7 @@ fn selection_check(
 }
 // Check after cleanup on success and failure. Keep the first typed cause and
 // append a distinct stop, while avoiding a duplicate observation of one stop.
-fn selection_finish<T>(result: Result<T>, stopped: Result<()>) -> Result<T> {
+pub(crate) fn selection_finish<T>(result: Result<T>, stopped: Result<()>) -> Result<T> {
     if let (Err(first), Err(stop)) = (&result, &stopped)
         && first.code == stop.code
         && first.message == stop.message

@@ -43,7 +43,9 @@ test('every addon fixture runs independently under all six exact profiles', () =
 test('staging contains current authenticated addon plus exact frozen fixture dependencies', () => scratch(dir => {
   const target = join(dir, 'staged'); materialize(root, target, fixed); verifyMaterial(target, fixed); verifyUnifiedTOC(target);
   assert.equal(readFileSync(join(target, 'tests/baseline/probes/sync.lua')).toString(), readFileSync(join(root, BASE, 'oracle/tests/baseline/probes/sync.lua')).toString());
-  assert.equal(fixed.historicalAddonExtras.length, 21);
+  // The current delivery retired the 21 historical addon extras; their frozen
+  // source evidence remains separate from the exact staged addon inventory.
+  assert.deepEqual(fixed.historicalAddonExtras, []);
 }));
 test('fixture mutation, current addon mutation, missing source and unexpected fixture fail authentication', () => {
   for (const mutate of [

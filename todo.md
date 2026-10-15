@@ -250,7 +250,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 ## Immediate default Data integration order
 
-- [ ] Validate the integrated direct remote `dispatch_target` route with its seven actual CLI regressions; finish named targets through controlled configuration-only lookup and exact pin-reference/output behavior. Preserve local routing, original control/Budget, capture and provenance.
+- [ ] Validate the integrated direct and named local/remote `dispatch_target` routes. Configuration-only paged lookup, exact create-only pin-reference/output behavior and fixed-Go local preparation order are now implemented with 17 new Rust regressions; execution remains NOT_RUN. Preserve original control/Budget, committed captures and named provenance semantics.
 - [ ] Validate the frozen decoded-alias Session candidate after its Core optional-blob dependency closes directory-walk cancellation review. Missing body alone may be a cache miss; encoded integrity, metadata mismatch, cancellation and cleanup failures remain errors.
 - [ ] Connect the same scoped provider to `local_query::read_batches` / `read_files_with_keys`, then DB2/SQL/navigation. Keep planning/definitions/execution/capture within real admission ownership; EXPLAIN/schema-only and metadata-only must not trigger content scans. Do not replay callbacks on retry.
 - [ ] Transfer retained body ownership without cloning complete remote buffers; preserve exact release accounting and actual source provenance. Connect streamed asset inspect/export/demux through the owned verified-blob lifetime, rather than materializing large assets.
